@@ -12,6 +12,8 @@ use std::{
     time::{Duration, Instant},
 };
 static NEXT: AtomicU64 = AtomicU64::new(0);
+#[path = "tests_process.rs"]
+mod process_cases;
 struct Tree(PathBuf);
 impl Tree {
     fn new() -> Self {

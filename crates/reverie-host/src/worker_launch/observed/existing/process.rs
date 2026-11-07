@@ -98,8 +98,7 @@ impl ExistingLaptopInspection {
             self.data
                 .require_id_field()
                 .map_err(ExistingObservationError::Data)?;
-            Self::read_process(runtime, &pid, end)
-                .map(|start| (pid, start))
+            Self::read_process(runtime, &pid, end).map(|start| (pid, start))
         })();
         self.finish_capture(plan, result)
     }
@@ -120,8 +119,7 @@ impl ExistingLaptopInspection {
             if self.data.canonical_id().is_none() {
                 return Err(ExistingObservationError::Data(LaptopReadError::Process));
             }
-            Self::read_process(runtime, &pid, end)
-                .map(|start| (pid, start))
+            Self::read_process(runtime, &pid, end).map(|start| (pid, start))
         })();
         self.finish_capture(plan, result)
     }
