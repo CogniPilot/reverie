@@ -153,28 +153,25 @@ impl StorageClaim {
         previous: Option<ExistingLaptopInspection>,
     ) -> Result<OrdinaryStopPreparation, Box<OrdinaryStopRetainFailure>> {
         match self.state {
-            ClaimState::Legacy { registry, owner } => match retain_native(
-                &registry.runtime,
-                owner,
-                plan,
-                previous,
-            ) {
-                Ok(native) => Ok(OrdinaryStopPreparation {
-                    destination: ClaimDestination::Legacy { registry },
-                    native: Arc::new(Mutex::new(native)),
-                }),
-                Err(failure) => {
-                    let (owner, plan, previous, cause) = failure.into_parts();
-                    Err(Box::new(OrdinaryStopRetainFailure {
-                        claim: StorageClaim {
-                            state: ClaimState::Legacy { registry, owner },
-                        },
-                        plan,
-                        previous,
-                        cause: cause.into(),
-                    }))
+            ClaimState::Legacy { registry, owner } => {
+                match retain_native(&registry.runtime, owner, plan, previous) {
+                    Ok(native) => Ok(OrdinaryStopPreparation {
+                        destination: ClaimDestination::Legacy { registry },
+                        native: Arc::new(Mutex::new(native)),
+                    }),
+                    Err(failure) => {
+                        let (owner, plan, previous, cause) = failure.into_parts();
+                        Err(Box::new(OrdinaryStopRetainFailure {
+                            claim: StorageClaim {
+                                state: ClaimState::Legacy { registry, owner },
+                            },
+                            plan,
+                            previous,
+                            cause: cause.into(),
+                        }))
+                    }
                 }
-            },
+            }
             ClaimState::Registered {
                 registry,
                 identity,

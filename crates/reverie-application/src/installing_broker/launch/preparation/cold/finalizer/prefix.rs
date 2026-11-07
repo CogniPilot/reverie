@@ -19,16 +19,35 @@ impl<'a> ReusableWorkerLaunch<'a> {
         self,
         budget: CleanupBudget,
     ) -> Result<ColdHandlerClosed, Box<ColdFinalizationFailure<'a>>> {
-        let ReusableWorkerLaunch { receipt, inspected, resources } = self;
+        let ReusableWorkerLaunch {
+            receipt,
+            inspected,
+            resources,
+        } = self;
         let InspectedWorkerLaunch { observed, previous } = inspected;
-        let observe::ObservedWorkerLaunch { claimed, current, plan } = observed;
+        let observe::ObservedWorkerLaunch {
+            claimed,
+            current,
+            plan,
+        } = observed;
         let ClaimedWorkerLaunch {
-            preparing, observed, active, lifecycle, mut storage,
+            preparing,
+            observed,
+            active,
+            lifecycle,
+            mut storage,
         } = claimed;
-        let registration = lifecycle.capture_reuse_registration(preparing.admitted.request().session());
+        let registration =
+            lifecycle.capture_reuse_registration(preparing.admitted.request().session());
         let owner = ClassifiedCleanup {
             scope: ColdScope {
-                preparing, observed, active, current, resources, receipt, registration,
+                preparing,
+                observed,
+                active,
+                current,
+                resources,
+                receipt,
+                registration,
                 original: OriginalRuntime::Running,
                 budget: CreationBudget::Initial,
             },

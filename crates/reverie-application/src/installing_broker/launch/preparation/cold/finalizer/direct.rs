@@ -10,9 +10,11 @@ impl Finalizer<'_> {
             return None;
         };
         let input = match resources {
-            Resources::OriginalCleanup { storage, plan, inspection } => Some((
-                storage, plan, FinalStorageRemainder::Original(inspection),
-            )),
+            Resources::OriginalCleanup {
+                storage,
+                plan,
+                inspection,
+            } => Some((storage, plan, FinalStorageRemainder::Original(inspection))),
             Resources::Direct(input) => Some((
                 input.storage,
                 input.plan,
@@ -37,10 +39,7 @@ impl Finalizer<'_> {
             return None;
         };
         match claim.retain_direct_final_storage(plan) {
-            Ok(native) => *slot = Some(Resources::FinalStorage(FinalStorage {
-                native,
-                remainder,
-            })),
+            Ok(native) => *slot = Some(Resources::FinalStorage(FinalStorage { native, remainder })),
             Err(failure) => {
                 let (claim, plan, cause) = failure.into_parts();
                 *slot = Some(remainder.restore(claim, plan));
@@ -84,7 +83,8 @@ impl Finalizer<'_> {
                 // Keep the actual opaque native/physical failure owner. Never
                 // rebuild a claim or ask a later observation to forgive it.
                 *slot = Some(Resources::FinalStorageFailed { failure, remainder });
-                self.errors.push(ColdError::Refused("WORKER_COLD_FINAL_STORAGE_RETAINED"));
+                self.errors
+                    .push(ColdError::Refused("WORKER_COLD_FINAL_STORAGE_RETAINED"));
                 None
             }
         }
@@ -95,10 +95,20 @@ impl FinalStorageRemainder {
     fn restore(self, storage: StorageClaim, plan: ObservedCreatePlan) -> Resources {
         match self {
             Self::Original(inspection) => Resources::OriginalCleanup {
-                storage, plan, inspection,
+                storage,
+                plan,
+                inspection,
             },
-            Self::Direct(target) => Resources::Direct(Direct { storage, plan, target }),
-            Self::Stopped(removal) => Resources::Stopped(Stopped { storage, plan, removal }),
+            Self::Direct(target) => Resources::Direct(Direct {
+                storage,
+                plan,
+                target,
+            }),
+            Self::Stopped(removal) => Resources::Stopped(Stopped {
+                storage,
+                plan,
+                removal,
+            }),
             Self::Returned(phone) => Resources::Returned(ReturnedStorage {
                 storage,
                 plan,
