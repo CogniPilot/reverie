@@ -2,7 +2,6 @@
 //! strategies require their real transaction; absent policy never bypasses a
 //! pending fence, resource binding, stop or the original supplied deadline.
 use super::*;
-use reverie_contracts::worker_validation::WorkerValidationData;
 
 #[must_use = "retain the actual record through pane/checked cleanup"]
 pub struct ColdCommitted {
@@ -89,23 +88,16 @@ fn commit(runtime: &WorkerRuntime, record: &Record, deadline: Instant) -> Result
         .held_nix()?
         .assert_cold_resources_current()
         .map_err(LaptopError::Nix)?;
-    if WorkerValidationData::new(resources.plan.source())
-        .cold()
-        .map_err(LaptopError::ColdPolicy)?
-        .is_some()
-    {
-        // This first bounded increment implements the real absent-policy
-        // phase only. Never mint enabled-policy success without its actual
-        // clear/retained transaction carried by the same storage owner.
-        return Err(LaptopError::Refused("WORKER_COLD_TRANSACTION_REQUIRED"));
-    }
+    resources
+        .held_nix()?
+        .require_cold_prepared(resources.plan.source())?;
     resources
         .held_nix()?
         .assert_cold_resources_current()
         .map_err(LaptopError::Nix)?;
     running(runtime, deadline)
 }
-fn running(runtime: &WorkerRuntime, supplied: Instant) -> Result<()> {
+pub(super) fn running(runtime: &WorkerRuntime, supplied: Instant) -> Result<()> {
     let end = runtime
         .stop_deadline()
         .map_or(supplied, |stop| supplied.min(stop));

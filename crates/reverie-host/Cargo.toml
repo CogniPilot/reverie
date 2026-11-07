@@ -9,7 +9,7 @@ publish.workspace = true
 sha2.workspace = true
 libc.workspace = true
 getrandom.workspace = true
-nix = { workspace = true, features = ["term", "fs", "socket", "poll"] }
+nix = { workspace = true, features = ["term", "fs", "socket", "poll", "user"] }
 reverie-core.workspace = true
 reverie-python-regex.workspace = true
 reverie-contracts.workspace = true
