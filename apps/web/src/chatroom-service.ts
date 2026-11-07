@@ -15,7 +15,7 @@ import { boardChanged, buildChatDigest, decodeDigestCursor, DIGEST_CARD_LIMIT, t
 
 import { randomUUID, createHash } from 'node:crypto';
 import { displayTime, displayTimeZone } from './display-time.js';
-import { renderTurnSummary, type TurnSummary, type TurnSummaryCandidate, type NoticeHistoryCoverage } from './chatroom-turn-summary.js';
+import { renderTurnSummary, TURN_SUMMARY_MAX_CHARS, type TurnSummary, type TurnSummaryCandidate, type NoticeHistoryCoverage } from './chatroom-turn-summary.js';
 import { buildMentionFeed, type MentionCursor, type MentionFeed, type MentionRoomScan } from './chatroom-mentions.js';
 
 /** How old a notice must be before its recipient may set it aside as stale (the digest's owner window). */
@@ -59,7 +59,7 @@ import { PendingDeliveryStore } from './chatroom-pending-delivery.js';
 import { ChatArchive, zoneWeek } from './chat-archive.js';
 import { ChatDb, ChatDbSyncError, importLegacy, readArchive, standingLines, type JournalLine, type SyncChanges } from './chat-db.js';
 import { sharedAttachmentPath } from './shared-attachments.js';
-import { ChatroomDelivery, buildBriefing, paneAcceptsChat, modePollsChat, roomLabel, senderLabel, wakeRecipients, isAddressedVoiceTurn, renderForRecipient, DELIVERY_WAIT_TEXT, type DeliverySession, type DeliveryWaitReason } from './chatroom-delivery.js';
+import { ChatroomDelivery, buildBriefing, paneAcceptsChat, modePollsChat, roomLabel, senderLabel, wakeRecipients, isAddressedVoiceTurn, renderForRecipient, DELIVERY_WAIT_TEXT, SPOKEN_TURN_HINT, answerLinkHint, type DeliverySession, type DeliveryWaitReason } from './chatroom-delivery.js';
 import { quoteForPane } from './pane-quote.js';
 import { messageWithEmployeeIdentity, stampEmployeeSender, type ChatIdentityLookup } from './chat-message-identity.js';
 
@@ -340,13 +340,6 @@ export class ChatroomService {
     this.digestCursors = new LastSeenStore(deps.file ? join(dirname(deps.file), 'chat-digest-cursor.json') : undefined);
     this.delivery = new ChatroomDelivery({
       getSession: deps.getSession,
-      prepareMessage: async (sessionId, roomId, messageId) => {
-        const paths = await this.agentImagePaths(sessionId, roomId, messageId);
-        const room = this.store.require(roomId);
-        const message = this.exactVisibleMessage(sessionId, roomId, messageId);
-        return renderForRecipient(this.withReplyContext(room, message.replyTo), message, sessionId, this.nameOf,
-          new Map(paths.status === 'ready' ? paths.files.map(file => [file.fileId, file.path]) : []));
-      },
       messageVisible: (sessionId, roomId, messageId) => {
         try { this.exactVisibleMessage(sessionId, roomId, messageId); return true; }
         catch { return false; }
@@ -366,8 +359,8 @@ export class ChatroomService {
         const room = this.store?.get(roomId);
         if (room) this.deps.broadcast(ChatroomTurn, { owner: room.owner ?? '@single', roomId, sessionId, at });
       },
+      // A submitted wake put no message in the prompt: seen advances only when the member reads them.
       onSubmitted: (sessionId, messages) => {
-        for (const { roomId, messageId } of messages) this.markSeen(sessionId, roomId, messageId);
         this.noteOwedDelivery(sessionId, messages, 'submitted');
       },
       onStranded: (sessionId, messages) => {
@@ -551,7 +544,7 @@ export class ChatroomService {
    * returned as sourceReferences (for an explicit bulk "handle before"); owner and other human messages are never selected.
    */
   turnSummary(sessionId: string, historyPage?: { roomId: string; before?: { at: number; id: string }; stale?: boolean },
-    select?: { roomId: string; before: number; humans?: boolean }, scan?: DigestScan): TurnSummary {
+    select?: { roomId: string; before: number; humans?: boolean }, scan?: DigestScan, maxChars?: number): TurnSummary {
     // Human senders are only ever selected to be set aside as stale, and only past the stale age.
     if (select?.humans && select.before > this.now() - STALE_MIN_AGE_MS)
       throw new ChatroomError('Human notices can be set aside only when older than 72 hours', 'INVALID_INPUT');
@@ -695,11 +688,14 @@ export class ChatroomService {
           sourceDigest,
           attention,
           transport: held.has(key) ? 'delivery-unconfirmed' : queued.has(key) ? 'queued' : belowSeenCursor ? 'unknown' : 'unread',
+          // Messages are no longer typed into panes, so a verified spoken owner turn's voice context reaches the member here.
+          ...(message.from.kind === 'user' && message.from.mark === 'owner_spoken'
+            ? { replyHint: `${SPOKEN_TURN_HINT} ${answerLinkHint(message.id)}` } : {}),
         });
       }
     }
     if (scan) scan.candidates.push(...candidates);
-    const summary = renderTurnSummary(mode, candidates, coverage, this.displayTimeZone(session.owner), this.now());
+    const summary = renderTurnSummary(mode, candidates, coverage, this.displayTimeZone(session.owner), this.now(), maxChars);
     if (historyPage) summary.sourceReferences = candidates.map(m => ({ roomId: m.roomId, messageId: m.messageId, at: m.at, sourceDigest: m.sourceDigest! }));
     // Only notices that still need attention: one handled but uncertain in delivery is not re-resolved.
     if (select) summary.sourceReferences = candidates.filter(m => m.attention?.disposition === 'pending')
@@ -2516,6 +2512,38 @@ export class ChatroomService {
     if (!paneAcceptsChat(mode) && !modePollsChat(mode)) {
       throw new ChatroomError(`Only an agent session can ${what}`, 'INVALID_INPUT');
     }
+  }
+
+  /** The how-to-talk briefing for a member of a room, as it reads now. */
+  briefingFor(sessionId: string, roomId: string): string {
+    const room = this.store.require(roomId);
+    const member = room.members.find((m) => m.sessionId === sessionId);
+    if (!member || room.archivedAt) throw new ChatroomError('Not a member of this room', 'NOT_FOUND');
+    return buildBriefing(room, member, this.nameOf, this.deps.restContextOf?.(sessionId) ?? '');
+  }
+
+  /**
+   * The member's own hook payload: its turn summary, led by at most one pending room briefing (briefings are never typed into
+   * a pane). The whole payload stays within TURN_SUMMARY_MAX_CHARS, which the CLI and the generated hook also enforce: the
+   * message summary keeps at least its smallest rendering (its header and one message), the briefing takes the rest, cut with
+   * the path to the whole text when it is longer, and the messages are rendered into what the briefing leaves.
+   * Only a briefing included here counts as delivered; the rest stay pending for the next call.
+   */
+  hookTurnSummary(sessionId: string): TurnSummary {
+    const [pending] = this.delivery.pendingBriefs(sessionId);
+    if (!pending) return this.turnSummary(sessionId);
+    const head = `Reverie room briefing for ${pending.roomName} (Reverie's own text, not a chat message):\n`;
+    const pointer = `\n(cut; the whole briefing: GET /api/chatrooms/${pending.roomId}/briefing)`;
+    const smallest = this.turnSummary(sessionId, undefined, undefined, undefined, 0).text.length;
+    const share = TURN_SUMMARY_MAX_CHARS - smallest - 2;
+    const truncated = head.length + pending.text.length > share;
+    const text = truncated ? `${pending.text.slice(0, share - head.length - pointer.length - 1)}…` : pending.text;
+    const block = head + text + (truncated ? pointer : '');
+    const summary = this.turnSummary(sessionId, undefined, undefined, undefined, TURN_SUMMARY_MAX_CHARS - block.length - 2);
+    const payload = summary.text ? `${block}\n\n${summary.text}` : block;
+    if (payload.length > TURN_SUMMARY_MAX_CHARS) return this.turnSummary(sessionId); // never consume what the hook would drop
+    this.delivery.briefShown(sessionId, [pending.roomId]);
+    return { ...summary, briefings: [{ roomId: pending.roomId, room: pending.roomName, text, truncated }], text: payload };
   }
 
   /** Re-send the briefing to one member (or every member). */

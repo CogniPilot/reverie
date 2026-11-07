@@ -3,6 +3,9 @@ import { displayTime, displayTimeZone } from './display-time.js';
 import type { AlertMode } from './employee-alert-mode.js';
 import type { NoticeAttention } from './chatroom-notice-state.js';
 
+/** The whole hook payload a member's turn summary may use: the server, the CLI and the generated hook all enforce it. */
+export const TURN_SUMMARY_MAX_CHARS = 3000;
+
 export interface TurnSummaryMessage {
   roomId: string;
   room: string;
@@ -17,6 +20,8 @@ export interface TurnSummaryMessage {
   sourceDigest?: string;
   attention?: NoticeAttention;
   transport?: 'unread' | 'queued' | 'delivery-unconfirmed' | 'unknown';
+  /** Reverie's own reply instruction for this message (a verified spoken owner turn), outside the quoted excerpt. */
+  replyHint?: string;
 }
 export interface TurnSummary {
   phoneMode: AlertMode;
@@ -27,6 +32,8 @@ export interface TurnSummary {
   messages: TurnSummaryMessage[];
   text: string;
   historyCoverage?: NoticeHistoryCoverage;
+  /** Pending room briefings carried by the member's own hook payload (hookTurnSummary), ahead of the messages. */
+  briefings?: Array<{ roomId: string; room: string; text: string; truncated: boolean }>;
   /** Only the explicit history inspection endpoint; all eligible examined sources remain inspectable. */
   sourceReferences?: Array<{ roomId: string; messageId: string; at: number; sourceDigest: string }>;
 }
@@ -58,7 +65,8 @@ export function renderTurnSummary(
   candidates: TurnSummaryCandidate[],
   historyCoverage?: NoticeHistoryCoverage,
   timeZone?: string,
-  now = Date.now()
+  now = Date.now(),
+  maxChars = TURN_SUMMARY_MAX_CHARS
 ): TurnSummary {
   const zone = timeZone === undefined ? undefined : displayTimeZone(timeZone);
   const clock = zone ? `Display timezone: ${zone}. Use this timezone and include its abbreviation for human-facing chat/deadline/reset times; retain explicit offsets for machine timestamps.\n` : '';
@@ -97,9 +105,9 @@ export function renderTurnSummary(
         messages.map((m) => JSON.stringify(m)).join('\n') +
         (omitted ? `\n${omitted} more not shown (agent chat pending lists them).` : '');
       text = clock + warning + header(byKind) + body;
-      if (text.length <= 3000) break;
+      if (text.length <= maxChars) break;
       text = clock + warning + header('') + body;
-      if (text.length <= 3000) break;
+      if (text.length <= maxChars) break;
       messages.pop();
     }
   }

@@ -26,6 +26,7 @@ import { USER_RECIPIENT, isDm, textMentions } from './chatroom-store.js';
 import { getCli } from './config/cli-registry/registry.js';
 import { findDeliveredTurn, markTranscript, type TranscriptMark } from './claude-delivery-evidence.js';
 import { STOCK_CLIS } from './config/cli-registry/stock.js';
+import { composerGlyphVerified } from './session-submit-verifier.js';
 
 /**
  * Does a pane of this mode take room text as a prompt? Delivery TYPES the text and presses
@@ -48,6 +49,14 @@ export function paneAcceptsChat(mode: string | undefined): boolean {
   const stock = STOCK_CLIS.find((entry) => (entry.id as string) === mode);
   if (stock) return stock.kind === 'agent';
   return getCli(mode)?.acceptsChat === true;
+}
+
+/**
+ * Can delivery wake this pane? Only when it takes chat and its CLI's composer glyph is verified, so an empty composer can be
+ * proven before the wake line goes in. Any other member gets its messages through the harness hooks on its next turn.
+ */
+export function paneWakes(mode: string | undefined): boolean {
+  return paneAcceptsChat(mode) && composerGlyphVerified(getCli(mode!)?.capabilities.workDetect?.promptGlyph ?? '');
 }
 
 /** What delivery needs from a session; `Session` satisfies it. */
@@ -89,7 +98,6 @@ export interface DeliveryDeps {
   forceWake?: (sessionId: string, roomId: string, messageId: string) => boolean;
   allowFragment?: (sessionId: string, roomId: string, messageId?: string) => boolean;
   now?: () => number;
-  prepareMessage?: (sessionId: string, roomId: string, messageId: string) => Promise<string>;
   messageVisible?: (sessionId: string, roomId: string, messageId: string) => boolean;
   /** A message line was typed into this session's pane, for each room it was about (not a briefing, not a held message). */
   onWoken?: (sessionId: string, roomId: string, at: number) => void;
@@ -111,8 +119,13 @@ interface Pending {
   roomName: string;
   /** Fixed text, or a renderer called at flush time (briefings describe the room as it is THEN). */
   text: string | (() => string);
-  /** A briefing: one per room per session is kept, and it makes join/appointment notices redundant. */
+  /**
+   * A briefing: one per room per session is kept, and it makes join/appointment notices redundant. It is never typed: it stays
+   * queued until the member's own turn summary includes it (briefShown).
+   */
   brief?: boolean;
+  /** A briefing a wake already went in for: it waits for the member's turn summary without waking the member again. */
+  woken?: boolean;
   /** The chat message this fragment renders, so a deleted message can be withdrawn before it is typed. */
   messageId?: string;
   localImages?: boolean;
@@ -147,6 +160,12 @@ const MAX_RECEIVED_TRACKED = 2000;
 export const LAST_DELIVERY_WINDOW_MS = 30 * 60 * 1000;
 /** After a delivery, wait this long before the next one even if the pane still looks idle. */
 export const DELIVERY_SPACING_MS = 8000;
+/**
+ * The only text delivery ever types into a pane. Messages never go into a composer: they reach the member through the harness
+ * hooks (the turn summary) and `chat read`. This constant only starts a turn for an idle member, so a line left unsent in a
+ * composer carries no message and is safe to clear.
+ */
+export const WAKE_LINE = 'Reverie: new chat messages are waiting. Read them with reverie agent chat read.';
 
 /** Collapse newlines and control characters: the pane takes one printable line. For trusted, fixed text only: anything that comes from outside goes through `quoteForPane`. */
 export function flattenForPane(text: string): string {
@@ -547,7 +566,7 @@ export class ChatroomDelivery {
   /** When the oldest line that would wake the session was queued; undefined when none is queued. */
   private oldestWaking(sessionId: string): number | undefined {
     const now = (this.deps.now ?? Date.now)();
-    const times = (this.queues.get(sessionId) ?? []).filter((p) => !p.passive).map((p) => p.at ?? now);
+    const times = (this.queues.get(sessionId) ?? []).filter((p) => !p.passive && !p.woken).map((p) => p.at ?? now);
     return times.length ? Math.min(...times) : undefined;
   }
 
@@ -573,7 +592,7 @@ export class ChatroomDelivery {
     const last = this.stalledReported.get(sessionId);
     if (last && (last.since === wait.since || now - last.at < STALLED_REPEAT_MS)) return;
     this.stalledReported.set(sessionId, { since: wait.since, at: now });
-    const waking = (this.queues.get(sessionId) ?? []).filter((p) => !p.passive);
+    const waking = (this.queues.get(sessionId) ?? []).filter((p) => !p.passive && !p.woken);
     this.deps.onStalled(sessionId, { reason: wait.reason, since: wait.since, roomIds: [...new Set(waking.map((p) => p.roomId))], waiting: waking.length });
   }
 
@@ -721,8 +740,9 @@ export class ChatroomDelivery {
     );
   }
 
+  /** Queued entries still waiting on the pane; a briefing whose wake already went in waits only for the turn summary. */
   pendingFor(sessionId: string): number {
-    return this.queues.get(sessionId)?.length ?? 0;
+    return (this.queues.get(sessionId) ?? []).filter((p) => !p.woken).length;
   }
 
   /** A pull read acknowledges exactly the messages returned, never an entire time range. */
@@ -828,6 +848,22 @@ export class ChatroomDelivery {
   /** Does the session still have an undelivered briefing for this room? */
   hasPendingBrief(sessionId: string, roomId: string): boolean {
     return !!this.queues.get(sessionId)?.some((p) => p.brief && p.roomId === roomId);
+  }
+
+  /** The briefings still waiting for this session, rendered now; they stay queued until briefShown. */
+  pendingBriefs(sessionId: string): Array<{ roomId: string; roomName: string; text: string }> {
+    return (this.queues.get(sessionId) ?? [])
+      .filter((p) => p.brief)
+      .map((p) => ({ roomId: p.roomId, roomName: p.roomName, text: pendingText(p) }));
+  }
+
+  /** These rooms' briefings were included in the session's own hook payload, so they are delivered. */
+  briefShown(sessionId: string, roomIds: readonly string[]): void {
+    const queue = this.queues.get(sessionId);
+    if (!queue) return;
+    const left = queue.filter((p) => !(p.brief && roomIds.includes(p.roomId)));
+    if (left.length) this.queues.set(sessionId, left);
+    else this.queues.delete(sessionId);
   }
 
   /**
@@ -941,11 +977,22 @@ export class ChatroomDelivery {
       queue.splice(0, queue.length, ...fresh);
       if (!queue.length) this.queues.delete(sessionId);
     }
-    if (!queue.some((p) => !p.passive)) return false;
+    if (!queue.some((p) => !p.passive && !p.woken)) return false;
     if (!paneAcceptsChat(session.mode)) {
       // Never type into a shell (or unknown) pane; its queue is dropped, not held for later.
       this.discard(queue);
       this.queues.delete(sessionId);
+      return false;
+    }
+    if (!paneWakes(session.mode)) {
+      // No empty composer can be proven for this CLI, so nothing is typed at all. Its member gets the messages through the
+      // harness hooks on its next turn: messages stay in the room history and their queue is dropped, but a briefing exists
+      // only here, so it stays queued for the turn summary (as if woken: it neither wakes the member nor counts as stalled).
+      const briefs = queue.filter((p) => p.brief);
+      this.discard(queue.filter((p) => !p.brief));
+      for (const b of briefs) b.woken = true;
+      if (briefs.length) this.queues.set(sessionId, briefs);
+      else this.queues.delete(sessionId);
       return false;
     }
     const paneWait = this.paneWait(session);
@@ -964,8 +1011,12 @@ export class ChatroomDelivery {
     const now = (this.deps.now ?? Date.now)();
     const last = this.lastDelivered.get(sessionId) ?? 0;
     if (now - last < DELIVERY_SPACING_MS) return false;
-    const batch = queue.splice(0, queue.length);
-    this.queues.delete(sessionId);
+    // Briefings stay queued for the member's turn summary, even while this wake is in flight (its own prompt hook can read
+    // them before the write returns); the wake stands for them but does not carry them.
+    const briefs = queue.filter((p) => p.brief);
+    const batch = queue.filter((p) => !p.brief);
+    if (briefs.length) this.queues.set(sessionId, briefs);
+    else this.queues.delete(sessionId);
     // The messages that wake the member must fit in the line: keep the newest read-later ones up to half of it, drop the older ones
     // (they stay in the room history, `chat read`).
     // What wakes the member comes first: the held context only gets the room left after those (at most half the line), so the real
@@ -981,28 +1032,9 @@ export class ChatroomDelivery {
         this.omitted.set(sessionId, (this.omitted.get(sessionId) ?? 0) + 1);
       }
     }
-    const notices: Pending[] = [];
-    if (held) {
-      const anchor = batch.find((p) => !p.passive) ?? batch[0];
-      notices.push({
-        roomId: anchor.roomId,
-        roomName: anchor.roomName,
-        text: `SYSTEM: ${held} earlier message${held === 1 ? '' : 's'} may not have reached you and ${held === 1 ? 'was' : 'were'} not pasted again (read them with reverie agent chat read)`,
-      });
-      batch.unshift(notices[0]!);
-    }
-    // Say so when held messages were dropped, so the member does not act on a partial picture.
+    // Held and dropped messages are not announced in the pane either: `chat read` shows the member everything.
     const lost = this.omitted.get(sessionId) ?? 0;
-    if (lost > 0) {
-      this.omitted.delete(sessionId);
-      const anchor = batch.find((p) => !p.passive) ?? batch[0];
-      notices.push({
-        roomId: anchor.roomId,
-        roomName: anchor.roomName,
-        text: `SYSTEM: ${lost} earlier message${lost === 1 ? '' : 's'} not shown (read them with reverie agent chat read)`,
-      });
-      batch.unshift(notices[notices.length - 1]!);
-    }
+    this.omitted.delete(sessionId);
     this.inFlight.add(sessionId);
     this.lastDelivered.set(sessionId, now);
     this.preparing.set(sessionId, batch);
@@ -1022,17 +1054,10 @@ export class ChatroomDelivery {
           mark = transcript ? await markTranscript(transcript) : undefined;
         } catch { mark = undefined; }
       }
-      const prepared = new Map<Pending, string>();
-      let imageRequests = 0;
-      for (const item of batch.slice(0, buildDeliveryBatch(batch).taken)) {
-        if (!['codex', 'claude'].includes(session.mode) || !item.localImages || !item.messageId || !this.deps.prepareMessage || imageRequests++ >= 4) continue;
-        const text = await this.deps.prepareMessage(sessionId, item.roomId, item.messageId);
-        if (batch.includes(item)) prepared.set(item, text);
-      }
       const rejected = batch.filter(item => item.messageId && this.deps.messageVisible?.(sessionId, item.roomId, item.messageId) === false);
       this.discard(rejected);
       batch.splice(0, batch.length, ...batch.filter(item => !rejected.includes(item)));
-      if (!batch.length) return false;
+      if (!batch.length && !briefs.some((b) => !b.woken)) return false;
       // Image HTTP can yield to a read, room removal, plan move or another turn.
       // No pane attempt or uncertainty barrier exists yet, so a held batch stays queued.
       const lateWait = this.promptPauses.has(sessionId) ? 'paused'
@@ -1043,15 +1068,9 @@ export class ChatroomDelivery {
         return false;
       }
       this.preparing.delete(sessionId);
-      // Fresh paths are ephemeral: overflow/requeued fragments keep their original renderer.
-      const rendered = batch.map(item => prepared.has(item) ? { ...item, text: prepared.get(item)! } : item);
-      const { line, taken } = buildDeliveryBatch(rendered);
-      // Whatever the line could not hold waits for the next delivery; nothing is dropped. A last guard strips every control
-      // character (DEL is Backspace in a terminal input box) so no builder can type an editing key.
-      // eslint-disable-next-line no-control-regex
-      const safe = line.replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ');
-      // An OpenCode pane gets the line without an ASCII "!" and out of shell mode (Session.writeViaMux); other panes are untouched.
-      // Every chat message in the line, read-later ones included: once the line is submitted they are all in the member's prompt.
+      // One constant wake stands for the whole batch; none of its text is typed.
+      const taken = batch.length;
+      // Every chat message the wake stands for, read-later ones included.
       const carried: DeliveredMessage[] = batch
         .slice(0, taken)
         .filter((p): p is Pending & { messageId: string } => p.messageId !== undefined)
@@ -1076,10 +1095,12 @@ export class ChatroomDelivery {
       };
       attempted = taken;
       let refused = false;
-      const ok = await session.writeViaMux(`${safe}\r`, {
+      // Only into an idle pane whose composer is provably empty; otherwise nothing is typed and the batch waits.
+      const ok = await session.writeViaMux(`${WAKE_LINE}\r`, {
         opencodeGuard: true,
         requireEmptyComposer: true,
-        ...(prepared.size || held ? { requireIdle: true, onIdleRefused: () => { refused = true; } } : {}),
+        requireIdle: true,
+        onIdleRefused: () => { refused = true; },
         onOutcome: (outcome) => {
           if (finished || (carried.length && this.activeWrites.get(sessionId) !== writing)) return;
           outcomeSeen = true;
@@ -1095,7 +1116,7 @@ export class ChatroomDelivery {
           else if (carried.length) {
             this.deps.onUncertain?.(sessionId, carried);
           }
-          if (outcome !== 'submitted' && mark && carried.length) this.watchTranscript(sessionId, mark, safe, carried, ids);
+          if (outcome !== 'submitted' && mark && carried.length) this.watchTranscript(sessionId, mark, WAKE_LINE, carried, ids);
           finishWrite();
         },
       });
@@ -1110,14 +1131,14 @@ export class ChatroomDelivery {
       if (ok) for (const roomId of new Set(chat.map((p) => p.roomId))) this.deps.onWoken?.(sessionId, roomId, now);
       if (ok) this.noteReceived(sessionId, batch.slice(0, taken));
       if (ok) this.waits.delete(sessionId);
+      if (ok) for (const b of briefs) b.woken = true;
       if (!ok && refused && !submitted) {
         // Refused at the write before any key (not idle, or the composer not provably empty): nothing reached the pane,
         // so these identities are queued again rather than made uncertain.
         this.durable((store) => store.state(ids, 'queued'));
         this.releaseInspection(sessionId, carried);
-        // The notices are rebuilt on the next attempt; the dropped count they carried is kept for it.
         if (lost > 0) this.omitted.set(sessionId, (this.omitted.get(sessionId) ?? 0) + lost);
-        this.requeue(sessionId, batch.filter((p) => !notices.includes(p)));
+        this.requeue(sessionId, batch);
         this.noteWait(sessionId, 'not_idle'); // after the requeue: the batch is off the queue until then
         return false;
       }
@@ -1126,7 +1147,7 @@ export class ChatroomDelivery {
         // proves submission; no existing boolean return proves that the pane received no text.
         if (!submitted) {
           this.deps.onUncertain?.(sessionId, carried);
-          if (mark && carried.length && !outcomeSeen) this.watchTranscript(sessionId, mark, safe, carried, ids);
+          if (mark && carried.length && !outcomeSeen) this.watchTranscript(sessionId, mark, WAKE_LINE, carried, ids);
         }
         if (taken < batch.length) this.requeue(sessionId, batch.slice(taken));
       }
