@@ -319,6 +319,32 @@ fn option_named(token: &[u8]) -> Result<Option<&'static str>, String> {
     }
 }
 
+/// A `-h...` token, as argparse chains short flags: each `h` is another help
+/// action, and any other character ends the chain (it becomes an unknown
+/// extra), so help runs. An attached `=` value, or a `-` where the next flag
+/// would be, is refused before any action runs (`-h=x`, `-hh=`, `-h-x`).
+fn short_help(token: &[u8]) -> Prescan {
+    let (mut attached, mut rest) = match token.strip_prefix(b"-h=") {
+        Some(value) => (true, value),
+        None => (false, &token[2..]),
+    };
+    loop {
+        if attached || rest.first() == Some(&b'-') {
+            return Prescan::Usage(format!(
+                "argument -h/--help: ignored explicit argument '{}'",
+                String::from_utf8_lossy(rest)
+            ));
+        }
+        match rest.split_first() {
+            Some((b'h', tail)) => match tail.strip_prefix(b"=") {
+                Some(value) => (attached, rest) = (true, value),
+                None => rest = tail,
+            },
+            _ => return Prescan::Help,
+        }
+    }
+}
+
 /// argparse's left-to-right consumption: a help option exits 0 as soon as it
 /// is reached, while an ambiguous option, a split value read as an option
 /// (`--max-entries -1_000`) or a value of the wrong type exits 2 when its
@@ -335,7 +361,7 @@ pub fn prescan(args: &[OsString]) -> Prescan {
             continue;
         }
         if token.starts_with(b"-h") {
-            return Prescan::Help;
+            return short_help(token);
         }
         let option = match option_named(token) {
             Ok(Some(option)) => option,

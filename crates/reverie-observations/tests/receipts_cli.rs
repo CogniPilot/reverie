@@ -188,10 +188,9 @@ const HELP_ORDER: [(&[&str], i32); 28] = [
     (&["--a1", "--help"], 2),
 ];
 
-#[test]
-fn help_and_usage_errors_follow_argparse_order_without_file_effects() {
-    for (args, code) in HELP_ORDER {
-        let root = directory("help");
+fn assert_order(name: &str, cases: &[(&[&str], i32)]) {
+    for &(args, code) in cases {
+        let root = directory(name);
         let (status, stdout) = run(&root, args);
         assert_eq!(status, code, "{args:?}");
         assert_eq!(
@@ -207,10 +206,63 @@ fn help_and_usage_errors_follow_argparse_order_without_file_effects() {
         assert_eq!(names(&root), ["out.jsonl"], "{args:?}");
         let _ = fs::remove_dir_all(&root);
     }
+}
+
+#[test]
+fn help_and_usage_errors_follow_argparse_order_without_file_effects() {
+    assert_order("help", &HELP_ORDER);
     // Python's int() accepts an integer beyond 64 bits, so a later help wins.
     assert_eq!(
         scan(&["--max-entries", "99999999999999999999", "--help"]),
         Prescan::Help
     );
     assert_eq!(scan(&["--max-age-days", "nan", "--help"]), Prescan::Help);
+}
+
+/// Attached and chained short help, as the Python adapter gave it (packet logs
+/// help-probe-r3.txt and help-probe-r3b.txt): each further `h` is help again and any other character
+/// ends the chain with help, while `=` or `-` in place of a flag exits 2.
+const SHORT_HELP: [(&[&str], i32); 27] = [
+    (&["-h=x"], 2),
+    (&["-h="], 2),
+    (&["-h=="], 2),
+    (&["-h=-1"], 2),
+    (&["-h=--help"], 2),
+    (&["-h=x=y"], 2),
+    (&["-h=x y"], 2),
+    (&["-h-"], 2),
+    (&["-h-x"], 2),
+    (&["-hh=x"], 2),
+    (&["-hh="], 2),
+    (&["-hh-"], 2),
+    (&["-hhh=x"], 2),
+    (&["--h=x"], 2),
+    (&["--he="], 2),
+    (&["-hh"], 0),
+    (&["-hhh"], 0),
+    (&["-hhx"], 0),
+    (&["-hx=y"], 0),
+    (&["-hxy"], 0),
+    (&["-hx-"], 0),
+    (&["-hxh=y"], 0),
+    (&["-h x"], 0),
+    (&["-h=x", "--help"], 2),
+    (&["--help", "-h=x"], 0),
+    (&["-h=x", "--max-entries", "-1_000"], 2),
+    (&["--max-entries", "-1_000", "-h=x"], 2),
+];
+
+#[test]
+fn attached_short_help_is_refused_and_chained_short_help_is_help() {
+    assert_order("short-help", &SHORT_HELP);
+    let ignored = |value: &str| {
+        Prescan::Usage(format!(
+            "argument -h/--help: ignored explicit argument '{value}'"
+        ))
+    };
+    assert_eq!(scan(&["-h=x"]), ignored("x"));
+    assert_eq!(scan(&["-h="]), ignored(""));
+    assert_eq!(scan(&["-hh=x"]), ignored("x"));
+    assert_eq!(scan(&["-h-x"]), ignored("-x"));
+    assert_eq!(scan(&["-hx"]), Prescan::Help);
 }
