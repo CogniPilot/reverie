@@ -13,7 +13,6 @@ pub use error::{ImageStoreError, Result};
 use reverie_contracts::chat_images::LedgerEntry;
 use reverie_core::chat_images::{ImageFileName, LIFETIME_SECONDS};
 use std::{
-    collections::BTreeMap,
     path::Path,
     sync::Arc,
     time::{Duration, Instant},
@@ -40,7 +39,7 @@ impl ImageCopy {
 }
 pub struct ImageCache {
     custody: custody::Custody,
-    entries: BTreeMap<ImageFileName, Entry>,
+    entries: Vec<Entry>,
     origin: Arc<()>,
     failed: bool,
 }
@@ -53,7 +52,7 @@ impl ImageCache {
     pub fn open(state: &Path, root: &Path) -> std::result::Result<Self, ImageCacheOpenFailure> {
         let mut cache = Self {
             custody: custody::Custody::empty(),
-            entries: BTreeMap::new(),
+            entries: Vec::new(),
             origin: Arc::new(()),
             failed: false,
         };
@@ -95,7 +94,8 @@ impl ImageCache {
                 error::need(Arc::ptr_eq(&self.origin, &copy.origin), "write_unconfirmed")?;
                 let entry = self
                     .entries
-                    .get(&copy.name)
+                    .iter()
+                    .find(|entry| entry.record.name() == &copy.name)
                     .ok_or(ImageStoreError::Refused("write_unconfirmed"))?;
                 self.verify(entry)?;
                 error::need(entry.expires > now, "expired")?;
@@ -104,6 +104,7 @@ impl ImageCache {
             .collect()
     }
     pub fn rollback(&mut self, copies: &[ImageCopy]) -> Result<()> {
+        error::need(self.custody.require_active()?, "cache_unavailable")?;
         let mut result = Ok(());
         for copy in copies {
             let removed = error::need(Arc::ptr_eq(&self.origin, &copy.origin), "cache_changed")
@@ -117,8 +118,8 @@ impl ImageCache {
         let names = self
             .entries
             .iter()
-            .filter(|(_, e)| e.expires <= now)
-            .map(|(name, _)| name.clone())
+            .filter(|entry| entry.expires <= now)
+            .map(|entry| entry.record.name().clone())
             .collect::<Vec<_>>();
         for name in names {
             self.remove(&name)?;
@@ -127,7 +128,14 @@ impl ImageCache {
     }
     /// Close after the Host's actual reaper has joined, preserving one deadline.
     pub fn close(&mut self, end: Instant) -> Result<()> {
-        let names = self.entries.keys().cloned().collect::<Vec<_>>();
+        if !self.custody.require_active()? {
+            return Ok(());
+        }
+        let names = self
+            .entries
+            .iter()
+            .map(|entry| entry.record.name().clone())
+            .collect::<Vec<_>>();
         for name in names {
             error::need(Instant::now() < end, "busy")?;
             self.remove(&name)?;

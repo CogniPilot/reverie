@@ -18,7 +18,7 @@ impl ImageCache {
         let format = image_format(bytes)?;
         let total = self
             .entries
-            .values()
+            .iter()
             .map(|entry| entry.record.size())
             .sum::<usize>();
         need(
@@ -41,14 +41,11 @@ impl ImageCache {
                 bytes.len(),
                 image_digest(bytes),
             )?;
-            self.entries.insert(
-                name.clone(),
-                Entry {
-                    record,
-                    stamp,
-                    expires: Self::deadline(now),
-                },
-            );
+            self.entries.push(Entry {
+                record,
+                stamp,
+                expires: Self::deadline(now),
+            });
             adopted = true;
             private_fs::write_all(&mut file, bytes, self.custody.cache().path())?;
             let finished = private_fs::private_stamp(&file)?;
@@ -60,7 +57,12 @@ impl ImageCache {
                 .map_err(Into::into),
         );
         let result = result.and_then(|()| {
-            self.verify(self.entries.get(&name).expect("adopted new image"))?;
+            self.verify(
+                self.entries
+                    .iter()
+                    .find(|entry| entry.record.name() == &name)
+                    .expect("adopted new image"),
+            )?;
             self.checkpoint()?;
             Ok(ImageCopy {
                 origin: self.origin.clone(),

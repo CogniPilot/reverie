@@ -12,6 +12,13 @@ pub(super) struct Custody {
     state: Option<Directory>,
     cache: Option<Directory>,
     lock: Option<File>,
+    close: CloseState,
+}
+#[derive(Clone, Copy)]
+enum CloseState {
+    Open,
+    Closed,
+    Unconfirmed,
 }
 impl Custody {
     pub(super) fn empty() -> Self {
@@ -19,6 +26,7 @@ impl Custody {
             state: None,
             cache: None,
             lock: None,
+            close: CloseState::Open,
         }
     }
     pub(super) fn open(&mut self, state: &Path, cache: &Path) -> Result<()> {
@@ -46,6 +54,7 @@ impl Custody {
         self.cache.as_ref().expect("owned image cache")
     }
     pub(super) fn current(&self) -> Result<()> {
+        need(self.require_active()?, "cache_unavailable")?;
         need(
             self.state.is_some() && self.cache.is_some() && self.lock.is_some(),
             "cache_unavailable",
@@ -57,6 +66,13 @@ impl Custody {
             ".chat-image-custody.lock",
         )?;
         Ok(())
+    }
+    pub(super) fn require_active(&self) -> Result<bool> {
+        match self.close {
+            CloseState::Open => Ok(true),
+            CloseState::Closed => Ok(false),
+            CloseState::Unconfirmed => Err(ImageStoreError::Refused("custody_unconfirmed")),
+        }
     }
     pub(super) fn read(&self) -> Result<Option<(ImageLedger, Vec<u8>)>> {
         let Some(mut file) = self.state().read_file(NAME)? else {
@@ -131,6 +147,10 @@ impl Custody {
         }
     }
     pub(super) fn close(&mut self) -> Result<()> {
+        if !self.require_active()? {
+            return Ok(());
+        }
+        self.close = CloseState::Unconfirmed;
         let result = self.lock.take().map_or(Ok(()), |file| {
             private_fs::close(file, CloseRole::Lock, self.state().path()).map_err(Into::into)
         });
@@ -140,12 +160,16 @@ impl Custody {
                 .take()
                 .map_or(Ok(()), |cache| cache.close().map_err(Into::into)),
         );
-        finalized(
+        let result = finalized(
             result,
             self.state
                 .take()
                 .map_or(Ok(()), |state| state.close().map_err(Into::into)),
-        )
+        );
+        if result.is_ok() {
+            self.close = CloseState::Closed;
+        }
+        result
     }
 }
 impl Drop for Custody {

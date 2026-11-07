@@ -138,3 +138,83 @@ fn failed_actual_file_finalization_fences_further_ready() {
     );
     cache.retire().unwrap();
 }
+#[test]
+fn retired_owner_is_terminal_and_repeated_known_close_preserves_bytes() {
+    let fixture = Fixture::new();
+    let mut cache = fixture.open();
+    let copy = cache.install(PNG, Instant::now()).unwrap();
+    let ledger = fs::read(fixture.state.join(custody::NAME)).unwrap();
+    cache.retire().unwrap();
+    cache.close(Instant::now()).unwrap();
+    cache.retire().unwrap();
+    cache.close(Instant::now()).unwrap();
+    assert_eq!(
+        cache.rollback(&[copy]).err().unwrap().code(),
+        "cache_unavailable"
+    );
+    assert_eq!(fs::read(fixture.state.join(custody::NAME)).unwrap(), ledger);
+    assert_eq!(fs::read_dir(&fixture.cache).unwrap().count(), 1);
+}
+#[test]
+fn consumed_close_uncertainty_never_becomes_success_on_retry() {
+    for role in [
+        crate::private_fs::CloseRole::Lock,
+        crate::private_fs::CloseRole::Store,
+    ] {
+        let fixture = Fixture::new();
+        let mut cache = fixture.open();
+        crate::faults::STATE.with(|state| state.borrow_mut().close = Some(role));
+        assert!(cache.retire().is_err());
+        crate::faults::reset();
+        assert_eq!(cache.retire().err().unwrap().code(), "custody_unconfirmed");
+        assert_eq!(
+            cache
+                .close(Instant::now() + Duration::from_secs(2))
+                .err()
+                .unwrap()
+                .code(),
+            "custody_unconfirmed"
+        );
+    }
+}
+#[test]
+fn ledger_entry_order_remains_original_insertion_order() {
+    let fixture = Fixture::new();
+    let mut cache = fixture.open();
+    let copies = (0..8)
+        .map(|_| cache.install(PNG, Instant::now()).unwrap())
+        .collect::<Vec<_>>();
+    let raw = fs::read(fixture.state.join(custody::NAME)).unwrap();
+    let ledger = reverie_contracts::chat_images::decode_ledger(&raw).unwrap();
+    assert_eq!(
+        ledger
+            .entries()
+            .iter()
+            .map(|entry| entry.name())
+            .collect::<Vec<_>>(),
+        copies.iter().map(|copy| copy.name()).collect::<Vec<_>>()
+    );
+    cache
+        .close(Instant::now() + Duration::from_secs(2))
+        .unwrap();
+}
+#[test]
+fn failed_constructor_close_returns_sticky_actual_owner() {
+    let fixture = Fixture::new();
+    fs::write(fixture.cache.join("unknown"), b"preserved").unwrap();
+    crate::faults::STATE
+        .with(|state| state.borrow_mut().close = Some(crate::private_fs::CloseRole::Lock));
+    let failure = ImageCache::open(&fixture.state, &fixture.cache)
+        .err()
+        .unwrap();
+    crate::faults::reset();
+    let mut retained = failure.retained.expect("actual failed finalizer owner");
+    assert_eq!(
+        retained.retire().err().unwrap().code(),
+        "custody_unconfirmed"
+    );
+    assert_eq!(
+        fs::read(fixture.cache.join("unknown")).unwrap(),
+        b"preserved"
+    );
+}

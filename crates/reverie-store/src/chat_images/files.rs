@@ -10,7 +10,7 @@ impl ImageCache {
     pub(super) fn checkpoint(&mut self) -> Result<()> {
         let result = self.custody.checkpoint(
             self.entries
-                .values()
+                .iter()
                 .map(|entry| entry.record.clone())
                 .collect(),
         );
@@ -51,7 +51,12 @@ impl ImageCache {
         )
     }
     pub(super) fn remove(&mut self, name: &ImageFileName) -> Result<()> {
-        let Some(entry) = self.entries.get(name) else {
+        need(self.custody.require_active()?, "cache_unavailable")?;
+        let Some(entry) = self
+            .entries
+            .iter()
+            .find(|entry| entry.record.name() == name)
+        else {
             return Ok(());
         };
         let stamp = entry.stamp.clone();
@@ -65,7 +70,7 @@ impl ImageCache {
                     .cache()
                     .remove_temporary(name.as_str(), &stamp)?;
             }
-            self.entries.remove(name);
+            self.entries.retain(|entry| entry.record.name() != name);
             self.checkpoint()
         })();
         if result.is_err() {
