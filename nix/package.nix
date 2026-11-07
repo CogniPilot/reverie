@@ -605,11 +605,12 @@ let
     # Run the installed reverie-memory as packaged, with no environment: it must reach `reverie agent memory` and refuse.
     smoke() {
       input=$1 want=$2; shift 2
-      got_err=$(mktemp)
+      got_out=$(mktemp) got_err=$(mktemp)
       got_rc=0
-      got_out=$(printf '%s' "$input" | ${pkgs.coreutils}/bin/env -i "$out/bin/reverie-memory" "$@" 2>"$got_err") || got_rc=$?
-      if [ "$got_rc" != 1 ] || [ -n "$got_out" ] || [ "$(cat "$got_err")" != "$want" ]; then
-        echo "reverie-memory smoke failed (args: $*): exit $got_rc, stdout [$got_out], stderr [$(cat "$got_err")]" >&2
+      printf '%s' "$input" | ${pkgs.coreutils}/bin/env -i "$out/bin/reverie-memory" "$@" >"$got_out" 2>"$got_err" || got_rc=$?
+      # Byte for byte: no output at all, and exactly the one error line with its newline.
+      if [ "$got_rc" != 1 ] || [ -s "$got_out" ] || ! printf '%s\n' "$want" | ${pkgs.diffutils}/bin/cmp -s - "$got_err"; then
+        echo "reverie-memory smoke failed (args: $*): exit $got_rc, stdout [$(cat "$got_out")], stderr [$(cat "$got_err")]" >&2
         exit 1
       fi
     }
