@@ -198,7 +198,7 @@ fn cold_launch(args: &[String]) -> bool {
         ["inspect", target] if Path::new("cold-created-args").is_file()
             && (*target == NAME || *target == "c".repeat(64)) => {
             let running = !Path::new("cold-stopped").is_file();
-            let pid = if running { 321 } else { 0 };
+            let pid = if running { fs::read_to_string("cold-running-pid").map_or(321, |value| value.parse::<u32>().unwrap()) } else { 0 };
             let created = fs::read_to_string("cold-created-args").unwrap();
             let policy = created.split('\0').find_map(|word| word.strip_prefix("reverie.worker-policy=")).unwrap();
             assert_eq!(policy.len(), 64);

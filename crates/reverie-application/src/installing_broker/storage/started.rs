@@ -108,3 +108,59 @@ impl InstallingBroker {
         })
     }
 }
+
+/// Keep the original entry locked across the pure Host resource transfer and
+/// infallible publication of its exact new stop owner.
+pub(super) struct StartedEntry<'a> {
+    entries: Option<MutexGuard<'a, Vec<Entry>>>,
+    index: Option<usize>,
+}
+impl StartedClaim {
+    pub(super) fn stop_entry(&self) -> Result<StartedEntry<'_>, StorageWorkflowError> {
+        let ClaimDestination::Registered {
+            registry, identity, ..
+        } = &self.destination
+        else {
+            return Ok(StartedEntry {
+                entries: None,
+                index: None,
+            });
+        };
+        let entries = registry.lock(registry.runtime.stop_deadline())?;
+        let index = entries
+            .iter()
+            .position(|entry| Arc::ptr_eq(&entry.identity, identity))
+            .ok_or_else(|| StorageWorkflowError::refused("WORKER_STORAGE_CLAIM_CHANGED"))?;
+        let entry = &entries[index];
+        if !entry.writer_checked
+            || entry.paths != self.paths
+            || !matches!(&entry.owner, EntryOwner::Laptop(actual) if self.owner.created.same_workflow(actual))
+        {
+            return Err(StorageWorkflowError::refused(
+                "WORKER_STARTED_STORAGE_CHANGED",
+            ));
+        }
+        Ok(StartedEntry {
+            entries: Some(entries),
+            index: Some(index),
+        })
+    }
+}
+impl StartedEntry<'_> {
+    pub(super) fn publish_ordinary(
+        mut self,
+        native: Arc<Mutex<reverie_host::worker_source_stop::OrdinaryLaptopStop>>,
+    ) {
+        if let (Some(entries), Some(index)) = (&mut self.entries, self.index) {
+            entries[index].owner = EntryOwner::OrdinaryStop(native);
+        }
+    }
+    pub(super) fn publish_replacement(
+        mut self,
+        native: Arc<Mutex<reverie_host::worker_source_stop::OrdinaryReplacementStop>>,
+    ) {
+        if let (Some(entries), Some(index)) = (&mut self.entries, self.index) {
+            entries[index].owner = EntryOwner::ReplacementStop(native);
+        }
+    }
+}

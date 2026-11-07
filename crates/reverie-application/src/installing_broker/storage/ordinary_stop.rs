@@ -11,10 +11,12 @@ type RetainFailure = Box<(
     StorageWorkflowError,
 )>;
 pub(in crate::installing_broker) struct OrdinaryStopPreparation {
+    predecessor_office: Option<reverie_host::office::OfficePhone>,
     destination: ClaimDestination,
     native: Arc<Mutex<OrdinaryLaptopStop>>,
 }
 pub(in crate::installing_broker) struct OrdinaryStopReturned {
+    predecessor_office: Option<reverie_host::office::OfficePhone>,
     claim: StorageClaim,
     plan: ObservedCreatePlan,
     previous: Option<ExistingLaptopInspection>,
@@ -57,10 +59,17 @@ impl OrdinaryStopReturned {
         ObservedCreatePlan,
         Option<ExistingLaptopInspection>,
         StoppedLaptopRemoval,
+        Option<reverie_host::office::OfficePhone>,
     ) {
         // The actual observed input remains retained through confirmed stop;
         // the removal owner carries its stopped identity, not its DATA row.
-        (self.claim, self.plan, self.previous, self.removal)
+        (
+            self.claim,
+            self.plan,
+            self.previous,
+            self.removal,
+            self.predecessor_office,
+        )
     }
 }
 impl OrdinaryStopPreparation {
@@ -98,7 +107,7 @@ impl OrdinaryStopPreparation {
             .map_err(Into::into)
     }
     pub(in crate::installing_broker) fn reclaim(
-        self,
+        mut self,
         end: Instant,
     ) -> Result<OrdinaryStopReturned, Box<OrdinaryStopReclaimFailure>> {
         let result = match &self.destination {
@@ -111,6 +120,7 @@ impl OrdinaryStopPreparation {
                         .take_stopped(&registry.runtime, end)?
                         .into_cold_parts();
                     Ok(OrdinaryStopReturned {
+                        predecessor_office: self.predecessor_office.take(),
                         claim: StorageClaim {
                             state: ClaimState::Legacy {
                                 registry: registry.clone(),
@@ -126,7 +136,12 @@ impl OrdinaryStopPreparation {
                 registry,
                 identity,
                 newly_claimed,
-            } => registry.reclaim_ordinary_stop(identity, &self.native, *newly_claimed, end),
+            } => registry
+                .reclaim_ordinary_stop(identity, &self.native, *newly_claimed, end)
+                .map(|mut returned| {
+                    returned.predecessor_office = self.predecessor_office.take();
+                    returned
+                }),
         };
         result.map_err(|cause| {
             Box::new(OrdinaryStopReclaimFailure {
@@ -158,17 +173,11 @@ impl StorageClaim {
         previous: Option<ExistingLaptopInspection>,
     ) -> Result<OrdinaryStopPreparation, Box<OrdinaryStopRetainFailure>> {
         match self.state {
-            ClaimState::Started(owner) => Err(Box::new(OrdinaryStopRetainFailure {
-                claim: StorageClaim {
-                    state: ClaimState::Started(owner),
-                },
-                plan,
-                previous,
-                cause: StorageWorkflowError::refused("WORKER_STARTED_STOP_RESOURCE_RETAINED"),
-            })),
+            ClaimState::Started(owner) => retain_started(owner, plan, previous),
             ClaimState::Legacy { registry, owner } => {
                 match retain_native(&registry.runtime, owner, plan, previous) {
                     Ok(native) => Ok(OrdinaryStopPreparation {
+                        predecessor_office: None,
                         destination: ClaimDestination::Legacy { registry },
                         native: Arc::new(Mutex::new(native)),
                     }),
@@ -198,6 +207,7 @@ impl StorageClaim {
                 };
                 match registry.retain_ordinary_stop(&identity, plan, previous) {
                     Ok(native) => Ok(OrdinaryStopPreparation {
+                        predecessor_office: None,
                         destination,
                         native,
                     }),
@@ -281,6 +291,7 @@ impl StorageRegistry {
             native.take_stopped(&self.runtime, end)?.into_cold_parts();
         entries[index].owner = EntryOwner::Direct(owner);
         Ok(OrdinaryStopReturned {
+            predecessor_office: None,
             claim: self.handle(&entries[index], newly_claimed),
             plan,
             previous,
@@ -319,4 +330,68 @@ fn same_native(
             "WORKER_ORDINARY_STOP_CHANGED",
         ))
     }
+}
+
+fn retain_started(
+    owner: Box<super::started::StartedClaim>,
+    plan: ObservedCreatePlan,
+    previous: Option<ExistingLaptopInspection>,
+) -> Result<OrdinaryStopPreparation, Box<OrdinaryStopRetainFailure>> {
+    let mut inputs = Some((plan, previous));
+    match transfer_started(&owner, &mut inputs) {
+        Ok((native, office)) => Ok(OrdinaryStopPreparation {
+            destination: owner.destination,
+            native,
+            predecessor_office: Some(office),
+        }),
+        Err(cause) => {
+            let (plan, previous) = inputs.expect("all refusals return original observations");
+            Err(Box::new(OrdinaryStopRetainFailure {
+                claim: StorageClaim {
+                    state: ClaimState::Started(owner),
+                },
+                plan,
+                previous,
+                cause,
+            }))
+        }
+    }
+}
+fn transfer_started(
+    owner: &super::started::StartedClaim,
+    inputs: &mut Option<(ObservedCreatePlan, Option<ExistingLaptopInspection>)>,
+) -> Result<
+    (
+        Arc<Mutex<OrdinaryLaptopStop>>,
+        reverie_host::office::OfficePhone,
+    ),
+    StorageWorkflowError,
+> {
+    if inputs.as_ref().expect("original inputs").1.is_none() {
+        return Err(StorageWorkflowError::refused(
+            "WORKER_STARTED_INITIAL_OBSERVATION_REQUIRED",
+        ));
+    }
+    let entry = owner.stop_entry()?;
+    let registry = owner.destination.registry();
+    let (plan, previous) = inputs.take().expect("checked original inputs");
+    let transferred = match registry
+        .runtime
+        .transfer_started_laptop_ordinary_stop_for_worker(
+            &owner.owner.created,
+            plan,
+            previous.expect("actual original inspection"),
+            &owner.connection,
+        ) {
+        Ok(transferred) => transferred,
+        Err(failure) => {
+            let (plan, original, cause) = failure.into_parts();
+            *inputs = Some((plan, Some(original)));
+            return Err(cause.into());
+        }
+    };
+    let (native, office, _original_request_data) = transferred.into_parts();
+    let native = Arc::new(Mutex::new(native));
+    entry.publish_ordinary(native.clone());
+    Ok((native, office))
 }

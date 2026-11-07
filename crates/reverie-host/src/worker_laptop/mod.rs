@@ -24,7 +24,10 @@ mod start;
 mod started_transfer;
 mod storage;
 mod storage_cleanup;
-pub use started_transfer::{StartedOrdinaryStopTransferred, StartedReplacementStopTransferred};
+pub use started_transfer::{
+    StartedOrdinaryStopTransferFailure, StartedOrdinaryStopTransferred,
+    StartedReplacementStopTransferFailure, StartedReplacementStopTransferred,
+};
 mod started_source;
 pub use started_source::{
     StartedLaptopSource, StartedSourceStopTransferred, StartedSourceStorageBorrow,

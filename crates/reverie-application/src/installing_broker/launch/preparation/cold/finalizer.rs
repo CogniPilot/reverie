@@ -33,6 +33,7 @@ struct Finalizer<'a> {
     stopped: Option<StoppedCreatedLaptop>,
     target: Option<WorkerContainerName>,
     original_remainder: Option<FinalStorageRemainder>,
+    predecessor_phone: Option<reverie_host::office::OfficePhone>,
     returned: Option<Resources>,
 }
 #[must_use = "retains the original resource phases and counted handler hold"]
@@ -78,6 +79,7 @@ impl<'a> ColdFinalizationFailure<'a> {
                 stopped: None,
                 target: None,
                 original_remainder: None,
+                predecessor_phone: None,
                 returned: None,
             },
         })
@@ -255,6 +257,7 @@ fn finish<'a>(
         stopped: None,
         target: None,
         original_remainder: None,
+        predecessor_phone: None,
         returned: None,
     };
     // The actual original allocation finally precedes outstanding Nix close.
