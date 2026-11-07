@@ -6,6 +6,7 @@ mod create;
 mod error;
 mod memory;
 mod network;
+mod pane;
 mod publication;
 mod start;
 #[cfg(test)]
@@ -23,6 +24,7 @@ pub use create::{CreatedLaptop, LaptopCreation};
 pub use error::{CreateTelemetryFailure, LaptopError, TelemetryCause};
 use error::{Result, finalized, need};
 pub use memory::{ConfiguredMemory, MemoryConfiguration};
+pub use pane::{PaneStart, StartedPane};
 use reverie_contracts::worker_launch::WorkerRequest;
 pub use start::{ContainerStart, StartedContainer};
 use std::{
