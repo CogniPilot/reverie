@@ -431,7 +431,7 @@ impl Job {
         self.close_budget(None, guard)?;
         self.require_closed()
     }
-    pub(in crate::worker_laptop) fn cleanup_deadline(&self, fallback: Instant) -> Result<Instant> {
+    pub(crate) fn cleanup_deadline(&self, fallback: Instant) -> Result<Instant> {
         let plan = self
             .close
             .try_lock()

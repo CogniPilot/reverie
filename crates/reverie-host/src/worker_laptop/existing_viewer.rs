@@ -53,6 +53,17 @@ pub struct ExistingViewer {
     pub(super) reference: ExistingReference,
 }
 impl ExistingViewer {
+    #[cfg(test)]
+    pub(super) fn native_job_for_owned_test(&self) -> Arc<ViewerJob> {
+        self.reference
+            .record
+            .lock()
+            .unwrap()
+            .job
+            .as_ref()
+            .expect("actual retained constructor")
+            .clone()
+    }
     pub fn same_owner(&self, other: &Self) -> bool {
         self.reference.same_owner(&other.reference)
     }

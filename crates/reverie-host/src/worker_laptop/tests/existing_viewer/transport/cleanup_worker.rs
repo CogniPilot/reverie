@@ -12,6 +12,102 @@ impl Drop for Release {
         self.0.released.store(true, Ordering::Release);
     }
 }
+fn retained_after_closed_j(
+    fixture: &Fixture,
+    service: &Arc<WorkerReportService>,
+) -> (ExistingViewer, WorkerLaunchConnection, WorkerLaunchHold) {
+    let (_peer, connection, hold) = accepted(fixture, service, "opencode");
+    let existing = retained(fixture, &connection);
+    let gate = Arc::new(Gate::default());
+    std::thread::scope(|scope| {
+        let _release = Release(gate.clone());
+        let pause = gate.clone();
+        let runtime = fixture.runtime().clone();
+        let existing = &existing;
+        let connection = &connection;
+        let start = scope.spawn(move || {
+            crate::worker_laptop::viewer::test_hooks::next_constructor(pause);
+            runtime.start_existing_viewer_for_worker(existing, connection)
+        });
+        wait(|| gate.entered.load(Ordering::Acquire));
+        connection.close_socket(end()).unwrap();
+        gate.released.store(true, Ordering::Release);
+        assert!(matches!(
+            start.join().unwrap().unwrap(),
+            ExistingViewerStart::Retained
+        ));
+    });
+    wait(|| fixture.root.join("viewer-ready").is_file());
+    (existing, connection, hold)
+}
+
+#[test]
+fn actual_post_native_slot_contention_uses_saved_end_and_retains_the_same_constructor() {
+    if isolated(
+        "actual_post_native_slot_contention_uses_saved_end_and_retains_the_same_constructor",
+    ) {
+        return;
+    }
+    let fixture = Fixture::employee("created-viewer-echo");
+    let service = Arc::new(WorkerReportService::from_runtime(fixture.runtime()));
+    let (existing, connection, hold) = retained_after_closed_j(&fixture, &service);
+    let job = existing.native_job_for_owned_test();
+    let client = fixture.runtime().installed_engine().engine.client.clone();
+    let gate = Arc::new(Gate::default());
+    let (sent, observed) = std::sync::mpsc::channel();
+    let (refused, observation) = std::thread::scope(|scope| {
+        let _release = Release(gate.clone());
+        let locked = gate.clone();
+        let actual = job.clone();
+        let holding = client.clone();
+        let holder = scope
+            .spawn(move || holding.hold_cleanup_slot_for_owned_test(&locked, &actual, observed));
+        wait(|| gate.entered.load(Ordering::Acquire));
+        crate::captured_client::test_hooks::observe_viewer_release(sent);
+        let refused = fixture
+            .runtime()
+            .close_existing_viewer_for_worker(&existing)
+            .is_err();
+        gate.released.store(true, Ordering::Release);
+        (refused, holder.join().unwrap())
+    });
+    let confirmed = job.require_closed().is_ok();
+    let slot_retained = client.require_viewer_released(&job).is_err();
+    let unreclaimed = fixture.runtime().reclaim_existing_relay(&existing).is_err();
+    let held = StorageLease::acquire_migration(&fixture.source, &sid()).is_err();
+    let counts = job.native_counts();
+    assert!(
+        fixture.runtime().stop_deadline().is_none(),
+        "no invented global stop to bound slot waiting"
+    );
+    // Explicit lower-component recovery only after the refusal measurements.
+    // It may settle the same known closed native slot; it is not App release.
+    cleanup_component(&fixture, &existing, connection, hold, &service);
+    assert!(client.require_viewer_released(&job).is_ok());
+    assert!(
+        observation.end.is_some(),
+        "must reach actual confirmed-native slot release"
+    );
+    assert!(confirmed);
+    assert!(
+        refused,
+        "actual saved phase end must bound post-native mutex waiting"
+    );
+    assert!(
+        observation.released_by_caller,
+        "worker returns before owned fallback unlock"
+    );
+    assert!(
+        observation.same_job && slot_retained && unreclaimed && held,
+        "same real slot/Box remain retained on refusal"
+    );
+    assert_eq!(counts.1, 1);
+    assert_eq!(
+        job.native_counts(),
+        counts,
+        "recovery cannot repeat native group signal"
+    );
+}
 
 #[test]
 fn actual_late_first_stop_during_guard_wait_keeps_fresh_native_term_and_original_stop_end() {

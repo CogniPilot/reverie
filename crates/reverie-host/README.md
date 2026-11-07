@@ -758,7 +758,9 @@ uses the original first-stop end. The five-second TERM grace begins only after
 the real record, constructor and native state are acquired. KILL then gets its
 original 100 milliseconds, clipped by the caller and live first-stop limits.
 Each phase stays fixed on retry. Existing caller-bounded methods keep their
-original aggregate cap. Native cleanup advances before potentially blocking
+original aggregate cap. Final captured-slot release also uses the saved phase
+end: mutex contention retains the exact constructor instead of waiting without
+a bound after native cleanup. Native cleanup advances before potentially blocking
 query settlement: a retained resize, stop or final-read constructor must not
 hide the owned viewer. Actual provider stop effects still precede viewer reap.
 Unknown native/query owners and both causes remain retained; only actual join

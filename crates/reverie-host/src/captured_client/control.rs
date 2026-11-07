@@ -118,6 +118,55 @@ impl CallFailure {
     }
 }
 impl CapturedClient {
+    pub(crate) fn require_viewer_released(
+        &self,
+        job: &Arc<crate::worker_laptop::ViewerJob>,
+    ) -> Result<()> {
+        if !job.same_capture(&self.bootstrap) {
+            return Err(EngineError::new(EngineFault::Identity));
+        }
+        let active = self.active.try_lock().map_err(|_| {
+            EngineError::pending(EngineFault::Finalization, CleanupFault::Supervisor)
+        })?;
+        if matches!(active.as_ref(),Some(Active::ViewerConstructor(current)) if Arc::ptr_eq(current,job))
+        {
+            Err(EngineError::pending(
+                EngineFault::Finalization,
+                CleanupFault::PendingStart,
+            ))
+        } else {
+            Ok(())
+        }
+    }
+    #[cfg(test)]
+    pub(crate) fn hold_cleanup_slot_for_owned_test(
+        &self,
+        gate: &super::test_hooks::Gate,
+        job: &Arc<crate::worker_laptop::ViewerJob>,
+        observed: std::sync::mpsc::Receiver<Instant>,
+    ) -> super::test_hooks::CleanupSlotObservation {
+        assert!(job.same_capture(&self.bootstrap));
+        let active = self.active.lock().unwrap();
+        gate.entered.store(true, Ordering::Release);
+        let end = observed.recv_timeout(Duration::from_secs(3)).ok();
+        let released_by_caller = loop {
+            if gate.released.load(Ordering::Acquire) {
+                break true;
+            }
+            // Controlled fallback lets the old unbounded implementation
+            // return; it is not a product timer or renewed cleanup budget.
+            if end.is_none_or(|end| Instant::now() >= end + Duration::from_millis(500)) {
+                break false;
+            }
+            std::thread::sleep(Duration::from_millis(1));
+        };
+        let same_job = matches!(active.as_ref(),Some(Active::ViewerConstructor(current)) if Arc::ptr_eq(current,job));
+        super::test_hooks::CleanupSlotObservation {
+            end,
+            released_by_caller,
+            same_job,
+        }
+    }
     #[cfg(test)]
     pub(crate) fn hold_actual_slot_for_owned_test(&self, gate: &super::test_hooks::Gate) {
         let _slot = self.active.lock().unwrap();
@@ -200,7 +249,8 @@ impl CapturedClient {
         {
             *active = None;
         }
-        Ok(())
+        drop(active);
+        self.require_viewer_released(job)
     }
     pub(crate) fn settle_viewer_for_worker(
         &self,
@@ -212,12 +262,18 @@ impl CapturedClient {
         }
         job.close_captured_for_worker(guard)
             .map_err(|_| EngineError::pending(EngineFault::Finalization, CleanupFault::Unreaped))?;
-        let mut active = self.viewer_slot(job, None)?;
+        let end = job
+            .cleanup_deadline(guard)
+            .map_err(|_| EngineError::pending(EngineFault::Finalization, CleanupFault::Unreaped))?;
+        #[cfg(test)]
+        super::test_hooks::viewer_release(end);
+        let mut active = self.viewer_slot(job, Some(end))?;
         if matches!(active.as_ref(),Some(Active::ViewerConstructor(current)) if Arc::ptr_eq(current,job))
         {
             *active = None;
         }
-        Ok(())
+        drop(active);
+        self.require_viewer_released(job)
     }
     fn viewer_slot(
         &self,
