@@ -33,10 +33,12 @@ mod proxy;
 mod request;
 mod server;
 mod socket;
+mod telemetry;
 #[cfg(test)]
 mod test_hooks;
 #[cfg(test)]
 mod tests;
+mod worker_path;
 
 #[derive(Debug)]
 pub enum OfficeError {
@@ -95,14 +97,21 @@ fn finalized<T>(result: Result<T>, cleanup: Result<()>) -> Result<T> {
 }
 struct Company {
     root: MetadataText,
+    worker_socket_root: Option<MetadataText>,
     address: address::AddressSource,
     native_jobs: native_jobs::NativeJobs,
+    telemetry: Option<Arc<crate::command_telemetry::CommandTelemetry>>,
     engine: Arc<InstalledWorkerEngine>,
     closing: AtomicBool,
 }
 impl Company {
     fn root(&self) -> Result<PathBuf> {
         Ok(crate::native::python_path(self.root.codepoints())?)
+    }
+    fn telemetry_settled(&self) -> bool {
+        self.telemetry
+            .as_ref()
+            .is_none_or(|owner| !owner.has_pending_store())
     }
 }
 struct OwnedOffice {
@@ -146,8 +155,10 @@ impl OfficeService {
                     reverie_core::PythonText::try_new(crate::native::python_text(&company_root))
                         .expect("filesystem text"),
                 ),
+                worker_socket_root: None,
                 address: address::AddressSource::fixed(SocketAddr::new(address, 3000)),
                 native_jobs: native_jobs::NativeJobs::new(),
+                telemetry: None,
                 engine: Arc::clone(runtime.installed_engine()),
                 closing: AtomicBool::new(false),
             }),
@@ -174,8 +185,10 @@ impl OfficeService {
         Ok(Self {
             company: Arc::new(Company {
                 root: envelope.path(WorkerPath::CompanyRoot).clone(),
+                worker_socket_root: Some(envelope.path(WorkerPath::ApiSocketRoot).clone()),
                 address: address::AddressSource::worker(envelope.base().container().to_owned()),
                 native_jobs: native_jobs::NativeJobs::new(),
+                telemetry: telemetry.enabled().then_some(telemetry),
                 engine: runtime.installed_engine().clone(),
                 closing: AtomicBool::new(false),
             }),
@@ -309,7 +322,14 @@ impl OfficeService {
         self.request_close();
         // Abort servers first, then settle all native jobs even when a phone
         // has failed. Jobs own the same real request seats after cancellation.
-        let jobs = self.company.native_jobs.close(self.deadline(deadline));
+        let jobs = finalized(
+            self.company.native_jobs.close(self.deadline(deadline)),
+            if self.company.telemetry_settled() {
+                Ok(())
+            } else {
+                Err(OfficeError::Unconfirmed)
+            },
+        );
         let mut offices = match lock_until(&self.offices, self.deadline(deadline)) {
             Ok(offices) => offices,
             Err(error) => return finalized(jobs, Err(error)),
@@ -404,6 +424,7 @@ impl Drop for OfficeService {
             .get_mut()
             .is_ok_and(|offices| offices.is_empty())
             && self.company.native_jobs.known_settled()
+            && self.company.telemetry_settled()
         {
             return;
         }

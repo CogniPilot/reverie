@@ -82,8 +82,19 @@ impl CommandTelemetry {
     pub fn keys(&self) -> &[reverie_core::worker_options::TelemetryKey] {
         self.policy.keys()
     }
+    #[cfg(test)]
+    pub(crate) fn hold_report_for_owned_test(&self) -> std::sync::MutexGuard<'_, ()> {
+        self.reports.lock().unwrap()
+    }
+    #[cfg(test)]
+    pub(crate) fn hold_producer_for_owned_test(&self) -> std::sync::MutexGuard<'_, ()> {
+        self.producer.lock().unwrap()
+    }
     pub(crate) fn assert_runtime(&self, runtime: &WorkerRuntime) -> Result<()> {
-        if Arc::ptr_eq(&self.engine, runtime.installed_engine()) {
+        self.assert_engine(runtime.installed_engine())
+    }
+    pub(crate) fn assert_engine(&self, engine: &Arc<InstalledWorkerEngine>) -> Result<()> {
+        if Arc::ptr_eq(&self.engine, engine) {
             Ok(())
         } else {
             Err(TelemetryError::Runtime)

@@ -7,6 +7,7 @@ pub(super) enum Route {
     OpsUnavailable,
     Unavailable,
     PlanDecision,
+    Telemetry,
 }
 pub(super) struct RequestPolicy {
     pub(super) route: Route,
@@ -83,7 +84,7 @@ fn classify_route(request: &Request<Incoming>, length: usize) -> Result<Route, S
         if !post || uri.query().is_some() || length > 512 || lengths.iter().count() != 1 {
             return Err(StatusCode::BAD_REQUEST);
         }
-        Route::Unavailable
+        Route::Telemetry
     } else {
         if [
             "goals",
