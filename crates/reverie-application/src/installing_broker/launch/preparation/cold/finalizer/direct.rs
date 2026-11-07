@@ -10,6 +10,9 @@ impl Finalizer<'_> {
             return None;
         };
         let input = match resources {
+            Resources::UnobservedCleanup { storage, plan } => {
+                Some((storage, plan, FinalStorageRemainder::Unobserved))
+            }
             Resources::OriginalCleanup {
                 storage,
                 plan,
@@ -104,6 +107,7 @@ impl Finalizer<'_> {
 impl FinalStorageRemainder {
     pub(super) fn restore(self, storage: StorageClaim, plan: ObservedCreatePlan) -> Resources {
         match self {
+            Self::Unobserved => Resources::UnobservedCleanup { storage, plan },
             Self::Original(inspection) => Resources::OriginalCleanup {
                 storage,
                 plan,

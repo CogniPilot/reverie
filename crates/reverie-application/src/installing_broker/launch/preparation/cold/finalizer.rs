@@ -281,7 +281,7 @@ impl Finalizer<'_> {
     }
     fn capture_target(&mut self) {
         let plan = match self.owner.resource() {
-            Some(Resources::OriginalCleanup { plan, .. }) => Some(plan),
+            Some(Resources::OriginalCleanup { plan, .. } | Resources::UnobservedCleanup { plan, .. }) => Some(plan),
             Some(Resources::Direct(input)) => Some(&input.plan),
             Some(Resources::Stopped(input)) => Some(&input.plan),
             Some(Resources::PreparingNix(input)) => Some(&input.stopped.plan),

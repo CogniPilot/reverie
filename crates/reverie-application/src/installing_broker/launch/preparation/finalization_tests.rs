@@ -72,6 +72,53 @@ fn no_stop(tree: &Tree) {
             .any(|line| line.starts_with("stop\0") || line.starts_with("kill\0"))
     );
 }
+fn unobserved<'a>(tree: &Tree, broker: &'a InstallingBroker) -> Box<PreparationFailure<'a>> {
+    let (_client, admitted) = incoming(broker, SID);
+    let observed = PreparingWorkerLaunch::enter(admitted)
+        .unwrap()
+        .claim()
+        .unwrap()
+        .observe()
+        .unwrap();
+    tree.write("inspect.out.status", b"7");
+    let inspected = observed.inspect(end()).unwrap();
+    assert!(inspected.previous().is_none());
+    inspected.classify_existing().err().unwrap()
+}
+#[test]
+fn failed_initial_inspect_needs_real_successful_empty_census_before_prefix_release() {
+    crate::test_process::owning_case!(
+        failed_initial_inspect_needs_real_successful_empty_census_before_prefix_release
+    );
+    let tree = Tree::new();
+    let broker = broker(&tree);
+    let failure = unobserved(&tree, &broker);
+    assert!(lease_held(&broker));
+    let closed = failure.finalize_for_worker().unwrap();
+    assert!(!closed.storage_retained() && !lease_held(&broker));
+    no_stop(&tree);
+    let calls = fs::read_to_string(tree.root.join("calls.txt")).unwrap();
+    assert!(calls.contains("ps\0--all\0--no-trunc\0--format\0{{.ID}} {{.Names}}"));
+    broker.close_command_telemetry(end()).unwrap();
+}
+#[test]
+fn failed_initial_inspect_with_named_target_in_fresh_census_retains_lease_and_hold() {
+    crate::test_process::owning_case!(
+        failed_initial_inspect_with_named_target_in_fresh_census_retains_lease_and_hold
+    );
+    let tree = Tree::new();
+    let broker = broker(&tree);
+    let failure = unobserved(&tree, &broker);
+    tree.write(
+        "ps.out",
+        format!("{} test-agent-{SID}\n", "a".repeat(64)).as_bytes(),
+    );
+    let retained = failure.finalize(end()).err().unwrap();
+    assert!(lease_held(&broker) && retained.cleanup_error_count() > 0);
+    no_stop(&tree);
+    drop(retained);
+    assert!(broker.close_command_telemetry(end()).is_err());
+}
 #[test]
 fn actual_stopped_attach_failure_finishes_same_lease_and_hold_without_stop_dispatch() {
     crate::test_process::owning_case!(
