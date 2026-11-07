@@ -47,8 +47,11 @@ verification of `memory.high`.
 
 ## Host executor acceptance still required
 
-The existing Rust memory helper requires ordinary NixOS owner activation and
-root-owned employee policy. It does not provision the fleet pool or CPU policy.
+The rollout target is the repository-packaged Rust controller running in Docker,
+with instance settings beneath the registered `~/reverie` root. It must derive
+and verify its Docker-managed pool rather than install a host slice or edit
+another repository's NixOS configuration. The existing NixOS memory helper is a
+legacy alternative; it does not provision this pool or establish rollout readiness.
 The existing image-switch tool requires a stopped broker and fleet and explicitly
 does not recreate employees. The console update service updates only the console.
 None of those component outcomes is a complete fleet rollout.
@@ -64,3 +67,19 @@ The aggregate pool must leave enforced CPU/RAM/task/swap capacity for the
 website, control services and recovery. A capacity calculation or settings save
 is not that enforcement. See [SPEC_0001](../spec/SPEC_0001_OWNER_OPERATIONS.md)
 and [soft RAM setup](laptop-soft-limits-and-swap.md).
+
+For the selected 48 GiB pool, every employee may borrow up to the pool's full
+48 GiB hard ceiling. An employee's smaller `memory.high` threshold controls
+pressure without reserving or hard-partitioning that amount. The aggregate
+parent enforces the shared limit. All previous workers outside that parent must
+be stopped and their operations settled before the first such burst worker can
+start; counting their limits in a preview cannot enforce an aggregate ceiling.
+The executor must fence the previous provider throughout this handoff.
+
+The migration preserves the source session's complete resource and memory
+policy in a versioned session record before selecting the target policy. The
+approved intent must bind that exact target policy, including soft RAM and
+swap settings. A publication receipt proves the actual configuration commit;
+it is not permission to launch or evidence of applied kernel limits. Created,
+started, ready and settled are separate native outcomes. Lost replies or
+unconfirmed effects retain the original operation and forbid automatic replay.
