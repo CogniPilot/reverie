@@ -12,6 +12,10 @@ use reverie_core::{
     worker_schema::WorkerBase,
 };
 use std::collections::BTreeMap;
+mod ordinary;
+pub use ordinary::{
+    OrdinaryContainer, OrdinaryNetwork, ordinary_container_absent, ordinary_network_absent,
+};
 type Object = BTreeMap<Text, Value>;
 type Result<T> = std::result::Result<T, SourceStopDataError>;
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

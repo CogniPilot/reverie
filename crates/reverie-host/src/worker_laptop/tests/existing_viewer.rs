@@ -2,6 +2,7 @@
 //! phone, Created/Pane/guard tokens or host daemon access.
 use super::*;
 mod relay;
+mod stop;
 use crate::{
     worker_launch::ExistingLaptopInspection,
     worker_storage::{LaunchStorage, StorageLease},

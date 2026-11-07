@@ -1,0 +1,99 @@
+{
+  "source_sha256": "a112c936b4d0f406a4cd76b418d87861650fa687886fde6a1e6d75943d66f8e1",
+  "producer": "unchanged Broker._stop_observed, controlled reply DATA only; no native authority qualification",
+  "name": "test-agent-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+  "session": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+  "cases": [
+    {
+      "case": 0,
+      "raw": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Name\": \"/test-agent-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}}, \"State\": {\"Running\": false}, \"unknown\": \"\\ud800\"}, {\"ignored\": \"original first element only\"}]",
+      "conditional_kill": false,
+      "source_error": null,
+      "strict_false_stopped": true
+    },
+    {
+      "case": 1,
+      "raw": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Name\": \"/test-agent-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}}, \"State\": {\"Running\": 0}, \"unknown\": \"\\ud800\"}, {\"ignored\": \"original first element only\"}]",
+      "conditional_kill": false,
+      "source_error": null,
+      "strict_false_stopped": false
+    },
+    {
+      "case": 2,
+      "raw": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Name\": \"/test-agent-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}}, \"State\": {\"Running\": 0.0}, \"unknown\": \"\\ud800\"}, {\"ignored\": \"original first element only\"}]",
+      "conditional_kill": false,
+      "source_error": null,
+      "strict_false_stopped": false
+    },
+    {
+      "case": 3,
+      "raw": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Name\": \"/test-agent-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}}, \"State\": {\"Running\": null}, \"unknown\": \"\\ud800\"}, {\"ignored\": \"original first element only\"}]",
+      "conditional_kill": false,
+      "source_error": null,
+      "strict_false_stopped": false
+    },
+    {
+      "case": 4,
+      "raw": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Name\": \"/test-agent-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}}, \"State\": {\"Running\": []}, \"unknown\": \"\\ud800\"}, {\"ignored\": \"original first element only\"}]",
+      "conditional_kill": false,
+      "source_error": null,
+      "strict_false_stopped": false
+    },
+    {
+      "case": 5,
+      "raw": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Name\": \"/test-agent-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}}, \"State\": {\"Running\": {}}, \"unknown\": \"\\ud800\"}, {\"ignored\": \"original first element only\"}]",
+      "conditional_kill": false,
+      "source_error": null,
+      "strict_false_stopped": false
+    },
+    {
+      "case": 6,
+      "raw": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Name\": \"/test-agent-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}}, \"State\": {\"Running\": \"\"}, \"unknown\": \"\\ud800\"}, {\"ignored\": \"original first element only\"}]",
+      "conditional_kill": false,
+      "source_error": null,
+      "strict_false_stopped": false
+    },
+    {
+      "case": 7,
+      "raw": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Name\": \"/test-agent-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}}, \"State\": {\"Running\": true}, \"unknown\": \"\\ud800\"}, {\"ignored\": \"original first element only\"}]",
+      "conditional_kill": true,
+      "source_error": null,
+      "strict_false_stopped": false
+    },
+    {
+      "case": 8,
+      "raw": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Name\": \"/test-agent-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}}, \"State\": {\"Running\": 1}, \"unknown\": \"\\ud800\"}, {\"ignored\": \"original first element only\"}]",
+      "conditional_kill": true,
+      "source_error": null,
+      "strict_false_stopped": false
+    },
+    {
+      "case": 9,
+      "raw": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Name\": \"/test-agent-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}}, \"State\": {\"Running\": [0]}, \"unknown\": \"\\ud800\"}, {\"ignored\": \"original first element only\"}]",
+      "conditional_kill": true,
+      "source_error": null,
+      "strict_false_stopped": false
+    },
+    {
+      "case": 10,
+      "raw": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Name\": \"/test-agent-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}}, \"State\": {\"Running\": {\"x\": 0}}, \"unknown\": \"\\ud800\"}, {\"ignored\": \"original first element only\"}]",
+      "conditional_kill": true,
+      "source_error": null,
+      "strict_false_stopped": false
+    },
+    {
+      "case": 11,
+      "raw": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Name\": \"/test-agent-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}}, \"State\": {\"Running\": \"false\"}, \"unknown\": \"\\ud800\"}, {\"ignored\": \"original first element only\"}]",
+      "conditional_kill": true,
+      "source_error": null,
+      "strict_false_stopped": false
+    },
+    {
+      "case": 12,
+      "raw": "[{\"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Name\": \"/test-agent-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}}, \"State\": {\"Running\": NaN}, \"unknown\": \"\\ud800\"}, {\"ignored\": \"original first element only\"}]",
+      "conditional_kill": true,
+      "source_error": null,
+      "strict_false_stopped": false
+    }
+  ]
+}
