@@ -1,7 +1,7 @@
 //! Fixed Nix-store bytes in the host and selected init root. This returns file
 //! identity DATA only. The real Q owner must still bind the actual engine,
 //! incarnation, process, peer and current owner before authorizing any work.
-mod files;
+pub(super) mod files;
 #[cfg(test)]
 mod tests;
 use super::files::Descriptors;
@@ -17,7 +17,7 @@ use std::{
     path::Path,
     time::Instant,
 };
-const MAX_CODE_FILE: u64 = 256 * 1024 * 1024;
+pub(super) const MAX_CODE_FILE: u64 = 256 * 1024 * 1024;
 
 #[derive(Default)]
 pub struct ImmutableCodeObserver {
@@ -56,7 +56,7 @@ impl ImmutableCodeObserver {
         files.finish(body, &mut self.close_uncertain)
     }
 }
-fn read_open(path: &Path) -> io::Result<File> {
+pub(super) fn read_open(path: &Path) -> io::Result<File> {
     OpenOptions::new()
         .read(true)
         .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC | libc::O_NONBLOCK)
@@ -118,7 +118,7 @@ fn observe(
         inode: actual.ino(),
     })
 }
-fn hash(file: &mut File, code: &CodeFile, end: Instant) -> Result<()> {
+pub(super) fn hash(file: &mut File, code: &CodeFile, end: Instant) -> Result<()> {
     let mut hasher = Sha256::new();
     let mut count = 0_u64;
     let mut buffer = vec![0; 1024 * 1024];

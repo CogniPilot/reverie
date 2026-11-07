@@ -2,7 +2,7 @@ use super::*;
 use nix::fcntl::{OFlag, OpenHow, ResolveFlag, openat2};
 use reverie_core::PythonText;
 #[derive(Eq, PartialEq)]
-pub(super) struct Stamp {
+pub(in crate::website_facts) struct Stamp {
     device: u64,
     inode: u64,
     mode: u32,
@@ -12,7 +12,7 @@ pub(super) struct Stamp {
     ctime: (i64, i64),
 }
 impl Stamp {
-    pub(super) fn of(info: &fs::Metadata) -> Self {
+    pub(in crate::website_facts) fn of(info: &fs::Metadata) -> Self {
         Self {
             device: info.dev(),
             inode: info.ino(),
@@ -24,10 +24,10 @@ impl Stamp {
         }
     }
 }
-pub(super) fn check_end(end: Instant) -> Result<()> {
+pub(in crate::website_facts) fn check_end(end: Instant) -> Result<()> {
     need(Instant::now() < end, "BACKEND_CODE_DEADLINE")
 }
-pub(super) fn nix_path(value: &PythonText) -> Result<PathBuf> {
+pub(in crate::website_facts) fn nix_path(value: &PythonText) -> Result<PathBuf> {
     let parsed = reverie_core::posix_path::PosixPath::try_new(value.codepoints())
         .map_err(|_| WebsiteFactsError::Refused("IMMUTABLE_CODE_PATH"))?;
     need(
