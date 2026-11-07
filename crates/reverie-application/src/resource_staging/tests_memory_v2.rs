@@ -241,3 +241,56 @@ fn shared_48_gib_target_keeps_old_allocation_as_high_without_changing_old_sessio
     );
     assert!(original_data.get("laptopMemoryPolicy").is_none());
 }
+
+#[test]
+fn swap_pool_only_change_preserves_selected_old_full_policy_with_same_employee_map() {
+    let mut changed = Vec::new();
+    for policy in [
+        json!({"memoryHighMiB":1024,"swapMiB":512}),
+        json!({"swapMiB":512}),
+    ] {
+        let setup = crate::reservation_gate::tests::observation_cases::Setup::new();
+        let old = ProfileSessionId::parse(setup.oracle["employee"]["sessionId"].as_str().unwrap())
+            .unwrap();
+        let employee =
+            ProfileEmployeeId::parse(setup.oracle["employee"]["id"].as_str().unwrap()).unwrap();
+        let mut before: Value = serde_json::from_slice(&setup.tree.raw).unwrap();
+        before["memoryMiB"] = json!(2048);
+        before["laptopSwapPoolMiB"] = json!(4096);
+        before["employeeMemoryPolicies"] = json!({employee.as_str():policy});
+        let original = effective_config(config(&before), &old).unwrap();
+        let mut after = before.clone();
+        after["laptopSwapPoolMiB"] = json!(8192);
+        after["employeeResources"] = json!({employee.as_str():resources(4096)});
+        let mut target_policy = policy.clone();
+        target_policy["swapPoolMiB"] = json!(8192);
+        after["sessionResources"] = json!({TARGET:{"version":2,
+            "resources":resources(4096),"memoryPolicy":target_policy}});
+        let frozen = OldPolicyStart::capture(
+            config(&before),
+            config(&after),
+            old.clone(),
+            ProfileSessionId::parse(TARGET).unwrap(),
+        )
+        .unwrap()
+        .for_employee(&employee)
+        .unwrap()
+        .freeze(&original)
+        .unwrap();
+        let old_after = effective_config(frozen.candidate().clone(), &old).unwrap();
+        if frozen.assert_old_policy(&original, &old_after).is_err()
+            || worker_config::encode_config(&original) != worker_config::encode_config(&old_after)
+        {
+            changed.push(policy);
+        }
+        let selected = effective_config(
+            frozen.candidate().clone(),
+            &ProfileSessionId::parse(TARGET).unwrap(),
+        )
+        .unwrap();
+        let selected: Value =
+            serde_json::from_slice(&worker_config::encode_config(&selected)).unwrap();
+        assert_eq!(selected["laptopMemoryPolicy"]["swapPoolMiB"], 8192);
+    }
+    assert!(changed.is_empty(), "old policies changed: {changed:?}");
+}
