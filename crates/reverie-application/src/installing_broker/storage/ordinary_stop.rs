@@ -158,6 +158,14 @@ impl StorageClaim {
         previous: Option<ExistingLaptopInspection>,
     ) -> Result<OrdinaryStopPreparation, Box<OrdinaryStopRetainFailure>> {
         match self.state {
+            ClaimState::Started(owner) => Err(Box::new(OrdinaryStopRetainFailure {
+                claim: StorageClaim {
+                    state: ClaimState::Started(owner),
+                },
+                plan,
+                previous,
+                cause: StorageWorkflowError::refused("WORKER_STARTED_STOP_RESOURCE_RETAINED"),
+            })),
             ClaimState::Legacy { registry, owner } => {
                 match retain_native(&registry.runtime, owner, plan, previous) {
                     Ok(native) => Ok(OrdinaryStopPreparation {

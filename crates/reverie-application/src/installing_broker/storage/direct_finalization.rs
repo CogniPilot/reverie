@@ -44,6 +44,15 @@ impl StorageClaim {
         plan: ObservedCreatePlan,
     ) -> Result<DirectStoragePreparation, Box<DirectStorageRetainFailure>> {
         let destination = match self.state {
+            ClaimState::Started(owner) => {
+                return Err(Box::new(DirectStorageRetainFailure {
+                    claim: StorageClaim {
+                        state: ClaimState::Started(owner),
+                    },
+                    plan,
+                    cause: StorageWorkflowError::refused("WORKER_STARTED_FINAL_STORAGE_RETAINED"),
+                }));
+            }
             ClaimState::Legacy { registry, owner } => {
                 match registry.runtime.retain_direct_final_storage(owner, plan) {
                     Ok(owner) => Destination::Legacy { registry, owner },

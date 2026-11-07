@@ -5,7 +5,7 @@ use super::call_budget::CallBudget;
 use super::*;
 mod created_transfer;
 mod finalization;
-pub use created_transfer::StartedRelayTransferred;
+pub use created_transfer::{StartedRelayTransferFailure, StartedRelayTransferred};
 mod relay;
 mod stop;
 use crate::{

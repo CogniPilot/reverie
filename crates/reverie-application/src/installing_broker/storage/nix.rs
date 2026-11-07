@@ -134,6 +134,13 @@ impl StorageClaim {
     ) -> Result<NixStoragePreparation, Box<NixStorageRetainFailure>> {
         let paths = self.paths().clone();
         match self.state {
+            ClaimState::Started(owner) => Err(Box::new(NixStorageRetainFailure {
+                claim: StorageClaim {
+                    state: ClaimState::Started(owner),
+                },
+                guard,
+                error: NixStorageError::Refused("WORKER_STARTED_RESOURCE_NOT_STOPPED"),
+            })),
             ClaimState::Legacy { registry, owner } => {
                 match registry.runtime.retain_nix_store(guard, *owner, prepared) {
                     Ok(workflow) => Ok(NixStoragePreparation {

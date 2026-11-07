@@ -14,6 +14,40 @@ impl StartedRelayTransferred {
         (self.existing, self.office, self.original_request)
     }
 }
+struct TransferInputs {
+    plan: ObservedCreatePlan,
+    inspected: ExistingLaptopInspection,
+    receipt: LaunchReceiptObservation,
+}
+#[must_use = "retain all original once-observed inputs with the unchanged Started owner"]
+pub struct StartedRelayTransferFailure {
+    inputs: TransferInputs,
+    cause: LaptopError,
+}
+impl StartedRelayTransferFailure {
+    pub fn into_parts(
+        self,
+    ) -> (
+        ObservedCreatePlan,
+        ExistingLaptopInspection,
+        LaunchReceiptObservation,
+        LaptopError,
+    ) {
+        (
+            self.inputs.plan,
+            self.inputs.inspected,
+            self.inputs.receipt,
+            self.cause,
+        )
+    }
+}
+impl std::fmt::Debug for StartedRelayTransferFailure {
+    fn fmt(&self, out: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        out.debug_struct("StartedRelayTransferFailure")
+            .field("cause", &self.cause)
+            .finish_non_exhaustive()
+    }
+}
 impl WorkerRuntime {
     /// Only the later canonical J may take this purpose. The original J must
     /// already be physically closed and its actual logical Hold Released.
@@ -25,10 +59,37 @@ impl WorkerRuntime {
         inspected: ExistingLaptopInspection,
         receipt: LaunchReceiptObservation,
         connection: &WorkerLaunchConnection,
+    ) -> std::result::Result<StartedRelayTransferred, Box<StartedRelayTransferFailure>> {
+        let mut inputs = Some(TransferInputs {
+            plan,
+            inspected,
+            receipt,
+        });
+        match self.transfer_started_relay(created, &mut inputs, connection) {
+            Ok(transferred) => Ok(transferred),
+            Err(cause) => Err(Box::new(StartedRelayTransferFailure {
+                inputs: inputs.expect("all refusals precede input consumption"),
+                cause,
+            })),
+        }
+    }
+    fn transfer_started_relay(
+        &self,
+        created: &CreatedLaptop,
+        inputs: &mut Option<TransferInputs>,
+        connection: &WorkerLaunchConnection,
     ) -> Result<StartedRelayTransferred> {
+        let input = inputs.as_ref().expect("actual unconsumed transfer inputs");
         let workflows = self.laptop_workflows();
         let mut record = workflows.started_storage_record(self, created)?;
-        let next = check_transfer(self, &record, &plan, &inspected, &receipt, connection)?;
+        let next = check_transfer(
+            self,
+            &record,
+            &input.plan,
+            &input.inspected,
+            &input.receipt,
+            connection,
+        )?;
         let mut inventory = workflows
             .records
             .try_lock()
@@ -39,6 +100,11 @@ impl WorkerRuntime {
             .ok_or(LaptopError::Refused("WORKER_LAPTOP_REPLAYED"))?;
         // Every fallible check precedes the move. Both inventories are one
         // slot, so no capacity permit is released or reacquired in between.
+        let TransferInputs {
+            plan,
+            inspected,
+            receipt,
+        } = inputs.take().expect("checked original transfer inputs");
         let Resources {
             nix,
             plan: _,

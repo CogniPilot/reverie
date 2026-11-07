@@ -18,6 +18,7 @@ mod recovery_lifetime;
 mod replacement_stop;
 pub(in crate::installing_broker) use ordinary_stop::OrdinaryStopPreparation;
 mod source;
+mod started;
 pub use observed::OwnedCreatePreparationError;
 pub(crate) use source::RegisteredSource;
 pub(super) use source::SourceAttachment;
@@ -140,6 +141,13 @@ impl StorageRegistry {
         // Preserve source order and the real no-lease legacy branch: resolve
         // BEFORE the registry lock, and never census/register legacy storage.
         let selected = self.runtime.resolve_storage(source, session)?;
+        self.claim_selected(selected)
+    }
+    fn claim_selected(
+        self: &Arc<Self>,
+        selected: reverie_host::worker_storage::StorageSelection,
+    ) -> Result<StorageClaim, StorageWorkflowError> {
+        let session = selected.paths().session().clone();
         if selected.paths().kind() != StorageKind::Employee {
             return Ok(StorageClaim {
                 state: ClaimState::Legacy {
@@ -151,7 +159,7 @@ impl StorageRegistry {
         let mut entries = self.lock(None)?;
         if let Some(entry) = entries
             .iter()
-            .find(|entry| entry.paths.session() == session)
+            .find(|entry| entry.paths.session() == &session)
         {
             if matches!(entry.owner, EntryOwner::Source(_)) {
                 return Err(StorageWorkflowError::refused(
@@ -285,6 +293,7 @@ impl StorageRegistry {
     }
 }
 enum ClaimState {
+    Started(Box<started::StartedClaim>),
     Legacy {
         registry: Arc<StorageRegistry>,
         owner: Box<LaunchStorage>,
@@ -304,6 +313,7 @@ pub struct StorageClaim {
 impl StorageClaim {
     pub fn paths(&self) -> &StoragePaths {
         match &self.state {
+            ClaimState::Started(owner) => &owner.paths,
             ClaimState::Legacy { owner, .. } => owner.paths(),
             ClaimState::Registered { paths, .. } => paths,
         }
@@ -325,6 +335,12 @@ impl StorageClaim {
     /// filesystem calls do not have a hard kernel/disk latency guarantee.
     pub fn release(self, deadline: Instant) -> Result<(), Box<StorageReleaseFailure>> {
         match self.state {
+            ClaimState::Started(owner) => Err(Box::new(StorageReleaseFailure {
+                claim: StorageClaim {
+                    state: ClaimState::Started(owner),
+                },
+                cause: StorageWorkflowError::refused("WORKER_STARTED_STORAGE_RETAINED"),
+            })),
             ClaimState::Legacy { registry, owner } => owner.close(deadline).map_err(|failure| {
                 let (owner, cause) = failure.into_parts();
                 Box::new(StorageReleaseFailure {

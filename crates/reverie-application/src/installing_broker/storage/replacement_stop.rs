@@ -138,6 +138,14 @@ impl StorageClaim {
     ) -> Result<ReplacementStopPreparation, Box<ReplacementStopRetainFailure>> {
         let paths = self.paths().clone();
         match self.state {
+            ClaimState::Started(owner) => Err(Box::new(ReplacementStopRetainFailure {
+                claim: StorageClaim {
+                    state: ClaimState::Started(owner),
+                },
+                plan,
+                process,
+                cause: StorageWorkflowError::refused("WORKER_STARTED_STOP_RESOURCE_RETAINED"),
+            })),
             ClaimState::Legacy { registry, owner } => match registry
                 .runtime
                 .retain_ordinary_replacement_stop(owner, plan, process, end)

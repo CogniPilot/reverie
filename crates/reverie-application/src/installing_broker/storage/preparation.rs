@@ -34,6 +34,20 @@ impl StorageClaim {
     }
     fn prepare(&mut self, operation: Preparation) -> Result<(), StorageWorkflowError> {
         match &mut self.state {
+            ClaimState::Started(owner) => {
+                let mut borrowed = owner.borrow()?;
+                match operation {
+                    Preparation::Cold => borrowed.prepare_cold_launch_storage()?,
+                    Preparation::RuntimeDirectory => borrowed.prepare_runtime_directory()?,
+                    Preparation::Binding => borrowed.record_storage_binding()?,
+                    Preparation::Storage => {
+                        return Err(StorageWorkflowError::refused(
+                            "WORKER_STARTED_STORAGE_ALREADY_PREPARED",
+                        ));
+                    }
+                }
+                Ok(())
+            }
             ClaimState::Legacy { owner, .. } => operation.run(owner),
             ClaimState::Registered {
                 registry, identity, ..

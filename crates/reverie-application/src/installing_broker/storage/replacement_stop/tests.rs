@@ -135,6 +135,11 @@ fn inputs(
 }
 fn plan(claim: &StorageClaim, source: &EffectiveWorkerConfig) -> ObservedCreatePlan {
     match &claim.state {
+        ClaimState::Started(owner) => owner
+            .borrow()
+            .unwrap()
+            .prepare_create_plan(source.clone(), source.clone())
+            .unwrap(),
         ClaimState::Legacy { registry, owner } => registry
             .runtime
             .prepare_laptop_plan(source.clone(), source.clone(), owner)

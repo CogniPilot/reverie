@@ -173,7 +173,7 @@ impl Workflows {
         need(
             matches!(record.phase, Phase::Known | Phase::Cleaning)
                 && record.pending.is_none()
-                && record.finalization.untouched()
+                && record.finalization.available_for_started_owner()
                 && !record.unknown
                 && record.cleanup.is_none()
                 && record

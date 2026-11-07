@@ -56,7 +56,7 @@ use error::{Result, finalized, need};
 pub use existing_viewer::{
     ExistingRelayRetainFailure, ExistingRelayReturned, ExistingStorageObservation, ExistingViewer,
     ExistingViewerReceiptObservation, ExistingViewerRetainFailure, ExistingViewerReturned,
-    ExistingViewerStart, StartedRelayTransferred,
+    ExistingViewerStart, StartedRelayTransferFailure, StartedRelayTransferred,
 };
 pub use guard::{NixGuardRelease, NixReleasedPane};
 pub use memory::{
@@ -110,7 +110,7 @@ struct Inputs {
     office: OfficePhone,
 }
 struct Record {
-    source_attachment: Option<Arc<()>>,
+    source_attachment: Option<started_source::Attachment>,
     finalization: created_finalization::StorageCheck,
     cold: cold_prepare::Stage,
     resources: Option<Resources>,
