@@ -119,7 +119,7 @@ fn actual_handoff_expiry_retains_original_completed_result_and_exact_job() {
     let mut running = Running::new(client.clone(), gate.clone());
     wait(&gate.entered);
     let active = client.active.lock().unwrap();
-    let actual = active.as_ref().unwrap().clone();
+    let actual = active.as_ref().unwrap().query().clone();
     gate.released.store(true, Ordering::Release);
     wait(&contended);
     // Hold the real handoff through its ORIGINAL 20s operation ceiling;
@@ -156,7 +156,14 @@ fn poisoned_actual_handoff_retains_original_result_and_does_not_acknowledge_clos
     let client = tree.client(hooks);
     let mut running = Running::new(client.clone(), gate.clone());
     wait(&gate.entered);
-    let actual = client.active.lock().unwrap().as_ref().unwrap().clone();
+    let actual = client
+        .active
+        .lock()
+        .unwrap()
+        .as_ref()
+        .unwrap()
+        .query()
+        .clone();
     let sibling = client.clone();
     assert!(
         std::thread::spawn(move || {
@@ -199,7 +206,14 @@ fn actual_completed_result_survives_exact_admission_mutex_handoff() {
     // The child has actually completed and all native finalizers have run.
     // Hold the SAME mutex used by a sibling's pre-admission Busy check.
     let active = client.active.lock().unwrap();
-    assert!(active.as_ref().unwrap().finished.load(Ordering::Acquire));
+    assert!(
+        active
+            .as_ref()
+            .unwrap()
+            .query()
+            .finished
+            .load(Ordering::Acquire)
+    );
     gate.released.store(true, Ordering::Release);
     wait(&contended);
     drop(active);
