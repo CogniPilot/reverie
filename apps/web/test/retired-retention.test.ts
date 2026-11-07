@@ -56,6 +56,28 @@ describe('retired-session retention policy', () => {
     expect(seatOf(cycle[1], map)).toBe('q');
   });
 
+  it('keeps every record of a chain that cycles back into retired sessions, even when their terminals run', () => {
+    const live = (id: string) => id.length > 0;
+    // A -> B, and B -> B: the chain never reaches a live session, though B's terminal still runs.
+    const selfLoop: RetiredRecord[] = [
+      { sessionId: 'A', successorId: 'B', at: 1 },
+      { sessionId: 'B', successorId: 'B', at: 2 },
+    ];
+    expect(byId(decideRetention(input({ retired: selfLoop, exists: live, isRunning: live })))).toEqual({
+      A: 'keep:chain-cycle',
+      B: 'keep:chain-cycle',
+    });
+    // p <-> q, both long expired.
+    const pair: RetiredRecord[] = [
+      { sessionId: 'p', successorId: 'q', at: 1 },
+      { sessionId: 'q', successorId: 'p', at: 2 },
+    ];
+    expect(byId(decideRetention(input({ retired: pair, exists: live, isRunning: live })))).toEqual({
+      p: 'keep:chain-cycle',
+      q: 'keep:chain-cycle',
+    });
+  });
+
   it('keeps everything when retention is off', () => {
     for (const days of [null, Number.NaN, -1]) {
       const decisions = decideRetention(input({ settings: { days } }));

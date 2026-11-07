@@ -7,7 +7,8 @@
  * 1. retention off: keep everything;
  * 2. the session is gone: only the record is left, so forget it;
  * 3. the owner pinned it: keep;
- * 4. the live end of its successor chain is not running: keep, it may be the only working copy;
+ * 4. its successor chain has no live end (the end is gone, stopped, or the chain is a cycle of retired
+ *    sessions): keep, it may be the only working copy;
  * 5. it is the newest retired session of its seat (the most recent rollback): keep;
  * 6. retired less than the retention window ago: keep;
  * 7. otherwise prune, through the same path as the owner's Delete.
@@ -40,7 +41,13 @@ export interface RetentionInput {
   isRunning(sessionId: string): boolean;
 }
 
-export type KeepReason = 'retention-off' | 'pinned' | 'successor-not-running' | 'newest-for-seat' | 'within-window';
+export type KeepReason =
+  | 'retention-off'
+  | 'pinned'
+  | 'chain-cycle'
+  | 'successor-not-running'
+  | 'newest-for-seat'
+  | 'within-window';
 
 export type RetentionDecision =
   | { readonly sessionId: string; readonly seat: string; readonly action: 'prune'; readonly reason: 'expired' }
@@ -78,6 +85,8 @@ export function decideRetention(input: RetentionInput): RetentionDecision[] {
     if (days === null || !(days >= 0)) return keep('retention-off');
     if (!input.exists(r.sessionId)) return { sessionId: r.sessionId, seat, action: 'forget', reason: 'session-gone' };
     if (input.pinned.has(r.sessionId)) return keep('pinned');
+    // A cycle ends on a retired session, whose terminal still runs: that is no live end.
+    if (bySession.has(seat)) return keep('chain-cycle');
     if (!input.isRunning(seat)) return keep('successor-not-running');
     if (newest.get(seat)?.sessionId === r.sessionId) return keep('newest-for-seat');
     if (input.now - r.at < days * DAY_MS) return keep('within-window');
