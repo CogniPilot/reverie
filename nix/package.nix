@@ -258,7 +258,7 @@ let
         test/http-range.test.ts test/i18n-branding.test.ts test/image-paste-trap.test.ts test/image-watcher.test.ts \
         test/independent-pairing-cold-retirement.test.ts test/input-cjk.test.ts test/input-socket-map.test.ts test/integration-flows.test.ts \
         test/intent-store.test.ts test/journal-map.test.ts test/keyboard-shortcuts.test.ts test/laptop-stop-agent-client.test.ts \
-        test/link-provider-regex.test.ts test/local-echo-codex-gating.test.ts
+        test/legacy-recall.test.ts test/link-provider-regex.test.ts test/local-echo-codex-gating.test.ts
       npm test -- test/location-overlay-commands.test.ts test/lru-map.test.ts test/markdown-anchors.test.ts test/markdown-sanitizer.test.ts \
         test/mcp-memory-tools.test.ts test/mcp-server.test.ts test/mcp-sync-registry.test.ts test/mcp-sync-targets.test.ts \
         test/mcp-sync.test.ts test/media-extension-parity.test.ts test/member-board-focus-server.test.ts test/member-board-focus.test.ts \
@@ -284,7 +284,7 @@ let
         test/plans-roles.test.ts test/plans-statusline-usage.test.ts
       npm test -- test/plans-usage-resets.test.ts test/preview-envelope.test.ts test/previews-ui.test.ts test/proc-walk-bounds.test.ts \
         test/process-exit-wait.test.ts test/prompt-cache-status.test.ts test/pty-interactive.test.ts test/push-endpoint-validation.test.ts \
-        test/push-forged-actions.test.ts test/push-payload-host-title.test.ts test/qr-auth.test.ts test/quick-start.test.ts \
+        test/push-forged-actions.test.ts test/push-payload-host-title.test.ts test/python-float.test.ts test/qr-auth.test.ts test/quick-start.test.ts \
         test/ralph-config.test.ts test/ralph-integration.test.ts test/ralph-loop-deep.test.ts test/ralph-loop.test.ts \
         test/ralph-prompt.test.ts test/ralph-tracker.test.ts test/read-aloud-per-room.test.ts test/read-aloud-settings.test.ts \
         test/readmymind-collectors.test.ts test/readmymind-context.test.ts test/readmymind-phone-key.test.ts \
