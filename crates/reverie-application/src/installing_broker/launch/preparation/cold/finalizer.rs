@@ -229,13 +229,16 @@ fn finish<'a>(
     };
     // The actual original allocation finally precedes outstanding Nix close.
     cleanup.close_allocation();
-    cleanup.capture_target();
     cleanup.close_guard();
+    // Known Held/ready network returns publish the original plan here. Read
+    // that same restored owner before selecting its fixed stop target.
+    cleanup.capture_target();
     cleanup.observe_receipt();
     cleanup.stop_created();
     cleanup.stop_classified_original(budget);
     cleanup.stop_returned_original(budget);
     cleanup.close_viewer(budget);
+    cleanup.cleanup_request();
     cleanup.metadata(budget);
     let observation = cleanup.observe_storage();
     if let Some(observation) = &observation {
@@ -397,7 +400,19 @@ impl Finalizer<'_> {
             return;
         };
         // Mint the source TERM/KILL observation window only AFTER actual stop.
-        if let Err(error) = network.close_created_viewer(created, budget.phase(5_100)) {
+        let closed = match budget {
+            CleanupBudget::Bounded(end) => network.close_created_viewer(created, end),
+            CleanupBudget::Worker => network.close_created_viewer_for_worker(created),
+        };
+        if let Err(error) = closed {
+            self.errors.push(error.into());
+        }
+    }
+    fn cleanup_request(&mut self) {
+        let (Some(created), Some(network)) = (self.owner.created(), self.owner.network()) else { return; };
+        // The actual retained publication chooses whether source started was
+        // reached; no caller bool, nonce or filesystem path selects deletion.
+        if let Err(error) = network.cleanup_created_request(created) {
             self.errors.push(error.into());
         }
     }
