@@ -57,6 +57,7 @@
           };
         in packages // nativeWorkerPackages // {
           default = packages.reverie;
+          voiceCiVerifier = import ./nix/voice-ci-verifier.nix { inherit pkgs; src = source; };
           # Unselected native front; qualified together with its TS adapter.
           rustFront = import ./nix/rust-front.nix { inherit pkgs; src = source; };
           deployment = import ./nix/deployment.nix { inherit pkgs; src = source; };
@@ -474,9 +475,22 @@
         });
       devShells = forAllSystems (system:
         let pkgs = pkgsFor system; in {
-          voice-ci = import ./nix/voice-ci.nix { inherit pkgs; kokoro = self.packages.${system}.kokoro; };
-          default = pkgs.mkShell {
-            packages = [ (pkgs.python3.withPackages (ps: [ ps.pillow ps.setuptools ps.aiohttp ])) pkgs.nodejs_22 pkgs.git pkgs.tmux pkgs.gcc pkgs.gnumake pkgs.openssl pkgs.rustc pkgs.cargo pkgs.clippy pkgs.rustfmt pkgs.gnutar pkgs.attr pkgs.acl (pkgs.lib.getBin pkgs.util-linux) ];
+          voice-ci = import ./nix/voice-ci.nix {
+            inherit pkgs;
+            kokoro = self.packages.${system}.kokoro;
+            voiceVerifier = self.packages.${system}.voiceCiVerifier;
+          };
+          # The same Rust as CI (.github/workflows: toolchain 1.95.0), so local clippy, rustfmt and
+          # tests run the toolchain CI runs. A nixpkgs update that moves it fails here, not in review.
+          default = let ciRust = "1.95.0"; in assert pkgs.lib.assertMsg (pkgs.rustc.version == ciRust)
+            "the reverie dev shell must carry CI's Rust ${ciRust} (found ${pkgs.rustc.version})";
+            pkgs.mkShell {
+            packages = [ (pkgs.python3.withPackages (ps: [ ps.pillow ps.setuptools ps.aiohttp ])) pkgs.nodejs_22 pkgs.git pkgs.tmux pkgs.gcc pkgs.gnumake pkgs.openssl pkgs.rustc pkgs.cargo pkgs.clippy pkgs.rustfmt
+              # CI's test runner and same-host timing for performance changes.
+              pkgs.cargo-nextest pkgs.hyperfine
+              # getfattr and getfacl: deployment snapshot tests read extended attributes and ACLs.
+              pkgs.gnutar pkgs.attr pkgs.acl (pkgs.lib.getBin pkgs.util-linux)
+            ] ++ pkgs.lib.optionals pkgs.stdenv.isLinux [ pkgs.iproute2 ];
             shellHook = ''
               export PYTHONPATH="$PWD/python''${PYTHONPATH:+:$PYTHONPATH}"
               export REVERIE_LEASE_DIR="''${REVERIE_LEASE_DIR:-''${REVERIE_ROOT:-$HOME/reverie}/runtime/leases}"

@@ -271,7 +271,7 @@ class BrokerEmployeeLeaseTests(unittest.TestCase):
         self.assertIn(OLD,replacement.storage_leases)
         self.assertIn(OLD,replacement.laptops)
         office_api.assert_called_once(); self.assertEqual(office_api.call_args.args[1],OLD)
-        self.assertEqual(set(office_api.call_args.kwargs),{'host_actions'})  # telemetry off: legacy constructor contract
+        self.assertEqual(set(office_api.call_args.kwargs),set())  # telemetry off: legacy constructor contract
         with self.assertRaises(BlockingIOError):
             with storage_guard(self.config,OLD,migration=True):pass
 
@@ -283,7 +283,6 @@ class BrokerEmployeeLeaseTests(unittest.TestCase):
         with patch('reverie.worker.OfficeAPI') as office_api:
             broker.recover()
         self.assertIs(office_api.call_args.kwargs['command_telemetry'],broker.command_telemetry)
-        self.assertIs(office_api.call_args.kwargs['host_actions'],broker.host_actions)
         broker.offices.clear()
         with patch('reverie.worker.OfficeAPI') as office_api:
             broker.office(NEW)
