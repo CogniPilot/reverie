@@ -73,6 +73,7 @@ pub(super) fn nix_path(value: &PythonText) -> Result<PathBuf> {
         parsed.is_absolute()
             && parsed.codepoints() == value.codepoints()
             && !parsed.has_parent_component()
+            && !value.codepoints().contains(&0)
             && value
                 .codepoints()
                 .starts_with(&"/nix/store/".chars().map(u32::from).collect::<Vec<_>>()),
