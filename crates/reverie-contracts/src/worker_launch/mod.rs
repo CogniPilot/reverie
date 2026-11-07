@@ -1,12 +1,16 @@
 //! Broker request and immutable container argv preparation data. Successful
 //! decoding/preparation is not peer admission, storage custody or start authority.
 mod create;
+mod created;
 mod helpers;
 mod network;
+mod pane;
 mod request;
 pub use create::{CreateArguments, CreateObservations, CreatePreparation, create_arguments};
+pub use created::{CreatedState, CreatedStateError};
 pub use helpers::{LaunchSettings, employee_hostname, temporary_environment, tmux_exec_args};
 pub use network::{NetworkDataError, assert_network_labels};
+pub use pane::{pane_start_arguments, pane_status_arguments, runtime_metadata};
 pub fn account_mount_arguments(entries: &[(MetadataText, MetadataText)]) -> Vec<MetadataText> {
     entries
         .iter()

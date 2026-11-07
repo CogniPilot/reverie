@@ -329,9 +329,48 @@ closing them or acknowledging writer/capacity release. Last runtime/handle loss
 quarantines unreclaimed records for process lifetime instead of dropping their
 actual guards. This does not survive process exit or prove daemon reconciliation.
 The application supplies the atomic registry transition. Its complete canonical
-launch caller, create/private-record/start, stop/recovery, viewer and whole-service
-shutdown consumers remain required.
-No laptop-created/started object or selected backend is claimed by network success.
+launch caller, stop/recovery, viewer and whole-service shutdown consumers remain
+required. Network success alone cannot produce a created or started object.
+
+The following fixed create consumer advances only that same successful retained
+network record. It derives late account mounts from the retained original source,
+uses the exact earlier Nix result, checks current storage intent, and calls the
+same-runtime mandatory CommandTelemetry on the complete argv immediately before
+create. A successful reply creates a real `CreatedLaptop` even if stdout is not a
+canonical CID; failed or lost effect replies retain the record and cannot be
+replayed or reclaimed as an absent container. Private publication then writes the
+exclusive UUID launch record before runtime.json and checks every writer, anchor
+and held-parent close before allowing start. Both primary and finalizer errors
+remain attached to the same created resource record.
+
+Publication deliberately refuses preexisting runtime.json symlinks/hardlinks and
+foreign or group/world-writable launch parents before truncation. Actual original
+Python prefix controls establish that those otherwise-valid inputs were accepted
+there; these are explicit preservation corrections. Ordinary owned 0755 parents
+remain valid. Inode/link checks pin the observed entries but cannot exclude a
+later same-UID link or rename writer; the real installing lifecycle must serialize
+those writers. Failed publication never unlinks a name or loses created custody.
+
+`StartedContainer` acknowledges only the actual fixed engine start. It is not CLI
+readiness, completed memory/cold preparation, protected authorization or an App
+registry entry. Those real joins and the canonical pre-Nix App caller are still
+required. Fixed native pane argv DATA reuse worker-child --pane-exit without a
+new shell or program-selection endpoint.
+
+New-target cleanup accepts only the canonical CID retained from that actual
+create, never a recycled name or a caller CID. It preserves stop/inspect/kill/
+inspect order but requires an exact, known stopped state. Missing/failed inspect,
+unknown replies, and successful noncanonical create output cannot establish
+absence or release. This explicit conservative difference is bound to actual
+original ordinary-stop controls. Cleanup captures one original end and honors
+first-stop; repeats cannot renew it or replay effects. Cleanup enters a terminal
+state under the same record mutex before any settlement or native effect, so no
+later publication/start can revive it even when global stop is unset. A cached
+stopped result is valid only in that terminal stopped state. A prior unknown
+forward effect stays uncertain after local client settlement and cannot produce
+a stopped acknowledgement. Its local stopped result
+retains Office, Nix/storage and request ownership and provides no capacity,
+resource-release or whole-service acknowledgement.
 
 Protected-start qualification observes the captured old PID incarnation both
 before and after its fixed cgroup/events check, preserves all captured storage

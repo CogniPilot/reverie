@@ -145,6 +145,9 @@ pub struct NixReturned {
     prepared_store: Option<PathBuf>,
 }
 impl NixReturned {
+    pub(crate) fn runtime_directory(&self) -> Result<PathBuf> {
+        self.resources.guard.directory()
+    }
     /// Bind the actual returned resource owner, independently of reply status,
     /// paths or SID. This observation is not admission/start authorization.
     pub fn assert_create_plan(

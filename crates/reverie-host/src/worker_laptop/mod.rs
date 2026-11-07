@@ -1,7 +1,11 @@
 //! Fixed laptop effects retain actual Nix/storage/Office owners before the
 //! first native client. InstallingBroker still owns admission and authorization.
+mod cleanup;
+mod create;
 mod error;
 mod network;
+mod publication;
+mod start;
 #[cfg(test)]
 mod tests;
 use crate::{
@@ -11,9 +15,12 @@ use crate::{
     worker_nix::{NixReturned, NixWorkflow},
     worker_runtime::WorkerRuntime,
 };
-pub use error::LaptopError;
+pub use cleanup::{CreatedCleanup, StoppedCreatedLaptop};
+pub use create::{CreatedLaptop, LaptopCreation};
+pub use error::{CreateTelemetryFailure, LaptopError, TelemetryCause};
 use error::{Result, finalized, need};
 use reverie_contracts::worker_launch::WorkerRequest;
+pub use start::{ContainerStart, StartedContainer};
 use std::{
     sync::{Arc, Mutex, OnceLock},
     time::Instant,
@@ -30,6 +37,9 @@ enum Phase {
     Running,
     Known,
     Retained,
+    Cleaning,
+    Stopped,
+    CleanupRetained,
     Consumed,
 }
 struct Resources {
@@ -50,6 +60,8 @@ struct Record {
     pending: Option<crate::captured_client::CapturedCall>,
     unknown: bool,
     settlement: Option<crate::engine_metadata::EngineError>,
+    creation: Option<create::Creation>,
+    cleanup: Option<cleanup::Cleanup>,
 }
 impl Record {
     fn resources(&self) -> &Resources {
@@ -209,6 +221,8 @@ impl Workflows {
             pending: None,
             unknown: false,
             settlement: None,
+            creation: None,
+            cleanup: None,
         }));
         records.push(record.clone());
         Ok(LaptopWorkflow {
@@ -266,7 +280,13 @@ impl Workflows {
             .try_lock()
             .map_err(|_| LaptopError::Refused("WORKER_LAPTOP_RETAINED"))?;
         need(
-            record.phase == Phase::Known && record.pending.is_none() && !record.unknown,
+            record.phase == Phase::Known
+                && record.pending.is_none()
+                && !record.unknown
+                && !record
+                    .creation
+                    .as_ref()
+                    .is_some_and(create::Creation::owns_created),
             "WORKER_LAPTOP_RETAINED",
         )?;
         let resources = record.resources.take().expect("unreclaimed owners");
@@ -324,7 +344,12 @@ impl Workflows {
             record.phase = Phase::Known;
         }
         need(
-            !record.unknown && record.phase != Phase::Running,
+            !record.unknown
+                && record.phase != Phase::Running
+                && !record
+                    .creation
+                    .as_ref()
+                    .is_some_and(create::Creation::owns_created),
             "WORKER_LAPTOP_RETAINED",
         )
     }

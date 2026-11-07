@@ -41,7 +41,7 @@ struct Bootstrap {
 impl Bootstrap {
     fn installed() -> Self {
         Self {
-            root: "/home/agent/.reverie-launch".into(),
+            root: reverie_core::worker_child::LAUNCH_DIRECTORY.into(),
             shim: "/opt/reverie/autoenv/bin".into(),
             model_socket: "/run/reverie-model/default.sock".into(),
             model: "/bin/reverie-model-relay".into(),
