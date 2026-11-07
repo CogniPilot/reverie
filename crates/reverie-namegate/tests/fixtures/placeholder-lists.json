@@ -5,42 +5,38 @@
   "alder",
   "birch",
   "cedar",
-  "dogwood",
   "elm",
   "fir",
   "gale",
   "hazel",
-  "iris",
-  "juniper",
   "kelp",
-  "larch",
-  "maple",
-  "nettle"
+  "maple"
  ],
  "internal": [
-  "acmeproj"
+  "acmeproj",
+  "widgetco"
  ],
  "ai_words": [
   "vendora",
   "vendorb",
-  "vendorc",
-  "vendord"
+  "vendorc"
  ],
  "ai_phrases": [
   "coauthor-marker",
-  "made with tool"
+  "made with tool",
+  "written by bot"
  ],
  "path_markers": [
   "/vault/agent-",
   "drops/20{digit}{digit}-{digit}{digit}-{digit}{digit}",
   "acmeproj_space",
-  "acmeproj-drops"
+  "acmeproj-drops",
+  "/secret/stash-"
  ],
  "allow": [
   "@scope/plugin-elm",
   "lib-io-elm",
   "embed-fir-002",
-  "SolverElm",
-  "PathElm"
+  "SolverElm"
  ]
 }

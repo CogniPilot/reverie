@@ -19,7 +19,7 @@ pub const CATEGORIES: [&str; 6] = [
     "allow",
 ];
 
-#[derive(Debug, Deserialize)]
+#[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ListFile {
     schema: u32,
@@ -32,8 +32,8 @@ struct ListFile {
     allow: Vec<String>,
 }
 
-/// Validated lists. Entries are only ever compared, never printed.
-#[derive(Debug)]
+/// Validated lists. Entries are only ever compared, never printed: `Debug` shows the digest and
+/// counts only, so a panic message or log line cannot republish an entry.
 pub struct Lists {
     pub(crate) home_repo: String,
     pub(crate) team: Vec<String>,
@@ -43,6 +43,15 @@ pub struct Lists {
     pub(crate) path_markers: Vec<Vec<MarkerPart>>,
     pub(crate) allow: Vec<String>,
     digest: String,
+}
+
+impl fmt::Debug for Lists {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Lists")
+            .field("digest", &self.digest)
+            .field("counts", &self.counts())
+            .finish_non_exhaustive()
+    }
 }
 
 /// One unit of a path marker: a literal character or `{digit}`, any Unicode decimal digit.

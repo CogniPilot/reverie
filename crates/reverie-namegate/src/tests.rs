@@ -253,7 +253,7 @@ fn list_file_problems_fail_closed() {
 fn reports_digest_and_counts_without_entries() {
     let lists = lists();
     assert_eq!(lists.digest(), digest(LISTS.as_bytes()));
-    assert_eq!(lists.counts(), [14, 1, 4, 2, 4, 5]);
+    assert_eq!(lists.counts(), [9, 2, 3, 3, 5, 4]);
     let rendered = format!("{:?}", scan(&lists, "elm birch", Kind::Text, "other"));
     assert!(
         !rendered.contains("elm") && !rendered.contains("birch"),
@@ -269,11 +269,40 @@ fn locate_reports_columns_in_normalised_text_without_text() {
         .iter()
         .map(|(f, col)| (f.category.name(), f.index, *col))
         .collect();
-    assert_eq!(columns, vec![("team", 1, 12), ("team", 4, 4)]);
+    assert_eq!(columns, vec![("team", 1, 12), ("team", 3, 4)]);
     let zero_width = locate(&lists, "x el\u{200b}m", Kind::Text, "other");
     assert_eq!(zero_width.len(), 1);
     assert_eq!(
         zero_width[0].1, 3,
         "column after dropping the format character"
+    );
+}
+
+#[test]
+fn debug_of_lists_shows_digest_and_counts_only() {
+    let lists = lists();
+    let rendered = format!("{lists:?}");
+    let parsed: Value = serde_json::from_str(LISTS).expect("lists");
+    for category in [
+        "team",
+        "internal",
+        "ai_words",
+        "ai_phrases",
+        "path_markers",
+        "allow",
+    ] {
+        for entry in parsed[category].as_array().expect("entries") {
+            let entry = entry.as_str().expect("entry");
+            assert!(
+                !rendered.contains(entry),
+                "{category} entry leaked through Debug"
+            );
+        }
+    }
+    assert!(rendered.contains(lists.digest()));
+    let failed = format!("{:?}", Lists::from_bytes(LISTS.as_bytes(), &"0".repeat(64)));
+    assert!(
+        !failed.contains("alder") && !failed.contains("acmeproj"),
+        "errors carry no entries"
     );
 }
