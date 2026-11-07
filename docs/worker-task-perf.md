@@ -36,7 +36,8 @@ nix develop --command cargo xtask verify-worker-perf --deployment DEPLOYMENT
 The test performs real `perf stat`, `perf record` and `perf report` with positive
 `task-clock:u` counts and actual samples from a fixed, short user-space workload.
 It uses a nonroot process, no effective/permitted capabilities, active seccomp
-and no-new-privileges. The image fixture drops all capabilities and uses the
+and no admin/perfmon/ptrace capabilities in its bounding set. The image fixture
+also enforces no-new-privileges, drops all capabilities and uses the
 hash-verified generated task-v1 derivative, read-only root and private scratch.
 It grants neither CAP_PERFMON nor SYS_ADMIN and uses no privileged/unconfined
 fallback. Private profiling files are removed after the test. A missing tool,
@@ -44,6 +45,11 @@ denied event, missing kernel support, zero samples or changing inventory fails.
 The local mode checks immutable container IDs before/after and checks every
 running laptop; zero laptops do not constitute success. Existing old-image or
 old-filter failures remain failures until normal preserving recreation.
+The local mode preserves the canonical rootless launch policy: its fixed ID
+helpers need the existing `systempaths=unconfined` exception and intentionally
+omit no-new-privileges. This test does not impose NNP or confuse that exception
+with forbidden seccomp/AppArmor-unconfined or privileged operation. The actual
+kernel capability/UID/seccomp checks still run before invoking perf.
 
 The image CI job builds the Nix worker image and policy, prepares only its
 declared disposable Ubuntu GitHub-hosted VM via `cargo xtask prepare-ci-perf`,

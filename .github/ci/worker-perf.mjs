@@ -6,13 +6,18 @@ import { realpathSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 
 export const workload = 'const end=process.hrtime.bigint()+750000000n;let n=1;while(process.hrtime.bigint()<end){for(let i=1;i<10000;i++)n=Math.imul(n+i,i)|0;}process.stdout.write(String(n));';
-export const guest = `
+export function guestFor(purpose) {
+  assert.ok(purpose === 'image' || purpose === 'laptop');
+  const nnp = purpose === 'image' ? "assert.match(status,/^NoNewPrivs:\\s*1$/m,'strict image fixture requires no-new-privileges');" : '';
+  return `
 const assert=require('node:assert/strict'), fs=require('node:fs'), os=require('node:os'), path=require('node:path'), cp=require('node:child_process');
 assert.ok(process.getuid()>0,'perf workload must run as the actual nonroot laptop user');
 const status=fs.readFileSync('/proc/self/status','utf8');
-for(const key of ['CapEff','CapPrm'])assert.equal(BigInt('0x'+status.match(new RegExp('^'+key+':\\s*(\\w+)','m'))[1]),0n,key+' must be empty');
+const capability=(key)=>{const line=status.split('\\n').find(line=>line.startsWith(key+':'));assert.ok(line,'missing '+key);return BigInt('0x'+line.slice(key.length+1).trim());};
+for(const key of ['CapEff','CapPrm'])assert.equal(capability(key),0n,key+' must be empty');
 assert.match(status,/^Seccomp:\\s*2$/m,'seccomp filter must be active');
-assert.match(status,/^NoNewPrivs:\\s*1$/m,'no-new-privileges must be active');
+const bound=capability('CapBnd');assert.equal(bound&((1n<<19n)|(1n<<21n)|(1n<<38n)),0n,'ptrace/admin/perfmon must not be available in the bounding set');
+${nnp}
 const dir=fs.mkdtempSync(path.join(os.tmpdir(),'reverie-perf-'));
 const invoke=(args)=>{const r=cp.spawnSync('perf',args,{cwd:dir,env:{...process.env,HOME:dir,XDG_CACHE_HOME:dir},encoding:'utf8',timeout:20000,maxBuffer:1024*1024});assert.ifError(r.error);assert.equal(r.status,0,'perf '+args[0]+' failed: '+r.stderr);return r;};
 try{
@@ -26,6 +31,7 @@ try{
  process.stdout.write(JSON.stringify({perf:'passed',uid:process.getuid(),event:'task-clock:u',stat:true,record:true,report:true})+'\\n');
 }finally{fs.rmSync(dir,{recursive:true,force:true});}
 `;
+}
 
 function docker(args, timeout = 60000) {
   const result = spawnSync('docker', args, { encoding: 'utf8', timeout, maxBuffer: 4 * 1024 * 1024 });
@@ -41,7 +47,7 @@ export function imageArguments(image, profile, identity = '2000:2000') {
   return ['run', '--rm', '--pull', 'never', '--network', 'none', '--read-only', '--user', identity,
     '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges', '--security-opt', `seccomp=${profile}`,
     '--pids-limit', '64', '--memory', '512m', '--tmpfs', `/tmp:rw,nosuid,nodev,noexec,size=64m,uid=${uid},gid=${gid},mode=0700`,
-    '--entrypoint', 'node', image, '-e', guest];
+    '--entrypoint', 'node', image, '-e', guestFor('image')];
 }
 function inventory(deployment) {
   const output = docker(['ps', '--quiet', '--no-trunc', '--filter', `label=reverie.worker=${deployment}`, '--filter', 'label=reverie.session']);
@@ -57,8 +63,10 @@ export function restricted(row, deployment) {
   assert.equal(row.HostConfig.Privileged, false, 'privileged laptops do not qualify');
   assert.ok(!row.HostConfig.PidMode, 'host/shared PID namespace does not qualify');
   assert.ok(!(row.HostConfig.CapAdd ?? []).some(cap => /^(?:CAP_)?(?:PERFMON|SYS_ADMIN|SYS_PTRACE|ALL)$/i.test(cap)), 'broad capability does not qualify');
-  assert.ok(!(row.HostConfig.SecurityOpt ?? []).some(option => option.endsWith('=unconfined')), 'unconfined security does not qualify');
-  assert.ok(row.HostConfig.SecurityOpt?.some(option => option === 'no-new-privileges' || option === 'no-new-privileges:true'), 'no-new-privileges required');
+  assert.ok(!(row.HostConfig.SecurityOpt ?? []).some(option => /^(?:seccomp|apparmor)[=:]unconfined$/i.test(option)), 'unconfined seccomp/AppArmor does not qualify');
+  // Canonical rootless laptops intentionally permit systempaths=unconfined
+  // and omit NNP for their fixed ID helpers. Kernel caps/seccomp are checked
+  // in the actual process; this acceptance adds no replacement launch policy.
 }
 function inspect(id) {
   const rows = JSON.parse(docker(['inspect', id]));
@@ -81,7 +89,7 @@ export function main(args) {
   for (const id of before) {
     try {
       const original = inspect(id); restricted(original, deployment);
-      const result = docker(['exec', id, 'node', '-e', guest]);
+      const result = docker(['exec', id, 'node', '-e', guestFor('laptop')]);
       const after = inspect(id); restricted(after, deployment);
       assert.equal(after.State.Pid, original.State.Pid, 'laptop restarted during acceptance');
       assert.equal(after.Image, original.Image);
@@ -93,4 +101,4 @@ export function main(args) {
   assert.deepEqual(inventory(deployment), before, 'running laptop inventory changed during acceptance');
   assert.equal(failures.length, 0, `${failures.length}/${before.length} running laptops failed real perf; no laptop was installed, restarted or reconfigured`);
 }
-if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) main(process.argv.slice(2));
+if (process.argv[1] && process.argv[1] !== '-' && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) main(process.argv.slice(2));
