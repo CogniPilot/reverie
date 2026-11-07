@@ -170,14 +170,18 @@ impl OldPolicyFreeze {
         for name in RESOURCES {
             policy.insert(key(name), field(old_effective, name)?.deep_clone());
         }
-        let changed = match (
-            root(&data.before).get(&key("employeeMemoryPolicies")),
-            root(&data.projected).get(&key("employeeMemoryPolicies")),
-        ) {
-            (None, None) => false,
-            (Some(before), Some(after)) => !before.python_eq(after),
-            _ => true,
-        };
+        let changed = ["employeeMemoryPolicies", "laptopSwapPoolMiB"]
+            .into_iter()
+            .any(|name| {
+                match (
+                    root(&data.before).get(&key(name)),
+                    root(&data.projected).get(&key(name)),
+                ) {
+                    (None, None) => false,
+                    (Some(before), Some(after)) => !before.python_eq(after),
+                    _ => true,
+                }
+            });
         let prior =
             root(&data.before)
                 .get(&key("sessionResources"))
