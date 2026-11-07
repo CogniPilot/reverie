@@ -1,8 +1,11 @@
 //! Real created pipeline, genuine kernel-peer J and original employee lease.
 //! These component controls mint no App admission or service completion.
 use super::*;
+use crate::command_telemetry::CommandTelemetry;
 mod cleanup;
 mod finalization;
+mod owners;
+mod source;
 mod transfer;
 fn isolated(name: &str) -> bool {
     crate::test_process::isolate_case(&format!(

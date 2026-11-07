@@ -5,7 +5,7 @@ fn isolated(name: &str) -> bool {
         "worker_laptop::tests::existing_viewer::transport::created_bridge::transfer::{name}"
     ))
 }
-fn inputs(
+pub(super) fn inputs(
     fixture: &Fixture,
     created: &CreatedLaptop,
     connection: &WorkerLaunchConnection,

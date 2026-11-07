@@ -18,6 +18,10 @@ pub(super) struct GuardConsumed {
     close: CloseState,
     failure: Option<Arc<LaptopError>>,
 }
+pub(super) struct ClosedGuardMetadata {
+    outcome: std::result::Result<NixDisposition, NixError>,
+    prepared: Option<PathBuf>,
+}
 #[derive(Clone, Copy, Eq, PartialEq)]
 enum CloseState {
     Closing,
@@ -26,11 +30,32 @@ enum CloseState {
 }
 impl NixOwnership {
     pub(super) fn into_closed_storage(self) -> LaunchStorage {
+        self.into_closed_parts().0
+    }
+    pub(super) fn into_closed_parts(self) -> (LaunchStorage, ClosedGuardMetadata) {
         let Self::GuardConsumed(data) = self else {
             unreachable!("actual closed guard checked under the same record mutex")
         };
         assert!(data.close == CloseState::Confirmed && data.outcome.is_ok());
-        data.storage
+        (
+            data.storage,
+            ClosedGuardMetadata {
+                outcome: data.outcome,
+                prepared: data.prepared,
+            },
+        )
+    }
+    pub(super) fn restore_closed_storage(
+        storage: LaunchStorage,
+        data: ClosedGuardMetadata,
+    ) -> Self {
+        Self::GuardConsumed(Box::new(GuardConsumed {
+            storage,
+            outcome: data.outcome,
+            prepared: data.prepared,
+            close: CloseState::Confirmed,
+            failure: None,
+        }))
     }
     pub(super) fn guard_close_confirmed(&self) -> bool {
         matches!(self,Self::GuardConsumed(data) if data.close==CloseState::Confirmed && data.outcome.is_ok())
@@ -145,7 +170,13 @@ impl Workflows {
         let result = run(runtime, &mut record, deadline);
         record.unknown |= record.resources().nix.unconfirmed();
         let succeeded = result.is_ok();
-        record.outcome = Some(result.map_err(Arc::new));
+        // The consumed guard already retains this exact original error Arc.
+        // Keep the existing workflow.failure() enum surface, not an extra
+        // Recorded envelope around the actual Nix/finalizer cause.
+        record.outcome = Some(result.map_err(|error| match error {
+            LaptopError::Recorded(error) => error,
+            error => Arc::new(error),
+        }));
         if !succeeded || record.unknown {
             record.phase = Phase::Retained;
             return Ok(NixGuardRelease::Retained);

@@ -751,3 +751,41 @@ original captured call; waiting neither cancels nor replays it. A stopped or
 uncertain viewer constructor remains in the same laptop/native inventory with
 its real storage and job. This timing join does not establish App allocation
 release, complete handler cleanup, storage release or global shutdown.
+### Created resource handoffs
+
+The Created record retains the actual launch storage value and its original
+owner identity through Nix guard consumption. `StartedStorageBorrow` offers
+named preparation/read operations while holding that record, without exposing
+a raw storage reference or an arbitrary callback. Later ordinary handlers need
+a genuine J from the same report service, physical closure of the predecessor
+socket, explicit release of its logical Hold, and checked guard/viewer closure.
+Socket closure or an idle producer alone is insufficient.
+
+Cleanup terminally fences old forward aliases before even a cached guard-close
+result. Worker-purpose created stop keeps the original per-call limits and live
+first-stop ceiling, without introducing an aggregate body deadline. It accepts
+only the original captured J and actual immutable created CID. Successful
+noncanonical create output remains retained for reconciliation rather than
+inventing a by-name stopped identity.
+
+Fresh final-storage DATA uses the shared fixed inspect/complete-census reader,
+the same pending-call slot and a one-shot observation brand. It cannot itself
+release storage. `StoppedCreatedReturned` holds the inventory and record guards
+until the App registry transaction consumes its originals; default Drop leaves
+them counted. Return requires actual known stop, a fresh stopped/absent result,
+no pending or unknown effect, and checked guard, viewer, publication and Office
+closure. The original body error remains separate from cleanup uncertainty.
+
+A later J can transfer Started storage into an Existing relay in the same
+inventory slot, including at full capacity. The sealed new inspection must match
+the original created CID and actual storage/plan generation. Other consuming
+purposes transfer directly into the existing ordinary stop owners and preserve
+the actual Office owner; no live raw-Box extraction is exposed.
+
+Protected-source attachment is a distinct same-slot custody transition before
+claim journaling. Its opaque attachment brand fences old Created aliases and
+refuses stale restore/re-attach handles. Only the later actual claim-derived
+SourceStopName can move that owner into the existing protected stop primitive;
+codec success or the attachment itself grants no stop authority. These Host
+components still require the real App registry/lifecycle consumers and do not
+establish whole-service or installed-worker selection.
