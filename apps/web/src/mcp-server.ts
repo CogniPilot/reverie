@@ -73,7 +73,7 @@ import {
 import { credentialsFrom, readReverieEnvFile } from './reverie-credentials.js';
 import { listClis } from './config/cli-registry/registry.js';
 import { getErrorMessage } from './types.js';
-import { createMemoryTools, resolveMemoryToolsConfig, type BridgeRunner, type JournalPort, type MemoryToolsConfig } from './mcp-memory-tools.js';
+import { createMemoryTools, resolveMemoryToolsConfig, type JournalPort, type LegacyRecall, type MemoryToolsConfig } from './mcp-memory-tools.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Protocol constants
@@ -1202,7 +1202,8 @@ export interface McpServerOptions {
   now?: () => number;
   /** The optional memory tools (opt-in through the environment by default). */
   memory?: MemoryToolsConfig;
-  memoryRunner?: BridgeRunner;
+  /** Recall from the old memory store; the in-process reader by default. */
+  memoryRecall?: LegacyRecall;
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -1234,7 +1235,7 @@ export function createMcpServer(options: McpServerOptions) {
           return { code, out, err };
         }
       : undefined;
-  const memory = createMemoryTools(options.memory ?? resolveMemoryToolsConfig(), options.memoryRunner, journal);
+  const memory = createMemoryTools(options.memory ?? resolveMemoryToolsConfig(), options.memoryRecall, journal);
   const serverInstructions = config.chat ? BASE_SERVER_INSTRUCTIONS + CHAT_SERVER_INSTRUCTIONS : BASE_SERVER_INSTRUCTIONS;
   const tools = [...buildToolDefinitions(options.modes ?? registryModes(), { chat: config.chat }), ...memory.definitions()];
   const runner = createToolRunner({

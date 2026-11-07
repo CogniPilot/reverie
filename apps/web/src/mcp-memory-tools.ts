@@ -3,40 +3,33 @@
  *
  * Opt-in per agent. They exist only when this MCP server's own environment names an instance configuration
  * (`REVERIE_MCP_MEMORY_INSTANCE`, set in that agent's MCP entry). The caller is that instance: no tool argument
- * can select another agent's store. Legacy recall runs the reverie's existing portable memory bridge
- * (`python -m reverie.memory_cli`) with the request on stdin, never interpolated into a command line, so the
- * bridge's own scope rules apply unchanged. The hard floors a save must pass run in-process (memory-floors.ts).
+ * can select another agent's store. Nothing here spawns a process: recall from the old store (legacy-recall.ts) and
+ * the hard floors a save must pass (memory-floors.ts) run in-process, with the old bridge's scope rules.
  *
  * Scope: with `project`, the shared project store; without it, the caller's private store.
  *
  * Inside a Reverie session the office journal is the store of record: recall reads it (the old store still answers, as
- * labelled read-only history) and remember saves to it, both in-process as the session this server runs in, never
- * through the bridge, whose environment stays stripped. A save names the room and the message it acts on; those come
+ * labelled read-only history) and remember saves to it, both in-process as the session this server runs in. A save names the room and the message it acts on; those come
  * from the caller and are never guessed. Without them, or without a session, remember refuses and shows the exact
  * `reverie agent journal save` command instead of running it.
  */
-import { execFile } from 'node:child_process';
 import { isAbsolute } from 'node:path';
 import type { AgentDeps } from './cli-agent.js';
 import { agentJournalRecall, agentJournalSave } from './cli-agent-journal.js';
 import type { ToolDefinition, ToolResult } from './mcp-server.js';
-import { environmentEntry, envValue } from './config/reverie-env.js';
+import { envValue } from './config/reverie-env.js';
+import { legacyRecall, type RecallRequest } from './legacy-recall.js';
 import { screenMemoryText } from './memory-floors.js';
 
 export const MEMORY_TOOL_NAMES = ['memory_recall', 'memory_remember'] as const;
 
 const QUERY_MAX = 500;
 const TEXT_MAX = 2000;
-const BRIDGE_TIMEOUT_MS = 60_000;
 const PROJECT = /^[a-z0-9][a-z0-9_-]{0,63}$/; // the same rule the project store enforces
 
 export interface MemoryToolsConfig {
   /** Absolute path of the calling agent's instance configuration; unset = the tools do not exist. */
   instance?: string;
-  /** Interpreter that runs the bridge. */
-  python: string;
-  /** Python source root on PYTHONPATH (python/, containing the reverie package). */
-  source: string;
 }
 
 /** Runs one journal verb as the session this MCP server runs in; undefined when it runs outside any session. */
@@ -47,19 +40,14 @@ const ID = /^[A-Za-z0-9_-]{1,100}$/;
 /** POSIX single-quoting, for a command the caller copies; nothing here runs it. */
 const quote = (value: string): string => (/^[A-Za-z0-9_./:=@%+-]+$/.test(value) ? value : `'${value.replace(/'/g, `'\\''`)}'`);
 
-export type BridgeRunner = (
-  python: string,
-  args: string[],
-  options: { env: NodeJS.ProcessEnv; input: string; timeoutMs: number }
-) => Promise<{ stdout: string; stderr: string; code: number }>;
+/** Recall from the caller's old store: the JSON text of its results, or a thrown reason. */
+export type LegacyRecall = (instance: string, request: RecallRequest) => Promise<string>;
 
 /** Read the opt-in from the environment. A relative or empty instance path leaves the tools off. */
 export function resolveMemoryToolsConfig(env: NodeJS.ProcessEnv = process.env): MemoryToolsConfig {
   const instance = env.REVERIE_MCP_MEMORY_INSTANCE?.trim();
   return {
     instance: instance && isAbsolute(instance) ? instance : undefined,
-    python: env.REVERIE_MCP_MEMORY_PYTHON?.trim() || '/opt/reverie/python/bin/python3',
-    source: env.REVERIE_MCP_MEMORY_SOURCE?.trim() || '/workspace/python',
   };
 }
 
@@ -111,14 +99,9 @@ export function memoryToolDefinitions(): ToolDefinition[] {
   ];
 }
 
-const defaultRunner: BridgeRunner = (python, args, { env, input, timeoutMs }) =>
-  new Promise((resolve) => {
-    const child = execFile(python, args, { env, timeout: timeoutMs, maxBuffer: 1024 * 1024 }, (error, stdout, stderr) =>
-      resolve({ stdout: String(stdout), stderr: String(stderr), code: error ? (typeof error.code === 'number' ? error.code : 1) : 0 })
-    );
-    child.stdin?.on('error', () => {});
-    child.stdin?.end(input);
-  });
+/** The old store as the bridge read it: the caller's HOME for `~` paths and the configured embedding service. */
+const defaultRecall: LegacyRecall = (instance, request) =>
+  legacyRecall(instance, request, { home: process.env.HOME ?? '/tmp', embedUrl: envValue(process.env, 'EMBED_URL') ?? '' });
 
 const failure = (text: string): ToolResult => ({ text, isError: true });
 /** Error text for the model: never a filesystem path, even the caller's own. */
@@ -139,25 +122,11 @@ export function journalSaveCommand(args: Record<string, unknown>): string {
 
 export function createMemoryTools(
   config: MemoryToolsConfig,
-  runner: BridgeRunner = defaultRunner,
+  recall: LegacyRecall = defaultRecall,
   journal?: JournalPort,
   screen: (text: string, home: string) => string = screenMemoryText,
 ) {
   const enabled = Boolean(config.instance);
-
-  /** Only what the bridge needs: never forward this process's room or session credentials to it. */
-  function bridgeEnv(): NodeJS.ProcessEnv {
-    const apiBase = envValue(process.env, 'API_BASE');
-    const embedUrl = envValue(process.env, 'EMBED_URL');
-    return {
-      PATH: process.env.PATH ?? '/usr/bin:/bin',
-      HOME: process.env.HOME ?? '/tmp',
-      PYTHONPATH: config.source,
-      ...(config.instance ? environmentEntry('INSTANCE_CONFIG', config.instance) : {}),
-      ...(apiBase ? environmentEntry('API_BASE', apiBase) : {}),
-      ...(embedUrl ? environmentEntry('EMBED_URL', embedUrl) : {}),
-    };
-  }
 
   async function journalVerb(verb: (deps: AgentDeps) => Promise<number>): Promise<unknown> {
     const done = await journal!(verb);
@@ -214,7 +183,7 @@ export function createMemoryTools(
     if (typeof text !== 'string' || !text.trim() || text.length > TEXT_MAX) return `text must be 1-${TEXT_MAX} characters`;
     const source = args.source;
     if (source !== undefined && (typeof source !== 'string' || source.length > 256)) return 'source must be text, at most 256 characters';
-    // The journal checks the rest (room, turn, tag and a source) in remember(); nothing goes to the bridge.
+    // The journal checks the rest (room, turn, tag and a source) in remember().
     return { action: 'remember', text: text.trim(), ...scope };
   }
 
@@ -227,21 +196,13 @@ export function createMemoryTools(
       const body = request(name, args);
       if (typeof body === 'string') return failure(body);
       if (name === 'memory_remember') return remember(args);
-      const out = await runner(config.python, ['-m', 'reverie.memory_cli'], {
-        env: bridgeEnv(),
-        input: JSON.stringify(body),
-        timeoutMs: BRIDGE_TIMEOUT_MS,
-      });
-      if (out.code !== 0) {
-        let reason = out.stderr.trim();
-        try {
-          reason = String(JSON.parse(reason).error ?? reason);
-        } catch {
-          /* plain text */
-        }
-        return failure(`Memory ${name === 'memory_recall' ? 'lookup' : 'save'} failed: ${scrubPaths(reason).slice(0, 500) || 'no detail'}`);
+      let legacy: string;
+      try {
+        legacy = await recall(config.instance!, { query: body.query as string, ...(body.project ? { project: body.project as string } : {}) });
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        return failure(`Memory lookup failed: ${scrubPaths(reason).slice(0, 500) || 'no detail'}`);
       }
-      const legacy = out.stdout.trim() || '[]';
       if (!journal) return { text: legacy };
       // Recall: the journal is the store of record; the old store answers as older, read-only history until imported.
       try {

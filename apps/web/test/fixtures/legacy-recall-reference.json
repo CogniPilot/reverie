@@ -1,0 +1,1517 @@
+{
+ "now": 1800000000.0,
+ "projectSchema": "\nCREATE TABLE IF NOT EXISTS memories (\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    kind TEXT NOT NULL,\n    created_at REAL NOT NULL,\n    user_text TEXT NOT NULL DEFAULT '',\n    assistant_text TEXT NOT NULL DEFAULT '',\n    text TEXT NOT NULL,\n    importance REAL NOT NULL,\n    importance_source TEXT NOT NULL DEFAULT 'default',\n    embed_model TEXT NOT NULL DEFAULT '',\n    embedding BLOB,\n    source_ids TEXT NOT NULL DEFAULT '[]',\n    section TEXT NOT NULL DEFAULT '',\n    meta TEXT NOT NULL DEFAULT '{}',\n    last_accessed REAL\n);\nCREATE INDEX IF NOT EXISTS memories_kind_time ON memories(kind, created_at);\nCREATE TABLE IF NOT EXISTS state (\n    key TEXT PRIMARY KEY,\n    value TEXT NOT NULL\n);\nCREATE TABLE IF NOT EXISTS answered (\n    source_id TEXT PRIMARY KEY,\n    at REAL NOT NULL\n);\nCREATE TABLE IF NOT EXISTS external_episodes (\n    source_id TEXT PRIMARY KEY,\n    memory_id INTEGER\n);\nCREATE TABLE IF NOT EXISTS voice_claims (\n    norm TEXT NOT NULL,\n    at REAL NOT NULL\n);\nCREATE TABLE IF NOT EXISTS beliefs (\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    text TEXT NOT NULL,\n    weight REAL NOT NULL,\n    parent_id INTEGER,\n    protected INTEGER NOT NULL DEFAULT 0,\n    created_at REAL NOT NULL\n);\n",
+ "cases": [
+  {
+   "id": "private-hashed-ranking",
+   "instance": {
+    "id": "a1",
+    "agent_name": "Agent",
+    "owner_name": "Owner",
+    "data_dir": "../state",
+    "persona": "p"
+   },
+   "state_in_home": null,
+   "columns": null,
+   "schema": "\nCREATE TABLE IF NOT EXISTS memories (\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    kind TEXT NOT NULL,\n    created_at REAL NOT NULL,\n    user_text TEXT NOT NULL DEFAULT '',\n    assistant_text TEXT NOT NULL DEFAULT '',\n    text TEXT NOT NULL,\n    importance REAL NOT NULL,\n    importance_source TEXT NOT NULL DEFAULT 'default',\n    embed_model TEXT NOT NULL DEFAULT '',\n    embedding BLOB,\n    source_ids TEXT NOT NULL DEFAULT '[]',\n    section TEXT NOT NULL DEFAULT '',\n    meta TEXT NOT NULL DEFAULT '{}',\n    last_accessed REAL\n);\nCREATE INDEX IF NOT EXISTS memories_kind_time ON memories(kind, created_at);\nCREATE TABLE IF NOT EXISTS state (\n    key TEXT PRIMARY KEY,\n    value TEXT NOT NULL\n);\nCREATE TABLE IF NOT EXISTS answered (\n    source_id TEXT PRIMARY KEY,\n    at REAL NOT NULL\n);\nCREATE TABLE IF NOT EXISTS external_episodes (\n    source_id TEXT PRIMARY KEY,\n    memory_id INTEGER\n);\nCREATE TABLE IF NOT EXISTS voice_claims (\n    norm TEXT NOT NULL,\n    at REAL NOT NULL\n);\nCREATE TABLE IF NOT EXISTS beliefs (\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    text TEXT NOT NULL,\n    weight REAL NOT NULL,\n    parent_id INTEGER,\n    protected INTEGER NOT NULL DEFAULT 0,\n    created_at REAL NOT NULL\n);\n",
+   "state": null,
+   "legacy_history": null,
+   "embed": null,
+   "request": {
+    "query": "compiler parity on chain five"
+   },
+   "refuses": false,
+   "private": [
+    {
+     "id": 1,
+     "kind": "episode",
+     "created_at": 1800000000.0,
+     "user_text": "",
+     "assistant_text": "",
+     "text": "User: compiler parity passed\nAssistant: chain five is green",
+     "importance": 7.0,
+     "importance_source": "default",
+     "embed_model": "hashed-v1-1024",
+     "embedding": {
+      "hashed": "b0efbc5b425b092c3d6409f8f44acbb40fcea16f12f2d6648117e3a1ae577714"
+     },
+     "source_ids": "[]",
+     "section": "",
+     "meta": "{}",
+     "last_accessed": null
+    },
+    {
+     "id": 2,
+     "kind": "reflection",
+     "created_at": 1799913600.0,
+     "user_text": "",
+     "assistant_text": "",
+     "text": "Compiler parity matters more than speed on chain five.",
+     "importance": 9.0,
+     "importance_source": "default",
+     "embed_model": "hashed-v1-1024",
+     "embedding": {
+      "hashed": "058658ae01916cd1218965d605327b6311b4e32924dd4e6ae0cf7bc513a5996d"
+     },
+     "source_ids": "[3, 4]",
+     "section": "",
+     "meta": "{\"visibility\": \"private\", \"n\": 1, \"x\": 1.0, \"e\": 1e2, \"neg\": -0, \"big\": 123456789012345678901234567890, \"tiny\": 1e-7, \"u\": \"caf\\u00e9 \\ud83d\\ude00\", \"ctl\": \"a\\u0001b\\n\\t\\\"q\\\" \\\\\", \"nest\": [1, 2.5, {\"k\": null, \"t\": true}]}",
+     "last_accessed": null
+    },
+    {
+     "id": 3,
+     "kind": "dream",
+     "created_at": 1797408000.0,
+     "user_text": "",
+     "assistant_text": "",
+     "text": "A dream about a compiler that sang parity.",
+     "importance": 2.0,
+     "importance_source": "default",
+     "embed_model": "hashed-v1-1024",
+     "embedding": {
+      "hashed": "789e91b27e436a364a754527cf4d42b081a5499b3d4d445967ea59eb582a143a"
+     },
+     "source_ids": "[]",
+     "section": "",
+     "meta": "{\"recall\": \"sang parity\", \"tone\": \"calm\"}",
+     "last_accessed": null
+    },
+    {
+     "id": 4,
+     "kind": "note",
+     "created_at": 1800000000.0,
+     "user_text": "",
+     "assistant_text": "",
+     "text": "compiler parity chain five note kind is never recalled",
+     "importance": 10.0,
+     "importance_source": "default",
+     "embed_model": "hashed-v1-1024",
+     "embedding": {
+      "hashed": "f41498c3cbe0d6562445453b21cc5e31c773226378782b4a7dac8d5b75d54063"
+     },
+     "source_ids": "[]",
+     "section": "",
+     "meta": "{}",
+     "last_accessed": null
+    },
+    {
+     "id": 5,
+     "kind": "episode",
+     "created_at": 1700000000.0,
+     "user_text": "",
+     "assistant_text": "",
+     "text": "An unrelated memory about lunch.",
+     "importance": 3.0,
+     "importance_source": "default",
+     "embed_model": "hashed-v1-1024",
+     "embedding": {
+      "hashed": "97f0210a74e7bf255943d8d5425ce926af097ea8ad45b3ff7a8feac84ee6f85a"
+     },
+     "source_ids": "[]",
+     "section": "",
+     "meta": "{}",
+     "last_accessed": 1750000000.5
+    },
+    {
+     "id": 6,
+     "kind": "episode",
+     "created_at": 1800003600.0,
+     "user_text": "",
+     "assistant_text": "",
+     "text": "Future dated compiler entry.",
+     "importance": 12.0,
+     "importance_source": "default",
+     "embed_model": "hashed-v1-1024",
+     "embedding": {
+      "hashed": "801451b01578bb5d74acfb698349c1d9b70d96a34e44ea71b2b1dc051046bf82"
+     },
+     "source_ids": "[]",
+     "section": "",
+     "meta": "{}",
+     "last_accessed": null
+    },
+    {
+     "id": 7,
+     "kind": "episode",
+     "created_at": 1799999999.0,
+     "user_text": "",
+     "assistant_text": "",
+     "text": "Opposite direction memory.",
+     "importance": 10.0,
+     "importance_source": "default",
+     "embed_model": "hashed-v1-1024",
+     "embedding": "000000800000008000000080000000800000008000000080000000808f84c13e00000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000808f84c13e00000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000808f84c13e00000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000808f84c13e0000008000000080000000800000008000000080000000808f84c13e000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000808f84c13e000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000808f84c13e000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080000000800000008000000080",
+     "source_ids": "[]",
+     "section": "",
+     "meta": "{}",
+     "last_accessed": null
+    },
+    {
+     "id": 8,
+     "kind": "episode",
+     "created_at": 1799990000.0,
+     "user_text": "",
+     "assistant_text": "",
+     "text": "Short vector memory.",
+     "importance": 5.5,
+     "importance_source": "default",
+     "embed_model": "hashed-v1-1024",
+     "embedding": "0000003f0000003f0000003f",
+     "source_ids": "[]",
+     "section": "",
+     "meta": "{}",
+     "last_accessed": null
+    },
+    {
+     "id": 9,
+     "kind": "episode",
+     "created_at": 1799980000.0,
+     "user_text": "",
+     "assistant_text": "",
+     "text": "No embedding stored.",
+     "importance": -1.0,
+     "importance_source": "default",
+     "embed_model": "",
+     "embedding": null,
+     "source_ids": "[]",
+     "section": "",
+     "meta": "{}",
+     "last_accessed": null
+    },
+    {
+     "id": 10,
+     "kind": "reflection",
+     "created_at": 1799000000.0,
+     "user_text": "q",
+     "assistant_text": "a",
+     "text": "Chain five parity notes: \u00c9COLE na\u00efve \u0130stanbul, tabs\tand \"quotes\" \\ back.",
+     "importance": 6.0,
+     "importance_source": "model",
+     "embed_model": "hashed-v1-1024",
+     "embedding": {
+      "hashed": "ed8edd9c1055e75506a39e2d6da883858c30450cb13f6438417bf5363bd42043"
+     },
+     "source_ids": "[]",
+     "section": "notes",
+     "meta": "{}",
+     "last_accessed": null
+    },
+    {
+     "id": 11,
+     "kind": "episode",
+     "created_at": 1799950000.0,
+     "user_text": "",
+     "assistant_text": "",
+     "text": "Tie compiler parity",
+     "importance": 4.0,
+     "importance_source": "default",
+     "embed_model": "hashed-v1-1024",
+     "embedding": {
+      "hashed": "31aa59647a31556f4291a3d72078fe55aae91e8d88b3dfe4c0626a91408bfca8"
+     },
+     "source_ids": "[]",
+     "section": "",
+     "meta": "{}",
+     "last_accessed": null
+    },
+    {
+     "id": 12,
+     "kind": "episode",
+     "created_at": 1799950000.0,
+     "user_text": "",
+     "assistant_text": "",
+     "text": "Tie compiler parity",
+     "importance": 4.0,
+     "importance_source": "default",
+     "embed_model": "hashed-v1-1024",
+     "embedding": {
+      "hashed": "31aa59647a31556f4291a3d72078fe55aae91e8d88b3dfe4c0626a91408bfca8"
+     },
+     "source_ids": "[]",
+     "section": "",
+     "meta": "{}",
+     "last_accessed": null
+    },
+    {
+     "id": 13,
+     "kind": "episode",
+     "created_at": 1600000000.0,
+     "user_text": "",
+     "assistant_text": "",
+     "text": "Very old compiler parity chain memory.",
+     "importance": 8.0,
+     "importance_source": "default",
+     "embed_model": "hashed-v1-1024",
+     "embedding": {
+      "hashed": "3e8f76c8f03b69b56ffcaf0a6b85e6218eee53e772d431dda51eeb79a9135ee9"
+     },
+     "source_ids": "[]",
+     "section": "",
+     "meta": "{}",
+     "last_accessed": null
+    }
+   ],
+   "expect": {
+    "code": 0,
+    "stdout": "[{\"id\": 2, \"kind\": \"reflection\", \"created_at\": 1799913600.0, \"user_text\": \"\", \"assistant_text\": \"\", \"text\": \"Compiler parity matters more than speed on chain five.\", \"importance\": 9.0, \"importance_source\": \"default\", \"embed_model\": \"hashed-v1-1024\", \"source_ids\": [3, 4], \"section\": \"\", \"meta\": {\"visibility\": \"private\", \"n\": 1, \"x\": 1.0, \"e\": 100.0, \"neg\": 0, \"big\": 123456789012345678901234567890, \"tiny\": 1e-07, \"u\": \"caf\u00e9 \ud83d\ude00\", \"ctl\": \"a\\u0001b\\n\\t\\\"q\\\" \\\\\", \"nest\": [1, 2.5, {\"k\": null, \"t\": true}]}, \"last_accessed\": null, \"score\": 0.7907311827631186}, {\"id\": 1, \"kind\": \"episode\", \"created_at\": 1800000000.0, \"user_text\": \"\", \"assistant_text\": \"\", \"text\": \"User: compiler parity passed\\nAssistant: chain five is green\", \"importance\": 7.0, \"importance_source\": \"default\", \"embed_model\": \"hashed-v1-1024\", \"source_ids\": [], \"section\": \"\", \"meta\": {}, \"last_accessed\": null, \"score\": 0.7618466792626828}, {\"id\": 6, \"kind\": \"episode\", \"created_at\": 1800003600.0, \"user_text\": \"\", \"assistant_text\": \"\", \"text\": \"Future dated compiler entry.\", \"importance\": 12.0, \"importance_source\": \"default\", \"embed_model\": \"hashed-v1-1024\", \"source_ids\": [], \"section\": \"\", \"meta\": {}, \"last_accessed\": null, \"score\": 0.7086627204748274}, {\"id\": 11, \"kind\": \"episode\", \"created_at\": 1799950000.0, \"user_text\": \"\", \"assistant_text\": \"\", \"text\": \"Tie compiler parity\", \"importance\": 4.0, \"importance_source\": \"default\", \"embed_model\": \"hashed-v1-1024\", \"source_ids\": [], \"section\": \"\", \"meta\": {}, \"last_accessed\": null, \"score\": 0.6132806718369718}, {\"id\": 12, \"kind\": \"episode\", \"created_at\": 1799950000.0, \"user_text\": \"\", \"assistant_text\": \"\", \"text\": \"Tie compiler parity\", \"importance\": 4.0, \"importance_source\": \"default\", \"embed_model\": \"hashed-v1-1024\", \"source_ids\": [], \"section\": \"\", \"meta\": {}, \"last_accessed\": null, \"score\": 0.6132806718369718}, {\"id\": 8, \"kind\": \"episode\", \"created_at\": 1799990000.0, \"user_text\": \"\", \"assistant_text\": \"\", \"text\": \"Short vector memory.\", \"importance\": 5.5, \"importance_source\": \"default\", \"embed_model\": \"hashed-v1-1024\", \"source_ids\": [], \"section\": \"\", \"meta\": {}, \"last_accessed\": null, \"score\": 0.5120575864885428}, {\"id\": 13, \"kind\": \"episode\", \"created_at\": 1600000000.0, \"user_text\": \"\", \"assistant_text\": \"\", \"text\": \"Very old compiler parity chain memory.\", \"importance\": 8.0, \"importance_source\": \"default\", \"embed_model\": \"hashed-v1-1024\", \"source_ids\": [], \"section\": \"\", \"meta\": {}, \"last_accessed\": null, \"score\": 0.47664693570747013}, {\"id\": 10, \"kind\": \"reflection\", \"created_at\": 1799000000.0, \"user_text\": \"q\", \"assistant_text\": \"a\", \"text\": \"Chain five parity notes: \u00c9COLE na\u00efve \u0130stanbul, tabs\\tand \\\"quotes\\\" \\\\ back.\", \"importance\": 6.0, \"importance_source\": \"model\", \"embed_model\": \"hashed-v1-1024\", \"source_ids\": [], \"section\": \"notes\", \"meta\": {}, \"last_accessed\": null, \"score\": 0.3927998209835308}]\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "private-stale-reembedded-hashed",
+   "instance": {
+    "id": "a1",
+    "agent_name": "Agent",
+    "owner_name": "Owner",
+    "data_dir": "../state",
+    "persona": "p"
+   },
+   "state_in_home": null,
+   "columns": null,
+   "schema": "\nCREATE TABLE IF NOT EXISTS memories (\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    kind TEXT NOT NULL,\n    created_at REAL NOT NULL,\n    user_text TEXT NOT NULL DEFAULT '',\n    assistant_text TEXT NOT NULL DEFAULT '',\n    text TEXT NOT NULL,\n    importance REAL NOT NULL,\n    importance_source TEXT NOT NULL DEFAULT 'default',\n    embed_model TEXT NOT NULL DEFAULT '',\n    embedding BLOB,\n    source_ids TEXT NOT NULL DEFAULT '[]',\n    section TEXT NOT NULL DEFAULT '',\n    meta TEXT NOT NULL DEFAULT '{}',\n    last_accessed REAL\n);\nCREATE INDEX IF NOT EXISTS memories_kind_time ON memories(kind, created_at);\nCREATE TABLE IF NOT EXISTS state (\n    key TEXT PRIMARY KEY,\n    value TEXT NOT NULL\n);\nCREATE TABLE IF NOT EXISTS answered (\n    source_id TEXT PRIMARY KEY,\n    at REAL NOT NULL\n);\nCREATE TABLE IF NOT EXISTS external_episodes (\n    source_id TEXT PRIMARY KEY,\n    memory_id INTEGER\n);\nCREATE TABLE IF NOT EXISTS voice_claims (\n    norm TEXT NOT NULL,\n    at REAL NOT NULL\n);\nCREATE TABLE IF NOT EXISTS beliefs (\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    text TEXT NOT NULL,\n    weight REAL NOT NULL,\n    parent_id INTEGER,\n    protected INTEGER NOT NULL DEFAULT 0,\n    created_at REAL NOT NULL\n);\n",
+   "state": null,
+   "legacy_history": null,
+   "embed": null,
+   "request": {
+    "query": "compiler parity"
+   },
+   "refuses": false,
+   "private": [
+    {
+     "id": 1,
+     "kind": "episode",
+     "created_at": 1799990000.0,
+     "user_text": "",
+     "assistant_text": "",
+     "text": "compiler parity from a removed model",
+     "importance": 6.0,
+     "importance_source": "default",
+     "embed_model": "llama:gone",
+     "embedding": null,
+     "source_ids": "[]",
+     "section": "",
+     "meta": "{}",
+     "last_accessed": null
+    },
+    {
+     "id": 2,
+     "kind": "reflection",
+     "created_at": 1799900000.0,
+     "user_text": "",
+     "assistant_text": "",
+     "text": "parity of the compiler under a small hash",
+     "importance": 5.0,
+     "importance_source": "default",
+     "embed_model": "hashed-v1-64",
+     "embedding": "0000003f0000003f0000003f",
+     "source_ids": "[]",
+     "section": "",
+     "meta": "{}",
+     "last_accessed": null
+    },
+    {
+     "id": 3,
+     "kind": "episode",
+     "created_at": 1799000000.0,
+     "user_text": "",
+     "assistant_text": "",
+     "text": "current compiler memory",
+     "importance": 3.0,
+     "importance_source": "default",
+     "embed_model": "hashed-v1-1024",
+     "embedding": {
+      "hashed": "548769aa7c46719bfd5a4ca8c0c2eadbdf7c39e11f16e5a4810d1d50873494e6"
+     },
+     "source_ids": "[]",
+     "section": "",
+     "meta": "{}",
+     "last_accessed": null
+    }
+   ],
+   "expect": {
+    "code": 0,
+    "stdout": "[{\"id\": 1, \"kind\": \"episode\", \"created_at\": 1799990000.0, \"user_text\": \"\", \"assistant_text\": \"\", \"text\": \"compiler parity from a removed model\", \"importance\": 6.0, \"importance_source\": \"default\", \"embed_model\": \"hashed-v1-1024\", \"source_ids\": [], \"section\": \"\", \"meta\": {}, \"last_accessed\": null, \"score\": 0.7853243804423227}, {\"id\": 2, \"kind\": \"reflection\", \"created_at\": 1799900000.0, \"user_text\": \"\", \"assistant_text\": \"\", \"text\": \"parity of the compiler under a small hash\", \"importance\": 5.0, \"importance_source\": \"default\", \"embed_model\": \"hashed-v1-1024\", \"source_ids\": [], \"section\": \"\", \"meta\": {}, \"last_accessed\": null, \"score\": 0.5849739207919754}, {\"id\": 3, \"kind\": \"episode\", \"created_at\": 1799000000.0, \"user_text\": \"\", \"assistant_text\": \"\", \"text\": \"current compiler memory\", \"importance\": 3.0, \"importance_source\": \"default\", \"embed_model\": \"hashed-v1-1024\", \"source_ids\": [], \"section\": \"\", \"meta\": {}, \"last_accessed\": null, \"score\": 0.26889463457366897}]\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "private-service-embedder",
+   "instance": {
+    "id": "a1",
+    "agent_name": "Agent",
+    "owner_name": "Owner",
+    "data_dir": "../state",
+    "persona": "p"
+   },
+   "state_in_home": null,
+   "columns": null,
+   "schema": "\nCREATE TABLE IF NOT EXISTS memories (\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    kind TEXT NOT NULL,\n    created_at REAL NOT NULL,\n    user_text TEXT NOT NULL DEFAULT '',\n    assistant_text TEXT NOT NULL DEFAULT '',\n    text TEXT NOT NULL,\n    importance REAL NOT NULL,\n    importance_source TEXT NOT NULL DEFAULT 'default',\n    embed_model TEXT NOT NULL DEFAULT '',\n    embedding BLOB,\n    source_ids TEXT NOT NULL DEFAULT '[]',\n    section TEXT NOT NULL DEFAULT '',\n    meta TEXT NOT NULL DEFAULT '{}',\n    last_accessed REAL\n);\nCREATE INDEX IF NOT EXISTS memories_kind_time ON memories(kind, created_at);\nCREATE TABLE IF NOT EXISTS state (\n    key TEXT PRIMARY KEY,\n    value TEXT NOT NULL\n);\nCREATE TABLE IF NOT EXISTS answered (\n    source_id TEXT PRIMARY KEY,\n    at REAL NOT NULL\n);\nCREATE TABLE IF NOT EXISTS external_episodes (\n    source_id TEXT PRIMARY KEY,\n    memory_id INTEGER\n);\nCREATE TABLE IF NOT EXISTS voice_claims (\n    norm TEXT NOT NULL,\n    at REAL NOT NULL\n);\nCREATE TABLE IF NOT EXISTS beliefs (\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    text TEXT NOT NULL,\n    weight REAL NOT NULL,\n    parent_id INTEGER,\n    protected INTEGER NOT NULL DEFAULT 0,\n    created_at REAL NOT NULL\n);\n",
+   "state": null,
+   "legacy_history": null,
+   "embed": "service",
+   "request": {
+    "query": "compiler parity"
+   },
+   "refuses": false,
+   "private": [
+    {
+     "id": 1,
+     "kind": "episode",
+     "created_at": 1799990000.0,
+     "user_text": "",
+     "assistant_text": "",
+     "text": "served compiler parity",
+     "importance": 6.0,
+     "importance_source": "default",
+     "embed_model": "llama:default",
+     "embedding": "85ba6cbea6d108bfaed19dbd751783bef5e822bb69ba1f3fb3d1abbe9474973e",
+     "source_ids": "[]",
+     "section": "",
+     "meta": "{}",
+     "last_accessed": null
+    },
+    {
+     "id": 2,
+     "kind": "reflection",
+     "created_at": 1799900000.0,
+     "user_text": "",
+     "assistant_text": "",
+     "text": "stale hashed row re-embedded by the service",
+     "importance": 5.0,
+     "importance_source": "default",
+     "embed_model": "hashed-v1-1024",
+     "embedding": {
+      "hashed": "b84ce46ea6745471e4a408e0875610e9c75b183e3be856f427fe9d234399bb29"
+     },
+     "source_ids": "[]",
+     "section": "",
+     "meta": "{}",
+     "last_accessed": null
+    },
+    {
+     "id": 3,
+     "kind": "dream",
+     "created_at": 1799800000.0,
+     "user_text": "",
+     "assistant_text": "",
+     "text": "served dream",
+     "importance": 2.0,
+     "importance_source": "default",
+     "embed_model": "llama:default",
+     "embedding": "d78abb3dffe365bd57ce9ebe21a88c3e6414c03eb23f363f3c34cfbe6b3e973d",
+     "source_ids": "[]",
+     "section": "",
+     "meta": "{}",
+     "last_accessed": null
+    }
+   ],
+   "expect": {
+    "code": 0,
+    "stdout": "[{\"id\": 2, \"kind\": \"reflection\", \"created_at\": 1799900000.0, \"user_text\": \"\", \"assistant_text\": \"\", \"text\": \"stale hashed row re-embedded by the service\", \"importance\": 5.0, \"importance_source\": \"default\", \"embed_model\": \"llama:default\", \"source_ids\": [], \"section\": \"\", \"meta\": {}, \"last_accessed\": null, \"score\": 0.5639462694450268}, {\"id\": 3, \"kind\": \"dream\", \"created_at\": 1799800000.0, \"user_text\": \"\", \"assistant_text\": \"\", \"text\": \"served dream\", \"importance\": 2.0, \"importance_source\": \"default\", \"embed_model\": \"llama:default\", \"source_ids\": [], \"section\": \"\", \"meta\": {}, \"last_accessed\": null, \"score\": 0.4944167937448643}]\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "private-service-down-falls-back",
+   "instance": {
+    "id": "a1",
+    "agent_name": "Agent",
+    "owner_name": "Owner",
+    "data_dir": "../state",
+    "persona": "p"
+   },
+   "state_in_home": null,
+   "columns": null,
+   "schema": "\nCREATE TABLE IF NOT EXISTS memories (\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    kind TEXT NOT NULL,\n    created_at REAL NOT NULL,\n    user_text TEXT NOT NULL DEFAULT '',\n    assistant_text TEXT NOT NULL DEFAULT '',\n    text TEXT NOT NULL,\n    importance REAL NOT NULL,\n    importance_source TEXT NOT NULL DEFAULT 'default',\n    embed_model TEXT NOT NULL DEFAULT '',\n    embedding BLOB,\n    source_ids TEXT NOT NULL DEFAULT '[]',\n    section TEXT NOT NULL DEFAULT '',\n    meta TEXT NOT NULL DEFAULT '{}',\n    last_accessed REAL\n);\nCREATE INDEX IF NOT EXISTS memories_kind_time ON memories(kind, created_at);\nCREATE TABLE IF NOT EXISTS state (\n    key TEXT PRIMARY KEY,\n    value TEXT NOT NULL\n);\nCREATE TABLE IF NOT EXISTS answered (\n    source_id TEXT PRIMARY KEY,\n    at REAL NOT NULL\n);\nCREATE TABLE IF NOT EXISTS external_episodes (\n    source_id TEXT PRIMARY KEY,\n    memory_id INTEGER\n);\nCREATE TABLE IF NOT EXISTS voice_claims (\n    norm TEXT NOT NULL,\n    at REAL NOT NULL\n);\nCREATE TABLE IF NOT EXISTS beliefs (\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    text TEXT NOT NULL,\n    weight REAL NOT NULL,\n    parent_id INTEGER,\n    protected INTEGER NOT NULL DEFAULT 0,\n    created_at REAL NOT NULL\n);\n",
+   "state": null,
+   "legacy_history": null,
+   "embed": "down",
+   "request": {
+    "query": "compiler parity"
+   },
+   "refuses": false,
+   "private": [
+    {
+     "id": 1,
+     "kind": "episode",
+     "created_at": 1799990000.0,
+     "user_text": "",
+     "assistant_text": "",
+     "text": "compiler parity hashed",
+     "importance": 6.0,
+     "importance_source": "default",
+     "embed_model": "hashed-v1-1024",
+     "embedding": {
+      "hashed": "460a119d28df15244058b56edf41805244ffb8043d8ceec6d0f2cff0f439ccf7"
+     },
+     "source_ids": "[]",
+     "section": "",
+     "meta": "{}",
+     "last_accessed": null
+    },
+    {
+     "id": 2,
+     "kind": "episode",
+     "created_at": 1799900000.0,
+     "user_text": "",
+     "assistant_text": "",
+     "text": "served row re-embedded by the fallback",
+     "importance": 5.0,
+     "importance_source": "default",
+     "embed_model": "llama:default",
+     "embedding": "20ba03bf20ba03bf169585bdc158b3bece1b03bea8e674bed6a22f3edb15fbbe",
+     "source_ids": "[]",
+     "section": "",
+     "meta": "{}",
+     "last_accessed": null
+    }
+   ],
+   "expect": {
+    "code": 0,
+    "stdout": "[{\"id\": 1, \"kind\": \"episode\", \"created_at\": 1799990000.0, \"user_text\": \"\", \"assistant_text\": \"\", \"text\": \"compiler parity hashed\", \"importance\": 6.0, \"importance_source\": \"default\", \"embed_model\": \"hashed-v1-1024\", \"source_ids\": [], \"section\": \"\", \"meta\": {}, \"last_accessed\": null, \"score\": 0.7869231398107482}, {\"id\": 2, \"kind\": \"episode\", \"created_at\": 1799900000.0, \"user_text\": \"\", \"assistant_text\": \"\", \"text\": \"served row re-embedded by the fallback\", \"importance\": 5.0, \"importance_source\": \"default\", \"embed_model\": \"hashed-v1-1024\", \"source_ids\": [], \"section\": \"\", \"meta\": {}, \"last_accessed\": null, \"score\": 0.4566738571484188}]\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "project-hashed",
+   "instance": {
+    "id": "a1",
+    "agent_name": "Agent",
+    "owner_name": "Owner",
+    "data_dir": "../state",
+    "persona": "p"
+   },
+   "state_in_home": null,
+   "columns": null,
+   "schema": "\nCREATE TABLE IF NOT EXISTS memories (\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    kind TEXT NOT NULL,\n    created_at REAL NOT NULL,\n    user_text TEXT NOT NULL DEFAULT '',\n    assistant_text TEXT NOT NULL DEFAULT '',\n    text TEXT NOT NULL,\n    importance REAL NOT NULL,\n    importance_source TEXT NOT NULL DEFAULT 'default',\n    embed_model TEXT NOT NULL DEFAULT '',\n    embedding BLOB,\n    source_ids TEXT NOT NULL DEFAULT '[]',\n    section TEXT NOT NULL DEFAULT '',\n    meta TEXT NOT NULL DEFAULT '{}',\n    last_accessed REAL\n);\nCREATE INDEX IF NOT EXISTS memories_kind_time ON memories(kind, created_at);\nCREATE TABLE IF NOT EXISTS state (\n    key TEXT PRIMARY KEY,\n    value TEXT NOT NULL\n);\nCREATE TABLE IF NOT EXISTS answered (\n    source_id TEXT PRIMARY KEY,\n    at REAL NOT NULL\n);\nCREATE TABLE IF NOT EXISTS external_episodes (\n    source_id TEXT PRIMARY KEY,\n    memory_id INTEGER\n);\nCREATE TABLE IF NOT EXISTS voice_claims (\n    norm TEXT NOT NULL,\n    at REAL NOT NULL\n);\nCREATE TABLE IF NOT EXISTS beliefs (\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    text TEXT NOT NULL,\n    weight REAL NOT NULL,\n    parent_id INTEGER,\n    protected INTEGER NOT NULL DEFAULT 0,\n    created_at REAL NOT NULL\n);\n",
+   "state": null,
+   "legacy_history": null,
+   "embed": null,
+   "request": {
+    "query": "solver parity",
+    "project": "solve-ir"
+   },
+   "refuses": false,
+   "private": [],
+   "project": {
+    "id": "solve-ir",
+    "rows": [
+     {
+      "id": 1,
+      "kind": "reflection",
+      "created_at": 1799990000.0,
+      "user_text": "",
+      "assistant_text": "",
+      "text": "solver parity holds",
+      "importance": 7.0,
+      "importance_source": "default",
+      "embed_model": "hashed-v1-1024",
+      "embedding": {
+       "hashed": "9ea0d467647f5315294c00b2be58a3312a5c9ca97ee1e5e1fe51f4afed8ce32b"
+      },
+      "source_ids": "[]",
+      "section": "",
+      "meta": "{}",
+      "last_accessed": null
+     },
+     {
+      "id": 2,
+      "kind": "reflection",
+      "created_at": 1799980000.0,
+      "user_text": "",
+      "assistant_text": "",
+      "text": "solver speed regressed",
+      "importance": 7.0,
+      "importance_source": "default",
+      "embed_model": "hashed-v1-1024",
+      "embedding": {
+       "hashed": "0296a6545d96a4f5adf96238a97e190c5ed6957f4db251bacdba8f1157b69d48"
+      },
+      "source_ids": "[]",
+      "section": "",
+      "meta": "{}",
+      "last_accessed": null
+     },
+     {
+      "id": 3,
+      "kind": "reflection",
+      "created_at": 1799970000.0,
+      "user_text": "",
+      "assistant_text": "",
+      "text": "parity check script",
+      "importance": 7.0,
+      "importance_source": "default",
+      "embed_model": "hashed-v1-1024",
+      "embedding": {
+       "hashed": "aac1a8847d73c106f3dd30e240a86a6b40d3a980ffe9924fed6f54a9fc3070e8"
+      },
+      "source_ids": "[]",
+      "section": "",
+      "meta": "{}",
+      "last_accessed": null
+     },
+     {
+      "id": 4,
+      "kind": "reflection",
+      "created_at": 1799960000.0,
+      "user_text": "",
+      "assistant_text": "",
+      "text": "unrelated",
+      "importance": 7.0,
+      "importance_source": "default",
+      "embed_model": "hashed-v1-1024",
+      "embedding": {
+       "hashed": "9c84be7dda314080257773cbd62e4b904a1370ea19fc6d7aaa40514e78c4f16d"
+      },
+      "source_ids": "[]",
+      "section": "",
+      "meta": "{}",
+      "last_accessed": null
+     },
+     {
+      "id": 5,
+      "kind": "reflection",
+      "created_at": 1799950000.0,
+      "user_text": "",
+      "assistant_text": "",
+      "text": "solver",
+      "importance": 1.0,
+      "importance_source": "default",
+      "embed_model": "hashed-v1-1024",
+      "embedding": {
+       "hashed": "5d604f4204a7d1f01a6a0fd85e658f821cb5c86d94453e21e195a30942f5588e"
+      },
+      "source_ids": "[]",
+      "section": "",
+      "meta": "{}",
+      "last_accessed": null
+     },
+     {
+      "id": 6,
+      "kind": "reflection",
+      "created_at": 1799940000.0,
+      "user_text": "",
+      "assistant_text": "",
+      "text": "parity",
+      "importance": 10.0,
+      "importance_source": "default",
+      "embed_model": "hashed-v1-1024",
+      "embedding": {
+       "hashed": "274206924e501a2c1854bb4fc2555be07ca0b477002499a256dca730e2a55224"
+      },
+      "source_ids": "[]",
+      "section": "",
+      "meta": "{}",
+      "last_accessed": null
+     },
+     {
+      "id": 7,
+      "kind": "reflection",
+      "created_at": 1799930000.0,
+      "user_text": "",
+      "assistant_text": "",
+      "text": "solver parity again",
+      "importance": 0.0,
+      "importance_source": "default",
+      "embed_model": "hashed-v1-1024",
+      "embedding": {
+       "hashed": "df60f932f7f44a4b9822946827c3236af0baea44f2059609ebc3a2ed3434f3e1"
+      },
+      "source_ids": "[]",
+      "section": "",
+      "meta": "{}",
+      "last_accessed": null
+     },
+     {
+      "id": 8,
+      "kind": "reflection",
+      "created_at": 1799920000.0,
+      "user_text": "",
+      "assistant_text": "",
+      "text": "other model is never re-embedded in a project",
+      "importance": 10.0,
+      "importance_source": "default",
+      "embed_model": "llama:default",
+      "embedding": "0000003f0000003f0000003f",
+      "source_ids": "[]",
+      "section": "",
+      "meta": "{}",
+      "last_accessed": null
+     }
+    ]
+   },
+   "expect": {
+    "code": 0,
+    "stdout": "[{\"id\": 6, \"kind\": \"reflection\", \"created_at\": 1799940000.0, \"user_text\": \"\", \"assistant_text\": \"\", \"text\": \"parity\", \"importance\": 10.0, \"importance_source\": \"default\", \"embed_model\": \"hashed-v1-1024\", \"source_ids\": [], \"section\": \"\", \"meta\": {}, \"last_accessed\": null, \"score\": 0.8324007955575344}, {\"id\": 1, \"kind\": \"reflection\", \"created_at\": 1799990000.0, \"user_text\": \"\", \"assistant_text\": \"\", \"text\": \"solver parity holds\", \"importance\": 7.0, \"importance_source\": \"default\", \"embed_model\": \"hashed-v1-1024\", \"source_ids\": [], \"section\": \"\", \"meta\": {}, \"last_accessed\": null, \"score\": 0.8202564731440817}, {\"id\": 2, \"kind\": \"reflection\", \"created_at\": 1799980000.0, \"user_text\": \"\", \"assistant_text\": \"\", \"text\": \"solver speed regressed\", \"importance\": 7.0, \"importance_source\": \"default\", \"embed_model\": \"hashed-v1-1024\", \"source_ids\": [], \"section\": \"\", \"meta\": {}, \"last_accessed\": null, \"score\": 0.6435785327225304}, {\"id\": 3, \"kind\": \"reflection\", \"created_at\": 1799970000.0, \"user_text\": \"\", \"assistant_text\": \"\", \"text\": \"parity check script\", \"importance\": 7.0, \"importance_source\": \"default\", \"embed_model\": \"hashed-v1-1024\", \"source_ids\": [], \"section\": \"\", \"meta\": {}, \"last_accessed\": null, \"score\": 0.6390960330430023}, {\"id\": 7, \"kind\": \"reflection\", \"created_at\": 1799930000.0, \"user_text\": \"\", \"assistant_text\": \"\", \"text\": \"solver parity again\", \"importance\": 0.0, \"importance_source\": \"default\", \"embed_model\": \"hashed-v1-1024\", \"source_ids\": [], \"section\": \"\", \"meta\": {}, \"last_accessed\": null, \"score\": 0.5605765869883687}, {\"id\": 4, \"kind\": \"reflection\", \"created_at\": 1799960000.0, \"user_text\": \"\", \"assistant_text\": \"\", \"text\": \"unrelated\", \"importance\": 7.0, \"importance_source\": \"default\", \"embed_model\": \"hashed-v1-1024\", \"source_ids\": [], \"section\": \"\", \"meta\": {}, \"last_accessed\": null, \"score\": 0.5486092184128922}]\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "project-missing-store",
+   "instance": {
+    "id": "a1",
+    "agent_name": "Agent",
+    "owner_name": "Owner",
+    "data_dir": "../state",
+    "persona": "p"
+   },
+   "state_in_home": null,
+   "columns": null,
+   "schema": "\nCREATE TABLE IF NOT EXISTS memories (\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    kind TEXT NOT NULL,\n    created_at REAL NOT NULL,\n    user_text TEXT NOT NULL DEFAULT '',\n    assistant_text TEXT NOT NULL DEFAULT '',\n    text TEXT NOT NULL,\n    importance REAL NOT NULL,\n    importance_source TEXT NOT NULL DEFAULT 'default',\n    embed_model TEXT NOT NULL DEFAULT '',\n    embedding BLOB,\n    source_ids TEXT NOT NULL DEFAULT '[]',\n    section TEXT NOT NULL DEFAULT '',\n    meta TEXT NOT NULL DEFAULT '{}',\n    last_accessed REAL\n);\nCREATE INDEX IF NOT EXISTS memories_kind_time ON memories(kind, created_at);\nCREATE TABLE IF NOT EXISTS state (\n    key TEXT PRIMARY KEY,\n    value TEXT NOT NULL\n);\nCREATE TABLE IF NOT EXISTS answered (\n    source_id TEXT PRIMARY KEY,\n    at REAL NOT NULL\n);\nCREATE TABLE IF NOT EXISTS external_episodes (\n    source_id TEXT PRIMARY KEY,\n    memory_id INTEGER\n);\nCREATE TABLE IF NOT EXISTS voice_claims (\n    norm TEXT NOT NULL,\n    at REAL NOT NULL\n);\nCREATE TABLE IF NOT EXISTS beliefs (\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    text TEXT NOT NULL,\n    weight REAL NOT NULL,\n    parent_id INTEGER,\n    protected INTEGER NOT NULL DEFAULT 0,\n    created_at REAL NOT NULL\n);\n",
+   "state": null,
+   "legacy_history": null,
+   "embed": null,
+   "request": {
+    "query": "anything",
+    "project": "empty-proj"
+   },
+   "refuses": false,
+   "private": [],
+   "expect": {
+    "code": 0,
+    "stdout": "[]\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "private-missing-store",
+   "instance": {
+    "id": "a1",
+    "agent_name": "Agent",
+    "owner_name": "Owner",
+    "data_dir": "../state",
+    "persona": "p"
+   },
+   "state_in_home": null,
+   "columns": null,
+   "schema": "\nCREATE TABLE IF NOT EXISTS memories (\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    kind TEXT NOT NULL,\n    created_at REAL NOT NULL,\n    user_text TEXT NOT NULL DEFAULT '',\n    assistant_text TEXT NOT NULL DEFAULT '',\n    text TEXT NOT NULL,\n    importance REAL NOT NULL,\n    importance_source TEXT NOT NULL DEFAULT 'default',\n    embed_model TEXT NOT NULL DEFAULT '',\n    embedding BLOB,\n    source_ids TEXT NOT NULL DEFAULT '[]',\n    section TEXT NOT NULL DEFAULT '',\n    meta TEXT NOT NULL DEFAULT '{}',\n    last_accessed REAL\n);\nCREATE INDEX IF NOT EXISTS memories_kind_time ON memories(kind, created_at);\nCREATE TABLE IF NOT EXISTS state (\n    key TEXT PRIMARY KEY,\n    value TEXT NOT NULL\n);\nCREATE TABLE IF NOT EXISTS answered (\n    source_id TEXT PRIMARY KEY,\n    at REAL NOT NULL\n);\nCREATE TABLE IF NOT EXISTS external_episodes (\n    source_id TEXT PRIMARY KEY,\n    memory_id INTEGER\n);\nCREATE TABLE IF NOT EXISTS voice_claims (\n    norm TEXT NOT NULL,\n    at REAL NOT NULL\n);\nCREATE TABLE IF NOT EXISTS beliefs (\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    text TEXT NOT NULL,\n    weight REAL NOT NULL,\n    parent_id INTEGER,\n    protected INTEGER NOT NULL DEFAULT 0,\n    created_at REAL NOT NULL\n);\n",
+   "state": null,
+   "legacy_history": null,
+   "embed": null,
+   "request": {
+    "query": "anything"
+   },
+   "refuses": false,
+   "expect": {
+    "code": 0,
+    "stdout": "[]\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "private-no-memories-table",
+   "instance": {
+    "id": "a1",
+    "agent_name": "Agent",
+    "owner_name": "Owner",
+    "data_dir": "../state",
+    "persona": "p"
+   },
+   "state_in_home": null,
+   "columns": "nomemories",
+   "schema": "CREATE TABLE other (x);",
+   "state": null,
+   "legacy_history": null,
+   "embed": null,
+   "request": {
+    "query": "anything"
+   },
+   "refuses": false,
+   "private": [],
+   "expect": {
+    "code": 0,
+    "stdout": "[]\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "legacy-assistant-column",
+   "instance": {
+    "id": "a1",
+    "agent_name": "Agent",
+    "owner_name": "Owner",
+    "data_dir": "../state",
+    "persona": "p"
+   },
+   "state_in_home": null,
+   "columns": "legacy",
+   "schema": "\nCREATE TABLE IF NOT EXISTS memories (\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    kind TEXT NOT NULL,\n    created_at REAL NOT NULL,\n    user_text TEXT NOT NULL DEFAULT '',\n    <legacy-assistant-column> TEXT NOT NULL DEFAULT '',\n    text TEXT NOT NULL,\n    importance REAL NOT NULL,\n    importance_source TEXT NOT NULL DEFAULT 'default',\n    embed_model TEXT NOT NULL DEFAULT '',\n    embedding BLOB,\n    source_ids TEXT NOT NULL DEFAULT '[]',\n    section TEXT NOT NULL DEFAULT '',\n    meta TEXT NOT NULL DEFAULT '{}',\n    last_accessed REAL\n);\nCREATE INDEX IF NOT EXISTS memories_kind_time ON memories(kind, created_at);\nCREATE TABLE IF NOT EXISTS state (\n    key TEXT PRIMARY KEY,\n    value TEXT NOT NULL\n);\nCREATE TABLE IF NOT EXISTS answered (\n    source_id TEXT PRIMARY KEY,\n    at REAL NOT NULL\n);\nCREATE TABLE IF NOT EXISTS external_episodes (\n    source_id TEXT PRIMARY KEY,\n    memory_id INTEGER\n);\nCREATE TABLE IF NOT EXISTS voice_claims (\n    norm TEXT NOT NULL,\n    at REAL NOT NULL\n);\nCREATE TABLE IF NOT EXISTS beliefs (\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    text TEXT NOT NULL,\n    weight REAL NOT NULL,\n    parent_id INTEGER,\n    protected INTEGER NOT NULL DEFAULT 0,\n    created_at REAL NOT NULL\n);\n",
+   "state": null,
+   "legacy_history": null,
+   "embed": null,
+   "request": {
+    "query": "compiler"
+   },
+   "refuses": false,
+   "private": [
+    {
+     "id": 1,
+     "kind": "episode",
+     "created_at": 1799990000.0,
+     "user_text": "",
+     "assistant_text": "old column",
+     "text": "compiler memory",
+     "importance": 6.0,
+     "importance_source": "default",
+     "embed_model": "hashed-v1-1024",
+     "embedding": {
+      "hashed": "fab0b9d2f2997374613807cdd2e797145e54121a7a8c01c9824f1f6ab96c5845"
+     },
+     "source_ids": "[]",
+     "section": "",
+     "meta": "{}",
+     "last_accessed": null
+    }
+   ],
+   "expect": {
+    "code": 0,
+    "stdout": "[{\"id\": 1, \"kind\": \"episode\", \"created_at\": 1799990000.0, \"user_text\": \"\", \"assistant_text\": \"old column\", \"text\": \"compiler memory\", \"importance\": 6.0, \"importance_source\": \"default\", \"embed_model\": \"hashed-v1-1024\", \"source_ids\": [], \"section\": \"\", \"meta\": {}, \"last_accessed\": null, \"score\": 0.721174339430946}]\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "ambiguous-assistant-columns",
+   "instance": {
+    "id": "a1",
+    "agent_name": "Agent",
+    "owner_name": "Owner",
+    "data_dir": "../state",
+    "persona": "p"
+   },
+   "state_in_home": null,
+   "columns": "both",
+   "schema": "\nCREATE TABLE IF NOT EXISTS memories (\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    kind TEXT NOT NULL,\n    created_at REAL NOT NULL,\n    user_text TEXT NOT NULL DEFAULT '',\n    assistant_text TEXT NOT NULL DEFAULT '', <legacy-assistant-column> TEXT NOT NULL DEFAULT '',\n    text TEXT NOT NULL,\n    importance REAL NOT NULL,\n    importance_source TEXT NOT NULL DEFAULT 'default',\n    embed_model TEXT NOT NULL DEFAULT '',\n    embedding BLOB,\n    source_ids TEXT NOT NULL DEFAULT '[]',\n    section TEXT NOT NULL DEFAULT '',\n    meta TEXT NOT NULL DEFAULT '{}',\n    last_accessed REAL\n);\nCREATE INDEX IF NOT EXISTS memories_kind_time ON memories(kind, created_at);\nCREATE TABLE IF NOT EXISTS state (\n    key TEXT PRIMARY KEY,\n    value TEXT NOT NULL\n);\nCREATE TABLE IF NOT EXISTS answered (\n    source_id TEXT PRIMARY KEY,\n    at REAL NOT NULL\n);\nCREATE TABLE IF NOT EXISTS external_episodes (\n    source_id TEXT PRIMARY KEY,\n    memory_id INTEGER\n);\nCREATE TABLE IF NOT EXISTS voice_claims (\n    norm TEXT NOT NULL,\n    at REAL NOT NULL\n);\nCREATE TABLE IF NOT EXISTS beliefs (\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    text TEXT NOT NULL,\n    weight REAL NOT NULL,\n    parent_id INTEGER,\n    protected INTEGER NOT NULL DEFAULT 0,\n    created_at REAL NOT NULL\n);\n",
+   "state": null,
+   "legacy_history": null,
+   "embed": null,
+   "request": {
+    "query": "compiler"
+   },
+   "refuses": false,
+   "private": [
+    {
+     "id": 1,
+     "kind": "episode",
+     "created_at": 1799990000.0,
+     "user_text": "",
+     "assistant_text": "",
+     "text": "compiler memory",
+     "importance": 6.0,
+     "importance_source": "default",
+     "embed_model": "hashed-v1-1024",
+     "embedding": {
+      "hashed": "fab0b9d2f2997374613807cdd2e797145e54121a7a8c01c9824f1f6ab96c5845"
+     },
+     "source_ids": "[]",
+     "section": "",
+     "meta": "{}",
+     "last_accessed": null
+    }
+   ],
+   "expect": {
+    "code": 1,
+    "stdout": "",
+    "stderr": "{\"error\": \"Ambiguous assistant columns in memory store\"}\n"
+   }
+  },
+  {
+   "id": "missing-assistant-column",
+   "instance": {
+    "id": "a1",
+    "agent_name": "Agent",
+    "owner_name": "Owner",
+    "data_dir": "../state",
+    "persona": "p"
+   },
+   "state_in_home": null,
+   "columns": "none",
+   "schema": "\nCREATE TABLE IF NOT EXISTS memories (\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    kind TEXT NOT NULL,\n    created_at REAL NOT NULL,\n    user_text TEXT NOT NULL DEFAULT '',\n    \n    text TEXT NOT NULL,\n    importance REAL NOT NULL,\n    importance_source TEXT NOT NULL DEFAULT 'default',\n    embed_model TEXT NOT NULL DEFAULT '',\n    embedding BLOB,\n    source_ids TEXT NOT NULL DEFAULT '[]',\n    section TEXT NOT NULL DEFAULT '',\n    meta TEXT NOT NULL DEFAULT '{}',\n    last_accessed REAL\n);\nCREATE INDEX IF NOT EXISTS memories_kind_time ON memories(kind, created_at);\nCREATE TABLE IF NOT EXISTS state (\n    key TEXT PRIMARY KEY,\n    value TEXT NOT NULL\n);\nCREATE TABLE IF NOT EXISTS answered (\n    source_id TEXT PRIMARY KEY,\n    at REAL NOT NULL\n);\nCREATE TABLE IF NOT EXISTS external_episodes (\n    source_id TEXT PRIMARY KEY,\n    memory_id INTEGER\n);\nCREATE TABLE IF NOT EXISTS voice_claims (\n    norm TEXT NOT NULL,\n    at REAL NOT NULL\n);\nCREATE TABLE IF NOT EXISTS beliefs (\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    text TEXT NOT NULL,\n    weight REAL NOT NULL,\n    parent_id INTEGER,\n    protected INTEGER NOT NULL DEFAULT 0,\n    created_at REAL NOT NULL\n);\n",
+   "state": null,
+   "legacy_history": null,
+   "embed": null,
+   "request": {
+    "query": "compiler"
+   },
+   "refuses": false,
+   "private": [
+    {
+     "id": 1,
+     "kind": "episode",
+     "created_at": 1799990000.0,
+     "user_text": "",
+     "assistant_text": "",
+     "text": "compiler memory",
+     "importance": 6.0,
+     "importance_source": "default",
+     "embed_model": "hashed-v1-1024",
+     "embedding": {
+      "hashed": "fab0b9d2f2997374613807cdd2e797145e54121a7a8c01c9824f1f6ab96c5845"
+     },
+     "source_ids": "[]",
+     "section": "",
+     "meta": "{}",
+     "last_accessed": null
+    }
+   ],
+   "expect": {
+    "code": 1,
+    "stdout": "",
+    "stderr": "{\"error\": \"Missing assistant column in memory store\"}\n"
+   }
+  },
+  {
+   "id": "odd-embedding-blob",
+   "instance": {
+    "id": "a1",
+    "agent_name": "Agent",
+    "owner_name": "Owner",
+    "data_dir": "../state",
+    "persona": "p"
+   },
+   "state_in_home": null,
+   "columns": null,
+   "schema": "\nCREATE TABLE IF NOT EXISTS memories (\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    kind TEXT NOT NULL,\n    created_at REAL NOT NULL,\n    user_text TEXT NOT NULL DEFAULT '',\n    assistant_text TEXT NOT NULL DEFAULT '',\n    text TEXT NOT NULL,\n    importance REAL NOT NULL,\n    importance_source TEXT NOT NULL DEFAULT 'default',\n    embed_model TEXT NOT NULL DEFAULT '',\n    embedding BLOB,\n    source_ids TEXT NOT NULL DEFAULT '[]',\n    section TEXT NOT NULL DEFAULT '',\n    meta TEXT NOT NULL DEFAULT '{}',\n    last_accessed REAL\n);\nCREATE INDEX IF NOT EXISTS memories_kind_time ON memories(kind, created_at);\nCREATE TABLE IF NOT EXISTS state (\n    key TEXT PRIMARY KEY,\n    value TEXT NOT NULL\n);\nCREATE TABLE IF NOT EXISTS answered (\n    source_id TEXT PRIMARY KEY,\n    at REAL NOT NULL\n);\nCREATE TABLE IF NOT EXISTS external_episodes (\n    source_id TEXT PRIMARY KEY,\n    memory_id INTEGER\n);\nCREATE TABLE IF NOT EXISTS voice_claims (\n    norm TEXT NOT NULL,\n    at REAL NOT NULL\n);\nCREATE TABLE IF NOT EXISTS beliefs (\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    text TEXT NOT NULL,\n    weight REAL NOT NULL,\n    parent_id INTEGER,\n    protected INTEGER NOT NULL DEFAULT 0,\n    created_at REAL NOT NULL\n);\n",
+   "state": null,
+   "legacy_history": null,
+   "embed": null,
+   "request": {
+    "query": "compiler"
+   },
+   "refuses": false,
+   "private": [
+    {
+     "id": 1,
+     "kind": "episode",
+     "created_at": 1799990000.0,
+     "user_text": "",
+     "assistant_text": "",
+     "text": "compiler memory",
+     "importance": 6.0,
+     "importance_source": "default",
+     "embed_model": "hashed-v1-1024",
+     "embedding": "000102",
+     "source_ids": "[]",
+     "section": "",
+     "meta": "{}",
+     "last_accessed": null
+    }
+   ],
+   "expect": {
+    "code": 1,
+    "stdout": "",
+    "stderr": "{\"error\": \"bytes length not a multiple of item size\"}\n"
+   }
+  },
+  {
+   "id": "legacy-history-pending",
+   "instance": {
+    "id": "a1",
+    "agent_name": "Agent",
+    "owner_name": "Owner",
+    "data_dir": "../state",
+    "persona": "p"
+   },
+   "state_in_home": null,
+   "columns": null,
+   "schema": "\nCREATE TABLE IF NOT EXISTS memories (\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    kind TEXT NOT NULL,\n    created_at REAL NOT NULL,\n    user_text TEXT NOT NULL DEFAULT '',\n    assistant_text TEXT NOT NULL DEFAULT '',\n    text TEXT NOT NULL,\n    importance REAL NOT NULL,\n    importance_source TEXT NOT NULL DEFAULT 'default',\n    embed_model TEXT NOT NULL DEFAULT '',\n    embedding BLOB,\n    source_ids TEXT NOT NULL DEFAULT '[]',\n    section TEXT NOT NULL DEFAULT '',\n    meta TEXT NOT NULL DEFAULT '{}',\n    last_accessed REAL\n);\nCREATE INDEX IF NOT EXISTS memories_kind_time ON memories(kind, created_at);\nCREATE TABLE IF NOT EXISTS state (\n    key TEXT PRIMARY KEY,\n    value TEXT NOT NULL\n);\nCREATE TABLE IF NOT EXISTS answered (\n    source_id TEXT PRIMARY KEY,\n    at REAL NOT NULL\n);\nCREATE TABLE IF NOT EXISTS external_episodes (\n    source_id TEXT PRIMARY KEY,\n    memory_id INTEGER\n);\nCREATE TABLE IF NOT EXISTS voice_claims (\n    norm TEXT NOT NULL,\n    at REAL NOT NULL\n);\nCREATE TABLE IF NOT EXISTS beliefs (\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    text TEXT NOT NULL,\n    weight REAL NOT NULL,\n    parent_id INTEGER,\n    protected INTEGER NOT NULL DEFAULT 0,\n    created_at REAL NOT NULL\n);\n",
+   "state": null,
+   "legacy_history": "[{\"role\": \"user\", \"content\": \"compiler question\"}, {\"role\": \"assistant\", \"content\": \"compiler answer\"}]",
+   "embed": null,
+   "request": {
+    "query": "compiler"
+   },
+   "refuses": true,
+   "private": [
+    {
+     "id": 1,
+     "kind": "episode",
+     "created_at": 1799990000.0,
+     "user_text": "",
+     "assistant_text": "",
+     "text": "compiler memory",
+     "importance": 6.0,
+     "importance_source": "default",
+     "embed_model": "hashed-v1-1024",
+     "embedding": {
+      "hashed": "fab0b9d2f2997374613807cdd2e797145e54121a7a8c01c9824f1f6ab96c5845"
+     },
+     "source_ids": "[]",
+     "section": "",
+     "meta": "{}",
+     "last_accessed": null
+    }
+   ],
+   "expect": {
+    "code": 0,
+    "stdout": "[{\"id\": 1, \"kind\": \"episode\", \"created_at\": 1799990000.0, \"user_text\": \"\", \"assistant_text\": \"\", \"text\": \"compiler memory\", \"importance\": 6.0, \"importance_source\": \"default\", \"embed_model\": \"hashed-v1-1024\", \"source_ids\": [], \"section\": \"\", \"meta\": {}, \"last_accessed\": null, \"score\": 0.721174339430946}, {\"id\": 2, \"kind\": \"episode\", \"created_at\": 1794074321.373328, \"user_text\": \"compiler question\", \"assistant_text\": \"compiler answer\", \"text\": \"User: compiler question\\nAssistant: compiler answer\", \"importance\": 3.0, \"importance_source\": \"migrated\", \"embed_model\": \"hashed-v1-1024\", \"source_ids\": [], \"section\": \"\", \"meta\": {\"idle\": false, \"legacy\": true}, \"last_accessed\": null, \"score\": 0.2797615267942155}]\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "legacy-history-already-imported",
+   "instance": {
+    "id": "a1",
+    "agent_name": "Agent",
+    "owner_name": "Owner",
+    "data_dir": "../state",
+    "persona": "p"
+   },
+   "state_in_home": null,
+   "columns": null,
+   "schema": "\nCREATE TABLE IF NOT EXISTS memories (\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    kind TEXT NOT NULL,\n    created_at REAL NOT NULL,\n    user_text TEXT NOT NULL DEFAULT '',\n    assistant_text TEXT NOT NULL DEFAULT '',\n    text TEXT NOT NULL,\n    importance REAL NOT NULL,\n    importance_source TEXT NOT NULL DEFAULT 'default',\n    embed_model TEXT NOT NULL DEFAULT '',\n    embedding BLOB,\n    source_ids TEXT NOT NULL DEFAULT '[]',\n    section TEXT NOT NULL DEFAULT '',\n    meta TEXT NOT NULL DEFAULT '{}',\n    last_accessed REAL\n);\nCREATE INDEX IF NOT EXISTS memories_kind_time ON memories(kind, created_at);\nCREATE TABLE IF NOT EXISTS state (\n    key TEXT PRIMARY KEY,\n    value TEXT NOT NULL\n);\nCREATE TABLE IF NOT EXISTS answered (\n    source_id TEXT PRIMARY KEY,\n    at REAL NOT NULL\n);\nCREATE TABLE IF NOT EXISTS external_episodes (\n    source_id TEXT PRIMARY KEY,\n    memory_id INTEGER\n);\nCREATE TABLE IF NOT EXISTS voice_claims (\n    norm TEXT NOT NULL,\n    at REAL NOT NULL\n);\nCREATE TABLE IF NOT EXISTS beliefs (\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    text TEXT NOT NULL,\n    weight REAL NOT NULL,\n    parent_id INTEGER,\n    protected INTEGER NOT NULL DEFAULT 0,\n    created_at REAL NOT NULL\n);\n",
+   "state": {
+    "migrated_legacy_history": "1"
+   },
+   "legacy_history": "[{\"role\": \"user\", \"content\": \"compiler question\"}, {\"role\": \"assistant\", \"content\": \"compiler answer\"}]",
+   "embed": null,
+   "request": {
+    "query": "compiler"
+   },
+   "refuses": false,
+   "private": [
+    {
+     "id": 1,
+     "kind": "episode",
+     "created_at": 1799990000.0,
+     "user_text": "",
+     "assistant_text": "",
+     "text": "compiler memory",
+     "importance": 6.0,
+     "importance_source": "default",
+     "embed_model": "hashed-v1-1024",
+     "embedding": {
+      "hashed": "fab0b9d2f2997374613807cdd2e797145e54121a7a8c01c9824f1f6ab96c5845"
+     },
+     "source_ids": "[]",
+     "section": "",
+     "meta": "{}",
+     "last_accessed": null
+    }
+   ],
+   "expect": {
+    "code": 0,
+    "stdout": "[{\"id\": 1, \"kind\": \"episode\", \"created_at\": 1799990000.0, \"user_text\": \"\", \"assistant_text\": \"\", \"text\": \"compiler memory\", \"importance\": 6.0, \"importance_source\": \"default\", \"embed_model\": \"hashed-v1-1024\", \"source_ids\": [], \"section\": \"\", \"meta\": {}, \"last_accessed\": null, \"score\": 0.721174339430946}]\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "legacy-history-without-pairs",
+   "instance": {
+    "id": "a1",
+    "agent_name": "Agent",
+    "owner_name": "Owner",
+    "data_dir": "../state",
+    "persona": "p"
+   },
+   "state_in_home": null,
+   "columns": null,
+   "schema": "\nCREATE TABLE IF NOT EXISTS memories (\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    kind TEXT NOT NULL,\n    created_at REAL NOT NULL,\n    user_text TEXT NOT NULL DEFAULT '',\n    assistant_text TEXT NOT NULL DEFAULT '',\n    text TEXT NOT NULL,\n    importance REAL NOT NULL,\n    importance_source TEXT NOT NULL DEFAULT 'default',\n    embed_model TEXT NOT NULL DEFAULT '',\n    embedding BLOB,\n    source_ids TEXT NOT NULL DEFAULT '[]',\n    section TEXT NOT NULL DEFAULT '',\n    meta TEXT NOT NULL DEFAULT '{}',\n    last_accessed REAL\n);\nCREATE INDEX IF NOT EXISTS memories_kind_time ON memories(kind, created_at);\nCREATE TABLE IF NOT EXISTS state (\n    key TEXT PRIMARY KEY,\n    value TEXT NOT NULL\n);\nCREATE TABLE IF NOT EXISTS answered (\n    source_id TEXT PRIMARY KEY,\n    at REAL NOT NULL\n);\nCREATE TABLE IF NOT EXISTS external_episodes (\n    source_id TEXT PRIMARY KEY,\n    memory_id INTEGER\n);\nCREATE TABLE IF NOT EXISTS voice_claims (\n    norm TEXT NOT NULL,\n    at REAL NOT NULL\n);\nCREATE TABLE IF NOT EXISTS beliefs (\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    text TEXT NOT NULL,\n    weight REAL NOT NULL,\n    parent_id INTEGER,\n    protected INTEGER NOT NULL DEFAULT 0,\n    created_at REAL NOT NULL\n);\n",
+   "state": null,
+   "legacy_history": "[{\"role\": \"user\", \"content\": \"only a question\"}]",
+   "embed": null,
+   "request": {
+    "query": "compiler"
+   },
+   "refuses": false,
+   "private": [
+    {
+     "id": 1,
+     "kind": "episode",
+     "created_at": 1799990000.0,
+     "user_text": "",
+     "assistant_text": "",
+     "text": "compiler memory",
+     "importance": 6.0,
+     "importance_source": "default",
+     "embed_model": "hashed-v1-1024",
+     "embedding": {
+      "hashed": "fab0b9d2f2997374613807cdd2e797145e54121a7a8c01c9824f1f6ab96c5845"
+     },
+     "source_ids": "[]",
+     "section": "",
+     "meta": "{}",
+     "last_accessed": null
+    }
+   ],
+   "expect": {
+    "code": 0,
+    "stdout": "[{\"id\": 1, \"kind\": \"episode\", \"created_at\": 1799990000.0, \"user_text\": \"\", \"assistant_text\": \"\", \"text\": \"compiler memory\", \"importance\": 6.0, \"importance_source\": \"default\", \"embed_model\": \"hashed-v1-1024\", \"source_ids\": [], \"section\": \"\", \"meta\": {}, \"last_accessed\": null, \"score\": 0.721174339430946}]\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "legacy-history-not-json",
+   "instance": {
+    "id": "a1",
+    "agent_name": "Agent",
+    "owner_name": "Owner",
+    "data_dir": "../state",
+    "persona": "p"
+   },
+   "state_in_home": null,
+   "columns": null,
+   "schema": "\nCREATE TABLE IF NOT EXISTS memories (\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    kind TEXT NOT NULL,\n    created_at REAL NOT NULL,\n    user_text TEXT NOT NULL DEFAULT '',\n    assistant_text TEXT NOT NULL DEFAULT '',\n    text TEXT NOT NULL,\n    importance REAL NOT NULL,\n    importance_source TEXT NOT NULL DEFAULT 'default',\n    embed_model TEXT NOT NULL DEFAULT '',\n    embedding BLOB,\n    source_ids TEXT NOT NULL DEFAULT '[]',\n    section TEXT NOT NULL DEFAULT '',\n    meta TEXT NOT NULL DEFAULT '{}',\n    last_accessed REAL\n);\nCREATE INDEX IF NOT EXISTS memories_kind_time ON memories(kind, created_at);\nCREATE TABLE IF NOT EXISTS state (\n    key TEXT PRIMARY KEY,\n    value TEXT NOT NULL\n);\nCREATE TABLE IF NOT EXISTS answered (\n    source_id TEXT PRIMARY KEY,\n    at REAL NOT NULL\n);\nCREATE TABLE IF NOT EXISTS external_episodes (\n    source_id TEXT PRIMARY KEY,\n    memory_id INTEGER\n);\nCREATE TABLE IF NOT EXISTS voice_claims (\n    norm TEXT NOT NULL,\n    at REAL NOT NULL\n);\nCREATE TABLE IF NOT EXISTS beliefs (\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    text TEXT NOT NULL,\n    weight REAL NOT NULL,\n    parent_id INTEGER,\n    protected INTEGER NOT NULL DEFAULT 0,\n    created_at REAL NOT NULL\n);\n",
+   "state": null,
+   "legacy_history": "{not json",
+   "embed": null,
+   "request": {
+    "query": "compiler"
+   },
+   "refuses": false,
+   "private": [
+    {
+     "id": 1,
+     "kind": "episode",
+     "created_at": 1799990000.0,
+     "user_text": "",
+     "assistant_text": "",
+     "text": "compiler memory",
+     "importance": 6.0,
+     "importance_source": "default",
+     "embed_model": "hashed-v1-1024",
+     "embedding": {
+      "hashed": "fab0b9d2f2997374613807cdd2e797145e54121a7a8c01c9824f1f6ab96c5845"
+     },
+     "source_ids": "[]",
+     "section": "",
+     "meta": "{}",
+     "last_accessed": null
+    }
+   ],
+   "expect": {
+    "code": 0,
+    "stdout": "[{\"id\": 1, \"kind\": \"episode\", \"created_at\": 1799990000.0, \"user_text\": \"\", \"assistant_text\": \"\", \"text\": \"compiler memory\", \"importance\": 6.0, \"importance_source\": \"default\", \"embed_model\": \"hashed-v1-1024\", \"source_ids\": [], \"section\": \"\", \"meta\": {}, \"last_accessed\": null, \"score\": 0.721174339430946}]\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "instance-unknown-field",
+   "instance": {
+    "id": "a1",
+    "agent_name": "A",
+    "owner_name": "O",
+    "data_dir": "../state",
+    "persona": "p",
+    "extra": 1
+   },
+   "state_in_home": null,
+   "columns": null,
+   "schema": "\nCREATE TABLE IF NOT EXISTS memories (\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    kind TEXT NOT NULL,\n    created_at REAL NOT NULL,\n    user_text TEXT NOT NULL DEFAULT '',\n    assistant_text TEXT NOT NULL DEFAULT '',\n    text TEXT NOT NULL,\n    importance REAL NOT NULL,\n    importance_source TEXT NOT NULL DEFAULT 'default',\n    embed_model TEXT NOT NULL DEFAULT '',\n    embedding BLOB,\n    source_ids TEXT NOT NULL DEFAULT '[]',\n    section TEXT NOT NULL DEFAULT '',\n    meta TEXT NOT NULL DEFAULT '{}',\n    last_accessed REAL\n);\nCREATE INDEX IF NOT EXISTS memories_kind_time ON memories(kind, created_at);\nCREATE TABLE IF NOT EXISTS state (\n    key TEXT PRIMARY KEY,\n    value TEXT NOT NULL\n);\nCREATE TABLE IF NOT EXISTS answered (\n    source_id TEXT PRIMARY KEY,\n    at REAL NOT NULL\n);\nCREATE TABLE IF NOT EXISTS external_episodes (\n    source_id TEXT PRIMARY KEY,\n    memory_id INTEGER\n);\nCREATE TABLE IF NOT EXISTS voice_claims (\n    norm TEXT NOT NULL,\n    at REAL NOT NULL\n);\nCREATE TABLE IF NOT EXISTS beliefs (\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    text TEXT NOT NULL,\n    weight REAL NOT NULL,\n    parent_id INTEGER,\n    protected INTEGER NOT NULL DEFAULT 0,\n    created_at REAL NOT NULL\n);\n",
+   "state": null,
+   "legacy_history": null,
+   "embed": null,
+   "request": {
+    "query": "q"
+   },
+   "refuses": false,
+   "expect": {
+    "code": 1,
+    "stdout": "",
+    "stderr": "{\"error\": \"instance config must be an object with supported fields only\"}\n"
+   }
+  },
+  {
+   "id": "instance-missing-persona",
+   "instance": {
+    "id": "a1",
+    "agent_name": "A",
+    "owner_name": "O",
+    "data_dir": "../state",
+    "persona": "  "
+   },
+   "state_in_home": null,
+   "columns": null,
+   "schema": "\nCREATE TABLE IF NOT EXISTS memories (\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    kind TEXT NOT NULL,\n    created_at REAL NOT NULL,\n    user_text TEXT NOT NULL DEFAULT '',\n    assistant_text TEXT NOT NULL DEFAULT '',\n    text TEXT NOT NULL,\n    importance REAL NOT NULL,\n    importance_source TEXT NOT NULL DEFAULT 'default',\n    embed_model TEXT NOT NULL DEFAULT '',\n    embedding BLOB,\n    source_ids TEXT NOT NULL DEFAULT '[]',\n    section TEXT NOT NULL DEFAULT '',\n    meta TEXT NOT NULL DEFAULT '{}',\n    last_accessed REAL\n);\nCREATE INDEX IF NOT EXISTS memories_kind_time ON memories(kind, created_at);\nCREATE TABLE IF NOT EXISTS state (\n    key TEXT PRIMARY KEY,\n    value TEXT NOT NULL\n);\nCREATE TABLE IF NOT EXISTS answered (\n    source_id TEXT PRIMARY KEY,\n    at REAL NOT NULL\n);\nCREATE TABLE IF NOT EXISTS external_episodes (\n    source_id TEXT PRIMARY KEY,\n    memory_id INTEGER\n);\nCREATE TABLE IF NOT EXISTS voice_claims (\n    norm TEXT NOT NULL,\n    at REAL NOT NULL\n);\nCREATE TABLE IF NOT EXISTS beliefs (\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    text TEXT NOT NULL,\n    weight REAL NOT NULL,\n    parent_id INTEGER,\n    protected INTEGER NOT NULL DEFAULT 0,\n    created_at REAL NOT NULL\n);\n",
+   "state": null,
+   "legacy_history": null,
+   "embed": null,
+   "request": {
+    "query": "q"
+   },
+   "refuses": false,
+   "expect": {
+    "code": 1,
+    "stdout": "",
+    "stderr": "{\"error\": \"instance config requires nonempty persona\"}\n"
+   }
+  },
+  {
+   "id": "instance-bad-id",
+   "instance": {
+    "id": "-bad",
+    "agent_name": "A",
+    "owner_name": "O",
+    "data_dir": "../state",
+    "persona": "p"
+   },
+   "state_in_home": null,
+   "columns": null,
+   "schema": "\nCREATE TABLE IF NOT EXISTS memories (\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    kind TEXT NOT NULL,\n    created_at REAL NOT NULL,\n    user_text TEXT NOT NULL DEFAULT '',\n    assistant_text TEXT NOT NULL DEFAULT '',\n    text TEXT NOT NULL,\n    importance REAL NOT NULL,\n    importance_source TEXT NOT NULL DEFAULT 'default',\n    embed_model TEXT NOT NULL DEFAULT '',\n    embedding BLOB,\n    source_ids TEXT NOT NULL DEFAULT '[]',\n    section TEXT NOT NULL DEFAULT '',\n    meta TEXT NOT NULL DEFAULT '{}',\n    last_accessed REAL\n);\nCREATE INDEX IF NOT EXISTS memories_kind_time ON memories(kind, created_at);\nCREATE TABLE IF NOT EXISTS state (\n    key TEXT PRIMARY KEY,\n    value TEXT NOT NULL\n);\nCREATE TABLE IF NOT EXISTS answered (\n    source_id TEXT PRIMARY KEY,\n    at REAL NOT NULL\n);\nCREATE TABLE IF NOT EXISTS external_episodes (\n    source_id TEXT PRIMARY KEY,\n    memory_id INTEGER\n);\nCREATE TABLE IF NOT EXISTS voice_claims (\n    norm TEXT NOT NULL,\n    at REAL NOT NULL\n);\nCREATE TABLE IF NOT EXISTS beliefs (\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    text TEXT NOT NULL,\n    weight REAL NOT NULL,\n    parent_id INTEGER,\n    protected INTEGER NOT NULL DEFAULT 0,\n    created_at REAL NOT NULL\n);\n",
+   "state": null,
+   "legacy_history": null,
+   "embed": null,
+   "request": {
+    "query": "q"
+   },
+   "refuses": false,
+   "expect": {
+    "code": 1,
+    "stdout": "",
+    "stderr": "{\"error\": \"invalid instance id\"}\n"
+   }
+  },
+  {
+   "id": "instance-data-dir-is-config-dir",
+   "instance": {
+    "id": "a1",
+    "agent_name": "A",
+    "owner_name": "O",
+    "data_dir": ".",
+    "persona": "p"
+   },
+   "state_in_home": null,
+   "columns": null,
+   "schema": "\nCREATE TABLE IF NOT EXISTS memories (\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    kind TEXT NOT NULL,\n    created_at REAL NOT NULL,\n    user_text TEXT NOT NULL DEFAULT '',\n    assistant_text TEXT NOT NULL DEFAULT '',\n    text TEXT NOT NULL,\n    importance REAL NOT NULL,\n    importance_source TEXT NOT NULL DEFAULT 'default',\n    embed_model TEXT NOT NULL DEFAULT '',\n    embedding BLOB,\n    source_ids TEXT NOT NULL DEFAULT '[]',\n    section TEXT NOT NULL DEFAULT '',\n    meta TEXT NOT NULL DEFAULT '{}',\n    last_accessed REAL\n);\nCREATE INDEX IF NOT EXISTS memories_kind_time ON memories(kind, created_at);\nCREATE TABLE IF NOT EXISTS state (\n    key TEXT PRIMARY KEY,\n    value TEXT NOT NULL\n);\nCREATE TABLE IF NOT EXISTS answered (\n    source_id TEXT PRIMARY KEY,\n    at REAL NOT NULL\n);\nCREATE TABLE IF NOT EXISTS external_episodes (\n    source_id TEXT PRIMARY KEY,\n    memory_id INTEGER\n);\nCREATE TABLE IF NOT EXISTS voice_claims (\n    norm TEXT NOT NULL,\n    at REAL NOT NULL\n);\nCREATE TABLE IF NOT EXISTS beliefs (\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    text TEXT NOT NULL,\n    weight REAL NOT NULL,\n    parent_id INTEGER,\n    protected INTEGER NOT NULL DEFAULT 0,\n    created_at REAL NOT NULL\n);\n",
+   "state": null,
+   "legacy_history": null,
+   "embed": null,
+   "request": {
+    "query": "q"
+   },
+   "refuses": false,
+   "expect": {
+    "code": 1,
+    "stdout": "",
+    "stderr": "{\"error\": \"instance data_dir must be a separate state directory\"}\n"
+   }
+  },
+  {
+   "id": "instance-data-dir-is-parent",
+   "instance": {
+    "id": "a1",
+    "agent_name": "A",
+    "owner_name": "O",
+    "data_dir": "..",
+    "persona": "p"
+   },
+   "state_in_home": null,
+   "columns": null,
+   "schema": "\nCREATE TABLE IF NOT EXISTS memories (\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    kind TEXT NOT NULL,\n    created_at REAL NOT NULL,\n    user_text TEXT NOT NULL DEFAULT '',\n    assistant_text TEXT NOT NULL DEFAULT '',\n    text TEXT NOT NULL,\n    importance REAL NOT NULL,\n    importance_source TEXT NOT NULL DEFAULT 'default',\n    embed_model TEXT NOT NULL DEFAULT '',\n    embedding BLOB,\n    source_ids TEXT NOT NULL DEFAULT '[]',\n    section TEXT NOT NULL DEFAULT '',\n    meta TEXT NOT NULL DEFAULT '{}',\n    last_accessed REAL\n);\nCREATE INDEX IF NOT EXISTS memories_kind_time ON memories(kind, created_at);\nCREATE TABLE IF NOT EXISTS state (\n    key TEXT PRIMARY KEY,\n    value TEXT NOT NULL\n);\nCREATE TABLE IF NOT EXISTS answered (\n    source_id TEXT PRIMARY KEY,\n    at REAL NOT NULL\n);\nCREATE TABLE IF NOT EXISTS external_episodes (\n    source_id TEXT PRIMARY KEY,\n    memory_id INTEGER\n);\nCREATE TABLE IF NOT EXISTS voice_claims (\n    norm TEXT NOT NULL,\n    at REAL NOT NULL\n);\nCREATE TABLE IF NOT EXISTS beliefs (\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    text TEXT NOT NULL,\n    weight REAL NOT NULL,\n    parent_id INTEGER,\n    protected INTEGER NOT NULL DEFAULT 0,\n    created_at REAL NOT NULL\n);\n",
+   "state": null,
+   "legacy_history": null,
+   "embed": null,
+   "request": {
+    "query": "q"
+   },
+   "refuses": false,
+   "expect": {
+    "code": 1,
+    "stdout": "",
+    "stderr": "{\"error\": \"instance data_dir must be a separate state directory\"}\n"
+   }
+  },
+  {
+   "id": "instance-bad-kind",
+   "instance": {
+    "id": "a1",
+    "agent_name": "A",
+    "owner_name": "O",
+    "data_dir": "../state",
+    "persona": "p",
+    "kind": "boss"
+   },
+   "state_in_home": null,
+   "columns": null,
+   "schema": "\nCREATE TABLE IF NOT EXISTS memories (\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    kind TEXT NOT NULL,\n    created_at REAL NOT NULL,\n    user_text TEXT NOT NULL DEFAULT '',\n    assistant_text TEXT NOT NULL DEFAULT '',\n    text TEXT NOT NULL,\n    importance REAL NOT NULL,\n    importance_source TEXT NOT NULL DEFAULT 'default',\n    embed_model TEXT NOT NULL DEFAULT '',\n    embedding BLOB,\n    source_ids TEXT NOT NULL DEFAULT '[]',\n    section TEXT NOT NULL DEFAULT '',\n    meta TEXT NOT NULL DEFAULT '{}',\n    last_accessed REAL\n);\nCREATE INDEX IF NOT EXISTS memories_kind_time ON memories(kind, created_at);\nCREATE TABLE IF NOT EXISTS state (\n    key TEXT PRIMARY KEY,\n    value TEXT NOT NULL\n);\nCREATE TABLE IF NOT EXISTS answered (\n    source_id TEXT PRIMARY KEY,\n    at REAL NOT NULL\n);\nCREATE TABLE IF NOT EXISTS external_episodes (\n    source_id TEXT PRIMARY KEY,\n    memory_id INTEGER\n);\nCREATE TABLE IF NOT EXISTS voice_claims (\n    norm TEXT NOT NULL,\n    at REAL NOT NULL\n);\nCREATE TABLE IF NOT EXISTS beliefs (\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    text TEXT NOT NULL,\n    weight REAL NOT NULL,\n    parent_id INTEGER,\n    protected INTEGER NOT NULL DEFAULT 0,\n    created_at REAL NOT NULL\n);\n",
+   "state": null,
+   "legacy_history": null,
+   "embed": null,
+   "request": {
+    "query": "q"
+   },
+   "refuses": false,
+   "expect": {
+    "code": 1,
+    "stdout": "",
+    "stderr": "{\"error\": \"invalid agent kind\"}\n"
+   }
+  },
+  {
+   "id": "instance-bad-employee",
+   "instance": {
+    "id": "a1",
+    "agent_name": "A",
+    "owner_name": "O",
+    "data_dir": "../state",
+    "persona": "p",
+    "employee_id": "NOT-A-UUID"
+   },
+   "state_in_home": null,
+   "columns": null,
+   "schema": "\nCREATE TABLE IF NOT EXISTS memories (\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    kind TEXT NOT NULL,\n    created_at REAL NOT NULL,\n    user_text TEXT NOT NULL DEFAULT '',\n    assistant_text TEXT NOT NULL DEFAULT '',\n    text TEXT NOT NULL,\n    importance REAL NOT NULL,\n    importance_source TEXT NOT NULL DEFAULT 'default',\n    embed_model TEXT NOT NULL DEFAULT '',\n    embedding BLOB,\n    source_ids TEXT NOT NULL DEFAULT '[]',\n    section TEXT NOT NULL DEFAULT '',\n    meta TEXT NOT NULL DEFAULT '{}',\n    last_accessed REAL\n);\nCREATE INDEX IF NOT EXISTS memories_kind_time ON memories(kind, created_at);\nCREATE TABLE IF NOT EXISTS state (\n    key TEXT PRIMARY KEY,\n    value TEXT NOT NULL\n);\nCREATE TABLE IF NOT EXISTS answered (\n    source_id TEXT PRIMARY KEY,\n    at REAL NOT NULL\n);\nCREATE TABLE IF NOT EXISTS external_episodes (\n    source_id TEXT PRIMARY KEY,\n    memory_id INTEGER\n);\nCREATE TABLE IF NOT EXISTS voice_claims (\n    norm TEXT NOT NULL,\n    at REAL NOT NULL\n);\nCREATE TABLE IF NOT EXISTS beliefs (\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    text TEXT NOT NULL,\n    weight REAL NOT NULL,\n    parent_id INTEGER,\n    protected INTEGER NOT NULL DEFAULT 0,\n    created_at REAL NOT NULL\n);\n",
+   "state": null,
+   "legacy_history": null,
+   "embed": null,
+   "request": {
+    "query": "q"
+   },
+   "refuses": false,
+   "expect": {
+    "code": 1,
+    "stdout": "",
+    "stderr": "{\"error\": \"employee_id must be a lowercase UUID\"}\n"
+   }
+  },
+  {
+   "id": "instance-bad-initial-self",
+   "instance": {
+    "id": "a1",
+    "agent_name": "A",
+    "owner_name": "O",
+    "data_dir": "../state",
+    "persona": "p",
+    "initial_self": {
+     "consciousness": "c",
+     "directives": [
+      "ok",
+      " "
+     ]
+    }
+   },
+   "state_in_home": null,
+   "columns": null,
+   "schema": "\nCREATE TABLE IF NOT EXISTS memories (\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    kind TEXT NOT NULL,\n    created_at REAL NOT NULL,\n    user_text TEXT NOT NULL DEFAULT '',\n    assistant_text TEXT NOT NULL DEFAULT '',\n    text TEXT NOT NULL,\n    importance REAL NOT NULL,\n    importance_source TEXT NOT NULL DEFAULT 'default',\n    embed_model TEXT NOT NULL DEFAULT '',\n    embedding BLOB,\n    source_ids TEXT NOT NULL DEFAULT '[]',\n    section TEXT NOT NULL DEFAULT '',\n    meta TEXT NOT NULL DEFAULT '{}',\n    last_accessed REAL\n);\nCREATE INDEX IF NOT EXISTS memories_kind_time ON memories(kind, created_at);\nCREATE TABLE IF NOT EXISTS state (\n    key TEXT PRIMARY KEY,\n    value TEXT NOT NULL\n);\nCREATE TABLE IF NOT EXISTS answered (\n    source_id TEXT PRIMARY KEY,\n    at REAL NOT NULL\n);\nCREATE TABLE IF NOT EXISTS external_episodes (\n    source_id TEXT PRIMARY KEY,\n    memory_id INTEGER\n);\nCREATE TABLE IF NOT EXISTS voice_claims (\n    norm TEXT NOT NULL,\n    at REAL NOT NULL\n);\nCREATE TABLE IF NOT EXISTS beliefs (\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    text TEXT NOT NULL,\n    weight REAL NOT NULL,\n    parent_id INTEGER,\n    protected INTEGER NOT NULL DEFAULT 0,\n    created_at REAL NOT NULL\n);\n",
+   "state": null,
+   "legacy_history": null,
+   "embed": null,
+   "request": {
+    "query": "q"
+   },
+   "refuses": false,
+   "expect": {
+    "code": 1,
+    "stdout": "",
+    "stderr": "{\"error\": \"initial_self requires a consciousness statement and directive strings\"}\n"
+   }
+  },
+  {
+   "id": "instance-tilde-data-dir",
+   "instance": {
+    "id": "a1",
+    "agent_name": "A",
+    "owner_name": "O",
+    "data_dir": "~/agent-state",
+    "persona": "p"
+   },
+   "state_in_home": "agent-state",
+   "columns": null,
+   "schema": "\nCREATE TABLE IF NOT EXISTS memories (\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    kind TEXT NOT NULL,\n    created_at REAL NOT NULL,\n    user_text TEXT NOT NULL DEFAULT '',\n    assistant_text TEXT NOT NULL DEFAULT '',\n    text TEXT NOT NULL,\n    importance REAL NOT NULL,\n    importance_source TEXT NOT NULL DEFAULT 'default',\n    embed_model TEXT NOT NULL DEFAULT '',\n    embedding BLOB,\n    source_ids TEXT NOT NULL DEFAULT '[]',\n    section TEXT NOT NULL DEFAULT '',\n    meta TEXT NOT NULL DEFAULT '{}',\n    last_accessed REAL\n);\nCREATE INDEX IF NOT EXISTS memories_kind_time ON memories(kind, created_at);\nCREATE TABLE IF NOT EXISTS state (\n    key TEXT PRIMARY KEY,\n    value TEXT NOT NULL\n);\nCREATE TABLE IF NOT EXISTS answered (\n    source_id TEXT PRIMARY KEY,\n    at REAL NOT NULL\n);\nCREATE TABLE IF NOT EXISTS external_episodes (\n    source_id TEXT PRIMARY KEY,\n    memory_id INTEGER\n);\nCREATE TABLE IF NOT EXISTS voice_claims (\n    norm TEXT NOT NULL,\n    at REAL NOT NULL\n);\nCREATE TABLE IF NOT EXISTS beliefs (\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    text TEXT NOT NULL,\n    weight REAL NOT NULL,\n    parent_id INTEGER,\n    protected INTEGER NOT NULL DEFAULT 0,\n    created_at REAL NOT NULL\n);\n",
+   "state": null,
+   "legacy_history": null,
+   "embed": null,
+   "request": {
+    "query": "compiler"
+   },
+   "refuses": false,
+   "private": [
+    {
+     "id": 1,
+     "kind": "episode",
+     "created_at": 1799990000.0,
+     "user_text": "",
+     "assistant_text": "",
+     "text": "compiler memory in home",
+     "importance": 6.0,
+     "importance_source": "default",
+     "embed_model": "hashed-v1-1024",
+     "embedding": {
+      "hashed": "3b02041bef31e4232ffed86f8821202961f9c33d221712c67df50bc4031c64d9"
+     },
+     "source_ids": "[]",
+     "section": "",
+     "meta": "{}",
+     "last_accessed": null
+    }
+   ],
+   "expect": {
+    "code": 0,
+    "stdout": "[{\"id\": 1, \"kind\": \"episode\", \"created_at\": 1799990000.0, \"user_text\": \"\", \"assistant_text\": \"\", \"text\": \"compiler memory in home\", \"importance\": 6.0, \"importance_source\": \"default\", \"embed_model\": \"hashed-v1-1024\", \"source_ids\": [], \"section\": \"\", \"meta\": {}, \"last_accessed\": null, \"score\": 0.6777954498702465}]\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "instance-config-missing",
+   "instance": null,
+   "state_in_home": null,
+   "columns": null,
+   "schema": "\nCREATE TABLE IF NOT EXISTS memories (\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    kind TEXT NOT NULL,\n    created_at REAL NOT NULL,\n    user_text TEXT NOT NULL DEFAULT '',\n    assistant_text TEXT NOT NULL DEFAULT '',\n    text TEXT NOT NULL,\n    importance REAL NOT NULL,\n    importance_source TEXT NOT NULL DEFAULT 'default',\n    embed_model TEXT NOT NULL DEFAULT '',\n    embedding BLOB,\n    source_ids TEXT NOT NULL DEFAULT '[]',\n    section TEXT NOT NULL DEFAULT '',\n    meta TEXT NOT NULL DEFAULT '{}',\n    last_accessed REAL\n);\nCREATE INDEX IF NOT EXISTS memories_kind_time ON memories(kind, created_at);\nCREATE TABLE IF NOT EXISTS state (\n    key TEXT PRIMARY KEY,\n    value TEXT NOT NULL\n);\nCREATE TABLE IF NOT EXISTS answered (\n    source_id TEXT PRIMARY KEY,\n    at REAL NOT NULL\n);\nCREATE TABLE IF NOT EXISTS external_episodes (\n    source_id TEXT PRIMARY KEY,\n    memory_id INTEGER\n);\nCREATE TABLE IF NOT EXISTS voice_claims (\n    norm TEXT NOT NULL,\n    at REAL NOT NULL\n);\nCREATE TABLE IF NOT EXISTS beliefs (\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    text TEXT NOT NULL,\n    weight REAL NOT NULL,\n    parent_id INTEGER,\n    protected INTEGER NOT NULL DEFAULT 0,\n    created_at REAL NOT NULL\n);\n",
+   "state": null,
+   "legacy_history": null,
+   "embed": null,
+   "request": {
+    "query": "q"
+   },
+   "refuses": false,
+   "expect": {
+    "code": 1,
+    "stdout": "",
+    "stderr": "{\"error\": \"[Errno 2] No such file or directory: '<root>/config/agent.json'\"}\n"
+   }
+  },
+  {
+   "id": "recency-only-scores",
+   "instance": {
+    "id": "a1",
+    "agent_name": "Agent",
+    "owner_name": "Owner",
+    "data_dir": "../state",
+    "persona": "p"
+   },
+   "state_in_home": null,
+   "columns": null,
+   "schema": "\nCREATE TABLE IF NOT EXISTS memories (\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    kind TEXT NOT NULL,\n    created_at REAL NOT NULL,\n    user_text TEXT NOT NULL DEFAULT '',\n    assistant_text TEXT NOT NULL DEFAULT '',\n    text TEXT NOT NULL,\n    importance REAL NOT NULL,\n    importance_source TEXT NOT NULL DEFAULT 'default',\n    embed_model TEXT NOT NULL DEFAULT '',\n    embedding BLOB,\n    source_ids TEXT NOT NULL DEFAULT '[]',\n    section TEXT NOT NULL DEFAULT '',\n    meta TEXT NOT NULL DEFAULT '{}',\n    last_accessed REAL\n);\nCREATE INDEX IF NOT EXISTS memories_kind_time ON memories(kind, created_at);\nCREATE TABLE IF NOT EXISTS state (\n    key TEXT PRIMARY KEY,\n    value TEXT NOT NULL\n);\nCREATE TABLE IF NOT EXISTS answered (\n    source_id TEXT PRIMARY KEY,\n    at REAL NOT NULL\n);\nCREATE TABLE IF NOT EXISTS external_episodes (\n    source_id TEXT PRIMARY KEY,\n    memory_id INTEGER\n);\nCREATE TABLE IF NOT EXISTS voice_claims (\n    norm TEXT NOT NULL,\n    at REAL NOT NULL\n);\nCREATE TABLE IF NOT EXISTS beliefs (\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    text TEXT NOT NULL,\n    weight REAL NOT NULL,\n    parent_id INTEGER,\n    protected INTEGER NOT NULL DEFAULT 0,\n    created_at REAL NOT NULL\n);\n",
+   "state": null,
+   "legacy_history": null,
+   "embed": null,
+   "request": {
+    "query": "nothing shared"
+   },
+   "refuses": false,
+   "private": [
+    {
+     "id": 1,
+     "kind": "episode",
+     "created_at": 1799872319.0,
+     "user_text": "",
+     "assistant_text": "",
+     "text": "recency only 1",
+     "importance": 0.0,
+     "importance_source": "default",
+     "embed_model": "",
+     "embedding": null,
+     "source_ids": "[]",
+     "section": "",
+     "meta": "{}",
+     "last_accessed": null
+    },
+    {
+     "id": 2,
+     "kind": "episode",
+     "created_at": 1799808967.0,
+     "user_text": "",
+     "assistant_text": "",
+     "text": "recency only 2",
+     "importance": 0.0,
+     "importance_source": "default",
+     "embed_model": "",
+     "embedding": null,
+     "source_ids": "[]",
+     "section": "",
+     "meta": "{}",
+     "last_accessed": null
+    },
+    {
+     "id": 3,
+     "kind": "episode",
+     "created_at": 1799793129.0,
+     "user_text": "",
+     "assistant_text": "",
+     "text": "recency only 3",
+     "importance": 0.0,
+     "importance_source": "default",
+     "embed_model": "",
+     "embedding": null,
+     "source_ids": "[]",
+     "section": "",
+     "meta": "{}",
+     "last_accessed": null
+    },
+    {
+     "id": 4,
+     "kind": "episode",
+     "created_at": 1799650587.0,
+     "user_text": "",
+     "assistant_text": "",
+     "text": "recency only 4",
+     "importance": 0.0,
+     "importance_source": "default",
+     "embed_model": "",
+     "embedding": null,
+     "source_ids": "[]",
+     "section": "",
+     "meta": "{}",
+     "last_accessed": null
+    },
+    {
+     "id": 5,
+     "kind": "episode",
+     "created_at": 1799563478.0,
+     "user_text": "",
+     "assistant_text": "",
+     "text": "recency only 5",
+     "importance": 0.0,
+     "importance_source": "default",
+     "embed_model": "",
+     "embedding": null,
+     "source_ids": "[]",
+     "section": "",
+     "meta": "{}",
+     "last_accessed": null
+    },
+    {
+     "id": 6,
+     "kind": "episode",
+     "created_at": 1799405098.0,
+     "user_text": "",
+     "assistant_text": "",
+     "text": "recency only 6",
+     "importance": 0.0,
+     "importance_source": "default",
+     "embed_model": "",
+     "embedding": null,
+     "source_ids": "[]",
+     "section": "",
+     "meta": "{}",
+     "last_accessed": null
+    },
+    {
+     "id": 7,
+     "kind": "episode",
+     "created_at": 1799389260.0,
+     "user_text": "",
+     "assistant_text": "",
+     "text": "recency only 7",
+     "importance": 0.0,
+     "importance_source": "default",
+     "embed_model": "",
+     "embedding": null,
+     "source_ids": "[]",
+     "section": "",
+     "meta": "{}",
+     "last_accessed": null
+    },
+    {
+     "id": 8,
+     "kind": "episode",
+     "created_at": 1799270475.0,
+     "user_text": "",
+     "assistant_text": "",
+     "text": "recency only 8",
+     "importance": 0.0,
+     "importance_source": "default",
+     "embed_model": "",
+     "embedding": null,
+     "source_ids": "[]",
+     "section": "",
+     "meta": "{}",
+     "last_accessed": null
+    }
+   ],
+   "expect": {
+    "code": 0,
+    "stdout": "[{\"id\": 1, \"kind\": \"episode\", \"created_at\": 1799872319.0, \"user_text\": \"\", \"assistant_text\": \"\", \"text\": \"recency only 1\", \"importance\": 0.0, \"importance_source\": \"default\", \"embed_model\": \"hashed-v1-1024\", \"source_ids\": [], \"section\": \"\", \"meta\": {}, \"last_accessed\": null, \"score\": 0.2790423180541521}, {\"id\": 2, \"kind\": \"episode\", \"created_at\": 1799808967.0, \"user_text\": \"\", \"assistant_text\": \"\", \"text\": \"recency only 2\", \"importance\": 0.0, \"importance_source\": \"default\", \"embed_model\": \"hashed-v1-1024\", \"source_ids\": [], \"section\": \"\", \"meta\": {}, \"last_accessed\": null, \"score\": 0.25548248382107747}, {\"id\": 3, \"kind\": \"episode\", \"created_at\": 1799793129.0, \"user_text\": \"\", \"assistant_text\": \"\", \"text\": \"recency only 3\", \"importance\": 0.0, \"importance_source\": \"default\", \"embed_model\": \"hashed-v1-1024\", \"source_ids\": [], \"section\": \"\", \"meta\": {}, \"last_accessed\": null, \"score\": 0.24991014957006794}, {\"id\": 4, \"kind\": \"episode\", \"created_at\": 1799650587.0, \"user_text\": \"\", \"assistant_text\": \"\", \"text\": \"recency only 4\", \"importance\": 0.0, \"importance_source\": \"default\", \"embed_model\": \"hashed-v1-1024\", \"source_ids\": [], \"section\": \"\", \"meta\": {}, \"last_accessed\": null, \"score\": 0.20492208998318115}, {\"id\": 5, \"kind\": \"episode\", \"created_at\": 1799563478.0, \"user_text\": \"\", \"assistant_text\": \"\", \"text\": \"recency only 5\", \"importance\": 0.0, \"importance_source\": \"default\", \"embed_model\": \"hashed-v1-1024\", \"source_ids\": [], \"section\": \"\", \"meta\": {}, \"last_accessed\": null, \"score\": 0.1815156111785744}, {\"id\": 6, \"kind\": \"episode\", \"created_at\": 1799405098.0, \"user_text\": \"\", \"assistant_text\": \"\", \"text\": \"recency only 6\", \"importance\": 0.0, \"importance_source\": \"default\", \"embed_model\": \"hashed-v1-1024\", \"source_ids\": [], \"section\": \"\", \"meta\": {}, \"last_accessed\": null, \"score\": 0.14559338022303664}, {\"id\": 7, \"kind\": \"episode\", \"created_at\": 1799389260.0, \"user_text\": \"\", \"assistant_text\": \"\", \"text\": \"recency only 7\", \"importance\": 0.0, \"importance_source\": \"default\", \"embed_model\": \"hashed-v1-1024\", \"source_ids\": [], \"section\": \"\", \"meta\": {}, \"last_accessed\": null, \"score\": 0.1424178397037686}, {\"id\": 8, \"kind\": \"episode\", \"created_at\": 1799270475.0, \"user_text\": \"\", \"assistant_text\": \"\", \"text\": \"recency only 8\", \"importance\": 0.0, \"importance_source\": \"default\", \"embed_model\": \"hashed-v1-1024\", \"source_ids\": [], \"section\": \"\", \"meta\": {}, \"last_accessed\": null, \"score\": 0.12070774282264672}]\n",
+    "stderr": ""
+   }
+  }
+ ]
+}
