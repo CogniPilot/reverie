@@ -175,6 +175,72 @@ fn finish_with_source(
     preparation.reclaim(end()).unwrap().into_parts().0
 }
 #[test]
+fn stale_claim_release_refuses_before_removing_actual_ordinary_stop_entry() {
+    crate::test_process::owning_case!(
+        stale_claim_release_refuses_before_removing_actual_ordinary_stop_entry
+    );
+    let tree = Tree::new();
+    let target = Target::new(&tree);
+    let registry = registry(&tree, &target, SID);
+    let source = source(&tree);
+    let mut claim = registry.claim(&source, &sid(SID)).unwrap();
+    claim.prepare_cold_launch_storage().unwrap();
+    claim.prepare_runtime_directory().unwrap();
+    let plan = plan(&claim, &source);
+    let stale = registry.claim(&source, &sid(SID)).unwrap();
+    let preparation = claim
+        .retain_unobserved_ordinary_stop(plan)
+        .unwrap_or_else(|_| panic!("actual same-resource ordinary transition"));
+    let original = {
+        let entries = registry.entries.lock().unwrap();
+        let EntryOwner::OrdinaryStop(owner) = &entries[0].owner else {
+            panic!("actual retained native owner");
+        };
+        owner.clone()
+    };
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| stale.release(end())));
+    let typed_refusal = matches!(&result, Ok(Err(error)) if error.cause().code() == "WORKER_ORDINARY_STOP_RETAINED");
+    let poisoned = registry.entries.is_poisoned();
+    let (members, same_owner) = {
+        let entries = registry
+            .entries
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        (entries.len(), entries.first().is_some_and(|entry| {
+            matches!(&entry.owner, EntryOwner::OrdinaryStop(current) if Arc::ptr_eq(current, &original))
+        }))
+    };
+    let lease_held = StorageLease::acquire_launch(&source, &sid(SID)).is_err();
+    // Finish the real owned target/engine BEFORE the decisive assertion. The
+    // old poisoned path cannot be restored from metadata; dropping its actual
+    // native owner quarantines that same resource instead of inventing a box.
+    if typed_refusal && same_owner && !poisoned {
+        tree.write("legacy-stop", b"fixed existing fixture mode");
+        tree.write("container-census", b"");
+        tree.write("network-census", b"");
+        preparation.stop_after_admission().unwrap();
+        let restored = preparation
+            .reclaim(end())
+            .unwrap_or_else(|_| panic!("known same Box restored"));
+        restored.into_cold_parts().0.release(end()).unwrap();
+    } else {
+        drop(preparation);
+    }
+    drop(original);
+    drop(target);
+    registry.runtime.close(end()).unwrap();
+    assert!(
+        result.is_ok(),
+        "release panicked; poisoned={poisoned}, members={members}, lease_held={lease_held}"
+    );
+    assert!(typed_refusal, "stale handle must retain its typed refusal");
+    assert!(
+        !poisoned && members == 1 && same_owner && lease_held,
+        "same actual entry/lease must survive refusal"
+    );
+}
+
+#[test]
 fn actual_registered_stop_restores_same_box_and_claim_generation_without_lease_release() {
     crate::test_process::owning_case!(
         actual_registered_stop_restores_same_box_and_claim_generation_without_lease_release

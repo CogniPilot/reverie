@@ -1,15 +1,22 @@
 //! The installing service's actual storage registry. A claim retains real
 //! resources; labels, returned paths and this handle do not authorize launch.
+mod direct_finalization;
 mod error;
+mod finalization;
+pub(in crate::installing_broker) use direct_finalization::{
+    DirectStorageFinishFailure, DirectStoragePreparation,
+};
 mod existing_viewer;
 pub(in crate::installing_broker) use existing_viewer::{
     ExistingStorageError, ExistingStoragePreparation, ExistingStorageReturned,
 };
 mod nix;
 mod observed;
+mod ordinary_stop;
 mod preparation;
 mod recovery_lifetime;
 mod replacement_stop;
+pub(in crate::installing_broker) use ordinary_stop::OrdinaryStopPreparation;
 mod source;
 pub use observed::OwnedCreatePreparationError;
 pub(crate) use source::RegisteredSource;
@@ -18,6 +25,7 @@ pub(super) use source::SourceAttachment;
 pub(in crate::installing_broker) mod tests;
 use super::*;
 pub use error::{StorageReleaseFailure, StorageWorkflowError};
+pub(in crate::installing_broker) use nix::{CreatedStorageFinishFailure, CreatedStorageReturned};
 pub use nix::{
     NetworkStorageError, NetworkStoragePreparation, NetworkStorageReclaimFailure,
     NetworkStorageRetainFailure, NetworkStorageReturned, NixStorageError, NixStoragePreparation,
@@ -50,11 +58,22 @@ enum EntryOwner {
     Nix(reverie_host::worker_nix::NixWorkflow),
     Laptop(reverie_host::worker_laptop::LaptopWorkflow),
     ReplacementStop(Arc<Mutex<reverie_host::worker_source_stop::OrdinaryReplacementStop>>),
+    OrdinaryStop(Arc<Mutex<reverie_host::worker_source_stop::OrdinaryLaptopStop>>),
     Existing(Arc<reverie_host::worker_laptop::ExistingViewer>),
 }
-struct FinalizingStorage {
-    owner: Box<LaunchStorage>,
-    brand: Arc<()>,
+enum FinalizingStorage {
+    Ready {
+        owner: Box<LaunchStorage>,
+        brand: Arc<()>,
+    },
+    Direct {
+        owner: Arc<Mutex<reverie_host::worker_laptop::DirectStorageFinalizer>>,
+        brand: Arc<()>,
+    },
+}
+struct FinalStorageDecision {
+    live: bool,
+    brand: Option<Arc<()>>,
 }
 /// The original claim destination, shared by named resource transitions.
 /// These private fields describe where to restore custody, never permission.
@@ -215,34 +234,7 @@ impl StorageRegistry {
         else {
             return Ok(());
         };
-        if matches!(entries[index].owner, EntryOwner::Finalizing(_)) {
-            return Err(StorageWorkflowError::refused(
-                "WORKER_STORAGE_FINALIZATION_HELD",
-            ));
-        }
-        if matches!(entries[index].owner, EntryOwner::Nix(_)) {
-            return Err(StorageWorkflowError::refused("WORKER_NIX_STORAGE_RETAINED"));
-        }
-        if matches!(entries[index].owner, EntryOwner::Laptop(_)) {
-            return Err(StorageWorkflowError::refused(
-                "WORKER_LAPTOP_STORAGE_RETAINED",
-            ));
-        }
-        if matches!(entries[index].owner, EntryOwner::Existing(_)) {
-            return Err(StorageWorkflowError::refused(
-                "WORKER_EXISTING_VIEWER_RETAINED",
-            ));
-        }
-        if matches!(entries[index].owner, EntryOwner::Source(_)) {
-            return Err(StorageWorkflowError::refused(
-                "WORKER_ORIGINAL_SOURCE_RETAINED",
-            ));
-        }
-        if matches!(entries[index].owner, EntryOwner::ReplacementStop(_)) {
-            return Err(StorageWorkflowError::refused(
-                "WORKER_REPLACEMENT_STOP_RETAINED",
-            ));
-        }
+        require_direct_release(&entries[index].owner)?;
         let entry = entries.remove(index);
         let EntryOwner::Direct(owner) = entry.owner else {
             unreachable!("checked direct owner")
@@ -264,6 +256,21 @@ impl StorageRegistry {
             }
         }
     }
+}
+/// Keep this exhaustive: a new retained owner must select its typed refusal
+/// before any entry is removed. The caller still holds the SAME registry lock.
+fn require_direct_release(owner: &EntryOwner) -> Result<(), StorageWorkflowError> {
+    let code = match owner {
+        EntryOwner::Direct(_) => return Ok(()),
+        EntryOwner::Finalizing(_) => "WORKER_STORAGE_FINALIZATION_HELD",
+        EntryOwner::Nix(_) => "WORKER_NIX_STORAGE_RETAINED",
+        EntryOwner::Laptop(_) => "WORKER_LAPTOP_STORAGE_RETAINED",
+        EntryOwner::Existing(_) => "WORKER_EXISTING_VIEWER_RETAINED",
+        EntryOwner::Source(_) => "WORKER_ORIGINAL_SOURCE_RETAINED",
+        EntryOwner::ReplacementStop(_) => "WORKER_REPLACEMENT_STOP_RETAINED",
+        EntryOwner::OrdinaryStop(_) => "WORKER_ORDINARY_STOP_RETAINED",
+    };
+    Err(StorageWorkflowError::refused(code))
 }
 enum ClaimState {
     Legacy {

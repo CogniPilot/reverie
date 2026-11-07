@@ -741,3 +741,68 @@ permits removal of its pinned matching inode. This is a startup availability
 correction, not a hard filesystem/kernel latency guarantee. As for Office,
 metadata comparison is not atomic against later same-UID namespace writers;
 the actual service lifecycle must exclude those competing writers.
+
+The actual created and existing worker viewer constructors accept the original
+accepted J connection and choose no aggregate construction deadline. Their
+shared admission, constructor wait and identity-checked slot handoff observe
+the same runtime's live first-stop deadline. Existing caller-bounded component
+constructors retain their supplied ceiling. A Busy query remains owned by its
+original captured call; waiting neither cancels nor replays it. A stopped or
+uncertain viewer constructor remains in the same laptop/native inventory with
+its real storage and job. This timing join does not establish App allocation
+release, complete handler cleanup, storage release or global shutdown.
+### Created resource handoffs
+
+The Created record retains the actual launch storage value and its original
+owner identity through Nix guard consumption. `StartedStorageBorrow` offers
+named preparation/read operations while holding that record, without exposing
+a raw storage reference or an arbitrary callback. Later ordinary handlers need
+a genuine J from the same report service, physical closure of the predecessor
+socket, explicit release of its logical Hold, and checked guard/viewer closure.
+Socket closure or an idle producer alone is insufficient.
+
+Cleanup terminally fences old forward aliases before even a cached guard-close
+result. Worker-purpose created stop keeps the original per-call limits and live
+first-stop ceiling, without introducing an aggregate body deadline. It accepts
+only the original captured J and actual immutable created CID. Successful
+noncanonical create output remains retained for reconciliation rather than
+inventing a by-name stopped identity.
+
+Fresh final-storage DATA uses the shared fixed inspect/complete-census reader,
+the same pending-call slot and a one-shot observation brand. It cannot itself
+release storage. `StoppedCreatedReturned` holds the inventory and record guards
+until the App registry transaction consumes its originals; default Drop leaves
+them counted. Return requires actual known stop, a fresh stopped/absent result,
+no pending or unknown effect, and checked guard, viewer, publication and Office
+closure. The original body error remains separate from cleanup uncertainty.
+
+A later J can transfer Started storage into an Existing relay in the same
+inventory slot, including at full capacity. The sealed new inspection must match
+the original created CID and actual storage/plan generation. Other consuming
+purposes transfer directly into the existing ordinary stop owners and preserve
+the actual Office owner; no live raw-Box extraction is exposed.
+
+Protected-source attachment is a distinct same-slot custody transition before
+claim journaling. Its opaque attachment brand fences old Created aliases and
+refuses stale restore/re-attach handles. Only the later actual claim-derived
+SourceStopName can move that owner into the existing protected stop primitive;
+codec success or the attachment itself grants no stop authority. These Host
+components still require the real App registry/lifecycle consumers and do not
+establish whole-service or installed-worker selection.
+
+### Worker viewer cleanup
+
+Worker viewer cleanup keeps distinct guard, TERM and KILL phases. Without an
+existing stop, guard acquisition gets the original 5.1 seconds; otherwise it
+uses the original first-stop end. The five-second TERM grace begins only after
+the real record, constructor and native state are acquired. KILL then gets its
+original 100 milliseconds, clipped by the caller and live first-stop limits.
+Each phase stays fixed on retry. Existing caller-bounded methods keep their
+original aggregate cap. Final captured-slot release also uses the saved phase
+end: mutex contention retains the exact constructor instead of waiting without
+a bound after native cleanup. Native cleanup advances before potentially blocking
+query settlement: a retained resize, stop or final-read constructor must not
+hide the owned viewer. Actual provider stop effects still precede viewer reap.
+Unknown native/query owners and both causes remain retained; only actual join
+and checked process/PTY/query completion stamps the private close receipt.
+That receipt alone grants no storage release or global shutdown acknowledgement.

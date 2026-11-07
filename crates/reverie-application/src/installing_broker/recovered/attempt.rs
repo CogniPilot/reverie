@@ -187,6 +187,9 @@ fn replace_storage(owner: &mut LaptopOwner, storage: Option<StorageClaim>) {
     let Some(storage) = storage else { return };
     match owner {
         LaptopOwner::Recovered(owner) => owner.storage = storage,
+        LaptopOwner::Started(_) => {
+            unreachable!("startup recovery refuses live Started before claiming")
+        }
         #[cfg(test)]
         LaptopOwner::Modeled => unreachable!("modeled entries refuse actual recovery"),
     }

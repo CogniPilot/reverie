@@ -52,6 +52,17 @@ impl ExistingStoragePreparation {
             .runtime
             .start_existing_viewer_for_connection(&self.viewer, connection, end)?)
     }
+    pub(in crate::installing_broker) fn start_for_worker(
+        &self,
+        connection: &reverie_host::worker_reports::WorkerLaunchConnection,
+    ) -> Result<ExistingViewerStart, ExistingStorageError> {
+        self.check()?;
+        Ok(self
+            .destination
+            .registry()
+            .runtime
+            .start_existing_viewer_for_worker(&self.viewer, connection)?)
+    }
     pub(in crate::installing_broker) fn close(
         &self,
         end: Instant,
@@ -62,6 +73,16 @@ impl ExistingStoragePreparation {
             .registry()
             .runtime
             .close_existing_viewer(&self.viewer, end)?)
+    }
+    pub(in crate::installing_broker) fn close_for_worker(
+        &self,
+    ) -> Result<(), ExistingStorageError> {
+        self.check()?;
+        Ok(self
+            .destination
+            .registry()
+            .runtime
+            .close_existing_viewer_for_worker(&self.viewer)?)
     }
     fn check(&self) -> Result<(), ExistingStorageError> {
         if let Destination::Registered {
@@ -99,10 +120,6 @@ pub(in crate::installing_broker) struct ExistingStorageReturned {
     inputs: Inputs,
     outcome: Option<Arc<LaptopError>>,
     finalization: Option<FinalStorageDecision>,
-}
-struct FinalStorageDecision {
-    live: bool,
-    brand: Option<Arc<()>>,
 }
 #[cfg(test)]
 impl ExistingStorageReturned {
@@ -318,7 +335,7 @@ fn reclaim_registered(
     };
     let (owner, plan, request, inspected, receipt, outcome) = returned.into_parts();
     entries[index].owner = match &brand {
-        Some(brand) => EntryOwner::Finalizing(FinalizingStorage {
+        Some(brand) => EntryOwner::Finalizing(FinalizingStorage::Ready {
             owner,
             brand: brand.clone(),
         }),

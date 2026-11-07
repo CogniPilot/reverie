@@ -1,6 +1,7 @@
 //! Post-memory cold phase on the SAME actual laptop resource record. Enabled
 //! strategies require their real transaction; absent policy never bypasses a
 //! pending fence, resource binding, stop or the original supplied deadline.
+use super::call_budget::CallBudget;
 use super::*;
 
 #[must_use = "retain the actual record through pane/checked cleanup"]
@@ -23,7 +24,7 @@ impl Workflows {
         &self,
         runtime: &WorkerRuntime,
         configured: &ConfiguredMemory,
-        deadline: Instant,
+        deadline: CallBudget,
     ) -> Result<ColdCommit> {
         self.bound(runtime, &configured.workflow)?;
         let mut record = configured
@@ -74,11 +75,21 @@ impl WorkerRuntime {
         deadline: Instant,
     ) -> Result<ColdCommit> {
         self.laptop_workflows()
-            .commit_cold(self, configured, deadline)
+            .commit_cold(self, configured, CallBudget::bounded(deadline))
+    }
+    pub fn commit_started_laptop_cold_for_connection(
+        &self,
+        configured: &ConfiguredMemory,
+        connection: &crate::worker_reports::WorkerLaunchConnection,
+    ) -> Result<ColdCommit> {
+        self.laptop_workflows()
+            .assert_worker_connection(self, &configured.workflow, connection)?;
+        self.laptop_workflows()
+            .commit_cold(self, configured, CallBudget::worker())
     }
 }
-fn commit(runtime: &WorkerRuntime, record: &mut Record, deadline: Instant) -> Result<()> {
-    running(runtime, deadline)?;
+fn commit(runtime: &WorkerRuntime, record: &mut Record, deadline: CallBudget) -> Result<()> {
+    running_budget(runtime, deadline)?;
     let resources = record.resources();
     let retained = matches!(
         reverie_contracts::worker_cold_tmp::ColdConfiguration::capture(resources.plan.source())
@@ -107,12 +118,17 @@ fn commit(runtime: &WorkerRuntime, record: &mut Record, deadline: Instant) -> Re
         .held_nix()?
         .assert_cold_resources_current()
         .map_err(LaptopError::Nix)?;
-    running(runtime, deadline)
+    running_budget(runtime, deadline)
 }
-fn commit_retained(runtime: &WorkerRuntime, record: &mut Record, deadline: Instant) -> Result<()> {
+fn commit_retained(
+    runtime: &WorkerRuntime,
+    record: &mut Record,
+    supplied: CallBudget,
+) -> Result<()> {
     // Source's first canonical confirmation precedes the commit's nominal
     // 30-second window. The original supplied/stop deadline still bounds it.
-    let first = super::cold_confirm::confirm(runtime, record, deadline)?;
+    let first = super::cold_confirm::confirm(runtime, record, supplied)?;
+    let deadline = supplied.end(runtime, 30);
     {
         let resources = record
             .resources
@@ -125,7 +141,7 @@ fn commit_retained(runtime: &WorkerRuntime, record: &mut Record, deadline: Insta
     }
     // Bound publication and every local finalizer have completed. Re-observe
     // the SAME actual Created CID; no caller-supplied native assertion exists.
-    let second = super::cold_confirm::confirm(runtime, record, deadline)?;
+    let second = super::cold_confirm::confirm(runtime, record, CallBudget::bounded(deadline))?;
     let resources = record.resources();
     resources
         .held_nix()?
@@ -148,10 +164,12 @@ fn commit_retained(runtime: &WorkerRuntime, record: &mut Record, deadline: Insta
     nix.release_retained_cold_commit(resources.plan.source(), &second, deadline)
 }
 pub(super) fn running(runtime: &WorkerRuntime, supplied: Instant) -> Result<()> {
-    let end = runtime
-        .stop_deadline()
-        .map_or(supplied, |stop| supplied.min(stop));
-    need(Instant::now() < end, "WORKER_COLD_DEADLINE")?;
+    running_budget(runtime, CallBudget::bounded(supplied))
+}
+pub(super) fn running_budget(runtime: &WorkerRuntime, budget: CallBudget) -> Result<()> {
+    budget
+        .check(runtime)
+        .map_err(|_| LaptopError::Refused("WORKER_COLD_DEADLINE"))?;
     need(
         !runtime.cancellation().is_cancelled(),
         "WORKER_LAPTOP_STOPPED",

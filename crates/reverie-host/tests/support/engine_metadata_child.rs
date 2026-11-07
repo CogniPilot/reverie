@@ -43,6 +43,9 @@ fn main() {
             use std::fs::{self,OpenOptions};
             let mut trace=OpenOptions::new().create(true).append(true).open("calls.txt").unwrap();
             writeln!(trace,"{}",args.join("\0")).unwrap();drop(trace);
+            if mode == "storage-writer" && std::path::Path::new("cold-launch-control").is_file() && cold_launch(&args) {
+                return;
+            }
             if mode == "storage-writer" && args == ["ps", "--filter", "label=reverie.worker=test", "--format", "{{.Names}}"] && std::path::Path::new("recovery-names.out").is_file() {
                 io::stdout().write_all(&fs::read("recovery-names.out").unwrap()).unwrap();
                 return;
@@ -162,6 +165,81 @@ fn wait_file(name: &str) {
         assert!(std::time::Instant::now() < end, "bounded owned fixture releases {name}");
         std::thread::sleep(Duration::from_millis(1));
     }
+}
+fn cold_launch(args: &[String]) -> bool {
+    use std::{fs, path::Path};
+    const NAME: &str = "test-agent-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
+    let command = args.iter().map(String::as_str).collect::<Vec<_>>();
+    match command.as_slice() {
+        ["image", "inspect", image] => {
+            assert_eq!(*image, format!("sha256:{}", "a".repeat(64)));
+            print!("[{{\"Config\":{{\"Labels\":{{\"reverie.worker.nix-store\":\"0\"}}}}}}]");
+        }
+        ["network", "inspect", target] => {
+            assert_eq!(*target, format!("{NAME}-lan"));
+            std::process::exit(7);
+        }
+        ["network", "ls", "--no-trunc", "--format", "{{.ID}} {{.Name}}"] => {}
+        ["stop", "--time", "2", target] => {
+            assert_eq!(*target, "c".repeat(64));
+            if Path::new("cold-stop-refused").is_file() { std::process::exit(7); }
+            if let Ok(pid) = fs::read_to_string("viewer-pid") {
+                let stat = fs::read_to_string(format!("/proc/{pid}/stat")).unwrap();
+                assert_ne!(stat.rsplit_once(')').unwrap().1.split_whitespace().next(), Some("Z"));
+                fs::write("cold-stop-before-viewer-reap", b"actual owned viewer still alive before stop").unwrap();
+            }
+            fs::write("cold-stopped", b"actual fixed stop child completed").unwrap();
+        }
+        ["kill", target] => {
+            assert_eq!(*target, "c".repeat(64));
+            assert!(Path::new("cold-stop-refused").is_file());
+            std::process::exit(7);
+        }
+        ["inspect", target] if Path::new("cold-created-args").is_file()
+            && (*target == NAME || *target == "c".repeat(64)) => {
+            let running = !Path::new("cold-stopped").is_file();
+            let pid = if running { 321 } else { 0 };
+            print!("[{{\"Id\":\"{}\",\"Name\":\"/{NAME}\",\"Config\":{{\"Labels\":{{\"reverie.worker\":\"test\",\"reverie.session\":\"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}}}},\"State\":{{\"Running\":{running},\"Pid\":{pid},\"Paused\":false,\"Restarting\":false,\"Dead\":false}}}}]", "c".repeat(64));
+        }
+        ["network", "create", "--label", "reverie.worker=test", "--label", session, "--opt", "com.docker.network.bridge.enable_icc=false", target] => {
+            assert_eq!(*session, "reverie.session=aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee");
+            assert_eq!(*target, format!("{NAME}-lan"));
+            fs::write("cold-network-created", b"actual fixed network child completed").unwrap();
+        }
+        ["create", "--name", target, ..] => {
+            assert_eq!(*target, NAME);
+            assert_eq!(&command[command.len()-4..command.len()-2], ["--entrypoint", "/bin/sleep"]);
+            assert_eq!(command.last(), Some(&"infinity"));
+            assert!(Path::new("cold-network-created").is_file());
+            fs::write("cold-created-args", args.join("\0")).unwrap();
+            if Path::new("cold-create-hold").is_file() {
+                fs::write("cold-create-entered", b"actual fixed create client entered").unwrap();
+                wait_file("cold-create-release");
+            }
+            if Path::new("cold-create-nonzero").is_file() { std::process::exit(9); }
+            println!("{}", "c".repeat(64));
+        }
+        ["start", target] => {
+            assert_eq!(*target, NAME);
+            assert!(Path::new("cold-created-args").is_file());
+            let metadata=fs::read_to_string("state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/runtime.json").unwrap();
+            assert!(metadata.contains(".exit"));
+            fs::write("cold-started", b"actual fixed start child completed").unwrap();
+        }
+        ["exec", ..] if command.iter().any(|arg| *arg == "new-session") => {
+            assert!(command.iter().any(|arg| *arg == NAME));
+            assert!(Path::new("cold-started").is_file());
+            assert!(command.ends_with(&["set-option", "-g", "remain-on-exit", "on"]));
+            fs::write("cold-pane-started", b"actual fixed pane child completed").unwrap();
+        }
+        ["exec", ..] if command.ends_with(&["set-option", "-g", "status", "off"]) => {
+            assert!(command.iter().any(|arg| *arg == NAME));
+            assert!(Path::new("cold-pane-started").is_file());
+            fs::write("cold-pane-configured", b"actual second pane child completed").unwrap();
+        }
+        _ => return false,
+    }
+    true
 }
 fn gpu_info(args:&[String]){
     use std::fs;

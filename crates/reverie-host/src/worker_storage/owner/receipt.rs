@@ -36,6 +36,14 @@ impl LaunchReceiptObservation {
     pub fn exists(&self) -> bool {
         self.exists
     }
+    /// Fresh DATA from the exact path selected by this original observation.
+    /// No runtime.json reread or current-Box/stop/release proof is inferred.
+    pub fn recheck_is_file(&self, runtime: &WorkerRuntime) -> OwnerResult<bool> {
+        if !Arc::ptr_eq(&self.engine, runtime.installed_engine()) {
+            return Err(StorageOwnerError::Refused("WORKER_RECEIPT_OWNER_CHANGED"));
+        }
+        native::python_is_file(&self.exit.codepoints()).map_err(StorageOwnerError::Path)
+    }
 }
 impl LaunchStorage {
     pub fn observe_launch_receipt(&self) -> OwnerResult<LaunchReceiptObservation> {

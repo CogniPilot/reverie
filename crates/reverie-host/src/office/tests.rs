@@ -21,6 +21,43 @@ use std::{
     sync::mpsc,
 };
 const SID: &str = "11111111-1111-4111-8111-111111111111";
+#[test]
+fn resource_close_observation_requires_actual_join_and_exact_runtime_session() {
+    let fixture = Fixture::new("127.0.0.1:9".parse().unwrap());
+    let foreign = Fixture::new("127.0.0.1:9".parse().unwrap());
+    let session = ProfileSessionId::parse(SID).unwrap();
+    let other = ProfileSessionId::parse("22222222-2222-4222-8222-222222222222").unwrap();
+    let phone = fixture.bind("resource-close");
+    assert!(
+        phone
+            .require_closed_for_resource(&fixture.runtime, &session)
+            .is_err()
+    );
+    phone.request_close();
+    assert!(
+        phone
+            .require_closed_for_resource(&fixture.runtime, &session)
+            .is_err(),
+        "requesting close or finished-but-unjoined thread is insufficient"
+    );
+    fixture
+        .service
+        .close_phone(&phone, Instant::now() + Duration::from_secs(2))
+        .unwrap();
+    phone
+        .require_closed_for_resource(&fixture.runtime, &session)
+        .unwrap();
+    assert!(
+        phone
+            .require_closed_for_resource(&fixture.runtime, &other)
+            .is_err()
+    );
+    assert!(
+        phone
+            .require_closed_for_resource(&foreign.runtime, &session)
+            .is_err()
+    );
+}
 struct Fixture {
     root: PathBuf,
     service: OfficeService,

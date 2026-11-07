@@ -1,5 +1,6 @@
 //! A concrete PTY attach constructor installed in the laptop record BEFORE
 //! thread creation. No thread/late spawn can outlive its retained native owner.
+use super::cleanup::{Cleanup, ClosePlan};
 use super::*;
 mod terminal;
 use crate::{
@@ -23,11 +24,6 @@ struct State {
     term_sent: bool,
     transport: Option<terminal::Transport>,
     receipt: Option<std::fs::File>,
-}
-struct ClosePlan {
-    end: Instant,
-    term: Instant,
-    kill: Option<Instant>,
 }
 pub(crate) struct Job {
     capture: Arc<InstalledCommand>,
@@ -239,12 +235,15 @@ impl Job {
             .stop_deadline()
             .map_or(requested, |stop| stop.min(requested)))
     }
-    pub(super) fn wait_started(&self, runtime: &WorkerRuntime, ceiling: Instant) -> Result<bool> {
+    pub(super) fn wait_started(
+        &self,
+        runtime: &WorkerRuntime,
+        ceiling: CallBudget,
+    ) -> Result<bool> {
         loop {
             if self.join()? {
                 need(
-                    Instant::now() < clipped(runtime, ceiling)
-                        && !runtime.cancellation().is_cancelled(),
+                    ceiling.check(runtime).is_ok() && !runtime.cancellation().is_cancelled(),
                     "VIEWER_START_PENDING",
                 )?;
                 let state = self
@@ -253,13 +252,23 @@ impl Job {
                     .map_err(|_| LaptopError::Refused("VIEWER_START_PENDING"))?;
                 return Ok(state.failure.is_none());
             }
-            let end = clipped(runtime, ceiling);
             need(
-                Instant::now() < end && !runtime.cancellation().is_cancelled(),
+                ceiling.check(runtime).is_ok() && !runtime.cancellation().is_cancelled(),
                 "VIEWER_START_PENDING",
             )?;
             std::thread::sleep(Duration::from_millis(1));
         }
+    }
+    pub(crate) fn constructor_deadline(&self, ceiling: Option<Instant>) -> Result<Option<Instant>> {
+        let origin = self
+            .origin
+            .upgrade()
+            .ok_or(LaptopError::Refused("VIEWER_ORIGIN_RETAINED"))?;
+        Ok(match (ceiling, origin.stop_deadline()) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (Some(a), None) | (None, Some(a)) => Some(a),
+            (None, None) => None,
+        })
     }
     pub(in crate::worker_laptop) fn failure(&self) -> Result<Option<Arc<LaptopError>>> {
         let state = self
@@ -314,7 +323,7 @@ impl Job {
     }
     #[cfg(test)]
     pub(in crate::worker_laptop) fn test_kill_end(&self) -> Instant {
-        self.close.lock().unwrap().as_ref().unwrap().kill.unwrap()
+        self.close.lock().unwrap().as_ref().unwrap().kill_end()
     }
     #[cfg(test)]
     pub(in crate::worker_laptop) fn test_reap_exited(&self) -> Result<()> {
@@ -393,6 +402,18 @@ impl Job {
         runtime: &WorkerRuntime,
         requested: Instant,
     ) -> Result<()> {
+        self.assert_runtime(runtime)?;
+        self.close_captured(requested)
+    }
+    pub(in crate::worker_laptop) fn close_for_worker(
+        &self,
+        runtime: &WorkerRuntime,
+        guard: Instant,
+    ) -> Result<()> {
+        self.assert_runtime(runtime)?;
+        self.close_captured_for_worker(guard)
+    }
+    fn assert_runtime(&self, runtime: &WorkerRuntime) -> Result<()> {
         let origin = self
             .origin
             .upgrade()
@@ -400,35 +421,84 @@ impl Job {
         need(
             Arc::ptr_eq(&origin, runtime.installed_engine()),
             "WORKER_VIEWER_ORIGIN",
-        )?;
-        self.close_captured(requested)
+        )
     }
     pub(crate) fn close_captured(&self, requested: Instant) -> Result<()> {
+        let cleanup = Cleanup::bounded(requested);
+        self.close_budget(cleanup.ceiling(), cleanup.guard())
+    }
+    pub(crate) fn close_captured_for_worker(&self, guard: Instant) -> Result<()> {
+        self.close_budget(None, guard)?;
+        self.require_closed()
+    }
+    pub(crate) fn cleanup_deadline(&self, fallback: Instant) -> Result<Instant> {
+        let plan = self
+            .close
+            .try_lock()
+            .map_err(|_| LaptopError::Refused("VIEWER_UNREAPED"))?;
+        self.clamp_deadline(plan.as_ref().map_or(fallback, |plan| plan.end(None)))
+    }
+    fn close_budget(&self, requested: Option<Instant>, guard: Instant) -> Result<()> {
         self.closing.store(true, Ordering::Release);
         let mut plan = self
             .close
             .try_lock()
             .map_err(|_| LaptopError::Refused("VIEWER_UNREAPED"))?;
-        let plan = plan.get_or_insert_with(|| ClosePlan {
-            end: requested,
-            term: (Instant::now() + Duration::from_secs(5)).min(requested),
-            kill: None,
-        });
+        let plan = plan.get_or_insert_with(|| ClosePlan::new(requested, guard));
         loop {
-            let bound = plan.end.min(requested);
-            let end = self.clamp_deadline(bound)?;
-            let end = plan.kill.map_or(end, |kill| end.min(kill));
-            if self.join()? && self.close_step(plan, end)? {
+            let joined = self.join()?;
+            if joined && self.close_step(plan, requested)? {
+                plan.confirm();
                 return Ok(());
             }
-            need(Instant::now() < end, "VIEWER_UNREAPED")?;
+            if !joined {
+                before(self.constructor_deadline(plan.bound(requested))?)?;
+            }
             std::thread::sleep(Duration::from_millis(1));
         }
     }
-    fn close_step(&self, plan: &mut ClosePlan, end: Instant) -> Result<bool> {
-        let Ok(mut state) = self.state.try_lock() else {
-            return Ok(false);
+    /// Only actual constructor join and checked group/PTY/query closure stamps
+    /// completion. A consumed or unavailable owner never supplies this receipt.
+    pub(in crate::worker_laptop) fn require_closed(&self) -> Result<()> {
+        let plan = self
+            .close
+            .try_lock()
+            .map_err(|_| LaptopError::Refused("VIEWER_UNREAPED"))?;
+        need(
+            plan.as_ref().is_some_and(ClosePlan::confirmed) && !self.has_pending_native_work(),
+            "VIEWER_UNREAPED",
+        )
+    }
+    fn close_step(&self, plan: &mut ClosePlan, requested: Option<Instant>) -> Result<bool> {
+        let mut state = match self.state.try_lock() {
+            Ok(state) => state,
+            Err(std::sync::TryLockError::Poisoned(_)) => {
+                return Err(LaptopError::Refused("VIEWER_UNREAPED"));
+            }
+            Err(std::sync::TryLockError::WouldBlock) => {
+                // An unavailable native owner cannot obtain a later phase or
+                // hide behind an unbounded wait after its actual phase ends.
+                before(Some(self.clamp_deadline(plan.end(requested))?))?;
+                return Ok(false);
+            }
         };
+        // Guard/constructor waiting cannot consume the native TERM grace.
+        // A possibly blocking exact query must not hide the real viewer group.
+        let allowed = if state.process.settled() {
+            Ok(())
+        } else {
+            self.constructor_deadline(plan.bound(requested))
+                .and_then(before)
+        };
+        let native = allowed.and_then(|()| {
+            plan.native();
+            let end = self.constructor_deadline(plan.bound(requested))?;
+            step(&mut state, plan, end)
+        });
+        if matches!(native, Ok(false)) {
+            return Ok(false);
+        }
+        let end = self.clamp_deadline(plan.end(requested))?;
         let query = match &mut state.transport {
             Some(transport) => self
                 .origin
@@ -437,9 +507,6 @@ impl Job {
                 .and_then(|origin| transport.settle(&origin, end)),
             None => Ok(()),
         };
-        // A refused query settlement cannot hide the actual viewer group.
-        // Attempt both under the SAME first cleanup budget, retaining causes.
-        let native = step(&mut state, plan, end);
         let done = native.as_ref().is_ok_and(|done| *done);
         let result = finalized(query, native.map(|_| ())).map(|()| done);
         match result {
@@ -475,15 +542,15 @@ impl Job {
         })
     }
 }
-fn step(state: &mut State, plan: &mut ClosePlan, end: Instant) -> Result<bool> {
+fn step(state: &mut State, plan: &mut ClosePlan, end: Option<Instant>) -> Result<bool> {
     if state.process.settled() && state.pty.is_none() && !state.opaque {
         return Ok(true);
     }
-    need(Instant::now() < end, "VIEWER_UNREAPED")?;
+    before(end)?;
     state.process.finish_preparation();
     let exited = state.process.peek().map_err(LaptopError::Io)?.is_some();
     if !exited && !state.process.settled() {
-        need(Instant::now() < end, "VIEWER_UNREAPED")?;
+        before(end)?;
         if !state.term_sent {
             state.term_sent = true;
             state.process.terminate().map_err(LaptopError::Io)?;
@@ -492,12 +559,12 @@ fn step(state: &mut State, plan: &mut ClosePlan, end: Instant) -> Result<bool> {
     // Compatibility correction: leader exit is not group completion. Keep its
     // WNOWAIT pin through the final one-shot owned-group KILL decision even
     // after TERM succeeded or the leader had already exited before close.
-    if state.process.needs_group_decision() && (exited || Instant::now() >= plan.term) {
-        plan.kill = Some((Instant::now() + Duration::from_millis(100)).min(end));
+    if state.process.needs_group_decision() && (exited || plan.term_expired()) {
+        plan.kill(end);
         state.process.kill_group().map_err(LaptopError::Io)?;
     }
-    let end = plan.kill.map_or(end, |kill| end.min(kill));
-    need(Instant::now() < end, "VIEWER_UNREAPED")?;
+    let end = plan.bound(end);
+    before(end)?;
     if !state.process.reap().map_err(LaptopError::Io)? {
         return Ok(false);
     }
@@ -524,8 +591,11 @@ fn step(state: &mut State, plan: &mut ClosePlan, end: Instant) -> Result<bool> {
     need(!state.opaque && state.process.settled(), "VIEWER_UNREAPED")?;
     Ok(true)
 }
-pub(in crate::worker_laptop) fn clipped(runtime: &WorkerRuntime, end: Instant) -> Instant {
-    runtime.stop_deadline().map_or(end, |stop| stop.min(end))
+fn before(end: Option<Instant>) -> Result<()> {
+    need(
+        end.is_none_or(|end| Instant::now() < end),
+        "VIEWER_UNREAPED",
+    )
 }
 fn uncertain_terminal(error: &LaptopError) -> bool {
     match error {

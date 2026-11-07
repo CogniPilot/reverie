@@ -6,6 +6,13 @@ deployment interface. The existing GUI/API and broker continue to own those
 operations. `--help` describes the fixed outputs, accepted target systems,
 build-only input paths and failure behavior.
 
+`--verify-manifest FILE` is a read-only native acceptance mode. It reuses the
+same Contracts manifest/hash/exact-derivative checks and bounded checked-close
+reader, then prints exactly the selected profile path (no newline or trimming).
+It is mutually exclusive with output-producing modes. This validates artifact
+DATA; the developer still selects the actual Nix-built package. It proves no
+installed custody, employee permission or deployment/host readiness.
+
 `--docker-profile-output FILE` selects the Docker mode and excludes task-perf
 output-directory/system flags. The Contracts `docker_profile` owner preserves
 the pinned Moby default-deny document and appends exactly the original seventeen

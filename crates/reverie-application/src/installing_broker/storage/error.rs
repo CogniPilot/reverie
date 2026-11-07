@@ -6,6 +6,7 @@ enum Cause {
     SourceStop(Box<reverie_host::worker_source_stop::SourceStopError>),
     Gate(GateError),
     Owner(StorageOwnerError),
+    Laptop(Box<reverie_host::worker_laptop::LaptopError>),
     Refused(&'static str),
 }
 #[derive(Debug)]
@@ -44,6 +45,7 @@ impl StorageWorkflowError {
             Cause::SourceStop(error) => error.code(),
             Cause::Gate(error) => error.code(),
             Cause::Owner(error) => error.code(),
+            Cause::Laptop(error) => error.code(),
             Cause::Refused(code) => code,
         }
     }
@@ -103,6 +105,14 @@ impl From<StorageOwnerError> for StorageWorkflowError {
         }
     }
 }
+impl From<reverie_host::worker_laptop::LaptopError> for StorageWorkflowError {
+    fn from(error: reverie_host::worker_laptop::LaptopError) -> Self {
+        Self {
+            primary: Cause::Laptop(Box::new(error)),
+            cleanup: Vec::new(),
+        }
+    }
+}
 impl fmt::Display for StorageWorkflowError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.code())
@@ -115,6 +125,7 @@ impl Error for StorageWorkflowError {
             Cause::SourceStop(error) => Some(error.as_ref()),
             Cause::Gate(error) => Some(error),
             Cause::Owner(error) => Some(error),
+            Cause::Laptop(error) => Some(error.as_ref()),
             Cause::Refused(_) => None,
         }
     }

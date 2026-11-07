@@ -57,7 +57,7 @@ pub(crate) use reservation::{
     read_reservation, reservation_identity, reservation_identity_text, reservation_location,
 };
 mod text;
-pub(crate) use text::{python_path, python_text};
+pub(crate) use text::{python_is_file, python_path, python_text};
 mod office;
 mod office_listener;
 pub(crate) use office_listener::OfficeListenerReady;

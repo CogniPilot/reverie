@@ -15,6 +15,64 @@ fn isolated(name: &str) -> bool {
     crate::test_process::isolate_case(&format!("worker_laptop::memory::worker::tests::{name}"))
 }
 #[test]
+fn same_original_j_reaches_actual_worker_pane_and_closed_j_guard_cleanup() {
+    if isolated("same_original_j_reaches_actual_worker_pane_and_closed_j_guard_cleanup") {
+        return;
+    }
+    let context = Context::without_memory_policy();
+    let runtime = context.fixture.runtime();
+    let WorkerMemoryBegin::Configured(memory) = runtime
+        .begin_started_laptop_memory_for_connection(&context.started, &context.connection, None)
+        .unwrap()
+    else {
+        panic!("actual absent memory");
+    };
+    let (_client, foreign, mut hold) = context
+        .fixture
+        .accepted(&context.service, "second-same-SID");
+    assert!(
+        runtime
+            .commit_started_laptop_cold_for_connection(&memory, &foreign)
+            .is_err()
+    );
+    let ColdCommit::Committed(cold) = runtime
+        .commit_started_laptop_cold_for_connection(&memory, &context.connection)
+        .unwrap()
+    else {
+        panic!("actual cold commit");
+    };
+    let PaneStart::Started(pane) = runtime
+        .start_laptop_pane_for_connection(&cold, &context.connection)
+        .unwrap()
+    else {
+        panic!("actual pane");
+    };
+    assert!(
+        runtime
+            .release_laptop_nix_guard_for_connection(&pane, &foreign)
+            .is_err()
+    );
+    context.connection.close_socket(fixture::end()).unwrap();
+    let NixGuardRelease::Released(released) = runtime
+        .release_laptop_nix_guard_for_connection(&pane, &context.connection)
+        .unwrap()
+    else {
+        panic!("same original closed J cleanup");
+    };
+    assert!(released.same_workflow(&context.workflow));
+    assert!(
+        crate::worker_storage::StorageLease::acquire_migration(
+            &context.fixture.source,
+            context.connection.request().session()
+        )
+        .is_err(),
+        "guard closure retains employee lease"
+    );
+    foreign.close_socket(fixture::end()).unwrap();
+    hold.release(fixture::end()).unwrap();
+    context.finish();
+}
+#[test]
 fn actual_source_selection_is_lazy_and_enabled_source_cannot_skip_it() {
     if isolated("actual_source_selection_is_lazy_and_enabled_source_cannot_skip_it") {
         return;

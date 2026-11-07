@@ -19,6 +19,20 @@ impl RelayIdentity {
         std::sync::Weak::ptr_eq(&self.service, &other.service)
             && Arc::ptr_eq(&self.record, &other.record)
     }
+    pub(crate) fn require_released_predecessor(
+        &self,
+        next: &Self,
+    ) -> std::result::Result<(), &'static str> {
+        if self.same(next) || !std::sync::Weak::ptr_eq(&self.service, &next.service) {
+            return Err("WORKER_STARTED_CONNECTION_SERVICE_CHANGED");
+        }
+        self.require_released()
+    }
+    pub(crate) fn require_released(&self) -> std::result::Result<(), &'static str> {
+        self.record
+            .require_released_handler()
+            .map_err(|_| "WORKER_STARTED_PREDECESSOR_RETAINED")
+    }
     pub(crate) fn can_progress(&self) -> bool {
         self.service
             .upgrade()

@@ -87,10 +87,10 @@ fn trusted_store_tool(path: &Path) -> Result<()> {
     }
     Ok(())
 }
-fn trusted_system_tool(path: &Path) -> Result<()> {
+pub(super) fn trusted_system_tool(path: &Path) -> Result<()> {
     let file = fs::metadata(path)?;
     if !file.is_file() || file.uid() != 0 || file.mode() & 0o022 != 0 || file.mode() & 0o111 == 0 {
-        return Err("CI sudo/AppArmor parser must be root-owned system executables".into());
+        return Err("CI administrative tools must be root-owned system executables".into());
     }
     Ok(())
 }

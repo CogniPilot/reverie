@@ -20,7 +20,15 @@ impl<'a> ObservedWorkerLaunch<'a> {
                 observed: self,
                 previous,
             }),
-            Err(cause) => Err(self.claimed.into_failure(cause, Some(self.current))),
+            Err(cause) => {
+                let mut failure = self.claimed.into_failure(cause, Some(self.current));
+                failure.observation = Some(FailureObservation {
+                    plan: self.plan,
+                    previous: None,
+                    receipt: None,
+                });
+                Err(failure)
+            }
         }
     }
     fn inspect_current(
@@ -46,6 +54,27 @@ impl<'a> ObservedWorkerLaunch<'a> {
                 }
                 error => PreparationError::ExistingHost(error),
             })
+    }
+}
+impl<'a> InspectedWorkerLaunch<'a> {
+    pub(super) fn into_failure(
+        self,
+        cause: PreparationError,
+        receipt: Option<reverie_host::worker_storage::LaunchReceiptObservation>,
+    ) -> Box<PreparationFailure<'a>> {
+        let Self { observed, previous } = self;
+        let ObservedWorkerLaunch {
+            claimed,
+            current,
+            plan,
+        } = observed;
+        let mut failure = claimed.into_failure(cause, Some(current));
+        failure.observation = Some(FailureObservation {
+            plan,
+            previous,
+            receipt,
+        });
+        failure
     }
 }
 

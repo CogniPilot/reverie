@@ -2,14 +2,15 @@
 //! The application must still perform actual admission/canonical release first.
 //! Existing reuse uses its original storage/inspection record rather than a
 //! created-pane token. Actual App admission/release remains a separate join.
+pub(super) mod cleanup;
 mod job;
 pub(in crate::worker_laptop) mod receipt;
 mod terminal;
 #[cfg(test)]
 pub(super) mod test_hooks;
+use super::call_budget::CallBudget;
 use super::*;
 pub(crate) use job::Job as ViewerJob;
-pub(super) use job::clipped;
 use reverie_core::worker_launch::{ContainerReference, TerminalSize};
 enum SessionOrigin {
     Created(LaptopWorkflow),
@@ -22,6 +23,14 @@ pub struct ViewerSession {
     job: Arc<job::Job>,
 }
 impl ViewerSession {
+    #[cfg(test)]
+    pub(in crate::worker_laptop) fn native_status_for_owned_test(&self) -> Result<Option<i32>> {
+        self.job.status()
+    }
+    #[cfg(test)]
+    pub(in crate::worker_laptop) fn native_counts_for_owned_test(&self) -> (usize, usize) {
+        self.job.native_counts()
+    }
     pub fn same_workflow(&self, other: &LaptopWorkflow) -> bool {
         matches!(&self.origin,SessionOrigin::Created(workflow) if workflow.same_workflow(other))
     }
@@ -51,7 +60,7 @@ impl Workflows {
         &self,
         runtime: &WorkerRuntime,
         pane: &NixReleasedPane,
-        end: Instant,
+        end: CallBudget,
     ) -> Result<ViewerStart> {
         self.bound(runtime, &pane.workflow)?;
         let mut record = pane
@@ -74,7 +83,7 @@ impl Workflows {
             "WORKER_VIEWER_PHASE",
         )?;
         need(
-            !runtime.cancellation().is_cancelled() && Instant::now() < job::clipped(runtime, end),
+            !runtime.cancellation().is_cancelled() && end.check(runtime).is_ok(),
             "WORKER_VIEWER_STOPPED",
         )?;
         let mut marker = [0u8; 16];
@@ -116,24 +125,33 @@ impl Workflows {
         viewer: &'a ViewerSession,
         forward: bool,
     ) -> Result<ViewerGuard<'a>> {
+        self.viewer_cleanup(runtime, viewer, forward, None)
+    }
+    fn viewer_cleanup<'a>(
+        &self,
+        runtime: &WorkerRuntime,
+        viewer: &'a ViewerSession,
+        forward: bool,
+        cleanup: Option<cleanup::Cleanup>,
+    ) -> Result<ViewerGuard<'a>> {
         let guard = match &viewer.origin {
             SessionOrigin::Created(workflow) => {
                 self.bound(runtime, workflow)?;
-                ViewerGuard::Created(
-                    workflow
-                        .record
-                        .try_lock()
-                        .map_err(|_| LaptopError::Refused("WORKER_LAPTOP_RETAINED"))?,
-                )
+                ViewerGuard::Created(cleanup::acquire(
+                    runtime,
+                    &workflow.record,
+                    cleanup,
+                    "WORKER_LAPTOP_RETAINED",
+                )?)
             }
             SessionOrigin::Existing(existing) => {
                 self.bound_existing(runtime, existing)?;
-                ViewerGuard::Existing(
-                    existing
-                        .record
-                        .try_lock()
-                        .map_err(|_| LaptopError::Refused("WORKER_EXISTING_VIEWER_RETAINED"))?,
-                )
+                ViewerGuard::Existing(cleanup::acquire(
+                    runtime,
+                    &existing.record,
+                    cleanup,
+                    "WORKER_EXISTING_VIEWER_RETAINED",
+                )?)
             }
         };
         if forward {
@@ -180,7 +198,7 @@ impl ViewerGuard<'_> {
 pub(super) fn launch_constructor(
     runtime: &WorkerRuntime,
     job: &Arc<ViewerJob>,
-    end: Instant,
+    end: CallBudget,
 ) -> std::result::Result<(), Arc<LaptopError>> {
     if let Err(error) = admit_constructor(runtime, job, end) {
         let error = Arc::new(error);
@@ -189,12 +207,14 @@ pub(super) fn launch_constructor(
     }
     job.launch(runtime.cancellation());
     match job.wait_started(runtime, end).map_err(Arc::new)? {
-        true => runtime
-            .installed_engine()
-            .engine
-            .client
-            .handoff_viewer(job, end)
-            .map_err(|error| Arc::new(LaptopError::Engine(error.into()))),
+        true => {
+            let client = &runtime.installed_engine().engine.client;
+            match end.ceiling() {
+                Some(end) => client.handoff_viewer(job, end),
+                None => client.handoff_viewer_for_worker(job),
+            }
+            .map_err(|error| Arc::new(LaptopError::Engine(error.into())))
+        }
         false => Err(job
             .failure()
             .map_err(Arc::new)?
@@ -204,12 +224,11 @@ pub(super) fn launch_constructor(
 fn admit_constructor(
     runtime: &WorkerRuntime,
     job: &Arc<ViewerJob>,
-    ceiling: Instant,
+    ceiling: CallBudget,
 ) -> Result<()> {
     loop {
         need(
-            !runtime.cancellation().is_cancelled()
-                && Instant::now() < job::clipped(runtime, ceiling),
+            !runtime.cancellation().is_cancelled() && ceiling.check(runtime).is_ok(),
             "VIEWER_START_PENDING",
         )?;
         match runtime.installed_engine().engine.client.admit_viewer(job) {
@@ -235,7 +254,18 @@ impl WorkerRuntime {
         pane: &NixReleasedPane,
         end: Instant,
     ) -> Result<ViewerStart> {
-        self.laptop_workflows().start_viewer(self, pane, end)
+        self.laptop_workflows()
+            .start_viewer(self, pane, CallBudget::bounded(end))
+    }
+    pub fn start_laptop_viewer_session_for_worker(
+        &self,
+        pane: &NixReleasedPane,
+        connection: &crate::worker_reports::WorkerLaunchConnection,
+    ) -> Result<ViewerStart> {
+        self.laptop_workflows()
+            .assert_worker_connection(self, &pane.workflow, connection)?;
+        self.laptop_workflows()
+            .start_viewer(self, pane, CallBudget::worker())
     }
     pub fn read_laptop_viewer(&self, viewer: &ViewerSession, bytes: &mut [u8]) -> Result<usize> {
         let _record = self.laptop_workflows().viewer(self, viewer, true)?;
@@ -264,5 +294,12 @@ impl WorkerRuntime {
     pub fn close_laptop_viewer(&self, viewer: &ViewerSession, end: Instant) -> Result<()> {
         let _record = self.laptop_workflows().viewer(self, viewer, false)?;
         viewer.job.close(self, end)
+    }
+    pub fn close_laptop_viewer_for_worker(&self, viewer: &ViewerSession) -> Result<()> {
+        let cleanup = cleanup::Cleanup::worker(self);
+        let _record = self
+            .laptop_workflows()
+            .viewer_cleanup(self, viewer, false, Some(cleanup))?;
+        viewer.job.close_for_worker(self, cleanup.guard())
     }
 }

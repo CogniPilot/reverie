@@ -1,5 +1,6 @@
 //! Original finally ordering over the whole actual accepted reuse owner.
 use super::*;
+use crate::installing_broker::launch::preparation::cold::ColdFinalizationFailure;
 use crate::installing_broker::launch::preparation::finalization::CleanupBudget;
 use reverie_host::worker_laptop::ExistingStorageObservation;
 mod registration;
@@ -14,7 +15,7 @@ enum Owner<'a> {
     },
     Restored(Box<RestoredReuse<'a>>),
     Transferred(ReuseScope<'a>),
-    Classified(Box<ReusableWorkerLaunch<'a>>),
+    Classified(Box<ColdFinalizationFailure<'a>>),
 }
 #[derive(Debug)]
 enum Error {
@@ -155,13 +156,24 @@ impl<'a> ReuseViewerFailure<'a> {
         let mut errors = Vec::new();
         let owner = match self.owner {
             FailureOwner::Classified(owner) => {
-                // The prefix still owns its real lifecycle/claim. Its typed
-                // failure remains available to the prefix cleanup consumer.
-                return Err(Box::new(ReuseFinalizationFailure {
-                    owner: Owner::Classified(owner),
-                    primary,
-                    errors,
-                }));
+                // Consume the WHOLE classified scope in cleanup only. The
+                // actual running inspection never becomes a Cold-create target.
+                let closed = match budget {
+                    CleanupBudget::Bounded(end) => owner.finalize_classified(end),
+                    CleanupBudget::Worker => owner.finalize_classified_for_worker(),
+                };
+                return match closed {
+                    Ok(closed) => Ok(ReuseHandlerClosed {
+                        completed: closed.completed(),
+                        storage_retained: closed.storage_retained(),
+                        primary,
+                    }),
+                    Err(owner) => Err(Box::new(ReuseFinalizationFailure {
+                        owner: Owner::Classified(owner),
+                        primary,
+                        errors,
+                    })),
+                };
             }
             FailureOwner::AllocationUnconfirmed(retained) => {
                 errors.push(primary.take().expect("actual allocation cleanup failure"));
@@ -279,9 +291,13 @@ impl<'a> Finalizer<'a> {
             }
             Err(error) => self.errors.push(Error::Storage(error)),
         }
-        // Source creates its 5s TERM +100ms KILL observation window only
-        // here, AFTER stop. A slow stop cannot consume the viewer's grace.
-        if let Err(error) = retained.native.close(budget.phase(5_100)) {
+        // After actual stop, native ownership first acquires its original
+        // guard, then starts TERM/KILL. Bookkeeping cannot consume that grace.
+        let closed = match budget {
+            CleanupBudget::Bounded(end) => retained.native.close(end),
+            CleanupBudget::Worker => retained.native.close_for_worker(),
+        };
+        if let Err(error) = closed {
             self.errors.push(Error::Storage(error));
         }
         // No live descriptor is extracted here; its actual owner remains in
@@ -370,6 +386,10 @@ impl ReuseFinalizationFailure<'_> {
     }
     pub fn cleanup_error_count(&self) -> usize {
         self.errors.len()
+            + match &self.owner {
+                Owner::Classified(owner) => owner.cleanup_error_count(),
+                _ => 0,
+            }
     }
 }
 impl std::fmt::Debug for ReuseFinalizationFailure<'_> {
@@ -385,6 +405,9 @@ impl std::fmt::Display for ReuseFinalizationFailure<'_> {
     fn fmt(&self, out: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         if let Some(primary) = &self.primary {
             write!(out, "{}; ", primary.as_error())?;
+        }
+        if let Owner::Classified(owner) = &self.owner {
+            write!(out, "{owner}; ")?;
         }
         for error in &self.errors {
             match error {

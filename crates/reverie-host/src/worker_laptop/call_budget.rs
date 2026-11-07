@@ -11,6 +11,9 @@ impl CallBudget {
     pub(super) fn worker() -> Self {
         Self(None)
     }
+    pub(super) fn ceiling(self) -> Option<Instant> {
+        self.0
+    }
     pub(super) fn end(self, runtime: &WorkerRuntime, seconds: u64) -> Instant {
         let end = Instant::now() + std::time::Duration::from_secs(seconds);
         [self.0, runtime.stop_deadline()]
@@ -27,6 +30,12 @@ impl CallBudget {
                 .all(|end| now < end),
             "WORKER_LAPTOP_DEADLINE",
         )
+    }
+    pub(super) fn settlement_end(self, runtime: &WorkerRuntime) -> Instant {
+        match self.0 {
+            Some(end) => runtime.stop_deadline().map_or(end, |stop| end.min(stop)),
+            None => self.end(runtime, 20),
+        }
     }
 }
 impl Workflows {

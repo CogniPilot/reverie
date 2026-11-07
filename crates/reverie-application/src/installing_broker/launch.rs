@@ -9,15 +9,17 @@ use reverie_host::worker_reports::{
 use std::{os::unix::net::UnixStream, time::Instant};
 mod error;
 mod preparation;
+pub(in crate::installing_broker) use preparation::StartedLaptop;
 mod viewer;
 pub use error::{LaunchAdmissionFailure, WorkerDispatchError};
 pub use preparation::{
-    AllocationClosedReuse, ClassifiedWorkerLaunch, ColdWorkerLaunch, ExistingColdTarget,
+    AllocationClosedCold, AllocationClosedReuse, ClassifiedWorkerLaunch, ColdFinalizationFailure,
+    ColdHandlerClosed, ColdLaunchFailure, ColdViewerFailure, ColdWorkerLaunch, ExistingColdTarget,
     InspectedWorkerLaunch, PreparationFailure as LaunchPreparationFailure, PreparedReuseViewer,
     RestoredReuse, ReusableWorkerLaunch, ReuseFinalizationFailure, ReuseHandlerClosed,
-    ReuseViewerFailure, ViewingReuse,
+    ReuseViewerFailure, ViewingCold, ViewingReuse,
 };
-pub use viewer::{ReuseRelayError, ReuseRelayReturned};
+pub use viewer::{ColdRelayReturned, ReuseRelayError, ReuseRelayReturned, WorkerViewerRelayError};
 #[cfg(test)]
 mod tests;
 

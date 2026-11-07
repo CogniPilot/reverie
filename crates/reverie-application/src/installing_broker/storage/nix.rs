@@ -4,9 +4,13 @@ use super::ClaimDestination as ReturnTo;
 use super::*;
 use reverie_contracts::worker_config::EffectiveWorkerConfig;
 use reverie_host::worker_nix::{NixDisposition, NixError, NixProgress, NixStoreGuard, NixWorkflow};
+mod cold;
 mod error;
 mod network;
 pub use error::{NixStorageError, NixStorageReclaimFailure, NixStorageRetainFailure};
+pub(in crate::installing_broker) use network::{
+    CreatedStorageFinishFailure, CreatedStorageReturned,
+};
 pub use network::{
     NetworkStorageError, NetworkStoragePreparation, NetworkStorageReclaimFailure,
     NetworkStorageRetainFailure, NetworkStorageReturned,

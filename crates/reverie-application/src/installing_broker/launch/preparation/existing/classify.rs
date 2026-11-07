@@ -20,15 +20,18 @@ pub enum ClassifiedWorkerLaunch<'a> {
 }
 #[must_use = "live pane readback is not admission, guard or resource release"]
 pub struct ReusableWorkerLaunch<'a> {
-    receipt: Option<reverie_host::worker_storage::LaunchReceiptObservation>,
+    pub(in crate::installing_broker::launch::preparation) receipt:
+        Option<reverie_host::worker_storage::LaunchReceiptObservation>,
     pub(in crate::installing_broker::launch::preparation) inspected: InspectedWorkerLaunch<'a>,
     pub(in crate::installing_broker::launch::preparation) resources: EffectiveWorkerConfig,
 }
 #[must_use = "existing laptops still require genuine ordinary stop before create"]
 pub struct ColdWorkerLaunch<'a> {
+    pub(in crate::installing_broker::launch::preparation) receipt:
+        Option<reverie_host::worker_storage::LaunchReceiptObservation>,
     pub(in crate::installing_broker::launch::preparation) inspected: InspectedWorkerLaunch<'a>,
     pub(in crate::installing_broker::launch::preparation) resources: EffectiveWorkerConfig,
-    pub(in crate::installing_broker::launch::preparation) target: ExistingColdTarget,
+    pub(in crate::installing_broker::launch::preparation) target: Box<ExistingColdTarget>,
 }
 /// Closed original-source branch, never fabricated from CID/PID/path DATA.
 /// The actual ColdWorkerLaunch owns this with its original accepted resources.
@@ -86,9 +89,10 @@ impl<'a> RuntimeWorkerLaunch<'a> {
                         .map_or(ExistingColdTarget::Absent, ExistingColdTarget::Stopped)
                 });
                 Ok(ClassifiedWorkerLaunch::Cold(ColdWorkerLaunch {
+                    receipt: self.receipt,
                     inspected: self.verified.existing,
                     resources,
-                    target,
+                    target: Box::new(target),
                 }))
             }
             Err(cause) => Err(self.into_failure(cause)),
@@ -211,11 +215,7 @@ impl<'a> RuntimeWorkerLaunch<'a> {
         Ok(resources)
     }
     fn into_failure(self, cause: PreparationError) -> Box<PreparationFailure<'a>> {
-        let inspected = self.verified.existing;
-        inspected
-            .observed
-            .claimed
-            .into_failure(cause, Some(inspected.observed.current))
+        self.verified.existing.into_failure(cause, self.receipt)
     }
 }
 impl<'a> ReusableWorkerLaunch<'a> {
@@ -230,10 +230,12 @@ impl<'a> ReusableWorkerLaunch<'a> {
         &self.resources
     }
     pub fn abort(self) -> Box<PreparationFailure<'a>> {
-        self.inspected.observed.claimed.into_failure(
-            PreparationError::Refused("WORKER_LAUNCH_ABORTED"),
-            Some(self.inspected.observed.current),
-        )
+        self.inspected
+            .into_failure(
+                PreparationError::Refused("WORKER_LAUNCH_ABORTED"),
+                self.receipt,
+            )
+            .classified_abort()
     }
 }
 impl<'a> ColdWorkerLaunch<'a> {
@@ -247,20 +249,22 @@ impl<'a> ColdWorkerLaunch<'a> {
         &self.target
     }
     pub fn previous_process(&self) -> Option<&ExistingProcessIncarnation> {
-        match &self.target {
+        match self.target.as_ref() {
             ExistingColdTarget::DeadPane(process)
             | ExistingColdTarget::RunningCompleted(process) => Some(process),
             ExistingColdTarget::Absent | ExistingColdTarget::Stopped(_) => None,
         }
     }
     pub fn has_dead_inner(&self) -> bool {
-        matches!(self.target, ExistingColdTarget::DeadPane(_))
+        matches!(self.target.as_ref(), ExistingColdTarget::DeadPane(_))
     }
     pub fn abort(self) -> Box<PreparationFailure<'a>> {
-        self.inspected.observed.claimed.into_failure(
-            PreparationError::Refused("WORKER_LAUNCH_ABORTED"),
-            Some(self.inspected.observed.current),
-        )
+        self.inspected
+            .into_failure(
+                PreparationError::Refused("WORKER_LAUNCH_ABORTED"),
+                self.receipt,
+            )
+            .classified_abort()
     }
 }
 

@@ -180,10 +180,21 @@ impl<'a> AllocationClosedReuse<'a> {
     /// Only a confirmed allocation close reaches this constructor. Any native
     /// uncertainty retains the same inventory record and original J/Hold.
     pub fn start(self, end: Instant) -> Result<ViewingReuse<'a>, Box<ReuseViewerFailure<'a>>> {
-        let cause = match self.retained.native.start(
-            &self.retained.scope.preparing.admitted.request.connection,
-            end,
-        ) {
+        self.start_budget(Some(end))
+    }
+    pub fn start_for_worker(self) -> Result<ViewingReuse<'a>, Box<ReuseViewerFailure<'a>>> {
+        self.start_budget(None)
+    }
+    fn start_budget(
+        self,
+        end: Option<Instant>,
+    ) -> Result<ViewingReuse<'a>, Box<ReuseViewerFailure<'a>>> {
+        let original = &self.retained.scope.preparing.admitted.request.connection;
+        let started = match end {
+            Some(end) => self.retained.native.start(original, end),
+            None => self.retained.native.start_for_worker(original),
+        };
+        let cause = match started {
             Ok(ExistingViewerStart::Started(session)) => {
                 return Ok(ViewingReuse {
                     owner: self,

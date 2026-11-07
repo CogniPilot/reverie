@@ -4,7 +4,13 @@ use super::*;
 use crate::installing_broker::lifecycle::{ActiveLaunchToken, LaunchGeneration};
 use reverie_host::worker_launch::ExistingLaptopInspection;
 use reverie_host::worker_reports::WorkerLaunchHold;
+mod cold;
 mod error;
+pub(in crate::installing_broker) use cold::StartedLaptop;
+pub use cold::{
+    AllocationClosedCold, ColdFinalizationFailure, ColdHandlerClosed, ColdLaunchFailure,
+    ColdViewerFailure, ViewingCold,
+};
 mod existing;
 pub use existing::{
     AllocationClosedReuse, ClassifiedWorkerLaunch, ColdWorkerLaunch, ExistingColdTarget,
@@ -53,6 +59,24 @@ pub struct PreparationFailure<'a> {
     cause: PreparationError,
     transport_attempted: bool,
     cleanup: Vec<WorkerDispatchError>,
+    observation: Option<FailureObservation>,
+    origin: FailureOrigin,
+    registration: FailureRegistration,
+}
+enum FailureOrigin {
+    Prefix,
+    ClassifiedAbort,
+}
+enum FailureRegistration {
+    Unobserved,
+    Captured(Option<Arc<crate::installing_broker::recovered::RecoveredOffice>>),
+}
+// Actual observations retained by their original producer. None before their
+// phase is DATA; no path/SID/status can recreate a cleanup or release owner.
+struct FailureObservation {
+    plan: reverie_host::worker_launch::ObservedCreatePlan,
+    previous: Option<ExistingLaptopInspection>,
+    receipt: Option<reverie_host::worker_storage::LaunchReceiptObservation>,
 }
 impl<'a> AdmittedWorkerLaunch<'a> {
     /// Original prefix with existing per-query policy, not a reset of the
@@ -128,6 +152,9 @@ impl<'a> PreparingWorkerLaunch<'a> {
                 cause: error.into(),
                 transport_attempted: false,
                 cleanup: Vec::new(),
+                observation: None,
+                origin: FailureOrigin::Prefix,
+                registration: FailureRegistration::Unobserved,
             })),
         }
     }
@@ -147,6 +174,9 @@ impl<'a> PreparingWorkerLaunch<'a> {
                     cause,
                     transport_attempted: false,
                     cleanup: Vec::new(),
+                    observation: None,
+                    origin: FailureOrigin::Prefix,
+                    registration: FailureRegistration::Unobserved,
                 }));
             }
         };
@@ -162,6 +192,9 @@ impl<'a> PreparingWorkerLaunch<'a> {
                     cause,
                     transport_attempted: false,
                     cleanup: Vec::new(),
+                    observation: None,
+                    origin: FailureOrigin::Prefix,
+                    registration: FailureRegistration::Unobserved,
                 }));
             }
         };
@@ -182,6 +215,9 @@ impl<'a> PreparingWorkerLaunch<'a> {
                 cause,
                 transport_attempted: false,
                 cleanup: Vec::new(),
+                observation: None,
+                origin: FailureOrigin::Prefix,
+                registration: FailureRegistration::Unobserved,
             })),
         }
     }
