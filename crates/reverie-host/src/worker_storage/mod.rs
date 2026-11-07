@@ -11,8 +11,8 @@ mod writers;
 pub use wait_binding::read_launch_wait_binding;
 mod prepare;
 pub use owner::{
-    LaunchReceiptObservation, LaunchStorage, StorageAcquireFailure, StorageCloseFailure,
-    StorageOwnerError, StorageOwnershipKind, StorageSelection,
+    LaunchStorage, StorageAcquireFailure, StorageCloseFailure, StorageOwnerError,
+    StorageOwnershipKind, StorageSelection,
 };
 mod label;
 mod temporary;

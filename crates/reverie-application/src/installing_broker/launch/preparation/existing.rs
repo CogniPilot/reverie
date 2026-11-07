@@ -2,20 +2,13 @@
 //! before runtime/exit/pane/memory reads. Keep the SAME lifecycle and resources.
 use super::{observe::ObservedWorkerLaunch, *};
 use reverie_contracts::broker_laptop::LaunchLaptopInspection;
-mod memory;
-mod receipt;
-
-struct ExistingWorkerLaunch<'a> {
-    observed: ObservedWorkerLaunch<'a>,
-    previous: Option<LaunchLaptopInspection>,
-}
 impl<'a> ObservedWorkerLaunch<'a> {
-    fn inspect(
+    pub(super) fn inspect(
         self,
         end: Instant,
-    ) -> Result<ExistingWorkerLaunch<'a>, Box<PreparationFailure<'a>>> {
+    ) -> Result<InspectedWorkerLaunch<'a>, Box<PreparationFailure<'a>>> {
         match self.inspect_current(end) {
-            Ok(previous) => Ok(ExistingWorkerLaunch {
+            Ok(previous) => Ok(InspectedWorkerLaunch {
                 observed: self,
                 previous,
             }),

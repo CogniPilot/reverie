@@ -1,5 +1,4 @@
 use super::*;
-mod lifecycle;
 use crate::{reservation_gate::tests::Tree, worker_validation::load_owner_config};
 use reverie_core::worker_wire::{HEADER_BYTES, WorkerFrameHeader};
 use reverie_host::{

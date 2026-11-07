@@ -146,7 +146,7 @@ pub(super) fn finish_claimed(claimed: ClaimedWorkerLaunch<'_>) {
     drop(lifecycle);
     storage.unwrap().release(end()).unwrap();
     preparing.admitted.close(end()).unwrap();
-    token.release_hold(end()).unwrap();
+    crate::installing_broker::lifecycle::fixture_cleanup::release_hold(&mut token, end()).unwrap();
 }
 
 #[test]
@@ -239,7 +239,8 @@ fn duplicate_active_refusal_precedes_the_late_unavailable_company_read_and_keeps
         .unwrap();
     first_storage.release(end()).unwrap();
     first.admitted.close(end()).unwrap();
-    first_token.release_hold(end()).unwrap();
+    crate::installing_broker::lifecycle::fixture_cleanup::release_hold(&mut first_token, end())
+        .unwrap();
     broker.close_command_telemetry(end()).unwrap();
 }
 
@@ -258,5 +259,110 @@ fn closed_connection_refuses_preparation_before_any_storage_resource_and_retains
     assert!(!failure.cause.to_string().is_empty());
     assert!(!tree.root.join("state/storage-locks").exists());
     failure.preparing.admitted.close(end()).unwrap();
+    broker.close_command_telemetry(end()).unwrap();
+}
+
+#[test]
+fn public_prefix_keeps_the_original_connection_plan_and_lifecycle_without_minting_reuse_or_create()
+{
+    let tree = Tree::new();
+    let broker = broker(&tree);
+    tree.write("company.json", br#"{"employees":[]}"#);
+    tree.write("inspect.out", b"optional nonzero is not parsed");
+    tree.write("inspect.out.status", b"7");
+    let (_client, admitted) = incoming(&broker, "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee");
+    let original = admitted.request.connection.clone();
+    let prefix = admitted.prepare_prefix().unwrap();
+    assert!(prefix.previous().is_none());
+    assert!(Arc::ptr_eq(
+        &original,
+        &prefix
+            .observed
+            .claimed
+            .preparing
+            .admitted
+            .request
+            .connection
+    ));
+    assert_eq!(prefix.request().session(), prefix.observed.plan.session());
+    assert_eq!(
+        prefix.configuration().source_path(),
+        prefix.observed.current.source_path()
+    );
+    assert!(broker.installed.laptops.try_lock().is_err());
+    finish_claimed(prefix.observed.claimed);
+    broker.close_command_telemetry(end()).unwrap();
+}
+
+#[test]
+fn public_prefix_abort_closes_only_transport_metadata_and_keeps_real_employee_lease_and_hold() {
+    crate::test_process::owning_case!(
+        public_prefix_abort_closes_only_transport_metadata_and_keeps_real_employee_lease_and_hold
+    );
+    let tree = Tree::new();
+    let broker = broker(&tree);
+    let sid = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
+    company(&tree, sid, "11111111-2222-4333-8444-555555555555");
+    tree.write("inspect.out", b"not JSON");
+    tree.write("inspect.out.status", b"7");
+    let (_client, admitted) = incoming(&broker, sid);
+    let mut failure = admitted.prepare_prefix().unwrap().abort(end());
+    assert!(failure.cleanup.is_empty());
+    assert_eq!(broker.installed.lifecycle().unwrap().entries().count(), 0);
+    assert!(failure.storage.is_some() && failure.active.is_some());
+    assert!(
+        StorageLease::acquire_launch(
+            broker.configuration().unwrap().configuration(),
+            &ProfileSessionId::parse(sid).unwrap()
+        )
+        .is_err()
+    );
+    assert!(
+        broker.close_command_telemetry(end()).is_err(),
+        "socket close leaves SAME logical hold counted"
+    );
+    // Effect-free owning-fixture teardown after the negative assertions. This
+    // cannot acknowledge a production stopped container or global release.
+    failure.storage.take().unwrap().release(end()).unwrap();
+    let mut token = failure.active.take().unwrap();
+    crate::installing_broker::lifecycle::fixture_cleanup::release_hold(&mut token, end()).unwrap();
+}
+
+#[test]
+fn failure_transport_finalizer_attempts_socket_after_lock_refusal_and_never_replays_or_drops_resources()
+ {
+    let tree = Tree::new();
+    let broker = broker(&tree);
+    tree.write("company.json", br#"{"employees":[]}"#);
+    tree.write("inspect.out", b"bad JSON");
+    let (_client, admitted) = incoming(&broker, "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee");
+    let mut failure = admitted.prepare_prefix().err().unwrap();
+    let held = broker.installed.lifecycle().unwrap();
+    assert_eq!(failure.close_transport(Instant::now()).len(), 1);
+    assert!(
+        failure
+            .preparing
+            .admitted
+            .request
+            .connection
+            .assert_open(&broker.storage.runtime)
+            .is_err()
+    );
+    drop(held);
+    assert_eq!(
+        failure.close_transport(end()).len(),
+        1,
+        "latched original refusal, no metadata replay"
+    );
+    assert_eq!(broker.installed.lifecycle().unwrap().entries().count(), 1);
+    let mut token = failure.active.take().unwrap();
+    broker
+        .installed
+        .lifecycle()
+        .unwrap()
+        .finalize_active(&token)
+        .unwrap();
+    failure.storage.take().unwrap().release(end()).unwrap();
+    crate::installing_broker::lifecycle::fixture_cleanup::release_hold(&mut token, end()).unwrap();
     broker.close_command_telemetry(end()).unwrap();
 }

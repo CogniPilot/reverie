@@ -88,6 +88,15 @@ impl WorkerLaunchConnection {
         }
         self.record.assert_lifecycle_hold(&hold.identity)
     }
+    /// Pure origin identity for negative handler bookkeeping after its socket
+    /// closed. This proves neither open/progress state nor a releasable hold.
+    pub fn assert_same_lifecycle_record(&self, hold: &WorkerLaunchHold) -> Result<()> {
+        if Arc::ptr_eq(&self.service, &hold.service) && Arc::ptr_eq(&self.record, &hold.record) {
+            Ok(())
+        } else {
+            Err(WorkerReportError::Unconfirmed)
+        }
+    }
     pub fn assert_open(&self, runtime: &WorkerRuntime) -> Result<()> {
         if !self.same_runtime(runtime) || !self.record.can_progress() || self.service.stopping() {
             return Err(WorkerReportError::Unconfirmed);

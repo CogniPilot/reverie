@@ -2,13 +2,17 @@
 //! Its same-record hold precedes every real claim, including failed attempts.
 use super::*;
 use crate::installing_broker::lifecycle::{ActiveLaunchToken, LaunchGeneration};
+use reverie_contracts::broker_laptop::LaunchLaptopInspection;
 use reverie_host::worker_reports::WorkerLaunchHold;
 mod error;
 mod existing;
+mod finalization;
 mod observe;
 mod wait;
 use error::PreparationError;
 use wait::WaitObservation;
+#[cfg(test)]
+mod prefix_tests;
 #[cfg(test)]
 mod tests;
 
@@ -25,13 +29,76 @@ struct ClaimedWorkerLaunch<'a> {
     active: Option<ActiveLaunchToken<'a>>,
     lifecycle: LaptopLifecycle<'a>,
 }
-struct PreparationFailure<'a> {
+/// Real constructor prefix through first inspect, retaining the original
+/// lifecycle guard, accepted connection, counted hold and actual resource.
+#[must_use = "continue or abort the SAME preparation; path data cannot replace it"]
+pub struct InspectedWorkerLaunch<'a> {
+    observed: observe::ObservedWorkerLaunch<'a>,
+    previous: Option<LaunchLaptopInspection>,
+}
+#[must_use = "resource acquisition can remain uncertain even when storage is None"]
+pub struct PreparationFailure<'a> {
     preparing: PreparingWorkerLaunch<'a>,
     storage: Option<StorageClaim>,
     active: Option<ActiveLaunchToken<'a>>,
     observed: Option<WaitObservation>,
     current: Option<Arc<ValidatedWorkerSnapshot>>,
     cause: PreparationError,
+    transport_attempted: bool,
+    cleanup: Vec<WorkerDispatchError>,
+}
+impl<'a> AdmittedWorkerLaunch<'a> {
+    /// Original prefix with existing per-query policy, not a reset of the
+    /// retained admission or ten-second wait budget. This is not full launch.
+    pub fn prepare_prefix(self) -> Result<InspectedWorkerLaunch<'a>, Box<PreparationFailure<'a>>> {
+        let observed = PreparingWorkerLaunch::enter(self)?.claim()?.observe()?;
+        let runtime = &observed.claimed.preparing.broker().storage.runtime;
+        let end = Instant::now() + std::time::Duration::from_secs(20);
+        let end = runtime.stop_deadline().map_or(end, |stop| stop.min(end));
+        observed.inspect(end)
+    }
+}
+impl InspectedWorkerLaunch<'_> {
+    /// DATA only; reuse still needs policy/memory/runtime/exit/pane phases.
+    pub fn previous(&self) -> Option<&LaunchLaptopInspection> {
+        self.previous.as_ref()
+    }
+    pub fn request(&self) -> &WorkerRequest {
+        self.observed.claimed.preparing.admitted.request()
+    }
+    pub fn configuration(&self) -> &ValidatedWorkerSnapshot {
+        &self.observed.current
+    }
+}
+impl PreparationFailure<'_> {
+    pub fn cause(&self) -> &(dyn std::error::Error + 'static) {
+        &self.cause
+    }
+}
+impl std::fmt::Debug for PreparationFailure<'_> {
+    fn fmt(&self, out: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        out.debug_struct("LaunchPreparationFailure")
+            .field("cause", &self.cause)
+            .field("direct_storage_reference", &self.storage.is_some())
+            .field("active_reference", &self.active.is_some())
+            .field(
+                "waited",
+                &self.observed.as_ref().map(WaitObservation::waited),
+            )
+            .field("current_snapshot_reference", &self.current.is_some())
+            .field("cleanup", &self.cleanup)
+            .finish()
+    }
+}
+impl std::fmt::Display for PreparationFailure<'_> {
+    fn fmt(&self, out: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.cause.fmt(out)
+    }
+}
+impl std::error::Error for PreparationFailure<'_> {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&self.cause)
+    }
 }
 impl<'a> PreparingWorkerLaunch<'a> {
     fn enter(admitted: AdmittedWorkerLaunch<'a>) -> Result<Self, Box<PreparationFailure<'a>>> {
@@ -52,6 +119,8 @@ impl<'a> PreparingWorkerLaunch<'a> {
                 observed: None,
                 current: None,
                 cause: error.into(),
+                transport_attempted: false,
+                cleanup: Vec::new(),
             })),
         }
     }
@@ -69,6 +138,8 @@ impl<'a> PreparingWorkerLaunch<'a> {
                     observed: None,
                     current: None,
                     cause,
+                    transport_attempted: false,
+                    cleanup: Vec::new(),
                 }));
             }
         };
@@ -82,6 +153,8 @@ impl<'a> PreparingWorkerLaunch<'a> {
                     observed: Some(observed),
                     current: None,
                     cause,
+                    transport_attempted: false,
+                    cleanup: Vec::new(),
                 }));
             }
         };
@@ -100,6 +173,8 @@ impl<'a> PreparingWorkerLaunch<'a> {
                 observed: Some(observed),
                 current: None,
                 cause,
+                transport_attempted: false,
+                cleanup: Vec::new(),
             })),
         }
     }

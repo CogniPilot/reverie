@@ -1,6 +1,27 @@
 use super::launch::{configuration, launch};
 use super::*;
 #[test]
+fn negative_record_identity_survives_socket_close_without_conferring_progress_or_release() {
+    let fixture = Fixture::new();
+    let service = Arc::new(fixture.service());
+    let (_client, connection) = launch(&service, &fixture);
+    let mut hold = connection.retain_lifecycle().unwrap();
+    let (_other_client, other) = launch(&service, &fixture);
+    assert!(other.assert_same_lifecycle_record(&hold).is_err());
+    connection.assert_same_lifecycle_record(&hold).unwrap();
+    connection.close_socket(end()).unwrap();
+    connection.assert_same_lifecycle_record(&hold).unwrap();
+    assert!(connection.assert_lifecycle_hold(&hold).is_err());
+    assert_eq!(
+        service.records.lock().unwrap().len(),
+        2,
+        "identity is not retirement"
+    );
+    hold.release(end()).unwrap();
+    other.close(end()).unwrap();
+    service.close(end()).unwrap();
+}
+#[test]
 fn known_closed_socket_holds_the_same_capacity_until_exact_checked_lifecycle_release() {
     let fixture = Fixture::new();
     let service = Arc::new(fixture.service());

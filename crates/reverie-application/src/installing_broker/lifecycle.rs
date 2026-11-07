@@ -1,7 +1,7 @@
 //! The single installing lifecycle state. Native operations and resource
 //! settlement stay with their actual owners; membership is never a stop grant.
 use super::*;
-use reverie_host::worker_reports::{WorkerLaunchConnection, WorkerLaunchHold, WorkerReportError};
+use reverie_host::worker_reports::{WorkerLaunchConnection, WorkerLaunchHold};
 use std::ops::{Deref, DerefMut};
 
 /// Only equality with the same installed state has meaning. This is not wire
@@ -12,17 +12,6 @@ struct ActiveLaunch {
     session: ProfileSessionId,
     identity: Arc<()>,
     connection: Arc<WorkerLaunchConnection>,
-}
-impl ActiveLaunchToken<'_> {
-    /// Only the actual preparation/handler owner calls this after known native
-    /// finalization or a genuine ownership transfer. Metadata removal alone
-    /// must never release a record whose real resource outcome is unknown.
-    pub(super) fn release_hold(
-        &mut self,
-        end: std::time::Instant,
-    ) -> Result<(), WorkerReportError> {
-        self.hold.release(end)
-    }
 }
 struct PendingName {
     session: ProfileSessionId,
@@ -83,7 +72,6 @@ pub(super) struct ActiveLaunchToken<'a> {
     owner: &'a InstalledWorker,
     session: ProfileSessionId,
     identity: Arc<()>,
-    generation: LaunchGeneration,
     connection: Arc<WorkerLaunchConnection>,
     hold: WorkerLaunchHold,
 }
@@ -182,7 +170,6 @@ impl<'a> LaptopLifecycle<'a> {
             owner: self.owner,
             session: session.clone(),
             identity,
-            generation: generation.clone(),
             connection,
             hold,
         })
@@ -224,28 +211,6 @@ impl<'a> LaptopLifecycle<'a> {
         }
         Ok(connection)
     }
-    /// Reentry after unlocked Nix work still requires the real preparation's
-    /// current config/intent/storage/writer checks before any further effect.
-    pub(super) fn reenter_active(
-        &self,
-        token: &ActiveLaunchToken<'_>,
-        context: &launch::AdmittedWorkerLaunch<'_>,
-    ) -> Result<(), GateError> {
-        if !self.belongs_to(token.owner) {
-            return Err(GateError::Refused("WORKER_BROKER_ACTIVE_ORIGIN"));
-        }
-        let connection = context.lifecycle_connection(self)?;
-        if !Arc::ptr_eq(&connection, &token.connection) {
-            return Err(GateError::Refused("WORKER_BROKER_ACTIVE_ORIGIN"));
-        }
-        self.check_generation(&token.generation)?;
-        if !self.guard.active.iter().any(|entry| {
-            entry.session == token.session && Arc::ptr_eq(&entry.identity, &token.identity)
-        }) {
-            return Err(GateError::Refused("WORKER_BROKER_ACTIVE_CHANGED"));
-        }
-        Ok(())
-    }
     /// Remove only this handler's actual socket/name registrations. No storage,
     /// Office, Nix or committed Recovered/Started ownership is released here.
     pub(super) fn finalize_active(
@@ -255,8 +220,14 @@ impl<'a> LaptopLifecycle<'a> {
         if !self.belongs_to(token.owner) {
             return Err(GateError::Refused("WORKER_BROKER_ACTIVE_ORIGIN"));
         }
+        token
+            .connection
+            .assert_same_lifecycle_record(&token.hold)
+            .map_err(|_| GateError::Refused("WORKER_BROKER_PREPARATION_HOLD_CHANGED"))?;
         if self.guard.active.iter().any(|entry| {
-            entry.session == token.session && !Arc::ptr_eq(&entry.identity, &token.identity)
+            entry.session == token.session
+                && (!Arc::ptr_eq(&entry.identity, &token.identity)
+                    || !Arc::ptr_eq(&entry.connection, &token.connection))
         }) || self.guard.pending.iter().any(|entry| {
             entry.session == token.session && !Arc::ptr_eq(&entry.identity, &token.identity)
         }) {
@@ -270,56 +241,17 @@ impl<'a> LaptopLifecycle<'a> {
             .retain(|entry| !Arc::ptr_eq(&entry.identity, &token.identity));
         Ok(())
     }
-    /// Only the actual stop-all caller enters this scope while retaining
-    /// admission -> lifecycle. Snapshotting names is DATA, not stop authority.
-    pub(super) fn begin_drain(&mut self) -> Result<DrainingLaptops<'_, 'a>, GateError> {
-        if self.guard.draining {
-            return Err(GateError::Refused("WORKER_BROKER_DRAIN_ALREADY_ACTIVE"));
-        }
-        let connections = self
-            .guard
-            .active
-            .iter()
-            .map(|entry| entry.connection.clone())
-            .collect();
-        let names = self.entries().map(|(_, name)| name.clone()).collect();
-        self.guard.draining = true;
-        self.guard.generation = LaunchGeneration(Arc::new(()));
-        Ok(DrainingLaptops {
-            lifecycle: self,
-            connections,
-            names,
-        })
-    }
 }
-/// Finally-style draining reset under the original held mutex. Dropping this
-/// scope never acknowledges a stopped container or any native cleanup.
-pub(super) struct DrainingLaptops<'g, 'a> {
-    lifecycle: &'g mut LaptopLifecycle<'a>,
-    connections: Vec<Arc<WorkerLaunchConnection>>,
-    names: Vec<WorkerContainerName>,
-}
-impl DrainingLaptops<'_, '_> {
-    pub(super) fn connections(&self) -> &[Arc<WorkerLaunchConnection>] {
-        &self.connections
-    }
-    pub(super) fn names(&self) -> &[WorkerContainerName] {
-        &self.names
-    }
-}
-impl<'a> Deref for DrainingLaptops<'_, 'a> {
-    type Target = LaptopLifecycle<'a>;
-    fn deref(&self) -> &Self::Target {
-        self.lifecycle
-    }
-}
-impl DerefMut for DrainingLaptops<'_, '_> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        self.lifecycle
-    }
-}
-impl Drop for DrainingLaptops<'_, '_> {
-    fn drop(&mut self) {
-        self.lifecycle.guard.draining = false;
+
+#[cfg(test)]
+pub(super) mod fixture_cleanup {
+    use super::*;
+    /// Owning tests tear down known effect-free synthetic fixtures after their
+    /// assertions. This is not a production release contract or a no-op permit.
+    pub(in crate::installing_broker) fn release_hold(
+        token: &mut ActiveLaunchToken<'_>,
+        end: std::time::Instant,
+    ) -> Result<(), reverie_host::worker_reports::WorkerReportError> {
+        token.hold.release(end)
     }
 }

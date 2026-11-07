@@ -59,20 +59,4 @@ impl LaunchLaptopInspection {
         }
         .assert_policy(wanted)
     }
-    /// Exact parsed declarations DATA for the existing native limits reader.
-    pub fn fields_for_limits(
-        &self,
-    ) -> Result<
-        crate::reservation_engine::NativeLimitFields<'_>,
-        crate::reservation_engine::EngineDataError,
-    > {
-        crate::reservation_engine::NativeLimitFields::from_data(&self.0)
-    }
-    pub fn assert_native_result_data(
-        &self,
-    ) -> Result<(), crate::reservation_engine::EngineDataError> {
-        field(&self.0, "Id")
-            .map(|_| ())
-            .map_err(|_| crate::reservation_engine::EngineDataError::Structure)
-    }
 }

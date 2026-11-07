@@ -53,6 +53,8 @@ impl<'a> ClaimedWorkerLaunch<'a> {
             observed: Some(observed),
             current,
             cause,
+            transport_attempted: false,
+            cleanup: Vec::new(),
         })
     }
 }

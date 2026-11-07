@@ -281,20 +281,6 @@ impl ObservationContext {
             .verify_recovery_limits(row, policy.as_ref(), end)?;
         self.check(end)
     }
-    pub(crate) fn verify_launch_limits(
-        &self,
-        row: &reverie_contracts::broker_laptop::LaunchLaptopInspection,
-    ) -> Result<()> {
-        let end = self.deadline(None)?;
-        let fields = row.fields_for_limits()?;
-        fields.running_header()?;
-        let policy = self.memory_policy_fields(&fields)?;
-        self.check(end)?;
-        self.observer
-            .source
-            .verify_launch_limits(row, policy.as_ref(), end)?;
-        self.check(end)
-    }
     fn memory_policy_fields(
         &self,
         row: &NativeLimitFields<'_>,
