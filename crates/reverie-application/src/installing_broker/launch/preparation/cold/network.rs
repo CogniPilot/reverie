@@ -4,6 +4,10 @@ use super::*;
 use reverie_host::worker_laptop::{ColdPreparation, LaptopNetworkProgress};
 impl ColdBody<'_> {
     pub(super) fn prepare_network(&mut self) -> Result<(), ColdError> {
+        self.retain_network()?;
+        self.run_retained_network()
+    }
+    pub(super) fn retain_network(&mut self) -> Result<(), ColdError> {
         // The removal proof belongs to the still-held successful Nix record.
         // Validate it before Office construction or actual resource transfer.
         let Resources::CopyingNix(input) =
@@ -50,6 +54,10 @@ impl ColdBody<'_> {
                 return Err(error.into());
             }
         }
+        Ok(())
+    }
+    fn run_retained_network(&mut self) -> Result<(), ColdError> {
+        let connection = self.scope.preparing.admitted.request.connection.clone();
         let Some(Resources::NetworkHeld(network)) = self.resources.take() else {
             unreachable!("new retained network has not been dispatched");
         };

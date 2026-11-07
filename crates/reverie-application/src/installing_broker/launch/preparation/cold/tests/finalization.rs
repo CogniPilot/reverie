@@ -1,13 +1,50 @@
 //! Genuine accepted owners through the public consuming finally. The engine
 //! child supplies controlled kernel-independent Docker observations only.
 use super::*;
-use std::io::Read;
+use std::io::{Read, Write};
 
 fn request_closed(client: &mut std::os::unix::net::UnixStream) {
     client
         .set_read_timeout(Some(std::time::Duration::from_secs(1)))
         .unwrap();
     assert_eq!(client.read(&mut [0]).unwrap(), 0);
+}
+#[test]
+fn genuine_undispatched_network_abort_returns_original_owners_without_network_or_create_effects() {
+    crate::test_process::owning_case!(genuine_undispatched_network_abort_returns_original_owners_without_network_or_create_effects);
+    let tree = Tree::new();
+    let broker = broker(&tree);
+    let (mut client, cold) = classified(&broker);
+    let mut owner = ColdBody::from_classified(cold);
+    owner.stop_existing().unwrap();
+    owner.copy_nix().unwrap();
+    owner.retain_network().unwrap();
+    assert!(matches!(owner.resources, Some(Resources::NetworkHeld(_))));
+    let phone = owner.office.as_ref().unwrap().owner().clone();
+    drop(owner.lifecycle.take());
+    let failure = Box::new(ColdLaunchFailure {
+        owner,
+        cause: ColdError::Refused("OWNED_CALLER_ABORT_BEFORE_NETWORK_DISPATCH"),
+    });
+    let closed = failure.finalize_for_worker().unwrap();
+    assert!(!closed.completed() && !closed.storage_retained() && !lease_held(&broker));
+    phone
+        ._phone
+        .require_closed_for_resource(
+            &broker.storage.runtime,
+            &ProfileSessionId::parse(SID).unwrap(),
+        )
+        .unwrap();
+    request_closed(&mut client);
+    let calls = fs::read_to_string(tree.root.join("calls.txt")).unwrap();
+    assert!(
+        !calls
+            .lines()
+            .any(|line| line.starts_with("create\0") || line.starts_with("network\0create\0"))
+    );
+    broker
+        .close_command_telemetry(super::super::super::tests::end())
+        .unwrap();
 }
 #[test]
 fn known_ready_network_caller_abort_restores_plan_then_closes_actual_office_lease_and_hold() {
@@ -158,4 +195,143 @@ fn uncertain_create_finally_closes_socket_but_keeps_actual_box_office_and_counte
         .close_for_stopped_source(super::super::super::tests::end())
         .unwrap();
     drop(retained);
+}
+#[test]
+fn generic_native_stopped_without_receipt_retains_office_registration_box_and_hold() {
+    crate::test_process::owning_case!(
+        generic_native_stopped_without_receipt_retains_office_registration_box_and_hold
+    );
+    let tree = Tree::new();
+    let broker = broker(&tree);
+    let (mut client, cold) = classified(&broker);
+    let closed = cold.prepare_cold().unwrap();
+    let target = closed
+        .started
+        .network
+        .created_target(&closed.started.created)
+        .unwrap();
+    let admission = broker.admit_ordinary_stop(&target).unwrap();
+    let stopped = closed
+        .started
+        .network
+        .stop_created_under_admission(
+            &closed.started.created,
+            &closed.scope.preparing.admitted.request.connection,
+            &admission,
+            &broker,
+        )
+        .unwrap();
+    assert!(matches!(
+        stopped,
+        reverie_host::worker_laptop::CreatedCleanup::Stopped(_)
+    ));
+    admission.close().unwrap();
+    let office = closed.started.office.clone();
+    let retained = closed.finalize_for_worker().err().unwrap();
+    assert!(retained.to_string().contains("WORKER_COLD_OFFICE_RETAINED"));
+    assert!(lease_held(&broker));
+    assert_eq!(broker.installed.lifecycle().unwrap().guard.len(), 1);
+    assert!(
+        office
+            ._phone
+            .require_closed_for_resource(
+                &broker.storage.runtime,
+                &ProfileSessionId::parse(SID).unwrap()
+            )
+            .is_err()
+    );
+    request_closed(&mut client);
+    assert!(
+        broker
+            .close_command_telemetry(super::super::super::tests::end())
+            .is_err()
+    );
+    // No completion/Service owner authorized ending the producer. Synthetic
+    // fixture teardown below leaves the real resource and Hold retained.
+    office
+        .close_for_stopped_source(super::super::super::tests::end())
+        .unwrap();
+    drop(retained);
+}
+
+#[test]
+fn whole_created_relay_eof_preserves_owner_until_fresh_late_receipt_stop_before_reap() {
+    crate::test_process::owning_case!(
+        whole_created_relay_eof_preserves_owner_until_fresh_late_receipt_stop_before_reap
+    );
+    let tree = Tree::new();
+    let broker = broker(&tree);
+    let (mut client, cold) = classified(&broker);
+    let closed = cold.prepare_cold().unwrap();
+    let connection = closed.scope.preparing.admitted.request.connection.clone();
+    let home = closed.started.network.paths().home().to_owned();
+    let office = closed.started.office.clone();
+    let viewing = closed.start_viewer().unwrap();
+    client
+        .set_read_timeout(Some(std::time::Duration::from_secs(3)))
+        .unwrap();
+    let returned = std::thread::scope(|scope| {
+        let peer = scope.spawn(|| {
+            let frame = reverie_core::worker_wire::WorkerFrameHeader::for_payload(b'I', 7).unwrap();
+            client.write_all(&frame.encode()).unwrap();
+            client.write_all(b"cold-io").unwrap();
+            let mut bytes = Vec::new();
+            while bytes.len() < 7 {
+                let mut raw = [0; 5];
+                client.read_exact(&mut raw).unwrap();
+                let frame = reverie_core::worker_wire::WorkerFrameHeader::decode(raw);
+                assert_eq!(frame.kind(), b'O');
+                let mut payload = vec![0; frame.payload_length() as usize];
+                client.read_exact(&mut payload).unwrap();
+                bytes.extend(payload);
+            }
+            assert_eq!(bytes, b"cold-io");
+            client.shutdown(std::net::Shutdown::Write).unwrap();
+        });
+        let returned = viewing.relay();
+        peer.join().unwrap();
+        returned
+    });
+    let (viewing, outcome) = returned.into_parts();
+    assert!(matches!(
+        outcome,
+        Ok(reverie_host::worker_reports::ViewerRelayEnd::PeerClosed)
+    ));
+    assert!(Arc::ptr_eq(
+        &viewing.owner.scope.preparing.admitted.request.connection,
+        &connection
+    ));
+    assert!(viewing.owner.scope.active.is_some() && lease_held(&broker));
+    assert!(
+        broker
+            .storage
+            .runtime
+            .laptop_viewer_status(&viewing.session)
+            .unwrap()
+            .is_none()
+    );
+    let metadata: serde_json::Value = serde_json::from_slice(
+        &fs::read(tree.root.join("state").join(SID).join("runtime.json")).unwrap(),
+    )
+    .unwrap();
+    fs::write(
+        home.join(".reverie-launch")
+            .join(metadata["exit"].as_str().unwrap()),
+        b"0",
+    )
+    .unwrap();
+    let closed = viewing.finalize_for_worker().unwrap();
+    assert!(closed.completed() && !closed.storage_retained() && !lease_held(&broker));
+    assert!(tree.root.join("cold-stop-before-viewer-reap").is_file());
+    office
+        ._phone
+        .require_closed_for_resource(
+            &broker.storage.runtime,
+            &ProfileSessionId::parse(SID).unwrap(),
+        )
+        .unwrap();
+    request_closed(&mut client);
+    broker
+        .close_command_telemetry(super::super::super::tests::end())
+        .unwrap();
 }
