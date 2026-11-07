@@ -2,6 +2,7 @@
 use super::*;
 use reverie_contracts::human_protocol::HumanFrame;
 mod budgets;
+mod process_snapshot;
 
 fn accepted(
     fixture: &Fixture,

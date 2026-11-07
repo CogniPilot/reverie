@@ -4,8 +4,9 @@
 mod files;
 #[cfg(test)]
 mod tests;
+use super::files::Descriptors;
 use super::*;
-use files::{Descriptors, Stamp, check_end, nix_path, open_image};
+use files::{Stamp, check_end, nix_path, open_image};
 use reverie_contracts::resource_actor::CodeFile;
 use reverie_core::decimal::UnsignedInteger;
 use sha2::{Digest, Sha256};
@@ -52,26 +53,7 @@ impl ImmutableCodeObserver {
         let path = nix_path(&code.path)?;
         let mut files = Descriptors::default();
         let body = observe(&mut files, init, &path, code, end);
-        self.finish(body, &mut files)
-    }
-    fn finish(
-        &mut self,
-        body: Result<ObservedCodeFile>,
-        files: &mut Descriptors,
-    ) -> Result<ObservedCodeFile> {
-        let closed = files.close();
-        if closed.is_err() {
-            self.close_uncertain = true;
-        }
-        match (body, closed) {
-            (Ok(value), Ok(())) => Ok(value),
-            (Err(error), Ok(())) => Err(error),
-            (Ok(_), Err(error)) => Err(error),
-            (Err(primary), Err(secondary)) => Err(WebsiteFactsError::Finalization {
-                primary: Box::new(primary),
-                secondary: Box::new(secondary),
-            }),
-        }
+        files.finish(body, &mut self.close_uncertain)
     }
 }
 fn read_open(path: &Path) -> io::Result<File> {

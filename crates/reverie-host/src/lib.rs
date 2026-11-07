@@ -29,6 +29,7 @@ mod observation;
 pub mod office;
 pub mod reservation_control;
 pub mod reservation_kernel;
+pub mod resource_facts;
 pub mod rootless;
 pub mod task_perf;
 #[cfg(target_os = "linux")]
