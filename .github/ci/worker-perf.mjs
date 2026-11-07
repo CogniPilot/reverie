@@ -25,7 +25,7 @@ try{
  const stats=path.join(dir,'stat.csv'), data=path.join(dir,'perf.data');
  invoke(['stat','--no-big-num','-x,','--output',stats,'--event','task-clock:u','--',process.execPath,'-e',${JSON.stringify(workload)}]);
  const text=fs.readFileSync(stats,'utf8');assert.doesNotMatch(text,/<not (counted|supported)>/);assert.match(text,/task-clock:u/);assert.ok(text.split('\\n').some(line=>Number(line.split(',')[0])>0),'no positive task-clock count');
- invoke(['record','--quiet','--mmap-pages','64','--freq','99','--event','task-clock:u','--output',data,'--',process.execPath,'-e',${JSON.stringify(workload)}]);
+ invoke(['record','--quiet','--per-thread','--all-user','--mmap-pages','64','--freq','99','--event','task-clock:u','--output',data,'--',process.execPath,'-e',${JSON.stringify(workload)}]);
  const report=invoke(['report','--stdio','--header','--input',data]);
  assert.match(report.stdout,/task-clock:u/);assert.match(report.stdout,/# Samples:\\s*[1-9]/,'record/report must contain actual samples');
  process.stdout.write(JSON.stringify({perf:'passed',uid:process.getuid(),event:'task-clock:u',stat:true,record:true,report:true})+'\\n');
