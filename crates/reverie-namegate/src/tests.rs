@@ -110,22 +110,60 @@ fn category_name(category: Category) -> &'static str {
     category.name()
 }
 
+/// Maps one reference output string to (category, list index, inside a blob). The reference
+/// returns team, internal and AI words as list entries, and path markers and AI phrases as the
+/// matched text, which belongs to the first alternative that matches it whole.
+fn classify(lists: &Lists, output: &str) -> Value {
+    let (text, in_blob) = output
+        .strip_prefix("blob:")
+        .map_or((output, false), |rest| (rest, true));
+    let entry = |entries: &[String]| entries.iter().position(|e| e == text);
+    let whole = |alternatives: &[Vec<crate::lists::MarkerPart>]| {
+        crate::tokens::matches(text, alternatives)
+            .first()
+            .filter(|(_, matched, at)| *at == 0 && matched.chars().count() == text.chars().count())
+            .map(|(index, _, _)| *index)
+    };
+    let phrases: Vec<_> = lists
+        .ai_phrases
+        .iter()
+        .map(|p| crate::tokens::literal_parts(p))
+        .collect();
+    let (category, index) = entry(&lists.team)
+        .map(|i| (Category::Team, i))
+        .or_else(|| entry(&lists.internal).map(|i| (Category::Internal, i)))
+        .or_else(|| entry(&lists.ai_words).map(|i| (Category::AiWord, i)))
+        .or_else(|| whole(&lists.path_markers).map(|i| (Category::Path, i)))
+        .or_else(|| whole(&phrases).map(|i| (Category::AiPhrase, i)))
+        .expect("every reference output belongs to a placeholder entry");
+    serde_json::json!([category.name(), index, in_blob])
+}
+
+fn expected(lists: &Lists, outputs: &Value) -> Value {
+    Value::Array(
+        outputs
+            .as_array()
+            .expect("outputs")
+            .iter()
+            .map(|o| classify(lists, o.as_str().expect("output")))
+            .collect(),
+    )
+}
+
+/// The fixture is the raw output of the reviewed reference gate, run unmodified with only its
+/// list constants rebound to the placeholder lists. The reference hard-codes its own repository
+/// name, so the placeholder `home_repo` is that name and both sides of the exemption are run.
 #[test]
 fn every_parity_case_matches_the_reference() {
     let lists = lists();
     let corpus: Value = serde_json::from_str(PARITY).expect("parity corpus");
-    assert_eq!(
-        corpus["lists_sha256"].as_str(),
-        Some(lists.digest()),
-        "corpus was generated from these lists"
-    );
     let modes = [
+        ("text", Kind::Text, "reverie"),
         ("text", Kind::Text, "other"),
-        ("text", Kind::Text, "acmeproj"),
+        ("code", Kind::Code, "reverie"),
         ("code", Kind::Code, "other"),
-        ("code", Kind::Code, "acmeproj"),
     ];
-    let failures: Vec<String> = corpus["cases"]
+    let failures: Vec<String> = corpus
         .as_array()
         .expect("cases")
         .iter()
@@ -133,15 +171,20 @@ fn every_parity_case_matches_the_reference() {
         .flat_map(|(n, case)| modes.iter().map(move |mode| (n, case, mode)))
         .filter_map(|(n, case, &(kind_name, kind, repo))| {
             let text = case["text"].as_str().expect("text");
-            let expected = &case[format!("{kind_name}/{repo}")];
+            let reference = &case[format!("{kind_name}/{repo}")];
+            let want = serde_json::json!({
+                "blocking": expected(&lists, &reference["blocking"]),
+                "flagged": expected(&lists, &reference["flagged"]),
+                "hits": expected(&lists, &reference["hits"]),
+            });
             let outcome = scan(&lists, text, kind, repo);
             let actual = serde_json::json!({
                 "blocking": encode(&outcome.blocking),
                 "flagged": encode(&outcome.flagged),
                 "hits": encode(&hits(&lists, text, kind, repo)),
             });
-            (&actual != expected)
-                .then(|| format!("case {n} {kind_name}/{repo}: expected {expected} got {actual}"))
+            (actual != want)
+                .then(|| format!("case {n} {kind_name}/{repo}: expected {want} got {actual}"))
         })
         .collect();
     assert!(
