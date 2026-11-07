@@ -7,6 +7,7 @@ mod direct;
 mod entry;
 mod original;
 mod prefix;
+mod preparation_failure;
 mod registration;
 mod resources;
 
@@ -117,7 +118,7 @@ impl std::fmt::Display for ColdFinalizationFailure<'_> {
 }
 impl std::error::Error for ColdFinalizationFailure<'_> {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        if let Owner::Preparation(owner) = &self.cleanup.owner { return Some(owner.cause()); }
+        if let Owner::Preparation(owner) = &self.cleanup.owner { return Some(owner.as_ref().cause()); }
         self.cleanup
             .primary
             .as_ref()

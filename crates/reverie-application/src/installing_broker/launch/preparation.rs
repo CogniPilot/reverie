@@ -60,6 +60,16 @@ pub struct PreparationFailure<'a> {
     transport_attempted: bool,
     cleanup: Vec<WorkerDispatchError>,
     observation: Option<FailureObservation>,
+    origin: FailureOrigin,
+    registration: FailureRegistration,
+}
+enum FailureOrigin {
+    Prefix,
+    ClassifiedAbort,
+}
+enum FailureRegistration {
+    Unobserved,
+    Captured(Option<Arc<crate::installing_broker::recovered::RecoveredOffice>>),
 }
 // Actual observations retained by their original producer. None before their
 // phase is DATA; no path/SID/status can recreate a cleanup or release owner.
@@ -143,6 +153,8 @@ impl<'a> PreparingWorkerLaunch<'a> {
                 transport_attempted: false,
                 cleanup: Vec::new(),
                 observation: None,
+                origin: FailureOrigin::Prefix,
+                registration: FailureRegistration::Unobserved,
             })),
         }
     }
@@ -163,6 +175,8 @@ impl<'a> PreparingWorkerLaunch<'a> {
                     transport_attempted: false,
                     cleanup: Vec::new(),
                     observation: None,
+                    origin: FailureOrigin::Prefix,
+                    registration: FailureRegistration::Unobserved,
                 }));
             }
         };
@@ -179,6 +193,8 @@ impl<'a> PreparingWorkerLaunch<'a> {
                     transport_attempted: false,
                     cleanup: Vec::new(),
                     observation: None,
+                    origin: FailureOrigin::Prefix,
+                    registration: FailureRegistration::Unobserved,
                 }));
             }
         };
@@ -200,6 +216,8 @@ impl<'a> PreparingWorkerLaunch<'a> {
                 transport_attempted: false,
                 cleanup: Vec::new(),
                 observation: None,
+                origin: FailureOrigin::Prefix,
+                registration: FailureRegistration::Unobserved,
             })),
         }
     }

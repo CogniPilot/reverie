@@ -45,6 +45,8 @@ impl<'a> ClaimedWorkerLaunch<'a> {
             observed,
             lifecycle,
         } = self;
+        let registration =
+            lifecycle.capture_reuse_registration(preparing.admitted.request().session());
         drop(lifecycle);
         Box::new(PreparationFailure {
             preparing,
@@ -56,6 +58,8 @@ impl<'a> ClaimedWorkerLaunch<'a> {
             transport_attempted: false,
             cleanup: Vec::new(),
             observation: None,
+            origin: FailureOrigin::Prefix,
+            registration: FailureRegistration::Captured(registration),
         })
     }
 }
