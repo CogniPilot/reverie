@@ -28,7 +28,7 @@ pub use launch::{
     ColdLaunchFailure, ColdWorkerLaunch, ExistingColdTarget, InspectedWorkerLaunch,
     LaunchAdmissionFailure, LaunchPreparationFailure, PreparedReuseViewer, ReceivedWorkerLaunch,
     RestoredReuse, ReusableWorkerLaunch, ReuseRelayError, ReuseRelayReturned, ReuseViewerFailure,
-    ViewingReuse, WorkerConnectionDispatch, WorkerDispatchError,
+    ReuseFinalizationFailure, ReuseHandlerClosed, ViewingReuse, WorkerConnectionDispatch, WorkerDispatchError,
 };
 pub(crate) use lifecycle::LaptopLifecycle;
 use lifecycle::LaptopState;

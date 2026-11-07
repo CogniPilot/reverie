@@ -3,6 +3,7 @@
 use super::*;
 use reverie_host::worker_reports::{WorkerLaunchConnection, WorkerLaunchHold};
 use std::ops::{Deref, DerefMut};
+mod reuse_finalization;
 
 /// Only equality with the same installed state has meaning. This is not wire
 /// data or permission. Keeping the Arc prevents address reuse while observed.

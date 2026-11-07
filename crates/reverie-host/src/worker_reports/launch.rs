@@ -31,45 +31,69 @@ impl WorkerReportService {
         collector: &CommandTelemetry,
         configuration: &EffectiveWorkerConfig,
     ) -> Result<AcceptedWorkerConnection> {
-        let record = self.admit(stream)?;
-        match record.read_request(self, collector, configuration) {
-            Ok(Some(request)) => Ok(AcceptedWorkerConnection::Launch(WorkerLaunchConnection {
-                service: self.clone(),
-                record,
-                request,
-            })),
-            Ok(None) => {
-                self.finish_accepted(&record)?;
-                Ok(AcceptedWorkerConnection::ReportCompleted)
-            }
-            Err(error) => finalized(Err(error), self.finish_accepted(&record)),
-        }
+        self.register_worker_connection(stream)?
+            .receive(collector, configuration)
     }
-    fn finish_accepted(&self, record: &Arc<Record>) -> Result<()> {
+    pub(super) fn finish_accepted(&self, record: &Arc<Record>) -> Result<()> {
         let end = self
             .engine
             .stop_deadline()
             .unwrap_or_else(|| Instant::now() + Duration::from_secs(10));
-        let result = record.finish_launch(end);
+        self.finish_accepted_budget(record, &super::budget::CleanupBudget::bounded(self, end))
+    }
+    pub(super) fn finish_accepted_for_worker(&self, record: &Arc<Record>) -> Result<()> {
+        self.finish_accepted_budget(record, &super::budget::CleanupBudget::worker(self))
+    }
+    fn finish_accepted_budget(
+        &self,
+        record: &Arc<Record>,
+        budget: &super::budget::CleanupBudget<'_>,
+    ) -> Result<()> {
+        let result = record.finish_launch(budget);
         finalized(
             result,
-            self.retire_launch(record, end).and_then(require_retired),
+            self.retire_launch(record, budget)
+                .and_then(|state| match state {
+                    WorkerLaunchClose::Complete
+                    | WorkerLaunchClose::SocketClosedHandlerRetained => Ok(()),
+                    WorkerLaunchClose::SocketClosedLifecycleHeld => {
+                        Err(WorkerReportError::LifecycleRetained)
+                    }
+                }),
         )
     }
-    fn retire_launch(&self, record: &Arc<Record>, end: Instant) -> Result<WorkerLaunchClose> {
-        let mut records = self.lock_until(end)?;
-        let state = record.lifecycle_until(end)?;
+    fn retire_launch(
+        &self,
+        record: &Arc<Record>,
+        budget: &super::budget::CleanupBudget<'_>,
+    ) -> Result<WorkerLaunchClose> {
+        let mut records = self.lock_budget(budget)?;
+        let state = record.lifecycle_until(budget)?;
         if !record.socket_closed_known() {
             return Err(WorkerReportError::Unconfirmed);
         }
         if matches!(*state, super::retention::LifecycleHoldState::Held(_)) {
             return Ok(WorkerLaunchClose::SocketClosedLifecycleHeld);
         }
+        if !record.handler_settled() {
+            return Ok(WorkerLaunchClose::SocketClosedHandlerRetained);
+        }
         records.retain(|other| !Arc::ptr_eq(other, record));
         Ok(WorkerLaunchClose::Complete)
     }
 }
 impl WorkerLaunchConnection {
+    pub(super) fn from_registered(
+        service: Arc<WorkerReportService>,
+        record: Arc<Record>,
+        request: WorkerRequest,
+    ) -> Self {
+        Self {
+            service,
+            record,
+            request,
+        }
+    }
     pub(super) fn require_terminal_hold(&self) -> Result<()> {
         self.record.require_terminal_hold()
     }
@@ -158,16 +182,23 @@ impl WorkerLaunchConnection {
     /// Consume the socket descriptors once, preserving a distinct known-closed
     /// lifecycle-held outcome. It does not release that actual lifecycle hold.
     pub fn close_socket(&self, requested: Instant) -> Result<WorkerLaunchClose> {
-        let end = self
-            .service
-            .engine
-            .stop_deadline()
-            .map_or(requested, |stop| stop.min(requested));
-        let result = self.record.finish_launch(end);
+        self.close_socket_budget(&super::budget::CleanupBudget::bounded(
+            &self.service,
+            requested,
+        ))
+    }
+    pub fn close_socket_for_worker(&self) -> Result<WorkerLaunchClose> {
+        self.close_socket_budget(&super::budget::CleanupBudget::worker(&self.service))
+    }
+    fn close_socket_budget(
+        &self,
+        budget: &super::budget::CleanupBudget<'_>,
+    ) -> Result<WorkerLaunchClose> {
+        let result = self.record.finish_launch(budget);
         match result {
-            Ok(()) => self.service.retire_launch(&self.record, end),
+            Ok(()) => self.service.retire_launch(&self.record, budget),
             Err(primary) => {
-                let cleanup = self.service.retire_launch(&self.record, end).map(|_| ());
+                let cleanup = self.service.retire_launch(&self.record, budget).map(|_| ());
                 finalized(Err(primary), cleanup)
             }
         }
@@ -184,5 +215,6 @@ fn require_retired(outcome: WorkerLaunchClose) -> Result<()> {
     match outcome {
         WorkerLaunchClose::Complete => Ok(()),
         WorkerLaunchClose::SocketClosedLifecycleHeld => Err(WorkerReportError::LifecycleRetained),
+        WorkerLaunchClose::SocketClosedHandlerRetained => Err(WorkerReportError::HandlerRetained),
     }
 }

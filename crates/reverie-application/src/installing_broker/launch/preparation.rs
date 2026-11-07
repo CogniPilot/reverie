@@ -11,7 +11,8 @@ pub use cold::{AllocationClosedCold, ColdLaunchFailure};
 mod existing;
 pub use existing::{
     AllocationClosedReuse, ClassifiedWorkerLaunch, ColdWorkerLaunch, ExistingColdTarget,
-    PreparedReuseViewer, RestoredReuse, ReusableWorkerLaunch, ReuseViewerFailure, ViewingReuse,
+    PreparedReuseViewer, RestoredReuse, ReusableWorkerLaunch, ReuseFinalizationFailure,
+    ReuseHandlerClosed, ReuseViewerFailure, ViewingReuse,
 };
 mod finalization;
 mod observe;

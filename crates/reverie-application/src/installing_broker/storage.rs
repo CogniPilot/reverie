@@ -50,12 +50,17 @@ struct Entry {
 }
 enum EntryOwner {
     Direct(Box<LaunchStorage>),
+    Finalizing(FinalizingStorage),
     Source(Arc<source::SourceRecord>),
     Nix(reverie_host::worker_nix::NixWorkflow),
     Laptop(reverie_host::worker_laptop::LaptopWorkflow),
     ReplacementStop(Arc<Mutex<reverie_host::worker_source_stop::OrdinaryReplacementStop>>),
     OrdinaryStop(Arc<Mutex<reverie_host::worker_source_stop::OrdinaryLaptopStop>>),
     Existing(Arc<reverie_host::worker_laptop::ExistingViewer>),
+}
+struct FinalizingStorage {
+    owner: Box<LaunchStorage>,
+    brand: Arc<()>,
 }
 /// The original claim destination, shared by named resource transitions.
 /// These private fields describe where to restore custody, never permission.
@@ -216,6 +221,11 @@ impl StorageRegistry {
         else {
             return Ok(());
         };
+        if matches!(entries[index].owner, EntryOwner::Finalizing(_)) {
+            return Err(StorageWorkflowError::refused(
+                "WORKER_STORAGE_FINALIZATION_HELD",
+            ));
+        }
         if matches!(entries[index].owner, EntryOwner::Nix(_)) {
             return Err(StorageWorkflowError::refused("WORKER_NIX_STORAGE_RETAINED"));
         }
