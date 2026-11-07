@@ -118,7 +118,9 @@ function kindOf(i) {
 const onTimeline = i => i.status !== 'wontdo' && Number.isFinite(i.start) && Number.isFinite(i.end) && i.end >= i.start;
 const overdue = (i, now) => i.status !== 'done' && i.status !== 'wontdo' && Number.isFinite(i.end) && i.end <= now;
 
-/* Only the work view is filtered. Cards, history and all-work summary totals stay intact. */
+/* Only the work view is filtered. Cards, history and all-work summary totals stay intact.
+   All work is the default: the newest plan tag can be days old while current cards carry none,
+   so the latest plan is shown only after the viewer picks it. */
 let workChoice = null;
 try { const saved = localStorage.getItem('board-work-view'); if (saved === 'all' || saved === 'latest') workChoice = saved; } catch (e) {}
 function latestPlanTag() {
@@ -126,14 +128,14 @@ function latestPlanTag() {
 }
 function workIssues() {
   const tag = latestPlanTag();
-  return tag && workChoice !== 'all' ? B.issues.filter(i => (i.tags || []).includes(tag)) : (B?.issues || []);
+  return tag && workChoice === 'latest' ? B.issues.filter(i => (i.tags || []).includes(tag)) : (B?.issues || []);
 }
 function workScope() {
   const tag = latestPlanTag(), select = document.getElementById('work-scope');
   const date = tag ? tag.slice(-8).replace(/^(....)(..)(..)$/, '$1-$2-$3') : null;
   select.options[0].textContent = date ? 'Latest plan · ' + date : 'Latest plan (none)';
   select.options[0].disabled = !tag;
-  select.value = tag && workChoice !== 'all' ? 'latest' : 'all';
+  select.value = tag && workChoice === 'latest' ? 'latest' : 'all';
   document.getElementById('work-scope-count').textContent = (select.value === 'latest' ? 'Latest plan: ' : 'All work: ') + workIssues().length + ' of ' + B.issues.length + ' cards. Summary totals above cover all work.';
 }
 document.getElementById('work-scope').onchange = e => {
@@ -214,7 +216,7 @@ async function load(warm = false, afterWrite = false) {
     // built changes on each read; unchanged board data must not rebuild the SVG.
     const nextKey = JSON.stringify([next.rev, next.timeZone, next.company, next.roster, next.ownerIds, next.polls, next.pins, next.planBurn, next.pace, next.pollNotes, next.structuredDecisionWrites]);
     B = next; TZ = B.timeZone || TZ; failures = 0; banner.hidden = true; boardActionState(boardActive && !document.hidden);
-    if ((first || previousPlan !== latestPlanTag()) && latestPlanTag() && workChoice !== 'all') preset = 'fit';
+    if ((first || previousPlan !== latestPlanTag()) && latestPlanTag() && workChoice === 'latest') preset = 'fit';
     if (first || preset === 'fit') view = presetView(preset);
     if (renderKey === nextKey) { kpis(); return; }
     renderKey = nextKey;
