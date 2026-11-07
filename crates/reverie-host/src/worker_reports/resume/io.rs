@@ -86,6 +86,8 @@ impl WorkerActorChannel {
                 Ok(count) => bytes = &bytes[count..],
                 Err(nix::errno::Errno::EINTR) => {}
                 Err(nix::errno::Errno::EAGAIN) => {
+                    #[cfg(test)]
+                    super::test_hooks::send_wait();
                     self.wait(stream, nix::poll::PollFlags::POLLOUT, end)?;
                 }
                 Err(error) => return Err(std::io::Error::from(error).into()),

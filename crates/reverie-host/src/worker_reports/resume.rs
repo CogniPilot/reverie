@@ -3,6 +3,8 @@
 //! Domain owners must qualify the installed program and recheck its process
 //! before and after every receive chunk; no verifier callback is accepted here.
 mod io;
+#[cfg(test)]
+pub(super) mod test_hooks;
 use super::*;
 use std::os::fd::OwnedFd;
 

@@ -162,7 +162,10 @@ impl Record {
                     self.opaque.store(true, Ordering::Release);
                     return Ok(error.into_inner());
                 }
-                Err(std::sync::TryLockError::WouldBlock) => {}
+                Err(std::sync::TryLockError::WouldBlock) => {
+                    #[cfg(test)]
+                    super::resume::test_hooks::lock_wait();
+                }
             }
             if budget.pause().is_err() {
                 self.opaque.store(true, Ordering::Release);
