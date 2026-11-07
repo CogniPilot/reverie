@@ -183,6 +183,11 @@ fn cold_launch(args: &[String]) -> bool {
         ["stop", "--time", "2", target] => {
             assert_eq!(*target, "c".repeat(64));
             if Path::new("cold-stop-refused").is_file() { std::process::exit(7); }
+            if let Ok(pid) = fs::read_to_string("viewer-pid") {
+                let stat = fs::read_to_string(format!("/proc/{pid}/stat")).unwrap();
+                assert_ne!(stat.rsplit_once(')').unwrap().1.split_whitespace().next(), Some("Z"));
+                fs::write("cold-stop-before-viewer-reap", b"actual owned viewer still alive before stop").unwrap();
+            }
             fs::write("cold-stopped", b"actual fixed stop child completed").unwrap();
         }
         ["kill", target] => {
