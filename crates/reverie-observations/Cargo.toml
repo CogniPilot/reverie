@@ -9,6 +9,10 @@ publish.workspace = true
 name = "reverie-resource-history"
 path = "src/bin/reverie-resource-history.rs"
 
+[[bin]]
+name = "reverie-collect-state"
+path = "src/bin/reverie-collect-state.rs"
+
 [dependencies]
 clap.workspace = true
 libc.workspace = true
