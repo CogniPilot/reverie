@@ -27,7 +27,7 @@ concurrency:
 jobs:
   image:
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    timeout-minutes: 90
     permissions:
       contents: read
     steps:
@@ -115,6 +115,24 @@ jobs:
             sleep 1
           done
           [ "$code" = 401 ] || { cat "$native_home/console.log"; exit 1; }
+
+      - name: Enable per-task userspace perf on the disposable CI host
+        env:
+          REVERIE_CI_RUNNER_ENVIRONMENT: ${{ runner.environment }}
+          CARGO_TARGET_DIR: ${{ runner.temp }}/reverie-perf-target
+        run: nix develop --command cargo xtask prepare-ci-perf
+
+      - name: Qualify real perf in the Nix worker image under task-v1 seccomp
+        env:
+          CARGO_TARGET_DIR: ${{ runner.temp }}/reverie-perf-target
+        run: |
+          nix build .#workerImage --out-link "$HOME/scratch/reverie/build/worker-image"
+          nix build .#workerTaskPerfPolicy --out-link "$HOME/scratch/reverie/build/perf-policy"
+          docker load --input "$HOME/scratch/reverie/build/worker-image"
+          worker_image=$(docker image inspect --format '{{.Id}}' reverie-worker:latest)
+          nix develop --command cargo xtask verify-worker-perf --temporary-image "$worker_image" \
+            --policy-manifest "$HOME/scratch/reverie/build/perf-policy/share/reverie/worker-perf-profile.json" \
+            --archive-link "$HOME/scratch/reverie/build/worker-image"
 
       - name: Smoke-test the pinned Codex runtime against generated launch commands
         timeout-minutes: 6
