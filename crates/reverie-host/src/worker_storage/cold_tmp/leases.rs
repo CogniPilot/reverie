@@ -3,7 +3,6 @@
 use super::directories::Directory;
 use super::*;
 mod keys;
-#[cfg(test)]
 mod retained;
 pub(super) use keys::ClearKeys;
 use reverie_contracts::worker_cold_tmp::{

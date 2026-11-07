@@ -231,6 +231,56 @@ pub struct LaunchStorage {
     cold: super::cold_tmp::Lifecycle,
 }
 impl LaunchStorage {
+    pub(crate) fn require_cold_unattempted(&self) -> OwnerResult<()> {
+        self.cold.require_unattempted()
+    }
+    pub(in crate::worker_storage) fn matches_cold_confirmation(
+        &self,
+        native: &crate::worker_laptop::cold_confirm::Confirmed,
+    ) -> bool {
+        native.matches_storage(self, &self.engine)
+    }
+    pub(crate) fn retained_native_target(&self) -> OwnerResult<((u64, u64), PosixPath)> {
+        self.cold.native_target()
+    }
+    pub(crate) fn begin_retained_cold_commit(
+        &mut self,
+        source: &EffectiveWorkerConfig,
+        native: &crate::worker_laptop::cold_confirm::Confirmed,
+        end: Instant,
+    ) -> OwnerResult<()> {
+        let mut cold = std::mem::take(&mut self.cold);
+        let result = cold.begin_commit(self, source, native, end);
+        self.cold = cold;
+        result
+    }
+    pub(crate) fn release_retained_cold_commit(
+        &mut self,
+        source: &EffectiveWorkerConfig,
+        native: &crate::worker_laptop::cold_confirm::Confirmed,
+        end: Instant,
+    ) -> OwnerResult<()> {
+        let mut cold = std::mem::take(&mut self.cold);
+        let result = cold.release(self, source, native, end);
+        self.cold = cold;
+        result
+    }
+    pub(crate) fn prepare_retained_cold_temporary(
+        &mut self,
+        runtime: &WorkerRuntime,
+        plan: &crate::worker_launch::ObservedCreatePlan,
+        end: Instant,
+    ) -> OwnerResult<()> {
+        plan.assert_storage_owner(runtime, self)
+            .map_err(|_| StorageOwnerError::Refused("WORKER_COLD_STORAGE_OWNER_CHANGED"))?;
+        let mut cold = std::mem::take(&mut self.cold);
+        let result = cold.retain(runtime, self, plan, end);
+        self.cold = cold;
+        result
+    }
+    pub(crate) fn require_cold_resources_current(&self) -> OwnerResult<()> {
+        self.cold.require_current(self)
+    }
     pub(crate) fn clear_cold_temporary(
         &mut self,
         runtime: &WorkerRuntime,

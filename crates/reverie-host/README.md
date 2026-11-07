@@ -407,9 +407,36 @@ or codec call. Iteration avoids interpreter recursion exhaustion; it adds no
 new depth cap. These observations still rely on the original trusted host and
 serialized lifecycle boundary, not immunity to privileged/same-UID rename races.
 Absent policy remains non-destructive and independently fenced.
-`retain-and-replace` still refuses until its full pre-Office preparation and
-post-memory confirmation are implemented. This checkpoint supplies no installed
-selection, data migration, context/grant publisher or complete cold-feature claim.
+`prepare_retained_cold_tmp` runs `retain-and-replace` before Office/network on
+the SAME successful Nix record and its actual employee lease. The original
+plan's raw configuration selects the fixed paths and configured lease bases.
+Real canonical barriers, complete registered-lease inventory, fixed native
+census and bounded same-real-UID reference scans precede durable pending intent.
+Only fixed no-replace renames move the old root into its permanent `.keep`
+envelope and publish a new private writable TMP. No old-tree enumeration,
+payload read, removal or automatic reclamation occurs. UNKNOWN observations
+remain explicit; definite references still refuse. Fresh attempt-owned lease
+temporaries refuse occupied names instead of truncating a foreign partial file.
+
+Network/create/memory retain the SAME private prepared proof. Post-memory
+commit confirms the actual created CID, image, labels, sleeping entrypoint,
+PID/start, fresh inode and real `/tmp` namespace binding. Bound publication,
+lease/refscan descriptors and every local finalizer complete before a second
+fixed same-record confirmation. All fallible caller/current/deadline checks
+precede the final pending unlink; only in-memory phase/token publication follows.
+Neither prepared JSON nor a durable BOUND_PENDING_RELEASE record can mint the
+phase or repair an uncertain outcome. Failure preserves original and foreign
+bytes, the actual resources and any pending fence, with no transaction replay.
+The actual App lifecycle must consume these methods in the original order;
+this source does not select an installed runtime, migrate live data, publish
+memory contexts/grants or establish global writer/capacity release.
+Fixed finish tests bind their synthetic fresh TMP onto `/tmp` in a private
+user/mount/PID/network namespace while retaining the positive service UID.
+They use a unique0700 current-system-account home fixture outside `/tmp`, so
+the canonical gate's short `/tmp` override cannot hide their own controls.
+The ordinary reference/permission cases and required UID0 reader case keep
+their existing namespace/capability semantics. These are synthetic native
+resource tests, not an OCI-image or installed-launch qualification.
 
 `release_laptop_nix_guard` consumes only the original guard after the same
 record's acknowledged pane startup. It moves the actual storage, original Nix

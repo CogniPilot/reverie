@@ -67,7 +67,6 @@ fn live_aliases(
 impl ReservationKernel {
     /// The cold collector supplies only nodes from its fixed proc inventory.
     /// The same reader/identity bracket is shared with ordinary kernel probes.
-    #[cfg(test)]
     pub(crate) fn cold_reference_mounts(
         &self,
         base: &PosixPath,
@@ -75,7 +74,6 @@ impl ReservationKernel {
     ) -> Result<MountTable> {
         table_base(&Installed, base, end)
     }
-    #[cfg(test)]
     pub(crate) fn cold_reference_location(
         &self,
         target: &PosixPath,
@@ -87,7 +85,6 @@ impl ReservationKernel {
         check(end)?;
         Ok(result)
     }
-    #[cfg(test)]
     pub(crate) fn cold_retained_related(
         &self,
         target: &PosixPath,

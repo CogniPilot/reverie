@@ -40,27 +40,56 @@ pub(crate) fn isolate_cold_namespace(name: &str) -> bool {
             crate::native::uid().to_string(),
             std::env::var("REVERIE_COLD_NAMESPACE_UID").unwrap()
         );
+        if retained_mount_case(name) {
+            assert_ne!(
+                std::fs::read_link("/proc/self/ns/net").unwrap().as_os_str(),
+                std::env::var_os("REVERIE_COLD_PARENT_NETWORK").unwrap(),
+                "fixed finish control must not reinterpret host Unix paths beneath its own /tmp mount"
+            );
+            let status = std::fs::read_to_string("/proc/self/status").unwrap();
+            let caps = status
+                .lines()
+                .find_map(|line| line.strip_prefix("CapEff:"))
+                .unwrap()
+                .trim();
+            assert_ne!(
+                u64::from_str_radix(caps, 16).unwrap() & (1 << 21),
+                0,
+                "actual private-user-namespace CAP_SYS_ADMIN for fixed bind control"
+            );
+        }
         return false;
     }
     let nonce = reverie_store::worker_storage::instruction_temporary_name().unwrap();
-    let root = std::env::temp_dir().join(format!("cn-{}", &nonce[nonce.len() - 8..]));
+    let root = cold_fixture_root(name, &nonce);
     std::fs::DirBuilder::new()
         .mode(0o700)
         .create(&root)
         .unwrap();
     let original = std::fs::symlink_metadata(&root).unwrap();
-    let output = std::process::Command::new("unshare")
-        .args([
-            "--user",
-            "--map-current-user",
-            "--mount",
-            "--pid",
-            "--fork",
-            "--mount-proc",
-            "--propagation",
-            "private",
-            "--kill-child=TERM",
-        ])
+    let mut command = std::process::Command::new("unshare");
+    command.args([
+        "--user",
+        "--map-current-user",
+        "--mount",
+        "--pid",
+        "--fork",
+        "--mount-proc",
+        "--propagation",
+        "private",
+        "--kill-child=TERM",
+    ]);
+    // util-linux explicitly carries this new namespace's granted capabilities
+    // across exec. Only fixed retained-finish tests require actual bind mounts;
+    // ordinary same-UID permission/UNKNOWN and required root cases are unchanged.
+    if retained_mount_case(name) {
+        command.args(["--keep-caps", "--net"]);
+        command.env(
+            "REVERIE_COLD_PARENT_NETWORK",
+            std::fs::read_link("/proc/self/ns/net").unwrap(),
+        );
+    }
+    let output = command
         .arg(std::env::current_exe().unwrap())
         .args(["--exact", name, "--test-threads=1", "--nocapture"])
         .env(MARKER, name)
@@ -94,4 +123,22 @@ pub(crate) fn isolate_cold_namespace(name: &str) -> bool {
     // terminated; only this uniquely created test root is removed.
     std::fs::remove_dir_all(root).unwrap();
     true
+}
+fn retained_mount_case(name: &str) -> bool {
+    name.starts_with("worker_laptop::tests::cold_prepare::retained::finish::")
+}
+fn cold_fixture_root(name: &str, nonce: &str) -> std::path::PathBuf {
+    let leaf = format!("cn-{}", &nonce[nonce.len() - 8..]);
+    if !retained_mount_case(name) {
+        return std::env::temp_dir().join(leaf);
+    }
+    // xtask intentionally supplies /tmp; fixed finish cases overmount it.
+    // Reuse current-account NSS facts, never an env/program/grant selector.
+    let home = crate::native::home_directory(None).unwrap();
+    let home = std::fs::canonicalize(crate::native::python_path(&home).unwrap()).unwrap();
+    assert!(
+        !home.starts_with("/tmp"),
+        "fixed mounted-/tmp controls require a writable account home outside /tmp"
+    );
+    home.join(format!(".{leaf}"))
 }

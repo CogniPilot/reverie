@@ -12,7 +12,6 @@ use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
 mod child_record;
 pub(crate) mod child_signals;
-#[cfg(test)]
 mod cold_temporary;
 mod control;
 #[cfg(test)]
@@ -21,7 +20,6 @@ mod lease;
 mod memory_namespace;
 mod memory_profile;
 mod rename;
-#[cfg(test)]
 pub(crate) use cold_temporary::{
     install as install_cold_temporary, retire as retire_cold_temporary,
 };

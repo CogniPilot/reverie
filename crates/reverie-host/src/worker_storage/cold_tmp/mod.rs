@@ -9,10 +9,7 @@ pub(super) use lifecycle::Lifecycle;
 #[cfg(test)]
 mod leases_tests;
 mod references;
-// Qualify the lossless retained path/namespace data seam before enabling the
-// real retirement transaction. Production retain-and-replace still refuses.
-#[cfg(test)]
-mod retained;
+pub(in crate::worker_storage) mod retained;
 #[cfg(test)]
 mod tests;
 mod tree;

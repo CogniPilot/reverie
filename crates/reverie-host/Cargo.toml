@@ -29,6 +29,7 @@ rustls.workspace = true
 rustls-platform-verifier.workspace = true
 
 [dev-dependencies]
+nix = { workspace = true, features = ["mount"] }
 serde.workspace = true
 socket2.workspace = true
 reverie-diagnostics.workspace = true

@@ -44,6 +44,9 @@ fn digits(value: &str) -> bool {
 }
 
 pub struct RetainedLeaseRecord(Value);
+/// Captured original until_utc JSON slot, never a live reservation proof.
+/// The actual retirement inventory independently rechecks the current window.
+pub struct RetainedReservationUntil(pub(super) Value);
 impl RetainedLeaseRecord {
     /// Match json.loads(bytes, object_pairs_hook=unique), with exact integer
     /// version 1. The real filesystem owner separately checks the 65536-byte
@@ -53,6 +56,12 @@ impl RetainedLeaseRecord {
     }
     pub fn reservation_state(&self, now: f64) -> Result<ColdLeaseState> {
         super::lease::state(&self.0, now)
+    }
+    pub fn reservation_until(&self) -> Result<RetainedReservationUntil> {
+        let fields = object(&self.0).expect("strict retirement object");
+        field(fields, "until_utc")
+            .map(|value| RetainedReservationUntil(value.deep_clone()))
+            .ok_or(ColdDataError::Lease)
     }
     pub fn registered_path(&self) -> Result<PosixPath> {
         let fields = object(&self.0).expect("strict retirement object");

@@ -12,6 +12,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 mod records;
+mod reserve;
 #[cfg(test)]
 mod tests;
 const MAX_RECORDS: usize = 4096;
