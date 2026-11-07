@@ -1,7 +1,7 @@
 //! Actual fixed engine clients over the genuine create -> publication -> start
 //! -> absent-memory -> no-retention cold chain. No stage/token is fabricated.
 use super::*;
-fn cold(fixture: &Fixture) -> (LaptopWorkflow, CreatedLaptop, ColdCommitted) {
+pub(super) fn cold(fixture: &Fixture) -> (LaptopWorkflow, CreatedLaptop, ColdCommitted) {
     let (workflow, created) = super::publication::created(fixture);
     fixture.runtime().publish_laptop_launch(&created).unwrap();
     let ContainerStart::Started(started) = fixture

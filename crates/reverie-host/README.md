@@ -379,6 +379,18 @@ identity and check the held target close. Only that result constructs
 application readiness. The installing application and later lifecycle joins
 remain required. Owned fixture controls do not establish installed enforcement.
 
+`release_laptop_nix_guard` consumes only the original guard after the same
+record's acknowledged pane startup. It moves the actual storage, original Nix
+outcome and prepared path into that record before attempting checked descriptor
+finalization. Failed finalization retains cleanup custody and cannot be retried
+or produce `NixReleasedPane`. Successful finalization preserves the employee
+storage lease and allows immutable created-CID cleanup. This local close does
+not prove a globally free flock or release application admission. The installing
+caller must publish any protected CLI-start receipt first, then actually release
+admission and publish canonical release before starting a viewer. Any later
+forward consumer must recheck the same record's current phase; an old token
+cannot revive a record that entered terminal container cleanup.
+
 New-target cleanup accepts only the canonical CID retained from that actual
 create, never a recycled name or a caller CID. It preserves stop/inspect/kill/
 inspect order but requires an exact, known stopped state. Missing/failed inspect,
