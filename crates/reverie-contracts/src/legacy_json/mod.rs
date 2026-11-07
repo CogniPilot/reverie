@@ -53,6 +53,12 @@ pub(crate) fn utf8_file_text(raw: &[u8]) -> Result<String, Error> {
         .replace("\r\n", "\n")
         .replace('\r', "\n"))
 }
+/// `json.loads(str)` of already decoded text: duplicate keys last-wins and
+/// literal constants accepted. There is no byte-encoding detection, so a BOM is
+/// invalid JSON, as in Python.
+pub(crate) fn decode_text(text: &str) -> Result<Value, Error> {
+    decode::decode_last_wins(text.as_bytes())
+}
 /// Normal rootless seccomp JSON uses json.loads(bytes), without object_pairs_hook.
 /// Keep this mode purpose-private; strict profile/perf/registry readers differ.
 pub(crate) fn decode_rootless_profile(raw: &[u8]) -> Result<Value, Error> {
