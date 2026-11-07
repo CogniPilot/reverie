@@ -220,12 +220,12 @@ pub fn reserve(
 }
 
 /// Whether `_parse_duration`'s pattern matched, so the bound message applies.
+/// Character-safe: the unit is stripped as a char, never sliced by byte.
 fn duration_shape(text: &str) -> bool {
-    text.len() > 1
-        && text[..text.len() - 1]
-            .bytes()
-            .all(|byte| byte.is_ascii_digit())
-        && matches!(text.as_bytes().last(), Some(b's' | b'm' | b'h' | b'd'))
+    text.strip_suffix(['s', 'm', 'h', 'd'])
+        .is_some_and(|digits| {
+            !digits.is_empty() && digits.bytes().all(|byte| byte.is_ascii_digit())
+        })
 }
 
 /// `unreserve`: drop the reservation under the shared barrier.

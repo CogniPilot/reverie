@@ -154,6 +154,10 @@ fn reservations_protect_until_unreserved_and_renew_requires_one() {
         ("25h", "a reservation lasts more than 0 and at most 24 h"),
         ("0s", "a reservation lasts more than 0 and at most 24 h"),
         ("1w", "duration must look like 90m, 6h or 1d: 1w"),
+        // A multibyte final character is refused, never sliced mid-character.
+        ("é", "duration must look like 90m, 6h or 1d: é"),
+        ("1é", "duration must look like 90m, 6h or 1d: 1é"),
+        ("٣h", "duration must look like 90m, 6h or 1d: ٣h"),
     ] {
         let error = reserve(&base, &task, duration, "", None, WAIT, false).unwrap_err();
         assert_eq!(
