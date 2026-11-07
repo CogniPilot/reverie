@@ -38,19 +38,25 @@ pub(super) struct Entry {
 }
 impl Inner {
     pub(super) fn admit(self: &Arc<Self>, bounds: AdmissionBounds) -> Result<Admission> {
-        self.admit_selected(bounds, None)
+        self.admit_selected(bounds, None, None)
     }
     pub(super) fn admit_launch(
         self: &Arc<Self>,
         bounds: AdmissionBounds,
         session: &reverie_core::ids::ProfileSessionId,
     ) -> Result<Admission> {
-        self.admit_selected(bounds, Some(session))
+        self.admit_selected(bounds, Some(session), None)
+    }
+    /// Broker.stop has no launch/entry body budget. Its real first-stop ceiling
+    /// bounds native observation without changing admission mutex/flock order.
+    pub(super) fn admit_stop(self: &Arc<Self>, ceiling: Option<Instant>) -> Result<Admission> {
+        self.admit_selected(AdmissionBounds::default(), None, ceiling)
     }
     fn admit_selected(
         self: &Arc<Self>,
         bounds: AdmissionBounds,
         ordinary_session: Option<&reverie_core::ids::ProfileSessionId>,
+        native_ceiling: Option<Instant>,
     ) -> Result<Admission> {
         let end = bounds.validate()?;
         let entry = self.reserve_entry(end)?;
@@ -69,7 +75,7 @@ impl Inner {
             process: std::process::id(),
             lock: Mutex::new(lock),
             context: Mutex::new(self.observer.capture(config.configuration().clone(), None)),
-            deadline: Mutex::new(end),
+            deadline: Mutex::new([end, native_ceiling].into_iter().flatten().min()),
             policy_ack: Mutex::new(None),
             gpu_transition: Mutex::new(None),
         });
@@ -98,7 +104,10 @@ impl Inner {
                 .deadline
                 .lock()
                 .map_err(|_| GateError::Refused("RESERVATION_ADMISSION_UNAVAILABLE"))? =
-                bounds.operation;
+                [bounds.operation, native_ceiling]
+                    .into_iter()
+                    .flatten()
+                    .min();
             Ok(())
         })();
         match entered {

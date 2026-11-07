@@ -18,6 +18,8 @@ use wait::WaitObservation;
 #[cfg(test)]
 mod prefix_tests;
 #[cfg(test)]
+mod stop_scope_tests;
+#[cfg(test)]
 mod tests;
 
 /// This private owner is constructed only by consuming the original admitted J.

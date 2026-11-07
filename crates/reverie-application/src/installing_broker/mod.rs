@@ -12,7 +12,9 @@ mod launch;
 mod lifecycle;
 mod recovered;
 pub(crate) mod source;
+mod stop_admission;
 mod storage;
+pub(crate) use stop_admission::WorkerStopAdmission;
 mod telemetry;
 use crate::{
     reservation_gate::{GateError, ReservationGate},
