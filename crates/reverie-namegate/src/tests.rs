@@ -349,3 +349,57 @@ fn debug_of_lists_shows_digest_and_counts_only() {
         "errors carry no entries"
     );
 }
+
+/// Lists with a team placeholder spelled only with hex letters, for the code-hex rule.
+fn hex_letter_lists() -> Lists {
+    load(&with("team", serde_json::json!(["bead", "alder"])))
+        .expect("lists with a hex-letter team entry")
+}
+
+fn team_findings(lists: &Lists, text: &str) -> usize {
+    let outcome = scan(lists, text, Kind::Code, "other");
+    outcome
+        .blocking
+        .iter()
+        .chain(outcome.flagged.iter())
+        .filter(|f| f.category.name() == "team")
+        .count()
+}
+
+#[test]
+fn hex_digits_of_escapes_and_short_hex_words_are_not_name_tokens() {
+    let lists = hex_letter_lists();
+    for text in [
+        "\"48\": \"17bead4c\"",
+        "x = 1234bead5678901;",
+        "\"input\": \"\\u0bead\"",
+        "\"input\": \"\\U00000bead\"",
+        "s = \"\\x0bead\"",
+    ] {
+        assert_eq!(team_findings(&lists, text), 0, "{text:?} holds no name");
+    }
+}
+
+#[test]
+fn a_name_beside_hex_or_escapes_is_still_found() {
+    let lists = hex_letter_lists();
+    for text in [
+        "bead",
+        "id bead12345 here",
+        "id 12345bead here",
+        "id 1bead2 here",
+        "id x17bead4c here",
+        "id 17bead4cz here",
+        "fooBead()",
+        "\"\\u00e9Bead\"",
+        "\"\\u00e9 bead\"",
+        "\"\\u12 bead\"",
+        "\"\\x0 bead\"",
+    ] {
+        assert_eq!(
+            team_findings(&lists, text),
+            1,
+            "{text:?} names the placeholder"
+        );
+    }
+}
