@@ -5,6 +5,7 @@ mod nix;
 mod observed;
 mod preparation;
 mod recovery_lifetime;
+mod replacement_stop;
 mod source;
 pub use observed::OwnedCreatePreparationError;
 pub(crate) use source::RegisteredSource;
@@ -17,6 +18,10 @@ pub use nix::{
     NetworkStorageError, NetworkStoragePreparation, NetworkStorageReclaimFailure,
     NetworkStorageRetainFailure, NetworkStorageReturned, NixStorageError, NixStoragePreparation,
     NixStorageReclaimFailure, NixStorageRetainFailure, NixStorageReturned,
+};
+pub use replacement_stop::{
+    ReplacementStopPreparation, ReplacementStopReclaimFailure, ReplacementStopRetainFailure,
+    ReplacementStopReturned,
 };
 use reverie_host::{
     worker_runtime::WorkerRuntime,
@@ -39,6 +44,26 @@ enum EntryOwner {
     Source(Arc<source::SourceRecord>),
     Nix(reverie_host::worker_nix::NixWorkflow),
     Laptop(reverie_host::worker_laptop::LaptopWorkflow),
+    ReplacementStop(Arc<Mutex<reverie_host::worker_source_stop::OrdinaryReplacementStop>>),
+}
+/// The original claim destination, shared by named resource transitions.
+/// These private fields describe where to restore custody, never permission.
+enum ClaimDestination {
+    Legacy {
+        registry: Arc<StorageRegistry>,
+    },
+    Registered {
+        registry: Arc<StorageRegistry>,
+        identity: Arc<()>,
+        newly_claimed: bool,
+    },
+}
+impl ClaimDestination {
+    fn registry(&self) -> &Arc<StorageRegistry> {
+        match self {
+            Self::Legacy { registry } | Self::Registered { registry, .. } => registry,
+        }
+    }
 }
 pub(super) struct StorageRegistry {
     pub(super) runtime: WorkerRuntime,
@@ -191,6 +216,11 @@ impl StorageRegistry {
         if matches!(entries[index].owner, EntryOwner::Source(_)) {
             return Err(StorageWorkflowError::refused(
                 "WORKER_ORIGINAL_SOURCE_RETAINED",
+            ));
+        }
+        if matches!(entries[index].owner, EntryOwner::ReplacementStop(_)) {
+            return Err(StorageWorkflowError::refused(
+                "WORKER_REPLACEMENT_STOP_RETAINED",
             ));
         }
         let entry = entries.remove(index);

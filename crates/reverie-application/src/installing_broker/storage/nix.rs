@@ -1,5 +1,6 @@
 //! Move real registry resources into the existing same-runtime Nix owner. No
 //! handle/status/path constructs admission, owner authorization or a laptop.
+use super::ClaimDestination as ReturnTo;
 use super::*;
 use reverie_contracts::worker_config::EffectiveWorkerConfig;
 use reverie_host::worker_nix::{NixDisposition, NixError, NixProgress, NixStoreGuard, NixWorkflow};
@@ -11,23 +12,6 @@ pub use network::{
     NetworkStorageRetainFailure, NetworkStorageReturned,
 };
 
-enum ReturnTo {
-    Legacy {
-        registry: Arc<StorageRegistry>,
-    },
-    Registered {
-        registry: Arc<StorageRegistry>,
-        identity: Arc<()>,
-        newly_claimed: bool,
-    },
-}
-impl ReturnTo {
-    fn registry(&self) -> &Arc<StorageRegistry> {
-        match self {
-            Self::Legacy { registry } | Self::Registered { registry, .. } => registry,
-        }
-    }
-}
 /// A move-only actual resource transition. While the actual Registry/Runtime
 /// remains retained, dropping this handle leaves its workflow resources held.
 /// Last-owner/process exit is NOT confirmed shutdown or global writer release;

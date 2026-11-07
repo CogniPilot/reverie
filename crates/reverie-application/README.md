@@ -493,3 +493,14 @@ flocks, plus a genuine installed-Gate publication/CAS/STARTING join for an alrea
 stopped source with explicitly synthetic kernel facts. They do not qualify a live
 Docker source stop, ordinary legacy/network stop, the complete source-to-target
 launch consumer, every process producer, global shutdown, or backend selection.
+
+`StorageClaim::retain_replacement_stop` now moves the original box, observed
+create plan and sealed process incarnation into the reviewed ordinary stop owner.
+Registered storage changes to that exact native Arc in the existing registry;
+legacy storage creates no entry or employee lease. Native inspect/stop runs
+outside the registry mutex. Only known stopped readback can restore the same box,
+plan, process and claim generation, with no fallible gap after extraction.
+Uncertainty, dropped handles and local native settlement keep custody retained.
+This resource bridge does not provide the actual cold/J caller, its common
+admission stop fence, late policy resolver, dead-pane recheck, or legacy
+name/network cleanup. It never acknowledges lease, capacity or global release.

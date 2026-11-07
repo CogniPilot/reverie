@@ -46,6 +46,8 @@ mod cold_cases;
 mod network_cases;
 #[path = "nix/tests.rs"]
 mod nix_cases;
+#[path = "replacement_stop/tests.rs"]
+mod replacement_stop_cases;
 struct Tree(PathBuf);
 impl Tree {
     fn new() -> Self {
