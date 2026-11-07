@@ -16,7 +16,9 @@ impl Finalizer<'_> {
             return;
         };
         if !self.owner.remove_registration(completed) {
-            if self.owner.scope().registration.is_some() {
+            let unregistered = matches!(&self.owner, Owner::Body(owner)
+                if owner.office.is_some() || owner.construction.is_some() || owner.network_phone.is_some());
+            if self.owner.scope().registration.is_some() || self.owner.started().is_some() || unregistered {
                 self.errors
                     .push(ColdError::Refused("WORKER_COLD_OFFICE_RETAINED"));
             }
@@ -42,31 +44,56 @@ impl Finalizer<'_> {
                 .active
                 .as_ref()
                 .ok_or(ColdError::Refused("WORKER_COLD_ACTIVE_REQUIRED"))?;
+            let reused = match &self.owner {
+                Owner::Body(owner) => match &owner.office {
+                    Some(ColdOffice::Retained { original, .. }) => Some(original),
+                    _ => None,
+                },
+                _ => None,
+            };
             let original = self
                 .owner
                 .started()
                 .map(|started| &started.office)
-                .or(scope.registration.as_ref());
-            match budget {
+                .or(reused).or(scope.registration.as_ref());
+            let registration = match budget {
                 CleanupBudget::Bounded(end) => {
-                    lifecycle.close_reuse_registration(active, target, original, end)?
+                    lifecycle.close_reuse_registration(active, target, original, end)
                 }
                 CleanupBudget::Worker => {
-                    lifecycle.close_reuse_registration_for_worker(active, target, original)?
+                    lifecycle.close_reuse_registration_for_worker(active, target, original)
                 }
-            }
-            // A genuinely new phone was never published to a registration.
-            // An original alias shares the already-closed native owner and
-            // supplies no second close attempt or independent close credit.
-            if original.is_none()
-                && let Owner::Body(owner) = &self.owner
-            {
-                if let Some(office) = &owner.office {
-                    office.close_for_stopped_source(budget.phase(2_000))?;
+            }.map_err(ColdError::from);
+            // Constructor provenance, not a prior Option, distinguishes a
+            // genuinely new producer from an alias. Every real owner must
+            // independently report joined close before physical data release.
+            if let Owner::Body(owner) = &self.owner {
+                let mut closed = registration;
+                if self.owner.started().is_none()
+                    && let Some(ColdOffice::Constructed(office)) = &owner.office
+                {
+                    let next = office.close_for_stopped_source(budget.phase(2_000)).map_err(ColdError::from);
+                    closed = combine(closed, next);
                 }
                 if let Some((office, construction)) = &owner.construction {
-                    office.close_construction(construction, budget.phase(2_000))?;
+                    let next = office.close_construction(construction, budget.phase(2_000)).map_err(ColdError::from);
+                    closed = combine(closed, next);
                 }
+                closed?;
+                let session = scope.preparing.admitted.request().session();
+                if let Some(office) = &owner.office {
+                    office.owner()._phone.require_closed_for_resource(&broker.storage.runtime, session)?;
+                }
+                if let Some(phone) = &owner.network_phone {
+                    phone.require_closed_for_resource(&broker.storage.runtime, session)?;
+                }
+            } else {
+                registration?;
+            }
+            if let Some(original) = &scope.registration {
+                original._phone.require_closed_for_resource(
+                    &broker.storage.runtime, scope.preparing.admitted.request().session(),
+                )?;
             }
             Ok(())
         })();
@@ -81,5 +108,11 @@ impl Finalizer<'_> {
             (Ok(()), Err(cause)) => Err(cause.into()),
             (Err(primary), Err(secondary)) => Err(error::finalized(primary, secondary.into())),
         }
+    }
+}
+fn combine(primary: Result<(), ColdError>, secondary: Result<(), ColdError>) -> Result<(), ColdError> {
+    match (primary, secondary) {
+        (Ok(()), next) | (next, Ok(())) => next,
+        (Err(primary), Err(secondary)) => Err(error::finalized(primary, secondary)),
     }
 }

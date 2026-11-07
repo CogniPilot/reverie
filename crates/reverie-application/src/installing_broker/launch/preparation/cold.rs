@@ -125,7 +125,7 @@ struct ColdBody<'a> {
     scope: ColdScope<'a>,
     lifecycle: Option<LaptopLifecycle<'a>>,
     resources: Option<Resources>,
-    office: Option<Arc<RecoveredOffice>>,
+    office: Option<ColdOffice>,
     construction: Option<(Arc<OfficeService>, OfficeConstruction)>,
     network_phone: Option<reverie_host::office::OfficePhone>,
     creation: Option<CreationContext>,
@@ -141,6 +141,15 @@ struct CreationContext {
 enum MemoryJoin {
     Policy(StartedMemoryPolicy),
     Readback(StartedMemoryReadback),
+}
+enum ColdOffice {
+    Retained { original: Arc<RecoveredOffice>, alias: Arc<RecoveredOffice> },
+    Constructed(Arc<RecoveredOffice>),
+}
+impl ColdOffice {
+    fn owner(&self) -> &Arc<RecoveredOffice> {
+        match self { Self::Retained { alias, .. } => alias, Self::Constructed(owner) => owner }
+    }
 }
 /// Stored in the existing lifecycle only after actual pane and guard success.
 /// This shared owner is also retained by the original handler continuation.
