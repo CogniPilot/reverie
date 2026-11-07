@@ -57,6 +57,7 @@
           };
         in packages // nativeWorkerPackages // {
           default = packages.reverie;
+          voiceCiVerifier = import ./nix/voice-ci-verifier.nix { inherit pkgs; src = source; };
           # Unselected native front; qualified together with its TS adapter.
           rustFront = import ./nix/rust-front.nix { inherit pkgs; src = source; };
           # Optional tools: excluded from the runtime/image and never fetched by a chat toggle.
@@ -465,7 +466,11 @@
         });
       devShells = forAllSystems (system:
         let pkgs = pkgsFor system; in {
-          voice-ci = import ./nix/voice-ci.nix { inherit pkgs; kokoro = self.packages.${system}.kokoro; };
+          voice-ci = import ./nix/voice-ci.nix {
+            inherit pkgs;
+            kokoro = self.packages.${system}.kokoro;
+            voiceVerifier = self.packages.${system}.voiceCiVerifier;
+          };
           default = pkgs.mkShell {
             packages = [ (pkgs.python3.withPackages (ps: [ ps.pillow ps.setuptools ps.aiohttp ])) pkgs.nodejs_22 pkgs.git pkgs.tmux pkgs.gcc pkgs.gnumake pkgs.openssl pkgs.rustc pkgs.cargo pkgs.clippy pkgs.rustfmt ];
             shellHook = ''
