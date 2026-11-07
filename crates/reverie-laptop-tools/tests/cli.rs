@@ -3,6 +3,10 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
+#[path = "support/autoenv_cases.rs"]
+mod autoenv_cases;
+#[path = "support/autoenv_fixture.rs"]
+mod autoenv_fixture;
 
 static NEXT: AtomicU64 = AtomicU64::new(0);
 struct Fixture {
@@ -18,17 +22,6 @@ impl Fixture {
         fs::create_dir(&root).unwrap();
         fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).unwrap();
         Self { root }
-    }
-    fn shell() -> String {
-        std::env::var("REVERIE_TEST_SHELL")
-            .or_else(|_| std::env::var("SHELL"))
-            .unwrap_or_else(|_| "/bin/sh".into())
-    }
-    fn script(&self, name: &str, body: &str) -> PathBuf {
-        let path = self.root.join(name);
-        fs::write(&path, format!("#!{}\n{body}\n", Self::shell())).unwrap();
-        fs::set_permissions(&path, fs::Permissions::from_mode(0o700)).unwrap();
-        path
     }
 }
 impl Drop for Fixture {
@@ -77,6 +70,7 @@ fn help_and_invalid_arguments_never_create_or_change_a_home() {
     for binary in [
         env!("CARGO_BIN_EXE_reverie-build-jobs"),
         env!("CARGO_BIN_EXE_reverie-cargo-defaults"),
+        env!("CARGO_BIN_EXE_reverie-autoenv"),
     ] {
         let fixture = Fixture::new();
         for (argument, status) in [("--help", 0), ("--unsupported", 2)] {
@@ -97,39 +91,13 @@ fn shim_case(
     called: bool,
     expected: Option<&str>,
 ) {
-    let fixture = Fixture::new();
-    let shimdir = fixture.root.join("shim");
-    fs::create_dir(&shimdir).unwrap();
-    let shim = shimdir.join("cargo");
-    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .unwrap()
-        .parent()
-        .unwrap()
-        .to_owned();
-    fs::copy(root.join("scripts/reverie-autoenv-shim"), &shim).unwrap();
-    let real = fixture.script("cargo", "printf '%s' \"${CARGO_BUILD_JOBS-<unset>}\"");
+    let fixture = autoenv_fixture::Fixture::new();
+    let shim = fixture.shim.join("cargo");
     let marker = fixture.root.join("helper-called");
-    let helper = fixture.script(
-        "helper",
-        &format!(
-            "printf x > '{}'\nexec '{}'",
-            marker.display(),
-            env!("CARGO_BIN_EXE_reverie-build-jobs")
-        ),
-    );
-    let path = format!(
-        "{}:{}",
-        fixture.root.display(),
-        std::env::var("PATH").unwrap()
-    );
-    let mut command = Command::new(Fixture::shell());
+    let mut command = fixture.command(shim);
     command
-        .arg(&shim)
         .args(arguments)
-        .env("PATH", path)
         .env("IN_NIX_SHELL", "1")
-        .env("REVERIE_JOBS_HELPER", helper)
         .env_remove("CARGO_BUILD_JOBS")
         .env_remove("REVERIE_NO_AUTOENV");
     if let Some(jobs) = owner_jobs {
@@ -145,8 +113,7 @@ fn shim_case(
         String::from_utf8_lossy(&output.stderr)
     );
     assert_eq!(marker.exists(), called);
-    assert!(real.exists());
-    let jobs = String::from_utf8(output.stdout).unwrap();
+    let jobs = autoenv_fixture::Fixture::values(&output)["CARGO_BUILD_JOBS"].clone();
     if let Some(expected) = expected {
         assert_eq!(jobs, expected);
     } else {

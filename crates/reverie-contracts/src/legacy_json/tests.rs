@@ -140,6 +140,22 @@ fn utf16(text: &str, little: bool, bom: bool) -> Vec<u8> {
     raw
 }
 #[test]
+fn strict_engine_hooks_are_isolated_from_existing_purposes() {
+    use super::*;
+    assert!(decode_engine_inventory(br#"{"x":0,"x":1}"#).is_ok());
+    assert_eq!(
+        decode_engine_stopped(br#"{"x":0,"x":1}"#).err(),
+        Some(Error::DuplicateKey)
+    );
+    assert!(decode_engine_stopped(br#"{"unused":1e309}"#).is_ok());
+    assert!(decode_engine_stopped(br#"{"unused":NaN}"#).is_err());
+    let raw = format!("{{\"unused\":{}}}", "1".repeat(4301));
+    assert!(decode_engine_stopped(raw.as_bytes()).is_err());
+    assert!(decode_bytes_without_constants(raw.as_bytes()).is_ok());
+    assert!(decode_engine_inventory(b"\xef\xbb\xbf{}").is_err());
+    assert!(decode_rootless_profile(b"\xef\xbb\xbf{}").is_ok());
+}
+#[test]
 fn metadata_hooks_do_not_change_existing_hash_data_or_default_byte_mode() {
     let raw = format!("{{\"opaque\":{}}}", "7".repeat(4301));
     assert!(decode_utf8(raw.as_bytes()).is_ok());
@@ -156,4 +172,9 @@ fn metadata_hooks_do_not_change_existing_hash_data_or_default_byte_mode() {
         decode_metadata_bytes(br#"[{"x":0,"x":1},{"later":[}]"#).err(),
         Some(Error::DuplicateKey)
     );
+}
+// The old general bytes purpose has no production consumer after fixed perf
+// readers adopt metadata hooks. Keep its isolation controls local to tests.
+fn decode_bytes(raw: &[u8]) -> Result<Value, Error> {
+    decode::decode(&text::python_bytes(raw)?)
 }

@@ -1,0 +1,7 @@
+{"name":"late-invalid","policy":{"denied_patterns":["a","("]},"text":[97],"errorType":"PatternError","message":[109,105,115,115,105,110,103,32,41,44,32,117,110,116,101,114,109,105,110,97,116,101,100,32,115,117,98,112,97,116,116,101,114,110,32,97,116,32,112,111,115,105,116,105,111,110,32,48],"patterns":[[97],[40]]}
+{"name":"early-invalid","policy":{"denied_patterns":["(","a"]},"text":[97],"errorType":"PatternError","message":[109,105,115,115,105,110,103,32,41,44,32,117,110,116,101,114,109,105,110,97,116,101,100,32,115,117,98,112,97,116,116,101,114,110,32,97,116,32,112,111,115,105,116,105,111,110,32,48],"patterns":[[40],[97]]}
+{"name":"late-class-invalid","policy":{"denied_patterns":["a","["]},"text":[97],"errorType":"PatternError","message":[117,110,116,101,114,109,105,110,97,116,101,100,32,99,104,97,114,97,99,116,101,114,32,115,101,116,32,97,116,32,112,111,115,105,116,105,111,110,32,48],"patterns":[[97],[91]]}
+{"name":"empty-policy","policy":{},"text":[],"result":false,"patterns":[]}
+{"name":"empty-pattern-list","policy":{"denied_patterns":[]},"text":[97],"result":false,"patterns":[]}
+{"name":"missing-match","policy":{"denied_patterns":["z"]},"text":[97],"result":false,"patterns":[[122]]}
+{"name":"successful-match","policy":{"denied_patterns":["a"]},"text":[65],"result":true,"patterns":[[97]]}

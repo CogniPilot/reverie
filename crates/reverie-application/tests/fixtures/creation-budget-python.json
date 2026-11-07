@@ -1,0 +1,2267 @@
+{
+  "source": "python/reverie/worker.py",
+  "sourceSha256": "6f22e845dad7a85ea963b1097e6cd1376d0550edf4b0bf44d4f925d3b56504d7",
+  "scope": "Actual Broker.check_creation_budget; synthetic engine results and owned proc/pool data roots. No live engine, reservation gate, memory-policy host-root or launch qualification.",
+  "cases": [
+    {
+      "name": "no-peers",
+      "config": {
+        "deployment": "test",
+        "maxWorkers": 4,
+        "poolMemoryMiB": 4096
+      },
+      "resources": {
+        "budgetMode": "admission",
+        "memoryMiB": 512
+      },
+      "listed": [],
+      "registry": [],
+      "inspectSucceeded": true,
+      "inspectText": "[{\"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"22222222-2222-4333-8444-555555555555\"}}, \"State\": {\"Running\": true, \"Pid\": 123}, \"HostConfig\": {\"Memory\": 536870912, \"MemorySwap\": 536870912}}]",
+      "cgroup": "0::/outside\n",
+      "poolMemory": "4294967296",
+      "poolTasks": "1024",
+      "meminfo": "MemTotal: 16777216 kB\n",
+      "error": null,
+      "events": [
+        {
+          "args": [
+            "ps",
+            "--filter",
+            "label=reverie.worker=test",
+            "--format",
+            "{{.Names}}"
+          ],
+          "optional": false
+        }
+      ]
+    },
+    {
+      "name": "candidate-at-pool",
+      "config": {
+        "deployment": "test",
+        "maxWorkers": 4,
+        "poolMemoryMiB": 4096
+      },
+      "resources": {
+        "budgetMode": "admission",
+        "memoryMiB": 4096
+      },
+      "listed": [],
+      "registry": [],
+      "inspectSucceeded": true,
+      "inspectText": "[{\"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"22222222-2222-4333-8444-555555555555\"}}, \"State\": {\"Running\": true, \"Pid\": 123}, \"HostConfig\": {\"Memory\": 536870912, \"MemorySwap\": 536870912}}]",
+      "cgroup": "0::/outside\n",
+      "poolMemory": "4294967296",
+      "poolTasks": "1024",
+      "meminfo": "MemTotal: 16777216 kB\n",
+      "error": null,
+      "events": [
+        {
+          "args": [
+            "ps",
+            "--filter",
+            "label=reverie.worker=test",
+            "--format",
+            "{{.Names}}"
+          ],
+          "optional": false
+        }
+      ]
+    },
+    {
+      "name": "candidate-over-pool",
+      "config": {
+        "deployment": "test",
+        "maxWorkers": 4,
+        "poolMemoryMiB": 4096
+      },
+      "resources": {
+        "budgetMode": "admission",
+        "memoryMiB": 4097
+      },
+      "listed": [],
+      "registry": [],
+      "inspectSucceeded": true,
+      "inspectText": "[{\"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"22222222-2222-4333-8444-555555555555\"}}, \"State\": {\"Running\": true, \"Pid\": 123}, \"HostConfig\": {\"Memory\": 536870912, \"MemorySwap\": 536870912}}]",
+      "cgroup": "0::/outside\n",
+      "poolMemory": "4294967296",
+      "poolTasks": "1024",
+      "meminfo": "MemTotal: 16777216 kB\n",
+      "error": {
+        "type": "RuntimeError",
+        "message": "Worker memory admission is full; actual peer ceilings reserve the budget"
+      },
+      "events": [
+        {
+          "args": [
+            "ps",
+            "--filter",
+            "label=reverie.worker=test",
+            "--format",
+            "{{.Names}}"
+          ],
+          "optional": false
+        }
+      ]
+    },
+    {
+      "name": "outside-peer",
+      "config": {
+        "deployment": "test",
+        "maxWorkers": 4,
+        "poolMemoryMiB": 4096
+      },
+      "resources": {
+        "budgetMode": "admission",
+        "memoryMiB": 512
+      },
+      "listed": [
+        "test-agent-22222222-2222-4333-8444-555555555555"
+      ],
+      "registry": [],
+      "inspectSucceeded": true,
+      "inspectText": "[{\"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"22222222-2222-4333-8444-555555555555\"}}, \"State\": {\"Running\": true, \"Pid\": 123}, \"HostConfig\": {\"Memory\": 536870912, \"MemorySwap\": 536870912}}]",
+      "cgroup": "0::/outside\n",
+      "poolMemory": "4294967296",
+      "poolTasks": "1024",
+      "meminfo": "MemTotal: 16777216 kB\n",
+      "error": null,
+      "events": [
+        {
+          "args": [
+            "ps",
+            "--filter",
+            "label=reverie.worker=test",
+            "--format",
+            "{{.Names}}"
+          ],
+          "optional": false
+        },
+        {
+          "args": [
+            "inspect",
+            "test-agent-22222222-2222-4333-8444-555555555555"
+          ],
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "plain-uuid-peer",
+      "config": {
+        "deployment": "test",
+        "maxWorkers": 4,
+        "poolMemoryMiB": 4096
+      },
+      "resources": {
+        "budgetMode": "admission",
+        "memoryMiB": 512
+      },
+      "listed": [
+        "22222222-2222-4333-8444-555555555555"
+      ],
+      "registry": [],
+      "inspectSucceeded": true,
+      "inspectText": "[{\"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"22222222-2222-4333-8444-555555555555\"}}, \"State\": {\"Running\": true, \"Pid\": 123}, \"HostConfig\": {\"Memory\": 536870912, \"MemorySwap\": 536870912}}]",
+      "cgroup": "0::/outside\n",
+      "poolMemory": "4294967296",
+      "poolTasks": "1024",
+      "meminfo": "MemTotal: 16777216 kB\n",
+      "error": null,
+      "events": [
+        {
+          "args": [
+            "ps",
+            "--filter",
+            "label=reverie.worker=test",
+            "--format",
+            "{{.Names}}"
+          ],
+          "optional": false
+        },
+        {
+          "args": [
+            "inspect",
+            "22222222-2222-4333-8444-555555555555"
+          ],
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "target-skipped",
+      "config": {
+        "deployment": "test",
+        "maxWorkers": 4,
+        "poolMemoryMiB": 4096
+      },
+      "resources": {
+        "budgetMode": "admission",
+        "memoryMiB": 512
+      },
+      "listed": [
+        "test-agent-11111111-2222-4333-8444-555555555555"
+      ],
+      "registry": [],
+      "inspectSucceeded": false,
+      "inspectText": "[{\"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-2222-4333-8444-555555555555\"}}, \"State\": {\"Running\": true, \"Pid\": 123}, \"HostConfig\": {\"Memory\": 536870912, \"MemorySwap\": 536870912}}]",
+      "cgroup": "0::/outside\n",
+      "poolMemory": "4294967296",
+      "poolTasks": "1024",
+      "meminfo": "MemTotal: 16777216 kB\n",
+      "error": null,
+      "events": [
+        {
+          "args": [
+            "ps",
+            "--filter",
+            "label=reverie.worker=test",
+            "--format",
+            "{{.Names}}"
+          ],
+          "optional": false
+        }
+      ]
+    },
+    {
+      "name": "unknown-name",
+      "config": {
+        "deployment": "test",
+        "maxWorkers": 4,
+        "poolMemoryMiB": 4096
+      },
+      "resources": {
+        "budgetMode": "admission",
+        "memoryMiB": 512
+      },
+      "listed": [
+        "test-console"
+      ],
+      "registry": [],
+      "inspectSucceeded": true,
+      "inspectText": "[{\"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"22222222-2222-4333-8444-555555555555\"}}, \"State\": {\"Running\": true, \"Pid\": 123}, \"HostConfig\": {\"Memory\": 536870912, \"MemorySwap\": 536870912}}]",
+      "cgroup": "0::/outside\n",
+      "poolMemory": "4294967296",
+      "poolTasks": "1024",
+      "meminfo": "MemTotal: 16777216 kB\n",
+      "error": {
+        "type": "RuntimeError",
+        "message": "Unknown laptop in resource admission"
+      },
+      "events": [
+        {
+          "args": [
+            "ps",
+            "--filter",
+            "label=reverie.worker=test",
+            "--format",
+            "{{.Names}}"
+          ],
+          "optional": false
+        }
+      ]
+    },
+    {
+      "name": "listed-inspect-failure",
+      "config": {
+        "deployment": "test",
+        "maxWorkers": 4,
+        "poolMemoryMiB": 4096
+      },
+      "resources": {
+        "budgetMode": "admission",
+        "memoryMiB": 512
+      },
+      "listed": [
+        "test-agent-22222222-2222-4333-8444-555555555555"
+      ],
+      "registry": [],
+      "inspectSucceeded": false,
+      "inspectText": "[{\"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"22222222-2222-4333-8444-555555555555\"}}, \"State\": {\"Running\": true, \"Pid\": 123}, \"HostConfig\": {\"Memory\": 536870912, \"MemorySwap\": 536870912}}]",
+      "cgroup": "0::/outside\n",
+      "poolMemory": "4294967296",
+      "poolTasks": "1024",
+      "meminfo": "MemTotal: 16777216 kB\n",
+      "error": {
+        "type": "RuntimeError",
+        "message": "Cannot inspect a running peer for resource admission"
+      },
+      "events": [
+        {
+          "args": [
+            "ps",
+            "--filter",
+            "label=reverie.worker=test",
+            "--format",
+            "{{.Names}}"
+          ],
+          "optional": false
+        },
+        {
+          "args": [
+            "inspect",
+            "test-agent-22222222-2222-4333-8444-555555555555"
+          ],
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "registry-only-gone",
+      "config": {
+        "deployment": "test",
+        "maxWorkers": 4,
+        "poolMemoryMiB": 4096
+      },
+      "resources": {
+        "budgetMode": "admission",
+        "memoryMiB": 512
+      },
+      "listed": [],
+      "registry": [
+        "test-agent-22222222-2222-4333-8444-555555555555"
+      ],
+      "inspectSucceeded": false,
+      "inspectText": "[{\"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"22222222-2222-4333-8444-555555555555\"}}, \"State\": {\"Running\": true, \"Pid\": 123}, \"HostConfig\": {\"Memory\": 536870912, \"MemorySwap\": 536870912}}]",
+      "cgroup": "0::/outside\n",
+      "poolMemory": "4294967296",
+      "poolTasks": "1024",
+      "meminfo": "MemTotal: 16777216 kB\n",
+      "error": null,
+      "events": [
+        {
+          "args": [
+            "ps",
+            "--filter",
+            "label=reverie.worker=test",
+            "--format",
+            "{{.Names}}"
+          ],
+          "optional": false
+        },
+        {
+          "args": [
+            "inspect",
+            "test-agent-22222222-2222-4333-8444-555555555555"
+          ],
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "registry-only-live",
+      "config": {
+        "deployment": "test",
+        "maxWorkers": 4,
+        "poolMemoryMiB": 4096
+      },
+      "resources": {
+        "budgetMode": "admission",
+        "memoryMiB": 512
+      },
+      "listed": [],
+      "registry": [
+        "test-agent-22222222-2222-4333-8444-555555555555"
+      ],
+      "inspectSucceeded": true,
+      "inspectText": "[{\"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"22222222-2222-4333-8444-555555555555\"}}, \"State\": {\"Running\": true, \"Pid\": 123}, \"HostConfig\": {\"Memory\": 536870912, \"MemorySwap\": 536870912}}]",
+      "cgroup": "0::/outside\n",
+      "poolMemory": "4294967296",
+      "poolTasks": "1024",
+      "meminfo": "MemTotal: 16777216 kB\n",
+      "error": null,
+      "events": [
+        {
+          "args": [
+            "ps",
+            "--filter",
+            "label=reverie.worker=test",
+            "--format",
+            "{{.Names}}"
+          ],
+          "optional": false
+        },
+        {
+          "args": [
+            "inspect",
+            "test-agent-22222222-2222-4333-8444-555555555555"
+          ],
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "not-array",
+      "config": {
+        "deployment": "test",
+        "maxWorkers": 4,
+        "poolMemoryMiB": 4096
+      },
+      "resources": {
+        "budgetMode": "admission",
+        "memoryMiB": 512
+      },
+      "listed": [
+        "test-agent-22222222-2222-4333-8444-555555555555"
+      ],
+      "registry": [],
+      "inspectSucceeded": true,
+      "inspectText": "{}",
+      "cgroup": "0::/outside\n",
+      "poolMemory": "4294967296",
+      "poolTasks": "1024",
+      "meminfo": "MemTotal: 16777216 kB\n",
+      "error": {
+        "type": "RuntimeError",
+        "message": "Cannot identify a peer for resource admission"
+      },
+      "events": [
+        {
+          "args": [
+            "ps",
+            "--filter",
+            "label=reverie.worker=test",
+            "--format",
+            "{{.Names}}"
+          ],
+          "optional": false
+        },
+        {
+          "args": [
+            "inspect",
+            "test-agent-22222222-2222-4333-8444-555555555555"
+          ],
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "empty-array",
+      "config": {
+        "deployment": "test",
+        "maxWorkers": 4,
+        "poolMemoryMiB": 4096
+      },
+      "resources": {
+        "budgetMode": "admission",
+        "memoryMiB": 512
+      },
+      "listed": [
+        "test-agent-22222222-2222-4333-8444-555555555555"
+      ],
+      "registry": [],
+      "inspectSucceeded": true,
+      "inspectText": "[]",
+      "cgroup": "0::/outside\n",
+      "poolMemory": "4294967296",
+      "poolTasks": "1024",
+      "meminfo": "MemTotal: 16777216 kB\n",
+      "error": {
+        "type": "RuntimeError",
+        "message": "Cannot identify a peer for resource admission"
+      },
+      "events": [
+        {
+          "args": [
+            "ps",
+            "--filter",
+            "label=reverie.worker=test",
+            "--format",
+            "{{.Names}}"
+          ],
+          "optional": false
+        },
+        {
+          "args": [
+            "inspect",
+            "test-agent-22222222-2222-4333-8444-555555555555"
+          ],
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "two-rows",
+      "config": {
+        "deployment": "test",
+        "maxWorkers": 4,
+        "poolMemoryMiB": 4096
+      },
+      "resources": {
+        "budgetMode": "admission",
+        "memoryMiB": 512
+      },
+      "listed": [
+        "test-agent-22222222-2222-4333-8444-555555555555"
+      ],
+      "registry": [],
+      "inspectSucceeded": true,
+      "inspectText": "[{},{}]",
+      "cgroup": "0::/outside\n",
+      "poolMemory": "4294967296",
+      "poolTasks": "1024",
+      "meminfo": "MemTotal: 16777216 kB\n",
+      "error": {
+        "type": "RuntimeError",
+        "message": "Cannot identify a peer for resource admission"
+      },
+      "events": [
+        {
+          "args": [
+            "ps",
+            "--filter",
+            "label=reverie.worker=test",
+            "--format",
+            "{{.Names}}"
+          ],
+          "optional": false
+        },
+        {
+          "args": [
+            "inspect",
+            "test-agent-22222222-2222-4333-8444-555555555555"
+          ],
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "scalar-row",
+      "config": {
+        "deployment": "test",
+        "maxWorkers": 4,
+        "poolMemoryMiB": 4096
+      },
+      "resources": {
+        "budgetMode": "admission",
+        "memoryMiB": 512
+      },
+      "listed": [
+        "test-agent-22222222-2222-4333-8444-555555555555"
+      ],
+      "registry": [],
+      "inspectSucceeded": true,
+      "inspectText": "[null]",
+      "cgroup": "0::/outside\n",
+      "poolMemory": "4294967296",
+      "poolTasks": "1024",
+      "meminfo": "MemTotal: 16777216 kB\n",
+      "error": {
+        "type": "TypeError",
+        "message": "'NoneType' object is not subscriptable"
+      },
+      "events": [
+        {
+          "args": [
+            "ps",
+            "--filter",
+            "label=reverie.worker=test",
+            "--format",
+            "{{.Names}}"
+          ],
+          "optional": false
+        },
+        {
+          "args": [
+            "inspect",
+            "test-agent-22222222-2222-4333-8444-555555555555"
+          ],
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "invalid-json",
+      "config": {
+        "deployment": "test",
+        "maxWorkers": 4,
+        "poolMemoryMiB": 4096
+      },
+      "resources": {
+        "budgetMode": "admission",
+        "memoryMiB": 512
+      },
+      "listed": [
+        "test-agent-22222222-2222-4333-8444-555555555555"
+      ],
+      "registry": [],
+      "inspectSucceeded": true,
+      "inspectText": "{",
+      "cgroup": "0::/outside\n",
+      "poolMemory": "4294967296",
+      "poolTasks": "1024",
+      "meminfo": "MemTotal: 16777216 kB\n",
+      "error": {
+        "type": "JSONDecodeError",
+        "message": "Expecting property name enclosed in double quotes: line 1 column 2 (char 1)"
+      },
+      "events": [
+        {
+          "args": [
+            "ps",
+            "--filter",
+            "label=reverie.worker=test",
+            "--format",
+            "{{.Names}}"
+          ],
+          "optional": false
+        },
+        {
+          "args": [
+            "inspect",
+            "test-agent-22222222-2222-4333-8444-555555555555"
+          ],
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "running-int",
+      "config": {
+        "deployment": "test",
+        "maxWorkers": 4,
+        "poolMemoryMiB": 4096
+      },
+      "resources": {
+        "budgetMode": "admission",
+        "memoryMiB": 512
+      },
+      "listed": [
+        "test-agent-22222222-2222-4333-8444-555555555555"
+      ],
+      "registry": [],
+      "inspectSucceeded": true,
+      "inspectText": "[{\"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"22222222-2222-4333-8444-555555555555\"}}, \"State\": {\"Running\": 1, \"Pid\": 123}, \"HostConfig\": {\"Memory\": 536870912, \"MemorySwap\": 536870912}}]",
+      "cgroup": "0::/outside\n",
+      "poolMemory": "4294967296",
+      "poolTasks": "1024",
+      "meminfo": "MemTotal: 16777216 kB\n",
+      "error": {
+        "type": "RuntimeError",
+        "message": "Laptop resource ownership mismatch"
+      },
+      "events": [
+        {
+          "args": [
+            "ps",
+            "--filter",
+            "label=reverie.worker=test",
+            "--format",
+            "{{.Names}}"
+          ],
+          "optional": false
+        },
+        {
+          "args": [
+            "inspect",
+            "test-agent-22222222-2222-4333-8444-555555555555"
+          ],
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "stopped",
+      "config": {
+        "deployment": "test",
+        "maxWorkers": 4,
+        "poolMemoryMiB": 4096
+      },
+      "resources": {
+        "budgetMode": "admission",
+        "memoryMiB": 512
+      },
+      "listed": [
+        "test-agent-22222222-2222-4333-8444-555555555555"
+      ],
+      "registry": [],
+      "inspectSucceeded": true,
+      "inspectText": "[{\"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"22222222-2222-4333-8444-555555555555\"}}, \"State\": {\"Running\": false, \"Pid\": 123}, \"HostConfig\": {\"Memory\": 536870912, \"MemorySwap\": 536870912}}]",
+      "cgroup": "0::/outside\n",
+      "poolMemory": "4294967296",
+      "poolTasks": "1024",
+      "meminfo": "MemTotal: 16777216 kB\n",
+      "error": null,
+      "events": [
+        {
+          "args": [
+            "ps",
+            "--filter",
+            "label=reverie.worker=test",
+            "--format",
+            "{{.Names}}"
+          ],
+          "optional": false
+        },
+        {
+          "args": [
+            "inspect",
+            "test-agent-22222222-2222-4333-8444-555555555555"
+          ],
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "stopped-wrong-label",
+      "config": {
+        "deployment": "test",
+        "maxWorkers": 4,
+        "poolMemoryMiB": 4096
+      },
+      "resources": {
+        "budgetMode": "admission",
+        "memoryMiB": 512
+      },
+      "listed": [
+        "test-agent-22222222-2222-4333-8444-555555555555"
+      ],
+      "registry": [],
+      "inspectSucceeded": true,
+      "inspectText": "[{\"Config\": {\"Labels\": {\"reverie.worker\": \"foreign\", \"reverie.session\": \"22222222-2222-4333-8444-555555555555\"}}, \"State\": {\"Running\": false, \"Pid\": 123}, \"HostConfig\": {\"Memory\": 536870912, \"MemorySwap\": 536870912}}]",
+      "cgroup": "0::/outside\n",
+      "poolMemory": "4294967296",
+      "poolTasks": "1024",
+      "meminfo": "MemTotal: 16777216 kB\n",
+      "error": {
+        "type": "RuntimeError",
+        "message": "Laptop resource ownership mismatch"
+      },
+      "events": [
+        {
+          "args": [
+            "ps",
+            "--filter",
+            "label=reverie.worker=test",
+            "--format",
+            "{{.Names}}"
+          ],
+          "optional": false
+        },
+        {
+          "args": [
+            "inspect",
+            "test-agent-22222222-2222-4333-8444-555555555555"
+          ],
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "pid-bool",
+      "config": {
+        "deployment": "test",
+        "maxWorkers": 4,
+        "poolMemoryMiB": 4096
+      },
+      "resources": {
+        "budgetMode": "admission",
+        "memoryMiB": 512
+      },
+      "listed": [
+        "test-agent-22222222-2222-4333-8444-555555555555"
+      ],
+      "registry": [],
+      "inspectSucceeded": true,
+      "inspectText": "[{\"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"22222222-2222-4333-8444-555555555555\"}}, \"State\": {\"Running\": true, \"Pid\": true}, \"HostConfig\": {\"Memory\": 536870912, \"MemorySwap\": 536870912}}]",
+      "cgroup": "0::/outside\n",
+      "poolMemory": "4294967296",
+      "poolTasks": "1024",
+      "meminfo": "MemTotal: 16777216 kB\n",
+      "error": {
+        "type": "RuntimeError",
+        "message": "Unknown peer process during resource admission"
+      },
+      "events": [
+        {
+          "args": [
+            "ps",
+            "--filter",
+            "label=reverie.worker=test",
+            "--format",
+            "{{.Names}}"
+          ],
+          "optional": false
+        },
+        {
+          "args": [
+            "inspect",
+            "test-agent-22222222-2222-4333-8444-555555555555"
+          ],
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "pid-zero",
+      "config": {
+        "deployment": "test",
+        "maxWorkers": 4,
+        "poolMemoryMiB": 4096
+      },
+      "resources": {
+        "budgetMode": "admission",
+        "memoryMiB": 512
+      },
+      "listed": [
+        "test-agent-22222222-2222-4333-8444-555555555555"
+      ],
+      "registry": [],
+      "inspectSucceeded": true,
+      "inspectText": "[{\"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"22222222-2222-4333-8444-555555555555\"}}, \"State\": {\"Running\": true, \"Pid\": 0}, \"HostConfig\": {\"Memory\": 536870912, \"MemorySwap\": 536870912}}]",
+      "cgroup": "0::/outside\n",
+      "poolMemory": "4294967296",
+      "poolTasks": "1024",
+      "meminfo": "MemTotal: 16777216 kB\n",
+      "error": {
+        "type": "RuntimeError",
+        "message": "Unknown peer process during resource admission"
+      },
+      "events": [
+        {
+          "args": [
+            "ps",
+            "--filter",
+            "label=reverie.worker=test",
+            "--format",
+            "{{.Names}}"
+          ],
+          "optional": false
+        },
+        {
+          "args": [
+            "inspect",
+            "test-agent-22222222-2222-4333-8444-555555555555"
+          ],
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "pid-float",
+      "config": {
+        "deployment": "test",
+        "maxWorkers": 4,
+        "poolMemoryMiB": 4096
+      },
+      "resources": {
+        "budgetMode": "admission",
+        "memoryMiB": 512
+      },
+      "listed": [
+        "test-agent-22222222-2222-4333-8444-555555555555"
+      ],
+      "registry": [],
+      "inspectSucceeded": true,
+      "inspectText": "[{\"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"22222222-2222-4333-8444-555555555555\"}}, \"State\": {\"Running\": true, \"Pid\": 123.0}, \"HostConfig\": {\"Memory\": 536870912, \"MemorySwap\": 536870912}}]",
+      "cgroup": "0::/outside\n",
+      "poolMemory": "4294967296",
+      "poolTasks": "1024",
+      "meminfo": "MemTotal: 16777216 kB\n",
+      "error": {
+        "type": "RuntimeError",
+        "message": "Unknown peer process during resource admission"
+      },
+      "events": [
+        {
+          "args": [
+            "ps",
+            "--filter",
+            "label=reverie.worker=test",
+            "--format",
+            "{{.Names}}"
+          ],
+          "optional": false
+        },
+        {
+          "args": [
+            "inspect",
+            "test-agent-22222222-2222-4333-8444-555555555555"
+          ],
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "memory-bool",
+      "config": {
+        "deployment": "test",
+        "maxWorkers": 4,
+        "poolMemoryMiB": 4096
+      },
+      "resources": {
+        "budgetMode": "admission",
+        "memoryMiB": 512
+      },
+      "listed": [
+        "test-agent-22222222-2222-4333-8444-555555555555"
+      ],
+      "registry": [],
+      "inspectSucceeded": true,
+      "inspectText": "[{\"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"22222222-2222-4333-8444-555555555555\"}}, \"State\": {\"Running\": true, \"Pid\": 123}, \"HostConfig\": {\"Memory\": true, \"MemorySwap\": 536870912}}]",
+      "cgroup": "0::/outside\n",
+      "poolMemory": "4294967296",
+      "poolTasks": "1024",
+      "meminfo": "MemTotal: 16777216 kB\n",
+      "error": {
+        "type": "RuntimeError",
+        "message": "Outside-pool peer requires finite RAM and zero swap"
+      },
+      "events": [
+        {
+          "args": [
+            "ps",
+            "--filter",
+            "label=reverie.worker=test",
+            "--format",
+            "{{.Names}}"
+          ],
+          "optional": false
+        },
+        {
+          "args": [
+            "inspect",
+            "test-agent-22222222-2222-4333-8444-555555555555"
+          ],
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "memory-zero",
+      "config": {
+        "deployment": "test",
+        "maxWorkers": 4,
+        "poolMemoryMiB": 4096
+      },
+      "resources": {
+        "budgetMode": "admission",
+        "memoryMiB": 512
+      },
+      "listed": [
+        "test-agent-22222222-2222-4333-8444-555555555555"
+      ],
+      "registry": [],
+      "inspectSucceeded": true,
+      "inspectText": "[{\"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"22222222-2222-4333-8444-555555555555\"}}, \"State\": {\"Running\": true, \"Pid\": 123}, \"HostConfig\": {\"Memory\": 0, \"MemorySwap\": 536870912}}]",
+      "cgroup": "0::/outside\n",
+      "poolMemory": "4294967296",
+      "poolTasks": "1024",
+      "meminfo": "MemTotal: 16777216 kB\n",
+      "error": {
+        "type": "RuntimeError",
+        "message": "Outside-pool peer requires finite RAM and zero swap"
+      },
+      "events": [
+        {
+          "args": [
+            "ps",
+            "--filter",
+            "label=reverie.worker=test",
+            "--format",
+            "{{.Names}}"
+          ],
+          "optional": false
+        },
+        {
+          "args": [
+            "inspect",
+            "test-agent-22222222-2222-4333-8444-555555555555"
+          ],
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "memory-float",
+      "config": {
+        "deployment": "test",
+        "maxWorkers": 4,
+        "poolMemoryMiB": 4096
+      },
+      "resources": {
+        "budgetMode": "admission",
+        "memoryMiB": 512
+      },
+      "listed": [
+        "test-agent-22222222-2222-4333-8444-555555555555"
+      ],
+      "registry": [],
+      "inspectSucceeded": true,
+      "inspectText": "[{\"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"22222222-2222-4333-8444-555555555555\"}}, \"State\": {\"Running\": true, \"Pid\": 123}, \"HostConfig\": {\"Memory\": 536870912.0, \"MemorySwap\": 536870912}}]",
+      "cgroup": "0::/outside\n",
+      "poolMemory": "4294967296",
+      "poolTasks": "1024",
+      "meminfo": "MemTotal: 16777216 kB\n",
+      "error": {
+        "type": "RuntimeError",
+        "message": "Outside-pool peer requires finite RAM and zero swap"
+      },
+      "events": [
+        {
+          "args": [
+            "ps",
+            "--filter",
+            "label=reverie.worker=test",
+            "--format",
+            "{{.Names}}"
+          ],
+          "optional": false
+        },
+        {
+          "args": [
+            "inspect",
+            "test-agent-22222222-2222-4333-8444-555555555555"
+          ],
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "swap-float-equality",
+      "config": {
+        "deployment": "test",
+        "maxWorkers": 4,
+        "poolMemoryMiB": 4096
+      },
+      "resources": {
+        "budgetMode": "admission",
+        "memoryMiB": 512
+      },
+      "listed": [
+        "test-agent-22222222-2222-4333-8444-555555555555"
+      ],
+      "registry": [],
+      "inspectSucceeded": true,
+      "inspectText": "[{\"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"22222222-2222-4333-8444-555555555555\"}}, \"State\": {\"Running\": true, \"Pid\": 123}, \"HostConfig\": {\"Memory\": 536870912, \"MemorySwap\": 536870912.0}}]",
+      "cgroup": "0::/outside\n",
+      "poolMemory": "4294967296",
+      "poolTasks": "1024",
+      "meminfo": "MemTotal: 16777216 kB\n",
+      "error": null,
+      "events": [
+        {
+          "args": [
+            "ps",
+            "--filter",
+            "label=reverie.worker=test",
+            "--format",
+            "{{.Names}}"
+          ],
+          "optional": false
+        },
+        {
+          "args": [
+            "inspect",
+            "test-agent-22222222-2222-4333-8444-555555555555"
+          ],
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "swap-mismatch",
+      "config": {
+        "deployment": "test",
+        "maxWorkers": 4,
+        "poolMemoryMiB": 4096
+      },
+      "resources": {
+        "budgetMode": "admission",
+        "memoryMiB": 512
+      },
+      "listed": [
+        "test-agent-22222222-2222-4333-8444-555555555555"
+      ],
+      "registry": [],
+      "inspectSucceeded": true,
+      "inspectText": "[{\"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"22222222-2222-4333-8444-555555555555\"}}, \"State\": {\"Running\": true, \"Pid\": 123}, \"HostConfig\": {\"Memory\": 536870912, \"MemorySwap\": 536870913}}]",
+      "cgroup": "0::/outside\n",
+      "poolMemory": "4294967296",
+      "poolTasks": "1024",
+      "meminfo": "MemTotal: 16777216 kB\n",
+      "error": {
+        "type": "RuntimeError",
+        "message": "Outside-pool peer requires finite RAM and zero swap"
+      },
+      "events": [
+        {
+          "args": [
+            "ps",
+            "--filter",
+            "label=reverie.worker=test",
+            "--format",
+            "{{.Names}}"
+          ],
+          "optional": false
+        },
+        {
+          "args": [
+            "inspect",
+            "test-agent-22222222-2222-4333-8444-555555555555"
+          ],
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "bool-swap-equality",
+      "config": {
+        "deployment": "test",
+        "maxWorkers": 4,
+        "poolMemoryMiB": 4096
+      },
+      "resources": {
+        "budgetMode": "admission",
+        "memoryMiB": 512
+      },
+      "listed": [
+        "test-agent-22222222-2222-4333-8444-555555555555"
+      ],
+      "registry": [],
+      "inspectSucceeded": true,
+      "inspectText": "[{\"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"22222222-2222-4333-8444-555555555555\"}}, \"State\": {\"Running\": true, \"Pid\": 123}, \"HostConfig\": {\"Memory\": 1, \"MemorySwap\": true}}]",
+      "cgroup": "0::/outside\n",
+      "poolMemory": "4294967296",
+      "poolTasks": "1024",
+      "meminfo": "MemTotal: 16777216 kB\n",
+      "error": null,
+      "events": [
+        {
+          "args": [
+            "ps",
+            "--filter",
+            "label=reverie.worker=test",
+            "--format",
+            "{{.Names}}"
+          ],
+          "optional": false
+        },
+        {
+          "args": [
+            "inspect",
+            "test-agent-22222222-2222-4333-8444-555555555555"
+          ],
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "pool-child",
+      "config": {
+        "deployment": "test",
+        "maxWorkers": 4,
+        "poolMemoryMiB": 4096
+      },
+      "resources": {
+        "budgetMode": "admission",
+        "memoryMiB": 512
+      },
+      "listed": [
+        "test-agent-22222222-2222-4333-8444-555555555555"
+      ],
+      "registry": [],
+      "inspectSucceeded": true,
+      "inspectText": "[{\"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"22222222-2222-4333-8444-555555555555\"}}, \"State\": {\"Running\": true, \"Pid\": 123}, \"HostConfig\": {\"Memory\": 536870912, \"MemorySwap\": 536870912}}]",
+      "cgroup": "0::/reverie.slice/reverie-workers.slice/a\n",
+      "poolMemory": "4294967296",
+      "poolTasks": "1024",
+      "meminfo": "MemTotal: 16777216 kB\n",
+      "error": null,
+      "events": [
+        {
+          "args": [
+            "ps",
+            "--filter",
+            "label=reverie.worker=test",
+            "--format",
+            "{{.Names}}"
+          ],
+          "optional": false
+        },
+        {
+          "args": [
+            "inspect",
+            "test-agent-22222222-2222-4333-8444-555555555555"
+          ],
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "pool-exact-root",
+      "config": {
+        "deployment": "test",
+        "maxWorkers": 4,
+        "poolMemoryMiB": 4096
+      },
+      "resources": {
+        "budgetMode": "admission",
+        "memoryMiB": 512
+      },
+      "listed": [
+        "test-agent-22222222-2222-4333-8444-555555555555"
+      ],
+      "registry": [],
+      "inspectSucceeded": true,
+      "inspectText": "[{\"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"22222222-2222-4333-8444-555555555555\"}}, \"State\": {\"Running\": true, \"Pid\": 123}, \"HostConfig\": {\"Memory\": 536870912, \"MemorySwap\": 536870912}}]",
+      "cgroup": "0::/reverie.slice/reverie-workers.slice\n",
+      "poolMemory": "4294967296",
+      "poolTasks": "1024",
+      "meminfo": "MemTotal: 16777216 kB\n",
+      "error": null,
+      "events": [
+        {
+          "args": [
+            "ps",
+            "--filter",
+            "label=reverie.worker=test",
+            "--format",
+            "{{.Names}}"
+          ],
+          "optional": false
+        },
+        {
+          "args": [
+            "inspect",
+            "test-agent-22222222-2222-4333-8444-555555555555"
+          ],
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "bad-cgroup",
+      "config": {
+        "deployment": "test",
+        "maxWorkers": 4,
+        "poolMemoryMiB": 4096
+      },
+      "resources": {
+        "budgetMode": "admission",
+        "memoryMiB": 512
+      },
+      "listed": [
+        "test-agent-22222222-2222-4333-8444-555555555555"
+      ],
+      "registry": [],
+      "inspectSucceeded": true,
+      "inspectText": "[{\"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"22222222-2222-4333-8444-555555555555\"}}, \"State\": {\"Running\": true, \"Pid\": 123}, \"HostConfig\": {\"Memory\": 536870912, \"MemorySwap\": 536870912}}]",
+      "cgroup": "0:/owned\n",
+      "poolMemory": "4294967296",
+      "poolTasks": "1024",
+      "meminfo": "MemTotal: 16777216 kB\n",
+      "error": {
+        "type": "RuntimeError",
+        "message": "Unified peer cgroup identity required"
+      },
+      "events": [
+        {
+          "args": [
+            "ps",
+            "--filter",
+            "label=reverie.worker=test",
+            "--format",
+            "{{.Names}}"
+          ],
+          "optional": false
+        },
+        {
+          "args": [
+            "inspect",
+            "test-agent-22222222-2222-4333-8444-555555555555"
+          ],
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "two-cgroups",
+      "config": {
+        "deployment": "test",
+        "maxWorkers": 4,
+        "poolMemoryMiB": 4096
+      },
+      "resources": {
+        "budgetMode": "admission",
+        "memoryMiB": 512
+      },
+      "listed": [
+        "test-agent-22222222-2222-4333-8444-555555555555"
+      ],
+      "registry": [],
+      "inspectSucceeded": true,
+      "inspectText": "[{\"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"22222222-2222-4333-8444-555555555555\"}}, \"State\": {\"Running\": true, \"Pid\": 123}, \"HostConfig\": {\"Memory\": 536870912, \"MemorySwap\": 536870912}}]",
+      "cgroup": "0::/one\n0::/two\n",
+      "poolMemory": "4294967296",
+      "poolTasks": "1024",
+      "meminfo": "MemTotal: 16777216 kB\n",
+      "error": {
+        "type": "RuntimeError",
+        "message": "Unified peer cgroup identity required"
+      },
+      "events": [
+        {
+          "args": [
+            "ps",
+            "--filter",
+            "label=reverie.worker=test",
+            "--format",
+            "{{.Names}}"
+          ],
+          "optional": false
+        },
+        {
+          "args": [
+            "inspect",
+            "test-agent-22222222-2222-4333-8444-555555555555"
+          ],
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "parent-cgroup-spelling",
+      "config": {
+        "deployment": "test",
+        "maxWorkers": 4,
+        "poolMemoryMiB": 4096
+      },
+      "resources": {
+        "budgetMode": "admission",
+        "memoryMiB": 512
+      },
+      "listed": [
+        "test-agent-22222222-2222-4333-8444-555555555555"
+      ],
+      "registry": [],
+      "inspectSucceeded": true,
+      "inspectText": "[{\"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"22222222-2222-4333-8444-555555555555\"}}, \"State\": {\"Running\": true, \"Pid\": 123}, \"HostConfig\": {\"Memory\": 536870912, \"MemorySwap\": 536870912}}]",
+      "cgroup": "0::/reverie.slice/reverie-workers.slice/../x\n",
+      "poolMemory": "4294967296",
+      "poolTasks": "1024",
+      "meminfo": "MemTotal: 16777216 kB\n",
+      "error": null,
+      "events": [
+        {
+          "args": [
+            "ps",
+            "--filter",
+            "label=reverie.worker=test",
+            "--format",
+            "{{.Names}}"
+          ],
+          "optional": false
+        },
+        {
+          "args": [
+            "inspect",
+            "test-agent-22222222-2222-4333-8444-555555555555"
+          ],
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "capacity-full",
+      "config": {
+        "deployment": "test",
+        "maxWorkers": 1,
+        "poolMemoryMiB": 4096
+      },
+      "resources": {
+        "budgetMode": "admission",
+        "memoryMiB": 512
+      },
+      "listed": [
+        "test-agent-22222222-2222-4333-8444-555555555555"
+      ],
+      "registry": [],
+      "inspectSucceeded": true,
+      "inspectText": "[{\"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"22222222-2222-4333-8444-555555555555\"}}, \"State\": {\"Running\": true, \"Pid\": 123}, \"HostConfig\": {\"Memory\": 536870912, \"MemorySwap\": 536870912}}]",
+      "cgroup": "0::/outside\n",
+      "poolMemory": "4294967296",
+      "poolTasks": "1024",
+      "meminfo": "MemTotal: 16777216 kB\n",
+      "error": {
+        "type": "RuntimeError",
+        "message": "Worker capacity is full"
+      },
+      "events": [
+        {
+          "args": [
+            "ps",
+            "--filter",
+            "label=reverie.worker=test",
+            "--format",
+            "{{.Names}}"
+          ],
+          "optional": false
+        },
+        {
+          "args": [
+            "inspect",
+            "test-agent-22222222-2222-4333-8444-555555555555"
+          ],
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "outside-at-budget",
+      "config": {
+        "deployment": "test",
+        "maxWorkers": 4,
+        "poolMemoryMiB": 4096
+      },
+      "resources": {
+        "budgetMode": "admission",
+        "memoryMiB": 3584
+      },
+      "listed": [
+        "test-agent-22222222-2222-4333-8444-555555555555"
+      ],
+      "registry": [],
+      "inspectSucceeded": true,
+      "inspectText": "[{\"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"22222222-2222-4333-8444-555555555555\"}}, \"State\": {\"Running\": true, \"Pid\": 123}, \"HostConfig\": {\"Memory\": 536870912, \"MemorySwap\": 536870912}}]",
+      "cgroup": "0::/outside\n",
+      "poolMemory": "4294967296",
+      "poolTasks": "1024",
+      "meminfo": "MemTotal: 16777216 kB\n",
+      "error": null,
+      "events": [
+        {
+          "args": [
+            "ps",
+            "--filter",
+            "label=reverie.worker=test",
+            "--format",
+            "{{.Names}}"
+          ],
+          "optional": false
+        },
+        {
+          "args": [
+            "inspect",
+            "test-agent-22222222-2222-4333-8444-555555555555"
+          ],
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "outside-over-budget",
+      "config": {
+        "deployment": "test",
+        "maxWorkers": 4,
+        "poolMemoryMiB": 4096
+      },
+      "resources": {
+        "budgetMode": "admission",
+        "memoryMiB": 3585
+      },
+      "listed": [
+        "test-agent-22222222-2222-4333-8444-555555555555"
+      ],
+      "registry": [],
+      "inspectSucceeded": true,
+      "inspectText": "[{\"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"22222222-2222-4333-8444-555555555555\"}}, \"State\": {\"Running\": true, \"Pid\": 123}, \"HostConfig\": {\"Memory\": 536870912, \"MemorySwap\": 536870912}}]",
+      "cgroup": "0::/outside\n",
+      "poolMemory": "4294967296",
+      "poolTasks": "1024",
+      "meminfo": "MemTotal: 16777216 kB\n",
+      "error": {
+        "type": "RuntimeError",
+        "message": "Worker memory admission is full; actual peer ceilings reserve the budget"
+      },
+      "events": [
+        {
+          "args": [
+            "ps",
+            "--filter",
+            "label=reverie.worker=test",
+            "--format",
+            "{{.Names}}"
+          ],
+          "optional": false
+        },
+        {
+          "args": [
+            "inspect",
+            "test-agent-22222222-2222-4333-8444-555555555555"
+          ],
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "pool-max",
+      "config": {
+        "deployment": "test",
+        "maxWorkers": 4,
+        "poolMemoryMiB": 4096
+      },
+      "resources": {
+        "budgetMode": "pool",
+        "memoryMiB": 512
+      },
+      "listed": [],
+      "registry": [],
+      "inspectSucceeded": true,
+      "inspectText": "[{\"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"22222222-2222-4333-8444-555555555555\"}}, \"State\": {\"Running\": true, \"Pid\": 123}, \"HostConfig\": {\"Memory\": 536870912, \"MemorySwap\": 536870912}}]",
+      "cgroup": "0::/outside\n",
+      "poolMemory": "max",
+      "poolTasks": "1024",
+      "meminfo": "MemTotal: 16777216 kB\n",
+      "error": {
+        "type": "ValueError",
+        "message": "invalid literal for int() with base 10: 'max'"
+      },
+      "events": [
+        {
+          "args": [
+            "ps",
+            "--filter",
+            "label=reverie.worker=test",
+            "--format",
+            "{{.Names}}"
+          ],
+          "optional": false
+        }
+      ]
+    },
+    {
+      "name": "pool-negative",
+      "config": {
+        "deployment": "test",
+        "maxWorkers": 4,
+        "poolMemoryMiB": 4096
+      },
+      "resources": {
+        "budgetMode": "pool",
+        "memoryMiB": 512
+      },
+      "listed": [],
+      "registry": [],
+      "inspectSucceeded": true,
+      "inspectText": "[{\"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"22222222-2222-4333-8444-555555555555\"}}, \"State\": {\"Running\": true, \"Pid\": 123}, \"HostConfig\": {\"Memory\": 536870912, \"MemorySwap\": 536870912}}]",
+      "cgroup": "0::/outside\n",
+      "poolMemory": "-1",
+      "poolTasks": "1024",
+      "meminfo": "MemTotal: 16777216 kB\n",
+      "error": {
+        "type": "RuntimeError",
+        "message": "Finite positive shared pool limits required"
+      },
+      "events": [
+        {
+          "args": [
+            "ps",
+            "--filter",
+            "label=reverie.worker=test",
+            "--format",
+            "{{.Names}}"
+          ],
+          "optional": false
+        }
+      ]
+    },
+    {
+      "name": "pool-zero",
+      "config": {
+        "deployment": "test",
+        "maxWorkers": 4,
+        "poolMemoryMiB": 4096
+      },
+      "resources": {
+        "budgetMode": "pool",
+        "memoryMiB": 512
+      },
+      "listed": [],
+      "registry": [],
+      "inspectSucceeded": true,
+      "inspectText": "[{\"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"22222222-2222-4333-8444-555555555555\"}}, \"State\": {\"Running\": true, \"Pid\": 123}, \"HostConfig\": {\"Memory\": 536870912, \"MemorySwap\": 536870912}}]",
+      "cgroup": "0::/outside\n",
+      "poolMemory": "0",
+      "poolTasks": "1024",
+      "meminfo": "MemTotal: 16777216 kB\n",
+      "error": {
+        "type": "RuntimeError",
+        "message": "Finite positive shared pool limits required"
+      },
+      "events": [
+        {
+          "args": [
+            "ps",
+            "--filter",
+            "label=reverie.worker=test",
+            "--format",
+            "{{.Names}}"
+          ],
+          "optional": false
+        }
+      ]
+    },
+    {
+      "name": "tasks-zero",
+      "config": {
+        "deployment": "test",
+        "maxWorkers": 4,
+        "poolMemoryMiB": 4096
+      },
+      "resources": {
+        "budgetMode": "pool",
+        "memoryMiB": 512
+      },
+      "listed": [],
+      "registry": [],
+      "inspectSucceeded": true,
+      "inspectText": "[{\"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"22222222-2222-4333-8444-555555555555\"}}, \"State\": {\"Running\": true, \"Pid\": 123}, \"HostConfig\": {\"Memory\": 536870912, \"MemorySwap\": 536870912}}]",
+      "cgroup": "0::/outside\n",
+      "poolMemory": "4294967296",
+      "poolTasks": "0",
+      "meminfo": "MemTotal: 16777216 kB\n",
+      "error": {
+        "type": "RuntimeError",
+        "message": "Finite positive shared pool limits required"
+      },
+      "events": [
+        {
+          "args": [
+            "ps",
+            "--filter",
+            "label=reverie.worker=test",
+            "--format",
+            "{{.Names}}"
+          ],
+          "optional": false
+        }
+      ]
+    },
+    {
+      "name": "pool-python-int",
+      "config": {
+        "deployment": "test",
+        "maxWorkers": 4,
+        "poolMemoryMiB": 4096
+      },
+      "resources": {
+        "budgetMode": "pool",
+        "memoryMiB": 512
+      },
+      "listed": [],
+      "registry": [],
+      "inspectSucceeded": true,
+      "inspectText": "[{\"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"22222222-2222-4333-8444-555555555555\"}}, \"State\": {\"Running\": true, \"Pid\": 123}, \"HostConfig\": {\"Memory\": 536870912, \"MemorySwap\": 536870912}}]",
+      "cgroup": "0::/outside\n",
+      "poolMemory": " +\uff14_\uff10\uff19\uff16 ",
+      "poolTasks": "1024",
+      "meminfo": "MemTotal: 16777216 kB\n",
+      "error": null,
+      "events": [
+        {
+          "args": [
+            "ps",
+            "--filter",
+            "label=reverie.worker=test",
+            "--format",
+            "{{.Names}}"
+          ],
+          "optional": false
+        }
+      ]
+    },
+    {
+      "name": "tasks-python-int",
+      "config": {
+        "deployment": "test",
+        "maxWorkers": 4,
+        "poolMemoryMiB": 4096
+      },
+      "resources": {
+        "budgetMode": "pool",
+        "memoryMiB": 512
+      },
+      "listed": [],
+      "registry": [],
+      "inspectSucceeded": true,
+      "inspectText": "[{\"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"22222222-2222-4333-8444-555555555555\"}}, \"State\": {\"Running\": true, \"Pid\": 123}, \"HostConfig\": {\"Memory\": 536870912, \"MemorySwap\": 536870912}}]",
+      "cgroup": "0::/outside\n",
+      "poolMemory": "4294967296",
+      "poolTasks": " +\uff11_\uff10\uff12\uff14 ",
+      "meminfo": "MemTotal: 16777216 kB\n",
+      "error": null,
+      "events": [
+        {
+          "args": [
+            "ps",
+            "--filter",
+            "label=reverie.worker=test",
+            "--format",
+            "{{.Names}}"
+          ],
+          "optional": false
+        }
+      ]
+    },
+    {
+      "name": "memtotal-missing",
+      "config": {
+        "deployment": "test",
+        "maxWorkers": 4,
+        "poolMemoryMiB": 4096
+      },
+      "resources": {
+        "budgetMode": "pool",
+        "memoryMiB": 512
+      },
+      "listed": [],
+      "registry": [],
+      "inspectSucceeded": true,
+      "inspectText": "[{\"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"22222222-2222-4333-8444-555555555555\"}}, \"State\": {\"Running\": true, \"Pid\": 123}, \"HostConfig\": {\"Memory\": 536870912, \"MemorySwap\": 536870912}}]",
+      "cgroup": "0::/outside\n",
+      "poolMemory": "4294967296",
+      "poolTasks": "1024",
+      "meminfo": "MemAvailable: 10 kB\n",
+      "error": {
+        "type": "StopIteration",
+        "message": ""
+      },
+      "events": [
+        {
+          "args": [
+            "ps",
+            "--filter",
+            "label=reverie.worker=test",
+            "--format",
+            "{{.Names}}"
+          ],
+          "optional": false
+        }
+      ]
+    },
+    {
+      "name": "memtotal-short",
+      "config": {
+        "deployment": "test",
+        "maxWorkers": 4,
+        "poolMemoryMiB": 4096
+      },
+      "resources": {
+        "budgetMode": "pool",
+        "memoryMiB": 512
+      },
+      "listed": [],
+      "registry": [],
+      "inspectSucceeded": true,
+      "inspectText": "[{\"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"22222222-2222-4333-8444-555555555555\"}}, \"State\": {\"Running\": true, \"Pid\": 123}, \"HostConfig\": {\"Memory\": 536870912, \"MemorySwap\": 536870912}}]",
+      "cgroup": "0::/outside\n",
+      "poolMemory": "4294967296",
+      "poolTasks": "1024",
+      "meminfo": "MemTotal:\n",
+      "error": {
+        "type": "IndexError",
+        "message": "list index out of range"
+      },
+      "events": [
+        {
+          "args": [
+            "ps",
+            "--filter",
+            "label=reverie.worker=test",
+            "--format",
+            "{{.Names}}"
+          ],
+          "optional": false
+        }
+      ]
+    },
+    {
+      "name": "memtotal-nondigit",
+      "config": {
+        "deployment": "test",
+        "maxWorkers": 4,
+        "poolMemoryMiB": 4096
+      },
+      "resources": {
+        "budgetMode": "pool",
+        "memoryMiB": 512
+      },
+      "listed": [],
+      "registry": [],
+      "inspectSucceeded": true,
+      "inspectText": "[{\"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"22222222-2222-4333-8444-555555555555\"}}, \"State\": {\"Running\": true, \"Pid\": 123}, \"HostConfig\": {\"Memory\": 536870912, \"MemorySwap\": 536870912}}]",
+      "cgroup": "0::/outside\n",
+      "poolMemory": "4294967296",
+      "poolTasks": "1024",
+      "meminfo": "MemTotal: nope kB\n",
+      "error": {
+        "type": "ValueError",
+        "message": "invalid literal for int() with base 10: 'nope'"
+      },
+      "events": [
+        {
+          "args": [
+            "ps",
+            "--filter",
+            "label=reverie.worker=test",
+            "--format",
+            "{{.Names}}"
+          ],
+          "optional": false
+        }
+      ]
+    },
+    {
+      "name": "memtotal-duplicates",
+      "config": {
+        "deployment": "test",
+        "maxWorkers": 4,
+        "poolMemoryMiB": 4096
+      },
+      "resources": {
+        "budgetMode": "pool",
+        "memoryMiB": 512
+      },
+      "listed": [],
+      "registry": [],
+      "inspectSucceeded": true,
+      "inspectText": "[{\"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"22222222-2222-4333-8444-555555555555\"}}, \"State\": {\"Running\": true, \"Pid\": 123}, \"HostConfig\": {\"Memory\": 536870912, \"MemorySwap\": 536870912}}]",
+      "cgroup": "0::/outside\n",
+      "poolMemory": "4294967296",
+      "poolTasks": "1024",
+      "meminfo": "MemTotal: 16777216 kB\nMemTotal: 0 kB\n",
+      "error": null,
+      "events": [
+        {
+          "args": [
+            "ps",
+            "--filter",
+            "label=reverie.worker=test",
+            "--format",
+            "{{.Names}}"
+          ],
+          "optional": false
+        }
+      ]
+    },
+    {
+      "name": "memtotal-unicode",
+      "config": {
+        "deployment": "test",
+        "maxWorkers": 4,
+        "poolMemoryMiB": 4096
+      },
+      "resources": {
+        "budgetMode": "pool",
+        "memoryMiB": 512
+      },
+      "listed": [],
+      "registry": [],
+      "inspectSucceeded": true,
+      "inspectText": "[{\"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"22222222-2222-4333-8444-555555555555\"}}, \"State\": {\"Running\": true, \"Pid\": 123}, \"HostConfig\": {\"Memory\": 536870912, \"MemorySwap\": 536870912}}]",
+      "cgroup": "0::/outside\n",
+      "poolMemory": "4294967296",
+      "poolTasks": "1024",
+      "meminfo": "MemTotal: +\uff11\uff16\uff17\uff17\uff17\uff12\uff11\uff16 kB\n",
+      "error": null,
+      "events": [
+        {
+          "args": [
+            "ps",
+            "--filter",
+            "label=reverie.worker=test",
+            "--format",
+            "{{.Names}}"
+          ],
+          "optional": false
+        }
+      ]
+    },
+    {
+      "name": "memtotal-exact-headroom",
+      "config": {
+        "deployment": "test",
+        "maxWorkers": 4,
+        "poolMemoryMiB": 4096
+      },
+      "resources": {
+        "budgetMode": "pool",
+        "memoryMiB": 512
+      },
+      "listed": [],
+      "registry": [],
+      "inspectSucceeded": true,
+      "inspectText": "[{\"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"22222222-2222-4333-8444-555555555555\"}}, \"State\": {\"Running\": true, \"Pid\": 123}, \"HostConfig\": {\"Memory\": 536870912, \"MemorySwap\": 536870912}}]",
+      "cgroup": "0::/outside\n",
+      "poolMemory": "4294967296",
+      "poolTasks": "1024",
+      "meminfo": "MemTotal: 9320676 kB\n",
+      "error": {
+        "type": "RuntimeError",
+        "message": "Pool plus actual peer ceilings exceed host headroom"
+      },
+      "events": [
+        {
+          "args": [
+            "ps",
+            "--filter",
+            "label=reverie.worker=test",
+            "--format",
+            "{{.Names}}"
+          ],
+          "optional": false
+        }
+      ]
+    },
+    {
+      "name": "nested-last-wins",
+      "config": {
+        "deployment": "test",
+        "maxWorkers": 4,
+        "poolMemoryMiB": 4096
+      },
+      "resources": {
+        "budgetMode": "admission",
+        "memoryMiB": 512
+      },
+      "listed": [
+        "test-agent-22222222-2222-4333-8444-555555555555"
+      ],
+      "registry": [],
+      "inspectSucceeded": true,
+      "inspectText": "[{\"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"22222222-2222-4333-8444-555555555555\"}}, \"State\": {\"Running\": true, \"Pid\": 123}, \"HostConfig\": {\"Memory\": false, \"Memory\": 536870912, \"MemorySwap\": 536870912}}]",
+      "cgroup": "0::/outside\n",
+      "poolMemory": "4294967296",
+      "poolTasks": "1024",
+      "meminfo": "MemTotal: 16777216 kB\n",
+      "error": null,
+      "events": [
+        {
+          "args": [
+            "ps",
+            "--filter",
+            "label=reverie.worker=test",
+            "--format",
+            "{{.Names}}"
+          ],
+          "optional": false
+        },
+        {
+          "args": [
+            "inspect",
+            "test-agent-22222222-2222-4333-8444-555555555555"
+          ],
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "nonfinite-extras",
+      "config": {
+        "deployment": "test",
+        "maxWorkers": 4,
+        "poolMemoryMiB": 4096
+      },
+      "resources": {
+        "budgetMode": "admission",
+        "memoryMiB": 512
+      },
+      "listed": [
+        "test-agent-22222222-2222-4333-8444-555555555555"
+      ],
+      "registry": [],
+      "inspectSucceeded": true,
+      "inspectText": "[{\"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"22222222-2222-4333-8444-555555555555\"}}, \"State\": {\"Running\": true, \"Pid\": 123}, \"HostConfig\": {\"opaque\": [NaN,Infinity,-Infinity,1e999],\"Memory\": 536870912, \"MemorySwap\": 536870912}}]",
+      "cgroup": "0::/outside\n",
+      "poolMemory": "4294967296",
+      "poolTasks": "1024",
+      "meminfo": "MemTotal: 16777216 kB\n",
+      "error": null,
+      "events": [
+        {
+          "args": [
+            "ps",
+            "--filter",
+            "label=reverie.worker=test",
+            "--format",
+            "{{.Names}}"
+          ],
+          "optional": false
+        },
+        {
+          "args": [
+            "inspect",
+            "test-agent-22222222-2222-4333-8444-555555555555"
+          ],
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "json-int-4300",
+      "config": {
+        "deployment": "test",
+        "maxWorkers": 4,
+        "poolMemoryMiB": 4096
+      },
+      "resources": {
+        "budgetMode": "admission",
+        "memoryMiB": 512
+      },
+      "listed": [
+        "test-agent-22222222-2222-4333-8444-555555555555"
+      ],
+      "registry": [],
+      "inspectSucceeded": true,
+      "inspectText": "[{\"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"22222222-2222-4333-8444-555555555555\"}}, \"State\": {\"Running\": true, \"Pid\": 123}, \"HostConfig\": {\"opaque\": 1111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111,\"Memory\": 536870912, \"MemorySwap\": 536870912}}]",
+      "cgroup": "0::/outside\n",
+      "poolMemory": "4294967296",
+      "poolTasks": "1024",
+      "meminfo": "MemTotal: 16777216 kB\n",
+      "error": null,
+      "events": [
+        {
+          "args": [
+            "ps",
+            "--filter",
+            "label=reverie.worker=test",
+            "--format",
+            "{{.Names}}"
+          ],
+          "optional": false
+        },
+        {
+          "args": [
+            "inspect",
+            "test-agent-22222222-2222-4333-8444-555555555555"
+          ],
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "json-int-4301",
+      "config": {
+        "deployment": "test",
+        "maxWorkers": 4,
+        "poolMemoryMiB": 4096
+      },
+      "resources": {
+        "budgetMode": "admission",
+        "memoryMiB": 512
+      },
+      "listed": [
+        "test-agent-22222222-2222-4333-8444-555555555555"
+      ],
+      "registry": [],
+      "inspectSucceeded": true,
+      "inspectText": "[{\"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"22222222-2222-4333-8444-555555555555\"}}, \"State\": {\"Running\": true, \"Pid\": 123}, \"HostConfig\": {\"opaque\": 11111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111,\"Memory\": 536870912, \"MemorySwap\": 536870912}}]",
+      "cgroup": "0::/outside\n",
+      "poolMemory": "4294967296",
+      "poolTasks": "1024",
+      "meminfo": "MemTotal: 16777216 kB\n",
+      "error": {
+        "type": "ValueError",
+        "message": "Exceeds the limit (4300 digits) for integer string conversion: value has 4301 digits; use sys.set_int_max_str_digits() to increase the limit"
+      },
+      "events": [
+        {
+          "args": [
+            "ps",
+            "--filter",
+            "label=reverie.worker=test",
+            "--format",
+            "{{.Names}}"
+          ],
+          "optional": false
+        },
+        {
+          "args": [
+            "inspect",
+            "test-agent-22222222-2222-4333-8444-555555555555"
+          ],
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "utf8-bom",
+      "config": {
+        "deployment": "test",
+        "maxWorkers": 4,
+        "poolMemoryMiB": 4096
+      },
+      "resources": {
+        "budgetMode": "admission",
+        "memoryMiB": 512
+      },
+      "listed": [
+        "test-agent-22222222-2222-4333-8444-555555555555"
+      ],
+      "registry": [],
+      "inspectSucceeded": true,
+      "inspectText": "\ufeff[{\"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"22222222-2222-4333-8444-555555555555\"}}, \"State\": {\"Running\": true, \"Pid\": 123}, \"HostConfig\": {\"Memory\": 536870912, \"MemorySwap\": 536870912}}]",
+      "cgroup": "0::/outside\n",
+      "poolMemory": "4294967296",
+      "poolTasks": "1024",
+      "meminfo": "MemTotal: 16777216 kB\n",
+      "error": {
+        "type": "JSONDecodeError",
+        "message": "Unexpected UTF-8 BOM (decode using utf-8-sig): line 1 column 1 (char 0)"
+      },
+      "events": [
+        {
+          "args": [
+            "ps",
+            "--filter",
+            "label=reverie.worker=test",
+            "--format",
+            "{{.Names}}"
+          ],
+          "optional": false
+        },
+        {
+          "args": [
+            "inspect",
+            "test-agent-22222222-2222-4333-8444-555555555555"
+          ],
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "unused-surrogate",
+      "config": {
+        "deployment": "test",
+        "maxWorkers": 4,
+        "poolMemoryMiB": 4096
+      },
+      "resources": {
+        "budgetMode": "admission",
+        "memoryMiB": 512
+      },
+      "listed": [
+        "test-agent-22222222-2222-4333-8444-555555555555"
+      ],
+      "registry": [],
+      "inspectSucceeded": true,
+      "inspectText": "[{\"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"22222222-2222-4333-8444-555555555555\"}}, \"State\": {\"Running\": true, \"Pid\": 123}, \"HostConfig\": {\"opaque\": \"\\ud800\",\"Memory\": 536870912, \"MemorySwap\": 536870912}}]",
+      "cgroup": "0::/outside\n",
+      "poolMemory": "4294967296",
+      "poolTasks": "1024",
+      "meminfo": "MemTotal: 16777216 kB\n",
+      "error": null,
+      "events": [
+        {
+          "args": [
+            "ps",
+            "--filter",
+            "label=reverie.worker=test",
+            "--format",
+            "{{.Names}}"
+          ],
+          "optional": false
+        },
+        {
+          "args": [
+            "inspect",
+            "test-agent-22222222-2222-4333-8444-555555555555"
+          ],
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "float-large-unequal",
+      "config": {
+        "deployment": "test",
+        "maxWorkers": 4,
+        "poolMemoryMiB": 4096
+      },
+      "resources": {
+        "budgetMode": "admission",
+        "memoryMiB": 512
+      },
+      "listed": [
+        "test-agent-22222222-2222-4333-8444-555555555555"
+      ],
+      "registry": [],
+      "inspectSucceeded": true,
+      "inspectText": "[{\"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"22222222-2222-4333-8444-555555555555\"}}, \"State\": {\"Running\": true, \"Pid\": 123}, \"HostConfig\": {\"Memory\": 9007199254740993, \"MemorySwap\": 9007199254740992.0}}]",
+      "cgroup": "0::/outside\n",
+      "poolMemory": "4294967296",
+      "poolTasks": "1024",
+      "meminfo": "MemTotal: 16777216 kB\n",
+      "error": {
+        "type": "RuntimeError",
+        "message": "Outside-pool peer requires finite RAM and zero swap"
+      },
+      "events": [
+        {
+          "args": [
+            "ps",
+            "--filter",
+            "label=reverie.worker=test",
+            "--format",
+            "{{.Names}}"
+          ],
+          "optional": false
+        },
+        {
+          "args": [
+            "inspect",
+            "test-agent-22222222-2222-4333-8444-555555555555"
+          ],
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "float-large-equal",
+      "config": {
+        "deployment": "test",
+        "maxWorkers": 4,
+        "poolMemoryMiB": 4096
+      },
+      "resources": {
+        "budgetMode": "admission",
+        "memoryMiB": 512
+      },
+      "listed": [
+        "test-agent-22222222-2222-4333-8444-555555555555"
+      ],
+      "registry": [],
+      "inspectSucceeded": true,
+      "inspectText": "[{\"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"22222222-2222-4333-8444-555555555555\"}}, \"State\": {\"Running\": true, \"Pid\": 123}, \"HostConfig\": {\"Memory\": 9007199254740992, \"MemorySwap\": 9007199254740992.0}}]",
+      "cgroup": "0::/outside\n",
+      "poolMemory": "4294967296",
+      "poolTasks": "1024",
+      "meminfo": "MemTotal: 16777216 kB\n",
+      "error": {
+        "type": "RuntimeError",
+        "message": "Worker memory admission is full; actual peer ceilings reserve the budget"
+      },
+      "events": [
+        {
+          "args": [
+            "ps",
+            "--filter",
+            "label=reverie.worker=test",
+            "--format",
+            "{{.Names}}"
+          ],
+          "optional": false
+        },
+        {
+          "args": [
+            "inspect",
+            "test-agent-22222222-2222-4333-8444-555555555555"
+          ],
+          "optional": true
+        }
+      ]
+    }
+  ]
+}

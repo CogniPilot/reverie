@@ -1,0 +1,97 @@
+{
+  "method": "Original J.fingerprint + exact state equality expressions from worker_resource_native.qualify_start/_old_released; synthetic DATA only",
+  "sources": {
+    "worker_resource_native.py": "9fffea4f978db3904f0ac492079e820cf0672312eb474dcae57e205e08d7b76f",
+    "laptop_resource_operations.py": "d9337151a1207d6b8e634741694efb77797aa08a18992b4d6a29b15c5a4bff67"
+  },
+  "operationDocument": "{\"operations\":{\"00000008-1111-4111-8111-111111111111\":{\"delta_bytes\":\"16777216\",\"id\":\"00000008-1111-4111-8111-111111111111\",\"idempotency_key\":\"00000002-1111-4111-8111-111111111111\",\"last_receipt_digest\":null,\"observation\":{\"budget_bytes\":\"134217728\",\"committed_bytes\":\"104857600\",\"current_memory_bytes\":\"33554432\",\"current_sid\":\"00000007-1111-4111-8111-111111111111\",\"employee_id\":\"00000004-1111-4111-8111-111111111111\",\"generation\":\"1\",\"pool_id\":\"00000006-1111-4111-8111-111111111111\",\"pool_revision_digest\":\"2222222222222222222222222222222222222222222222222222222222222222\",\"profile_version\":\"1\",\"source_binding_digest\":\"3333333333333333333333333333333333333333333333333333333333333333\"},\"reason\":null,\"request\":{\"employee_id\":\"00000004-1111-4111-8111-111111111111\",\"observation_digest\":\"b53fcc3980335277cbb317b10e2dde5b08ae5e2a09bedc5c37d64ec1f065b139\",\"pool_id\":\"00000006-1111-4111-8111-111111111111\",\"preview_digest\":\"4444444444444444444444444444444444444444444444444444444444444444\",\"profile_version\":\"1\",\"requested_memory_bytes\":\"50331648\",\"source_binding_digest\":\"3333333333333333333333333333333333333333333333333333333333333333\"},\"request_digest\":\"2324c2dde98db167533b305aee781a1e7c5beae5cfaacdb2b57370215c30593a\",\"reservation_id\":\"00000009-1111-4111-8111-111111111111\",\"reserved_sid\":\"0000000a-1111-4111-8111-111111111111\",\"scope\":{\"company_id\":\"00000001-1111-4111-8111-111111111111\",\"owner_scope_digest\":\"1111111111111111111111111111111111111111111111111111111111111111\"},\"state\":\"STARTING\",\"version\":4}},\"revision\":0,\"schema\":\"reverie-laptop-resource-operations-v1\"}",
+  "cases": [
+    {
+      "name": "integer",
+      "source": "{\"Id\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"Name\":\"/source-\\u03bb\",\"Image\":\"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"Config\":{\"Labels\":{\"reverie.worker\":\"office\"}},\"State\":{\"Running\":true,\"Pid\":123},\"Mounts\":[],\"HostConfig\":{\"Memory\":536870912,\"MemorySwap\":536870912,\"PidsLimit\":128,\"NanoCpus\":0},\"opaque\":\"\\ud800\",\"cpuExtra\":0}",
+      "canonical": "{\"nativeBaselineDigest\":\"fe90944548630483e75bb8c2f605fd42e3739a7c21809bd1245adadc1c9ff7ce\",\"operationId\":\"00000008-1111-4111-8111-111111111111\",\"reservationId\":\"00000009-1111-4111-8111-111111111111\",\"schema\":\"reverie-resource-start-intent-v1\",\"state\":\"STARTING\",\"targetSid\":\"0000000a-1111-4111-8111-111111111111\"}",
+      "error": null
+    },
+    {
+      "name": "float",
+      "source": "{\"Id\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"Name\":\"/source-\\u03bb\",\"Image\":\"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"Config\":{\"Labels\":{\"reverie.worker\":\"office\"}},\"State\":{\"Running\":true,\"Pid\":123},\"Mounts\":[],\"HostConfig\":{\"Memory\":536870912,\"MemorySwap\":536870912,\"PidsLimit\":128,\"NanoCpus\":0},\"opaque\":\"\\ud800\",\"cpuExtra\":0.0}",
+      "canonical": "{\"nativeBaselineDigest\":\"4f2402e0b6f33d4701c3fc5f1a0f60c37f5552f8a3d4e5f973d0d4665b32fdc2\",\"operationId\":\"00000008-1111-4111-8111-111111111111\",\"reservationId\":\"00000009-1111-4111-8111-111111111111\",\"schema\":\"reverie-resource-start-intent-v1\",\"state\":\"STARTING\",\"targetSid\":\"0000000a-1111-4111-8111-111111111111\"}",
+      "error": null
+    },
+    {
+      "name": "negative-zero",
+      "source": "{\"Id\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"Name\":\"/source-\\u03bb\",\"Image\":\"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"Config\":{\"Labels\":{\"reverie.worker\":\"office\"}},\"State\":{\"Running\":true,\"Pid\":123},\"Mounts\":[],\"HostConfig\":{\"Memory\":536870912,\"MemorySwap\":536870912,\"PidsLimit\":128,\"NanoCpus\":0},\"opaque\":\"\\ud800\",\"cpuExtra\":-0.0}",
+      "canonical": "{\"nativeBaselineDigest\":\"9ae6e6ddfd883d2529e338549196d60b3835a004a6759c0a7f053b7e58c7145f\",\"operationId\":\"00000008-1111-4111-8111-111111111111\",\"reservationId\":\"00000009-1111-4111-8111-111111111111\",\"schema\":\"reverie-resource-start-intent-v1\",\"state\":\"STARTING\",\"targetSid\":\"0000000a-1111-4111-8111-111111111111\"}",
+      "error": null
+    },
+    {
+      "name": "precision",
+      "source": "{\"Id\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"Name\":\"/source-\\u03bb\",\"Image\":\"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"Config\":{\"Labels\":{\"reverie.worker\":\"office\"}},\"State\":{\"Running\":true,\"Pid\":123},\"Mounts\":[],\"HostConfig\":{\"Memory\":536870912,\"MemorySwap\":536870912,\"PidsLimit\":128,\"NanoCpus\":0},\"opaque\":\"\\ud800\",\"cpuExtra\":11.764508228891675}",
+      "canonical": "{\"nativeBaselineDigest\":\"7c3cabe43f2935219525327362f350d7f21a92ddf98d841ec418eddc5b3c6e62\",\"operationId\":\"00000008-1111-4111-8111-111111111111\",\"reservationId\":\"00000009-1111-4111-8111-111111111111\",\"schema\":\"reverie-resource-start-intent-v1\",\"state\":\"STARTING\",\"targetSid\":\"0000000a-1111-4111-8111-111111111111\"}",
+      "error": null
+    },
+    {
+      "name": "nan",
+      "source": "{\"Id\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"Name\":\"/source-\\u03bb\",\"Image\":\"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"Config\":{\"Labels\":{\"reverie.worker\":\"office\"}},\"State\":{\"Running\":true,\"Pid\":123},\"Mounts\":[],\"HostConfig\":{\"Memory\":536870912,\"MemorySwap\":536870912,\"PidsLimit\":128,\"NanoCpus\":0},\"opaque\":\"\\ud800\",\"cpuExtra\":NaN}",
+      "canonical": null,
+      "error": "RESOURCE_NATIVE_START_FINGERPRINT"
+    }
+  ],
+  "states": [
+    {
+      "raw": "{\"Running\":true,\"Pid\":123}",
+      "running": true,
+      "stopped": false
+    },
+    {
+      "raw": "{\"Running\":1,\"Pid\":123}",
+      "running": true,
+      "stopped": false
+    },
+    {
+      "raw": "{\"Running\":true,\"Pid\":123.0}",
+      "running": true,
+      "stopped": false
+    },
+    {
+      "raw": "{\"Running\":1.0,\"Pid\":123}",
+      "running": true,
+      "stopped": false
+    },
+    {
+      "raw": "{\"Running\":false,\"Pid\":0}",
+      "running": false,
+      "stopped": true
+    },
+    {
+      "raw": "{\"Running\":0,\"Pid\":0}",
+      "running": false,
+      "stopped": true
+    },
+    {
+      "raw": "{\"Running\":false,\"Pid\":false}",
+      "running": false,
+      "stopped": true
+    },
+    {
+      "raw": "{\"Running\":false,\"Pid\":-0.0}",
+      "running": false,
+      "stopped": true
+    },
+    {
+      "raw": "{\"Running\":false,\"Pid\":0,\"extra\":1}",
+      "running": false,
+      "stopped": false
+    },
+    {
+      "raw": "{\"Running\":false,\"Pid\":1}",
+      "running": false,
+      "stopped": false
+    },
+    {
+      "raw": "null",
+      "running": false,
+      "stopped": false
+    }
+  ]
+}

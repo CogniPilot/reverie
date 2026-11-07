@@ -1,0 +1,102 @@
+{
+  "source": "python/reverie/worker_resource_reservations.py:check_stop",
+  "sourceSHA256": "89f4e9a90d85b790ee6f7d08fbe6dbe770aba54c0e264201e94ab571d3d9f2e3",
+  "functionSHA256": "56dd24bceff415d3f1712556f4a23f1428d83f32f30968e8d80d2527f807b5f0",
+  "scope": "Actual unchanged Python check_stop with controlled postguard rows and empty/nonempty operation lists; no native I/O or lifecycle effect. Native downgrade is source-confirmed prediction pending actual public native witness.",
+  "cases": [
+    {
+      "sessionLabel": null,
+      "active": false,
+      "result": "allowed"
+    },
+    {
+      "sessionLabel": null,
+      "active": true,
+      "result": "allowed"
+    },
+    {
+      "sessionLabel": false,
+      "active": false,
+      "result": "allowed"
+    },
+    {
+      "sessionLabel": false,
+      "active": true,
+      "result": "allowed"
+    },
+    {
+      "sessionLabel": true,
+      "active": false,
+      "result": "allowed"
+    },
+    {
+      "sessionLabel": true,
+      "active": true,
+      "result": "allowed"
+    },
+    {
+      "sessionLabel": 0,
+      "active": false,
+      "result": "allowed"
+    },
+    {
+      "sessionLabel": 0,
+      "active": true,
+      "result": "allowed"
+    },
+    {
+      "sessionLabel": 1,
+      "active": false,
+      "result": "allowed"
+    },
+    {
+      "sessionLabel": 1,
+      "active": true,
+      "result": "allowed"
+    },
+    {
+      "sessionLabel": "unrelated",
+      "active": false,
+      "result": "allowed"
+    },
+    {
+      "sessionLabel": "unrelated",
+      "active": true,
+      "result": "allowed"
+    },
+    {
+      "sessionLabel": [],
+      "active": false,
+      "result": "TypeError"
+    },
+    {
+      "sessionLabel": [],
+      "active": true,
+      "result": "TypeError"
+    },
+    {
+      "sessionLabel": {},
+      "active": false,
+      "result": "TypeError"
+    },
+    {
+      "sessionLabel": {},
+      "active": true,
+      "result": "TypeError"
+    },
+    {
+      "sessionLabel": [
+        1
+      ],
+      "active": false,
+      "result": "TypeError"
+    },
+    {
+      "sessionLabel": [
+        1
+      ],
+      "active": true,
+      "result": "TypeError"
+    }
+  ]
+}

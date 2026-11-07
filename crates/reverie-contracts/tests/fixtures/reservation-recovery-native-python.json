@@ -1,0 +1,244 @@
+[
+  {
+    "role": "worker",
+    "name": "missing-state",
+    "outcome": "unavailable"
+  },
+  {
+    "role": "worker",
+    "name": "null-state",
+    "outcome": "propagated",
+    "legacyException": "AttributeError",
+    "detail": "'NoneType' object has no attribute 'get'"
+  },
+  {
+    "role": "worker",
+    "name": "list-state",
+    "outcome": "propagated",
+    "legacyException": "AttributeError",
+    "detail": "'list' object has no attribute 'get'"
+  },
+  {
+    "role": "worker",
+    "name": "missing-running",
+    "outcome": "unavailable"
+  },
+  {
+    "role": "worker",
+    "name": "string-running",
+    "outcome": "unavailable"
+  },
+  {
+    "role": "worker",
+    "name": "missing-host",
+    "outcome": "propagated",
+    "legacyException": "KeyError",
+    "detail": "'HostConfig'"
+  },
+  {
+    "role": "worker",
+    "name": "null-host",
+    "outcome": "propagated",
+    "legacyException": "TypeError",
+    "detail": "'NoneType' object is not subscriptable"
+  },
+  {
+    "role": "worker",
+    "name": "list-host",
+    "outcome": "propagated",
+    "legacyException": "TypeError",
+    "detail": "list indices must be integers or slices, not str"
+  },
+  {
+    "role": "worker",
+    "name": "missing-Memory",
+    "outcome": "propagated",
+    "legacyException": "KeyError",
+    "detail": "'Memory'"
+  },
+  {
+    "role": "worker",
+    "name": "missing-MemorySwap",
+    "outcome": "propagated",
+    "legacyException": "KeyError",
+    "detail": "'MemorySwap'"
+  },
+  {
+    "role": "worker",
+    "name": "missing-PidsLimit",
+    "outcome": "propagated",
+    "legacyException": "KeyError",
+    "detail": "'PidsLimit'"
+  },
+  {
+    "role": "worker",
+    "name": "missing-NanoCpus",
+    "outcome": "propagated",
+    "legacyException": "KeyError",
+    "detail": "'NanoCpus'"
+  },
+  {
+    "role": "worker",
+    "name": "negative-memory",
+    "outcome": "unavailable"
+  },
+  {
+    "role": "worker",
+    "name": "missing-pid",
+    "outcome": "unavailable"
+  },
+  {
+    "role": "worker",
+    "name": "null-pid",
+    "outcome": "unavailable"
+  },
+  {
+    "role": "worker",
+    "name": "null-config",
+    "outcome": "propagated",
+    "legacyException": "AttributeError",
+    "detail": "'NoneType' object has no attribute 'get'"
+  },
+  {
+    "role": "worker",
+    "name": "list-config",
+    "outcome": "propagated",
+    "legacyException": "AttributeError",
+    "detail": "'list' object has no attribute 'get'"
+  },
+  {
+    "role": "worker",
+    "name": "list-labels",
+    "outcome": "unavailable"
+  },
+  {
+    "role": "worker",
+    "name": "empty-list-labels",
+    "outcome": "unavailable"
+  },
+  {
+    "role": "website",
+    "name": "missing-state",
+    "outcome": "propagated",
+    "legacyException": "KeyError",
+    "detail": "'State'"
+  },
+  {
+    "role": "website",
+    "name": "null-state",
+    "outcome": "propagated",
+    "legacyException": "TypeError",
+    "detail": "'NoneType' object is not subscriptable"
+  },
+  {
+    "role": "website",
+    "name": "list-state",
+    "outcome": "propagated",
+    "legacyException": "TypeError",
+    "detail": "list indices must be integers or slices, not str"
+  },
+  {
+    "role": "website",
+    "name": "missing-running",
+    "outcome": "propagated",
+    "legacyException": "KeyError",
+    "detail": "'Running'"
+  },
+  {
+    "role": "website",
+    "name": "string-running",
+    "outcome": "unavailable"
+  },
+  {
+    "role": "website",
+    "name": "missing-host",
+    "outcome": "propagated",
+    "legacyException": "KeyError",
+    "detail": "'HostConfig'"
+  },
+  {
+    "role": "website",
+    "name": "null-host",
+    "outcome": "propagated",
+    "legacyException": "TypeError",
+    "detail": "'NoneType' object is not subscriptable"
+  },
+  {
+    "role": "website",
+    "name": "list-host",
+    "outcome": "propagated",
+    "legacyException": "TypeError",
+    "detail": "list indices must be integers or slices, not str"
+  },
+  {
+    "role": "website",
+    "name": "missing-Memory",
+    "outcome": "propagated",
+    "legacyException": "KeyError",
+    "detail": "'Memory'"
+  },
+  {
+    "role": "website",
+    "name": "missing-MemorySwap",
+    "outcome": "propagated",
+    "legacyException": "KeyError",
+    "detail": "'MemorySwap'"
+  },
+  {
+    "role": "website",
+    "name": "missing-PidsLimit",
+    "outcome": "propagated",
+    "legacyException": "KeyError",
+    "detail": "'PidsLimit'"
+  },
+  {
+    "role": "website",
+    "name": "missing-NanoCpus",
+    "outcome": "propagated",
+    "legacyException": "KeyError",
+    "detail": "'NanoCpus'"
+  },
+  {
+    "role": "website",
+    "name": "negative-memory",
+    "outcome": "unavailable"
+  },
+  {
+    "role": "website",
+    "name": "missing-pid",
+    "outcome": "propagated",
+    "legacyException": "KeyError",
+    "detail": "'Pid'"
+  },
+  {
+    "role": "website",
+    "name": "null-pid",
+    "outcome": "unavailable"
+  },
+  {
+    "role": "website",
+    "name": "null-config",
+    "outcome": "propagated",
+    "legacyException": "AttributeError",
+    "detail": "'NoneType' object has no attribute 'get'"
+  },
+  {
+    "role": "website",
+    "name": "list-config",
+    "outcome": "propagated",
+    "legacyException": "AttributeError",
+    "detail": "'list' object has no attribute 'get'"
+  },
+  {
+    "role": "website",
+    "name": "list-labels",
+    "outcome": "propagated",
+    "legacyException": "AttributeError",
+    "detail": "'list' object has no attribute 'get'"
+  },
+  {
+    "role": "website",
+    "name": "empty-list-labels",
+    "outcome": "matches"
+  }
+]

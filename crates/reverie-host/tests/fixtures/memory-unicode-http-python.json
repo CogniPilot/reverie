@@ -1,0 +1,148 @@
+{
+  "reference": "actual unchanged LlamaEmbedder and urllib; real libc localhost DNS, no resolver stub; local raw TCP only",
+  "cases": [
+    {
+      "name": "latin1-origin",
+      "urlTemplate": "http://lo\u00adcalhost:PORT/v1",
+      "proxyTemplate": null,
+      "result": [
+        0.6,
+        0.8
+      ],
+      "requests": [
+        {
+          "first": "POST /v1/embeddings HTTP/1.1",
+          "proxyAuthorization": "",
+          "bodyAscii": "{\"input\": \"search_document: unicode host\", \"model\": \"model\"}",
+          "hostBytesTemplate": [
+            108,
+            111,
+            173,
+            99,
+            97,
+            108,
+            104,
+            111,
+            115,
+            116,
+            58,
+            80,
+            79,
+            82,
+            84
+          ]
+        }
+      ]
+    },
+    {
+      "name": "uppercase-latin1-origin",
+      "urlTemplate": "http://LO\u00adCALHOST:PORT/v1",
+      "proxyTemplate": null,
+      "result": [
+        0.6,
+        0.8
+      ],
+      "requests": [
+        {
+          "first": "POST /v1/embeddings HTTP/1.1",
+          "proxyAuthorization": "",
+          "bodyAscii": "{\"input\": \"search_document: unicode host\", \"model\": \"model\"}",
+          "hostBytesTemplate": [
+            76,
+            79,
+            173,
+            67,
+            65,
+            76,
+            72,
+            79,
+            83,
+            84,
+            58,
+            80,
+            79,
+            82,
+            84
+          ]
+        }
+      ]
+    },
+    {
+      "name": "nonlatin1-origin",
+      "urlTemplate": "http://\uff4c\uff4f\uff43\uff41\uff4c\uff48\uff4f\uff53\uff54:PORT/v1",
+      "proxyTemplate": null,
+      "error": "UnicodeEncodeError",
+      "requests": []
+    },
+    {
+      "name": "unicode-proxy",
+      "urlTemplate": "http://synthetic.invalid/v1",
+      "proxyTemplate": "http://\uff4c\uff4f\uff43\uff41\uff4c\uff48\uff4f\uff53\uff54:PORT",
+      "result": [
+        0.6,
+        0.8
+      ],
+      "requests": [
+        {
+          "first": "POST http://synthetic.invalid/v1/embeddings HTTP/1.1",
+          "proxyAuthorization": "",
+          "bodyAscii": "{\"input\": \"search_document: unicode host\", \"model\": \"model\"}",
+          "hostBytesTemplate": [
+            115,
+            121,
+            110,
+            116,
+            104,
+            101,
+            116,
+            105,
+            99,
+            46,
+            105,
+            110,
+            118,
+            97,
+            108,
+            105,
+            100
+          ]
+        }
+      ]
+    },
+    {
+      "name": "percent-unicode-proxy",
+      "urlTemplate": "http://synthetic.invalid/v1",
+      "proxyTemplate": "http://user:p%61ss@lo%C2%ADcalhost:PORT",
+      "result": [
+        0.6,
+        0.8
+      ],
+      "requests": [
+        {
+          "first": "POST http://synthetic.invalid/v1/embeddings HTTP/1.1",
+          "proxyAuthorization": "Basic dXNlcjpwYXNz",
+          "bodyAscii": "{\"input\": \"search_document: unicode host\", \"model\": \"model\"}",
+          "hostBytesTemplate": [
+            115,
+            121,
+            110,
+            116,
+            104,
+            101,
+            116,
+            105,
+            99,
+            46,
+            105,
+            110,
+            118,
+            97,
+            108,
+            105,
+            100
+          ]
+        }
+      ]
+    }
+  ]
+}

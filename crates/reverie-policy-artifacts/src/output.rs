@@ -16,6 +16,12 @@ pub(super) fn read_bounded(path: &Path, maximum: usize) -> io::Result<Vec<u8>> {
     finalized(result, close(file))
 }
 
+pub(super) fn write_new(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    let mut file = OpenOptions::new().write(true).create_new(true).open(path)?;
+    let result = file.write_all(bytes).and_then(|()| file.flush());
+    finalized(result, close(file))
+}
+
 pub(super) fn write_new_pair(
     profile: &Path,
     profile_bytes: &[u8],
@@ -96,6 +102,9 @@ mod tests {
         FAIL_NTH.with(|nth| nth.set(1));
         assert!(read_bounded(&base, 4).is_err());
         assert_eq!(read_bounded(&base, 4).unwrap(), b"base");
+        FAIL_NTH.with(|value| value.set(1));
+        assert!(write_new(&root.join("docker-profile"), b"profile").is_err());
+        assert_eq!(FAIL_NTH.with(Cell::get), 0);
         for nth in [1, 2] {
             FAIL_NTH.with(|value| value.set(nth));
             assert!(

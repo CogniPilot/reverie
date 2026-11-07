@@ -63,6 +63,25 @@ source checksum and locked dependency provenance are retained under
 `nix/codex-observer/`; its package retains the upstream LICENSE and any NOTICE.
 This optional candidate is separate from the default provider CLI installer.
 
+The native CDI compatibility constructor/resolver follows PyYAML 6.0.3 (MIT),
+copyright 2017-2021 Ingy döt Net and 2006-2016 Kirill Simonov. The upstream notice
+is retained at `crates/reverie-contracts/src/gpu_access/cdi/PYYAML_LICENSE.txt`.
+The underlying safe Rust grammar parser is the pinned `libyaml-safer` dependency;
+no Python interpreter is used by the native CDI reader.
+
+The native memory output-policy compiler uses the standalone RustPython SRE
+matcher and lossless WTF8 utility pinned to
+`d02d81e740e67496a70579282c848358e461d0d0` (MIT). Exact source changes, licensing,
+dependency scope and the non-default Unicode trim feature are recorded in
+[vendor/README.md](vendor/README.md). No RustPython interpreter or Python
+parser/compiler is included. The native compiler follows CPython 3.13.15 grammar
+and emission rules; its PSF/CNRI licenses and original SRE notices are retained
+in `crates/reverie-python-regex/`. Core's additional frozen text facts use the
+same CPython/Unicode provenance as its existing text facts. Maintained
+`unicode_names2` 1.2.2 supplies Unicode 15.1 names/aliases (MIT/Apache-2.0), with
+the exact CPython algorithmic-name lexical check in Core. Its source-data-driven
+Rust code generator is build-time tooling, distinct from runtime name lookup.
+
 ## Rust front TLS dependencies
 
 The Rust TLS adapter uses rustls (Apache-2.0 OR ISC OR MIT), tokio-rustls

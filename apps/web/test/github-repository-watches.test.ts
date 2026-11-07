@@ -1301,6 +1301,23 @@ it.each([false, true])(
   }
 );
 
+function expectExactBytes(actual: Buffer, expected: Buffer) {
+  // The invariant is exact file bytes, not enumerable Buffer properties.
+  expect(actual.equals(expected)).toBe(true);
+}
+
+it('refuses early, middle, late and length differences in raw archive byte assertions', () => {
+  const expected = Buffer.alloc(1025, 37);
+  expectExactBytes(Buffer.from(expected), expected);
+  for (const position of [0, 512, 1024]) {
+    const changed = Buffer.from(expected);
+    changed[position] = changed[position]! ^ 1;
+    expect(() => expectExactBytes(changed, expected)).toThrow();
+  }
+  expect(() => expectExactBytes(expected.subarray(0, -1), expected)).toThrow();
+  expect(() => expectExactBytes(Buffer.concat([expected, Buffer.from([37])]), expected)).toThrow();
+});
+
 it('requires all archived frames and current authority before cancellation commit', async () => {
   const f = await queuedArchiveFixture();
   const original = await readFile(f.service.store.file);
@@ -1322,8 +1339,8 @@ it('requires all archived frames and current authority before cancellation commi
     )
   ).rejects.toThrow('Owner revoked');
   expect(allArchived).toBe(true);
-  expect(await readFile(f.service.store.file)).toEqual(original);
-  expect(reconstructCancellation(await storedCancellationFrames(f.service.store.file))).toEqual(expected);
+  expectExactBytes(await readFile(f.service.store.file), original);
+  expectExactBytes(reconstructCancellation(await storedCancellationFrames(f.service.store.file)), expected);
   const reopened = new GithubRepositoryWatches(f.service.store.file, f.deps);
   await reopened.init();
   expect(reopened.store.snapshot().slots.repo!.config.enabled).toBe(true);

@@ -30,6 +30,19 @@ impl OperationDocument {
     pub fn operations(&self) -> &BTreeMap<JournalId, Operation> {
         &self.operations
     }
+    /// Existing global role identifiers as DATA; no claim ownership, target
+    /// eligibility or effect permission is inferred from their presence.
+    pub fn role_ids(&self) -> impl Iterator<Item = &JournalId> {
+        self.operations.values().flat_map(|op| {
+            let op = op.data();
+            [
+                &op.id,
+                &op.reservation_id,
+                &op.reserved_sid,
+                &op.observation.data().current_sid,
+            ]
+        })
+    }
     pub fn replacing(&self, operation: Operation) -> Result<Self> {
         let mut operations = self.operations.clone();
         operations.insert(operation.data().id.clone(), operation);
