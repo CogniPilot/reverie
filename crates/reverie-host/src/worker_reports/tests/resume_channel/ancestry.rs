@@ -1,7 +1,9 @@
 //! Actual accepted child peer and pinned pidfd, with no protected-status or
 //! program/website/owner assertion. Every owned child is reaped before verdict.
+mod fixture;
 use super::*;
 use crate::website_facts::{WebsiteProcessObserver, process_test_metadata};
+use fixture::{PeerFixture, request};
 use std::{
     os::fd::OwnedFd,
     process::{Child, Command, ExitStatus, Stdio},
@@ -22,81 +24,17 @@ fn finish(child: &mut Child) -> std::io::Result<ExitStatus> {
         std::thread::sleep(Duration::from_millis(2));
     }
 }
-fn child_peer(fixture: &Fixture) -> (Child, UnixStream) {
-    let path = fixture.root.join("ancestry");
-    let listener = UnixListener::bind(&path).unwrap();
-    if let Err(error) = listener.set_nonblocking(true) {
-        close_listener(listener).unwrap();
-        panic!("owned listener configuration: {error}");
-    }
-    let spawned = Command::new(std::env::current_exe().unwrap())
-        .args([
-            "--ignored",
-            "--exact",
-            "worker_reports::tests::resume_channel::ancestry::ancestry_child",
-        ])
-        .env("REVERIE_ANCESTRY_SOCKET", &path)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn();
-    let mut child = match spawned {
-        Ok(child) => child,
-        Err(error) => {
-            close_listener(listener).unwrap();
-            panic!("fixed owned child spawn: {error}");
-        }
-    };
-    let end = Instant::now() + Duration::from_secs(5);
-    let accepted = loop {
-        match listener.accept() {
-            Ok((server, _)) => break Ok(server),
-            Err(error)
-                if error.kind() == std::io::ErrorKind::WouldBlock && Instant::now() < end =>
-            {
-                std::thread::sleep(Duration::from_millis(2));
-            }
-            Err(error) => break Err(error),
-        }
-    };
-    let closed = close_listener(listener);
-    if accepted.is_err() {
-        let joined = finish(&mut child);
-        closed.unwrap();
-        joined.unwrap();
-        panic!("owned child connection: {:?}", accepted.err());
-    }
-    closed.unwrap();
-    (child, accepted.unwrap())
-}
 #[test]
 fn actual_pinned_child_peer_walks_to_owned_parent_with_same_namespace_and_incarnation_brackets() {
-    let fixture = Fixture::new();
-    let service = Arc::new(fixture.service());
-    let (mut child, server) = child_peer(&fixture);
-    let mut channel = accepted(&fixture, &service, server)
-        .retain_resource_website_channel(&fixture.runtime)
-        .ok()
-        .unwrap();
+    let mut fixture = PeerFixture::new();
     let result = (|| {
-        channel.pin_peer()?;
-        channel.greet(end())?;
-        let parent = process_test_metadata(std::process::id());
-        let mut observer = WebsiteProcessObserver::default();
-        observer.observe_peer_ancestry(&mut channel, &parent, end())
+        let child = fixture.connect_child()?;
+        let observed = fixture.observe(std::process::id())?;
+        Ok((child, observed))
     })();
-    let peer_pid = channel.peer().pid();
-    let closed = channel.close_for_worker();
-    let joined = finish(&mut child);
-    let service_closed = service.close(end());
-    closed.unwrap();
-    let status = joined.unwrap();
-    service_closed.unwrap();
-    assert!(status.success());
-    let observed = result.unwrap();
-    assert_eq!(peer_pid, child.id() as i32);
-    assert_eq!(observed.peer_identity().pid(), child.id() as i32);
-    assert_eq!(observed.peer().pid().to_u64(), Some(u64::from(child.id())));
+    let (child, observed) = fixture.finish(result).unwrap();
+    assert_eq!(observed.peer_identity().pid(), child as i32);
+    assert_eq!(observed.peer().pid().to_u64(), Some(u64::from(child)));
     assert_eq!(
         observed.peer().parent().to_u64(),
         Some(u64::from(std::process::id()))
@@ -109,38 +47,40 @@ fn actual_pinned_child_peer_walks_to_owned_parent_with_same_namespace_and_incarn
 }
 #[test]
 fn actual_same_pid_ancestry_is_data_and_known_closed_channel_refuses_before_proc_reads() {
-    let fixture = Fixture::new();
-    let service = Arc::new(fixture.service());
-    let (client, mut channel) = channel(&fixture, &service);
-    let metadata = process_test_metadata(std::process::id());
-    let mut observer = WebsiteProcessObserver::default();
-    let observed = observer.observe_peer_ancestry(&mut channel, &metadata, end());
-    let closed = channel.close_for_worker();
-    let refused = observer.observe_peer_ancestry(&mut channel, &metadata, end());
-    let client_closed = super::super::super::record::close(client);
-    let service_closed = service.close(end());
-    closed.unwrap();
-    client_closed.unwrap();
-    service_closed.unwrap();
+    let mut fixture = PeerFixture::new();
+    let result = (|| {
+        fixture.connect_self()?;
+        let observed = fixture.observe(std::process::id())?;
+        fixture.close_channel()?;
+        let refused = fixture.observe(std::process::id());
+        Ok((observed, refused))
+    })();
+    let (observed, refused) = fixture.finish(result).unwrap();
     assert!(refused.is_err());
-    let value = observed.unwrap();
-    assert_eq!(value.peer(), value.init());
-    assert_eq!(value.peer_identity().pid(), std::process::id() as i32);
+    assert_eq!(observed.peer(), observed.init());
+    assert_eq!(observed.peer_identity().pid(), std::process::id() as i32);
+}
+#[test]
+fn actual_parent_peer_cannot_claim_its_owned_child_as_init_and_all_owners_close_before_verdict() {
+    let mut fixture = PeerFixture::new();
+    let result = (|| {
+        fixture.connect_self()?;
+        let child = fixture.spawn_init()?;
+        Ok(fixture.observe(child))
+    })();
+    let refused = fixture.finish(result).unwrap();
+    // A real unrelated/reversed ancestry never succeeds. This does not claim
+    // a 32-deep process farm or force a kernel visibility refusal into one code.
+    assert!(refused.is_err());
 }
 #[test]
 #[ignore = "fixed owned child invoked only by the actual ancestry control"]
 fn ancestry_child() {
     let path = std::env::var_os("REVERIE_ANCESTRY_SOCKET").unwrap();
     let mut stream = UnixStream::connect(path).unwrap();
-    stream
-        .set_read_timeout(Some(Duration::from_secs(10)))
-        .unwrap();
     let outcome = (|| {
-        send(
-            &mut stream,
-            b'Q',
-            br#"{"purpose":"resource-replacement-v1","version":1}"#,
-        );
+        stream.set_read_timeout(Some(Duration::from_secs(10)))?;
+        request(&mut stream)?;
         let mut greeting = [0; 15];
         stream.read_exact(&mut greeting)?;
         if greeting != *b"RESOURCE_READY\n" {
