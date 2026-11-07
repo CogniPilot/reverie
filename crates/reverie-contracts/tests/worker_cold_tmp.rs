@@ -1,5 +1,85 @@
 use reverie_contracts::{worker_cold_tmp::*, worker_config};
 
+#[test]
+fn retained_names_keep_raw_key_identity_and_strict_ascii_registration_grammar() {
+    let name = RetainedLeaseName::parse("0001-0002.003.json").unwrap();
+    assert_eq!(name.key(), "0001-0002");
+    assert_eq!(name.kind(), RetainedLeaseKind::Holder);
+    for (raw, kind) in [
+        ("0-0.lock", RetainedLeaseKind::Lock),
+        ("1-2.path.json", RetainedLeaseKind::Path),
+        ("1-2.reserve.json", RetainedLeaseKind::Reservation),
+    ] {
+        assert_eq!(RetainedLeaseName::parse(raw).unwrap().kind(), kind);
+    }
+    for bad in [
+        "barrier.lock",
+        "1-2..json",
+        "1-2.other.json",
+        "+1-2.lock",
+        "١-2.lock",
+        "1--2.lock",
+        "1-2.3.json.extra",
+    ] {
+        assert!(RetainedLeaseName::parse(bad).is_err(), "{bad}");
+    }
+}
+
+#[test]
+fn retained_registered_paths_use_strict_utf8_bytes_and_original_path_spelling() {
+    let record = |path: &str| {
+        RetainedLeaseRecord::decode(
+            &serde_json::to_vec(&serde_json::json!({"version":1,"path":path})).unwrap(),
+        )
+        .unwrap()
+    };
+    for valid in [
+        "/".to_owned(),
+        "//host/path".to_owned(),
+        format!("/{}", "a".repeat(4095)),
+        format!("/{}a", "é".repeat(2047)),
+    ] {
+        assert_eq!(
+            record(&valid).registered_path().unwrap().codepoints(),
+            valid.chars().map(u32::from).collect::<Vec<_>>()
+        );
+    }
+    for bad in [
+        "relative".to_owned(),
+        "/tmp/".to_owned(),
+        "/tmp/./a".to_owned(),
+        "/tmp//a".to_owned(),
+        "/tmp/../a".to_owned(),
+        "/tmp\0a".to_owned(),
+        format!("/{}", "a".repeat(4096)),
+        format!("/{}aa", "é".repeat(2047)),
+    ] {
+        assert!(record(&bad).registered_path().is_err(), "{bad:?}");
+    }
+    for raw in [
+        br#"{"version":1,"path":"/tmp/\udcff"}"#.as_slice(),
+        br#"{"version":1,"path":null}"#,
+        br#"{"version":1}"#,
+    ] {
+        assert!(
+            RetainedLeaseRecord::decode(raw)
+                .unwrap()
+                .registered_path()
+                .is_err()
+        );
+    }
+    assert!(RetainedLeaseRecord::decode(br#"{"version":true,"path":"/tmp"}"#).is_err());
+    assert!(
+        RetainedLeaseRecord::decode(br#"{"version":1,"path":"/tmp","path":"/other"}"#).is_err()
+    );
+    assert!(
+        RetainedLeaseRecord::decode(
+            br#"{"version":1,"path":"/tmp","extension":{"duplicate":0,"duplicate":1}}"#
+        )
+        .is_err()
+    );
+}
+
 fn ids() -> ColdInventoryIds {
     ColdInventoryIds::decode(format!("{}\n{}", "a".repeat(64), "b".repeat(64)).as_bytes()).unwrap()
 }

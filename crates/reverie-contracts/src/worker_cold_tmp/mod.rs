@@ -3,6 +3,7 @@ mod census;
 mod lease;
 mod numbers;
 mod records;
+mod retirement;
 use crate::{
     legacy_json::{Node, Text, Value},
     storage_identity::MetadataText,
@@ -15,6 +16,7 @@ pub use lease::{
     clear_reservation, retained_record_path, retained_reservation,
 };
 pub use records::{clear_complete_record, clear_pending_record};
+pub use retirement::{RetainedLeaseKind, RetainedLeaseName, RetainedLeaseRecord};
 use sha2::{Digest, Sha256};
 use std::{collections::BTreeMap, fmt};
 type Object = BTreeMap<Text, Value>;

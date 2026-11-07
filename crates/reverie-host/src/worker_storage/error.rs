@@ -44,6 +44,7 @@ pub enum StorageError {
     Entropy(reverie_store::StoreError),
     PathText(reverie_contracts::reservation_engine::EngineDataError),
     ColdFilesystem(reverie_store::StoreError),
+    ColdKernel(Box<crate::reservation_kernel::ReservationKernelError>),
     Finalization {
         primary: Box<Self>,
         secondary: Box<Self>,
@@ -80,6 +81,7 @@ impl std::error::Error for StorageError {
             Self::Entropy(error) => Some(error),
             Self::PathText(error) => Some(error),
             Self::ColdFilesystem(error) => Some(error),
+            Self::ColdKernel(error) => Some(&**error),
             Self::Finalization { primary, .. } | Self::PartialEffects(primary) => Some(primary),
             Self::Refused(_) => None,
         }

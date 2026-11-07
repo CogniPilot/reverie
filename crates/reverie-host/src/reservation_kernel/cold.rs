@@ -65,6 +65,24 @@ fn live_aliases(
     Ok(())
 }
 impl ReservationKernel {
+    #[cfg(test)]
+    pub(crate) fn cold_retained_related(
+        &self,
+        target: &PosixPath,
+        scope: &PosixPath,
+        selected: &PosixPath,
+        table: &MountTable,
+        end: Instant,
+    ) -> Result<bool> {
+        check(end)?;
+        let target = custody::location(&Installed, target, table)?;
+        let scope = custody::location(&Installed, scope, table)?;
+        let selected = custody::location(&Installed, selected, table)?;
+        check(end)?;
+        Ok(selected.0 == target.0
+            && (selected.1.is_relative_to(&target.1)
+                || (target.1.is_relative_to(&selected.1) && selected.1.is_relative_to(&scope.1))))
+    }
     pub(crate) fn cold_process_mounts(&self, pid: &str, end: Instant) -> Result<MountTable> {
         need(
             UnsignedInteger::parse(pid).is_some_and(|value| !value.is_zero()),
