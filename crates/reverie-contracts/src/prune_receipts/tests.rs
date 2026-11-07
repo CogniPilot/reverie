@@ -143,3 +143,33 @@ fn context_rejects_each_invalid_field_and_binding() {
         Some(Crash("AttributeError"))
     );
 }
+
+fn a1_run_id(since: &str) -> String {
+    let report = format!(
+        r#"{{"tool": "prune_exceptions", "window": {{"since": {since}}}, "generated_utc": "2026-11-07T17:00:00Z"}}"#
+    );
+    let context = Context::load(None).unwrap().0;
+    let receipt = from_a1(
+        report.as_bytes(),
+        &Reference::of(report.as_bytes()),
+        &context,
+    )
+    .unwrap()
+    .unwrap();
+    let start = receipt.line.find(r#""run_id":""#).unwrap() + 10;
+    receipt.line[start..].split('"').next().unwrap().to_owned()
+}
+
+/// Nested window strings use `repr`, which only matters through the digits
+/// of its escapes. ASCII and Latin-1 controls and lone surrogates match
+/// Python. Other non-printable characters are a documented difference: for
+/// `["\u2028"]` Python's run id is `a1-2028-20261107T170000Z` (oracle in the
+/// packet), and this one keeps no digits for it.
+#[test]
+fn nested_window_strings_keep_the_digits_of_latin1_and_surrogate_escapes() {
+    assert_eq!(a1_run_id(r#"["\u0085"]"#), "a1-85-20261107T170000Z");
+    assert_eq!(a1_run_id(r#"["\u00a0T"]"#), "a1-0T-20261107T170000Z");
+    assert_eq!(a1_run_id(r#"["\ud800"]"#), "a1-800-20261107T170000Z");
+    assert_eq!(a1_run_id(r#"["\u2028"]"#), "a1--20261107T170000Z");
+    assert_eq!(a1_run_id(r#""\u2028""#), "a1--20261107T170000Z");
+}

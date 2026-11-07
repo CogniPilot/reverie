@@ -2,7 +2,7 @@
 //! line on stdout; exit 0 ok, 1 refusals or conflicts, 2 usage, 3 output UNKNOWN.
 use clap::Parser;
 use reverie_contracts::prune_receipts::{Limits, python_float, python_int};
-use reverie_observations::receipts::{Options, run};
+use reverie_observations::receipts::{Options, refused_split_value, run};
 use std::ffi::OsString;
 use std::io::Write;
 use std::path::PathBuf;
@@ -24,16 +24,16 @@ fn float(text: &str) -> Result<f64, String> {
 #[command(name = "reverie-prune-receipts", infer_long_args = true)]
 struct Cli {
     /// reverie-prune log_dir (reads *.summary.json)
-    #[arg(long, overrides_with = "log_dir")]
+    #[arg(long, allow_hyphen_values = true, overrides_with = "log_dir")]
     log_dir: Option<OsString>,
     /// an A1 report JSON; repeatable
-    #[arg(long)]
+    #[arg(long, allow_hyphen_values = true)]
     a1: Vec<OsString>,
     /// operator's trusted producer context JSON
-    #[arg(long, overrides_with = "context")]
+    #[arg(long, allow_hyphen_values = true, overrides_with = "context")]
     context: Option<OsString>,
     /// append-only receipts JSONL
-    #[arg(long, overrides_with = "out")]
+    #[arg(long, allow_hyphen_values = true, overrides_with = "out")]
     out: OsString,
     #[arg(long, default_value = "1048576", allow_hyphen_values = true, value_parser = integer, overrides_with = "max_input_bytes")]
     max_input_bytes: i64,
@@ -46,6 +46,13 @@ struct Cli {
 }
 
 fn main() -> ExitCode {
+    // Every value option takes hyphen values here; argparse decides which
+    // split ones it reads as options instead, before any file effect.
+    let args = std::env::args_os().skip(1).collect::<Vec<_>>();
+    if let Some(option) = refused_split_value(&args) {
+        eprintln!("reverie-prune-receipts: error: argument {option}: expected one argument");
+        return ExitCode::from(2);
+    }
     let cli = Cli::parse();
     // Paths are plain strings: an empty one is accepted, and false in Python.
     let present = |path: Option<OsString>| path.filter(|path| !path.is_empty()).map(PathBuf::from);

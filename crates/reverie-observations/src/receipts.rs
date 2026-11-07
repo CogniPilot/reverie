@@ -223,3 +223,106 @@ pub fn run(options: &Options, now: f64) -> Result<(i32, String), Crash> {
     };
     Ok((code, format!("{line}\n")))
 }
+
+/// The value options of `main()`'s parser, and every option string.
+const VALUE_OPTIONS: [&str; 8] = [
+    "--log-dir",
+    "--a1",
+    "--context",
+    "--out",
+    "--max-input-bytes",
+    "--max-entries",
+    "--max-bytes",
+    "--max-age-days",
+];
+const OPTIONS: [&str; 10] = [
+    "-h",
+    "--help",
+    "--log-dir",
+    "--a1",
+    "--context",
+    "--out",
+    "--max-input-bytes",
+    "--max-entries",
+    "--max-bytes",
+    "--max-age-days",
+];
+
+/// argparse's negative-number pattern `^-\d+$|^-\d*\.\d+$` (ASCII digits;
+/// `$` also matches before one final newline).
+fn negative_number(token: &[u8]) -> bool {
+    let token = token.strip_suffix(b"\n").unwrap_or(token);
+    let Some(body) = token.strip_prefix(b"-") else {
+        return false;
+    };
+    let digits = |part: &[u8]| part.iter().all(u8::is_ascii_digit);
+    match body.iter().position(|byte| *byte == b'.') {
+        None => !body.is_empty() && digits(body),
+        Some(dot) => digits(&body[..dot]) && body.len() > dot + 1 && digits(&body[dot + 1..]),
+    }
+}
+
+/// argparse's `_parse_optional` for the argument after a value option given
+/// without `=`: whether it is that option's value. Anything else starting
+/// with `-` is read as an option, so the value option has no argument.
+fn is_value(token: &[u8]) -> bool {
+    if token.first() != Some(&b'-') {
+        return true;
+    }
+    if OPTIONS.iter().any(|option| option.as_bytes() == token) {
+        return false;
+    }
+    if token.len() == 1 {
+        return true;
+    }
+    let prefix = token.split(|byte| *byte == b'=').next().unwrap_or(token);
+    if token.contains(&b'=') && OPTIONS.iter().any(|option| option.as_bytes() == prefix) {
+        return false;
+    }
+    let abbreviation = if token.starts_with(b"--") {
+        OPTIONS
+            .iter()
+            .any(|option| option.as_bytes().starts_with(prefix))
+    } else {
+        OPTIONS
+            .iter()
+            .any(|option| option.as_bytes() == &token[..2] || option.as_bytes().starts_with(token))
+    };
+    !abbreviation && (negative_number(token) || token.contains(&b' '))
+}
+
+/// The value option, if any, whose split argument argparse refuses with
+/// "expected one argument" (exit 2) before reading or writing any file.
+/// `--option=value` is not split and is never refused here.
+pub fn refused_split_value(args: &[OsString]) -> Option<&'static str> {
+    let mut at = 0;
+    while let Some(token) = args.get(at).map(|arg| arg.as_bytes()) {
+        if token == b"--" {
+            return None;
+        }
+        let candidates = OPTIONS
+            .iter()
+            .filter(|option| option.as_bytes().starts_with(token))
+            .collect::<Vec<_>>();
+        let option = OPTIONS
+            .iter()
+            .find(|option| option.as_bytes() == token)
+            .or(match candidates.as_slice() {
+                [only] if token.starts_with(b"--") => Some(*only),
+                _ => None,
+            })
+            .filter(|option| VALUE_OPTIONS.contains(option));
+        match option {
+            Some(option)
+                if !args
+                    .get(at + 1)
+                    .is_some_and(|value| is_value(value.as_bytes())) =>
+            {
+                return Some(option);
+            }
+            Some(_) => at += 2,
+            None => at += 1,
+        }
+    }
+    None
+}
