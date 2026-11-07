@@ -5,6 +5,7 @@ use crate::installing_broker::lifecycle::{ActiveLaunchToken, LaunchGeneration};
 use reverie_host::worker_launch::ExistingLaptopInspection;
 use reverie_host::worker_reports::WorkerLaunchHold;
 mod error;
+mod cold;
 mod existing;
 pub use existing::{
     AllocationClosedReuse, ClassifiedWorkerLaunch, ColdWorkerLaunch, ExistingColdTarget,
