@@ -4,7 +4,7 @@ use super::*;
 use reverie_contracts::worker_config::WorkerPolicyDigest;
 use reverie_host::{
     worker_launch::{ExistingProcessIncarnation, ObservedCreatePlan},
-    worker_source_stop::OrdinaryReplacementStop,
+    worker_source_stop::{OrdinaryReplacementStop, StoppedLaptopRemoval},
 };
 mod error;
 pub use error::{ReplacementStopReclaimFailure, ReplacementStopRetainFailure};
@@ -20,6 +20,7 @@ pub struct ReplacementStopReturned {
     claim: StorageClaim,
     plan: ObservedCreatePlan,
     process: ExistingProcessIncarnation,
+    removal: StoppedLaptopRemoval,
 }
 struct RegistryRetainFailure {
     plan: ObservedCreatePlan,
@@ -29,6 +30,10 @@ struct RegistryRetainFailure {
 impl ReplacementStopReturned {
     pub fn into_parts(self) -> (StorageClaim, ObservedCreatePlan, ExistingProcessIncarnation) {
         (self.claim, self.plan, self.process)
+    }
+    pub(in crate::installing_broker) fn into_cold_parts(self)
+        -> (StorageClaim, ObservedCreatePlan, ExistingProcessIncarnation, StoppedLaptopRemoval) {
+        (self.claim, self.plan, self.process, self.removal)
     }
 }
 impl ReplacementStopPreparation {
@@ -86,8 +91,8 @@ impl ReplacementStopPreparation {
                 .try_lock()
                 .map_err(|_| StorageWorkflowError::refused("WORKER_REPLACEMENT_STOP_RETAINED"))
                 .and_then(|mut native| {
-                    let (owner, plan, process) =
-                        native.take_stopped(&registry.runtime, end)?.into_parts();
+                    let (owner, plan, process, removal) =
+                        native.take_stopped(&registry.runtime, end)?.into_cold_parts();
                     Ok(ReplacementStopReturned {
                         claim: StorageClaim {
                             state: ClaimState::Legacy {
@@ -97,6 +102,7 @@ impl ReplacementStopPreparation {
                         },
                         plan,
                         process,
+                        removal,
                     })
                 }),
             ClaimDestination::Registered {
@@ -265,12 +271,13 @@ impl StorageRegistry {
         let mut native = native
             .try_lock()
             .map_err(|_| StorageWorkflowError::refused("WORKER_REPLACEMENT_STOP_RETAINED"))?;
-        let (owner, plan, process) = native.take_stopped(&self.runtime, end)?.into_parts();
+        let (owner, plan, process, removal) = native.take_stopped(&self.runtime, end)?.into_cold_parts();
         entries[index].owner = EntryOwner::Direct(owner);
         Ok(ReplacementStopReturned {
             claim: self.handle(&entries[index], newly_claimed),
             plan,
             process,
+            removal,
         })
     }
 }

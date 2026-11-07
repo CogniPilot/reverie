@@ -55,6 +55,14 @@ pub struct PreparationFailure<'a> {
     cause: PreparationError,
     transport_attempted: bool,
     cleanup: Vec<WorkerDispatchError>,
+    observation: Option<FailureObservation>,
+}
+// Actual observations retained by their original producer. None before their
+// phase is DATA; no path/SID/status can recreate a cleanup or release owner.
+struct FailureObservation {
+    plan: reverie_host::worker_launch::ObservedCreatePlan,
+    previous: Option<ExistingLaptopInspection>,
+    receipt: Option<reverie_host::worker_storage::LaunchReceiptObservation>,
 }
 impl<'a> AdmittedWorkerLaunch<'a> {
     /// Original prefix with existing per-query policy, not a reset of the
@@ -130,6 +138,7 @@ impl<'a> PreparingWorkerLaunch<'a> {
                 cause: error.into(),
                 transport_attempted: false,
                 cleanup: Vec::new(),
+                observation: None,
             })),
         }
     }
@@ -149,6 +158,7 @@ impl<'a> PreparingWorkerLaunch<'a> {
                     cause,
                     transport_attempted: false,
                     cleanup: Vec::new(),
+                    observation: None,
                 }));
             }
         };
@@ -164,6 +174,7 @@ impl<'a> PreparingWorkerLaunch<'a> {
                     cause,
                     transport_attempted: false,
                     cleanup: Vec::new(),
+                    observation: None,
                 }));
             }
         };
@@ -184,6 +195,7 @@ impl<'a> PreparingWorkerLaunch<'a> {
                 cause,
                 transport_attempted: false,
                 cleanup: Vec::new(),
+                observation: None,
             })),
         }
     }

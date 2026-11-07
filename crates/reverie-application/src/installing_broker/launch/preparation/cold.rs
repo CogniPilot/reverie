@@ -27,6 +27,7 @@ struct ColdScope<'a> {
     observed: WaitObservation,
     current: Arc<ValidatedWorkerSnapshot>,
     resources: EffectiveWorkerConfig,
+    receipt: Option<reverie_host::worker_storage::LaunchReceiptObservation>,
 }
 struct Direct {
     storage: StorageClaim,
@@ -118,6 +119,7 @@ impl<'a> ColdBody<'a> {
             inspected,
             resources,
             target,
+            receipt,
         } = classified;
         let InspectedWorkerLaunch {
             observed,
@@ -142,6 +144,7 @@ impl<'a> ColdBody<'a> {
                 observed,
                 current,
                 resources,
+                receipt,
             },
             lifecycle: Some(lifecycle),
             resources: Some(Resources::Direct(Direct {

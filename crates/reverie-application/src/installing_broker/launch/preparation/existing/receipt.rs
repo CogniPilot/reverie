@@ -29,11 +29,7 @@ impl<'a> VerifiedInspectedWorkerLaunch<'a> {
                 verified: self,
                 receipt: Some(receipt),
             }),
-            Err(error) => Err(self
-                .existing
-                .observed
-                .claimed
-                .into_failure(error.into(), Some(self.existing.observed.current))),
+            Err(error) => Err(self.existing.into_failure(error.into(), None)),
         }
     }
 }

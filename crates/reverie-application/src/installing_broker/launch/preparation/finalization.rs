@@ -6,9 +6,9 @@ impl<'a> InspectedWorkerLaunch<'a> {
     /// Stop this prefix's handler, retaining the SAME actual uncertain resources
     /// and logical hold in the returned failure. No positive release is minted.
     pub fn abort(self, end: Instant) -> Box<PreparationFailure<'a>> {
-        let mut failure = self.observed.claimed.into_failure(
+        let mut failure = self.into_failure(
             PreparationError::Refused("WORKER_LAUNCH_PREPARATION_ABORTED"),
-            Some(self.observed.current),
+            None,
         );
         failure.close_transport(end);
         failure

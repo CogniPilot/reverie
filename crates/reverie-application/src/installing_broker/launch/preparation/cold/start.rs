@@ -39,8 +39,7 @@ impl<'a> ColdBody<'a> {
             }
         }
         let memory = self.configure_memory()?;
-        let end = Instant::now() + std::time::Duration::from_secs(30);
-        let cold = match network.commit_cold(&memory, end)? {
+        let cold = match network.commit_cold(&memory, &connection)? {
             ColdCommit::Committed(cold) => cold,
             ColdCommit::Rejected | ColdCommit::Retained => {
                 return Err(Self::phase_refused(
@@ -60,7 +59,7 @@ impl<'a> ColdBody<'a> {
         };
         // This is ordinary J, never a fabricated protected CLI receipt. The
         // protected launch producer must supply its own durable joins later.
-        let released = match network.close_nix_guard(&pane, self.end())? {
+        let released = match network.close_nix_guard(&pane, &connection)? {
             NixGuardRelease::Released(released) => released,
             NixGuardRelease::Retained => {
                 return Err(Self::phase_refused(

@@ -122,10 +122,10 @@ impl NetworkStoragePreparation {
     pub(in crate::installing_broker) fn commit_cold(
         &self,
         memory: &ConfiguredMemory,
-        end: Instant,
+        connection: &WorkerLaunchConnection,
     ) -> Result<ColdCommit> {
         self.cold_runtime()?
-            .commit_started_laptop_cold(memory, end)
+            .commit_started_laptop_cold_for_connection(memory, connection)
             .map_err(NetworkStorageError::Host)
     }
     pub(in crate::installing_broker) fn start_pane(
@@ -140,10 +140,10 @@ impl NetworkStoragePreparation {
     pub(in crate::installing_broker) fn close_nix_guard(
         &self,
         pane: &StartedPane,
-        end: Instant,
+        connection: &WorkerLaunchConnection,
     ) -> Result<NixGuardRelease> {
         self.cold_runtime()?
-            .release_laptop_nix_guard(pane, end)
+            .release_laptop_nix_guard_for_connection(pane, connection)
             .map_err(NetworkStorageError::Host)
     }
 }

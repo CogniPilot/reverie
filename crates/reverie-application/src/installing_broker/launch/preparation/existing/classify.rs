@@ -25,6 +25,8 @@ pub struct ReusableWorkerLaunch<'a> {
 }
 #[must_use = "existing laptops still require genuine ordinary stop before create"]
 pub struct ColdWorkerLaunch<'a> {
+    pub(in crate::installing_broker::launch::preparation) receipt:
+        Option<reverie_host::worker_storage::LaunchReceiptObservation>,
     pub(in crate::installing_broker::launch::preparation) inspected: InspectedWorkerLaunch<'a>,
     pub(in crate::installing_broker::launch::preparation) resources: EffectiveWorkerConfig,
     pub(in crate::installing_broker::launch::preparation) target: ExistingColdTarget,
@@ -85,6 +87,7 @@ impl<'a> RuntimeWorkerLaunch<'a> {
                         .map_or(ExistingColdTarget::Absent, ExistingColdTarget::Stopped)
                 });
                 Ok(ClassifiedWorkerLaunch::Cold(ColdWorkerLaunch {
+                    receipt: self.receipt,
                     inspected: self.verified.existing,
                     resources,
                     target,
@@ -210,11 +213,7 @@ impl<'a> RuntimeWorkerLaunch<'a> {
         Ok(resources)
     }
     fn into_failure(self, cause: PreparationError) -> Box<PreparationFailure<'a>> {
-        let inspected = self.verified.existing;
-        inspected
-            .observed
-            .claimed
-            .into_failure(cause, Some(inspected.observed.current))
+        self.verified.existing.into_failure(cause, self.receipt)
     }
 }
 impl<'a> ReusableWorkerLaunch<'a> {
@@ -229,9 +228,9 @@ impl<'a> ReusableWorkerLaunch<'a> {
         &self.resources
     }
     pub fn abort(self) -> Box<PreparationFailure<'a>> {
-        self.inspected.observed.claimed.into_failure(
+        self.inspected.into_failure(
             PreparationError::Refused("WORKER_LAUNCH_ABORTED"),
-            Some(self.inspected.observed.current),
+            self.receipt,
         )
     }
 }
@@ -256,9 +255,9 @@ impl<'a> ColdWorkerLaunch<'a> {
         matches!(self.target, ExistingColdTarget::DeadPane(_))
     }
     pub fn abort(self) -> Box<PreparationFailure<'a>> {
-        self.inspected.observed.claimed.into_failure(
+        self.inspected.into_failure(
             PreparationError::Refused("WORKER_LAUNCH_ABORTED"),
-            Some(self.inspected.observed.current),
+            self.receipt,
         )
     }
 }
