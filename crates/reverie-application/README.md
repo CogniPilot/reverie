@@ -251,6 +251,13 @@ same runtime; neither registers a laptop or grants effects. Candidate swap is
 read from the existing finite memory projection: the worker loader rejects
 owner-authored `laptopMemoryPolicy` input.
 
+The canonical launch's held lifecycle uses the private
+`check_creation_budget_locked` continuation. It checks that the borrowed guard
+belongs to this exact installed broker, then uses the same budget algorithm and
+native client. The public standalone method acquires its guard and delegates to
+that owner. A launch must not call the standalone method while already holding
+the nonreentrant mutex, or release/reacquire the guard to avoid that deadlock.
+
 Fixtures cover 55 actual legacy budget, 23 pool, 12 swap and two paired native
 lookup-priority cases. These use synthetic engine results/owned files; separate
 controls exercise the real held gate and controlled supervised Rust clients.
