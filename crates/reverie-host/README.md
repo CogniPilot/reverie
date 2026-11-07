@@ -674,3 +674,15 @@ query/viewer cleanup reaches Closed. Actual App admission/current-source/receipt
 and handler/lifecycle owners remain mandatory; no global release follows from
 the Host stop result. Recovered/stop-all owners and full caller adoption are
 separate required integration work.
+
+The standalone broker's `install_broker_signals` owns the actual fixed native
+SIGINT/SIGTERM guard on the same runtime. Its existing cancellation-token clones
+observe that installed source directly; no watcher grants a later 34-second
+budget. Native first-signal and manual first-stop deadlines take their minimum.
+Unrelated/default tokens do not acquire a signal source. Before restoration the
+source freezes, so a later standalone installation cannot alter an older engine.
+Restoration requires an actually closed captured client; this local observation
+does not certify all App/Office/storage cleanup. Unknown Drop or restoration
+retains the actual guard/origin and refuses replacement. The actual listener,
+all command producers, supervisor and complete service close remain required
+before replacing the Python broker entry point.

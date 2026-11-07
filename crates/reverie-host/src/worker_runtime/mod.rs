@@ -8,6 +8,8 @@ use crate::{
 };
 use reverie_core::worker_schema::{WorkerBase, WorkerServiceIdentity};
 use std::{sync::Arc, time::Instant};
+mod signals;
+pub use signals::{BrokerSignalError, BrokerSignalFailure, BrokerSignals};
 #[cfg(test)]
 mod tests;
 
