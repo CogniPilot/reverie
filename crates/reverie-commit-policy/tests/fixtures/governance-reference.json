@@ -1,0 +1,4653 @@
+{
+ "reference": "python/reverie/governance.py at 0d0eaec89bd5ef8daccb7c266deb0965d90d45b5; the trailer key in inputs and outputs is a placeholder the generator maps to the real key",
+ "inputs": {
+  "message_policies": [
+   {},
+   {
+    "commits": {
+     "dco_signoff": true
+    }
+   },
+   {
+    "commits": {
+     "no_ai_coauthors": true,
+     "ai_author_trailers": [
+      "Paired-with"
+     ],
+     "ai_author_patterns": [
+      "helper",
+      "opsbot",
+      "assist",
+      "\\[bot\\]"
+     ]
+    }
+   },
+   {
+    "commits": {
+     "dco_signoff": true,
+     "no_ai_coauthors": true,
+     "ai_author_trailers": [
+      "Paired-with"
+     ],
+     "ai_author_patterns": [
+      "helper",
+      "opsbot",
+      "assist",
+      "\\[bot\\]"
+     ]
+    }
+   },
+   {
+    "commits": {
+     "no_ai_coauthors": true,
+     "ai_author_patterns": [
+      "robot",
+      "\\[ci\\]",
+      "deep-thought",
+      "helper",
+      "opsbot",
+      "assist",
+      "kayak"
+     ],
+     "ai_author_trailers": [
+      "Paired-with"
+     ]
+    }
+   },
+   {
+    "commits": {
+     "no_ai_coauthors": 1,
+     "dco_signoff": "yes",
+     "ai_author_trailers": [
+      "Paired-with"
+     ],
+     "ai_author_patterns": [
+      "helper",
+      "opsbot",
+      "assist",
+      "\\[bot\\]"
+     ]
+    }
+   },
+   {
+    "commits": {
+     "no_ai_coauthors": true,
+     "ai_author_patterns": [
+      ""
+     ],
+     "ai_author_trailers": [
+      "Paired-with"
+     ]
+    }
+   },
+   {
+    "commits": {
+     "dco_signoff": 0,
+     "no_ai_coauthors": []
+    }
+   }
+  ],
+  "messages": [
+   "Fix restart\n\nSigned-off-by: Jane Doe <jane@example.org>\n",
+   "Fix\n\nSigned-off-by: Jane Doe <jane@example.org>",
+   "Fix\r\nSigned-off-by: Jane Doe <jane@example.org>\r\n",
+   "Signed-off-by: <jane@example.org>",
+   "Signed-off-by:  <jane@example.org>",
+   "Signed-off-by: J <j@x>",
+   "Signed-off-by: J <@x>",
+   "Signed-off-by: J <j@>",
+   "Signed-off-by: J <j@x y>",
+   "Signed-off-by: J <j@x> ",
+   "Signed-off-by: J <a> <j@x>",
+   "signed-off-by: J <j@x>",
+   "  Signed-off-by: J <j@x>",
+   "Fix Signed-off-by: J <j@x>",
+   "Signed-off-by: J <j @x>",
+   "Signed-off-by: J <j\u001c@x>",
+   "Signed-off-by: J\t<j@x>",
+   "Signed-off-by: J <j@x>>",
+   "Signed-off-by: J <j@@>",
+   "Signed-off-by: J <a@b@c>",
+   "Fix\n\nPaired-with: Helper <noreply@example.com>\n",
+   "Fix\n\nPaired-With: Jane <jane@example.org>\n",
+   "Fix\n\npaired-with:assİst\n",
+   "Fix\n\nPAIRED-WITH: dependabot[bot] <x@y>\n",
+   "Fix\n\n Paired-with: Helper\n",
+   "Fix\n\nPaired-with Helper\n",
+   "Fix\rPaired-with: OPSBOT\r",
+   "Fix Paired-with: helper",
+   "Fix\n\nPaired-with: Robot Arm\nPaired-with: deep-thought\n",
+   "Fix\n\nPaired-with: CI [ci] runner\n",
+   "Fix\n\nPaired-with: Jane <jane@example.org>\nSigned-off-by: Jane <jane@example.org>\n",
+   "",
+   "Fix\n\nPaired-with: Helper\nSigned-off-by: Jane <jane@example.org>",
+   "Fix\n\nPaired-with: Aſſist\n",
+   "Fix\n\nPaired-with: Kayak and ası\n",
+   "Fix\u000bPaired-with: opsbot\f",
+   "FixPaired-with: ASSIST",
+   "Fix\n\nPaired-with: deep thought\n"
+  ],
+  "anonymity_policies": [
+   {
+    "agent_anonymity": {
+     "agent_names": [
+      "Alpha",
+      "Bravo",
+      "Sentinel"
+     ],
+     "allow_paths": [
+      "vendor/*"
+     ]
+    }
+   },
+   {
+    "agent_anonymity": {
+     "agent_names": [
+      "Sent",
+      "Sentinel",
+      " Pax ",
+      "",
+      5,
+      "Pax",
+      "Alpha"
+     ],
+     "allow_paths": [
+      "docs/[a-c]*.md",
+      "*.lock"
+     ]
+    }
+   },
+   {
+    "agent_anonymity": {
+     "agent_names": []
+    }
+   },
+   {
+    "agent_anonymity": null
+   },
+   {},
+   {
+    "agent_anonymity": {
+     "agent_names": [
+      "Zoë",
+      "Ünal",
+      "Alpha"
+     ]
+    }
+   },
+   {
+    "agent_anonymity": {
+     "agent_names": [
+      "Alpha"
+     ]
+    },
+    "commits": {
+     "dco_signoff": true
+    }
+   }
+  ],
+  "texts": [
+   "Fix restart\n\nAs Bravo noted, the Sentinel stalls.\n",
+   "SentinelTests pass",
+   "the sentinel restarts",
+   "Alphabet soup",
+   "alpha_mode",
+   "BravoX",
+   "_Alpha",
+   "Alpha_",
+   "(Alpha)",
+   "Alpha-Bravo",
+   "AlphaAlpha Alpha",
+   "Sentinel's",
+   "Sent Sentinel Sentinels",
+   "Pax,Pax",
+   "ÉAlpha",
+   "Alphaé",
+   "Zoë and Ünal",
+   "xZoë",
+   "Alpha\r\nBravo\rSentinel Pax",
+   "",
+   "9Alpha Alpha9 Alpha.",
+   "Alpha Alpha Alpha Alpha Alpha Alpha Alpha Alpha Alpha Alpha Alpha Alpha"
+  ],
+  "diffs": [
+   "diff --git a/old.py b/old.py\nindex 1..2 100644\n--- a/old.py\n+++ b/old.py\n@@ -2 +2 @@\n-value = 1\n+value = 2  # tuned by Bravo\n",
+   "diff --git a/notes.txt b/notes.txt\nnew file mode 100644\n--- /dev/null\n+++ b/notes.txt\n@@ -0,0 +1,3 @@\n+++ b/vendor/x Alpha\n+diff --git a/vendor/y b/vendor/y\n+@@ -1 +1 @@ Bravo\n",
+   "+++ b/vendor/upstream.js\n@@ -0,0 +1 @@\n+// Alpha's upstream comment\n",
+   "diff --git a/gone.txt b/gone.txt\ndeleted file mode 100644\n--- a/gone.txt\n+++ /dev/null\n@@ -1,2 +0,0 @@\n-Alpha\n-Bravo\n",
+   "--- a/a.txt\n+++ b/a.txt\n@@ -1,3 +1,4 @@\n one\n-two\n+Bravo two\n+three Sentinel\n four\n\\ No newline at end of file\n@@ -10 +11,2 @@\n-x\n+y Alpha\n+z\n",
+   "+++ b/a.txt\n@@ -x +1 @@\n+Alpha\n",
+   "+++ b/w.txt\r\n@@ -0,0 +1,2 @@\r\n+Alpha\r\n+ok\r\n",
+   "+++ c/odd.txt\n@@ -0,0 +1 @@\n+Bravo\n",
+   "+++ b/docs/apple.md\n@@ -0,0 +1 @@\n+Pax\n+++ b/docs/zebra.md\n@@ -0,0 +1 @@\n+Pax\n+++ b/Cargo.lock\n@@ -0,0 +1 @@\n+Pax\n",
+   "+++ b/z.txt\n@@ -1,0 +2,0 @@\n+++ b/y.txt\n@@ -0,0 +5 @@\n+Sentinel\n",
+   "@@ -1 +1 @xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n",
+   "+++ b/m.txt\n@@ -3,2 +3 @@\n-a\n-b\n+Alpha\n+Bravo after the hunk\n",
+   "+++ b/p.txt\n@@ -1 +1 @@ fn context() {\n-a\n+Sentinel\n",
+   "+++ b/q.txt\n@@ -1,2 +1,2 @@\n-a\n+Alpha\n+Bravo\n-b\n",
+   ""
+  ],
+  "globs": [
+   [
+    "vendor/a.js",
+    "vendor/*"
+   ],
+   [
+    "vendor/x/y.js",
+    "vendor/*"
+   ],
+   [
+    "src/vendor/a",
+    "vendor/*"
+   ],
+   [
+    "a.lock",
+    "*.lock"
+   ],
+   [
+    "docs/apple.md",
+    "docs/[a-c]*.md"
+   ],
+   [
+    "docs/zebra.md",
+    "docs/[a-c]*.md"
+   ],
+   [
+    "docs/zebra.md",
+    "docs/[!a-c]*.md"
+   ],
+   [
+    "x",
+    "[]x]"
+   ],
+   [
+    "]",
+    "[]]"
+   ],
+   [
+    "[",
+    "["
+   ],
+   [
+    "[a",
+    "[a"
+   ],
+   [
+    "a",
+    "[!]a]"
+   ],
+   [
+    "-",
+    "[a-]"
+   ],
+   [
+    "b",
+    "[c-a]"
+   ],
+   [
+    "b",
+    "[!c-a]"
+   ],
+   [
+    "ab",
+    "a?"
+   ],
+   [
+    "a",
+    "a?"
+   ],
+   [
+    "",
+    "*"
+   ],
+   [
+    "abc",
+    "a*c"
+   ],
+   [
+    "abbbc",
+    "a*b*c"
+   ],
+   [
+    "a\nb",
+    "a*b"
+   ],
+   [
+    "A.LOCK",
+    "*.lock"
+   ],
+   [
+    "a\\b",
+    "a\\b"
+   ],
+   [
+    "a\\b",
+    "a[\\]b"
+   ],
+   [
+    "e",
+    "[a-c-e]"
+   ],
+   [
+    "-",
+    "[a-c-e]"
+   ],
+   [
+    "d",
+    "[a-c-e]"
+   ],
+   [
+    "aXb",
+    "a[!x]b"
+   ],
+   [
+    "axb",
+    "a[!x]b"
+   ],
+   [
+    "é",
+    "[a-ü]"
+   ],
+   [
+    "x*y",
+    "x[*]y"
+   ],
+   [
+    "x?y",
+    "x[?]y"
+   ],
+   [
+    "xay",
+    "x[*]y"
+   ],
+   [
+    "",
+    ""
+   ],
+   [
+    "a",
+    ""
+   ],
+   [
+    "abc",
+    "*b"
+   ],
+   [
+    "abcb",
+    "*b"
+   ],
+   [
+    "ab",
+    "a**b"
+   ],
+   [
+    "a]",
+    "a]"
+   ],
+   [
+    "a!",
+    "[!]!"
+   ],
+   [
+    "!",
+    "[!!]"
+   ],
+   [
+    "!",
+    "[!]"
+   ],
+   [
+    "a-b",
+    "a[--/]b"
+   ],
+   [
+    "acb",
+    "a[a-c-]b"
+   ]
+  ],
+  "reviews": [
+   [
+    {
+     "revision": "T1",
+     "approved": true,
+     "unresolved_findings": 0,
+     "reviewer": "rev-a",
+     "covered_directives": [
+      "D1",
+      "D2"
+     ],
+     "evidence": "log"
+    },
+    "T1",
+    "impl-a",
+    [
+     "D1"
+    ]
+   ],
+   [
+    {
+     "revision": "T1",
+     "approved": true,
+     "reviewer": "rev-a",
+     "covered_directives": [
+      "D1"
+     ],
+     "evidence": "log"
+    },
+    "T2",
+    "impl-a",
+    [
+     "D1"
+    ]
+   ],
+   [
+    {
+     "revision": "T1",
+     "approved": false,
+     "reviewer": "rev-a",
+     "evidence": "log"
+    },
+    "T1",
+    "impl-a",
+    []
+   ],
+   [
+    {
+     "revision": "T1",
+     "approved": 1,
+     "reviewer": "rev-a",
+     "evidence": "log"
+    },
+    "T1",
+    "impl-a",
+    []
+   ],
+   [
+    {
+     "revision": "T1",
+     "approved": true,
+     "unresolved_findings": 2,
+     "reviewer": "rev-a",
+     "evidence": "log"
+    },
+    "T1",
+    "impl-a",
+    []
+   ],
+   [
+    {
+     "revision": "T1",
+     "approved": true,
+     "unresolved_findings": "",
+     "reviewer": "rev-a",
+     "evidence": "log"
+    },
+    "T1",
+    "impl-a",
+    []
+   ],
+   [
+    {
+     "revision": "T1",
+     "approved": true,
+     "unresolved_findings": [
+      "x"
+     ],
+     "reviewer": "rev-a",
+     "evidence": "log"
+    },
+    "T1",
+    "impl-a",
+    []
+   ],
+   [
+    {
+     "revision": "T1",
+     "approved": true,
+     "reviewer": "",
+     "evidence": "log"
+    },
+    "T1",
+    "impl-a",
+    []
+   ],
+   [
+    {
+     "revision": "T1",
+     "approved": true,
+     "reviewer": "impl-a",
+     "evidence": "log"
+    },
+    "T1",
+    "impl-a",
+    []
+   ],
+   [
+    {
+     "revision": "T1",
+     "approved": true,
+     "evidence": "log"
+    },
+    "T1",
+    "impl-a",
+    []
+   ],
+   [
+    {
+     "revision": "T1",
+     "approved": true,
+     "reviewer": true,
+     "evidence": "log"
+    },
+    "T1",
+    1,
+    []
+   ],
+   [
+    {
+     "revision": "T1",
+     "approved": true,
+     "reviewer": "rev-a",
+     "covered_directives": [
+      "D1"
+     ],
+     "evidence": "log"
+    },
+    "T1",
+    "impl-a",
+    [
+     "D1",
+     "D3"
+    ]
+   ],
+   [
+    {
+     "revision": "T1",
+     "approved": true,
+     "reviewer": "rev-a",
+     "covered_directives": [
+      1
+     ],
+     "evidence": "log"
+    },
+    "T1",
+    "impl-a",
+    [
+     true
+    ]
+   ],
+   [
+    {
+     "revision": "T1",
+     "approved": true,
+     "reviewer": "rev-a",
+     "covered_directives": [
+      "D1"
+     ]
+    },
+    "T1",
+    "impl-a",
+    [
+     "D1"
+    ]
+   ],
+   [
+    {
+     "revision": "T1",
+     "approved": true,
+     "reviewer": "rev-a",
+     "evidence": []
+    },
+    "T1",
+    "impl-a",
+    []
+   ],
+   [
+    {
+     "revision": "T1",
+     "approved": true,
+     "reviewer": "rev-a",
+     "evidence": "log"
+    },
+    "T1",
+    "impl-a",
+    []
+   ],
+   [
+    {
+     "approved": true,
+     "reviewer": "rev-a",
+     "evidence": "log"
+    },
+    "T1",
+    "impl-a",
+    []
+   ],
+   [
+    {
+     "revision": "T1",
+     "approved": true,
+     "reviewer": "rev-a",
+     "covered_directives": [
+      [
+       "D1"
+      ]
+     ],
+     "evidence": "log"
+    },
+    "T1",
+    "impl-a",
+    [
+     "D1"
+    ]
+   ],
+   [
+    {
+     "revision": "T1",
+     "approved": true,
+     "reviewer": "rev-a",
+     "covered_directives": [
+      1.0
+     ],
+     "evidence": "log"
+    },
+    "T1",
+    null,
+    [
+     1
+    ]
+   ]
+  ],
+  "merge_policy": {
+   "repositories": {
+    "o/r": {
+     "auto_merge": true,
+     "required_checks": [
+      "ci",
+      "lint"
+     ],
+     "owner_review_paths": [
+      "nix/*",
+      "*.lock"
+     ],
+     "owner_review_labels": [
+      "owner"
+     ],
+     "merge_method": "merge"
+    }
+   },
+   "review_directives": [
+    {
+     "id": "D1",
+     "instruction": "Keep it small"
+    }
+   ],
+   "commits": {
+    "dco_signoff": true
+   }
+  },
+  "merge_pr": {
+   "repository": "o/r",
+   "number": 5,
+   "head_sha": "H1",
+   "draft": false,
+   "mergeable": "MERGEABLE",
+   "author_agent": "impl-a",
+   "files": [
+    "src/a.rs",
+    "src/b.rs"
+   ],
+   "labels": [
+    "rust"
+   ],
+   "checks": {
+    "ci": "SUCCESS",
+    "lint": "SUCCESS"
+   },
+   "commit_messages": [
+    "Fix\n\nSigned-off-by: J <j@x>"
+   ]
+  },
+  "merge_review": {
+   "revision": "H1",
+   "approved": true,
+   "reviewer": "rev-a",
+   "covered_directives": [
+    "D1"
+   ],
+   "evidence": "e",
+   "reviewed_files": [
+    "src/b.rs",
+    "src/a.rs"
+   ]
+  },
+  "merges": [
+   [
+    {},
+    {},
+    {}
+   ],
+   [
+    {
+     "repository": "o/other"
+    },
+    {},
+    {}
+   ],
+   [
+    {
+     "draft": true
+    },
+    {},
+    {}
+   ],
+   [
+    {
+     "mergeable": "UNKNOWN"
+    },
+    {},
+    {}
+   ],
+   [
+    {
+     "files": [
+      "src/a.rs",
+      "nix/x.nix"
+     ]
+    },
+    {
+     "reviewed_files": [
+      "src/a.rs",
+      "nix/x.nix"
+     ]
+    },
+    {}
+   ],
+   [
+    {
+     "labels": [
+      "rust",
+      "owner"
+     ]
+    },
+    {},
+    {}
+   ],
+   [
+    {},
+    {},
+    {
+     "required_checks": []
+    }
+   ],
+   [
+    {
+     "checks": {
+      "ci": "SUCCESS",
+      "lint": "FAILURE"
+     }
+    },
+    {},
+    {}
+   ],
+   [
+    {
+     "checks": {
+      "ci": "SUCCESS"
+     }
+    },
+    {},
+    {}
+   ],
+   [
+    {},
+    {
+     "revision": "H0"
+    },
+    {}
+   ],
+   [
+    {},
+    {
+     "reviewed_files": [
+      "src/a.rs"
+     ]
+    },
+    {}
+   ],
+   [
+    {
+     "commit_messages": []
+    },
+    {},
+    {}
+   ],
+   [
+    {
+     "commit_messages": [
+      "Fix without a trailer"
+     ]
+    },
+    {},
+    {}
+   ],
+   [
+    {},
+    {},
+    {
+     "merge_method": null
+    }
+   ],
+   [
+    {
+     "author_agent": "rev-a"
+    },
+    {},
+    {}
+   ],
+   [
+    {},
+    {
+     "covered_directives": []
+    },
+    {}
+   ],
+   [
+    {
+     "head_sha": null
+    },
+    {
+     "revision": null
+    },
+    {}
+   ],
+   [
+    {
+     "files": [
+      "Cargo.lock"
+     ]
+    },
+    {
+     "reviewed_files": [
+      "Cargo.lock"
+     ]
+    },
+    {}
+   ],
+   [
+    {},
+    {},
+    {
+     "required_checks": [
+      "ci",
+      5
+     ]
+    }
+   ],
+   [
+    {},
+    {},
+    {
+     "auto_merge": "yes"
+    }
+   ],
+   [
+    {
+     "mergeable": "MERGEABLE",
+     "draft": 0
+    },
+    {
+     "reviewed_files": [
+      "src/a.rs",
+      "src/b.rs",
+      "src/a.rs"
+     ]
+    },
+    {}
+   ],
+   [
+    {
+     "checks": {
+      "ci": "SUCCESS",
+      "lint": "success"
+     }
+    },
+    {},
+    {}
+   ],
+   [
+    {
+     "files": []
+    },
+    {
+     "reviewed_files": []
+    },
+    {}
+   ]
+  ],
+  "contexts": [
+   [
+    {
+     "review_directives": [
+      {
+       "id": "D1",
+       "instruction": "Keep it small"
+      },
+      {
+       "id": "D2",
+       "instruction": "Test the edges"
+      }
+     ],
+     "commits": {
+      "require_review": true,
+      "dco_signoff": true,
+      "no_ai_coauthors": true
+     }
+    },
+    {
+     "review_directives": [
+      {
+       "id": "P1",
+       "instruction": "Project rule"
+      }
+     ]
+    }
+   ],
+   [
+    {},
+    null
+   ],
+   [
+    {
+     "commits": {
+      "require_review": 0,
+      "dco_signoff": "",
+      "no_ai_coauthors": [
+       1
+      ]
+     }
+    },
+    {}
+   ],
+   [
+    {
+     "review_directives": [
+      {
+       "id": 7,
+       "instruction": "x"
+      }
+     ]
+    },
+    null
+   ]
+  ]
+ },
+ "outputs": {
+  "messages": [
+   [
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    }
+   ],
+   [
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    }
+   ],
+   [
+    {
+     "ok": null
+    },
+    {
+     "policy": "a DCO Signed-off-by trailer is required; use git commit -s"
+    },
+    {
+     "ok": null
+    },
+    {
+     "policy": "a DCO Signed-off-by trailer is required; use git commit -s"
+    },
+    {
+     "ok": null
+    },
+    {
+     "policy": "a DCO Signed-off-by trailer is required; use git commit -s"
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    }
+   ],
+   [
+    {
+     "ok": null
+    },
+    {
+     "policy": "a DCO Signed-off-by trailer is required; use git commit -s"
+    },
+    {
+     "ok": null
+    },
+    {
+     "policy": "a DCO Signed-off-by trailer is required; use git commit -s"
+    },
+    {
+     "ok": null
+    },
+    {
+     "policy": "a DCO Signed-off-by trailer is required; use git commit -s"
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    }
+   ],
+   [
+    {
+     "ok": null
+    },
+    {
+     "policy": "a DCO Signed-off-by trailer is required; use git commit -s"
+    },
+    {
+     "ok": null
+    },
+    {
+     "policy": "a DCO Signed-off-by trailer is required; use git commit -s"
+    },
+    {
+     "ok": null
+    },
+    {
+     "policy": "a DCO Signed-off-by trailer is required; use git commit -s"
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    }
+   ],
+   [
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    }
+   ],
+   [
+    {
+     "ok": null
+    },
+    {
+     "policy": "a DCO Signed-off-by trailer is required; use git commit -s"
+    },
+    {
+     "ok": null
+    },
+    {
+     "policy": "a DCO Signed-off-by trailer is required; use git commit -s"
+    },
+    {
+     "ok": null
+    },
+    {
+     "policy": "a DCO Signed-off-by trailer is required; use git commit -s"
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    }
+   ],
+   [
+    {
+     "ok": null
+    },
+    {
+     "policy": "a DCO Signed-off-by trailer is required; use git commit -s"
+    },
+    {
+     "ok": null
+    },
+    {
+     "policy": "a DCO Signed-off-by trailer is required; use git commit -s"
+    },
+    {
+     "ok": null
+    },
+    {
+     "policy": "a DCO Signed-off-by trailer is required; use git commit -s"
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    }
+   ],
+   [
+    {
+     "ok": null
+    },
+    {
+     "policy": "a DCO Signed-off-by trailer is required; use git commit -s"
+    },
+    {
+     "ok": null
+    },
+    {
+     "policy": "a DCO Signed-off-by trailer is required; use git commit -s"
+    },
+    {
+     "ok": null
+    },
+    {
+     "policy": "a DCO Signed-off-by trailer is required; use git commit -s"
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    }
+   ],
+   [
+    {
+     "ok": null
+    },
+    {
+     "policy": "a DCO Signed-off-by trailer is required; use git commit -s"
+    },
+    {
+     "ok": null
+    },
+    {
+     "policy": "a DCO Signed-off-by trailer is required; use git commit -s"
+    },
+    {
+     "ok": null
+    },
+    {
+     "policy": "a DCO Signed-off-by trailer is required; use git commit -s"
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    }
+   ],
+   [
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    }
+   ],
+   [
+    {
+     "ok": null
+    },
+    {
+     "policy": "a DCO Signed-off-by trailer is required; use git commit -s"
+    },
+    {
+     "ok": null
+    },
+    {
+     "policy": "a DCO Signed-off-by trailer is required; use git commit -s"
+    },
+    {
+     "ok": null
+    },
+    {
+     "policy": "a DCO Signed-off-by trailer is required; use git commit -s"
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    }
+   ],
+   [
+    {
+     "ok": null
+    },
+    {
+     "policy": "a DCO Signed-off-by trailer is required; use git commit -s"
+    },
+    {
+     "ok": null
+    },
+    {
+     "policy": "a DCO Signed-off-by trailer is required; use git commit -s"
+    },
+    {
+     "ok": null
+    },
+    {
+     "policy": "a DCO Signed-off-by trailer is required; use git commit -s"
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    }
+   ],
+   [
+    {
+     "ok": null
+    },
+    {
+     "policy": "a DCO Signed-off-by trailer is required; use git commit -s"
+    },
+    {
+     "ok": null
+    },
+    {
+     "policy": "a DCO Signed-off-by trailer is required; use git commit -s"
+    },
+    {
+     "ok": null
+    },
+    {
+     "policy": "a DCO Signed-off-by trailer is required; use git commit -s"
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    }
+   ],
+   [
+    {
+     "ok": null
+    },
+    {
+     "policy": "a DCO Signed-off-by trailer is required; use git commit -s"
+    },
+    {
+     "ok": null
+    },
+    {
+     "policy": "a DCO Signed-off-by trailer is required; use git commit -s"
+    },
+    {
+     "ok": null
+    },
+    {
+     "policy": "a DCO Signed-off-by trailer is required; use git commit -s"
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    }
+   ],
+   [
+    {
+     "ok": null
+    },
+    {
+     "policy": "a DCO Signed-off-by trailer is required; use git commit -s"
+    },
+    {
+     "ok": null
+    },
+    {
+     "policy": "a DCO Signed-off-by trailer is required; use git commit -s"
+    },
+    {
+     "ok": null
+    },
+    {
+     "policy": "a DCO Signed-off-by trailer is required; use git commit -s"
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    }
+   ],
+   [
+    {
+     "ok": null
+    },
+    {
+     "policy": "a DCO Signed-off-by trailer is required; use git commit -s"
+    },
+    {
+     "ok": null
+    },
+    {
+     "policy": "a DCO Signed-off-by trailer is required; use git commit -s"
+    },
+    {
+     "ok": null
+    },
+    {
+     "policy": "a DCO Signed-off-by trailer is required; use git commit -s"
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    }
+   ],
+   [
+    {
+     "ok": null
+    },
+    {
+     "policy": "a DCO Signed-off-by trailer is required; use git commit -s"
+    },
+    {
+     "ok": null
+    },
+    {
+     "policy": "a DCO Signed-off-by trailer is required; use git commit -s"
+    },
+    {
+     "ok": null
+    },
+    {
+     "policy": "a DCO Signed-off-by trailer is required; use git commit -s"
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    }
+   ],
+   [
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    }
+   ],
+   [
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    }
+   ],
+   [
+    {
+     "ok": null
+    },
+    {
+     "policy": "a DCO Signed-off-by trailer is required; use git commit -s"
+    },
+    {
+     "policy": "AI co-author trailers are disabled by owner policy"
+    },
+    {
+     "policy": "a DCO Signed-off-by trailer is required; use git commit -s"
+    },
+    {
+     "policy": "AI co-author trailers are disabled by owner policy"
+    },
+    {
+     "policy": "a DCO Signed-off-by trailer is required; use git commit -s"
+    },
+    {
+     "policy": "AI co-author trailers are disabled by owner policy"
+    },
+    {
+     "ok": null
+    }
+   ],
+   [
+    {
+     "ok": null
+    },
+    {
+     "policy": "a DCO Signed-off-by trailer is required; use git commit -s"
+    },
+    {
+     "ok": null
+    },
+    {
+     "policy": "a DCO Signed-off-by trailer is required; use git commit -s"
+    },
+    {
+     "ok": null
+    },
+    {
+     "policy": "a DCO Signed-off-by trailer is required; use git commit -s"
+    },
+    {
+     "policy": "AI co-author trailers are disabled by owner policy"
+    },
+    {
+     "ok": null
+    }
+   ],
+   [
+    {
+     "ok": null
+    },
+    {
+     "policy": "a DCO Signed-off-by trailer is required; use git commit -s"
+    },
+    {
+     "policy": "AI co-author trailers are disabled by owner policy"
+    },
+    {
+     "policy": "a DCO Signed-off-by trailer is required; use git commit -s"
+    },
+    {
+     "policy": "AI co-author trailers are disabled by owner policy"
+    },
+    {
+     "policy": "a DCO Signed-off-by trailer is required; use git commit -s"
+    },
+    {
+     "policy": "AI co-author trailers are disabled by owner policy"
+    },
+    {
+     "ok": null
+    }
+   ],
+   [
+    {
+     "ok": null
+    },
+    {
+     "policy": "a DCO Signed-off-by trailer is required; use git commit -s"
+    },
+    {
+     "policy": "AI co-author trailers are disabled by owner policy"
+    },
+    {
+     "policy": "a DCO Signed-off-by trailer is required; use git commit -s"
+    },
+    {
+     "ok": null
+    },
+    {
+     "policy": "a DCO Signed-off-by trailer is required; use git commit -s"
+    },
+    {
+     "policy": "AI co-author trailers are disabled by owner policy"
+    },
+    {
+     "ok": null
+    }
+   ],
+   [
+    {
+     "ok": null
+    },
+    {
+     "policy": "a DCO Signed-off-by trailer is required; use git commit -s"
+    },
+    {
+     "ok": null
+    },
+    {
+     "policy": "a DCO Signed-off-by trailer is required; use git commit -s"
+    },
+    {
+     "ok": null
+    },
+    {
+     "policy": "a DCO Signed-off-by trailer is required; use git commit -s"
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    }
+   ],
+   [
+    {
+     "ok": null
+    },
+    {
+     "policy": "a DCO Signed-off-by trailer is required; use git commit -s"
+    },
+    {
+     "ok": null
+    },
+    {
+     "policy": "a DCO Signed-off-by trailer is required; use git commit -s"
+    },
+    {
+     "ok": null
+    },
+    {
+     "policy": "a DCO Signed-off-by trailer is required; use git commit -s"
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    }
+   ],
+   [
+    {
+     "ok": null
+    },
+    {
+     "policy": "a DCO Signed-off-by trailer is required; use git commit -s"
+    },
+    {
+     "policy": "AI co-author trailers are disabled by owner policy"
+    },
+    {
+     "policy": "a DCO Signed-off-by trailer is required; use git commit -s"
+    },
+    {
+     "policy": "AI co-author trailers are disabled by owner policy"
+    },
+    {
+     "policy": "a DCO Signed-off-by trailer is required; use git commit -s"
+    },
+    {
+     "policy": "AI co-author trailers are disabled by owner policy"
+    },
+    {
+     "ok": null
+    }
+   ],
+   [
+    {
+     "ok": null
+    },
+    {
+     "policy": "a DCO Signed-off-by trailer is required; use git commit -s"
+    },
+    {
+     "policy": "AI co-author trailers are disabled by owner policy"
+    },
+    {
+     "policy": "a DCO Signed-off-by trailer is required; use git commit -s"
+    },
+    {
+     "policy": "AI co-author trailers are disabled by owner policy"
+    },
+    {
+     "policy": "a DCO Signed-off-by trailer is required; use git commit -s"
+    },
+    {
+     "policy": "AI co-author trailers are disabled by owner policy"
+    },
+    {
+     "ok": null
+    }
+   ],
+   [
+    {
+     "ok": null
+    },
+    {
+     "policy": "a DCO Signed-off-by trailer is required; use git commit -s"
+    },
+    {
+     "ok": null
+    },
+    {
+     "policy": "a DCO Signed-off-by trailer is required; use git commit -s"
+    },
+    {
+     "policy": "AI co-author trailers are disabled by owner policy"
+    },
+    {
+     "policy": "a DCO Signed-off-by trailer is required; use git commit -s"
+    },
+    {
+     "policy": "AI co-author trailers are disabled by owner policy"
+    },
+    {
+     "ok": null
+    }
+   ],
+   [
+    {
+     "ok": null
+    },
+    {
+     "policy": "a DCO Signed-off-by trailer is required; use git commit -s"
+    },
+    {
+     "ok": null
+    },
+    {
+     "policy": "a DCO Signed-off-by trailer is required; use git commit -s"
+    },
+    {
+     "policy": "AI co-author trailers are disabled by owner policy"
+    },
+    {
+     "policy": "a DCO Signed-off-by trailer is required; use git commit -s"
+    },
+    {
+     "policy": "AI co-author trailers are disabled by owner policy"
+    },
+    {
+     "ok": null
+    }
+   ],
+   [
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    },
+    {
+     "policy": "AI co-author trailers are disabled by owner policy"
+    },
+    {
+     "ok": null
+    }
+   ],
+   [
+    {
+     "ok": null
+    },
+    {
+     "policy": "a DCO Signed-off-by trailer is required; use git commit -s"
+    },
+    {
+     "ok": null
+    },
+    {
+     "policy": "a DCO Signed-off-by trailer is required; use git commit -s"
+    },
+    {
+     "ok": null
+    },
+    {
+     "policy": "a DCO Signed-off-by trailer is required; use git commit -s"
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    }
+   ],
+   [
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    },
+    {
+     "policy": "AI co-author trailers are disabled by owner policy"
+    },
+    {
+     "policy": "AI co-author trailers are disabled by owner policy"
+    },
+    {
+     "policy": "AI co-author trailers are disabled by owner policy"
+    },
+    {
+     "policy": "AI co-author trailers are disabled by owner policy"
+    },
+    {
+     "policy": "AI co-author trailers are disabled by owner policy"
+    },
+    {
+     "ok": null
+    }
+   ],
+   [
+    {
+     "ok": null
+    },
+    {
+     "policy": "a DCO Signed-off-by trailer is required; use git commit -s"
+    },
+    {
+     "policy": "AI co-author trailers are disabled by owner policy"
+    },
+    {
+     "policy": "a DCO Signed-off-by trailer is required; use git commit -s"
+    },
+    {
+     "policy": "AI co-author trailers are disabled by owner policy"
+    },
+    {
+     "policy": "a DCO Signed-off-by trailer is required; use git commit -s"
+    },
+    {
+     "policy": "AI co-author trailers are disabled by owner policy"
+    },
+    {
+     "ok": null
+    }
+   ],
+   [
+    {
+     "ok": null
+    },
+    {
+     "policy": "a DCO Signed-off-by trailer is required; use git commit -s"
+    },
+    {
+     "ok": null
+    },
+    {
+     "policy": "a DCO Signed-off-by trailer is required; use git commit -s"
+    },
+    {
+     "policy": "AI co-author trailers are disabled by owner policy"
+    },
+    {
+     "policy": "a DCO Signed-off-by trailer is required; use git commit -s"
+    },
+    {
+     "policy": "AI co-author trailers are disabled by owner policy"
+    },
+    {
+     "ok": null
+    }
+   ],
+   [
+    {
+     "ok": null
+    },
+    {
+     "policy": "a DCO Signed-off-by trailer is required; use git commit -s"
+    },
+    {
+     "policy": "AI co-author trailers are disabled by owner policy"
+    },
+    {
+     "policy": "a DCO Signed-off-by trailer is required; use git commit -s"
+    },
+    {
+     "policy": "AI co-author trailers are disabled by owner policy"
+    },
+    {
+     "policy": "a DCO Signed-off-by trailer is required; use git commit -s"
+    },
+    {
+     "policy": "AI co-author trailers are disabled by owner policy"
+    },
+    {
+     "ok": null
+    }
+   ],
+   [
+    {
+     "ok": null
+    },
+    {
+     "policy": "a DCO Signed-off-by trailer is required; use git commit -s"
+    },
+    {
+     "policy": "AI co-author trailers are disabled by owner policy"
+    },
+    {
+     "policy": "a DCO Signed-off-by trailer is required; use git commit -s"
+    },
+    {
+     "policy": "AI co-author trailers are disabled by owner policy"
+    },
+    {
+     "policy": "a DCO Signed-off-by trailer is required; use git commit -s"
+    },
+    {
+     "policy": "AI co-author trailers are disabled by owner policy"
+    },
+    {
+     "ok": null
+    }
+   ],
+   [
+    {
+     "ok": null
+    },
+    {
+     "policy": "a DCO Signed-off-by trailer is required; use git commit -s"
+    },
+    {
+     "ok": null
+    },
+    {
+     "policy": "a DCO Signed-off-by trailer is required; use git commit -s"
+    },
+    {
+     "ok": null
+    },
+    {
+     "policy": "a DCO Signed-off-by trailer is required; use git commit -s"
+    },
+    {
+     "policy": "AI co-author trailers are disabled by owner policy"
+    },
+    {
+     "ok": null
+    }
+   ]
+  ],
+  "texts": [
+   [
+    {
+     "ok": [
+      [
+       "message",
+       3,
+       "Bravo"
+      ],
+      [
+       "message",
+       3,
+       "Sentinel"
+      ]
+     ]
+    },
+    {
+     "ok": [
+      [
+       "message",
+       3,
+       "Sentinel"
+      ]
+     ]
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    }
+   ],
+   [
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    }
+   ],
+   [
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    }
+   ],
+   [
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    }
+   ],
+   [
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    }
+   ],
+   [
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    }
+   ],
+   [
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    }
+   ],
+   [
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    }
+   ],
+   [
+    {
+     "ok": [
+      [
+       "message",
+       1,
+       "Alpha"
+      ]
+     ]
+    },
+    {
+     "ok": [
+      [
+       "message",
+       1,
+       "Alpha"
+      ]
+     ]
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": [
+      [
+       "message",
+       1,
+       "Alpha"
+      ]
+     ]
+    },
+    {
+     "ok": [
+      [
+       "message",
+       1,
+       "Alpha"
+      ]
+     ]
+    }
+   ],
+   [
+    {
+     "ok": [
+      [
+       "message",
+       1,
+       "Alpha"
+      ],
+      [
+       "message",
+       1,
+       "Bravo"
+      ]
+     ]
+    },
+    {
+     "ok": [
+      [
+       "message",
+       1,
+       "Alpha"
+      ]
+     ]
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": [
+      [
+       "message",
+       1,
+       "Alpha"
+      ]
+     ]
+    },
+    {
+     "ok": [
+      [
+       "message",
+       1,
+       "Alpha"
+      ]
+     ]
+    }
+   ],
+   [
+    {
+     "ok": [
+      [
+       "message",
+       1,
+       "Alpha"
+      ]
+     ]
+    },
+    {
+     "ok": [
+      [
+       "message",
+       1,
+       "Alpha"
+      ]
+     ]
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": [
+      [
+       "message",
+       1,
+       "Alpha"
+      ]
+     ]
+    },
+    {
+     "ok": [
+      [
+       "message",
+       1,
+       "Alpha"
+      ]
+     ]
+    }
+   ],
+   [
+    {
+     "ok": [
+      [
+       "message",
+       1,
+       "Sentinel"
+      ]
+     ]
+    },
+    {
+     "ok": [
+      [
+       "message",
+       1,
+       "Sentinel"
+      ]
+     ]
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    }
+   ],
+   [
+    {
+     "ok": [
+      [
+       "message",
+       1,
+       "Sentinel"
+      ]
+     ]
+    },
+    {
+     "ok": [
+      [
+       "message",
+       1,
+       "Sent"
+      ],
+      [
+       "message",
+       1,
+       "Sentinel"
+      ]
+     ]
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    }
+   ],
+   [
+    {
+     "ok": []
+    },
+    {
+     "ok": [
+      [
+       "message",
+       1,
+       "Pax"
+      ],
+      [
+       "message",
+       1,
+       "Pax"
+      ]
+     ]
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    }
+   ],
+   [
+    {
+     "ok": [
+      [
+       "message",
+       1,
+       "Alpha"
+      ]
+     ]
+    },
+    {
+     "ok": [
+      [
+       "message",
+       1,
+       "Alpha"
+      ]
+     ]
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": [
+      [
+       "message",
+       1,
+       "Alpha"
+      ]
+     ]
+    },
+    {
+     "ok": [
+      [
+       "message",
+       1,
+       "Alpha"
+      ]
+     ]
+    }
+   ],
+   [
+    {
+     "ok": [
+      [
+       "message",
+       1,
+       "Alpha"
+      ]
+     ]
+    },
+    {
+     "ok": [
+      [
+       "message",
+       1,
+       "Alpha"
+      ]
+     ]
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": [
+      [
+       "message",
+       1,
+       "Alpha"
+      ]
+     ]
+    },
+    {
+     "ok": [
+      [
+       "message",
+       1,
+       "Alpha"
+      ]
+     ]
+    }
+   ],
+   [
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": [
+      [
+       "message",
+       1,
+       "Zoë"
+      ],
+      [
+       "message",
+       1,
+       "Ünal"
+      ]
+     ]
+    },
+    {
+     "ok": []
+    }
+   ],
+   [
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    }
+   ],
+   [
+    {
+     "ok": [
+      [
+       "message",
+       1,
+       "Alpha"
+      ],
+      [
+       "message",
+       2,
+       "Bravo"
+      ],
+      [
+       "message",
+       3,
+       "Sentinel"
+      ]
+     ]
+    },
+    {
+     "ok": [
+      [
+       "message",
+       1,
+       "Alpha"
+      ],
+      [
+       "message",
+       3,
+       "Sentinel"
+      ],
+      [
+       "message",
+       4,
+       "Pax"
+      ]
+     ]
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": [
+      [
+       "message",
+       1,
+       "Alpha"
+      ]
+     ]
+    },
+    {
+     "ok": [
+      [
+       "message",
+       1,
+       "Alpha"
+      ]
+     ]
+    }
+   ],
+   [
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    }
+   ],
+   [
+    {
+     "ok": [
+      [
+       "message",
+       1,
+       "Alpha"
+      ]
+     ]
+    },
+    {
+     "ok": [
+      [
+       "message",
+       1,
+       "Alpha"
+      ]
+     ]
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": [
+      [
+       "message",
+       1,
+       "Alpha"
+      ]
+     ]
+    },
+    {
+     "ok": [
+      [
+       "message",
+       1,
+       "Alpha"
+      ]
+     ]
+    }
+   ],
+   [
+    {
+     "ok": [
+      [
+       "message",
+       1,
+       "Alpha"
+      ],
+      [
+       "message",
+       1,
+       "Alpha"
+      ],
+      [
+       "message",
+       1,
+       "Alpha"
+      ],
+      [
+       "message",
+       1,
+       "Alpha"
+      ],
+      [
+       "message",
+       1,
+       "Alpha"
+      ],
+      [
+       "message",
+       1,
+       "Alpha"
+      ],
+      [
+       "message",
+       1,
+       "Alpha"
+      ],
+      [
+       "message",
+       1,
+       "Alpha"
+      ],
+      [
+       "message",
+       1,
+       "Alpha"
+      ],
+      [
+       "message",
+       1,
+       "Alpha"
+      ],
+      [
+       "message",
+       1,
+       "Alpha"
+      ],
+      [
+       "message",
+       1,
+       "Alpha"
+      ]
+     ]
+    },
+    {
+     "ok": [
+      [
+       "message",
+       1,
+       "Alpha"
+      ],
+      [
+       "message",
+       1,
+       "Alpha"
+      ],
+      [
+       "message",
+       1,
+       "Alpha"
+      ],
+      [
+       "message",
+       1,
+       "Alpha"
+      ],
+      [
+       "message",
+       1,
+       "Alpha"
+      ],
+      [
+       "message",
+       1,
+       "Alpha"
+      ],
+      [
+       "message",
+       1,
+       "Alpha"
+      ],
+      [
+       "message",
+       1,
+       "Alpha"
+      ],
+      [
+       "message",
+       1,
+       "Alpha"
+      ],
+      [
+       "message",
+       1,
+       "Alpha"
+      ],
+      [
+       "message",
+       1,
+       "Alpha"
+      ],
+      [
+       "message",
+       1,
+       "Alpha"
+      ]
+     ]
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": [
+      [
+       "message",
+       1,
+       "Alpha"
+      ],
+      [
+       "message",
+       1,
+       "Alpha"
+      ],
+      [
+       "message",
+       1,
+       "Alpha"
+      ],
+      [
+       "message",
+       1,
+       "Alpha"
+      ],
+      [
+       "message",
+       1,
+       "Alpha"
+      ],
+      [
+       "message",
+       1,
+       "Alpha"
+      ],
+      [
+       "message",
+       1,
+       "Alpha"
+      ],
+      [
+       "message",
+       1,
+       "Alpha"
+      ],
+      [
+       "message",
+       1,
+       "Alpha"
+      ],
+      [
+       "message",
+       1,
+       "Alpha"
+      ],
+      [
+       "message",
+       1,
+       "Alpha"
+      ],
+      [
+       "message",
+       1,
+       "Alpha"
+      ]
+     ]
+    },
+    {
+     "ok": [
+      [
+       "message",
+       1,
+       "Alpha"
+      ],
+      [
+       "message",
+       1,
+       "Alpha"
+      ],
+      [
+       "message",
+       1,
+       "Alpha"
+      ],
+      [
+       "message",
+       1,
+       "Alpha"
+      ],
+      [
+       "message",
+       1,
+       "Alpha"
+      ],
+      [
+       "message",
+       1,
+       "Alpha"
+      ],
+      [
+       "message",
+       1,
+       "Alpha"
+      ],
+      [
+       "message",
+       1,
+       "Alpha"
+      ],
+      [
+       "message",
+       1,
+       "Alpha"
+      ],
+      [
+       "message",
+       1,
+       "Alpha"
+      ],
+      [
+       "message",
+       1,
+       "Alpha"
+      ],
+      [
+       "message",
+       1,
+       "Alpha"
+      ]
+     ]
+    }
+   ]
+  ],
+  "text_checks": [
+   [
+    {
+     "policy": "agent names are not allowed by owner policy (agent_anonymity): message:3 Bravo; message:3 Sentinel"
+    },
+    {
+     "policy": "agent names are not allowed by owner policy (agent_anonymity): message:3 Sentinel"
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    }
+   ],
+   [
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    }
+   ],
+   [
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    }
+   ],
+   [
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    }
+   ],
+   [
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    }
+   ],
+   [
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    }
+   ],
+   [
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    }
+   ],
+   [
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    }
+   ],
+   [
+    {
+     "policy": "agent names are not allowed by owner policy (agent_anonymity): message:1 Alpha"
+    },
+    {
+     "policy": "agent names are not allowed by owner policy (agent_anonymity): message:1 Alpha"
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    },
+    {
+     "policy": "agent names are not allowed by owner policy (agent_anonymity): message:1 Alpha"
+    },
+    {
+     "policy": "agent names are not allowed by owner policy (agent_anonymity): message:1 Alpha"
+    }
+   ],
+   [
+    {
+     "policy": "agent names are not allowed by owner policy (agent_anonymity): message:1 Alpha; message:1 Bravo"
+    },
+    {
+     "policy": "agent names are not allowed by owner policy (agent_anonymity): message:1 Alpha"
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    },
+    {
+     "policy": "agent names are not allowed by owner policy (agent_anonymity): message:1 Alpha"
+    },
+    {
+     "policy": "agent names are not allowed by owner policy (agent_anonymity): message:1 Alpha"
+    }
+   ],
+   [
+    {
+     "policy": "agent names are not allowed by owner policy (agent_anonymity): message:1 Alpha"
+    },
+    {
+     "policy": "agent names are not allowed by owner policy (agent_anonymity): message:1 Alpha"
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    },
+    {
+     "policy": "agent names are not allowed by owner policy (agent_anonymity): message:1 Alpha"
+    },
+    {
+     "policy": "agent names are not allowed by owner policy (agent_anonymity): message:1 Alpha"
+    }
+   ],
+   [
+    {
+     "policy": "agent names are not allowed by owner policy (agent_anonymity): message:1 Sentinel"
+    },
+    {
+     "policy": "agent names are not allowed by owner policy (agent_anonymity): message:1 Sentinel"
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    }
+   ],
+   [
+    {
+     "policy": "agent names are not allowed by owner policy (agent_anonymity): message:1 Sentinel"
+    },
+    {
+     "policy": "agent names are not allowed by owner policy (agent_anonymity): message:1 Sent; message:1 Sentinel"
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    }
+   ],
+   [
+    {
+     "ok": null
+    },
+    {
+     "policy": "agent names are not allowed by owner policy (agent_anonymity): message:1 Pax; message:1 Pax"
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    }
+   ],
+   [
+    {
+     "policy": "agent names are not allowed by owner policy (agent_anonymity): message:1 Alpha"
+    },
+    {
+     "policy": "agent names are not allowed by owner policy (agent_anonymity): message:1 Alpha"
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    },
+    {
+     "policy": "agent names are not allowed by owner policy (agent_anonymity): message:1 Alpha"
+    },
+    {
+     "policy": "agent names are not allowed by owner policy (agent_anonymity): message:1 Alpha"
+    }
+   ],
+   [
+    {
+     "policy": "agent names are not allowed by owner policy (agent_anonymity): message:1 Alpha"
+    },
+    {
+     "policy": "agent names are not allowed by owner policy (agent_anonymity): message:1 Alpha"
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    },
+    {
+     "policy": "agent names are not allowed by owner policy (agent_anonymity): message:1 Alpha"
+    },
+    {
+     "policy": "agent names are not allowed by owner policy (agent_anonymity): message:1 Alpha"
+    }
+   ],
+   [
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    },
+    {
+     "policy": "agent names are not allowed by owner policy (agent_anonymity): message:1 Zoë; message:1 Ünal"
+    },
+    {
+     "ok": null
+    }
+   ],
+   [
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    }
+   ],
+   [
+    {
+     "policy": "agent names are not allowed by owner policy (agent_anonymity): message:1 Alpha; message:2 Bravo; message:3 Sentinel"
+    },
+    {
+     "policy": "agent names are not allowed by owner policy (agent_anonymity): message:1 Alpha; message:3 Sentinel; message:4 Pax"
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    },
+    {
+     "policy": "agent names are not allowed by owner policy (agent_anonymity): message:1 Alpha"
+    },
+    {
+     "policy": "agent names are not allowed by owner policy (agent_anonymity): message:1 Alpha"
+    }
+   ],
+   [
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    }
+   ],
+   [
+    {
+     "policy": "agent names are not allowed by owner policy (agent_anonymity): message:1 Alpha"
+    },
+    {
+     "policy": "agent names are not allowed by owner policy (agent_anonymity): message:1 Alpha"
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    },
+    {
+     "policy": "agent names are not allowed by owner policy (agent_anonymity): message:1 Alpha"
+    },
+    {
+     "policy": "agent names are not allowed by owner policy (agent_anonymity): message:1 Alpha"
+    }
+   ],
+   [
+    {
+     "policy": "agent names are not allowed by owner policy (agent_anonymity): message:1 Alpha; message:1 Alpha; message:1 Alpha; message:1 Alpha; message:1 Alpha; message:1 Alpha; message:1 Alpha; message:1 Alpha; message:1 Alpha; message:1 Alpha (+2 more)"
+    },
+    {
+     "policy": "agent names are not allowed by owner policy (agent_anonymity): message:1 Alpha; message:1 Alpha; message:1 Alpha; message:1 Alpha; message:1 Alpha; message:1 Alpha; message:1 Alpha; message:1 Alpha; message:1 Alpha; message:1 Alpha (+2 more)"
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    },
+    {
+     "ok": null
+    },
+    {
+     "policy": "agent names are not allowed by owner policy (agent_anonymity): message:1 Alpha; message:1 Alpha; message:1 Alpha; message:1 Alpha; message:1 Alpha; message:1 Alpha; message:1 Alpha; message:1 Alpha; message:1 Alpha; message:1 Alpha (+2 more)"
+    },
+    {
+     "policy": "agent names are not allowed by owner policy (agent_anonymity): message:1 Alpha; message:1 Alpha; message:1 Alpha; message:1 Alpha; message:1 Alpha; message:1 Alpha; message:1 Alpha; message:1 Alpha; message:1 Alpha; message:1 Alpha (+2 more)"
+    }
+   ]
+  ],
+  "diffs": [
+   [
+    {
+     "ok": [
+      [
+       "old.py",
+       2,
+       "Bravo"
+      ]
+     ]
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    }
+   ],
+   [
+    {
+     "ok": [
+      [
+       "notes.txt",
+       1,
+       "Alpha"
+      ],
+      [
+       "notes.txt",
+       3,
+       "Bravo"
+      ]
+     ]
+    },
+    {
+     "ok": [
+      [
+       "notes.txt",
+       1,
+       "Alpha"
+      ]
+     ]
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": [
+      [
+       "notes.txt",
+       1,
+       "Alpha"
+      ]
+     ]
+    },
+    {
+     "ok": [
+      [
+       "notes.txt",
+       1,
+       "Alpha"
+      ]
+     ]
+    }
+   ],
+   [
+    {
+     "ok": []
+    },
+    {
+     "ok": [
+      [
+       "vendor/upstream.js",
+       1,
+       "Alpha"
+      ]
+     ]
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": [
+      [
+       "vendor/upstream.js",
+       1,
+       "Alpha"
+      ]
+     ]
+    },
+    {
+     "ok": [
+      [
+       "vendor/upstream.js",
+       1,
+       "Alpha"
+      ]
+     ]
+    }
+   ],
+   [
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    }
+   ],
+   [
+    {
+     "ok": [
+      [
+       "a.txt",
+       2,
+       "Bravo"
+      ],
+      [
+       "a.txt",
+       3,
+       "Sentinel"
+      ],
+      [
+       "a.txt",
+       11,
+       "Alpha"
+      ]
+     ]
+    },
+    {
+     "ok": [
+      [
+       "a.txt",
+       3,
+       "Sentinel"
+      ],
+      [
+       "a.txt",
+       11,
+       "Alpha"
+      ]
+     ]
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": [
+      [
+       "a.txt",
+       11,
+       "Alpha"
+      ]
+     ]
+    },
+    {
+     "ok": [
+      [
+       "a.txt",
+       11,
+       "Alpha"
+      ]
+     ]
+    }
+   ],
+   [
+    {
+     "policy": "unparseable diff hunk header: @@ -x +1 @@"
+    },
+    {
+     "policy": "unparseable diff hunk header: @@ -x +1 @@"
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    },
+    {
+     "policy": "unparseable diff hunk header: @@ -x +1 @@"
+    },
+    {
+     "policy": "unparseable diff hunk header: @@ -x +1 @@"
+    }
+   ],
+   [
+    {
+     "ok": [
+      [
+       "w.txt",
+       1,
+       "Alpha"
+      ]
+     ]
+    },
+    {
+     "ok": [
+      [
+       "w.txt",
+       1,
+       "Alpha"
+      ]
+     ]
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": [
+      [
+       "w.txt",
+       1,
+       "Alpha"
+      ]
+     ]
+    },
+    {
+     "ok": [
+      [
+       "w.txt",
+       1,
+       "Alpha"
+      ]
+     ]
+    }
+   ],
+   [
+    {
+     "ok": [
+      [
+       "c/odd.txt",
+       1,
+       "Bravo"
+      ]
+     ]
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    }
+   ],
+   [
+    {
+     "ok": []
+    },
+    {
+     "ok": [
+      [
+       "docs/zebra.md",
+       1,
+       "Pax"
+      ]
+     ]
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    }
+   ],
+   [
+    {
+     "ok": [
+      [
+       "y.txt",
+       5,
+       "Sentinel"
+      ]
+     ]
+    },
+    {
+     "ok": [
+      [
+       "y.txt",
+       5,
+       "Sentinel"
+      ]
+     ]
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    }
+   ],
+   [
+    {
+     "policy": "unparseable diff hunk header: @@ -1 +1 @xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    },
+    {
+     "policy": "unparseable diff hunk header: @@ -1 +1 @xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    },
+    {
+     "policy": "unparseable diff hunk header: @@ -1 +1 @xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    },
+    {
+     "policy": "unparseable diff hunk header: @@ -1 +1 @xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    }
+   ],
+   [
+    {
+     "ok": [
+      [
+       "m.txt",
+       3,
+       "Alpha"
+      ]
+     ]
+    },
+    {
+     "ok": [
+      [
+       "m.txt",
+       3,
+       "Alpha"
+      ]
+     ]
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": [
+      [
+       "m.txt",
+       3,
+       "Alpha"
+      ]
+     ]
+    },
+    {
+     "ok": [
+      [
+       "m.txt",
+       3,
+       "Alpha"
+      ]
+     ]
+    }
+   ],
+   [
+    {
+     "ok": [
+      [
+       "p.txt",
+       1,
+       "Sentinel"
+      ]
+     ]
+    },
+    {
+     "ok": [
+      [
+       "p.txt",
+       1,
+       "Sentinel"
+      ]
+     ]
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    }
+   ],
+   [
+    {
+     "ok": [
+      [
+       "q.txt",
+       1,
+       "Alpha"
+      ],
+      [
+       "q.txt",
+       2,
+       "Bravo"
+      ]
+     ]
+    },
+    {
+     "ok": [
+      [
+       "q.txt",
+       1,
+       "Alpha"
+      ]
+     ]
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": [
+      [
+       "q.txt",
+       1,
+       "Alpha"
+      ]
+     ]
+    },
+    {
+     "ok": [
+      [
+       "q.txt",
+       1,
+       "Alpha"
+      ]
+     ]
+    }
+   ],
+   [
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    },
+    {
+     "ok": []
+    }
+   ]
+  ],
+  "added": [
+   {
+    "ok": [
+     [
+      "old.py",
+      2,
+      "value = 2  # tuned by Bravo"
+     ]
+    ]
+   },
+   {
+    "ok": [
+     [
+      "notes.txt",
+      1,
+      "++ b/vendor/x Alpha"
+     ],
+     [
+      "notes.txt",
+      2,
+      "diff --git a/vendor/y b/vendor/y"
+     ],
+     [
+      "notes.txt",
+      3,
+      "@@ -1 +1 @@ Bravo"
+     ]
+    ]
+   },
+   {
+    "ok": [
+     [
+      "vendor/upstream.js",
+      1,
+      "// Alpha's upstream comment"
+     ]
+    ]
+   },
+   {
+    "ok": []
+   },
+   {
+    "ok": [
+     [
+      "a.txt",
+      2,
+      "Bravo two"
+     ],
+     [
+      "a.txt",
+      3,
+      "three Sentinel"
+     ],
+     [
+      "a.txt",
+      11,
+      "y Alpha"
+     ],
+     [
+      "a.txt",
+      12,
+      "z"
+     ]
+    ]
+   },
+   {
+    "policy": "unparseable diff hunk header: @@ -x +1 @@"
+   },
+   {
+    "ok": [
+     [
+      "w.txt",
+      1,
+      "Alpha"
+     ],
+     [
+      "w.txt",
+      2,
+      "ok"
+     ]
+    ]
+   },
+   {
+    "ok": [
+     [
+      "c/odd.txt",
+      1,
+      "Bravo"
+     ]
+    ]
+   },
+   {
+    "ok": [
+     [
+      "docs/apple.md",
+      1,
+      "Pax"
+     ],
+     [
+      "docs/zebra.md",
+      1,
+      "Pax"
+     ],
+     [
+      "Cargo.lock",
+      1,
+      "Pax"
+     ]
+    ]
+   },
+   {
+    "ok": [
+     [
+      "y.txt",
+      5,
+      "Sentinel"
+     ]
+    ]
+   },
+   {
+    "policy": "unparseable diff hunk header: @@ -1 +1 @xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+   },
+   {
+    "ok": [
+     [
+      "m.txt",
+      3,
+      "Alpha"
+     ]
+    ]
+   },
+   {
+    "ok": [
+     [
+      "p.txt",
+      1,
+      "Sentinel"
+     ]
+    ]
+   },
+   {
+    "ok": [
+     [
+      "q.txt",
+      1,
+      "Alpha"
+     ],
+     [
+      "q.txt",
+      2,
+      "Bravo"
+     ]
+    ]
+   },
+   {
+    "ok": []
+   }
+  ],
+  "globs": [
+   true,
+   true,
+   false,
+   true,
+   true,
+   false,
+   true,
+   true,
+   true,
+   true,
+   true,
+   false,
+   true,
+   false,
+   true,
+   true,
+   false,
+   true,
+   true,
+   true,
+   true,
+   false,
+   true,
+   true,
+   true,
+   true,
+   false,
+   true,
+   false,
+   true,
+   true,
+   true,
+   false,
+   true,
+   false,
+   false,
+   true,
+   true,
+   true,
+   false,
+   false,
+   false,
+   true,
+   true
+  ],
+  "reviews": [
+   {
+    "ok": null
+   },
+   {
+    "policy": "review does not match the current revision"
+   },
+   {
+    "policy": "review has unresolved findings or no approval"
+   },
+   {
+    "policy": "review has unresolved findings or no approval"
+   },
+   {
+    "policy": "review has unresolved findings or no approval"
+   },
+   {
+    "ok": null
+   },
+   {
+    "policy": "review has unresolved findings or no approval"
+   },
+   {
+    "policy": "review must identify an independent reviewer"
+   },
+   {
+    "policy": "review must identify an independent reviewer"
+   },
+   {
+    "policy": "review must identify an independent reviewer"
+   },
+   {
+    "policy": "review must identify an independent reviewer"
+   },
+   {
+    "policy": "review did not address required design directives"
+   },
+   {
+    "ok": null
+   },
+   {
+    "policy": "review requires durable evidence"
+   },
+   {
+    "policy": "review requires durable evidence"
+   },
+   {
+    "ok": null
+   },
+   {
+    "policy": "review does not match the current revision"
+   },
+   {
+    "malformed": "TypeError"
+   },
+   {
+    "ok": null
+   }
+  ],
+  "merges": [
+   {
+    "ok": [
+     [
+      "action",
+      "auto_merge"
+     ],
+     [
+      "reason",
+      "current revision passed configured review and checks"
+     ],
+     [
+      "head_sha",
+      "H1"
+     ],
+     [
+      "method",
+      "merge"
+     ]
+    ]
+   },
+   {
+    "ok": [
+     [
+      "action",
+      "owner_review"
+     ],
+     [
+      "reason",
+      "automatic merging is not enabled for this repository"
+     ]
+    ]
+   },
+   {
+    "ok": [
+     [
+      "action",
+      "wait"
+     ],
+     [
+      "reason",
+      "PR is draft, conflicting or not yet known mergeable"
+     ]
+    ]
+   },
+   {
+    "ok": [
+     [
+      "action",
+      "wait"
+     ],
+     [
+      "reason",
+      "PR is draft, conflicting or not yet known mergeable"
+     ]
+    ]
+   },
+   {
+    "ok": [
+     [
+      "action",
+      "owner_review"
+     ],
+     [
+      "reason",
+      "change touches an owner-reviewed area"
+     ]
+    ]
+   },
+   {
+    "ok": [
+     [
+      "action",
+      "owner_review"
+     ],
+     [
+      "reason",
+      "PR carries an owner-review label"
+     ]
+    ]
+   },
+   {
+    "ok": [
+     [
+      "action",
+      "owner_review"
+     ],
+     [
+      "reason",
+      "required checks are not configured"
+     ]
+    ]
+   },
+   {
+    "ok": [
+     [
+      "action",
+      "wait"
+     ],
+     [
+      "reason",
+      "required checks have not all passed"
+     ]
+    ]
+   },
+   {
+    "ok": [
+     [
+      "action",
+      "wait"
+     ],
+     [
+      "reason",
+      "required checks have not all passed"
+     ]
+    ]
+   },
+   {
+    "ok": [
+     [
+      "action",
+      "adversarial_review"
+     ],
+     [
+      "reason",
+      "review does not match the current revision"
+     ]
+    ]
+   },
+   {
+    "ok": [
+     [
+      "action",
+      "adversarial_review"
+     ],
+     [
+      "reason",
+      "review does not cover every changed file"
+     ]
+    ]
+   },
+   {
+    "ok": [
+     [
+      "action",
+      "adversarial_review"
+     ],
+     [
+      "reason",
+      "commit messages have not been checked"
+     ]
+    ]
+   },
+   {
+    "ok": [
+     [
+      "action",
+      "adversarial_review"
+     ],
+     [
+      "reason",
+      "a DCO Signed-off-by trailer is required; use git commit -s"
+     ]
+    ]
+   },
+   {
+    "ok": [
+     [
+      "action",
+      "auto_merge"
+     ],
+     [
+      "reason",
+      "current revision passed configured review and checks"
+     ],
+     [
+      "head_sha",
+      "H1"
+     ],
+     [
+      "method",
+      "rebase"
+     ]
+    ]
+   },
+   {
+    "ok": [
+     [
+      "action",
+      "adversarial_review"
+     ],
+     [
+      "reason",
+      "review must identify an independent reviewer"
+     ]
+    ]
+   },
+   {
+    "ok": [
+     [
+      "action",
+      "adversarial_review"
+     ],
+     [
+      "reason",
+      "review did not address required design directives"
+     ]
+    ]
+   },
+   {
+    "ok": [
+     [
+      "action",
+      "auto_merge"
+     ],
+     [
+      "reason",
+      "current revision passed configured review and checks"
+     ],
+     [
+      "head_sha",
+      null
+     ],
+     [
+      "method",
+      "merge"
+     ]
+    ]
+   },
+   {
+    "ok": [
+     [
+      "action",
+      "owner_review"
+     ],
+     [
+      "reason",
+      "change touches an owner-reviewed area"
+     ]
+    ]
+   },
+   {
+    "ok": [
+     [
+      "action",
+      "wait"
+     ],
+     [
+      "reason",
+      "required checks have not all passed"
+     ]
+    ]
+   },
+   {
+    "ok": [
+     [
+      "action",
+      "auto_merge"
+     ],
+     [
+      "reason",
+      "current revision passed configured review and checks"
+     ],
+     [
+      "head_sha",
+      "H1"
+     ],
+     [
+      "method",
+      "merge"
+     ]
+    ]
+   },
+   {
+    "ok": [
+     [
+      "action",
+      "auto_merge"
+     ],
+     [
+      "reason",
+      "current revision passed configured review and checks"
+     ],
+     [
+      "head_sha",
+      "H1"
+     ],
+     [
+      "method",
+      "merge"
+     ]
+    ]
+   },
+   {
+    "ok": [
+     [
+      "action",
+      "wait"
+     ],
+     [
+      "reason",
+      "required checks have not all passed"
+     ]
+    ]
+   },
+   {
+    "ok": [
+     [
+      "action",
+      "auto_merge"
+     ],
+     [
+      "reason",
+      "current revision passed configured review and checks"
+     ],
+     [
+      "head_sha",
+      "H1"
+     ],
+     [
+      "method",
+      "merge"
+     ]
+    ]
+   }
+  ],
+  "contexts": [
+   {
+    "ok": "Review directives:\n- D1: Keep it small\n- D2: Test the edges\n- P1: Project rule\n- Every commit needs review of its exact staged tree.\n- Require DCO Signed-off-by trailers; this is distinct from cryptographic signing.\n- Credit human contributors appropriately; no AI Paired-with trailers."
+   },
+   {
+    "ok": "Review directives:"
+   },
+   {
+    "ok": "Review directives:\n- Credit human contributors appropriately; no AI Paired-with trailers."
+   },
+   {
+    "malformed": "TypeError"
+   }
+  ]
+ }
+}

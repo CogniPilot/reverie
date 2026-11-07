@@ -426,6 +426,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "reverie-commit-policy"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
 name = "reverie-contracts"
 version = "0.1.0"
 dependencies = [
@@ -505,6 +514,18 @@ dependencies = [
  "sha2",
  "unicode-normalization",
  "unicode-properties",
+]
+
+[[package]]
+name = "reverie-observations"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "libc",
+ "nix",
+ "reverie-contracts",
+ "reverie-core",
+ "serde_json",
 ]
 
 [[package]]
