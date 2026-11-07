@@ -1,6 +1,8 @@
 //! Fixed laptop effects retain actual Nix/storage/Office owners before the
 //! first native client. InstallingBroker still owns admission and authorization.
+mod abort_held;
 mod call_budget;
+pub use abort_held::HeldLaptopNetworkReturn;
 mod cleanup;
 mod cold;
 pub(crate) mod cold_confirm;
