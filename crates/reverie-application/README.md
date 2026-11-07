@@ -251,6 +251,13 @@ same runtime; neither registers a laptop or grants effects. Candidate swap is
 read from the existing finite memory projection: the worker loader rejects
 owner-authored `laptopMemoryPolicy` input.
 
+The canonical launch's held lifecycle uses the private
+`check_creation_budget_locked` continuation. It checks that the borrowed guard
+belongs to this exact installed broker, then uses the same budget algorithm and
+native client. The public standalone method acquires its guard and delegates to
+that owner. A launch must not call the standalone method while already holding
+the nonreentrant mutex, or release/reacquire the guard to avoid that deadlock.
+
 Fixtures cover 55 actual legacy budget, 23 pool, 12 swap and two paired native
 lookup-priority cases. These use synthetic engine results/owned files; separate
 controls exercise the real held gate and controlled supervised Rust clients.
@@ -382,11 +389,27 @@ boundary, and real captured optional Gate admission. Entry failure retains that
 exact connection; successful prefix close consumes the actual allocation scope
 and socket without acknowledging storage, laptop, or global release.
 
-This prefix does not yet join storage wait/reuse, lifecycle active/generation
-state, Nix/network preparation, created publication/start, memory/cold completion,
-pane supervision, or committed Started registration. Protected L/source-stop
-joins and the real listener/global-stop producer also remain required. No wire
-selection or data-to-start permission follows from this bounded prefix.
+`AdmittedWorkerLaunch::prepare_prefix` continues that same owner through actual
+storage acquisition and its original ten-second wait. A one-shot counted
+connection hold precedes the first claim and moves into the actual active entry;
+waiting releases common admission before an old employee lease can settle.
+The same lifecycle mutex spans paired active/name insertion, pending/fresh-home
+storage preparation, runtime-directory preparation, create-plan observation and
+the original first inspect. `InspectedWorkerLaunch` keeps all those owners
+private; its request, snapshot and previous-inspection getters return data.
+
+`abort` returns the actual retained failure. Its one-shot `close_transport`
+attempts admission, own handler metadata and socket finalization, retaining
+sibling errors and the logical hold/storage context. Even a failure with no
+direct StorageClaim can still have an uncertain owner in the real registry.
+Physical EOF and successful local metadata removal do not release that custody.
+
+Existing-laptop policy/memory/runtime/exit/pane/reuse classification, ordinary
+replacement stop, Nix/network and create/start completion, protected CLI receipt,
+actual admission/canonical release, viewer and committed Started registration
+still require their genuine continuations. Protected L/source-stop dispatch and
+the real listener/global-stop producer also remain required. First inspect is
+neither cold eligibility nor a data-to-start or data-to-stop permission.
 
 # Actual running-laptop recovery ownership
 

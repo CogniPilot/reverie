@@ -3,17 +3,29 @@ use super::*;
 enum Preparation {
     Storage,
     Binding,
+    Cold,
+    RuntimeDirectory,
 }
 impl Preparation {
     fn run(&self, owner: &mut LaunchStorage) -> Result<(), StorageWorkflowError> {
         match self {
             Self::Storage => owner.prepare_storage()?,
             Self::Binding => owner.record_storage_binding()?,
+            Self::Cold => owner.prepare_cold_launch_storage()?,
+            Self::RuntimeDirectory => owner.prepare_runtime_directory()?,
         };
         Ok(())
     }
 }
 impl StorageClaim {
+    pub fn prepare_runtime_directory(&mut self) -> Result<(), StorageWorkflowError> {
+        self.prepare(Preparation::RuntimeDirectory)
+    }
+    /// Canonical pending/fresh-home/storage/lease-inventory prerequisite over
+    /// this SAME actual box. It neither clears TMP nor grants a native start.
+    pub fn prepare_cold_launch_storage(&mut self) -> Result<(), StorageWorkflowError> {
+        self.prepare(Preparation::Cold)
+    }
     pub fn prepare_storage(&mut self) -> Result<(), StorageWorkflowError> {
         self.prepare(Preparation::Storage)
     }

@@ -1,12 +1,12 @@
 use super::*;
-fn configuration() -> worker_config::EffectiveWorkerConfig {
+pub(super) fn configuration() -> worker_config::EffectiveWorkerConfig {
     worker_config::decode(
         br#"{"mounts":[{"source":"/owned","destination":"/work","readOnly":false}]}"#,
     )
     .unwrap()
 }
 const LAUNCH: &[u8] = br#"{"sessionId":"00000000-0000-0000-0000-000000000000","cwd":"/work","command":"echo hello","env":{},"cols":80,"rows":24}"#;
-fn launch(
+pub(super) fn launch(
     service: &Arc<WorkerReportService>,
     fixture: &Fixture,
 ) -> (UnixStream, WorkerLaunchConnection) {

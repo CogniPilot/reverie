@@ -8,7 +8,9 @@ use reverie_host::worker_reports::{
 };
 use std::{os::unix::net::UnixStream, time::Instant};
 mod error;
+mod preparation;
 pub use error::{LaunchAdmissionFailure, WorkerDispatchError};
+pub use preparation::{InspectedWorkerLaunch, PreparationFailure as LaunchPreparationFailure};
 #[cfg(test)]
 mod tests;
 
@@ -21,7 +23,7 @@ pub enum WorkerConnectionDispatch<'a> {
 #[must_use = "retain the accepted connection through checked handler close"]
 pub struct ReceivedWorkerLaunch<'a> {
     broker: &'a InstallingBroker,
-    connection: WorkerLaunchConnection,
+    connection: Arc<WorkerLaunchConnection>,
 }
 #[must_use = "close the actual admission and connection, not just request data"]
 pub struct AdmittedWorkerLaunch<'a> {
@@ -54,7 +56,7 @@ impl InstallingBroker {
             AcceptedWorkerConnection::Launch(connection) => {
                 Ok(WorkerConnectionDispatch::Launch(ReceivedWorkerLaunch {
                     broker: self,
-                    connection,
+                    connection: Arc::new(connection),
                 }))
             }
         }
@@ -65,7 +67,8 @@ impl<'a> ReceivedWorkerLaunch<'a> {
         self.connection.request()
     }
     pub fn close(&self, end: Instant) -> Result<(), WorkerReportError> {
-        self.connection.close(end)
+        // Physical connection close is not lifecycle-hold/capacity settlement.
+        self.connection.close_socket(end).map(|_| ())
     }
     /// Original ordinary prefix: actual validated J -> image refresh -> queued
     /// GPU cold boundary for non-attach -> actual captured optional admission.
@@ -114,6 +117,19 @@ impl<'a> ReceivedWorkerLaunch<'a> {
     }
 }
 impl AdmittedWorkerLaunch<'_> {
+    pub(super) fn lifecycle_connection(
+        &self,
+        lifecycle: &LaptopLifecycle<'_>,
+    ) -> Result<Arc<WorkerLaunchConnection>, GateError> {
+        if !lifecycle.belongs_to(&self.request.broker.installed) {
+            return Err(GateError::Refused("WORKER_BROKER_ACTIVE_ORIGIN"));
+        }
+        self.request
+            .connection
+            .assert_open(&self.request.broker.storage.runtime)
+            .map_err(|_| GateError::Refused("WORKER_LAUNCH_CONNECTION_CHANGED"))?;
+        Ok(self.request.connection.clone())
+    }
     pub fn request(&self) -> &WorkerRequest {
         self.request.request()
     }
@@ -137,5 +153,13 @@ impl AdmittedWorkerLaunch<'_> {
             }),
             (Ok(_), Err(error)) => Err(error.into()),
         }
+    }
+}
+impl Drop for ReceivedWorkerLaunch<'_> {
+    fn drop(&mut self) {
+        // A retained active reference does not keep a dead handler's socket
+        // usable. Checked-close uncertainty stays in the original service;
+        // active/pending and actual storage/Nix/Office owners settle separately.
+        let _ = self.connection.close_socket(Instant::now());
     }
 }

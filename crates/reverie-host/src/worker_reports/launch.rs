@@ -51,18 +51,52 @@ impl WorkerReportService {
             .stop_deadline()
             .unwrap_or_else(|| Instant::now() + Duration::from_secs(10));
         let result = record.finish_launch(end);
-        finalized(result, self.retire_launch(record, end))
+        finalized(
+            result,
+            self.retire_launch(record, end).and_then(require_retired),
+        )
     }
-    fn retire_launch(&self, record: &Arc<Record>, end: Instant) -> Result<()> {
-        if !record.settled() {
+    fn retire_launch(&self, record: &Arc<Record>, end: Instant) -> Result<WorkerLaunchClose> {
+        let mut records = self.lock_until(end)?;
+        let state = record.lifecycle_until(end)?;
+        if !record.socket_closed_known() {
             return Err(WorkerReportError::Unconfirmed);
         }
-        let mut records = self.lock_until(end)?;
+        if matches!(*state, super::retention::LifecycleHoldState::Held(_)) {
+            return Ok(WorkerLaunchClose::SocketClosedLifecycleHeld);
+        }
         records.retain(|other| !Arc::ptr_eq(other, record));
-        Ok(())
+        Ok(WorkerLaunchClose::Complete)
     }
 }
 impl WorkerLaunchConnection {
+    /// One-shot nonblocking mint from this actual accepted J record. The real
+    /// application keeps this with its active/preparation/failure owner. This
+    /// value retains transport capacity, never grants native effects.
+    pub fn retain_lifecycle(&self) -> Result<WorkerLaunchHold> {
+        self.record.retain_lifecycle(&self.service)
+    }
+    /// Identity/liveness of an already-issued resource hold. This neither
+    /// constructs a hold nor grants a native operation or storage ownership.
+    pub fn assert_lifecycle_hold(&self, hold: &WorkerLaunchHold) -> Result<()> {
+        if !Arc::ptr_eq(&self.service, &hold.service)
+            || !Arc::ptr_eq(&self.record, &hold.record)
+            || self.service.stopping()
+            || !self.record.can_progress()
+        {
+            return Err(WorkerReportError::Unconfirmed);
+        }
+        self.record.assert_lifecycle_hold(&hold.identity)
+    }
+    /// Pure origin identity for negative handler bookkeeping after its socket
+    /// closed. This proves neither open/progress state nor a releasable hold.
+    pub fn assert_same_lifecycle_record(&self, hold: &WorkerLaunchHold) -> Result<()> {
+        if Arc::ptr_eq(&self.service, &hold.service) && Arc::ptr_eq(&self.record, &hold.record) {
+            Ok(())
+        } else {
+            Err(WorkerReportError::Unconfirmed)
+        }
+    }
     pub fn assert_open(&self, runtime: &WorkerRuntime) -> Result<()> {
         if !self.same_runtime(runtime) || !self.record.can_progress() || self.service.stopping() {
             return Err(WorkerReportError::Unconfirmed);
@@ -84,19 +118,36 @@ impl WorkerLaunchConnection {
         self.record.interrupt()
     }
     pub fn close(&self, requested: Instant) -> Result<()> {
+        require_retired(self.close_socket(requested)?)
+    }
+    /// Consume the socket descriptors once, preserving a distinct known-closed
+    /// lifecycle-held outcome. It does not release that actual lifecycle hold.
+    pub fn close_socket(&self, requested: Instant) -> Result<WorkerLaunchClose> {
         let end = self
             .service
             .engine
             .stop_deadline()
             .map_or(requested, |stop| stop.min(requested));
         let result = self.record.finish_launch(end);
-        finalized(result, self.service.retire_launch(&self.record, end))
+        match result {
+            Ok(()) => self.service.retire_launch(&self.record, end),
+            Err(primary) => {
+                let cleanup = self.service.retire_launch(&self.record, end).map(|_| ());
+                finalized(Err(primary), cleanup)
+            }
+        }
     }
 }
 impl Drop for WorkerLaunchConnection {
     fn drop(&mut self) {
         // A contended or opaque last Drop remains in the SAME service registry
         // and ultimately its process-lifetime quarantine. No positive ACK.
-        let _ = self.close(Instant::now());
+        let _ = self.close_socket(Instant::now());
+    }
+}
+fn require_retired(outcome: WorkerLaunchClose) -> Result<()> {
+    match outcome {
+        WorkerLaunchClose::Complete => Ok(()),
+        WorkerLaunchClose::SocketClosedLifecycleHeld => Err(WorkerReportError::LifecycleRetained),
     }
 }

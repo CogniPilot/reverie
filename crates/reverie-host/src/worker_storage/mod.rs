@@ -267,6 +267,12 @@ impl StorageLease {
         let result = prepare::prepare(&self.config, &self.paths, &mut effects);
         partial(finalized(result, self.assert_current()), effects)
     }
+    pub fn prepare_runtime_directory(&mut self) -> Result<()> {
+        self.assert_current()?;
+        let mut effects = false;
+        let result = prepare::runtime_directory(&self.config, &self.paths, &mut effects);
+        partial(finalized(result, self.assert_current()), effects)
+    }
     pub fn record_storage_binding(&mut self) -> Result<()> {
         if self.paths.employee().is_none() {
             return Ok(());
