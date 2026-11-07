@@ -8,6 +8,7 @@ mod bootstrap_tests;
 mod creation;
 mod gpu_access;
 mod image_refresh;
+mod launch;
 mod recovered;
 pub(crate) mod source;
 mod storage;
@@ -19,6 +20,10 @@ use crate::{
 };
 pub use creation::CreationBudgetError;
 pub(crate) use image_refresh::LoadedLaunchImage;
+pub use launch::{
+    AdmittedWorkerLaunch, LaunchAdmissionFailure, ReceivedWorkerLaunch, WorkerConnectionDispatch,
+    WorkerDispatchError,
+};
 use recovered::{LaptopOwner, RecoveryOwners};
 pub use recovered::{RecoveryError, RecoverySummary};
 use reverie_contracts::reservation_engine::ReservationConfiguration;
