@@ -45,6 +45,13 @@ fn telemetry_native_refusal_precedes_gate_marker_reads_and_retains_same_runtime(
     ));
     assert_eq!(failure.code(), "TELEMETRY_BOUNDARY_REFUSED");
     assert!(
+        std::error::Error::source(failure.as_ref())
+            .unwrap()
+            .source()
+            .unwrap()
+            .is::<TelemetryError>()
+    );
+    assert!(
         !tree.root.join("calls.txt").exists(),
         "state refusal precedes real inventory"
     );
@@ -64,6 +71,13 @@ fn actual_enabled_inventory_and_sink_complete_before_gate_failure() {
     );
     let mut failure = InstallingBroker::new(snapshot, runtime).err().unwrap();
     assert!(matches!(failure.cause(), BrokerBootstrapCause::Gate(_)));
+    assert!(
+        std::error::Error::source(failure.as_ref())
+            .unwrap()
+            .source()
+            .unwrap()
+            .is::<GateError>()
+    );
     assert!(
         failure
             .owner
@@ -127,6 +141,11 @@ fn failed_startup_retains_actual_pending_pipe_owner_until_checked_same_runtime_s
         .close(Instant::now() + Duration::from_millis(20))
         .unwrap_err();
     assert!(error.runtime_error().is_some());
+    assert!(
+        std::error::Error::source(&error)
+            .unwrap()
+            .is::<RuntimeError>()
+    );
     let first_stop = failure
         .owner
         .as_ref()

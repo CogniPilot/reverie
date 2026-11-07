@@ -30,7 +30,14 @@ impl fmt::Display for BrokerBootstrapCause {
         f.write_str(self.code())
     }
 }
-impl std::error::Error for BrokerBootstrapCause {}
+impl std::error::Error for BrokerBootstrapCause {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(match self {
+            Self::Telemetry(error) => error.as_ref(),
+            Self::Gate(error) => error.as_ref(),
+        })
+    }
+}
 struct BootstrapOwner {
     installed: Arc<InstalledWorker>,
     runtime: WorkerRuntime,
@@ -81,7 +88,11 @@ impl fmt::Display for BootstrapSettlementError {
         f.write_str("WORKER_BOOTSTRAP_SETTLEMENT_UNCONFIRMED")
     }
 }
-impl std::error::Error for BootstrapSettlementError {}
+impl std::error::Error for BootstrapSettlementError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        self.runtime.as_deref().map(|error| error as _)
+    }
+}
 impl BrokerBootstrapFailure {
     pub fn code(&self) -> &'static str {
         self.cause.code()
