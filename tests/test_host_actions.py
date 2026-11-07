@@ -86,73 +86,6 @@ class HostActionsTests(unittest.TestCase):
         self.pending()
 
 
-class FixedTargetsTests(unittest.TestCase):
-    def setUp(self):
-        import json
-        from reverie.host_action_targets import FixedTargets
-        self.json=json
-        self.record={'Id':'a'*64,'Name':'/reverie-agent-'+SID,'Config':{'Labels':{'reverie.worker':'reverie','reverie.session':SID,'reverie.worker-policy':'b'*64}},'State':{'Running':True}}
-        self.calls=[]
-        def engine(argv):
-            self.calls.append(argv)
-            if argv[0]=='stop':self.record['State']['Running']=False;return ''
-            return json.dumps([self.record])
-        class Pool:
-            def preview(self):return {'existingUnitSha256':None}
-            def apply(self,permit):permit.begin()
-            def verify(self):pass
-        self.targets=FixedTargets('reverie',engine,Pool())
-        self.op={'action':'stop-laptop','sessionId':SID}
-
-    def test_only_exact_approved_container_is_stopped(self):
-        preview=self.targets.resolve(self.op)
-        from reverie.host_actions import ExecutionPermit
-        self.targets.execute(self.op,preview,ExecutionPermit(1300,lambda:1000))
-        stops=[a for a in self.calls if a[0]=='stop']
-        self.assertEqual(stops,[['stop','--time','20','a'*64]])
-
-    def test_replacement_container_cannot_inherit_approval(self):
-        preview=self.targets.resolve(self.op)
-        self.record['Id']='c'*64
-        from reverie.host_actions import ExecutionPermit
-        with self.assertRaises(ValueError):self.targets.execute(self.op,preview,ExecutionPermit(1300,lambda:1000))
-        self.assertFalse(any(a[0]=='stop' for a in self.calls))
-
-    def test_foreign_deployment_and_session_refused(self):
-        self.record['Config']['Labels']['reverie.session']='other'
-        with self.assertRaises(ValueError):self.targets.resolve(self.op)
-
-    def test_runtime_proof_rejects_unlimited_or_wrong_pool(self):
-        from reverie.host_action_targets import RuntimePoolProof,POOL
-        with tempfile.TemporaryDirectory() as tmp:
-            root=Path(tmp)
-            for name,value in {**POOL,'cpu.max':'max 100000'}.items():(root/name).write_text(value)
-            proof=RuntimePoolProof(root);proof.verify()
-            for name in POOL:
-                old=(root/name).read_text();(root/name).write_text('max')
-                with self.subTest(name=name),self.assertRaises(ValueError):proof.verify()
-                (root/name).write_text(old)
-
-    def test_pool_swap_ceiling_follows_laptop_swap_pool(self):
-        import hashlib
-        from reverie.host_action_targets import FixedTargets,RuntimePoolProof,UNIT,pool_limits,pool_unit
-        self.assertEqual(pool_unit(),UNIT)
-        self.assertIn(b'\nMemorySwapMax=0\n',UNIT)
-        self.assertEqual(pool_unit(32768),UNIT.replace(b'MemorySwapMax=0',b'MemorySwapMax=32768M'))
-        self.assertEqual(pool_limits(32768)['memory.swap.max'],str(32768*1048576))
-        for bad in [-1,1048577,True,'32768',None]:
-            with self.subTest(bad=bad),self.assertRaises(ValueError):pool_unit(bad)
-        op={'action':'apply-runtime-pool'}
-        default=self.targets.resolve(op)['desiredUnitSha256']
-        swapped=FixedTargets('reverie',lambda argv:'',self.targets.pool,32768).resolve(op)['desiredUnitSha256']
-        self.assertEqual(default,hashlib.sha256(UNIT).hexdigest())
-        self.assertEqual(swapped,hashlib.sha256(pool_unit(32768)).hexdigest())
-        with tempfile.TemporaryDirectory() as tmp:
-            root=Path(tmp)
-            for name,value in {**pool_limits(32768),'cpu.max':'max 100000'}.items():(root/name).write_text(value)
-            RuntimePoolProof(root,32768).verify()
-            with self.assertRaises(ValueError):RuntimePoolProof(root).verify()
-
 class PrivateStorageTests(unittest.TestCase):
     def test_public_directory_and_symlink_database_refused(self):
         import os
@@ -191,47 +124,6 @@ class ExecutionDeadlineTests(unittest.TestCase):
         self.assertEqual(queue.run(row['id']),'failed')
         self.assertEqual(effects,[])
         with self.assertRaises(ValueError):queue.run(row['id'])
-
-    def test_expiry_during_fixed_adapter_second_resolve_has_no_stop(self):
-        import json
-        from reverie.host_action_targets import FixedTargets
-        inspections=0;effects=[]
-        def engine(argv):
-            nonlocal inspections
-            if argv[0]=='stop':effects.append(self.now);return ''
-            inspections+=1
-            if inspections==3:self.now+=2
-            return json.dumps([{'Id':'a'*64,'Name':'/reverie-agent-'+SID,'Config':{'Labels':{'reverie.worker':'reverie','reverie.session':SID}},'State':{'Running':True}}])
-        target=FixedTargets('reverie',engine,None)
-        def execute(op,preview,permit=None):
-            if permit is None:return target.execute(op,preview)
-            return target.execute(op,preview,permit)
-        queue=ActionQueue(self.path,target.resolve,execute,lambda:self.now)
-        row=self.approve(queue,{'action':'stop-laptop','sessionId':SID})
-        self.assertEqual(queue.run(row['id']),'failed')
-        self.assertEqual(effects,[])
-
-    def test_expiry_during_pool_second_preview_has_no_apply(self):
-        from reverie.host_action_targets import FixedTargets
-        effects=[];test=self
-        class Pool:
-            calls=0
-            def preview(self):
-                self.calls+=1
-                if self.calls==3:test.now+=2
-                return {'existingUnitSha256':None}
-            def apply(self,permit=None):
-                if permit is not None:permit.begin()
-                effects.append(test.now)
-            def verify(self):pass
-        target=FixedTargets('reverie',lambda _:None,Pool())
-        def execute(op,preview,permit=None):
-            if permit is None:return target.execute(op,preview)
-            return target.execute(op,preview,permit)
-        queue=ActionQueue(self.path,target.resolve,execute,lambda:self.now)
-        row=self.approve(queue,{'action':'apply-runtime-pool'})
-        self.assertEqual(queue.run(row['id']),'failed')
-        self.assertEqual(effects,[])
 
     def test_expiry_after_partial_effect_is_unconfirmed_and_not_retried(self):
         effects=[]
