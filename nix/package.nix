@@ -563,7 +563,6 @@ let
   '') [ "claude" "codex" "opencode" ];
   launcher = pkgs.writeShellScript "reverie-launcher" ''
     export PATH=${installClis}/bin:${runtime}/bin:$PATH
-    export REVERIE_MCP_MEMORY_PYTHON=${memory}/bin/python3
     export REVERIE_MANAGED_INSTALL=nix
     export REVERIE_OWNER_SETUP=1
     export REVERIE_NIX_LAUNCHER="$0"
@@ -603,8 +602,7 @@ let
     ln -s ${opsNativeCli}/bin/reverie-ops "$out/bin/reverie-ops"
     for command in ${memory}/bin/reverie-*; do
       makeWrapper "$command" "$out/bin/$(basename "$command")" \
-        --prefix PATH : ${runtime}/bin \
-        --set REVERIE_MCP_MEMORY_PYTHON ${memory}/bin/python3
+        --prefix PATH : ${runtime}/bin
     done
   '';
 
