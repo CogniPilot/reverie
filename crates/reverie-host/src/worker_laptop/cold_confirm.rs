@@ -1,5 +1,6 @@
 //! Fixed actual Created CID/PID/mount observation. The private confirmation is
 //! minted only while borrowing this retained laptop record and its real owners.
+use super::call_budget::CallBudget;
 use super::*;
 use crate::{
     native,
@@ -51,9 +52,9 @@ impl Confirmed {
 pub(super) fn confirm(
     runtime: &WorkerRuntime,
     record: &mut Record,
-    end: Instant,
+    budget: CallBudget,
 ) -> Result<Confirmed> {
-    current(runtime, record, end)?;
+    current(runtime, record, budget)?;
     let container = record
         .creation
         .as_ref()
@@ -61,19 +62,19 @@ pub(super) fn confirm(
         .ok_or(LaptopError::Refused(
             "WORKER_COLD_ACTUAL_CREATED_CID_REQUIRED",
         ))?;
-    let row = inspect(runtime, record, &container, end)?;
-    let start = start(&row, end)?;
-    mounts(record, &row, end)?;
+    let row = inspect(runtime, record, &container, budget)?;
+    let start = start(runtime, &row, budget)?;
+    mounts(runtime, record, &row, budget)?;
     need(
-        row.same_observation(&inspect(runtime, record, &container, end)?)
+        row.same_observation(&inspect(runtime, record, &container, budget)?)
             .map_err(data)?,
         "WORKER_COLD_NATIVE_CHANGED",
     )?;
     need(
-        start == self::start(&row, end)?,
+        start == self::start(runtime, &row, budget)?,
         "WORKER_COLD_NATIVE_PID_CHANGED",
     )?;
-    current(runtime, record, end)?;
+    current(runtime, record, budget)?;
     Ok(Confirmed {
         origin: runtime.installed_engine().clone(),
         owner: record.resources().storage().owner_identity().clone(),
@@ -83,8 +84,8 @@ pub(super) fn confirm(
         start,
     })
 }
-fn current(runtime: &WorkerRuntime, record: &Record, end: Instant) -> Result<()> {
-    super::cold::running(runtime, end)?;
+fn current(runtime: &WorkerRuntime, record: &Record, budget: CallBudget) -> Result<()> {
+    super::cold::running_budget(runtime, budget)?;
     let resources = record.resources();
     let storage = resources.storage();
     resources
@@ -123,15 +124,15 @@ fn inspect(
     runtime: &WorkerRuntime,
     record: &mut Record,
     cid: &ContainerId,
-    end: Instant,
+    budget: CallBudget,
 ) -> Result<RetainedInspection> {
-    super::cold::running(runtime, end)?;
-    let output = network::call(
+    super::cold::running_budget(runtime, budget)?;
+    let output = network::call_with_budget(
         runtime,
         record,
         vec!["inspect".into(), cid.as_str().into()],
         network::CallPurpose::Observe,
-        end,
+        budget,
     )?;
     need(output.succeeded, "WORKER_COLD_NATIVE_INSPECT_FAILED")?;
     let resources = record.resources();
@@ -148,8 +149,8 @@ fn inspect(
     )
     .map_err(data)
 }
-fn start(row: &RetainedInspection, end: Instant) -> Result<String> {
-    need(Instant::now() < end, "WORKER_COLD_DEADLINE")?;
+fn start(runtime: &WorkerRuntime, row: &RetainedInspection, budget: CallBudget) -> Result<String> {
+    super::cold::running_budget(runtime, budget)?;
     let raw = native::read_reservation(
         &std::path::PathBuf::from(format!("/proc/{}/stat", row.pid().as_str())),
         65536,
@@ -162,7 +163,12 @@ fn start(row: &RetainedInspection, end: Instant) -> Result<String> {
         .start()
         .to_owned())
 }
-fn mounts(record: &Record, row: &RetainedInspection, end: Instant) -> Result<()> {
+fn mounts(
+    runtime: &WorkerRuntime,
+    record: &Record,
+    row: &RetainedInspection,
+    budget: CallBudget,
+) -> Result<()> {
     let resources = record.resources();
     let storage = resources.storage();
     let (key, retained) = storage
@@ -187,12 +193,14 @@ fn mounts(record: &Record, row: &RetainedInspection, end: Instant) -> Result<()>
     ))
     .map_err(data)?;
     let kernel = ReservationKernel::new();
-    let host = kernel.mount_table(end).map_err(LaptopError::MemoryKernel)?;
+    let host = kernel
+        .mount_table(budget.end(runtime, 30))
+        .map_err(LaptopError::MemoryKernel)?;
     let container = kernel
-        .cold_process_mounts(row.pid().as_str(), end)
+        .cold_process_mounts(row.pid().as_str(), budget.end(runtime, 30))
         .map_err(LaptopError::MemoryKernel)?;
     let location = kernel
-        .cold_reference_location(&target, &host, end)
+        .cold_reference_location(&target, &host, budget.end(runtime, 30))
         .map_err(LaptopError::MemoryKernel)?;
     let selected = container
         .rows()
@@ -212,7 +220,14 @@ fn mounts(record: &Record, row: &RetainedInspection, end: Instant) -> Result<()>
             let destination = PosixPath::try_new(bind.destination().map_err(data)?.codepoints())
                 .map_err(|_| LaptopError::Refused("WORKER_COLD_BIND_DESTINATION"))?;
             kernel
-                .cold_live_aliases(&retained, &real, &destination, &host, &container, end)
+                .cold_live_aliases(
+                    &retained,
+                    &real,
+                    &destination,
+                    &host,
+                    &container,
+                    budget.end(runtime, 30),
+                )
                 .map_err(LaptopError::MemoryKernel)?;
         }
     }
