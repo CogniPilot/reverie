@@ -37,7 +37,11 @@ legacy HTTP parser equivalence is made.
 
 The portable CI gate includes this CLI, its closed wire contracts and the
 shared HTTP implementation. Tests cover original Python byte-format vectors
-and the actual native executable over an owned TCP phone. The `opsNativeCli`
-flake package builds and tests this candidate independently. Its existence does
-not select it in the runtime, replace the OPS daemon, or establish real-host
-acceptance. Those consumer changes require separate qualification.
+and the actual native executable over an owned TCP phone. The Python byte-format
+vectors were generated from the retired `python/reverie/ops_cli.py`, whose hash
+each fixture records; they remain the frozen compatibility oracle.
+
+`nix/ops-core.nix` installs this executable as its `reverie-ops` command; the
+Python client is removed. The OPS daemon and installer in that package remain
+Python until their own port. Selecting the package does not establish
+real-host acceptance.
