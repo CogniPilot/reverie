@@ -210,19 +210,6 @@ fn worker_waits_beyond_original_query_limit_without_replay_or_cancelling_another
     let token = crate::captured_client::CancellationToken::new();
     let cancellation = token.clone();
     let original = Instant::now() + Duration::from_secs(MAX_QUERY_SECONDS);
-    let query = std::thread::spawn(move || {
-        native.run_scoped(
-            vec!["ps".into(), "-aq".into(), "--no-trunc".into()],
-            original,
-            &cancellation,
-            Policy {
-                maximum: Duration::from_secs(MAX_QUERY_SECONDS),
-                maximum_output: 4 * 1024 * 1024,
-                successful_exit: true,
-            },
-        )
-    });
-    wait(|| gate.entered.load(Ordering::Acquire));
     let busy = Arc::new(Gate::default());
     let pause = busy.clone();
     let runtime = fixture.runtime().clone();
@@ -233,6 +220,19 @@ fn worker_waits_beyond_original_query_limit_without_replay_or_cancelling_another
             gate: gate.clone(),
             token: Some(token.clone()),
         };
+        let query = scope.spawn(move || {
+            native.run_scoped(
+                vec!["ps".into(), "-aq".into(), "--no-trunc".into()],
+                original,
+                &cancellation,
+                Policy {
+                    maximum: Duration::from_secs(MAX_QUERY_SECONDS),
+                    maximum_output: 4 * 1024 * 1024,
+                    successful_exit: true,
+                },
+            )
+        });
+        wait(|| gate.entered.load(Ordering::Acquire));
         let existing = &existing;
         let connection = &connection;
         let viewer = scope.spawn(move || {
@@ -297,19 +297,6 @@ fn worker_admission_wait_observes_original_first_stop_without_a_fresh_budget_or_
     let token = crate::captured_client::CancellationToken::new();
     let cancellation = token.clone();
     let original = Instant::now() + Duration::from_secs(MAX_QUERY_SECONDS);
-    let query = std::thread::spawn(move || {
-        native.run_scoped(
-            vec!["ps".into(), "-aq".into(), "--no-trunc".into()],
-            original,
-            &cancellation,
-            Policy {
-                maximum: Duration::from_secs(MAX_QUERY_SECONDS),
-                maximum_output: 4 * 1024 * 1024,
-                successful_exit: true,
-            },
-        )
-    });
-    wait(|| gate.entered.load(Ordering::Acquire));
     let busy = Arc::new(Gate::default());
     let seen = busy.clone();
     let runtime = fixture.runtime().clone();
@@ -319,6 +306,19 @@ fn worker_admission_wait_observes_original_first_stop_without_a_fresh_budget_or_
             gate: gate.clone(),
             token: Some(token.clone()),
         };
+        let query = scope.spawn(move || {
+            native.run_scoped(
+                vec!["ps".into(), "-aq".into(), "--no-trunc".into()],
+                original,
+                &cancellation,
+                Policy {
+                    maximum: Duration::from_secs(MAX_QUERY_SECONDS),
+                    maximum_output: 4 * 1024 * 1024,
+                    successful_exit: true,
+                },
+            )
+        });
+        wait(|| gate.entered.load(Ordering::Acquire));
         let existing = &existing;
         let connection = &connection;
         let worker = scope.spawn(move || {
