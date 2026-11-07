@@ -40,7 +40,7 @@ fn inspected<'a>(
             "Id":"a".repeat(64),"Name":format!("/{}",observed.plan.arguments().name()),
             "Config":{"Labels":{"reverie.worker":"test","reverie.session":SID,
                 "reverie.worker-policy":observed.plan.arguments().policy_digest().to_hex()}},
-            "State":{"Running":running,"Pid":std::process::id()}
+        "State":{"Running":running,"Pid":null}
         }]))
         .unwrap(),
     );
