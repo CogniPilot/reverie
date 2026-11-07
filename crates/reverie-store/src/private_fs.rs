@@ -54,10 +54,10 @@ impl Stamp {
             && self.uid == uid()
     }
     pub(crate) fn private_file(&self) -> bool {
-        self.mode & libc::S_IFMT == libc::S_IFREG
-            && self.mode & 0o7777 == 0o600
-            && self.uid == uid()
-            && self.links == 1
+        self.owned_regular() && self.mode & 0o7777 == 0o600
+    }
+    pub(crate) fn owned_regular(&self) -> bool {
+        self.mode & libc::S_IFMT == libc::S_IFREG && self.uid == uid() && self.links == 1
     }
 }
 pub(crate) fn uid() -> u32 {
@@ -191,6 +191,53 @@ impl Directory {
     }
     pub(crate) fn path(&self) -> &Path {
         &self.path
+    }
+    pub(crate) fn identity(&self) -> [u64; 2] {
+        [self.identity.dev, self.identity.ino]
+    }
+    pub(crate) fn image_names(&self) -> Result<Vec<Vec<u8>>> {
+        let file = open_at(
+            self.file.as_raw_fd(),
+            OsStr::new("."),
+            libc::O_RDONLY | libc::O_DIRECTORY,
+            0,
+        )
+        .map_err(StoreError::io)?;
+        scan_directory(file, &self.path, |stream| {
+            let mut names = Vec::new();
+            while let Some(name) = next_directory_name(stream)? {
+                names.push(name);
+            }
+            Ok(names)
+        })
+    }
+    /// Original image cache opens do not repair permissions masked by umask.
+    pub(crate) fn create_image_file(&self, leaf: &str) -> Result<File> {
+        open_at(
+            self.file.as_raw_fd(),
+            OsStr::new(leaf),
+            libc::O_RDWR | libc::O_CREAT | libc::O_EXCL,
+            0o600,
+        )
+        .map_err(StoreError::io)
+    }
+    pub(crate) fn lock_images(&self) -> Result<File> {
+        let name = ".chat-image-custody.lock";
+        let file = match self.create_image_file(name) {
+            Ok(file) => file,
+            Err(StoreError::Io { source, .. }) if source.kind() == io::ErrorKind::AlreadyExists => {
+                self.read_write_lock(name)?
+            }
+            Err(error) => return Err(error),
+        };
+        let result = private_stamp(&file).and_then(|stamp| {
+            need(stamp.size == 0, StoreFault::PrivateFile)?;
+            self.lock_file(&file, name)
+        });
+        match result {
+            Ok(()) => Ok(file),
+            Err(error) => finalized(Err(error), close(file, CloseRole::Lock, &self.path)),
+        }
     }
     pub(crate) fn check(&self) -> Result<()> {
         let other = Self::open(&self.path).map_err(|cause| StoreError::DirectoryRecheck {
