@@ -86,6 +86,23 @@ impl InstalledCommand {
         }
         Ok(())
     }
+    /// Only the fixed PTY viewer consumer may use this inherited-stdio shape;
+    /// its native preparation replaces all three streams before exact exec.
+    pub(crate) fn viewer_command(&self, arguments: &[OsString]) -> std::io::Result<Command> {
+        let mut command = self.command(arguments);
+        command
+            .stdin(Stdio::inherit())
+            .stdout(Stdio::inherit())
+            .stderr(Stdio::inherit());
+        Ok(command)
+    }
+    pub(crate) fn configure_viewer_exact(
+        &self,
+        command: &mut Command,
+        arguments: &[OsString],
+    ) -> std::io::Result<()> {
+        self.configure_exact(command, arguments)
+    }
 }
 fn executable(path: &Path) -> bool {
     std::fs::metadata(path).is_ok_and(|metadata| metadata.is_file())

@@ -55,8 +55,22 @@ impl Job {
 #[must_use = "retain the engine context and check settle_owned before shutdown acknowledgement"]
 pub(crate) struct CapturedClient {
     bootstrap: Arc<InstalledCommand>,
-    active: Mutex<Option<Arc<Job>>>,
+    active: Mutex<Option<Active>>,
     closing: AtomicBool,
+}
+#[derive(Clone)]
+enum Active {
+    Query(Arc<Job>),
+    ViewerConstructor(Arc<crate::worker_laptop::ViewerJob>),
+}
+impl Active {
+    #[cfg(test)]
+    fn query(&self) -> &Arc<Job> {
+        let Self::Query(job) = self else {
+            panic!("actual query fixture expected")
+        };
+        job
+    }
 }
 /// Exact native job custody, minted only after actual locked admission. It is
 /// not an engine effect/owner permit and has no wire or PID/path constructor.
@@ -74,6 +88,94 @@ impl CallFailure {
     }
 }
 impl CapturedClient {
+    /// Share the service capture; interactive PTY ownership stays separate from
+    /// this client's bounded PIPE query slot and cannot block metadata queries.
+    pub(crate) fn viewer_capture(&self) -> Arc<InstalledCommand> {
+        self.bootstrap.clone()
+    }
+    /// The same one-slot admission owner covers constructor custody. A fully
+    /// handed-off interactive process is inventoried by its laptop record, so
+    /// it does not occupy the PIPE query slot for its entire terminal lifetime.
+    pub(crate) fn admit_viewer(&self, job: &Arc<crate::worker_laptop::ViewerJob>) -> Result<()> {
+        if !job.same_capture(&self.bootstrap) {
+            return Err(EngineError::new(EngineFault::Identity));
+        }
+        let mut active = self.active.try_lock().map_err(|_| {
+            EngineError::before_start_pending(EngineFault::Busy, CleanupFault::Supervisor)
+        })?;
+        if self.closing.load(Ordering::Acquire) {
+            return Err(EngineError::new(EngineFault::Cancelled));
+        }
+        if active.is_some() {
+            return Err(EngineError::before_start_pending(
+                EngineFault::Busy,
+                CleanupFault::PendingStart,
+            ));
+        }
+        *active = Some(Active::ViewerConstructor(job.clone()));
+        Ok(())
+    }
+    pub(crate) fn handoff_viewer(
+        &self,
+        job: &Arc<crate::worker_laptop::ViewerJob>,
+        deadline: Instant,
+    ) -> Result<()> {
+        if !job.same_capture(&self.bootstrap) {
+            return Err(EngineError::new(EngineFault::Identity));
+        }
+        let mut active = self.viewer_slot(job, deadline)?;
+        let same = matches!(active.as_ref(),Some(Active::ViewerConstructor(current)) if Arc::ptr_eq(current,job));
+        if !same || self.closing.load(Ordering::Acquire) || !job.handoff_ready() {
+            return Err(EngineError::pending(
+                EngineFault::Finalization,
+                CleanupFault::PendingStart,
+            ));
+        }
+        *active = None;
+        Ok(())
+    }
+    pub(crate) fn settle_viewer(
+        &self,
+        job: &Arc<crate::worker_laptop::ViewerJob>,
+        deadline: Instant,
+    ) -> Result<()> {
+        if !job.same_capture(&self.bootstrap) {
+            return Err(EngineError::new(EngineFault::Identity));
+        }
+        job.close_captured(deadline)
+            .map_err(|_| EngineError::pending(EngineFault::Finalization, CleanupFault::Unreaped))?;
+        let mut active = self.viewer_slot(job, deadline)?;
+        if matches!(active.as_ref(),Some(Active::ViewerConstructor(current)) if Arc::ptr_eq(current,job))
+        {
+            *active = None;
+        }
+        Ok(())
+    }
+    fn viewer_slot(
+        &self,
+        job: &crate::worker_laptop::ViewerJob,
+        deadline: Instant,
+    ) -> Result<std::sync::MutexGuard<'_, Option<Active>>> {
+        loop {
+            let end = viewer_deadline(job, deadline)?;
+            if Instant::now() >= end {
+                return Err(EngineError::pending(
+                    EngineFault::Deadline,
+                    CleanupFault::Supervisor,
+                ));
+            }
+            match self.active.try_lock() {
+                Ok(active) => return Ok(active),
+                Err(TryLockError::Poisoned(_)) => {
+                    return Err(EngineError::pending(
+                        EngineFault::Supervisor,
+                        CleanupFault::Supervisor,
+                    ));
+                }
+                Err(TryLockError::WouldBlock) => tick(end),
+            }
+        }
+    }
     /// This does not clear a fence or turn a negative close into success. A
     /// standalone owner may terminate negatively only after all known native
     /// work is consumed; persistent services keep the same failed context.
@@ -97,8 +199,14 @@ impl CapturedClient {
         let Ok(active) = self.active.try_lock() else {
             return true;
         };
-        let Some(job) = &*active else {
+        let Some(current) = &*active else {
             return false;
+        };
+        let Active::Query(job) = current else {
+            let Active::ViewerConstructor(job) = current else {
+                unreachable!()
+            };
+            return job.has_pending_native_work();
         };
         // The accepted worker publishes this only after start/observe/catch
         // and cleanup. All its native resources reside in this JobData; there
@@ -267,7 +375,7 @@ impl CapturedClient {
             #[cfg(test)]
             hooks: self.bootstrap.hooks.clone(),
         });
-        *active = Some(Arc::clone(&job));
+        *active = Some(Active::Query(Arc::clone(&job)));
         Ok(CapturedCall {
             origin: Arc::clone(&self.bootstrap),
             job,
@@ -299,10 +407,9 @@ impl CapturedClient {
             }
             tick(deadline);
         };
-        if active
-            .as_ref()
-            .is_some_and(|current| Arc::ptr_eq(current, job))
-        {
+        if active.as_ref().is_some_and(
+            |current| matches!(current,Active::Query(current) if Arc::ptr_eq(current, job)),
+        ) {
             *active = None;
         }
         Ok(())
@@ -339,7 +446,10 @@ impl CapturedClient {
         let Some(job) = job else {
             return Ok(());
         };
-        self.settle_job(&job, deadline)
+        match job {
+            Active::Query(job) => self.settle_job(&job, deadline),
+            Active::ViewerConstructor(job) => self.settle_viewer(&job, deadline),
+        }
     }
     pub(crate) fn settle_call(&self, call: &CapturedCall, deadline: Instant) -> Result<()> {
         if !Arc::ptr_eq(&self.bootstrap, &call.origin) {
@@ -393,10 +503,17 @@ impl CapturedClient {
         self.release(job, deadline)
     }
 }
+fn viewer_deadline(job: &crate::worker_laptop::ViewerJob, deadline: Instant) -> Result<Instant> {
+    job.clamp_deadline(deadline)
+        .map_err(|_| EngineError::pending(EngineFault::Identity, CleanupFault::Identity))
+}
 impl Drop for CapturedClient {
     fn drop(&mut self) {
         if let Ok(Some(job)) = self.active.get_mut() {
-            job.abort.store(true, Ordering::Release);
+            match job {
+                Active::Query(job) => job.abort.store(true, Ordering::Release),
+                Active::ViewerConstructor(job) => job.request_close(),
+            }
         }
     }
 }

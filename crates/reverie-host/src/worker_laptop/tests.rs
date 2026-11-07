@@ -1,10 +1,12 @@
 mod cleanup;
 mod cold_prepare;
 mod create;
+mod existing_viewer;
 mod guard;
 mod pane;
 mod publication;
 mod reference;
+mod viewer;
 use super::*;
 use crate::{
     engine_metadata::EngineBootstrap,

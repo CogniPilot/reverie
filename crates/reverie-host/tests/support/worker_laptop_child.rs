@@ -3,10 +3,19 @@
 use std::{env,fs::{self,OpenOptions},io::Write,path::Path,time::{Instant,Duration}};
 fn main() {
     let args=env::args().skip(1).collect::<Vec<_>>();
+    if args==["--viewer-descendant"] { viewer_descendant();return; }
+    if args==["--viewer-early-group-control"] { viewer_early_group_control();return; }
     let mode=env::var("LAPTOP_FIXTURE_MODE").unwrap();
     let mut trace=OpenOptions::new().append(true).create(true).open("trace").unwrap();
     writeln!(trace,"{}",args.join("\0")).unwrap();drop(trace);
     if args.starts_with(&["image".into(),"inspect".into()]) {print!("[{{\"Config\":{{\"Labels\":{{\"reverie.worker.nix-store\":\"0\"}}}}}}]");return;}
+    if args==["ps","-aq","--no-trunc"] {
+        assert_eq!(mode,"created-viewer-metadata");
+        fs::write("metadata-entered",b"actual same-context query").unwrap();
+        let end=Instant::now()+Duration::from_secs(20);
+        while !Path::new("release-metadata").exists() {assert!(Instant::now()<end);std::thread::sleep(Duration::from_millis(1));}
+        return;
+    }
     if args==["ps","--quiet","--no-trunc"] || args==["ps","--all","--filter","label=reverie.worker","--format","{{.ID}}"] {return;}
     if args==["ps","--all","--quiet","--no-trunc"] {
         let count=fs::read_to_string("cold-ps.count").ok().map(|v|v.parse::<usize>().unwrap()).unwrap_or(0)+1;
@@ -50,7 +59,7 @@ fn main() {
         return;
     }
     if args.first().map(String::as_str)==Some("exec") {
-        pane(&args,&mode);return;
+        if args.get(1).map(String::as_str)==Some("-it") { viewer(&args,&mode); } else { pane(&args,&mode); } return;
     }
     if args.first().map(String::as_str)==Some("stop") {
         assert_eq!(args,["stop","--time","2",&"c".repeat(64)]);
@@ -63,6 +72,10 @@ fn main() {
         fs::write("killed-laptop",b"actual fixed kill effect").unwrap();return;
     }
     if args.first().map(String::as_str)==Some("inspect") {
+        if Path::new("existing-inspect.json").is_file() {
+            assert_eq!(args,["inspect",&format!("fixture-agent-{}",fs::read_to_string("started-laptop").unwrap())]);
+            std::io::stdout().write_all(&fs::read("existing-inspect.json").unwrap()).unwrap();return;
+        }
         if mode.starts_with("created-memory") {
             assert_eq!(args,["inspect",&format!("fixture-agent-{}",fs::read_to_string("started-laptop").unwrap())]);
             let row=fs::read("memory-inspect.json").unwrap();
@@ -131,4 +144,55 @@ fn pane(args:&[String],mode:&str) {
     }
     if mode==format!("created-pane-{part}-nonzero") {std::process::exit(9);}
     if mode==format!("created-pane-{part}-bad-utf8") {std::io::stdout().write_all(&[255]).unwrap();}
+}
+
+// Linux-only owned fixture. All foreign calls target this fixture process:
+// fixed dispositions and read-only stdio identity, never caller PIDs/signals.
+unsafe extern "C" { fn signal(sig:i32,handler:usize)->usize; fn isatty(fd:i32)->i32; }
+static WINCH: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+extern "C" fn winch(_:i32) { WINCH.fetch_add(1,std::sync::atomic::Ordering::Relaxed); }
+fn viewer_descendant() {
+    // SAFETY: fixed SIGTERM ignore in this isolated owned fixture only.
+    unsafe { signal(15,1); }
+    fs::write("viewer-descendant",std::process::id().to_string()).unwrap();
+    let end=Instant::now()+Duration::from_secs(20);
+    while Instant::now()<end && !Path::new("release-viewer-descendant").exists() {std::thread::sleep(Duration::from_millis(1));}
+}
+fn viewer_early_group_control() {
+    let _child=std::process::Command::new(env::current_exe().unwrap()).arg("--viewer-descendant").spawn().unwrap();
+    let end=Instant::now()+Duration::from_secs(3);
+    while !Path::new("viewer-descendant").exists() {assert!(Instant::now()<end);std::thread::sleep(Duration::from_millis(1));}
+    std::process::exit(7);
+}
+fn viewer(args:&[String],mode:&str) {
+    use std::io::Read;
+    assert_eq!(&args[..10],&["exec","-it","--env","LANG=C.UTF-8","--env","LC_ALL=C.UTF-8","--env","TERM=xterm-256color","--env","COLORTERM=truecolor"]);
+    assert_eq!(args[10],"--env");let marker=args[11].strip_prefix("REVERIE_VIEWER=").unwrap();
+    assert_eq!(marker.len(),32);assert!(marker.bytes().all(|b|b.is_ascii_digit()||(b'a'..=b'f').contains(&b)));
+    assert_eq!(args[12],format!("fixture-agent-{}",fs::read_to_string("started-laptop").unwrap()));
+    assert_eq!(&args[13..],&["/bin/tmux","-u","-L","reverie-laptop","attach-session","-d","-t","office"]);
+    // SAFETY: fixed stdio descriptor observations and handler in the owned
+    // subprocess. Handler only updates a lock-free atomic, never allocates.
+    assert!((0..3).all(|fd|unsafe { isatty(fd)==1 }));
+    unsafe { signal(28,winch as *const () as usize); }
+    let stat=fs::read_to_string("/proc/self/stat").unwrap();
+    let tail=stat.rsplit_once(") ").unwrap().1.split_whitespace().collect::<Vec<_>>();
+    let pid=std::process::id().to_string();assert_eq!(tail[2],pid);assert_eq!(tail[3],pid);
+    fs::write("viewer-identity",format!("{pid} {} {}",tail[2],tail[3])).unwrap();
+    if mode=="created-viewer-group" || mode=="created-viewer-early-group" {
+        if mode=="created-viewer-group" {unsafe { signal(15,1); }}
+        let _child=std::process::Command::new(env::current_exe().unwrap()).arg("--viewer-descendant").spawn().unwrap();
+        let end=Instant::now()+Duration::from_secs(3);while !Path::new("viewer-descendant").exists() {assert!(Instant::now()<end);std::thread::sleep(Duration::from_millis(1));}
+    }
+    fs::write("viewer-ready",marker).unwrap();
+    if mode=="created-viewer-early-group" {std::process::exit(7);}
+    if mode=="created-viewer-exit" { std::io::stdout().write_all(b"LAST").unwrap();std::process::exit(7); }
+    if mode=="created-viewer-group" {std::thread::sleep(Duration::from_secs(20));return;}
+    loop {
+        let mut byte=[0];if std::io::stdin().read(&mut byte).unwrap()==0 {return;}
+        if byte==[b'Q'] { std::process::exit(7); }
+        if byte==[b'W'] {write!(std::io::stdout(),"WINCH={};",WINCH.load(std::sync::atomic::Ordering::Relaxed)).unwrap();}
+        else {std::io::stdout().write_all(&byte).unwrap();}
+        std::io::stdout().flush().unwrap();
+    }
 }
