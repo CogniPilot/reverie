@@ -6,6 +6,8 @@ use reverie_contracts::{worker_config::EffectiveWorkerConfig, worker_source_stop
 use reverie_core::ids::ProfileSessionId;
 use reverie_store::storage_identity::StoragePaths;
 use std::sync::MutexGuard;
+mod finalization;
+pub use finalization::{StartedSourceStorageObservation, StoppedStartedSourceReturned};
 
 #[must_use = "retain this actual counted source through claim/stop/known return"]
 pub struct StartedLaptopSource {
@@ -105,6 +107,10 @@ impl WorkerRuntime {
     /// its App registry transaction. No native effect/descriptor release occurs.
     pub fn restore_unclaimed_started_source(&self, source: &StartedLaptopSource) -> Result<()> {
         let mut record = self.laptop_workflows().source_record(self, source)?;
+        need(
+            record.finalization.untouched(),
+            "WORKER_STARTED_SOURCE_FINALIZING",
+        )?;
         let mut inventory = self
             .laptop_workflows()
             .records
@@ -128,6 +134,10 @@ impl WorkerRuntime {
         end: Option<Instant>,
     ) -> Result<StartedSourceStopTransferred> {
         let mut record = self.laptop_workflows().source_record(self, source)?;
+        need(
+            record.finalization.untouched() && record.pending.is_none() && !record.unknown,
+            "WORKER_STARTED_SOURCE_FINALIZING",
+        )?;
         let mut inventory = self
             .laptop_workflows()
             .records

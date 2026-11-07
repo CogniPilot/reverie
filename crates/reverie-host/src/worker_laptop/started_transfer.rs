@@ -209,9 +209,7 @@ pub(super) fn require_closed(
         .storage()
         .check_resource_current()
         .map_err(LaptopError::StorageOwner)?;
-    if let Some(viewer) = &record.viewer {
-        viewer.require_closed()?;
-    }
+    storage_cleanup::require_viewer_closed(runtime, record)?;
     if let Some(publication) = record
         .creation
         .as_ref()

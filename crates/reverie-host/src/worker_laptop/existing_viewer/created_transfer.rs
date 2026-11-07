@@ -102,9 +102,7 @@ fn check_transfer(
         .require_released_predecessor(&next)
         .map_err(LaptopError::Refused)?;
     resources.nix.require_guard_close()?;
-    if let Some(viewer) = &record.viewer {
-        viewer.require_closed()?;
-    }
+    storage_cleanup::require_viewer_closed(runtime, record)?;
     plan.assert_storage_owner(runtime, resources.storage())
         .map_err(LaptopError::Plan)?;
     need(

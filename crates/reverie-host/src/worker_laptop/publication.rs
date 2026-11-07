@@ -1,6 +1,8 @@
 //! Fixed post-create record publication. Every partial native owner remains
 //! inside the actual created resource record; no error unlinks by name.
 mod file;
+mod request;
+pub(super) use request::Disposition as RequestDisposition;
 #[cfg(test)]
 pub(super) mod test_hooks;
 use super::*;
@@ -17,6 +19,7 @@ use std::{
 };
 
 pub(super) struct Publication {
+    request: request::Custody,
     root: PathBuf,
     runtime: PathBuf,
     uid: u32,
@@ -37,6 +40,7 @@ pub(super) struct Publication {
 impl Publication {
     fn new(root: PathBuf, runtime: PathBuf, uid: u32) -> Self {
         Self {
+            request: Default::default(),
             root,
             runtime,
             uid,
@@ -100,6 +104,14 @@ impl Publication {
             )
             .map_err(LaptopError::Io)?,
         );
+        // Duplicate only the verified O_PATH inode anchor. The original
+        // transient anchor still goes through its existing checked finalizer.
+        // This separate readonly custody pin is not writer completion.
+        self.request.capture(
+            self.writer.as_ref().expect("actual exclusive writer"),
+            self.anchor.as_ref().expect("actual O_PATH anchor"),
+            self.uid,
+        )?;
         self.write_record(bytes)?;
         #[cfg(test)]
         test_hooks::after_record_write();
@@ -226,6 +238,7 @@ impl Publication {
         self.complete && !self.opaque
     }
     pub(super) fn require_native_closed(&self) -> Result<()> {
+        self.request.require_closed(self.record_created)?;
         need(
             !self.opaque
                 && self.parent.is_none()
@@ -241,6 +254,22 @@ impl Publication {
         self.nonce
             .as_ref()
             .map(|nonce| self.root.join(format!("{}.exit", nonce.as_str())))
+    }
+    pub(super) fn finish_request(&mut self, disposition: RequestDisposition) -> Result<()> {
+        let name = self
+            .nonce
+            .as_ref()
+            .map(|nonce| format!("{}.json", nonce.as_str()))
+            .unwrap_or_default();
+        let result = self.request.finish(
+            &self.root,
+            name.as_ref(),
+            self.uid,
+            self.record_created,
+            disposition,
+        );
+        self.opaque |= result.is_err();
+        result
     }
 }
 impl Workflows {
@@ -307,6 +336,9 @@ impl Drop for Publication {
         // The normal publisher checked all its descriptors before success.
         // This fallback only consumes any slots left by unwind; no ACK results.
         // Never unlink failed/foreign names from Drop or retry consumed closes.
+        if self.request.close_abandoned().is_err() {
+            self.opaque = true;
+        }
         for slot in [
             &mut self.writer,
             &mut self.metadata,
