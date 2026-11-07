@@ -222,6 +222,7 @@ impl InstallingBroker {
                 .telemetry
                 .expect("successful actual telemetry constructor"),
             reports,
+            recovery: Arc::new(RecoveryOwners::new()),
         })
     }
 }
