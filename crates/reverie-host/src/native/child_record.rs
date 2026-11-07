@@ -41,22 +41,5 @@ pub(crate) fn create_private(directory: &File, name: &OsStr) -> io::Result<File>
 pub(crate) fn publish(directory: &File, temporary: &OsStr, target: &OsStr) -> io::Result<()> {
     let temporary = CString::new(temporary.as_bytes()).map_err(|_| io::ErrorKind::InvalidInput)?;
     let target = CString::new(target.as_bytes()).map_err(|_| io::ErrorKind::InvalidInput)?;
-    // SAFETY: two terminated relative leaf names and one owned/live directory.
-    // Never overwrite an existing receipt or retry an uncertain publication.
-    if unsafe {
-        // The Linux syscall is available with both glibc and static musl.
-        libc::syscall(
-            libc::SYS_renameat2,
-            directory.as_raw_fd(),
-            temporary.as_ptr(),
-            directory.as_raw_fd(),
-            target.as_ptr(),
-            libc::RENAME_NOREPLACE,
-        )
-    } == 0
-    {
-        Ok(())
-    } else {
-        Err(io::Error::last_os_error())
-    }
+    super::rename::noreplace(directory, &temporary, directory, &target)
 }

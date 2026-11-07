@@ -12,12 +12,19 @@ use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
 mod child_record;
 pub(crate) mod child_signals;
+#[cfg(test)]
+mod cold_temporary;
 mod control;
 #[cfg(test)]
 pub(crate) mod interrupted_test;
 mod lease;
 mod memory_namespace;
 mod memory_profile;
+mod rename;
+#[cfg(test)]
+pub(crate) use cold_temporary::{
+    install as install_cold_temporary, retire as retire_cold_temporary,
+};
 pub(crate) mod ordered_exec;
 pub(crate) mod owned_process;
 pub(crate) use child_record::unlink as unlink_child_record;
