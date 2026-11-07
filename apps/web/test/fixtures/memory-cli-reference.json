@@ -1,0 +1,613 @@
+{
+ "python": "3.13.15",
+ "cases": [
+  {
+   "id": "no-instance",
+   "argv": [],
+   "stdin": "{\"action\":\"recall\",\"query\":\"deploy\",\"private\":true}",
+   "expect": {
+    "code": 1,
+    "stdout": "",
+    "stderr": "{\"error\": \"select an instance with --instance or REVERIE_INSTANCE_CONFIG\"}\n"
+   },
+   "argvCalls": []
+  },
+  {
+   "id": "malformed-json",
+   "stdin": "{nope",
+   "expect": {
+    "code": 1,
+    "stdout": "",
+    "stderr": "{\"error\": \"Expecting property name enclosed in double quotes: line 1 column 2 (char 1)\"}\n"
+   },
+   "argvCalls": []
+  },
+  {
+   "id": "empty-input",
+   "stdin": "",
+   "expect": {
+    "code": 1,
+    "stdout": "",
+    "stderr": "{\"error\": \"Expecting value: line 1 column 1 (char 0)\"}\n"
+   },
+   "argvCalls": []
+  },
+  {
+   "id": "array-input",
+   "stdin": "[1]",
+   "expect": {
+    "code": 1,
+    "stdout": "",
+    "stderr": "{\"error\": \"expected a recall or remember JSON object\"}\n"
+   },
+   "argvCalls": []
+  },
+  {
+   "id": "unknown-action",
+   "stdin": "{\"action\":\"forget\",\"private\":true}",
+   "expect": {
+    "code": 1,
+    "stdout": "",
+    "stderr": "{\"error\": \"expected a recall or remember JSON object\"}\n"
+   },
+   "argvCalls": []
+  },
+  {
+   "id": "both-scopes",
+   "stdin": "{\"action\":\"recall\",\"query\":\"deploy\",\"private\":true,\"project\":\"alpha\"}",
+   "expect": {
+    "code": 1,
+    "stdout": "",
+    "stderr": "{\"error\": \"select exactly one project or private scope\"}\n"
+   },
+   "argvCalls": []
+  },
+  {
+   "id": "no-scope",
+   "stdin": "{\"action\":\"recall\",\"query\":\"deploy\"}",
+   "expect": {
+    "code": 1,
+    "stdout": "",
+    "stderr": "{\"error\": \"select exactly one project or private scope\"}\n"
+   },
+   "argvCalls": []
+  },
+  {
+   "id": "private-false",
+   "stdin": "{\"action\":\"recall\",\"query\":\"deploy\",\"private\":false}",
+   "expect": {
+    "code": 1,
+    "stdout": "",
+    "stderr": "{\"error\": \"select exactly one project or private scope\"}\n"
+   },
+   "argvCalls": []
+  },
+  {
+   "id": "private-work-channel",
+   "stdin": "{\"action\":\"recall\",\"query\":\"deploy\",\"private\":true,\"channel\":\"work\"}",
+   "expect": {
+    "code": 1,
+    "stdout": "",
+    "stderr": "{\"error\": \"private memory is unavailable in shared channels\"}\n"
+   },
+   "argvCalls": []
+  },
+  {
+   "id": "private-int-truthy",
+   "stdin": "{\"action\":\"recall\",\"query\":\"deploy\",\"private\":1}",
+   "expect": {
+    "code": 0,
+    "stdout": "[]\n",
+    "stderr": ""
+   },
+   "argvCalls": []
+  },
+  {
+   "id": "empty-project-with-private",
+   "stdin": "{\"action\":\"recall\",\"query\":\"deploy\",\"private\":true,\"project\":\"\"}",
+   "expect": {
+    "code": 0,
+    "stdout": "[]\n",
+    "stderr": ""
+   },
+   "argvCalls": []
+  },
+  {
+   "id": "project-missing-store",
+   "stdin": "{\"action\":\"recall\",\"query\":\"deploy\",\"project\":\"alpha\"}",
+   "expect": {
+    "code": 0,
+    "stdout": "[]\n",
+    "stderr": ""
+   },
+   "argvCalls": []
+  },
+  {
+   "id": "private-missing-store",
+   "stdin": "{\"action\":\"recall\",\"query\":\"deploy\",\"private\":true}",
+   "expect": {
+    "code": 0,
+    "stdout": "[]\n",
+    "stderr": ""
+   },
+   "argvCalls": []
+  },
+  {
+   "id": "missing-instance-file",
+   "argv": [
+    "--instance",
+    "<root>/config/missing.json"
+   ],
+   "stdin": "{\"action\":\"remember\",\"text\":\"t\",\"private\":true}",
+   "expect": {
+    "code": 1,
+    "stdout": "",
+    "stderr": "{\"error\": \"[Errno 2] No such file or directory: '<root>/config/missing.json'\"}\n"
+   },
+   "argvCalls": []
+  },
+  {
+   "id": "remember-outside-session-full",
+   "stdin": "{\"action\":\"remember\",\"text\":\"  Verified: it’s fine, see ü  \",\"room\":\"11111111-2222-4333-8444-555555555555\",\"turn\":\"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\",\"tag\":\"decision\",\"quote\":\"it's done, ok\",\"reason\":\"why now\",\"private\":true}",
+   "expect": {
+    "code": 1,
+    "stdout": "",
+    "stderr": "{\"error\": \"remember saves to your office journal as your own Reverie session, and this process is not running inside one. Nothing was saved. Inside your session, run: reverie agent journal save --room 11111111-2222-4333-8444-555555555555 --turn aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee --text 'Verified: it\\u2019s fine, see \\u00fc' --tag decision --source aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee --quote 'it'\\\"'\\\"'s done, ok' --reason 'why now'\"}\n"
+   },
+   "argvCalls": []
+  },
+  {
+   "id": "remember-outside-session-project",
+   "stdin": "{\"action\":\"remember\",\"text\":\"Shared finding\",\"project\":\"alpha\",\"source\":\"commit abc123\",\"tag\":\"lesson\"}",
+   "expect": {
+    "code": 1,
+    "stdout": "",
+    "stderr": "{\"error\": \"remember saves to your office journal as your own Reverie session, and this process is not running inside one. Nothing was saved. Inside your session, run: reverie agent journal save --room '<room-id>' --turn '<message-id>' --text 'Shared finding' --tag lesson --ref 'commit abc123' --project alpha\"}\n"
+   },
+   "argvCalls": []
+  },
+  {
+   "id": "remember-outside-session-bare",
+   "stdin": "{\"action\":\"remember\",\"text\":\"  Verified finding  \",\"private\":true}",
+   "expect": {
+    "code": 1,
+    "stdout": "",
+    "stderr": "{\"error\": \"remember saves to your office journal as your own Reverie session, and this process is not running inside one. Nothing was saved. Inside your session, run: reverie agent journal save --room '<room-id>' --turn '<message-id>' --text 'Verified finding' --tag '<decision|promise|correction|preference|identity|relationship|open-question|lesson|personal-reflection>' --source '<message-id>' --quote '<exact words from that message>'\"}\n"
+   },
+   "argvCalls": []
+  },
+  {
+   "id": "remember-empty-text",
+   "stdin": "{\"action\":\"remember\",\"text\":\"   \",\"private\":true}",
+   "expect": {
+    "code": 1,
+    "stdout": "",
+    "stderr": "{\"error\": \"memory is empty or crossed a hard floor\"}\n"
+   },
+   "argvCalls": []
+  },
+  {
+   "id": "remember-missing-text",
+   "stdin": "{\"action\":\"remember\",\"private\":true}",
+   "expect": {
+    "code": 1,
+    "stdout": "",
+    "stderr": "{\"error\": \"memory is empty or crossed a hard floor\"}\n"
+   },
+   "argvCalls": []
+  },
+  {
+   "id": "remember-floor",
+   "names": "Robin Example\n",
+   "stdin": "{\"action\":\"remember\",\"text\":\"Robin Example lives at the corner.\",\"private\":true}",
+   "expect": {
+    "code": 1,
+    "stdout": "",
+    "stderr": "{\"error\": \"memory is empty or crossed a hard floor\"}\n"
+   },
+   "argvCalls": []
+  },
+  {
+   "id": "session-recall-ok",
+   "journal": {
+    "rc": 0,
+    "stdout": "{\"success\":true,\"data\":{\"entries\":[{\"id\":1,\"text\":\"ü note\",\"weight\":3.5,\"tags\":[\"decision\"]}]}}\n",
+    "stderr": ""
+   },
+   "stdin": "{\"action\":\"recall\",\"query\":\"  deploy notes  \",\"private\":true}",
+   "expect": {
+    "code": 0,
+    "stdout": "{\"journal\": [{\"id\": 1, \"text\": \"ü note\", \"weight\": 3.5, \"tags\": [\"decision\"]}], \"legacy\": [], \"note\": \"journal entries are your store of record; legacy results are older, read-only history\"}\n",
+    "stderr": ""
+   },
+   "argvCalls": [
+    [
+     "reverie",
+     "agent",
+     "journal",
+     "recall",
+     "deploy notes",
+     "--json"
+    ]
+   ]
+  },
+  {
+   "id": "session-recall-project",
+   "journal": {
+    "rc": 0,
+    "stdout": "{\"success\":true,\"data\":{\"entries\":[{\"id\":1,\"text\":\"ü note\",\"weight\":3.5,\"tags\":[\"decision\"]}]}}\n",
+    "stderr": ""
+   },
+   "stdin": "{\"action\":\"recall\",\"query\":\"deploy\",\"project\":\"alpha\"}",
+   "expect": {
+    "code": 0,
+    "stdout": "{\"journal\": [{\"id\": 1, \"text\": \"ü note\", \"weight\": 3.5, \"tags\": [\"decision\"]}], \"legacy\": [], \"note\": \"journal entries are your store of record; legacy results are older, read-only history\"}\n",
+    "stderr": ""
+   },
+   "argvCalls": [
+    [
+     "reverie",
+     "agent",
+     "journal",
+     "recall",
+     "deploy",
+     "--project",
+     "alpha",
+     "--json"
+    ]
+   ]
+  },
+  {
+   "id": "session-recall-refused",
+   "journal": {
+    "rc": 4,
+    "stdout": "{\"success\":false,\"error\":\"journal says no ü\"}\n",
+    "stderr": ""
+   },
+   "stdin": "{\"action\":\"recall\",\"query\":\"deploy\",\"private\":true}",
+   "expect": {
+    "code": 0,
+    "stdout": "{\"journal\": [], \"legacy\": [], \"note\": \"journal lookup failed (journal says no ü); these are only older, read-only results from the old store\"}\n",
+    "stderr": ""
+   },
+   "argvCalls": [
+    [
+     "reverie",
+     "agent",
+     "journal",
+     "recall",
+     "deploy",
+     "--json"
+    ]
+   ]
+  },
+  {
+   "id": "session-recall-stderr",
+   "journal": {
+    "rc": 1,
+    "stdout": "oops",
+    "stderr": "  denied here \n"
+   },
+   "stdin": "{\"action\":\"recall\",\"query\":\"deploy\",\"private\":true}",
+   "expect": {
+    "code": 0,
+    "stdout": "{\"journal\": [], \"legacy\": [], \"note\": \"journal lookup failed (denied here); these are only older, read-only results from the old store\"}\n",
+    "stderr": ""
+   },
+   "argvCalls": [
+    [
+     "reverie",
+     "agent",
+     "journal",
+     "recall",
+     "deploy",
+     "--json"
+    ]
+   ]
+  },
+  {
+   "id": "session-recall-silent",
+   "journal": {
+    "rc": 1,
+    "stdout": "",
+    "stderr": ""
+   },
+   "stdin": "{\"action\":\"recall\",\"query\":\"deploy\",\"private\":true}",
+   "expect": {
+    "code": 0,
+    "stdout": "{\"journal\": [], \"legacy\": [], \"note\": \"journal lookup failed (journal unavailable); these are only older, read-only results from the old store\"}\n",
+    "stderr": ""
+   },
+   "argvCalls": [
+    [
+     "reverie",
+     "agent",
+     "journal",
+     "recall",
+     "deploy",
+     "--json"
+    ]
+   ]
+  },
+  {
+   "id": "session-recall-success-false-rc0",
+   "journal": {
+    "rc": 0,
+    "stdout": "{\"success\":false}",
+    "stderr": ""
+   },
+   "stdin": "{\"action\":\"recall\",\"query\":\"deploy\",\"private\":true}",
+   "expect": {
+    "code": 0,
+    "stdout": "{\"journal\": [], \"legacy\": [], \"note\": \"journal lookup failed (journal unavailable); these are only older, read-only results from the old store\"}\n",
+    "stderr": ""
+   },
+   "argvCalls": [
+    [
+     "reverie",
+     "agent",
+     "journal",
+     "recall",
+     "deploy",
+     "--json"
+    ]
+   ]
+  },
+  {
+   "id": "session-recall-long-error",
+   "journal": {
+    "rc": 1,
+    "stdout": "{\"success\":false,\"error\":\"éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé\"}",
+    "stderr": ""
+   },
+   "stdin": "{\"action\":\"recall\",\"query\":\"deploy\",\"private\":true}",
+   "expect": {
+    "code": 0,
+    "stdout": "{\"journal\": [], \"legacy\": [], \"note\": \"journal lookup failed (éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé); these are only older, read-only results from the old store\"}\n",
+    "stderr": ""
+   },
+   "argvCalls": [
+    [
+     "reverie",
+     "agent",
+     "journal",
+     "recall",
+     "deploy",
+     "--json"
+    ]
+   ]
+  },
+  {
+   "id": "session-recall-no-data-key",
+   "journal": {
+    "rc": 0,
+    "stdout": "{\"entries\":[{\"id\":2,\"weight\":1}]}",
+    "stderr": ""
+   },
+   "stdin": "{\"action\":\"recall\",\"query\":\"deploy\",\"private\":true}",
+   "expect": {
+    "code": 0,
+    "stdout": "{\"journal\": [{\"id\": 2, \"weight\": 1}], \"legacy\": [], \"note\": \"journal entries are your store of record; legacy results are older, read-only history\"}\n",
+    "stderr": ""
+   },
+   "argvCalls": [
+    [
+     "reverie",
+     "agent",
+     "journal",
+     "recall",
+     "deploy",
+     "--json"
+    ]
+   ]
+  },
+  {
+   "id": "session-recall-blank-query",
+   "journal": {
+    "rc": 0,
+    "stdout": "{\"success\":true,\"data\":{\"entries\":[{\"id\":1,\"text\":\"ü note\",\"weight\":3.5,\"tags\":[\"decision\"]}]}}\n",
+    "stderr": ""
+   },
+   "stdin": "{\"action\":\"recall\",\"query\":\"   \",\"private\":true}",
+   "expect": {
+    "code": 1,
+    "stdout": "",
+    "stderr": "{\"error\": \"recall needs a query\"}\n"
+   },
+   "argvCalls": []
+  },
+  {
+   "id": "session-remember-ok",
+   "journal": {
+    "rc": 0,
+    "stdout": "{\"success\":true,\"data\":{\"id\":7,\"sha256\":\"ab12\",\"gates\":[{\"gate\":\"fields\",\"status\":\"pass\"}]}}\n",
+    "stderr": ""
+   },
+   "stdin": "{\"action\":\"remember\",\"text\":\"  Verified: it’s fine, see ü  \",\"room\":\"11111111-2222-4333-8444-555555555555\",\"turn\":\"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\",\"tag\":\"decision\",\"quote\":\"it's done, ok\",\"reason\":\"why now\",\"private\":true}",
+   "expect": {
+    "code": 0,
+    "stdout": "{\"id\": 7, \"sha256\": \"ab12\", \"gates\": [{\"gate\": \"fields\", \"status\": \"pass\"}]}\n",
+    "stderr": ""
+   },
+   "argvCalls": [
+    [
+     "reverie",
+     "agent",
+     "journal",
+     "save",
+     "--room",
+     "11111111-2222-4333-8444-555555555555",
+     "--turn",
+     "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+     "--text",
+     "Verified: it’s fine, see ü",
+     "--tag",
+     "decision",
+     "--source",
+     "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+     "--quote",
+     "it's done, ok",
+     "--reason",
+     "why now",
+     "--json"
+    ]
+   ]
+  },
+  {
+   "id": "session-remember-ref-reason-project",
+   "journal": {
+    "rc": 0,
+    "stdout": "{\"success\":true,\"data\":{\"id\":7,\"sha256\":\"ab12\",\"gates\":[{\"gate\":\"fields\",\"status\":\"pass\"}]}}\n",
+    "stderr": ""
+   },
+   "stdin": "{\"action\":\"remember\",\"text\":\"Shared finding\",\"project\":\"alpha\",\"room\":\"11111111-2222-4333-8444-555555555555\",\"turn\":\"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\",\"tag\":\"lesson\",\"source\":\"commit abc123\",\"reason\":\"verified\"}",
+   "expect": {
+    "code": 0,
+    "stdout": "{\"id\": 7, \"sha256\": \"ab12\", \"gates\": [{\"gate\": \"fields\", \"status\": \"pass\"}]}\n",
+    "stderr": ""
+   },
+   "argvCalls": [
+    [
+     "reverie",
+     "agent",
+     "journal",
+     "save",
+     "--room",
+     "11111111-2222-4333-8444-555555555555",
+     "--turn",
+     "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+     "--text",
+     "Shared finding",
+     "--tag",
+     "lesson",
+     "--ref",
+     "commit abc123",
+     "--reason",
+     "verified",
+     "--project",
+     "alpha",
+     "--json"
+    ]
+   ]
+  },
+  {
+   "id": "session-remember-quote-and-ref",
+   "journal": {
+    "rc": 0,
+    "stdout": "{\"success\":true,\"data\":{\"id\":7,\"sha256\":\"ab12\",\"gates\":[{\"gate\":\"fields\",\"status\":\"pass\"}]}}\n",
+    "stderr": ""
+   },
+   "stdin": "{\"action\":\"remember\",\"text\":\"Both\",\"private\":true,\"room\":\"11111111-2222-4333-8444-555555555555\",\"turn\":\"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\",\"tag\":\"promise\",\"quote\":\"exact words\",\"source\":\"report r1\"}",
+   "expect": {
+    "code": 0,
+    "stdout": "{\"id\": 7, \"sha256\": \"ab12\", \"gates\": [{\"gate\": \"fields\", \"status\": \"pass\"}]}\n",
+    "stderr": ""
+   },
+   "argvCalls": [
+    [
+     "reverie",
+     "agent",
+     "journal",
+     "save",
+     "--room",
+     "11111111-2222-4333-8444-555555555555",
+     "--turn",
+     "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+     "--text",
+     "Both",
+     "--tag",
+     "promise",
+     "--source",
+     "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+     "--quote",
+     "exact words",
+     "--ref",
+     "report r1",
+     "--json"
+    ]
+   ]
+  },
+  {
+   "id": "session-remember-missing",
+   "journal": {
+    "rc": 0,
+    "stdout": "{\"success\":true,\"data\":{\"id\":7,\"sha256\":\"ab12\",\"gates\":[{\"gate\":\"fields\",\"status\":\"pass\"}]}}\n",
+    "stderr": ""
+   },
+   "stdin": "{\"action\":\"remember\",\"text\":\"Only text\",\"private\":true}",
+   "expect": {
+    "code": 1,
+    "stdout": "",
+    "stderr": "{\"error\": \"remember needs room, turn, tag, quote or source. Nothing was saved. To save it to your journal, run: reverie agent journal save --room '<room-id>' --turn '<message-id>' --text 'Only text' --tag '<decision|promise|correction|preference|identity|relationship|open-question|lesson|personal-reflection>' --source '<message-id>' --quote '<exact words from that message>'\"}\n"
+   },
+   "argvCalls": []
+  },
+  {
+   "id": "session-remember-bad-tag",
+   "journal": {
+    "rc": 0,
+    "stdout": "{\"success\":true,\"data\":{\"id\":7,\"sha256\":\"ab12\",\"gates\":[{\"gate\":\"fields\",\"status\":\"pass\"}]}}\n",
+    "stderr": ""
+   },
+   "stdin": "{\"action\":\"remember\",\"text\":\"x\",\"private\":true,\"room\":\"11111111-2222-4333-8444-555555555555\",\"turn\":\"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\",\"tag\":\"whim\",\"quote\":\"q\"}",
+   "expect": {
+    "code": 1,
+    "stdout": "",
+    "stderr": "{\"error\": \"remember needs a tag from: decision, promise, correction, preference, identity, relationship, open-question, lesson, personal-reflection. Nothing was saved. To save it to your journal, run: reverie agent journal save --room 11111111-2222-4333-8444-555555555555 --turn aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee --text x --tag whim --source aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee --quote q\"}\n"
+   },
+   "argvCalls": []
+  },
+  {
+   "id": "session-remember-blank-room",
+   "journal": {
+    "rc": 0,
+    "stdout": "{\"success\":true,\"data\":{\"id\":7,\"sha256\":\"ab12\",\"gates\":[{\"gate\":\"fields\",\"status\":\"pass\"}]}}\n",
+    "stderr": ""
+   },
+   "stdin": "{\"action\":\"remember\",\"text\":\"x\",\"private\":true,\"room\":\"  \",\"turn\":\"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\",\"tag\":\"lesson\",\"quote\":\"q\"}",
+   "expect": {
+    "code": 1,
+    "stdout": "",
+    "stderr": "{\"error\": \"remember needs room. Nothing was saved. To save it to your journal, run: reverie agent journal save --room '  ' --turn aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee --text x --tag lesson --source aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee --quote q\"}\n"
+   },
+   "argvCalls": []
+  },
+  {
+   "id": "session-remember-refused",
+   "journal": {
+    "rc": 4,
+    "stdout": "{\"success\":false,\"error\":\"turn message is not readable by this employee\"}\n",
+    "stderr": ""
+   },
+   "stdin": "{\"action\":\"remember\",\"text\":\"  Verified: it’s fine, see ü  \",\"room\":\"11111111-2222-4333-8444-555555555555\",\"turn\":\"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\",\"tag\":\"decision\",\"quote\":\"it's done, ok\",\"reason\":\"why now\",\"private\":true}",
+   "expect": {
+    "code": 1,
+    "stdout": "",
+    "stderr": "{\"error\": \"turn message is not readable by this employee\"}\n"
+   },
+   "argvCalls": [
+    [
+     "reverie",
+     "agent",
+     "journal",
+     "save",
+     "--room",
+     "11111111-2222-4333-8444-555555555555",
+     "--turn",
+     "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+     "--text",
+     "Verified: it’s fine, see ü",
+     "--tag",
+     "decision",
+     "--source",
+     "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+     "--quote",
+     "it's done, ok",
+     "--reason",
+     "why now",
+     "--json"
+    ]
+   ]
+  }
+ ]
+}

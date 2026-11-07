@@ -63,6 +63,7 @@ import { pronounsProblem, pronounsProposal } from './pronouns.js';
 import { agentPlanRequest, agentRequestPlanMove, agentPlanMoveAction, agentPendingPlanMoves, agentPlanRecovery } from './cli-plan-request.js';
 import { registerGoalCommands } from './cli-goal.js';
 import { registerJournalCommands } from './cli-agent-journal.js';
+import { registerMemoryCommand } from './cli-agent-memory.js';
 import { registerPublishCommands } from './cli-agent-publish.js';
 import { registerHireRequestCommands } from './cli-agent-hire-request.js';
 import { goalClientTarget } from './goal-client-target.js';
@@ -2773,6 +2774,7 @@ export function registerAgentCommands(program: Command): Command {
   credentials.command('install <name-or-id>').description('Install one granted credential as a private local file; never print its value').option('--json', 'Machine-readable installation metadata; never token material')
     .action((reference: string, options: { json?: boolean }) => run(Boolean(options.json), (deps) => agentCredentialsInstall(deps, reference)));
   registerJournalCommands(agent, run);
+  registerMemoryCommand(agent);
   registerPublishCommands(agent, run);
   registerHireRequestCommands(agent, run);
   registerGoalCommands(agent, run);

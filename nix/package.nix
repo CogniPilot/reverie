@@ -216,7 +216,7 @@ let
         test/cli-agent-chat-channels.test.ts test/cli-agent-chat-if-latest.test.ts test/cli-agent-chat-images.test.ts \
         test/cli-agent-chat-new.test.ts test/cli-agent-chat-nudge.test.ts test/cli-agent-chat-reply-to.test.ts \
         test/cli-agent-chat-room-default.test.ts test/cli-agent-chat-roster.test.ts test/cli-agent-hire-request.test.ts \
-        test/cli-agent-journal-import.test.ts test/cli-agent-journal.test.ts test/cli-agent-poll-close.test.ts \
+        test/cli-agent-journal-import.test.ts test/cli-agent-journal.test.ts test/cli-agent-memory.test.ts test/cli-agent-poll-close.test.ts \
         test/cli-executable-resolver.test.ts test/cli-management-settings-ui.test.ts test/cli-newline-capability.test.ts \
         test/cli-registry-load.test.ts test/cli-registry-schema.test.ts test/cli-routine.test.ts test/cli-skill-target.test.ts \
         test/cli-style.test.ts test/cod54-hook-event-auth.test.ts test/codex-plan-usage.test.ts test/codex-reasoning-effort-schema.test.ts \
@@ -600,6 +600,8 @@ let
     ln -s ${adminMemory}/bin/reverie-admin-memory "$out/bin/reverie-admin-memory"
     # The structured OPS client is native; no Python console command remains.
     ln -s ${opsNativeCli}/bin/reverie-ops "$out/bin/reverie-ops"
+    # reverie-memory is the console's `reverie agent memory`; skills and agents keep calling it by this name.
+    makeWrapper ${console}/bin/reverie "$out/bin/reverie-memory" --add-flags "agent memory"
     for command in ${memory}/bin/reverie-*; do
       makeWrapper "$command" "$out/bin/$(basename "$command")" \
         --prefix PATH : ${runtime}/bin
