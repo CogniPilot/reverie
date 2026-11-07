@@ -19,6 +19,7 @@ pub(super) struct Record {
     control: Mutex<Option<UnixStream>>,
     finished: AtomicBool,
     opaque: AtomicBool,
+    lifecycle: Mutex<super::retention::LifecycleHoldState>,
 }
 impl Record {
     pub(super) fn read_request(
@@ -116,6 +117,7 @@ impl Record {
             control: Mutex::new(None),
             finished: AtomicBool::new(false),
             opaque: AtomicBool::new(false),
+            lifecycle: Mutex::new(super::retention::LifecycleHoldState::Unissued),
         }
     }
     fn lock<'a, T>(&self, lock: &'a Mutex<T>) -> MutexGuard<'a, T> {
@@ -200,13 +202,76 @@ impl Record {
         result
     }
     pub(super) fn settled(&self) -> bool {
-        self.finished() && !self.opaque.load(Ordering::Acquire)
+        if !self.socket_closed_known() {
+            return false;
+        }
+        match self.lifecycle.try_lock() {
+            Ok(state) => !matches!(*state, super::retention::LifecycleHoldState::Held(_)),
+            Err(std::sync::TryLockError::WouldBlock) => false,
+            Err(std::sync::TryLockError::Poisoned(_)) => {
+                self.opaque.store(true, Ordering::Release);
+                false
+            }
+        }
     }
     pub(super) fn finished(&self) -> bool {
         self.finished.load(Ordering::Acquire)
     }
     pub(super) fn can_progress(&self) -> bool {
         !self.finished() && !self.opaque.load(Ordering::Acquire)
+    }
+    pub(super) fn opaque(&self) -> bool {
+        self.opaque.load(Ordering::Acquire)
+    }
+    pub(super) fn socket_closed_known(&self) -> bool {
+        self.finished() && !self.opaque()
+    }
+    pub(super) fn lifecycle_until(
+        &self,
+        end: Instant,
+    ) -> Result<MutexGuard<'_, super::retention::LifecycleHoldState>> {
+        self.until(&self.lifecycle, end)
+    }
+    /// Nonblocking mint: stream -> records -> hold. The still-owned stream
+    /// fences physical close/retirement; admission retains this exact record.
+    /// Service admission only TRY-locks hold state and never acquires stream.
+    pub(super) fn retain_lifecycle(
+        self: &std::sync::Arc<Self>,
+        service: &std::sync::Arc<WorkerReportService>,
+    ) -> Result<super::WorkerLaunchHold> {
+        let stream = self.try_mint_lock(&self.stream)?;
+        let records = service.records.try_lock().map_err(|error| {
+            if matches!(error, std::sync::TryLockError::Poisoned(_)) {
+                service.opaque.store(true, Ordering::Release);
+            }
+            WorkerReportError::Unconfirmed
+        })?;
+        let mut state = self.try_mint_lock(&self.lifecycle)?;
+        if stream.is_none()
+            || !self.can_progress()
+            || service.stopping()
+            || !records
+                .iter()
+                .any(|record| std::sync::Arc::ptr_eq(record, self))
+            || !matches!(*state, super::retention::LifecycleHoldState::Unissued)
+        {
+            return Err(WorkerReportError::Unconfirmed);
+        }
+        let identity = std::sync::Arc::new(());
+        *state = super::retention::LifecycleHoldState::Held(identity.clone());
+        Ok(super::WorkerLaunchHold {
+            service: service.clone(),
+            record: self.clone(),
+            identity,
+        })
+    }
+    fn try_mint_lock<'a, T>(&self, mutex: &'a Mutex<T>) -> Result<MutexGuard<'a, T>> {
+        mutex.try_lock().map_err(|error| {
+            if matches!(error, std::sync::TryLockError::Poisoned(_)) {
+                self.opaque.store(true, Ordering::Release);
+            }
+            WorkerReportError::Unconfirmed
+        })
     }
     #[cfg(test)]
     pub(super) fn control_ready(&self) -> bool {

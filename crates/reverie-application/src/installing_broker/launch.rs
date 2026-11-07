@@ -65,7 +65,8 @@ impl<'a> ReceivedWorkerLaunch<'a> {
         self.connection.request()
     }
     pub fn close(&self, end: Instant) -> Result<(), WorkerReportError> {
-        self.connection.close(end)
+        // Physical connection close is not lifecycle-hold/capacity settlement.
+        self.connection.close_socket(end).map(|_| ())
     }
     /// Original ordinary prefix: actual validated J -> image refresh -> queued
     /// GPU cold boundary for non-attach -> actual captured optional admission.
@@ -157,6 +158,6 @@ impl Drop for ReceivedWorkerLaunch<'_> {
         // A retained active reference does not keep a dead handler's socket
         // usable. Checked-close uncertainty stays in the original service;
         // active/pending and actual storage/Nix/Office owners settle separately.
-        let _ = self.connection.close(Instant::now());
+        let _ = self.connection.close_socket(Instant::now());
     }
 }

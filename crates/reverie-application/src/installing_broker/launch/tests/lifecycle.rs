@@ -36,7 +36,11 @@ fn register<'a>(
     assert!(broker.allowed(scope.request().session()).unwrap());
     lifecycle.claim_active(generation, scope).unwrap()
 }
-fn finish(scope: AdmittedWorkerLaunch<'_>, storage: StorageClaim, token: &ActiveLaunchToken<'_>) {
+fn finish(
+    scope: AdmittedWorkerLaunch<'_>,
+    storage: StorageClaim,
+    token: &mut ActiveLaunchToken<'_>,
+) {
     scope
         .request
         .broker
@@ -47,6 +51,7 @@ fn finish(scope: AdmittedWorkerLaunch<'_>, storage: StorageClaim, token: &Active
         .unwrap();
     scope.close(end()).unwrap();
     storage.release(end()).unwrap();
+    token.release_hold(end()).unwrap();
 }
 fn unreserved(tree: &Tree) -> InstallingBroker {
     let broker = fixture(tree);
@@ -69,7 +74,7 @@ fn wrong_origin_refuses_without_poisoning_the_real_scope_and_aba_cannot_remove_i
             .is_err()
     );
     assert_eq!(other.installed.lifecycle().unwrap().entries().count(), 0);
-    let token = register(&scope, &generation);
+    let mut token = register(&scope, &generation);
     broker
         .installed
         .lifecycle()
@@ -83,7 +88,7 @@ fn wrong_origin_refuses_without_poisoning_the_real_scope_and_aba_cannot_remove_i
         .finalize_active(&token)
         .unwrap();
     let (_client2, scope2, storage2, generation2) = actual_scope(&broker, FIRST);
-    let token2 = register(&scope2, &generation2);
+    let mut token2 = register(&scope2, &generation2);
     assert!(
         broker
             .installed
@@ -99,9 +104,10 @@ fn wrong_origin_refuses_without_poisoning_the_real_scope_and_aba_cannot_remove_i
         .reenter_active(&token2, &scope2)
         .unwrap();
     assert_eq!(broker.installed.lifecycle().unwrap().entries().count(), 1);
-    finish(scope2, storage2, &token2);
+    finish(scope2, storage2, &mut token2);
     scope.close(end()).unwrap();
     storage.release(end()).unwrap();
+    token.release_hold(end()).unwrap();
     broker.close_command_telemetry(end()).unwrap();
     other.close_command_telemetry(end()).unwrap();
 }
@@ -110,7 +116,7 @@ fn actual_drain_changes_generation_and_finally_clears_draining_without_global_ru
     let tree = Tree::new();
     let broker = unreserved(&tree);
     let (_client, scope, storage, generation) = actual_scope(&broker, FIRST);
-    let token = register(&scope, &generation);
+    let mut token = register(&scope, &generation);
     {
         let mut lifecycle = broker.installed.lifecycle().unwrap();
         let drain = lifecycle.begin_drain().unwrap();
@@ -130,10 +136,10 @@ fn actual_drain_changes_generation_and_finally_clears_draining_without_global_ru
         assert!(lifecycle.reenter_active(&token, &scope).is_err());
     }
     assert!(!broker.storage.runtime.cancellation().is_cancelled());
-    finish(scope, storage, &token);
+    finish(scope, storage, &mut token);
     let (_client, next, storage, generation) = actual_scope(&broker, FIRST);
-    let token = register(&next, &generation);
-    finish(next, storage, &token);
+    let mut token = register(&next, &generation);
+    finish(next, storage, &mut token);
     broker.close_command_telemetry(end()).unwrap();
 }
 #[test]
@@ -185,7 +191,7 @@ fn actual_pending_j_refuses_recovery_before_an_empty_native_census_or_office_con
     );
     let broker = InstallingBroker::new(snapshot, runtime).unwrap();
     let (_client, scope, storage, generation) = actual_scope(&broker, FIRST);
-    let token = register(&scope, &generation);
+    let mut token = register(&scope, &generation);
     assert_eq!(
         broker.recover_laptops().err().unwrap().to_string(),
         "WORKER_RECOVERY_LAUNCH_IN_PROGRESS"
@@ -202,7 +208,7 @@ fn actual_pending_j_refuses_recovery_before_an_empty_native_census_or_office_con
         broker.installed.lifecycle().unwrap().guard.is_empty(),
         "no committed owner from a pending name"
     );
-    finish(scope, storage, &token);
+    finish(scope, storage, &mut token);
     broker.close_command_telemetry(end()).unwrap();
 }
 #[test]
@@ -213,9 +219,9 @@ fn real_recovered_owners_and_pending_name_overlay_keep_unique_original_sid_order
     let tree = super::super::super::recovered::tests::Tree::new(&format!("{FIRST}\n{SECOND}\n"));
     tree.broker.recover_laptops().unwrap();
     let (_client, first, first_storage, first_generation) = actual_scope(&tree.broker, FIRST);
-    let first_token = register(&first, &first_generation);
+    let mut first_token = register(&first, &first_generation);
     let (_client, third, third_storage, third_generation) = actual_scope(&tree.broker, THIRD);
-    let third_token = register(&third, &third_generation);
+    let mut third_token = register(&third, &third_generation);
     {
         let lifecycle = tree.broker.installed.lifecycle().unwrap();
         let entries = lifecycle
@@ -236,8 +242,8 @@ fn real_recovered_owners_and_pending_name_overlay_keep_unique_original_sid_order
             "only actual Recovered owners are committed"
         );
     }
-    finish(first, first_storage, &first_token);
-    finish(third, third_storage, &third_token);
+    finish(first, first_storage, &mut first_token);
+    finish(third, third_storage, &mut third_token);
     assert_eq!(tree.broker.installed.lifecycle().unwrap().guard.len(), 2);
 }
 #[test]
@@ -313,12 +319,41 @@ fn recovery_keeps_the_same_lifecycle_guard_between_pending_check_and_publication
         "the same lifecycle excludes a new active J through publication"
     );
     assert_eq!(held.release().unwrap().registered(), 0);
-    let token = register(&scope, &generation);
+    let mut token = register(&scope, &generation);
     tree.broker
         .installed
         .lifecycle()
         .unwrap()
         .reenter_active(&token, &scope)
         .unwrap();
-    finish(scope, storage, &token);
+    finish(scope, storage, &mut token);
+}
+
+#[test]
+fn repeated_actual_handler_abandonment_keeps_the_one_transport_cap_counted() {
+    crate::test_process::owning_case!(
+        repeated_actual_handler_abandonment_keeps_the_one_transport_cap_counted
+    );
+    let tree = Tree::new();
+    let broker = unreserved(&tree);
+    let limit = broker.storage.runtime.connection_limit();
+    for index in 0..limit {
+        let sid = format!("{:08x}-2222-3333-4444-555555555555", index + 1);
+        let (_client, scope, storage, generation) = actual_scope(&broker, &sid);
+        let token = register(&scope, &generation);
+        storage.release(end()).unwrap();
+        drop(token);
+        drop(scope);
+        assert_eq!(
+            broker.installed.lifecycle().unwrap().entries().count(),
+            index + 1
+        );
+    }
+    let sid = format!("{:08x}-2222-3333-4444-555555555555", limit + 1);
+    let (_client, socket) = incoming_as(&broker, b'J', &sid, true);
+    assert!(matches!(
+        broker.accept_worker_connection(socket),
+        Err(WorkerDispatchError::Transport(WorkerReportError::Stopping))
+    ));
+    assert!(broker.close_command_telemetry(end()).is_err());
 }

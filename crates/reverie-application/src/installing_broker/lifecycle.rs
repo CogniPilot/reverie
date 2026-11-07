@@ -1,7 +1,7 @@
 //! The single installing lifecycle state. Native operations and resource
 //! settlement stay with their actual owners; membership is never a stop grant.
 use super::*;
-use reverie_host::worker_reports::WorkerLaunchConnection;
+use reverie_host::worker_reports::{WorkerLaunchConnection, WorkerLaunchHold, WorkerReportError};
 use std::ops::{Deref, DerefMut};
 
 /// Only equality with the same installed state has meaning. This is not wire
@@ -12,6 +12,17 @@ struct ActiveLaunch {
     session: ProfileSessionId,
     identity: Arc<()>,
     connection: Arc<WorkerLaunchConnection>,
+}
+impl ActiveLaunchToken<'_> {
+    /// Only the actual preparation/handler owner calls this after known native
+    /// finalization or a genuine ownership transfer. Metadata removal alone
+    /// must never release a record whose real resource outcome is unknown.
+    pub(super) fn release_hold(
+        &mut self,
+        end: std::time::Instant,
+    ) -> Result<(), WorkerReportError> {
+        self.hold.release(end)
+    }
 }
 struct PendingName {
     session: ProfileSessionId,
@@ -74,6 +85,7 @@ pub(super) struct ActiveLaunchToken<'a> {
     identity: Arc<()>,
     generation: LaunchGeneration,
     connection: Arc<WorkerLaunchConnection>,
+    hold: WorkerLaunchHold,
 }
 impl InstalledWorker {
     pub(super) fn capture_generation(&self) -> Result<LaunchGeneration, GateError> {
@@ -163,6 +175,9 @@ impl<'a> LaptopLifecycle<'a> {
             .pending
             .try_reserve(1)
             .map_err(|_| GateError::Refused("WORKER_BROKER_ACTIVE_UNAVAILABLE"))?;
+        let hold = connection
+            .retain_lifecycle()
+            .map_err(|_| GateError::Refused("WORKER_BROKER_ACTIVE_UNAVAILABLE"))?;
         self.guard.active.push(ActiveLaunch {
             session: session.clone(),
             identity: identity.clone(),
@@ -179,6 +194,7 @@ impl<'a> LaptopLifecycle<'a> {
             identity,
             generation: generation.clone(),
             connection,
+            hold,
         })
     }
     /// Reentry after unlocked Nix work still requires the real preparation's
