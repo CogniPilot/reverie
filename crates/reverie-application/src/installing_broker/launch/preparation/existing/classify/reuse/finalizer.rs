@@ -233,7 +233,7 @@ fn finish<'a>(
         // A fresh stop scope precedes lifecycle acquisition and remains held
         // through the original Office producer's checked close. A prior stop
         // refusal never grants this separate shared-registration effect.
-        cleanup.close_registration(budget.phase(2_000));
+        cleanup.close_registration(budget);
     }
     let mut storage_retained = false;
     if cleanup.errors.is_empty()

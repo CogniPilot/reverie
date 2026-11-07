@@ -516,11 +516,13 @@ fallible gap; genuine legacy storage adds no registry entry, lease, Nix or Offic
 
 Native component close/restoration returns a retained whole owner, never a stopped
 laptop, handler completion, canonical release or storage/global acknowledgement.
-The integrated handler must freshly re-stat its bound receipt for EVERY outcome,
-including peer EOF and errors. If completion requires stop, that actual stop must
-precede viewer reaping, metadata/Office removal and final storage-live checks.
-Those integrated finalizer joins remain open; the component API does not choose
-them from EOF, X, an earlier receipt or local client settlement. Last-owner Drop
+The reuse finalizer freshly re-stats its bound receipt for EVERY outcome,
+including peer EOF and errors. A completed receipt triggers actual stop before
+viewer reaping. Fresh storage observations and stop admission precede closing
+the exact Office owner captured under the original lifecycle lock. A failed stop,
+changed registration or unconfirmed close retains the resource and handler Hold.
+The component close API alone does not select these effects from EOF, X, an
+earlier receipt or local client settlement. Last-owner Drop
 quarantines the existing resource and counted connection owners in this process.
 The new owning controls cover genuine legacy, physical employee storage, a real
 fixed PTY child, actual configured-Gate allocation close and negative dropped-owner
@@ -550,8 +552,14 @@ same-SID socket. `ViewingReuse::relay` drives the same framed native viewer and
 reads the real broker snapshot at each current-intent check. Its typed result
 returns the whole `ViewingReuse` for receipt, child exit, EOF, stop, intent change
 and failure. It performs no automatic close/restore or handler completion. The
-original finally ordering and final storage-live/resource release remain separate
-required consumers; no relay outcome is a release permission.
+reuse finalizer consumes that whole owner after every outcome; no relay outcome
+alone is a release permission. `finalize_for_worker` uses the original worker
+socket/Hold timing, while explicit bounded component methods keep their supplied
+ceiling. A private registry Finalizing phase blocks stale same-identity release
+until the matching finalizer concludes. Known live ownership transfer differs
+from physical lease closure, and both differ from global shutdown completion.
+Direct-prefix failures and the genuine Cold/Started continuation still need their
+whole-owner cleanup consumers before complete broker selection.
 
 The private ordinary-stop allocation consumer follows Broker.stop's generic
 admission then check_stop sequence, with no launch SID, image, GPU or creation
