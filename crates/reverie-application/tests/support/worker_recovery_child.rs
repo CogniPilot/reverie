@@ -19,6 +19,7 @@ fn main() {
             "{{.Names}}",
         ] => "names.out",
         ["ps", "--all", "--quiet", "--no-trunc"] => "ids.out",
+        ["ps", "-aq", "--no-trunc"] => "ids.out",
         ["ps", "--quiet", "--no-trunc"] => "ids.out",
         ["inspect", "test-console"] => "server.out",
         ["inspect", name] if name.starts_with("test-agent-") => "inspect.out",
@@ -31,15 +32,27 @@ fn main() {
         .unwrap();
     writeln!(trace, "{}", args.join("\0")).unwrap();
     drop(trace);
-    if file == "server.out" && fs::exists("server.hold").unwrap() {
-        fs::write("server.started", "actual fixed server query").unwrap();
+    let held = match file {
+        "server.out" => "server",
+        "names.out" => "names",
+        _ => "unheld",
+    };
+    if fs::exists(format!("{held}.hold")).unwrap() {
+        fs::write(format!("{held}.started"), "actual fixed query").unwrap();
         let end = std::time::Instant::now() + std::time::Duration::from_secs(15);
-        while !fs::exists("server.release").unwrap() {
+        while !fs::exists(format!("{held}.release")).unwrap() {
             if std::time::Instant::now() >= end {
                 std::process::exit(84);
             }
             std::thread::sleep(std::time::Duration::from_millis(2));
         }
+    }
+    if file == "ids.out"
+        && fs::exists("reject-after-phone").unwrap()
+        && fs::exists("office/11111111-2222-3333-4444-555555555555/office.sock").unwrap()
+    {
+        io::stdout().write_all(b"invalid inventory ID\n").unwrap();
+        return;
     }
     io::stdout().write_all(&fs::read(file).unwrap()).unwrap();
 }

@@ -2,6 +2,8 @@
 //! child. No business callback, fake Runtime, live company or engine.
 #[path = "lifetime_tests.rs"]
 mod lifetime;
+#[path = "reserved_tests.rs"]
+mod reserved;
 use super::*;
 use reverie_host::{
     engine_metadata::EngineBootstrap, installed_worker_engine::InstalledWorkerEngine,

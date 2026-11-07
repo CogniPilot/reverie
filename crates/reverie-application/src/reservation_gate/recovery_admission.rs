@@ -6,6 +6,28 @@ pub(crate) struct RecoveryAdmission {
     admission: admission::Admission,
 }
 impl ReservationGate {
+    #[cfg(test)]
+    pub(crate) fn poison_recovery_cleanup_for_test(&self) {
+        // Exercise the real poisoned owner branch. No error result, clock or
+        // admission identity is substituted; cleanup still consumes its FD.
+        let active = self
+            .inner
+            .state
+            .lock()
+            .unwrap()
+            .active
+            .as_ref()
+            .expect("actual admitted recovery")
+            .clone();
+        assert!(
+            std::thread::spawn(move || {
+                let _held = active.lock.lock().unwrap();
+                panic!("controlled poison of actual admission owner");
+            })
+            .join()
+            .is_err()
+        );
+    }
     pub(crate) fn admit_recovery(&self) -> Result<RecoveryAdmission> {
         let admission = self.inner.admit(AdmissionBounds::default())?;
         match self.inner.check_recovery() {
