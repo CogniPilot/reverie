@@ -1,45 +1,6 @@
 use super::*;
 use nix::fcntl::{OFlag, OpenHow, ResolveFlag, openat2};
 use reverie_core::PythonText;
-#[derive(Default)]
-pub(super) struct Descriptors {
-    files: Vec<File>,
-    attempted: bool,
-    uncertain: bool,
-}
-impl Descriptors {
-    pub(super) fn retain(&mut self, file: File) -> usize {
-        let index = self.files.len();
-        self.files.push(file);
-        index
-    }
-    pub(super) fn get(&self, index: usize) -> &File {
-        &self.files[index]
-    }
-    pub(super) fn get_mut(&mut self, index: usize) -> &mut File {
-        &mut self.files[index]
-    }
-    pub(super) fn close(&mut self) -> Result<()> {
-        if !self.attempted {
-            self.attempted = true;
-            for file in self.files.drain(..).rev() {
-                self.uncertain |= native::close(file).is_err();
-            }
-        }
-        if self.uncertain {
-            Err(WebsiteFactsError::Refused("BACKEND_CODE_CLOSE_UNCONFIRMED"))
-        } else {
-            Ok(())
-        }
-    }
-}
-impl Drop for Descriptors {
-    fn drop(&mut self) {
-        if !self.attempted {
-            std::mem::forget(std::mem::take(&mut self.files));
-        }
-    }
-}
 #[derive(Eq, PartialEq)]
 pub(super) struct Stamp {
     device: u64,

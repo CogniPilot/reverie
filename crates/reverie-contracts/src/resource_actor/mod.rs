@@ -2,12 +2,14 @@
 //! can authenticate a channel or authorize maintenance; these values cannot.
 mod facts;
 mod metadata;
+mod process;
 #[cfg(test)]
 mod tests;
 mod website;
 use crate::legacy_json::{self, Node, Number, Text, Value};
 pub use facts::{ArtifactReference, EngineSelection, InstalledFactsDocument};
 pub use metadata::{EngineMetadata, MAX_ENGINE_BODY, QualifiedWebsiteMetadata};
+pub use process::{ProcessStatData, require_peer_kernel_status};
 use reverie_core::{PythonText, decimal::UnsignedInteger, operations::JournalDigest};
 use std::{collections::BTreeMap, fmt};
 pub use website::{CodeFile, ProgramSelection, WebsiteSelection};
