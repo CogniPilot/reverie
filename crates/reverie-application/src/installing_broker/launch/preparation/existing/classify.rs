@@ -20,7 +20,8 @@ pub enum ClassifiedWorkerLaunch<'a> {
 }
 #[must_use = "live pane readback is not admission, guard or resource release"]
 pub struct ReusableWorkerLaunch<'a> {
-    receipt: Option<reverie_host::worker_storage::LaunchReceiptObservation>,
+    pub(in crate::installing_broker::launch::preparation) receipt:
+        Option<reverie_host::worker_storage::LaunchReceiptObservation>,
     pub(in crate::installing_broker::launch::preparation) inspected: InspectedWorkerLaunch<'a>,
     pub(in crate::installing_broker::launch::preparation) resources: EffectiveWorkerConfig,
 }
