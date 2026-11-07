@@ -195,10 +195,13 @@ fn table(source: &impl Source, end: Instant) -> Result<MountTable> {
     table_at(source, "self", end)
 }
 fn table_at(source: &impl Source, pid: &str, end: Instant) -> Result<MountTable> {
-    let stat = path(&format!("/proc/{pid}/stat"));
+    table_base(source, &path(&format!("/proc/{pid}")), end)
+}
+fn table_base(source: &impl Source, base: &PosixPath, end: Instant) -> Result<MountTable> {
+    let stat = join(base, "stat");
     let before = kernel_accounting::process_start(&text(source, &stat, 65536, false, end)?)?;
     check(end)?;
-    let raw = source.read(&path(&format!("/proc/{pid}/mountinfo")), MAX_MOUNT_BYTES)?;
+    let raw = source.read(&join(base, "mountinfo"), MAX_MOUNT_BYTES)?;
     check(end)?;
     need(raw.len() <= MAX_MOUNT_BYTES, "RESERVATION_NATIVE_BOUND")?;
     let points = native::python_text(Path::new(std::ffi::OsStr::from_bytes(&raw)));

@@ -62,7 +62,7 @@ pub(crate) fn parse_python_integer(
         reverie_core::decimal::UnsignedInteger::parse(value.magnitude.as_str())?,
     ))
 }
-pub(super) fn is_digit(point: u32) -> bool {
+pub(crate) fn is_digit(point: u32) -> bool {
     decimal(point).is_some()
         || [
             (178, 179),

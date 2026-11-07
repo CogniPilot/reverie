@@ -45,6 +45,7 @@ pub enum StorageError {
     PathText(reverie_contracts::reservation_engine::EngineDataError),
     ColdFilesystem(reverie_store::StoreError),
     ColdKernel(Box<crate::reservation_kernel::ReservationKernelError>),
+    ColdData(reverie_contracts::worker_cold_tmp::ColdDataError),
     Finalization {
         primary: Box<Self>,
         secondary: Box<Self>,
@@ -82,6 +83,7 @@ impl std::error::Error for StorageError {
             Self::PathText(error) => Some(error),
             Self::ColdFilesystem(error) => Some(error),
             Self::ColdKernel(error) => Some(&**error),
+            Self::ColdData(error) => Some(error),
             Self::Finalization { primary, .. } | Self::PartialEffects(primary) => Some(primary),
             Self::Refused(_) => None,
         }
@@ -100,6 +102,11 @@ impl From<IdentityError> for StorageError {
 impl From<IdentityDataError> for StorageError {
     fn from(v: IdentityDataError) -> Self {
         Self::Data(v)
+    }
+}
+impl From<reverie_contracts::worker_cold_tmp::ColdDataError> for StorageError {
+    fn from(value: reverie_contracts::worker_cold_tmp::ColdDataError) -> Self {
+        Self::ColdData(value)
     }
 }
 impl From<ResourceConfigError> for StorageError {

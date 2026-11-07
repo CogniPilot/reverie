@@ -31,6 +31,7 @@ pub(crate) fn isolate_cold_namespace(name: &str) -> bool {
     assert!(
         name.starts_with("worker_storage::tests::owner::cold_admission::")
             || name.starts_with("worker_laptop::tests::cold_prepare::")
+            || name.starts_with("worker_storage::cold_tmp::retained::references::tests::actual_")
     );
     if std::env::var_os(MARKER).as_deref() == Some(std::ffi::OsStr::new(name)) {
         assert_eq!(std::process::id(), 1, "actual owned PID namespace");
