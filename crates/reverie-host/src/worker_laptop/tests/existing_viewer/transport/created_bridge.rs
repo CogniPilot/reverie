@@ -5,8 +5,10 @@ use crate::command_telemetry::CommandTelemetry;
 mod cleanup;
 mod finalization;
 mod owners;
+mod request;
 mod source;
 mod transfer;
+mod worker_close;
 fn isolated(name: &str) -> bool {
     crate::test_process::isolate_case(&format!(
         "worker_laptop::tests::existing_viewer::transport::created_bridge::{name}"
@@ -125,6 +127,7 @@ fn later_j_requires_both_actual_socket_close_and_explicit_original_hold_release(
             .borrow_started_laptop_source_storage(&created)
             .is_err()
     );
+    runtime.cleanup_created_laptop_request(&created).unwrap();
     original.close_socket(end()).unwrap();
     assert!(
         runtime
@@ -170,6 +173,7 @@ fn physical_socket_and_hold_release_cannot_replace_actual_old_viewer_cleanup() {
     };
     wait(|| fixture.root.join("viewer-ready").is_file());
     let (_new_client, next, mut next_hold) = accepted(&fixture, &service, "later");
+    runtime.cleanup_created_laptop_request(&created).unwrap();
     original.close_socket(end()).unwrap();
     old_hold.release(end()).unwrap();
     assert!(
@@ -202,6 +206,7 @@ fn another_service_on_same_runtime_cannot_borrow_a_released_created_resource() {
     let service = Arc::new(WorkerReportService::from_runtime(runtime));
     let (_client, original, mut hold) = accepted(&fixture, &service, "original");
     let (created, _released) = ready(&fixture, &original);
+    runtime.cleanup_created_laptop_request(&created).unwrap();
     original.close_socket(end()).unwrap();
     hold.release(end()).unwrap();
     let other = Arc::new(WorkerReportService::from_runtime(runtime));

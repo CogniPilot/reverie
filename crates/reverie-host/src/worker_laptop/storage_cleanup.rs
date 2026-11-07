@@ -78,19 +78,51 @@ impl WorkerRuntime {
     /// Also handles the real stored constructor without a ViewerSession. No
     /// supplied PID, fake job or successful constructor token is introduced.
     pub fn close_created_laptop_viewer(&self, created: &CreatedLaptop, end: Instant) -> Result<()> {
+        self.close_created_viewer(created, viewer::cleanup::Cleanup::bounded(end))
+    }
+    /// The actual worker cleanup phase chooses its guard inside the native
+    /// owner; no caller-created aggregate viewer deadline is introduced.
+    pub fn close_created_laptop_viewer_for_worker(&self, created: &CreatedLaptop) -> Result<()> {
+        self.close_created_viewer(created, viewer::cleanup::Cleanup::worker(self))
+    }
+    fn close_created_viewer(
+        &self,
+        created: &CreatedLaptop,
+        cleanup: viewer::cleanup::Cleanup,
+    ) -> Result<()> {
         self.laptop_workflows().bound(self, &created.workflow)?;
-        let mut record = created
-            .workflow
-            .record
-            .try_lock()
-            .map_err(|_| LaptopError::Refused("WORKER_LAPTOP_RETAINED"))?;
+        let mut record = match cleanup.ceiling() {
+            Some(_) => created
+                .workflow
+                .record
+                .try_lock()
+                .map_err(|_| LaptopError::Refused("WORKER_LAPTOP_RETAINED"))?,
+            None => cleanup.acquire(self, &created.workflow.record)?,
+        };
         need(record.resources.is_some(), "WORKER_LAPTOP_REPLAYED")?;
         if !matches!(record.phase, Phase::Stopped | Phase::CleanupRetained) {
             record.phase = Phase::Cleaning;
         }
-        match &record.viewer {
-            Some(viewer) => viewer.close(self, end),
-            None => Ok(()),
+        if let Some(viewer) = &record.viewer {
+            let client = &self.installed_engine().engine.client;
+            match cleanup.ceiling() {
+                Some(end) => client.settle_viewer(viewer, end),
+                None => client.settle_viewer_for_worker(viewer, cleanup.guard()),
+            }
+            .map_err(|error| LaptopError::Engine(error.into()))?;
         }
+        require_viewer_closed(self, &record)
     }
+}
+pub(super) fn require_viewer_closed(runtime: &WorkerRuntime, record: &Record) -> Result<()> {
+    if let Some(viewer) = &record.viewer {
+        viewer.require_closed()?;
+        runtime
+            .installed_engine()
+            .engine
+            .client
+            .require_viewer_released(viewer)
+            .map_err(|error| LaptopError::Engine(error.into()))?;
+    }
+    Ok(())
 }

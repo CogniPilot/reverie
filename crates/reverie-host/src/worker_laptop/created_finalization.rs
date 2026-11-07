@@ -27,7 +27,7 @@ impl StorageCheck {
     pub(super) fn untouched(&self) -> bool {
         !self.attempted
     }
-    fn require_stopped(
+    pub(super) fn require_stopped(
         &self,
         workflow: &LaptopWorkflow,
         observation: &CreatedStorageObservation,
@@ -52,6 +52,25 @@ pub struct StoppedCreatedReturned<'a> {
     inventory: MutexGuard<'a, Vec<RetainedRecord>>,
     record: MutexGuard<'a, Record>,
     identity: &'a RecordOwner,
+    origin: ReturnOrigin,
+}
+enum ReturnOrigin {
+    Created,
+    Source,
+}
+impl<'a> StoppedCreatedReturned<'a> {
+    pub(super) fn source(
+        inventory: MutexGuard<'a, Vec<RetainedRecord>>,
+        record: MutexGuard<'a, Record>,
+        identity: &'a RecordOwner,
+    ) -> Self {
+        Self {
+            inventory,
+            record,
+            identity,
+            origin: ReturnOrigin::Source,
+        }
+    }
 }
 impl StoppedCreatedReturned<'_> {
     pub fn into_parts(
@@ -82,8 +101,11 @@ impl StoppedCreatedReturned<'_> {
             .cloned();
         let storage = nix.into_closed_storage();
         self.record.phase = Phase::Consumed;
-        self.inventory
-            .retain(|entry| !entry.is_created(self.identity));
+        self.record.source_attachment = None;
+        self.inventory.retain(|entry| match self.origin {
+            ReturnOrigin::Created => !entry.is_created(self.identity),
+            ReturnOrigin::Source => !entry.is_source(self.identity),
+        });
         (Box::new(storage), plan, request, office, failure)
     }
 }
@@ -100,35 +122,7 @@ impl WorkerRuntime {
             .record
             .try_lock()
             .map_err(|_| LaptopError::Refused("WORKER_LAPTOP_RETAINED"))?;
-        need(
-            matches!(
-                record.phase,
-                Phase::Cleaning | Phase::Stopped | Phase::CleanupRetained
-            ) && !record.finalization.attempted
-                && record.pending.is_none(),
-            "WORKER_CREATED_FINAL_STORAGE_PHASE",
-        )?;
-        if let Some(viewer) = &record.viewer {
-            viewer.require_closed()?;
-        }
-        record.finalization.attempted = true;
-        let result = observe(self, &mut record);
-        match result {
-            Ok(live) => {
-                let current = Arc::new(());
-                record.finalization.current = Some(current.clone());
-                Ok(CreatedStorageObservation {
-                    workflow: created.workflow.clone(),
-                    current,
-                    live,
-                })
-            }
-            Err(error) => {
-                let error = Arc::new(error);
-                record.finalization.failure = Some(error.clone());
-                Err(LaptopError::Recorded(error))
-            }
-        }
+        observe_closed(self, &mut record, &created.workflow)
     }
     pub fn prepare_stopped_created_return<'a>(
         &'a self,
@@ -151,7 +145,40 @@ impl WorkerRuntime {
             inventory,
             record,
             identity: &stopped.workflow.record,
+            origin: ReturnOrigin::Created,
         })
+    }
+}
+pub(super) fn observe_closed(
+    runtime: &WorkerRuntime,
+    record: &mut Record,
+    workflow: &LaptopWorkflow,
+) -> Result<CreatedStorageObservation> {
+    need(
+        matches!(
+            record.phase,
+            Phase::Cleaning | Phase::Stopped | Phase::CleanupRetained
+        ) && !record.finalization.attempted
+            && record.pending.is_none(),
+        "WORKER_CREATED_FINAL_STORAGE_PHASE",
+    )?;
+    storage_cleanup::require_viewer_closed(runtime, record)?;
+    record.finalization.attempted = true;
+    match observe(runtime, record) {
+        Ok(live) => {
+            let current = Arc::new(());
+            record.finalization.current = Some(current.clone());
+            Ok(CreatedStorageObservation {
+                workflow: workflow.clone(),
+                current,
+                live,
+            })
+        }
+        Err(error) => {
+            let error = Arc::new(error);
+            record.finalization.failure = Some(error.clone());
+            Err(LaptopError::Recorded(error))
+        }
     }
 }
 fn observe(runtime: &WorkerRuntime, record: &mut Record) -> Result<bool> {
@@ -194,6 +221,9 @@ fn require_return(
         "WORKER_CREATED_RETURN_UNCONFIRMED",
     )?;
     record.finalization.require_stopped(workflow, observation)?;
+    require_native_closed(runtime, record)
+}
+pub(super) fn require_native_closed(runtime: &WorkerRuntime, record: &Record) -> Result<()> {
     let resources = record.resources();
     resources.nix.require_guard_close()?;
     resources
@@ -208,9 +238,7 @@ fn require_return(
         .office
         .require_closed_for_resource(runtime, resources.plan.session())
         .map_err(LaptopError::Office)?;
-    if let Some(viewer) = &record.viewer {
-        viewer.require_closed()?;
-    }
+    storage_cleanup::require_viewer_closed(runtime, record)?;
     if let Some(publication) = record
         .creation
         .as_ref()

@@ -4,7 +4,7 @@ fn isolated(name: &str) -> bool {
         "worker_laptop::tests::existing_viewer::transport::created_bridge::finalization::{name}"
     ))
 }
-fn observation_row(fixture: &Fixture, running: bool, id: &str) {
+pub(super) fn observation_row(fixture: &Fixture, running: bool, id: &str) {
     fs::write(
         fixture.root.join("created-final-inspect.json"),
         serde_json::to_vec(&json!([{
@@ -22,6 +22,7 @@ fn stopped(runtime: &WorkerRuntime, created: &CreatedLaptop) -> StoppedCreatedLa
         panic!("actual confirmed fixed CID stop")
     };
     runtime.close_created_laptop_viewer(created, end()).unwrap();
+    runtime.cleanup_created_laptop_request(created).unwrap();
     stopped
 }
 #[test]

@@ -92,6 +92,7 @@ fn full_inventory_transfer_replaces_same_slot_and_old_created_aliases_are_fenced
         runtime.laptop_workflows().records.lock().unwrap().len(),
         maximum
     );
+    runtime.cleanup_created_laptop_request(&created).unwrap();
     original.close_socket(end()).unwrap();
     old_hold.release(end()).unwrap();
     let (_next_client, next, next_hold) = accepted(&fixture, &service, "later");
@@ -128,6 +129,7 @@ fn same_original_j_or_foreign_created_identity_cannot_consume_the_record() {
             .is_err()
     );
     let (plan, inspected, receipt) = inputs(&fixture, &created, &original, &"f".repeat(64));
+    runtime.cleanup_created_laptop_request(&created).unwrap();
     original.close_socket(end()).unwrap();
     old_hold.release(end()).unwrap();
     let (_client, next, mut next_hold) = accepted(&fixture, &service, "later");
@@ -167,6 +169,7 @@ fn released_old_j_with_actual_live_viewer_does_not_allow_transfer() {
     };
     wait(|| fixture.root.join("viewer-ready").is_file());
     let (plan, inspected, receipt) = inputs(&fixture, &created, &original, &"c".repeat(64));
+    runtime.cleanup_created_laptop_request(&created).unwrap();
     original.close_socket(end()).unwrap();
     old_hold.release(end()).unwrap();
     let (_client, next, next_hold) = accepted(&fixture, &service, "later");

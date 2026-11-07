@@ -790,6 +790,8 @@ codec success or the attachment itself grants no stop authority. These Host
 components still require the real App registry/lifecycle consumers and do not
 establish whole-service or installed-worker selection.
 
+### Worker viewer cleanup
+
 Worker viewer cleanup keeps distinct guard, TERM and KILL phases. Without an
 existing stop, guard acquisition gets the original 5.1 seconds; otherwise it
 uses the original first-stop end. The five-second TERM grace begins only after

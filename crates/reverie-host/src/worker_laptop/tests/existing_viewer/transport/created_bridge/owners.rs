@@ -17,6 +17,7 @@ fn source_attachment_fences_created_before_journaling_and_old_attachment_cannot_
     let (_client, original, mut hold) = accepted(&fixture, &service, "original");
     let (created, released) = ready(&fixture, &original);
     assert!(runtime.retain_started_laptop_source(&created).is_err());
+    runtime.cleanup_created_laptop_request(&created).unwrap();
     original.close_socket(end()).unwrap();
     hold.release(end()).unwrap();
     let source = runtime.retain_started_laptop_source(&created).unwrap();
@@ -56,6 +57,7 @@ fn later_j_legacy_stop_consumes_same_storage_only_into_actual_fixed_stop_owner()
     let (created, released) = ready(&fixture, &original);
     let (plan, inspected, _receipt) =
         transfer::inputs(&fixture, &created, &original, &"c".repeat(64));
+    runtime.cleanup_created_laptop_request(&created).unwrap();
     original.close_socket(end()).unwrap();
     old_hold.release(end()).unwrap();
     let (_client, next, mut next_hold) = accepted(&fixture, &service, "later");
@@ -124,6 +126,7 @@ fn later_j_replacement_transfer_keeps_real_process_brand_and_cannot_release_on_d
     let process = inspected
         .capture_running_replacement_process(runtime, &plan, end())
         .unwrap();
+    runtime.cleanup_created_laptop_request(&created).unwrap();
     original.close_socket(end()).unwrap();
     old_hold.release(end()).unwrap();
     let (_client, next, mut next_hold) = accepted(&fixture, &service, "later");

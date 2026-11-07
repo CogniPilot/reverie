@@ -33,6 +33,7 @@ fn cached_guard_and_absent_viewer_cleanup_fence_old_pane_without_global_stop_or_
     let old_borrow_denied = runtime
         .borrow_started_laptop_storage(&created, &connection)
         .is_err();
+    runtime.cleanup_created_laptop_request(&created).unwrap();
     connection.close_socket(end()).unwrap();
     hold.release(end()).unwrap();
     let (_later_client, later, mut later_hold) = accepted(&fixture, &service, "later");
