@@ -335,9 +335,25 @@ function rows(db: Database, onlyModel: string | null): Row[] {
   if (n > RECALL_LIMITS.rows) throw new RecallBound(`the old memory store holds ${n} memories, more than recall reads`);
   // Byte sizes before anything is read into memory: every column a result can carry, plus the embedding.
   const size = (column: string) => `coalesce(length(CAST(${column} AS BLOB)), 0)`;
+  // every selected column: SQLite may hold text, of any length, even in a nominally numeric one
+  const selected = [
+    'id',
+    'kind',
+    'created_at',
+    'user_text',
+    `"${assistant}"`,
+    'text',
+    'importance',
+    'importance_source',
+    'embed_model',
+    'embedding',
+    'source_ids',
+    'section',
+    'meta',
+    'last_accessed',
+  ];
   const bytes = db.prepare(
-    `SELECT max(${['user_text', `"${assistant}"`, 'text', 'source_ids', 'section', 'meta', 'embedding'].map(size).join(' + ')}) AS row, ` +
-      `sum(${['user_text', `"${assistant}"`, 'text', 'source_ids', 'section', 'meta', 'embedding'].map(size).join(' + ')}) AS total ` +
+    `SELECT max(${selected.map(size).join(' + ')}) AS row, sum(${selected.map(size).join(' + ')}) AS total ` +
       `FROM memories WHERE kind IN (?, ?, ?)${onlyModel === null ? '' : ' AND embed_model = ?'}`
   );
   const measured = bytes.get(...KINDS, ...(onlyModel === null ? [] : [onlyModel])) as {
@@ -426,6 +442,8 @@ export interface RecallOptions {
   home: string;
   /** Seconds since the epoch; defaults to now. */
   now?: () => number;
+  /** The clock the recall's deadline is read against (ms since the epoch); defaults to Date.now. */
+  clock?: () => number;
   llama?: LlamaOptions;
 }
 
@@ -442,7 +460,7 @@ async function retrieve(
   k: number,
   reembed: boolean,
   now: () => number,
-  deadline: number
+  check: () => void
 ): Promise<PyJson[]> {
   const found = rows(db, reembed ? null : embedder.name);
   const stale = found.filter((row) => row.embed_model !== embedder.name);
@@ -454,17 +472,17 @@ async function retrieve(
   const vectors = new Map<bigint, number[]>();
   for (const row of stale) {
     if (typeof row.text !== 'string') throw new Error("embed() argument 'text' must be str");
-    remaining(1, deadline);
+    check();
     vectors.set(row.id, (await embedder.embed(row.text, 'document')).map(Math.fround));
     await new Promise((resolve) => setImmediate(resolve)); // keep the console responsive between rows
   }
-  remaining(1, deadline);
+  check();
   const q = await embedder.embed(query, 'query');
   const at = now();
   const scored: Array<{ row: Row; score: number; created: number }> = [];
   for (const [index, row] of found.entries()) {
     if (index && index % 1000 === 0) {
-      remaining(1, deadline);
+      check();
       await new Promise((resolve) => setImmediate(resolve));
     }
     const rel = cosine(q, vectors.get(row.id) ?? unpack(row.embedding));
@@ -476,8 +494,9 @@ async function retrieve(
     const score = (Math.max(0, Math.min(1, rel)) + recency + importance) / 3;
     scored.push({ row, score, created });
   }
+  check();
   scored.sort((a, b) => b.score - a.score || b.created - a.created);
-  return scored.slice(0, k).map(({ row, score }) => {
+  const results = scored.slice(0, k).map(({ row, score }) => {
     const json = (value: unknown, fallback: string) => {
       const text = value === null || value === '' ? fallback : value;
       if (typeof text !== 'string') throw new Error('the JSON object must be str, bytes or bytearray');
@@ -500,6 +519,8 @@ async function retrieve(
       ['score', { float: score }],
     ]);
   });
+  check();
+  return results;
 }
 
 /**
@@ -520,7 +541,15 @@ export async function legacyRecall(
 
 async function recall(instanceConfig: string, request: RecallRequest, options: RecallOptions): Promise<string> {
   const now = options.now ?? (() => Date.now() / 1000);
-  const deadline = Date.now() + RECALL_LIMITS.totalMs;
+  const clock = options.clock ?? Date.now;
+  const deadline = clock() + RECALL_LIMITS.totalMs;
+  const check = () => void remaining(1, deadline, clock);
+  /** Serialized, size-checked and, last of all, checked against the deadline. */
+  const finish = (results: PyJson[]) => {
+    const text = capped(dumpPyJson(results));
+    check();
+    return text;
+  };
   const dataDir = instanceDataDir(instanceConfig, options.home);
   if (request.project !== undefined) {
     if (!PROJECT.test(request.project)) throw new Error('project must be a lowercase project identifier');
@@ -528,7 +557,7 @@ async function recall(instanceConfig: string, request: RecallRequest, options: R
     if (!db) return '[]';
     try {
       return tables(db).has('memories')
-        ? capped(dumpPyJson(await retrieve(db, hashedEmbedder(1024), request.query, 6, false, now, deadline)))
+        ? finish(await retrieve(db, hashedEmbedder(1024), request.query, 6, false, now, check))
         : '[]';
     } finally {
       db.close();
@@ -542,8 +571,8 @@ async function recall(instanceConfig: string, request: RecallRequest, options: R
         'the old memory store has a legacy-history.json that was never imported; recall reads it only after that import'
       );
     if (!tables(db).has('memories')) return '[]';
-    const embedder = await pickEmbedder(options.embedUrl ?? '', { ...options.llama, deadline });
-    return capped(dumpPyJson(await retrieve(db, embedder, request.query, 8, true, now, deadline)));
+    const embedder = await pickEmbedder(options.embedUrl ?? '', { ...options.llama, deadline, clock });
+    return finish(await retrieve(db, embedder, request.query, 8, true, now, check));
   } finally {
     db.close();
   }

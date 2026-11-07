@@ -317,16 +317,23 @@ describe('bounds on the embedding service and on one recall', () => {
 });
 
 describe('bounds on what one recall reads and returns', () => {
-  async function store(id: string, legacy?: (state: string) => void) {
+  async function store(id: string, legacy?: (state: string) => void, edit?: (rows: FixtureRow[]) => FixtureRow[]) {
     const c = fixture.cases.find((x) => x.id === id)!;
     const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'legacy-recall-bound-')));
     const config = path.join(root, 'config', 'agent.json');
     fs.mkdirSync(path.dirname(config), { recursive: true });
     fs.writeFileSync(config, JSON.stringify(c.instance));
-    await build(path.join(root, 'state', 'memory.sqlite'), c.schema, c.private!, c.columns, c.state);
+    await build(
+      path.join(root, 'state', 'memory.sqlite'),
+      c.schema,
+      edit ? edit(c.private!) : c.private!,
+      c.columns,
+      c.state
+    );
     legacy?.(path.join(root, 'state'));
     return {
-      recall: () => legacyRecall(config, c.request, { home: root, now: () => fixture.now }),
+      recall: (extra: { clock?: () => number } = {}) =>
+        legacyRecall(config, c.request, { home: root, now: () => fixture.now, ...extra }),
       done: () => fs.rmSync(root, { recursive: true, force: true }),
     };
   }
@@ -383,6 +390,53 @@ describe('bounds on what one recall reads and returns', () => {
       expect(await dir.recall()).toMatch(/^\[\{"id": 1/); // a directory is an OSError to python: nothing pending
     } finally {
       dir.done();
+    }
+  });
+});
+
+describe('every column and every step count against the bounds', () => {
+  async function single(edit: (row: FixtureRow) => FixtureRow) {
+    const c = fixture.cases.find((x) => x.id === 'legacy-assistant-column')!;
+    const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'legacy-recall-step-')));
+    const config = path.join(root, 'config', 'agent.json');
+    fs.mkdirSync(path.dirname(config), { recursive: true });
+    fs.writeFileSync(config, JSON.stringify(c.instance));
+    await build(path.join(root, 'state', 'memory.sqlite'), c.schema, c.private!.map(edit), c.columns, c.state);
+    return {
+      recall: (clock?: () => number) => legacyRecall(config, c.request, { home: root, now: () => fixture.now, clock }),
+      done: () => fs.rmSync(root, { recursive: true, force: true }),
+    };
+  }
+
+  it('measures columns that are not memory text, such as importance_source', async () => {
+    const s = await single((row) => ({ ...row, importance_source: 'x'.repeat(16 * 1024) }));
+    const before = RECALL_LIMITS.rowBytes;
+    RECALL_LIMITS.rowBytes = 8 * 1024;
+    try {
+      await expect(s.recall()).rejects.toThrow('an old memory is too large for recall to read');
+    } finally {
+      RECALL_LIMITS.rowBytes = before;
+      s.done();
+    }
+  });
+
+  it('refuses at whichever step the deadline passes, the last one included', async () => {
+    const s = await single((row) => row);
+    try {
+      let reads = 0;
+      await s.recall(() => (reads++, 0));
+      // one row, hashed, nothing stale: the deadline is set, then checked before the query, after scoring, after the
+      // results are built and after they are serialized; no step may finish once it has passed
+      expect(reads).toBe(5);
+      for (let expireAfter = 1; expireAfter < reads; expireAfter++) {
+        let n = 0;
+        const clock = () => (n++ < expireAfter ? 0 : RECALL_LIMITS.totalMs + 1);
+        await expect(s.recall(clock), `deadline passing after ${expireAfter} reads`).rejects.toThrow(
+          'recall took longer than its time limit'
+        );
+      }
+    } finally {
+      s.done();
     }
   });
 });

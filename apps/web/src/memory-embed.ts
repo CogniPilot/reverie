@@ -184,6 +184,8 @@ export interface LlamaOptions {
   maxBytes?: number;
   /** Absolute deadline (ms since the epoch) shared by every request of one recall. */
   deadline?: number;
+  /** The clock the deadline is read against (ms since the epoch). */
+  clock?: () => number;
   fetch?: typeof fetch;
 }
 
@@ -228,7 +230,7 @@ export function llamaEmbedder(url: string, options: LlamaOptions = {}): Embedder
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
-        signal: AbortSignal.timeout(remaining(timeoutMs, options.deadline)),
+        signal: AbortSignal.timeout(remaining(timeoutMs, options.deadline, options.clock)),
       });
       if (!response.ok) throw new Error(`embedding service answered ${response.status}`);
       const raw = await readBounded(response, maxBytes);
@@ -262,9 +264,9 @@ export async function pickEmbedder(
 }
 
 /** The time a request may take: its own limit, or less when the recall's shared deadline is nearer. */
-export function remaining(limitMs: number, deadline?: number): number {
+export function remaining(limitMs: number, deadline?: number, clock: () => number = Date.now): number {
   if (deadline === undefined) return limitMs;
-  const left = deadline - Date.now();
+  const left = deadline - clock();
   if (left <= 0) throw new Error('recall took longer than its time limit');
   return Math.min(limitMs, left);
 }
