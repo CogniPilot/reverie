@@ -73,6 +73,9 @@ fn main() {
         return;
     }
     io::stdout().write_all(&fs::read(file).unwrap()).unwrap();
+    if let Ok(status) = fs::read_to_string(format!("{file}.status")) {
+        std::process::exit(status.parse().unwrap());
+    }
 }
 fn source_stop(args: &[String]) -> bool {
     let Ok(cid) = fs::read_to_string("source-stop.cid") else { return false; };
