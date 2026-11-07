@@ -138,3 +138,74 @@ fn worker_lifecycle_wait_without_stop_retains_no_prestop_aggregate_deadline() {
         .close(Instant::now() + Duration::from_secs(2))
         .unwrap();
 }
+
+#[test]
+fn bounded_lifecycle_wait_keeps_original_component_end_without_stopping_runtime() {
+    crate::test_process::owning_case!(
+        bounded_lifecycle_wait_keeps_original_component_end_without_stopping_runtime
+    );
+    let tree = Tree::new();
+    let broker = broker(&tree);
+    let locked = broker.installed.lifecycle().unwrap();
+    let end = Instant::now() + Duration::from_millis(40);
+    assert!(
+        broker
+            .installed
+            .cleanup_lifecycle_until(&broker.storage.runtime, end)
+            .is_err()
+    );
+    assert!(Instant::now() >= end);
+    assert!(broker.storage.runtime.stop_deadline().is_none());
+    drop(locked);
+    broker
+        .close_command_telemetry(Instant::now() + Duration::from_secs(2))
+        .unwrap();
+    broker
+        .storage
+        .runtime
+        .close(Instant::now() + Duration::from_secs(2))
+        .unwrap();
+}
+
+#[test]
+fn poisoned_lifecycle_wait_refuses_and_last_broker_drop_retains_actual_origin() {
+    crate::test_process::owning_case!(
+        poisoned_lifecycle_wait_refuses_and_last_broker_drop_retains_actual_origin
+    );
+    let tree = Tree::new();
+    let broker = broker(&tree);
+    let origin = Arc::downgrade(&broker.installed);
+    let poisoned = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let _locked = broker.installed.lifecycle().unwrap();
+        panic!("owned lifecycle poison");
+    }));
+    assert!(poisoned.is_err());
+    assert!(
+        broker
+            .installed
+            .cleanup_lifecycle(&broker.storage.runtime)
+            .is_err()
+    );
+    assert!(
+        broker
+            .installed
+            .cleanup_lifecycle_until(
+                &broker.storage.runtime,
+                Instant::now() + Duration::from_secs(2)
+            )
+            .is_err()
+    );
+    broker
+        .close_command_telemetry(Instant::now() + Duration::from_secs(2))
+        .unwrap();
+    broker
+        .storage
+        .runtime
+        .close(Instant::now() + Duration::from_secs(2))
+        .unwrap();
+    drop(broker);
+    assert!(
+        origin.upgrade().is_some(),
+        "poison cannot certify empty App ownership"
+    );
+}
