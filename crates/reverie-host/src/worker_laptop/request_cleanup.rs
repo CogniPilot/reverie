@@ -85,12 +85,12 @@ fn require_unlink(runtime: &WorkerRuntime, record: &Record) -> Result<()> {
     Ok(())
 }
 fn started(stage: create::CreateStage) -> bool {
-    !matches!(
+    // Source sets started only after pane/status and successful guard exit;
+    // Docker start ACK alone must not preserve an abandoned launch request.
+    matches!(
         stage,
-        create::CreateStage::Preparing
-            | create::CreateStage::Created
-            | create::CreateStage::Publishing
-            | create::CreateStage::Published
-            | create::CreateStage::Starting
+        create::CreateStage::NixGuardReleased
+            | create::CreateStage::StartingViewer
+            | create::CreateStage::Viewing
     )
 }

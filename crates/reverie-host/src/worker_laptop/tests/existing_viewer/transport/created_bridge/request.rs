@@ -66,6 +66,44 @@ fn unissued_request_unlinks_once_and_keeps_runtime_exit_and_later_foreign_leaf()
     finish_j(&service, connection, hold);
 }
 #[test]
+fn acknowledged_container_start_before_pane_removes_request_only_after_confirmed_stop() {
+    if isolated(
+        "acknowledged_container_start_before_pane_removes_request_only_after_confirmed_stop",
+    ) {
+        return;
+    }
+    let fixture = Fixture::employee("created-viewer-echo");
+    let runtime = fixture.runtime();
+    let service = Arc::new(WorkerReportService::from_runtime(runtime));
+    let (_client, connection, hold) = accepted(&fixture, &service, "original");
+    let created = create(&fixture, &connection);
+    runtime.publish_laptop_launch(&created).unwrap();
+    let request = selected(&created);
+    let before = fs::read(&request).unwrap();
+    assert!(matches!(
+        runtime.start_laptop_container(&created, end()).unwrap(),
+        ContainerStart::Started(_)
+    ));
+    runtime
+        .cleanup_created_laptop_nix_guard_for_worker(&created, &connection)
+        .unwrap();
+    assert!(runtime.cleanup_created_laptop_request(&created).is_err());
+    assert_eq!(fs::read(&request).unwrap(), before);
+    assert!(matches!(
+        runtime
+            .stop_created_laptop_for_worker(&created, &connection)
+            .unwrap(),
+        CreatedCleanup::Stopped(_)
+    ));
+    runtime
+        .close_created_laptop_viewer_for_worker(&created)
+        .unwrap();
+    runtime.cleanup_created_laptop_request(&created).unwrap();
+    assert!(!request.exists());
+    assert!(StorageLease::acquire_migration(&fixture.source, &sid()).is_err());
+    finish_j(&service, connection, hold);
+}
+#[test]
 fn started_request_is_kept_and_readonly_custody_is_checked_closed() {
     if isolated("started_request_is_kept_and_readonly_custody_is_checked_closed") {
         return;
