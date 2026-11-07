@@ -104,6 +104,7 @@ struct ColdBody<'a> {
 struct CreationContext {
     created: CreatedLaptop,
     started: Option<StartedContainer>,
+    pane: Option<NixReleasedPane>,
 }
 enum MemoryJoin {
     Policy(StartedMemoryPolicy),

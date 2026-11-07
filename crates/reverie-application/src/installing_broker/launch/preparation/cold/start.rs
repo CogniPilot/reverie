@@ -23,6 +23,7 @@ impl<'a> ColdBody<'a> {
         self.creation = Some(CreationContext {
             created,
             started: None,
+            pane: None,
         });
         let creation = self
             .creation
@@ -68,12 +69,15 @@ impl<'a> ColdBody<'a> {
                 ));
             }
         };
-        self.register_started(network, released)
+        // The original started predicate becomes true after actual pane and
+        // guard completion, even if later App registry allocation refuses.
+        // Retain that real token before attempting the fallible publication.
+        self.creation.as_mut().expect("actual Created").pane = Some(released);
+        self.register_started(network)
     }
     fn register_started(
         &mut self,
         network: Arc<storage::NetworkStoragePreparation>,
-        pane: NixReleasedPane,
     ) -> Result<Arc<StartedLaptop>, ColdError> {
         let sid = self.scope.preparing.admitted.request().session().clone();
         let current = self.broker().configuration()?;
@@ -93,11 +97,12 @@ impl<'a> ColdBody<'a> {
                 .try_reserve(1)
                 .map_err(|_| ColdError::Refused("WORKER_LAPTOP_REGISTRY_UNAVAILABLE"))?;
         }
+        let creation = self.creation.take().expect("actual Created");
         let started = Arc::new(StartedLaptop {
             network,
-            pane,
+            pane: creation.pane.expect("actual pane and guard completion"),
             office: self.office.as_ref().expect("actual phone").clone(),
-            created: self.creation.take().expect("actual Created").created,
+            created: creation.created,
         });
         // Admission can still fail after registration. The failure keeps the
         // actual Created/pane owner, without a later SID/path reconstruction.

@@ -18,7 +18,7 @@ pub(in crate::installing_broker) struct OrdinaryStopReturned {
 pub(in crate::installing_broker) struct OrdinaryStopRetainFailure {
     claim: StorageClaim,
     plan: ObservedCreatePlan,
-    previous: ExistingLaptopInspection,
+    previous: Option<ExistingLaptopInspection>,
     cause: StorageWorkflowError,
 }
 pub(in crate::installing_broker) struct OrdinaryStopReclaimFailure {
@@ -31,7 +31,7 @@ impl OrdinaryStopRetainFailure {
     ) -> (
         StorageClaim,
         ObservedCreatePlan,
-        ExistingLaptopInspection,
+        Option<ExistingLaptopInspection>,
         StorageWorkflowError,
     ) {
         (self.claim, self.plan, self.previous, self.cause)
@@ -137,11 +137,28 @@ impl StorageClaim {
         plan: ObservedCreatePlan,
         previous: ExistingLaptopInspection,
     ) -> Result<OrdinaryStopPreparation, Box<OrdinaryStopRetainFailure>> {
+        self.retain_ordinary_stop_input(plan, Some(previous))
+    }
+    /// No absence is claimed. The same resource's fixed native consumer must
+    /// perform its complete initial inspect/census after actual stop admission.
+    pub(in crate::installing_broker) fn retain_unobserved_ordinary_stop(
+        self,
+        plan: ObservedCreatePlan,
+    ) -> Result<OrdinaryStopPreparation, Box<OrdinaryStopRetainFailure>> {
+        self.retain_ordinary_stop_input(plan, None)
+    }
+    fn retain_ordinary_stop_input(
+        self,
+        plan: ObservedCreatePlan,
+        previous: Option<ExistingLaptopInspection>,
+    ) -> Result<OrdinaryStopPreparation, Box<OrdinaryStopRetainFailure>> {
         match self.state {
-            ClaimState::Legacy { registry, owner } => match registry
-                .runtime
-                .retain_ordinary_laptop_stop_for_worker(owner, plan, previous)
-            {
+            ClaimState::Legacy { registry, owner } => match retain_native(
+                &registry.runtime,
+                owner,
+                plan,
+                previous,
+            ) {
                 Ok(native) => Ok(OrdinaryStopPreparation {
                     destination: ClaimDestination::Legacy { registry },
                     native: Arc::new(Mutex::new(native)),
@@ -153,7 +170,7 @@ impl StorageClaim {
                             state: ClaimState::Legacy { registry, owner },
                         },
                         plan,
-                        previous: previous.expect("actual observed input returned"),
+                        previous,
                         cause: cause.into(),
                     }))
                 }
@@ -197,12 +214,12 @@ impl StorageRegistry {
         &self,
         identity: &Arc<()>,
         plan: ObservedCreatePlan,
-        previous: ExistingLaptopInspection,
+        previous: Option<ExistingLaptopInspection>,
     ) -> Result<
         Arc<Mutex<OrdinaryLaptopStop>>,
         (
             ObservedCreatePlan,
-            ExistingLaptopInspection,
+            Option<ExistingLaptopInspection>,
             StorageWorkflowError,
         ),
     > {
@@ -226,10 +243,7 @@ impl StorageRegistry {
         let EntryOwner::Direct(owner) = entry.owner else {
             unreachable!("checked actual Direct owner")
         };
-        match self
-            .runtime
-            .retain_ordinary_laptop_stop_for_worker(owner, plan, previous)
-        {
+        match retain_native(&self.runtime, owner, plan, previous) {
             Ok(native) => {
                 let native = Arc::new(Mutex::new(native));
                 entry.owner = EntryOwner::OrdinaryStop(native.clone());
@@ -240,7 +254,7 @@ impl StorageRegistry {
                 let (owner, plan, previous, cause) = failure.into_parts();
                 entry.owner = EntryOwner::Direct(owner);
                 entries.insert(index, entry);
-                Err((plan, previous.expect("same observed input"), cause.into()))
+                Err((plan, previous, cause.into()))
             }
         }
     }
@@ -266,6 +280,20 @@ impl StorageRegistry {
             previous,
             removal,
         })
+    }
+}
+fn retain_native(
+    runtime: &WorkerRuntime,
+    owner: Box<LaunchStorage>,
+    plan: ObservedCreatePlan,
+    previous: Option<ExistingLaptopInspection>,
+) -> Result<
+    OrdinaryLaptopStop,
+    Box<reverie_host::worker_source_stop::OrdinaryLaptopStopRetainFailure>,
+> {
+    match previous {
+        Some(previous) => runtime.retain_ordinary_laptop_stop_for_worker(owner, plan, previous),
+        None => runtime.retain_unobserved_ordinary_laptop_stop_for_worker(owner, plan),
     }
 }
 fn selected(entries: &[Entry], identity: &Arc<()>) -> Result<usize, StorageWorkflowError> {

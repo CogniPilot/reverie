@@ -65,7 +65,9 @@ impl<'a> Owner<'a> {
         }
     }
     fn remove_registration(&self, completed: bool) -> bool {
-        (self.started().is_none() && !matches!(self.scope().original, OriginalRuntime::Running))
+        let cli_started = self.started().is_some()
+            || matches!(self, Self::Body(owner) if owner.creation.as_ref().is_some_and(|creation| creation.pane.is_some()));
+        (!cli_started && !matches!(self.scope().original, OriginalRuntime::Running))
             || completed
     }
     fn stop_required(&self, completed: bool) -> bool {

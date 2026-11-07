@@ -95,7 +95,9 @@ impl ColdBody<'_> {
                         self.resources = Some(Resources::Direct(Direct {
                             storage,
                             plan,
-                            target: ExistingColdTarget::Stopped(previous),
+                            target: ExistingColdTarget::Stopped(
+                                previous.expect("actual observed stopped input returned"),
+                            ),
                         }));
                         return Err(cause.into());
                     }
