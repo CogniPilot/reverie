@@ -22,6 +22,7 @@ fn stopped(runtime: &WorkerRuntime, created: &CreatedLaptop) -> StoppedCreatedLa
         panic!("actual confirmed fixed CID stop")
     };
     runtime.close_created_laptop_viewer(created, end()).unwrap();
+    runtime.cleanup_created_laptop_request(created).unwrap();
     stopped
 }
 #[test]

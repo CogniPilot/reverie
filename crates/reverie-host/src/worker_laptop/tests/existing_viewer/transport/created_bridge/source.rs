@@ -74,6 +74,7 @@ fn protected_stop_transfer_refuses_wrong_target_and_restores_legacy_factory_refu
         let service = Arc::new(WorkerReportService::from_runtime(runtime));
         let (_client, original, mut hold) = accepted(&fixture, &service, "original");
         let (created, _released) = ready(&fixture, &original);
+        runtime.cleanup_created_laptop_request(&created).unwrap();
         original.close_socket(end()).unwrap();
         hold.release(end()).unwrap();
         let source = runtime.retain_started_laptop_source(&created).unwrap();
@@ -124,6 +125,7 @@ fn already_stopped_source_returns_same_resource_without_forced_stop_after_actual
     let service = Arc::new(WorkerReportService::from_runtime(runtime));
     let (_client, original, mut hold) = accepted(&fixture, &service, "original");
     let (created, _released) = ready(&fixture, &original);
+    runtime.cleanup_created_laptop_request(&created).unwrap();
     original.close_socket(end()).unwrap();
     hold.release(end()).unwrap();
     let source = runtime.retain_started_laptop_source(&created).unwrap();
@@ -182,6 +184,7 @@ fn final_source_live_and_foreign_identity_observations_remain_retained_without_r
         let service = Arc::new(WorkerReportService::from_runtime(runtime));
         let (_client, original, mut hold) = accepted(&fixture, &service, "original");
         let (created, _released) = ready(&fixture, &original);
+        runtime.cleanup_created_laptop_request(&created).unwrap();
         original.close_socket(end()).unwrap();
         hold.release(end()).unwrap();
         let source = runtime.retain_started_laptop_source(&created).unwrap();

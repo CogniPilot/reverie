@@ -356,7 +356,7 @@ impl OfficePhone {
     /// Read only the actual close/join result of this retained phone. An idle
     /// still-listening producer, closing request, or consumed failure is not a
     /// future-request fence for physical storage return.
-    pub(crate) fn require_closed_for_resource(
+    pub fn require_closed_for_resource(
         &self,
         runtime: &WorkerRuntime,
         session: &ProfileSessionId,

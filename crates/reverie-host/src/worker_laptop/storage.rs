@@ -151,6 +151,13 @@ fn require_local_closed(record: &Record) -> Result<()> {
     if let Some(viewer) = &record.viewer {
         viewer.require_closed()?;
     }
+    if let Some(publication) = record
+        .creation
+        .as_ref()
+        .and_then(|creation| creation.publication.as_ref())
+    {
+        publication.require_native_closed()?;
+    }
     Ok(())
 }
 impl Workflows {
