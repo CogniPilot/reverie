@@ -4,6 +4,7 @@ use super::*;
 mod bulk;
 mod contention;
 mod created;
+mod created_bridge;
 mod diagnostic;
 mod identity;
 mod receipt;

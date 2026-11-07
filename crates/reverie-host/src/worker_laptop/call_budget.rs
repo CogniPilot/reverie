@@ -31,6 +31,12 @@ impl CallBudget {
             "WORKER_LAPTOP_DEADLINE",
         )
     }
+    pub(super) fn settlement_end(self, runtime: &WorkerRuntime) -> Instant {
+        match self.0 {
+            Some(end) => runtime.stop_deadline().map_or(end, |stop| end.min(stop)),
+            None => self.end(runtime, 20),
+        }
+    }
 }
 impl Workflows {
     pub(super) fn assert_worker_connection(
