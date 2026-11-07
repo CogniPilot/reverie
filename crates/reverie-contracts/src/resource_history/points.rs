@@ -4,7 +4,7 @@ use super::{
     HistoryRefused, HistoryRequest, HistorySource, MAX_ROWS, ObservationConfig, field, integer,
 };
 use crate::legacy_json::{Node, Text, Value};
-use crate::python_number::PythonNumber;
+use crate::python_number::{self, PythonNumber};
 use crate::worker_config::{python_float_repr, python_json_string};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -49,11 +49,6 @@ fn statistics(value: Option<&Value>) -> Option<Stat> {
     (min.le(avg) && avg.le(max)).then_some(Stat { min, avg, max, n })
 }
 
-/// Python's `round(x, 3)`: the double nearest the correctly rounded decimal.
-fn round3(value: f64) -> f64 {
-    format!("{value:.3}").parse().unwrap_or(value)
-}
-
 /// `combine(values)`: first minimal/maximal objects, an int count, and the
 /// count-weighted average in Python's evaluation order.
 fn combine(values: &[Option<Stat>]) -> Option<Stat> {
@@ -76,7 +71,7 @@ fn combine(values: &[Option<Stat>]) -> Option<Stat> {
     }
     Some(Stat {
         min,
-        avg: PythonNumber::Float(round3(total.divided_by(n))),
+        avg: PythonNumber::Float(python_number::round(total.divided_by(n), 3)),
         max,
         n,
     })

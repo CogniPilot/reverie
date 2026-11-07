@@ -49,3 +49,25 @@ reverie-collect-state --state-dir /var/lib/reverie-collect
 
 It prints `{"state": ..., "status": "COLLECTOR_STATE_READY"}`, or
 `reverie-collect-state: <reason>` on stdout with exit status 2.
+
+## Host collector
+
+`reverie-collect` takes one host resource sample per run, as the collect
+service's timer drives it, and replaces `python/reverie/cleanup/collector.py`
+for that service:
+
+```console
+reverie-collect --config /etc/reverie/collect.toml once
+```
+
+- Each run appends one record to `samples-YYYY-MM-DD.jsonl` with CPU, load,
+  memory, GPU (`nvidia-smi` with one 10 s deadline, else sysfs) and drive
+  readings. A reading that fails is recorded under `errors`, never as a value.
+- New prune summaries are joined once into `prune-runs.jsonl`, at most
+  `max_prune_join` per sample. An unreadable ledger leaves prune accounting
+  unavailable, never zero.
+- Every closed hour and day is appended once to its rollup file. Retention
+  removes only the collector's own history files.
+- Records are strict JSON with sorted keys, byte-identical to the Python
+  collector's. Exit status is 0 sampled, 2 configuration error, 5 another run
+  holds the lock.

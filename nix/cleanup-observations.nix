@@ -1,8 +1,9 @@
 # Observation producers only; these do not grant pruning or authenticated effects.
 { pkgs, src }:
 let
-  # The resource history reader and the state initializer are native; the
-  # collector and receipts remain here.
+  # The collector, resource history reader and state initializer are native.
+  # collector.py stays installed only for collector_user.py's sampling; it
+  # and receipts remain here.
   observationsCli = import ./observations-cli.nix { inherit pkgs src; };
 in
 pkgs.runCommand "reverie-cleanup-observations" {
@@ -21,8 +22,7 @@ pkgs.runCommand "reverie-cleanup-observations" {
     '6681e2e6e6291b3f1ee383c110a39f7d0dd09e1c7b61e07ae2dfe308672646ab' "$out/libexec/reverie/receipts.py" \
     'cc04f1e1f34719244cea905c6018f8c5e352bad2b739bfcb2ae8ab27ebc9625f' "$out/libexec/reverie/collector_user.py" \
     | sha256sum --check --status
-  makeWrapper ${pkgs.python3}/bin/python3 "$out/bin/reverie-collect" \
-    --add-flags "-I -B $out/libexec/reverie/collector.py"
+  ln -s ${observationsCli}/bin/reverie-collect "$out/bin/reverie-collect"
   makeWrapper ${pkgs.python3}/bin/python3 "$out/bin/reverie-prune-receipts" \
     --add-flags "-I -B $out/libexec/reverie/receipts.py"
   makeWrapper ${pkgs.python3}/bin/python3 "$out/bin/reverie-observations" \
