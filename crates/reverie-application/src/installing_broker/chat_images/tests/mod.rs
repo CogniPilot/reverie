@@ -12,6 +12,7 @@ use std::{
 };
 mod backend;
 mod fixture;
+mod lifecycle;
 mod namespace;
 mod protocol;
 const SID: &str = "11111111-1111-4111-8111-111111111111";

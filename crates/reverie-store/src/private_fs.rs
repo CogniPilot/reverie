@@ -108,10 +108,10 @@ pub(crate) fn close(file: File, role: CloseRole, path: &Path) -> Result<()> {
         Err(StoreError::io(io::Error::last_os_error()))
     };
     #[cfg(test)]
-    crate::faults::closed(role, path)?;
+    let result = finalized(result, crate::faults::closed(role, path));
     #[cfg(not(test))]
     let _ = (role, path);
-    result
+    result.map_err(StoreError::unconfirmed_close)
 }
 pub(crate) fn private_stamp(file: &File) -> Result<Stamp> {
     let value = Stamp::from_metadata(&file.metadata().map_err(StoreError::io)?);
@@ -487,7 +487,7 @@ fn scan_directory<T>(
     };
     #[cfg(test)]
     let closed = finalized(closed, crate::faults::closed(CloseRole::Walk, path));
-    finalized(result, closed)
+    finalized(result, closed.map_err(StoreError::unconfirmed_close))
 }
 pub(crate) fn random_name(prefix: &str) -> Result<String> {
     let bytes = random_bytes()?;

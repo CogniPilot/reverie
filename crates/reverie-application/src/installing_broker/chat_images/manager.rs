@@ -1,11 +1,13 @@
 use super::*;
 use std::sync::{MutexGuard, TryLockError};
+// Counts 0..=2 and the terminal bit share ONE linearization point. A close
+// cannot observe zero and succeed while a subsequent admission enters.
+const CLOSED: usize = 4;
 impl ChatImages {
     pub(in crate::installing_broker) fn new() -> Self {
         Self {
             entries: Mutex::new(Vec::new()),
             admitted: AtomicUsize::new(0),
-            stopped: AtomicBool::new(false),
         }
     }
     pub(super) fn admit(self: &Arc<Self>) -> Result<GlobalPermit> {
@@ -13,14 +15,20 @@ impl ChatImages {
             .fetch_update(Ordering::AcqRel, Ordering::Acquire, |active| {
                 (active < 2).then_some(active + 1)
             })
-            .map_err(|_| ChatImagesError::Refused("busy"))?;
+            .map_err(|state| {
+                ChatImagesError::Refused(if state & CLOSED == 0 {
+                    "busy"
+                } else {
+                    "cache_unavailable"
+                })
+            })?;
         Ok(GlobalPermit {
             owner: self.clone(),
             released: false,
         })
     }
     pub(in crate::installing_broker) fn known_empty_for_drop(&self) -> bool {
-        self.admitted.load(Ordering::Acquire) == 0
+        self.admitted.load(Ordering::Acquire) & !CLOSED == 0
             && self
                 .entries
                 .try_lock()
@@ -40,7 +48,7 @@ impl ChatImages {
         }
     }
     pub(super) fn close(&self, end: Instant) -> Result<()> {
-        self.stopped.store(true, Ordering::Release);
+        self.admitted.fetch_or(CLOSED, Ordering::AcqRel);
         let mut entries = self.lock_until(end)?;
         let mut failed = Vec::new();
         entries.retain(|cache| match cache.close(end) {
@@ -53,7 +61,7 @@ impl ChatImages {
         if !failed.is_empty() {
             return Err(ChatImagesError::Cleanup(failed));
         }
-        need(self.admitted.load(Ordering::Acquire) == 0, "busy")
+        need(self.admitted.load(Ordering::Acquire) & !CLOSED == 0, "busy")
     }
 }
 impl InstallingBroker {
@@ -78,7 +86,7 @@ impl InstallingBroker {
             .lock()
             .map_err(|_| ChatImagesError::Refused("cache_unavailable"))?;
         need(
-            !self.images.stopped.load(Ordering::Acquire),
+            self.images.admitted.load(Ordering::Acquire) & CLOSED == 0,
             "cache_unavailable",
         )?;
         let mut index = 0;

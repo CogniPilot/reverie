@@ -13,6 +13,7 @@ pub use error::{ImageStoreError, Result};
 use reverie_contracts::chat_images::LedgerEntry;
 use reverie_core::chat_images::{ImageFileName, LIFETIME_SECONDS};
 use std::{
+    cell::Cell,
     path::Path,
     sync::Arc,
     time::{Duration, Instant},
@@ -42,7 +43,7 @@ pub struct ImageCache {
     entries: Vec<Entry>,
     origin: Arc<()>,
     failed: bool,
-    uncertain: bool,
+    uncertain: Cell<bool>,
 }
 /// Construction failure retains the actual owner if its finalization refused.
 pub struct ImageCacheOpenFailure {
@@ -61,7 +62,7 @@ impl ImageCache {
             entries: Vec::new(),
             origin: Arc::new(()),
             failed: false,
-            uncertain: false,
+            uncertain: Cell::new(false),
         };
         let opened = cache
             .custody
@@ -75,7 +76,7 @@ impl ImageCache {
                     retained: None,
                 }),
                 Ok(()) => {
-                    cache.uncertain = true;
+                    cache.uncertain.set(true);
                     Err(ImageCacheOpenFailure {
                         error,
                         retained: Some(Box::new(cache)),
@@ -83,7 +84,7 @@ impl ImageCache {
                 }
                 Err(close) => {
                     cache.failed = true;
-                    cache.uncertain = true;
+                    cache.uncertain.set(true);
                     Err(ImageCacheOpenFailure {
                         error: error::finalized::<()>(Err(error), Err(close))
                             .expect_err("two errors"),
@@ -94,8 +95,12 @@ impl ImageCache {
         }
     }
     fn current(&self) -> Result<()> {
-        error::need(!self.failed, "cache_unavailable")?;
-        self.custody.current()
+        error::need(!self.failed && !self.uncertain.get(), "cache_unavailable")?;
+        self.custody.current().inspect_err(|error| {
+            if error.is_uncertain() {
+                self.uncertain.set(true);
+            }
+        })
     }
     pub fn begin(&mut self, now: Instant) -> Result<()> {
         self.current()?;
@@ -143,7 +148,7 @@ impl ImageCache {
     }
     /// Close after the Host's actual reaper has joined, preserving one deadline.
     pub fn close(&mut self, end: Instant) -> Result<()> {
-        if self.uncertain {
+        if self.uncertain.get() {
             return self.retire();
         }
         if !self.custody.require_active()? {
@@ -164,8 +169,8 @@ impl ImageCache {
     /// Retiring a changed generation preserves bytes and ledger for recovery.
     pub fn retire(&mut self) -> Result<()> {
         let result = self.custody.close();
-        self.uncertain |= result.is_err();
-        if self.uncertain {
+        self.uncertain.set(self.uncertain.get() || result.is_err());
+        if self.uncertain.get() {
             error::finalized(
                 Err(ImageStoreError::Unconfirmed(Box::new(
                     ImageStoreError::Refused("custody_unconfirmed"),

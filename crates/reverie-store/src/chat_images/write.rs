@@ -75,17 +75,20 @@ impl ImageCache {
             Err(error) if adopted => {
                 let result = finalized(Err(error), self.remove(&name));
                 self.failed = true;
-                self.uncertain |= result
-                    .as_ref()
-                    .err()
-                    .is_some_and(|error| error.is_uncertain());
+                self.uncertain.set(
+                    self.uncertain.get()
+                        || result
+                            .as_ref()
+                            .err()
+                            .is_some_and(|error| error.is_uncertain()),
+                );
                 result
             }
             Err(error) => {
                 // No fstat means the real exclusive file's identity is unknown;
                 // preserve its name and fence this manager, never guess-delete.
                 self.failed = true;
-                self.uncertain = true;
+                self.uncertain.set(true);
                 Err(super::ImageStoreError::Unconfirmed(Box::new(error)))
             }
         }

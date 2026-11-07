@@ -17,7 +17,7 @@ use reverie_host::{
 };
 use std::{
     fmt,
-    sync::atomic::{AtomicBool, AtomicUsize, Ordering},
+    sync::atomic::{AtomicUsize, Ordering},
     time::{Duration, Instant},
 };
 #[derive(Debug)]
@@ -83,7 +83,6 @@ fn need(value: bool, code: &'static str) -> Result<()> {
 pub(super) struct ChatImages {
     entries: Mutex<Vec<Arc<ChatImageCache>>>,
     admitted: AtomicUsize,
-    stopped: AtomicBool,
 }
 struct GlobalPermit {
     owner: Arc<ChatImages>,

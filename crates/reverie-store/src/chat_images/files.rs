@@ -18,7 +18,7 @@ impl ImageCache {
             self.failed = true;
         }
         result.map_err(|error| {
-            self.uncertain = true;
+            self.uncertain.set(true);
             super::ImageStoreError::Unconfirmed(Box::new(error))
         })
     }
@@ -52,6 +52,11 @@ impl ImageCache {
             private_fs::close(file, CloseRole::Data, self.custody.cache().path())
                 .map_err(super::ImageStoreError::Close),
         )
+        .inspect_err(|error| {
+            if error.is_uncertain() {
+                self.uncertain.set(true);
+            }
+        })
     }
     pub(super) fn remove(&mut self, name: &ImageFileName) -> Result<()> {
         need(self.custody.require_active()?, "cache_unavailable")?;

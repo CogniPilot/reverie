@@ -10,6 +10,8 @@ socket closure and actual logical Hold release are separate outcomes. Known
 body/delivery refusals remain reportable after cleanup; uncertain native calls,
 descriptor closes or custody writes retain the whole connection, Hold, permit
 and real resource owner. A full cache is a known refusal, not close uncertainty.
+Its component close atomically fences later admission through the same count
+state, strengthening the old implementation's reliance on broker shutdown.
 This library producer is unselected until the broker dispatch, generation
 advance and whole-service lifetime consumers are independently qualified.
 

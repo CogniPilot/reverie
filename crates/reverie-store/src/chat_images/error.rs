@@ -27,6 +27,7 @@ impl ImageStoreError {
     pub fn is_uncertain(&self) -> bool {
         match self {
             Self::Close(_) | Self::Unconfirmed(_) => true,
+            Self::Store(error) => error.has_unconfirmed_close(),
             Self::Finalization { primary, secondary } => {
                 primary.is_uncertain() || secondary.is_uncertain()
             }
@@ -42,7 +43,11 @@ impl fmt::Display for ImageStoreError {
 impl std::error::Error for ImageStoreError {}
 impl From<StoreError> for ImageStoreError {
     fn from(error: StoreError) -> Self {
-        Self::Store(error)
+        if error.has_unconfirmed_close() {
+            Self::Close(error)
+        } else {
+            Self::Store(error)
+        }
     }
 }
 impl From<ImageDataError> for ImageStoreError {

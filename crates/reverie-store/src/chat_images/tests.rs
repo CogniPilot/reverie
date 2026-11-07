@@ -278,3 +278,76 @@ fn actual_checkpoint_close_refusal_is_typed_and_cannot_be_retried_to_success() {
     assert!(cache.retire().err().unwrap().is_uncertain());
     assert!(cache.close(Instant::now()).err().unwrap().is_uncertain());
 }
+#[test]
+fn actual_verification_close_refusal_fences_forward_and_retains_retire_uncertainty() {
+    let fixture = Fixture::new();
+    let mut cache = fixture.open();
+    let now = Instant::now();
+    let copy = cache.install(PNG, now).unwrap();
+    crate::faults::STATE
+        .with(|state| state.borrow_mut().close = Some(crate::private_fs::CloseRole::Data));
+    let error = cache.verify_copies(&[copy], now).err().unwrap();
+    crate::faults::reset();
+    assert!(error.is_uncertain());
+    let forward = cache.begin(now);
+    let retired = cache.retire();
+    eprintln!(
+        "after consumed Data close refusal: forward_ok={} retire_ok={}",
+        forward.is_ok(),
+        retired.is_ok()
+    );
+    assert!(
+        forward.is_err(),
+        "prior actual verification close must fence forward"
+    );
+    assert!(
+        retired
+            .expect_err("same cache must retain prior close")
+            .is_uncertain()
+    );
+    assert!(cache.retire().err().unwrap().is_uncertain());
+    assert_eq!(fs::read_dir(&fixture.cache).unwrap().count(), 1);
+}
+#[test]
+fn internal_ancestor_close_refusal_survives_constructor_anchor_cleanup() {
+    let fixture = Fixture::new();
+    crate::faults::STATE
+        .with(|state| state.borrow_mut().close = Some(crate::private_fs::CloseRole::Walk));
+    let failure = ImageCache::open(&fixture.state, &fixture.cache)
+        .err()
+        .unwrap();
+    crate::faults::reset();
+    eprintln!(
+        "internal Walk close refusal: uncertain={} retained={}",
+        failure.error.is_uncertain(),
+        failure.retained.is_some()
+    );
+    assert!(
+        failure.error.is_uncertain(),
+        "preserve actual consumed close cause"
+    );
+    let mut cache = failure.retained.expect("same failed constructor owner");
+    assert!(cache.retire().err().unwrap().is_uncertain());
+    assert!(cache.retire().err().unwrap().is_uncertain());
+}
+#[test]
+fn shared_directory_stream_and_primary_failure_preserve_consumed_close_cause() {
+    let fixture = Fixture::new();
+    let file = fixture.base.join("not-a-directory");
+    fs::write(&file, b"owned ordinary file").unwrap();
+    for selected in [&fixture.cache, &file] {
+        crate::faults::STATE
+            .with(|state| state.borrow_mut().close = Some(crate::private_fs::CloseRole::Walk));
+        let error = crate::private_fs::settlement_directory_names(selected).unwrap_err();
+        crate::faults::reset();
+        assert!(error.has_unconfirmed_close());
+        assert!(
+            !error.is_uncertain(),
+            "generic publication predicate stays separate"
+        );
+        if selected == &file {
+            assert!(matches!(error, crate::StoreError::Finalization { .. }));
+        }
+        assert!(ImageStoreError::from(error).is_uncertain());
+    }
+}

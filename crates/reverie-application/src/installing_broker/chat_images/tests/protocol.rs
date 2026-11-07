@@ -37,6 +37,10 @@ pub(super) fn call(
 ) {
     let (mut client, connection) = connection(broker, value);
     let result = broker.handle_chat_images(connection);
+    let (kind, value) = reply(&mut client);
+    (kind, value, result)
+}
+pub(super) fn reply(client: &mut UnixStream) -> (u8, Json) {
     let mut head = [0; 5];
     client.read_exact(&mut head).unwrap();
     let count = u32::from_be_bytes(head[1..].try_into().unwrap()) as usize;
@@ -48,5 +52,5 @@ pub(super) fn call(
     } else {
         json!({"error":String::from_utf8(bytes).unwrap()})
     };
-    (head[0], value, result)
+    (head[0], value)
 }

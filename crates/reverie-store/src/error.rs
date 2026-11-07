@@ -59,6 +59,11 @@ pub enum StoreError {
     CommitUncertain {
         cause: Box<StoreError>,
     },
+    /// The actual owned close was attempted once. This preserves its cause
+    /// without changing the separate publication-outcome predicate below.
+    CloseUnconfirmed {
+        cause: Box<StoreError>,
+    },
 }
 impl StoreError {
     pub(crate) fn io(source: io::Error) -> Self {
@@ -80,6 +85,23 @@ impl StoreError {
     pub fn is_uncertain(&self) -> bool {
         matches!(self, Self::CommitUncertain { .. })
     }
+    pub(crate) fn unconfirmed_close(self) -> Self {
+        Self::CloseUnconfirmed {
+            cause: Box::new(self),
+        }
+    }
+    pub(crate) fn has_unconfirmed_close(&self) -> bool {
+        match self {
+            Self::CloseUnconfirmed { .. } => true,
+            Self::Finalization { primary, secondary } => {
+                primary.has_unconfirmed_close() || secondary.has_unconfirmed_close()
+            }
+            Self::DirectoryRecheck { cause }
+            | Self::PreparationRetained { cause }
+            | Self::CommitUncertain { cause } => cause.has_unconfirmed_close(),
+            _ => false,
+        }
+    }
     /// A code suitable for an application's existing error mapping.
     pub fn code(&self) -> &'static str {
         match self {
@@ -90,6 +112,7 @@ impl StoreError {
             Self::PreparationRetained { .. } => "STORE_PREPARATION_FAILED_RETAIN_RAW",
             Self::Finalization { .. } => "STORE_FINALIZATION_FAILED_RETAIN_EVIDENCE",
             Self::CommitUncertain { .. } => "COMMIT_OUTCOME_UNCERTAIN_RETAIN_EVIDENCE",
+            Self::CloseUnconfirmed { cause } => cause.code(),
         }
     }
 }
@@ -106,6 +129,7 @@ impl std::error::Error for StoreError {
             Self::PreparationRetained { cause } => Some(cause),
             Self::Finalization { primary, .. } => Some(primary),
             Self::DirectoryRecheck { cause } => Some(cause),
+            Self::CloseUnconfirmed { cause } => Some(cause),
             _ => None,
         }
     }
