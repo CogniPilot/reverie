@@ -1,0 +1,396 @@
+{
+ "names": [
+  "Robin Example",
+  "Kai Sample",
+  "\u00d6lga Testperson"
+ ],
+ "texts": [
+  {
+   "text": "The baseline is 305/566.",
+   "floor": ""
+  },
+  {
+   "text": "Robin Example lives at the corner.",
+   "floor": "targeting a real private person"
+  },
+  {
+   "text": "robin example LIVES AT the corner.",
+   "floor": "targeting a real private person"
+  },
+  {
+   "text": "Robin Example l\u0130ves at the corner.",
+   "floor": "targeting a real private person"
+  },
+  {
+   "text": "Robin Example l\u0131ves at the corner.",
+   "floor": "targeting a real private person"
+  },
+  {
+   "text": "Robin Example lives  at the corner.",
+   "floor": ""
+  },
+  {
+   "text": "Robin Example lives\u00a0at the corner.",
+   "floor": ""
+  },
+  {
+   "text": "We should \u017ftalk Robin Example.",
+   "floor": "targeting a real private person"
+  },
+  {
+   "text": "We should stal\u212a Robin Example.",
+   "floor": "targeting a real private person"
+  },
+  {
+   "text": "Robin Example was harassed.",
+   "floor": "targeting a real private person"
+  },
+  {
+   "text": "Robin Example was harass\u00e9.",
+   "floor": "targeting a real private person"
+  },
+  {
+   "text": "Robin Example's phone\u00e9 broke.",
+   "floor": ""
+  },
+  {
+   "text": "Robin Example's phone_x broke.",
+   "floor": ""
+  },
+  {
+   "text": "Robin Example's phone broke.",
+   "floor": "targeting a real private person"
+  },
+  {
+   "text": "Robin Example addressed the team.",
+   "floor": ""
+  },
+  {
+   "text": "Robin Example: address unknown.",
+   "floor": "targeting a real private person"
+  },
+  {
+   "text": "Kai Sample doxxed nobody.",
+   "floor": "targeting a real private person"
+  },
+  {
+   "text": "\u00f6lga testperson works at a lab.",
+   "floor": "targeting a real private person"
+  },
+  {
+   "text": "\u00d6LGA TESTPERSON works at a lab.",
+   "floor": "targeting a real private person"
+  },
+  {
+   "text": "Robin Example. Works at a lab.",
+   "floor": ""
+  },
+  {
+   "text": "Robin Example! works at a lab",
+   "floor": ""
+  },
+  {
+   "text": "Robin Example.works at a lab",
+   "floor": "targeting a real private person"
+  },
+  {
+   "text": "Robin Example.\u2003works at a lab",
+   "floor": ""
+  },
+  {
+   "text": "Robin Example.\u001cworks at a lab",
+   "floor": ""
+  },
+  {
+   "text": "Robin Example.\ufeffworks at a lab",
+   "floor": "targeting a real private person"
+  },
+  {
+   "text": "Call Jane Doe at +1 (555) 123-4567.",
+   "floor": "targeting a real private person"
+  },
+  {
+   "text": "Call Jane Doe at 555 123 4567 today",
+   "floor": "targeting a real private person"
+  },
+  {
+   "text": "Jane Doe uses 10.0.0.1 for the router.",
+   "floor": ""
+  },
+  {
+   "text": "Jane Doe uses 10.0.0.1:8080 here.",
+   "floor": ""
+  },
+  {
+   "text": "Jane Doe uses 10.0.0.1/24 here.",
+   "floor": ""
+  },
+  {
+   "text": "Jane Doe uses 10.20.30.x here.",
+   "floor": ""
+  },
+  {
+   "text": "Jane Doe ships v1.2.3.4 today.",
+   "floor": ""
+  },
+  {
+   "text": "Jane Doe met on 2026-11-07 today.",
+   "floor": ""
+  },
+  {
+   "text": "Jane Doe dialed 06.12.34.56.78 once.",
+   "floor": "targeting a real private person"
+  },
+  {
+   "text": "Jane Doe dialed 12.34.56.78 once.",
+   "floor": ""
+  },
+  {
+   "text": "Jane Doe dialed 256.1.1.1 once.",
+   "floor": "targeting a real private person"
+  },
+  {
+   "text": "Jane Doe dialed (10.0.0.1), once.",
+   "floor": ""
+  },
+  {
+   "text": "Jane Doe dialed **10.0.0.1**. once.",
+   "floor": ""
+  },
+  {
+   "text": "Jane Doe dialed 10.0.0.1: once.",
+   "floor": ""
+  },
+  {
+   "text": "Jane Doe dialed \u0661\u0662\u0663\u0664\u0665\u0666\u0667\u0668\u0669 once.",
+   "floor": "targeting a real private person"
+  },
+  {
+   "text": "Jane Doe dialed \u0661\u0660.\u0660.\u0660.\u0661 once.",
+   "floor": ""
+  },
+  {
+   "text": "Jane Doe dialed 555\u2003123\u20034567 once.",
+   "floor": "targeting a real private person"
+  },
+  {
+   "text": "Jane Doe dialed 555\u001c123\u001c4567 once.",
+   "floor": "targeting a real private person"
+  },
+  {
+   "text": "Jane Doe dialed 555\ufeff123\ufeff4567 once.",
+   "floor": ""
+  },
+  {
+   "text": "Jane Doe lives at 12 Elm Street.",
+   "floor": "targeting a real private person"
+  },
+  {
+   "text": "Jane Doe lives at 12 Elm Grove Street now",
+   "floor": "targeting a real private person"
+  },
+  {
+   "text": "Jane Doe lives at 12 Elm St.",
+   "floor": "targeting a real private person"
+  },
+  {
+   "text": "Jane Doe lives at 123456 Elm Street.",
+   "floor": ""
+  },
+  {
+   "text": "Jane Doe lives at \u0661\u0662 Elm Street.",
+   "floor": "targeting a real private person"
+  },
+  {
+   "text": "Jane Doe lives at 12\u2003Elm\u2003Street.",
+   "floor": "targeting a real private person"
+  },
+  {
+   "text": "Jane Doe lives at 12 elm street.",
+   "floor": ""
+  },
+  {
+   "text": "Mail Jane Doe at jane.doe+x@example.org now",
+   "floor": "targeting a real private person"
+  },
+  {
+   "text": "Mail Jane Doe at j\u00e9r\u00f4me@exampl\u00e9.org now",
+   "floor": "targeting a real private person"
+  },
+  {
+   "text": "Mail jane doe at jane@example.org now",
+   "floor": ""
+  },
+  {
+   "text": "Mail Jane\u2003Doe at jane@example.org now",
+   "floor": "targeting a real private person"
+  },
+  {
+   "text": "Mail Jane\u001cDoe at jane@example.org now",
+   "floor": "targeting a real private person"
+  },
+  {
+   "text": "Mail Jane\ufeffDoe at jane@example.org now",
+   "floor": "targeting a real private person"
+  },
+  {
+   "text": "Mail \u00c9mile Doe at e@example.org now",
+   "floor": ""
+  },
+  {
+   "text": "Mail JaneDoe at jane@example.org now",
+   "floor": ""
+  },
+  {
+   "text": "Mail Jane Doe_ at jane@example.org now",
+   "floor": "targeting a real private person"
+  },
+  {
+   "text": "Mail Jane Do\u00e9 at jane@example.org now",
+   "floor": "targeting a real private person"
+  },
+  {
+   "text": "Nothing personal here at all.",
+   "floor": ""
+  },
+  {
+   "text": "Threats were made. Robin Example is fine.",
+   "floor": ""
+  },
+  {
+   "text": "Robin Example threatened? No. Robin Example is fine.",
+   "floor": "targeting a real private person"
+  },
+  {
+   "text": "Release v2.0 landed; see 2026-11-07 notes.",
+   "floor": ""
+  },
+  {
+   "text": "\ud83d\ude00 Jane Doe \ud83d\ude00 at +1 555 123 4567 \ud83d\ude00",
+   "floor": "targeting a real private person"
+  },
+  {
+   "text": "Jane Doe x\ud83d\ude00+1 555 123 4567 here",
+   "floor": "targeting a real private person"
+  },
+  {
+   "text": "Jane Doe at 555-123-4567x",
+   "floor": "targeting a real private person"
+  },
+  {
+   "text": "Jane Doe at x555-123-4567",
+   "floor": "targeting a real private person"
+  },
+  {
+   "text": "Jane Doe at 555.123.4567.",
+   "floor": "targeting a real private person"
+  },
+  {
+   "text": "Jane Doe at 1.2.3.4.5.6.7.8",
+   "floor": "targeting a real private person"
+  },
+  {
+   "text": "\u0130stanbul Robin Example threat level",
+   "floor": "targeting a real private person"
+  },
+  {
+   "text": "Robin Example THREAT\u0130",
+   "floor": "targeting a real private person"
+  },
+  {
+   "text": "Robin Example \u03a3\u039f\u03a3 harassment",
+   "floor": "targeting a real private person"
+  }
+ ],
+ "files": [
+  {
+   "id": "plain",
+   "hex": "526f62696e204578616d706c650a4b61692053616d706c650a",
+   "names": [
+    "Robin Example",
+    "Kai Sample"
+   ]
+  },
+  {
+   "id": "crlf",
+   "hex": "526f62696e204578616d706c650d0a4b61692053616d706c650d0a",
+   "names": [
+    "Robin Example",
+    "Kai Sample"
+   ]
+  },
+  {
+   "id": "cr",
+   "hex": "526f62696e204578616d706c650d4b61692053616d706c65",
+   "names": [
+    "Robin Example",
+    "Kai Sample"
+   ]
+  },
+  {
+   "id": "separators",
+   "hex": "526f62696e204578616d706c651c4b61692053616d706c651d5468697264204f6e651e466f75727468204f6e65c2854669667468204f6e65e280a85369787468204f6e65e280a9536576656e7468204f6e650b4569676874680c4e696e7468",
+   "names": [
+    "Robin Example",
+    "Kai Sample",
+    "Third One",
+    "Fourth One",
+    "Fifth One",
+    "Sixth One",
+    "Seventh One",
+    "Eighth",
+    "Ninth"
+   ]
+  },
+  {
+   "id": "comments",
+   "hex": "23206865616465720a526f62696e204578616d706c650a20202320696e64656e7465642073746179730a0a2020200a094b61692053616d706c6520200a",
+   "names": [
+    "Robin Example",
+    "# indented stays",
+    "Kai Sample"
+   ]
+  },
+  {
+   "id": "bom",
+   "hex": "efbbbf526f62696e204578616d706c650a4b61692053616d706c650a",
+   "names": [
+    "\ufeffRobin Example",
+    "Kai Sample"
+   ]
+  },
+  {
+   "id": "unicode-space",
+   "hex": "e28083526f62696e204578616d706c65e380800ac2a04b61692053616d706c65c2a00a",
+   "names": [
+    "Robin Example",
+    "Kai Sample"
+   ]
+  },
+  {
+   "id": "nul",
+   "hex": "526f62696e004578616d706c650a",
+   "names": [
+    "Robin\u0000Example"
+   ]
+  },
+  {
+   "id": "invalid-utf8",
+   "hex": "526f62696e20ff4578616d706c650a",
+   "error": "UnicodeDecodeError"
+  },
+  {
+   "id": "encoded-surrogate",
+   "hex": "eda080",
+   "error": "UnicodeDecodeError"
+  },
+  {
+   "id": "missing",
+   "names": []
+  },
+  {
+   "id": "directory",
+   "names": []
+  }
+ ]
+}

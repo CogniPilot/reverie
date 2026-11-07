@@ -1063,14 +1063,13 @@ Admin only in multi-user mode (`403`), like `POST /api/cases/link`: it writes ou
 
 ## Agent profile
 
-`GET /api/agents/:id/profile` is what an agent's profile panel reads: the session's backend, model, effort (the spawn-time default, plus the level its newest Claude Code transcript turn used), the console's token and message counters, the company employee and chat rooms it is bound to, whether the reverie runtime supervises it (with that runtime's configured backends), and the owner-selected persona from its instance config. **Read-only:** the reverie runtime builds it (`reverie-runtime --policy POLICY profile ID`) from GET calls and local reads, and reports backend switching as unavailable (`runtime.switch.available: false`), because switching is an owner action that waits for owner authentication.
+`GET /api/agents/:id/profile` is what an agent's profile panel reads: the session's backend, model, effort (the spawn-time default, plus the level its newest agent CLI transcript turn used), the console's token and message counters, the company employee and chat rooms it is bound to, whether the reverie runtime supervises it (with that runtime's configured backends), and the owner-selected persona from its instance config. **Read-only:** the console builds it from its own session, company and room state plus bounded local reads (the transcript tail and, with a runtime policy, the supervisor state and instance config), and reports backend switching as unavailable (`runtime.switch.available: false`), because switching is an owner action that waits for owner authentication.
 
 - The session resolves like every session route (ownership via `findSessionOrFail`; another user's session is `404`).
 - **Who may read it:** the owner (no `X-Reverie-Parent-Session` header) reads any agent's profile. An agent reads only its **own**, and direct-message rooms are left out of it. Any other header, resolvable or not, gets `403`.
-- `503` until the server's environment names the runtime policy (`REVERIE_RUNTIME_POLICY`; `REVERIE_RUNTIME_BIN` overrides `reverie-runtime` on `PATH`). The command comes only from the environment, so no API call can choose what this route runs.
+- The runtime section and the persona are read only when the server's environment names the runtime policy (`REVERIE_RUNTIME_POLICY`); without one, `runtime.supervised` is `false` and `persona` is `null`. Instance configs must lie strictly inside the policy's `instances_dir`. The policy comes only from the environment, so no API call can choose what this route reads.
 - `501` in multi-user mode: the report reads the console as its owner.
-- `502` when the runtime fails or prints no JSON object, with its `error` when it reported one; `404` when the session disappeared before the report ran.
-- Concurrent requests for one session share a single report. A finished report is reused for 15 s. At most two reports run at once server-wide; more requests wait their turn.
+- `502` with the reason when the configured runtime policy is unusable (unreadable, or without an enabled local OpenCode fallback).
 
 ## Git status
 

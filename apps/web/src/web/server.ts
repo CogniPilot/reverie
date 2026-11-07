@@ -282,6 +282,7 @@ import {
   registerRebootRestoreRoutes,
   registerReadMyMindRoutes,
   registerGitStatusRoutes,
+  profileEnvSources,
   registerAgentProfileRoutes,
   registerStatusTelemetryRoutes,
   registerSystemRoutes,
@@ -1391,7 +1392,17 @@ export class WebServer extends EventEmitter {
     registerRebootRestoreRoutes(this.app, ctx);
     registerReadMyMindRoutes(this.app, ctx);
     registerGitStatusRoutes(this.app, ctx);
-    registerAgentProfileRoutes(this.app, ctx, undefined, undefined, verifiedOwner);
+    // The room and company services are created later in start-up; the report reads them per request.
+    registerAgentProfileRoutes(
+      this.app,
+      ctx,
+      {
+        ...profileEnvSources(),
+        employees: () => this.companyService?.view(undefined).employees ?? [],
+        rooms: () => this.chatroomService?.rooms() ?? [],
+      },
+      verifiedOwner
+    );
     registerStatusTelemetryRoutes(this.app, ctx, this.planCosts);
     registerSubscriptionProfileRoutes(
       this.app,

@@ -64,4 +64,4 @@ wait_ready "$REVERIE_VOICE_CI_ARTIFACTS/speech-url.txt" "$speech_pid"
 console_pid=$!
 wait_ready "$REVERIE_VOICE_CI_ARTIFACTS/console-url.txt" "$console_pid"
 "${fixture_env[@]}" node apps/web/scripts/voice-ci-browser.mjs
-"${fixture_env[@]}" python3 scripts/voice-ci/verify.py --artifacts "$REVERIE_VOICE_CI_ARTIFACTS"
+"${fixture_env[@]}" reverie-voice-ci-verify --artifacts "$REVERIE_VOICE_CI_ARTIFACTS"

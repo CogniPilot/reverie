@@ -1,5 +1,7 @@
 //! Named legacy wire codecs. Decoded values and digests confer no authority.
 pub mod broker_resources;
+pub mod collector;
+pub mod collector_state;
 pub mod device_policy;
 mod digest;
 pub mod js_json;
@@ -8,7 +10,9 @@ mod legacy_json;
 pub mod operations_v1;
 pub mod ops_command;
 pub mod profiles_v1;
+mod python_number;
 pub mod resource_config;
+pub mod resource_history;
 pub mod rootless;
 pub mod route_frames_v1;
 pub mod route_frames_v2;

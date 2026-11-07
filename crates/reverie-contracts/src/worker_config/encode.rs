@@ -103,7 +103,7 @@ fn array<'a>(
         }
     }
 }
-fn string(text: &Text, result: &mut String) {
+pub(crate) fn string(text: &Text, result: &mut String) {
     result.push('"');
     for &codepoint in &text.0 {
         match codepoint {
@@ -135,7 +135,7 @@ fn string(text: &Text, result: &mut String) {
 // Rust Debug provides shortest round-trip digits, including integral floats and
 // signed zero. Python uses a signed, at-least-two-digit exponent at the same
 // display thresholds; no JSON number is passed through a lossy Value conversion.
-fn float(value: f64) -> String {
+pub(crate) fn float(value: f64) -> String {
     let text = format!("{value:?}");
     let Some((mantissa, exponent)) = text.split_once('e') else {
         return text;

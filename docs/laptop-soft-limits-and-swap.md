@@ -49,11 +49,10 @@ laptop's `memory.high` must remain `max`. For example, a swap-only policy entry:
 
 Every ancestor cgroup must allow at least a laptop's swap allowance, or launch
 refuses with `RESERVATION_EFFECTIVE_SWAP_CONFLICT`. The NixOS module option
-`services.reverieWorkers.laptopSwapPoolMiB` and the fixed host-action pool
-target (`pool_unit`/`pool_limits`) set the `reverie-workers.slice` swap ceiling.
-Set them to the broker's `laptopSwapPoolMiB`. Zero, the default, keeps the
-previous swap-free pool byte for byte. Workers enter this slice only in
-`budgetMode: "pool"`.
+`services.reverieWorkers.laptopSwapPoolMiB` sets the `reverie-workers.slice`
+swap ceiling (`MemorySwapMax`). Set it to the broker's `laptopSwapPoolMiB`.
+Zero, the default, keeps the previous swap-free pool byte for byte. Workers
+enter this slice only in `budgetMode: "pool"`.
 
 ### Soft threshold authority
 

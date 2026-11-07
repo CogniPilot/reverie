@@ -6,7 +6,9 @@
       "email": "YOUR_EMAIL"
     },
     "dco_signoff": true,
-    "no_ai_coauthors": true
+    "no_ai_coauthors": true,
+    "ai_author_trailers": ["YOUR-TRAILER-KEY"],
+    "ai_author_patterns": ["YOUR_AUTHOR_PATTERN"]
   },
   "review_directives": [
     {
@@ -22,5 +24,5 @@
   "github": {
     "token_env": "GH_TOKEN"
   },
-  "note": "Repositories require explicit merge policies. Credentials remain outside source and images."
+  "note": "Repositories require explicit merge policies. Credentials remain outside source and images. no_ai_coauthors checks the listed trailer keys for the listed literal author patterns; leave both out and pass a pinned private list with `cargo commit-policy --author-list FILE --author-list-sha256 HEX` instead."
 }

@@ -86,6 +86,13 @@ ownership separately from manager health. Install only publishes fixed units
 and reloads the user manager;
 it does not enable or start them. Repeating init/install preserves history.
 
+Units installed by the earlier Python command keep working for `stop`,
+`disable` and `status`. `start` and `enable` refuse them with a re-install
+message. `install` replaces them only when they are byte for byte that
+release's units for this configuration; anything else is never replaced.
+A migration stages its files first. If it is interrupted, the units can
+still be stopped and disabled, and the next `install` completes it.
+
 The user service has a 90-second sample bound, 256 MiB/no swap, 32 tasks and half
 a CPU. It calls the same collector, rollup and retention implementation; prune
 inputs and producer receipts are disabled in user mode. GPU sampling defaults
@@ -105,7 +112,8 @@ freshness. This source task does not perform those checks or installation.
 
 ## Bounded history reads
 
-The same package supplies `reverie-resource-history`:
+The same package supplies the native `reverie-resource-history` (crate
+`reverie-observations`, which replaced the Python reader byte for byte):
 
 ```sh
 RESULT/bin/reverie-resource-history --config /ABSOLUTE/PRIVATE/CONFIG.json \

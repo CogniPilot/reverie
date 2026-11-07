@@ -166,17 +166,3 @@ class VoiceAdapterSchedulingTests(unittest.TestCase):
             self.assertEqual([event["phase"] for event in events], ["synthesis-start", "synthesis-return"])
             self.assertEqual(events[0]["requestId"], events[1]["requestId"])
             self.assertNotIn("text", events[0])
-
-    def test_inference_telemetry_requires_finite_ordered_real_stage_times(self):
-        import sys
-        from unittest.mock import patch
-        spec = importlib.util.spec_from_file_location("voice_ci_verify", Path(__file__).parents[1] / "scripts/voice-ci/verify.py")
-        verify = importlib.util.module_from_spec(spec)
-        with patch.dict(sys.modules, {"audio": audio}): spec.loader.exec_module(verify)
-        timing = dict(status="completed", lockAttemptNs=2, acquiredNs=3, inferenceStartNs=4, inferenceEndNs=5, finishedNs=6)
-        event = dict(status="completed", requestNs=1, responseNs=7, timing=timing)
-        verify.check_synthesis_timing(event)
-        for changed in ({"inferenceEndNs": 3}, {"acquiredNs": float('nan')}, {"inferenceStartNs": True}, {"status": "busy"}, {"finishedNs": 8}):
-            with self.subTest(changed=changed), self.assertRaises(ValueError):
-                verify.check_synthesis_timing({**event, "timing": {**timing, **changed}})
-        with self.assertRaises(ValueError): verify.check_synthesis_timing({**event, "timing": {}})
