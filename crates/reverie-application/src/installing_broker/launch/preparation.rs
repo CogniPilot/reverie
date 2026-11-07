@@ -7,7 +7,8 @@ use reverie_host::worker_reports::WorkerLaunchHold;
 mod error;
 mod existing;
 pub use existing::{
-    ClassifiedWorkerLaunch, ColdWorkerLaunch, ExistingColdTarget, ReusableWorkerLaunch,
+    AllocationClosedReuse, ClassifiedWorkerLaunch, ColdWorkerLaunch, ExistingColdTarget,
+    PreparedReuseViewer, RestoredReuse, ReusableWorkerLaunch, ReuseViewerFailure, ViewingReuse,
 };
 mod finalization;
 mod observe;

@@ -516,8 +516,8 @@ let
   # Unselected until owner regex, installed lifecycle/auth and actual MCP/client
   # consumers qualify together. No Python fallback inside this native package.
   memoryNativeCli = import ./memory-cli.nix { inherit pkgs src console; };
-  # Independently qualified candidate; selecting the installed client is a
-  # separate consumer change. The OPS daemon and grants remain server-owned.
+  # The selected reverie-ops client (laptop runtime, console and opsCore).
+  # The OPS daemon and grants remain server-owned.
   opsNativeCli = import ./ops-cli.nix { inherit pkgs src; };
   mcpNativeCli = import ./mcp-cli.nix { inherit pkgs src console memoryNativeCli; };
   workerChild = pkgs.writeShellScriptBin "reverie-worker-child" ''
@@ -539,7 +539,7 @@ let
   laptopTools = import ./laptop-tools.nix { inherit pkgs src; };
   runtime = pkgs.buildEnv {
     name = "reverie-runtime";
-    paths = [ console memory kokoro modelRelay officeRelay hands adminMemory handsTools workerExec workerChild pkgs.nodejs_22 pkgs.tmux pkgs.git pkgs.ripgrep
+    paths = [ console memory kokoro modelRelay officeRelay hands adminMemory handsTools workerExec workerChild opsNativeCli pkgs.nodejs_22 pkgs.tmux pkgs.git pkgs.ripgrep
       pkgs.curl pkgs.coreutils pkgs.bashInteractive pkgs.gnugrep pkgs.gnused
       pkgs.gawk pkgs.findutils pkgs.gnutar pkgs.gzip pkgs.procps pkgs.which pkgs.gnumake pkgs.gcc
       pkgs.gh pkgs.jq pkgs.diffutils pkgs.fd
@@ -610,6 +610,8 @@ let
     ln -s ${kokoro}/bin/reverie-kokoro "$out/bin/reverie-kokoro"
     ln -s ${hands}/bin/reverie-hands "$out/bin/reverie-hands"
     ln -s ${adminMemory}/bin/reverie-admin-memory "$out/bin/reverie-admin-memory"
+    # The structured OPS client is native; no Python console command remains.
+    ln -s ${opsNativeCli}/bin/reverie-ops "$out/bin/reverie-ops"
     for command in ${memory}/bin/reverie-*; do
       makeWrapper "$command" "$out/bin/$(basename "$command")" \
         --prefix PATH : ${runtime}/bin \

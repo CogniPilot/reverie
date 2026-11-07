@@ -1,6 +1,6 @@
 use super::tests::{broker, end, finish_claimed, incoming};
 use crate::reservation_gate::tests::Tree;
-mod configured;
+pub(in crate::installing_broker) mod configured;
 
 #[test]
 fn actual_prefix_metadata_finalizer_refuses_foreign_origin_and_old_same_sid_successor() {

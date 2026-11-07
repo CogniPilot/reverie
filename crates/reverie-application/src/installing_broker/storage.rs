@@ -1,10 +1,15 @@
 //! The installing service's actual storage registry. A claim retains real
 //! resources; labels, returned paths and this handle do not authorize launch.
 mod error;
+mod existing_viewer;
+pub(in crate::installing_broker) use existing_viewer::{
+    ExistingStorageError, ExistingStoragePreparation, ExistingStorageReturned,
+};
 mod nix;
 mod observed;
 mod preparation;
 mod recovery_lifetime;
+mod replacement_stop;
 mod source;
 pub use observed::OwnedCreatePreparationError;
 pub(crate) use source::RegisteredSource;
@@ -17,6 +22,10 @@ pub use nix::{
     NetworkStorageError, NetworkStoragePreparation, NetworkStorageReclaimFailure,
     NetworkStorageRetainFailure, NetworkStorageReturned, NixStorageError, NixStoragePreparation,
     NixStorageReclaimFailure, NixStorageRetainFailure, NixStorageReturned,
+};
+pub use replacement_stop::{
+    ReplacementStopPreparation, ReplacementStopReclaimFailure, ReplacementStopRetainFailure,
+    ReplacementStopReturned,
 };
 use reverie_host::{
     worker_runtime::WorkerRuntime,
@@ -39,6 +48,27 @@ enum EntryOwner {
     Source(Arc<source::SourceRecord>),
     Nix(reverie_host::worker_nix::NixWorkflow),
     Laptop(reverie_host::worker_laptop::LaptopWorkflow),
+    ReplacementStop(Arc<Mutex<reverie_host::worker_source_stop::OrdinaryReplacementStop>>),
+    Existing(Arc<reverie_host::worker_laptop::ExistingViewer>),
+}
+/// The original claim destination, shared by named resource transitions.
+/// These private fields describe where to restore custody, never permission.
+enum ClaimDestination {
+    Legacy {
+        registry: Arc<StorageRegistry>,
+    },
+    Registered {
+        registry: Arc<StorageRegistry>,
+        identity: Arc<()>,
+        newly_claimed: bool,
+    },
+}
+impl ClaimDestination {
+    fn registry(&self) -> &Arc<StorageRegistry> {
+        match self {
+            Self::Legacy { registry } | Self::Registered { registry, .. } => registry,
+        }
+    }
 }
 pub(super) struct StorageRegistry {
     pub(super) runtime: WorkerRuntime,
@@ -188,9 +218,19 @@ impl StorageRegistry {
                 "WORKER_LAPTOP_STORAGE_RETAINED",
             ));
         }
+        if matches!(entries[index].owner, EntryOwner::Existing(_)) {
+            return Err(StorageWorkflowError::refused(
+                "WORKER_EXISTING_VIEWER_RETAINED",
+            ));
+        }
         if matches!(entries[index].owner, EntryOwner::Source(_)) {
             return Err(StorageWorkflowError::refused(
                 "WORKER_ORIGINAL_SOURCE_RETAINED",
+            ));
+        }
+        if matches!(entries[index].owner, EntryOwner::ReplacementStop(_)) {
+            return Err(StorageWorkflowError::refused(
+                "WORKER_REPLACEMENT_STOP_RETAINED",
             ));
         }
         let entry = entries.remove(index);

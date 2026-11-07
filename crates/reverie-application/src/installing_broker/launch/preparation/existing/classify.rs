@@ -7,6 +7,10 @@ use reverie_contracts::{
 };
 use reverie_core::resources::BudgetMode;
 use reverie_host::worker_launch::{ExistingPaneState, ExistingProcessIncarnation};
+mod reuse;
+pub use reuse::{
+    AllocationClosedReuse, PreparedReuseViewer, RestoredReuse, ReuseViewerFailure, ViewingReuse,
+};
 
 #[must_use = "continue the same actual launch or retain its failure owners"]
 pub enum ClassifiedWorkerLaunch<'a> {

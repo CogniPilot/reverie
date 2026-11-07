@@ -35,6 +35,7 @@ fn main() {
         ["ps", "--quiet", "--no-trunc"] => "ids.out",
         ["inspect", "test-console"] => "server.out",
         ["inspect", name] if name.starts_with("test-agent-") => "inspect.out",
+        ["exec", "--env", "LANG=C.UTF-8", "--env", "LC_ALL=C.UTF-8", "--env", "TERM=xterm-256color", "--env", "COLORTERM=truecolor", name, "/bin/tmux", "-u", "-L", "reverie-laptop", "display-message", "-p", "-t", "office", "#{pane_dead}"] if *name == "test-agent-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee" => "pane.out",
         ["inspect", "--format", format, ids @ ..]
             if format.starts_with("{\"Id\":{{json .Id}}")
                 && !ids.is_empty()

@@ -1,10 +1,9 @@
 use super::*;
-use crate::reservation_kernel::ReservationKernel;
 use reverie_contracts::worker_config::WorkerPolicyDigest;
-impl OriginalSourceStop {
+impl ExactStopAttempt {
     /// Real inspect and early header validation. The App's existing effective
     /// config/policy resolver runs AFTER this method, before strict state/PID.
-    pub fn inspect(&mut self, runtime: &WorkerRuntime) -> Result<()> {
+    pub(super) fn inspect(&mut self, runtime: &WorkerRuntime) -> Result<()> {
         self.bound(runtime)?;
         need(
             self.phase == Phase::Held,
@@ -17,9 +16,10 @@ impl OriginalSourceStop {
                 true,
             )?;
             self.inspection = Some(
-                SourceStopInspection::identity(
+                SourceStopInspection::identity_for_worker(
                     &output.stdout,
-                    &self.name,
+                    self.name.name(),
+                    self.name.session(),
                     self.name.container(),
                     runtime.worker_identity().deployment(),
                 )
@@ -31,7 +31,7 @@ impl OriginalSourceStop {
     }
     /// A late policy observation failure is terminal too; it never permits a
     /// second inspect/resolver/stop attempt from this actual source record.
-    pub fn refuse_policy(&mut self, runtime: &WorkerRuntime) -> Result<()> {
+    pub(super) fn refuse_policy(&mut self, runtime: &WorkerRuntime) -> Result<()> {
         self.bound(runtime)?;
         need(
             self.phase == Phase::Policy,
@@ -43,7 +43,7 @@ impl OriginalSourceStop {
         )));
         Ok(())
     }
-    pub fn stop_after_policy(
+    pub(super) fn stop_after_policy(
         &mut self,
         runtime: &WorkerRuntime,
         policy: &WorkerPolicyDigest,
@@ -62,12 +62,7 @@ impl OriginalSourceStop {
         row.assert_policy(policy).map_err(SourceStopError::Data)?;
         let state = row.state().map_err(SourceStopError::Data)?;
         need(
-            state.pid()
-                == &self
-                    .name
-                    .native()
-                    .pid()
-                    .map_err(SourceStopError::NativeData)?,
+            state.pid() == &self.name.pid()?,
             "Exact source process incarnation changed",
         )?;
         self.process_matches()?;
@@ -118,18 +113,13 @@ impl OriginalSourceStop {
     fn process_matches(&self) -> Result<String> {
         let start = self.observed_process_start()?;
         need(
-            self.name
-                .native()
-                .start_matches(&start)
-                .map_err(SourceStopError::NativeData)?,
+            self.name.start_matches(&start)?,
             "Exact source process incarnation changed",
         )?;
         Ok(start)
     }
     fn observed_process_start(&self) -> Result<String> {
-        ReservationKernel::new()
-            .original_process_start(self.name.native(), self.read_end())
-            .map_err(SourceStopError::Kernel)
+        self.name.process_start(self.read_end())
     }
     fn observe(
         &mut self,
