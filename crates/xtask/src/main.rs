@@ -40,6 +40,19 @@ fn run() -> Result<(), Box<dyn Error>> {
         {
             worker_perf::image(&workspace_root()?, value, Path::new(manifest))?;
         }
+        [command, mode, value, policy, manifest, archive, link]
+            if command == "verify-worker-perf"
+                && mode == "--temporary-image"
+                && policy == "--policy-manifest"
+                && archive == "--archive-link" =>
+        {
+            worker_perf::temporary_image(
+                &workspace_root()?,
+                value,
+                Path::new(manifest),
+                Path::new(link),
+            )?;
+        }
         [command, mode, value] if command == "verify-worker-perf" && mode == "--deployment" => {
             worker_perf::deployment(&workspace_root()?, value)?;
         }
@@ -49,6 +62,9 @@ fn run() -> Result<(), Box<dyn Error>> {
 }
 
 fn help() {
+    println!(
+        "cargo xtask verify-worker-perf --temporary-image sha256:IMAGE --policy-manifest PATH --archive-link LINK\n  CI: verify, then attempt exact temporary image and unchanged Nix archive-link cleanup on success or failure."
+    );
     println!(
         "cargo xtask verify-worker-perf --image IMAGE --policy-manifest /nix/store/.../worker-perf-profile.json\n  Strict real nonroot container perf stat/record/report using verified task-v1 policy.\ncargo xtask verify-worker-perf --deployment DEPLOYMENT\n  Check every currently running laptop without changing configuration or restarting it.\ncargo xtask prepare-ci-perf\n  Disposable Ubuntu GitHub-hosted VM only: declare per-task user-space host support before the strict Nix-image test."
     );

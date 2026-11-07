@@ -55,6 +55,9 @@ The image CI job builds the Nix worker image and policy, prepares only its
 declared disposable Ubuntu GitHub-hosted VM via `cargo xtask prepare-ci-perf`,
 then runs the strict real test. That preparation command refuses local and
 self-hosted use and never belongs to ordinary verification or product startup.
+The CI-only `--temporary-image` verification purpose attempts removal of the
+exact tested immutable worker image ID and unchanged Nix archive out-link after
+either verification outcome; it never prunes images or removes containers.
 NixOS deployments use the declarative module instead. An image test proves
 container compatibility; it does not claim that every existing employee was
 migrated or that hardware PMU events are available.

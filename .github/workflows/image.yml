@@ -126,27 +126,13 @@ jobs:
         env:
           CARGO_TARGET_DIR: ${{ runner.temp }}/reverie-perf-target
         run: |
-          worker_image=
-          cleanup_worker() {
-            result=$?
-            trap - EXIT
-            if [ -n "$worker_image" ]; then
-              # This disposable job loaded the sole worker tag. Remove only
-              # its tested immutable ID (and that tag), never the server image.
-              docker image rm "$worker_image" || result=1
-            fi
-            if [ -L "$HOME/scratch/reverie/build/worker-image" ]; then
-              rm "$HOME/scratch/reverie/build/worker-image" || result=1
-            fi
-            exit "$result"
-          }
-          trap cleanup_worker EXIT
           nix build .#workerImage --out-link "$HOME/scratch/reverie/build/worker-image"
           nix build .#workerTaskPerfPolicy --out-link "$HOME/scratch/reverie/build/perf-policy"
           docker load --input "$HOME/scratch/reverie/build/worker-image"
           worker_image=$(docker image inspect --format '{{.Id}}' reverie-worker:latest)
-          nix develop --command cargo xtask verify-worker-perf --image "$worker_image" \
-            --policy-manifest "$HOME/scratch/reverie/build/perf-policy/share/reverie/worker-perf-profile.json"
+          nix develop --command cargo xtask verify-worker-perf --temporary-image "$worker_image" \
+            --policy-manifest "$HOME/scratch/reverie/build/perf-policy/share/reverie/worker-perf-profile.json" \
+            --archive-link "$HOME/scratch/reverie/build/worker-image"
 
       - name: Smoke-test the pinned Codex runtime against generated launch commands
         timeout-minutes: 6
