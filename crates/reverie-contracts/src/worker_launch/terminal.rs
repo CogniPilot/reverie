@@ -2,6 +2,8 @@
 //! untrusted DATA; client PIDs never select a host signal target.
 use crate::legacy_json::{self, Node, Number, Value};
 use reverie_core::worker_launch::TerminalSize;
+mod receipt;
+pub use receipt::{ExitReceiptDecoder, ExitReceiptError};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum TerminalFrameError {

@@ -47,7 +47,8 @@ pub use request::{MAX_REQUEST_FRAME, WorkerRequest};
 use reverie_core::worker_launch::LaunchRuleError;
 use std::{collections::BTreeMap, fmt};
 pub use terminal::{
-    TerminalFrame, TerminalFrameError, ViewerClient, decode_terminal_frame, viewer_clients,
+    ExitReceiptDecoder, ExitReceiptError, TerminalFrame, TerminalFrameError, ViewerClient,
+    decode_terminal_frame, viewer_clients,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

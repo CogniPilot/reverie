@@ -1,3 +1,4 @@
+use reverie_contracts::worker_launch::{ExitReceiptDecoder, ExitReceiptError};
 use reverie_contracts::worker_launch::{TerminalFrame, decode_terminal_frame, viewer_clients};
 use serde_json::Value;
 fn corpus() -> Value {
@@ -55,4 +56,45 @@ fn input_borrows_arbitrary_bytes_and_unknown_kind_does_not_parse_json() {
             .to_string(),
         "Invalid terminal frame"
     );
+}
+#[test]
+fn actual_read_text_then_int_receipts_preserve_utf8_precedence_and_decimal_rules_in_every_chunking()
+{
+    let fixture: Value =
+        serde_json::from_str(include_str!("fixtures/worker-exit-receipt-python.json")).unwrap();
+    for case in fixture["cases"].as_array().unwrap() {
+        let hex = case["hex"].as_str().unwrap();
+        let bytes = (0..hex.len())
+            .step_by(2)
+            .map(|at| u8::from_str_radix(&hex[at..at + 2], 16).unwrap())
+            .collect::<Vec<_>>();
+        for size in [1, 2, 3, 4, 7, 1024, 65536] {
+            let mut decoder = ExitReceiptDecoder::new();
+            for chunk in bytes.chunks(size) {
+                decoder.push(chunk);
+            }
+            match decoder.finish() {
+                Ok(output) => assert_eq!(
+                    output
+                        .iter()
+                        .map(|byte| format!("{byte:02x}"))
+                        .collect::<String>(),
+                    case["output"].as_str().unwrap()
+                ),
+                Err(error) => {
+                    let error = match error {
+                        ExitReceiptError::Utf8 => "utf8",
+                        ExitReceiptError::Integer => "integer",
+                        ExitReceiptError::Digits => "digits",
+                    };
+                    assert_eq!(
+                        error,
+                        case["error"].as_str().unwrap(),
+                        "chunk={size}, input prefix={:?}",
+                        &bytes[..bytes.len().min(32)]
+                    );
+                }
+            }
+        }
+    }
 }
