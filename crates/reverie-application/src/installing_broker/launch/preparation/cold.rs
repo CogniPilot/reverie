@@ -151,12 +151,18 @@ enum MemoryJoin {
     Readback(StartedMemoryReadback),
 }
 enum ColdOffice {
-    Retained { original: Arc<RecoveredOffice>, alias: Arc<RecoveredOffice> },
+    Retained {
+        original: Arc<RecoveredOffice>,
+        alias: Arc<RecoveredOffice>,
+    },
     Constructed(Arc<RecoveredOffice>),
 }
 impl ColdOffice {
     fn owner(&self) -> &Arc<RecoveredOffice> {
-        match self { Self::Retained { alias, .. } => alias, Self::Constructed(owner) => owner }
+        match self {
+            Self::Retained { alias, .. } => alias,
+            Self::Constructed(owner) => owner,
+        }
     }
 }
 /// Stored in the existing lifecycle only after actual pane and guard success.

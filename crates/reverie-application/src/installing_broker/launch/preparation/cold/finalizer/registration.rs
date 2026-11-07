@@ -18,7 +18,10 @@ impl Finalizer<'_> {
         if !self.owner.remove_registration(completed) {
             let unregistered = matches!(&self.owner, Owner::Body(owner)
                 if owner.office.is_some() || owner.construction.is_some() || owner.network_phone.is_some());
-            if self.owner.scope().registration.is_some() || self.owner.started().is_some() || unregistered {
+            if self.owner.scope().registration.is_some()
+                || self.owner.started().is_some()
+                || unregistered
+            {
                 self.errors
                     .push(ColdError::Refused("WORKER_COLD_OFFICE_RETAINED"));
             }
@@ -55,7 +58,8 @@ impl Finalizer<'_> {
                 .owner
                 .started()
                 .map(|started| &started.office)
-                .or(reused).or(scope.registration.as_ref());
+                .or(reused)
+                .or(scope.registration.as_ref());
             let registration = match budget {
                 CleanupBudget::Bounded(end) => {
                     lifecycle.close_reuse_registration(active, target, original, end)
@@ -63,39 +67,10 @@ impl Finalizer<'_> {
                 CleanupBudget::Worker => {
                     lifecycle.close_reuse_registration_for_worker(active, target, original)
                 }
-            }.map_err(ColdError::from);
-            // Constructor provenance, not a prior Option, distinguishes a
-            // genuinely new producer from an alias. Every real owner must
-            // independently report joined close before physical data release.
-            if let Owner::Body(owner) = &self.owner {
-                let mut closed = registration;
-                if self.owner.started().is_none()
-                    && let Some(ColdOffice::Constructed(office)) = &owner.office
-                {
-                    let next = office.close_for_stopped_source(budget.phase(2_000)).map_err(ColdError::from);
-                    closed = combine(closed, next);
-                }
-                if let Some((office, construction)) = &owner.construction {
-                    let next = office.close_construction(construction, budget.phase(2_000)).map_err(ColdError::from);
-                    closed = combine(closed, next);
-                }
-                closed?;
-                let session = scope.preparing.admitted.request().session();
-                if let Some(office) = &owner.office {
-                    office.owner()._phone.require_closed_for_resource(&broker.storage.runtime, session)?;
-                }
-                if let Some(phone) = &owner.network_phone {
-                    phone.require_closed_for_resource(&broker.storage.runtime, session)?;
-                }
-            } else {
-                registration?;
             }
-            if let Some(original) = &scope.registration {
-                original._phone.require_closed_for_resource(
-                    &broker.storage.runtime, scope.preparing.admitted.request().session(),
-                )?;
-            }
-            Ok(())
+            .map_err(ColdError::from);
+            self.close_body_producers(registration, budget)?;
+            self.require_office_closure()
         })();
         let closed = if body.is_ok() {
             admission.close()
@@ -109,8 +84,60 @@ impl Finalizer<'_> {
             (Err(primary), Err(secondary)) => Err(error::finalized(primary, secondary.into())),
         }
     }
+    fn close_body_producers(
+        &self,
+        registration: Result<(), ColdError>,
+        budget: CleanupBudget,
+    ) -> Result<(), ColdError> {
+        let Owner::Body(owner) = &self.owner else {
+            return registration;
+        };
+        // Constructor provenance distinguishes a new producer from an alias.
+        // Attempt every actual close even when an earlier close failed.
+        let mut closed = registration;
+        if self.owner.started().is_none()
+            && let Some(ColdOffice::Constructed(office)) = &owner.office
+        {
+            let next = office
+                .close_for_stopped_source(budget.phase(2_000))
+                .map_err(ColdError::from);
+            closed = combine(closed, next);
+        }
+        if let Some((office, construction)) = &owner.construction {
+            let next = office
+                .close_construction(construction, budget.phase(2_000))
+                .map_err(ColdError::from);
+            closed = combine(closed, next);
+        }
+        closed
+    }
+    fn require_office_closure(&self) -> Result<(), ColdError> {
+        let scope = self.owner.scope();
+        let runtime = &scope.preparing.broker().storage.runtime;
+        let session = scope.preparing.admitted.request().session();
+        if let Owner::Body(owner) = &self.owner {
+            if let Some(office) = &owner.office {
+                office
+                    .owner()
+                    ._phone
+                    .require_closed_for_resource(runtime, session)?;
+            }
+            if let Some(phone) = &owner.network_phone {
+                phone.require_closed_for_resource(runtime, session)?;
+            }
+        }
+        if let Some(original) = &scope.registration {
+            original
+                ._phone
+                .require_closed_for_resource(runtime, session)?;
+        }
+        Ok(())
+    }
 }
-fn combine(primary: Result<(), ColdError>, secondary: Result<(), ColdError>) -> Result<(), ColdError> {
+fn combine(
+    primary: Result<(), ColdError>,
+    secondary: Result<(), ColdError>,
+) -> Result<(), ColdError> {
     match (primary, secondary) {
         (Ok(()), next) | (next, Ok(())) => next,
         (Err(primary), Err(secondary)) => Err(error::finalized(primary, secondary)),

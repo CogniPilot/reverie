@@ -10,9 +10,7 @@ impl Finalizer<'_> {
         } else {
             self.owner.resource_slot()?
         };
-        let Some(resources) = slot.take() else {
-            return None;
-        };
+        let resources = slot.take()?;
         let input = match resources {
             Resources::UnobservedCleanup { storage, plan } => {
                 Some((storage, plan, FinalStorageRemainder::Unobserved))
@@ -42,9 +40,7 @@ impl Finalizer<'_> {
                 None
             }
         };
-        let Some((claim, plan, remainder)) = input else {
-            return None;
-        };
+        let (claim, plan, remainder) = input?;
         match claim.retain_direct_final_storage(plan) {
             Ok(native) => *slot = Some(Resources::FinalStorage(FinalStorage { native, remainder })),
             Err(failure) => {

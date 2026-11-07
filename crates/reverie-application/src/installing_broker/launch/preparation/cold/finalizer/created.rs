@@ -53,20 +53,7 @@ impl Finalizer<'_> {
                     .push(ColdError::Refused("WORKER_COLD_LIVE_RESOURCE_UNREGISTERED"));
                 return None;
             };
-            let scope = self.owner.scope();
-            let result = (|| {
-                let lifecycle = budget.lifecycle(scope.preparing.broker())?;
-                let selected = lifecycle.guard.iter().any(|entry| {
-                    entry.session == *scope.preparing.admitted.request().session()
-                        && matches!(&entry.owner, LaptopOwner::Started(actual) if Arc::ptr_eq(actual, started))
-                });
-                if !selected {
-                    return Err(GateError::Refused(
-                        "WORKER_COLD_STARTED_REGISTRATION_CHANGED",
-                    ));
-                }
-                Ok(())
-            })();
+            let result = self.require_started_registration(started, budget);
             if let Err(error) = result {
                 self.errors.push(error.into());
                 return None;
@@ -104,5 +91,23 @@ impl Finalizer<'_> {
                 None
             }
         }
+    }
+    fn require_started_registration(
+        &self,
+        started: &Arc<StartedLaptop>,
+        budget: CleanupBudget,
+    ) -> Result<(), GateError> {
+        let scope = self.owner.scope();
+        let lifecycle = budget.lifecycle(scope.preparing.broker())?;
+        let selected = lifecycle.guard.iter().any(|entry| {
+            entry.session == *scope.preparing.admitted.request().session()
+                && matches!(&entry.owner, LaptopOwner::Started(actual) if Arc::ptr_eq(actual, started))
+        });
+        if !selected {
+            return Err(GateError::Refused(
+                "WORKER_COLD_STARTED_REGISTRATION_CHANGED",
+            ));
+        }
+        Ok(())
     }
 }

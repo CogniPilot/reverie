@@ -138,6 +138,7 @@ fn nonzero_actual_create_retains_same_unknown_record_and_never_publishes_or_star
         .office
         .as_ref()
         .unwrap()
+        .owner()
         .close_for_stopped_source(super::super::tests::end())
         .unwrap();
     assert!(lease_held(&broker));
