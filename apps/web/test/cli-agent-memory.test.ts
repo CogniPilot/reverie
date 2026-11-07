@@ -261,6 +261,13 @@ describe('the session journal', () => {
 
 const WEB = path.join(import.meta.dirname, '..');
 const REPO = path.join(WEB, '..', '..');
+
+/** nix/package.nix: the copy the Nix build supplies (it sees only apps/web), or else this checkout's, as the partition test reads it. */
+function nixPackageSource(): string {
+  const packaged = path.join(import.meta.dirname, 'fixtures', 'nix-package', 'package.nix');
+  if (fs.existsSync(packaged)) return fs.readFileSync(packaged, 'utf8');
+  return fs.readFileSync(path.join(REPO, 'nix', 'package.nix'), 'utf8');
+}
 const byId = (id: string) => reference.cases.find((c) => c.id === id)!;
 
 /** The real command as a process: node on the console entry, the request on standard input, a bare environment. */
@@ -303,11 +310,15 @@ describe('the command', () => {
     expect(memory.options.map((o) => o.long)).toEqual(['--instance']);
   });
 
-  it('is installed as reverie-memory by the package, and python no longer provides that command', () => {
-    const nix = fs.readFileSync(path.join(REPO, 'nix', 'package.nix'), 'utf8');
+  it('is installed as reverie-memory by the package, which runs it when it is built', () => {
+    const nix = nixPackageSource();
     expect(nix).toContain('makeWrapper ${console}/bin/reverie "$out/bin/reverie-memory" --add-flags "agent memory"');
     // The package build itself runs the installed command and fails unless it refuses as below.
     expect(nix).toContain('smoke \x27{}\x27 \x27{"error": "select an instance with --instance or REVERIE_INSTANCE_CONFIG"}\x27');
+  });
+
+  // The Nix build of the console sees only apps/web, so the python side is checked where the whole checkout is.
+  it.skipIf(!fs.existsSync(path.join(REPO, 'python', 'pyproject.toml')))('is no longer provided by python', () => {
     const pyproject = fs.readFileSync(path.join(REPO, 'python', 'pyproject.toml'), 'utf8');
     expect(pyproject).not.toMatch(/^reverie-memory\s*=/m);
     expect(fs.existsSync(path.join(REPO, 'python', 'reverie', 'memory_cli.py'))).toBe(false);
