@@ -14,6 +14,13 @@ enum Purpose {
     ResumeOwner,
     ResourceWebsite,
 }
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum ClosePhase {
+    Open,
+    SocketsClosed,
+    Finished,
+    Unconfirmed,
+}
 #[must_use = "retain the whole channel on uncertain native finalization"]
 pub struct WorkerActorChannel {
     connection: WorkerServiceConnection,
@@ -22,7 +29,7 @@ pub struct WorkerActorChannel {
     purpose: Purpose,
     greeted: bool,
     failed: bool,
-    close_failed: bool,
+    close: ClosePhase,
 }
 pub struct WorkerActorChannelFailure {
     connection: WorkerServiceConnection,
@@ -98,7 +105,7 @@ impl WorkerActorChannel {
             purpose,
             greeted: false,
             failed: false,
-            close_failed: false,
+            close: ClosePhase::Open,
         })
     }
     /// Original kernel credentials are DATA for the actual program verifier.
@@ -181,23 +188,61 @@ impl WorkerActorChannel {
     }
     pub fn close_for_worker(&mut self) -> Result<WorkerLaunchClose> {
         self.failed = true;
-        if self.close_failed {
+        if self.close == ClosePhase::Unconfirmed {
             return Err(WorkerReportError::Unconfirmed);
         }
-        let peer = self.peer.take().map_or(Ok(()), |peer| {
-            crate::native::owned_process::close(peer).map_err(WorkerReportError::Io)
-        });
-        if peer.is_err() {
-            self.connection.record.mark_opaque();
+        if self.close == ClosePhase::Open {
+            let budget = super::budget::CleanupBudget::worker(&self.connection.service);
+            let socket = self.connection.record.finish_actor_channel(&budget);
+            if matches!(socket, Err(WorkerReportError::ChannelClosePending)) && !self.opaque() {
+                return Err(WorkerReportError::ChannelClosePending);
+            }
+            let socket =
+                if matches!(socket, Err(WorkerReportError::ChannelClosePending)) && self.opaque() {
+                    finalized(socket, Err(WorkerReportError::Unconfirmed))
+                } else {
+                    socket
+                };
+            let peer = self.peer.take().map_or(Ok(()), |peer| {
+                crate::native::owned_process::close(peer).map_err(WorkerReportError::Io)
+            });
+            if peer.is_err() {
+                self.connection.record.mark_opaque();
+            }
+            if let Err(error) = finalized(socket, peer) {
+                self.close = ClosePhase::Unconfirmed;
+                return Err(error);
+            }
+            self.close = ClosePhase::SocketsClosed;
         }
-        let socket = self.connection.close_socket_for_worker();
-        let result =
-            finalized(peer, socket.map(|_| ())).and_then(|()| self.hold.release_for_worker());
-        if result.is_err() {
-            self.close_failed = true;
+        if self.close == ClosePhase::SocketsClosed {
+            self.release_hold()?;
         }
-        result?;
-        self.connection.close_socket_for_worker()
+        let handler = self.connection.record.handler_settled();
+        if !self.connection.record.socket_closed_known() {
+            self.close = ClosePhase::Unconfirmed;
+            return Err(WorkerReportError::Unconfirmed);
+        }
+        Ok(if handler {
+            WorkerLaunchClose::Complete
+        } else {
+            WorkerLaunchClose::SocketClosedHandlerRetained
+        })
+    }
+    fn release_hold(&mut self) -> Result<()> {
+        if let Err(error) = self.hold.release_for_worker() {
+            if self.opaque() {
+                self.close = ClosePhase::Unconfirmed;
+            }
+            // Keep the original hold owner's error. Only the socket lock owner
+            // can classify a wait-only refusal as ChannelClosePending.
+            return Err(error);
+        }
+        self.close = ClosePhase::Finished;
+        Ok(())
+    }
+    fn opaque(&self) -> bool {
+        self.connection.record.opaque() || self.connection.service.opaque.load(Ordering::Acquire)
     }
 }
 impl Drop for WorkerActorChannel {

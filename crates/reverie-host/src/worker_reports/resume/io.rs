@@ -11,7 +11,12 @@ impl WorkerActorChannel {
             Purpose::ResumeOwner => b"HOST_RESUME_OWNER_READY\n".as_slice(),
             Purpose::ResourceWebsite => b"RESOURCE_READY\n".as_slice(),
         };
-        let result = self.write(bytes, deadline);
+        // Original worker initial greetings inherit its ten-second sendall
+        // timeout; later FramedChannel sends have a separate two-second cap.
+        let result = self.write(
+            bytes,
+            deadline.min(Instant::now() + Duration::from_secs(10)),
+        );
         self.failed |= result.is_err();
         if result.is_ok() {
             self.greeted = true;
@@ -41,7 +46,10 @@ impl WorkerActorChannel {
         let raw = frame.canonical().map_err(|_| WorkerReportError::Frame)?;
         let mut bytes = (raw.len() as u32).to_be_bytes().to_vec();
         bytes.extend(raw);
-        let result = self.write(&bytes, deadline);
+        let result = self.write(
+            &bytes,
+            deadline.min(Instant::now() + Duration::from_secs(2)),
+        );
         self.failed |= result.is_err();
         result
     }
@@ -74,7 +82,7 @@ impl WorkerActorChannel {
         }
     }
     fn write(&self, mut bytes: &[u8], requested: Instant) -> Result<()> {
-        let end = requested.min(Instant::now() + Duration::from_secs(2));
+        let end = requested;
         let slot = self.connection.record.terminal_stream()?;
         let stream = slot.as_ref().ok_or(WorkerReportError::Unconfirmed)?;
         while !bytes.is_empty() {

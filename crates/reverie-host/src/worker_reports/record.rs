@@ -22,6 +22,11 @@ pub(super) struct Record {
     opaque: AtomicBool,
     lifecycle: Mutex<super::retention::LifecycleHoldState>,
 }
+#[derive(Clone, Copy)]
+enum LockTimeout {
+    Opaque,
+    ActorClosePending,
+}
 impl Record {
     /// Actual predecessor completion, distinct from a closed socket whose
     /// application resources still retain their logical hold.
@@ -139,6 +144,30 @@ impl Record {
         };
         let companion = control.take().map_or(Ok(()), close);
         drop(control);
+        self.finish_closed(interrupted, closed, companion)
+    }
+    /// The actor owns its exact logical hold and terminally fences forwards.
+    /// Acquire both original socket owners BEFORE consuming either descriptor.
+    /// A wait-only refusal retains them in this SAME counted Record.
+    pub(super) fn finish_actor_channel(
+        &self,
+        budget: &super::budget::CleanupBudget<'_>,
+    ) -> Result<()> {
+        let mut stream = self.until_with(&self.stream, budget, LockTimeout::ActorClosePending)?;
+        let mut control = self.until_with(&self.control, budget, LockTimeout::ActorClosePending)?;
+        let interrupted = control.as_ref().map_or(Ok(()), wire::shutdown);
+        let closed = stream.take().map_or(Ok(()), close);
+        let companion = control.take().map_or(Ok(()), close);
+        drop(stream);
+        drop(control);
+        self.finish_closed(interrupted, closed, companion)
+    }
+    fn finish_closed(
+        &self,
+        interrupted: Result<()>,
+        closed: Result<()>,
+        companion: Result<()>,
+    ) -> Result<()> {
         if interrupted.is_err() || closed.is_err() || companion.is_err() {
             self.opaque.store(true, Ordering::Release);
         }
@@ -155,6 +184,14 @@ impl Record {
         lock: &'a Mutex<T>,
         budget: &super::budget::CleanupBudget<'_>,
     ) -> Result<MutexGuard<'a, T>> {
+        self.until_with(lock, budget, LockTimeout::Opaque)
+    }
+    fn until_with<'a, T>(
+        &self,
+        lock: &'a Mutex<T>,
+        budget: &super::budget::CleanupBudget<'_>,
+        timeout: LockTimeout,
+    ) -> Result<MutexGuard<'a, T>> {
         loop {
             match lock.try_lock() {
                 Ok(guard) => return Ok(guard),
@@ -168,9 +205,17 @@ impl Record {
                 }
             }
             if budget.pause().is_err() {
-                self.opaque.store(true, Ordering::Release);
-                return Err(WorkerReportError::Unconfirmed);
+                return Err(self.lock_timeout(timeout));
             }
+        }
+    }
+    fn lock_timeout(&self, timeout: LockTimeout) -> WorkerReportError {
+        match timeout {
+            LockTimeout::Opaque => {
+                self.opaque.store(true, Ordering::Release);
+                WorkerReportError::Unconfirmed
+            }
+            LockTimeout::ActorClosePending => WorkerReportError::ChannelClosePending,
         }
     }
     pub(super) fn new(stream: UnixStream) -> Self {

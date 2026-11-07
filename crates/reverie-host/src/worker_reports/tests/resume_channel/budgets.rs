@@ -113,6 +113,10 @@ fn late_close_settles_same_record_after_actual_preconsumption_lock_timeout() {
     let count_after = service.records.lock().unwrap().len();
     assert!(first.is_err());
     assert_eq!(
+        first.unwrap_err().code(),
+        "WORKER_NATIVE_CHANNEL_CLOSE_PENDING"
+    );
+    assert_eq!(
         count_before, 1,
         "same actual record remains counted while held"
     );
