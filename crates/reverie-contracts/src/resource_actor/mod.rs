@@ -1,11 +1,13 @@
 //! Closed resource-purpose DATA. Only the actual native website/owner actor
 //! can authenticate a channel or authorize maintenance; these values cannot.
 mod facts;
+mod metadata;
 #[cfg(test)]
 mod tests;
 mod website;
 use crate::legacy_json::{self, Node, Number, Text, Value};
 pub use facts::{ArtifactReference, EngineSelection, InstalledFactsDocument};
+pub use metadata::{EngineMetadata, MAX_ENGINE_BODY};
 use reverie_core::{PythonText, decimal::UnsignedInteger, operations::JournalDigest};
 use std::{collections::BTreeMap, fmt};
 pub use website::{CodeFile, ProgramSelection, WebsiteSelection};
