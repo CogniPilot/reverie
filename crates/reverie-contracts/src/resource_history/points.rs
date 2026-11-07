@@ -3,9 +3,9 @@ use super::scan::{Plan, Scanned, gpu_uuid};
 use super::{
     HistoryRefused, HistoryRequest, HistorySource, MAX_ROWS, ObservationConfig, field, integer,
 };
-use crate::legacy_json::{Node, Value};
-use crate::python_number::PythonNumber;
-use crate::worker_config::python_float_repr;
+use crate::legacy_json::{Node, Text, Value};
+use crate::python_number::{self, PythonNumber};
+use crate::worker_config::{python_float_repr, python_json_string};
 use std::collections::{BTreeMap, BTreeSet};
 
 /// `{'min', 'avg', 'max', 'n'}` with the original number objects.
@@ -49,11 +49,6 @@ fn statistics(value: Option<&Value>) -> Option<Stat> {
     (min.le(avg) && avg.le(max)).then_some(Stat { min, avg, max, n })
 }
 
-/// Python's `round(x, 3)`: the double nearest the correctly rounded decimal.
-fn round3(value: f64) -> f64 {
-    format!("{value:.3}").parse().unwrap_or(value)
-}
-
 /// `combine(values)`: first minimal/maximal objects, an int count, and the
 /// count-weighted average in Python's evaluation order.
 fn combine(values: &[Option<Stat>]) -> Option<Stat> {
@@ -76,7 +71,7 @@ fn combine(values: &[Option<Stat>]) -> Option<Stat> {
     }
     Some(Stat {
         min,
-        avg: PythonNumber::Float(round3(total.divided_by(n))),
+        avg: PythonNumber::Float(python_number::round(total.divided_by(n), 3)),
         max,
         n,
     })
@@ -291,18 +286,7 @@ impl Writer {
         self.0.push(':');
     }
     fn string(&mut self, text: &str) {
-        self.0.push('"');
-        for c in text.chars() {
-            match c {
-                '"' => self.0.push_str("\\\""),
-                '\\' => self.0.push_str("\\\\"),
-                c if (c as u32) < 0x20 || !c.is_ascii() => {
-                    self.0.push_str(&format!("\\u{:04x}", c as u32))
-                }
-                c => self.0.push(c),
-            }
-        }
-        self.0.push('"');
+        python_json_string(&Text(text.chars().map(u32::from).collect()), &mut self.0);
     }
     fn number(&mut self, number: PythonNumber) {
         match number {
