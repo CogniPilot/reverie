@@ -10,6 +10,8 @@ members = [
     "crates/reverie-application",
     "crates/reverie-routes",
     "crates/reverie-worker-client",
+    "crates/reverie-front",
+    "crates/reverie-diagnostics",
     "crates/reverie-http",
     "crates/reverie-ops-cli",
     "crates/xtask",
@@ -24,23 +26,28 @@ publish = false
 [workspace.dependencies]
 clap = { version = "4.5", features = ["derive"] }
 libc = "0.2"
+nix = { version = "0.31.3", default-features = false }
+rustls = { version = "0.23", default-features = false, features = ["std", "ring", "tls12"] }
+tokio-rustls = { version = "0.26.6", default-features = false, features = ["ring", "tls12"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["raw_value", "float_roundtrip"] }
 toml = "0.9"
 sha2 = "0.10"
+command-fds = "0.3.3"
 http = "1.4"
-hyper = { version = "1.12", default-features = false, features = ["client", "http1"] }
-hyper-util = { version = "0.1.21", default-features = false, features = ["tokio"] }
-http-body-util = "0.1.5"
 bytes = "1.11"
-tokio = { version = "1.50", default-features = false, features = ["rt", "time", "net", "io-util", "sync"] }
 reverie-http = { path = "crates/reverie-http" }
 getrandom = "=0.2.17"
 uuid = { version = "=1.18.1", default-features = false }
+hyper = { version = "1.12", default-features = false, features = ["client", "http1"] }
+hyper-util = { version = "0.1.21", default-features = false, features = ["tokio"] }
+http-body-util = "0.1.5"
+tokio = { version = "1.50", default-features = false, features = ["rt", "rt-multi-thread", "time", "net", "io-util", "process", "signal", "sync", "macros"] }
 reverie-core = { path = "crates/reverie-core" }
 reverie-contracts = { path = "crates/reverie-contracts" }
 reverie-store = { path = "crates/reverie-store" }
 reverie-host = { path = "crates/reverie-host" }
+reverie-diagnostics = { path = "crates/reverie-diagnostics" }
 
 # Derived from CogniPilot/rumoca 0bab7e08c42dced38488abd298a4b9bb77d2b0cc.
 # Every member must opt in with [lints] workspace = true.
