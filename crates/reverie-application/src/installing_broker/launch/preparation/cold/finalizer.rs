@@ -229,8 +229,10 @@ fn finish<'a>(
     };
     // The actual original allocation finally precedes outstanding Nix close.
     cleanup.close_allocation();
-    cleanup.capture_target();
     cleanup.close_guard();
+    // Known Held/ready network returns publish the original plan here. Read
+    // that same restored owner before selecting its fixed stop target.
+    cleanup.capture_target();
     cleanup.observe_receipt();
     cleanup.stop_created();
     cleanup.stop_classified_original(budget);
