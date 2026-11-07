@@ -84,10 +84,11 @@ impl GoalCustodyAttempt {
                 Ok(output.stdout)
             }
             Err(failure) => {
-                // An occupied shared slot admitted no G job. Its other owner
-                // remains fenced separately; do not strand this G Hold for it.
-                let owned = failure.call.is_some() || failure.error.may_have_started;
-                self.uncertain |= owned && failure.error.is_uncertain();
+                // These fixed calls are read-only. Keep their failed body
+                // outcome, but let the SAME ticket's checked native settlement
+                // establish resource closure. No query or projection is replayed.
+                // The shared client retains consumed-close uncertainty itself.
+                self.uncertain |= failure.call.is_none() && failure.error.may_have_started;
                 self.pending = failure.call;
                 Err(GoalCustodyError::Engine(failure.error.into()))
             }

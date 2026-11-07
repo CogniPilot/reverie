@@ -197,7 +197,10 @@ impl GoalCustodyAttempt {
         if let Some(call) = &self.pending {
             match self.origin.engine.client.settle_call(call, end) {
                 Ok(()) => self.pending = None,
-                Err(_) => self.uncertain = true,
+                // Keep the exact pending ticket. A later checked settlement
+                // may finish its native resources; opaque consumed-close
+                // failures remain negative in that original captured owner.
+                Err(_) => {}
             }
         }
         if self.files.close().is_err() {
