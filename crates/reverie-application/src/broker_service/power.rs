@@ -46,24 +46,31 @@ pub trait PowerCore: Send + Sync {
     fn sweep_failures(&self) -> Option<BrokerReply>;
 }
 
+/// The monotonic clock maintenance spacing is measured on.
+pub type Clock = Arc<dyn Fn() -> Instant + Send + Sync>;
+
 /// The legacy maintenance lock and last-maintenance time.
 pub struct Power {
     core: Arc<dyn PowerCore>,
     busy: Arc<AtomicBool>,
     last: Mutex<Option<Instant>>,
     delay: Duration,
+    clock: Clock,
 }
 impl Power {
     pub fn new(core: Arc<dyn PowerCore>) -> Self {
-        Self::with_delay(core, WEBSITE_DELAY)
+        Self::with_clock(core, WEBSITE_DELAY, Arc::new(Instant::now))
     }
-    pub(super) fn with_delay(core: Arc<dyn PowerCore>, delay: Duration) -> Self {
+    pub(super) fn with_clock(core: Arc<dyn PowerCore>, delay: Duration, clock: Clock) -> Self {
         Self {
             core,
             busy: Arc::new(AtomicBool::new(false)),
-            // The legacy 0.0 monotonic start: the first restart is never spaced.
+            // No maintenance yet, so the first restart is never spaced. Legacy
+            // started from a 0.0 monotonic stamp, which spaced the first
+            // restart on a host up for under a minute; that is not kept.
             last: Mutex::new(None),
             delay,
+            clock,
         }
     }
     /// One routed `Power{action, caller}` request, in the legacy order.
@@ -71,7 +78,6 @@ impl Power {
         &self,
         action: &ControlField,
         caller: Option<&ControlField>,
-        now: Instant,
     ) -> Result<BrokerReply, Refusal> {
         let named = |name: &str| *action == ControlField::Text(name.into());
         if named("restart-website") && self.core.ops_configured() {
@@ -108,7 +114,7 @@ impl Power {
             self.core.stop_laptops()?;
         }
         if let Some(website) = website {
-            self.schedule(website, now)?;
+            self.schedule(website)?;
         }
         let name = match website {
             None => "stop-laptops",
@@ -135,7 +141,7 @@ impl Power {
         }
         BrokerReply::object(fields)
     }
-    fn schedule(&self, website: WebsiteAction, now: Instant) -> Result<(), Refusal> {
+    fn schedule(&self, website: WebsiteAction) -> Result<(), Refusal> {
         if self
             .busy
             .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
@@ -145,6 +151,9 @@ impl Power {
                 "Website maintenance is already running".into(),
             ));
         }
+        // Sampled after the laptop stop and the flag, as legacy read its
+        // monotonic clock, so a slow stop delays the next restart.
+        let now = (self.clock)();
         let mut last = self.last.lock().unwrap_or_else(PoisonError::into_inner);
         if website == WebsiteAction::Restart
             && last.is_some_and(|at| now.saturating_duration_since(at) < RESTART_SPACING)
@@ -159,9 +168,10 @@ impl Power {
         let busy = self.busy.clone();
         let delay = self.delay;
         let spawned = std::thread::Builder::new().spawn(move || {
+            // Released on every return or unwind, as the legacy `finally` did.
+            let _release = BusyGuard(busy);
             std::thread::sleep(delay);
             core.website(website);
-            busy.store(false, Ordering::Release);
         });
         if spawned.is_err() {
             *last = previous;
@@ -169,6 +179,13 @@ impl Power {
             return Err(Refusal::Transport);
         }
         Ok(())
+    }
+}
+/// Clears the maintenance flag when the website task ends, however it ends.
+struct BusyGuard(Arc<AtomicBool>);
+impl Drop for BusyGuard {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::Release);
     }
 }
 fn refuse<T>(text: &str) -> Result<T, Refusal> {
