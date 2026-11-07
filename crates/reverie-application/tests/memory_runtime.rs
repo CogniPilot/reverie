@@ -98,9 +98,15 @@ fn service_entry() {
                 .get_state("native_memory_startup_v1", None)
                 .unwrap()
                 .as_deref(),
-            Some("initializing")
+            None
         );
         store.close().unwrap();
+        let mut profile = reverie_store::memory::MemoryReadProfile::open_native(&db).unwrap();
+        assert_eq!(
+            profile.native_readiness().unwrap().unwrap().phase(),
+            reverie_core::memory::MemoryStartupPhase::Initializing
+        );
+        profile.close().unwrap();
         return;
     }
     let started = StartedMemory::initialize(&cfg, &seeds).unwrap();
@@ -126,7 +132,8 @@ fn service_entry() {
         MemoryRecall::open_existing(&db, Arc::new(HashedEmbedder::new(16)), 0.995, 6),
         Err(MemoryError::NeedsMigration)
     ));
-    assert_eq!(reader.recall("retained source").unwrap().len(), 2);
+    let retained_query = reader.recall("retained source").unwrap();
+    assert_eq!(retained_query.len(), 2);
     let after = store
         .all(None)
         .unwrap()
@@ -137,10 +144,12 @@ fn service_entry() {
     store
         .set_state("native_memory_startup_v1", "profile-pending")
         .unwrap();
-    assert!(matches!(
-        reader.recall("must not run a query"),
-        Err(MemoryError::NeedsProfileRefresh)
-    ));
+    let after_historical_key = reader.recall("retained source").unwrap();
+    assert_eq!(
+        recall_ids(&retained_query),
+        recall_ids(&after_historical_key),
+        "generic historical state is not readiness authority"
+    );
     store
         .set_state("native_memory_startup_v1", "ready")
         .unwrap();
@@ -148,6 +157,33 @@ fn service_entry() {
     assert!(matches!(reader.recall("closed"), Err(MemoryError::Closed)));
     assert!(matches!(started.recall_service(), Err(MemoryError::Closed)));
     reader.close().unwrap();
+    pending_phase_refuses(&db);
+}
+fn recall_ids(views: &[reverie_contracts::memory::MemoryView]) -> Vec<i64> {
+    views
+        .iter()
+        .map(|memory| {
+            serde_json::from_slice::<serde_json::Value>(memory.as_json()).unwrap()["id"]
+                .as_i64()
+                .unwrap()
+        })
+        .collect()
+}
+fn pending_phase_refuses(db: &std::path::Path) {
+    // Create a genuine pending native owner through the same public storage
+    // lifecycle, after closing the prior writer/reader. No legacy string or
+    // unchecked SQL is used to simulate native phase publication.
+    let mut pending = reverie_store::memory::MemoryStartupStore::open(db).unwrap();
+    pending.preflight().unwrap();
+    pending
+        .admit(Arc::new(HashedEmbedder::new(8)), 0.995)
+        .unwrap();
+    pending.profile_pending().unwrap();
+    pending.close().unwrap();
+    assert!(matches!(
+        MemoryRecall::open_existing(db, Arc::new(HashedEmbedder::new(8)), 0.995, 6),
+        Err(MemoryError::NeedsProfileRefresh)
+    ));
 }
 #[test]
 fn readonly_missing_boot_does_not_create_any_state_then_explicit_startup_is_repeatable() {

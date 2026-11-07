@@ -31,6 +31,20 @@ impl std::fmt::Display for MemoryLifecycleError {
                 "memory profile needs explicit refresh"
             }
             Self::Store(MemoryError::NeedsMigration) => "memory scope needs explicit migration",
+            Self::Store(
+                MemoryError::LegacyReadinessCollision
+                | MemoryError::ForeignReadinessNamespace
+                | MemoryError::MalformedReadinessMetadata
+                | MemoryError::UnsupportedReadinessVersion,
+            ) => "memory readiness conflicts with existing data; explicit migration is required",
+            Self::Store(
+                MemoryError::ReadinessRecoveryRequired
+                | MemoryError::ReadinessObservationUnavailable(_),
+            ) => "memory data requires safe recovery before initialization",
+            Self::Store(MemoryError::ReadinessChanged) => {
+                "memory data changed during the operation"
+            }
+            Self::Store(MemoryError::ReadinessUnconfirmed) => "memory finalization is unconfirmed",
             Self::Control(LifecycleError::Busy) => "memory lifecycle is busy",
             Self::Namespace(_) => "memory namespace refused",
             Self::Control(_) => "memory scope control refused",

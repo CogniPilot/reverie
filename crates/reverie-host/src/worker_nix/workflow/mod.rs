@@ -2,6 +2,7 @@
 //! sequence; handles/data here never mint owner, admission or start authority.
 mod cleanup;
 mod drive;
+mod image;
 mod log;
 #[cfg(test)]
 mod tests;
@@ -10,6 +11,7 @@ use crate::{
     installed_worker_engine::InstalledWorkerEngine, worker_runtime::WorkerRuntime,
     worker_storage::LaunchStorage,
 };
+pub use image::NixImageQualification;
 use reverie_contracts::{storage_identity::MetadataText, worker_storage::StorageConfiguration};
 use reverie_core::ids::ContainerId;
 use std::{
@@ -54,6 +56,7 @@ struct Record {
     id: u64,
     resources: Option<Resources>,
     prepared: EffectiveWorkerConfig,
+    image: image::ImagePhase,
     prepared_store: Option<PathBuf>,
     phase: Phase,
     outcome: Option<Result<NixDisposition>>,
@@ -145,6 +148,12 @@ pub struct NixReturned {
     prepared_store: Option<PathBuf>,
 }
 impl NixReturned {
+    /// The actual moved guard/storage resources, never a replacement from paths.
+    pub(crate) fn assert_cold_resources_current(&self) -> Result<()> {
+        self.resources.guard.assert_current()?;
+        self.resources.storage.require_no_cold_pending()?;
+        Ok(())
+    }
     pub(crate) fn runtime_directory(&self) -> Result<PathBuf> {
         self.resources.guard.directory()
     }
@@ -228,6 +237,7 @@ impl Workflows {
             id,
             resources: Some(resources),
             prepared,
+            image: image::ImagePhase::Unchecked,
             prepared_store: None,
             phase: Phase::Held,
             outcome: None,
@@ -304,6 +314,7 @@ impl Workflows {
             .try_lock()
             .map_err(|_| NixError::Refused(NixFault::Retained))?;
         need(record.phase == Phase::Held, NixFault::Replayed)?;
+        image::require_qualified(&record)?;
         record.phase = Phase::Running;
         record.outcome = Some(drive::execute(runtime, self, &mut record));
         cleanup::finish(runtime, self, &mut record, None);

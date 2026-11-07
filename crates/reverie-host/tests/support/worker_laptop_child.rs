@@ -1,4 +1,4 @@
-//! Owned controlled counterpart for the fixed laptop network effect only.
+//! Owned controlled counterpart for the fixed laptop lifecycle effects.
 //! It never invokes a real engine, daemon, company service or mount.
 use std::{env,fs::{self,OpenOptions},io::Write,path::Path,time::{Instant,Duration}};
 fn main() {
@@ -42,6 +42,9 @@ fn main() {
         }
         if mode=="created-start-nonzero" {std::process::exit(9);}
         return;
+    }
+    if args.first().map(String::as_str)==Some("exec") {
+        pane(&args,&mode);return;
     }
     if args.first().map(String::as_str)==Some("stop") {
         assert_eq!(args,["stop","--time","2",&"c".repeat(64)]);
@@ -93,4 +96,33 @@ fn main() {
         },
         _=>panic!("unsupported fixed laptop command"),
     }
+}
+fn pane(args:&[String],mode:&str) {
+    assert!(mode.starts_with("created-"));
+    assert_eq!(&args[..9],&["exec","--env","LANG=C.UTF-8","--env","LC_ALL=C.UTF-8","--env","TERM=xterm-256color","--env","COLORTERM=truecolor"]);
+    let sid=fs::read_to_string("started-laptop").unwrap();
+    assert_eq!(args[9],format!("fixture-agent-{sid}"));
+    assert_eq!(&args[10..14],&["/bin/tmux","-u","-L","reverie-laptop"]);
+    let status=args.get(14).map(String::as_str)==Some("set-option");
+    if status {
+        assert_eq!(&args[14..],&["set-option","-g","status","off"]);
+        assert!(Path::new("pane-created").is_file());
+        fs::write("pane-status",b"actual status-off client").unwrap();
+    } else {
+        let metadata=fs::read_to_string(Path::new("state").join(&sid).join("runtime.json")).unwrap();
+        let exit=metadata.strip_prefix("{\"exit\": \"").unwrap().strip_suffix("\"}").unwrap();
+        let nonce=exit.strip_suffix(".exit").unwrap();
+        let record=format!("/home/agent/.reverie-launch/{nonce}.json");
+        let receipt=format!("/home/agent/.reverie-launch/{exit}");
+        assert_eq!(&args[14..],&["-f","/dev/null","new-session","-d","-x","80","-y","24","-s","office","/bin/reverie-worker-child","--pane-exit",&receipt,&record,";","set-option","-g","remain-on-exit","on"]);
+        fs::write("pane-created",args.join("\0")).unwrap();
+    }
+    let part=if status {"status"} else {"start"};
+    if mode==format!("created-pane-{part}-pending") {
+        fs::write("pane-entered",b"actual owned tmux client").unwrap();
+        let end=Instant::now()+Duration::from_secs(30);
+        while !Path::new("release-pane").exists() {assert!(Instant::now()<end);std::thread::sleep(Duration::from_millis(1));}
+    }
+    if mode==format!("created-pane-{part}-nonzero") {std::process::exit(9);}
+    if mode==format!("created-pane-{part}-bad-utf8") {std::io::stdout().write_all(&[255]).unwrap();}
 }

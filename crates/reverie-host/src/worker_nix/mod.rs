@@ -6,7 +6,8 @@ mod selection;
 mod workflow;
 pub(crate) use workflow::Workflows;
 pub use workflow::{
-    NixDisposition, NixProgress, NixReclaimFailure, NixRetainFailure, NixReturned, NixWorkflow,
+    NixDisposition, NixImageQualification, NixProgress, NixReclaimFailure, NixRetainFailure,
+    NixReturned, NixWorkflow,
 };
 #[cfg(test)]
 mod tests;

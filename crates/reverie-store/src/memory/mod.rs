@@ -10,7 +10,8 @@ pub use documents::{
 };
 mod query;
 mod reader;
-pub use reader::{MemoryReadProfile, MemoryReader};
+pub use reader::{MemoryReadProfile, MemoryReader, NativeMemoryRead};
+mod startup;
 #[cfg(test)]
 mod tests;
 mod writes;
@@ -24,6 +25,7 @@ pub use reverie_core::memory::Belief;
 use reverie_core::memory::{Embedder, HashedEmbedder};
 use reverie_core::memory::{EmbeddingError, EmbeddingText};
 use rusqlite::{Connection, OpenFlags, TransactionBehavior};
+pub use startup::MemoryStartupStore;
 use std::{
     path::{Path, PathBuf},
     sync::{Arc, Mutex, RwLock},
@@ -39,6 +41,7 @@ pub struct MemoryStore {
     connection: Mutex<Option<Connection>>,
     embedder: RwLock<Arc<dyn Embedder>>,
     decay_per_hour: f64,
+    startup_source: Mutex<Option<startup::source::Source>>,
 }
 pub struct MemoryTransaction<'a> {
     origin: &'a MemoryStore,
@@ -90,6 +93,7 @@ impl MemoryStore {
             connection: Mutex::new(Some(db)),
             embedder: RwLock::new(embedder),
             decay_per_hour,
+            startup_source: Mutex::new(None),
         })
     }
     pub fn path(&self) -> &Path {
@@ -162,14 +166,19 @@ impl MemoryStore {
         })
     }
     pub fn close(&self) -> Result<()> {
-        let mut connection = self.connection.lock().map_err(|_| MemoryError::Poisoned)?;
-        if let Some(db) = connection.take()
-            && let Err((db, error)) = db.close()
-        {
-            *connection = Some(db);
-            return Err(error.into());
-        }
-        Ok(())
+        self.shutdown().into_result()
+    }
+    /// Actual SQLite ownership remains Pending on refused close. A consumed
+    /// native-source failure is permanently negative, never a release receipt.
+    pub fn shutdown(&self) -> reverie_core::shutdown::ShutdownStatus<MemoryError> {
+        use reverie_core::shutdown::ShutdownStatus;
+        let Ok(mut connection) = self.connection.lock() else {
+            return ShutdownStatus::Pending(MemoryError::Poisoned);
+        };
+        let Ok(mut source) = self.startup_source.lock() else {
+            return ShutdownStatus::Pending(MemoryError::Poisoned);
+        };
+        startup::shutdown_actual(&mut connection, source.as_mut())
     }
     /// Consistent SQLite online backup of every table, including later stores'
     /// tables, IDs and original vector BLOBs. Trusted application paths only.
@@ -190,8 +199,13 @@ impl MemoryStore {
 }
 fn migrate(db: &mut Connection) -> Result<()> {
     let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    migrate_connection(&tx)?;
+    tx.commit()?;
+    Ok(())
+}
+fn migrate_connection(db: &Connection) -> Result<()> {
     let columns = {
-        let mut statement = tx.prepare("PRAGMA table_info(memories)")?;
+        let mut statement = db.prepare("PRAGMA table_info(memories)")?;
         statement
             .query_map([], |row| row.get::<_, String>(1))?
             .collect::<rusqlite::Result<Vec<_>>>()?
@@ -200,17 +214,16 @@ fn migrate(db: &mut Connection) -> Result<()> {
         if columns.iter().any(|name| name == "assistant_text") {
             return Err(MemoryError::AmbiguousAssistantColumns);
         }
-        tx.execute_batch(&format!(
+        db.execute_batch(&format!(
             "ALTER TABLE memories RENAME COLUMN \"{LEGACY_ASSISTANT_COLUMN}\" TO assistant_text"
         ))?;
     } else if !columns.iter().any(|name| name == "assistant_text") {
         return Err(MemoryError::MissingAssistantColumn);
     }
-    let version: i64 = tx.pragma_query_value(None, "user_version", |row| row.get(0))?;
+    let version: i64 = db.pragma_query_value(None, "user_version", |row| row.get(0))?;
     if version < SCHEMA_VERSION {
-        tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
+        db.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     }
-    tx.commit()?;
     Ok(())
 }
 impl MemoryTransaction<'_> {

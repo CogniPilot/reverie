@@ -1,6 +1,6 @@
 use super::*;
 use crate::command_telemetry::CommandTelemetry;
-fn created(fixture: &Fixture) -> (LaptopWorkflow, CreatedLaptop) {
+pub(super) fn created(fixture: &Fixture) -> (LaptopWorkflow, CreatedLaptop) {
     let workflow = fixture.retain();
     fixture
         .runtime()

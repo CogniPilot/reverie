@@ -12,6 +12,7 @@ use std::{
 mod admission;
 mod employee;
 mod global_stop;
+mod image;
 mod retained;
 static PROGRAM: OnceLock<PathBuf> = OnceLock::new();
 static NEXT: AtomicU64 = AtomicU64::new(0);
