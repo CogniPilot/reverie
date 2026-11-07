@@ -1,7 +1,9 @@
 //! Read-only process snapshots, never website, program or owner authority.
+mod ancestry;
 mod read;
+pub use ancestry::PeerInitSnapshot;
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 use super::{
     Result, WebsiteFactsError,
     files::{Descriptors, finalized},
