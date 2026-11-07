@@ -35,7 +35,7 @@ fn classified(broker: &InstallingBroker) -> (std::os::unix::net::UnixStream, Col
     else {
         panic!("actual initial Cold classification");
     };
-    assert!(matches!(cold.target, ExistingColdTarget::Absent));
+    assert!(matches!(cold.target(), ExistingColdTarget::Absent));
     (client, cold)
 }
 fn lease_held(broker: &InstallingBroker) -> bool {

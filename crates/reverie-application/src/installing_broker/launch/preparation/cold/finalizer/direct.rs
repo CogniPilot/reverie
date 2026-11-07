@@ -5,11 +5,18 @@ use reverie_host::worker_laptop::DirectStorageObservation;
 
 impl Finalizer<'_> {
     pub(super) fn observe_direct_storage(&mut self) -> Option<DirectStorageObservation> {
-        let slot = if self.returned.is_some() { &mut self.returned } else { self.owner.resource_slot()? };
+        let slot = if self.returned.is_some() {
+            &mut self.returned
+        } else {
+            self.owner.resource_slot()?
+        };
         let Some(resources) = slot.take() else {
             return None;
         };
         let input = match resources {
+            Resources::UnobservedCleanup { storage, plan } => {
+                Some((storage, plan, FinalStorageRemainder::Unobserved))
+            }
             Resources::OriginalCleanup {
                 storage,
                 plan,
@@ -65,10 +72,22 @@ impl Finalizer<'_> {
         end: Instant,
     ) -> Option<bool> {
         let broker = self.owner.scope().preparing.broker();
-        let session = self.owner.scope().preparing.admitted.request().session().clone();
-        let slot = if self.returned.is_some() { &mut self.returned } else { self.owner.resource_slot()? };
+        let session = self
+            .owner
+            .scope()
+            .preparing
+            .admitted
+            .request()
+            .session()
+            .clone();
+        let slot = if self.returned.is_some() {
+            &mut self.returned
+        } else {
+            self.owner.resource_slot()?
+        };
         if let Some(Resources::FinalStorage(FinalStorage {
-            remainder: FinalStorageRemainder::Returned(Some(phone)), ..
+            remainder: FinalStorageRemainder::Returned(Some(phone)),
+            ..
         })) = slot.as_ref()
             && let Err(cause) = phone.require_closed_for_resource(&broker.storage.runtime, &session)
         {
@@ -92,7 +111,10 @@ impl Finalizer<'_> {
             Err(failure) => {
                 // Keep the actual opaque native/physical failure owner. Never
                 // rebuild a claim or ask a later observation to forgive it.
-                *slot = Some(Resources::FinalStorageFailed { failure, _remainder: remainder });
+                *slot = Some(Resources::FinalStorageFailed {
+                    failure,
+                    _remainder: remainder,
+                });
                 self.errors
                     .push(ColdError::Refused("WORKER_COLD_FINAL_STORAGE_RETAINED"));
                 None
@@ -104,6 +126,7 @@ impl Finalizer<'_> {
 impl FinalStorageRemainder {
     pub(super) fn restore(self, storage: StorageClaim, plan: ObservedCreatePlan) -> Resources {
         match self {
+            Self::Unobserved => Resources::UnobservedCleanup { storage, plan },
             Self::Original(inspection) => Resources::OriginalCleanup {
                 storage,
                 plan,

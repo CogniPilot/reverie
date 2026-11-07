@@ -42,6 +42,9 @@ enum OriginalRuntime {
     Running,
     Stopped,
     Absent,
+    /// No initial identity/state was observed. This never proves absence;
+    /// prefix cleanup still needs a fresh fixed inspection/complete census.
+    Unobserved,
 }
 enum CreationBudget {
     Unconfirmed,
@@ -75,6 +78,10 @@ enum CopiedRemoval {
     Removed(reverie_host::worker_nix::RemovedStoppedLaptop),
 }
 enum Resources {
+    UnobservedCleanup {
+        storage: StorageClaim,
+        plan: ObservedCreatePlan,
+    },
     OriginalCleanup {
         storage: StorageClaim,
         plan: ObservedCreatePlan,
@@ -110,6 +117,7 @@ struct FinalStorage {
 /// These are actual leftover owners/read-side identities, never a fresh claim
 /// or proof that an Office producer has closed.
 enum FinalStorageRemainder {
+    Unobserved,
     Original(ExistingLaptopInspection),
     Direct(ExistingColdTarget),
     Stopped(Option<StoppedLaptopRemoval>),
@@ -196,6 +204,7 @@ impl<'a> ColdBody<'a> {
             target,
             receipt,
         } = classified;
+        let target = *target;
         let InspectedWorkerLaunch {
             observed,
             previous: _,

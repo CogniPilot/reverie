@@ -14,7 +14,7 @@ impl<'a> PreparationFailure<'a> {
     ) -> Result<ColdHandlerClosed, Box<ColdFinalizationFailure<'a>>> {
         self.finalize_prefix(CleanupBudget::Worker)
     }
-    fn original_running(&self) -> Option<bool> {
+    fn original_context(&self) -> Option<OriginalRuntime> {
         if self.transport_attempted
             || !self.cleanup.is_empty()
             || !matches!(self.origin, FailureOrigin::Prefix)
@@ -26,19 +26,22 @@ impl<'a> PreparationFailure<'a> {
         {
             return None;
         }
-        self.observation
-            .as_ref()?
-            .previous
-            .as_ref()?
-            .data()
-            .running()
-            .ok()
+        match self.observation.as_ref()?.previous.as_ref() {
+            Some(inspection) => inspection.data().running().ok().map(|running| {
+                if running {
+                    OriginalRuntime::Running
+                } else {
+                    OriginalRuntime::Stopped
+                }
+            }),
+            None => Some(OriginalRuntime::Unobserved),
+        }
     }
     fn finalize_prefix(
         mut self: Box<Self>,
         budget: CleanupBudget,
     ) -> Result<ColdHandlerClosed, Box<ColdFinalizationFailure<'a>>> {
-        let Some(running) = self.original_running() else {
+        let Some(original) = self.original_context() else {
             // Checked local finalizers do not establish physical resource or
             // counted-Hold release. Never replay an earlier uncertain attempt.
             self.close_transport_budget(budget);
@@ -63,31 +66,34 @@ impl<'a> PreparationFailure<'a> {
         let FailureRegistration::Captured(registration) = registration else {
             unreachable!("checked original lifecycle capture");
         };
-        let resources = plan.effective_configuration().clone();
+        let effective = plan.effective_configuration().clone();
+        let resources = match previous {
+            Some(inspection) => Resources::OriginalCleanup {
+                storage: storage.expect("same actual original claim"),
+                plan,
+                inspection,
+            },
+            None => Resources::UnobservedCleanup {
+                storage: storage.expect("same actual original claim"),
+                plan,
+            },
+        };
         let owner = ClassifiedCleanup {
             scope: ColdScope {
                 preparing,
                 active,
                 observed: observed.expect("original wait owner"),
                 current: current.expect("original observed source"),
-                resources,
+                resources: effective,
                 receipt,
                 registration,
-                original: if running {
-                    OriginalRuntime::Running
-                } else {
-                    OriginalRuntime::Stopped
-                },
+                original,
                 // Only actual Prefix producers reach this branch. A classified
                 // abort has a distinct origin and cannot infer this phase.
                 budget: CreationBudget::Unconfirmed,
             },
             lifecycle: None,
-            resources: Some(Resources::OriginalCleanup {
-                storage: storage.expect("same actual original claim"),
-                plan,
-                inspection: previous.expect("same sealed first inspection"),
-            }),
+            resources: Some(resources),
         };
         finish(
             Owner::Classified(Box::new(owner)),
