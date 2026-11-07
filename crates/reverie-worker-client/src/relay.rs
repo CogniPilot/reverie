@@ -7,46 +7,9 @@ use serde_json::{Value, json};
 use std::io::Read;
 
 fn allowed_env(key: &str) -> bool {
-    const EXACT: &[&str] = &[
-        "LANG",
-        "LC_ALL",
-        "TERM",
-        "COLORTERM",
-        "XDG_DATA_HOME",
-        "XDG_CONFIG_HOME",
-        "XDG_CACHE_HOME",
-        "XDG_STATE_HOME",
-        "DISABLE_AUTOUPDATER",
-        "DISABLE_UPDATES",
-        "REVERIE_SESSION_ID",
-        "REVERIE_MUX",
-        "REVERIE_MUX_NAME",
-        "REVERIE_PARENT_SESSION_ID",
-        "REVERIE_API_URL",
-        "REVERIE_HOOK_SECRET_FILE",
-    ];
-    EXACT.contains(&key)
-        || [
-            "CLAUDE_",
-            "CODEX_",
-            "OPENCODE_",
-            "OPENAI_",
-            "ANTHROPIC_",
-            "GEMINI_",
-            "GOOGLE_",
-            "REVERIE_STATUSLINE_",
-            "REVERIE_HANDS_",
-        ]
-        .iter()
-        .any(|prefix| {
-            key.strip_prefix(prefix).is_some_and(|suffix| {
-                !suffix.is_empty()
-                    && suffix
-                        .bytes()
-                        .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit() || b == b'_')
-            })
-        })
+    reverie_core::worker_launch::EnvironmentKey::parse(key).is_ok()
 }
+
 fn environment() -> Result<Value> {
     let mut selected = serde_json::Map::new();
     for (key, value) in std::env::vars_os() {

@@ -1,0 +1,1219 @@
+[
+  {
+    "name": "complete-unlimited-ancestors",
+    "reads": {
+      "/proc/123/stat": [
+        "1 (owned fixture) S 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 opaque-start"
+      ],
+      "/proc/123/cgroup": [
+        "0::/parent/worker\n"
+      ],
+      "/sys/fs/cgroup/memory.max": [
+        "max"
+      ],
+      "/sys/fs/cgroup/pids.max": [
+        "max"
+      ],
+      "/sys/fs/cgroup/parent/memory.max": [
+        "max"
+      ],
+      "/sys/fs/cgroup/parent/pids.max": [
+        "max"
+      ],
+      "/sys/fs/cgroup/parent/worker/memory.max": [
+        "2147483648"
+      ],
+      "/sys/fs/cgroup/parent/worker/pids.max": [
+        "128"
+      ],
+      "/sys/fs/cgroup/parent/worker/memory.swap.max": [
+        "0"
+      ]
+    },
+    "row": {
+      "Id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "Image": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "Config": {
+        "Labels": {}
+      },
+      "State": {
+        "Running": true,
+        "Pid": 123
+      },
+      "Mounts": [],
+      "HostConfig": {
+        "Memory": 2147483648,
+        "MemorySwap": 2147483648,
+        "PidsLimit": 128,
+        "NanoCpus": 0
+      }
+    },
+    "policy": null,
+    "binding": {
+      "containerId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "pid": 123,
+      "start": "opaque-start",
+      "cgroup": "parent/worker",
+      "memory": 2147483648,
+      "tasks": 128,
+      "nanoCpus": 0,
+      "image": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    },
+    "error": null
+  },
+  {
+    "name": "missing-true-root",
+    "reads": {
+      "/proc/123/stat": [
+        "1 (owned fixture) S 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 opaque-start"
+      ],
+      "/proc/123/cgroup": [
+        "0::/parent/worker\n"
+      ],
+      "/sys/fs/cgroup/parent/memory.max": [
+        "max"
+      ],
+      "/sys/fs/cgroup/parent/pids.max": [
+        "max"
+      ],
+      "/sys/fs/cgroup/parent/worker/memory.max": [
+        "2147483648"
+      ],
+      "/sys/fs/cgroup/parent/worker/pids.max": [
+        "128"
+      ],
+      "/sys/fs/cgroup/parent/worker/memory.swap.max": [
+        "0"
+      ]
+    },
+    "row": {
+      "Id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "Image": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "Config": {
+        "Labels": {}
+      },
+      "State": {
+        "Running": true,
+        "Pid": 123
+      },
+      "Mounts": [],
+      "HostConfig": {
+        "Memory": 2147483648,
+        "MemorySwap": 2147483648,
+        "PidsLimit": 128,
+        "NanoCpus": 0
+      }
+    },
+    "policy": null,
+    "binding": {
+      "containerId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "pid": 123,
+      "start": "opaque-start",
+      "cgroup": "parent/worker",
+      "memory": 2147483648,
+      "tasks": 128,
+      "nanoCpus": 0,
+      "image": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    },
+    "error": null
+  },
+  {
+    "name": "missing-intermediate",
+    "reads": {
+      "/proc/123/stat": [
+        "1 (owned fixture) S 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 opaque-start"
+      ],
+      "/proc/123/cgroup": [
+        "0::/parent/worker\n"
+      ],
+      "/sys/fs/cgroup/memory.max": [
+        "max"
+      ],
+      "/sys/fs/cgroup/pids.max": [
+        "max"
+      ],
+      "/sys/fs/cgroup/parent/pids.max": [
+        "max"
+      ],
+      "/sys/fs/cgroup/parent/worker/memory.max": [
+        "2147483648"
+      ],
+      "/sys/fs/cgroup/parent/worker/pids.max": [
+        "128"
+      ],
+      "/sys/fs/cgroup/parent/worker/memory.swap.max": [
+        "0"
+      ]
+    },
+    "row": {
+      "Id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "Image": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "Config": {
+        "Labels": {}
+      },
+      "State": {
+        "Running": true,
+        "Pid": 123
+      },
+      "Mounts": [],
+      "HostConfig": {
+        "Memory": 2147483648,
+        "MemorySwap": 2147483648,
+        "PidsLimit": 128,
+        "NanoCpus": 0
+      }
+    },
+    "policy": null,
+    "binding": null,
+    "error": "'/sys/fs/cgroup/parent/memory.max'"
+  },
+  {
+    "name": "lower-ancestor",
+    "reads": {
+      "/proc/123/stat": [
+        "1 (owned fixture) S 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 opaque-start"
+      ],
+      "/proc/123/cgroup": [
+        "0::/parent/worker\n"
+      ],
+      "/sys/fs/cgroup/memory.max": [
+        "max"
+      ],
+      "/sys/fs/cgroup/pids.max": [
+        "max"
+      ],
+      "/sys/fs/cgroup/parent/memory.max": [
+        "1073741824"
+      ],
+      "/sys/fs/cgroup/parent/pids.max": [
+        "max"
+      ],
+      "/sys/fs/cgroup/parent/worker/memory.max": [
+        "2147483648"
+      ],
+      "/sys/fs/cgroup/parent/worker/pids.max": [
+        "128"
+      ],
+      "/sys/fs/cgroup/parent/worker/memory.swap.max": [
+        "0"
+      ]
+    },
+    "row": {
+      "Id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "Image": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "Config": {
+        "Labels": {}
+      },
+      "State": {
+        "Running": true,
+        "Pid": 123
+      },
+      "Mounts": [],
+      "HostConfig": {
+        "Memory": 2147483648,
+        "MemorySwap": 2147483648,
+        "PidsLimit": 128,
+        "NanoCpus": 0
+      }
+    },
+    "policy": null,
+    "binding": null,
+    "error": "RESERVATION_EFFECTIVE_LIMIT_CONFLICT"
+  },
+  {
+    "name": "leaf-leading-zero",
+    "reads": {
+      "/proc/123/stat": [
+        "1 (owned fixture) S 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 opaque-start"
+      ],
+      "/proc/123/cgroup": [
+        "0::/parent/worker\n"
+      ],
+      "/sys/fs/cgroup/memory.max": [
+        "max"
+      ],
+      "/sys/fs/cgroup/pids.max": [
+        "max"
+      ],
+      "/sys/fs/cgroup/parent/memory.max": [
+        "max"
+      ],
+      "/sys/fs/cgroup/parent/pids.max": [
+        "max"
+      ],
+      "/sys/fs/cgroup/parent/worker/memory.max": [
+        "02147483648"
+      ],
+      "/sys/fs/cgroup/parent/worker/pids.max": [
+        "128"
+      ],
+      "/sys/fs/cgroup/parent/worker/memory.swap.max": [
+        "0"
+      ]
+    },
+    "row": {
+      "Id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "Image": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "Config": {
+        "Labels": {}
+      },
+      "State": {
+        "Running": true,
+        "Pid": 123
+      },
+      "Mounts": [],
+      "HostConfig": {
+        "Memory": 2147483648,
+        "MemorySwap": 2147483648,
+        "PidsLimit": 128,
+        "NanoCpus": 0
+      }
+    },
+    "policy": null,
+    "binding": null,
+    "error": "RESERVATION_EFFECTIVE_LIMIT_CONFLICT"
+  },
+  {
+    "name": "ancestor-leading-zero",
+    "reads": {
+      "/proc/123/stat": [
+        "1 (owned fixture) S 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 opaque-start"
+      ],
+      "/proc/123/cgroup": [
+        "0::/parent/worker\n"
+      ],
+      "/sys/fs/cgroup/memory.max": [
+        "max"
+      ],
+      "/sys/fs/cgroup/pids.max": [
+        "max"
+      ],
+      "/sys/fs/cgroup/parent/memory.max": [
+        "02147483648"
+      ],
+      "/sys/fs/cgroup/parent/pids.max": [
+        "max"
+      ],
+      "/sys/fs/cgroup/parent/worker/memory.max": [
+        "2147483648"
+      ],
+      "/sys/fs/cgroup/parent/worker/pids.max": [
+        "128"
+      ],
+      "/sys/fs/cgroup/parent/worker/memory.swap.max": [
+        "0"
+      ]
+    },
+    "row": {
+      "Id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "Image": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "Config": {
+        "Labels": {}
+      },
+      "State": {
+        "Running": true,
+        "Pid": 123
+      },
+      "Mounts": [],
+      "HostConfig": {
+        "Memory": 2147483648,
+        "MemorySwap": 2147483648,
+        "PidsLimit": 128,
+        "NanoCpus": 0
+      }
+    },
+    "policy": null,
+    "binding": {
+      "containerId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "pid": 123,
+      "start": "opaque-start",
+      "cgroup": "parent/worker",
+      "memory": 2147483648,
+      "tasks": 128,
+      "nanoCpus": 0,
+      "image": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    },
+    "error": null
+  },
+  {
+    "name": "invalid-ancestor",
+    "reads": {
+      "/proc/123/stat": [
+        "1 (owned fixture) S 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 opaque-start"
+      ],
+      "/proc/123/cgroup": [
+        "0::/parent/worker\n"
+      ],
+      "/sys/fs/cgroup/memory.max": [
+        "max"
+      ],
+      "/sys/fs/cgroup/pids.max": [
+        "max"
+      ],
+      "/sys/fs/cgroup/parent/memory.max": [
+        "max"
+      ],
+      "/sys/fs/cgroup/parent/pids.max": [
+        "nonsense"
+      ],
+      "/sys/fs/cgroup/parent/worker/memory.max": [
+        "2147483648"
+      ],
+      "/sys/fs/cgroup/parent/worker/pids.max": [
+        "128"
+      ],
+      "/sys/fs/cgroup/parent/worker/memory.swap.max": [
+        "0"
+      ]
+    },
+    "row": {
+      "Id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "Image": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "Config": {
+        "Labels": {}
+      },
+      "State": {
+        "Running": true,
+        "Pid": 123
+      },
+      "Mounts": [],
+      "HostConfig": {
+        "Memory": 2147483648,
+        "MemorySwap": 2147483648,
+        "PidsLimit": 128,
+        "NanoCpus": 0
+      }
+    },
+    "policy": null,
+    "binding": null,
+    "error": "RESERVATION_NATIVE_CGROUP_LIMIT"
+  },
+  {
+    "name": "zero-ancestor",
+    "reads": {
+      "/proc/123/stat": [
+        "1 (owned fixture) S 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 opaque-start"
+      ],
+      "/proc/123/cgroup": [
+        "0::/parent/worker\n"
+      ],
+      "/sys/fs/cgroup/memory.max": [
+        "max"
+      ],
+      "/sys/fs/cgroup/pids.max": [
+        "max"
+      ],
+      "/sys/fs/cgroup/parent/memory.max": [
+        "max"
+      ],
+      "/sys/fs/cgroup/parent/pids.max": [
+        "0"
+      ],
+      "/sys/fs/cgroup/parent/worker/memory.max": [
+        "2147483648"
+      ],
+      "/sys/fs/cgroup/parent/worker/pids.max": [
+        "128"
+      ],
+      "/sys/fs/cgroup/parent/worker/memory.swap.max": [
+        "0"
+      ]
+    },
+    "row": {
+      "Id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "Image": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "Config": {
+        "Labels": {}
+      },
+      "State": {
+        "Running": true,
+        "Pid": 123
+      },
+      "Mounts": [],
+      "HostConfig": {
+        "Memory": 2147483648,
+        "MemorySwap": 2147483648,
+        "PidsLimit": 128,
+        "NanoCpus": 0
+      }
+    },
+    "policy": null,
+    "binding": null,
+    "error": "RESERVATION_NATIVE_CGROUP_LIMIT"
+  },
+  {
+    "name": "pid-drift",
+    "reads": {
+      "/proc/123/stat": [
+        "1 (owned fixture) S 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 opaque-start",
+        "1 (owned fixture) S 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 opaque-start-changed"
+      ],
+      "/proc/123/cgroup": [
+        "0::/parent/worker\n"
+      ],
+      "/sys/fs/cgroup/memory.max": [
+        "max"
+      ],
+      "/sys/fs/cgroup/pids.max": [
+        "max"
+      ],
+      "/sys/fs/cgroup/parent/memory.max": [
+        "max"
+      ],
+      "/sys/fs/cgroup/parent/pids.max": [
+        "max"
+      ],
+      "/sys/fs/cgroup/parent/worker/memory.max": [
+        "2147483648"
+      ],
+      "/sys/fs/cgroup/parent/worker/pids.max": [
+        "128"
+      ],
+      "/sys/fs/cgroup/parent/worker/memory.swap.max": [
+        "0"
+      ]
+    },
+    "row": {
+      "Id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "Image": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "Config": {
+        "Labels": {}
+      },
+      "State": {
+        "Running": true,
+        "Pid": 123
+      },
+      "Mounts": [],
+      "HostConfig": {
+        "Memory": 2147483648,
+        "MemorySwap": 2147483648,
+        "PidsLimit": 128,
+        "NanoCpus": 0
+      }
+    },
+    "policy": null,
+    "binding": null,
+    "error": "RESERVATION_NATIVE_PID_CHANGED"
+  },
+  {
+    "name": "group-drift",
+    "reads": {
+      "/proc/123/stat": [
+        "1 (owned fixture) S 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 opaque-start"
+      ],
+      "/proc/123/cgroup": [
+        "0::/parent/worker\n",
+        "0::/other\n"
+      ],
+      "/sys/fs/cgroup/memory.max": [
+        "max"
+      ],
+      "/sys/fs/cgroup/pids.max": [
+        "max"
+      ],
+      "/sys/fs/cgroup/parent/memory.max": [
+        "max"
+      ],
+      "/sys/fs/cgroup/parent/pids.max": [
+        "max"
+      ],
+      "/sys/fs/cgroup/parent/worker/memory.max": [
+        "2147483648"
+      ],
+      "/sys/fs/cgroup/parent/worker/pids.max": [
+        "128"
+      ],
+      "/sys/fs/cgroup/parent/worker/memory.swap.max": [
+        "0"
+      ]
+    },
+    "row": {
+      "Id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "Image": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "Config": {
+        "Labels": {}
+      },
+      "State": {
+        "Running": true,
+        "Pid": 123
+      },
+      "Mounts": [],
+      "HostConfig": {
+        "Memory": 2147483648,
+        "MemorySwap": 2147483648,
+        "PidsLimit": 128,
+        "NanoCpus": 0
+      }
+    },
+    "policy": null,
+    "binding": null,
+    "error": "RESERVATION_NATIVE_PID_CHANGED"
+  },
+  {
+    "name": "non-root-absolute-tail",
+    "reads": {
+      "/proc/123/stat": [
+        "1 (owned fixture) S 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 opaque-start"
+      ],
+      "/proc/123/cgroup": [
+        "0:://parent/worker"
+      ],
+      "/sys/fs/cgroup/memory.max": [
+        "max"
+      ],
+      "/sys/fs/cgroup/pids.max": [
+        "max"
+      ],
+      "/sys/fs/cgroup/parent/memory.max": [
+        "max"
+      ],
+      "/sys/fs/cgroup/parent/pids.max": [
+        "max"
+      ],
+      "/sys/fs/cgroup/parent/worker/memory.max": [
+        "2147483648"
+      ],
+      "/sys/fs/cgroup/parent/worker/pids.max": [
+        "128"
+      ],
+      "/sys/fs/cgroup/parent/worker/memory.swap.max": [
+        "0"
+      ]
+    },
+    "row": {
+      "Id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "Image": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "Config": {
+        "Labels": {}
+      },
+      "State": {
+        "Running": true,
+        "Pid": 123
+      },
+      "Mounts": [],
+      "HostConfig": {
+        "Memory": 2147483648,
+        "MemorySwap": 2147483648,
+        "PidsLimit": 128,
+        "NanoCpus": 0
+      }
+    },
+    "policy": null,
+    "binding": null,
+    "error": "RESERVATION_NATIVE_CGROUP"
+  },
+  {
+    "name": "parent-tail",
+    "reads": {
+      "/proc/123/stat": [
+        "1 (owned fixture) S 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 opaque-start"
+      ],
+      "/proc/123/cgroup": [
+        "0::/parent/../worker"
+      ],
+      "/sys/fs/cgroup/memory.max": [
+        "max"
+      ],
+      "/sys/fs/cgroup/pids.max": [
+        "max"
+      ],
+      "/sys/fs/cgroup/parent/memory.max": [
+        "max"
+      ],
+      "/sys/fs/cgroup/parent/pids.max": [
+        "max"
+      ],
+      "/sys/fs/cgroup/parent/worker/memory.max": [
+        "2147483648"
+      ],
+      "/sys/fs/cgroup/parent/worker/pids.max": [
+        "128"
+      ],
+      "/sys/fs/cgroup/parent/worker/memory.swap.max": [
+        "0"
+      ]
+    },
+    "row": {
+      "Id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "Image": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "Config": {
+        "Labels": {}
+      },
+      "State": {
+        "Running": true,
+        "Pid": 123
+      },
+      "Mounts": [],
+      "HostConfig": {
+        "Memory": 2147483648,
+        "MemorySwap": 2147483648,
+        "PidsLimit": 128,
+        "NanoCpus": 0
+      }
+    },
+    "policy": null,
+    "binding": null,
+    "error": "RESERVATION_NATIVE_CGROUP"
+  },
+  {
+    "name": "pid-zero",
+    "reads": {
+      "/proc/123/stat": [
+        "1 (owned fixture) S 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 opaque-start"
+      ],
+      "/proc/123/cgroup": [
+        "0::/parent/worker\n"
+      ],
+      "/sys/fs/cgroup/memory.max": [
+        "max"
+      ],
+      "/sys/fs/cgroup/pids.max": [
+        "max"
+      ],
+      "/sys/fs/cgroup/parent/memory.max": [
+        "max"
+      ],
+      "/sys/fs/cgroup/parent/pids.max": [
+        "max"
+      ],
+      "/sys/fs/cgroup/parent/worker/memory.max": [
+        "2147483648"
+      ],
+      "/sys/fs/cgroup/parent/worker/pids.max": [
+        "128"
+      ],
+      "/sys/fs/cgroup/parent/worker/memory.swap.max": [
+        "0"
+      ]
+    },
+    "row": {
+      "Id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "Image": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "Config": {
+        "Labels": {}
+      },
+      "State": {
+        "Running": true,
+        "Pid": 0
+      },
+      "Mounts": [],
+      "HostConfig": {
+        "Memory": 2147483648,
+        "MemorySwap": 2147483648,
+        "PidsLimit": 128,
+        "NanoCpus": 0
+      }
+    },
+    "policy": null,
+    "binding": null,
+    "error": "RESERVATION_NATIVE_PID"
+  },
+  {
+    "name": "bad-image",
+    "reads": {
+      "/proc/123/stat": [
+        "1 (owned fixture) S 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 opaque-start"
+      ],
+      "/proc/123/cgroup": [
+        "0::/parent/worker\n"
+      ],
+      "/sys/fs/cgroup/memory.max": [
+        "max"
+      ],
+      "/sys/fs/cgroup/pids.max": [
+        "max"
+      ],
+      "/sys/fs/cgroup/parent/memory.max": [
+        "max"
+      ],
+      "/sys/fs/cgroup/parent/pids.max": [
+        "max"
+      ],
+      "/sys/fs/cgroup/parent/worker/memory.max": [
+        "2147483648"
+      ],
+      "/sys/fs/cgroup/parent/worker/pids.max": [
+        "128"
+      ],
+      "/sys/fs/cgroup/parent/worker/memory.swap.max": [
+        "0"
+      ]
+    },
+    "row": {
+      "Id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "Image": "latest",
+      "Config": {
+        "Labels": {}
+      },
+      "State": {
+        "Running": true,
+        "Pid": 123
+      },
+      "Mounts": [],
+      "HostConfig": {
+        "Memory": 2147483648,
+        "MemorySwap": 2147483648,
+        "PidsLimit": 128,
+        "NanoCpus": 0
+      }
+    },
+    "policy": null,
+    "binding": null,
+    "error": "RESERVATION_NATIVE_IMAGE"
+  },
+  {
+    "name": "finite-memory-float",
+    "reads": {
+      "/proc/123/stat": [
+        "1 (owned fixture) S 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 opaque-start"
+      ],
+      "/proc/123/cgroup": [
+        "0::/parent/worker\n"
+      ],
+      "/sys/fs/cgroup/memory.max": [
+        "max"
+      ],
+      "/sys/fs/cgroup/pids.max": [
+        "max"
+      ],
+      "/sys/fs/cgroup/parent/memory.max": [
+        "max"
+      ],
+      "/sys/fs/cgroup/parent/pids.max": [
+        "max"
+      ],
+      "/sys/fs/cgroup/parent/worker/memory.max": [
+        "2147483648"
+      ],
+      "/sys/fs/cgroup/parent/worker/pids.max": [
+        "128"
+      ],
+      "/sys/fs/cgroup/parent/worker/memory.swap.max": [
+        "0"
+      ]
+    },
+    "row": {
+      "Id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "Image": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "Config": {
+        "Labels": {}
+      },
+      "State": {
+        "Running": true,
+        "Pid": 123
+      },
+      "Mounts": [],
+      "HostConfig": {
+        "Memory": 2147483648.0,
+        "MemorySwap": 2147483648,
+        "PidsLimit": 128,
+        "NanoCpus": 0
+      }
+    },
+    "policy": null,
+    "binding": null,
+    "error": "RESERVATION_NATIVE_FINITE_LIMITS"
+  },
+  {
+    "name": "cpu-bool",
+    "reads": {
+      "/proc/123/stat": [
+        "1 (owned fixture) S 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 opaque-start"
+      ],
+      "/proc/123/cgroup": [
+        "0::/parent/worker\n"
+      ],
+      "/sys/fs/cgroup/memory.max": [
+        "max"
+      ],
+      "/sys/fs/cgroup/pids.max": [
+        "max"
+      ],
+      "/sys/fs/cgroup/parent/memory.max": [
+        "max"
+      ],
+      "/sys/fs/cgroup/parent/pids.max": [
+        "max"
+      ],
+      "/sys/fs/cgroup/parent/worker/memory.max": [
+        "2147483648"
+      ],
+      "/sys/fs/cgroup/parent/worker/pids.max": [
+        "128"
+      ],
+      "/sys/fs/cgroup/parent/worker/memory.swap.max": [
+        "0"
+      ]
+    },
+    "row": {
+      "Id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "Image": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "Config": {
+        "Labels": {}
+      },
+      "State": {
+        "Running": true,
+        "Pid": 123
+      },
+      "Mounts": [],
+      "HostConfig": {
+        "Memory": 2147483648,
+        "MemorySwap": 2147483648,
+        "PidsLimit": 128,
+        "NanoCpus": false
+      }
+    },
+    "policy": null,
+    "binding": null,
+    "error": "RESERVATION_NATIVE_FINITE_LIMITS"
+  },
+  {
+    "name": "high-and-swap",
+    "reads": {
+      "/proc/123/stat": [
+        "1 (owned fixture) S 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 opaque-start"
+      ],
+      "/proc/123/cgroup": [
+        "0::/parent/worker\n"
+      ],
+      "/sys/fs/cgroup/memory.max": [
+        "max"
+      ],
+      "/sys/fs/cgroup/pids.max": [
+        "max"
+      ],
+      "/sys/fs/cgroup/parent/memory.max": [
+        "max"
+      ],
+      "/sys/fs/cgroup/parent/pids.max": [
+        "max"
+      ],
+      "/sys/fs/cgroup/parent/worker/memory.max": [
+        "2147483648"
+      ],
+      "/sys/fs/cgroup/parent/worker/pids.max": [
+        "128"
+      ],
+      "/sys/fs/cgroup/parent/worker/memory.swap.max": [
+        "268435456"
+      ],
+      "/sys/fs/cgroup/parent/worker/memory.high": [
+        "1073741824"
+      ],
+      "/sys/fs/cgroup/parent/memory.swap.max": [
+        "max"
+      ]
+    },
+    "row": {
+      "Id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "Image": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "Config": {
+        "Labels": {
+          "reverie.worker": "office",
+          "reverie.session": "00000000-0000-0000-0000-000000000000",
+          "reverie.worker-policy": "matching"
+        }
+      },
+      "State": {
+        "Running": true,
+        "Pid": 123
+      },
+      "Mounts": [],
+      "HostConfig": {
+        "Memory": 2147483648,
+        "MemorySwap": 2415919104,
+        "PidsLimit": 128,
+        "NanoCpus": 0
+      }
+    },
+    "policy": {
+      "swapMiB": 256,
+      "memoryHighMiB": 1024
+    },
+    "binding": {
+      "containerId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "pid": 123,
+      "start": "opaque-start",
+      "cgroup": "parent/worker",
+      "memory": 2147483648,
+      "tasks": 128,
+      "nanoCpus": 0,
+      "image": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "swapBytes": 268435456,
+      "memoryHighBytes": 1073741824
+    },
+    "error": null
+  },
+  {
+    "name": "lower-swap-ancestor",
+    "reads": {
+      "/proc/123/stat": [
+        "1 (owned fixture) S 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 opaque-start"
+      ],
+      "/proc/123/cgroup": [
+        "0::/parent/worker\n"
+      ],
+      "/sys/fs/cgroup/memory.max": [
+        "max"
+      ],
+      "/sys/fs/cgroup/pids.max": [
+        "max"
+      ],
+      "/sys/fs/cgroup/parent/memory.max": [
+        "max"
+      ],
+      "/sys/fs/cgroup/parent/pids.max": [
+        "max"
+      ],
+      "/sys/fs/cgroup/parent/worker/memory.max": [
+        "2147483648"
+      ],
+      "/sys/fs/cgroup/parent/worker/pids.max": [
+        "128"
+      ],
+      "/sys/fs/cgroup/parent/worker/memory.swap.max": [
+        "268435456"
+      ],
+      "/sys/fs/cgroup/parent/worker/memory.high": [
+        "1073741824"
+      ],
+      "/sys/fs/cgroup/parent/memory.swap.max": [
+        "134217728"
+      ]
+    },
+    "row": {
+      "Id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "Image": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "Config": {
+        "Labels": {
+          "reverie.worker": "office",
+          "reverie.session": "00000000-0000-0000-0000-000000000000",
+          "reverie.worker-policy": "matching"
+        }
+      },
+      "State": {
+        "Running": true,
+        "Pid": 123
+      },
+      "Mounts": [],
+      "HostConfig": {
+        "Memory": 2147483648,
+        "MemorySwap": 2415919104,
+        "PidsLimit": 128,
+        "NanoCpus": 0
+      }
+    },
+    "policy": {
+      "swapMiB": 256,
+      "memoryHighMiB": 1024
+    },
+    "binding": null,
+    "error": "RESERVATION_EFFECTIVE_SWAP_CONFLICT"
+  },
+  {
+    "name": "high-conflict",
+    "reads": {
+      "/proc/123/stat": [
+        "1 (owned fixture) S 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 opaque-start"
+      ],
+      "/proc/123/cgroup": [
+        "0::/parent/worker\n"
+      ],
+      "/sys/fs/cgroup/memory.max": [
+        "max"
+      ],
+      "/sys/fs/cgroup/pids.max": [
+        "max"
+      ],
+      "/sys/fs/cgroup/parent/memory.max": [
+        "max"
+      ],
+      "/sys/fs/cgroup/parent/pids.max": [
+        "max"
+      ],
+      "/sys/fs/cgroup/parent/worker/memory.max": [
+        "2147483648"
+      ],
+      "/sys/fs/cgroup/parent/worker/pids.max": [
+        "128"
+      ],
+      "/sys/fs/cgroup/parent/worker/memory.swap.max": [
+        "268435456"
+      ],
+      "/sys/fs/cgroup/parent/worker/memory.high": [
+        "max"
+      ],
+      "/sys/fs/cgroup/parent/memory.swap.max": [
+        "max"
+      ]
+    },
+    "row": {
+      "Id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "Image": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "Config": {
+        "Labels": {
+          "reverie.worker": "office",
+          "reverie.session": "00000000-0000-0000-0000-000000000000",
+          "reverie.worker-policy": "matching"
+        }
+      },
+      "State": {
+        "Running": true,
+        "Pid": 123
+      },
+      "Mounts": [],
+      "HostConfig": {
+        "Memory": 2147483648,
+        "MemorySwap": 2415919104,
+        "PidsLimit": 128,
+        "NanoCpus": 0
+      }
+    },
+    "policy": {
+      "swapMiB": 256,
+      "memoryHighMiB": 1024
+    },
+    "binding": null,
+    "error": "RESERVATION_EFFECTIVE_SOFT_LIMIT_CONFLICT"
+  },
+  {
+    "name": "swap-only-explicit-max-high",
+    "reads": {
+      "/proc/123/stat": [
+        "1 (owned fixture) S 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 opaque-start"
+      ],
+      "/proc/123/cgroup": [
+        "0::/parent/worker\n"
+      ],
+      "/sys/fs/cgroup/memory.max": [
+        "max"
+      ],
+      "/sys/fs/cgroup/pids.max": [
+        "max"
+      ],
+      "/sys/fs/cgroup/parent/memory.max": [
+        "max"
+      ],
+      "/sys/fs/cgroup/parent/pids.max": [
+        "max"
+      ],
+      "/sys/fs/cgroup/parent/worker/memory.max": [
+        "2147483648"
+      ],
+      "/sys/fs/cgroup/parent/worker/pids.max": [
+        "128"
+      ],
+      "/sys/fs/cgroup/parent/worker/memory.swap.max": [
+        "268435456"
+      ],
+      "/sys/fs/cgroup/parent/worker/memory.high": [
+        "max"
+      ],
+      "/sys/fs/cgroup/parent/memory.swap.max": [
+        "max"
+      ]
+    },
+    "row": {
+      "Id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "Image": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "Config": {
+        "Labels": {
+          "reverie.worker": "office",
+          "reverie.session": "00000000-0000-0000-0000-000000000000",
+          "reverie.worker-policy": "matching"
+        }
+      },
+      "State": {
+        "Running": true,
+        "Pid": 123
+      },
+      "Mounts": [],
+      "HostConfig": {
+        "Memory": 2147483648,
+        "MemorySwap": 2415919104,
+        "PidsLimit": 128,
+        "NanoCpus": 0
+      }
+    },
+    "policy": {
+      "swapMiB": 256
+    },
+    "binding": {
+      "containerId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "pid": 123,
+      "start": "opaque-start",
+      "cgroup": "parent/worker",
+      "memory": 2147483648,
+      "tasks": 128,
+      "nanoCpus": 0,
+      "image": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "swapBytes": 268435456
+    },
+    "error": null
+  },
+  {
+    "name": "swap-only-numeric-high",
+    "reads": {
+      "/proc/123/stat": [
+        "1 (owned fixture) S 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 opaque-start"
+      ],
+      "/proc/123/cgroup": [
+        "0::/parent/worker\n"
+      ],
+      "/sys/fs/cgroup/memory.max": [
+        "max"
+      ],
+      "/sys/fs/cgroup/pids.max": [
+        "max"
+      ],
+      "/sys/fs/cgroup/parent/memory.max": [
+        "max"
+      ],
+      "/sys/fs/cgroup/parent/pids.max": [
+        "max"
+      ],
+      "/sys/fs/cgroup/parent/worker/memory.max": [
+        "2147483648"
+      ],
+      "/sys/fs/cgroup/parent/worker/pids.max": [
+        "128"
+      ],
+      "/sys/fs/cgroup/parent/worker/memory.swap.max": [
+        "268435456"
+      ],
+      "/sys/fs/cgroup/parent/worker/memory.high": [
+        "1073741824"
+      ],
+      "/sys/fs/cgroup/parent/memory.swap.max": [
+        "max"
+      ]
+    },
+    "row": {
+      "Id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "Image": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "Config": {
+        "Labels": {
+          "reverie.worker": "office",
+          "reverie.session": "00000000-0000-0000-0000-000000000000",
+          "reverie.worker-policy": "matching"
+        }
+      },
+      "State": {
+        "Running": true,
+        "Pid": 123
+      },
+      "Mounts": [],
+      "HostConfig": {
+        "Memory": 2147483648,
+        "MemorySwap": 2415919104,
+        "PidsLimit": 128,
+        "NanoCpus": 0
+      }
+    },
+    "policy": {
+      "swapMiB": 256
+    },
+    "binding": null,
+    "error": "RESERVATION_EFFECTIVE_SOFT_LIMIT_CONFLICT"
+  }
+]

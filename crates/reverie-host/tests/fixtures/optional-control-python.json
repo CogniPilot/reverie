@@ -1,0 +1,79 @@
+{
+  "source": "actual worker_resource_reservations.configured and removed-option ReservationGate constructor, owned synthetic paths only; not custody or admission",
+  "python": "3.13.15 (main, Aug  5 2026, 12:25:43) [GCC 15.3.0]",
+  "moduleSha256": "89f4e9a90d85b790ee6f7d08fbe6dbe770aba54c0e264201e94ab571d3d9f2e3",
+  "cases": [
+    {
+      "recipe": "missing-state",
+      "configText": "{}",
+      "configured": false
+    },
+    {
+      "recipe": "clean",
+      "configText": "{\"stateRoot\": \"$ROOT/state\"}",
+      "configured": false
+    },
+    {
+      "recipe": "marker-file",
+      "configText": "{\"stateRoot\": \"$ROOT/state\"}",
+      "configured": true,
+      "constructorError": "RESERVATION_POLICY_REMOVED"
+    },
+    {
+      "recipe": "marker-directory",
+      "configText": "{\"stateRoot\": \"$ROOT/state\"}",
+      "configured": true,
+      "constructorError": "RESERVATION_POLICY_REMOVED"
+    },
+    {
+      "recipe": "marker-dangling",
+      "configText": "{\"stateRoot\": \"$ROOT/state\"}",
+      "configured": true,
+      "constructorError": "RESERVATION_POLICY_REMOVED"
+    },
+    {
+      "recipe": "pending-file",
+      "configText": "{\"stateRoot\": \"$ROOT/state\"}",
+      "configured": true,
+      "constructorError": "RESERVATION_POLICY_REMOVED"
+    },
+    {
+      "recipe": "pending-dangling",
+      "configText": "{\"stateRoot\": \"$ROOT/state\"}",
+      "configured": true,
+      "constructorError": "RESERVATION_POLICY_REMOVED"
+    },
+    {
+      "recipe": "normalized-marker",
+      "configText": "{\"stateRoot\": \"$ROOT/state//./\"}",
+      "configured": true,
+      "constructorError": "RESERVATION_POLICY_REMOVED"
+    },
+    {
+      "recipe": "unencodable-state",
+      "configText": "{\"stateRoot\": \"$ROOT/bad-\\ud800\"}",
+      "configured": false
+    },
+    {
+      "recipe": "nul-state",
+      "configText": "{\"stateRoot\": \"$ROOT/bad\\u0000tail\"}",
+      "configured": false
+    },
+    {
+      "recipe": "inaccessible-state",
+      "configText": "{\"stateRoot\": \"$ROOT/closed/state\"}",
+      "requiresUnprivileged": true,
+      "configured": false
+    },
+    {
+      "recipe": "option-no-state",
+      "configText": "{\"resourceReservations\": {\"directory\": \"$ROOT/control\", \"companyId\": \"11111111-2222-4333-8444-555555555555\", \"poolId\": \"22222222-2222-4333-8444-555555555555\", \"ownerScopeDigest\": \"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\", \"hostReserveMiB\": 64}}",
+      "configured": true
+    },
+    {
+      "recipe": "null-state",
+      "configText": "{\"stateRoot\": null}",
+      "error": "TypeError"
+    }
+  ]
+}

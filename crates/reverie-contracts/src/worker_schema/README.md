@@ -1,5 +1,12 @@
 # Worker validation ownership audit
 
+The envelope remains intentionally partial. The later
+[ordered application validator](../../../reverie-application/src/worker_validation/README.md)
+now composes the remaining purpose owners, actual readonly observations and
+named compatible owner-file loader. The historical list below records what
+this envelope cohort alone established; it is not a full-validation token or a
+claim that a production consumer has switched.
+
 Frozen source: `python/reverie/worker.py::load_config/validate_config` and
 `worker_docker.py::{enabled,require_immutable_mounts,require_account_mounts}` at
 `26abbc0e`. This cohort ports the complete pure envelope/base and mount

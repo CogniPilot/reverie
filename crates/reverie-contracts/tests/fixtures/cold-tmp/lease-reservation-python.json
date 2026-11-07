@@ -1,0 +1,371 @@
+{
+  "source": "python/reverie/cleanup/lease.py:_reservation_value_state",
+  "sourceSha256": "606cacea83ebb70bb805423e67be44168fec411d3e5c62c5e563c416ab6891aa",
+  "python": "3.13.15",
+  "cases": [
+    {
+      "label": "shape-None",
+      "raw": "null",
+      "now": 1000.5,
+      "state": 0,
+      "error": null
+    },
+    {
+      "label": "shape-True",
+      "raw": "true",
+      "now": 1000.5,
+      "state": 2,
+      "error": null
+    },
+    {
+      "label": "shape-0",
+      "raw": "0",
+      "now": 1000.5,
+      "state": 2,
+      "error": null
+    },
+    {
+      "label": "shape-[]",
+      "raw": "[]",
+      "now": 1000.5,
+      "state": 2,
+      "error": null
+    },
+    {
+      "label": "shape-{}",
+      "raw": "{}",
+      "now": 1000.5,
+      "state": 2,
+      "error": null
+    },
+    {
+      "label": "shape-text",
+      "raw": "\"text\"",
+      "now": 1000.5,
+      "state": 2,
+      "error": null
+    },
+    {
+      "label": "active",
+      "raw": "{\"version\": 1, \"created_utc\": 999, \"until_utc\": 1001}",
+      "now": 1000.5,
+      "state": 1,
+      "error": null
+    },
+    {
+      "label": "version-True",
+      "raw": "{\"version\": true, \"created_utc\": 999, \"until_utc\": 1001}",
+      "now": 1000.5,
+      "state": 1,
+      "error": null
+    },
+    {
+      "label": "version-1.0",
+      "raw": "{\"version\": 1.0, \"created_utc\": 999, \"until_utc\": 1001}",
+      "now": 1000.5,
+      "state": 1,
+      "error": null
+    },
+    {
+      "label": "version-False",
+      "raw": "{\"version\": false, \"created_utc\": 999, \"until_utc\": 1001}",
+      "now": 1000.5,
+      "state": 2,
+      "error": null
+    },
+    {
+      "label": "version-None",
+      "raw": "{\"version\": null, \"created_utc\": 999, \"until_utc\": 1001}",
+      "now": 1000.5,
+      "state": 2,
+      "error": null
+    },
+    {
+      "label": "version-1",
+      "raw": "{\"version\": \"1\", \"created_utc\": 999, \"until_utc\": 1001}",
+      "now": 1000.5,
+      "state": 2,
+      "error": null
+    },
+    {
+      "label": "version-2",
+      "raw": "{\"version\": 2, \"created_utc\": 999, \"until_utc\": 1001}",
+      "now": 1000.5,
+      "state": 2,
+      "error": null
+    },
+    {
+      "label": "malformed-True",
+      "raw": "{\"version\": 1, \"created_utc\": 999, \"until_utc\": 1001, \"malformed\": true}",
+      "now": 1000.5,
+      "state": 2,
+      "error": null
+    },
+    {
+      "label": "malformed-False",
+      "raw": "{\"version\": 1, \"created_utc\": 999, \"until_utc\": 1001, \"malformed\": false}",
+      "now": 1000.5,
+      "state": 1,
+      "error": null
+    },
+    {
+      "label": "malformed-0",
+      "raw": "{\"version\": 1, \"created_utc\": 999, \"until_utc\": 1001, \"malformed\": 0}",
+      "now": 1000.5,
+      "state": 1,
+      "error": null
+    },
+    {
+      "label": "malformed-1",
+      "raw": "{\"version\": 1, \"created_utc\": 999, \"until_utc\": 1001, \"malformed\": 1}",
+      "now": 1000.5,
+      "state": 2,
+      "error": null
+    },
+    {
+      "label": "malformed-",
+      "raw": "{\"version\": 1, \"created_utc\": 999, \"until_utc\": 1001, \"malformed\": \"\"}",
+      "now": 1000.5,
+      "state": 1,
+      "error": null
+    },
+    {
+      "label": "malformed-[]",
+      "raw": "{\"version\": 1, \"created_utc\": 999, \"until_utc\": 1001, \"malformed\": []}",
+      "now": 1000.5,
+      "state": 1,
+      "error": null
+    },
+    {
+      "label": "malformed-{}",
+      "raw": "{\"version\": 1, \"created_utc\": 999, \"until_utc\": 1001, \"malformed\": {}}",
+      "now": 1000.5,
+      "state": 1,
+      "error": null
+    },
+    {
+      "label": "malformed-bad",
+      "raw": "{\"version\": 1, \"created_utc\": 999, \"until_utc\": 1001, \"malformed\": \"bad\"}",
+      "now": 1000.5,
+      "state": 2,
+      "error": null
+    },
+    {
+      "label": "created_utc-None",
+      "raw": "{\"version\": 1, \"created_utc\": null, \"until_utc\": 1001}",
+      "now": 1000.5,
+      "state": 2,
+      "error": null
+    },
+    {
+      "label": "created_utc-True",
+      "raw": "{\"version\": 1, \"created_utc\": true, \"until_utc\": 1001}",
+      "now": 1000.5,
+      "state": 2,
+      "error": null
+    },
+    {
+      "label": "created_utc-1000",
+      "raw": "{\"version\": 1, \"created_utc\": \"1000\", \"until_utc\": 1001}",
+      "now": 1000.5,
+      "state": 2,
+      "error": null
+    },
+    {
+      "label": "created_utc-[]",
+      "raw": "{\"version\": 1, \"created_utc\": [], \"until_utc\": 1001}",
+      "now": 1000.5,
+      "state": 2,
+      "error": null
+    },
+    {
+      "label": "created_utc-nan",
+      "raw": "{\"version\": 1, \"created_utc\": NaN, \"until_utc\": 1001}",
+      "now": 1000.5,
+      "state": 2,
+      "error": null
+    },
+    {
+      "label": "created_utc-inf",
+      "raw": "{\"version\": 1, \"created_utc\": Infinity, \"until_utc\": 1001}",
+      "now": 1000.5,
+      "state": 2,
+      "error": null
+    },
+    {
+      "label": "created_utc--inf",
+      "raw": "{\"version\": 1, \"created_utc\": -Infinity, \"until_utc\": 1001}",
+      "now": 1000.5,
+      "state": 2,
+      "error": null
+    },
+    {
+      "label": "until_utc-None",
+      "raw": "{\"version\": 1, \"created_utc\": 999, \"until_utc\": null}",
+      "now": 1000.5,
+      "state": 2,
+      "error": null
+    },
+    {
+      "label": "until_utc-True",
+      "raw": "{\"version\": 1, \"created_utc\": 999, \"until_utc\": true}",
+      "now": 1000.5,
+      "state": 2,
+      "error": null
+    },
+    {
+      "label": "until_utc-1000",
+      "raw": "{\"version\": 1, \"created_utc\": 999, \"until_utc\": \"1000\"}",
+      "now": 1000.5,
+      "state": 2,
+      "error": null
+    },
+    {
+      "label": "until_utc-[]",
+      "raw": "{\"version\": 1, \"created_utc\": 999, \"until_utc\": []}",
+      "now": 1000.5,
+      "state": 2,
+      "error": null
+    },
+    {
+      "label": "until_utc-nan",
+      "raw": "{\"version\": 1, \"created_utc\": 999, \"until_utc\": NaN}",
+      "now": 1000.5,
+      "state": 2,
+      "error": null
+    },
+    {
+      "label": "until_utc-inf",
+      "raw": "{\"version\": 1, \"created_utc\": 999, \"until_utc\": Infinity}",
+      "now": 1000.5,
+      "state": 2,
+      "error": null
+    },
+    {
+      "label": "until_utc--inf",
+      "raw": "{\"version\": 1, \"created_utc\": 999, \"until_utc\": -Infinity}",
+      "now": 1000.5,
+      "state": 2,
+      "error": null
+    },
+    {
+      "label": "window-35",
+      "raw": "{\"version\": 1, \"created_utc\": 0, \"until_utc\": 86400}",
+      "now": 1000.5,
+      "state": 1,
+      "error": null
+    },
+    {
+      "label": "window-36",
+      "raw": "{\"version\": 1, \"created_utc\": 0, \"until_utc\": 86401}",
+      "now": 1000.5,
+      "state": 2,
+      "error": null
+    },
+    {
+      "label": "window-37",
+      "raw": "{\"version\": 1, \"created_utc\": 1000, \"until_utc\": 1000}",
+      "now": 1000.5,
+      "state": 2,
+      "error": null
+    },
+    {
+      "label": "window-38",
+      "raw": "{\"version\": 1, \"created_utc\": 1001, \"until_utc\": 1000}",
+      "now": 1000.5,
+      "state": 2,
+      "error": null
+    },
+    {
+      "label": "window-39",
+      "raw": "{\"version\": 1, \"created_utc\": 1060.5, \"until_utc\": 1061}",
+      "now": 1000.5,
+      "state": 1,
+      "error": null
+    },
+    {
+      "label": "window-40",
+      "raw": "{\"version\": 1, \"created_utc\": 1060.5000001, \"until_utc\": 1061}",
+      "now": 1000.5,
+      "state": 2,
+      "error": null
+    },
+    {
+      "label": "window-41",
+      "raw": "{\"version\": 1, \"created_utc\": 999, \"until_utc\": 1000.5}",
+      "now": 1000.5,
+      "state": 0,
+      "error": null
+    },
+    {
+      "label": "window-42",
+      "raw": "{\"version\": 1, \"created_utc\": 999, \"until_utc\": 1000.5000001}",
+      "now": 1000.5,
+      "state": 1,
+      "error": null
+    },
+    {
+      "label": "window-43",
+      "raw": "{\"version\": 1, \"created_utc\": -1000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000, \"until_utc\": -999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999}",
+      "now": 1000.5,
+      "state": 0,
+      "error": null
+    },
+    {
+      "label": "window-44",
+      "raw": "{\"version\": 1, \"created_utc\": -10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000, \"until_utc\": -9999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999}",
+      "now": 1000.5,
+      "state": null,
+      "error": "OverflowError"
+    },
+    {
+      "label": "window-45",
+      "raw": "{\"version\": 1, \"created_utc\": 0, \"until_utc\": 1000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000}",
+      "now": 1000.5,
+      "state": 2,
+      "error": null
+    },
+    {
+      "label": "window-46",
+      "raw": "{\"version\": 1, \"created_utc\": 999.5, \"until_utc\": 1000.5}",
+      "now": 1000.5,
+      "state": 0,
+      "error": null
+    },
+    {
+      "label": "window-47",
+      "raw": "{\"version\": 1, \"created_utc\": -0.0, \"until_utc\": 1}",
+      "now": 1000.5,
+      "state": 0,
+      "error": null
+    },
+    {
+      "label": "window-48",
+      "raw": "{\"version\": 1, \"created_utc\": 0, \"until_utc\": -0.0}",
+      "now": 1000.5,
+      "state": 2,
+      "error": null
+    },
+    {
+      "label": "clock--1000.5",
+      "raw": "{\"version\": 1, \"created_utc\": -1001.5, \"until_utc\": -999.5}",
+      "now": -1000.5,
+      "state": 1,
+      "error": null
+    },
+    {
+      "label": "clock-0.0",
+      "raw": "{\"version\": 1, \"created_utc\": -1.0, \"until_utc\": 1.0}",
+      "now": 0.0,
+      "state": 1,
+      "error": null
+    },
+    {
+      "label": "clock-1000.0",
+      "raw": "{\"version\": 1, \"created_utc\": 999.0, \"until_utc\": 1001.0}",
+      "now": 1000.0,
+      "state": 1,
+      "error": null
+    }
+  ]
+}

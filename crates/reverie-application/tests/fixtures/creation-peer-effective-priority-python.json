@@ -1,0 +1,50 @@
+{
+  "sourceSha256": "6f22e845dad7a85ea963b1097e6cd1376d0550edf4b0bf44d4f925d3b56504d7",
+  "scope": "Actual full validated config and check_creation_budget with owned missing company/proc paths and synthetic engine. No host-root/engine effects.",
+  "cases": [
+    {
+      "missingMemorySwap": true,
+      "configValidated": true,
+      "rowText": "[{\"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"22222222-2222-4333-8444-555555555555\"}}, \"State\": {\"Running\": true, \"Pid\": 123}, \"HostConfig\": {\"Memory\": \"bad\"}}]",
+      "error": {
+        "type": "KeyError",
+        "message": "'MemorySwap'"
+      },
+      "events": [
+        [
+          "ps",
+          "--filter",
+          "label=reverie.worker=test",
+          "--format",
+          "{{.Names}}"
+        ],
+        [
+          "inspect",
+          "test-agent-22222222-2222-4333-8444-555555555555"
+        ]
+      ]
+    },
+    {
+      "missingMemorySwap": false,
+      "configValidated": true,
+      "rowText": "[{\"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"22222222-2222-4333-8444-555555555555\"}}, \"State\": {\"Running\": true, \"Pid\": 123}, \"HostConfig\": {\"Memory\": \"bad\", \"MemorySwap\": 0}}]",
+      "error": {
+        "type": "FileNotFoundError",
+        "message": "[Errno 2] No such file or directory: '$ROOT/company.json'"
+      },
+      "events": [
+        [
+          "ps",
+          "--filter",
+          "label=reverie.worker=test",
+          "--format",
+          "{{.Names}}"
+        ],
+        [
+          "inspect",
+          "test-agent-22222222-2222-4333-8444-555555555555"
+        ]
+      ]
+    }
+  ]
+}

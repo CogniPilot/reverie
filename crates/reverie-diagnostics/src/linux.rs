@@ -1,5 +1,6 @@
-//! Only the process's inherited stderr descriptor. No caller-selected fd/path.
+//! Only fixed inherited stdout/stderr. No caller-selected fd/path.
 #![allow(unsafe_code)]
+use super::StandardStream;
 use std::{
     fs::{File, OpenOptions},
     io, mem,
@@ -8,30 +9,44 @@ use std::{
         unix::fs::{MetadataExt, OpenOptionsExt},
     },
 };
-pub(super) fn stderr(message: &[u8]) -> io::Result<()> {
+impl StandardStream {
+    fn fd(self) -> i32 {
+        match self {
+            Self::Output => 1,
+            Self::Error => 2,
+        }
+    }
+    fn path(self) -> &'static str {
+        match self {
+            Self::Output => "/proc/self/fd/1",
+            Self::Error => "/proc/self/fd/2",
+        }
+    }
+}
+pub(super) fn emit(stream: StandardStream, message: &[u8]) -> io::Result<()> {
     if message.is_empty() {
         return Ok(());
     }
-    let info = metadata()?;
+    let info = metadata(stream)?;
     match info.st_mode & libc::S_IFMT {
-        libc::S_IFREG => write_once(2, message, false),
-        libc::S_IFSOCK => write_once(2, message, true),
+        libc::S_IFREG => write_once(stream.fd(), message, false),
+        libc::S_IFSOCK => write_once(stream.fd(), message, true),
         libc::S_IFIFO => {
             require_ignored_sigpipe()?;
-            reopened(message, &info)
+            reopened(stream, message, &info)
         }
-        libc::S_IFCHR => reopened(message, &info),
+        libc::S_IFCHR => reopened(stream, message, &info),
         _ => Err(io::ErrorKind::Unsupported.into()),
     }
 }
-fn metadata() -> io::Result<libc::stat> {
-    // SAFETY: fd2 is borrowed, never closed/replaced; stat output is live ABI
+fn metadata(stream: StandardStream) -> io::Result<libc::stat> {
+    // SAFETY: the fixed fd1/fd2 is borrowed, never closed/replaced; stat output is live ABI
     // storage. Checking its existing access mode never changes shared flags.
     let mut info: libc::stat = unsafe { mem::zeroed() };
-    if unsafe { libc::fstat(2, &mut info) } != 0 {
+    if unsafe { libc::fstat(stream.fd(), &mut info) } != 0 {
         return Err(io::Error::last_os_error());
     }
-    let flags = unsafe { libc::fcntl(2, libc::F_GETFL) };
+    let flags = unsafe { libc::fcntl(stream.fd(), libc::F_GETFL) };
     if flags < 0 {
         return Err(io::Error::last_os_error());
     }
@@ -40,14 +55,14 @@ fn metadata() -> io::Result<libc::stat> {
     }
     Ok(info)
 }
-fn reopened(message: &[u8], original: &libc::stat) -> io::Result<()> {
+fn reopened(stream: StandardStream, message: &[u8], original: &libc::stat) -> io::Result<()> {
     // Reopening a FIFO/TTY creates an independent open-file description, so
     // nonblocking mode cannot leak into the inherited stderr or its peers.
     // O_NOCTTY prevents acquiring a controlling terminal in a session leader.
     let file = OpenOptions::new()
         .write(true)
         .custom_flags(libc::O_NONBLOCK | libc::O_CLOEXEC | libc::O_NOCTTY)
-        .open("/proc/self/fd/2")?;
+        .open(stream.path())?;
     let result = (|| {
         let current = file.metadata()?;
         if current.dev() != original.st_dev

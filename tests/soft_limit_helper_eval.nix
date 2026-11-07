@@ -26,7 +26,7 @@ let
     brokerGroup = "agent";
     entries = [ { employeeId = employee; memoryMaxMiB = 4096; memoryHighMiB = 3072; } ];
   };
-  evaluate = kernel: settings: (import "${nixpkgs}/nixos/lib/eval-config.nix" {
+  evaluateWith = kernel: settings: extra: (import "${nixpkgs}/nixos/lib/eval-config.nix" {
     inherit system;
     modules = [
       ({ config, lib, pkgs, ... }: import ../nix/worker-isolation.nix {
@@ -34,8 +34,10 @@ let
       })
       (withKernel kernel)
       { system.stateVersion = "26.05"; services.reverieWorkers = settings; }
+      extra
     ];
   }).config;
+  evaluate = kernel: settings: evaluateWith kernel settings { };
   # Only this module's assertions: a synthetic evaluation also fails unrelated NixOS base checks.
   failing = c: builtins.any (entry: !entry.assertion && lib.hasInfix "softlimithelper" (lib.toLower entry.message)) c.assertions;
   disabled = evaluate "6.18.39" workers;
@@ -49,6 +51,13 @@ let
   service = enabled.systemd.services."reverie-soft-limit@".serviceConfig;
   policy = builtins.fromJSON enabled.environment.etc."reverie/soft-limit-policy.json".text;
   checks = {
+    cpuPlacementInheritedByDefault = !(disabled.systemd.slices.reverie-workers.sliceConfig ? AllowedCPUs);
+    explicitSharedCpuPlacement = (evaluate "6.18.39" (workers // { allowedCPUs = [ 0 1 2 3 4 5 6 7 ]; })).systemd.slices.reverie-workers.sliceConfig.AllowedCPUs == "0 1 2 3 4 5 6 7";
+    invalidCpuPlacementRefused = lib.all (cpus: builtins.any (entry: !entry.assertion && lib.hasInfix "allowedCPUs" entry.message)
+      (evaluate "6.18.39" (workers // { allowedCPUs = cpus; })).assertions) [ [ ] [ 0 0 ] ];
+    taskPerfHostDefault = disabled.services.reverieWorkers.taskPerf.enable && disabled.boot.kernel.sysctl."kernel.perf_event_paranoid" == 2;
+    taskPerfOwnerOverride = (evaluateWith "6.18.39" workers { boot.kernel.sysctl."kernel.perf_event_paranoid" = 3; }).boot.kernel.sysctl."kernel.perf_event_paranoid" == 3;
+    taskPerfMayBeDisabled = !(evaluate "6.18.39" (workers // { taskPerf.enable = false; })).services.reverieWorkers.taskPerf.enable;
     disabledInstallsNothing = !(disabled.systemd.sockets ? reverie-soft-limit) && !(disabled.environment.etc ? "reverie/soft-limit-policy.json");
     enabledIsClean = !(failing enabled);
     socketBounds = socket.Accept == true && socket.MaxConnections == 4 && socket.Backlog == 4 && socket.SocketMode == "0660" &&

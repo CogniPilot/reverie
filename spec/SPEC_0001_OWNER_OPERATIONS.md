@@ -83,6 +83,33 @@ The UI must show requested values separately from observed running values.
 Unsupported host capabilities should disable the affected option and explain
 the supported remedy before the owner submits a change.
 
+### Host headroom and recovery
+
+The owner API configures employee soft limits, hard ceilings and the aggregate
+employee pool. The GUI renders that API's capabilities, validation, previews and
+observed enforcement; it must not implement a separate resource policy. A soft
+memory maximum means reclaim pressure (`memory.high` on cgroup v2). Docker's
+memory reservation is not an equivalent implementation.
+
+Reserve finite CPU, memory and task capacity for the website, host control
+services and an explicitly designated recovery employee. Place these workloads
+outside the aggregate employee pool that ordinary employees can exhaust. Include
+swap in the capacity model. A configured budget or sum of requested allocations
+does not prove a kernel-enforced aggregate ceiling or reserved capacity.
+
+The API must refuse pool expansion that consumes the configured recovery
+headroom. Report desired settings separately from observed cgroup membership and
+limits. If a host cannot enforce the required isolation, report that capability
+gap and its packaged provisioning step rather than claiming the change applied.
+Changing these controls follows the same versioned preview, authorization and
+durable operation flow as other resource changes.
+
+Acceptance must deliberately saturate an isolated employee test pool and verify
+that the website API and the recovery employee remain responsive and can stop
+the offending workload through the supported API. Verify CPU contention, memory
+pressure, task exhaustion and the configured swap bound on an appropriately
+provisioned host. A configuration-file assertion alone does not pass acceptance.
+
 Every disruptive change follows the same product flow:
 
 1. Read the current configuration, revision, running state and host capabilities.

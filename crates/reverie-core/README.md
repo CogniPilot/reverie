@@ -1,4 +1,67 @@
-# Checked profile domain
+# Reverie core data and algorithms
+
+`posix_text` is the shared portable UTF-8/surrogateescape byte/codepoint owner.
+It performs no path normalization or filesystem lookup; native host/store
+adapters decide when to encode captured text and independently check custody.
+CPU nano-ceiling arithmetic and observation numeric validation stay in their
+existing checked resource/journal owners, separate from ID or effect authority.
+
+`memory` owns the existing `hashed-v1-N` lexical embedding algorithm, signed
+eight-byte BLAKE2b buckets, first-feature accumulation order, Python 3.13
+compensated summation, native float32 vector packing and retrieval scoring.
+The hashed backend remains the existing lexical fallback; it makes no claim of
+model inference or semantic retrieval quality. An explicit backend identity
+continues to distinguish stored vectors.
+
+Unicode 15.1 lowercase, final-sigma context, alphanumeric, decimal, printable and
+whitespace facts are frozen to the accepted Python runtime rather than Rust's
+changing Unicode tables. They preserve voice claims and numerical/text coercion.
+The Unicode data license is retained beside the tables. The port has no Python
+build or runtime dependency. Fixtures cover actual Python tokens, f64 values,
+stored f32 bytes, scores, HTTP float coercion and metadata string representation.
+
+`python_regex` exposes purpose-specific frozen facts to the native compiler and
+standalone matcher: Python 3.13 simple lower/upper, word/decimal/space classes,
+identifier/alphabetic predicates, regex case additions and Unicode 15.1 named
+characters. Existing lowercase/character tables remain the single owner.
+Additional uppercase and identifier facts were exhaustively qualified against
+the accepted Python runtime, including lone surrogates. The named-character
+dependency is pinned to Unicode 15.1 and its CJK lexical check follows CPython.
+Its adapter also rejects a canonical name followed by extra characters when the
+pinned dependency's hash lookup incorrectly returns the canonical character;
+exact canonical names and exact alias lookup remain unchanged.
+Core depends on no matcher or regex compiler, so this seam introduces no cycle.
+
+The private `python_text` owner shares those unchanged frozen tables across
+scalar memory operations and lossless codepoint consumers such as hostnames and
+nonpersisted model/query text. Lone surrogates retain Python's lower-case
+context behavior; the existing public memory helpers remain available.
+
+Scores use the existing real-valued f64/JSON contract. Negative decay and unusual
+weights remain accepted when their powers produce real results, including IEEE
+infinite/NaN cases. A power for which Python returns a complex value produces an
+explicit `Domain` refusal here; this is not a general Python complex arithmetic
+port. No positive-only decay or finite-only weight restriction is introduced.
+
+This component performs no SQLite, HTTP, provider selection, re-embedding or
+deployment. Persistence and service workflows remain separate owners.
+
+`memory_configuration` captures the existing named integer, float and text
+settings without clamping accepted Python integers to i64. It shares the frozen
+Unicode numeric facts and float parser. Configured negative hashed dimensions
+retain their original model name and empty-feature behavior; out-of-Py_ssize_t
+counts fail at embedding allocation instead of changing configuration identity.
+`memory_instance` owns identifier/kind/tone data only. `memory_documents` owns
+document revisions, developer names, ballot categories and runtime week math.
+`persona` renders the existing deterministic reflection profile, sharing the
+pinned ranking and Unicode owners. None of these labels supplies a permission.
+
+Retrieval ordering pins CPython3.13.15's powersort/count-run/gallop policy in
+safe Rust. NaN keys make the exact run schedule observable, so a different
+stable sorter changes retained results. Eighty actual Python rank vectors span
+minrun boundaries and unordered/finite run shapes; SQLite retrieval adds120
+end-to-end vectors. The original PSF license and source provenance are retained
+beside the narrowly scoped implementation. It grants no persistence authority.
 
 `operations` owns the existing resource journal's checked nonnil identifiers,
 unsigned memory references, phase/receipt rules, conservative positive deltas,
@@ -18,6 +81,11 @@ See the contracts [validation audit](../reverie-contracts/src/worker_schema/READ
 
 `rootless` owns arbitrary-precision subordinate-ID containment. Checked decimal
 data and containment results are neither host observations nor access grants.
+
+`decimal` supplies shared exact unsigned arithmetic without schema bounds;
+`capacity` applies the existing signed63-bit explicit policy bounds, exact host/
+pool sums and the separate legacy floating90%+8GiB rule. Rootless and journal
+domains retain their own bounds. Arithmetic data never qualifies a native fact.
 
 - `ProfileEmployeeId` and `ProfileSessionId` preserve lexical UUID compatibility,
   including nil. `NativeOperationId` rejects nil. These purpose-specific values
@@ -81,3 +149,15 @@ It preserves the double-slash anchor, '..' and Python codepoints. These values
 establish no filesystem resolution, custody or mount authority. The existing
 lease broker-parent comparison reuses this owner; source/control path policies
 remain the responsibility of their respective consumers.
+
+`worker_launch` owns the worker environment-key vocabulary, checked request text,
+cwd/terminal/account-namespace rules, derived worker/container references and
+ASCII employee hostname labels. The native client reuses the key owner without
+inheriting broker value/frame bounds. These values are data, never peer grants.
+
+`PythonText` and `PythonTextRef` share one checked Python-codepoint invariant
+for owned and borrowed data, including NUL and lone surrogates. Trimming uses
+the existing frozen Python whitespace facts; slicing counts codepoints. No OS
+encoding, replacement, normalization, serde or authority is implied. Existing
+metadata text wraps the owned value; named memory inputs may delegate to the
+borrowed view without duplicating text rules.

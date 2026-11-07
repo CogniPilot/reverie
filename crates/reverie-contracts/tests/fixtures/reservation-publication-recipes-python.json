@@ -1,0 +1,339 @@
+[
+  {
+    "name": "0",
+    "recipe": null,
+    "accepted": false,
+    "wrapper": "RESOURCE_PREPARATION_INTENT_UNCERTAIN_KEEP_CLAIM",
+    "causeType": "Refused",
+    "cause": "RESOURCE_PREPARATION_NORMAL_RECIPE_REQUIRED",
+    "state": "PREPARING",
+    "version": 2
+  },
+  {
+    "name": "1",
+    "recipe": true,
+    "accepted": false,
+    "wrapper": "RESOURCE_PREPARATION_INTENT_UNCERTAIN_KEEP_CLAIM",
+    "causeType": "Refused",
+    "cause": "RESOURCE_PREPARATION_NORMAL_RECIPE_REQUIRED",
+    "state": "PREPARING",
+    "version": 2
+  },
+  {
+    "name": "2",
+    "recipe": 0,
+    "accepted": false,
+    "wrapper": "RESOURCE_PREPARATION_INTENT_UNCERTAIN_KEEP_CLAIM",
+    "causeType": "Refused",
+    "cause": "RESOURCE_PREPARATION_NORMAL_RECIPE_REQUIRED",
+    "state": "PREPARING",
+    "version": 2
+  },
+  {
+    "name": "3",
+    "recipe": "codex",
+    "accepted": false,
+    "wrapper": "RESOURCE_PREPARATION_INTENT_UNCERTAIN_KEEP_CLAIM",
+    "causeType": "Refused",
+    "cause": "RESOURCE_PREPARATION_NORMAL_RECIPE_REQUIRED",
+    "state": "PREPARING",
+    "version": 2
+  },
+  {
+    "name": "4",
+    "recipe": [],
+    "accepted": false,
+    "wrapper": "RESOURCE_PREPARATION_INTENT_UNCERTAIN_KEEP_CLAIM",
+    "causeType": "Refused",
+    "cause": "RESOURCE_PREPARATION_NORMAL_RECIPE_REQUIRED",
+    "state": "PREPARING",
+    "version": 2
+  },
+  {
+    "name": "5",
+    "recipe": {},
+    "accepted": false,
+    "wrapper": "RESOURCE_PREPARATION_INTENT_UNCERTAIN_KEEP_CLAIM",
+    "causeType": "Refused",
+    "cause": "RESOURCE_PREPARATION_NORMAL_RECIPE_REQUIRED",
+    "state": "PREPARING",
+    "version": 2
+  },
+  {
+    "name": "6",
+    "recipe": {
+      "mode": "other"
+    },
+    "accepted": false,
+    "wrapper": "RESOURCE_PREPARATION_INTENT_UNCERTAIN_KEEP_CLAIM",
+    "causeType": "Refused",
+    "cause": "RESOURCE_PREPARATION_NORMAL_RECIPE_REQUIRED",
+    "state": "PREPARING",
+    "version": 2
+  },
+  {
+    "name": "7",
+    "recipe": {
+      "mode": "CLAUDE"
+    },
+    "accepted": false,
+    "wrapper": "RESOURCE_PREPARATION_INTENT_UNCERTAIN_KEEP_CLAIM",
+    "causeType": "Refused",
+    "cause": "RESOURCE_PREPARATION_NORMAL_RECIPE_REQUIRED",
+    "state": "PREPARING",
+    "version": 2
+  },
+  {
+    "name": "8",
+    "recipe": {
+      "mode": "claude"
+    },
+    "accepted": true,
+    "after": {
+      "mode": "claude",
+      "runtimeThreads": {}
+    },
+    "state": "PREPARING",
+    "version": 2
+  },
+  {
+    "name": "9",
+    "recipe": {
+      "mode": "claude",
+      "configs": null,
+      "runtimeThreads": 123,
+      "extra": {
+        "keep": "stable"
+      }
+    },
+    "accepted": true,
+    "after": {
+      "mode": "claude",
+      "configs": null,
+      "runtimeThreads": {},
+      "extra": {
+        "keep": "stable"
+      }
+    },
+    "state": "PREPARING",
+    "version": 2
+  },
+  {
+    "name": "10",
+    "recipe": {
+      "mode": "codex"
+    },
+    "accepted": true,
+    "after": {
+      "mode": "codex",
+      "runtimeThreads": {}
+    },
+    "state": "PREPARING",
+    "version": 2
+  },
+  {
+    "name": "11",
+    "recipe": {
+      "mode": "codex",
+      "configs": {}
+    },
+    "accepted": true,
+    "after": {
+      "mode": "codex",
+      "configs": {},
+      "runtimeThreads": {}
+    },
+    "state": "PREPARING",
+    "version": 2
+  },
+  {
+    "name": "12",
+    "recipe": {
+      "mode": "codex",
+      "configs": null
+    },
+    "accepted": false,
+    "wrapper": "RESOURCE_PREPARATION_INTENT_UNCERTAIN_KEEP_CLAIM",
+    "causeType": "AttributeError",
+    "cause": "'NoneType' object has no attribute 'get'",
+    "state": "PREPARING",
+    "version": 2
+  },
+  {
+    "name": "13",
+    "recipe": {
+      "mode": "codex",
+      "configs": []
+    },
+    "accepted": false,
+    "wrapper": "RESOURCE_PREPARATION_INTENT_UNCERTAIN_KEEP_CLAIM",
+    "causeType": "AttributeError",
+    "cause": "'list' object has no attribute 'get'",
+    "state": "PREPARING",
+    "version": 2
+  },
+  {
+    "name": "14",
+    "recipe": {
+      "mode": "codex",
+      "configs": false
+    },
+    "accepted": false,
+    "wrapper": "RESOURCE_PREPARATION_INTENT_UNCERTAIN_KEEP_CLAIM",
+    "causeType": "AttributeError",
+    "cause": "'bool' object has no attribute 'get'",
+    "state": "PREPARING",
+    "version": 2
+  },
+  {
+    "name": "15",
+    "recipe": {
+      "mode": "codex",
+      "configs": {
+        "codexConfig": null
+      }
+    },
+    "accepted": true,
+    "after": {
+      "mode": "codex",
+      "configs": {
+        "codexConfig": null
+      },
+      "runtimeThreads": {}
+    },
+    "state": "PREPARING",
+    "version": 2
+  },
+  {
+    "name": "16",
+    "recipe": {
+      "mode": "codex",
+      "configs": {
+        "codexConfig": false
+      }
+    },
+    "accepted": false,
+    "wrapper": "RESOURCE_PREPARATION_INTENT_UNCERTAIN_KEEP_CLAIM",
+    "causeType": "Refused",
+    "cause": "RESOURCE_PREPARATION_NORMAL_RECIPE_REQUIRED",
+    "state": "PREPARING",
+    "version": 2
+  },
+  {
+    "name": "17",
+    "recipe": {
+      "mode": "codex",
+      "configs": {
+        "codexConfig": 0
+      }
+    },
+    "accepted": false,
+    "wrapper": "RESOURCE_PREPARATION_INTENT_UNCERTAIN_KEEP_CLAIM",
+    "causeType": "Refused",
+    "cause": "RESOURCE_PREPARATION_NORMAL_RECIPE_REQUIRED",
+    "state": "PREPARING",
+    "version": 2
+  },
+  {
+    "name": "18",
+    "recipe": {
+      "mode": "codex",
+      "configs": {
+        "codexConfig": []
+      }
+    },
+    "accepted": false,
+    "wrapper": "RESOURCE_PREPARATION_INTENT_UNCERTAIN_KEEP_CLAIM",
+    "causeType": "Refused",
+    "cause": "RESOURCE_PREPARATION_NORMAL_RECIPE_REQUIRED",
+    "state": "PREPARING",
+    "version": 2
+  },
+  {
+    "name": "19",
+    "recipe": {
+      "mode": "codex",
+      "configs": {
+        "codexConfig": {}
+      }
+    },
+    "accepted": true,
+    "after": {
+      "mode": "codex",
+      "configs": {
+        "codexConfig": {}
+      },
+      "runtimeThreads": {}
+    },
+    "state": "PREPARING",
+    "version": 2
+  },
+  {
+    "name": "20",
+    "recipe": {
+      "mode": "codex",
+      "configs": {
+        "codexConfig": {
+          "resumeSessionId": "old",
+          "model": "fixture",
+          "unknown": {
+            "unicode": "\u00e9\ud83d\ude00"
+          }
+        }
+      },
+      "runtimeThreads": {
+        "old": "thread"
+      }
+    },
+    "accepted": true,
+    "after": {
+      "mode": "codex",
+      "configs": {
+        "codexConfig": {
+          "model": "fixture",
+          "unknown": {
+            "unicode": "\u00e9\ud83d\ude00"
+          }
+        }
+      },
+      "runtimeThreads": {}
+    },
+    "state": "PREPARING",
+    "version": 2
+  },
+  {
+    "name": "21",
+    "recipe": {
+      "mode": "codex",
+      "configs": {
+        "codexConfig": {
+          "resumeSessionId": {
+            "arbitrary": [
+              "old"
+            ]
+          },
+          "unknown": true
+        },
+        "other": {
+          "keep": true
+        }
+      },
+      "runtimeThreads": null
+    },
+    "accepted": true,
+    "after": {
+      "mode": "codex",
+      "configs": {
+        "codexConfig": {
+          "unknown": true
+        },
+        "other": {
+          "keep": true
+        }
+      },
+      "runtimeThreads": {}
+    },
+    "state": "PREPARING",
+    "version": 2
+  }
+]

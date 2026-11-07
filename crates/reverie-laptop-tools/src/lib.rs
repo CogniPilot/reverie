@@ -1,6 +1,7 @@
 //! Native laptop defaults shared by the packaged command-line entrypoints.
 use std::path::Path;
 
+pub mod autoenv;
 mod cargo;
 mod fs;
 pub use cargo::{MergeError, MergeOutcome, merge_cargo_defaults};

@@ -4,7 +4,7 @@
 # measurements in workerResumeProgram's normal build.
 { pkgs, src, console, ownerTerminalProgram ? null }:
 rec {
-  workerDockerSeccomp = import ./worker-docker-profile.nix { inherit pkgs; };
+  workerDockerSeccomp = import ./worker-docker-profile.nix { inherit pkgs src; };
   workerTaskPerfPolicy = import ./worker-perf-profile.nix {
     inherit pkgs src;
     baseProfile = workerDockerSeccomp;

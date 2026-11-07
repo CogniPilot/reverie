@@ -1,6 +1,7 @@
 /** Authenticated, effect-free Goal commands over the private canonical company transaction. */
 import { createHash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
+import { MEMORY_READ_PURPOSE, type MemoryScopeCatalog } from './memory-scope-config.js';
 import { serviceAuthorityFits, type CompanyStore } from './company-store.js';
 import {
   GoalBlockerSchema,
@@ -253,18 +254,34 @@ function managesGoal(state: CompanyState, principal: GoalPrincipal, employeeId: 
   if (principal.kind !== 'employee') return false;
   const actor = employeeOf(state, principal.employeeId, principal.owner);
   const target = employeeOf(state, employeeId, principal.owner);
-  return !!actor && !!target && actor.permissions.manageGoals === true &&
-    actor.sessionId === principal.sessionId && actor.sessionGeneration === principal.sessionGeneration &&
-    !actor.bindingMigration && !actor.onVacation && actor.desiredRunning !== false &&
-    !target.bindingMigration && !target.onVacation && target.desiredRunning !== false;
+  return (
+    !!actor &&
+    !!target &&
+    actor.permissions.manageGoals === true &&
+    actor.sessionId === principal.sessionId &&
+    actor.sessionGeneration === principal.sessionGeneration &&
+    !actor.bindingMigration &&
+    !actor.onVacation &&
+    actor.desiredRunning !== false &&
+    !target.bindingMigration &&
+    !target.onVacation &&
+    target.desiredRunning !== false
+  );
 }
 function managementFence(
-  state: CompanyState, principal: GoalPrincipal, employeeId: string, sessionId: string, sessionGeneration: number
+  state: CompanyState,
+  principal: GoalPrincipal,
+  employeeId: string,
+  sessionId: string,
+  sessionGeneration: number
 ): () => void {
   return () => {
     const target = employeeOf(state, employeeId, principal.owner);
-    if (!managesGoal(state, principal, employeeId) || target?.sessionId !== sessionId ||
-        target.sessionGeneration !== sessionGeneration)
+    if (
+      !managesGoal(state, principal, employeeId) ||
+      target?.sessionId !== sessionId ||
+      target.sessionGeneration !== sessionGeneration
+    )
       refuse('Team Goal permission or current target binding changed');
   };
 }
@@ -276,11 +293,21 @@ function canReadFull(state: CompanyState, goal: GoalRecord, principal: GoalPrinc
         goal.sessionId === principal.sessionId &&
         goal.sessionGeneration === principal.sessionGeneration) ||
       (managesGoal(state, principal, goal.employeeId) &&
-        state.employees.some(employee => employee.id === goal.employeeId && employee.owner === goal.owner &&
-          employee.sessionId === goal.sessionId && employee.sessionGeneration === goal.sessionGeneration)))
+        state.employees.some(
+          (employee) =>
+            employee.id === goal.employeeId &&
+            employee.owner === goal.owner &&
+            employee.sessionId === goal.sessionId &&
+            employee.sessionGeneration === goal.sessionGeneration
+        )))
   );
 }
-function atReceipt(state: CompanyState, goal: GoalRecord, receipt: GoalTransitionReceipt, principal: GoalPrincipal): GoalCommandResult {
+function atReceipt(
+  state: CompanyState,
+  goal: GoalRecord,
+  receipt: GoalTransitionReceipt,
+  principal: GoalPrincipal
+): GoalCommandResult {
   // Construct the closed view directly: never spread a receipt/snapshot into a restricted response.
   // In particular receipt.after and requestDigest contain or fingerprint private worker input.
   if (!canReadFull(state, goal, principal))
@@ -364,7 +391,8 @@ export class GoalLifecycle {
     private readonly now: () => number = Date.now,
     private readonly auth: GoalAuthentication = INACCESSIBLE_GOAL_AUTH,
     /** Deployment-configured service purposes; only these can be granted. */
-    private readonly servicePurposes: ServicePurposes = DEFAULT_SERVICE_PURPOSES
+    private readonly servicePurposes: ServicePurposes = DEFAULT_SERVICE_PURPOSES,
+    private readonly memoryScopes?: MemoryScopeCatalog
   ) {}
 
   private async authenticate(context: unknown): Promise<GoalPrincipal> {
@@ -422,7 +450,11 @@ export class GoalLifecycle {
   async forEmployee(employeeId: string, context?: unknown, metadataGrantId?: string) {
     parse(id, employeeId);
     return this.read(context, (state, principal) => {
-      if (principal.kind !== 'owner' && principal.employeeId !== employeeId && !managesGoal(state, principal, employeeId))
+      if (
+        principal.kind !== 'owner' &&
+        principal.employeeId !== employeeId &&
+        !managesGoal(state, principal, employeeId)
+      )
         this.grant(state, principal, metadataGrantId, 'METADATA_READ', employeeId);
       return state.goals
         .filter((g) => g.owner === principal.owner && g.employeeId === employeeId)
@@ -621,6 +653,8 @@ export class GoalLifecycle {
         invalid('Service grant expiry must be within 90 days');
       const scope = servicePurposeScope(this.servicePurposes, input.purpose);
       if (!scope) invalid('Unknown service purpose');
+      if (input.purpose === MEMORY_READ_PURPOSE && this.memoryScopes && !this.memoryScopes.acceptsGrant(input))
+        invalid('Memory grants require one current employee and configured scopes for one existing instance');
       const wantEmployees = scope !== 'resources',
         wantResources = scope !== 'employees';
       if (!!input.employeeIds.length !== wantEmployees || !!input.resources.length !== wantResources)
@@ -759,11 +793,12 @@ export class GoalLifecycle {
         retain(() => {
           this.grant(state, principal, verifier.id, 'VERIFY', goal.employeeId, goal, input.expectedSequence);
         });
-      const manager = principal.kind === 'employee' && principal.employeeId !== goal.employeeId &&
+      const manager =
+        principal.kind === 'employee' &&
+        principal.employeeId !== goal.employeeId &&
         managesGoal(state, principal, goal.employeeId);
       // Management also authorizes the full response when VERIFY authorizes the decision.
-      if (manager)
-        retain(managementFence(state, principal, goal.employeeId, goal.sessionId, goal.sessionGeneration));
+      if (manager) retain(managementFence(state, principal, goal.employeeId, goal.sessionId, goal.sessionGeneration));
       if (principal.kind !== 'owner' && !verifier && principal.employeeId !== goal.employeeId && !manager)
         refuse('A worker updates only its own Goal');
       const digest = goalDigest({ input, principal });

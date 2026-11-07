@@ -1,0 +1,185 @@
+[
+  {
+    "name": "normal",
+    "ok": true,
+    "sink": true,
+    "calls": [
+      [
+        "ps",
+        "--all",
+        "--filter",
+        "label=reverie.worker",
+        "--format",
+        "{{.ID}}"
+      ]
+    ]
+  },
+  {
+    "name": "disabled",
+    "ok": true,
+    "sink": false,
+    "calls": []
+  },
+  {
+    "name": "uid",
+    "ok": false,
+    "sink": false,
+    "calls": []
+  },
+  {
+    "name": "public-state",
+    "ok": false,
+    "sink": false,
+    "calls": []
+  },
+  {
+    "name": "state-source",
+    "ok": false,
+    "sink": false,
+    "calls": []
+  },
+  {
+    "name": "future-safe",
+    "ok": true,
+    "sink": true,
+    "calls": [
+      [
+        "ps",
+        "--all",
+        "--filter",
+        "label=reverie.worker",
+        "--format",
+        "{{.ID}}"
+      ]
+    ]
+  },
+  {
+    "name": "alias-safe",
+    "ok": false,
+    "sink": false,
+    "calls": []
+  },
+  {
+    "name": "noncanonical",
+    "ok": false,
+    "sink": false,
+    "calls": []
+  },
+  {
+    "name": "readonly-ancestor",
+    "ok": false,
+    "sink": false,
+    "calls": []
+  },
+  {
+    "name": "scratch-ancestor",
+    "ok": false,
+    "sink": false,
+    "calls": []
+  },
+  {
+    "name": "api-ancestor",
+    "ok": false,
+    "sink": false,
+    "calls": []
+  },
+  {
+    "name": "company-sink",
+    "ok": false,
+    "sink": false,
+    "calls": []
+  },
+  {
+    "name": "bad-mount",
+    "ok": false,
+    "sink": false,
+    "calls": []
+  },
+  {
+    "name": "bad-inventory",
+    "ok": false,
+    "sink": false,
+    "calls": [
+      [
+        "ps",
+        "--all",
+        "--filter",
+        "label=reverie.worker",
+        "--format",
+        "{{.ID}}"
+      ]
+    ]
+  },
+  {
+    "name": "bad-inspect",
+    "ok": false,
+    "sink": false,
+    "calls": [
+      [
+        "ps",
+        "--all",
+        "--filter",
+        "label=reverie.worker",
+        "--format",
+        "{{.ID}}"
+      ],
+      [
+        "inspect",
+        "aaaaaaaaaaaa"
+      ]
+    ]
+  },
+  {
+    "name": "volume-state",
+    "ok": false,
+    "sink": false,
+    "calls": [
+      [
+        "ps",
+        "--all",
+        "--filter",
+        "label=reverie.worker",
+        "--format",
+        "{{.ID}}"
+      ],
+      [
+        "inspect",
+        "aaaaaaaaaaaa"
+      ]
+    ]
+  },
+  {
+    "name": "tmpfs-state",
+    "ok": true,
+    "sink": true,
+    "calls": [
+      [
+        "ps",
+        "--all",
+        "--filter",
+        "label=reverie.worker",
+        "--format",
+        "{{.ID}}"
+      ],
+      [
+        "inspect",
+        "aaaaaaaaaaaa"
+      ]
+    ]
+  },
+  {
+    "name": "legacy-name",
+    "ok": true,
+    "sink": true,
+    "calls": [
+      [
+        "ps",
+        "--all",
+        "--filter",
+        "label=reverie.worker",
+        "--format",
+        "{{.ID}}"
+      ]
+    ]
+  }
+]

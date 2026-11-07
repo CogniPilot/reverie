@@ -5,6 +5,8 @@
 use super::{python_path, python_text};
 use reverie_core::posix_path::PosixPath;
 use std::{collections::BTreeMap, fs, io};
+#[cfg(test)]
+mod tests;
 
 enum Pending {
     Component(Vec<u32>),
@@ -15,12 +17,24 @@ struct Resolver {
     pending: Vec<Pending>,
     remaining: usize,
     seen: BTreeMap<Vec<u32>, Option<Vec<u32>>>,
+    strict: bool,
 }
 pub(crate) fn resolve_strict_text(points: &[u32]) -> io::Result<PosixPath> {
+    resolve_text(points, true)
+}
+pub(crate) fn resolve_optional_text(points: &[u32]) -> io::Result<PosixPath> {
+    resolve_text(points, false)
+}
+fn resolve_text(points: &[u32], strict: bool) -> io::Result<PosixPath> {
     let input = PosixPath::try_new(points).map_err(|_| io::ErrorKind::InvalidInput)?;
-    if !input.is_absolute() {
+    if strict && !input.is_absolute() {
         return Err(io::ErrorKind::InvalidInput.into());
     }
+    let initial = if input.is_absolute() {
+        vec![47]
+    } else {
+        python_text(&std::env::current_dir()?)
+    };
     // Path(str) folds dots/separators before realpath; symlink targets are
     // processed as returned by readlink, including their trailing separators.
     let pending: Vec<_> = input
@@ -30,10 +44,11 @@ pub(crate) fn resolve_strict_text(points: &[u32]) -> io::Result<PosixPath> {
         .map(|part| Pending::Component(part.to_vec()))
         .collect();
     Resolver {
-        path: vec![47],
+        path: initial,
         remaining: pending.len(),
         pending,
         seen: BTreeMap::new(),
+        strict,
     }
     .resolve()
 }
@@ -70,22 +85,43 @@ impl Resolver {
             candidate.push(47);
         }
         candidate.extend_from_slice(&name);
+        // Python raises ValueError for NUL, not an ignored OSError. Likewise
+        // surrogate encoding failures from python_path must remain failures.
+        if candidate.contains(&0) {
+            return Err(io::ErrorKind::InvalidInput.into());
+        }
         let native = python_path(&candidate)?;
-        let metadata = fs::symlink_metadata(&native)?;
+        let metadata = match fs::symlink_metadata(&native) {
+            Ok(value) => value,
+            Err(_) if !self.strict => {
+                self.path = candidate;
+                return Ok(());
+            }
+            Err(error) => return Err(error),
+        };
         if !metadata.file_type().is_symlink() {
-            if self.remaining > 0 && !metadata.is_dir() {
+            if self.strict && self.remaining > 0 && !metadata.is_dir() {
                 return Err(io::Error::from_raw_os_error(libc::ENOTDIR));
             }
             self.path = candidate;
             return Ok(());
         }
         if let Some(target) = self.seen.get(&candidate) {
-            self.path = target
-                .clone()
-                .ok_or_else(|| io::Error::from_raw_os_error(libc::ELOOP))?;
+            self.path = match target {
+                Some(target) => target.clone(),
+                None if !self.strict => candidate,
+                None => return Err(io::Error::from_raw_os_error(libc::ELOOP)),
+            };
             return Ok(());
         }
-        let target = python_text(&fs::read_link(&native)?);
+        let target = match fs::read_link(&native) {
+            Ok(target) => python_text(&target),
+            Err(_) if !self.strict => {
+                self.path = candidate;
+                return Ok(());
+            }
+            Err(error) => return Err(error),
+        };
         self.seen.insert(candidate.clone(), None);
         self.pending.push(Pending::Cache(candidate));
         if target.first() == Some(&47) {
