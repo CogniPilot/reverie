@@ -4,6 +4,7 @@ mod launch;
 mod listener;
 mod reference;
 mod retention;
+mod service_connection;
 mod worker_cleanup;
 use crate::engine_metadata::EngineBootstrap;
 use reverie_contracts::worker_config;

@@ -16,6 +16,20 @@ pub enum AcceptedWorkerConnection {
     Launch(WorkerLaunchConnection),
 }
 impl WorkerReportService {
+    pub(super) fn close_record_socket_budget(
+        &self,
+        record: &Arc<Record>,
+        budget: &super::budget::CleanupBudget<'_>,
+    ) -> Result<WorkerLaunchClose> {
+        let result = record.finish_launch(budget);
+        match result {
+            Ok(()) => self.retire_launch(record, budget),
+            Err(primary) => {
+                let cleanup = self.retire_launch(record, budget).map(|_| ());
+                finalized(Err(primary), cleanup)
+            }
+        }
+    }
     /// A current-configuration failure still consumes the actual accepted
     /// socket through this same registry and checked finalizer owner.
     pub fn close_unread_launch(&self, stream: UnixStream) -> Result<()> {
@@ -83,6 +97,13 @@ impl WorkerReportService {
     }
 }
 impl WorkerLaunchConnection {
+    /// The fixed outer handler attempts its original E frame before resource
+    /// finalization. This borrows the same registered socket; it creates no
+    /// request, native command, lifecycle hold or cleanup acknowledgement.
+    pub fn report_handler_failure(&self, message: &str) -> Result<()> {
+        let mut socket = self.terminal_socket()?;
+        socket.error(message)
+    }
     pub(super) fn from_registered(
         service: Arc<WorkerReportService>,
         record: Arc<Record>,
@@ -194,14 +215,8 @@ impl WorkerLaunchConnection {
         &self,
         budget: &super::budget::CleanupBudget<'_>,
     ) -> Result<WorkerLaunchClose> {
-        let result = self.record.finish_launch(budget);
-        match result {
-            Ok(()) => self.service.retire_launch(&self.record, budget),
-            Err(primary) => {
-                let cleanup = self.service.retire_launch(&self.record, budget).map(|_| ());
-                finalized(Err(primary), cleanup)
-            }
-        }
+        self.service
+            .close_record_socket_budget(&self.record, budget)
     }
 }
 impl Drop for WorkerLaunchConnection {
