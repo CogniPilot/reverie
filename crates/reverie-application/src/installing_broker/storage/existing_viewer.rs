@@ -10,6 +10,7 @@ use reverie_host::{
 };
 mod error;
 mod finalization;
+mod started;
 pub(in crate::installing_broker) use error::{
     ExistingStorageError, ExistingStorageReclaimFailure, ExistingStorageRetainFailure,
 };
@@ -33,6 +34,7 @@ struct RegistryRetainFailure {
 pub(in crate::installing_broker) struct ExistingStoragePreparation {
     destination: Destination,
     viewer: Arc<ExistingViewer>,
+    predecessor_office: Option<reverie_host::office::OfficePhone>,
 }
 impl ExistingStoragePreparation {
     pub(in crate::installing_broker) fn failure(
@@ -96,7 +98,7 @@ impl ExistingStoragePreparation {
         Ok(())
     }
     pub(in crate::installing_broker) fn reclaim(
-        self,
+        mut self,
     ) -> Result<ExistingStorageReturned, Box<ExistingStorageReclaimFailure>> {
         let result = match &self.destination {
             Destination::Legacy { registry } => reclaim_legacy(registry, &self.viewer, None),
@@ -106,12 +108,16 @@ impl ExistingStoragePreparation {
                 newly_claimed,
             } => reclaim_registered(registry, identity, &self.viewer, *newly_claimed, None),
         };
-        result.map_err(|error| {
-            Box::new(ExistingStorageReclaimFailure {
+        match result {
+            Ok(mut returned) => {
+                returned.predecessor_office = self.predecessor_office.take();
+                Ok(returned)
+            }
+            Err(error) => Err(Box::new(ExistingStorageReclaimFailure {
                 preparation: self,
                 error,
-            })
-        })
+            })),
+        }
     }
 }
 #[must_use = "the actual restored claim remains held; this is not release credit"]
@@ -120,6 +126,7 @@ pub(in crate::installing_broker) struct ExistingStorageReturned {
     inputs: Inputs,
     outcome: Option<Arc<LaptopError>>,
     finalization: Option<FinalStorageDecision>,
+    predecessor_office: Option<reverie_host::office::OfficePhone>,
 }
 #[cfg(test)]
 impl ExistingStorageReturned {
@@ -162,11 +169,13 @@ impl StorageClaim {
             receipt,
         };
         match self.state {
+            ClaimState::Started(owner) => started::retain(owner, inputs, connection),
             ClaimState::Legacy { registry, owner } => {
                 match retain_native(&registry, owner, inputs, connection) {
                     Ok(viewer) => Ok(ExistingStoragePreparation {
                         destination: Destination::Legacy { registry },
                         viewer,
+                        predecessor_office: None,
                     }),
                     Err(failure) => {
                         let NativeRetainFailure {
@@ -197,6 +206,7 @@ impl StorageClaim {
                         newly_claimed,
                     },
                     viewer,
+                    predecessor_office: None,
                 }),
                 Err(failure) => {
                     let RegistryRetainFailure { inputs, error } = *failure;
@@ -350,6 +360,7 @@ fn reclaim_registered(
             receipt,
         },
         outcome,
+        predecessor_office: None,
         finalization: observation.map(|observation| FinalStorageDecision {
             live: observation.is_live(),
             brand,
@@ -382,6 +393,7 @@ fn reclaim_legacy(
             receipt,
         },
         outcome,
+        predecessor_office: None,
         finalization: observation.map(|observation| FinalStorageDecision {
             live: observation.is_live(),
             brand: None,

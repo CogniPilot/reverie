@@ -1,5 +1,9 @@
 # Observation producers only; these do not grant pruning or authenticated effects.
 { pkgs, src }:
+let
+  # The resource history reader is native; the collector and receipts remain here.
+  historyCli = import ./observations-cli.nix { inherit pkgs src; };
+in
 pkgs.runCommand "reverie-cleanup-observations" {
   nativeBuildInputs = [ pkgs.makeWrapper pkgs.python3 ];
   meta.platforms = pkgs.lib.platforms.linux;
@@ -9,7 +13,6 @@ pkgs.runCommand "reverie-cleanup-observations" {
   install -m444 ${src}/python/reverie/cleanup/receipts.py "$out/libexec/reverie/receipts.py"
   install -m444 ${src}/python/reverie/cleanup/collector_state.py "$out/libexec/reverie/collector_state.py"
   install -m444 ${src}/python/reverie/cleanup/collector_user.py "$out/libexec/reverie/collector_user.py"
-  install -m444 ${src}/python/reverie/cleanup/collector_history.py "$out/libexec/reverie/collector_history.py"
   cat > "$out/libexec/reverie/collector-runtime.json" <<'JSON'
   {"python":"${pkgs.python3}/bin/python3","systemctl":"${pkgs.systemd}/bin/systemctl"}
   JSON
@@ -18,7 +21,6 @@ pkgs.runCommand "reverie-cleanup-observations" {
     '6681e2e6e6291b3f1ee383c110a39f7d0dd09e1c7b61e07ae2dfe308672646ab' "$out/libexec/reverie/receipts.py" \
     'cf76217a3176ed443b6057b1cfd7b632b4e4b264c9f8e676264d743651d15899' "$out/libexec/reverie/collector_state.py" \
     'cc04f1e1f34719244cea905c6018f8c5e352bad2b739bfcb2ae8ab27ebc9625f' "$out/libexec/reverie/collector_user.py" \
-    'e0150804f6dfe9b4b6297f911f80475313f59c677b2a1ffa2f8c59f95c4f1626' "$out/libexec/reverie/collector_history.py" \
     | sha256sum --check --status
   makeWrapper ${pkgs.python3}/bin/python3 "$out/bin/reverie-collect" \
     --add-flags "-I -B $out/libexec/reverie/collector.py"
@@ -28,8 +30,7 @@ pkgs.runCommand "reverie-cleanup-observations" {
     --add-flags "-I -B $out/libexec/reverie/collector_state.py"
   makeWrapper ${pkgs.python3}/bin/python3 "$out/bin/reverie-observations" \
     --add-flags "-I -B $out/libexec/reverie/collector_user.py"
-  makeWrapper ${pkgs.python3}/bin/python3 "$out/bin/reverie-resource-history" \
-    --add-flags "-I -B $out/libexec/reverie/collector_history.py"
+  ln -s ${historyCli}/bin/reverie-resource-history "$out/bin/reverie-resource-history"
   "$out/bin/reverie-collect" --help > /dev/null
   "$out/bin/reverie-prune-receipts" --help > /dev/null
   "$out/bin/reverie-collect-state" --help > /dev/null

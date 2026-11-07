@@ -6,6 +6,8 @@ use std::fs;
 const SID: &str = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
 const EID: &str = "11111111-2222-4333-8444-555555555555";
 mod finalization;
+mod started;
+mod started_prefix;
 fn broker(tree: &Tree) -> InstallingBroker {
     let mut raw: serde_json::Value = serde_json::from_slice(&tree.raw).unwrap();
     raw.as_object_mut().unwrap().remove("resourceReservations");

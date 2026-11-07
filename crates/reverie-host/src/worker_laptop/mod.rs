@@ -21,10 +21,15 @@ mod pane;
 mod publication;
 mod request_cleanup;
 mod start;
+mod started_finalization;
 mod started_transfer;
+pub use started_finalization::StartedStorageFinalizer;
 mod storage;
 mod storage_cleanup;
-pub use started_transfer::{StartedOrdinaryStopTransferred, StartedReplacementStopTransferred};
+pub use started_transfer::{
+    StartedOrdinaryStopTransferFailure, StartedOrdinaryStopTransferred,
+    StartedReplacementStopTransferFailure, StartedReplacementStopTransferred,
+};
 mod started_source;
 pub use started_source::{
     StartedLaptopSource, StartedSourceStopTransferred, StartedSourceStorageBorrow,
@@ -56,7 +61,7 @@ use error::{Result, finalized, need};
 pub use existing_viewer::{
     ExistingRelayRetainFailure, ExistingRelayReturned, ExistingStorageObservation, ExistingViewer,
     ExistingViewerReceiptObservation, ExistingViewerRetainFailure, ExistingViewerReturned,
-    ExistingViewerStart, StartedRelayTransferred,
+    ExistingViewerStart, StartedRelayTransferFailure, StartedRelayTransferred,
 };
 pub use guard::{NixGuardRelease, NixReleasedPane};
 pub use memory::{
@@ -85,6 +90,7 @@ enum Phase {
     Known,
     Retained,
     Cleaning,
+    FinalizingStarted,
     Stopped,
     CleanupRetained,
     Consumed,
@@ -110,7 +116,7 @@ struct Inputs {
     office: OfficePhone,
 }
 struct Record {
-    source_attachment: Option<Arc<()>>,
+    source_attachment: Option<started_source::Attachment>,
     finalization: created_finalization::StorageCheck,
     cold: cold_prepare::Stage,
     resources: Option<Resources>,
@@ -124,6 +130,18 @@ struct Record {
     viewer: Option<Arc<viewer::ViewerJob>>,
 }
 impl Record {
+    /// Cached local cleanup must not revoke another actual consuming purpose.
+    /// Refuse before changing phase, returning cached success or native effects.
+    fn begin_cleanup(&mut self) -> Result<()> {
+        need(
+            self.phase != Phase::FinalizingStarted,
+            "WORKER_STARTED_FINAL_STORAGE_RETAINED",
+        )?;
+        if !matches!(self.phase, Phase::Stopped | Phase::CleanupRetained) {
+            self.phase = Phase::Cleaning;
+        }
+        Ok(())
+    }
     fn resources(&self) -> &Resources {
         self.resources.as_ref().expect("actual unreclaimed owners")
     }

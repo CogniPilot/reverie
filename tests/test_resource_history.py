@@ -9,7 +9,7 @@ import subprocess
 import sys
 import unittest
 from unittest.mock import patch
-from reverie.cleanup import collector, collector_user as U, collector_history as H
+from reverie.cleanup import collector, collector_user as U
 
 GPU = 'GPU-01234567-89ab-cdef-0123-456789abcdef'
 T = 1792940400
@@ -48,43 +48,10 @@ class UserHistoryTests(unittest.TestCase):
         with self.assertRaises(ValueError): U.state_directory(self.cfg, create=True)
         self.assertEqual(sample.read_bytes(), before)
 
-    def test_identity_survives_index_reorder_and_missing_values_stay_gaps(self):
-        self.write('samples-2026-10-25.jsonl', [self.row(T, 40, index=7), self.row(T+300, 60, index=0), self.row(T+900, 80, identity=None)])
-        result = H.query(self.config, T, T+1200, 'five-minute', GPU, now=T+1200)
-        self.assertEqual([p['gpu_pct']['avg'] if p['gpu_pct'] else None for p in result['points']], [40, 60, None, None])
-        self.assertEqual([p['status'] for p in result['points']], ['observed', 'observed', 'missing', 'partial'])
-        self.assertEqual(result['deviceUUIDs'], [GPU]); self.assertIsNone(result['employeeAttribution'])
-        self.assertFalse(result['effectAuthority']); self.assertNotIn(str(self.home), json.dumps(result))
-
-    def test_additive_rollup_preserves_device_identity_and_legacy_older_device_gap(self):
+    def test_additive_rollup_preserves_device_identity(self):
         rollup = collector.rollup([self.row(T, 20), self.row(T+300, 60, index=9)], T, 3600, 'hour')
         self.assertEqual(rollup['gpu_pct']['avg'], 40)
         self.assertEqual(rollup['gpu_devices'][0]['util_pct']['avg'], 40)
-        self.write('rollup-hour-2026-10.jsonl', [rollup, {k: v for k, v in {**rollup, 'start': T+3600, 'end': T+7200}.items() if not k.startswith('gpu_') or k == 'gpu_pct'}])
-        result = H.query(self.config, T, T+7200, 'hour', GPU, now=T+86400)
-        self.assertEqual(result['points'][0]['gpu_pct']['avg'], 40)
-        self.assertIsNone(result['points'][1]['gpu_pct'])
-        self.assertEqual(result['freshness'], 'missing')
-
-    def test_restart_read_does_not_repair_or_write_and_truncated_record_is_explicit(self):
-        file = self.write('samples-2026-10-25.jsonl', [self.row(T)])
-        with file.open('a') as f: f.write('{"t":')
-        before = {p.name: p.read_bytes() for p in self.state.iterdir()}
-        for _ in range(2):
-            result = H.query(self.config, T, T+300, 'five-minute', now=T+300)
-            self.assertEqual(result['malformedLines'], 1); self.assertEqual(result['freshness'], 'fresh')
-        self.assertEqual(before, {p.name: p.read_bytes() for p in self.state.iterdir()})
-        self.assertEqual(H.query(self.config, T, T+300, now=T+3600)['freshness'], 'stale')
-
-    def test_read_bounds_and_custody_refuse_links_writable_config_and_invalid_query(self):
-        outside = self.home/'outside'; outside.write_text('not history')
-        (self.state/'samples-2026-10-25.jsonl').symlink_to(outside)
-        with self.assertRaises(ValueError): H.query(self.config, T, T+300, now=T+300)
-        (self.state/'samples-2026-10-25.jsonl').unlink()
-        for start, end, gpu in [(True, T+300, None), (T, T+401*86400, None), (T, T+300, '../../secret')]:
-            with self.assertRaises(ValueError): H.query(self.config, start, end, gpu=gpu, now=T+500*86400)
-        self.config.chmod(0o644)
-        with self.assertRaises(ValueError): H.query(self.config, T, T+300, now=T+300)
 
     def test_fixed_units_are_disabled_until_explicit_control_and_restart_keeps_state(self):
         tools = {'python': '/nix/store/synthetic-python/bin/python3', 'systemctl': '/nix/store/synthetic-systemd/bin/systemctl'}
@@ -190,79 +157,6 @@ class UserHistoryTests(unittest.TestCase):
         new = self.write('samples-2026-10-25.jsonl', [self.row(T)])
         self.assertEqual(collector.retention(str(self.state), {**collector.DEFAULTS, 'retention_days': 30}, T), [old.name])
         self.assertFalse(old.exists()); self.assertTrue(new.exists())
-
-    def test_recorded_device_disappearance_in_rollup_remains_partial(self):
-        rows = [self.row(T+n*300, identity=GPU if n == 0 else None) for n in range(12)]
-        rollup = collector.rollup(rows, T, 3600, 'hour')
-        self.write('rollup-hour-2026-10.jsonl', [rollup])
-        point = H.query(self.config, T, T+3600, 'hour', GPU, now=T+7200)['points'][0]
-        self.assertEqual(point['gpu_pct']['n'], 1)
-        self.assertEqual(point['deviceIdentityMissing'], 11)
-        self.assertEqual(point['status'], 'partial')
-
-    def test_standalone_path_free_cli_reads_only_the_owned_fixture(self):
-        self.write('samples-2026-10-25.jsonl', [self.row(T)])
-        result = subprocess.run([sys.executable, '-I', '-B', H.__file__, '--config', str(self.config),
-                                 '--start', str(T), '--end', str(T+300), '--resolution', 'five-minute', '--gpu', GPU],
-                                env={'HOME': str(self.home), 'LANG': 'C.UTF-8', 'PATH': '/unavailable'},
-                                capture_output=True, text=True, timeout=8)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        value = json.loads(result.stdout)
-        self.assertEqual(value['points'][0]['gpu_pct']['avg'], 40)
-        self.assertNotIn(str(self.home), result.stdout)
-
-    def test_unrelated_oversized_retained_files_are_not_opened_for_recent_query(self):
-        old = self.state/'samples-2026-10-24.jsonl'
-        with old.open('wb') as stream: stream.truncate(33 << 20)
-        old.chmod(0o600)
-        self.write('samples-2026-10-25.jsonl', [self.row(T)])
-        real = H.user.private_bytes
-        def selected_only(path, *args):
-            if path == old: raise AssertionError('Unrelated retained file was opened')
-            return real(path, *args)
-        with patch.object(H.user, 'private_bytes', side_effect=selected_only):
-            value = H.query(self.config, T, T+300, 'five-minute', GPU, now=T+300)
-        self.assertEqual(value['points'][0]['gpu_pct']['avg'], 40)
-        self.assertEqual(value['lastSampleAt'], T)
-        self.assertEqual(value['freshness'], 'fresh')
-
-    def test_historical_device_inventory_and_bounded_latest_freshness_have_separate_scope(self):
-        recent_gpu = 'GPU-fedcba98-7654-3210-fedc-ba9876543210'
-        self.write('samples-2026-10-24.jsonl', [self.row(T-86400)])
-        recent = self.state/'samples-2026-10-25.jsonl'
-        with recent.open('wb') as stream:
-            stream.truncate(9 << 20); stream.seek(0, 2)
-            stream.write(b'\n'+json.dumps(self.row(T, identity=recent_gpu)).encode()+b'\n')
-        recent.chmod(0o600)
-        real = H.user.private_bytes
-        def no_full_freshness(path, *args):
-            if path == recent: raise AssertionError('Latest file was read in full for freshness')
-            return real(path, *args)
-        with patch.object(H.user, 'private_bytes', side_effect=no_full_freshness):
-            value = H.query(self.config, T-86400, T-86400+300, 'five-minute', GPU, now=T+300)
-        self.assertEqual(value['deviceUUIDs'], [GPU]); self.assertEqual(value['deviceUUIDsScope'], 'queried-records')
-        self.assertEqual(value['lastSampleAt'], T); self.assertEqual(value['freshness'], 'fresh')
-        self.assertFalse(value['freshnessReadComplete'])
-
-    def test_complete_rollup_and_partial_raw_buckets_are_never_silently_mixed(self):
-        first = collector.rollup([self.row(T+n*300, 40) for n in range(12)], T, 3600, 'hour')
-        beyond = {**first, 'start': T+3600, 'end': T+7200}
-        self.write('rollup-hour-2026-10.jsonl', [first, beyond])
-        self.write('samples-2026-10-25.jsonl', [self.row(T+60, 99), self.row(T+3600, 10), self.row(T+4200, 30)])
-        value = H.query(self.config, T, T+4500, 'hour', GPU, now=T+4500)
-        self.assertEqual([(p['gpu_pct']['avg'], p['samples']) for p in value['points']], [(40, 12), (20, 2)])
-        self.assertEqual(value['points'][1]['status'], 'partial')
-
-    def test_legacy_rollup_uses_recorded_raw_uuid_when_available_else_preserves_gap(self):
-        legacy = collector.rollup([self.row(T+n*300) for n in range(12)], T, 3600, 'hour')
-        del legacy['gpu_devices']
-        self.write('rollup-hour-2026-10.jsonl', [legacy])
-        raw = self.write('samples-2026-10-25.jsonl', [self.row(T, 5), self.row(T+300, 15)])
-        value = H.query(self.config, T, T+3600, 'hour', GPU, now=T+3600)
-        self.assertEqual(value['points'][0]['gpu_pct']['avg'], 10)
-        self.assertEqual(value['points'][0]['gpu_pct']['n'], 2)
-        raw.unlink()
-        self.assertIsNone(H.query(self.config, T, T+3600, 'hour', GPU, now=T+3600)['points'][0]['gpu_pct'])
 
 
 if __name__ == '__main__': unittest.main()

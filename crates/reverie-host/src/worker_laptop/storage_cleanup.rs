@@ -17,9 +17,7 @@ impl Workflows {
         // Terminal before any fallible local finalizer; ordinary forward paths
         // can no longer run while the actual guard changes sum variants.
         need(record.resources.is_some(), "WORKER_LAPTOP_REPLAYED")?;
-        if !matches!(record.phase, Phase::Stopped | Phase::CleanupRetained) {
-            record.phase = Phase::Cleaning;
-        }
+        record.begin_cleanup()?;
         if matches!(
             record.resources().nix,
             guard::NixOwnership::GuardConsumed(_)
@@ -100,9 +98,7 @@ impl WorkerRuntime {
             None => cleanup.acquire(self, &created.workflow.record)?,
         };
         need(record.resources.is_some(), "WORKER_LAPTOP_REPLAYED")?;
-        if !matches!(record.phase, Phase::Stopped | Phase::CleanupRetained) {
-            record.phase = Phase::Cleaning;
-        }
+        record.begin_cleanup()?;
         if let Some(viewer) = &record.viewer {
             let client = &self.installed_engine().engine.client;
             match cleanup.ceiling() {

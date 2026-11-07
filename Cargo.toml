@@ -21,6 +21,10 @@ members = [
     "crates/reverie-memory-capsule",
     "crates/reverie-diagnostics",
     "crates/reverie-deployment",
+    "crates/reverie-namegate",
+    "crates/reverie-observations",
+    "crates/reverie-voice-ci",
+    "crates/reverie-commit-policy",
     "crates/xtask",
 ]
 exclude = ["vendor/rustpython-sre-engine", "vendor/rustpython-wtf8"]
@@ -57,7 +61,8 @@ tokio = { version = "1.50", default-features = false, features = ["rt", "rt-mult
 tokio-rustls = { version = "0.26.6", default-features = false, features = ["ring", "tls12"] }
 base64 = "0.22"
 socket2 = "0.6.5"
-unicode-normalization = "=0.1.25"
+unicode-normalization = "=0.1.26"
+unicode-properties = { version = "=0.1.5", default-features = false, features = ["general-category"] }
 idna = "=1.1.0"
 rustls = { version = "0.23", default-features = false, features = ["std", "ring", "tls12"] }
 rustls-platform-verifier = "0.7.1"

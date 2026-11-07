@@ -86,7 +86,7 @@ impl ExistingStoragePreparation {
             .existing_viewer_stop_target(&self.viewer)?)
     }
     pub(in crate::installing_broker) fn reclaim_final_storage(
-        self,
+        mut self,
         observation: &ExistingStorageObservation,
     ) -> Result<ExistingStorageReturned, Box<ExistingStorageReclaimFailure>> {
         let result = match &self.destination {
@@ -105,12 +105,16 @@ impl ExistingStoragePreparation {
                 Some(observation),
             ),
         };
-        result.map_err(|error| {
-            Box::new(ExistingStorageReclaimFailure {
+        match result {
+            Ok(mut returned) => {
+                returned.predecessor_office = self.predecessor_office.take();
+                Ok(returned)
+            }
+            Err(error) => Err(Box::new(ExistingStorageReclaimFailure {
                 preparation: self,
                 error,
-            })
-        })
+            })),
+        }
     }
 }
 pub(in crate::installing_broker) struct ExistingStorageFinishFailure {
@@ -135,6 +139,26 @@ impl ExistingStorageReturned {
                 cause: ExistingStorageError::Refused("WORKER_FINAL_STORAGE_PHASE"),
             }));
         };
+        if !decision.live
+            && let Some(phone) = &self.predecessor_office
+        {
+            let registry = match &self.claim.state {
+                ClaimState::Legacy { registry, .. } | ClaimState::Registered { registry, .. } => {
+                    registry
+                }
+                ClaimState::Started(_) => {
+                    unreachable!("actual Existing return owns its original Box")
+                }
+            };
+            if let Err(cause) =
+                phone.require_closed_for_resource(&registry.runtime, self.claim.paths().session())
+            {
+                return Err(Box::new(ExistingStorageFinishFailure {
+                    returned: self,
+                    cause: StorageWorkflowError::from(cause).into(),
+                }));
+            }
+        }
         if let ClaimState::Registered {
             registry, identity, ..
         } = &self.claim.state
@@ -153,6 +177,7 @@ impl ExistingStorageReturned {
             inputs,
             outcome,
             finalization,
+            predecessor_office,
         } = self;
         match claim.release(end) {
             Ok(()) => Ok(false),
@@ -163,6 +188,7 @@ impl ExistingStorageReturned {
                     inputs,
                     outcome,
                     finalization,
+                    predecessor_office,
                 };
                 Err(Box::new(ExistingStorageFinishFailure {
                     returned: self,

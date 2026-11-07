@@ -7,6 +7,8 @@ use crate::{
     worker_source_stop::{OrdinaryLaptopStop, OrdinaryReplacementStop},
 };
 use std::sync::MutexGuard;
+mod error;
+pub use error::{StartedOrdinaryStopTransferFailure, StartedReplacementStopTransferFailure};
 
 #[must_use = "retain the actual stop and original Office through cleanup"]
 pub struct StartedOrdinaryStopTransferred {
@@ -99,14 +101,34 @@ impl WorkerRuntime {
         plan: ObservedCreatePlan,
         inspected: ExistingLaptopInspection,
         connection: &WorkerLaunchConnection,
+    ) -> std::result::Result<StartedOrdinaryStopTransferred, Box<StartedOrdinaryStopTransferFailure>>
+    {
+        let mut inputs = Some((plan, inspected));
+        self.transfer_started_ordinary(created, &mut inputs, connection)
+            .map_err(|cause| {
+                let (plan, inspected) = inputs.expect("all refusals return original observations");
+                Box::new(StartedOrdinaryStopTransferFailure {
+                    plan,
+                    inspected,
+                    cause,
+                })
+            })
+    }
+    fn transfer_started_ordinary(
+        &self,
+        created: &CreatedLaptop,
+        inputs: &mut Option<(ObservedCreatePlan, ExistingLaptopInspection)>,
+        connection: &WorkerLaunchConnection,
     ) -> Result<StartedOrdinaryStopTransferred> {
+        let (plan, inspected) = inputs.as_ref().expect("original observations");
         let mut transfer = self
             .laptop_workflows()
-            .started_transfer(self, created, &plan, connection)?;
+            .started_transfer(self, created, plan, connection)?;
         inspected
-            .assert_plan(self, &plan)
+            .assert_plan(self, plan)
             .map_err(LaptopError::ExistingObservation)?;
         require_identity(&transfer.record, inspected.data().canonical_id().as_ref())?;
+        let (plan, inspected) = inputs.take().expect("checked original observations");
         let (storage, rest) = transfer.take();
         match self.retain_ordinary_laptop_stop_for_worker(storage, plan, inspected) {
             Ok(stop) => {
@@ -118,8 +140,9 @@ impl WorkerRuntime {
                 })
             }
             Err(failure) => {
-                let (storage, _plan, _inspection, error) = (*failure).into_parts();
+                let (storage, plan, original, error) = (*failure).into_parts();
                 transfer.restore(storage, rest);
+                *inputs = Some((plan, original.expect("actual observed input retained")));
                 Err(LaptopError::OrdinaryStop(error))
             }
         }
@@ -130,17 +153,39 @@ impl WorkerRuntime {
         plan: ObservedCreatePlan,
         process: ExistingProcessIncarnation,
         connection: &WorkerLaunchConnection,
+    ) -> std::result::Result<
+        StartedReplacementStopTransferred,
+        Box<StartedReplacementStopTransferFailure>,
+    > {
+        let mut inputs = Some((plan, process));
+        self.transfer_started_replacement(created, &mut inputs, connection)
+            .map_err(|cause| {
+                let (plan, process) = inputs.expect("all refusals return original observations");
+                Box::new(StartedReplacementStopTransferFailure {
+                    plan,
+                    process,
+                    cause,
+                })
+            })
+    }
+    fn transfer_started_replacement(
+        &self,
+        created: &CreatedLaptop,
+        inputs: &mut Option<(ObservedCreatePlan, ExistingProcessIncarnation)>,
+        connection: &WorkerLaunchConnection,
     ) -> Result<StartedReplacementStopTransferred> {
+        let (plan, process) = inputs.as_ref().expect("original observations");
         let mut transfer = self
             .laptop_workflows()
-            .started_transfer(self, created, &plan, connection)?;
+            .started_transfer(self, created, plan, connection)?;
         process
-            .assert_plan(self, &plan)
+            .assert_plan(self, plan)
             .map_err(LaptopError::ExistingObservation)?;
         process
             .assert_storage_owner(self, transfer.record.resources().storage())
             .map_err(LaptopError::ExistingObservation)?;
         require_identity(&transfer.record, process.data().canonical_id().as_ref())?;
+        let (plan, process) = inputs.take().expect("checked original observations");
         let (storage, rest) = transfer.take();
         match self.retain_ordinary_replacement_stop(storage, plan, process, None) {
             Ok(stop) => {
@@ -152,8 +197,9 @@ impl WorkerRuntime {
                 })
             }
             Err(failure) => {
-                let (storage, _plan, _process, error) = (*failure).into_parts();
+                let (storage, plan, original, error) = (*failure).into_parts();
                 transfer.restore(storage, rest);
+                *inputs = Some((plan, original));
                 Err(LaptopError::OrdinaryStop(error))
             }
         }

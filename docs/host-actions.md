@@ -1,5 +1,11 @@
 # Owner-approved host actions
 
+> **Design record.** The Python implementation of this queue and its transport
+> (`host_actions.py`, `host_action_rpc.py`, `host_action_http.py`) was never wired
+> into a running broker and has been removed. The broker answers
+> `/api/host-actions` with 503. The native owner-host executor is to implement
+> this design.
+
 The proposed executor lets an authenticated expert request a named operation and
 lets the owner approve its exact target once. It is separate from terminal tools:
 there is no shell, arbitrary command, argument list, environment or path in the

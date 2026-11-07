@@ -35,6 +35,16 @@ impl DirectStorageObservation {
     pub fn is_live(&self) -> bool {
         self.live
     }
+    pub(super) fn recorded(owner: Arc<()>, current: Arc<()>, live: bool) -> Self {
+        Self {
+            owner,
+            current,
+            live,
+        }
+    }
+    pub(super) fn matches(&self, owner: &Arc<()>, current: &Arc<()>) -> bool {
+        Arc::ptr_eq(&self.owner, owner) && Arc::ptr_eq(&self.current, current)
+    }
 }
 impl WorkerRuntime {
     /// Transfer the actual original resources, not a target/path/CID selected

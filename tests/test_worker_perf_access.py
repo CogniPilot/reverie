@@ -382,8 +382,9 @@ class PerfAccess(unittest.TestCase):
         source=Path(__file__).resolve().parents[1]/'python/reverie/worker.py'
         node=next(n for n in ast.parse(source.read_bytes()).body if isinstance(n,ast.ClassDef) and n.name=='OfficeAPI')
         # Approved OfficeAPI body-drain snapshot, fixed so Nix needs no .git.
-        # Includes only purpose-bound recovery HTTP assertions, not C/perf forwarding.
-        self.assertEqual(hashlib.sha256(ast.dump(node).encode()).hexdigest(),'ca89d0873e8f9f07cdaf665946e44f4610922b3217a94e68859f6397e1f1c843')
+        # Includes only purpose-bound recovery HTTP assertions, not C/perf forwarding;
+        # the retired host-action path is a fixed 503.
+        self.assertEqual(hashlib.sha256(ast.dump(node).encode()).hexdigest(),'cc494194def537407e95b3355651f64942ec72bde1f4fb6753c550e90b7eb1b9')
 
     def test_actual_host_C_socket_and_foreign_namespace_rejection(self):
         self.broker.handlers={};self.broker.stopping=threading.Event();self.broker.cleanup_uncertain=set()

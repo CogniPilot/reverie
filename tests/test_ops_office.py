@@ -22,6 +22,10 @@ class Office(unittest.TestCase):
  def test_caller_identity_field_never_reaches_host(self):
   office=OfficeAPI(self.root/'phone',SID,'127.0.0.1',self.root,ops=lambda *args:self.calls.append(args));self.addCleanup(office.close)
   command={'kind':'reverie.ops.command','version':1,'requestId':'status-1','action':ACTIONS[0],'resourceId':'website','actor':{'owner':True}};status,body=self.request(office,command);self.assertEqual(status,200);self.assertFalse(json.loads(body)['success']);self.assertEqual(self.calls,[])
+ def test_retired_host_action_path_fails_closed_without_website(self):
+  office=OfficeAPI(self.root/'phone',SID,lambda:(_ for _ in ()).throw(AssertionError('website touched')),self.root);self.addCleanup(office.close)
+  for path in ('/api/host-actions','/api/host-actions/'+SID):
+   with self.subTest(path=path):self.assertEqual(self.request(office,{},path=path)[0],503)
  def test_legacy_restart_cannot_bypass_enabled_ops_fence(self):
   broker=Broker({'maxWorkers':1,'opsConfig':'/unavailable','maintenanceSessions':[SID]})
   for caller in (None,SID):

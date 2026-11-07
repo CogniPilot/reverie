@@ -14,6 +14,12 @@ pub struct StartedLaptopSource {
     workflow: LaptopWorkflow,
     current: Arc<()>,
 }
+/// The genuine source attachment starts its own readback epoch. Only an
+/// unclaimed rollback may restore the prior epoch; there is no public reset.
+pub(super) struct Attachment {
+    current: Arc<()>,
+    previous: created_finalization::StorageCheck,
+}
 impl StartedLaptopSource {
     pub fn same_workflow(&self, other: &LaptopWorkflow) -> bool {
         self.workflow.same_workflow(other)
@@ -86,7 +92,11 @@ impl WorkerRuntime {
             .find(|entry| entry.is_created(&created.workflow.record))
             .ok_or(LaptopError::Refused("WORKER_LAPTOP_REPLAYED"))?;
         let current = Arc::new(());
-        record.source_attachment = Some(current.clone());
+        let previous = std::mem::take(&mut record.finalization);
+        record.source_attachment = Some(Attachment {
+            current: current.clone(),
+            previous,
+        });
         *slot = RetainedRecord::Source(created.workflow.record.clone());
         Ok(StartedLaptopSource {
             workflow: created.workflow.clone(),
@@ -120,7 +130,11 @@ impl WorkerRuntime {
             .iter_mut()
             .find(|entry| entry.is_source(&source.workflow.record))
             .ok_or(LaptopError::Refused("WORKER_STARTED_SOURCE_CONSUMED"))?;
-        record.source_attachment = None;
+        let attachment = record
+            .source_attachment
+            .take()
+            .expect("checked original source attachment");
+        record.finalization = attachment.previous;
         *slot = RetainedRecord::Created(source.workflow.record.clone());
         Ok(())
     }
@@ -206,7 +220,7 @@ impl Workflows {
                 && record
                     .source_attachment
                     .as_ref()
-                    .is_some_and(|current| Arc::ptr_eq(current, &source.current)),
+                    .is_some_and(|attachment| Arc::ptr_eq(&attachment.current, &source.current)),
             "WORKER_STARTED_SOURCE_CONSUMED",
         )?;
         Ok(record)
