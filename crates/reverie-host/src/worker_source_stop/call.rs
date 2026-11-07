@@ -13,25 +13,41 @@ impl ExactStopAttempt {
             .fold(end, Instant::min)
     }
     pub(super) fn call(&mut self, args: Vec<OsString>, required: bool) -> Result<CapturedOutput> {
-        let end = self.read_end();
-        need(Instant::now() < end, "RESOURCE_SOURCE_STOP_DEADLINE")?;
-        match self.origin.engine.client.run_scoped(
+        captured(
+            &self.origin,
+            self.read_end(),
+            &mut self.pending,
             args,
-            end,
-            &CancellationToken::new(),
-            Policy {
-                maximum: Duration::from_secs(MAX_QUERY_SECONDS),
-                maximum_output: MAX_OUTPUT_BYTES,
-                successful_exit: required,
-            },
-        ) {
-            Ok(output) => Ok(output),
-            Err(failure) => {
-                if failure.error.is_uncertain() {
-                    self.pending = failure.call;
-                }
-                Err(SourceStopError::Engine(failure.error.into()))
+            required,
+        )
+    }
+}
+/// One private fixed-client call owner for the distinct stop purposes. No raw
+/// command interface leaves this module; each purpose selects its own argv.
+pub(super) fn captured(
+    origin: &InstalledWorkerEngine,
+    end: Instant,
+    pending: &mut Option<CapturedCall>,
+    args: Vec<OsString>,
+    required: bool,
+) -> Result<CapturedOutput> {
+    need(Instant::now() < end, "RESOURCE_SOURCE_STOP_DEADLINE")?;
+    match origin.engine.client.run_scoped(
+        args,
+        end,
+        &CancellationToken::new(),
+        Policy {
+            maximum: Duration::from_secs(MAX_QUERY_SECONDS),
+            maximum_output: MAX_OUTPUT_BYTES,
+            successful_exit: required,
+        },
+    ) {
+        Ok(output) => Ok(output),
+        Err(failure) => {
+            if failure.error.is_uncertain() {
+                *pending = failure.call;
             }
+            Err(SourceStopError::Engine(failure.error.into()))
         }
     }
 }

@@ -608,3 +608,30 @@ restoration step. Dropping that guard leaves the box in the record. Unknown
 construction or descriptor close retains the box and job. Actual reused-viewer
 App transfer, transport/replacement/drain and recovered-viewer producers remain
 required; no backend selection follows from this Host component.
+
+`OrdinaryLaptopStop` is the separate legacy/stopped-name cleanup owner. Its
+observed constructor consumes the same Box, plan and original sealed inspection;
+the unobserved constructor consumes the same Box/plan and requires an actual
+first observation. Neither constructor creates a process incarnation or a
+protected/Created/Nix token. App performs its actual common stop admission first.
+The native owner preserves optional stop, inspect, conditional kill and inspect,
+plus owned-label network cleanup. Foreign network labels remain a no-op.
+
+Explicit safety corrections apply to this legacy branch: a fresh identity
+observation precedes effects; container and network commands target captured
+immutable IDs; stopped acknowledgment requires positive boolean false or a
+successful complete absence census. Failed optional inspect and falsey malformed
+state no longer release storage. The original conditional-kill truthiness and
+first-row JSON behavior remain DATA semantics. Owned network removal requires
+confirmed absence; uncertain cleanup retains the actual Box and call. Local
+native settlement never upgrades an unknown provider result or permits replay.
+
+`stop_existing_viewer_laptop` uses that same private algorithm inside the actual
+bounded existing record. It covers Held/no-Job, Viewing and retained constructor
+phases without fabricating a viewer. Any present job remains unreaped through
+stop; the App must stop before closing it. An attempted stop forbids a new
+constructor, and unknown stop independently prevents Box reclamation even after
+query/viewer cleanup reaches Closed. Actual App admission/current-source/receipt
+and handler/lifecycle owners remain mandatory; no global release follows from
+the Host stop result. Recovered/stop-all owners and full caller adoption are
+separate required integration work.
