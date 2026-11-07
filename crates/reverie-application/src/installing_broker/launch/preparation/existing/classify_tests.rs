@@ -5,8 +5,8 @@ use std::{
     fs,
     process::{Child, Command},
 };
-const SID: &str = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
-fn broker(tree: &Tree) -> InstallingBroker {
+pub(super) const SID: &str = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
+pub(super) fn broker(tree: &Tree) -> InstallingBroker {
     let mut raw: serde_json::Value = serde_json::from_slice(&tree.raw).unwrap();
     raw.as_object_mut().unwrap().remove("resourceReservations");
     raw["budgetMode"] = serde_json::json!("admission");
@@ -15,7 +15,7 @@ fn broker(tree: &Tree) -> InstallingBroker {
     tree.write("company.json", br#"{"employees":[]}"#);
     broker
 }
-fn inspection<'a>(
+pub(super) fn inspection<'a>(
     tree: &Tree,
     broker: &'a InstallingBroker,
     pid: Option<u32>,

@@ -1,6 +1,53 @@
 use super::*;
 
 #[test]
+fn receipt_observation_binds_original_runtime_and_resource_generation_across_moves() {
+    let tree = Tree::new();
+    let runtime = runtime(&tree);
+    let other = super::runtime(&tree);
+    let source = selected(&tree);
+    let mut owner = runtime
+        .resolve_storage(&source, &session(B))
+        .unwrap()
+        .into_legacy()
+        .unwrap();
+    owner.prepare_storage().unwrap();
+    owner.prepare_runtime_directory().unwrap();
+    tree.write(
+        &tree.state().join(B).join("runtime.json"),
+        br#"{"exit":""}"#,
+    );
+    let receipt = owner.observe_launch_receipt().unwrap();
+    let moved = Box::new(owner);
+    receipt.assert_storage_owner(&runtime, &moved).unwrap();
+    assert_eq!(
+        receipt
+            .assert_storage_owner(&other, &moved)
+            .unwrap_err()
+            .code(),
+        "WORKER_RECEIPT_OWNER_CHANGED"
+    );
+    let paths = moved.paths().clone();
+    moved.close(end()).unwrap();
+    let successor = runtime
+        .resolve_storage(&source, &session(B))
+        .unwrap()
+        .into_legacy()
+        .unwrap();
+    assert_eq!(successor.paths(), &paths);
+    assert_eq!(
+        receipt
+            .assert_storage_owner(&runtime, &successor)
+            .unwrap_err()
+            .code(),
+        "WORKER_RECEIPT_OWNER_CHANGED"
+    );
+    successor.close(end()).unwrap();
+    runtime.close(end()).unwrap();
+    other.close(end()).unwrap();
+}
+
+#[test]
 fn actual_legacy_receipt_keeps_empty_nul_parent_and_dangling_path_dispositions() {
     let tree = Tree::new();
     let runtime = runtime(&tree);

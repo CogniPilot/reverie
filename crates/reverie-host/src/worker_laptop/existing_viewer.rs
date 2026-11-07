@@ -2,7 +2,12 @@
 //! App supplies its actual classified reuse scope; these resources are not an
 //! authorization, live-pane proof, admission release or source-stop permit.
 use super::*;
-use crate::{worker_launch::ExistingLaptopInspection, worker_storage::LaunchStorage};
+mod relay;
+use crate::{
+    worker_launch::ExistingLaptopInspection,
+    worker_storage::{LaunchReceiptObservation, LaunchStorage},
+};
+pub use relay::{ExistingRelayRetainFailure, ExistingRelayReturned};
 use std::sync::MutexGuard;
 
 struct Inputs {
@@ -10,6 +15,7 @@ struct Inputs {
     plan: ObservedCreatePlan,
     request: WorkerRequest,
     inspected: ExistingLaptopInspection,
+    receipt: Option<LaunchReceiptObservation>,
 }
 #[derive(Clone, Copy, Eq, PartialEq)]
 enum Stage {
@@ -79,6 +85,7 @@ impl ExistingViewerRetainFailure {
             plan,
             request,
             inspected,
+            receipt: _,
         } = self.inputs;
         (storage, plan, request, inspected, self.error)
     }
@@ -113,6 +120,7 @@ impl ExistingViewerReturned<'_> {
             plan,
             request,
             inspected,
+            receipt: _,
         } = self
             .record
             .inputs
@@ -210,6 +218,11 @@ impl Workflows {
                 .inspected
                 .assert_plan(runtime, &inputs.plan)
                 .map_err(LaptopError::ExistingObservation)?;
+            if let Some(receipt) = &inputs.receipt {
+                receipt
+                    .assert_storage_owner(runtime, &inputs.storage)
+                    .map_err(LaptopError::StorageOwner)?;
+            }
             need(
                 inputs.request.session() == inputs.plan.session(),
                 "WORKER_LAPTOP_REQUEST_CHANGED",
@@ -333,6 +346,7 @@ impl Workflows {
         &'a self,
         runtime: &WorkerRuntime,
         existing: &'a ExistingViewer,
+        relay: bool,
     ) -> Result<ExistingViewerReturned<'a>> {
         need(
             Arc::ptr_eq(runtime.installed_engine(), &existing.reference.origin),
@@ -356,6 +370,13 @@ impl Workflows {
         need(
             matches!(record.stage, Stage::Held | Stage::Closed) && record.inputs.is_some(),
             "WORKER_EXISTING_VIEWER_RETAINED",
+        )?;
+        need(
+            record
+                .inputs
+                .as_ref()
+                .is_some_and(|inputs| inputs.receipt.is_some() == relay),
+            "WORKER_EXISTING_VIEWER_PURPOSE",
         )?;
         Ok(ExistingViewerReturned {
             inventory,
@@ -381,6 +402,7 @@ impl WorkerRuntime {
                 plan,
                 request,
                 inspected,
+                receipt: None,
             },
         )
     }
@@ -398,6 +420,7 @@ impl WorkerRuntime {
         &'a self,
         existing: &'a ExistingViewer,
     ) -> Result<ExistingViewerReturned<'a>> {
-        self.laptop_workflows().reclaim_existing(self, existing)
+        self.laptop_workflows()
+            .reclaim_existing(self, existing, false)
     }
 }

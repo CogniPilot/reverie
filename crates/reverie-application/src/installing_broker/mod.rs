@@ -22,9 +22,10 @@ use crate::{
 pub use creation::CreationBudgetError;
 pub(crate) use image_refresh::LoadedLaunchImage;
 pub use launch::{
-    AdmittedWorkerLaunch, ClassifiedWorkerLaunch, ColdWorkerLaunch, ExistingColdTarget,
-    InspectedWorkerLaunch, LaunchAdmissionFailure, LaunchPreparationFailure, ReceivedWorkerLaunch,
-    ReusableWorkerLaunch, WorkerConnectionDispatch, WorkerDispatchError,
+    AdmittedWorkerLaunch, AllocationClosedReuse, ClassifiedWorkerLaunch, ColdWorkerLaunch,
+    ExistingColdTarget, InspectedWorkerLaunch, LaunchAdmissionFailure, LaunchPreparationFailure,
+    PreparedReuseViewer, ReceivedWorkerLaunch, RestoredReuse, ReusableWorkerLaunch,
+    ReuseViewerFailure, ViewingReuse, WorkerConnectionDispatch, WorkerDispatchError,
 };
 pub(crate) use lifecycle::LaptopLifecycle;
 use lifecycle::LaptopState;
@@ -38,7 +39,9 @@ pub use storage::{
     NetworkStorageError, NetworkStoragePreparation, NetworkStorageReclaimFailure,
     NetworkStorageRetainFailure, NetworkStorageReturned, NixStorageError, NixStoragePreparation,
     NixStorageReclaimFailure, NixStorageRetainFailure, NixStorageReturned,
-    OwnedCreatePreparationError, StorageClaim, StorageReleaseFailure, StorageWorkflowError,
+    OwnedCreatePreparationError, ReplacementStopPreparation, ReplacementStopReclaimFailure,
+    ReplacementStopRetainFailure, ReplacementStopReturned, StorageClaim, StorageReleaseFailure,
+    StorageWorkflowError,
 };
 pub use telemetry::TelemetryCloseError;
 struct CurrentInstalled {

@@ -51,6 +51,7 @@ pub enum LaptopError {
     Refused(&'static str),
     Plan(CreateObservationError),
     ExistingObservation(crate::worker_launch::ExistingObservationError),
+    StorageOwner(crate::worker_storage::StorageOwnerError),
     Office(OfficeError),
     Network(NetworkDataError),
     Engine(EngineError),
@@ -88,6 +89,7 @@ impl LaptopError {
         match self {
             Self::MemoryEffectUnconfirmed(_) => true,
             Self::ColdStorage(error) => error.unconfirmed_native(),
+            Self::StorageOwner(error) => error.unconfirmed_native(),
             Self::Observation(_) => true,
             Self::Publication(error) => !error.cleanup_faults().is_empty(),
             Self::Finalization { primary, secondary } => {
@@ -121,6 +123,7 @@ impl LaptopError {
             Self::MemoryHelperSelection(_) => "LAPTOP_SOFT_LIMIT_HELPER_SELECTION",
             Self::ColdPolicy(_) => "WORKER_COLD_POLICY",
             Self::ColdStorage(error) => error.code(),
+            Self::StorageOwner(error) => error.code(),
             Self::MemoryHelperRefused(_) => "LAPTOP_SOFT_LIMIT_HELPER_REFUSED",
             Self::MemoryEffectUnconfirmed(_) => "LAPTOP_MEMORY_EFFECT_UNCONFIRMED",
             Self::Recorded(error) => error.code(),
@@ -153,6 +156,7 @@ impl std::error::Error for LaptopError {
             Self::MemoryHelperSelection(error) => Some(error),
             Self::ColdPolicy(error) => Some(error),
             Self::ColdStorage(error) => Some(error),
+            Self::StorageOwner(error) => Some(error),
             Self::MemoryHelperRefused(_) => None,
             Self::MemoryEffectUnconfirmed(error) => Some(error.as_ref()),
             Self::Recorded(error) => Some(error.as_ref()),
