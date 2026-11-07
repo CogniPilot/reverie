@@ -1,6 +1,12 @@
 //! The installing service's actual storage registry. A claim retains real
 //! resources; labels, returned paths and this handle do not authorize launch.
+mod direct_finalization;
 mod error;
+mod finalization;
+pub(in crate::installing_broker) use direct_finalization::{
+    DirectStorageFinishFailure, DirectStorageFinished, DirectStoragePreparation,
+    DirectStorageRetainFailure,
+};
 mod existing_viewer;
 pub(in crate::installing_broker) use existing_viewer::{
     ExistingStorageError, ExistingStoragePreparation, ExistingStorageReturned,
@@ -55,9 +61,19 @@ enum EntryOwner {
     OrdinaryStop(Arc<Mutex<reverie_host::worker_source_stop::OrdinaryLaptopStop>>),
     Existing(Arc<reverie_host::worker_laptop::ExistingViewer>),
 }
-struct FinalizingStorage {
-    owner: Box<LaunchStorage>,
-    brand: Arc<()>,
+enum FinalizingStorage {
+    Ready {
+        owner: Box<LaunchStorage>,
+        brand: Arc<()>,
+    },
+    Direct {
+        owner: Arc<Mutex<reverie_host::worker_laptop::DirectStorageFinalizer>>,
+        brand: Arc<()>,
+    },
+}
+struct FinalStorageDecision {
+    live: bool,
+    brand: Option<Arc<()>>,
 }
 /// The original claim destination, shared by named resource transitions.
 /// These private fields describe where to restore custody, never permission.
