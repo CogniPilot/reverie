@@ -20,6 +20,7 @@ members = [
     "crates/reverie-python-regex",
     "crates/reverie-memory-capsule",
     "crates/reverie-diagnostics",
+    "crates/reverie-deployment",
     "crates/xtask",
 ]
 exclude = ["vendor/rustpython-sre-engine", "vendor/rustpython-wtf8"]

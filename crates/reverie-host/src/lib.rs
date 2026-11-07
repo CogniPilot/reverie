@@ -4,6 +4,7 @@ pub mod broker_engine;
 mod captured_client;
 pub mod command_telemetry;
 pub mod creation_budget;
+pub mod deployment_snapshot;
 pub mod device_policy;
 pub mod embeddings;
 pub mod engine_metadata;

@@ -140,6 +140,24 @@ contracts. Full native completion also requires the remaining runtime/model,
 terminal, service and maintenance entry points in the cohort inventory above;
 passing a front-only trial does not retire those Python consumers.
 
+## Hybrid production selection
+
+The November 7, 2026 hybrid cutover selected the qualified Rust network front
+with the existing TypeScript application. Rust owns public listeners, transport
+buffers, backpressure and child supervision; HTTP application routes,
+authentication and company stores remain in TypeScript/Node. Rust worker command
+clients are also running. The existing Python worker broker and other legacy
+helpers remain active. Other Rust backend crates are not thereby selected as
+production services, and this is not the full native-backend migration.
+
+The owner-directed fix-forward cutover retained the original stopped container,
+all existing data mounts and an ordinary full console copy. Strict snapshot
+verification refused before producing an archive, so the operation explicitly
+reports `backup_verified: false`; no consistent-backup or automatic data-restore
+claim follows. Startup and browser login passed. One-employee chat, journal,
+dispatch, clean stop/restart, inventory and perf checks are separate acceptance.
+Exact installed identities and outcomes belong to private deployment receipts.
+
 ## Workspace and quality gate
 
 The [specification index](../spec/README.md) owns the adopted Rumoca rules:

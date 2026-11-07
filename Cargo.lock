@@ -906,6 +906,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "reverie-deployment"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "clap",
+ "getrandom",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
+ "nix",
+ "reverie-host",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tokio",
+]
+
+[[package]]
 name = "reverie-diagnostics"
 version = "0.1.0"
 dependencies = [
