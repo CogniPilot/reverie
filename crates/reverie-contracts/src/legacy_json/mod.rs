@@ -39,7 +39,8 @@ pub(crate) fn decode_metadata_bytes(raw: &[u8]) -> Result<Value, Error> {
     decode::decode_metadata(&text::python_bytes(raw)?)
 }
 /// `json.loads(str)` of already decoded text: duplicate keys last-wins and
-/// literal constants accepted. A BOM is invalid JSON, as in Python.
+/// literal constants accepted. There is no byte-encoding detection, so a BOM is
+/// invalid JSON, as in Python.
 pub(crate) fn decode_text(text: &str) -> Result<Value, Error> {
     decode::decode_last_wins(text.as_bytes())
 }

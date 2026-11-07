@@ -270,3 +270,102 @@ impl Owner {
         Ok((state, (followed.st_dev, followed.st_ino)))
     }
 }
+
+/// `exclusive(path, data)`: a new private file (never replacing one, never
+/// through a final symlink), synced, then its directory synced.
+pub(crate) fn exclusive(path: &Path, data: &[u8]) -> Result<(), Refused> {
+    use std::io::Write;
+    let refusal = Refused("Exclusive observation write refused");
+    let flags =
+        OFlag::O_WRONLY | OFlag::O_CREAT | OFlag::O_EXCL | OFlag::O_NOFOLLOW | OFlag::O_CLOEXEC;
+    let mut file =
+        File::from(open(path, flags, Mode::from_bits_truncate(0o600)).map_err(refused(refusal.0))?);
+    file.write_all(data)
+        .and_then(|()| file.sync_all())
+        .map_err(|_| refusal)?;
+    let directory = path.parent().ok_or(refusal)?;
+    let fd = open(
+        directory,
+        OFlag::O_RDONLY | OFlag::O_DIRECTORY | OFlag::O_CLOEXEC,
+        Mode::empty(),
+    )
+    .map_err(refused(refusal.0))?;
+    File::from(fd).sync_all().map_err(|_| refusal)
+}
+
+/// `Path.mkdir(parents=True, mode=mode, exist_ok=True)`: missing parents
+/// with the default mode, the leaf with `mode`.
+pub(crate) fn make_directories(path: &Path, mode: u32) -> Result<(), Refused> {
+    use std::os::unix::fs::DirBuilderExt;
+    let refusal = Refused("Observation directory unavailable");
+    if path.is_dir() {
+        return Ok(());
+    }
+    if let Some(parent) = path.parent() {
+        std::fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o777)
+            .create(parent)
+            .map_err(|_| refusal)?;
+    }
+    match std::fs::DirBuilder::new().mode(mode).create(path) {
+        Ok(()) => Ok(()),
+        Err(_) if path.is_dir() => Ok(()),
+        Err(_) => Err(refusal),
+    }
+}
+
+impl Owner {
+    /// `state_directory(cfg, create=True)`: create the private directory and
+    /// its marker, but never adopt existing content without the marker.
+    pub(crate) fn create_state(&self, config: &ObservationConfig) -> Result<PathBuf, Refused> {
+        let state = path_of(&config.state_directory)?;
+        self.ancestry(&state)?;
+        make_directories(&state, 0o700)?;
+        let private = Refused("User observation state must be private");
+        let meta = lstat(&state).map_err(|_| private)?;
+        let directory = meta.st_mode & libc::S_IFMT == libc::S_IFDIR;
+        if !directory || meta.st_uid != self.uid || meta.st_mode & 0o077 != 0 {
+            return Err(private);
+        }
+        let marker = state.join(".reverie-user-observations.json");
+        let present = stat(&marker).is_ok()
+            || lstat(&marker).is_ok_and(|meta| meta.st_mode & libc::S_IFMT == libc::S_IFLNK);
+        if !present {
+            let mut entries = std::fs::read_dir(&state).map_err(|_| private)?;
+            if entries.next().is_some() {
+                return Err(Refused("Refusing to adopt existing observations"));
+            }
+            exclusive(&marker, MARKER)?;
+        }
+        if self.private_bytes(&marker, CONFIG_LIMIT)? != MARKER {
+            return Err(Refused("Wrong user observation marker"));
+        }
+        Ok(state)
+    }
+
+    /// `operation(path)`: the exclusive, non-blocking unit-control lock next
+    /// to the configuration.
+    pub(crate) fn operation(&self, config: &Path) -> Result<nix::fcntl::Flock<File>, Refused> {
+        let refusal = Refused("User observation lock refused");
+        let lock = config
+            .parent()
+            .ok_or(refusal)?
+            .join(".observations-control.lock");
+        let flags = OFlag::O_RDWR | OFlag::O_CREAT | OFlag::O_NOFOLLOW | OFlag::O_CLOEXEC;
+        let file =
+            File::from(open(&lock, flags, Mode::from_bits_truncate(0o600)).map_err(|_| refusal)?);
+        let meta = fstat(&file).map_err(|_| refusal)?;
+        let regular = meta.st_mode & libc::S_IFMT == libc::S_IFREG;
+        if !regular || meta.st_uid != self.uid || meta.st_nlink != 1 || meta.st_mode & 0o077 != 0 {
+            return Err(refusal);
+        }
+        nix::fcntl::Flock::lock(file, nix::fcntl::FlockArg::LockExclusiveNonblock)
+            .map_err(|_| refusal)
+    }
+}
+
+/// `canonical(value)` for the configuration path given on the command line.
+pub fn canonical_config(path: &Path) -> Result<(), Refused> {
+    canonical(path)
+}

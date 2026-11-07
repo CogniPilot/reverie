@@ -58,7 +58,7 @@ class PhoneComposition(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             broker=Broker({'maxWorkers':1,'apiSocketRoot':directory,'companyRoot':directory})
             sentinel=object()
-            def old_constructor(directory,sid,address,company_root,host_actions=None):
+            def old_constructor(directory,sid,address,company_root):
                 return sentinel
             with patch('reverie.worker.OfficeAPI',side_effect=old_constructor):
                 self.assertIs(broker.office(SID),sentinel)
