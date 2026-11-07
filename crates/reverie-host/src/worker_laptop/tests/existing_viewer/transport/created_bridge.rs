@@ -8,6 +8,7 @@ mod owners;
 mod request;
 mod source;
 mod transfer;
+mod worker_close;
 fn isolated(name: &str) -> bool {
     crate::test_process::isolate_case(&format!(
         "worker_laptop::tests::existing_viewer::transport::created_bridge::{name}"

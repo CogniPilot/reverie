@@ -162,9 +162,7 @@ pub(super) fn observe_closed(
             && record.pending.is_none(),
         "WORKER_CREATED_FINAL_STORAGE_PHASE",
     )?;
-    if let Some(viewer) = &record.viewer {
-        viewer.require_closed()?;
-    }
+    storage_cleanup::require_viewer_closed(runtime, record)?;
     record.finalization.attempted = true;
     match observe(runtime, record) {
         Ok(live) => {
@@ -240,9 +238,7 @@ pub(super) fn require_native_closed(runtime: &WorkerRuntime, record: &Record) ->
         .office
         .require_closed_for_resource(runtime, resources.plan.session())
         .map_err(LaptopError::Office)?;
-    if let Some(viewer) = &record.viewer {
-        viewer.require_closed()?;
-    }
+    storage_cleanup::require_viewer_closed(runtime, record)?;
     if let Some(publication) = record
         .creation
         .as_ref()

@@ -81,9 +81,7 @@ fn require_unlink(runtime: &WorkerRuntime, record: &Record) -> Result<()> {
         .storage()
         .check_resource_current()
         .map_err(LaptopError::StorageOwner)?;
-    if let Some(viewer) = &record.viewer {
-        viewer.require_closed()?;
-    }
+    storage_cleanup::require_viewer_closed(runtime, record)?;
     Ok(())
 }
 fn started(stage: create::CreateStage) -> bool {

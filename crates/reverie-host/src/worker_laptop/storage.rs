@@ -113,7 +113,7 @@ impl WorkerRuntime {
             original
                 .require_released_predecessor(&next)
                 .map_err(LaptopError::Refused)?;
-            require_local_closed(&record)?;
+            require_local_closed(self, &record)?;
         }
         Ok(StartedStorageBorrow {
             runtime: self,
@@ -136,21 +136,19 @@ impl WorkerRuntime {
             .ok_or(LaptopError::Refused("WORKER_STARTED_CONNECTION_REQUIRED"))?
             .require_released()
             .map_err(LaptopError::Refused)?;
-        require_local_closed(&record)?;
+        require_local_closed(self, &record)?;
         Ok(StartedStorageBorrow {
             runtime: self,
             record,
         })
     }
 }
-fn require_local_closed(record: &Record) -> Result<()> {
+fn require_local_closed(runtime: &WorkerRuntime, record: &Record) -> Result<()> {
     need(
         record.resources().nix.guard_close_confirmed(),
         "WORKER_STARTED_NIX_GUARD_RETAINED",
     )?;
-    if let Some(viewer) = &record.viewer {
-        viewer.require_closed()?;
-    }
+    storage_cleanup::require_viewer_closed(runtime, record)?;
     if let Some(publication) = record
         .creation
         .as_ref()
