@@ -27,3 +27,25 @@ entries, a 5 s deadline and 2 MiB of output. The address space is capped at
 
 The projection itself is data in `reverie_contracts::resource_history`; this
 crate owns the file, clock and deadline effects.
+
+## Collector state
+
+`reverie-collect-state` prepares the collector service's state directory and
+replaces `python/reverie/cleanup/collector_state.py`. The collect service runs
+it as root before the collector starts:
+
+```console
+reverie-collect-state --state-dir /var/lib/reverie-collect
+```
+
+- The path must be absolute, without `..` or control characters, and not a
+  shared system directory such as `/var/lib` or `/nix/store`.
+- Missing directories are created with mode 0700. The path and every ancestor
+  must be root-owned real directories without group or other write; existing
+  directories are never chmodded or chowned.
+- An empty directory gets the custody marker. A directory with any other
+  content and no marker is refused, and an existing marker must be a private,
+  singly linked root file with the exact marker bytes.
+
+It prints `{"state": ..., "status": "COLLECTOR_STATE_READY"}`, or
+`reverie-collect-state: <reason>` on stdout with exit status 2.
