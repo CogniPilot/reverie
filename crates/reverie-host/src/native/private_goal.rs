@@ -2,9 +2,9 @@
 //! policy-current reader and G's retained multi-entry batch. Facts grant no access.
 use reverie_core::posix_path::PosixPath;
 use std::{fs::Metadata, os::unix::fs::MetadataExt, path::Path};
-pub(crate) type PathIdentity = (u64, u64, u32, u32);
+pub(crate) type PathIdentity = (u64, u64, u32, u32, u32);
 pub(crate) fn identity(info: &Metadata) -> PathIdentity {
-    (info.dev(), info.ino(), info.uid(), info.mode())
+    (info.dev(), info.ino(), info.uid(), info.mode(), info.gid())
 }
 pub(crate) fn path_available(path: &Path) -> bool {
     let text = super::python_text(path);
