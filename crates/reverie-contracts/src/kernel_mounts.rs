@@ -87,7 +87,7 @@ impl MountTable {
                 minor: integer(device[1])?,
             };
             let root = if fields[3].first() == Some(&47) {
-                Some(path(fields[3])?)
+                Some(decode_path(fields[3])?)
             } else {
                 None
             };
@@ -95,7 +95,7 @@ impl MountTable {
                 id,
                 device,
                 root,
-                point: path(fields[4])?,
+                point: decode_path(fields[4])?,
             });
         }
         Ok(Self { rows })
@@ -107,7 +107,9 @@ impl MountTable {
 fn integer(points: &[u32]) -> Result<UnsignedInteger, MountTableError> {
     crate::rootless::parse_python_digits(points).ok_or(MountTableError)
 }
-fn path(raw: &[u32]) -> Result<PosixPath, MountTableError> {
+/// Original _mount_path, also used for proc reference paths. Parsing supplies
+/// only lexical coordinates; actual namespace and inode custody stay native.
+pub fn decode_path(raw: &[u32]) -> Result<PosixPath, MountTableError> {
     let mut points = Vec::new();
     let mut offset = 0;
     while offset < raw.len() {

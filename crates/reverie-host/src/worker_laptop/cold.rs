@@ -47,7 +47,7 @@ impl Workflows {
             .expect("known configured memory")
             .stage = create::CreateStage::CommittingCold;
         record.phase = Phase::Running;
-        let result = commit(runtime, &record, deadline);
+        let result = commit(runtime, &mut record, deadline);
         record.unknown |= result.as_ref().is_err_and(LaptopError::unconfirmed_native);
         record.outcome = Some(result.map_err(Arc::new));
         if record.pending.is_some() || record.unknown {
@@ -77,9 +77,18 @@ impl WorkerRuntime {
             .commit_cold(self, configured, deadline)
     }
 }
-fn commit(runtime: &WorkerRuntime, record: &Record, deadline: Instant) -> Result<()> {
+fn commit(runtime: &WorkerRuntime, record: &mut Record, deadline: Instant) -> Result<()> {
     running(runtime, deadline)?;
     let resources = record.resources();
+    let retained = matches!(
+        reverie_contracts::worker_cold_tmp::ColdConfiguration::capture(resources.plan.source())
+            .map_err(|error| LaptopError::ColdStorage(
+                crate::worker_storage::StorageOwnerError::ColdData(error)
+            ))?
+            .as_ref()
+            .map(reverie_contracts::worker_cold_tmp::ColdConfiguration::strategy),
+        Some(reverie_contracts::worker_cold_tmp::ColdStrategy::RetainAndReplace)
+    );
     resources
         .held_nix()?
         .assert_create_plan(runtime, &resources.plan)
@@ -91,11 +100,52 @@ fn commit(runtime: &WorkerRuntime, record: &Record, deadline: Instant) -> Result
     resources
         .held_nix()?
         .require_cold_prepared(resources.plan.source())?;
+    if retained {
+        return commit_retained(runtime, record, deadline);
+    }
     resources
         .held_nix()?
         .assert_cold_resources_current()
         .map_err(LaptopError::Nix)?;
     running(runtime, deadline)
+}
+fn commit_retained(runtime: &WorkerRuntime, record: &mut Record, deadline: Instant) -> Result<()> {
+    // Source's first canonical confirmation precedes the commit's nominal
+    // 30-second window. The original supplied/stop deadline still bounds it.
+    let first = super::cold_confirm::confirm(runtime, record, deadline)?;
+    {
+        let resources = record
+            .resources
+            .as_mut()
+            .expect("actual retained laptop resources");
+        let guard::NixOwnership::Held(nix) = &mut resources.nix else {
+            return Err(LaptopError::Refused("WORKER_LAPTOP_NIX_GUARD_CONSUMED"));
+        };
+        nix.begin_retained_cold_commit(resources.plan.source(), &first, deadline)?;
+    }
+    // Bound publication and every local finalizer have completed. Re-observe
+    // the SAME actual Created CID; no caller-supplied native assertion exists.
+    let second = super::cold_confirm::confirm(runtime, record, deadline)?;
+    let resources = record.resources();
+    resources
+        .held_nix()?
+        .assert_create_plan(runtime, &resources.plan)
+        .map_err(LaptopError::Plan)?;
+    resources
+        .held_nix()?
+        .assert_cold_resources_current()
+        .map_err(LaptopError::Nix)?;
+    running(runtime, deadline)?;
+    let resources = record
+        .resources
+        .as_mut()
+        .expect("actual retained laptop resources");
+    let guard::NixOwnership::Held(nix) = &mut resources.nix else {
+        return Err(LaptopError::Refused("WORKER_LAPTOP_NIX_GUARD_CONSUMED"));
+    };
+    // The named owner checks its actual guard BEFORE final fence removal.
+    // No fallible call occurs after this release in this caller.
+    nix.release_retained_cold_commit(resources.plan.source(), &second, deadline)
 }
 pub(super) fn running(runtime: &WorkerRuntime, supplied: Instant) -> Result<()> {
     let end = runtime
