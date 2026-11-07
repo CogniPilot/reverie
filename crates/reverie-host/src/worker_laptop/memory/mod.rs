@@ -2,8 +2,15 @@
 //! Completion is local to memory; it is not CLI readiness or cold-storage ACK.
 mod helper;
 mod target;
+mod worker;
+pub(super) use worker::Pending;
+pub(super) use worker::close_abandoned;
+pub use worker::{
+    StartedMemoryPolicy, StartedMemoryReadback, WorkerMemoryBegin, WorkerMemoryEffect,
+};
 #[cfg(test)]
 mod tests;
+use super::call_budget::CallBudget;
 use super::*;
 use crate::reservation_kernel::ReservationKernel;
 use reverie_contracts::{
@@ -98,6 +105,19 @@ trait Observations {
         policy: &ObservedMemoryPolicy,
         deadline: Instant,
     ) -> Result<()>;
+    fn limits_selected(
+        &self,
+        row: &RecoveryInspection,
+        policy: Option<&ObservedMemoryPolicy>,
+        deadline: Instant,
+    ) -> Result<()> {
+        match policy {
+            Some(policy) => self.limits(row, policy, deadline),
+            None => ReservationKernel::new()
+                .verify_recovery_limits(row, None, deadline)
+                .map_err(LaptopError::MemoryKernel),
+        }
+    }
 }
 struct Installed;
 impl Observations for Installed {
@@ -141,22 +161,13 @@ fn run(
     };
     observed.host_root(deadline)?;
     let row = inspect(runtime, record, deadline)?;
-    let plan = &record.resources().plan;
-    let cid = record
-        .creation
-        .as_ref()
-        .and_then(|state| state.container.as_ref())
-        .ok_or(LaptopError::Refused("LAPTOP_MEMORY_CANONICAL_CID_REQUIRED"))?;
-    let pid = row
-        .started_memory_pid(
-            plan.arguments().name(),
-            runtime.worker_identity().deployment(),
-            plan.session(),
-            cid,
-            plan.arguments().policy_digest(),
-        )
-        .map_err(LaptopError::MemoryIdentity)?;
-    let target = observed.target(pid)?;
+    let target = target_from_row(
+        runtime,
+        record,
+        &row,
+        record.resources().plan.arguments().policy_digest(),
+        observed,
+    )?;
     let mut attempted = false;
     let effect = enforce(
         runtime,
@@ -171,6 +182,30 @@ fn run(
     .and_then(|()| refresh(runtime, record, &row, &target, deadline));
     let result = finalized(effect, target.close());
     classify(result, attempted)
+}
+fn target_from_row(
+    runtime: &WorkerRuntime,
+    record: &Record,
+    row: &RecoveryInspection,
+    wanted: &reverie_contracts::worker_config::WorkerPolicyDigest,
+    observed: &impl Observations,
+) -> Result<target::Target> {
+    let plan = &record.resources().plan;
+    let cid = record
+        .creation
+        .as_ref()
+        .and_then(|state| state.container.as_ref())
+        .ok_or(LaptopError::Refused("LAPTOP_MEMORY_CANONICAL_CID_REQUIRED"))?;
+    let pid = row
+        .started_memory_pid(
+            plan.arguments().name(),
+            runtime.worker_identity().deployment(),
+            plan.session(),
+            cid,
+            wanted,
+        )
+        .map_err(LaptopError::MemoryIdentity)?;
+    observed.target(pid)
 }
 fn enforce(
     runtime: &WorkerRuntime,
@@ -210,17 +245,37 @@ fn enforce(
     } else {
         // Slow engine equality first, then fresh local fences, hard ceiling and
         // original deadline immediately before the one fixed writer open.
-        refresh(runtime, record, row, target, deadline)?;
-        target.hard_is(policy.memory().as_str())?;
-        running(runtime, deadline)?;
-        target.write_high(high.as_str(), deadline, attempted)?;
-        refresh(runtime, record, row, target, deadline)?;
-        target.high_is(high.as_str())?;
-        target.hard_is(policy.memory().as_str())?;
+        direct_high(
+            runtime,
+            record,
+            row,
+            target,
+            policy,
+            CallBudget::bounded(deadline),
+            attempted,
+        )?;
     }
     Ok(())
 }
-fn classify(result: Result<()>, attempted: bool) -> Result<()> {
+fn direct_high(
+    runtime: &WorkerRuntime,
+    record: &mut Record,
+    row: &RecoveryInspection,
+    target: &target::Target,
+    policy: &ObservedMemoryPolicy,
+    budget: CallBudget,
+    attempted: &mut bool,
+) -> Result<()> {
+    let high = policy.high().expect("selected high");
+    refresh_with_budget(runtime, record, row, target, budget)?;
+    target.hard_is(policy.memory().as_str())?;
+    running_budget(runtime, budget)?;
+    target.write_high(high.as_str(), budget.end(runtime, 30), attempted)?;
+    refresh_with_budget(runtime, record, row, target, budget)?;
+    target.high_is(high.as_str())?;
+    target.hard_is(policy.memory().as_str())
+}
+fn classify<T>(result: Result<T>, attempted: bool) -> Result<T> {
     match result {
         Err(error) if attempted => Err(LaptopError::MemoryEffectUnconfirmed(Box::new(error))),
         other => other,
@@ -231,14 +286,21 @@ fn inspect(
     record: &mut Record,
     deadline: Instant,
 ) -> Result<RecoveryInspection> {
-    running(runtime, deadline)?;
+    inspect_with_budget(runtime, record, CallBudget::bounded(deadline))
+}
+fn inspect_with_budget(
+    runtime: &WorkerRuntime,
+    record: &mut Record,
+    budget: CallBudget,
+) -> Result<RecoveryInspection> {
+    running_budget(runtime, budget)?;
     let name = record.resources().plan.arguments().name().to_owned();
-    let output = network::call(
+    let output = network::call_with_budget(
         runtime,
         record,
         vec!["inspect".into(), name.clone().into()],
         network::CallPurpose::Observe,
-        deadline,
+        budget,
     )?;
     let out = std::str::from_utf8(&output.stdout)
         .map_err(|_| LaptopError::Refused("LAPTOP_MEMORY_INSPECT_ENCODING"))?;
@@ -271,8 +333,35 @@ fn refresh(
     target: &target::Target,
     deadline: Instant,
 ) -> Result<()> {
-    same(runtime, record, row, deadline)?;
+    refresh_with_budget(runtime, record, row, target, CallBudget::bounded(deadline))
+}
+fn refresh_with_budget(
+    runtime: &WorkerRuntime,
+    record: &mut Record,
+    row: &RecoveryInspection,
+    target: &target::Target,
+    budget: CallBudget,
+) -> Result<()> {
+    same_with_budget(runtime, record, row, budget)?;
     target.fences()
+}
+fn same_with_budget(
+    runtime: &WorkerRuntime,
+    record: &mut Record,
+    row: &RecoveryInspection,
+    budget: CallBudget,
+) -> Result<()> {
+    need(
+        row.same_memory_observation(&inspect_with_budget(runtime, record, budget)?),
+        "LAPTOP_MEMORY_ENGINE_CHANGED",
+    )
+}
+fn running_budget(runtime: &WorkerRuntime, budget: CallBudget) -> Result<()> {
+    budget.check(runtime)?;
+    need(
+        !runtime.cancellation().is_cancelled(),
+        "WORKER_LAPTOP_STOPPED",
+    )
 }
 fn check(deadline: Instant) -> Result<()> {
     need(Instant::now() < deadline, "LAPTOP_MEMORY_DEADLINE")

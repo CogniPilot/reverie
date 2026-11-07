@@ -91,6 +91,16 @@ impl OrdinaryStopAttempt {
     pub(crate) fn failure(&self) -> Option<&Arc<SourceStopError>> {
         self.failure.as_ref()
     }
+    fn removal(&self, storage: &LaunchStorage) -> StoppedLaptopRemoval {
+        assert!(self.confirmed());
+        StoppedLaptopRemoval::legacy(
+            self.origin.clone(),
+            storage,
+            self.name.clone(),
+            self.session.clone(),
+            self.container.clone(),
+        )
+    }
     pub(crate) fn settle(&mut self, runtime: &WorkerRuntime, end: Instant) -> Result<()> {
         self.bound(runtime)?;
         if let Some(call) = &self.pending {

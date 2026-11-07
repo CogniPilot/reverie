@@ -32,8 +32,19 @@ pub struct OrdinaryLaptopReturned {
     storage: Box<LaunchStorage>,
     plan: ObservedCreatePlan,
     original: Option<ExistingLaptopInspection>,
+    removal: StoppedLaptopRemoval,
 }
 impl OrdinaryLaptopReturned {
+    pub fn into_cold_parts(
+        self,
+    ) -> (
+        Box<LaunchStorage>,
+        ObservedCreatePlan,
+        Option<ExistingLaptopInspection>,
+        StoppedLaptopRemoval,
+    ) {
+        (self.storage, self.plan, self.original, self.removal)
+    }
     pub fn into_parts(
         self,
     ) -> (
@@ -140,6 +151,9 @@ impl OrdinaryLaptopStop {
             )
             .map_err(SourceStopError::Plan)?;
         Ok(OrdinaryLaptopReturned {
+            removal: self
+                .attempt
+                .removal(self.storage.as_ref().expect("checked actual Box")),
             storage: self.storage.take().expect("checked actual Box"),
             plan: self.plan.take().expect("same original plan"),
             original: self.original.take(),
