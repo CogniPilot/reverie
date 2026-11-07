@@ -1,5 +1,5 @@
 use super::*;
-use reverie_core::posix_path::PosixPath;
+use crate::storage_identity::MetadataText;
 use serde_json::{Value as Json, json};
 
 fn fixture() -> Json {
@@ -17,8 +17,8 @@ fn fixture() -> Json {
 fn config(raw: &[u8]) -> Result<GoalPrivateConfig> {
     GoalPrivateConfig::decode(
         raw,
-        &PosixPath::from_scalar_text("/private/goals.json"),
-        &PosixPath::from_scalar_text("/private/company.json"),
+        &MetadataText::from_scalar_text("/private/goals.json"),
+        &MetadataText::from_scalar_text("/private/company.json"),
     )
 }
 fn encoded(text: &str) -> Vec<Vec<u8>> {
@@ -130,4 +130,22 @@ fn original_path_dictionary_order_survives_last_wins_bytes_decode() {
             .collect::<Vec<_>>(),
         order
     );
+}
+
+#[test]
+fn raw_worker_scope_spelling_cannot_be_normalized_into_a_matching_private_scope() {
+    let raw = fixture().to_string();
+    for (selected, company) in [
+        ("/private//goals.json", "/private/company.json"),
+        ("/private/goals.json", "/private/./company.json"),
+    ] {
+        assert!(matches!(
+            GoalPrivateConfig::decode(
+                raw.as_bytes(),
+                &MetadataText::from_scalar_text(selected),
+                &MetadataText::from_scalar_text(company),
+            ),
+            Err(GoalDataError::Scope)
+        ));
+    }
 }

@@ -1,5 +1,6 @@
 use super::*;
 use crate::legacy_json::{Number, ordered::OrderNode};
+use crate::storage_identity::MetadataText;
 use reverie_core::{
     ids::{ContainerId, ProfileSessionId},
     posix_path::PosixPath,
@@ -66,7 +67,7 @@ pub struct GoalPrivateConfig {
 impl GoalPrivateConfig {
     /// Equivalent to GoalBrokerBootstrap.config's DATA checks. The caller
     /// separately captures the raw-byte digest and first private-file identity.
-    pub fn decode(raw: &[u8], selected: &PosixPath, company: &PosixPath) -> Result<Self> {
+    pub fn decode(raw: &[u8], selected: &MetadataText, company: &MetadataText) -> Result<Self> {
         // Both named purposes use ordinary json.loads(bytes), including last
         // duplicate wins and encoding detection. Reuse its one shared codec.
         let decoded =
@@ -99,8 +100,14 @@ impl GoalPrivateConfig {
         let server = ContainerId::parse(&scalar(field(fields, "serverContainerId")?)?)
             .map_err(|_| GoalDataError::Configuration)?;
         let paths = paths(&decoded)?;
-        if selected_path(&paths, GoalPrivatePath::Config).host() != selected
-            || selected_path(&paths, GoalPrivatePath::Canonical).host() != company
+        if selected_path(&paths, GoalPrivatePath::Config)
+            .host()
+            .codepoints()
+            != selected.codepoints()
+            || selected_path(&paths, GoalPrivatePath::Canonical)
+                .host()
+                .codepoints()
+                != company.codepoints()
             || selected_path(&paths, GoalPrivatePath::Key)
                 .host()
                 .is_relative_to(&PosixPath::from_scalar_text("/nix/store"))
