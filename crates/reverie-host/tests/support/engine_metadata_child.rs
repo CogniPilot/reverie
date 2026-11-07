@@ -179,6 +179,23 @@ fn cold_launch(args: &[String]) -> bool {
             assert_eq!(*target, format!("{NAME}-lan"));
             std::process::exit(7);
         }
+        ["network", "ls", "--no-trunc", "--format", "{{.ID}} {{.Name}}"] => {}
+        ["stop", "--time", "2", target] => {
+            assert_eq!(*target, "c".repeat(64));
+            if Path::new("cold-stop-refused").is_file() { std::process::exit(7); }
+            fs::write("cold-stopped", b"actual fixed stop child completed").unwrap();
+        }
+        ["kill", target] => {
+            assert_eq!(*target, "c".repeat(64));
+            assert!(Path::new("cold-stop-refused").is_file());
+            std::process::exit(7);
+        }
+        ["inspect", target] if Path::new("cold-created-args").is_file()
+            && (*target == NAME || *target == "c".repeat(64)) => {
+            let running = !Path::new("cold-stopped").is_file();
+            let pid = if running { 321 } else { 0 };
+            print!("[{{\"Id\":\"{}\",\"Name\":\"/{NAME}\",\"Config\":{{\"Labels\":{{\"reverie.worker\":\"test\",\"reverie.session\":\"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}}}},\"State\":{{\"Running\":{running},\"Pid\":{pid},\"Paused\":false,\"Restarting\":false,\"Dead\":false}}}}]", "c".repeat(64));
+        }
         ["network", "create", "--label", "reverie.worker=test", "--label", session, "--opt", "com.docker.network.bridge.enable_icc=false", target] => {
             assert_eq!(*session, "reverie.session=aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee");
             assert_eq!(*target, format!("{NAME}-lan"));
