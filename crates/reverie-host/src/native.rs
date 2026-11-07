@@ -47,6 +47,7 @@ pub(crate) use control::{
     open_admission,
 };
 mod policy;
+pub(crate) mod private_goal;
 pub(crate) use lease::observe_ops_private;
 pub(crate) use lease::observe_with_ancestors;
 pub(crate) use policy::{

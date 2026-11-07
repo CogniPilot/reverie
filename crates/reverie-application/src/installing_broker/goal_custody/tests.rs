@@ -290,3 +290,22 @@ fn actual_g_refuses_private_mount_alias_before_key_and_fresh_worker_policy_chang
     assert!(!fixture.tree.root.join("calls.txt").exists());
     fixture.close();
 }
+#[test]
+fn actual_failed_goal_read_closes_known_resources_then_same_service_accepts_next_g() {
+    crate::test_process::owning_case!(
+        actual_failed_goal_read_closes_known_resources_then_same_service_accepts_next_g
+    );
+    let fixture = Fixture::new();
+    fixture.tree.write(
+        "goal-stall-read",
+        b"fixed owned read child waits beyond original 500ms query",
+    );
+    let (kind, _, closed) = fixture.request(br#"{"action":"goal-custody"}"#);
+    assert_eq!(kind, b'E');
+    assert!(closed.primary_error_code().is_some());
+    fs::remove_file(fixture.tree.root.join("goal-stall-read")).unwrap();
+    let (kind, bytes, closed) = fixture.request(br#"{"action":"goal-custody"}"#);
+    assert_eq!(kind, b'J', "{}", String::from_utf8_lossy(&bytes));
+    assert!(closed.primary_error_code().is_none());
+    fixture.close();
+}

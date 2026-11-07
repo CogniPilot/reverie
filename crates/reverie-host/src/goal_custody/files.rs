@@ -1,32 +1,18 @@
 //! Original no-follow private walk; one batch retains all actual descriptors
 //! and rechecks path identities before consuming each descriptor exactly once.
 use super::*;
+use crate::native::private_goal::{PathIdentity, identity};
 use std::{
-    fs::{self, File, Metadata},
+    fs::{self, File},
     io::Read,
     os::{fd::AsRawFd, unix::fs::MetadataExt},
     path::{Component, PathBuf},
 };
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub(super) struct Fingerprint(pub(super) [String; 5]);
-impl Fingerprint {
-    fn of(info: &Metadata) -> Self {
-        Self([
-            info.dev().to_string(),
-            info.ino().to_string(),
-            info.len().to_string(),
-            (i128::from(info.mtime()) * 1_000_000_000 + i128::from(info.mtime_nsec())).to_string(),
-            (i128::from(info.ctime()) * 1_000_000_000 + i128::from(info.ctime_nsec())).to_string(),
-        ])
-    }
-}
+pub(super) type Fingerprint = native::PolicyEntryStamp;
 struct Entry {
     path: PathBuf,
-    identity: (u64, u64, u32, u32),
-}
-fn identity(info: &Metadata) -> (u64, u64, u32, u32) {
-    (info.dev(), info.ino(), info.uid(), info.mode())
+    identity: PathIdentity,
 }
 pub(super) struct PrivateBatch {
     files: Vec<File>,
@@ -68,7 +54,7 @@ impl PrivateBatch {
         Ok(self
             .observe(path, directory, absent, None)?
             .0
-            .map(|value| value.0))
+            .map(|value| native::private_goal::projection(&value)))
     }
     fn retain(&mut self, file: File) -> usize {
         let index = self.files.len();
@@ -82,7 +68,7 @@ impl PrivateBatch {
     }
     fn parent(&mut self, path: &Path) -> Result<usize> {
         need(
-            !self.close_attempted && path.is_absolute(),
+            !self.close_attempted && native::private_goal::path_available(path),
             "Private Goal configuration unavailable",
         )?;
         let parent = path
@@ -107,10 +93,8 @@ impl PrivateBatch {
             )?;
             index = self.retain(file);
             let info = self.files[index].metadata()?;
-            let sticky_root = info.uid() == 0 && info.mode() & libc::S_ISVTX != 0;
             need(
-                (info.uid() == 0 || info.uid() == native::uid())
-                    && (info.mode() & 0o022 == 0 || sticky_root),
+                native::private_goal::ancestry_available(&info),
                 "Private Goal ancestry unavailable",
             )?;
             self.entries.push(Entry {
@@ -121,7 +105,7 @@ impl PrivateBatch {
         }
         let parent = self.files[index].metadata()?;
         need(
-            parent.uid() == native::uid() && parent.mode() & 0o077 == 0,
+            native::private_goal::parent_available(&parent),
             "Private Goal parent unavailable",
         )?;
         Ok(index)
@@ -151,13 +135,7 @@ impl PrivateBatch {
         let index = self.retain(file);
         let info = self.files[index].metadata()?;
         need(
-            (if directory {
-                info.is_dir()
-            } else {
-                info.is_file()
-            }) && info.uid() == native::uid()
-                && info.mode() & 0o077 == 0
-                && (directory || info.nlink() == 1),
+            native::private_goal::entry_available(&info, directory),
             "Private Goal entry unavailable",
         )?;
         self.entries.push(Entry {
@@ -209,9 +187,7 @@ impl PrivateBatch {
         if !self.close_attempted {
             self.close_attempted = true;
             for file in self.files.drain(..).rev() {
-                if native::close(file).is_err() {
-                    self.close_uncertain = true;
-                }
+                self.close_uncertain |= native::close(file).is_err();
             }
         }
         if self.close_uncertain {

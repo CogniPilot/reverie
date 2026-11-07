@@ -37,7 +37,7 @@ fn private_batch_keeps_original_fd_but_rejects_replaced_name_and_new_optional_en
     tree.write("original", b"{}");
     let mut files = PrivateBatch::new().unwrap();
     let (stamp, bytes) = files.read_json_file(&tree.0.join("original")).unwrap();
-    assert_eq!(stamp.0[2], "2");
+    assert_eq!(stamp.size, 2);
     assert_eq!(bytes, b"{}");
     files.check().unwrap();
     fs::rename(tree.0.join("original"), tree.0.join("saved")).unwrap();

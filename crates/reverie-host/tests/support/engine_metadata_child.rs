@@ -170,6 +170,9 @@ fn goal_inventory(args: &[String]) -> bool {
             assert_eq!(&args[1..],expected.lines().collect::<Vec<_>>());
             "goal-inventory.out"
         } else { return false; };
+    if std::path::Path::new("goal-stall-read").is_file() {
+        std::thread::sleep(Duration::from_secs(2));
+    }
     io::stdout().write_all(&std::fs::read(name).unwrap()).unwrap();
     if let Ok(raw) = std::fs::read("goal-ignored.stderr") { io::stderr().write_all(&raw).unwrap(); }
     true
