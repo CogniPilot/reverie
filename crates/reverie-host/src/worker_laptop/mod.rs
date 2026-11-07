@@ -3,6 +3,7 @@
 mod cleanup;
 mod create;
 mod error;
+mod memory;
 mod network;
 mod publication;
 mod start;
@@ -19,6 +20,7 @@ pub use cleanup::{CreatedCleanup, StoppedCreatedLaptop};
 pub use create::{CreatedLaptop, LaptopCreation};
 pub use error::{CreateTelemetryFailure, LaptopError, TelemetryCause};
 use error::{Result, finalized, need};
+pub use memory::{ConfiguredMemory, MemoryConfiguration};
 use reverie_contracts::worker_launch::WorkerRequest;
 pub use start::{ContainerStart, StartedContainer};
 use std::{

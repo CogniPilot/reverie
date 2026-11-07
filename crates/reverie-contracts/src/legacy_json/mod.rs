@@ -71,6 +71,11 @@ pub(crate) fn decode_python_str_ordered(raw: &[u8]) -> Result<ordered::OrderedVa
 pub(crate) fn decode_strict_bytes(raw: &[u8]) -> Result<Value, Error> {
     decode::decode_engine_stopped(&text::python_bytes(raw)?)
 }
+/// Fixed helper replies use strict UTF-8, without bytes-JSON encoding detection.
+pub(crate) fn decode_soft_limit_reply(raw: &[u8]) -> Result<Value, Error> {
+    std::str::from_utf8(raw).map_err(|_| Error::InvalidJson)?;
+    decode::decode_engine_stopped(raw)
+}
 pub(crate) fn decode_gpu_control_bytes(raw: &[u8]) -> Result<Value, GpuControlParseError> {
     let raw = text::python_bytes(raw).map_err(GpuControlParseError::Json)?;
     decode::decode_gpu_control(&raw)

@@ -84,6 +84,14 @@ impl<'a> WorkerValidationData<'a> {
     pub fn ops_path(&self) -> Result<Option<MetadataText>> {
         optional_path(root(self.0), "opsConfig", WorkerPathPolicy::Ops)
     }
+    /// Fixed existing helper selection, never a direct-write fallback.
+    pub fn soft_limit_helper(&self) -> Result<Option<MetadataText>> {
+        optional_path(
+            root(self.0),
+            "softLimitHelperSocket",
+            WorkerPathPolicy::Helper,
+        )
+    }
     pub fn selector(&self, selected: PrivateSelector) -> Result<Option<MetadataText>> {
         let name = match selected {
             PrivateSelector::BrowserJob => "browserJobPolicy",
