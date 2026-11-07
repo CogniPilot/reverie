@@ -9,12 +9,14 @@ use reverie_host::worker_reports::{
 use std::{os::unix::net::UnixStream, time::Instant};
 mod error;
 mod preparation;
+mod viewer;
 pub use error::{LaunchAdmissionFailure, WorkerDispatchError};
 pub use preparation::{
     AllocationClosedReuse, ClassifiedWorkerLaunch, ColdWorkerLaunch, ExistingColdTarget,
     InspectedWorkerLaunch, PreparationFailure as LaunchPreparationFailure, PreparedReuseViewer,
     RestoredReuse, ReusableWorkerLaunch, ReuseViewerFailure, ViewingReuse,
 };
+pub use viewer::{ReuseRelayError, ReuseRelayReturned};
 #[cfg(test)]
 mod tests;
 

@@ -70,6 +70,8 @@ impl ViewerRelay<'_> {
         Ok(ViewerRelayEvent::Progress)
     }
     fn input(&self, stream: &socket::Socket<'_>, mut bytes: &[u8]) -> RelayResult<()> {
+        #[cfg(test)]
+        super::test_hooks::before_input();
         while !bytes.is_empty() {
             if self.runtime.cancellation().is_cancelled() || !self.identity.can_progress() {
                 return Err(ViewerRelayError::Phase);

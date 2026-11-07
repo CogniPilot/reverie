@@ -5,6 +5,8 @@ mod identity;
 mod resize;
 pub(super) mod socket;
 mod step;
+#[cfg(test)]
+pub(crate) mod test_hooks;
 use super::*;
 use crate::worker_laptop::ViewerSession;
 pub use error::ViewerRelayError;
@@ -136,6 +138,8 @@ impl ViewerRelay<'_> {
         match result {
             Ok(event) => Ok(event),
             Err(error) if error.busy() => {
+                #[cfg(test)]
+                test_hooks::saw_busy();
                 std::thread::sleep(Duration::from_millis(1));
                 Ok(ViewerRelayEvent::Progress)
             }
