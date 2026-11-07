@@ -649,3 +649,25 @@ This uses the same original per-query end, rechecks the live first-stop bound,
 and dispatches no command while waiting. Admitted tickets and every other error
 remain failed without replay. Exact-source and bounded component admission
 behavior is unchanged.
+
+Known exact and legacy stop returns additionally expose `into_cold_parts` with
+a move-only `StoppedLaptopRemoval`; existing tuple APIs remain available. The
+token binds the actual original storage owner, installed Runtime, session and
+immutable old target. It cannot be reconstructed from inspected data. Actual
+Cold callers carry it separately while that same storage moves into Nix. The
+named post-Nix removal requires the same successful Nix record and current guard
+and original plan, after the caller's real lifecycle/current-policy/writer/budget
+rechecks. It does not rerun create arguments or require a new observation brand.
+
+Removal uses fresh strict stopped metadata followed by required non-force
+`rm CID` and a complete successful absence census. Exact-origin metadata keeps
+its existing projection; legacy-origin checks only its original identity and
+worker/session binding. An absent old target cannot authorize removing a new
+target which later takes its name. This deliberately corrects original post-Nix
+`rm name` retargeting. Each worker call retains its original 20-second bound and
+live first-stop clipping without an aggregate body cap. A failed, restarted or
+uncertain outcome stays in the same counted Nix record with its actual pending
+call, storage and guard; native settlement permits neither retry nor success.
+Only checked success mints `RemovedStoppedLaptop`, bound to that same record.
+These components do not implement the outer Cold/J continuation or select a
+native backend, and they grant no storage release or global shutdown receipt.

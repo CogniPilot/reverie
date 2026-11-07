@@ -6,6 +6,7 @@ mod error;
 mod identity;
 pub(crate) mod legacy;
 mod ordinary;
+mod removal;
 mod stop;
 #[cfg(test)]
 mod tests;
@@ -20,6 +21,7 @@ pub use legacy::{OrdinaryLaptopReturned, OrdinaryLaptopStop, OrdinaryLaptopStopR
 pub use ordinary::{
     OrdinaryReplacementReturned, OrdinaryReplacementStop, OrdinaryStopRetainFailure,
 };
+pub use removal::StoppedLaptopRemoval;
 use reverie_contracts::{
     worker_config::EffectiveWorkerConfig,
     worker_source_stop::{

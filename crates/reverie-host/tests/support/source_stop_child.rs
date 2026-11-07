@@ -20,39 +20,102 @@ fn legacy(args: &[String], cid: &str, name: &str) {
     if Path::new("legacy-query-delay").is_file() {
         std::thread::sleep(Duration::from_millis(80));
     }
-    match args.iter().map(String::as_str).collect::<Vec<_>>().as_slice() {
+    match args
+        .iter()
+        .map(String::as_str)
+        .collect::<Vec<_>>()
+        .as_slice()
+    {
         ["ps", "-aq", "--no-trunc"] => {
-            fs::write("metadata-entered",b"actual unrelated fixed native query").unwrap();wait("release-metadata");
+            fs::write("metadata-entered", b"actual unrelated fixed native query").unwrap();
+            wait("release-metadata");
+        }
+        ["image", "inspect", target] if *target == format!("sha256:{}", "a".repeat(64)) => {
+            print!("[{{\"Config\":{{\"Labels\":{{\"reverie.worker.nix-store\":\"0\"}}}}}}]");
         }
         ["inspect", target] if *target == cid || *target == name => {
-            if Path::new("legacy-missing").exists()
-                || (Path::new("stop-requested").exists() && Path::new("legacy-failed-inspect").exists())
-            { std::process::exit(7); }
-            output(if Path::new("kill-requested").exists() { "final.json" }
-                else if Path::new("stop-requested").exists() { "after.json" } else { "before.json" });
+            if Path::new("old-removed").exists()
+                || Path::new("legacy-missing").exists()
+                || (Path::new("stop-requested").exists()
+                    && Path::new("legacy-failed-inspect").exists())
+            {
+                std::process::exit(7);
+            }
+            output(if Path::new("kill-requested").exists() {
+                "final.json"
+            } else if Path::new("stop-requested").exists() {
+                "after.json"
+            } else {
+                "before.json"
+            });
         }
         ["stop", "--time", "2", target] if *target == cid || *target == name => {
             fs::write("stop-requested", target).unwrap();
-            if std::env::var("SOURCE_EXIT_ON").unwrap() == "stop-requested" { wait("source-reaped"); }
-            if Path::new("hold-stop-reply").exists() {
-                fs::write("stop-reply-held", b"actual effect").unwrap();wait("release-stop-reply");
+            if std::env::var("SOURCE_EXIT_ON").unwrap() == "stop-requested" {
+                wait("source-reaped");
             }
-            if Path::new("legacy-stop-nonzero").exists() { std::process::exit(7); }
+            if Path::new("hold-stop-reply").exists() {
+                fs::write("stop-reply-held", b"actual effect").unwrap();
+                wait("release-stop-reply");
+            }
+            if Path::new("legacy-stop-nonzero").exists() {
+                std::process::exit(7);
+            }
         }
         ["kill", target] if *target == cid || *target == name => {
-            fs::write("kill-requested", target).unwrap();wait("source-reaped");
+            fs::write("kill-requested", target).unwrap();
+            wait("source-reaped");
         }
-        ["ps", "--all", "--no-trunc", "--format", "{{.ID}} {{.Names}}"] => output("container-census"),
-        ["network", "inspect", target] if *target == format!("{name}-lan") || *target == "b".repeat(64) => {
-            if !Path::new("network-before.json").exists() || Path::new("network-removed").exists() { std::process::exit(7); }
+        ["rm", target] if *target == cid => {
+            assert!(
+                Path::new("source-reaped").exists(),
+                "nonforce rm requires actual old target exit"
+            );
+            fs::write("rm-entered", target).unwrap();
+            if Path::new("hold-rm-submit").exists() {
+                wait("release-rm-submit");
+            }
+            if Path::new("rm-running").exists() || Path::new("rm-nonzero").exists() {
+                std::process::exit(7);
+            }
+            fs::write("old-removed", target).unwrap();
+            fs::write("container-census", b"").unwrap();
+            if Path::new("hold-rm-reply").exists() {
+                fs::write("rm-reply-held", b"actual fixed effect before reply").unwrap();
+                wait("release-rm-reply");
+            }
+        }
+        [
+            "ps",
+            "--all",
+            "--no-trunc",
+            "--format",
+            "{{.ID}} {{.Names}}",
+        ] => output("container-census"),
+        ["network", "inspect", target]
+            if *target == format!("{name}-lan") || *target == "b".repeat(64) =>
+        {
+            if !Path::new("network-before.json").exists() || Path::new("network-removed").exists() {
+                std::process::exit(7);
+            }
             output("network-before.json");
         }
-        ["network", "ls", "--no-trunc", "--format", "{{.ID}} {{.Name}}"] => output("network-census"),
-        ["network", "disconnect", "--force", network, target] if *network == "b".repeat(64) && *target == cid => {
+        [
+            "network",
+            "ls",
+            "--no-trunc",
+            "--format",
+            "{{.ID}} {{.Name}}",
+        ] => output("network-census"),
+        ["network", "disconnect", "--force", network, target]
+            if *network == "b".repeat(64) && *target == cid =>
+        {
             fs::write("network-disconnected", network).unwrap();
         }
         ["network", "rm", network] if *network == "b".repeat(64) => {
-            if Path::new("legacy-network-retained").exists() { std::process::exit(7); }
+            if Path::new("legacy-network-retained").exists() {
+                std::process::exit(7);
+            }
             fs::write("network-removed", network).unwrap();
         }
         _ => std::process::exit(94),
@@ -76,9 +139,19 @@ fn main() {
     writeln!(trace, "{}", args.join("\0")).unwrap();
     let cid = fs::read_to_string("cid").unwrap();
     let name = fs::read_to_string("name").unwrap();
-    if Path::new("legacy-stop").exists() { legacy(&args, &cid, &name); return; }
+    if Path::new("legacy-stop").exists() {
+        legacy(&args, &cid, &name);
+        return;
+    }
     let path = match args.as_slice() {
-        [verb, quiet, no_trunc] if verb == "ps" && quiet == "--quiet" && no_trunc == "--no-trunc" && Path::new("registry-empty-census").exists() => return,
+        [verb, quiet, no_trunc]
+            if verb == "ps"
+                && quiet == "--quiet"
+                && no_trunc == "--no-trunc"
+                && Path::new("registry-empty-census").exists() =>
+        {
+            return;
+        }
         [verb, target] if verb == "inspect" && target == &name => {
             if Path::new("hold-inspect-reply").exists() {
                 fs::write("inspect-reply-held", b"owned query admitted").unwrap();
