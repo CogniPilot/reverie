@@ -130,6 +130,18 @@ struct Record {
     viewer: Option<Arc<viewer::ViewerJob>>,
 }
 impl Record {
+    /// Cached local cleanup must not revoke another actual consuming purpose.
+    /// Refuse before changing phase, returning cached success or native effects.
+    fn begin_cleanup(&mut self) -> Result<()> {
+        need(
+            self.phase != Phase::FinalizingStarted,
+            "WORKER_STARTED_FINAL_STORAGE_RETAINED",
+        )?;
+        if !matches!(self.phase, Phase::Stopped | Phase::CleanupRetained) {
+            self.phase = Phase::Cleaning;
+        }
+        Ok(())
+    }
     fn resources(&self) -> &Resources {
         self.resources.as_ref().expect("actual unreclaimed owners")
     }
