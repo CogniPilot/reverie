@@ -29,7 +29,8 @@ pub use create::{CreatedLaptop, LaptopCreation};
 pub use error::{CreateTelemetryFailure, LaptopError, TelemetryCause};
 use error::{Result, finalized, need};
 pub use existing_viewer::{
-    ExistingViewer, ExistingViewerRetainFailure, ExistingViewerReturned, ExistingViewerStart,
+    ExistingRelayRetainFailure, ExistingRelayReturned, ExistingViewer, ExistingViewerRetainFailure,
+    ExistingViewerReturned, ExistingViewerStart,
 };
 pub use guard::{NixGuardRelease, NixReleasedPane};
 pub use memory::{ConfiguredMemory, MemoryConfiguration};
