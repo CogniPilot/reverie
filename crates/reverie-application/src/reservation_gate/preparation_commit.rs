@@ -8,7 +8,7 @@ use reverie_contracts::{
 use reverie_host::reservation_control::PolicyTransaction;
 use std::path::Path;
 impl RetainedPreparation {
-    pub fn commit_configuration(&mut self) -> Result<PreparedPolicyRecord> {
+    pub fn commit_configuration(&mut self) -> Result<CommittedPolicy> {
         need(
             self.store.is_some(),
             "RESOURCE_PREPARATION_ACTIVE_HANDLE_REQUIRED",
@@ -26,7 +26,7 @@ impl RetainedPreparation {
             "RESOURCE_PREPARATION_CONFIG_FILE_REQUIRED",
         ))?;
         match self.commit_attempt(candidate, &path) {
-            Ok(receipt) => Ok(receipt),
+            Ok(receipt) => Ok(CommittedPolicy::after_commit(self, receipt)),
             Err(error) => Err(GateError::PreparationConfigUncertain {
                 cause: Box::new(finalized::<()>(Err(error), self.close_owned()).unwrap_err()),
             }),
