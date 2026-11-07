@@ -175,6 +175,22 @@ impl InstallingBroker {
         admission: Option<&OrdinaryLaunchAdmission>,
     ) -> Result<()> {
         let lifecycle = self.installed.lifecycle()?;
+        self.check_creation_budget_locked(&lifecycle, session, resources, admission)
+    }
+    /// The canonical launch already holds this SAME lifecycle across its
+    /// pre/post-Nix phases. Borrow it instead of reacquiring a nonreentrant
+    /// mutex or opening an unlock/relock gap in the original sequence.
+    pub(super) fn check_creation_budget_locked(
+        &self,
+        lifecycle: &LaptopLifecycle<'_>,
+        session: &ProfileSessionId,
+        resources: &EffectiveWorkerConfig,
+        admission: Option<&OrdinaryLaunchAdmission>,
+    ) -> Result<()> {
+        need(
+            lifecycle.belongs_to(&self.installed),
+            "WORKER_CREATION_LIFECYCLE_ORIGIN",
+        )?;
         let snapshot = self.configuration()?;
         let registered = lifecycle
             .entries()

@@ -148,6 +148,26 @@ pub struct NixReturned {
     prepared_store: Option<PathBuf>,
 }
 impl NixReturned {
+    /// Named laptop continuation consumes this real guard owner, retaining the
+    /// exact storage/outcome/path remainder before its checked finalizer.
+    pub(crate) fn split_for_laptop_guard_close(
+        self,
+    ) -> (
+        NixStoreGuard,
+        LaunchStorage,
+        Result<NixDisposition>,
+        Option<PathBuf>,
+    ) {
+        (
+            self.resources.guard,
+            self.resources.storage,
+            self.outcome,
+            self.prepared_store,
+        )
+    }
+    pub(crate) fn laptop_storage(&self) -> &LaunchStorage {
+        &self.resources.storage
+    }
     /// The actual moved guard/storage resources, never a replacement from paths.
     pub(crate) fn assert_cold_resources_current(&self) -> Result<()> {
         self.resources.guard.assert_current()?;

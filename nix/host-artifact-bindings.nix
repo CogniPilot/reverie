@@ -2,7 +2,7 @@
 # The Rust producer projects only its actual crate/dependency inputs.
 { pkgs, src }:
 let
-  baseProfile = import ./worker-docker-profile.nix { inherit pkgs; };
+  baseProfile = import ./worker-docker-profile.nix { inherit pkgs src; };
   taskPerfPolicy = import ./worker-perf-profile.nix {
     inherit pkgs src baseProfile;
   };

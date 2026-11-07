@@ -245,7 +245,7 @@ impl Workflows {
         let resources = record.resources();
         let root = resources.plan.storage().home().join(".reverie-launch");
         let runtime_root = resources
-            .nix
+            .held_nix()?
             .runtime_directory()
             .map_err(LaptopError::Nix)?;
         let bytes = reverie_contracts::worker_child::encode_launch_record(&resources.request);

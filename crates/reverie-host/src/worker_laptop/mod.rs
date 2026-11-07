@@ -4,6 +4,7 @@ mod cleanup;
 mod cold;
 mod create;
 mod error;
+mod guard;
 mod memory;
 mod network;
 mod pane;
@@ -23,6 +24,7 @@ pub use cold::{ColdCommit, ColdCommitted};
 pub use create::{CreatedLaptop, LaptopCreation};
 pub use error::{CreateTelemetryFailure, LaptopError, TelemetryCause};
 use error::{Result, finalized, need};
+pub use guard::{NixGuardRelease, NixReleasedPane};
 pub use memory::{ConfiguredMemory, MemoryConfiguration};
 pub use pane::{PaneStart, StartedPane};
 use reverie_contracts::worker_launch::WorkerRequest;
@@ -49,10 +51,18 @@ enum Phase {
     Consumed,
 }
 struct Resources {
-    nix: NixReturned,
+    nix: guard::NixOwnership,
     plan: ObservedCreatePlan,
     request: WorkerRequest,
     office: OfficePhone,
+}
+impl Resources {
+    fn held_nix(&self) -> Result<&NixReturned> {
+        self.nix.held()
+    }
+    fn storage(&self) -> &crate::worker_storage::LaunchStorage {
+        self.nix.storage()
+    }
 }
 struct Inputs {
     plan: ObservedCreatePlan,
@@ -143,7 +153,8 @@ impl LaptopReclaimFailure {
 /// neither closes them nor acknowledges global writer/capacity release.
 #[must_use = "restore all real owners to the installing lifecycle"]
 pub struct LaptopNetworkReturned {
-    resources: Resources,
+    nix: NixReturned,
+    inputs: Inputs,
     outcome: std::result::Result<(), Arc<LaptopError>>,
 }
 impl LaptopNetworkReturned {
@@ -156,8 +167,8 @@ impl LaptopNetworkReturned {
         OfficePhone,
         std::result::Result<(), Arc<LaptopError>>,
     ) {
-        let r = self.resources;
-        (r.nix, r.plan, r.request, r.office, self.outcome)
+        let r = self.inputs;
+        (self.nix, r.plan, r.request, r.office, self.outcome)
     }
 }
 pub(crate) struct Workflows {
@@ -215,7 +226,7 @@ impl Workflows {
             }
         };
         let resources = Resources {
-            nix,
+            nix: guard::NixOwnership::Held(Box::new(nix)),
             plan: inputs.plan,
             request: inputs.request,
             office: inputs.office,
@@ -289,6 +300,7 @@ impl Workflows {
             record.phase == Phase::Known
                 && record.pending.is_none()
                 && !record.unknown
+                && record.resources().held_nix().is_ok()
                 && !record
                     .creation
                     .as_ref()
@@ -299,7 +311,24 @@ impl Workflows {
         let outcome = record.outcome.take().expect("known native result");
         record.phase = Phase::Consumed;
         records.retain(|r| !Arc::ptr_eq(r, &workflow.record));
-        Ok(LaptopNetworkReturned { resources, outcome })
+        let Resources {
+            nix,
+            plan,
+            request,
+            office,
+        } = resources;
+        let guard::NixOwnership::Held(nix) = nix else {
+            unreachable!("actual Held guard checked under this same record mutex")
+        };
+        Ok(LaptopNetworkReturned {
+            nix: *nix,
+            inputs: Inputs {
+                plan,
+                request,
+                office,
+            },
+            outcome,
+        })
     }
     pub(crate) fn settle(&self, runtime: &WorkerRuntime, deadline: Instant) -> Result<()> {
         let records = self
