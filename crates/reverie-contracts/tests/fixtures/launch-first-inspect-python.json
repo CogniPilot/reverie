@@ -1,0 +1,198 @@
+{
+  "scope": "Exact existing Broker.handle AST ownership prefix, original Running expression and first three running-policy statements only. Not whole handle or native effects.",
+  "source": "/home/jgoppert/git/reverie-application-flock-tests/python/reverie/worker.py",
+  "source_sha256": "a112c936b4d0f406a4cd76b418d87861650fa687886fde6a1e6d75943d66f8e1",
+  "prefix_line": 2145,
+  "running_line": 2153,
+  "cases": [
+    {
+      "name": "labels-None",
+      "stdout": "[{\"Config\": {\"Labels\": null}, \"State\": {\"Running\": false}}]",
+      "outcome": {
+        "accepted_to_runtime_phase": false,
+        "error": "AttributeError",
+        "message": "'NoneType' object has no attribute 'get'"
+      }
+    },
+    {
+      "name": "labels-False",
+      "stdout": "[{\"Config\": {\"Labels\": false}, \"State\": {\"Running\": false}}]",
+      "outcome": {
+        "accepted_to_runtime_phase": false,
+        "error": "AttributeError",
+        "message": "'bool' object has no attribute 'get'"
+      }
+    },
+    {
+      "name": "labels-[]",
+      "stdout": "[{\"Config\": {\"Labels\": []}, \"State\": {\"Running\": false}}]",
+      "outcome": {
+        "accepted_to_runtime_phase": false,
+        "error": "AttributeError",
+        "message": "'list' object has no attribute 'get'"
+      }
+    },
+    {
+      "name": "labels-{}",
+      "stdout": "[{\"Config\": {\"Labels\": {}}, \"State\": {\"Running\": false}}]",
+      "outcome": {
+        "accepted_to_runtime_phase": false,
+        "error": "ValueError",
+        "message": "Existing container is not owned by this deployment"
+      }
+    },
+    {
+      "name": "labels-''",
+      "stdout": "[{\"Config\": {\"Labels\": \"\"}, \"State\": {\"Running\": false}}]",
+      "outcome": {
+        "accepted_to_runtime_phase": false,
+        "error": "AttributeError",
+        "message": "'str' object has no attribute 'get'"
+      }
+    },
+    {
+      "name": "labels-0",
+      "stdout": "[{\"Config\": {\"Labels\": 0}, \"State\": {\"Running\": false}}]",
+      "outcome": {
+        "accepted_to_runtime_phase": false,
+        "error": "AttributeError",
+        "message": "'int' object has no attribute 'get'"
+      }
+    },
+    {
+      "name": "labels-'wrong'",
+      "stdout": "[{\"Config\": {\"Labels\": \"wrong\"}, \"State\": {\"Running\": false}}]",
+      "outcome": {
+        "accepted_to_runtime_phase": false,
+        "error": "AttributeError",
+        "message": "'str' object has no attribute 'get'"
+      }
+    },
+    {
+      "name": "running-None",
+      "stdout": "[{\"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-1111-4111-8111-111111111111\", \"reverie.worker-policy\": \"p\"}}, \"State\": {\"Running\": null}}]",
+      "outcome": {
+        "accepted_to_runtime_phase": true,
+        "running": false,
+        "canonical_id": false
+      }
+    },
+    {
+      "name": "running-False",
+      "stdout": "[{\"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-1111-4111-8111-111111111111\", \"reverie.worker-policy\": \"p\"}}, \"State\": {\"Running\": false}}]",
+      "outcome": {
+        "accepted_to_runtime_phase": true,
+        "running": false,
+        "canonical_id": false
+      }
+    },
+    {
+      "name": "running-[]",
+      "stdout": "[{\"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-1111-4111-8111-111111111111\", \"reverie.worker-policy\": \"p\"}}, \"State\": {\"Running\": []}}]",
+      "outcome": {
+        "accepted_to_runtime_phase": true,
+        "running": false,
+        "canonical_id": false
+      }
+    },
+    {
+      "name": "running-{}",
+      "stdout": "[{\"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-1111-4111-8111-111111111111\", \"reverie.worker-policy\": \"p\"}}, \"State\": {\"Running\": {}}}]",
+      "outcome": {
+        "accepted_to_runtime_phase": true,
+        "running": false,
+        "canonical_id": false
+      }
+    },
+    {
+      "name": "running-''",
+      "stdout": "[{\"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-1111-4111-8111-111111111111\", \"reverie.worker-policy\": \"p\"}}, \"State\": {\"Running\": \"\"}}]",
+      "outcome": {
+        "accepted_to_runtime_phase": true,
+        "running": false,
+        "canonical_id": false
+      }
+    },
+    {
+      "name": "running-0",
+      "stdout": "[{\"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-1111-4111-8111-111111111111\", \"reverie.worker-policy\": \"p\"}}, \"State\": {\"Running\": 0}}]",
+      "outcome": {
+        "accepted_to_runtime_phase": true,
+        "running": false,
+        "canonical_id": false
+      }
+    },
+    {
+      "name": "running-[0]",
+      "stdout": "[{\"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-1111-4111-8111-111111111111\", \"reverie.worker-policy\": \"p\"}}, \"State\": {\"Running\": [0]}}]",
+      "outcome": {
+        "accepted_to_runtime_phase": true,
+        "running": true,
+        "canonical_id": false
+      }
+    },
+    {
+      "name": "running--1",
+      "stdout": "[{\"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-1111-4111-8111-111111111111\", \"reverie.worker-policy\": \"p\"}}, \"State\": {\"Running\": -1}}]",
+      "outcome": {
+        "accepted_to_runtime_phase": true,
+        "running": true,
+        "canonical_id": false
+      }
+    },
+    {
+      "name": "running-nan",
+      "stdout": "[{\"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-1111-4111-8111-111111111111\", \"reverie.worker-policy\": \"p\"}}, \"State\": {\"Running\": NaN}}]",
+      "outcome": {
+        "accepted_to_runtime_phase": true,
+        "running": true,
+        "canonical_id": false
+      }
+    },
+    {
+      "name": "running-'yes'",
+      "stdout": "[{\"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-1111-4111-8111-111111111111\", \"reverie.worker-policy\": \"p\"}}, \"State\": {\"Running\": \"yes\"}}]",
+      "outcome": {
+        "accepted_to_runtime_phase": true,
+        "running": true,
+        "canonical_id": false
+      }
+    },
+    {
+      "name": "foreign-before-state",
+      "stdout": "[{\"Config\": {\"Labels\": {}}}]",
+      "outcome": {
+        "accepted_to_runtime_phase": false,
+        "error": "ValueError",
+        "message": "Existing container is not owned by this deployment"
+      }
+    },
+    {
+      "name": "owned-before-state",
+      "stdout": "[{\"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-1111-4111-8111-111111111111\", \"reverie.worker-policy\": \"p\"}}}]",
+      "outcome": {
+        "accepted_to_runtime_phase": false,
+        "error": "KeyError",
+        "message": "'State'"
+      }
+    },
+    {
+      "name": "extra-row",
+      "stdout": "[{\"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-1111-4111-8111-111111111111\", \"reverie.worker-policy\": \"p\"}}, \"State\": {\"Running\": false}}, 42]",
+      "outcome": {
+        "accepted_to_runtime_phase": true,
+        "running": false,
+        "canonical_id": false
+      }
+    },
+    {
+      "name": "BOM",
+      "stdout": "\ufeff[{\"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-1111-4111-8111-111111111111\", \"reverie.worker-policy\": \"p\"}}, \"State\": {\"Running\": false}}]",
+      "outcome": {
+        "accepted_to_runtime_phase": false,
+        "error": "JSONDecodeError",
+        "message": "Unexpected UTF-8 BOM (decode using utf-8-sig): line 1 column 1 (char 0)"
+      }
+    }
+  ]
+}

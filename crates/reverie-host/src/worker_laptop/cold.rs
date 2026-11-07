@@ -82,11 +82,11 @@ fn commit(runtime: &WorkerRuntime, record: &Record, deadline: Instant) -> Result
     running(runtime, deadline)?;
     let resources = record.resources();
     resources
-        .nix
+        .held_nix()?
         .assert_create_plan(runtime, &resources.plan)
         .map_err(LaptopError::Plan)?;
     resources
-        .nix
+        .held_nix()?
         .assert_cold_resources_current()
         .map_err(LaptopError::Nix)?;
     if WorkerValidationData::new(resources.plan.source())
@@ -100,7 +100,7 @@ fn commit(runtime: &WorkerRuntime, record: &Record, deadline: Instant) -> Result
         return Err(LaptopError::Refused("WORKER_COLD_TRANSACTION_REQUIRED"));
     }
     resources
-        .nix
+        .held_nix()?
         .assert_cold_resources_current()
         .map_err(LaptopError::Nix)?;
     running(runtime, deadline)

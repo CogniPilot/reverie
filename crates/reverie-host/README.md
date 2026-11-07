@@ -114,10 +114,10 @@ broker must still retain its supported admission and execution guards. This
 cohort does not replace `worker_memory.check_swap_budget`, `configure_started`,
 soft-limit requests or running-kernel verification.
 
-The existing Python broker remains selected. The task-perf artifact is now built
-by the separate Rust build-only policy-artifacts package, with filtered actual
-crate/dependency inputs. The separate Docker base-profile Python producer and
-other build-time tooling remain migration debt. Neither this library nor its
+The existing Python broker remains selected. The Docker namespace base and
+task-perf artifacts are built by the separate Rust build-only policy-artifacts
+package, with filtered actual crate/dependency inputs. Other build-time tooling
+remains migration debt. Neither this library nor its
 tests claim a consumer cutover, activation, a live syscall canary or the complete
 Python-free backend has finished.
 
@@ -324,6 +324,15 @@ default-JSON/first-row/label rules. Network create is never replayed after admis
 Unknown replies/native cleanup retain the exact owners; original errors and
 additional settlement failures remain data, not fabricated completion.
 
+`WorkerLaunchHold` retains the original counted J record through application
+resource acquisition and uncertain cleanup. Only that actual connection can
+mint it once. `close_socket` distinguishes known physical close with lifecycle
+still held from complete retirement; neither outcome acknowledges laptop or
+storage release. Dropping a hold leaves the same record counted, and an opaque
+descriptor close cannot be forgiven by logical release. Negative handler
+bookkeeping uses pure same-record identity after close; forward progression
+still requires the separate live-connection/held-resource checks.
+
 The network phase has checked one-shot return of the same resources, without
 closing them or acknowledging writer/capacity release. Last runtime/handle loss
 quarantines unreclaimed records for process lifetime instead of dropping their
@@ -378,6 +387,18 @@ identity and check the held target close. Only that result constructs
 `ConfiguredMemory`; it does not complete cold storage, launch a child or publish
 application readiness. The installing application and later lifecycle joins
 remain required. Owned fixture controls do not establish installed enforcement.
+
+`release_laptop_nix_guard` consumes only the original guard after the same
+record's acknowledged pane startup. It moves the actual storage, original Nix
+outcome and prepared path into that record before attempting checked descriptor
+finalization. Failed finalization retains cleanup custody and cannot be retried
+or produce `NixReleasedPane`. Successful finalization preserves the employee
+storage lease and allows immutable created-CID cleanup. This local close does
+not prove a globally free flock or release application admission. The installing
+caller must publish any protected CLI-start receipt first, then actually release
+admission and publish canonical release before starting a viewer. Any later
+forward consumer must recheck the same record's current phase; an old token
+cannot revive a record that entered terminal container cleanup.
 
 New-target cleanup accepts only the canonical CID retained from that actual
 create, never a recycled name or a caller CID. It preserves stop/inspect/kill/

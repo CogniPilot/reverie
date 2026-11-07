@@ -84,6 +84,11 @@ impl Workflows {
 }
 fn run(runtime: &WorkerRuntime, record: &mut Record, cid: &ContainerId) -> Result<()> {
     let end = record.cleanup.as_ref().expect("cleanup owner").end;
+    let resources = record.resources();
+    resources
+        .storage()
+        .assert_binding(runtime, resources.plan.source(), resources.plan.session())
+        .map_err(|error| LaptopError::Nix(crate::worker_nix::NixError::Owner(error)))?;
     if let Some(call) = &record.pending {
         runtime
             .installed_engine()

@@ -20,6 +20,8 @@ pub(super) enum CreateStage {
     ColdCommitted,
     StartingPane,
     PaneStarted,
+    ReleasingNixGuard,
+    NixGuardReleased,
 }
 pub(super) struct Creation {
     created: bool,
@@ -120,7 +122,7 @@ fn run(
         .map_err(|error| LaptopError::Telemetry(CreateTelemetryFailure::new(error)))?;
     let resources = record.resources();
     resources
-        .nix
+        .held_nix()?
         .assert_create_plan(runtime, &resources.plan)
         .map_err(LaptopError::Plan)?;
     let accounts = crate::worker_launch::account_mounts(

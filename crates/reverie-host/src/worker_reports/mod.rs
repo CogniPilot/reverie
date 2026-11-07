@@ -4,6 +4,7 @@
 mod error;
 mod launch;
 mod record;
+mod retention;
 #[cfg(test)]
 mod tests;
 mod wire;
@@ -16,6 +17,7 @@ pub use error::WorkerReportError;
 use error::{Result, finalized};
 pub use launch::{AcceptedWorkerConnection, WorkerLaunchConnection};
 use record::Record;
+pub use retention::{WorkerLaunchClose, WorkerLaunchHold};
 use std::{
     os::unix::net::UnixStream,
     sync::{
@@ -73,6 +75,9 @@ impl WorkerReportService {
         if self.opaque.load(Ordering::Acquire) {
             return self.refuse(stream, WorkerReportError::Unconfirmed);
         }
+        // A checked lifecycle release may have left only known-complete
+        // bookkeeping while contending with this same admission mutex.
+        records.retain(|record| !record.settled());
         if self.closed.load(Ordering::Acquire) || records.len() >= self.limit {
             return self.refuse(stream, WorkerReportError::Stopping);
         }

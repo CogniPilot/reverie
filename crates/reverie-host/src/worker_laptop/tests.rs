@@ -1,5 +1,6 @@
 mod cleanup;
 mod create;
+mod guard;
 mod pane;
 mod publication;
 mod reference;
@@ -65,6 +66,11 @@ pub(super) struct Fixture {
     pub(super) source: EffectiveWorkerConfig,
 }
 impl Fixture {
+    fn employee(mode: &str) -> Self {
+        let fixture = Self::new(mode);
+        fs::write(fixture.root.join("company.json"), serde_json::to_vec(&json!({"employees":[{"id":"11111111-2222-4333-8444-555555555555","sessionId":SID,"owner":null,"name":"Owned fixture","desiredRunning":true}]})).unwrap()).unwrap();
+        fixture
+    }
     pub(super) fn new(mode: &str) -> Self {
         let _ = program();
         let root = fs::canonicalize(std::env::temp_dir())
@@ -119,13 +125,18 @@ impl Fixture {
         session: &ProfileSessionId,
         effective: EffectiveWorkerConfig,
     ) -> (NixWorkflow, ObservedCreatePlan, WorkerRequest, OfficePhone) {
-        let mut storage = self
+        let selection = self
             .runtime()
             .resolve_storage(&self.source, session)
-            .unwrap()
-            .into_legacy()
             .unwrap();
+        let mut storage =
+            if selection.paths().kind() == reverie_store::storage_identity::StorageKind::Session {
+                selection.into_legacy().unwrap()
+            } else {
+                selection.acquire().unwrap()
+            };
         storage.prepare_storage().unwrap();
+        storage.record_storage_binding().unwrap();
         let plan = self
             .runtime()
             .prepare_laptop_plan(self.source.clone(), effective, &storage)
@@ -293,8 +304,8 @@ fn real_office_must_match_the_actual_runtime_and_constructor_fixed_session() {
     ));
     fixture
         .close_resources(LaptopNetworkReturned {
-            resources: Resources {
-                nix,
+            nix,
+            inputs: Inputs {
                 plan,
                 request,
                 office: phone,
