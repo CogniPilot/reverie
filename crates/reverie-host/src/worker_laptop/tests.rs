@@ -70,11 +70,17 @@ pub(super) struct Fixture {
 }
 impl Fixture {
     fn employee(mode: &str) -> Self {
-        let fixture = Self::new(mode);
+        Self::employee_with_hooks(mode, crate::captured_client::test_hooks::Hooks::default())
+    }
+    fn employee_with_hooks(mode: &str, hooks: crate::captured_client::test_hooks::Hooks) -> Self {
+        let fixture = Self::new_with_hooks(mode, hooks);
         fs::write(fixture.root.join("company.json"), serde_json::to_vec(&json!({"employees":[{"id":"11111111-2222-4333-8444-555555555555","sessionId":SID,"owner":null,"name":"Owned fixture","desiredRunning":true}]})).unwrap()).unwrap();
         fixture
     }
     pub(super) fn new(mode: &str) -> Self {
+        Self::new_with_hooks(mode, crate::captured_client::test_hooks::Hooks::default())
+    }
+    fn new_with_hooks(mode: &str, hooks: crate::captured_client::test_hooks::Hooks) -> Self {
         let _ = program();
         let root = fs::canonicalize(std::env::temp_dir())
             .unwrap()
@@ -91,12 +97,13 @@ impl Fixture {
         let info = fs::metadata(&root).unwrap();
         let source=worker_config::decode(&serde_json::to_vec(&json!({"version":1,"deployment":"fixture","image":format!("sha256:{}","a".repeat(64)),"serverContainer":"fixture-server","socket":"/run/launch-order.sock","stateRoot":root.join("state"),"companyFile":root.join("company.json"),"companyRoot":root.join("company"),"scratchRoot":root.join("scratch"),"apiSocketRoot":root.join("api"),"budgetMode":"pool","uid":info.uid(),"gid":info.gid(),"memoryMiB":0,"poolMemoryMiB":4096,"poolTasksMax":1024,"cgroupParent":"reverie-workers.slice","pidsLimit":128,"cpus":0,"maxWorkers":4,"mounts":[{"source":root.join("work"),"destination":"/workspace","readOnly":false}],"maintenanceSessions":[]})).unwrap()).unwrap();
         let envelope = WorkerEnvelope::capture(source.clone()).unwrap();
-        let bootstrap = EngineBootstrap::from_service(
+        let mut bootstrap = EngineBootstrap::from_service(
             program().as_os_str(),
             BTreeMap::from([("LAPTOP_FIXTURE_MODE".into(), mode.into())]),
             root.clone(),
         )
         .unwrap();
+        bootstrap.hooks = hooks;
         let runtime = Arc::new(WorkerRuntime::new(
             InstalledWorkerEngine::new(bootstrap),
             envelope.base(),

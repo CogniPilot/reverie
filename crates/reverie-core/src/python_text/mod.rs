@@ -47,6 +47,29 @@ pub(crate) fn linebreak_point(value: u32) -> bool {
 pub fn trim_text(text: &str) -> &str {
     text.trim_matches(whitespace)
 }
+/// Python str.splitlines for scalar text, without keeping the terminators.
+/// CRLF is one boundary; a final boundary does not add another empty row.
+pub fn split_lines(mut text: &str) -> impl Iterator<Item = &str> {
+    std::iter::from_fn(move || {
+        if text.is_empty() {
+            return None;
+        }
+        let Some((at, point)) = text
+            .char_indices()
+            .find(|&(_, c)| linebreak_point(u32::from(c)))
+        else {
+            let last = text;
+            text = "";
+            return Some(last);
+        };
+        let row = &text[..at];
+        text = &text[at + point.len_utf8()..];
+        if point == '\r' && text.starts_with('\n') {
+            text = &text[1..];
+        }
+        Some(row)
+    })
+}
 pub fn collapse_whitespace(text: &str) -> String {
     text.split(whitespace)
         .filter(|part| !part.is_empty())

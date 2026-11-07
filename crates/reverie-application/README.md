@@ -543,3 +543,12 @@ storage/capacity credit or global completion. Source's unbounded None admission
 mutex wait remains explicit; the actual service must retain/bound those waiting
 handlers during shutdown. The real legacy stop/finalizer is a separate required
 consumer, and full production qualification requires that joint caller.
+
+The actual reuse continuation now threads its original accepted connection into
+Host retention and construction, rather than pairing request data with a later
+same-SID socket. `ViewingReuse::relay` drives the same framed native viewer and
+reads the real broker snapshot at each current-intent check. Its typed result
+returns the whole `ViewingReuse` for receipt, child exit, EOF, stop, intent change
+and failure. It performs no automatic close/restore or handler completion. The
+original finally ordering and final storage-live/resource release remain separate
+required consumers; no relay outcome is a release permission.

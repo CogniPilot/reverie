@@ -6,6 +6,16 @@ stdio lock, wait for no peer and retry no short/interrupted write. Callers
 must settle owned resources first; delivery never changes the operation result
 or supplies cleanup evidence.
 
+`terminal_resize_report(&[u8])` is the separate live-worker purpose. It uses
+the same fixed fd2 adapter and refuses reports over 1024 bytes rather than
+truncating them. The viewer remains owned; delivery error ends the transport
+operation while retaining its native/resource owners for their real finalizer.
+The report is attempted before later receipt/X work. This deliberately replaces
+Python's potentially blocking print/flush with bounded best-effort delivery:
+backpressure, a partial write or an interrupted write is an error, never report
+success or a cleanup acknowledgement. It does not broaden the post-cleanup
+contract of `stderr`/`stdout`.
+
 The Linux adapter uses nonblocking socket sends, independently reopened
 nonblocking FIFO/TTY descriptions, and `O_NOCTTY`. It preserves inherited file
 flags. Regular files use the inherited descriptor so offset and append semantics

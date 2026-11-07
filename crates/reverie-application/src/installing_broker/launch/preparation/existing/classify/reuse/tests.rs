@@ -13,6 +13,142 @@ fn reusable<'a>(tree: &Tree, broker: &'a InstallingBroker) -> ReusableWorkerLaun
     };
     reuse
 }
+#[test]
+fn genuine_whole_reuse_relay_returns_same_scope_after_io_and_eof_without_cleanup_credit() {
+    crate::test_process::owning_case!(
+        genuine_whole_reuse_relay_returns_same_scope_after_io_and_eof_without_cleanup_credit
+    );
+    use std::io::{Read, Write};
+    let tree = Tree::new();
+    let broker = broker(&tree);
+    tree.write("company.json", &serde_json::to_vec(&serde_json::json!({"employees":[{"id":"11111111-2222-4333-8444-555555555555","owner":null,"sessionId":SID,"desiredRunning":true}]})).unwrap());
+    let (mut client, inspected) =
+        super::super::tests::inspection_with_client(&tree, &broker, None, false);
+    tree.write("pane.out", b"0\n");
+    let ClassifiedWorkerLaunch::Reuse(reuse) = inspected.classify_existing().unwrap() else {
+        panic!("actual reuse")
+    };
+    let source = reuse.inspected.observed.current.configuration().clone();
+    let sid = reuse.request().session().clone();
+    let connection = reuse
+        .inspected
+        .observed
+        .claimed
+        .preparing
+        .admitted
+        .request
+        .connection
+        .clone();
+    let viewing = reuse
+        .prepare_viewer()
+        .unwrap()
+        .close_allocation()
+        .unwrap()
+        .start(end())
+        .unwrap();
+    client
+        .set_read_timeout(Some(std::time::Duration::from_secs(3)))
+        .unwrap();
+    let returned = std::thread::scope(|scope| {
+        let peer = scope.spawn(|| {
+            let header =
+                reverie_core::worker_wire::WorkerFrameHeader::for_payload(b'I', 8).unwrap();
+            client.write_all(&header.encode()).unwrap();
+            client.write_all(b"whole-io").unwrap();
+            let mut output = Vec::new();
+            while output.len() < 8 {
+                let mut raw = [0; 5];
+                client.read_exact(&mut raw).unwrap();
+                let header = reverie_core::worker_wire::WorkerFrameHeader::decode(raw);
+                assert_eq!(header.kind(), b'O');
+                let mut bytes = vec![0; header.payload_length() as usize];
+                client.read_exact(&mut bytes).unwrap();
+                output.extend(bytes);
+            }
+            assert_eq!(output, b"whole-io");
+            client.shutdown(std::net::Shutdown::Write).unwrap();
+        });
+        let returned = viewing.relay();
+        peer.join().unwrap();
+        returned
+    });
+    let (viewing, outcome) = returned.into_parts();
+    assert!(matches!(
+        outcome,
+        Ok(reverie_host::worker_reports::ViewerRelayEnd::PeerClosed)
+    ));
+    assert!(Arc::ptr_eq(viewing.relay_connection(), &connection));
+    assert!(viewing.owner.retained.scope.active.is_some());
+    assert!(
+        broker
+            .storage
+            .runtime
+            .laptop_viewer_status(viewing.viewer_session())
+            .unwrap()
+            .is_none()
+    );
+    assert!(reverie_host::worker_storage::StorageLease::acquire_migration(&source, &sid).is_err());
+    assert!(
+        broker.close_command_telemetry(end()).is_err(),
+        "EOF cannot release actual counted Hold"
+    );
+    let restored = viewing.close_native_component(end()).unwrap();
+    finish(restored);
+    broker.close_command_telemetry(end()).unwrap();
+}
+#[test]
+fn whole_reuse_relay_reads_actual_current_broker_intent_and_returns_live_owner_without_x() {
+    crate::test_process::owning_case!(
+        whole_reuse_relay_reads_actual_current_broker_intent_and_returns_live_owner_without_x
+    );
+    use std::io::Read;
+    let tree = Tree::new();
+    let broker = broker(&tree);
+    let employee = |running| {
+        serde_json::to_vec(&serde_json::json!({"employees":[{"id":"11111111-2222-4333-8444-555555555555","owner":null,"sessionId":SID,"desiredRunning":running}]})).unwrap()
+    };
+    tree.write("company.json", &employee(true));
+    let (mut client, inspected) =
+        super::super::tests::inspection_with_client(&tree, &broker, None, false);
+    tree.write("pane.out", b"0\n");
+    let ClassifiedWorkerLaunch::Reuse(reuse) = inspected.classify_existing().unwrap() else {
+        panic!("actual reuse")
+    };
+    let source = reuse.inspected.observed.current.configuration().clone();
+    let sid = reuse.request().session().clone();
+    let viewing = reuse
+        .prepare_viewer()
+        .unwrap()
+        .close_allocation()
+        .unwrap()
+        .start(end())
+        .unwrap();
+    tree.write("company.json", &employee(false));
+    let (viewing, outcome) = viewing.relay().into_parts();
+    assert!(matches!(
+        outcome,
+        Ok(reverie_host::worker_reports::ViewerRelayEnd::IntentChanged)
+    ));
+    assert!(
+        broker
+            .storage
+            .runtime
+            .laptop_viewer_status(viewing.viewer_session())
+            .unwrap()
+            .is_none()
+    );
+    assert!(reverie_host::worker_storage::StorageLease::acquire_migration(&source, &sid).is_err());
+    client
+        .set_read_timeout(Some(std::time::Duration::from_millis(20)))
+        .unwrap();
+    assert_eq!(
+        client.read(&mut [0; 5]).unwrap_err().kind(),
+        std::io::ErrorKind::WouldBlock,
+        "intent refusal sends neither X nor cleanup acknowledgement"
+    );
+    finish(viewing.close_native_component(end()).unwrap());
+    broker.close_command_telemetry(end()).unwrap();
+}
 fn finish(restored: RestoredReuse<'_>) {
     let RestoredReuse { scope, returned } = restored;
     let claim = returned.fixture_claim();

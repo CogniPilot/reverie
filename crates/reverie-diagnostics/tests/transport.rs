@@ -24,6 +24,10 @@ fn entry() {
         stdout_entry(&mode);
         return;
     }
+    if let Some(mode) = mode.strip_prefix("resize-") {
+        resize_entry(mode);
+        return;
+    }
     if mode == "blocking-control" {
         std::io::stderr().write_all(b"owned-diagnostic\n").unwrap();
         return;
@@ -66,6 +70,28 @@ fn entry() {
     let result = reverie_diagnostics::stderr(&data);
     if mode == "regular" || mode == "bound" {
         result.unwrap();
+    }
+}
+fn resize_entry(mode: &str) {
+    if mode == "closed" {
+        // SAFETY: only this separately owned exact-one test subprocess closes
+        // its inherited fd2. No numeric descriptor escapes or is retried.
+        assert_eq!(unsafe { libc::close(2) }, 0);
+    }
+    let data = if mode == "oversize" {
+        vec![b'x'; reverie_diagnostics::MAX_BYTES + 1]
+    } else {
+        b"Reverie worker: terminal resize to 100x35 unconfirmed (EXPIRED); last observed none\n"
+            .to_vec()
+    };
+    let result = reverie_diagnostics::terminal_resize_report(&data);
+    match mode {
+        "regular" => result.unwrap(),
+        "closed" => assert_eq!(result.unwrap_err().raw_os_error(), Some(libc::EBADF)),
+        "readonly" => assert_eq!(result.unwrap_err().kind(), io::ErrorKind::PermissionDenied),
+        "oversize" => assert_eq!(result.unwrap_err().kind(), io::ErrorKind::InvalidInput),
+        "full" => assert_eq!(result.unwrap_err().kind(), io::ErrorKind::WouldBlock),
+        _ => panic!("closed resize fixture mode"),
     }
 }
 fn stdout_entry(mode: &str) {
@@ -203,6 +229,48 @@ fn full_socket_is_nonblocking_without_altering_its_shared_description() {
     }
     assert!(done);
     assert_eq!(flags(writer.as_raw_fd()), before);
+}
+#[test]
+fn live_resize_report_refuses_full_fifo_and_socket_without_mutating_shared_flags() {
+    let (_reader, writer) = full_pipe();
+    let before = flags(writer.as_raw_fd());
+    let mut child = spawn("resize-full", writer.try_clone().unwrap().into());
+    finish_owned(&mut child);
+    assert_eq!(flags(writer.as_raw_fd()), before);
+    let (_reader, mut writer) = UnixStream::pair().unwrap();
+    writer.set_nonblocking(true).unwrap();
+    fill(&mut writer);
+    writer.set_nonblocking(false).unwrap();
+    let before = flags(writer.as_raw_fd());
+    let mut child = spawn("resize-full", writer.try_clone().unwrap().into());
+    finish_owned(&mut child);
+    assert_eq!(flags(writer.as_raw_fd()), before);
+}
+#[test]
+fn live_resize_report_is_complete_or_negative_for_regular_closed_readonly_and_oversize() {
+    let tree = Tree::new();
+    let leaf = tree.0.join("resize");
+    let writer = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(&leaf)
+        .unwrap();
+    let mut child = spawn("resize-regular", writer.into());
+    finish_owned(&mut child);
+    let actual = fs::read(&leaf).unwrap();
+    assert_eq!(
+        actual,
+        b"Reverie worker: terminal resize to 100x35 unconfirmed (EXPIRED); last observed none\n"
+    );
+    for mode in ["resize-closed", "resize-readonly", "resize-oversize"] {
+        let reader = File::open(&leaf).unwrap();
+        let before = flags(reader.as_raw_fd());
+        let mut child = spawn(mode, reader.try_clone().unwrap().into());
+        finish_owned(&mut child);
+        assert_eq!(flags(reader.as_raw_fd()), before);
+        assert_eq!(fs::read(&leaf).unwrap(), actual);
+    }
 }
 #[test]
 fn changed_sigpipe_disposition_omits_fifo_output_without_killing_the_process() {

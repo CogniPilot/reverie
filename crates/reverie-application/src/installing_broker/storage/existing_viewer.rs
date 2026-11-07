@@ -41,6 +41,7 @@ impl ExistingStoragePreparation {
     }
     pub(in crate::installing_broker) fn start(
         &self,
+        connection: &reverie_host::worker_reports::WorkerLaunchConnection,
         end: Instant,
     ) -> Result<ExistingViewerStart, ExistingStorageError> {
         self.check()?;
@@ -48,7 +49,7 @@ impl ExistingStoragePreparation {
             .destination
             .registry()
             .runtime
-            .start_existing_viewer(&self.viewer, end)?)
+            .start_existing_viewer_for_connection(&self.viewer, connection, end)?)
     }
     pub(in crate::installing_broker) fn close(
         &self,
@@ -124,22 +125,22 @@ impl ExistingStorageReturned {
 impl StorageClaim {
     /// Pure resource handoff only. The actual classified App continuation must
     /// release its lifecycle/allocation scope before starting the native job.
-    pub(in crate::installing_broker) fn retain_existing_relay(
+    pub(in crate::installing_broker) fn retain_existing_relay_for_connection(
         self,
         plan: ObservedCreatePlan,
-        request: WorkerRequest,
         inspected: ExistingLaptopInspection,
         receipt: LaunchReceiptObservation,
+        connection: &reverie_host::worker_reports::WorkerLaunchConnection,
     ) -> Result<ExistingStoragePreparation, Box<ExistingStorageRetainFailure>> {
         let inputs = Inputs {
             plan,
-            request,
+            request: connection.request().clone(),
             inspected,
             receipt,
         };
         match self.state {
             ClaimState::Legacy { registry, owner } => {
-                match retain_native(&registry, owner, inputs) {
+                match retain_native(&registry, owner, inputs, connection) {
                     Ok(viewer) => Ok(ExistingStoragePreparation {
                         destination: Destination::Legacy { registry },
                         viewer,
@@ -165,7 +166,7 @@ impl StorageClaim {
                 identity,
                 paths,
                 newly_claimed,
-            } => match registry.retain_existing(&identity, inputs) {
+            } => match registry.retain_existing(&identity, inputs, connection) {
                 Ok(viewer) => Ok(ExistingStoragePreparation {
                     destination: Destination::Registered {
                         registry,
@@ -197,13 +198,14 @@ fn retain_native(
     registry: &StorageRegistry,
     owner: Box<LaunchStorage>,
     inputs: Inputs,
+    connection: &reverie_host::worker_reports::WorkerLaunchConnection,
 ) -> Result<Arc<ExistingViewer>, Box<NativeRetainFailure>> {
-    match registry.runtime.retain_existing_relay(
+    match registry.runtime.retain_existing_relay_for_connection(
         owner,
         inputs.plan,
-        inputs.request,
         inputs.inspected,
         inputs.receipt,
+        connection,
     ) {
         Ok(viewer) => Ok(Arc::new(viewer)),
         Err(failure) => {
@@ -226,6 +228,7 @@ impl StorageRegistry {
         &self,
         identity: &Arc<()>,
         inputs: Inputs,
+        connection: &reverie_host::worker_reports::WorkerLaunchConnection,
     ) -> Result<Arc<ExistingViewer>, Box<RegistryRetainFailure>> {
         let mut entries = match self.lock(self.runtime.stop_deadline()) {
             Ok(entries) => entries,
@@ -251,7 +254,7 @@ impl StorageRegistry {
         let EntryOwner::Direct(owner) = entry.owner else {
             unreachable!("checked same Direct box")
         };
-        match retain_native(self, owner, inputs) {
+        match retain_native(self, owner, inputs, connection) {
             Ok(viewer) => {
                 entry.owner = EntryOwner::Existing(viewer.clone());
                 entries.insert(index, entry);

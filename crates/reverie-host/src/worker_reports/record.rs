@@ -22,6 +22,21 @@ pub(super) struct Record {
     lifecycle: Mutex<super::retention::LifecycleHoldState>,
 }
 impl Record {
+    pub(super) fn require_terminal_hold(&self) -> Result<()> {
+        let hold = self.try_mint_lock(&self.lifecycle)?;
+        if matches!(*hold, super::retention::LifecycleHoldState::Held(_)) {
+            Ok(())
+        } else {
+            Err(WorkerReportError::LifecycleRetained)
+        }
+    }
+    pub(super) fn terminal_stream(&self) -> Result<MutexGuard<'_, Option<UnixStream>>> {
+        let stream = self.try_mint_lock(&self.stream)?;
+        if !self.can_progress() || stream.is_none() {
+            return Err(WorkerReportError::Unconfirmed);
+        }
+        Ok(stream)
+    }
     pub(super) fn read_request(
         &self,
         service: &WorkerReportService,

@@ -5,6 +5,8 @@ mod error;
 mod launch;
 mod record;
 mod retention;
+pub(crate) mod terminal;
+pub use terminal::{ViewerRelay, ViewerRelayEnd, ViewerRelayError, ViewerRelayEvent};
 #[cfg(test)]
 mod tests;
 mod wire;

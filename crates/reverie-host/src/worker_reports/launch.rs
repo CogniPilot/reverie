@@ -70,6 +70,36 @@ impl WorkerReportService {
     }
 }
 impl WorkerLaunchConnection {
+    pub(super) fn require_terminal_hold(&self) -> Result<()> {
+        self.record.require_terminal_hold()
+    }
+    pub(super) fn terminal_identity(&self) -> super::terminal::RelayIdentity {
+        super::terminal::RelayIdentity::new(&self.service, self.record.clone())
+    }
+    pub(crate) fn viewer_constructor_identity(
+        &self,
+        runtime: &WorkerRuntime,
+        session: &reverie_core::ids::ProfileSessionId,
+    ) -> std::result::Result<super::terminal::RelayIdentity, &'static str> {
+        if !self.same_runtime(runtime) {
+            return Err("VIEWER_CONNECTION_RUNTIME_CHANGED");
+        }
+        if self.request.session() != session {
+            return Err("VIEWER_CONNECTION_SESSION_CHANGED");
+        }
+        self.assert_open(runtime)
+            .map_err(|_| "VIEWER_CONNECTION_CLOSED")?;
+        self.require_terminal_hold()
+            .map_err(|_| "VIEWER_CONNECTION_HOLD_REQUIRED")?;
+        Ok(self.terminal_identity())
+    }
+    pub(super) fn terminal_socket(&self) -> Result<super::terminal::socket::Socket<'_>> {
+        if self.service.stopping() {
+            return Err(WorkerReportError::Stopping);
+        }
+        let stream = self.record.terminal_stream()?;
+        Ok(super::terminal::socket::Socket::new(&self.service, stream))
+    }
     /// One-shot nonblocking mint from this actual accepted J record. The real
     /// application keeps this with its active/preparation/failure owner. This
     /// value retains transport capacity, never grants native effects.
