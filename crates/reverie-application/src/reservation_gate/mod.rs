@@ -14,6 +14,8 @@ mod image_refresh;
 mod launch;
 mod observation;
 mod preparation;
+mod preparation_draft;
+pub(crate) use preparation_draft::{DraftRetentionFailure, EnteredResourceDraft};
 mod preparation_commit;
 mod preparation_phase;
 mod preparation_policy;

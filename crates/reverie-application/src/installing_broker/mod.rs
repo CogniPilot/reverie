@@ -9,6 +9,7 @@ mod creation;
 mod gpu_access;
 mod image_refresh;
 mod recovered;
+pub(crate) mod source;
 mod storage;
 mod telemetry;
 use crate::{
@@ -22,6 +23,7 @@ use recovered::{LaptopOwner, RecoveryOwners};
 pub use recovered::{RecoveryError, RecoverySummary};
 use reverie_contracts::reservation_engine::ReservationConfiguration;
 use reverie_core::{ids::ProfileSessionId, worker_laptop::WorkerContainerName};
+pub use source::SourceDraftError;
 use std::sync::{Arc, Mutex, MutexGuard, RwLock};
 pub use storage::{
     NetworkStorageError, NetworkStoragePreparation, NetworkStorageReclaimFailure,

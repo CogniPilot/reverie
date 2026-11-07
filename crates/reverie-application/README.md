@@ -384,3 +384,21 @@ They cover held admission, success/failure final guards, nil and malformed-journ
 refusal, and dual body/poisoned-owner cleanup errors with consumed-flock checks.
 The controlled engine's empty inventory/name replies remain synthetic membership
 DATA; these controls establish no real running-container or start qualification.
+
+The named installing `retain_resource_draft` entry captures only a genuine
+recovered employee-storage owner. It retains the original admission and the
+lifecycle/registry locks while moving that exact acquired lease and Office owner
+into a source record BEFORE the durable reservation claim. The canonical claim,
+original baseline, admission finalizer and source join share that interval.
+Ordinary release refuses the source record; neither closing the retained store
+nor changing the employee's session reconstructs or releases the original lease.
+A known pre-claim refusal restores the same box. Any possible durable claim or
+failed join retains the source record and claim, with typed cleanup errors.
+
+The standalone Gate `retain_draft` remains a read-side claim producer without a
+source resource or effect authority. Actual Created/Started owners need their own
+same-record integration; they cannot become Direct owners from paths or status.
+The source-holder tests use the unchanged genuine bootstrap/recovery path and
+same captured metadata engine; only kernel observations are controlled data.
+Protected source stop, physical lease release, create/start and global shutdown
+acknowledgement are not provided by this resource/durable-claim join.

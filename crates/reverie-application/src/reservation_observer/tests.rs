@@ -5,6 +5,7 @@ use serde_json::{Value, json};
 use std::{collections::VecDeque, sync::Mutex};
 
 struct State {
+    engine: Option<ReadonlyEngine>,
     outputs: VecDeque<String>,
     events: Vec<String>,
     deadlines: Vec<Instant>,
@@ -33,6 +34,7 @@ impl Fixture {
     }
     pub(crate) fn new() -> Arc<Self> {
         Arc::new(Self(Mutex::new(State {
+            engine: None,
             outputs: VecDeque::new(),
             events: Vec::new(),
             deadlines: Vec::new(),
@@ -54,6 +56,19 @@ impl Fixture {
         NativeObserver {
             source: Arc::new(self.clone()),
             cancellation: CancellationToken::new(),
+        }
+    }
+    /// Only the kernel observations remain synthetic. Every metadata query and
+    /// owned settlement uses the actual installing Runtime's captured client.
+    pub(crate) fn observer_using_engine(
+        self: &Arc<Self>,
+        engine: ReadonlyEngine,
+        cancellation: CancellationToken,
+    ) -> NativeObserver {
+        self.0.lock().unwrap().engine = Some(engine);
+        NativeObserver {
+            source: Arc::new(self.clone()),
+            cancellation,
         }
     }
     pub(crate) fn inventory(&self, rows: &[Value]) {
@@ -183,11 +198,20 @@ impl Source for Arc<Fixture> {
     fn inspect_laptop(
         &self,
         name: &reverie_core::worker_laptop::WorkerContainerName,
-        _: Instant,
-        _: &CancellationToken,
+        end: Instant,
+        cancellation: &CancellationToken,
     ) -> Result<reverie_host::broker_engine::LaptopInspectOutput> {
         let mut state = self.0.lock().unwrap();
         state.events.push(format!("laptop:{}", name.as_str()));
+        if let Some(engine) = state.engine.clone() {
+            drop(state);
+            return Ok(reverie_host::broker_engine::inspect_laptop(
+                &engine,
+                name,
+                end,
+                cancellation,
+            )?);
+        }
         state
             .laptop_outputs
             .pop_front()
@@ -195,7 +219,12 @@ impl Source for Arc<Fixture> {
                 "OWNED_LAPTOP_INSPECTION_FIXTURE_EXHAUSTED",
             ))
     }
-    fn query(&self, query: EngineQuery<'_>, end: Instant, _: &CancellationToken) -> Result<String> {
+    fn query(
+        &self,
+        query: EngineQuery<'_>,
+        end: Instant,
+        cancellation: &CancellationToken,
+    ) -> Result<String> {
         let mut state = self.0.lock().unwrap();
         state.events.push(
             match query {
@@ -211,13 +240,22 @@ impl Source for Arc<Fixture> {
         if let Some(hook) = state.on_query.as_mut() {
             hook()?;
         }
+        if let Some(engine) = state.engine.clone() {
+            drop(state);
+            return Ok(engine.query(query, end, cancellation)?);
+        }
         state
             .outputs
             .pop_front()
             .ok_or(ObserverError::Refused("FIXTURE_QUERY_UNAVAILABLE"))
     }
-    fn settle_owned(&self, _: Instant) -> Result<()> {
-        self.0.lock().unwrap().events.push("settle".to_owned());
+    fn settle_owned(&self, end: Instant) -> Result<()> {
+        let mut state = self.0.lock().unwrap();
+        state.events.push("settle".to_owned());
+        if let Some(engine) = state.engine.clone() {
+            drop(state);
+            engine.settle_owned(end)?;
+        }
         Ok(())
     }
     fn host_root(&self, _: Instant) -> Result<HostAccounting> {

@@ -25,7 +25,7 @@ static PROGRAM: OnceLock<PathBuf> = OnceLock::new();
 static NEXT: AtomicU64 = AtomicU64::new(0);
 const FIRST: &str = "11111111-2222-3333-4444-555555555555";
 const SECOND: &str = "22222222-2222-3333-4444-555555555555";
-fn program() -> &'static Path {
+pub(in crate::installing_broker) fn program() -> &'static Path {
     PROGRAM.get_or_init(|| {
         let root = fs::canonicalize(std::env::temp_dir())
             .unwrap()
@@ -50,12 +50,12 @@ fn program() -> &'static Path {
         binary
     })
 }
-struct Tree {
-    root: PathBuf,
-    broker: InstallingBroker,
+pub(in crate::installing_broker) struct Tree {
+    pub(in crate::installing_broker) root: PathBuf,
+    pub(in crate::installing_broker) broker: InstallingBroker,
 }
 impl Tree {
-    fn new(names: &str) -> Self {
+    pub(in crate::installing_broker) fn new(names: &str) -> Self {
         Self::with_budget(names, "pool", 0, 4096)
     }
     fn with_budget(names: &str, mode: &str, memory: u32, pool: u32) -> Self {
