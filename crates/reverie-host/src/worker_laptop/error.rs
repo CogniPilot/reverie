@@ -50,6 +50,7 @@ impl std::error::Error for CreateTelemetryFailure {}
 pub enum LaptopError {
     Refused(&'static str),
     Plan(CreateObservationError),
+    ExistingObservation(crate::worker_launch::ExistingObservationError),
     Office(OfficeError),
     Network(NetworkDataError),
     Engine(EngineError),
@@ -100,6 +101,7 @@ impl LaptopError {
         match self {
             Self::Refused(code) => code,
             Self::Plan(_) => "WORKER_LAPTOP_PLAN",
+            Self::ExistingObservation(_) => "WORKER_EXISTING_VIEWER_OBSERVATION",
             Self::Office(_) => "WORKER_LAPTOP_OFFICE",
             Self::Network(_) => "WORKER_LAPTOP_NETWORK",
             Self::Engine(error) => error.code(),
@@ -131,6 +133,7 @@ impl std::error::Error for LaptopError {
         match self {
             Self::Refused(_) => None,
             Self::Plan(error) => Some(error),
+            Self::ExistingObservation(error) => Some(error),
             Self::Office(error) => Some(error),
             Self::Network(error) => Some(error),
             Self::Engine(error) => Some(error),

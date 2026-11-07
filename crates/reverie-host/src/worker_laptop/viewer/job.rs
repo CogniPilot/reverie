@@ -40,7 +40,7 @@ pub(crate) struct Job {
     gate: Option<Arc<crate::captured_client::test_hooks::Gate>>,
 }
 impl Job {
-    pub(super) fn new(
+    pub(in crate::worker_laptop) fn new(
         runtime: &WorkerRuntime,
         name: reverie_core::worker_launch::WorkerName,
         size: TerminalSize,
@@ -485,7 +485,7 @@ fn step(state: &mut State, plan: &mut ClosePlan, end: Instant) -> Result<bool> {
     need(!state.opaque && state.process.settled(), "VIEWER_UNREAPED")?;
     Ok(true)
 }
-pub(super) fn clipped(runtime: &WorkerRuntime, end: Instant) -> Instant {
+pub(in crate::worker_laptop) fn clipped(runtime: &WorkerRuntime, end: Instant) -> Instant {
     runtime.stop_deadline().map_or(end, |stop| stop.min(end))
 }
 fn uncertain_terminal(error: &LaptopError) -> bool {

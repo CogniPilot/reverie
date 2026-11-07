@@ -72,6 +72,10 @@ fn main() {
         fs::write("killed-laptop",b"actual fixed kill effect").unwrap();return;
     }
     if args.first().map(String::as_str)==Some("inspect") {
+        if Path::new("existing-inspect.json").is_file() {
+            assert_eq!(args,["inspect",&format!("fixture-agent-{}",fs::read_to_string("started-laptop").unwrap())]);
+            std::io::stdout().write_all(&fs::read("existing-inspect.json").unwrap()).unwrap();return;
+        }
         if mode.starts_with("created-memory") {
             assert_eq!(args,["inspect",&format!("fixture-agent-{}",fs::read_to_string("started-laptop").unwrap())]);
             let row=fs::read("memory-inspect.json").unwrap();

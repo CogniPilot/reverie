@@ -1,21 +1,39 @@
 //! Owned fixed PTY attach after real pane and original Nix guard finalization.
 //! The application must still perform actual admission/canonical release first.
-//! Recovered/reused panes have no constructor here until their real owner exists.
+//! Existing reuse uses its original storage/inspection record rather than a
+//! created-pane token. Actual App admission/release remains a separate join.
 mod job;
 #[cfg(test)]
 pub(super) mod test_hooks;
 use super::*;
 pub(crate) use job::Job as ViewerJob;
+pub(super) use job::clipped;
 use reverie_core::worker_launch::{ContainerReference, TerminalSize};
+enum SessionOrigin {
+    Created(LaptopWorkflow),
+    Existing(existing_viewer::ExistingReference),
+}
 
 #[must_use = "retain the actual viewer until checked session and PTY cleanup"]
 pub struct ViewerSession {
-    workflow: LaptopWorkflow,
+    origin: SessionOrigin,
     job: Arc<job::Job>,
 }
 impl ViewerSession {
     pub fn same_workflow(&self, other: &LaptopWorkflow) -> bool {
-        self.workflow.same_workflow(other)
+        matches!(&self.origin,SessionOrigin::Created(workflow) if workflow.same_workflow(other))
+    }
+    pub fn same_existing(&self, other: &ExistingViewer) -> bool {
+        matches!(&self.origin,SessionOrigin::Existing(existing) if existing.same_owner(&other.reference))
+    }
+    pub(super) fn existing(
+        reference: existing_viewer::ExistingReference,
+        job: Arc<ViewerJob>,
+    ) -> Self {
+        Self {
+            origin: SessionOrigin::Existing(reference),
+            job,
+        }
     }
     pub fn failure(&self) -> Result<Option<Arc<LaptopError>>> {
         self.job.failure()
@@ -72,48 +90,19 @@ impl Workflows {
         // spawn. Same bounded record is inventoried even if this caller times out.
         record.viewer = Some(job.clone());
         record.creation.as_mut().expect("actual pane").stage = create::CreateStage::StartingViewer;
-        if let Err(error) = admit_constructor(runtime, &job, end) {
-            let error = Arc::new(error);
-            job.refused_before_admission(error.clone());
-            record.unknown = true;
-            record.phase = Phase::Retained;
-            record.outcome = Some(Err(error));
-            return Ok(ViewerStart::Retained);
-        }
-        job.launch(runtime.cancellation());
-        match job.wait_started(runtime, end) {
-            Ok(true) => {
-                if let Err(error) = runtime
-                    .installed_engine()
-                    .engine
-                    .client
-                    .handoff_viewer(&job, end)
-                {
-                    record.unknown = true;
-                    record.phase = Phase::Retained;
-                    record.outcome = Some(Err(Arc::new(LaptopError::Engine(error.into()))));
-                    return Ok(ViewerStart::Retained);
-                }
+        match launch_constructor(runtime, &job, end) {
+            Ok(()) => {
                 record.creation.as_mut().expect("actual viewer").stage =
                     create::CreateStage::Viewing;
                 Ok(ViewerStart::Started(ViewerSession {
-                    workflow: pane.workflow.clone(),
+                    origin: SessionOrigin::Created(pane.workflow.clone()),
                     job,
                 }))
-            }
-            Ok(false) => {
-                record.unknown = true;
-                record.phase = Phase::Retained;
-                let error = job.failure()?.unwrap_or_else(|| {
-                    Arc::new(LaptopError::Refused("VIEWER_CONSTRUCTOR_UNCONFIRMED"))
-                });
-                record.outcome = Some(Err(error));
-                Ok(ViewerStart::Retained)
             }
             Err(error) => {
                 record.unknown = true;
                 record.phase = Phase::Retained;
-                record.outcome = Some(Err(Arc::new(error)));
+                record.outcome = Some(Err(error));
                 Ok(ViewerStart::Retained)
             }
         }
@@ -123,32 +112,90 @@ impl Workflows {
         runtime: &WorkerRuntime,
         viewer: &'a ViewerSession,
         forward: bool,
-    ) -> Result<std::sync::MutexGuard<'a, Record>> {
-        self.bound(runtime, &viewer.workflow)?;
-        let record = viewer
-            .workflow
-            .record
-            .try_lock()
-            .map_err(|_| LaptopError::Refused("WORKER_LAPTOP_RETAINED"))?;
-        need(
-            record
-                .viewer
-                .as_ref()
-                .is_some_and(|job| Arc::ptr_eq(job, &viewer.job)),
-            "WORKER_VIEWER_ORIGIN",
-        )?;
+    ) -> Result<ViewerGuard<'a>> {
+        let guard = match &viewer.origin {
+            SessionOrigin::Created(workflow) => {
+                self.bound(runtime, workflow)?;
+                ViewerGuard::Created(
+                    workflow
+                        .record
+                        .try_lock()
+                        .map_err(|_| LaptopError::Refused("WORKER_LAPTOP_RETAINED"))?,
+                )
+            }
+            SessionOrigin::Existing(existing) => {
+                self.bound_existing(runtime, existing)?;
+                ViewerGuard::Existing(
+                    existing
+                        .record
+                        .try_lock()
+                        .map_err(|_| LaptopError::Refused("WORKER_EXISTING_VIEWER_RETAINED"))?,
+                )
+            }
+        };
         if forward {
             need(
-                record.phase == Phase::Known
-                    && !runtime.cancellation().is_cancelled()
-                    && record
-                        .creation
-                        .as_ref()
-                        .is_some_and(|c| c.stage == create::CreateStage::Viewing),
+                !runtime.cancellation().is_cancelled(),
                 "WORKER_VIEWER_PHASE",
             )?;
         }
-        Ok(record)
+        guard.assert_session(&viewer.job, forward)?;
+        Ok(guard)
+    }
+}
+enum ViewerGuard<'a> {
+    Created(std::sync::MutexGuard<'a, Record>),
+    Existing(std::sync::MutexGuard<'a, existing_viewer::ExistingRecord>),
+}
+impl ViewerGuard<'_> {
+    fn assert_session(&self, job: &Arc<ViewerJob>, forward: bool) -> Result<()> {
+        match self {
+            Self::Created(record) => {
+                need(
+                    record
+                        .viewer
+                        .as_ref()
+                        .is_some_and(|current| Arc::ptr_eq(current, job)),
+                    "WORKER_VIEWER_ORIGIN",
+                )?;
+                if forward {
+                    need(
+                        record.phase == Phase::Known
+                            && record
+                                .creation
+                                .as_ref()
+                                .is_some_and(|c| c.stage == create::CreateStage::Viewing),
+                        "WORKER_VIEWER_PHASE",
+                    )?;
+                }
+                Ok(())
+            }
+            Self::Existing(record) => record.assert_session(job, forward),
+        }
+    }
+}
+pub(super) fn launch_constructor(
+    runtime: &WorkerRuntime,
+    job: &Arc<ViewerJob>,
+    end: Instant,
+) -> std::result::Result<(), Arc<LaptopError>> {
+    if let Err(error) = admit_constructor(runtime, job, end) {
+        let error = Arc::new(error);
+        job.refused_before_admission(error.clone());
+        return Err(error);
+    }
+    job.launch(runtime.cancellation());
+    match job.wait_started(runtime, end).map_err(Arc::new)? {
+        true => runtime
+            .installed_engine()
+            .engine
+            .client
+            .handoff_viewer(job, end)
+            .map_err(|error| Arc::new(LaptopError::Engine(error.into()))),
+        false => Err(job
+            .failure()
+            .map_err(Arc::new)?
+            .unwrap_or_else(|| Arc::new(LaptopError::Refused("VIEWER_CONSTRUCTOR_UNCONFIRMED")))),
     }
 }
 fn admit_constructor(
