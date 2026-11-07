@@ -8,6 +8,7 @@ mod legacy_json;
 pub mod operations_v1;
 pub mod ops_command;
 pub mod profiles_v1;
+pub mod prune_receipts;
 mod python_number;
 pub mod resource_config;
 pub mod resource_history;
