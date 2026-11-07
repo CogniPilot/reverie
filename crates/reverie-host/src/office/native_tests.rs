@@ -1,9 +1,14 @@
 //! Actual fixed Rust child, local owned sockets and real request seats.
 #[path = "freshness_tests.rs"]
 mod freshness;
+#[path = "worker_path_tests.rs"]
+mod worker_path;
 use super::*;
 use reverie_contracts::{worker_config, worker_schema::WorkerEnvelope};
 fn fixture() -> Fixture {
+    fixture_with_socket_root(|root| root.join("office"))
+}
+fn fixture_with_socket_root(socket_root: impl FnOnce(&Path) -> PathBuf) -> Fixture {
     let mut fixture = Fixture::new("127.0.0.1:9".parse().unwrap());
     fixture
         .service
@@ -19,6 +24,7 @@ fn fixture() -> Fixture {
     .unwrap();
     let config = &mut raw["configuration"];
     config["companyRoot"] = serde_json::json!(fixture.root);
+    config["apiSocketRoot"] = serde_json::json!(socket_root(&fixture.root));
     let config = worker_config::decode(&serde_json::to_vec(config).unwrap()).unwrap();
     let envelope = WorkerEnvelope::capture(config.clone()).unwrap();
     let program = fixture.root.join("image-refresh");

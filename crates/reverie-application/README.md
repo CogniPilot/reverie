@@ -320,8 +320,8 @@ required before selecting the Rust worker service.
 namespace, repeated policy-digest, host-root and native-limit sequence to genuine
 same-Runtime recovery inspection data. It shares the existing resolver and kernel
 rule owners; no CID is invented to adapt the weaker legacy recovery data. The
-complete recovery transaction, phone/storage registration, source-stop and later
-create/start lifecycle still require their real InstallingBroker producers.
+complete recovery transaction is owned by InstallingBroker as described below;
+source-stop and later create/start lifecycle still require their real producers.
 
 # Installing telemetry ownership and the protected read operation
 
@@ -347,3 +347,33 @@ The original complete-create check remains mandatory after current running inten
 and all Nix/account mounts, immediately before actual create. This bounded cohort
 adds no data-to-start constructor; the actual protected/unreserved create and
 whole lifecycle producers must consume this retained collector when they land.
+
+# Actual running-laptop recovery ownership
+
+`recover_laptops` uses the genuine mandatory-telemetry bootstrap and its same
+Runtime. It performs the original optional admission/recovery checks, running-name
+census, memory checks and ordered budget projections, then completes every selected
+storage claim/validation before opening any phone. The original separate effective
+configuration reads remain separate. Phones use the worker's captured socket root
+at the late construction phase. The ordered registry changes only after every
+constructor succeeds; a failed final admission check retains committed owners.
+
+Each production recovered entry contains a real Office service/phone and actual
+selected StorageClaim. The legacy storage branch adds no employee lease or lock
+tree. Names, including nil sessions without a Gate, remain membership DATA rather
+than exact CID/process or start authority. Test-only modeled membership refuses
+actual recovery and cannot manufacture a production entry.
+
+Failure cleanup attempts every newly created phone/construction and actual newly
+acquired claim. Native close uncertainty keeps its actual storage owners. Last
+broker Drop jointly retains the real installed snapshot/registry, storage registry,
+recovery/Office owners, mandatory collector and report service when those states
+are unresolved, contended or poisoned. An actual retained storage entry is included
+even when a failed census returned no claim handle. This is process-lifetime
+quarantine, without a normal-operation reference cycle or a durable death fence.
+
+Office/query settlement alone never releases a recovered running laptop's employee
+lease. Structured stop must own the real container, settle all actual native
+constructors/processes and close resource owners before acknowledging release.
+That whole-service stop, protected source stop, create/start, authenticated
+dispatcher and production selection remain separate obligations.

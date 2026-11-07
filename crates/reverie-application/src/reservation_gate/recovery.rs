@@ -46,7 +46,7 @@ impl ReservationGate {
     }
 }
 impl Inner {
-    fn check_recovery(self: &Arc<Self>) -> Result<RecoveryFacts> {
+    pub(super) fn check_recovery(self: &Arc<Self>) -> Result<RecoveryFacts> {
         let document = self.document()?;
         let active = self.active_operations(&document)?;
         let mut observations = Vec::new();
