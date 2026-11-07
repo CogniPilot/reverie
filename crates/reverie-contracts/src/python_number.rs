@@ -72,6 +72,12 @@ impl PythonNumber {
     }
 }
 
+/// Python's `round(x, digits)`: the double nearest the correctly rounded
+/// decimal. Rust's fixed-precision formatting also breaks exact ties to even.
+pub(crate) fn round(value: f64, digits: usize) -> f64 {
+    format!("{value:.digits$}").parse().unwrap_or(value)
+}
+
 #[allow(clippy::cast_possible_truncation, clippy::float_cmp)]
 fn int_float(integer: i128, float: f64) -> Option<Ordering> {
     const LIMIT: f64 = 170_141_183_460_469_231_731_687_303_715_884_105_728.0; // 2^127

@@ -10,18 +10,25 @@ name = "reverie-resource-history"
 path = "src/bin/reverie-resource-history.rs"
 
 [[bin]]
+name = "reverie-collect"
+path = "src/bin/reverie-collect.rs"
+
+[[bin]]
+name = "reverie-observations"
+path = "src/bin/reverie-observations.rs"
+
+[[bin]]
 name = "reverie-collect-state"
 path = "src/bin/reverie-collect-state.rs"
 
 [dependencies]
 clap.workspace = true
 libc.workspace = true
-nix = { workspace = true, features = ["fs", "resource", "user"] }
+nix = { workspace = true, features = ["fs", "poll", "resource", "signal", "user"] }
 reverie-contracts.workspace = true
 reverie-core.workspace = true
-
-[dev-dependencies]
 serde_json.workspace = true
+sha2.workspace = true
 
 [lints]
 workspace = true
