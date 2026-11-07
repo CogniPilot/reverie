@@ -602,6 +602,20 @@ let
     ln -s ${opsNativeCli}/bin/reverie-ops "$out/bin/reverie-ops"
     # reverie-memory is the console's `reverie agent memory`; skills and agents keep calling it by this name.
     makeWrapper ${console}/bin/reverie "$out/bin/reverie-memory" --add-flags "agent memory"
+    # Run the installed reverie-memory as packaged, with no environment: it must reach `reverie agent memory` and refuse.
+    smoke() {
+      input=$1 want=$2; shift 2
+      got_err=$(mktemp)
+      got_rc=0
+      got_out=$(printf '%s' "$input" | ${pkgs.coreutils}/bin/env -i "$out/bin/reverie-memory" "$@" 2>"$got_err") || got_rc=$?
+      if [ "$got_rc" != 1 ] || [ -n "$got_out" ] || [ "$(cat "$got_err")" != "$want" ]; then
+        echo "reverie-memory smoke failed (args: $*): exit $got_rc, stdout [$got_out], stderr [$(cat "$got_err")]" >&2
+        exit 1
+      fi
+    }
+    smoke '{}' '{"error": "select an instance with --instance or REVERIE_INSTANCE_CONFIG"}'
+    smoke '{"action":"recall","private":true,"query":"q"}' "{\"error\": \"[Errno 2] No such file or directory: '/nonexistent'\"}" --instance /nonexistent/agent.json
+    echo "reverie-memory smoke passed: no instance and a missing instance both refuse with exit 1"
     for command in ${memory}/bin/reverie-*; do
       makeWrapper "$command" "$out/bin/$(basename "$command")" \
         --prefix PATH : ${runtime}/bin

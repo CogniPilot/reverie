@@ -306,6 +306,8 @@ describe('the command', () => {
   it('is installed as reverie-memory by the package, and python no longer provides that command', () => {
     const nix = fs.readFileSync(path.join(REPO, 'nix', 'package.nix'), 'utf8');
     expect(nix).toContain('makeWrapper ${console}/bin/reverie "$out/bin/reverie-memory" --add-flags "agent memory"');
+    // The package build itself runs the installed command and fails unless it refuses as below.
+    expect(nix).toContain('smoke \x27{}\x27 \x27{"error": "select an instance with --instance or REVERIE_INSTANCE_CONFIG"}\x27');
     const pyproject = fs.readFileSync(path.join(REPO, 'python', 'pyproject.toml'), 'utf8');
     expect(pyproject).not.toMatch(/^reverie-memory\s*=/m);
     expect(fs.existsSync(path.join(REPO, 'python', 'reverie', 'memory_cli.py'))).toBe(false);
