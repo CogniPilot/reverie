@@ -36,7 +36,7 @@ fn end() -> Instant {
 fn incoming(broker: &InstallingBroker, kind: u8) -> (UnixStream, UnixStream) {
     incoming_as(broker, kind, "00000000-0000-0000-0000-000000000000", false)
 }
-fn incoming_as(
+pub(super) fn incoming_as(
     broker: &InstallingBroker,
     kind: u8,
     sid: &str,

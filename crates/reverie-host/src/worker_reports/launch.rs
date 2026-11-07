@@ -76,6 +76,18 @@ impl WorkerLaunchConnection {
     pub fn retain_lifecycle(&self) -> Result<WorkerLaunchHold> {
         self.record.retain_lifecycle(&self.service)
     }
+    /// Identity/liveness of an already-issued resource hold. This neither
+    /// constructs a hold nor grants a native operation or storage ownership.
+    pub fn assert_lifecycle_hold(&self, hold: &WorkerLaunchHold) -> Result<()> {
+        if !Arc::ptr_eq(&self.service, &hold.service)
+            || !Arc::ptr_eq(&self.record, &hold.record)
+            || self.service.stopping()
+            || !self.record.can_progress()
+        {
+            return Err(WorkerReportError::Unconfirmed);
+        }
+        self.record.assert_lifecycle_hold(&hold.identity)
+    }
     pub fn assert_open(&self, runtime: &WorkerRuntime) -> Result<()> {
         if !self.same_runtime(runtime) || !self.record.can_progress() || self.service.stopping() {
             return Err(WorkerReportError::Unconfirmed);

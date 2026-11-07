@@ -4,6 +4,20 @@ use super::*;
 use crate::worker_storage::{error::partial, temporary};
 
 impl LaunchStorage {
+    /// The original pre-argument runtime-directory and selected-home phase.
+    /// Actual resource/namespace ownership selects all paths internally.
+    pub fn prepare_runtime_directory(&mut self) -> OwnerResult<()> {
+        if let Ownership::Held(lease) = &mut self.ownership {
+            return lease
+                .prepare_runtime_directory()
+                .map_err(StorageOwnerError::Storage);
+        }
+        let config = self.legacy_configuration()?;
+        let mut effects = false;
+        let result =
+            crate::worker_storage::prepare::runtime_directory(&config, &self.paths, &mut effects);
+        partial(result, effects).map_err(StorageOwnerError::Storage)
+    }
     pub fn write_scratch_label(&mut self) -> OwnerResult<crate::worker_storage::LabelDisposition> {
         if let Ownership::Held(lease) = &mut self.ownership {
             return lease

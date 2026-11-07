@@ -8,6 +8,7 @@ use reverie_host::worker_reports::{
 };
 use std::{os::unix::net::UnixStream, time::Instant};
 mod error;
+mod preparation;
 pub use error::{LaunchAdmissionFailure, WorkerDispatchError};
 #[cfg(test)]
 mod tests;

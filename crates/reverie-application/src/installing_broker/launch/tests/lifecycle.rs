@@ -30,11 +30,19 @@ fn register<'a>(
     scope: &AdmittedWorkerLaunch<'a>,
     generation: &LaunchGeneration,
 ) -> ActiveLaunchToken<'a> {
+    let mut hold = Some(scope.request.connection.retain_lifecycle().unwrap());
+    register_held(scope, generation, &mut hold)
+}
+fn register_held<'a>(
+    scope: &AdmittedWorkerLaunch<'a>,
+    generation: &LaunchGeneration,
+    hold: &mut Option<reverie_host::worker_reports::WorkerLaunchHold>,
+) -> ActiveLaunchToken<'a> {
     let broker = scope.request.broker;
     let mut lifecycle = broker.installed.lifecycle().unwrap();
     lifecycle.check_generation(generation).unwrap();
     assert!(broker.allowed(scope.request().session()).unwrap());
-    lifecycle.claim_active(generation, scope).unwrap()
+    lifecycle.claim_active(generation, scope, hold).unwrap()
 }
 fn finish(
     scope: AdmittedWorkerLaunch<'_>,
@@ -65,16 +73,21 @@ fn wrong_origin_refuses_without_poisoning_the_real_scope_and_aba_cannot_remove_i
     let other_tree = Tree::new();
     let other = unreserved(&other_tree);
     let (_client, scope, storage, generation) = actual_scope(&broker, FIRST);
+    let mut hold = Some(scope.request.connection.retain_lifecycle().unwrap());
     assert!(
         other
             .installed
             .lifecycle()
             .unwrap()
-            .claim_active(&generation, &scope)
+            .claim_active(&generation, &scope, &mut hold)
             .is_err()
     );
     assert_eq!(other.installed.lifecycle().unwrap().entries().count(), 0);
-    let mut token = register(&scope, &generation);
+    assert!(
+        hold.is_some(),
+        "wrong-origin insertion returns the same actual hold"
+    );
+    let mut token = register_held(&scope, &generation, &mut hold);
     broker
         .installed
         .lifecycle()

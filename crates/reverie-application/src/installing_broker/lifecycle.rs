@@ -142,7 +142,65 @@ impl<'a> LaptopLifecycle<'a> {
         &mut self,
         generation: &LaunchGeneration,
         context: &launch::AdmittedWorkerLaunch<'_>,
+        preparation_hold: &mut Option<WorkerLaunchHold>,
     ) -> Result<ActiveLaunchToken<'a>, GateError> {
+        let connection = self.active_connection(generation, context)?;
+        connection
+            .assert_lifecycle_hold(preparation_hold.as_ref().ok_or(GateError::Refused(
+                "WORKER_BROKER_PREPARATION_HOLD_REQUIRED",
+            ))?)
+            .map_err(|_| GateError::Refused("WORKER_BROKER_PREPARATION_HOLD_CHANGED"))?;
+        let session = context.request().session();
+        let name =
+            WorkerContainerName::for_session(context.configuration().envelope().base(), session);
+        let identity = Arc::new(());
+        self.guard
+            .active
+            .try_reserve(1)
+            .map_err(|_| GateError::Refused("WORKER_BROKER_ACTIVE_UNAVAILABLE"))?;
+        self.guard
+            .pending
+            .try_reserve(1)
+            .map_err(|_| GateError::Refused("WORKER_BROKER_ACTIVE_UNAVAILABLE"))?;
+        // The genuine preparation minted this BEFORE its first storage claim.
+        // Every fallible check/allocation is complete before moving it. No
+        // second mint or identity reconstruction occurs at active insertion.
+        let hold = preparation_hold
+            .take()
+            .expect("checked actual preparation hold");
+        self.guard.active.push(ActiveLaunch {
+            session: session.clone(),
+            identity: identity.clone(),
+            connection: connection.clone(),
+        });
+        self.guard.pending.push(PendingName {
+            session: session.clone(),
+            name,
+            identity: identity.clone(),
+        });
+        Ok(ActiveLaunchToken {
+            owner: self.owner,
+            session: session.clone(),
+            identity,
+            generation: generation.clone(),
+            connection,
+            hold,
+        })
+    }
+    /// The original attached/generation refusal precedes the late allowed()
+    /// read under the same held lifecycle. This observation grants no effect.
+    pub(super) fn check_active_available(
+        &self,
+        generation: &LaunchGeneration,
+        context: &launch::AdmittedWorkerLaunch<'_>,
+    ) -> Result<(), GateError> {
+        self.active_connection(generation, context).map(|_| ())
+    }
+    fn active_connection(
+        &self,
+        generation: &LaunchGeneration,
+        context: &launch::AdmittedWorkerLaunch<'_>,
+    ) -> Result<Arc<WorkerLaunchConnection>, GateError> {
         let connection = context.lifecycle_connection(self)?;
         self.check_generation(generation)?;
         let session = context.request().session();
@@ -164,38 +222,7 @@ impl<'a> LaptopLifecycle<'a> {
         {
             return Err(GateError::Refused("WORKER_BROKER_ACTIVE_UNAVAILABLE"));
         }
-        let name =
-            WorkerContainerName::for_session(context.configuration().envelope().base(), session);
-        let identity = Arc::new(());
-        self.guard
-            .active
-            .try_reserve(1)
-            .map_err(|_| GateError::Refused("WORKER_BROKER_ACTIVE_UNAVAILABLE"))?;
-        self.guard
-            .pending
-            .try_reserve(1)
-            .map_err(|_| GateError::Refused("WORKER_BROKER_ACTIVE_UNAVAILABLE"))?;
-        let hold = connection
-            .retain_lifecycle()
-            .map_err(|_| GateError::Refused("WORKER_BROKER_ACTIVE_UNAVAILABLE"))?;
-        self.guard.active.push(ActiveLaunch {
-            session: session.clone(),
-            identity: identity.clone(),
-            connection: connection.clone(),
-        });
-        self.guard.pending.push(PendingName {
-            session: session.clone(),
-            name,
-            identity: identity.clone(),
-        });
-        Ok(ActiveLaunchToken {
-            owner: self.owner,
-            session: session.clone(),
-            identity,
-            generation: generation.clone(),
-            connection,
-            hold,
-        })
+        Ok(connection)
     }
     /// Reentry after unlocked Nix work still requires the real preparation's
     /// current config/intent/storage/writer checks before any further effect.

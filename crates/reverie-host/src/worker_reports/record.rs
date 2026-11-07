@@ -273,6 +273,15 @@ impl Record {
             WorkerReportError::Unconfirmed
         })
     }
+    pub(super) fn assert_lifecycle_hold(&self, identity: &std::sync::Arc<()>) -> Result<()> {
+        let state = self.try_mint_lock(&self.lifecycle)?;
+        if matches!(&*state, super::retention::LifecycleHoldState::Held(actual) if std::sync::Arc::ptr_eq(actual, identity))
+        {
+            Ok(())
+        } else {
+            Err(WorkerReportError::Unconfirmed)
+        }
+    }
     #[cfg(test)]
     pub(super) fn control_ready(&self) -> bool {
         self.control.try_lock().is_ok_and(|slot| slot.is_some())
