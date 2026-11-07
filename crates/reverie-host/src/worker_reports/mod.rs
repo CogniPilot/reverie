@@ -11,7 +11,9 @@ pub use listener::{
 };
 mod record;
 mod registered;
+mod resume;
 mod service_connection;
+pub use resume::{WorkerActorChannel, WorkerActorChannelFailure};
 pub use service_connection::{
     AcceptedWorkerServiceConnection, WorkerPeer, WorkerServiceConnection, WorkerServicePurpose,
 };

@@ -2,9 +2,11 @@ use super::Error;
 use super::value::{Node, Number, Text, Value};
 use serde_json::value::RawValue;
 use std::collections::BTreeMap;
+mod human;
 mod journal;
 mod ordered;
 use super::ordered::OrderNode;
+pub(crate) use human::HumanParseError;
 pub(crate) use journal::{JournalParseError, JournalParsed};
 
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -15,6 +17,7 @@ pub(super) enum Purpose {
     Journal,
     StrictEngine,
     Metadata,
+    Human,
 }
 
 enum Phase {
@@ -53,6 +56,7 @@ struct Cursor<'a> {
     orders: Option<Vec<OrderNode>>,
     ready_order: Option<usize>,
     constant_refusal: bool,
+    human_error: Option<HumanParseError>,
 }
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum GpuControlParseError {
@@ -94,6 +98,9 @@ pub(super) fn decode_ordered(
 ) -> Result<super::ordered::OrderedValue, Error> {
     ordered::decode(source, purpose)
 }
+pub(super) fn decode_human(source: &[u8]) -> Result<super::ordered::OrderedValue, HumanParseError> {
+    human::decode(source)
+}
 fn decode_mode(source: &[u8], purpose: Purpose) -> Result<Value, Error> {
     finish(&mut Cursor::new(source, purpose))
 }
@@ -116,6 +123,7 @@ impl<'a> Cursor<'a> {
             orders: None,
             ready_order: None,
             constant_refusal: false,
+            human_error: None,
         }
     }
 }
@@ -255,7 +263,7 @@ impl Frame {
 fn duplicate_value(purpose: Purpose) -> Result<bool, Error> {
     match purpose {
         Purpose::Rootless => Ok(false),
-        Purpose::Journal | Purpose::StrictEngine | Purpose::Metadata => Ok(true),
+        Purpose::Journal | Purpose::StrictEngine | Purpose::Metadata | Purpose::Human => Ok(true),
         _ => Err(Error::DuplicateKey),
     }
 }
@@ -317,6 +325,17 @@ impl Cursor<'_> {
             Some(b't') => self.literal("true", Node::Bool(true))?,
             Some(b'f') => self.literal("false", Node::Bool(false))?,
             Some(b'n') => self.literal("null", Node::Null)?,
+            Some(b'N' | b'I') if self.purpose == Purpose::Human => {
+                return self.human_failure(
+                    if self.source[self.offset..].starts_with(b"NaN")
+                        || self.source[self.offset..].starts_with(b"Infinity")
+                    {
+                        HumanParseError::Nonfinite
+                    } else {
+                        HumanParseError::Json(Error::InvalidJson)
+                    },
+                );
+            }
             Some(b'N' | b'I')
                 if matches!(self.purpose, Purpose::NoConstants | Purpose::StrictEngine) =>
             {
@@ -350,6 +369,9 @@ impl Cursor<'_> {
         }
         let begin = self.offset;
         if self.source[begin..].starts_with(b"-Infinity") {
+            if self.purpose == Purpose::Human {
+                return self.human_failure(HumanParseError::Nonfinite);
+            }
             if matches!(self.purpose, Purpose::NoConstants | Purpose::StrictEngine) {
                 self.constant_refusal = true;
                 return Err(Error::InvalidJson);
@@ -357,7 +379,10 @@ impl Cursor<'_> {
             self.offset += "-Infinity".len();
             return Ok(Number::NegativeInfinity);
         }
-        if matches!(self.purpose, Purpose::StrictEngine | Purpose::Metadata) {
+        if matches!(
+            self.purpose,
+            Purpose::StrictEngine | Purpose::Metadata | Purpose::Human
+        ) {
             self.offset = journal::number_end(self.source, begin).ok_or(Error::InvalidJson)?;
         } else {
             while self
@@ -372,6 +397,9 @@ impl Cursor<'_> {
             .map_err(|_| Error::InvalidJson)?;
         serde_json::from_str::<&RawValue>(text).map_err(|_| Error::InvalidJson)?;
         if !text.contains(['.', 'e', 'E']) {
+            if self.purpose == Purpose::Human && !human::integer(text) {
+                return self.human_failure(HumanParseError::Integer);
+            }
             // The rootless-purpose default Python decoder uses its runtime's
             // decimal conversion cap even for ignored/overwritten fields.
             // Other named readers keep their separately frozen number policy.

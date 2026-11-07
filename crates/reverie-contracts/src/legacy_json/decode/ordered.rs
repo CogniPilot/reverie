@@ -2,10 +2,13 @@ use super::*;
 use crate::legacy_json::ordered::{OrderGraph, OrderedValue};
 pub(super) fn decode(source: &[u8], purpose: Purpose) -> Result<OrderedValue, Error> {
     let mut cursor = Cursor::new(source, purpose);
+    with_cursor(&mut cursor)
+}
+pub(super) fn with_cursor(cursor: &mut Cursor<'_>) -> Result<OrderedValue, Error> {
     cursor.orders = Some(Vec::new());
-    let value = finish(&mut cursor)?;
+    let value = finish(cursor)?;
     let root = cursor.ready_order.ok_or(Error::InvalidJson)?;
-    let nodes = cursor.orders.ok_or(Error::InvalidJson)?;
+    let nodes = cursor.orders.take().ok_or(Error::InvalidJson)?;
     Ok(OrderedValue {
         value,
         graph: OrderGraph { nodes, root },

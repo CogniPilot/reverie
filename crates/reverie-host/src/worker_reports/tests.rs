@@ -3,6 +3,7 @@ mod handler;
 mod launch;
 mod listener;
 mod reference;
+mod resume_channel;
 mod retention;
 mod service_connection;
 mod worker_cleanup;
