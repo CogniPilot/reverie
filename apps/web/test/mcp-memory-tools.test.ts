@@ -3,7 +3,10 @@
  * instance, the caller can never pick another store, requests go to the bridge on stdin with a minimal
  * environment, and every failure is an isError result.
  */
-import { describe, it, expect, afterEach } from 'vitest';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { describe, it, expect, afterEach, beforeEach } from 'vitest';
 import { createMcpServer, type McpConfig } from '../src/mcp-server.js';
 import {
   createMemoryTools,
@@ -32,9 +35,25 @@ function server(memory: MemoryToolsConfig, runner: BridgeRunner) {
   return { out, send };
 }
 
+// The hard floors read <HOME>/reverie/companies/default/data/protected-people.txt: point HOME at a scratch directory so
+// no test ever reads a real list.
+const realHome = process.env.HOME;
+let home = '';
+beforeEach(() => {
+  home = fs.mkdtempSync(path.join(os.tmpdir(), 'mcp-memory-home-'));
+  process.env.HOME = home;
+});
+const protectedPeople = (bytes: string | Buffer) => {
+  const file = path.join(home, 'reverie', 'companies', 'default', 'data', 'protected-people.txt');
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, bytes);
+};
+
 afterEach(() => {
   delete process.env.REVERIE_SESSION_ID;
   delete process.env.REVERIE_HOOK_SECRET_FILE;
+  process.env.HOME = realHome;
+  fs.rmSync(home, { recursive: true, force: true });
 });
 
 describe('opt-in', () => {
@@ -166,8 +185,7 @@ describe('inside a Reverie session: the office journal', () => {
     const result = await s.call('memory_remember', SAVE);
     expect(result.isError).toBe(false);
     expect(JSON.parse(result.text)).toMatchObject({ entryId: 5, turnId: 'm-1' });
-    expect(s.calls.map((c) => JSON.parse(c.input))).toEqual([{ action: 'screen', text: 'The baseline is 305/566.' }]);
-    expect(s.calls[0].env.REVERIE_SESSION_ID).toBeUndefined(); // the bridge env stays stripped
+    expect(s.calls).toEqual([]); // the floors run in-process: nothing is spawned for a save
     expect(s.requests).toEqual([{ selfId: MINE, method: 'POST', path: '/api/agent/journal/save', query: undefined, body: {
       roomId: 'r-1', turnId: 'm-1', draft: { text: 'The baseline is 305/566.', tags: ['lesson'],
         sources: [{ roomId: 'r-1', id: 'm-1', quote: '305/566' }, { ref: 'commit abc123' }] } } }]);
@@ -191,13 +209,14 @@ describe('inside a Reverie session: the office journal', () => {
   });
 
   it('saves nothing when a hard floor is crossed or the check did not run', async () => {
-    for (const bridge of [{ stdout: '{"floor":"configured output policy"}' }, { code: 1, stderr: 'boom' }, { stdout: 'not json' }]) {
-      const s = journalServer(bridge, {});
-      const result = await s.call('memory_remember', SAVE);
-      expect(result.isError, JSON.stringify(bridge)).toBe(true);
-      expect(result.text).toMatch(/hard floor|did not run/);
-      expect(s.requests).toEqual([]);
-    }
+    protectedPeople('Robin Example\n');
+    const crossed = journalServer({}, {});
+    const result = await crossed.call('memory_remember', { ...SAVE, text: 'Robin Example lives at the old mill.' });
+    expect(result).toEqual({ isError: true, text: 'Memory save failed: memory is empty or crossed a hard floor' });
+    protectedPeople(Buffer.from([0x52, 0xff, 0x0a])); // not UTF-8: the list cannot be read, so the check did not run
+    const unreadable = journalServer({}, {});
+    expect((await unreadable.call('memory_remember', SAVE)).text).toContain('the hard-floor check did not run');
+    for (const s of [crossed, unreadable]) expect([s.calls, s.requests]).toEqual([[], []]);
   });
 
   it('still answers from the old store, and says so, when the journal lookup fails', async () => {
