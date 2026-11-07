@@ -1,5 +1,6 @@
 //! Same-Box classified reuse transfer. Neither native viewer cleanup nor this
 //! atomic restoration acknowledges a stopped laptop or storage/global release.
+use super::ClaimDestination as Destination;
 use super::*;
 use reverie_contracts::worker_launch::WorkerRequest;
 use reverie_host::{
@@ -12,28 +13,20 @@ pub(in crate::installing_broker) use error::{
     ExistingStorageError, ExistingStorageReclaimFailure, ExistingStorageRetainFailure,
 };
 
-enum Destination {
-    Legacy {
-        registry: Arc<StorageRegistry>,
-    },
-    Registered {
-        registry: Arc<StorageRegistry>,
-        identity: Arc<()>,
-        newly_claimed: bool,
-    },
-}
-impl Destination {
-    fn registry(&self) -> &Arc<StorageRegistry> {
-        match self {
-            Self::Legacy { registry } | Self::Registered { registry, .. } => registry,
-        }
-    }
-}
 struct Inputs {
     plan: ObservedCreatePlan,
     request: WorkerRequest,
     inspected: ExistingLaptopInspection,
     receipt: LaunchReceiptObservation,
+}
+struct NativeRetainFailure {
+    owner: Box<LaunchStorage>,
+    inputs: Inputs,
+    error: ExistingStorageError,
+}
+struct RegistryRetainFailure {
+    inputs: Inputs,
+    error: ExistingStorageError,
 }
 #[must_use = "retain the SAME native owner, original registry and actual J scope"]
 pub(in crate::installing_broker) struct ExistingStoragePreparation {
@@ -41,6 +34,11 @@ pub(in crate::installing_broker) struct ExistingStoragePreparation {
     viewer: Arc<ExistingViewer>,
 }
 impl ExistingStoragePreparation {
+    pub(in crate::installing_broker) fn failure(
+        &self,
+    ) -> Result<Option<Arc<LaptopError>>, LaptopError> {
+        self.viewer.failure()
+    }
     pub(in crate::installing_broker) fn start(
         &self,
         end: Instant,
@@ -99,26 +97,28 @@ pub(in crate::installing_broker) struct ExistingStorageReturned {
     inputs: Inputs,
     outcome: Option<Arc<LaptopError>>,
 }
+#[cfg(test)]
 impl ExistingStorageReturned {
-    pub(in crate::installing_broker) fn into_parts(
-        self,
-    ) -> (
-        StorageClaim,
-        ObservedCreatePlan,
-        WorkerRequest,
-        ExistingLaptopInspection,
-        LaunchReceiptObservation,
-        Option<Arc<LaptopError>>,
-    ) {
-        let inputs = self.inputs;
-        (
-            self.claim,
-            inputs.plan,
-            inputs.request,
-            inputs.inspected,
-            inputs.receipt,
-            self.outcome,
-        )
+    /// Actual synthetic-fixture teardown only; no production release token.
+    pub(in crate::installing_broker) fn fixture_claim(self) -> StorageClaim {
+        self.claim
+    }
+}
+impl std::fmt::Debug for ExistingStorageReturned {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ExistingStorageReturned")
+            .field("storage", self.claim.paths())
+            .field("name", &self.inputs.plan.arguments().name())
+            .field("session", self.inputs.request.session())
+            .field("running_readback", &self.inputs.inspected.data().running())
+            .field("receipt_readback", &self.inputs.receipt.exists())
+            .field("native_outcome", &self.outcome)
+            .finish_non_exhaustive()
+    }
+}
+impl ExistingStorageReturned {
+    pub(in crate::installing_broker) fn failure(&self) -> Option<&LaptopError> {
+        self.outcome.as_deref()
     }
 }
 impl StorageClaim {
@@ -144,13 +144,20 @@ impl StorageClaim {
                         destination: Destination::Legacy { registry },
                         viewer,
                     }),
-                    Err((owner, inputs, error)) => Err(Box::new(ExistingStorageRetainFailure {
-                        claim: StorageClaim {
-                            state: ClaimState::Legacy { registry, owner },
-                        },
-                        inputs,
-                        error,
-                    })),
+                    Err(failure) => {
+                        let NativeRetainFailure {
+                            owner,
+                            inputs,
+                            error,
+                        } = *failure;
+                        Err(Box::new(ExistingStorageRetainFailure {
+                            claim: StorageClaim {
+                                state: ClaimState::Legacy { registry, owner },
+                            },
+                            inputs,
+                            error,
+                        }))
+                    }
                 }
             }
             ClaimState::Registered {
@@ -167,18 +174,21 @@ impl StorageClaim {
                     },
                     viewer,
                 }),
-                Err((inputs, error)) => Err(Box::new(ExistingStorageRetainFailure {
-                    claim: StorageClaim {
-                        state: ClaimState::Registered {
-                            registry,
-                            identity,
-                            paths,
-                            newly_claimed,
+                Err(failure) => {
+                    let RegistryRetainFailure { inputs, error } = *failure;
+                    Err(Box::new(ExistingStorageRetainFailure {
+                        claim: StorageClaim {
+                            state: ClaimState::Registered {
+                                registry,
+                                identity,
+                                paths,
+                                newly_claimed,
+                            },
                         },
-                    },
-                    inputs,
-                    error,
-                })),
+                        inputs,
+                        error,
+                    }))
+                }
             },
         }
     }
@@ -187,7 +197,7 @@ fn retain_native(
     registry: &StorageRegistry,
     owner: Box<LaunchStorage>,
     inputs: Inputs,
-) -> Result<Arc<ExistingViewer>, (Box<LaunchStorage>, Inputs, ExistingStorageError)> {
+) -> Result<Arc<ExistingViewer>, Box<NativeRetainFailure>> {
     match registry.runtime.retain_existing_relay(
         owner,
         inputs.plan,
@@ -198,16 +208,16 @@ fn retain_native(
         Ok(viewer) => Ok(Arc::new(viewer)),
         Err(failure) => {
             let (owner, plan, request, inspected, receipt, error) = failure.into_parts();
-            Err((
+            Err(Box::new(NativeRetainFailure {
                 owner,
-                Inputs {
+                inputs: Inputs {
                     plan,
                     request,
                     inspected,
                     receipt,
                 },
-                error.into(),
-            ))
+                error: error.into(),
+            }))
         }
     }
 }
@@ -216,21 +226,26 @@ impl StorageRegistry {
         &self,
         identity: &Arc<()>,
         inputs: Inputs,
-    ) -> Result<Arc<ExistingViewer>, (Inputs, ExistingStorageError)> {
+    ) -> Result<Arc<ExistingViewer>, Box<RegistryRetainFailure>> {
         let mut entries = match self.lock(self.runtime.stop_deadline()) {
             Ok(entries) => entries,
-            Err(error) => return Err((inputs, error.into())),
+            Err(error) => {
+                return Err(Box::new(RegistryRetainFailure {
+                    inputs,
+                    error: error.into(),
+                }));
+            }
         };
         let index = match selected(&entries, identity) {
             Ok(index) => index,
-            Err(error) => return Err((inputs, error)),
+            Err(error) => return Err(Box::new(RegistryRetainFailure { inputs, error })),
         };
         if !entries[index].writer_checked || !matches!(entries[index].owner, EntryOwner::Direct(_))
         {
-            return Err((
+            return Err(Box::new(RegistryRetainFailure {
                 inputs,
-                ExistingStorageError::Refused("WORKER_EXISTING_STORAGE_RETAINED"),
-            ));
+                error: ExistingStorageError::Refused("WORKER_EXISTING_STORAGE_RETAINED"),
+            }));
         }
         let mut entry = entries.remove(index);
         let EntryOwner::Direct(owner) = entry.owner else {
@@ -242,10 +257,15 @@ impl StorageRegistry {
                 entries.insert(index, entry);
                 Ok(viewer)
             }
-            Err((owner, inputs, error)) => {
+            Err(failure) => {
+                let NativeRetainFailure {
+                    owner,
+                    inputs,
+                    error,
+                } = *failure;
                 entry.owner = EntryOwner::Direct(owner);
                 entries.insert(index, entry);
-                Err((inputs, error))
+                Err(Box::new(RegistryRetainFailure { inputs, error }))
             }
         }
     }

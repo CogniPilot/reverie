@@ -18,7 +18,7 @@ const EID: &str = "11111111-2222-4333-8444-555555555555";
 fn company(tree: &Tree, session: &str) {
     tree.write("company.json", &serde_json::to_vec(&serde_json::json!({"employees":[{"id":EID,"owner":null,"sessionId":session,"desiredRunning":true}]})).unwrap());
 }
-fn configured(tree: &Tree) -> InstallingBroker {
+pub(in crate::installing_broker) fn configured(tree: &Tree) -> InstallingBroker {
     tree.write("ids.out", b"");
     let snapshot = load_owner_config(&tree.root.join("worker.json")).unwrap();
     let bootstrap = EngineBootstrap::from_service(

@@ -68,7 +68,7 @@ pub(in crate::installing_broker) struct ExistingStorageReclaimFailure {
 }
 impl ExistingStorageReclaimFailure {
     pub(in crate::installing_broker) fn into_parts(
-        self: Box<Self>,
+        self,
     ) -> (ExistingStoragePreparation, ExistingStorageError) {
         (self.preparation, self.error)
     }

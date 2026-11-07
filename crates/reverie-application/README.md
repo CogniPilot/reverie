@@ -493,3 +493,24 @@ flocks, plus a genuine installed-Gate publication/CAS/STARTING join for an alrea
 stopped source with explicitly synthetic kernel facts. They do not qualify a live
 Docker source stop, ordinary legacy/network stop, the complete source-to-target
 launch consumer, every process producer, global shutdown, or backend selection.
+
+Classified ordinary reuse can now move the actual selected storage box, observed
+plan, first inspection and bound receipt into the same bounded Host existing-viewer
+record. The original accepted J, logical Hold, active metadata, configuration and
+wait observation remain in the App continuation. It leaves the original lifecycle
+before closing its actual allocation admission, and only that confirmed close can
+reach the native viewer constructor. Registered restoration checks the same Arc
+and both actual Host guards before taking the box, then restores Direct without a
+fallible gap; genuine legacy storage adds no registry entry, lease, Nix or Office.
+
+Native component close/restoration returns a retained whole owner, never a stopped
+laptop, handler completion, canonical release or storage/global acknowledgement.
+The integrated handler must freshly re-stat its bound receipt for EVERY outcome,
+including peer EOF and errors. If completion requires stop, that actual stop must
+precede viewer reaping, metadata/Office removal and final storage-live checks.
+Those integrated finalizer joins remain open; the component API does not choose
+them from EOF, X, an earlier receipt or local client settlement. Last-owner Drop
+quarantines the existing resource and counted connection owners in this process.
+The new owning controls cover genuine legacy, physical employee storage, a real
+fixed PTY child, actual configured-Gate allocation close and negative dropped-owner
+retention. They do not select the native service or qualify live Docker cleanup.

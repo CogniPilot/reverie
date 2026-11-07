@@ -3,8 +3,7 @@
 mod error;
 mod existing_viewer;
 pub(in crate::installing_broker) use existing_viewer::{
-    ExistingStorageError, ExistingStoragePreparation, ExistingStorageReclaimFailure,
-    ExistingStorageRetainFailure, ExistingStorageReturned,
+    ExistingStorageError, ExistingStoragePreparation, ExistingStorageReturned,
 };
 mod nix;
 mod observed;
@@ -45,6 +44,25 @@ enum EntryOwner {
     Nix(reverie_host::worker_nix::NixWorkflow),
     Laptop(reverie_host::worker_laptop::LaptopWorkflow),
     Existing(Arc<reverie_host::worker_laptop::ExistingViewer>),
+}
+/// The original claim destination, shared by named resource transitions.
+/// These private fields describe where to restore custody, never permission.
+enum ClaimDestination {
+    Legacy {
+        registry: Arc<StorageRegistry>,
+    },
+    Registered {
+        registry: Arc<StorageRegistry>,
+        identity: Arc<()>,
+        newly_claimed: bool,
+    },
+}
+impl ClaimDestination {
+    fn registry(&self) -> &Arc<StorageRegistry> {
+        match self {
+            Self::Legacy { registry } | Self::Registered { registry, .. } => registry,
+        }
+    }
 }
 pub(super) struct StorageRegistry {
     pub(super) runtime: WorkerRuntime,
