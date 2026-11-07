@@ -2,12 +2,14 @@
 //! App supplies its actual classified reuse scope; these resources are not an
 //! authorization, live-pane proof, admission release or source-stop permit.
 use super::*;
+mod finalization;
 mod relay;
 mod stop;
 use crate::{
     worker_launch::ExistingLaptopInspection,
     worker_storage::{LaunchReceiptObservation, LaunchStorage},
 };
+pub use finalization::ExistingStorageObservation;
 pub use relay::{
     ExistingRelayRetainFailure, ExistingRelayReturned, ExistingViewerReceiptObservation,
 };
@@ -37,6 +39,7 @@ pub(super) struct ExistingRecord {
     job: Option<Arc<ViewerJob>>,
     failure: Option<Arc<LaptopError>>,
     stop: stop::ExistingStop,
+    finalization: finalization::StorageCheck,
 }
 pub(super) type ExistingRecordOwner = Arc<Mutex<ExistingRecord>>;
 #[derive(Clone)]
@@ -159,10 +162,13 @@ impl ExistingRecord {
             "WORKER_EXISTING_VIEWER_CONSUMED",
         )?;
         if self.stage == Stage::Closed {
-            return Ok(());
+            return self.finalization.settle(runtime, end);
         }
         self.stage = Stage::Closing;
-        let stopped_call = self.stop.settle(runtime, end);
+        let stopped_call = finalized(
+            self.stop.settle(runtime, end),
+            self.finalization.settle(runtime, end),
+        );
         let viewer = self.job.as_ref().map_or(Ok(()), |job| {
             runtime
                 .installed_engine()
@@ -253,6 +259,7 @@ impl Workflows {
             job: None,
             failure: None,
             stop: stop::ExistingStop::default(),
+            finalization: finalization::StorageCheck::default(),
         }));
         inventory.push(RetainedRecord::Existing(record.clone()));
         Ok(ExistingViewer {
@@ -376,6 +383,7 @@ impl Workflows {
         runtime: &WorkerRuntime,
         existing: &'a ExistingViewer,
         relay: bool,
+        finalization: Option<&ExistingStorageObservation>,
     ) -> Result<ExistingViewerReturned<'a>> {
         need(
             Arc::ptr_eq(runtime.installed_engine(), &existing.reference.origin),
@@ -401,6 +409,9 @@ impl Workflows {
             "WORKER_EXISTING_VIEWER_RETAINED",
         )?;
         record.stop.require_reclaimable()?;
+        record
+            .finalization
+            .require_reclaimable(existing, finalization)?;
         need(
             record
                 .inputs
@@ -462,6 +473,6 @@ impl WorkerRuntime {
         existing: &'a ExistingViewer,
     ) -> Result<ExistingViewerReturned<'a>> {
         self.laptop_workflows()
-            .reclaim_existing(self, existing, false)
+            .reclaim_existing(self, existing, false, None)
     }
 }

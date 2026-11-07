@@ -9,6 +9,7 @@ use reverie_host::{
     worker_storage::LaunchReceiptObservation,
 };
 mod error;
+mod finalization;
 pub(in crate::installing_broker) use error::{
     ExistingStorageError, ExistingStorageReclaimFailure, ExistingStorageRetainFailure,
 };
@@ -77,12 +78,12 @@ impl ExistingStoragePreparation {
         self,
     ) -> Result<ExistingStorageReturned, Box<ExistingStorageReclaimFailure>> {
         let result = match &self.destination {
-            Destination::Legacy { registry } => reclaim_legacy(registry, &self.viewer),
+            Destination::Legacy { registry } => reclaim_legacy(registry, &self.viewer, None),
             Destination::Registered {
                 registry,
                 identity,
                 newly_claimed,
-            } => reclaim_registered(registry, identity, &self.viewer, *newly_claimed),
+            } => reclaim_registered(registry, identity, &self.viewer, *newly_claimed, None),
         };
         result.map_err(|error| {
             Box::new(ExistingStorageReclaimFailure {
@@ -97,6 +98,11 @@ pub(in crate::installing_broker) struct ExistingStorageReturned {
     claim: StorageClaim,
     inputs: Inputs,
     outcome: Option<Arc<LaptopError>>,
+    finalization: Option<FinalStorageDecision>,
+}
+struct FinalStorageDecision {
+    live: bool,
+    brand: Option<Arc<()>>,
 }
 #[cfg(test)]
 impl ExistingStorageReturned {
@@ -295,6 +301,7 @@ fn reclaim_registered(
     identity: &Arc<()>,
     viewer: &Arc<ExistingViewer>,
     newly_claimed: bool,
+    observation: Option<&reverie_host::worker_laptop::ExistingStorageObservation>,
 ) -> Result<ExistingStorageReturned, ExistingStorageError> {
     let mut entries = registry.lock(registry.runtime.stop_deadline())?;
     let index = selected(&entries, identity)?;
@@ -302,9 +309,21 @@ fn reclaim_registered(
     // Clone before borrowing the entry. All fallible checks and both actual
     // Host guards precede take; Direct replacement below is infallible.
     let retained = viewer.clone();
-    let returned = registry.runtime.reclaim_existing_relay(&retained)?;
+    let brand = observation.map(|_| Arc::new(()));
+    let returned = match observation {
+        Some(observation) => registry
+            .runtime
+            .reclaim_finalized_existing_relay(&retained, observation)?,
+        None => registry.runtime.reclaim_existing_relay(&retained)?,
+    };
     let (owner, plan, request, inspected, receipt, outcome) = returned.into_parts();
-    entries[index].owner = EntryOwner::Direct(owner);
+    entries[index].owner = match &brand {
+        Some(brand) => EntryOwner::Finalizing(FinalizingStorage {
+            owner,
+            brand: brand.clone(),
+        }),
+        None => EntryOwner::Direct(owner),
+    };
     Ok(ExistingStorageReturned {
         claim: registry.handle(&entries[index], newly_claimed),
         inputs: Inputs {
@@ -314,13 +333,23 @@ fn reclaim_registered(
             receipt,
         },
         outcome,
+        finalization: observation.map(|observation| FinalStorageDecision {
+            live: observation.is_live(),
+            brand,
+        }),
     })
 }
 fn reclaim_legacy(
     registry: &Arc<StorageRegistry>,
     viewer: &Arc<ExistingViewer>,
+    observation: Option<&reverie_host::worker_laptop::ExistingStorageObservation>,
 ) -> Result<ExistingStorageReturned, ExistingStorageError> {
-    let returned = registry.runtime.reclaim_existing_relay(viewer)?;
+    let returned = match observation {
+        Some(observation) => registry
+            .runtime
+            .reclaim_finalized_existing_relay(viewer, observation)?,
+        None => registry.runtime.reclaim_existing_relay(viewer)?,
+    };
     let (owner, plan, request, inspected, receipt, outcome) = returned.into_parts();
     Ok(ExistingStorageReturned {
         claim: StorageClaim {
@@ -336,5 +365,9 @@ fn reclaim_legacy(
             receipt,
         },
         outcome,
+        finalization: observation.map(|observation| FinalStorageDecision {
+            live: observation.is_live(),
+            brand: None,
+        }),
     })
 }

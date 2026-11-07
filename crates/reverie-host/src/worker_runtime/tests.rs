@@ -70,3 +70,38 @@ fn runtime_uses_the_consumed_native_capture_and_its_actual_close_fence() {
         EngineFault::Busy
     );
 }
+#[test]
+fn stop_budget_is_live_readonly_same_engine_state_and_never_renews_first_stop() {
+    let make = || {
+        WorkerRuntime::new(
+            InstalledWorkerEngine::new(
+                EngineBootstrap::from_service(
+                    crate::engine_metadata::tests::program().as_os_str(),
+                    BTreeMap::new(),
+                    fs::canonicalize(std::env::temp_dir()).unwrap(),
+                )
+                .unwrap(),
+            ),
+            &base('a', 1024),
+        )
+    };
+    let runtime = make();
+    let foreign = make();
+    let budget = runtime.stop_budget();
+    assert!(budget.same_origin(&runtime.stop_budget()));
+    assert!(budget.same_runtime(&runtime));
+    assert!(!budget.same_runtime(&foreign));
+    assert!(!budget.same_origin(&foreign.stop_budget()));
+    assert_eq!(budget.deadline(), None);
+    let end = runtime.request_stop();
+    assert_eq!(budget.deadline(), Some(end));
+    assert_eq!(runtime.request_stop(), end);
+    assert_eq!(budget.clone().deadline(), Some(end));
+    runtime
+        .close(Instant::now() + Duration::from_secs(2))
+        .unwrap();
+    assert_eq!(budget.deadline(), Some(end));
+    foreign
+        .close(Instant::now() + Duration::from_secs(2))
+        .unwrap();
+}

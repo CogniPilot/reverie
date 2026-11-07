@@ -129,6 +129,21 @@ fn main() {
         _=>panic!("unsupported fixed laptop command"),
     }
 }
+fn existing_stop(args: &[String]) {
+    let name=format!("fixture-agent-{}",fs::read_to_string("started-laptop").unwrap());
+    match args.iter().map(String::as_str).collect::<Vec<_>>().as_slice() {
+        ["inspect",target] if *target==name || *target=="c".repeat(64) => {
+            if Path::new("stopped-laptop").exists() && Path::new("existing-stop-failed-inspect").exists(){std::process::exit(7);}
+            let file=if Path::new("stopped-laptop").exists(){"existing-after.json"}else{"existing-inspect.json"};
+            std::io::stdout().write_all(&fs::read(file).unwrap()).unwrap();
+        }
+        ["stop","--time","2",target] if *target=="c".repeat(64) => {fs::write("stopped-laptop",target).unwrap();}
+        ["ps","--all","--no-trunc","--format","{{.ID}} {{.Names}}"] => {std::io::stdout().write_all(&fs::read("existing-stop-census").unwrap()).unwrap();}
+        ["network","inspect",_] => std::process::exit(7),
+        ["network","ls","--no-trunc","--format","{{.ID}} {{.Name}}"] => {},
+        _ => std::process::exit(95),
+    }
+}
 fn relay_query(args:&[String])->bool {
     let cid="c".repeat(64);
     if args.get(1)==Some(&cid) && args.get(2).map(String::as_str)==Some("/bin/cat") {
@@ -152,21 +167,6 @@ fn relay_query(args:&[String])->bool {
     }
     assert_eq!(&args[14..],["display-message","-p","-t","office","#{pane_dead}"]);
     std::io::stdout().write_all(&fs::read("relay-pane.out").unwrap()).unwrap();true
-}
-fn existing_stop(args: &[String]) {
-    let name=format!("fixture-agent-{}",fs::read_to_string("started-laptop").unwrap());
-    match args.iter().map(String::as_str).collect::<Vec<_>>().as_slice() {
-        ["inspect",target] if *target==name || *target=="c".repeat(64) => {
-            if Path::new("stopped-laptop").exists() && Path::new("existing-stop-failed-inspect").exists(){std::process::exit(7);}
-            let file=if Path::new("stopped-laptop").exists(){"existing-after.json"}else{"existing-inspect.json"};
-            std::io::stdout().write_all(&fs::read(file).unwrap()).unwrap();
-        }
-        ["stop","--time","2",target] if *target=="c".repeat(64) => {fs::write("stopped-laptop",target).unwrap();}
-        ["ps","--all","--no-trunc","--format","{{.ID}} {{.Names}}"] => {std::io::stdout().write_all(&fs::read("existing-stop-census").unwrap()).unwrap();}
-        ["network","inspect",_] => std::process::exit(7),
-        ["network","ls","--no-trunc","--format","{{.ID}} {{.Name}}"] => {},
-        _ => std::process::exit(95),
-    }
 }
 fn pane(args:&[String],mode:&str) {
     assert!(mode.starts_with("created-"));

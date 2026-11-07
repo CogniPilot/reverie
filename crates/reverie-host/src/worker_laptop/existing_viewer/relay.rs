@@ -162,7 +162,16 @@ impl WorkerRuntime {
         existing: &'a ExistingViewer,
     ) -> Result<ExistingRelayReturned<'a>> {
         self.laptop_workflows()
-            .reclaim_existing(self, existing, true)
+            .reclaim_existing(self, existing, true, None)
+            .map(|inner| ExistingRelayReturned { inner })
+    }
+    pub fn reclaim_finalized_existing_relay<'a>(
+        &'a self,
+        existing: &'a ExistingViewer,
+        observation: &ExistingStorageObservation,
+    ) -> Result<ExistingRelayReturned<'a>> {
+        self.laptop_workflows()
+            .reclaim_existing(self, existing, true, Some(observation))
             .map(|inner| ExistingRelayReturned { inner })
     }
     pub fn retain_existing_relay_for_connection(

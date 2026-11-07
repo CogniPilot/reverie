@@ -22,7 +22,7 @@ pub(crate) struct OrdinaryStopAttempt {
     name: String,
     session: ProfileSessionId,
     container: Option<ContainerId>,
-    deadline: Instant,
+    deadline: Option<Instant>,
     pending: Option<CapturedCall>,
     failure: Option<Arc<SourceStopError>>,
 }
@@ -32,7 +32,7 @@ impl OrdinaryStopAttempt {
         storage: &LaunchStorage,
         plan: &ObservedCreatePlan,
         inspection: Option<&ExistingLaptopInspection>,
-        deadline: Instant,
+        deadline: Option<Instant>,
     ) -> Result<Self> {
         plan.assert_storage_owner(runtime, storage)
             .map_err(SourceStopError::Plan)?;
@@ -117,7 +117,7 @@ impl OrdinaryStopAttempt {
         )
     }
     fn clipped(&self, end: Instant) -> Instant {
-        let end = self.deadline.min(end);
+        let end = self.deadline.map_or(end, |deadline| deadline.min(end));
         self.origin
             .stop_deadline()
             .map_or(end, |stop| end.min(stop))
@@ -128,6 +128,10 @@ impl OrdinaryStopAttempt {
         required: bool,
     ) -> Result<crate::captured_client::CapturedOutput> {
         let end = self.clipped(Instant::now() + Duration::from_secs(20));
-        call::captured(&self.origin, end, &mut self.pending, args, required)
+        if self.deadline.is_none() {
+            call::captured_for_worker(&self.origin, end, &mut self.pending, args, required)
+        } else {
+            call::captured(&self.origin, end, &mut self.pending, args, required)
+        }
     }
 }

@@ -38,19 +38,28 @@ pub(super) struct Entry {
 }
 impl Inner {
     pub(super) fn admit(self: &Arc<Self>, bounds: AdmissionBounds) -> Result<Admission> {
-        self.admit_selected(bounds, None)
+        self.admit_selected(bounds, None, None)
     }
     pub(super) fn admit_launch(
         self: &Arc<Self>,
         bounds: AdmissionBounds,
         session: &reverie_core::ids::ProfileSessionId,
     ) -> Result<Admission> {
-        self.admit_selected(bounds, Some(session))
+        self.admit_selected(bounds, Some(session), None)
+    }
+    /// Broker.stop has no launch/entry body budget. Its real first-stop ceiling
+    /// bounds native observation without changing admission mutex/flock order.
+    pub(super) fn admit_stop(
+        self: &Arc<Self>,
+        budget: Option<&reverie_host::worker_runtime::WorkerStopBudget>,
+    ) -> Result<Admission> {
+        self.admit_selected(AdmissionBounds::default(), None, budget)
     }
     fn admit_selected(
         self: &Arc<Self>,
         bounds: AdmissionBounds,
         ordinary_session: Option<&reverie_core::ids::ProfileSessionId>,
+        native_budget: Option<&reverie_host::worker_runtime::WorkerStopBudget>,
     ) -> Result<Admission> {
         let end = bounds.validate()?;
         let entry = self.reserve_entry(end)?;
@@ -83,6 +92,14 @@ impl Inner {
         }
         let admission = entry.activate(active)?;
         let entered = (|| {
+            if let Some(budget) = native_budget {
+                admission
+                    .active
+                    .context
+                    .lock()
+                    .map_err(|_| GateError::Refused("RESERVATION_ADMISSION_UNAVAILABLE"))?
+                    .inherit_worker_stop_budget(budget)?;
+            }
             self.guard(None)?;
             // The fixed ordinary SID/journal phase is still entry work. Do not
             // clear entered_by before it or renew it after a slow observation.

@@ -14,6 +14,8 @@ mod image_refresh;
 mod launch;
 mod observation;
 mod ordinary_stop;
+mod stop_admission;
+pub(crate) use stop_admission::OrdinaryStopAdmission;
 mod preparation;
 mod preparation_draft;
 pub(crate) use preparation_draft::{DraftRetentionFailure, EnteredResourceDraft};

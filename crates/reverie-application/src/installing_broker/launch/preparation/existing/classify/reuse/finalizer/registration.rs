@@ -1,0 +1,67 @@
+//! Shared registration effects require fresh allocation authority outside the
+//! lifecycle lock and the exact Office owner captured under the original lock.
+use super::*;
+#[cfg(test)]
+fn pause_registration() {
+    REGISTRATION_PAUSE.with(|slot| {
+        if let Some(pause) = slot.borrow_mut().take() {
+            pause.wait(());
+        }
+    });
+}
+impl Finalizer<'_> {
+    pub(super) fn metadata(&mut self) {
+        let result = (|| {
+            let scope = self.owner.scope();
+            let broker = scope.preparing.broker();
+            let mut lifecycle = broker
+                .installed
+                .cleanup_lifecycle(&broker.storage.runtime)?;
+            if let Some(token) = &scope.active {
+                lifecycle.finalize_active(token)?;
+            }
+            Ok(())
+        })();
+        if let Err(error) = result {
+            self.errors.push(Error::Gate(error));
+        }
+    }
+    pub(super) fn close_registration(&mut self, end: Instant) {
+        if let Err(error) = self.close_registration_inner(end) {
+            self.errors.push(Error::Gate(error));
+        }
+    }
+    fn close_registration_inner(&self, end: Instant) -> Result<(), GateError> {
+        let scope = self.owner.scope();
+        let broker = scope.preparing.broker();
+        let target = self
+            .target
+            .as_ref()
+            .ok_or(GateError::Refused("WORKER_REUSE_TARGET_REQUIRED"))?;
+        // Gate -> lifecycle is the original lock order. Never acquire a fresh
+        // allocation flock while holding the application lifecycle mutex.
+        let admission = broker.admit_ordinary_stop(target)?;
+        let body = (|| {
+            admission.assert_broker(broker)?;
+            admission.assert_target(target)?;
+            #[cfg(test)]
+            pause_registration();
+            let mut lifecycle = broker
+                .installed
+                .cleanup_lifecycle(&broker.storage.runtime)?;
+            let token = scope
+                .active
+                .as_ref()
+                .ok_or(GateError::Refused("WORKER_REUSE_ACTIVE_REQUIRED"))?;
+            lifecycle
+                .close_reuse_registration(token, target, scope.registration.as_ref(), end)
+                .map_err(|error| GateError::OriginalSource(Box::new(error)))
+        })();
+        let closed = if body.is_ok() {
+            admission.close()
+        } else {
+            admission.abort()
+        };
+        crate::reservation_gate::finalized(body, closed)
+    }
+}

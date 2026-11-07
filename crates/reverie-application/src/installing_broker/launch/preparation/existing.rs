@@ -7,7 +7,8 @@ mod memory;
 mod receipt;
 pub use classify::{
     AllocationClosedReuse, ClassifiedWorkerLaunch, ColdWorkerLaunch, ExistingColdTarget,
-    PreparedReuseViewer, RestoredReuse, ReusableWorkerLaunch, ReuseViewerFailure, ViewingReuse,
+    PreparedReuseViewer, RestoredReuse, ReusableWorkerLaunch, ReuseFinalizationFailure,
+    ReuseHandlerClosed, ReuseViewerFailure, ViewingReuse,
 };
 impl<'a> ObservedWorkerLaunch<'a> {
     pub(super) fn inspect(

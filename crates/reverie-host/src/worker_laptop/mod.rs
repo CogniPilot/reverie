@@ -31,7 +31,7 @@ pub use create::{CreatedLaptop, LaptopCreation};
 pub use error::{CreateTelemetryFailure, LaptopError, TelemetryCause};
 use error::{Result, finalized, need};
 pub use existing_viewer::{
-    ExistingRelayRetainFailure, ExistingRelayReturned, ExistingViewer,
+    ExistingRelayRetainFailure, ExistingRelayReturned, ExistingStorageObservation, ExistingViewer,
     ExistingViewerReceiptObservation, ExistingViewerRetainFailure, ExistingViewerReturned,
     ExistingViewerStart,
 };

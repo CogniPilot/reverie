@@ -5,6 +5,8 @@ use crate::installing_broker::storage::{
     ExistingStorageError, ExistingStoragePreparation, ExistingStorageReturned,
 };
 use reverie_host::worker_laptop::{ExistingViewerStart, LaptopError, ViewerSession};
+mod finalizer;
+pub use finalizer::{ReuseFinalizationFailure, ReuseHandlerClosed};
 
 struct ReuseScope<'a> {
     preparing: PreparingWorkerLaunch<'a>,
@@ -12,6 +14,7 @@ struct ReuseScope<'a> {
     active: Option<ActiveLaunchToken<'a>>,
     current: Arc<ValidatedWorkerSnapshot>,
     resources: EffectiveWorkerConfig,
+    registration: Option<Arc<crate::installing_broker::recovered::RecoveredOffice>>,
 }
 struct RetainedReuse<'a> {
     scope: ReuseScope<'a>,
@@ -69,6 +72,9 @@ impl<'a> ReusableWorkerLaunch<'a> {
             plan,
         } = observed;
         let connection = claimed.preparing.admitted.request.connection.clone();
+        let registration = claimed
+            .lifecycle
+            .capture_reuse_registration(claimed.preparing.admitted.request().session());
         let storage = claimed.storage.take().expect("genuine classified storage");
         let previous = previous.expect("genuine classified running observation");
         let receipt = receipt.expect("genuine classified runtime receipt");
@@ -89,6 +95,7 @@ impl<'a> ReusableWorkerLaunch<'a> {
                             active,
                             current,
                             resources,
+                            registration,
                         },
                         native,
                     },

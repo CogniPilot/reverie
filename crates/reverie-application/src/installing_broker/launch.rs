@@ -14,7 +14,8 @@ pub use error::{LaunchAdmissionFailure, WorkerDispatchError};
 pub use preparation::{
     AllocationClosedReuse, ClassifiedWorkerLaunch, ColdWorkerLaunch, ExistingColdTarget,
     InspectedWorkerLaunch, PreparationFailure as LaunchPreparationFailure, PreparedReuseViewer,
-    RestoredReuse, ReusableWorkerLaunch, ReuseViewerFailure, ViewingReuse,
+    RestoredReuse, ReusableWorkerLaunch, ReuseFinalizationFailure, ReuseHandlerClosed,
+    ReuseViewerFailure, ViewingReuse,
 };
 pub use viewer::{ReuseRelayError, ReuseRelayReturned};
 #[cfg(test)]
@@ -97,6 +98,9 @@ impl<'a> ReceivedWorkerLaunch<'a> {
     pub fn close(&self, end: Instant) -> Result<(), WorkerReportError> {
         // Physical connection close is not lifecycle-hold/capacity settlement.
         self.connection.close_socket(end).map(|_| ())
+    }
+    pub(crate) fn close_for_worker(&self) -> Result<(), WorkerReportError> {
+        self.connection.close_socket_for_worker().map(|_| ())
     }
     /// Original ordinary prefix: actual validated J -> image refresh -> queued
     /// GPU cold boundary for non-attach -> actual captured optional admission.

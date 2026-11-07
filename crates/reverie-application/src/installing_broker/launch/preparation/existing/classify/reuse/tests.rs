@@ -2,6 +2,7 @@
 //! synthetic and does not stand in for a production stopped-laptop contract.
 use super::super::super::super::tests::{end, finish_claimed};
 use super::super::tests::{SID, broker, inspection};
+mod finalization;
 use super::*;
 use crate::reservation_gate::tests::Tree;
 
