@@ -182,12 +182,15 @@ fn protected_pool_creation_requires_native_protection_and_keeps_real_admission()
     );
     let mut setup = Setup::new();
     let mut config: Value = serde_json::from_slice(&setup.tree.raw).unwrap();
+    config["budgetMode"] = json!("pool");
     config["memoryMiB"] = json!(1024);
     config["employeeMemoryPolicies"] =
         json!({setup.employee().as_str(): {"memoryHighMiB":512,"swapMiB":0}});
     setup.tree.raw = serde_json::to_vec(&config).unwrap();
     setup.tree.write("worker.json", &setup.tree.raw);
     setup.tree.marker(&config);
+    setup.rows[1]["Config"]["Labels"] = json!({"reverie.worker":"foreign"});
+    setup.rows[1]["Name"] = json!("/foreign-agent");
     let fixture = Fixture::new();
     let gate = setup.gate(&fixture);
     for _ in 0..60 {
@@ -199,7 +202,7 @@ fn protected_pool_creation_requires_native_protection_and_keeps_real_admission()
         .unwrap();
     assert_eq!(
         admission
-            .check_creation(&policy(BudgetMode::Pool, 512, 4096))
+            .check_creation(&policy(BudgetMode::Pool, 1024, 4096))
             .unwrap_err()
             .code(),
         "RESERVATION_POOL_NATIVE_REQUIRED"
@@ -213,7 +216,7 @@ fn protected_pool_creation_requires_native_protection_and_keeps_real_admission()
     );
     fixture.protected_pool_facts();
     let facts = admission
-        .check_creation(&policy(BudgetMode::Pool, 512, 4096))
+        .check_creation(&policy(BudgetMode::Pool, 1024, 4096))
         .unwrap();
     assert_eq!(facts.committed_bytes, 512 * 1_048_576);
     assert_eq!(facts.retained_bytes, 0);
@@ -234,11 +237,15 @@ fn protected_pool_hard_candidate_cannot_replace_twelve_gib_with_twenty_four_in_f
     let mut setup = Setup::new();
     let mut config: Value = serde_json::from_slice(&setup.tree.raw).unwrap();
     config["poolMemoryMiB"] = json!(49152);
+    config["budgetMode"] = json!("pool");
+    config["memoryMiB"] = json!(24576);
     config["employeeMemoryPolicies"] =
         json!({setup.employee().as_str(): {"memoryHighMiB":12288,"swapMiB":0}});
     setup.tree.raw = serde_json::to_vec(&config).unwrap();
     setup.tree.write("worker.json", &setup.tree.raw);
     setup.tree.marker(&config);
+    setup.rows[1]["Config"]["Labels"] = json!({"reverie.worker":"foreign"});
+    setup.rows[1]["Name"] = json!("/foreign-agent");
     setup.rows[1]["HostConfig"]["Memory"] = json!(35328u64 * 1_048_576);
     setup.rows[1]["HostConfig"]["MemorySwap"] = json!(35328u64 * 1_048_576);
     let fixture = Fixture::new();
