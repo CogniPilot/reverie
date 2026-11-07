@@ -5,6 +5,7 @@
 //! (the signal path); the office-power C actions never reach it.
 mod close;
 mod dispatch;
+pub mod power;
 #[cfg(test)]
 mod tests;
 pub mod watchdog;
