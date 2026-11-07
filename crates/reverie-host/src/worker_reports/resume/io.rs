@@ -23,6 +23,7 @@ impl WorkerActorChannel {
     /// length headers. Limits and deadlines are DATA, not authority callbacks.
     pub fn receive_chunk(&mut self, maximum: usize, deadline: Instant) -> Result<Vec<u8>> {
         if maximum == 0 || maximum > 8192 || !self.greeted {
+            self.failed = true;
             return Err(WorkerReportError::Frame);
         }
         let result = self.read(maximum, deadline);
@@ -31,7 +32,7 @@ impl WorkerActorChannel {
     }
     pub fn send_frame(
         &mut self,
-        frame: &reverie_contracts::worker_resume::ResumeFrame,
+        frame: &reverie_contracts::human_protocol::HumanFrame,
         deadline: Instant,
     ) -> Result<()> {
         if !self.greeted {
@@ -130,7 +131,13 @@ impl WorkerActorChannel {
         let ready = nix::poll::poll(&mut fds, nix::poll::PollTimeout::ZERO)
             .map_err(|error| WorkerReportError::Io(error.into()))?;
         if ready != 0 {
-            return Ok(true);
+            let flags = fds[0].revents().ok_or(WorkerReportError::Unconfirmed)?;
+            if flags.intersects(nix::poll::PollFlags::POLLERR | nix::poll::PollFlags::POLLNVAL) {
+                return Err(WorkerReportError::Unconfirmed);
+            }
+            return Ok(
+                flags.intersects(nix::poll::PollFlags::POLLIN | nix::poll::PollFlags::POLLHUP)
+            );
         }
         let slot = self.connection.record.terminal_stream()?;
         let stream = slot.as_ref().ok_or(WorkerReportError::Unconfirmed)?;

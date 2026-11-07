@@ -13,6 +13,12 @@ pub(crate) fn receive_credentials(
     bytes: &mut [u8],
     expected: (i32, u32, u32),
 ) -> Result<usize, CredentialReadError> {
+    if bytes.is_empty() || bytes.len() > 8192 {
+        return Err(CredentialReadError {
+            cause: io::ErrorKind::InvalidInput.into(),
+            close_failed: false,
+        });
+    }
     let packet = receive(stream.as_raw_fd(), bytes).map_err(|cause| CredentialReadError {
         cause,
         close_failed: false,
@@ -29,8 +35,15 @@ pub(crate) fn receive_credentials(
     if valid && !close_failed {
         Ok(packet.received)
     } else {
+        let kind = if packet.received == 0 {
+            io::ErrorKind::UnexpectedEof
+        } else if packet.flags & (libc::MSG_CTRUNC | libc::MSG_TRUNC) != 0 {
+            io::ErrorKind::InvalidData
+        } else {
+            io::ErrorKind::PermissionDenied
+        };
         Err(CredentialReadError {
-            cause: io::ErrorKind::PermissionDenied.into(),
+            cause: kind.into(),
             close_failed,
         })
     }
@@ -86,15 +99,7 @@ pub(super) fn receive(socket: RawFd, bytes: &mut [u8]) -> io::Result<Packet> {
             let data = libc::CMSG_DATA(header);
             match ((*header).cmsg_level, (*header).cmsg_type) {
                 (libc::SOL_SOCKET, libc::SCM_RIGHTS) => {
-                    packet.valid &= size != 0 && size.is_multiple_of(mem::size_of::<RawFd>());
-                    for index in 0..size / mem::size_of::<RawFd>() {
-                        let fd = std::ptr::read_unaligned(data.cast::<RawFd>().add(index));
-                        if fd >= 0 {
-                            packet.descriptors.push(OwnedFd::from_raw_fd(fd));
-                        } else {
-                            packet.valid = false;
-                        }
-                    }
+                    rights(&mut packet, data, size);
                 }
                 (libc::SOL_SOCKET, libc::SCM_CREDENTIALS)
                     if size == mem::size_of::<libc::ucred>() =>
@@ -109,4 +114,21 @@ pub(super) fn receive(socket: RawFd, bytes: &mut [u8]) -> io::Result<Packet> {
         }
     }
     Ok(packet)
+}
+/// SAFETY: data points to the initialized body of one kernel-provided
+/// SCM_RIGHTS record, for exactly size bytes inside the live control buffer.
+unsafe fn rights(packet: &mut Packet, data: *mut u8, size: usize) {
+    packet.valid &= size != 0 && size.is_multiple_of(mem::size_of::<RawFd>());
+    for index in 0..size / mem::size_of::<RawFd>() {
+        // SAFETY: each complete descriptor integer lies in that initialized
+        // body. Unaligned reads do not impose extra alignment requirements.
+        let fd = unsafe { std::ptr::read_unaligned(data.cast::<RawFd>().add(index)) };
+        if fd >= 0 {
+            // SAFETY: recvmsg installed each right as a fresh owned descriptor;
+            // this traversal visits its integer once and immediately takes it.
+            packet.descriptors.push(unsafe { OwnedFd::from_raw_fd(fd) });
+        } else {
+            packet.valid = false;
+        }
+    }
 }

@@ -199,6 +199,15 @@ while legacy implementations are being retired. The portable gate exercises
 core/contracts/routes, shared HTTP, the OPS CLI and xtask on Linux, macOS and Windows; native host adapters have their
 separate Linux gate. Neither gate proves unported runtime paths are portable.
 
+The native credential channels for resource and host-resume actors additionally
+require Linux 6.5 or later with `SO_PEERPIDFD`. The process handle comes from
+the actual accepted socket, with no PID lookup fallback. Missing support refuses
+with `WORKER_NATIVE_CHANNEL_REQUIRES_SO_PEERPIDFD` before actor host effects.
+The older Python implementation's PID lookup is not used as an exact-peer proof.
+The initial native Q and resume protocols preserve the actual Python broker's
+8192-byte frame bound and credential check on every received chunk. The existing
+TypeScript resource client's larger advertised limit does not extend Q v1.
+
 The native Ubuntu24.04 GitHub-hosted job explicitly runs `cargo xtask
 prepare-ci-userns` before verification. Ubuntu's AppArmor restriction can remove
 namespace capabilities and deny the memory fixture's UID map. The task loads a

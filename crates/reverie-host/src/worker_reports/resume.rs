@@ -103,6 +103,11 @@ impl WorkerActorChannel {
     pub fn peer(&self) -> &WorkerPeer {
         self.connection.peer()
     }
+    /// Original authenticated first-frame DATA for the purpose's closed
+    /// registration/command decoder. It is not supplied again by a caller.
+    pub fn request_bytes(&self) -> &[u8] {
+        self.connection.request_bytes()
+    }
     pub fn assert_service(&self, expected: &Arc<WorkerReportService>) -> Result<()> {
         self.connection.assert_service(expected)
     }
@@ -124,8 +129,14 @@ impl WorkerActorChannel {
         nix::sys::socket::setsockopt(stream, nix::sys::socket::sockopt::PassCred, &true)
             .map_err(|error| WorkerReportError::Io(error.into()))?;
         self.peer = Some(
-            nix::sys::socket::getsockopt(stream, nix::sys::socket::sockopt::PeerPidfd)
-                .map_err(|error| WorkerReportError::Io(error.into()))?,
+            nix::sys::socket::getsockopt(stream, nix::sys::socket::sockopt::PeerPidfd).map_err(
+                |error| match error {
+                    nix::errno::Errno::ENOPROTOOPT | nix::errno::Errno::EINVAL => {
+                        WorkerReportError::ChannelCapability
+                    }
+                    _ => WorkerReportError::Io(error.into()),
+                },
+            )?,
         );
         self.require_live()
     }
@@ -146,6 +157,16 @@ impl WorkerActorChannel {
             Ok(())
         } else {
             Err(WorkerReportError::Peer)
+        }
+    }
+    /// Adjacent cancellation observation for the actual action owner. This
+    /// cannot replace that owner's fresh code, process, scope and target checks.
+    pub fn require_connected(&self) -> Result<()> {
+        self.require_live()?;
+        if self.ended()? {
+            Err(WorkerReportError::Peer)
+        } else {
+            Ok(())
         }
     }
     /// This positive observation permits registration replacement, not an

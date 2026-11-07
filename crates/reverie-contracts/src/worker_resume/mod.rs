@@ -43,16 +43,5 @@ fn field<'a>(fields: &'a BTreeMap<Text, Value>, name: &str) -> Option<&'a Value>
     fields.get(&key(name))
 }
 fn finite(name: Option<&str>) -> Result<()> {
-    match name {
-        None => Ok(()),
-        Some("-inf") => Err(ResumeDataError(
-            "Out of range float values are not JSON compliant: -inf",
-        )),
-        Some("inf") => Err(ResumeDataError(
-            "Out of range float values are not JSON compliant: inf",
-        )),
-        Some(_) => Err(ResumeDataError(
-            "Out of range float values are not JSON compliant: nan",
-        )),
-    }
+    crate::human_protocol::finite(name).map_err(|error| ResumeDataError(error.code()))
 }
