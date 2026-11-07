@@ -8,6 +8,15 @@ pub(super) enum CallPurpose {
     Launch,
     Cleanup,
 }
+pub(super) fn encode_arguments(
+    arguments: &[reverie_contracts::storage_identity::MetadataText],
+) -> Result<Vec<OsString>> {
+    arguments
+        .iter()
+        .map(|arg| crate::native::python_path(arg.codepoints()).map(|path| path.into_os_string()))
+        .collect::<std::io::Result<Vec<_>>>()
+        .map_err(LaptopError::Io)
+}
 pub(super) fn run(runtime: &WorkerRuntime, record: &mut Record, ceiling: Instant) -> Result<()> {
     let name = format!("{}-lan", record.resources().plan.arguments().name());
     let state = call(

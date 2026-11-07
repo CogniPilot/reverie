@@ -16,6 +16,10 @@ pub(super) enum CreateStage {
     Started,
     ConfiguringMemory,
     MemoryConfigured,
+    CommittingCold,
+    ColdCommitted,
+    StartingPane,
+    PaneStarted,
 }
 pub(super) struct Creation {
     created: bool,
@@ -145,11 +149,7 @@ fn run(
     telemetry
         .check_create_args(runtime, &args)
         .map_err(|error| LaptopError::Telemetry(CreateTelemetryFailure::new(error)))?;
-    let argv = args
-        .iter()
-        .map(|arg| crate::native::python_path(arg.codepoints()).map(|path| path.into_os_string()))
-        .collect::<std::io::Result<Vec<_>>>()
-        .map_err(LaptopError::Io)?;
+    let argv = network::encode_arguments(&args)?;
     let output = network::call(
         runtime,
         record,

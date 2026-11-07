@@ -42,6 +42,24 @@ impl NixStoragePreparation {
     pub fn paths(&self) -> &StoragePaths {
         &self.paths
     }
+    /// Original pre-unlock rootless-image phase on the same held Nix record.
+    /// The actual launch caller retains its lifecycle guard until this returns.
+    pub fn qualify_rootless_image(
+        &self,
+        end: std::time::Instant,
+    ) -> Result<reverie_host::worker_nix::NixImageQualification, NixStorageError> {
+        if let ReturnTo::Registered {
+            registry, identity, ..
+        } = &self.destination
+        {
+            registry.check_nix(identity, &self.workflow)?;
+        }
+        Ok(self
+            .destination
+            .registry()
+            .runtime
+            .qualify_prepared_nix_image(&self.workflow, end)?)
+    }
     /// Run only after releasing the installing lifecycle/registry mutex. The
     /// fixed Host workflow owns commands, first-stop cleanup and real guards.
     pub fn run(&self) -> Result<NixProgress, NixStorageError> {

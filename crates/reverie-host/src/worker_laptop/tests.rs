@@ -1,5 +1,6 @@
 mod cleanup;
 mod create;
+mod pane;
 mod publication;
 mod reference;
 use super::*;

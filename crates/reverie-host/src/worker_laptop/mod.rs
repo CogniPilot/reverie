@@ -1,10 +1,12 @@
 //! Fixed laptop effects retain actual Nix/storage/Office owners before the
 //! first native client. InstallingBroker still owns admission and authorization.
 mod cleanup;
+mod cold;
 mod create;
 mod error;
 mod memory;
 mod network;
+mod pane;
 mod publication;
 mod start;
 #[cfg(test)]
@@ -17,10 +19,12 @@ use crate::{
     worker_runtime::WorkerRuntime,
 };
 pub use cleanup::{CreatedCleanup, StoppedCreatedLaptop};
+pub use cold::{ColdCommit, ColdCommitted};
 pub use create::{CreatedLaptop, LaptopCreation};
 pub use error::{CreateTelemetryFailure, LaptopError, TelemetryCause};
 use error::{Result, finalized, need};
 pub use memory::{ConfiguredMemory, MemoryConfiguration};
+pub use pane::{PaneStart, StartedPane};
 use reverie_contracts::worker_launch::WorkerRequest;
 pub use start::{ContainerStart, StartedContainer};
 use std::{
