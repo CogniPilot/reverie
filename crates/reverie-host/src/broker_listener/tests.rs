@@ -22,7 +22,7 @@ fn me() -> u32 {
 fn directory_is_created_owner_only() {
     let root = scratch("create");
     let socket = root.join("control").join("broker.sock");
-    prepare_directory(&socket, me()).unwrap();
+    prepare_directory(&socket).unwrap();
     let mode = fs::metadata(root.join("control")).unwrap().mode() & 0o777;
     assert_eq!(mode & 0o077, 0, "mode {mode:o}");
 }
@@ -33,7 +33,7 @@ fn group_accessible_directory_is_refused() {
     let dir = root.join("control");
     fs::create_dir(&dir).unwrap();
     fs::set_permissions(&dir, fs::Permissions::from_mode(0o750)).unwrap();
-    let error = prepare_directory(&dir.join("broker.sock"), me()).unwrap_err();
+    let error = prepare_directory(&dir.join("broker.sock")).unwrap_err();
     assert!(matches!(error, ListenerError::DirectoryUnsafe));
     assert_eq!(
         error.message(),
@@ -48,7 +48,7 @@ fn symlinked_directory_is_refused() {
     fs::create_dir(&real).unwrap();
     fs::set_permissions(&real, fs::Permissions::from_mode(0o700)).unwrap();
     symlink(&real, root.join("control")).unwrap();
-    let error = prepare_directory(&root.join("control").join("broker.sock"), me()).unwrap_err();
+    let error = prepare_directory(&root.join("control").join("broker.sock")).unwrap_err();
     assert!(matches!(error, ListenerError::DirectoryUnsafe));
 }
 
@@ -56,7 +56,7 @@ fn symlinked_directory_is_refused() {
 fn foreign_owner_is_refused() {
     let root = scratch("owner");
     let socket = root.join("control").join("broker.sock");
-    let error = prepare_directory(&socket, me() + 1).unwrap_err();
+    let error = prepare_directory_as(&socket, me() + 1).unwrap_err();
     assert!(matches!(error, ListenerError::DirectoryUnsafe));
 }
 
@@ -138,4 +138,44 @@ fn error_payload_cuts_at_1000_bytes_even_mid_code_point() {
     let payload = error_payload(&message);
     assert_eq!(payload.len(), 1000);
     assert_eq!(payload[999], 0xC3, "first byte of é kept, second cut");
+}
+
+#[test]
+fn peek_leaves_the_frame_for_its_owner() {
+    let (mut client, mut server) = UnixStream::pair().unwrap();
+    write_frame(&mut client, b'T', b"{}").unwrap();
+    assert_eq!(peek_kind(&server).unwrap(), b'T');
+    assert_eq!(read_frame(&mut server).unwrap(), (b'T', b"{}".to_vec()));
+}
+
+#[test]
+fn oversized_length_is_refused_before_reading_the_payload() {
+    use std::io::Write;
+    let (mut client, mut server) = UnixStream::pair().unwrap();
+    let length = (reverie_core::worker_wire::MAX_FRAME as u32 + 1).to_be_bytes();
+    client
+        .write_all(&[b'C', length[0], length[1], length[2], length[3]])
+        .unwrap();
+    assert!(matches!(read_frame(&mut server), Err(FrameError::TooLarge)));
+    let too_big = vec![0u8; reverie_core::worker_wire::MAX_FRAME + 1];
+    assert!(matches!(
+        write_frame(&mut client, b'J', &too_big),
+        Err(FrameError::TooLarge)
+    ));
+}
+
+#[test]
+fn a_peer_that_closes_mid_frame_gets_no_reply() {
+    use std::io::Write;
+    let (mut client, mut server) = UnixStream::pair().unwrap();
+    client.write_all(&[b'C', 0, 0, 0, 9, b'{']).unwrap();
+    drop(client);
+    assert!(matches!(read_frame(&mut server), Err(FrameError::Closed)));
+    assert!(matches!(
+        peek_kind(&server),
+        Ok(_) | Err(FrameError::Closed)
+    ));
+    let (client, server) = UnixStream::pair().unwrap();
+    drop(client);
+    assert!(matches!(peek_kind(&server), Err(FrameError::Closed)));
 }

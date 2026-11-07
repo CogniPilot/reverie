@@ -53,9 +53,13 @@ impl From<io::Error> for ListenerError {
 }
 pub type Result<T> = std::result::Result<T, ListenerError>;
 
-/// `mkdir 0700` (with parents), then refuse a symlinked, foreign-owned or
-/// group/other-accessible parent of `socket`, as the legacy `serve()` does.
-pub fn prepare_directory(socket: &Path, uid: u32) -> Result<()> {
+/// `mkdir 0700` (with parents), then refuse a symlinked, group/other-accessible
+/// parent of `socket`, or one not owned by this process's UID, as the legacy
+/// `serve()` does with `os.getuid()`. The peer UID is a separate check.
+pub fn prepare_directory(socket: &Path) -> Result<()> {
+    prepare_directory_as(socket, crate::native::uid())
+}
+fn prepare_directory_as(socket: &Path, uid: u32) -> Result<()> {
     let parent = socket.parent().ok_or(ListenerError::DirectoryUnsafe)?;
     DirBuilder::new()
         .recursive(true)
@@ -180,4 +184,75 @@ pub fn peer_uid(stream: &UnixStream) -> io::Result<u32> {
 pub fn error_payload(message: &str) -> Vec<u8> {
     let bytes = message.as_bytes();
     bytes[..bytes.len().min(ERROR_FRAME_BYTES)].to_vec()
+}
+
+#[derive(Debug)]
+pub enum FrameError {
+    /// The peer closed or reset before a whole frame arrived; no reply.
+    Closed,
+    /// The legacy `ValueError("Worker frame is too large")`.
+    TooLarge,
+    Io(io::Error),
+}
+impl FrameError {
+    fn from_io(error: io::Error) -> Self {
+        match error.kind() {
+            io::ErrorKind::UnexpectedEof
+            | io::ErrorKind::BrokenPipe
+            | io::ErrorKind::ConnectionReset => Self::Closed,
+            _ => Self::Io(error),
+        }
+    }
+}
+
+/// The first frame's kind byte, left unread so an owner that reads its own
+/// frame (the T report service) receives the stream whole.
+pub fn peek_kind(stream: &UnixStream) -> std::result::Result<u8, FrameError> {
+    let mut kind = [0u8; 1];
+    loop {
+        match nix::sys::socket::recv(
+            stream.as_raw_fd(),
+            &mut kind,
+            nix::sys::socket::MsgFlags::MSG_PEEK,
+        ) {
+            Ok(0) => return Err(FrameError::Closed),
+            Ok(_) => return Ok(kind[0]),
+            Err(nix::errno::Errno::EINTR) => continue,
+            Err(error) => return Err(FrameError::from_io(error.into())),
+        }
+    }
+}
+
+/// One legacy frame. The common bound is checked before the payload is read.
+pub fn read_frame(stream: &mut UnixStream) -> std::result::Result<(u8, Vec<u8>), FrameError> {
+    use std::io::Read;
+    let mut header = [0u8; reverie_core::worker_wire::HEADER_BYTES];
+    stream
+        .read_exact(&mut header)
+        .map_err(FrameError::from_io)?;
+    let header = reverie_core::worker_wire::WorkerFrameHeader::decode(header);
+    let length = header.payload_length() as usize;
+    if length > reverie_core::worker_wire::MAX_FRAME {
+        return Err(FrameError::TooLarge);
+    }
+    let mut payload = vec![0u8; length];
+    stream
+        .read_exact(&mut payload)
+        .map_err(FrameError::from_io)?;
+    Ok((header.kind(), payload))
+}
+
+/// One legacy frame; a payload past the common bound is refused unsent.
+pub fn write_frame(
+    stream: &mut UnixStream,
+    kind: u8,
+    payload: &[u8],
+) -> std::result::Result<(), FrameError> {
+    use std::io::Write;
+    let header = reverie_core::worker_wire::WorkerFrameHeader::for_payload(kind, payload.len())
+        .ok_or(FrameError::TooLarge)?;
+    let mut wire = Vec::with_capacity(payload.len() + reverie_core::worker_wire::HEADER_BYTES);
+    wire.extend_from_slice(&header.encode());
+    wire.extend_from_slice(payload);
+    stream.write_all(&wire).map_err(FrameError::from_io)
 }
