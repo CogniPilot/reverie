@@ -1,12 +1,13 @@
-//! `cargo xtask namegate`: scans outbound text with a private, pinned list file and prints only
+//! `cargo namegate`: scans outbound text with a private, pinned list file and prints only
 //! categories, locations and list indices, never what matched.
 
 use reverie_namegate::{CATEGORIES, Finding, Kind, Lists, locate, scan};
 use std::error::Error;
 use std::io::Read;
 use std::path::PathBuf;
+use std::process::ExitCode;
 
-pub(crate) const USAGE: &str = "cargo xtask namegate --lists FILE --lists-sha256 HEX --repo NAME --kind text|code [--strict] [FILE...]\n  Scan files (or stdin) with the private name lists. Prints category, file:line:col and list\n  index only. Exits nonzero on any blocking finding (with --strict, also on blob findings) and\n  on any missing, altered or empty list file.";
+const USAGE: &str = "cargo namegate --lists FILE --lists-sha256 HEX --repo NAME --kind text|code [--strict] [FILE...]\n  Scan files (or stdin) with the private name lists. Prints category, file:line:col and list\n  index only. Exits nonzero on any blocking finding (with --strict, also on blob findings) and\n  on any missing, altered or empty list file.";
 
 struct Options {
     lists: PathBuf,
@@ -17,7 +18,24 @@ struct Options {
     inputs: Vec<String>,
 }
 
-pub(crate) fn run(arguments: &[String]) -> Result<(), Box<dyn Error>> {
+fn main() -> ExitCode {
+    let arguments: Vec<String> = std::env::args().skip(1).collect();
+    if let [flag] = arguments.as_slice()
+        && ["help", "--help", "-h"].contains(&flag.as_str())
+    {
+        println!("{USAGE}");
+        return ExitCode::SUCCESS;
+    }
+    match run(&arguments) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => {
+            eprintln!("namegate: {error}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn run(arguments: &[String]) -> Result<(), Box<dyn Error>> {
     let options = parse(arguments)?;
     let lists = Lists::load(&options.lists, &options.pin)?;
     let counts: Vec<String> = CATEGORIES

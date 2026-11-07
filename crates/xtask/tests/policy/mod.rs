@@ -1,3 +1,4 @@
+mod manifest;
 mod runner;
 mod script_migration;
 mod size;

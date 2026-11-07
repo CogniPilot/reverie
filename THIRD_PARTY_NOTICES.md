@@ -8,7 +8,7 @@ The front uses command-fds' single owned fd mapping to fd 3; its reviewed
 pre-exec syscall boundary stays in that dependency. The front's packaging gate
 must retain the upstream licenses and any notices alongside the executable.
 
-The release tooling's name gate (`crates/reverie-namegate`, run through `cargo xtask`)
+The release tooling's name gate (`crates/reverie-namegate`, run through `cargo namegate`)
 uses unicode-normalization 0.1.26 and unicode-properties 0.1.5 (MIT OR Apache-2.0;
 their Unicode data tables are under Unicode-3.0) and tinyvec 1.13.3 (Zlib OR
 Apache-2.0 OR MIT). It is a development tool and is not part of the runtime package.

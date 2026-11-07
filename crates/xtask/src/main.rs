@@ -5,7 +5,6 @@ use std::error::Error;
 use std::ffi::OsStr;
 use std::path::Path;
 use std::process::{Command, ExitCode};
-mod namegate;
 mod worker_package;
 
 fn main() -> ExitCode {
@@ -30,7 +29,6 @@ fn run() -> Result<(), Box<dyn Error>> {
         [command] if command == "verify-worker-package" => {
             worker_package::verify(workspace_root()?)?
         }
-        [command, rest @ ..] if command == "namegate" => namegate::run(rest)?,
         _ => return Err("expected a cargo xtask verification command (or --help)".into()),
     }
     Ok(())
@@ -38,8 +36,7 @@ fn run() -> Result<(), Box<dyn Error>> {
 
 fn help() {
     println!(
-        "cargo xtask check | verify\n  Check Rust formatting, strict Clippy, workspace tests and repository policies.\ncargo xtask verify-portable\n  Check platform-neutral core, contracts, HTTP, OPS CLI, route handlers and task tooling; native Linux host acceptance is separate.\ncargo xtask verify-worker-package\n  Linux: qualify the selected executable/manifest and Goal-stream broker interoperability.\n{}",
-        namegate::USAGE
+        "cargo xtask check | verify\n  Check Rust formatting, strict Clippy, workspace tests and repository policies.\ncargo xtask verify-portable\n  Check platform-neutral core, contracts, HTTP, OPS CLI, route handlers and task tooling; native Linux host acceptance is separate.\ncargo xtask verify-worker-package\n  Linux: qualify the selected executable/manifest and Goal-stream broker interoperability."
     );
 }
 
