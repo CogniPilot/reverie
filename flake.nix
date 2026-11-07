@@ -471,8 +471,16 @@
             kokoro = self.packages.${system}.kokoro;
             voiceVerifier = self.packages.${system}.voiceCiVerifier;
           };
-          default = pkgs.mkShell {
-            packages = [ (pkgs.python3.withPackages (ps: [ ps.pillow ps.setuptools ps.aiohttp ])) pkgs.nodejs_22 pkgs.git pkgs.tmux pkgs.gcc pkgs.gnumake pkgs.openssl pkgs.rustc pkgs.cargo pkgs.clippy pkgs.rustfmt ];
+          # The same Rust as CI (.github/workflows: toolchain 1.95.0), so local clippy, rustfmt and
+          # tests run the toolchain CI runs. A nixpkgs update that moves it fails here, not in review.
+          default = let ciRust = "1.95.0"; in assert pkgs.lib.assertMsg (pkgs.rustc.version == ciRust)
+            "the reverie dev shell must carry CI's Rust ${ciRust} (found ${pkgs.rustc.version})";
+            pkgs.mkShell {
+            packages = [ (pkgs.python3.withPackages (ps: [ ps.pillow ps.setuptools ps.aiohttp ])) pkgs.nodejs_22 pkgs.git pkgs.tmux pkgs.gcc pkgs.gnumake pkgs.openssl pkgs.rustc pkgs.cargo pkgs.clippy pkgs.rustfmt
+              # CI's test runner and same-host timing for performance changes.
+              pkgs.cargo-nextest pkgs.hyperfine
+              # getfattr and getfacl: deployment snapshot tests read extended attributes and ACLs.
+              pkgs.attr pkgs.acl ];
             shellHook = ''
               export PYTHONPATH="$PWD/python''${PYTHONPATH:+:$PYTHONPATH}"
               export REVERIE_LEASE_DIR="''${REVERIE_LEASE_DIR:-''${REVERIE_ROOT:-$HOME/reverie}/runtime/leases}"
