@@ -188,3 +188,56 @@ fn real_locked_profile_stage_emits_v2_and_preserves_explicit_sid_null_over_eid_h
     assert_eq!(store.snapshot().unwrap(), document);
     store.close().unwrap();
 }
+
+#[test]
+fn shared_48_gib_target_keeps_old_allocation_as_high_without_changing_old_session_or_domain() {
+    let setup = crate::reservation_gate::tests::observation_cases::Setup::new();
+    let old =
+        ProfileSessionId::parse(setup.oracle["employee"]["sessionId"].as_str().unwrap()).unwrap();
+    let employee =
+        ProfileEmployeeId::parse(setup.oracle["employee"]["id"].as_str().unwrap()).unwrap();
+    let mut before: Value = serde_json::from_slice(&setup.tree.raw).unwrap();
+    before["poolMemoryMiB"] = json!(49_152);
+    let original = effective_config(config(&before), &old).unwrap();
+    let original_data: Value =
+        serde_json::from_slice(&worker_config::encode_config(&original)).unwrap();
+    let mut target = resources(49_152);
+    target["poolMemoryMiB"] = json!(49_152);
+    let mut after = before.clone();
+    after["poolMemoryMiB"] = json!(49_152);
+    after["employeeResources"] = json!({employee.as_str():target});
+    after["employeeMemoryPolicies"] = json!({employee.as_str():{
+        "memoryHighMiB":original_data["memoryMiB"],"swapMiB":0
+    }});
+    after["sessionResources"] = json!({TARGET:{"version":2,"resources":target,
+        "memoryPolicy":{"memoryHighMiB":original_data["memoryMiB"],"swapMiB":0,"swapPoolMiB":0}}});
+    let frozen = OldPolicyStart::capture(
+        config(&before),
+        config(&after),
+        old.clone(),
+        ProfileSessionId::parse(TARGET).unwrap(),
+    )
+    .unwrap()
+    .for_employee(&employee)
+    .unwrap()
+    .freeze(&original)
+    .unwrap();
+    let old_after = effective_config(frozen.candidate().clone(), &old).unwrap();
+    assert_eq!(
+        worker_config::encode_config(&old_after),
+        worker_config::encode_config(&original)
+    );
+    let new = effective_config(
+        frozen.candidate().clone(),
+        &ProfileSessionId::parse(TARGET).unwrap(),
+    )
+    .unwrap();
+    let new: Value = serde_json::from_slice(&worker_config::encode_config(&new)).unwrap();
+    assert_eq!(new["memoryMiB"], 49_152);
+    assert_eq!(new["laptopMemoryPolicy"]["memoryHighMiB"], 512);
+    assert_eq!(
+        reverie_contracts::reservation_control::domain_digest(&config(&before)).unwrap(),
+        reverie_contracts::reservation_control::domain_digest(frozen.candidate()).unwrap()
+    );
+    assert!(original_data.get("laptopMemoryPolicy").is_none());
+}
