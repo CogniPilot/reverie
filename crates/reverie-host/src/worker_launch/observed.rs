@@ -17,7 +17,7 @@ use reverie_core::ids::ProfileSessionId;
 use std::sync::Arc;
 mod existing;
 pub use existing::{
-    ExistingCaptureFailure, ExistingLaptopInspection, ExistingObservationError,
+    ExistingCaptureFailure, ExistingLaptopInspection, ExistingObservationError, ExistingPaneState,
     ExistingProcessIncarnation,
 };
 #[cfg(test)]

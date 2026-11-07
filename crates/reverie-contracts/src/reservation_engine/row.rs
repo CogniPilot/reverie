@@ -1,5 +1,6 @@
 use super::*;
 use reverie_core::ids::ProfileSessionId;
+use std::collections::BTreeSet;
 pub struct ContainerRow {
     pub(super) id: ContainerId,
     pub(super) value: Value,
@@ -71,6 +72,18 @@ impl ContainerRow {
     }
     pub fn label_is(&self, name: &str, value: &str) -> Result<bool> {
         self.fields_for_limits().label_is(name, value)
+    }
+    /// Original check_stop set membership, including its unhashable refusal
+    /// even for an empty set. Hashable nonstring labels are valid nonmatches.
+    /// This is only DATA projection, never permission to stop a container.
+    pub fn reservation_stop_session_in(&self, sessions: &BTreeSet<&str>) -> Result<bool> {
+        match field(self.labels()?, "reverie.session") {
+            Some(Value(Node::Array(_) | Node::Object(_))) => Err(EngineDataError::Structure),
+            Some(Value(Node::String(session))) => {
+                Ok(sessions.iter().any(|sid| session.equals_ascii(sid)))
+            }
+            _ => Ok(false),
+        }
     }
     pub fn memory_session(&self, deployment: &str) -> Result<Option<ProfileSessionId>> {
         self.fields_for_limits().memory_session(deployment)

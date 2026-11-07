@@ -15,10 +15,10 @@ fn policy(mode: BudgetMode, memory: u32, pool: u32) -> ResourcePolicy {
     )
     .unwrap()
 }
-fn source_session(setup: &Setup) -> ProfileSessionId {
+pub(super) fn source_session(setup: &Setup) -> ProfileSessionId {
     ProfileSessionId::parse(setup.oracle["employee"]["sessionId"].as_str().unwrap()).unwrap()
 }
-fn prepared() -> (Setup, Arc<Fixture>, ReservationGate) {
+pub(super) fn prepared() -> (Setup, Arc<Fixture>, ReservationGate) {
     let setup = Setup::new();
     let fixture = Fixture::new();
     let gate = setup.gate(&fixture);

@@ -4,7 +4,7 @@ mod observed;
 use crate::{native, rootless};
 pub use observed::{
     CreateObservationError, ExistingCaptureFailure, ExistingLaptopInspection,
-    ExistingObservationError, ExistingProcessIncarnation, ObservedCreatePlan,
+    ExistingObservationError, ExistingPaneState, ExistingProcessIncarnation, ObservedCreatePlan,
     observe_create_arguments,
 };
 use reverie_contracts::{

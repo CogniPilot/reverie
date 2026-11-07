@@ -6,6 +6,9 @@ use reverie_host::worker_launch::ExistingLaptopInspection;
 use reverie_host::worker_reports::WorkerLaunchHold;
 mod error;
 mod existing;
+pub use existing::{
+    ClassifiedWorkerLaunch, ColdWorkerLaunch, ExistingColdTarget, ReusableWorkerLaunch,
+};
 mod finalization;
 mod observe;
 mod wait;

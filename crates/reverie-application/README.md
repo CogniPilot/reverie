@@ -407,8 +407,16 @@ sibling errors and the logical hold/storage context. Even a failure with no
 direct StorageClaim can still have an uncertain owner in the real registry.
 Physical EOF and successful local metadata removal do not release that custody.
 
-Existing-laptop policy/memory/runtime/exit/pane/reuse classification, ordinary
-replacement stop, Nix/network and create/start completion, protected CLI receipt,
+`classify_existing` now continues the same accepted owner through original
+running-policy and optional memory verification, runtime/exit observation,
+pane/attach checks, process capture, pool policy and initial creation budget.
+Its closed result retains either actual reusable ownership or the original
+Absent/Stopped/DeadPane/RunningCompleted cold target. Runtime-bound memory
+observation keeps the actual cancellation token and first-stop deadline; runtime
+receipt reads preserve the existing finite-writer FIFO behavior. A whole
+configured-Gate control exercises the same held lifecycle and common flock.
+
+Ordinary replacement stop, Nix/network and create/start completion, protected CLI receipt,
 actual admission/canonical release, viewer and committed Started registration
 still require their genuine continuations. Protected L/source-stop dispatch and
 the real listener/global-stop producer also remain required. First inspect is

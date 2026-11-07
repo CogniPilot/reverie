@@ -76,8 +76,7 @@ pub fn verify_recovered_memory(
     let repeated = resource_staging::effective_config(source.clone(), row.session())?;
     row.data()
         .assert_memory_policy(&worker_config::policy_digest(&repeated))?;
-    let observer = NativeObserver::new(runtime.readonly());
-    let context = observer.capture(source.clone(), None);
+    let context = NativeObserver::capture_worker(runtime, source.clone());
     context.host_root()?;
     context.verify_recovery_limits(row.data())?;
     Ok(())
