@@ -3,6 +3,8 @@
 mod encode;
 /// Python `repr(float)` for a finite value (shared by named byte encoders).
 pub(crate) use encode::float as python_float_repr;
+/// Python `json.dumps` of one string with the default `ensure_ascii`.
+pub(crate) use encode::string as python_json_string;
 
 use crate::legacy_json::{self, Node, Text, Value};
 use sha2::{Digest, Sha256};

@@ -8,7 +8,7 @@ pkgs.rustPlatform.buildRustPackage {
   cargoTestFlags = [ "-p" "reverie-observations" ];
   doCheck = true;
   meta = {
-    description = "Native bounded USER resource history reader";
+    description = "Native USER resource history reader and collector state initializer";
     license = pkgs.lib.licenses.mit;
     platforms = pkgs.lib.platforms.linux;
     mainProgram = "reverie-resource-history";

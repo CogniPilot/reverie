@@ -102,7 +102,7 @@ fn array<'a>(
         }
     }
 }
-fn string(text: &Text, result: &mut String) {
+pub(crate) fn string(text: &Text, result: &mut String) {
     result.extend(
         quoted_text(text, true)
             .0
