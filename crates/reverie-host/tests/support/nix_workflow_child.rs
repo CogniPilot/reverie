@@ -7,6 +7,13 @@ fn main() {
     let mut trace = OpenOptions::new().append(true).create(true).open("trace").unwrap();
     writeln!(trace, "{}", args.join("\0")).unwrap(); drop(trace);
     if args.starts_with(&["image".into(), "inspect".into()]) {
+        if mode.starts_with("rootless-image") {
+            assert_eq!(args.len(), 3);
+            fs::write("rootless-image-entered", b"owned image inspection").unwrap();
+            std::io::stdout().write_all(&fs::read("rootless-image.out").unwrap()).unwrap();
+            if mode == "rootless-image-nonzero" { std::process::exit(7); }
+            return;
+        }
         let enabled = !args[2].ends_with(&"b".repeat(64));
         print!("[{{\"Config\":{{\"Labels\":{{\"reverie.worker.nix-store\":\"{}\"}}}}}}]", if enabled { "1" } else { "0" });
         return;

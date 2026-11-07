@@ -22,6 +22,7 @@ pub enum NixFault {
     EngineFailed,
     UnknownCreate,
     HelperFailed,
+    ImageQualification,
 }
 #[derive(Debug)]
 pub enum NixError {
@@ -34,6 +35,7 @@ pub enum NixError {
     Engine(crate::engine_metadata::EngineError),
     Owner(crate::worker_storage::StorageOwnerError),
     Intent(crate::worker_intent::IntentHostError),
+    Rootless(crate::rootless::RootlessHostError),
     Finalization {
         primary: Box<Self>,
         secondary: Box<Self>,
@@ -84,6 +86,11 @@ impl From<crate::worker_storage::StorageOwnerError> for NixError {
 impl From<crate::worker_intent::IntentHostError> for NixError {
     fn from(error: crate::worker_intent::IntentHostError) -> Self {
         Self::Intent(error)
+    }
+}
+impl From<crate::rootless::RootlessHostError> for NixError {
+    fn from(error: crate::rootless::RootlessHostError) -> Self {
+        Self::Rootless(error)
     }
 }
 pub(super) type Result<T> = std::result::Result<T, NixError>;

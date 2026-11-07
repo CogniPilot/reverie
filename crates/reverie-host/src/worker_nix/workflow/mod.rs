@@ -2,6 +2,7 @@
 //! sequence; handles/data here never mint owner, admission or start authority.
 mod cleanup;
 mod drive;
+mod image;
 mod log;
 #[cfg(test)]
 mod tests;
@@ -10,6 +11,7 @@ use crate::{
     installed_worker_engine::InstalledWorkerEngine, worker_runtime::WorkerRuntime,
     worker_storage::LaunchStorage,
 };
+pub use image::NixImageQualification;
 use reverie_contracts::{storage_identity::MetadataText, worker_storage::StorageConfiguration};
 use reverie_core::ids::ContainerId;
 use std::{
@@ -54,6 +56,7 @@ struct Record {
     id: u64,
     resources: Option<Resources>,
     prepared: EffectiveWorkerConfig,
+    image: image::ImagePhase,
     prepared_store: Option<PathBuf>,
     phase: Phase,
     outcome: Option<Result<NixDisposition>>,
@@ -228,6 +231,7 @@ impl Workflows {
             id,
             resources: Some(resources),
             prepared,
+            image: image::ImagePhase::Unchecked,
             prepared_store: None,
             phase: Phase::Held,
             outcome: None,
@@ -304,6 +308,7 @@ impl Workflows {
             .try_lock()
             .map_err(|_| NixError::Refused(NixFault::Retained))?;
         need(record.phase == Phase::Held, NixFault::Replayed)?;
+        image::require_qualified(&record)?;
         record.phase = Phase::Running;
         record.outcome = Some(drive::execute(runtime, self, &mut record));
         cleanup::finish(runtime, self, &mut record, None);
