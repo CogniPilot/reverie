@@ -17,7 +17,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { sqlite } from './chat-db.js';
 import { pyStrip } from './memory-floors.js';
-import { cosine, hashedEmbedder, pickEmbedder, type Embedder, type LlamaOptions } from './memory-embed.js';
+import { cosine, hashedEmbedder, pickEmbedder, remaining, type Embedder, type LlamaOptions } from './memory-embed.js';
 import { crPow, pyFloatRepr } from './python-float.js';
 import { resolveLoose } from './web/routes/agent-profile-report.js';
 
@@ -48,7 +48,27 @@ export const RECALL_LIMITS = {
   embeddingBytes: 64 * 1024,
   /** Rows under another embedder re-embedded through the embedding service in one recall. */
   serviceReembeds: 256,
+  /** Rows under another embedder re-embedded with the hashed embedder in one recall (about 10 ms each). */
+  hashedReembeds: 2_000,
+  /** One recall, end to end: the old bridge process was killed after 60 s. */
+  totalMs: 60_000,
+  /** One memory row's text, metadata and embedding. */
+  rowBytes: 1024 * 1024,
+  /** All candidate rows together, measured before any is read. */
+  inputBytes: 64 * 1024 * 1024,
+  /** The JSON text returned, with python's newline: the old bridge's 1 MiB output buffer. */
+  outputBytes: 1024 * 1024,
 };
+
+/** A refusal at one of the bounds above, which the python path did not have. */
+export class RecallBound extends Error {}
+
+/** Results larger than the old bridge's output buffer refuse instead of returning. */
+function capped(text: string): string {
+  if (Buffer.byteLength(text, 'utf8') + 1 > RECALL_LIMITS.outputBytes)
+    throw new RecallBound('the old memory store returned more than recall passes on');
+  return text;
+}
 
 const nonEmpty = (value: unknown): value is string => typeof value === 'string' && pyStrip(value) !== '';
 
@@ -62,8 +82,9 @@ function readUtf8(file: string, limit: number): string {
   const fd = fs.openSync(file, fs.constants.O_RDONLY | fs.constants.O_NONBLOCK);
   try {
     const stat = fs.fstatSync(fd);
-    if (!stat.isFile()) throw new Error(`${file} is not a regular file`);
-    if (stat.size > limit) throw new Error(`${file} is too large to read`);
+    if (stat.isDirectory()) throw Object.assign(new Error('Is a directory'), { code: 'EISDIR', path: file });
+    if (!stat.isFile()) throw new RecallBound(`${path.basename(file)} is not a regular file`);
+    if (stat.size > limit) throw new RecallBound(`${path.basename(file)} is too large to read`);
     const bytes = Buffer.alloc(stat.size);
     let read = 0;
     while (read < bytes.length) {
@@ -311,7 +332,22 @@ function rows(db: Database, onlyModel: string | null): Row[] {
     `SELECT count(*) AS n FROM memories WHERE kind IN (?, ?, ?)${onlyModel === null ? '' : ' AND embed_model = ?'}`
   );
   const n = Number((count.get(...KINDS, ...(onlyModel === null ? [] : [onlyModel])) as { n: number }).n);
-  if (n > RECALL_LIMITS.rows) throw new Error(`the old memory store holds ${n} memories, more than recall reads`);
+  if (n > RECALL_LIMITS.rows) throw new RecallBound(`the old memory store holds ${n} memories, more than recall reads`);
+  // Byte sizes before anything is read into memory: every column a result can carry, plus the embedding.
+  const size = (column: string) => `coalesce(length(CAST(${column} AS BLOB)), 0)`;
+  const bytes = db.prepare(
+    `SELECT max(${['user_text', `"${assistant}"`, 'text', 'source_ids', 'section', 'meta', 'embedding'].map(size).join(' + ')}) AS row, ` +
+      `sum(${['user_text', `"${assistant}"`, 'text', 'source_ids', 'section', 'meta', 'embedding'].map(size).join(' + ')}) AS total ` +
+      `FROM memories WHERE kind IN (?, ?, ?)${onlyModel === null ? '' : ' AND embed_model = ?'}`
+  );
+  const measured = bytes.get(...KINDS, ...(onlyModel === null ? [] : [onlyModel])) as {
+    row: number | null;
+    total: number | null;
+  };
+  if ((measured.row ?? 0) > RECALL_LIMITS.rowBytes)
+    throw new RecallBound('an old memory is too large for recall to read');
+  if ((measured.total ?? 0) > RECALL_LIMITS.inputBytes)
+    throw new RecallBound('the old memory store is too large for recall to read');
   const select = db.prepare(
     `SELECT id, kind, created_at, user_text, "${assistant}" AS assistant_text, text, importance, importance_source, embed_model, embedding, ` +
       `source_ids, section, meta, last_accessed FROM memories WHERE kind IN (?, ?, ?)${onlyModel === null ? '' : ' AND embed_model = ?'}`
@@ -331,7 +367,8 @@ function pendingLegacyImport(db: Database, dataDir: string): boolean {
   let turns: unknown;
   try {
     turns = JSON.parse(readUtf8(path.join(dataDir, 'legacy-history.json'), RECALL_LIMITS.legacyHistoryBytes));
-  } catch {
+  } catch (error) {
+    if (error instanceof RecallBound) throw error; // a limit python did not have: refuse rather than answer as if missing
     return false; // python records it as missing and imports nothing
   }
   if (!Array.isArray(turns)) return false;
@@ -404,23 +441,32 @@ async function retrieve(
   query: string,
   k: number,
   reembed: boolean,
-  now: () => number
+  now: () => number,
+  deadline: number
 ): Promise<PyJson[]> {
   const found = rows(db, reembed ? null : embedder.name);
   const stale = found.filter((row) => row.embed_model !== embedder.name);
-  if (stale.length > RECALL_LIMITS.serviceReembeds && !embedder.name.startsWith('hashed-'))
+  const hashed = embedder.name.startsWith('hashed-');
+  if (stale.length > (hashed ? RECALL_LIMITS.hashedReembeds : RECALL_LIMITS.serviceReembeds))
     throw new Error(
       `${stale.length} old memories were stored under another embedder; re-embedding them would take too many requests`
     );
   const vectors = new Map<bigint, number[]>();
   for (const row of stale) {
     if (typeof row.text !== 'string') throw new Error("embed() argument 'text' must be str");
+    remaining(1, deadline);
     vectors.set(row.id, (await embedder.embed(row.text, 'document')).map(Math.fround));
+    await new Promise((resolve) => setImmediate(resolve)); // keep the console responsive between rows
   }
+  remaining(1, deadline);
   const q = await embedder.embed(query, 'query');
   const at = now();
   const scored: Array<{ row: Row; score: number; created: number }> = [];
-  for (const row of found) {
+  for (const [index, row] of found.entries()) {
+    if (index && index % 1000 === 0) {
+      remaining(1, deadline);
+      await new Promise((resolve) => setImmediate(resolve));
+    }
     const rel = cosine(q, vectors.get(row.id) ?? unpack(row.embedding));
     if (rel < 0) continue;
     const created = numeric(row.created_at, 'created_at');
@@ -474,6 +520,7 @@ export async function legacyRecall(
 
 async function recall(instanceConfig: string, request: RecallRequest, options: RecallOptions): Promise<string> {
   const now = options.now ?? (() => Date.now() / 1000);
+  const deadline = Date.now() + RECALL_LIMITS.totalMs;
   const dataDir = instanceDataDir(instanceConfig, options.home);
   if (request.project !== undefined) {
     if (!PROJECT.test(request.project)) throw new Error('project must be a lowercase project identifier');
@@ -481,7 +528,7 @@ async function recall(instanceConfig: string, request: RecallRequest, options: R
     if (!db) return '[]';
     try {
       return tables(db).has('memories')
-        ? dumpPyJson(await retrieve(db, hashedEmbedder(1024), request.query, 6, false, now))
+        ? capped(dumpPyJson(await retrieve(db, hashedEmbedder(1024), request.query, 6, false, now, deadline)))
         : '[]';
     } finally {
       db.close();
@@ -495,8 +542,8 @@ async function recall(instanceConfig: string, request: RecallRequest, options: R
         'the old memory store has a legacy-history.json that was never imported; recall reads it only after that import'
       );
     if (!tables(db).has('memories')) return '[]';
-    const embedder = await pickEmbedder(options.embedUrl ?? '', options.llama);
-    return dumpPyJson(await retrieve(db, embedder, request.query, 8, true, now));
+    const embedder = await pickEmbedder(options.embedUrl ?? '', { ...options.llama, deadline });
+    return capped(dumpPyJson(await retrieve(db, embedder, request.query, 8, true, now, deadline)));
   } finally {
     db.close();
   }

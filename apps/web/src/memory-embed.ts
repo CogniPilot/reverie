@@ -7,17 +7,11 @@
 
 import { crLog, pySum } from './python-float.js';
 
-const MASK = (1n << 64n) - 1n;
-const IV = [
-  0x6a09e667f3bcc908n,
-  0xbb67ae8584caa73bn,
-  0x3c6ef372fe94f82bn,
-  0xa54ff53a5f1d36f1n,
-  0x510e527fade682d1n,
-  0x9b05688c2b3e6c1fn,
-  0x1f83d9abfb41bd6bn,
-  0x5be0cd19137e2179n,
-];
+// BLAKE2b on 32-bit word pairs (low word first), so hashing a feature costs microseconds rather than BigInt arithmetic.
+const IV = new Uint32Array([
+  0xf3bcc908, 0x6a09e667, 0x84caa73b, 0xbb67ae85, 0xfe94f82b, 0x3c6ef372, 0x5f1d36f1, 0xa54ff53a, 0xade682d1,
+  0x510e527f, 0x2b3e6c1f, 0x9b05688c, 0xfb41bd6b, 0x1f83d9ab, 0x137e2179, 0x5be0cd19,
+]);
 const SIGMA = [
   [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
   [14, 10, 4, 8, 9, 15, 13, 6, 1, 12, 0, 2, 11, 7, 5, 3],
@@ -31,52 +25,94 @@ const SIGMA = [
   [10, 2, 8, 4, 7, 6, 1, 5, 15, 11, 9, 14, 3, 12, 13, 0],
 ];
 
-const rotr = (x: bigint, n: bigint): bigint => ((x >> n) | (x << (64n - n))) & MASK;
+const v = new Uint32Array(32);
+const m = new Uint32Array(32);
 
-function compress(h: bigint[], block: Uint8Array, counter: bigint, last: boolean): void {
-  const view = new DataView(block.buffer, block.byteOffset, 128);
-  const m = Array.from({ length: 16 }, (_, i) => view.getBigUint64(i * 8, true));
-  const v = [...h, ...IV];
-  v[12] ^= counter & MASK;
-  v[13] ^= counter >> 64n;
-  if (last) v[14] ^= MASK;
-  const g = (a: number, b: number, c: number, d: number, x: bigint, y: bigint) => {
-    v[a] = (v[a] + v[b] + x) & MASK;
-    v[d] = rotr(v[d] ^ v[a], 32n);
-    v[c] = (v[c] + v[d]) & MASK;
-    v[b] = rotr(v[b] ^ v[c], 24n);
-    v[a] = (v[a] + v[b] + y) & MASK;
-    v[d] = rotr(v[d] ^ v[a], 16n);
-    v[c] = (v[c] + v[d]) & MASK;
-    v[b] = rotr(v[b] ^ v[c], 63n);
-  };
-  for (let round = 0; round < 12; round++) {
-    const s = SIGMA[round % 10];
-    g(0, 4, 8, 12, m[s[0]], m[s[1]]);
-    g(1, 5, 9, 13, m[s[2]], m[s[3]]);
-    g(2, 6, 10, 14, m[s[4]], m[s[5]]);
-    g(3, 7, 11, 15, m[s[6]], m[s[7]]);
-    g(0, 5, 10, 15, m[s[8]], m[s[9]]);
-    g(1, 6, 11, 12, m[s[10]], m[s[11]]);
-    g(2, 7, 8, 13, m[s[12]], m[s[13]]);
-    g(3, 4, 9, 14, m[s[14]], m[s[15]]);
-  }
-  for (let i = 0; i < 8; i++) h[i] ^= v[i] ^ v[i + 8];
+/** v[a] += v[b], 64-bit. */
+function add64(a: number, b: number): void {
+  const lo = v[a] + v[b];
+  v[a + 1] = v[a + 1] + v[b + 1] + (lo >= 0x100000000 ? 1 : 0);
+  v[a] = lo;
 }
 
-/** Unkeyed BLAKE2b with an 8-byte digest, read as a little-endian unsigned integer (python's `int.from_bytes`). */
-export function blake2b64(data: Uint8Array): bigint {
-  const h = [...IV];
-  h[0] ^= 0x01010000n ^ 8n;
-  const blocks = Math.max(1, Math.ceil(data.length / 128));
-  for (let i = 0; i < blocks; i++) {
-    const block = new Uint8Array(128);
-    const chunk = data.subarray(i * 128, (i + 1) * 128);
-    block.set(chunk);
-    const last = i === blocks - 1;
-    compress(h, block, BigInt(last ? data.length : (i + 1) * 128), last);
+/** v[a] += m[x], 64-bit. */
+function add64m(a: number, x: number): void {
+  const lo = v[a] + m[x];
+  v[a + 1] = v[a + 1] + m[x + 1] + (lo >= 0x100000000 ? 1 : 0);
+  v[a] = lo;
+}
+
+function g(a: number, b: number, c: number, d: number, x: number, y: number): void {
+  add64(a, b);
+  add64m(a, x);
+  let lo = v[d] ^ v[a];
+  let hi = v[d + 1] ^ v[a + 1];
+  v[d] = hi; // rotate right 32
+  v[d + 1] = lo;
+  add64(c, d);
+  lo = v[b] ^ v[c];
+  hi = v[b + 1] ^ v[c + 1];
+  v[b] = (lo >>> 24) | (hi << 8); // rotate right 24
+  v[b + 1] = (hi >>> 24) | (lo << 8);
+  add64(a, b);
+  add64m(a, y);
+  lo = v[d] ^ v[a];
+  hi = v[d + 1] ^ v[a + 1];
+  v[d] = (lo >>> 16) | (hi << 16); // rotate right 16
+  v[d + 1] = (hi >>> 16) | (lo << 16);
+  add64(c, d);
+  lo = v[b] ^ v[c];
+  hi = v[b + 1] ^ v[c + 1];
+  v[b] = (hi >>> 31) | (lo << 1); // rotate right 63
+  v[b + 1] = (lo >>> 31) | (hi << 1);
+}
+
+function compress(h: Uint32Array, block: Uint8Array, counter: number, last: boolean): void {
+  for (let i = 0; i < 16; i++) {
+    v[i] = h[i];
+    v[i + 16] = IV[i];
   }
-  return h[0];
+  v[24] ^= counter >>> 0;
+  v[25] ^= Math.floor(counter / 0x100000000);
+  if (last) {
+    v[28] = ~v[28];
+    v[29] = ~v[29];
+  }
+  for (let i = 0; i < 32; i++)
+    m[i] = block[i * 4] | (block[i * 4 + 1] << 8) | (block[i * 4 + 2] << 16) | (block[i * 4 + 3] << 24);
+  for (let round = 0; round < 12; round++) {
+    const s = SIGMA[round % 10];
+    g(0, 8, 16, 24, s[0] * 2, s[1] * 2);
+    g(2, 10, 18, 26, s[2] * 2, s[3] * 2);
+    g(4, 12, 20, 28, s[4] * 2, s[5] * 2);
+    g(6, 14, 22, 30, s[6] * 2, s[7] * 2);
+    g(0, 10, 20, 30, s[8] * 2, s[9] * 2);
+    g(2, 12, 22, 24, s[10] * 2, s[11] * 2);
+    g(4, 14, 16, 26, s[12] * 2, s[13] * 2);
+    g(6, 8, 18, 28, s[14] * 2, s[15] * 2);
+  }
+  for (let i = 0; i < 16; i++) h[i] ^= v[i] ^ v[i + 16];
+}
+
+/** Unkeyed BLAKE2b with an 8-byte digest, as its low and high little-endian 32-bit words. */
+function blake2bWords(data: Uint8Array): [number, number] {
+  const h = IV.slice();
+  h[0] ^= 0x01010000 ^ 8;
+  const blocks = Math.max(1, Math.ceil(data.length / 128));
+  const block = new Uint8Array(128);
+  for (let i = 0; i < blocks; i++) {
+    block.fill(0);
+    block.set(data.subarray(i * 128, (i + 1) * 128));
+    const last = i === blocks - 1;
+    compress(h, block, last ? data.length : (i + 1) * 128, last);
+  }
+  return [h[0], h[1]];
+}
+
+/** The 8-byte digest read as a little-endian unsigned integer (python's `int.from_bytes(..., "little")`). */
+export function blake2b64(data: Uint8Array): bigint {
+  const [lo, hi] = blake2bWords(data);
+  return (BigInt(hi) << 32n) | BigInt(lo);
 }
 
 const WORD = /[a-z0-9']+/g;
@@ -111,6 +147,13 @@ export interface Embedder {
 }
 
 const encoder = new TextEncoder();
+const weights = new Map<number, number>();
+/** Sublinear term frequency, `1 + log(count)`, cached: counts repeat and the correctly rounded log is not cheap. */
+function weight(count: number): number {
+  let w = weights.get(count);
+  if (w === undefined) weights.set(count, (w = 1 + crLog(count)));
+  return w;
+}
 
 export function hashedEmbedder(dims = 1024): Embedder {
   return {
@@ -122,8 +165,9 @@ export function hashedEmbedder(dims = 1024): Embedder {
       const counts = new Map<string, number>();
       for (const feature of features) counts.set(feature, (counts.get(feature) ?? 0) + 1);
       for (const [feature, count] of counts) {
-        const n = blake2b64(encoder.encode(feature));
-        vector[Number(n % BigInt(dims))] += ((n >> 63n) & 1n ? 1 : -1) * (1 + crLog(count));
+        const [lo, hi] = blake2bWords(encoder.encode(feature));
+        // n % dims for n = hi * 2**32 + lo, exact in doubles for any dims below 2**20; the sign is bit 63
+        vector[(hi * (0x100000000 % dims) + (lo % dims)) % dims] += (hi >>> 31 ? 1 : -1) * weight(count);
       }
       return normalize(vector);
     },
@@ -136,9 +180,36 @@ export interface LlamaOptions {
   queryPrefix?: string;
   /** Per-request deadline. */
   timeoutMs?: number;
-  /** Largest response body read. */
+  /** Largest response body read; the read stops as soon as it is exceeded. */
   maxBytes?: number;
+  /** Absolute deadline (ms since the epoch) shared by every request of one recall. */
+  deadline?: number;
   fetch?: typeof fetch;
+}
+
+/** The whole body, read incrementally and abandoned as soon as it exceeds `maxBytes`. */
+async function readBounded(response: Response, maxBytes: number): Promise<Uint8Array> {
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  const reader = response.body?.getReader();
+  if (!reader) return new Uint8Array(0);
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > maxBytes) {
+      await reader.cancel().catch(() => {});
+      throw new Error('embedding response is too large');
+    }
+    chunks.push(value);
+  }
+  const body = new Uint8Array(total);
+  let at = 0;
+  for (const chunk of chunks) {
+    body.set(chunk, at);
+    at += chunk.byteLength;
+  }
+  return body;
 }
 
 /** A llama-server `/v1/embeddings` client, as python's LlamaEmbedder: prefixes by kind, model only when set. */
@@ -157,11 +228,10 @@ export function llamaEmbedder(url: string, options: LlamaOptions = {}): Embedder
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
-        signal: AbortSignal.timeout(timeoutMs),
+        signal: AbortSignal.timeout(remaining(timeoutMs, options.deadline)),
       });
       if (!response.ok) throw new Error(`embedding service answered ${response.status}`);
-      const raw = await response.arrayBuffer();
-      if (raw.byteLength > maxBytes) throw new Error('embedding response is too large');
+      const raw = await readBounded(response, maxBytes);
       const vector = (JSON.parse(new TextDecoder().decode(raw)) as { data: Array<{ embedding: unknown[] }> }).data[0]
         .embedding;
       return normalize(
@@ -189,4 +259,12 @@ export async function pickEmbedder(
     }
   }
   return hashedEmbedder(options.dims ?? 1024);
+}
+
+/** The time a request may take: its own limit, or less when the recall's shared deadline is nearer. */
+export function remaining(limitMs: number, deadline?: number): number {
+  if (deadline === undefined) return limitMs;
+  const left = deadline - Date.now();
+  if (left <= 0) throw new Error('recall took longer than its time limit');
+  return Math.min(limitMs, left);
 }

@@ -12,7 +12,7 @@ import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { sqlite } from '../src/chat-db.js';
 import { legacyRecall, parsePyJson, dumpPyJson, RECALL_LIMITS } from '../src/legacy-recall.js';
-import { hashedEmbedder } from '../src/memory-embed.js';
+import { hashedEmbedder, llamaEmbedder } from '../src/memory-embed.js';
 
 interface FixtureRow {
   id: number;
@@ -212,5 +212,177 @@ describe("python's json", () => {
         )
       )
     ).toBe('{"a": 2, "b": 1.0, "c": 100.0, "d": 0, "e": 12345678901234567890123, "f": [1.5e-07, "x\\u0001\\"y"]}');
+  });
+});
+
+describe('bounds on the embedding service and on one recall', () => {
+  async function serve(handler: http.RequestListener): Promise<{ url: string; close: () => Promise<void> }> {
+    const server = http.createServer(handler);
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    return {
+      url: `http://127.0.0.1:${(server.address() as AddressInfo).port}/v1`,
+      close: () =>
+        new Promise<void>((resolve) => {
+          server.closeAllConnections();
+          server.close(() => resolve());
+        }),
+    };
+  }
+
+  it('stops reading an embedding response as soon as it passes the size bound', async () => {
+    let written = 0;
+    const big = await serve((_req, res) => {
+      res.setHeader('Content-Type', 'application/json');
+      const chunk = Buffer.alloc(64 * 1024, 0x20);
+      const pump = () => {
+        while (written < 8 * 1024 * 1024) {
+          written += chunk.length;
+          if (!res.write(chunk)) return void res.once('drain', pump);
+        }
+        res.end();
+      };
+      res.on('close', () => (written = Math.min(written, 8 * 1024 * 1024)));
+      pump();
+    });
+    try {
+      await expect(llamaEmbedder(big.url, { maxBytes: 64 * 1024 }).embed('x')).rejects.toThrow(
+        'embedding response is too large'
+      );
+      expect(written).toBeLessThan(8 * 1024 * 1024);
+    } finally {
+      await big.close();
+    }
+  });
+
+  it('gives every request only the time left of the shared deadline', async () => {
+    const hang = await serve(() => {});
+    try {
+      const started = Date.now();
+      await expect(
+        llamaEmbedder(hang.url, { timeoutMs: 10_000, deadline: Date.now() + 300 }).embed('x')
+      ).rejects.toThrow();
+      expect(Date.now() - started).toBeLessThan(3000);
+    } finally {
+      await hang.close();
+    }
+  });
+
+  it('ends a whole recall at its time limit even when every request is within its own', async () => {
+    let requests = 0;
+    const slow = await serve((req, res) => {
+      if (requests++ === 0) {
+        req.resume();
+        req.on('end', () => res.end(JSON.stringify({ data: [{ embedding: [1, 0, 0] }] })));
+      } // later requests never answer
+    });
+    const c = fixture.cases.find((x) => x.id === 'private-service-embedder')!;
+    const total = RECALL_LIMITS.totalMs;
+    RECALL_LIMITS.totalMs = 800;
+    const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'legacy-recall-deadline-')));
+    try {
+      const config = path.join(root, 'config', 'agent.json');
+      fs.mkdirSync(path.dirname(config), { recursive: true });
+      fs.writeFileSync(config, JSON.stringify(c.instance));
+      await build(path.join(root, 'state', 'memory.sqlite'), c.schema, c.private!, null, null);
+      const started = Date.now();
+      await expect(
+        legacyRecall(config, c.request, { home: root, embedUrl: slow.url, now: () => fixture.now })
+      ).rejects.toThrow();
+      expect(Date.now() - started).toBeLessThan(4000);
+    } finally {
+      RECALL_LIMITS.totalMs = total;
+      fs.rmSync(root, { recursive: true, force: true });
+      await slow.close();
+    }
+  });
+
+  it('refuses rather than re-embedding more stale rows than the bound', async () => {
+    const c = fixture.cases.find((x) => x.id === 'private-stale-reembedded-hashed')!;
+    const cap = RECALL_LIMITS.hashedReembeds;
+    RECALL_LIMITS.hashedReembeds = 1;
+    const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'legacy-recall-cap-')));
+    try {
+      const config = path.join(root, 'config', 'agent.json');
+      fs.mkdirSync(path.dirname(config), { recursive: true });
+      fs.writeFileSync(config, JSON.stringify(c.instance));
+      await build(path.join(root, 'state', 'memory.sqlite'), c.schema, c.private!, null, null);
+      await expect(legacyRecall(config, c.request, { home: root, now: () => fixture.now })).rejects.toThrow(
+        /stored under another embedder/
+      );
+    } finally {
+      RECALL_LIMITS.hashedReembeds = cap;
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('bounds on what one recall reads and returns', () => {
+  async function store(id: string, legacy?: (state: string) => void) {
+    const c = fixture.cases.find((x) => x.id === id)!;
+    const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'legacy-recall-bound-')));
+    const config = path.join(root, 'config', 'agent.json');
+    fs.mkdirSync(path.dirname(config), { recursive: true });
+    fs.writeFileSync(config, JSON.stringify(c.instance));
+    await build(path.join(root, 'state', 'memory.sqlite'), c.schema, c.private!, c.columns, c.state);
+    legacy?.(path.join(root, 'state'));
+    return {
+      recall: () => legacyRecall(config, c.request, { home: root, now: () => fixture.now }),
+      done: () => fs.rmSync(root, { recursive: true, force: true }),
+    };
+  }
+  async function withLimit(name: keyof typeof RECALL_LIMITS, value: number, run: () => Promise<void>) {
+    const before = RECALL_LIMITS[name];
+    RECALL_LIMITS[name] = value;
+    try {
+      await run();
+    } finally {
+      RECALL_LIMITS[name] = before;
+    }
+  }
+
+  it('measures row sizes before reading any row, and refuses an oversized one', async () => {
+    const s = await store('private-hashed-ranking');
+    try {
+      await withLimit('rowBytes', 64, () =>
+        expect(s.recall()).rejects.toThrow('an old memory is too large for recall to read')
+      );
+      await withLimit('inputBytes', 1024, () =>
+        expect(s.recall()).rejects.toThrow('the old memory store is too large for recall to read')
+      );
+    } finally {
+      s.done();
+    }
+  });
+
+  it('refuses results larger than the old bridge passed on', async () => {
+    const s = await store('private-hashed-ranking');
+    try {
+      await withLimit('outputBytes', 512, () =>
+        expect(s.recall()).rejects.toThrow('returned more than recall passes on')
+      );
+    } finally {
+      s.done();
+    }
+  });
+
+  it('refuses an over-bound legacy-history.json instead of answering as if none were pending', async () => {
+    const s = await store('legacy-history-without-pairs', (state) =>
+      fs.writeFileSync(path.join(state, 'legacy-history.json'), '[' + ' '.repeat(100) + ']')
+    );
+    try {
+      await withLimit('legacyHistoryBytes', 10, () =>
+        expect(s.recall()).rejects.toThrow('legacy-history.json is too large to read')
+      );
+    } finally {
+      s.done();
+    }
+    const dir = await store('legacy-history-without-pairs', (state) =>
+      fs.mkdirSync(path.join(state, 'legacy-history.json'))
+    );
+    try {
+      expect(await dir.recall()).toMatch(/^\[\{"id": 1/); // a directory is an OSError to python: nothing pending
+    } finally {
+      dir.done();
+    }
   });
 });
