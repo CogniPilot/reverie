@@ -1,5 +1,7 @@
 //! Read-only process snapshots, never website, program or owner authority.
 mod read;
+#[cfg(test)]
+mod tests;
 use super::{
     Result, WebsiteFactsError,
     files::{Descriptors, finalized},
@@ -11,6 +13,7 @@ use reverie_core::{decimal::UnsignedInteger, operations::JournalDigest};
 use std::time::Instant;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+/// Kernel observation DATA, not a program/website/owner or action grant.
 pub struct ProcessSnapshot {
     pid: UnsignedInteger,
     start: UnsignedInteger,
@@ -52,6 +55,7 @@ impl PeerProcessSnapshot {
     }
 }
 #[derive(Default)]
+#[must_use = "retain this observer and the original channel hold on uncertain descriptor close"]
 pub struct WebsiteProcessObserver {
     close_uncertain: bool,
 }
@@ -88,8 +92,9 @@ impl WebsiteProcessObserver {
         let pid = UnsignedInteger::from_u64(peer.pid() as u64);
         let mut files = Descriptors::default();
         let body = self.peer_body(&mut files, &pid, peer, end);
+        let body = files.finish(body, &mut self.close_uncertain);
         let checked = channel.require_connected().map_err(WebsiteFactsError::from);
-        files.finish(finalized(body, checked), &mut self.close_uncertain)
+        finalized(body, checked)
     }
     fn peer_body(
         &self,

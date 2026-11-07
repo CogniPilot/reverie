@@ -20,7 +20,7 @@ impl ProcessStatData {
             .first()
             .ok_or(ResourceActorDataError("PROCESS_STAT_REQUIRED"))?;
         need(!matches!(*state, b"Z" | b"X"), "PROCESS_ENDED")?;
-        let integer = |index| -> Result<UnsignedInteger> {
+        let integer = |index: usize| -> Result<UnsignedInteger> {
             let bytes = fields
                 .get(index)
                 .ok_or(ResourceActorDataError("PROCESS_STAT_REQUIRED"))?;
