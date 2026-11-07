@@ -24,6 +24,7 @@ pub enum ImageCacheError {
     Store(ImageStoreError),
     Office(OfficeImageError),
     Thread(std::io::Error),
+    Retained(Box<Self>),
     Finalization {
         primary: Box<Self>,
         secondary: Box<Self>,
@@ -36,6 +37,18 @@ impl ImageCacheError {
             Self::Store(error) => error.code(),
             Self::Office(error) => error.code(),
             Self::Thread(_) | Self::Finalization { .. } => "cache_unavailable",
+            Self::Retained(error) => error.code(),
+        }
+    }
+    pub fn is_uncertain(&self) -> bool {
+        match self {
+            Self::Retained(_) => true,
+            Self::Store(error) => error.is_uncertain(),
+            Self::Office(error) => error.is_uncertain(),
+            Self::Finalization { primary, secondary } => {
+                primary.is_uncertain() || secondary.is_uncertain()
+            }
+            _ => false,
         }
     }
 }
@@ -92,7 +105,8 @@ impl ChatImageCache {
         reader: OfficeImageReader,
     ) -> std::result::Result<Arc<Self>, Box<ImageCacheCaptureFailure>> {
         let checked = require(
-            matches!(binding.phase, BindingPhase::Cache)
+            nix::unistd::getuid() == nix::unistd::geteuid()
+                && matches!(binding.phase, BindingPhase::Cache)
                 && binding.selection.assert_runtime(runtime).is_ok()
                 && binding.selection.paths().session() == reader.session(),
             "binding_changed",

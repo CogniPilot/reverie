@@ -92,7 +92,7 @@ impl ChatImageCache {
         if result.is_ok() {
             self.closed.store(true, Ordering::Release);
         }
-        result
+        result.map_err(|error| ImageCacheError::Retained(Box::new(error)))
     }
     fn close_store(&self, end: Instant, retire: bool) -> CacheResult<()> {
         loop {

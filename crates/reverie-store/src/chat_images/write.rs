@@ -54,7 +54,7 @@ impl ImageCache {
         let result = finalized(
             result,
             private_fs::close(file, CloseRole::Data, self.custody.cache().path())
-                .map_err(Into::into),
+                .map_err(super::ImageStoreError::Close),
         );
         let result = result.and_then(|()| {
             self.verify(
@@ -75,13 +75,18 @@ impl ImageCache {
             Err(error) if adopted => {
                 let result = finalized(Err(error), self.remove(&name));
                 self.failed = true;
+                self.uncertain |= result
+                    .as_ref()
+                    .err()
+                    .is_some_and(|error| error.is_uncertain());
                 result
             }
             Err(error) => {
                 // No fstat means the real exclusive file's identity is unknown;
                 // preserve its name and fence this manager, never guess-delete.
                 self.failed = true;
-                Err(error)
+                self.uncertain = true;
+                Err(super::ImageStoreError::Unconfirmed(Box::new(error)))
             }
         }
     }

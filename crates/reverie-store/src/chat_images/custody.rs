@@ -71,7 +71,9 @@ impl Custody {
         match self.close {
             CloseState::Open => Ok(true),
             CloseState::Closed => Ok(false),
-            CloseState::Unconfirmed => Err(ImageStoreError::Refused("custody_unconfirmed")),
+            CloseState::Unconfirmed => Err(ImageStoreError::Unconfirmed(Box::new(
+                ImageStoreError::Refused("custody_unconfirmed"),
+            ))),
         }
     }
     pub(super) fn read(&self) -> Result<Option<(ImageLedger, Vec<u8>)>> {
@@ -86,7 +88,8 @@ impl Custody {
         })();
         finalized(
             result,
-            private_fs::close(file, CloseRole::Data, self.state().path()).map_err(Into::into),
+            private_fs::close(file, CloseRole::Data, self.state().path())
+                .map_err(ImageStoreError::Close),
         )
         .map(Some)
     }
@@ -131,7 +134,8 @@ impl Custody {
         })();
         let result = finalized(
             result,
-            private_fs::close(file, CloseRole::Temporary, self.state().path()).map_err(Into::into),
+            private_fs::close(file, CloseRole::Temporary, self.state().path())
+                .map_err(ImageStoreError::Close),
         );
         if replace {
             finalized(
@@ -152,19 +156,20 @@ impl Custody {
         }
         self.close = CloseState::Unconfirmed;
         let result = self.lock.take().map_or(Ok(()), |file| {
-            private_fs::close(file, CloseRole::Lock, self.state().path()).map_err(Into::into)
+            private_fs::close(file, CloseRole::Lock, self.state().path())
+                .map_err(ImageStoreError::Close)
         });
         let result = finalized(
             result,
-            self.cache
-                .take()
-                .map_or(Ok(()), |cache| cache.close().map_err(Into::into)),
+            self.cache.take().map_or(Ok(()), |cache| {
+                cache.close().map_err(ImageStoreError::Close)
+            }),
         );
         let result = finalized(
             result,
-            self.state
-                .take()
-                .map_or(Ok(()), |state| state.close().map_err(Into::into)),
+            self.state.take().map_or(Ok(()), |state| {
+                state.close().map_err(ImageStoreError::Close)
+            }),
         );
         if result.is_ok() {
             self.close = CloseState::Closed;

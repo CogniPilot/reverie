@@ -42,6 +42,7 @@ pub struct ImageCache {
     entries: Vec<Entry>,
     origin: Arc<()>,
     failed: bool,
+    uncertain: bool,
 }
 /// Construction failure retains the actual owner if its finalization refused.
 pub struct ImageCacheOpenFailure {
@@ -52,7 +53,7 @@ impl ImageCache {
     pub fn prepare_root(temporary: &Path) -> Result<std::path::PathBuf> {
         let parent = crate::private_fs::Directory::open(temporary)?;
         let result = parent.prepare_image_child().map_err(Into::into);
-        error::finalized(result, parent.close().map_err(Into::into))
+        error::finalized(result, parent.close().map_err(ImageStoreError::Close))
     }
     pub fn open(state: &Path, root: &Path) -> std::result::Result<Self, ImageCacheOpenFailure> {
         let mut cache = Self {
@@ -60,6 +61,7 @@ impl ImageCache {
             entries: Vec::new(),
             origin: Arc::new(()),
             failed: false,
+            uncertain: false,
         };
         let opened = cache
             .custody
@@ -68,12 +70,20 @@ impl ImageCache {
         match opened {
             Ok(()) => Ok(cache),
             Err(error) => match cache.custody.close() {
-                Ok(()) => Err(ImageCacheOpenFailure {
+                Ok(()) if !error.is_uncertain() => Err(ImageCacheOpenFailure {
                     error,
                     retained: None,
                 }),
+                Ok(()) => {
+                    cache.uncertain = true;
+                    Err(ImageCacheOpenFailure {
+                        error,
+                        retained: Some(Box::new(cache)),
+                    })
+                }
                 Err(close) => {
                     cache.failed = true;
+                    cache.uncertain = true;
                     Err(ImageCacheOpenFailure {
                         error: error::finalized::<()>(Err(error), Err(close))
                             .expect_err("two errors"),
@@ -133,6 +143,9 @@ impl ImageCache {
     }
     /// Close after the Host's actual reaper has joined, preserving one deadline.
     pub fn close(&mut self, end: Instant) -> Result<()> {
+        if self.uncertain {
+            return self.retire();
+        }
         if !self.custody.require_active()? {
             return Ok(());
         }
@@ -150,7 +163,18 @@ impl ImageCache {
     }
     /// Retiring a changed generation preserves bytes and ledger for recovery.
     pub fn retire(&mut self) -> Result<()> {
-        self.custody.close()
+        let result = self.custody.close();
+        self.uncertain |= result.is_err();
+        if self.uncertain {
+            error::finalized(
+                Err(ImageStoreError::Unconfirmed(Box::new(
+                    ImageStoreError::Refused("custody_unconfirmed"),
+                ))),
+                result,
+            )
+        } else {
+            result
+        }
     }
     fn deadline(now: Instant) -> Instant {
         now + Duration::from_secs(LIFETIME_SECONDS)

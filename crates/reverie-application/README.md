@@ -1,5 +1,18 @@
 # Reverie application services
 
+The native chat-image actor accepts the authenticated M connection retained in
+the existing report record. Its two-request admission precedes decoding. The
+inert manager is allocated before telemetry and Gate construction; current
+employee, generation, actual laptop namespace and registered Office are checked
+before materialization. Every image performs fresh message/file/message GETs,
+followed by current-binding checks before publication. Cache adoption, physical
+socket closure and actual logical Hold release are separate outcomes. Known
+body/delivery refusals remain reportable after cleanup; uncertain native calls,
+descriptor closes or custody writes retain the whole connection, Hold, permit
+and real resource owner. A full cache is a known refusal, not close uncertainty.
+This library producer is unselected until the broker dispatch, generation
+advance and whole-service lifetime consumers are independently qualified.
+
 `RetainedPreparation::begin_native_start` reuses the live protected claim,
 original source baseline and fresh complete qualification before the real
 journal STARTING/version-4 transition. Its exclusive start-intent receipt and

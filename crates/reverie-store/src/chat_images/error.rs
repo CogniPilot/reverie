@@ -6,6 +6,8 @@ use std::fmt;
 pub enum ImageStoreError {
     Refused(&'static str),
     Store(StoreError),
+    Close(StoreError),
+    Unconfirmed(Box<Self>),
     Data(ImageDataError),
     Finalization {
         primary: Box<Self>,
@@ -17,8 +19,18 @@ impl ImageStoreError {
         match self {
             Self::Refused(code) => code,
             Self::Store(_) => "custody_unavailable",
+            Self::Close(_) | Self::Unconfirmed(_) => "custody_unconfirmed",
             Self::Data(error) => error.code(),
             Self::Finalization { .. } => "custody_unconfirmed",
+        }
+    }
+    pub fn is_uncertain(&self) -> bool {
+        match self {
+            Self::Close(_) | Self::Unconfirmed(_) => true,
+            Self::Finalization { primary, secondary } => {
+                primary.is_uncertain() || secondary.is_uncertain()
+            }
+            _ => false,
         }
     }
 }

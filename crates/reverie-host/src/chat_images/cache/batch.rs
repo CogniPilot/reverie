@@ -54,7 +54,10 @@ impl ImageMaterialization {
                 Ok(())
             }
             Err(error) => {
-                self.uncertain = true;
+                self.uncertain |= error.is_uncertain();
+                if self.uncertain {
+                    self.cache.shared.failed.store(true, Ordering::Release);
+                }
                 Err(ImageCacheError::Store(error))
             }
         }
@@ -79,9 +82,14 @@ impl ImageMaterialization {
             .cache
             .lock()
             .map_err(|_| ImageCacheError::Refused("cache_unavailable"))?;
-        let lifetimes = cache
-            .verify_copies(&self.made, Instant::now())
-            .map_err(ImageCacheError::Store)?;
+        let lifetimes = match cache.verify_copies(&self.made, Instant::now()) {
+            Ok(lifetimes) => lifetimes,
+            Err(error) => {
+                self.uncertain |= error.is_uncertain();
+                self.cache.shared.failed.store(true, Ordering::Release);
+                return Err(ImageCacheError::Store(error));
+            }
+        };
         let files = self
             .made
             .iter()

@@ -2,7 +2,9 @@
 //! lifecycle registry and effects remain private composition of this service;
 //! a captured configuration is neither owner authorization nor a start grant.
 mod bootstrap;
+mod chat_images;
 pub use bootstrap::{BootstrapSettlementError, BrokerBootstrapCause, BrokerBootstrapFailure};
+pub use chat_images::{ChatImageHandlerClosed, ChatImageHandlerFailure, ChatImagesError};
 #[cfg(test)]
 mod bootstrap_tests;
 mod creation;
@@ -167,6 +169,7 @@ pub struct InstallingBroker {
     telemetry: Arc<reverie_host::command_telemetry::CommandTelemetry>,
     reports: Arc<reverie_host::worker_reports::WorkerReportService>,
     recovery: Arc<RecoveryOwners>,
+    images: Arc<chat_images::ChatImages>,
 }
 impl InstallingBroker {
     /// Trusted installing bootstrap; no wire-selected native engine or path.

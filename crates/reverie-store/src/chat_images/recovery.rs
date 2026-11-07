@@ -20,7 +20,7 @@ impl ImageCache {
             if !ledger.entries().is_empty() {
                 self.custody.retain(&raw)?;
             }
-            return self.custody.checkpoint(Vec::new());
+            return self.checkpoint();
         }
         let known = ledger
             .entries()
@@ -55,6 +55,6 @@ impl ImageCache {
                 .remove_temporary(entry.name().as_str(), &stamp)?;
         }
         self.custody.cache().sync()?;
-        self.custody.checkpoint(Vec::new())
+        self.checkpoint()
     }
 }

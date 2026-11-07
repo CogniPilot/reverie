@@ -1,6 +1,7 @@
 //! The single installing lifecycle state. Native operations and resource
 //! settlement stay with their actual owners; membership is never a stop grant.
 use super::*;
+use reverie_core::decimal::UnsignedInteger;
 use reverie_host::worker_reports::{WorkerLaunchConnection, WorkerLaunchHold};
 use std::ops::{Deref, DerefMut};
 mod reuse_finalization;
@@ -8,7 +9,17 @@ mod reuse_finalization;
 /// Only equality with the same installed state has meaning. This is not wire
 /// data or permission. Keeping the Arc prevents address reuse while observed.
 #[derive(Clone)]
-pub(super) struct LaunchGeneration(Arc<()>);
+pub(super) struct LaunchGeneration(Arc<Generation>);
+struct Generation {
+    serial: UnsignedInteger,
+}
+impl LaunchGeneration {
+    /// The original Python integer is binding DATA. Equality/currentness still
+    /// requires the retained Arc and the SAME lifecycle guard below.
+    pub(super) fn serial(&self) -> &UnsignedInteger {
+        &self.0.serial
+    }
+}
 struct ActiveLaunch {
     session: ProfileSessionId,
     identity: Arc<()>,
@@ -32,7 +43,9 @@ impl LaptopState {
             committed: Vec::new(),
             active: Vec::new(),
             pending: Vec::new(),
-            generation: LaunchGeneration(Arc::new(())),
+            generation: LaunchGeneration(Arc::new(Generation {
+                serial: UnsignedInteger::from_u64(0),
+            })),
             draining: false,
         }
     }

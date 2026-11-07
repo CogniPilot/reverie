@@ -17,7 +17,10 @@ impl ImageCache {
         if result.is_err() {
             self.failed = true;
         }
-        result
+        result.map_err(|error| {
+            self.uncertain = true;
+            super::ImageStoreError::Unconfirmed(Box::new(error))
+        })
     }
     pub(super) fn verify(&self, entry: &Entry) -> Result<()> {
         self.verify_record(&entry.record)
@@ -47,7 +50,7 @@ impl ImageCache {
         finalized(
             result,
             private_fs::close(file, CloseRole::Data, self.custody.cache().path())
-                .map_err(Into::into),
+                .map_err(super::ImageStoreError::Close),
         )
     }
     pub(super) fn remove(&mut self, name: &ImageFileName) -> Result<()> {

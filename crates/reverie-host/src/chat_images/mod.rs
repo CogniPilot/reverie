@@ -60,6 +60,14 @@ pub struct ImageObservationFailure {
     query: QueryOwner,
     cause: ImageObserveError,
 }
+impl fmt::Debug for ImageObservationFailure {
+    fn fmt(&self, out: &mut fmt::Formatter<'_>) -> fmt::Result {
+        out.debug_struct("ImageObservationFailure")
+            .field("code", &self.cause.code())
+            .field("pending_native", &self.has_pending_native())
+            .finish_non_exhaustive()
+    }
+}
 impl ImageObservationFailure {
     pub fn error(&self) -> &ImageObserveError {
         &self.cause
@@ -97,6 +105,16 @@ pub struct ObservedImageBinding {
     temporary: PathBuf,
     phase: BindingPhase,
 }
+/// Source-ordered metadata/mount/namespace observation BEFORE Office lookup.
+/// It owns no grant, open image, socket or logical report lifecycle hold.
+pub struct ObservedImageNamespace {
+    selection: StorageSelection,
+    inspection: reverie_contracts::chat_images::ImageInspection,
+    temporary: PathBuf,
+    start: String,
+    identity: [u64; 2],
+    phase: BindingPhase,
+}
 #[derive(Clone, Copy)]
 enum BindingPhase {
     Temporary,
@@ -106,6 +124,11 @@ impl ObservedImageBinding {
     /// Fixed cache mkdir at the real selected scratch namespace. This remains
     /// an effect, never a current-binding success: App observes cache=true again.
     pub fn prepare_cache_root(&self) -> reverie_store::chat_images::Result<PathBuf> {
+        if nix::unistd::getuid() != nix::unistd::geteuid() {
+            return Err(reverie_store::chat_images::ImageStoreError::Refused(
+                "unsafe_cache",
+            ));
+        }
         reverie_store::chat_images::ImageCache::prepare_root(&self.temporary)
     }
     pub fn generation(&self) -> &ImageDigest {

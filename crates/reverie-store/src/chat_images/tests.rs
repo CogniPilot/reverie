@@ -130,13 +130,19 @@ fn failed_actual_file_finalization_fences_further_ready() {
     let mut cache = fixture.open();
     crate::faults::STATE
         .with(|state| state.borrow_mut().close = Some(crate::private_fs::CloseRole::Data));
-    assert!(cache.install(PNG, Instant::now()).is_err());
+    assert!(
+        cache
+            .install(PNG, Instant::now())
+            .err()
+            .unwrap()
+            .is_uncertain()
+    );
     crate::faults::reset();
     assert_eq!(
         cache.begin(Instant::now()).err().unwrap().code(),
         "cache_unavailable"
     );
-    cache.retire().unwrap();
+    assert!(cache.retire().err().unwrap().is_uncertain());
 }
 #[test]
 fn retired_owner_is_terminal_and_repeated_known_close_preserves_bytes() {
@@ -217,4 +223,58 @@ fn failed_constructor_close_returns_sticky_actual_owner() {
         fs::read(fixture.cache.join("unknown")).unwrap(),
         b"preserved"
     );
+}
+#[test]
+fn known_cache_limit_is_not_close_uncertainty_and_existing_copies_remain_usable() {
+    let fixture = Fixture::new();
+    let mut cache = fixture.open();
+    let now = Instant::now();
+    let copies = (0..reverie_core::chat_images::MAX_CACHE_FILES)
+        .map(|_| cache.install(PNG, now).unwrap())
+        .collect::<Vec<_>>();
+    let refused = cache.install(PNG, now).err().unwrap();
+    assert_eq!(refused.code(), "cache_limit");
+    assert!(!refused.is_uncertain());
+    assert_eq!(
+        cache.verify_copies(&copies, now).unwrap().len(),
+        copies.len()
+    );
+    cache.begin(now).unwrap();
+    cache
+        .close(Instant::now() + Duration::from_secs(2))
+        .unwrap();
+}
+#[test]
+fn actual_ledger_read_close_refusal_retains_original_constructor_uncertainty() {
+    let fixture = Fixture::new();
+    let mut cache = fixture.open();
+    cache.install(PNG, Instant::now()).unwrap();
+    cache.retire().unwrap();
+    let ledger = fs::read(fixture.state.join(custody::NAME)).unwrap();
+    crate::faults::STATE
+        .with(|state| state.borrow_mut().close = Some(crate::private_fs::CloseRole::Data));
+    let failure = ImageCache::open(&fixture.state, &fixture.cache)
+        .err()
+        .unwrap();
+    crate::faults::reset();
+    assert!(failure.error.is_uncertain());
+    let mut retained = failure
+        .retained
+        .expect("actual constructor retained after read close");
+    assert!(retained.retire().err().unwrap().is_uncertain());
+    assert!(retained.retire().err().unwrap().is_uncertain());
+    assert_eq!(fs::read(fixture.state.join(custody::NAME)).unwrap(), ledger);
+    assert_eq!(fs::read_dir(&fixture.cache).unwrap().count(), 1);
+}
+#[test]
+fn actual_checkpoint_close_refusal_is_typed_and_cannot_be_retried_to_success() {
+    let fixture = Fixture::new();
+    let mut cache = fixture.open();
+    crate::faults::STATE
+        .with(|state| state.borrow_mut().close = Some(crate::private_fs::CloseRole::Temporary));
+    let error = cache.install(PNG, Instant::now()).err().unwrap();
+    crate::faults::reset();
+    assert!(error.is_uncertain());
+    assert!(cache.retire().err().unwrap().is_uncertain());
+    assert!(cache.close(Instant::now()).err().unwrap().is_uncertain());
 }
