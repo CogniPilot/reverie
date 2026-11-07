@@ -2,8 +2,8 @@
 //! scope come from installation, never a request-selected employee/path label.
 //! This service cannot bootstrap or write the selected memory database.
 use reverie_contracts::memory::MemoryView;
-use reverie_core::memory::{Embedder, EmbeddingText};
-use reverie_store::memory::{MemoryError, MemoryReader, RetrievalOptions};
+use reverie_core::memory::{Embedder, EmbeddingText, MemoryStartupPhase};
+use reverie_store::memory::{MemoryError, MemoryReadProfile, MemoryReader, RetrievalOptions};
 use std::{
     path::Path,
     sync::{
@@ -12,9 +12,6 @@ use std::{
     },
 };
 
-pub(crate) const STARTUP_STATE: &str = "native_memory_startup_v1";
-pub(crate) const STARTUP_READY: &str = "ready";
-pub(crate) const STARTUP_MODEL: &str = "native_memory_embed_model_v1";
 pub struct MemoryRecall {
     reader: MemoryReader,
     count: i64,
@@ -30,19 +27,13 @@ impl MemoryRecall {
         decay_per_hour: f64,
         count: i64,
     ) -> Result<Self, MemoryError> {
-        let reader = MemoryReader::open_with(path, embedder, decay_per_hour)?;
+        let reader = MemoryReadProfile::open_native(path)?.bind(embedder, decay_per_hour)?;
         Self::from_reader(reader, count)
     }
     pub(crate) fn from_reader(reader: MemoryReader, count: i64) -> Result<Self, MemoryError> {
         let readiness = require_ready(&reader);
         if let Err(primary) = readiness {
-            return match reader.close() {
-                Ok(()) => Err(primary),
-                Err(secondary) => Err(MemoryError::Finalization {
-                    primary: Box::new(primary),
-                    secondary: Box::new(secondary),
-                }),
-            };
+            return Err(reader.finalize_error(primary));
         }
         Ok(Self::bind_existing(reader, count))
     }
@@ -78,6 +69,9 @@ impl MemoryRecall {
     pub fn close(&self) -> Result<(), MemoryError> {
         self.reader.close()
     }
+    pub(crate) fn shutdown(&self) -> reverie_core::shutdown::ShutdownStatus<MemoryError> {
+        self.reader.shutdown()
+    }
     pub(crate) fn under_lifecycle(mut self, closed: Arc<AtomicBool>) -> Self {
         self.lifecycle = Some(closed);
         self
@@ -95,19 +89,22 @@ impl MemoryRecall {
     }
 }
 fn require_ready(reader: &MemoryReader) -> Result<(), MemoryError> {
-    match reader.get_state(STARTUP_STATE)?.as_deref() {
-        Some(STARTUP_READY) => {
+    let Some(readiness) = reader.native_readiness()? else {
+        return Err(MemoryError::NotInitialized);
+    };
+    match readiness.phase() {
+        MemoryStartupPhase::Ready => {
             let selected = reader
                 .embedder_name()
                 .scalar_text()
                 .ok_or(reverie_core::memory::EmbeddingError::InvalidText)?;
-            if reader.get_state(STARTUP_MODEL)?.as_deref() == Some(selected.as_str()) {
+            if readiness.model() == Some(selected.as_str()) {
                 Ok(())
             } else {
                 Err(MemoryError::NeedsMigration)
             }
         }
-        Some("profile-pending") => Err(MemoryError::NeedsProfileRefresh),
-        _ => Err(MemoryError::NotInitialized),
+        MemoryStartupPhase::ProfilePending => Err(MemoryError::NeedsProfileRefresh),
+        MemoryStartupPhase::Initializing => Err(MemoryError::NotInitialized),
     }
 }

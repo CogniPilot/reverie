@@ -11,6 +11,8 @@ use std::{
     },
 };
 static NEXT: AtomicU64 = AtomicU64::new(0);
+#[path = "memory_store/native_readiness.rs"]
+mod native_readiness;
 struct Tree(PathBuf);
 impl Tree {
     fn new() -> Self {

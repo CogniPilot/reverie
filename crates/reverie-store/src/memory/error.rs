@@ -28,6 +28,25 @@ pub enum MemoryError {
     NotInitialized,
     NeedsMigration,
     NeedsProfileRefresh,
+    LegacyReadinessCollision,
+    ForeignReadinessNamespace,
+    MalformedReadinessMetadata,
+    UnsupportedReadinessVersion,
+    ReadinessRecoveryRequired,
+    ReadinessObservationUnavailable(Box<Self>),
+    ReadinessChanged,
+    ReadinessUnconfirmed,
+    /// Failed native constructor with an actual refused-close connection.
+    NativeReadPending {
+        primary: Box<Self>,
+        reader: Box<super::NativeMemoryRead>,
+    },
+    /// Failed bound read whose actual SQLite connection still needs shutdown.
+    ReaderPending {
+        primary: Box<Self>,
+        reader: Box<super::MemoryReader>,
+    },
+    Filesystem(crate::StoreError),
     AmbiguousLegacyHistory,
     Closed,
     Poisoned,
@@ -53,6 +72,7 @@ impl fmt::Display for MemoryError {
             Self::Math(e) => e.fmt(f),
             Self::Ranking(e) => e.fmt(f),
             Self::Json(e) => e.fmt(f),
+            Self::Filesystem(e) => e.fmt(f),
             Self::Missing(id) => write!(f, "memory or belief {id} does not exist"),
             Self::ProtectedBelief(id) => write!(
                 f,
@@ -76,10 +96,14 @@ impl std::error::Error for MemoryError {
             Self::DocumentCodec(e) => Some(e),
             Self::DocumentPolicy(e) => Some(e),
             Self::Json(e) => Some(e),
-            Self::Finalization { primary, .. } => Some(primary),
-            Self::BackupUncertain(e) | Self::RestoreUncertain(e) | Self::RollbackAfterPanic(e) => {
-                Some(e)
-            }
+            Self::Filesystem(e) => Some(e),
+            Self::Finalization { primary, .. }
+            | Self::NativeReadPending { primary, .. }
+            | Self::ReaderPending { primary, .. } => Some(primary),
+            Self::BackupUncertain(e)
+            | Self::RestoreUncertain(e)
+            | Self::RollbackAfterPanic(e)
+            | Self::ReadinessObservationUnavailable(e) => Some(e),
             _ => None,
         }
     }
@@ -102,6 +126,11 @@ impl From<reverie_core::memory_documents::DocumentPolicyError> for MemoryError {
 impl From<io::Error> for MemoryError {
     fn from(e: io::Error) -> Self {
         Self::Io(e)
+    }
+}
+impl From<crate::StoreError> for MemoryError {
+    fn from(error: crate::StoreError) -> Self {
+        Self::Filesystem(error)
     }
 }
 impl From<EmbeddingError> for MemoryError {

@@ -58,7 +58,7 @@ impl Stamp {
             && self.links == 1
     }
 }
-fn uid() -> u32 {
+pub(crate) fn uid() -> u32 {
     // SAFETY: geteuid has no pointer or lifetime preconditions.
     unsafe { libc::geteuid() }
 }
