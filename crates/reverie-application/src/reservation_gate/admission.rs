@@ -71,6 +71,7 @@ impl Inner {
             context: Mutex::new(self.observer.capture(config.configuration().clone(), None)),
             deadline: Mutex::new(end),
             policy_ack: Mutex::new(None),
+            gpu_transition: Mutex::new(None),
         });
         #[cfg(test)]
         {

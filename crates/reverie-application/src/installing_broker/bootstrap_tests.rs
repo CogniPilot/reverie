@@ -17,7 +17,7 @@ fn unreserved(tree: &Tree) {
     tree.write("worker.json", &serde_json::to_vec(&raw).unwrap());
     tree.write("company.json", br#"{"employees":[]}"#);
 }
-fn broker(tree: &Tree) -> Result<InstallingBroker, GateError> {
+fn broker(tree: &Tree) -> Result<InstallingBroker, Box<BrokerBootstrapFailure>> {
     let snapshot = load_owner_config(&tree.root.join("worker.json")).unwrap();
     // Construction/legacy resolution must not query the engine. A query to
     // this real captured test executable would fail instead of faking success.

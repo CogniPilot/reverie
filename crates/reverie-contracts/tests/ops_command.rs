@@ -1,5 +1,5 @@
 use reverie_contracts::ops_command::{OpsCommand, OpsReply};
-use reverie_core::worker_options::OpsServiceId;
+use reverie_core::ops::OpsServiceId;
 use serde_json::Value;
 fn fixture() -> Value {
     serde_json::from_str(include_str!("fixtures/ops-command-python.json")).unwrap()

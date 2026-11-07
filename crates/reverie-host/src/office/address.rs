@@ -61,7 +61,9 @@ impl AddressSource {
                 let job = company.native_jobs.socket(value, lifetime)?;
                 match wait(&job).await? {
                     NativeValue::Socket(addresses) => Ok(addresses),
-                    NativeValue::Address(..) => Err(OfficeError::Unconfirmed),
+                    NativeValue::Address(..) | NativeValue::Telemetry(_) => {
+                        Err(OfficeError::Unconfirmed)
+                    }
                 }
             }
         }
@@ -111,7 +113,9 @@ async fn literal(
             // Its original completion time is not renewed by another waiter;
             // discard an expired result and select a fresh fixed query.
             Ok(NativeValue::Address(..)) => (),
-            Ok(NativeValue::Socket(_)) => return Err(OfficeError::Unconfirmed),
+            Ok(NativeValue::Socket(_) | NativeValue::Telemetry(_)) => {
+                return Err(OfficeError::Unconfirmed);
+            }
             Err(error) if owner => return Err(error),
             // As with the original address_lock, another waiter gets its own
             // read after the first failed lookup, never a cached false success.

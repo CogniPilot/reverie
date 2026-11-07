@@ -9,6 +9,7 @@ let
   # Use the original snapshot for the selected files so read-only flake check
   # evaluation never has to materialize the intermediate filtered root first.
   consoleFixture = relative: builtins.path { path = (src.origSrc or src) + "/${relative}"; };
+  rustRouteHandler = import ./rust-route-handler.nix { inherit pkgs src; };
   console = pkgs.buildNpmPackage {
     pname = "reverie-console";
     version = manifest.version;
@@ -40,6 +41,17 @@ let
       mkdir -p test/fixtures/subscription-profiles
       cp ${consoleFixture "crates/reverie-routes/tests/fixtures/subscription-profiles/cases.json"} test/fixtures/subscription-profiles/cases.json
       cp ${consoleFixture "crates/reverie-routes/tests/fixtures/subscription-profiles/goldens.json"} test/fixtures/subscription-profiles/goldens.json
+      # The route frame cases are shared with the Rust codec in reverie-contracts.
+      mkdir -p test/fixtures/route-frames-v1
+      cp ${consoleFixture "crates/reverie-contracts/tests/fixtures/route-frames-v1/cases.json"} test/fixtures/route-frames-v1/cases.json
+      mkdir -p test/fixtures/route-frames-v2
+      cp ${consoleFixture "crates/reverie-contracts/tests/fixtures/route-frames-v2/cases.json"} test/fixtures/route-frames-v2/cases.json
+      # The settings handler's TS byte goldens, and the two tables it compiles in.
+      mkdir -p test/fixtures/settings test/fixtures/settings-v1
+      cp ${consoleFixture "crates/reverie-routes/tests/fixtures/settings/cases.json"} test/fixtures/settings/cases.json
+      cp ${consoleFixture "crates/reverie-routes/tests/fixtures/settings/goldens.json"} test/fixtures/settings/goldens.json
+      cp ${consoleFixture "crates/reverie-contracts/src/settings_v1/error-status.json"} test/fixtures/settings-v1/error-status.json
+      cp ${consoleFixture "crates/reverie-contracts/src/settings_v1/inherited-error-codes.json"} test/fixtures/settings-v1/inherited-error-codes.json
       # test/test-suite-partition.test.ts reads the npm test commands below from this copy.
       mkdir -p test/fixtures/nix-package
       cp ${consoleFixture "nix/package.nix"} test/fixtures/nix-package/package.nix
@@ -57,7 +69,8 @@ let
         test/chat-bot-presets.test.ts test/cron-post-bot.test.ts test/cron-post-security.test.ts \
         test/chatroom-delivery-modes.test.ts test/routes/polling-membership.test.ts \
         test/company-service.test.ts test/company-office-enforced-auth.test.ts test/company-hierarchy.test.ts \
-        test/native-memory-journal-api.test.ts \
+        test/native-memory-journal-api.test.ts test/installed-memory-access.test.ts \
+        test/memory-bridge-settlement.test.ts test/memory-scope-config.test.ts \
         test/owner-auth-admin-grant.test.ts test/owner-auth-review.test.ts \
         test/experts-api.test.ts test/experts-delegated-server.test.ts test/delegated-session-create.test.ts test/self-update.test.ts \
         test/owner-auth-lock-portability.test.ts test/company-full-page.test.ts \
@@ -133,6 +146,13 @@ let
         test/github-watches-ui.test.ts test/office-footer-panel.test.ts
       npm test -- test/chat-reply-releases-hold.test.ts
       npm test -- test/routes/subscription-profiles-rust-goldens.test.ts
+      npm test -- test/rust-routes/frames.test.ts test/rust-routes/channel.test.ts test/rust-routes/config.test.ts \
+        test/routes/subscription-profiles-forwarder.test.ts
+      npm test -- test/rust-front/frames.test.ts
+      npm test -- test/routes/settings-rust-goldens.test.ts test/routes/settings-forwarder.test.ts \
+        test/rust-routes/settings-fixtures.test.ts
+      npm test -- test/rust-front/adapter.test.ts test/rust-front/fd-inheritance.test.ts test/rust-front/server-front.test.ts \
+        test/rust-front/front-child.test.ts test/rust-front/receipts.test.ts
       npm test -- test/board-permissions.test.ts \
         test/publication-credentials.test.ts test/publication-routes.test.ts test/credential-status.test.ts \
         test/employee-context.test.ts test/employee-context-routes.test.ts test/cli-agent-context.test.ts \
@@ -407,6 +427,7 @@ let
       find "$out/lib/reverie/node_modules" \( -path '*/node-pty/build/Makefile' -o -path '*/node-pty/*.mk' \) -delete
       makeWrapper ${pkgs.nodejs_22}/bin/node "$out/bin/reverie" \
         --prefix PATH : ${lib.getBin pkgs.util-linux}/bin \
+        --set-default REVERIE_RUST_ROUTE_HANDLER ${rustRouteHandler}/bin/reverie-route-handler \
         --add-flags "$out/lib/reverie/dist/index.js"
       runHook postInstall
     '';
@@ -489,8 +510,7 @@ let
   # Candidate only: source preparation/admission consumers still select the
   # existing child entry point until the complete broker transition is reviewed.
   workerNativeChild = import ./worker-child.nix { inherit pkgs src; };
-  # Candidate: the full retained host preparation workflow must qualify before
-  # the worker image replaces its existing bootstrap entry point.
+  # Same fixed native helper selected by the worker image; no shell fallback.
   workerNativeNixStorePrepare = import ./nix-store-prepare.nix { inherit pkgs src; };
   # Unselected until owner regex, installed lifecycle/auth and actual MCP/client
   # consumers qualify together. No Python fallback inside this native package.
@@ -498,6 +518,7 @@ let
   # Independently qualified candidate; selecting the installed client is a
   # separate consumer change. The OPS daemon and grants remain server-owned.
   opsNativeCli = import ./ops-cli.nix { inherit pkgs src; };
+  mcpNativeCli = import ./mcp-cli.nix { inherit pkgs src console memoryNativeCli; };
   workerChild = pkgs.writeShellScriptBin "reverie-worker-child" ''
     exec ${memory}/bin/python3 -m reverie.worker child "$@"
   '';
@@ -595,4 +616,4 @@ let
     done
   '';
 
-in { inherit reverie console memory memoryPackage runtime entrypoint kokoro hands handsTools workerExec workerResourceClientManifest workerNativeClient workerNativeClientManifest workerNativeChild workerNativeNixStorePrepare memoryNativeCli opsNativeCli laptopTools; }
+in { inherit reverie console memory memoryPackage runtime entrypoint kokoro hands handsTools workerExec workerResourceClientManifest workerNativeClient workerNativeClientManifest workerNativeChild workerNativeNixStorePrepare memoryNativeCli mcpNativeCli opsNativeCli laptopTools rustRouteHandler; }

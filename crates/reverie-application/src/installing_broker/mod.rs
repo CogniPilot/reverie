@@ -1,11 +1,15 @@
 //! Actual installing-service current configuration owner. Native admission,
 //! lifecycle registry and effects remain private composition of this service;
 //! a captured configuration is neither owner authorization nor a start grant.
+mod bootstrap;
+pub use bootstrap::{BootstrapSettlementError, BrokerBootstrapCause, BrokerBootstrapFailure};
 #[cfg(test)]
 mod bootstrap_tests;
 mod creation;
+mod gpu_access;
 mod image_refresh;
 mod storage;
+mod telemetry;
 use crate::{
     reservation_gate::{GateError, ReservationGate},
     reservation_observer::NativeObserver,
@@ -22,6 +26,7 @@ pub use storage::{
     NixStorageReclaimFailure, NixStorageRetainFailure, NixStorageReturned,
     OwnedCreatePreparationError, StorageClaim, StorageReleaseFailure, StorageWorkflowError,
 };
+pub use telemetry::TelemetryCloseError;
 struct CurrentInstalled {
     snapshot: Arc<ValidatedWorkerSnapshot>,
     resources: Arc<ReservationConfiguration>,
@@ -66,6 +71,28 @@ pub(crate) struct InstalledWorker {
         Mutex<Option<crate::test_process::PausePoint<Arc<ValidatedWorkerSnapshot>>>>,
 }
 impl InstalledWorker {
+    /// Read the current configuration and its same-installation binding under
+    /// the publication lock order. The caller retains Gate state/context when
+    /// it needs the full guard tuple; no I/O or transition authority is created.
+    pub(crate) fn bound_resources(
+        &self,
+        binding: &RwLock<reverie_contracts::reservation_control::ControlBinding>,
+    ) -> Result<
+        (
+            Arc<ReservationConfiguration>,
+            reverie_contracts::reservation_control::ControlBinding,
+        ),
+        GateError,
+    > {
+        let current = self
+            .current
+            .read()
+            .map_err(|_| GateError::Refused("WORKER_BROKER_CURRENT_UNAVAILABLE"))?;
+        let binding = binding
+            .read()
+            .map_err(|_| GateError::Refused("RESERVATION_ADMISSION_UNAVAILABLE"))?;
+        Ok((current.resources.clone(), binding.clone()))
+    }
     #[cfg(test)]
     pub(crate) fn model_laptop(&self, session: ProfileSessionId) {
         let snapshot = self.snapshot().unwrap();
@@ -129,36 +156,21 @@ pub struct InstallingBroker {
     installed: Arc<InstalledWorker>,
     gate: Option<ReservationGate>,
     storage: Arc<storage::StorageRegistry>,
+    telemetry: Arc<reverie_host::command_telemetry::CommandTelemetry>,
+    reports: Arc<reverie_host::worker_reports::WorkerReportService>,
 }
 impl InstallingBroker {
     /// Trusted installing bootstrap; no wire-selected native engine or path.
     pub fn new(
         snapshot: ValidatedWorkerSnapshot,
         runtime: reverie_host::worker_runtime::WorkerRuntime,
-    ) -> Result<Self, GateError> {
-        let installed = InstalledWorker::capture(snapshot);
-        let current = installed.snapshot()?;
-        let has_option = reverie_contracts::worker_validation::WorkerValidationData::new(
-            current.configuration(),
-        )
-        .reservation()?
-        .is_some();
-        let gate = if has_option
-            || reverie_host::reservation_control::prior_control_present(
-                installed.resources()?.as_ref(),
-            )? {
-            Some(ReservationGate::from_installed(
-                installed.clone(),
-                NativeObserver::new(runtime.readonly()),
-            )?)
-        } else {
-            None
-        };
-        Ok(Self {
-            installed,
-            gate,
-            storage: Arc::new(storage::StorageRegistry::new(runtime)),
-        })
+    ) -> Result<Self, Box<BrokerBootstrapFailure>> {
+        Self::bootstrap(snapshot, runtime)
+    }
+    pub(crate) fn command_telemetry(
+        &self,
+    ) -> &Arc<reverie_host::command_telemetry::CommandTelemetry> {
+        &self.telemetry
     }
     pub fn configuration(&self) -> Result<Arc<ValidatedWorkerSnapshot>, GateError> {
         self.installed.snapshot()

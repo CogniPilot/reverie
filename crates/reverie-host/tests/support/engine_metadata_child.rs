@@ -8,6 +8,11 @@ use std::{
 };
 fn main() {
     let args = env::args().skip(1).collect::<Vec<_>>();
+    if args.first().map(String::as_str) == Some("__telemetry_pipe_owner") {
+        std::fs::write("pipe-owner-ready", b"actual inherited stdout owner").unwrap();
+        wait_file("release-pipe-owner");
+        return;
+    }
     if args.first().map(String::as_str) == Some("__descendant") {
         std::thread::sleep(Duration::from_millis(250));
         return;
@@ -15,6 +20,19 @@ fn main() {
     let executable = env::current_exe().unwrap();
     let mode = executable.file_name().unwrap().to_str().unwrap();
     match mode {
+        "telemetry-bootstrap-pending" => {
+            assert_eq!(args.first().map(String::as_str), Some("ps"));
+            let mut trace = std::fs::OpenOptions::new().create(true).append(true).open("calls.txt").unwrap();
+            writeln!(trace, "{}", args.join("\0")).unwrap();
+            drop(trace);
+            let mut owned = std::process::Command::new(&executable)
+                .arg("__telemetry_pipe_owner").spawn().unwrap();
+            wait_file("pipe-owner-ready");
+            std::fs::write("query-started", b"owned constructor and actual pipe owner ready").unwrap();
+            wait_file("release-pipe-owner");
+            assert!(owned.wait().unwrap().success());
+        }
+        "gpu-info"=>gpu_info(&args),
         "storage-writer" | "image-refresh" | "command-telemetry" => {
             use std::fs::{self,OpenOptions};
             let mut trace=OpenOptions::new().create(true).append(true).open("calls.txt").unwrap();
@@ -100,4 +118,23 @@ fn main() {
             print!("{}", args.join("\0"));
         }
     }
+}
+fn wait_file(name: &str) {
+    let end = std::time::Instant::now() + Duration::from_secs(15);
+    while !std::path::Path::new(name).exists() {
+        assert!(std::time::Instant::now() < end, "bounded owned fixture releases {name}");
+        std::thread::sleep(Duration::from_millis(1));
+    }
+}
+fn gpu_info(args:&[String]){
+    use std::fs;
+    assert!(args.len()==3&&args[0]=="info"&&args[1]=="--format","fixed GPU information purpose only");
+    let count=fs::read_to_string("info-count").map_or(0,|value|value.parse::<u32>().unwrap())+1;
+    fs::write("info-count",count.to_string()).unwrap();
+    let mut trace=fs::OpenOptions::new().create(true).append(true).open("calls.txt").unwrap();
+    writeln!(trace,"{}",args.join("\0")).unwrap();drop(trace);
+    if count==2&&fs::exists("replace-on-second-info").unwrap(){
+        fs::copy("replacement-spec.json","cdi/device.json").unwrap();
+    }
+    io::stdout().write_all(&fs::read("info.json").unwrap()).unwrap();
 }

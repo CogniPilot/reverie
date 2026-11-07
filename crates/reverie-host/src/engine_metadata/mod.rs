@@ -34,11 +34,16 @@ const STOPPED_ENGINE_FORMAT: &str = concat!(
     "\"Memory\":{{json .HostConfig.Memory}},\"MemorySwap\":{{json .HostConfig.MemorySwap}},",
     "\"PidsLimit\":{{json .HostConfig.PidsLimit}},\"NanoCpus\":{{json .HostConfig.NanoCpus}}}}"
 );
+const GPU_INFORMATION_FORMAT: &str = concat!(
+    "{\"ID\":{{json .ID}},\"OSType\":{{json .OSType}},\"KernelVersion\":{{json .KernelVersion}},",
+    "\"ServerVersion\":{{json .ServerVersion}},\"CDISpecDirs\":{{json .CDISpecDirs}}}"
+);
 
 pub enum EngineQuery<'a> {
     InventoryIds,
     InspectBatch(&'a [ContainerId]),
     InspectStopped(&'a ContainerId),
+    GpuInformation,
     TelemetryInventory,
     TelemetryInspect(&'a reverie_core::command_telemetry::TelemetryContainerId),
 }
@@ -60,6 +65,11 @@ impl EngineQuery<'_> {
             }
             Self::TelemetryInspect(id) => {
                 return Ok(["inspect", id.as_str()].map(Into::into).to_vec());
+            }
+            Self::GpuInformation => {
+                return Ok(["info", "--format", GPU_INFORMATION_FORMAT]
+                    .map(Into::into)
+                    .to_vec());
             }
             Self::InspectBatch(ids) if !ids.is_empty() && ids.len() <= 32 => (ENGINE_FORMAT, ids),
             Self::InspectBatch(_) => return Err(EngineError::new(EngineFault::Query)),

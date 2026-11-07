@@ -107,25 +107,18 @@ pub struct ReservationOption {
     host_reserve_mib: u32,
 }
 
-/// The OPS configuration's company/resource identifier vocabulary. This value
-/// is a reference, never an authorization or resource ownership assertion.
+/// Compatibility wrapper retains worker-purpose diagnostics while the shared
+/// published OPS owner validates the identifier grammar once.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct OpsServiceId(String);
+pub struct OpsServiceId(crate::ops::OpsServiceId);
 impl OpsServiceId {
     pub fn parse(value: &str) -> Result<Self, WorkerOptionError> {
-        if value.is_empty()
-            || value.len() > 96
-            || value.as_bytes()[0] == b'-'
-            || !value
-                .bytes()
-                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'-')
-        {
-            return Err(WorkerOptionError::Ops);
-        }
-        Ok(Self(value.to_owned()))
+        crate::ops::OpsServiceId::parse(value)
+            .map(Self)
+            .map_err(|_| WorkerOptionError::Ops)
     }
     pub fn as_str(&self) -> &str {
-        &self.0
+        self.0.as_str()
     }
 }
 impl ReservationOption {

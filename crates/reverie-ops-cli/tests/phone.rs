@@ -17,7 +17,10 @@ fn accept(listener: &TcpListener) -> TcpStream {
     let until = Instant::now() + Duration::from_secs(4);
     loop {
         match listener.accept() {
-            Ok((stream, _)) => return stream,
+            Ok((stream, _)) => {
+                stream.set_nonblocking(false).unwrap();
+                return stream;
+            }
             Err(error)
                 if error.kind() == std::io::ErrorKind::WouldBlock && Instant::now() < until =>
             {
@@ -55,10 +58,21 @@ fn receive(stream: &mut TcpStream) -> Request {
     stream.read_exact(&mut body).unwrap();
     Request { head, body }
 }
+fn command() -> Command {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_reverie-ops"));
+    command.env_clear();
+    // Windows socket providers expand this variable when loading their DLLs.
+    // Preserve only the OS requirement, not caller credentials or proxy state.
+    #[cfg(windows)]
+    command.env(
+        "SystemRoot",
+        std::env::var_os("SystemRoot").expect("Windows socket tests require SystemRoot"),
+    );
+    command
+}
 fn cli(url: &str, args: &[&str], input: &[u8]) -> std::process::Output {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_reverie-ops"))
+    let mut child = command()
         .args(args)
-        .env_clear()
         .env("REVERIE_API_URL", url)
         .env("http_proxy", "http://127.0.0.1:1")
         .env("REVERIE_SESSION_ID", "caller-does-not-select-actor")
@@ -87,7 +101,16 @@ fn roundtrip(args: &[&str], input: &[u8], response: Vec<u8>) -> (std::process::O
         );
     });
     let output = cli(&format!("http://{address}"), args, input);
-    let request = received.recv_timeout(Duration::from_secs(10)).unwrap();
+    let request = received
+        .recv_timeout(Duration::from_secs(10))
+        .unwrap_or_else(|error| {
+            panic!(
+                "owned phone request missing ({error}); CLI status={}, stdout={:?}, stderr={:?}",
+                output.status,
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            )
+        });
     worker.join().unwrap();
     (output, request)
 }
@@ -248,11 +271,7 @@ fn overlong_decimal_port_is_refused_before_any_tcp_connection() {
 }
 #[test]
 fn help_is_available_without_installation_and_names_permissions_output_and_recovery() {
-    let output = Command::new(env!("CARGO_BIN_EXE_reverie-ops"))
-        .env_clear()
-        .arg("--help")
-        .output()
-        .unwrap();
+    let output = command().arg("--help").output().unwrap();
     assert!(output.status.success());
     let text = String::from_utf8(output.stdout).unwrap();
     for word in [
@@ -266,11 +285,7 @@ fn help_is_available_without_installation_and_names_permissions_output_and_recov
     ] {
         assert!(text.contains(word), "{word}");
     }
-    let output = Command::new(env!("CARGO_BIN_EXE_reverie-ops"))
-        .env_clear()
-        .args(["status", "website"])
-        .output()
-        .unwrap();
+    let output = command().args(["status", "website"]).output().unwrap();
     assert_eq!(output.status.code(), Some(3));
     assert_eq!(output.stdout, REFUSAL);
 }

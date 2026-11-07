@@ -3,7 +3,7 @@ mod address;
 mod transport;
 use clap::{Parser, Subcommand};
 use reverie_contracts::ops_command::{MAX_SUBMIT_BYTES, OpsCommand, OpsReply};
-use reverie_core::worker_options::OpsServiceId;
+use reverie_core::ops::OpsServiceId;
 use std::{
     ffi::{OsStr, OsString},
     io::{self, Read, Write},

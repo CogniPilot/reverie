@@ -54,7 +54,10 @@ fn environment(request: &WorkerRequest) -> OrderedValue {
             "REVERIE_SESSION_ID",
             scalar_text(request.session().as_str()),
         ),
-        ("REVERIE_API_URL", scalar_text("http://127.0.0.1:8093")),
+        (
+            "REVERIE_API_URL",
+            scalar_text(reverie_core::worker_child::OFFICE_API_URL),
+        ),
         ("PATH", text(&path)),
         ("NIX_REMOTE", scalar_text("local")),
         ("NIX_PATH", scalar_text("nixpkgs=flake:nixpkgs")),

@@ -18,6 +18,7 @@ use std::{
 pub(in crate::office) enum NativeValue {
     Address(OfficeAddressData, Instant),
     Socket(Vec<SocketAddr>),
+    Telemetry(bool),
 }
 type Output = std::result::Result<NativeValue, Arc<OfficeError>>;
 struct PendingCall {
@@ -180,6 +181,18 @@ impl NativeJob {
 }
 fn run(purpose: Purpose) -> Completed {
     match purpose {
+        Purpose::Telemetry {
+            collector,
+            session,
+            body,
+        } => Completed {
+            output: Ok(NativeValue::Telemetry(collector.observe(&session, &body))),
+            call: None,
+            // Actual refused-close SQL owners remain intrinsically retained
+            // by Company's SAME collector. Joining this thread is not their
+            // settlement; Company close/drop independently checks that owner.
+            uncertain: false,
+        },
         Purpose::Backend { engine, name } => {
             match worker_recovery::inspect_fixed_container_scoped(&engine, &name) {
                 Ok(row) => Completed {

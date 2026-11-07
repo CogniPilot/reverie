@@ -10,6 +10,8 @@ reverie-core.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
+libyaml-safer.workspace = true
+regex-lite.workspace = true
 
 [lints]
 workspace = true

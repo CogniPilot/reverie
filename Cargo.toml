@@ -6,6 +6,7 @@ members = [
     "crates/reverie-contracts",
     "crates/reverie-store",
     "crates/reverie-host",
+    "crates/reverie-policy-artifacts",
     "crates/reverie-application",
     "crates/reverie-routes",
     "crates/reverie-worker-client",
@@ -14,6 +15,7 @@ members = [
     "crates/reverie-memory-cli",
     "crates/reverie-http",
     "crates/reverie-ops-cli",
+    "crates/reverie-mcp-cli",
     "crates/reverie-diagnostics",
     "crates/xtask",
 ]
@@ -32,6 +34,8 @@ serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["raw_value", "float_roundtrip"] }
 toml = "0.9"
 sha2 = "0.10"
+libyaml-safer = "=0.3.0"
+regex-lite = "=0.1.9"
 blake2 = "0.10.6"
 rusqlite = { version = "0.41.1", features = ["bundled", "backup"] }
 http = "1.4"

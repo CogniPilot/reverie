@@ -3,7 +3,7 @@ import { trustedFixtureOwner } from '../helpers/trusted-owner-fixture.js';
  * Chatroom routes + service: room lifecycle, who-is-speaking resolution, role
  * permissions, and delivery of messages into member panes as single lines.
  */
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -244,10 +244,13 @@ describe('chatroom routes', () => {
       expect(room.coordinatorId).toBe(C);
       expect(room.members.map((m: { sessionId: string }) => m.sessionId).sort()).toEqual([A, C].sort());
       expect(room.members.find((m: { sessionId: string }) => m.sessionId === C).role).toBe('coordinator');
-      // The Reverie briefing went out on its own timer a moment ago; deliveries to one pane are spaced.
-      clock += 10_000;
-      await service.delivery.flushAll();
-      expect(panes(A).join('')).toContain('"Side"');
+      // The Reverie briefing went out on its own timer a moment ago; deliveries to one pane are spaced,
+      // and the next line waits until that one has been written. The Side briefing is its own line.
+      await vi.waitFor(async () => {
+        clock += 10_000;
+        await service.delivery.flushAll();
+        expect(panes(A).some((line) => line.startsWith('[Reverie chat "Side"] '))).toBe(true);
+      });
     });
 
     it('refuses an agent that coordinates no room, and one that is not in any room', async () => {

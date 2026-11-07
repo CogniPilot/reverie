@@ -1,0 +1,1711 @@
+{
+ "spec": "route-frames-v2 (server-ownership design r4, 2a implementation spec r1)",
+ "max_lengths": {
+  "to_front": 65554,
+  "to_ts": 65554
+ },
+ "cases": [
+  {
+   "name": "bind-request-main-tls-port0",
+   "direction": "to_front",
+   "hex": "0000002002010000000000000001000000000000000000010000093132372e302e302e31",
+   "expect": {
+    "kind": "bind_request",
+    "listener": "main",
+    "tls": true,
+    "port": 0,
+    "host": "127.0.0.1",
+    "generation": "1",
+    "id": "0"
+   }
+  },
+  {
+   "name": "bind-request-bridge-plain",
+   "direction": "to_front",
+   "hex": "0000002102010000000000000001000000000000000001000bb80a3137322e31372e302e31",
+   "expect": {
+    "kind": "bind_request",
+    "listener": "bridge",
+    "tls": false,
+    "port": 3000,
+    "host": "172.17.0.1",
+    "generation": "1",
+    "id": "0"
+   }
+  },
+  {
+   "name": "bind-request-host-max",
+   "direction": "to_front",
+   "hex": "0000011602010000000000000001000000000000000000000001ff686868686868686868686868686868686868686868686868686868686868686868686868686868686868686868686868686868686868686868686868686868686868686868686868686868686868686868686868686868686868686868686868686868686868686868686868686868686868686868686868686868686868686868686868686868686868686868686868686868686868686868686868686868686868686868686868686868686868686868686868686868686868686868686868686868686868686868686868686868686868686868686868686868686868686868686868686868686868686868686868686868686868686868686868686868",
+   "expect": {
+    "kind": "bind_request",
+    "listener": "main",
+    "tls": false,
+    "port": 1,
+    "host": "hhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhh",
+    "generation": "1",
+    "id": "0"
+   }
+  },
+  {
+   "name": "bind-request-host-utf8",
+   "direction": "to_front",
+   "hex": "0000001a020100000000000000010000000000000000000000010368c3a9",
+   "expect": {
+    "kind": "bind_request",
+    "listener": "main",
+    "tls": false,
+    "port": 1,
+    "host": "hé",
+    "generation": "1",
+    "id": "0"
+   }
+  },
+  {
+   "name": "bind-request-host-leading-bom",
+   "direction": "to_front",
+   "hex": "0000001b0201000000000000000100000000000000000000000104efbbbf78",
+   "expect": {
+    "kind": "bind_request",
+    "listener": "main",
+    "tls": false,
+    "port": 1,
+    "host": "﻿x",
+    "generation": "1",
+    "id": "0"
+   }
+  },
+  {
+   "name": "bind-request-host-trailing-bom",
+   "direction": "to_front",
+   "hex": "0000001b020100000000000000010000000000000000000000010478efbbbf",
+   "expect": {
+    "kind": "bind_request",
+    "listener": "main",
+    "tls": false,
+    "port": 1,
+    "host": "x﻿",
+    "generation": "1",
+    "id": "0"
+   }
+  },
+  {
+   "name": "bound",
+   "direction": "to_ts",
+   "hex": "0000001502020000000000000001000000000000000000a112",
+   "expect": {
+    "kind": "bound",
+    "listener": "main",
+    "port": 41234,
+    "generation": "1",
+    "id": "0"
+   }
+  },
+  {
+   "name": "bind-failed",
+   "direction": "to_ts",
+   "hex": "00000034020300000000000000010000000000000000010a4541444452494e5553456164647265737320616c726561647920696e20757365",
+   "expect": {
+    "kind": "bind_failed",
+    "listener": "bridge",
+    "errno": "EADDRINUSE",
+    "message": "address already in use",
+    "generation": "1",
+    "id": "0"
+   }
+  },
+  {
+   "name": "bind-failed-empty-message",
+   "direction": "to_ts",
+   "hex": "0000001a0203000000000000000100000000000000000006454143434553",
+   "expect": {
+    "kind": "bind_failed",
+    "listener": "main",
+    "errno": "EACCES",
+    "message": "",
+    "generation": "1",
+    "id": "0"
+   }
+  },
+  {
+   "name": "bind-failed-message-leading-bom",
+   "direction": "to_ts",
+   "hex": "00000027020300000000000000010000000000000000000a4541444452494e555345efbbbf696e20757365",
+   "expect": {
+    "kind": "bind_failed",
+    "listener": "main",
+    "errno": "EADDRINUSE",
+    "message": "﻿in use",
+    "generation": "1",
+    "id": "0"
+   }
+  },
+  {
+   "name": "bind-failed-message-interior-bom",
+   "direction": "to_ts",
+   "hex": "00000026020300000000000000010000000000000000000a4541444452494e555345696eefbbbf757365",
+   "expect": {
+    "kind": "bind_failed",
+    "listener": "main",
+    "errno": "EADDRINUSE",
+    "message": "in﻿use",
+    "generation": "1",
+    "id": "0"
+   }
+  },
+  {
+   "name": "accepting",
+   "direction": "to_front",
+   "hex": "0000001302040000000000000001000000000000000000",
+   "expect": {
+    "kind": "accepting",
+    "listener": "main",
+    "generation": "1",
+    "id": "0"
+   }
+  },
+  {
+   "name": "service-ready",
+   "direction": "to_front",
+   "hex": "00000012020500000000000000070000000000000000",
+   "expect": {
+    "kind": "service_ready",
+    "generation": "7",
+    "id": "0"
+   }
+  },
+  {
+   "name": "unbind-bridge",
+   "direction": "to_front",
+   "hex": "0000001302060000000000000001000000000000000001",
+   "expect": {
+    "kind": "unbind",
+    "listener": "bridge",
+    "generation": "1",
+    "id": "0"
+   }
+  },
+  {
+   "name": "shutdown-term",
+   "direction": "to_ts",
+   "hex": "0000001302070000000000000001000000000000000001",
+   "expect": {
+    "kind": "shutdown",
+    "signal": "SIGTERM",
+    "generation": "1",
+    "id": "0"
+   }
+  },
+  {
+   "name": "shutdown-hup",
+   "direction": "to_ts",
+   "hex": "0000001302070000000000000001000000000000000003",
+   "expect": {
+    "kind": "shutdown",
+    "signal": "SIGHUP",
+    "generation": "1",
+    "id": "0"
+   }
+  },
+  {
+   "name": "conn-open-v4",
+   "direction": "to_ts",
+   "hex": "000000390210000000000000000100000000000000010004cb007107000000000000000000000000c3507f00000100000000000000000000000020fb01",
+   "expect": {
+    "kind": "conn_open",
+    "listener": "main",
+    "peer": {
+     "address": "203.0.113.7",
+     "port": 50000
+    },
+    "local": {
+     "address": "127.0.0.1",
+     "port": 8443
+    },
+    "encrypted": true,
+    "generation": "1",
+    "id": "1"
+   }
+  },
+  {
+   "name": "conn-open-v6-bridge",
+   "direction": "to_ts",
+   "hex": "000000390210000000000000000100000000000000020106fd0000000000000000000000000000070001000000000000000000000000000000010bb800",
+   "expect": {
+    "kind": "conn_open",
+    "listener": "bridge",
+    "peer": {
+     "address": "fd00::7",
+     "port": 1
+    },
+    "local": {
+     "address": "::1",
+     "port": 3000
+    },
+    "encrypted": false,
+    "generation": "1",
+    "id": "2"
+   }
+  },
+  {
+   "name": "conn-open-v6-mapped",
+   "direction": "to_ts",
+   "hex": "00000039021000000000000000010000000000000003000600000000000000000000ffffc00002019c4000000000000000000000ffff0a0000020bb801",
+   "expect": {
+    "kind": "conn_open",
+    "listener": "main",
+    "peer": {
+     "address": "::ffff:192.0.2.1",
+     "port": 40000
+    },
+    "local": {
+     "address": "::ffff:10.0.0.2",
+     "port": 3000
+    },
+    "encrypted": true,
+    "generation": "1",
+    "id": "3"
+   }
+  },
+  {
+   "name": "conn-open-v6-zero-runs",
+   "direction": "to_ts",
+   "hex": "00000039021000000000000000010000000000000004000620010db8000000010001000100010001000220010000000000010000000000000001000300",
+   "expect": {
+    "kind": "conn_open",
+    "listener": "main",
+    "peer": {
+     "address": "2001:db8:0:1:1:1:1:1",
+     "port": 2
+    },
+    "local": {
+     "address": "2001:0:0:1::1",
+     "port": 3
+    },
+    "encrypted": false,
+    "generation": "1",
+    "id": "4"
+   }
+  },
+  {
+   "name": "data-to-ts",
+   "direction": "to_ts",
+   "hex": "0000002d021100000000000000010000000000000001474554202f20485454502f312e310d0a486f73743a20780d0a0d0a",
+   "expect": {
+    "kind": "data",
+    "bytes_hex": "474554202f20485454502f312e310d0a486f73743a20780d0a0d0a",
+    "generation": "1",
+    "id": "1"
+   }
+  },
+  {
+   "name": "data-to-front",
+   "direction": "to_front",
+   "hex": "00000023021100000000000000010000000000000001485454502f312e3120323030204f4b0d0a",
+   "expect": {
+    "kind": "data",
+    "bytes_hex": "485454502f312e3120323030204f4b0d0a",
+    "generation": "1",
+    "id": "1"
+   }
+  },
+  {
+   "name": "data-one-byte",
+   "direction": "to_front",
+   "hex": "0000001302110000000000000001ffffffffffffffff00",
+   "expect": {
+    "kind": "data",
+    "bytes_hex": "00",
+    "generation": "1",
+    "id": "18446744073709551615"
+   }
+  },
+  {
+   "name": "end-to-front",
+   "direction": "to_front",
+   "hex": "00000012021200000000000000010000000000000001",
+   "expect": {
+    "kind": "end",
+    "generation": "1",
+    "id": "1"
+   }
+  },
+  {
+   "name": "end-to-ts",
+   "direction": "to_ts",
+   "hex": "00000012021200000000000000010000000000000001",
+   "expect": {
+    "kind": "end",
+    "generation": "1",
+    "id": "1"
+   }
+  },
+  {
+   "name": "abort-peer-reset",
+   "direction": "to_ts",
+   "hex": "0000001302130000000000000001000000000000000100",
+   "expect": {
+    "kind": "abort",
+    "reason": "peer_reset",
+    "generation": "1",
+    "id": "1"
+   }
+  },
+  {
+   "name": "abort-destroy",
+   "direction": "to_front",
+   "hex": "0000001302130000000000000001000000000000000101",
+   "expect": {
+    "kind": "abort",
+    "reason": "destroy",
+    "generation": "1",
+    "id": "1"
+   }
+  },
+  {
+   "name": "abort-timeout",
+   "direction": "to_front",
+   "hex": "0000001302130000000000000001000000000000000102",
+   "expect": {
+    "kind": "abort",
+    "reason": "timeout",
+    "generation": "1",
+    "id": "1"
+   }
+  },
+  {
+   "name": "abort-generation",
+   "direction": "to_ts",
+   "hex": "0000001302130000000000000001000000000000000103",
+   "expect": {
+    "kind": "abort",
+    "reason": "generation",
+    "generation": "1",
+    "id": "1"
+   }
+  },
+  {
+   "name": "credit-max",
+   "direction": "to_front",
+   "hex": "00000016021400000000000000010000000000000001ffffffff",
+   "expect": {
+    "kind": "credit",
+    "bytes": 4294967295,
+    "generation": "1",
+    "id": "1"
+   }
+  },
+  {
+   "name": "credit-one",
+   "direction": "to_ts",
+   "hex": "0000001602140000000000000001000000000000000100000001",
+   "expect": {
+    "kind": "credit",
+    "bytes": 1,
+    "generation": "1",
+    "id": "1"
+   }
+  },
+  {
+   "name": "version-1",
+   "direction": "to_ts",
+   "hex": "00000012011200000000000000010000000000000001",
+   "error": "FRAME_VERSION"
+  },
+  {
+   "name": "kind-unknown-0",
+   "direction": "to_ts",
+   "hex": "0000001302000000000000000001000000000000000100",
+   "error": "FRAME_KIND"
+  },
+  {
+   "name": "kind-reserved-2b-21",
+   "direction": "to_ts",
+   "hex": "0000001302150000000000000001000000000000000100",
+   "error": "FRAME_KIND"
+  },
+  {
+   "name": "kind-reserved-event-23",
+   "direction": "to_ts",
+   "hex": "0000001302170000000000000001000000000000000100",
+   "error": "FRAME_KIND"
+  },
+  {
+   "name": "kind-conn-open-to-front",
+   "direction": "to_front",
+   "hex": "0000003902100000000000000001000000000000000100047f00000100000000000000000000000000507f000001000000000000000000000000005100",
+   "error": "FRAME_KIND"
+  },
+  {
+   "name": "kind-accepting-to-ts",
+   "direction": "to_ts",
+   "hex": "0000001302040000000000000001000000000000000000",
+   "error": "FRAME_KIND"
+  },
+  {
+   "name": "kind-bound-to-front",
+   "direction": "to_front",
+   "hex": "00000015020200000000000000010000000000000000000050",
+   "error": "FRAME_KIND"
+  },
+  {
+   "name": "identity-generation-0",
+   "direction": "to_ts",
+   "hex": "00000012021200000000000000000000000000000001",
+   "error": "FRAME_IDENTITY"
+  },
+  {
+   "name": "identity-conn-id-0",
+   "direction": "to_ts",
+   "hex": "00000012021200000000000000010000000000000000",
+   "error": "FRAME_IDENTITY"
+  },
+  {
+   "name": "identity-lifecycle-id-1",
+   "direction": "to_front",
+   "hex": "00000012020500000000000000010000000000000001",
+   "error": "FRAME_IDENTITY"
+  },
+  {
+   "name": "length-below-header",
+   "direction": "to_ts",
+   "hex": "00000011",
+   "error": "FRAME_LENGTH"
+  },
+  {
+   "name": "length-direction-max-plus-one",
+   "direction": "to_ts",
+   "hex": "00010013",
+   "error": "FRAME_LENGTH"
+  },
+  {
+   "name": "length-end-with-payload",
+   "direction": "to_ts",
+   "hex": "0000001302120000000000000001000000000000000100",
+   "error": "FRAME_LENGTH"
+  },
+  {
+   "name": "length-data-empty",
+   "direction": "to_ts",
+   "hex": "00000012021100000000000000010000000000000001",
+   "error": "FRAME_LENGTH"
+  },
+  {
+   "name": "length-credit-3",
+   "direction": "to_ts",
+   "hex": "00000015021400000000000000010000000000000001000001",
+   "error": "FRAME_LENGTH"
+  },
+  {
+   "name": "length-conn-open-short",
+   "direction": "to_ts",
+   "hex": "0000003802100000000000000001000000000000000100047f00000100000000000000000000000000507f0000010000000000000000000000000051",
+   "error": "FRAME_LENGTH"
+  },
+  {
+   "name": "payload-listener-2",
+   "direction": "to_front",
+   "hex": "0000001302040000000000000001000000000000000002",
+   "error": "FRAME_PAYLOAD"
+  },
+  {
+   "name": "payload-tls-2",
+   "direction": "to_front",
+   "hex": "00000018020100000000000000010000000000000000000200500168",
+   "error": "FRAME_PAYLOAD"
+  },
+  {
+   "name": "length-bind-request-host-empty",
+   "direction": "to_front",
+   "hex": "000000170201000000000000000100000000000000000000005000",
+   "error": "FRAME_LENGTH"
+  },
+  {
+   "name": "payload-host-length-mismatch",
+   "direction": "to_front",
+   "hex": "00000018020100000000000000010000000000000000000000500268",
+   "error": "FRAME_PAYLOAD"
+  },
+  {
+   "name": "payload-host-not-utf8",
+   "direction": "to_front",
+   "hex": "000000180201000000000000000100000000000000000000005001ff",
+   "error": "FRAME_PAYLOAD"
+  },
+  {
+   "name": "payload-errno-lowercase",
+   "direction": "to_ts",
+   "hex": "00000015020300000000000000010000000000000000000165",
+   "error": "FRAME_PAYLOAD"
+  },
+  {
+   "name": "payload-errno-empty",
+   "direction": "to_ts",
+   "hex": "00000015020300000000000000010000000000000000000078",
+   "error": "FRAME_PAYLOAD"
+  },
+  {
+   "name": "payload-errno-overruns",
+   "direction": "to_ts",
+   "hex": "00000015020300000000000000010000000000000000000545",
+   "error": "FRAME_PAYLOAD"
+  },
+  {
+   "name": "payload-message-not-utf8",
+   "direction": "to_ts",
+   "hex": "00000016020300000000000000010000000000000000000145ff",
+   "error": "FRAME_PAYLOAD"
+  },
+  {
+   "name": "payload-signal-0",
+   "direction": "to_ts",
+   "hex": "0000001302070000000000000001000000000000000000",
+   "error": "FRAME_PAYLOAD"
+  },
+  {
+   "name": "payload-signal-4",
+   "direction": "to_ts",
+   "hex": "0000001302070000000000000001000000000000000004",
+   "error": "FRAME_PAYLOAD"
+  },
+  {
+   "name": "payload-abort-reason-4",
+   "direction": "to_ts",
+   "hex": "0000001302130000000000000001000000000000000104",
+   "error": "FRAME_PAYLOAD"
+  },
+  {
+   "name": "payload-credit-0",
+   "direction": "to_ts",
+   "hex": "0000001602140000000000000001000000000000000100000000",
+   "error": "FRAME_PAYLOAD"
+  },
+  {
+   "name": "payload-encrypted-2",
+   "direction": "to_ts",
+   "hex": "0000003902100000000000000001000000000000000100047f00000100000000000000000000000000507f000001000000000000000000000000005102",
+   "error": "FRAME_PAYLOAD"
+  },
+  {
+   "name": "payload-family-5",
+   "direction": "to_ts",
+   "hex": "0000003902100000000000000001000000000000000100057f00000100000000000000000000000000507f000001000000000000000000000000005100",
+   "error": "FRAME_PAYLOAD"
+  },
+  {
+   "name": "payload-ipv4-padding",
+   "direction": "to_ts",
+   "hex": "0000003902100000000000000001000000000000000100047f000001090000000000000000000000000000000000000000000000000000000000000000",
+   "error": "FRAME_PAYLOAD"
+  },
+  {
+   "name": "truncated",
+   "direction": "to_ts",
+   "hex": "000000120212000000000000000100000000000000",
+   "error": "FRAME_TRUNCATED"
+  },
+  {
+   "name": "written-one",
+   "direction": "to_ts",
+   "hex": "0000001a021b000000000000000100000000000000010000000000000001",
+   "expect": {
+    "kind": "written",
+    "bytes": 1,
+    "generation": "1",
+    "id": "1"
+   }
+  },
+  {
+   "name": "written-max",
+   "direction": "to_ts",
+   "hex": "0000001a021b00000000000000010000000000000001001fffffffffffff",
+   "expect": {
+    "kind": "written",
+    "bytes": 9007199254740991,
+    "generation": "1",
+    "id": "1"
+   }
+  },
+  {
+   "name": "payload-written-0",
+   "direction": "to_ts",
+   "hex": "0000001a021b000000000000000100000000000000010000000000000000",
+   "error": "FRAME_PAYLOAD"
+  },
+  {
+   "name": "payload-written-past-stream-bound",
+   "direction": "to_ts",
+   "hex": "0000001a021b000000000000000100000000000000010020000000000000",
+   "error": "FRAME_PAYLOAD"
+  },
+  {
+   "name": "kind-written-to-front",
+   "direction": "to_front",
+   "hex": "0000001a021b000000000000000100000000000000010000000000000001",
+   "error": "FRAME_KIND"
+  },
+  {
+   "name": "identity-written-id-0",
+   "direction": "to_ts",
+   "hex": "0000001a021b000000000000000100000000000000000000000000000001",
+   "error": "FRAME_IDENTITY"
+  },
+  {
+   "name": "length-written-7",
+   "direction": "to_ts",
+   "hex": "00000019021b0000000000000001000000000000000100000000000001",
+   "error": "FRAME_LENGTH"
+  },
+  {
+   "name": "length-written-9",
+   "direction": "to_ts",
+   "hex": "0000001b021b00000000000000010000000000000001000000000000000001",
+   "error": "FRAME_LENGTH"
+  }
+ ],
+ "boundaries": {
+  "data_max_to_ts": {
+   "direction": "to_ts",
+   "kind": 17,
+   "data_len": 65536
+  },
+  "data_max_plus_one_to_ts": {
+   "direction": "to_ts",
+   "kind": 17,
+   "data_len": 65537,
+   "error": "FRAME_LENGTH"
+  },
+  "data_max_to_front": {
+   "direction": "to_front",
+   "kind": 17,
+   "data_len": 65536
+  },
+  "data_max_plus_one_to_front": {
+   "direction": "to_front",
+   "kind": 17,
+   "data_len": 65537,
+   "error": "FRAME_LENGTH"
+  },
+  "bind_request_host_max": {
+   "direction": "to_front",
+   "kind": 1,
+   "host_len": 255
+  },
+  "bind_request_host_max_plus_one": {
+   "direction": "to_front",
+   "kind": 1,
+   "host_len": 256,
+   "error": "FRAME_LENGTH"
+  },
+  "bind_failed_max": {
+   "direction": "to_ts",
+   "kind": 3,
+   "errno_len": 32,
+   "message_len": 512
+  },
+  "bind_failed_max_plus_one": {
+   "direction": "to_ts",
+   "kind": 3,
+   "errno_len": 32,
+   "message_len": 513,
+   "error": "FRAME_LENGTH"
+  },
+  "bind_failed_errno_plus_one": {
+   "direction": "to_ts",
+   "kind": 3,
+   "errno_len": 33,
+   "message_len": 0,
+   "error": "FRAME_PAYLOAD"
+  },
+  "bind_failed_message_plus_one": {
+   "direction": "to_ts",
+   "kind": 3,
+   "errno_len": 1,
+   "message_len": 513,
+   "error": "FRAME_PAYLOAD"
+  }
+ },
+ "conn": [
+  {
+   "name": "front-half-closes-then-late-data",
+   "side": "front",
+   "max_open": 4,
+   "steps": [
+    {
+     "op": "open_next",
+     "expect": 1
+    },
+    {
+     "op": "send",
+     "id": 1,
+     "frame": {
+      "kind": "end"
+     },
+     "expect": true
+    },
+    {
+     "op": "receive",
+     "id": 1,
+     "frame": {
+      "kind": "data",
+      "bytes": 5
+     },
+     "expect": {
+      "received": "data",
+      "bytes": 5
+     }
+    },
+    {
+     "op": "receive",
+     "id": 1,
+     "frame": {
+      "kind": "end"
+     },
+     "expect": {
+      "received": "ended",
+      "closed": false
+     }
+    },
+    {
+     "op": "send",
+     "id": 1,
+     "frame": {
+      "kind": "written",
+      "bytes": 5
+     },
+     "expect": true
+    },
+    {
+     "op": "receive",
+     "id": 1,
+     "frame": {
+      "kind": "data",
+      "bytes": 3
+     },
+     "expect": {
+      "received": "late",
+      "data": 3
+     }
+    },
+    {
+     "op": "receive",
+     "id": 1,
+     "frame": {
+      "kind": "credit",
+      "bytes": 4096
+     },
+     "expect": {
+      "received": "late",
+      "data": 0
+     }
+    },
+    {
+     "op": "send",
+     "id": 1,
+     "frame": {
+      "kind": "data",
+      "bytes": 1
+     },
+     "expect": false
+    }
+   ],
+   "open_count": 0
+  },
+  {
+   "name": "ts-peer-ends-first-then-replies",
+   "side": "ts",
+   "max_open": 4,
+   "steps": [
+    {
+     "op": "receive",
+     "id": 1,
+     "frame": {
+      "kind": "open"
+     },
+     "expect": {
+      "received": "opened"
+     }
+    },
+    {
+     "op": "receive",
+     "id": 1,
+     "frame": {
+      "kind": "end"
+     },
+     "expect": {
+      "received": "ended",
+      "closed": false
+     }
+    },
+    {
+     "op": "receive",
+     "id": 1,
+     "frame": {
+      "kind": "credit",
+      "bytes": 65536
+     },
+     "expect": {
+      "received": "credit",
+      "bytes": 65536
+     }
+    },
+    {
+     "op": "send",
+     "id": 1,
+     "frame": {
+      "kind": "data",
+      "bytes": 100
+     },
+     "expect": true
+    },
+    {
+     "op": "send",
+     "id": 1,
+     "frame": {
+      "kind": "end"
+     },
+     "expect": true
+    },
+    {
+     "op": "receive",
+     "id": 1,
+     "frame": {
+      "kind": "written",
+      "bytes": 100
+     },
+     "expect": {
+      "received": "written",
+      "bytes": 100,
+      "closed": true
+     }
+    },
+    {
+     "op": "receive",
+     "id": 1,
+     "frame": {
+      "kind": "credit",
+      "bytes": 1
+     },
+     "expect": {
+      "received": "late",
+      "data": 0
+     }
+    }
+   ],
+   "open_count": 0
+  },
+  {
+   "name": "crossed-abort-front",
+   "side": "front",
+   "max_open": 4,
+   "steps": [
+    {
+     "op": "open_next",
+     "expect": 1
+    },
+    {
+     "op": "send",
+     "id": 1,
+     "frame": {
+      "kind": "abort"
+     },
+     "expect": true
+    },
+    {
+     "op": "receive",
+     "id": 1,
+     "frame": {
+      "kind": "abort"
+     },
+     "expect": {
+      "received": "late",
+      "data": 0
+     }
+    },
+    {
+     "op": "receive",
+     "id": 1,
+     "frame": {
+      "kind": "data",
+      "bytes": 7
+     },
+     "expect": {
+      "received": "late",
+      "data": 7
+     }
+    }
+   ],
+   "open_count": 0
+  },
+  {
+   "name": "crossed-abort-ts",
+   "side": "ts",
+   "max_open": 4,
+   "steps": [
+    {
+     "op": "receive",
+     "id": 1,
+     "frame": {
+      "kind": "open"
+     },
+     "expect": {
+      "received": "opened"
+     }
+    },
+    {
+     "op": "receive",
+     "id": 1,
+     "frame": {
+      "kind": "abort"
+     },
+     "expect": {
+      "received": "aborted"
+     }
+    },
+    {
+     "op": "send",
+     "id": 1,
+     "frame": {
+      "kind": "abort"
+     },
+     "expect": false
+    },
+    {
+     "op": "send",
+     "id": 1,
+     "frame": {
+      "kind": "end"
+     },
+     "expect": false
+    }
+   ],
+   "open_count": 0
+  },
+  {
+   "name": "never-opened-ids",
+   "side": "ts",
+   "max_open": 4,
+   "steps": [
+    {
+     "op": "receive",
+     "id": 1,
+     "frame": {
+      "kind": "data",
+      "bytes": 1
+     },
+     "error": "CONN_UNOPENED"
+    },
+    {
+     "op": "receive",
+     "id": 2,
+     "frame": {
+      "kind": "open"
+     },
+     "error": "CONN_UNOPENED"
+    },
+    {
+     "op": "receive",
+     "id": 1,
+     "frame": {
+      "kind": "open"
+     },
+     "expect": {
+      "received": "opened"
+     }
+    },
+    {
+     "op": "receive",
+     "id": 1,
+     "frame": {
+      "kind": "open"
+     },
+     "error": "CONN_UNOPENED"
+    },
+    {
+     "op": "receive",
+     "id": 2,
+     "frame": {
+      "kind": "credit",
+      "bytes": 1
+     },
+     "error": "CONN_UNOPENED"
+    },
+    {
+     "op": "send",
+     "id": 5,
+     "frame": {
+      "kind": "data",
+      "bytes": 1
+     },
+     "error": "CONN_UNOPENED"
+    }
+   ],
+   "open_count": 1
+  },
+  {
+   "name": "nothing-after-end",
+   "side": "ts",
+   "max_open": 4,
+   "steps": [
+    {
+     "op": "receive",
+     "id": 1,
+     "frame": {
+      "kind": "open"
+     },
+     "expect": {
+      "received": "opened"
+     }
+    },
+    {
+     "op": "receive",
+     "id": 1,
+     "frame": {
+      "kind": "end"
+     },
+     "expect": {
+      "received": "ended",
+      "closed": false
+     }
+    },
+    {
+     "op": "receive",
+     "id": 1,
+     "frame": {
+      "kind": "data",
+      "bytes": 1
+     },
+     "error": "CONN_AFTER_END"
+    },
+    {
+     "op": "receive",
+     "id": 1,
+     "frame": {
+      "kind": "end"
+     },
+     "error": "CONN_AFTER_END"
+    },
+    {
+     "op": "send",
+     "id": 1,
+     "frame": {
+      "kind": "end"
+     },
+     "expect": true
+    }
+   ],
+   "open_count": 0
+  },
+  {
+   "name": "no-send-after-own-end",
+   "side": "front",
+   "max_open": 4,
+   "steps": [
+    {
+     "op": "open_next",
+     "expect": 1
+    },
+    {
+     "op": "send",
+     "id": 1,
+     "frame": {
+      "kind": "end"
+     },
+     "expect": true
+    },
+    {
+     "op": "send",
+     "id": 1,
+     "frame": {
+      "kind": "data",
+      "bytes": 1
+     },
+     "error": "CONN_AFTER_END"
+    },
+    {
+     "op": "send",
+     "id": 1,
+     "frame": {
+      "kind": "end"
+     },
+     "error": "CONN_AFTER_END"
+    },
+    {
+     "op": "send",
+     "id": 1,
+     "frame": {
+      "kind": "credit",
+      "bytes": 1
+     },
+     "expect": true
+    }
+   ],
+   "open_count": 1
+  },
+  {
+   "name": "front-bound-frees-on-close",
+   "side": "front",
+   "max_open": 2,
+   "steps": [
+    {
+     "op": "open_next",
+     "expect": 1
+    },
+    {
+     "op": "open_next",
+     "expect": 2
+    },
+    {
+     "op": "open_next",
+     "error": "CONN_FULL"
+    },
+    {
+     "op": "send",
+     "id": 1,
+     "frame": {
+      "kind": "abort"
+     },
+     "expect": true
+    },
+    {
+     "op": "open_next",
+     "expect": 3
+    }
+   ],
+   "open_count": 2
+  },
+  {
+   "name": "ts-bound-refuses-open",
+   "side": "ts",
+   "max_open": 1,
+   "steps": [
+    {
+     "op": "receive",
+     "id": 1,
+     "frame": {
+      "kind": "open"
+     },
+     "expect": {
+      "received": "opened"
+     }
+    },
+    {
+     "op": "receive",
+     "id": 2,
+     "frame": {
+      "kind": "open"
+     },
+     "error": "CONN_FULL"
+    }
+   ],
+   "open_count": 1
+  },
+  {
+   "name": "ts-drains-after-an-early-front-end",
+   "side": "ts",
+   "max_open": 4,
+   "steps": [
+    {
+     "op": "receive",
+     "id": 1,
+     "frame": {
+      "kind": "open"
+     },
+     "expect": {
+      "received": "opened"
+     }
+    },
+    {
+     "op": "receive",
+     "id": 1,
+     "frame": {
+      "kind": "end"
+     },
+     "expect": {
+      "received": "ended",
+      "closed": false
+     }
+    },
+    {
+     "op": "send",
+     "id": 1,
+     "frame": {
+      "kind": "data",
+      "bytes": 100
+     },
+     "expect": true
+    },
+    {
+     "op": "send",
+     "id": 1,
+     "frame": {
+      "kind": "end"
+     },
+     "expect": true
+    },
+    {
+     "op": "receive",
+     "id": 1,
+     "frame": {
+      "kind": "credit",
+      "bytes": 7
+     },
+     "expect": {
+      "received": "credit",
+      "bytes": 7
+     }
+    },
+    {
+     "op": "receive",
+     "id": 1,
+     "frame": {
+      "kind": "data",
+      "bytes": 1
+     },
+     "error": "CONN_AFTER_END"
+    },
+    {
+     "op": "receive",
+     "id": 1,
+     "frame": {
+      "kind": "written",
+      "bytes": 60
+     },
+     "expect": {
+      "received": "written",
+      "bytes": 60,
+      "closed": false
+     }
+    },
+    {
+     "op": "receive",
+     "id": 1,
+     "frame": {
+      "kind": "written",
+      "bytes": 100
+     },
+     "expect": {
+      "received": "written",
+      "bytes": 100,
+      "closed": true
+     }
+    },
+    {
+     "op": "receive",
+     "id": 1,
+     "frame": {
+      "kind": "credit",
+      "bytes": 1
+     },
+     "expect": {
+      "received": "late",
+      "data": 0
+     }
+    }
+   ],
+   "open_count": 0
+  },
+  {
+   "name": "front-drains-until-its-last-receipt-is-sent",
+   "side": "front",
+   "max_open": 4,
+   "steps": [
+    {
+     "op": "open_next",
+     "expect": 1
+    },
+    {
+     "op": "send",
+     "id": 1,
+     "frame": {
+      "kind": "end"
+     },
+     "expect": true
+    },
+    {
+     "op": "receive",
+     "id": 1,
+     "frame": {
+      "kind": "data",
+      "bytes": 100
+     },
+     "expect": {
+      "received": "data",
+      "bytes": 100
+     }
+    },
+    {
+     "op": "receive",
+     "id": 1,
+     "frame": {
+      "kind": "end"
+     },
+     "expect": {
+      "received": "ended",
+      "closed": false
+     }
+    },
+    {
+     "op": "receive",
+     "id": 1,
+     "frame": {
+      "kind": "credit",
+      "bytes": 5
+     },
+     "expect": {
+      "received": "credit",
+      "bytes": 5
+     }
+    },
+    {
+     "op": "send",
+     "id": 1,
+     "frame": {
+      "kind": "written",
+      "bytes": 60
+     },
+     "expect": true
+    },
+    {
+     "op": "send",
+     "id": 1,
+     "frame": {
+      "kind": "written",
+      "bytes": 100
+     },
+     "expect": true
+    },
+    {
+     "op": "send",
+     "id": 1,
+     "frame": {
+      "kind": "written",
+      "bytes": 101
+     },
+     "expect": false
+    }
+   ],
+   "open_count": 0
+  },
+  {
+   "name": "ts-abort-while-draining-settles-a-late-receipt",
+   "side": "ts",
+   "max_open": 4,
+   "steps": [
+    {
+     "op": "receive",
+     "id": 1,
+     "frame": {
+      "kind": "open"
+     },
+     "expect": {
+      "received": "opened"
+     }
+    },
+    {
+     "op": "send",
+     "id": 1,
+     "frame": {
+      "kind": "data",
+      "bytes": 10
+     },
+     "expect": true
+    },
+    {
+     "op": "send",
+     "id": 1,
+     "frame": {
+      "kind": "end"
+     },
+     "expect": true
+    },
+    {
+     "op": "receive",
+     "id": 1,
+     "frame": {
+      "kind": "end"
+     },
+     "expect": {
+      "received": "ended",
+      "closed": false
+     }
+    },
+    {
+     "op": "send",
+     "id": 1,
+     "frame": {
+      "kind": "abort"
+     },
+     "expect": true
+    },
+    {
+     "op": "receive",
+     "id": 1,
+     "frame": {
+      "kind": "written",
+      "bytes": 10
+     },
+     "expect": {
+      "received": "late",
+      "data": 0
+     }
+    }
+   ],
+   "open_count": 0
+  },
+  {
+   "name": "ts-receipts-advance-strictly-within-the-stream",
+   "side": "ts",
+   "max_open": 4,
+   "steps": [
+    {
+     "op": "receive",
+     "id": 1,
+     "frame": {
+      "kind": "open"
+     },
+     "expect": {
+      "received": "opened"
+     }
+    },
+    {
+     "op": "send",
+     "id": 1,
+     "frame": {
+      "kind": "data",
+      "bytes": 10
+     },
+     "expect": true
+    },
+    {
+     "op": "receive",
+     "id": 1,
+     "frame": {
+      "kind": "written",
+      "bytes": 11
+     },
+     "error": "CONN_WRITTEN"
+    },
+    {
+     "op": "receive",
+     "id": 1,
+     "frame": {
+      "kind": "written",
+      "bytes": 4
+     },
+     "expect": {
+      "received": "written",
+      "bytes": 4,
+      "closed": false
+     }
+    },
+    {
+     "op": "receive",
+     "id": 1,
+     "frame": {
+      "kind": "written",
+      "bytes": 4
+     },
+     "error": "CONN_WRITTEN"
+    },
+    {
+     "op": "receive",
+     "id": 1,
+     "frame": {
+      "kind": "written",
+      "bytes": 3
+     },
+     "error": "CONN_WRITTEN"
+    },
+    {
+     "op": "send",
+     "id": 1,
+     "frame": {
+      "kind": "written",
+      "bytes": 5
+     },
+     "error": "CONN_WRITTEN"
+    },
+    {
+     "op": "receive",
+     "id": 2,
+     "frame": {
+      "kind": "written",
+      "bytes": 1
+     },
+     "error": "CONN_UNOPENED"
+    }
+   ],
+   "open_count": 1
+  },
+  {
+   "name": "front-sends-receipts-and-never-receives-them",
+   "side": "front",
+   "max_open": 4,
+   "steps": [
+    {
+     "op": "open_next",
+     "expect": 1
+    },
+    {
+     "op": "receive",
+     "id": 1,
+     "frame": {
+      "kind": "data",
+      "bytes": 10
+     },
+     "expect": {
+      "received": "data",
+      "bytes": 10
+     }
+    },
+    {
+     "op": "receive",
+     "id": 1,
+     "frame": {
+      "kind": "written",
+      "bytes": 1
+     },
+     "error": "CONN_WRITTEN"
+    },
+    {
+     "op": "send",
+     "id": 1,
+     "frame": {
+      "kind": "written",
+      "bytes": 11
+     },
+     "error": "CONN_WRITTEN"
+    },
+    {
+     "op": "send",
+     "id": 1,
+     "frame": {
+      "kind": "written",
+      "bytes": 10
+     },
+     "expect": true
+    }
+   ],
+   "open_count": 1
+  },
+  {
+   "name": "front-refuses-stream-bytes-past-the-bound",
+   "side": "front",
+   "max_open": 4,
+   "steps": [
+    {
+     "op": "open_next",
+     "expect": 1
+    },
+    {
+     "op": "receive",
+     "id": 1,
+     "frame": {
+      "kind": "data",
+      "bytes": 9007199254740991
+     },
+     "expect": {
+      "received": "data",
+      "bytes": 9007199254740991
+     }
+    },
+    {
+     "op": "receive",
+     "id": 1,
+     "frame": {
+      "kind": "data",
+      "bytes": 1
+     },
+     "error": "CONN_STREAM_BOUND"
+    }
+   ],
+   "open_count": 1
+  },
+  {
+   "name": "ts-never-sends-stream-bytes-past-the-bound",
+   "side": "ts",
+   "max_open": 4,
+   "steps": [
+    {
+     "op": "receive",
+     "id": 1,
+     "frame": {
+      "kind": "open"
+     },
+     "expect": {
+      "received": "opened"
+     }
+    },
+    {
+     "op": "send",
+     "id": 1,
+     "frame": {
+      "kind": "data",
+      "bytes": 9007199254740991
+     },
+     "expect": true
+    },
+    {
+     "op": "send",
+     "id": 1,
+     "frame": {
+      "kind": "data",
+      "bytes": 1
+     },
+     "error": "CONN_STREAM_BOUND"
+    }
+   ],
+   "open_count": 1
+  },
+  {
+   "name": "ts-front-to-ts-bytes-do-not-hold-the-close",
+   "side": "ts",
+   "max_open": 4,
+   "steps": [
+    {
+     "op": "receive",
+     "id": 1,
+     "frame": {
+      "kind": "open"
+     },
+     "expect": {
+      "received": "opened"
+     }
+    },
+    {
+     "op": "receive",
+     "id": 1,
+     "frame": {
+      "kind": "data",
+      "bytes": 9
+     },
+     "expect": {
+      "received": "data",
+      "bytes": 9
+     }
+    },
+    {
+     "op": "send",
+     "id": 1,
+     "frame": {
+      "kind": "end"
+     },
+     "expect": true
+    },
+    {
+     "op": "receive",
+     "id": 1,
+     "frame": {
+      "kind": "end"
+     },
+     "expect": {
+      "received": "ended",
+      "closed": true
+     }
+    }
+   ],
+   "open_count": 0
+  }
+ ]
+}

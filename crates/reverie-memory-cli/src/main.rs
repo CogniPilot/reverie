@@ -20,6 +20,12 @@ struct Arguments {
     /// Selected instance configuration; alternatively REVERIE_INSTANCE_CONFIG.
     #[arg(long)]
     instance: Option<PathBuf>,
+    /// Use fixed installed context DATA. Actual caller authority remains at the API.
+    #[arg(long, conflicts_with_all=["instance","initialize"], requires="expected_context")]
+    installed_context: bool,
+    /// Exact installed-context byte fingerprint supplied by the fixed MCP bootstrap.
+    #[arg(long, requires = "installed_context")]
+    expected_context: Option<String>,
     /// Explicitly initialize the selected scope; never performed by recall.
     #[arg(long)]
     initialize: bool,
@@ -70,6 +76,9 @@ fn main() -> ExitCode {
     }
 }
 fn selected(mut arguments: Arguments) -> Result<Arguments> {
+    if arguments.installed_context {
+        return Ok(arguments);
+    }
     if arguments.instance.is_none() {
         arguments.instance = std::env::var_os("REVERIE_INSTANCE_CONFIG")
             .filter(|value| !value.is_empty())
@@ -84,7 +93,29 @@ fn selected(mut arguments: Arguments) -> Result<Arguments> {
 }
 fn run(arguments: Arguments) -> Result<MemoryReply> {
     let mut namespace = MemoryNamespace::capture_current().map_err(Failure::display)?;
-    let result = request::run(&arguments);
+    let mut installed = None;
+    let result = (|| {
+        if arguments.installed_context {
+            let context = reverie_host::memory_context::InstalledContext::capture()
+                .map_err(Failure::display)?
+                .ok_or_else(|| Failure::text("installed memory context unavailable"))?;
+            installed = Some(context);
+            let context = installed.as_ref().expect("adopted installed context");
+            if arguments.expected_context.as_deref() != Some(context.fingerprint().as_str()) {
+                return Err(Failure::text("installed memory context changed"));
+            }
+        }
+        request::run(
+            &arguments,
+            installed
+                .as_ref()
+                .map(reverie_host::memory_context::InstalledContext::data),
+        )
+    })();
+    let closed = installed
+        .as_mut()
+        .map_or(Ok(()), |context| context.close().map_err(Failure::display));
+    let result = Failure::finalized(result, closed);
     // Namespace close synchronously consumes every local descriptor once. A
     // sticky negative outcome is not a constructor that could later finish.
     Failure::finalized(result, namespace.close().map_err(Failure::display))

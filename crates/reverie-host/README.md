@@ -114,12 +114,12 @@ broker must still retain its supported admission and execution guards. This
 cohort does not replace `worker_memory.check_swap_budget`, `configure_started`,
 soft-limit requests or running-kernel verification.
 
-The existing Python broker and artifact producer remain selected. Migrating the
-build-time first-party Python producer is **required remaining work**, preserving
-its filtered policy/builder/base/toolchain identity so unrelated workspace edits
-do not churn installed profile paths. Neither this library nor its tests claim
-that producer retirement, a consumer cutover, activation, a live syscall canary
-or the complete Python-free backend has finished.
+The existing Python broker remains selected. The task-perf artifact is now built
+by the separate Rust build-only policy-artifacts package, with filtered actual
+crate/dependency inputs. The separate Docker base-profile Python producer and
+other build-time tooling remain migration debt. Neither this library nor its
+tests claim a consumer cutover, activation, a live syscall canary or the complete
+Python-free backend has finished.
 
 `lease_policy::project_lease` consumes a captured `LeaseConfig` and session,
 obtaining the company path and UID comparison only from that same configuration.
@@ -361,10 +361,6 @@ Checked Company close attempts every job and phone; unresolved owners survive an
 accidental service drop in process-lifetime quarantine. Neither this quarantine
 nor a closed phone establishes durable recovery or global shutdown.
 
-The worker constructor checks the mandatory telemetry object's Runtime origin;
-the enabled telemetry Office hook and its InstallingBroker bootstrap consumer
-remain a separate composition. This increment does not recover/register laptops,
-stop a source, create/start a container, mint API grants, or select a backend.
 # Retained Office construction failures
 
 `bind_retained` returns a genuine failed-construction owner only after its actual
@@ -387,3 +383,35 @@ are created; regular-file traversal fails before resolution. Created directories
 remain on later failures. Trusted fixed-address constructors and their direct
 bind restrictions are unchanged. Root resolution grants neither writer exclusion
 nor authorization, and the existing no-overwrite socket policy remains in force.
+
+# Telemetry consumers
+The worker constructor checks and retains the mandatory telemetry object's
+Runtime origin. An enabled collector serves the fixed hands route locally using
+the phone's constructor-selected SID; the trusted fixed-address constructor
+keeps its original absent-collector behavior. The closed native-job purpose
+retains actual request seats through thread settlement after HTTP cancellation.
+Company close/drop independently inspect the same collector's pending SQLite
+owners; a joined thread cannot forgive a refused database close.
+
+`worker_reports` implements only the fixed T operation on an actual owned Unix
+connection, not a listener or generic dispatcher. Actual kernel UID precedes
+frame/collector access. The shared 256 KiB transport check precedes allocation;
+the complete common frame precedes the existing 4 KiB request-purpose check.
+Original 10-second per-receive and whole-sendall budgets, plus first-stop clamping,
+are retained; partial send progress never renews that attempt's deadline. EOF and
+connection loss close quietly. Interrupted receive waits keep their original
+monotonic deadline; only positive byte progress begins another recv budget.
+The receive-attempt behavior follows the pinned
+[CPython 3.13.15 socket implementation](https://github.com/python/cpython/blob/v3.13.15/Modules/socketmodule.c#L822).
+Operation refusals send one E, and successful
+closed reports send J. Independent report admission still refuses rather than
+queuing another batch. Checked socket finalizers, bounded retained connections,
+and uncertain-close quarantine are separate from report success. A refused socket's
+unconfirmed close fences further admission and retains the same engine origin,
+even when no connection record was admitted; its consumed descriptor is never
+retried. Native kernel
+or filesystem latency is not claimed to have a hard execution bound.
+
+These consumers do not recover/register laptops, stop a source, create/start a
+container, mint API grants, or select a backend. Complete-create argv must still
+reach the actual collector immediately before the genuine create producer.

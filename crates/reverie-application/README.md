@@ -322,3 +322,28 @@ same-Runtime recovery inspection data. It shares the existing resolver and kerne
 rule owners; no CID is invented to adapt the weaker legacy recovery data. The
 complete recovery transaction, phone/storage registration, source-stop and later
 create/start lifecycle still require their real InstallingBroker producers.
+
+# Installing telemetry ownership and the protected read operation
+
+InstallingBroker captures the genuine CommandTelemetry from its consumed Runtime
+before optional Gate/marker construction, preserving the Python constructor's
+ordering. Disabled is captured configuration state, not an omitted or replacement
+collector. A failed constructor returns opaque BrokerBootstrapFailure retaining
+that same Runtime, snapshot and completed owners with its typed primary cause.
+Its checked close settles actual runtime work and independently checks SQLite
+owners before sealing. Ignoring an unsettled failure quarantines those owners;
+settlement never upgrades the failed constructor or grants launch/release.
+Office construction remains in its later recovery/new-laptop phase.
+
+`handle_command_failure_report` delegates a real accepted Unix connection to the
+fixed same-runtime T service and mandatory collector. It supplies no listener,
+wire dispatch completion, browser owner authorization or company-selected path.
+`close_command_telemetry` publishes the original first stop, seals/settles its actual
+T connection records and checks pending Store state. The listener/dispatcher must
+still join its actual caller-owned handler threads. This component result does not close
+other Office/laptop/resource constructors or acknowledge global shutdown.
+
+The original complete-create check remains mandatory after current running intent
+and all Nix/account mounts, immediately before actual create. This bounded cohort
+adds no data-to-start constructor; the actual protected/unreserved create and
+whole lifecycle producers must consume this retained collector when they land.

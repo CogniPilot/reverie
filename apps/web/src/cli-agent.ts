@@ -58,7 +58,7 @@ import { GLYPH, palette, table } from './cli-style.js';
 import { getErrorMessage } from './types.js';
 import { CODEX_REASONING_EFFORTS } from './types/session.js';
 import { stripAnsi as stripAnsiSequences } from './utils/regex-patterns.js';
-import { quoteForPane } from './pane-quote.js';
+import { CHAT_MESSAGE_PART_CHARS, quoteChatBody, quoteForPane, type ChatBodyOptions } from './pane-quote.js';
 import { pronounsProblem, pronounsProposal } from './pronouns.js';
 import { agentPlanRequest, agentRequestPlanMove, agentPlanMoveAction, agentPendingPlanMoves, agentPlanRecovery } from './cli-plan-request.js';
 import { registerGoalCommands } from './cli-goal.js';
@@ -1207,7 +1207,7 @@ export async function resolveChatRoom(
  * One message as `agent chat read` prints it. Names and bodies are JSON strings (like the lines delivered to a pane), so a
  * body cannot start a new line or pass itself off as another speaker; a speaker's own label stays outside the quotes.
  */
-export function formatChatMessage(m: ChatMessageRow, members: ChatMemberRow[], roomId?: string, timeZone?: string): string {
+export function formatChatMessage(m: ChatMessageRow, members: ChatMemberRow[], roomId?: string, timeZone?: string, bodyOptions: ChatBodyOptions = {}): string {
   const nameOf = (id: string) =>
     id === 'user' ? 'user' : quoteForPane(members.find((x) => x.sessionId === id)?.name ?? id.slice(0, 8), 80);
   // A post to the whole room names no recipient (as in the delivered line); only an addressed message shows `-> who`.
@@ -1228,8 +1228,8 @@ export function formatChatMessage(m: ChatMessageRow, members: ChatMemberRow[], r
   const body = m.deleted
     ? '(deleted)'
     : m.poll
-      ? `${quoteForPane(m.text)} [poll ${m.id.slice(0, 8)}: ${pollTotals(m.poll)}]`
-      : !m.text && m.attachments?.length ? '(attachment only)' : quoteForPane(m.text);
+      ? `${quoteChatBody(m.text, roomId, m.id, bodyOptions)} [poll ${m.id.slice(0, 8)}: ${pollTotals(m.poll)}]`
+      : !m.text && m.attachments?.length ? '(attachment only)' : quoteChatBody(m.text, roomId, m.id, bodyOptions);
   // An edited message reads as its new text, marked; a pinned one is a room rule or announcement.
   const attached = m.deleted
     ? ''
@@ -1685,8 +1685,13 @@ async function withLocalImages(deps: AgentDeps, roomId: string, messages: ChatMe
 }
 
 /** `agent chat read` — recent history. */
-export async function agentChatRead(deps: AgentDeps, options: { room?: string; limit: number; message?: string; acknowledge?: boolean }): Promise<number> {
+export async function agentChatRead(deps: AgentDeps, options: { room?: string; limit: number; message?: string; part?: number; acknowledge?: boolean }): Promise<number> {
   if (options.acknowledge && !options.message) return fail(deps, '--acknowledge requires --message');
+  if (options.part !== undefined) {
+    if (!options.message) return fail(deps, '--part requires --message');
+    if (deps.json) return fail(deps, '--part cannot be combined with --json');
+    if (!Number.isSafeInteger(options.part) || options.part < 1) return fail(deps, '--part must be a positive integer');
+  }
   const target = await resolveChatRoom(deps, options.room);
   if ('error' in target) return fail(deps, target.error, target.code);
   if (options.message) {
@@ -1695,9 +1700,11 @@ export async function agentChatRead(deps: AgentDeps, options: { room?: string; l
     if (!exact.json?.success) return fail(deps, describeFailure(exact));
     const data = exact.json.data as { message?: ChatMessageRow; readToken?: string; timeZone?: string } | undefined;
     if (data?.message?.id !== options.message || typeof data.readToken !== 'string') return fail(deps, 'Unrecognized exact-message response; nothing acknowledged');
+    const parts = Math.max(1, Math.ceil(Array.from(data.message.text).length / CHAT_MESSAGE_PART_CHARS));
+    if (options.part !== undefined && options.part > parts) return fail(deps, `--part must be between 1 and ${parts}`);
     data.message = (await withLocalImages(deps, target.room.id, [data.message]))[0];
     // Explicit acknowledgement follows receipt of this exact response, never a guessed timestamp or text match.
-    if (!deps.json) deps.io.out(formatChatMessage(data.message, target.room.members ?? [], target.room.id, data.timeZone));
+    if (!deps.json) deps.io.out(formatChatMessage(data.message, target.room.members ?? [], target.room.id, data.timeZone, { full: true, part: options.part }));
     if (options.acknowledge) {
       const ack = await deps.request(deps.ctx, { method: 'POST', path: path + '/read-ack', body: { readToken: data.readToken } });
       const confirmed = ack.json?.success && (ack.json.data as { acknowledged?: string } | undefined)?.acknowledged === options.message;
@@ -3258,10 +3265,11 @@ export function registerAgentCommands(program: Command): Command {
     .option('-r, --room <room>', 'Room id or name')
     .option('--json', 'Machine-readable output')
     .option('--message <id>', 'Read exactly this message, including archived history; no automatic acknowledgement')
+    .option('--part <n>', 'Read a 2400-character part of --message (whole Unicode code points); exact reads otherwise print the full body')
     .option('--acknowledge', 'Explicitly acknowledge only the exact message after receiving it')
-    .action((options: { limit?: string; room?: string; json?: boolean; message?: string; acknowledge?: boolean }) =>
+    .action((options: { limit?: string; room?: string; json?: boolean; message?: string; part?: string; acknowledge?: boolean }) =>
       run(Boolean(options.json), (deps) =>
-        agentChatRead(deps, { room: options.room, limit: parsePositiveInt(options.limit, 30, '--limit'), message: options.message, acknowledge: options.acknowledge })
+        agentChatRead(deps, { room: options.room, limit: parsePositiveInt(options.limit, 30, '--limit'), message: options.message, part: options.part === undefined ? undefined : Number(options.part), acknowledge: options.acknowledge })
       )
     );
 

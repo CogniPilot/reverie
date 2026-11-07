@@ -47,6 +47,9 @@ pub(super) async fn handle(
         Route::OpsUnavailable | Route::Unavailable => {
             return refusal(StatusCode::SERVICE_UNAVAILABLE);
         }
+        Route::Telemetry => {
+            return super::telemetry::respond(&context, body, lifetime).await;
+        }
     };
     let headers = match credentials::headers(
         &context.company,

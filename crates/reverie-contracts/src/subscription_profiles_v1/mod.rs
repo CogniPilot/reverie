@@ -139,11 +139,11 @@ fn trim(units: &[u16]) -> &[u16] {
     &units[start..end]
 }
 
-/// What TS forwards after its own auth: its memoized CLI-registry modes and its own environment.
+/// What TS forwards after its own auth: its own environment. The CLI-registry modes are observed
+/// later, only after a read that found profiles, as the TS route reads them.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct Request {
-    pub modes_by_provider: Modes,
     pub env: Environment,
     /// `os.homedir()`, `process.cwd()`, `process.platform` and `getDataDir()` of the TS process.
     pub home: String,
@@ -151,11 +151,23 @@ pub struct Request {
     pub platform: String,
     pub data_dir: String,
 }
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
-#[serde(deny_unknown_fields)]
+/// The TS `subscriptionModes` lists; a provider that was not observed has none.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct Modes {
     pub anthropic: Vec<String>,
     pub openai: Vec<String>,
+}
+/// `None` only for an absent key: a present key must hold a list, so `null` is refused, not unread.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ObservedModes {
+    #[serde(default, deserialize_with = "present")]
+    anthropic: Option<Vec<String>>,
+    #[serde(default, deserialize_with = "present")]
+    openai: Option<Vec<String>>,
+}
+fn present<'de, D: serde::Deserializer<'de>>(input: D) -> Result<Option<Vec<String>>, D::Error> {
+    Vec::deserialize(input).map(Some)
 }
 impl Modes {
     pub fn of(&self, provider: Provider) -> &[String] {
@@ -184,6 +196,22 @@ pub fn decode_request(raw: &[u8]) -> Result<Request, Refusal> {
     serde_json::from_slice(raw).map_err(|_| Refusal::RequestSchema)
 }
 
+/// TS's answer to a modes observation: exactly the `requested` providers, each a list of strings.
+pub fn decode_modes(raw: &[u8], requested: &[Provider]) -> Result<Modes, Refusal> {
+    let observed: ObservedModes =
+        serde_json::from_slice(raw).map_err(|_| Refusal::ObservationSchema)?;
+    let wanted = |provider| requested.contains(&provider);
+    if observed.anthropic.is_some() != wanted(Provider::Anthropic)
+        || observed.openai.is_some() != wanted(Provider::Openai)
+    {
+        return Err(Refusal::ObservationSchema);
+    }
+    Ok(Modes {
+        anthropic: observed.anthropic.unwrap_or_default(),
+        openai: observed.openai.unwrap_or_default(),
+    })
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Response {
     pub status: u16,
@@ -198,6 +226,7 @@ pub enum Refusal {
     Platform,
     FileBound,
     ResponseBound,
+    ObservationSchema,
 }
 impl Refusal {
     pub fn code(self) -> &'static str {
@@ -207,6 +236,7 @@ impl Refusal {
             Self::Platform => "PLATFORM",
             Self::FileBound => "FILE_BOUND",
             Self::ResponseBound => "RESPONSE_BOUND",
+            Self::ObservationSchema => "OBSERVATION_SCHEMA",
         }
     }
 }

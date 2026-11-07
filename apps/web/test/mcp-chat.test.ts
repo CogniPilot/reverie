@@ -36,16 +36,16 @@ describe('plans tools (read-only)', () => {
     bankedResets: provider === 'openai' ? { availableCount: 2, earliestExpiresAt: null } : null,
     sessions: [{ id: SELF, name: 'alpha' }],
   });
-  const plans = { 'GET /api/v1/plans': () => ok({ generatedAt: 1, accounts: [ROW('Work', 'anthropic'), ROW('primary', 'openai')] }) };
+  const plans = { 'GET /api/v1/plans': () => ok({ generatedAt: 1, timeZone: 'America/New_York', accounts: [ROW('Work', 'anthropic'), ROW('primary', 'openai')] }) };
 
-  it('plans_list and plans_show are offered with the chat tools and print week, 5-hour, reset in ET and banked resets', async () => {
+  it('plans_list and plans_show are offered with the chat tools and print week, 5-hour, reset in the server timezone and banked resets', async () => {
     const { runner, calls } = run(cfg(), fake(plans));
     expect(buildToolDefinitions(['claude'], { chat: true }).map((t) => t.name)).toEqual(expect.arrayContaining(['plans_list', 'plans_show']));
     const list = await runner.run('plans_list', {});
     expect(list.isError).toBeFalsy();
     expect(list.text).toContain('week 40%');
     expect(list.text).toContain('5-hour 12%');
-    expect(list.text).toContain('resets Mon 19 Oct 00:00 ET');
+    expect(list.text).toContain('resets Mon 19 Oct 00:00 GMT-4');
     expect(list.text).toContain('banked resets: 2');
     const one = await runner.run('plans_show', { name: 'primary' });
     expect(one.text).toContain('primary');
@@ -155,6 +155,34 @@ describe('chat tools run the chat verbs as the session', () => {
     expect((await runner.run('chat_read', { limit: 101 })).isError).toBe(true);
     const who = await runner.run('chat_who', {});
     expect(who.text).toContain('alpha');
+  });
+
+  it('chat_read supports exact full messages and parts without truncating expanded quotes', async () => {
+    const mid = '22222222-2222-4222-8222-222222222222';
+    const text = '\u200b'.repeat(7999) + 'Z';
+    const f = fake({ [`GET /api/v1/chatrooms/${REVERIE.id}/messages/${mid}`]: () => ok({
+      message: { id: mid, at: 1, from: { kind: 'user', name: 'owner' }, to: 'all', text }, readToken: 'fixture',
+    }) });
+    const { runner, calls } = run(cfg(), f);
+    const full = await runner.run('chat_read', { message: mid });
+    expect(full.isError).toBeFalsy();
+    expect(full.text.length).toBeGreaterThan(40000);
+    expect(full.text).toContain('USER: "');
+    expect(full.text).toMatch(/Z"$/);
+    expect(JSON.parse(full.text.slice(full.text.indexOf('USER: ') + 6))).toBe(text);
+    const part = await runner.run('chat_read', { message: mid, part: 4 });
+    expect(part.isError).toBeFalsy();
+    expect(part.text).toContain('[part 4 of 4]');
+    expect(part.text).not.toContain('; next:');
+    expect(calls.every(c => c.method === 'GET')).toBe(true);
+    const before = calls.length;
+    for (const args of [{ part: 1 }, { message: mid, part: 0 }, { message: mid, part: 1.5 }])
+      expect((await runner.run('chat_read', args)).isError).toBe(true);
+    expect(calls).toHaveLength(before);
+    expect((await runner.run('chat_read', { message: mid, part: 5 })).isError).toBe(true);
+    const schema = CHAT_TOOL_DEFINITIONS.find(t => t.name === 'chat_read')!.inputSchema.properties;
+    expect(schema).toHaveProperty('message');
+    expect(schema).toHaveProperty('part');
   });
 
   it('chat_poll and chat_vote use the same routes as the CLI, and a bad poll is an error the model can fix', async () => {

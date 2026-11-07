@@ -79,6 +79,21 @@ pub struct ObservedRow<'a> {
     origin: &'a Arc<()>,
 }
 impl ObservedInventory {
+    pub(crate) fn gpu_selected(
+        &self,
+        config: &EffectiveWorkerConfig,
+        current: &reverie_contracts::storage_identity::CurrentEmployee,
+    ) -> std::result::Result<Option<ObservedRow<'_>>, reverie_contracts::gpu_access::GpuDataError>
+    {
+        let selected =
+            reverie_contracts::gpu_access::selected_container(&self.rows, config, current)?;
+        Ok(selected
+            .and_then(|id| self.rows.rows().iter().find(|row| row.id() == &id))
+            .map(|row| ObservedRow {
+                row,
+                origin: &self.origin,
+            }))
+    }
     /// Python structural equality of census DATA, independent of the sealed
     /// per-context row origin. This never makes another context's rows usable.
     pub fn equivalent(&self, other: &Self) -> bool {

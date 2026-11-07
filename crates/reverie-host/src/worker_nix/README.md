@@ -80,8 +80,12 @@ Active Python consumers remain migration debt: `worker.py` uses the guard and
 preparation; `employee_laptop_migrate.py` and `worker_nix_migrate.py` use offline
 guard paths; `worker_store_maintenance.py` uses selection and helper arguments.
 Those entry points must migrate before deleting their shared Python module.
-The native guest package is a candidate until image/source consumers qualify;
-there is no Python fallback within it.
+The worker image selects the native guest package at the same fixed entrypoint;
+the former standalone Bash recipe is retired. Its source hash and actual
+before/after filesystem/argv oracle remain in `fixtures/legacy-seed.json` (the
+unchanged original recipe is present at commit `6083f7d6`). There is no Python
+or shell fallback within the native helper. Source selection is separate from
+installed service activation and the pending real broker workflow consumer.
 
 A known-successful `NixReturned::prepared_path` retains the exact native path
 returned by the actual private-store preparation used for that helper. It is

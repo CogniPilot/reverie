@@ -1,7 +1,7 @@
 //! The existing fixed Office OPS command/reply wire. These are DATA, never
 //! owner authority, a native permit or proof that an effect completed.
 use crate::legacy_json::{self, Node, Number, Text, Value, truthy};
-use reverie_core::worker_options::OpsServiceId;
+use reverie_core::ops::OpsServiceId;
 use std::{collections::BTreeMap, fmt};
 mod validation;
 type Object = BTreeMap<Text, Value>;

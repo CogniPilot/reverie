@@ -38,6 +38,29 @@ pub(crate) fn open_policy_child_directory(parent: &File, name: &OsStr) -> io::Re
     super::lease::open_at(parent.as_raw_fd(), name, libc::O_RDONLY | libc::O_DIRECTORY)
 }
 pub(crate) fn named_policy_entry(parent: &File, name: &OsStr) -> io::Result<PolicyEntryStamp> {
+    let data = entry_stat(parent, name)?;
+    Ok(PolicyEntryStamp {
+        device: data.device,
+        inode: data.inode,
+        size: data.size,
+        mtime: data.mtime,
+        ctime: data.ctime,
+    })
+}
+/// One no-follow named-entry syscall owner. Individual purposes retain their
+/// actual source signature: policy uses five fields; GPU includes mode/uid/link
+/// count as well. This metadata itself is not current custody or permission.
+pub(crate) struct EntryStat {
+    pub(crate) device: u64,
+    pub(crate) inode: u64,
+    pub(crate) size: u64,
+    pub(crate) mode: u32,
+    pub(crate) uid: u32,
+    pub(crate) links: u64,
+    pub(crate) mtime: (i64, i64),
+    pub(crate) ctime: (i64, i64),
+}
+pub(crate) fn entry_stat(parent: &File, name: &OsStr) -> io::Result<EntryStat> {
     let name = CString::new(name.as_bytes()).map_err(|_| io::ErrorKind::InvalidInput)?;
     let mut data = std::mem::MaybeUninit::<libc::stat>::uninit();
     // SAFETY: name and parent remain live; data points to writable stat ABI
@@ -55,12 +78,15 @@ pub(crate) fn named_policy_entry(parent: &File, name: &OsStr) -> io::Result<Poli
     }
     // SAFETY: successful fstatat initialized every stat field consumed below.
     let data = unsafe { data.assume_init() };
-    Ok(PolicyEntryStamp {
+    Ok(EntryStat {
         device: data.st_dev,
         inode: data.st_ino,
         size: u64::try_from(data.st_size).map_err(|_| io::ErrorKind::InvalidData)?,
         mtime: (data.st_mtime, data.st_mtime_nsec),
         ctime: (data.st_ctime, data.st_ctime_nsec),
+        mode: data.st_mode,
+        uid: data.st_uid,
+        links: data.st_nlink,
     })
 }
 pub(crate) fn create_policy_temporary(parent: &File, name: &OsStr) -> io::Result<File> {
