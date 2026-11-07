@@ -1,23 +1,7 @@
 [workspace]
-members = [
-    "crates/reverie-soft-limit-helper",
-    "crates/reverie-laptop-tools",
-    "crates/reverie-core",
-    "crates/reverie-contracts",
-    "crates/reverie-store",
-    "crates/reverie-host",
-    "crates/reverie-policy-artifacts",
-    "crates/reverie-application",
-    "crates/reverie-routes",
-    "crates/reverie-worker-client",
-    "crates/reverie-front",
-    "crates/reverie-diagnostics",
-    "crates/reverie-http",
-    "crates/reverie-ops-cli",
-    "crates/reverie-namegate",
-    "crates/reverie-voice-ci",
-    "crates/xtask",
-]
+# Every crate under crates/ is a member, so adding a crate does not edit this file (and two
+# branches that each add one no longer conflict here). Cargo refuses a match without Cargo.toml.
+members = ["crates/*"]
 resolver = "3"
 
 [workspace.package]
