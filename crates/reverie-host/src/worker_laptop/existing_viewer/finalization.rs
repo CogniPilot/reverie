@@ -3,8 +3,6 @@
 //! result is read-side DATA, never a storage/global release permission.
 use super::*;
 use crate::captured_client::CapturedCall;
-use reverie_contracts::worker_source_stop::{OrdinaryContainer, ordinary_container_absent};
-use std::{ffi::OsString, time::Duration};
 
 #[derive(Default)]
 pub(super) struct StorageCheck {
@@ -61,27 +59,6 @@ impl StorageCheck {
             self.pending = None;
         }
         Ok(())
-    }
-    fn call(
-        &mut self,
-        runtime: &WorkerRuntime,
-        arguments: Vec<OsString>,
-        required: bool,
-    ) -> Result<crate::captured_client::CapturedOutput> {
-        // Reuse the actual fixed cleanup call owner and its typed before-start
-        // admission policy. This purpose alone selects the argv above/below.
-        crate::worker_source_stop::captured_worker_cleanup(
-            runtime.installed_engine(),
-            Instant::now() + Duration::from_secs(20),
-            &mut self.pending,
-            arguments,
-            required,
-        )
-        .map_err(|error| match error {
-            crate::worker_source_stop::SourceStopError::Engine(error) => LaptopError::Engine(error),
-            crate::worker_source_stop::SourceStopError::Refused(code) => LaptopError::Refused(code),
-            error => LaptopError::OrdinaryStop(error),
-        })
     }
 }
 impl WorkerRuntime {
@@ -159,55 +136,16 @@ fn observe(runtime: &WorkerRuntime, record: &mut ExistingRecord) -> Result<bool>
         .inspected
         .assert_plan(runtime, &inputs.plan)
         .map_err(LaptopError::ExistingObservation)?;
-    let name = inputs.plan.arguments().name().to_owned();
     let original = inputs
         .inspected
         .data()
         .canonical_id()
         .ok_or(LaptopError::Refused("WORKER_FINAL_STORAGE_IDENTITY"))?;
-    let session = inputs.plan.session().clone();
-    let output =
-        record
-            .finalization
-            .call(runtime, vec!["inspect".into(), name.clone().into()], false)?;
-    if output.succeeded {
-        let row = OrdinaryContainer::decode(
-            &output.stdout,
-            &name,
-            runtime.worker_identity().deployment(),
-            &session,
-        )
-        .map_err(|error| {
-            LaptopError::OrdinaryStop(crate::worker_source_stop::SourceStopError::Data(error))
-        })?;
-        need(
-            row.id() == &original,
-            "WORKER_FINAL_STORAGE_IDENTITY_CHANGED",
-        )?;
-        if row.running() {
-            return Ok(true);
-        }
-        need(row.stopped(), "WORKER_FINAL_STORAGE_STATE_UNAVAILABLE")?;
-        return Ok(false);
-    }
-    let census = record.finalization.call(
+    super::super::final_storage::observe(
         runtime,
-        [
-            "ps",
-            "--all",
-            "--no-trunc",
-            "--format",
-            "{{.ID}} {{.Names}}",
-        ]
-        .into_iter()
-        .map(OsString::from)
-        .collect(),
-        true,
-    )?;
-    let absent =
-        ordinary_container_absent(&census.stdout, &name, Some(&original)).map_err(|error| {
-            LaptopError::OrdinaryStop(crate::worker_source_stop::SourceStopError::Data(error))
-        })?;
-    need(absent, "WORKER_FINAL_STORAGE_STATE_UNAVAILABLE")?;
-    Ok(false)
+        &mut record.finalization.pending,
+        &inputs.storage,
+        &inputs.plan,
+        Some(&original),
+    )
 }
