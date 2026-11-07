@@ -1,6 +1,7 @@
 //! A concrete PTY attach constructor installed in the laptop record BEFORE
 //! thread creation. No thread/late spawn can outlive its retained native owner.
 use super::*;
+mod terminal;
 use crate::{
     captured_client::InstalledCommand, native::viewer_session::ViewerProcess,
     terminal_pty::OwnedPty,
@@ -11,6 +12,7 @@ use std::{
     thread::JoinHandle,
     time::Duration,
 };
+pub(in crate::worker_laptop) use terminal::{Query, QueryObservation};
 
 struct State {
     process: ViewerProcess,
@@ -19,6 +21,8 @@ struct State {
     cleanup_failure: Option<Arc<LaptopError>>,
     opaque: bool,
     term_sent: bool,
+    transport: Option<terminal::Transport>,
+    receipt: Option<std::fs::File>,
 }
 struct ClosePlan {
     end: Instant,
@@ -31,6 +35,7 @@ pub(crate) struct Job {
     name: reverie_core::worker_launch::WorkerName,
     size: TerminalSize,
     marker: [u8; 16],
+    source: Option<crate::worker_reports::terminal::RelayIdentity>,
     state: Mutex<State>,
     thread: Mutex<Option<JoinHandle<()>>>,
     done: AtomicBool,
@@ -45,6 +50,7 @@ impl Job {
         name: reverie_core::worker_launch::WorkerName,
         size: TerminalSize,
         marker: [u8; 16],
+        source: Option<crate::worker_reports::terminal::RelayIdentity>,
     ) -> Arc<Self> {
         let process = ViewerProcess::default();
         #[cfg(test)]
@@ -67,6 +73,7 @@ impl Job {
             name,
             size,
             marker,
+            source,
             state: Mutex::new(State {
                 process,
                 pty: None,
@@ -74,6 +81,8 @@ impl Job {
                 cleanup_failure: None,
                 opaque: false,
                 term_sent: false,
+                transport: None,
+                receipt: None,
             }),
             thread: Mutex::new(None),
             done: AtomicBool::new(false),
@@ -168,7 +177,12 @@ impl Job {
     }
     fn may_start(&self, cancellation: &crate::captured_client::CancellationToken) -> Result<()> {
         need(
-            !self.closing.load(Ordering::Acquire) && !cancellation.is_cancelled(),
+            !self.closing.load(Ordering::Acquire)
+                && !cancellation.is_cancelled()
+                && self
+                    .source
+                    .as_ref()
+                    .is_none_or(crate::worker_reports::terminal::RelayIdentity::can_progress),
             "WORKER_VIEWER_STOPPED",
         )
     }
@@ -193,6 +207,13 @@ impl Job {
     }
     pub(crate) fn handoff_ready(&self) -> bool {
         if !matches!(self.join(), Ok(true)) || self.closing.load(Ordering::Acquire) {
+            return false;
+        }
+        if self
+            .source
+            .as_ref()
+            .is_some_and(|source| !source.can_progress())
+        {
             return false;
         }
         if self
@@ -408,7 +429,19 @@ impl Job {
         let Ok(mut state) = self.state.try_lock() else {
             return Ok(false);
         };
-        let result = step(&mut state, plan, end);
+        let query = match &mut state.transport {
+            Some(transport) => self
+                .origin
+                .upgrade()
+                .ok_or(LaptopError::Refused("VIEWER_ORIGIN_RETAINED"))
+                .and_then(|origin| transport.settle(&origin, end)),
+            None => Ok(()),
+        };
+        // A refused query settlement cannot hide the actual viewer group.
+        // Attempt both under the SAME first cleanup budget, retaining causes.
+        let native = step(&mut state, plan, end);
+        let done = native.as_ref().is_ok_and(|done| *done);
+        let result = finalized(query, native.map(|_| ())).map(|()| done);
         match result {
             Ok(done) => Ok(done),
             Err(error) => {
@@ -432,7 +465,13 @@ impl Job {
             return true;
         }
         self.state.try_lock().map_or(true, |state| {
-            state.pty.is_some() || state.process.has_pending_native_work()
+            state.pty.is_some()
+                || state.receipt.is_some()
+                || state.process.has_pending_native_work()
+                || state
+                    .transport
+                    .as_ref()
+                    .is_some_and(terminal::Transport::has_pending_native_work)
         })
     }
 }

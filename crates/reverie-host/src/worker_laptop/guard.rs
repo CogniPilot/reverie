@@ -154,6 +154,7 @@ fn consume(record: &mut Record) -> NixStoreGuard {
         plan,
         request,
         office,
+        connection,
     } = record.resources.take().expect("actual resource record");
     let NixOwnership::Held(nix) = nix else {
         unreachable!("Held checked under same mutex")
@@ -169,6 +170,7 @@ fn consume(record: &mut Record) -> NixStoreGuard {
         plan,
         request,
         office,
+        connection,
     });
     guard
 }

@@ -24,6 +24,7 @@ use tokio::sync::Semaphore;
 mod address;
 mod body;
 mod construction;
+mod retention;
 pub use construction::{OfficeBindFailure, OfficeConstruction};
 mod credentials;
 mod io_timeout;

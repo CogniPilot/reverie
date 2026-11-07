@@ -21,8 +21,15 @@ pub(super) fn inspection<'a>(
     pid: Option<u32>,
     completed: bool,
 ) -> InspectedWorkerLaunch<'a> {
-    let (_client, socket) =
-        super::super::super::super::tests::incoming_as(broker, b'J', SID, false);
+    inspection_with_client(tree, broker, pid, completed).1
+}
+pub(super) fn inspection_with_client<'a>(
+    tree: &Tree,
+    broker: &'a InstallingBroker,
+    pid: Option<u32>,
+    completed: bool,
+) -> (std::os::unix::net::UnixStream, InspectedWorkerLaunch<'a>) {
+    let (client, socket) = super::super::super::super::tests::incoming_as(broker, b'J', SID, false);
     let WorkerConnectionDispatch::Launch(received) =
         broker.accept_worker_connection(socket).unwrap()
     else {
@@ -57,7 +64,7 @@ pub(super) fn inspection<'a>(
         fs::create_dir_all(&launch).unwrap();
         fs::write(launch.join("original.exit"), b"0").unwrap();
     }
-    observed.inspect(end()).unwrap()
+    (client, observed.inspect(end()).unwrap())
 }
 fn finish_failure(failure: Box<PreparationFailure<'_>>, broker: &InstallingBroker) {
     let failure = *failure;

@@ -2,8 +2,10 @@
 //! Actual resource custody and fixed native observations are not API authority.
 //! There is no separate Runtime source registry or caller-selected command.
 mod call;
+pub(crate) use call::captured_for_worker as captured_worker_cleanup;
 mod error;
 mod identity;
+pub(crate) mod legacy;
 mod ordinary;
 mod stop;
 #[cfg(test)]
@@ -15,6 +17,7 @@ use crate::{
 pub use error::SourceStopError;
 use error::{Result, need};
 use identity::StopIdentity;
+pub use legacy::{OrdinaryLaptopReturned, OrdinaryLaptopStop, OrdinaryLaptopStopRetainFailure};
 pub use ordinary::{
     OrdinaryReplacementReturned, OrdinaryReplacementStop, OrdinaryStopRetainFailure,
 };
@@ -211,24 +214,32 @@ impl Drop for ExactStopAttempt {
         // This is only process-lifetime quarantine, not a second active Runtime
         // registry or durable death fence. Existing STARTING/attempt readers
         // remain the authoritative restart/reconciliation obligation.
-        type Abandoned = (
-            Arc<InstalledWorkerEngine>,
-            Box<LaunchStorage>,
-            Option<CapturedCall>,
-            Option<Arc<SourceStopError>>,
-        );
-        static OWNERS: OnceLock<Mutex<Vec<Abandoned>>> = OnceLock::new();
         if let Some(storage) = self.storage.take() {
-            OWNERS
-                .get_or_init(Mutex::default)
-                .lock()
-                .unwrap_or_else(|error| error.into_inner())
-                .push((
-                    self.origin.clone(),
-                    storage,
-                    self.pending.take(),
-                    self.failure.take(),
-                ));
+            quarantine(
+                self.origin.clone(),
+                storage,
+                self.pending.take(),
+                self.failure.take(),
+            );
         }
     }
+}
+fn quarantine(
+    origin: Arc<InstalledWorkerEngine>,
+    storage: Box<LaunchStorage>,
+    pending: Option<CapturedCall>,
+    failure: Option<Arc<SourceStopError>>,
+) {
+    type Abandoned = (
+        Arc<InstalledWorkerEngine>,
+        Box<LaunchStorage>,
+        Option<CapturedCall>,
+        Option<Arc<SourceStopError>>,
+    );
+    static OWNERS: OnceLock<Mutex<Vec<Abandoned>>> = OnceLock::new();
+    OWNERS
+        .get_or_init(Mutex::default)
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .push((origin, storage, pending, failure));
 }

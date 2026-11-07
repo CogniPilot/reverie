@@ -9,6 +9,7 @@ pub(super) use lifecycle::Lifecycle;
 #[cfg(test)]
 mod leases_tests;
 mod references;
+pub(in crate::worker_storage) mod retained;
 #[cfg(test)]
 mod tests;
 mod tree;

@@ -47,6 +47,15 @@ impl Job {
             || self.external.is_cancelled()
             || (self.nix_tail && crate::native::child_signals::signal().is_some())
     }
+    fn has_pending_native_work(&self) -> bool {
+        if !self.finished.load(Ordering::Acquire) {
+            return true;
+        }
+        let Ok(data) = self.data.try_lock() else {
+            return true;
+        };
+        data.process.has_pending_native_work()
+    }
 }
 /// One persistent installing-service context, intentionally not Clone. Keep it
 /// alive across observation failures and check settle_owned before acknowledging
@@ -77,6 +86,13 @@ impl Active {
 pub(crate) struct CapturedCall {
     origin: Arc<InstalledCommand>,
     job: Arc<Job>,
+}
+impl CapturedCall {
+    /// Observe only this actual admitted job. Consumed-close uncertainty may
+    /// have no native handle left; false is never cleanup/release success.
+    pub(crate) fn has_pending_native_work(&self) -> bool {
+        self.job.has_pending_native_work()
+    }
 }
 pub(crate) struct CallFailure {
     pub(crate) error: EngineError,
@@ -211,13 +227,7 @@ impl CapturedClient {
         // The accepted worker publishes this only after start/observe/catch
         // and cleanup. All its native resources reside in this JobData; there
         // is no separate unadopted constructor JoinHandle/result here.
-        if !job.finished.load(Ordering::Acquire) {
-            return true;
-        }
-        let Ok(data) = job.data.try_lock() else {
-            return true;
-        };
-        data.process.has_pending_native_work()
+        job.has_pending_native_work()
     }
     pub(crate) fn new(bootstrap: InstalledCommand) -> Self {
         Self {

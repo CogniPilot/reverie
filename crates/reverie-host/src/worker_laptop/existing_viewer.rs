@@ -2,12 +2,17 @@
 //! App supplies its actual classified reuse scope; these resources are not an
 //! authorization, live-pane proof, admission release or source-stop permit.
 use super::*;
+mod finalization;
 mod relay;
+mod stop;
 use crate::{
     worker_launch::ExistingLaptopInspection,
     worker_storage::{LaunchReceiptObservation, LaunchStorage},
 };
-pub use relay::{ExistingRelayRetainFailure, ExistingRelayReturned};
+pub use finalization::ExistingStorageObservation;
+pub use relay::{
+    ExistingRelayRetainFailure, ExistingRelayReturned, ExistingViewerReceiptObservation,
+};
 use std::sync::MutexGuard;
 
 struct Inputs {
@@ -16,6 +21,7 @@ struct Inputs {
     request: WorkerRequest,
     inspected: ExistingLaptopInspection,
     receipt: Option<LaunchReceiptObservation>,
+    connection: Option<crate::worker_reports::terminal::RelayIdentity>,
 }
 #[derive(Clone, Copy, Eq, PartialEq)]
 enum Stage {
@@ -32,6 +38,8 @@ pub(super) struct ExistingRecord {
     stage: Stage,
     job: Option<Arc<ViewerJob>>,
     failure: Option<Arc<LaptopError>>,
+    stop: stop::ExistingStop,
+    finalization: finalization::StorageCheck,
 }
 pub(super) type ExistingRecordOwner = Arc<Mutex<ExistingRecord>>;
 #[derive(Clone)]
@@ -86,6 +94,7 @@ impl ExistingViewerRetainFailure {
             request,
             inspected,
             receipt: _,
+            connection: _,
         } = self.inputs;
         (storage, plan, request, inspected, self.error)
     }
@@ -121,6 +130,7 @@ impl ExistingViewerReturned<'_> {
             request,
             inspected,
             receipt: _,
+            connection: _,
         } = self
             .record
             .inputs
@@ -152,10 +162,14 @@ impl ExistingRecord {
             "WORKER_EXISTING_VIEWER_CONSUMED",
         )?;
         if self.stage == Stage::Closed {
-            return Ok(());
+            return self.finalization.settle(runtime, end);
         }
         self.stage = Stage::Closing;
-        let result = self.job.as_ref().map_or(Ok(()), |job| {
+        let stopped_call = finalized(
+            self.stop.settle(runtime, end),
+            self.finalization.settle(runtime, end),
+        );
+        let viewer = self.job.as_ref().map_or(Ok(()), |job| {
             runtime
                 .installed_engine()
                 .engine
@@ -163,6 +177,7 @@ impl ExistingRecord {
                 .settle_viewer(job, end)
                 .map_err(|error| LaptopError::Engine(error.into()))
         });
+        let result = finalized(stopped_call, viewer);
         match result {
             Ok(()) => {
                 self.stage = Stage::Closed;
@@ -243,6 +258,8 @@ impl Workflows {
             stage: Stage::Held,
             job: None,
             failure: None,
+            stop: stop::ExistingStop::default(),
+            finalization: finalization::StorageCheck::default(),
         }));
         inventory.push(RetainedRecord::Existing(record.clone()));
         Ok(ExistingViewer {
@@ -277,6 +294,7 @@ impl Workflows {
         runtime: &WorkerRuntime,
         existing: &ExistingViewer,
         end: Instant,
+        connection: Option<&crate::worker_reports::WorkerLaunchConnection>,
     ) -> Result<ExistingViewerStart> {
         self.bound_existing(runtime, &existing.reference)?;
         let mut record = existing
@@ -288,6 +306,7 @@ impl Workflows {
             record.stage == Stage::Held && record.job.is_none(),
             "WORKER_EXISTING_VIEWER_PHASE",
         )?;
+        record.stop.require_startable()?;
         need(
             !runtime.cancellation().is_cancelled()
                 && Instant::now() < viewer::clipped(runtime, end),
@@ -302,6 +321,22 @@ impl Workflows {
             .inspected
             .assert_plan(runtime, &inputs.plan)
             .map_err(LaptopError::ExistingObservation)?;
+        let supplied = connection
+            .map(|connection| {
+                connection
+                    .viewer_constructor_identity(runtime, inputs.plan.session())
+                    .map_err(LaptopError::Refused)
+            })
+            .transpose()?;
+        need(
+            match (&inputs.connection, &supplied) {
+                (None, None) => true,
+                (Some(original), Some(supplied)) => original.same(supplied),
+                _ => false,
+            },
+            "VIEWER_CONNECTION_CHANGED",
+        )?;
+        let source = inputs.connection.clone();
         let mut marker = [0; 16];
         getrandom::getrandom(&mut marker)
             .map_err(|error| LaptopError::Io(std::io::Error::other(error.to_string())))?;
@@ -310,6 +345,7 @@ impl Workflows {
             inputs.plan.arguments().worker_name().clone(),
             inputs.request.terminal(),
             marker,
+            source,
         );
         record.job = Some(job.clone());
         record.stage = Stage::Starting;
@@ -347,6 +383,7 @@ impl Workflows {
         runtime: &WorkerRuntime,
         existing: &'a ExistingViewer,
         relay: bool,
+        finalization: Option<&ExistingStorageObservation>,
     ) -> Result<ExistingViewerReturned<'a>> {
         need(
             Arc::ptr_eq(runtime.installed_engine(), &existing.reference.origin),
@@ -371,6 +408,10 @@ impl Workflows {
             matches!(record.stage, Stage::Held | Stage::Closed) && record.inputs.is_some(),
             "WORKER_EXISTING_VIEWER_RETAINED",
         )?;
+        record.stop.require_reclaimable()?;
+        record
+            .finalization
+            .require_reclaimable(existing, finalization)?;
         need(
             record
                 .inputs
@@ -403,6 +444,7 @@ impl WorkerRuntime {
                 request,
                 inspected,
                 receipt: None,
+                connection: None,
             },
         )
     }
@@ -411,7 +453,17 @@ impl WorkerRuntime {
         existing: &ExistingViewer,
         end: Instant,
     ) -> Result<ExistingViewerStart> {
-        self.laptop_workflows().start_existing(self, existing, end)
+        self.laptop_workflows()
+            .start_existing(self, existing, end, None)
+    }
+    pub fn start_existing_viewer_for_connection(
+        &self,
+        existing: &ExistingViewer,
+        connection: &crate::worker_reports::WorkerLaunchConnection,
+        end: Instant,
+    ) -> Result<ExistingViewerStart> {
+        self.laptop_workflows()
+            .start_existing(self, existing, end, Some(connection))
     }
     pub fn close_existing_viewer(&self, existing: &ExistingViewer, end: Instant) -> Result<()> {
         self.laptop_workflows().close_existing(self, existing, end)
@@ -421,6 +473,6 @@ impl WorkerRuntime {
         existing: &'a ExistingViewer,
     ) -> Result<ExistingViewerReturned<'a>> {
         self.laptop_workflows()
-            .reclaim_existing(self, existing, false)
+            .reclaim_existing(self, existing, false, None)
     }
 }

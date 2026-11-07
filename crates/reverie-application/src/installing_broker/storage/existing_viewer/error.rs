@@ -4,6 +4,10 @@ pub(in crate::installing_broker) enum ExistingStorageError {
     Storage(StorageWorkflowError),
     Host(LaptopError),
     Refused(&'static str),
+    Finalized {
+        primary: Box<Self>,
+        secondary: Box<Self>,
+    },
 }
 impl From<StorageWorkflowError> for ExistingStorageError {
     fn from(error: StorageWorkflowError) -> Self {
@@ -21,6 +25,9 @@ impl std::fmt::Display for ExistingStorageError {
             Self::Storage(error) => error.fmt(out),
             Self::Host(error) => error.fmt(out),
             Self::Refused(code) => out.write_str(code),
+            Self::Finalized { primary, secondary } => {
+                write!(out, "{primary}; cleanup: {secondary}")
+            }
         }
     }
 }
@@ -30,6 +37,7 @@ impl std::error::Error for ExistingStorageError {
             Self::Storage(error) => Some(error),
             Self::Host(error) => Some(error),
             Self::Refused(_) => None,
+            Self::Finalized { primary, .. } => Some(primary.as_ref()),
         }
     }
 }

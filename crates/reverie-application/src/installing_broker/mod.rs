@@ -12,7 +12,9 @@ mod launch;
 mod lifecycle;
 mod recovered;
 pub(crate) mod source;
+mod stop_admission;
 mod storage;
+pub(crate) use stop_admission::WorkerStopAdmission;
 mod telemetry;
 use crate::{
     reservation_gate::{GateError, ReservationGate},
@@ -25,6 +27,7 @@ pub use launch::{
     AdmittedWorkerLaunch, AllocationClosedReuse, ClassifiedWorkerLaunch, ColdWorkerLaunch,
     ExistingColdTarget, InspectedWorkerLaunch, LaunchAdmissionFailure, LaunchPreparationFailure,
     PreparedReuseViewer, ReceivedWorkerLaunch, RestoredReuse, ReusableWorkerLaunch,
+    ReuseFinalizationFailure, ReuseHandlerClosed, ReuseRelayError, ReuseRelayReturned,
     ReuseViewerFailure, ViewingReuse, WorkerConnectionDispatch, WorkerDispatchError,
 };
 pub(crate) use lifecycle::LaptopLifecycle;

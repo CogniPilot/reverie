@@ -103,6 +103,11 @@ pub(crate) fn decode_embedding_bytes(raw: &[u8]) -> Result<ordered::OrderedValue
 pub(crate) fn decode_worker_request_bytes(raw: &[u8]) -> Result<ordered::OrderedValue, Error> {
     decode::decode_ordered(&text::python_bytes(raw)?, decode::Purpose::Rootless)
 }
+/// Terminal R frames use ordinary json.loads(bytes), with default constants,
+/// integer conversion and encoding detection. Dimension rules are separate.
+pub(crate) fn decode_worker_terminal_bytes(raw: &[u8]) -> Result<Value, Error> {
+    decode::decode_last_wins(&text::python_bytes(raw)?)
+}
 pub(crate) fn decode_private_child_text(raw: &[u8]) -> Result<ordered::OrderedValue, Error> {
     std::str::from_utf8(raw).map_err(|_| Error::InvalidJson)?;
     decode::decode_ordered(raw, decode::Purpose::Rootless)

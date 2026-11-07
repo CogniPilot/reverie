@@ -5,6 +5,8 @@ use crate::legacy_json::{self, Number};
 use reverie_core::{PythonText, ids::ContainerId};
 use std::collections::BTreeSet;
 const MAX_CONTAINERS: usize = 512;
+mod retained;
+pub use retained::RetainedInspection;
 
 pub struct ColdInventoryIds {
     values: Vec<ContainerId>,
@@ -101,6 +103,11 @@ impl ColdContainer {
         matches!(field(self.fields(),"Name"),Some(Value(Node::String(text))) if text.equals_ascii(name))
     }
     pub fn state(&self) -> Result<ColdContainerState<'_>> {
+        let state = self.state_fields()?;
+        self.mount_values()?;
+        Ok(state)
+    }
+    fn state_fields(&self) -> Result<ColdContainerState<'_>> {
         let state = field(self.fields(), "State")
             .and_then(object)
             .ok_or(ColdDataError::State)?;
@@ -111,9 +118,6 @@ impl ColdContainer {
         let Some(Value(Node::Number(Number::Integer(pid)))) = field(state, "Pid") else {
             return Err(ColdDataError::State);
         };
-        if !matches!(field(self.fields(), "Mounts"), Some(Value(Node::Array(_)))) {
-            return Err(ColdDataError::Mounts);
-        }
         Ok(ColdContainerState {
             running: boolean("Running")?,
             paused: boolean("Paused")?,

@@ -3,18 +3,39 @@ mod census;
 mod lease;
 mod numbers;
 mod records;
+mod reference_data;
+mod reference_report;
+mod reference_rows;
+mod retained_records;
+mod retirement;
 use crate::{
     legacy_json::{Node, Text, Value},
     storage_identity::MetadataText,
     worker_config::{self, EffectiveWorkerConfig},
     worker_validation::WorkerValidationData,
 };
-pub use census::{ColdBind, ColdContainer, ColdContainerState, ColdInventory, ColdInventoryIds};
+pub use census::{
+    ColdBind, ColdContainer, ColdContainerState, ColdInventory, ColdInventoryIds,
+    RetainedInspection,
+};
 pub use lease::{
     ClearReservation, ColdLeaseState, clear_holder_metadata, clear_path_metadata,
     clear_reservation, retained_record_path, retained_reservation,
 };
 pub use records::{clear_complete_record, clear_pending_record};
+pub use reference_data::{ReferenceFdHeader, ReferenceProcessIdentity, reference_credentials};
+pub use reference_report::{
+    KnownReference, ReferenceKind, ReferenceLink, ReferenceReport, UnknownReference,
+};
+pub use reference_rows::{ReferenceMapRow, ReferenceUnixRow};
+pub use retained_records::{
+    RetainedNativeRecord, RetainedRecordEpoch, RetainedRecordFresh, RetainedRecordIdentity,
+    retained_bound_record, retained_intent_record, retained_keep_record, retained_path_record,
+    retained_prepared_binding, retained_prepared_record, retained_reservation_record,
+};
+pub use retirement::{
+    RetainedLeaseKind, RetainedLeaseName, RetainedLeaseRecord, RetainedReservationUntil,
+};
 use sha2::{Digest, Sha256};
 use std::{collections::BTreeMap, fmt};
 type Object = BTreeMap<Text, Value>;
@@ -29,6 +50,7 @@ pub enum ColdDataError {
     Mounts,
     Lease,
     Reservation,
+    Reference,
 }
 impl fmt::Display for ColdDataError {
     fn fmt(&self, out: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -40,6 +62,7 @@ impl fmt::Display for ColdDataError {
             Self::Mounts => "WORKER_COLD_MOUNTS",
             Self::Lease => "WORKER_COLD_LEASE_METADATA",
             Self::Reservation => "WORKER_COLD_RESERVATION",
+            Self::Reference => "WORKER_COLD_REFERENCE_METADATA",
         })
     }
 }

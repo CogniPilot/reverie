@@ -525,3 +525,30 @@ quarantines the existing resource and counted connection owners in this process.
 The new owning controls cover genuine legacy, physical employee storage, a real
 fixed PTY child, actual configured-Gate allocation close and negative dropped-owner
 retention. They do not select the native service or qualify live Docker cleanup.
+
+The actual reuse continuation now threads its original accepted connection into
+Host retention and construction, rather than pairing request data with a later
+same-SID socket. `ViewingReuse::relay` drives the same framed native viewer and
+reads the real broker snapshot at each current-intent check. Its typed result
+returns the whole `ViewingReuse` for receipt, child exit, EOF, stop, intent change
+and failure. It performs no automatic close/restore or handler completion. The
+original finally ordering and final storage-live/resource release remain separate
+required consumers; no relay outcome is a release permission.
+
+The private ordinary-stop allocation consumer follows Broker.stop's generic
+admission then check_stop sequence, with no launch SID, image, GPU or creation
+entry phase. It borrows an already-held admission only for that exact Gate,
+thread, process and active identity; nested close does not close the outer scope.
+The installing facade retains its checked target and broker origin, and only a
+genuinely disabled installation takes the no-Gate branch. Source/reserved roles
+remain fenced by the canonical operation history before any unprotected effect.
+
+Its native observer uses a read-only view of the SAME installed engine's actual
+first-stop state. Every native deadline observes later shutdown without resetting
+the original operation bound, cancellation owner or census context. Owned success
+runs the final guard and checked cleanup; body failure skips that success guard
+and still checks cleanup. Neither scope supplies process custody, stop authority,
+storage/capacity credit or global completion. Source's unbounded None admission
+mutex wait remains explicit; the actual service must retain/bound those waiting
+handlers during shutdown. The real legacy stop/finalizer is a separate required
+consumer, and full production qualification requires that joint caller.
