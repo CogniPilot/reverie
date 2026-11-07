@@ -200,3 +200,27 @@ fn status_reports_the_limit_baseline_and_jobs() {
     assert_eq!(report["jobs"].as_array().unwrap().len(), 1);
     assert_eq!(report["jobs"][0]["reservation"], 50 * MIB);
 }
+
+#[test]
+fn a_job_admitted_moments_earlier_keeps_a_back_to_back_one_out_until_it_exits() {
+    // 90% of 100 MiB is 90 MiB; each job reserves 60 MiB, so only one fits at a time even though
+    // neither has used any memory yet.
+    let seat = Seat::new("overcommit", &format!("{}\n", 100 * MIB), &stat(1));
+    let mut first = Command::new(env!("CARGO_BIN_EXE_reverie-job"))
+        .args(["run", "--estimate", "60m", "--", "sleep", "2"])
+        .env("REVERIE_JOB_CGROUP_ROOT", seat.root.join("cgroup"))
+        .env("REVERIE_JOB_PROC_ROOT", "/proc")
+        .env("REVERIE_JOB_LEDGER", seat.ledger())
+        .spawn()
+        .unwrap();
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while seat.holders().is_empty() && std::time::Instant::now() < until {
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert_eq!(seat.holders().len(), 1, "the first job never reserved");
+    let second = seat.job(&["run", "--estimate", "60m", "--wait-secs", "0", "--", "true"]);
+    assert_eq!(second.status.code(), Some(75), "{}", stderr(&second));
+    assert!(first.wait().unwrap().success());
+    let third = seat.job(&["run", "--estimate", "60m", "--wait-secs", "0", "--", "true"]);
+    assert_eq!(third.status.code(), Some(0), "{}", stderr(&third));
+}
