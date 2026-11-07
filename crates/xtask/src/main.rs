@@ -5,6 +5,7 @@ use std::error::Error;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
+mod ci_userns;
 mod worker_package;
 
 fn main() -> ExitCode {
@@ -29,6 +30,7 @@ fn run() -> Result<(), Box<dyn Error>> {
         [command] if command == "verify-worker-package" => {
             worker_package::verify(&workspace_root()?)?
         }
+        [command] if command == "prepare-ci-userns" => ci_userns::prepare()?,
         _ => return Err("expected a cargo xtask verification command (or --help)".into()),
     }
     Ok(())
@@ -36,7 +38,7 @@ fn run() -> Result<(), Box<dyn Error>> {
 
 fn help() {
     println!(
-        "cargo xtask check | verify\n  Check Rust formatting, strict Clippy, workspace tests and repository policies.\ncargo xtask verify-portable\n  Check platform-neutral core, contracts, HTTP, OPS CLI, route handlers and task tooling; native Linux host acceptance is separate.\ncargo xtask verify-worker-package\n  Linux: qualify the selected executable/manifest and Goal-stream broker interoperability."
+        "cargo xtask check | verify\n  Check Rust formatting, strict Clippy, workspace tests and repository policies.\ncargo xtask verify-portable\n  Check platform-neutral core, contracts, HTTP, OPS CLI, route handlers and task tooling; native Linux host acceptance is separate.\ncargo xtask verify-worker-package\n  Linux: qualify the selected executable/manifest and Goal-stream broker interoperability.\ncargo xtask prepare-ci-userns\n  Declared disposable Ubuntu24.04 GitHub-hosted runner only: prepare an exact Nix-unshare AppArmor exception; ordinary sudo permission is required."
     );
 }
 
