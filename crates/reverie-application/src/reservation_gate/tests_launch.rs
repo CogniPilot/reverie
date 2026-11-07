@@ -3,6 +3,8 @@ use reverie_core::{
     ids::ProfileSessionId,
     resources::{BudgetMode, CpuQuota, ResourcePolicy},
 };
+#[path = "tests_launch_pool_candidate.rs"]
+mod candidate_cases;
 
 fn policy(mode: BudgetMode, memory: u32, pool: u32) -> ResourcePolicy {
     ResourcePolicy::try_new(
@@ -171,6 +173,109 @@ fn creation_requires_exact_admission_pool_before_capacity_queries() {
         );
     }
     admission.close().unwrap();
+}
+
+#[test]
+fn protected_pool_creation_requires_native_protection_and_keeps_real_admission() {
+    crate::test_process::owning_case!(
+        protected_pool_creation_requires_native_protection_and_keeps_real_admission
+    );
+    let mut setup = Setup::new();
+    let mut config: Value = serde_json::from_slice(&setup.tree.raw).unwrap();
+    config["budgetMode"] = json!("pool");
+    config["memoryMiB"] = json!(1024);
+    config["employeeMemoryPolicies"] =
+        json!({setup.employee().as_str(): {"memoryHighMiB":512,"swapMiB":0}});
+    setup.tree.raw = serde_json::to_vec(&config).unwrap();
+    setup.tree.write("worker.json", &setup.tree.raw);
+    setup.tree.marker(&config);
+    setup.rows[1]["Config"]["Labels"] = json!({"reverie.worker":"foreign"});
+    setup.rows[1]["Name"] = json!("/foreign-agent");
+    let fixture = Fixture::new();
+    let gate = setup.gate(&fixture);
+    for _ in 0..60 {
+        fixture.inventory(&setup.rows);
+    }
+    let before = fs::read(setup.tree.root.join("control/operations/operations.json")).unwrap();
+    let admission = gate
+        .admit_ordinary_launch(&source_session(&setup), AdmissionBounds::default())
+        .unwrap();
+    assert_eq!(
+        admission
+            .check_creation(&policy(BudgetMode::Pool, 1024, 4096))
+            .unwrap_err()
+            .code(),
+        "RESERVATION_POOL_NATIVE_REQUIRED"
+    );
+    assert_eq!(
+        AdmissionLock::acquire(&gate.inner.config().unwrap())
+            .err()
+            .unwrap()
+            .code(),
+        "RESERVATION_ADMISSION_LOCK_BUSY"
+    );
+    fixture.protected_pool_facts();
+    let facts = admission
+        .check_creation(&policy(BudgetMode::Pool, 1024, 4096))
+        .unwrap();
+    assert_eq!(facts.committed_bytes, 512 * 1_048_576);
+    assert_eq!(facts.retained_bytes, 0);
+    admission.close().unwrap();
+    assert_eq!(
+        fs::read(setup.tree.root.join("control/operations/operations.json")).unwrap(),
+        before
+    );
+}
+
+#[test]
+fn protected_pool_hard_candidate_cannot_replace_twelve_gib_with_twenty_four_in_full_pool() {
+    crate::test_process::owning_case!(
+        protected_pool_hard_candidate_cannot_replace_twelve_gib_with_twenty_four_in_full_pool
+    );
+    // Original highs total 46.5 GiB, including the now-stopped 12 GiB source.
+    // Remaining 34.5 + candidate HARD 24 = 58.5 > protected 48 GiB.
+    let mut setup = Setup::new();
+    let mut config: Value = serde_json::from_slice(&setup.tree.raw).unwrap();
+    config["poolMemoryMiB"] = json!(49152);
+    config["budgetMode"] = json!("pool");
+    config["memoryMiB"] = json!(24576);
+    config["employeeMemoryPolicies"] =
+        json!({setup.employee().as_str(): {"memoryHighMiB":12288,"swapMiB":0}});
+    setup.tree.raw = serde_json::to_vec(&config).unwrap();
+    setup.tree.write("worker.json", &setup.tree.raw);
+    setup.tree.marker(&config);
+    setup.rows[1]["Config"]["Labels"] = json!({"reverie.worker":"foreign"});
+    setup.rows[1]["Name"] = json!("/foreign-agent");
+    setup.rows[1]["HostConfig"]["Memory"] = json!(35328u64 * 1_048_576);
+    setup.rows[1]["HostConfig"]["MemorySwap"] = json!(35328u64 * 1_048_576);
+    let fixture = Fixture::new();
+    fixture.host_memory_facts("MemTotal: 134217728 kB\nMemAvailable: 100663296 kB\n");
+    fixture.protected_pool_facts();
+    let gate = setup.gate(&fixture);
+    for _ in 0..60 {
+        fixture.inventory(&setup.rows);
+    }
+    let journal = setup.tree.root.join("control/operations/operations.json");
+    let before = fs::read(&journal).unwrap();
+    let admission = gate
+        .admit_ordinary_launch(&source_session(&setup), AdmissionBounds::default())
+        .unwrap();
+    let cause = admission
+        .check_creation(&policy(BudgetMode::Pool, 24576, 49152))
+        .unwrap_err();
+    assert_eq!(cause.code(), "RESERVATION_CAPACITY_EXHAUSTED");
+    assert_eq!(
+        AdmissionLock::acquire(&gate.inner.config().unwrap())
+            .err()
+            .unwrap()
+            .code(),
+        "RESERVATION_ADMISSION_LOCK_BUSY"
+    );
+    assert_eq!(
+        admission.fail(cause).unwrap_err().code(),
+        "RESERVATION_CAPACITY_EXHAUSTED"
+    );
+    assert_eq!(fs::read(journal).unwrap(), before);
 }
 
 #[test]

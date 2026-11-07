@@ -3,6 +3,8 @@ use reverie_contracts::{kernel_mounts::MountTable, worker_config};
 use reverie_core::{decimal::UnsignedInteger, ids::ProfileSessionId, posix_path::PosixPath};
 use serde_json::{Value, json};
 use std::{collections::VecDeque, sync::Mutex};
+#[path = "tests_pool.rs"]
+mod pool_cases;
 thread_local! {
     static INSTALLED_READS: std::cell::RefCell<Vec<&'static str>> = const { std::cell::RefCell::new(Vec::new()) };
 }
@@ -31,6 +33,7 @@ struct State {
     start_checks: bool,
     old_release: Option<&'static str>,
     process_starts: std::collections::BTreeMap<String, String>,
+    protected_pool: bool,
 }
 pub(crate) struct Fixture(Mutex<State>);
 impl Fixture {
@@ -61,6 +64,7 @@ impl Fixture {
             start_checks: false,
             old_release: None,
             process_starts: std::collections::BTreeMap::new(),
+            protected_pool: false,
         })))
     }
     pub(crate) fn observer(self: &Arc<Self>) -> NativeObserver {
@@ -132,6 +136,13 @@ impl Fixture {
     }
     pub(crate) fn native_start_facts(&self) {
         self.0.lock().unwrap().start_checks = true;
+    }
+    /// Synthetic kernel facts only; admission/config/locks remain real.
+    pub(crate) fn protected_pool_facts(&self) {
+        self.0.lock().unwrap().protected_pool = true;
+    }
+    pub(crate) fn host_memory_facts(&self, raw: &str) {
+        self.0.lock().unwrap().meminfo = raw.to_owned();
     }
     pub(crate) fn old_release(&self, result: &'static str) {
         self.0.lock().unwrap().old_release = Some(result);
@@ -299,6 +310,29 @@ impl Source for Arc<Fixture> {
         } else {
             state.tables[0].clone()
         })
+    }
+    fn protected_pool(
+        &self,
+        _: &ReservationConfiguration,
+        _: &NativeLimitBinding,
+        _: Instant,
+    ) -> Result<()> {
+        let mut state = self.0.lock().unwrap();
+        state.events.push("protected-pool".to_owned());
+        need(state.protected_pool, "RESERVATION_POOL_NATIVE_REQUIRED")
+    }
+    fn pool_charge(
+        &self,
+        config: &ReservationConfiguration,
+        site: &NativeLimitBinding,
+        row: &ContainerRow,
+        binding: &NativeLimitBinding,
+        policy: &ObservedMemoryPolicy,
+        end: Instant,
+    ) -> Result<UnsignedInteger> {
+        self.protected_pool(config, site, end)?;
+        need(row.id() == binding.container_id(), "FIXTURE_POOL_BINDING")?;
+        Ok(policy.high().unwrap().clone())
     }
     fn limits(
         &self,

@@ -4,6 +4,7 @@ mod baseline;
 mod cold;
 mod custody;
 mod limits;
+mod pool;
 mod source_release;
 mod storage;
 mod targets;
@@ -319,6 +320,25 @@ impl ReservationKernel {
         end: Instant,
     ) -> Result<LimitsObservation> {
         limits::observe(&Installed, row, policy, end)
+    }
+    pub fn verify_protected_pool_memory(
+        &self,
+        config: &ReservationConfiguration,
+        website: &reverie_contracts::reservation_engine::NativeLimitBinding,
+        end: Instant,
+    ) -> Result<()> {
+        pool::capture(&Installed, config, website, end).map(|_| ())
+    }
+    pub fn protected_pool_charge(
+        &self,
+        config: &ReservationConfiguration,
+        website: &reverie_contracts::reservation_engine::NativeLimitBinding,
+        row: &ContainerRow,
+        observed: &reverie_contracts::reservation_engine::NativeLimitBinding,
+        policy: &ObservedMemoryPolicy,
+        end: Instant,
+    ) -> Result<UnsignedInteger> {
+        pool::charge(&Installed, config, website, row, observed, policy, end)
     }
     pub fn custody_scan(
         &self,

@@ -15,6 +15,8 @@ mod baseline_cases;
 mod custody_cases;
 #[path = "tests_oracle.rs"]
 mod oracle_cases;
+#[path = "tests_pool.rs"]
+mod pool_cases;
 #[path = "tests_source_release.rs"]
 mod source_release_cases;
 #[path = "tests_storage.rs"]
@@ -123,6 +125,15 @@ impl Source for Fixture {
         Installed.exists(&PosixPath::try_new(&native::python_text(&self.actual(p))).unwrap())
     }
     fn resolve(&self, p: &PosixPath) -> Result<PosixPath> {
+        if p.is_relative_to(&path(CGROUP)) {
+            let resolved = fs::canonicalize(self.actual(p))?;
+            if let Ok(suffix) = resolved.strip_prefix(self.root.join("cgroup")) {
+                return Ok(
+                    path(CGROUP).join(&PosixPath::try_new(&native::python_text(suffix)).unwrap())
+                );
+            }
+            return Ok(PosixPath::try_new(&native::python_text(&resolved)).unwrap());
+        }
         Ok(native::resolve_strict_text(&p.codepoints())?)
     }
     fn identity(&self, p: &PosixPath) -> Result<[u64; 4]> {

@@ -320,6 +320,13 @@ impl ObservationContext {
         &self,
         row: &NativeLimitFields<'_>,
     ) -> Result<Option<ObservedMemoryPolicy>> {
+        self.memory_policy_fields_at(row, false)
+    }
+    fn memory_policy_fields_at(
+        &self,
+        row: &NativeLimitFields<'_>,
+        stable_pool_policy: bool,
+    ) -> Result<Option<ObservedMemoryPolicy>> {
         if !self.config.memory_policies_enabled() {
             return Ok(None);
         }
@@ -339,7 +346,8 @@ impl ObservationContext {
             .effective_config(self.config.configuration().clone(), &session)?;
         need(
             row.label_is("reverie.worker-policy", &policy_digest(&repeated).to_hex())?
-                && row.memory_matches(policy.memory())?,
+                && row.memory_matches(policy.memory())?
+                && (!stable_pool_policy || policy_digest(&effective) == policy_digest(&repeated)),
             "RESERVATION_SOURCE_POLICY",
         )?;
         Ok(Some(policy))
@@ -377,13 +385,19 @@ impl ObservationContext {
         Ok(result)
     }
     pub fn capacity(&self, inventory: &ObservedInventory) -> Result<CapacityFacts> {
-        self.capacity_at(inventory, None)
+        self.capacity_at(inventory, None, false)
+    }
+    pub(crate) fn pool_creation_capacity(
+        &self,
+        inventory: &ObservedInventory,
+    ) -> Result<CapacityFacts> {
+        self.capacity_at(inventory, None, true)
     }
     pub fn capacity_stopped_website(
         &self,
         inventory: &ObservedInventory,
         id: &ContainerId,
     ) -> Result<CapacityFacts> {
-        self.capacity_at(inventory, Some(id))
+        self.capacity_at(inventory, Some(id), false)
     }
 }
