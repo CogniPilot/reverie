@@ -46,6 +46,25 @@ pub(super) trait Source: Send + Sync {
     ) -> Result<String>;
     fn settle_owned(&self, end: Instant) -> Result<()>;
     fn host_root(&self, end: Instant) -> Result<HostAccounting>;
+    fn protected_pool(
+        &self,
+        _config: &ReservationConfiguration,
+        _website: &NativeLimitBinding,
+        _end: Instant,
+    ) -> Result<()> {
+        Err(ObserverError::Refused("RESERVATION_POOL_NATIVE_REQUIRED"))
+    }
+    fn pool_charge(
+        &self,
+        _config: &ReservationConfiguration,
+        _website: &NativeLimitBinding,
+        _row: &ContainerRow,
+        _observed: &NativeLimitBinding,
+        _policy: &ObservedMemoryPolicy,
+        _end: Instant,
+    ) -> Result<UnsignedInteger> {
+        Err(ObserverError::Refused("RESERVATION_POOL_NATIVE_REQUIRED"))
+    }
     fn mount_table(&self, end: Instant) -> Result<MountTable>;
     fn limits(
         &self,
@@ -168,6 +187,29 @@ impl Source for Installed {
     }
     fn mount_table(&self, end: Instant) -> Result<MountTable> {
         Ok(self.kernel.mount_table(end)?)
+    }
+    fn protected_pool(
+        &self,
+        config: &ReservationConfiguration,
+        website: &NativeLimitBinding,
+        end: Instant,
+    ) -> Result<()> {
+        Ok(self
+            .kernel
+            .verify_protected_pool_memory(config, website, end)?)
+    }
+    fn pool_charge(
+        &self,
+        config: &ReservationConfiguration,
+        website: &NativeLimitBinding,
+        row: &ContainerRow,
+        observed: &NativeLimitBinding,
+        policy: &ObservedMemoryPolicy,
+        end: Instant,
+    ) -> Result<UnsignedInteger> {
+        Ok(self
+            .kernel
+            .protected_pool_charge(config, website, row, observed, policy, end)?)
     }
     fn limits(
         &self,

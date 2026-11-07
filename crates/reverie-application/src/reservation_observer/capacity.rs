@@ -41,6 +41,7 @@ impl ObservationContext {
         &self,
         inventory: &ObservedInventory,
         stopped: Option<&ContainerId>,
+        pool_creation: bool,
     ) -> Result<CapacityFacts> {
         let end = self.deadline(None)?;
         need(
@@ -60,6 +61,14 @@ impl ObservationContext {
             None => WebsiteBinding::Running(self.limits_at(sites[0], end)?),
             Some(id) => WebsiteBinding::Stopped(sites[0].stopped_website(id)?),
         };
+        if pool_creation {
+            let WebsiteBinding::Running(binding) = &website else {
+                return Err(ObserverError::Refused("RESERVATION_POOL_WEBSITE_REQUIRED"));
+            };
+            self.observer
+                .source
+                .protected_pool(&self.config, binding, end)?;
+        }
         let mut total = UnsignedInteger::from_u64(0);
         let mut commitments = Vec::new();
         for row in inventory.rows.rows() {
@@ -75,8 +84,8 @@ impl ObservationContext {
                 need(pid.is_zero() != running, "RESERVATION_NATIVE_STATE")?;
             }
             if worker && running {
-                let binding = self.limits_at(row, end)?;
-                total = total.plus(binding.memory());
+                let (binding, charge) = self.capacity_member(row, &website, pool_creation, end)?;
+                total = total.plus(&charge);
                 commitments.push(binding);
             }
         }
@@ -99,6 +108,14 @@ impl ObservationContext {
             capacity::pool_headroom_fits(counter(&budget)?, counter(&total)?, zero, zero)?,
             "RESERVATION_CAPACITY_EXHAUSTED",
         )?;
+        if pool_creation {
+            let WebsiteBinding::Running(binding) = &website else {
+                return Err(ObserverError::Refused("RESERVATION_POOL_WEBSITE_REQUIRED"));
+            };
+            self.observer
+                .source
+                .protected_pool(&self.config, binding, end)?;
+        }
         self.check(end)?;
         Ok(CapacityFacts {
             total,
@@ -106,6 +123,31 @@ impl ObservationContext {
             website,
             commitments,
         })
+    }
+    fn capacity_member(
+        &self,
+        row: &ContainerRow,
+        website: &WebsiteBinding,
+        pool_creation: bool,
+        end: Instant,
+    ) -> Result<(NativeLimitBinding, UnsignedInteger)> {
+        self.check(end)?;
+        row.running_header()?;
+        let policy = self.memory_policy_fields_at(&row.fields_for_limits(), pool_creation)?;
+        self.check(end)?;
+        let binding = self.observer.source.limits(row, policy.as_ref(), end)?;
+        let charge = match (pool_creation, policy.as_ref(), website) {
+            (true, Some(policy), WebsiteBinding::Running(site))
+                if policy.uses_pool() && policy.high().is_some() =>
+            {
+                self.observer
+                    .source
+                    .pool_charge(&self.config, site, row, &binding, policy, end)?
+            }
+            _ => binding.memory().clone(),
+        };
+        self.check(end)?;
+        Ok((binding, charge))
     }
     fn swap_budget(&self, inventory: &InventoryRows, end: Instant) -> Result<()> {
         let budget = self.config.swap_pool_bytes()?;

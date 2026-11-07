@@ -6,6 +6,8 @@ use reverie_core::{
     ids::ProfileSessionId,
     resources::{BudgetMode, ResourcePolicy},
 };
+#[path = "launch_pool.rs"]
+mod pool;
 
 /// Owns the actual thread/process-bound allocation admission and native origin.
 /// It cannot be constructed, cloned or decoded from a request or plan. Drop is
@@ -86,16 +88,28 @@ impl Inner {
     ) -> Result<HeadroomFacts> {
         self.require_host_job_idle()?;
         self.check_ordinary_launch(session)?;
+        let config = self.config()?;
         need(
-            resources.budget_mode() == BudgetMode::Admission
+            (resources.budget_mode() == BudgetMode::Admission
+                || (resources.budget_mode() == BudgetMode::Pool
+                    && config.memory_policies_enabled()))
                 && reverie_core::decimal::UnsignedInteger::from_u64(
                     u64::from(resources.pool_memory_mib()) * 1_048_576,
-                ) == self.config()?.pool_bytes()?,
+                ) == config.pool_bytes()?,
             "RESERVATION_ADMISSION_POLICY_REQUIRED",
         )?;
         let rows = self.guard(None)?;
+        let selected = if resources.budget_mode() == BudgetMode::Pool {
+            Some(pool::candidate(&config, session, resources)?)
+        } else {
+            None
+        };
         let native = self.native_context()?;
-        let capacity = native.capacity(&rows)?;
+        let capacity = if resources.budget_mode() == BudgetMode::Pool {
+            native.pool_creation_capacity(&rows)?
+        } else {
+            native.capacity(&rows)?
+        };
         let retained = self.retained_delta(&self.document()?)?;
         let budget = CapacityCounter::from_integer(capacity.budget())?;
         let committed = CapacityCounter::from_integer(capacity.total())?;
@@ -109,6 +123,12 @@ impl Inner {
             native.inventory(None)?.equivalent(&rows),
             "RESERVATION_NATIVE_INVENTORY_CHANGED",
         )?;
+        if let Some(selected) = selected {
+            need(
+                pool::candidate(self.config()?.as_ref(), session, resources)? == selected,
+                "RESERVATION_POOL_CANDIDATE_POLICY",
+            )?;
+        }
         Ok(HeadroomFacts {
             budget_bytes: budget.get(),
             committed_bytes: committed.get(),
