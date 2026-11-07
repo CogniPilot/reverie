@@ -28,6 +28,17 @@ pub fn stdout(message: &[u8]) -> io::Result<()> {
     emit(message, StandardStream::Output)
 }
 
+/// The fixed live terminal-resize report. Unlike terminal-error diagnostics,
+/// the caller still owns an ongoing viewer and must retain it on any error.
+/// Refuse oversize rather than acknowledge a truncated report. The same fd2
+/// adapter attempts the entire bounded report once without changing OFD flags.
+pub fn terminal_resize_report(message: &[u8]) -> io::Result<()> {
+    if message.len() > MAX_BYTES {
+        return Err(io::ErrorKind::InvalidInput.into());
+    }
+    emit(message, StandardStream::Error)
+}
+
 fn emit(message: &[u8], stream: StandardStream) -> io::Result<()> {
     #[cfg(target_os = "linux")]
     {

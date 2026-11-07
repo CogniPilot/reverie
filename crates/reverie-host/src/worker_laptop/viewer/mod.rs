@@ -3,6 +3,8 @@
 //! Existing reuse uses its original storage/inspection record rather than a
 //! created-pane token. Actual App admission/release remains a separate join.
 mod job;
+pub(in crate::worker_laptop) mod receipt;
+mod terminal;
 #[cfg(test)]
 pub(super) mod test_hooks;
 use super::*;
@@ -85,6 +87,7 @@ impl Workflows {
             resources.plan.arguments().worker_name().clone(),
             size,
             marker,
+            None,
         );
         // Real constructor ownership is installed BEFORE thread creation/open/
         // spawn. Same bounded record is inventoried even if this caller times out.

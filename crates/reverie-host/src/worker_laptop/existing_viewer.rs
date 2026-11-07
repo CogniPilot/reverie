@@ -7,7 +7,9 @@ use crate::{
     worker_launch::ExistingLaptopInspection,
     worker_storage::{LaunchReceiptObservation, LaunchStorage},
 };
-pub use relay::{ExistingRelayRetainFailure, ExistingRelayReturned};
+pub use relay::{
+    ExistingRelayRetainFailure, ExistingRelayReturned, ExistingViewerReceiptObservation,
+};
 use std::sync::MutexGuard;
 
 struct Inputs {
@@ -16,6 +18,7 @@ struct Inputs {
     request: WorkerRequest,
     inspected: ExistingLaptopInspection,
     receipt: Option<LaunchReceiptObservation>,
+    connection: Option<crate::worker_reports::terminal::RelayIdentity>,
 }
 #[derive(Clone, Copy, Eq, PartialEq)]
 enum Stage {
@@ -86,6 +89,7 @@ impl ExistingViewerRetainFailure {
             request,
             inspected,
             receipt: _,
+            connection: _,
         } = self.inputs;
         (storage, plan, request, inspected, self.error)
     }
@@ -121,6 +125,7 @@ impl ExistingViewerReturned<'_> {
             request,
             inspected,
             receipt: _,
+            connection: _,
         } = self
             .record
             .inputs
@@ -277,6 +282,7 @@ impl Workflows {
         runtime: &WorkerRuntime,
         existing: &ExistingViewer,
         end: Instant,
+        connection: Option<&crate::worker_reports::WorkerLaunchConnection>,
     ) -> Result<ExistingViewerStart> {
         self.bound_existing(runtime, &existing.reference)?;
         let mut record = existing
@@ -302,6 +308,22 @@ impl Workflows {
             .inspected
             .assert_plan(runtime, &inputs.plan)
             .map_err(LaptopError::ExistingObservation)?;
+        let supplied = connection
+            .map(|connection| {
+                connection
+                    .viewer_constructor_identity(runtime, inputs.plan.session())
+                    .map_err(LaptopError::Refused)
+            })
+            .transpose()?;
+        need(
+            match (&inputs.connection, &supplied) {
+                (None, None) => true,
+                (Some(original), Some(supplied)) => original.same(supplied),
+                _ => false,
+            },
+            "VIEWER_CONNECTION_CHANGED",
+        )?;
+        let source = inputs.connection.clone();
         let mut marker = [0; 16];
         getrandom::getrandom(&mut marker)
             .map_err(|error| LaptopError::Io(std::io::Error::other(error.to_string())))?;
@@ -310,6 +332,7 @@ impl Workflows {
             inputs.plan.arguments().worker_name().clone(),
             inputs.request.terminal(),
             marker,
+            source,
         );
         record.job = Some(job.clone());
         record.stage = Stage::Starting;
@@ -403,6 +426,7 @@ impl WorkerRuntime {
                 request,
                 inspected,
                 receipt: None,
+                connection: None,
             },
         )
     }
@@ -411,7 +435,17 @@ impl WorkerRuntime {
         existing: &ExistingViewer,
         end: Instant,
     ) -> Result<ExistingViewerStart> {
-        self.laptop_workflows().start_existing(self, existing, end)
+        self.laptop_workflows()
+            .start_existing(self, existing, end, None)
+    }
+    pub fn start_existing_viewer_for_connection(
+        &self,
+        existing: &ExistingViewer,
+        connection: &crate::worker_reports::WorkerLaunchConnection,
+        end: Instant,
+    ) -> Result<ExistingViewerStart> {
+        self.laptop_workflows()
+            .start_existing(self, existing, end, Some(connection))
     }
     pub fn close_existing_viewer(&self, existing: &ExistingViewer, end: Instant) -> Result<()> {
         self.laptop_workflows().close_existing(self, existing, end)

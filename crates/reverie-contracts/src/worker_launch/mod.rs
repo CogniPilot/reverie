@@ -13,7 +13,7 @@ pub use created::{CreatedState, CreatedStateError};
 pub use helpers::{LaunchSettings, employee_hostname, temporary_environment, tmux_exec_args};
 pub use network::{NetworkDataError, assert_network_labels};
 pub use pane::{pane_start_arguments, pane_status_arguments, runtime_metadata};
-pub use viewer::viewer_attach_arguments;
+pub use viewer::{viewer_attach_arguments, viewer_marker_entry};
 pub fn account_mount_arguments(entries: &[(MetadataText, MetadataText)]) -> Vec<MetadataText> {
     entries
         .iter()
