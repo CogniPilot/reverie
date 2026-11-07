@@ -24,6 +24,7 @@ mod stop;
 mod tests;
 mod viewer;
 use error::ColdError;
+pub use finalizer::{ColdFinalizationFailure, ColdHandlerClosed};
 pub use viewer::{ColdViewerFailure, ViewingCold};
 
 struct ColdScope<'a> {
@@ -73,6 +74,11 @@ enum CopiedRemoval {
     Removed(reverie_host::worker_nix::RemovedStoppedLaptop),
 }
 enum Resources {
+    OriginalCleanup {
+        storage: StorageClaim,
+        plan: ObservedCreatePlan,
+        inspection: ExistingLaptopInspection,
+    },
     Direct(Direct),
     Replacement(storage::ReplacementStopPreparation),
     Legacy(storage::OrdinaryStopPreparation),
@@ -82,6 +88,28 @@ enum Resources {
     NetworkHeld(Arc<storage::NetworkStoragePreparation>),
     Network(Arc<storage::NetworkStoragePreparation>),
     Returned(ReturnedStorage),
+    FinalStorage(FinalStorage),
+    FinalStorageFailed {
+        failure: Box<storage::DirectStorageFinishFailure>,
+        remainder: FinalStorageRemainder,
+    },
+    Finalized {
+        plan: ObservedCreatePlan,
+        retained: bool,
+        remainder: FinalStorageRemainder,
+    },
+}
+struct FinalStorage {
+    native: storage::DirectStoragePreparation,
+    remainder: FinalStorageRemainder,
+}
+/// These are actual leftover owners/read-side identities, never a fresh claim
+/// or proof that an Office producer has closed.
+enum FinalStorageRemainder {
+    Original(ExistingLaptopInspection),
+    Direct(ExistingColdTarget),
+    Stopped(Option<StoppedLaptopRemoval>),
+    Returned(Option<reverie_host::office::OfficePhone>),
 }
 struct ReturnedStorage {
     storage: StorageClaim,

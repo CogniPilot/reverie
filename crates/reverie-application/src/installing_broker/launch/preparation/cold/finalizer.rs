@@ -3,11 +3,19 @@
 use super::*;
 use reverie_host::worker_laptop::{CreatedCleanup, StoppedCreatedLaptop};
 mod resources;
+mod direct;
+mod prefix;
 
 enum Owner<'a> {
     Body(Box<ColdBody<'a>>),
     Closed(AllocationClosedCold<'a>),
     Viewing(ViewingCold<'a>),
+    Classified(Box<ClassifiedCleanup<'a>>),
+}
+struct ClassifiedCleanup<'a> {
+    scope: ColdScope<'a>,
+    lifecycle: Option<LaptopLifecycle<'a>>,
+    resources: Option<Resources>,
 }
 struct Finalizer<'a> {
     owner: Owner<'a>,
@@ -17,12 +25,64 @@ struct Finalizer<'a> {
     completed: Option<bool>,
     stopped: Option<StoppedCreatedLaptop>,
 }
+#[must_use = "retains the original resource phases and counted handler hold"]
+pub struct ColdFinalizationFailure<'a> {
+    cleanup: Finalizer<'a>,
+}
+/// Only this handler's checked resource disposition and transport finalizers.
+/// It provides no Company/global stop or capacity acknowledgement.
+pub struct ColdHandlerClosed {
+    completed: bool,
+    storage_retained: bool,
+    primary: Option<ColdError>,
+    body_causes: Vec<ColdError>,
+}
+impl ColdHandlerClosed {
+    pub fn completed(&self) -> bool { self.completed }
+    pub fn storage_retained(&self) -> bool { self.storage_retained }
+    pub fn primary_error(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        self.primary.as_ref().map(|cause| cause as &dyn std::error::Error)
+            .or_else(|| self.body_causes.first().map(|cause| cause as &dyn std::error::Error))
+    }
+}
+impl ColdFinalizationFailure<'_> {
+    pub fn request(&self) -> &WorkerRequest {
+        self.cleanup.owner.scope().preparing.admitted.request()
+    }
+    pub fn cleanup_error_count(&self) -> usize { self.cleanup.errors.len() }
+}
+impl std::fmt::Debug for ColdFinalizationFailure<'_> {
+    fn fmt(&self, out: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        out.debug_struct("ColdFinalizationFailure")
+            .field("session", self.request().session())
+            .field("primary", &self.cleanup.primary)
+            .field("body_causes", &self.cleanup.body_causes)
+            .field("cleanup", &self.cleanup.errors)
+            .finish_non_exhaustive()
+    }
+}
+impl std::fmt::Display for ColdFinalizationFailure<'_> {
+    fn fmt(&self, out: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if let Some(primary) = &self.cleanup.primary { write!(out, "{primary}; ")?; }
+        for error in self.cleanup.body_causes.iter().chain(&self.cleanup.errors) {
+            write!(out, "{error}; ")?;
+        }
+        Ok(())
+    }
+}
+impl std::error::Error for ColdFinalizationFailure<'_> {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        self.cleanup.primary.as_ref().or(self.cleanup.errors.first())
+            .map(|cause| cause as &dyn std::error::Error)
+    }
+}
 impl<'a> Owner<'a> {
     fn scope(&self) -> &ColdScope<'a> {
         match self {
             Self::Body(owner) => &owner.scope,
             Self::Closed(owner) => &owner.scope,
             Self::Viewing(owner) => &owner.owner.scope,
+            Self::Classified(owner) => &owner.scope,
         }
     }
     fn scope_mut(&mut self) -> &mut ColdScope<'a> {
@@ -30,6 +90,7 @@ impl<'a> Owner<'a> {
             Self::Body(owner) => &mut owner.scope,
             Self::Closed(owner) => &mut owner.scope,
             Self::Viewing(owner) => &mut owner.owner.scope,
+            Self::Classified(owner) => &mut owner.scope,
         }
     }
     fn started(&self) -> Option<&Arc<StartedLaptop>> {
@@ -37,6 +98,7 @@ impl<'a> Owner<'a> {
             Self::Body(owner) => owner.started.as_ref(),
             Self::Closed(owner) => Some(&owner.started),
             Self::Viewing(owner) => Some(&owner.owner.started),
+            Self::Classified(_) => None,
         }
     }
     fn created(&self) -> Option<&CreatedLaptop> {
@@ -48,6 +110,14 @@ impl<'a> Owner<'a> {
                 .or_else(|| owner.started.as_ref().map(|owner| &owner.created)),
             Self::Closed(owner) => Some(&owner.started.created),
             Self::Viewing(owner) => Some(&owner.owner.started.created),
+            Self::Classified(_) => None,
+        }
+    }
+    fn resource_slot(&mut self) -> Option<&mut Option<Resources>> {
+        match self {
+            Self::Body(owner) => Some(&mut owner.resources),
+            Self::Classified(owner) => Some(&mut owner.resources),
+            Self::Closed(_) | Self::Viewing(_) => None,
         }
     }
     fn network(&self) -> Option<Arc<storage::NetworkStoragePreparation>> {
@@ -86,6 +156,9 @@ impl Finalizer<'_> {
                 self.errors
                     .push(ColdError::Refused("RESOURCE_ADMISSION_RELEASE_UNCONFIRMED"));
             }
+        }
+        if let Owner::Classified(owner) = &mut self.owner {
+            drop(owner.lifecycle.take());
         }
         if let Some(admission) = self.owner.scope_mut().preparing.admitted.admission.take()
             && let Err(error) = admission.close()
