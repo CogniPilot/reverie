@@ -111,10 +111,6 @@ pub(in crate::installing_broker) struct ExistingStorageReturned {
     outcome: Option<Arc<LaptopError>>,
     finalization: Option<FinalStorageDecision>,
 }
-struct FinalStorageDecision {
-    live: bool,
-    brand: Option<Arc<()>>,
-}
 #[cfg(test)]
 impl ExistingStorageReturned {
     /// Actual synthetic-fixture teardown only; no production release token.
@@ -329,7 +325,7 @@ fn reclaim_registered(
     };
     let (owner, plan, request, inspected, receipt, outcome) = returned.into_parts();
     entries[index].owner = match &brand {
-        Some(brand) => EntryOwner::Finalizing(FinalizingStorage {
+        Some(brand) => EntryOwner::Finalizing(FinalizingStorage::Ready {
             owner,
             brand: brand.clone(),
         }),

@@ -8,6 +8,7 @@ mod cold_prepare;
 mod connection;
 pub use cold_prepare::{ColdPreparation, PreparedColdTemporary};
 mod create;
+mod direct_finalization;
 mod error;
 mod existing_viewer;
 pub(crate) mod final_storage;
@@ -30,6 +31,9 @@ use crate::{
 pub use cleanup::{CreatedCleanup, StoppedCreatedLaptop};
 pub use cold::{ColdCommit, ColdCommitted};
 pub use create::{CreatedLaptop, LaptopCreation};
+pub use direct_finalization::{
+    DirectStorageFinalizer, DirectStorageObservation, DirectStorageRetainFailure,
+};
 pub use error::{CreateTelemetryFailure, LaptopError, TelemetryCause};
 use error::{Result, finalized, need};
 pub use existing_viewer::{

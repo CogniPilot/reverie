@@ -22,22 +22,7 @@ fn originals(fixture: &Fixture) -> Originals {
     originals_with_id(fixture, "existing-fixture")
 }
 fn originals_with_id(fixture: &Fixture, id: &str) -> Originals {
-    let selection = fixture
-        .runtime()
-        .resolve_storage(&fixture.source, &sid())
-        .unwrap();
-    let mut storage =
-        if selection.paths().kind() == reverie_store::storage_identity::StorageKind::Session {
-            selection.into_legacy().unwrap()
-        } else {
-            selection.acquire().unwrap()
-        };
-    storage.prepare_storage().unwrap();
-    storage.record_storage_binding().unwrap();
-    let plan = fixture
-        .runtime()
-        .prepare_laptop_plan(fixture.source.clone(), fixture.source.clone(), &storage)
-        .unwrap();
+    let (storage, plan) = direct_resources(fixture);
     // The controlled engine answers the actual fixed derived-name inspect.
     // This file does not mint the sealed Host observation.
     fs::write(fixture.root.join("started-laptop"), SID).unwrap();
@@ -47,7 +32,7 @@ fn originals_with_id(fixture: &Fixture, id: &str) -> Originals {
         .unwrap()
         .unwrap();
     let request=WorkerRequest::decode(&serde_json::to_vec(&json!({"sessionId":SID,"cwd":"/workspace","command":"opencode","env":{},"cols":80,"rows":24})).unwrap(),&fixture.source).unwrap();
-    (Box::new(storage), plan, request, inspected)
+    (storage, plan, request, inspected)
 }
 fn retain(fixture: &Fixture, originals: Originals) -> ExistingViewer {
     let (storage, plan, request, inspected) = originals;

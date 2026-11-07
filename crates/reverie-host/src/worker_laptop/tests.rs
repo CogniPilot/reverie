@@ -2,6 +2,7 @@ mod accepted;
 mod cleanup;
 mod cold_prepare;
 mod create;
+mod direct_finalization;
 mod existing_viewer;
 mod guard;
 mod pane;
@@ -62,6 +63,30 @@ fn sid() -> ProfileSessionId {
 }
 fn end() -> Instant {
     Instant::now() + Duration::from_secs(3)
+}
+fn direct_resources(
+    fixture: &Fixture,
+) -> (
+    Box<crate::worker_storage::LaunchStorage>,
+    ObservedCreatePlan,
+) {
+    let selection = fixture
+        .runtime()
+        .resolve_storage(&fixture.source, &sid())
+        .unwrap();
+    let mut storage =
+        if selection.paths().kind() == reverie_store::storage_identity::StorageKind::Session {
+            selection.into_legacy().unwrap()
+        } else {
+            selection.acquire().unwrap()
+        };
+    storage.prepare_storage().unwrap();
+    storage.record_storage_binding().unwrap();
+    let plan = fixture
+        .runtime()
+        .prepare_laptop_plan(fixture.source.clone(), fixture.source.clone(), &storage)
+        .unwrap();
+    (Box::new(storage), plan)
 }
 pub(super) struct Fixture {
     pub(super) root: PathBuf,

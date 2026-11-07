@@ -139,11 +139,12 @@ impl ExistingStorageReturned {
             registry, identity, ..
         } = &self.claim.state
         {
-            let result = finish_registered(registry, identity, decision, end);
+            let result =
+                super::super::finalization::finish_registered(registry, identity, decision, end);
             return result.map_err(|cause| {
                 Box::new(ExistingStorageFinishFailure {
                     returned: self,
-                    cause,
+                    cause: cause.into(),
                 })
             });
         }
@@ -168,50 +169,6 @@ impl ExistingStorageReturned {
                     cause: error.into(),
                 }))
             }
-        }
-    }
-}
-fn finish_registered(
-    registry: &StorageRegistry,
-    identity: &Arc<()>,
-    decision: &FinalStorageDecision,
-    end: Instant,
-) -> Result<bool, ExistingStorageError> {
-    let mut entries = registry.lock(registry.runtime.stop_deadline())?;
-    let index = selected(&entries, identity)?;
-    let EntryOwner::Finalizing(held) = &entries[index].owner else {
-        return Err(ExistingStorageError::Refused(
-            "WORKER_FINAL_STORAGE_CHANGED",
-        ));
-    };
-    if !decision
-        .brand
-        .as_ref()
-        .is_some_and(|brand| Arc::ptr_eq(brand, &held.brand))
-    {
-        return Err(ExistingStorageError::Refused("WORKER_FINAL_STORAGE_BRAND"));
-    }
-    let mut entry = entries.remove(index);
-    let EntryOwner::Finalizing(held) = entry.owner else {
-        unreachable!("same checked phase");
-    };
-    let FinalizingStorage { owner, brand } = held;
-    if decision.live {
-        entry.owner = EntryOwner::Direct(owner);
-        entries.insert(index, entry);
-        return Ok(true);
-    }
-    match owner.close(end) {
-        Ok(()) => Ok(false),
-        Err(failure) => {
-            let (owner, cause) = failure.into_parts();
-            entry.owner = EntryOwner::Finalizing(FinalizingStorage {
-                owner: Box::new(owner),
-                brand,
-            });
-            entry.writer_checked = false;
-            entries.insert(index, entry);
-            Err(StorageWorkflowError::from(cause).into())
         }
     }
 }
