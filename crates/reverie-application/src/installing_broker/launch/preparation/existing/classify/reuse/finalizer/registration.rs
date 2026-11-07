@@ -10,18 +10,9 @@ fn pause_registration() {
     });
 }
 impl Finalizer<'_> {
-    pub(super) fn metadata(&mut self) {
-        let result = (|| {
-            let scope = self.owner.scope();
-            let broker = scope.preparing.broker();
-            let mut lifecycle = broker
-                .installed
-                .cleanup_lifecycle(&broker.storage.runtime)?;
-            if let Some(token) = &scope.active {
-                lifecycle.finalize_active(token)?;
-            }
-            Ok(())
-        })();
+    pub(super) fn metadata(&mut self, budget: CleanupBudget) {
+        let scope = self.owner.scope();
+        let result = budget.metadata(&scope.preparing, scope.active.as_ref());
         if let Err(error) = result {
             self.errors.push(Error::Gate(error));
         }
@@ -46,9 +37,7 @@ impl Finalizer<'_> {
             admission.assert_target(target)?;
             #[cfg(test)]
             pause_registration();
-            let mut lifecycle = broker
-                .installed
-                .cleanup_lifecycle(&broker.storage.runtime)?;
+            let mut lifecycle = budget.lifecycle(broker)?;
             let token = scope
                 .active
                 .as_ref()

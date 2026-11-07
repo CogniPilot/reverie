@@ -9,6 +9,12 @@ impl InstalledWorker {
         let Some(end) = runtime.stop_deadline() else {
             return self.lifecycle();
         };
+        self.cleanup_lifecycle_until(end)
+    }
+    pub(in crate::installing_broker) fn cleanup_lifecycle_until(
+        &self,
+        end: Instant,
+    ) -> Result<LaptopLifecycle<'_>, GateError> {
         loop {
             match self.laptops.try_lock() {
                 Ok(guard) => return Ok(LaptopLifecycle { owner: self, guard }),
@@ -17,10 +23,14 @@ impl InstalledWorker {
                 }
                 Err(std::sync::TryLockError::WouldBlock) => {}
             }
-            if Instant::now() >= end {
+            let now = Instant::now();
+            if now >= end {
                 return Err(GateError::Refused("WORKER_BROKER_LOCK_UNAVAILABLE"));
             }
-            std::thread::sleep(std::time::Duration::from_millis(1));
+            std::thread::sleep(
+                end.duration_since(now)
+                    .min(std::time::Duration::from_millis(1)),
+            );
         }
     }
 }

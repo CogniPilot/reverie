@@ -10,6 +10,7 @@ pub use cold_prepare::{ColdPreparation, PreparedColdTemporary};
 mod create;
 mod error;
 mod existing_viewer;
+pub(crate) mod final_storage;
 mod guard;
 mod memory;
 mod network;
