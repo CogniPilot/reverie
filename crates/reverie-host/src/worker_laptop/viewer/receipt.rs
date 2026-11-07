@@ -14,7 +14,7 @@ pub(in crate::worker_laptop) fn is_file(path: &PosixPath) -> Result<bool> {
             if error.kind() == std::io::ErrorKind::InvalidInput
                 || matches!(
                     error.raw_os_error(),
-                    Some(libc::ENOENT | libc::ENOTDIR | libc::ELOOP)
+                    Some(libc::ENOENT | libc::ENOTDIR | libc::EBADF | libc::ELOOP)
                 ) =>
         {
             Ok(false)

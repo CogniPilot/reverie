@@ -15,7 +15,12 @@ impl WorkerRuntime {
             request: connection.request().clone(),
             office,
         };
-        let identity = match connection.viewer_constructor_identity(self, inputs.plan.session()) {
+        let captured = if self.cancellation().is_cancelled() {
+            Err("WORKER_LAPTOP_STOPPED")
+        } else {
+            connection.viewer_constructor_identity(self, inputs.plan.session())
+        };
+        let identity = match captured {
             Ok(identity) => identity,
             Err(code) => {
                 return Err(Box::new(LaptopRetainFailure {

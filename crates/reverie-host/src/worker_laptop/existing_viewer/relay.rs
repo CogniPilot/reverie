@@ -182,7 +182,12 @@ impl WorkerRuntime {
             receipt: Some(receipt),
             connection: None,
         };
-        match connection.viewer_constructor_identity(self, inputs.plan.session()) {
+        let identity = if self.cancellation().is_cancelled() {
+            Err("WORKER_LAPTOP_STOPPED")
+        } else {
+            connection.viewer_constructor_identity(self, inputs.plan.session())
+        };
+        match identity {
             Ok(identity) => inputs.connection = Some(identity),
             Err(code) => {
                 return Err(Box::new(ExistingRelayRetainFailure {
