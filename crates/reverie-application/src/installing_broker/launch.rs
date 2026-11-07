@@ -1,0 +1,141 @@
+//! Actual accepted T/J connection and the original ordinary launch prefix.
+//! This holds resources; it does not dispatch container or protected effects.
+use super::*;
+use crate::reservation_gate::{AdmissionBounds, OrdinaryLaunchAdmission};
+use reverie_contracts::worker_launch::WorkerRequest;
+use reverie_host::worker_reports::{
+    AcceptedWorkerConnection, WorkerLaunchConnection, WorkerReportError,
+};
+use std::{os::unix::net::UnixStream, time::Instant};
+mod error;
+pub use error::{LaunchAdmissionFailure, WorkerDispatchError};
+#[cfg(test)]
+mod tests;
+
+pub enum WorkerConnectionDispatch<'a> {
+    ReportCompleted,
+    Launch(ReceivedWorkerLaunch<'a>),
+}
+/// Only the actual same-service accepted socket produces this owner. A request
+/// or configuration value cannot create one, and it cannot outlive its broker.
+#[must_use = "retain the accepted connection through checked handler close"]
+pub struct ReceivedWorkerLaunch<'a> {
+    broker: &'a InstallingBroker,
+    connection: WorkerLaunchConnection,
+}
+#[must_use = "close the actual admission and connection, not just request data"]
+pub struct AdmittedWorkerLaunch<'a> {
+    request: ReceivedWorkerLaunch<'a>,
+    snapshot: Arc<ValidatedWorkerSnapshot>,
+    admission: Option<OrdinaryLaunchAdmission>,
+}
+impl InstallingBroker {
+    /// Fixed T/J dispatch only. Register the real socket before parsing; UID
+    /// precedes frame/collector access. Both purposes use the same actual
+    /// maxWorkers+4 registry and Runtime captured at installing bootstrap.
+    pub fn accept_worker_connection(
+        &self,
+        stream: UnixStream,
+    ) -> Result<WorkerConnectionDispatch<'_>, WorkerDispatchError> {
+        let snapshot = match self.configuration() {
+            Ok(snapshot) => snapshot,
+            Err(primary) => {
+                let cleanup = self.reports.close_unread_launch(stream).err();
+                return Err(WorkerDispatchError::Configuration { primary, cleanup });
+            }
+        };
+        match self
+            .reports
+            .accept(stream, self.command_telemetry(), snapshot.configuration())?
+        {
+            AcceptedWorkerConnection::ReportCompleted => {
+                Ok(WorkerConnectionDispatch::ReportCompleted)
+            }
+            AcceptedWorkerConnection::Launch(connection) => {
+                Ok(WorkerConnectionDispatch::Launch(ReceivedWorkerLaunch {
+                    broker: self,
+                    connection,
+                }))
+            }
+        }
+    }
+}
+impl<'a> ReceivedWorkerLaunch<'a> {
+    pub fn request(&self) -> &WorkerRequest {
+        self.connection.request()
+    }
+    pub fn close(&self, end: Instant) -> Result<(), WorkerReportError> {
+        self.connection.close(end)
+    }
+    /// Original ordinary prefix: actual validated J -> image refresh -> queued
+    /// GPU cold boundary for non-attach -> actual captured optional admission.
+    /// Protected L joins are deliberately not selected by a J request/DTO.
+    pub fn begin_ordinary(
+        self,
+    ) -> Result<AdmittedWorkerLaunch<'a>, Box<LaunchAdmissionFailure<'a>>> {
+        let result = self.enter();
+        match result {
+            Ok((snapshot, admission)) => Ok(AdmittedWorkerLaunch {
+                request: self,
+                snapshot,
+                admission,
+            }),
+            Err(cause) => Err(Box::new(LaunchAdmissionFailure {
+                request: self,
+                cause,
+            })),
+        }
+    }
+    fn enter(
+        &self,
+    ) -> Result<
+        (
+            Arc<ValidatedWorkerSnapshot>,
+            Option<OrdinaryLaunchAdmission>,
+        ),
+        WorkerDispatchError,
+    > {
+        self.connection.assert_open(&self.broker.storage.runtime)?;
+        self.broker.refresh_launch_configuration()?;
+        if self.request().attach_only() != Some(true) {
+            self.broker.gpu_cold_boundary(self.request().session())?;
+        }
+        // Capture after GPU's possible real publication, before acquiring the
+        // admission so no later fallible RAM read drops a partial scope.
+        let snapshot = self.broker.configuration()?;
+        let admission = self
+            .broker
+            .resource_reservations()?
+            .map(|gate| {
+                gate.admit_ordinary_launch(self.request().session(), AdmissionBounds::default())
+            })
+            .transpose()?;
+        Ok((snapshot, admission))
+    }
+}
+impl AdmittedWorkerLaunch<'_> {
+    pub fn request(&self) -> &WorkerRequest {
+        self.request.request()
+    }
+    pub fn configuration(&self) -> &ValidatedWorkerSnapshot {
+        &self.snapshot
+    }
+    /// This prefix has performed no container effect. Consume only its actual
+    /// allocation scope/socket; no storage/laptop/global release is claimed.
+    pub fn close(mut self, end: Instant) -> Result<(), WorkerDispatchError> {
+        let admission = self
+            .admission
+            .take()
+            .map(OrdinaryLaunchAdmission::close)
+            .transpose();
+        let transport = self.request.close(end);
+        match (admission, transport) {
+            (Ok(_), Ok(())) => Ok(()),
+            (Err(primary), cleanup) => Err(WorkerDispatchError::Finalization {
+                primary,
+                cleanup: cleanup.err(),
+            }),
+            (Ok(_), Err(error)) => Err(error.into()),
+        }
+    }
+}

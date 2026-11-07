@@ -432,8 +432,8 @@ retains actual request seats through thread settlement after HTTP cancellation.
 Company close/drop independently inspect the same collector's pending SQLite
 owners; a joined thread cannot forgive a refused database close.
 
-`worker_reports` implements only the fixed T operation on an actual owned Unix
-connection, not a listener or generic dispatcher. Actual kernel UID precedes
+`worker_reports` implements fixed T/J dispatch on an actual owned accepted Unix
+connection, not a listener or generic command dispatcher. Actual kernel UID precedes
 frame/collector access. The shared 256 KiB transport check precedes allocation;
 the complete common frame precedes the existing 4 KiB request-purpose check.
 Original 10-second per-receive and whole-sendall budgets, plus first-stop clamping,
@@ -450,6 +450,17 @@ unconfirmed close fences further admission and retains the same engine origin,
 even when no connection record was admitted; its consumed descriptor is never
 retried. Native kernel
 or filesystem latency is not claimed to have a hard execution bound.
+
+The same service's `accept` returns either an actually finalized report or an
+opaque `WorkerLaunchConnection`, retaining that J socket in the same bounded
+registry and installed engine origin. The request codec preserves original
+field/codepoint/ordering rules; an accepted request is not an allocation or
+start permit. Checked J close is terminal, and a refused close retains that
+record. Service close interrupts it but cannot acknowledge completion while
+the actual J owner remains. Nineteen original Python schema/encoding recipes
+are compared with full actual socket outcomes. Detailed CPython malformed-JSON
+and byte-decoding diagnostic text is still a separate compatibility obligation;
+the existing request codec retains only its typed JSON refusal.
 
 These consumers do not recover/register laptops, stop a source, create/start a
 container, mint API grants, or select a backend. Complete-create argv must still

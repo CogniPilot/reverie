@@ -4,8 +4,10 @@ pub enum WorkerReportError {
     Peer,
     Frame,
     Refused,
+    LaunchKind,
     Io(std::io::Error),
     Telemetry(super::TelemetryError),
+    Launch(reverie_contracts::worker_launch::LaunchDataError),
     Finalization {
         primary: Box<Self>,
         secondary: Box<Self>,
@@ -19,8 +21,10 @@ impl WorkerReportError {
             Self::Peer => "Worker peer identity is not authorized",
             Self::Frame => "Worker frame is too large",
             Self::Refused => "TELEMETRY_REPORT_REFUSED",
+            Self::LaunchKind => "Expected worker launch request",
             Self::Io(_) => "Worker transport failed",
             Self::Telemetry(_) => "TELEMETRY_REPORT_REFUSED",
+            Self::Launch(error) => launch_message(error),
             Self::Finalization { .. } | Self::Unconfirmed => "WORKER_TELEMETRY_CLOSE_UNCONFIRMED",
         }
     }
@@ -35,6 +39,24 @@ impl WorkerReportError {
             Self::Unconfirmed | Self::Finalization { .. } => "Worker transport failed",
             _ => self.code(),
         }
+    }
+}
+fn launch_message(error: &reverie_contracts::worker_launch::LaunchDataError) -> &'static str {
+    use reverie_contracts::worker_launch::LaunchDataError as Data;
+    use reverie_core::worker_launch::LaunchRuleError as Rule;
+    match error {
+        Data::Frame => "Worker frame is too large",
+        Data::Session => "Invalid session identifier",
+        Data::Attach => "Invalid attach-only request",
+        Data::Rule(Rule::Directory) => "Invalid worker directory",
+        Data::Rule(Rule::OutsideGrants) => "Worker directory is outside the owner grants",
+        Data::Rule(Rule::Command) => "Invalid worker command",
+        Data::Rule(Rule::Environment) => "Invalid worker environment",
+        Data::Rule(Rule::Terminal) => "Invalid terminal dimensions",
+        // The existing request codec retains a typed JSON refusal, but not
+        // CPython's detailed byte/line diagnostic. The complete dispatcher
+        // must qualify that remaining diagnostic seam before selection.
+        _ => "Invalid worker request",
     }
 }
 impl std::fmt::Display for WorkerReportError {
