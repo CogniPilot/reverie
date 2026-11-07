@@ -7,13 +7,12 @@ use super::*;
 use crate::reservation_observer::WebsiteBinding;
 use reverie_contracts::{
     reservation_baseline::{OriginalBaselineFields, OriginalSourceBaseline},
-    reservation_draft::DraftRecord,
     reservation_observation::{self, PoolWebsite},
     worker_config::EffectiveWorkerConfig,
 };
 use reverie_core::operations::JournalDigest;
 use reverie_store::{
-    operations::{ClaimSelection, OperationHandle},
+    operations::OperationHandle,
     storage_identity::{self, StorageKind, StoragePaths},
 };
 
@@ -29,6 +28,8 @@ pub struct RetainedPreparation {
     before: EffectiveWorkerConfig,
     paths: StoragePaths,
     baseline: OriginalSourceBaseline,
+    pub(super) original_source: Option<crate::installing_broker::source::RegisteredSource>,
+    pub(super) source_stop_phase: super::preparation_stop::SourceStopPhase,
     pub(super) preparing_attempted: bool,
     pub(super) start_attempted: bool,
     pub(super) start_owner: Option<super::preparation_start::ProtectedStartIntent>,
@@ -38,6 +39,12 @@ pub struct RetainedPreparation {
     pub(super) live: Arc<std::sync::atomic::AtomicBool>,
 }
 impl RetainedPreparation {
+    pub(crate) fn attach_original_source(
+        &mut self,
+        source: crate::installing_broker::source::RegisteredSource,
+    ) {
+        self.original_source = Some(source);
+    }
     pub fn operation(&self) -> &OperationView {
         &self.view
     }
@@ -80,42 +87,11 @@ impl ReservationGate {
         id: &JournalId,
         digest: &JournalDigest,
     ) -> Result<RetainedPreparation> {
-        let metadata = reservation_control::read_draft(self.inner.config()?.as_ref(), id)?;
-        let draft = DraftRecord::capture(&metadata, id, &self.inner.scope, digest)?;
-        let profile = self.inner.profile(&draft.employee()?)?;
-        draft.assert_current_profile(profile.as_ref())?;
-        let request =
-            draft.comparison_request(profile.as_ref().expect("checked current profile"))?;
-        let admission = self.inner.admit(AdmissionBounds::default())?;
-        let mut claimed = false;
-        let selected = ClaimSelection {
-            operation_id: Some(draft.operation()),
-            reservation_id: Some(draft.reservation()),
-            reserved_sid: None,
-        };
-        let body = self.inner.claim_reservation(
-            &draft.key(),
-            &request,
-            selected,
-            Some(&draft),
-            &mut claimed,
-        );
-        let result = match body {
-            Err(error) => admission.conclude(Err(error)),
-            Ok(context) => self.retain_context(admission, context),
-        };
-        if claimed {
-            result.map_err(|error| match error {
-                GateError::Journal(error) if error.is_uncertain() => GateError::Journal(error),
-                other => GateError::ClaimUncertain {
-                    cause: Box::new(other),
-                },
-            })
-        } else {
-            result
-        }
+        self.enter_resource_draft(id, digest)?
+            .retain()
+            .map_err(|failure| failure.cause)
     }
-    fn retain_context(
+    pub(super) fn retain_context(
         &self,
         admission: super::admission::Admission,
         context: ClaimedContext,
@@ -155,6 +131,8 @@ impl ReservationGate {
                     before,
                     paths,
                     baseline,
+                    original_source: None,
+                    source_stop_phase: super::preparation_stop::SourceStopPhase::Idle,
                     preparing_attempted: false,
                     start_attempted: false,
                     start_owner: None,

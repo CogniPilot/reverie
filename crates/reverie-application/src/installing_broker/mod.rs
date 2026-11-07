@@ -1,12 +1,18 @@
 //! Actual installing-service current configuration owner. Native admission,
 //! lifecycle registry and effects remain private composition of this service;
 //! a captured configuration is neither owner authorization nor a start grant.
+mod bootstrap;
+pub use bootstrap::{BootstrapSettlementError, BrokerBootstrapCause, BrokerBootstrapFailure};
 #[cfg(test)]
 mod bootstrap_tests;
 mod creation;
 mod gpu_access;
 mod image_refresh;
+mod launch;
+mod recovered;
+pub(crate) mod source;
 mod storage;
+mod telemetry;
 use crate::{
     reservation_gate::{GateError, ReservationGate},
     reservation_observer::NativeObserver,
@@ -14,8 +20,15 @@ use crate::{
 };
 pub use creation::CreationBudgetError;
 pub(crate) use image_refresh::LoadedLaunchImage;
+pub use launch::{
+    AdmittedWorkerLaunch, LaunchAdmissionFailure, ReceivedWorkerLaunch, WorkerConnectionDispatch,
+    WorkerDispatchError,
+};
+use recovered::{LaptopOwner, RecoveryOwners};
+pub use recovered::{RecoveryError, RecoverySummary};
 use reverie_contracts::reservation_engine::ReservationConfiguration;
 use reverie_core::{ids::ProfileSessionId, worker_laptop::WorkerContainerName};
+pub use source::SourceDraftError;
 use std::sync::{Arc, Mutex, MutexGuard, RwLock};
 pub use storage::{
     NetworkStorageError, NetworkStoragePreparation, NetworkStorageReclaimFailure,
@@ -23,6 +36,7 @@ pub use storage::{
     NixStorageReclaimFailure, NixStorageRetainFailure, NixStorageReturned,
     OwnedCreatePreparationError, StorageClaim, StorageReleaseFailure, StorageWorkflowError,
 };
+pub use telemetry::TelemetryCloseError;
 struct CurrentInstalled {
     snapshot: Arc<ValidatedWorkerSnapshot>,
     resources: Arc<ReservationConfiguration>,
@@ -40,9 +54,11 @@ impl CurrentInstalled {
 struct LaptopRegistration {
     session: ProfileSessionId,
     name: WorkerContainerName,
+    owner: LaptopOwner,
 }
 /// Ordered real installing lifecycle state. No raw registry setter or public
-/// registration constructor exists; native launch/recovery producers own it.
+/// registration constructor exists; the actual recovery producer owns retained
+/// Office/storage entries. Native launch ownership remains a separate producer.
 pub(crate) struct LaptopLifecycle<'a> {
     owner: &'a InstalledWorker,
     guard: MutexGuard<'a, Vec<LaptopRegistration>>,
@@ -93,10 +109,11 @@ impl InstalledWorker {
     pub(crate) fn model_laptop(&self, session: ProfileSessionId) {
         let snapshot = self.snapshot().unwrap();
         let name = WorkerContainerName::for_session(snapshot.envelope().base(), &session);
-        self.laptops
-            .lock()
-            .unwrap()
-            .push(LaptopRegistration { session, name });
+        self.laptops.lock().unwrap().push(LaptopRegistration {
+            session,
+            name,
+            owner: LaptopOwner::Modeled,
+        });
     }
     pub(crate) fn capture(snapshot: ValidatedWorkerSnapshot) -> Arc<Self> {
         Arc::new(Self {
@@ -152,36 +169,22 @@ pub struct InstallingBroker {
     installed: Arc<InstalledWorker>,
     gate: Option<ReservationGate>,
     storage: Arc<storage::StorageRegistry>,
+    telemetry: Arc<reverie_host::command_telemetry::CommandTelemetry>,
+    reports: Arc<reverie_host::worker_reports::WorkerReportService>,
+    recovery: Arc<RecoveryOwners>,
 }
 impl InstallingBroker {
     /// Trusted installing bootstrap; no wire-selected native engine or path.
     pub fn new(
         snapshot: ValidatedWorkerSnapshot,
         runtime: reverie_host::worker_runtime::WorkerRuntime,
-    ) -> Result<Self, GateError> {
-        let installed = InstalledWorker::capture(snapshot);
-        let current = installed.snapshot()?;
-        let has_option = reverie_contracts::worker_validation::WorkerValidationData::new(
-            current.configuration(),
-        )
-        .reservation()?
-        .is_some();
-        let gate = if has_option
-            || reverie_host::reservation_control::prior_control_present(
-                installed.resources()?.as_ref(),
-            )? {
-            Some(ReservationGate::from_installed(
-                installed.clone(),
-                NativeObserver::new(runtime.readonly()),
-            )?)
-        } else {
-            None
-        };
-        Ok(Self {
-            installed,
-            gate,
-            storage: Arc::new(storage::StorageRegistry::new(runtime)),
-        })
+    ) -> Result<Self, Box<BrokerBootstrapFailure>> {
+        Self::bootstrap(snapshot, runtime)
+    }
+    pub(crate) fn command_telemetry(
+        &self,
+    ) -> &Arc<reverie_host::command_telemetry::CommandTelemetry> {
+        &self.telemetry
     }
     pub fn configuration(&self) -> Result<Arc<ValidatedWorkerSnapshot>, GateError> {
         self.installed.snapshot()

@@ -26,6 +26,15 @@ pub fn publish_start_intent(
 ) -> Result<()> {
     private_record::publish(config, private_record::PrivateRecord::StartIntent(record))
 }
+pub fn publish_source_stop_intent(
+    config: &ReservationConfiguration,
+    record: &reverie_contracts::reservation_baseline::SourceStopIntentRecord,
+) -> Result<()> {
+    private_record::publish(
+        config,
+        private_record::PrivateRecord::SourceStopIntent(record),
+    )
+}
 use reverie_contracts::{
     reservation_control::{ControlBinding, ControlDirectory, ControlIdentity},
     reservation_engine::{EngineDataError, ReservationConfiguration},

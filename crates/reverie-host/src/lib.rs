@@ -4,6 +4,7 @@ pub mod broker_engine;
 mod captured_client;
 pub mod command_telemetry;
 pub mod creation_budget;
+pub mod deployment_snapshot;
 pub mod device_policy;
 pub mod embeddings;
 pub mod engine_metadata;
@@ -39,7 +40,10 @@ pub mod worker_laptop;
 pub mod worker_launch;
 pub mod worker_mounts;
 pub mod worker_nix;
+pub mod worker_recovery;
+pub mod worker_reports;
 pub mod worker_runtime;
+pub mod worker_source_stop;
 pub mod worker_storage;
 pub mod worker_validation;
 

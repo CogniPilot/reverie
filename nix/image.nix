@@ -140,15 +140,12 @@ pkgs.dockerTools.buildLayeredImage {
       cp ${humanToolkit}/opt/reverie/human/bin/{reverie-human-shell,bash} opt/reverie/human/bin/
       chmod 555 opt/reverie/human/bin/{reverie-human-shell,bash}
       mkdir -p opt/reverie/autoenv/bin opt/reverie/autoenv/lib
-      cp ${src}/scripts/reverie-autoenv-shim opt/reverie/autoenv/lib/shim
-      cp ${src}/scripts/reverie-autoenv bin/reverie-autoenv
-      for command in reverie-cargo-defaults reverie-build-jobs; do
+      cp ${laptopTools}/bin/reverie-autoenv-shim opt/reverie/autoenv/lib/shim
+      for command in reverie-autoenv reverie-cargo-defaults reverie-build-jobs; do
         test -L "bin/$command"
         unlink "bin/$command"
         cp ${laptopTools}/bin/"$command" "bin/$command"
       done
-      sed -i '1c#!${memory}/bin/python3' bin/reverie-autoenv
-      sed -i '1c#!${pkgs.bash}/bin/bash' opt/reverie/autoenv/lib/shim
       chmod 755 bin/reverie-autoenv bin/reverie-cargo-defaults bin/reverie-build-jobs opt/reverie/autoenv/lib/shim
       for tool in cargo rustc rustdoc pkg-config; do
         ln -s /opt/reverie/autoenv/lib/shim opt/reverie/autoenv/bin/$tool

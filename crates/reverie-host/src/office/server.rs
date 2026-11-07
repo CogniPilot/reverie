@@ -11,7 +11,7 @@ use std::{
     pin::Pin,
     sync::{
         Arc, Mutex,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
     },
     task::Poll,
     time::{Duration, Instant},
@@ -23,12 +23,14 @@ pub(super) struct Context {
     closing: Arc<AtomicBool>,
     tokens: Mutex<(f64, Instant)>,
     local: Arc<Semaphore>,
+    live_requests: Arc<AtomicUsize>,
 }
 impl Context {
     pub(super) fn new(
         company: Arc<Company>,
         session: ProfileSessionId,
         closing: Arc<AtomicBool>,
+        live_requests: Arc<AtomicUsize>,
     ) -> Arc<Self> {
         Arc::new(Self {
             company,
@@ -36,6 +38,7 @@ impl Context {
             closing,
             tokens: Mutex::new((40., Instant::now())),
             local: Arc::new(Semaphore::new(4)),
+            live_requests,
         })
     }
     fn closing(&self) -> bool {
@@ -175,10 +178,14 @@ fn admit(stream: UnixStream, context: &Arc<Context>, requests: &mut JoinSet<()>)
         return;
     };
     let context = Arc::clone(context);
+    let lifetime =
+        super::request::RequestLifetime::new(local, global, context.live_requests.clone());
     requests.spawn(async move {
-        let _owned = (local, global);
+        let _owned = lifetime.clone();
         let service_context = Arc::clone(&context);
-        let service = service_fn(move |request| handle(request, Arc::clone(&service_context)));
+        let service = service_fn(move |request| {
+            handle(request, Arc::clone(&service_context), lifetime.clone())
+        });
         let mut builder = http1::Builder::new();
         builder
             .keep_alive(false)
@@ -194,13 +201,14 @@ fn admit(stream: UnixStream, context: &Arc<Context>, requests: &mut JoinSet<()>)
 async fn handle(
     request: http::Request<hyper::body::Incoming>,
     context: Arc<Context>,
+    lifetime: Arc<super::request::RequestLifetime>,
 ) -> std::result::Result<http::Response<super::body::OfficeBody>, Infallible> {
     let response = if context.closing() {
         proxy::refusal(StatusCode::SERVICE_UNAVAILABLE)
     } else if !context.take_token() {
         proxy::refusal(StatusCode::TOO_MANY_REQUESTS)
     } else {
-        proxy::handle(request, context).await
+        proxy::handle(request, context, lifetime).await
     };
     Ok(response)
 }

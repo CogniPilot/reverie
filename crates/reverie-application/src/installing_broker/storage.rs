@@ -4,9 +4,13 @@ mod error;
 mod nix;
 mod observed;
 mod preparation;
+mod recovery_lifetime;
+mod source;
 pub use observed::OwnedCreatePreparationError;
+pub(crate) use source::RegisteredSource;
+pub(super) use source::SourceAttachment;
 #[cfg(test)]
-mod tests;
+pub(in crate::installing_broker) mod tests;
 use super::*;
 pub use error::{StorageReleaseFailure, StorageWorkflowError};
 pub use nix::{
@@ -32,6 +36,7 @@ struct Entry {
 }
 enum EntryOwner {
     Direct(Box<LaunchStorage>),
+    Source(Arc<source::SourceRecord>),
     Nix(reverie_host::worker_nix::NixWorkflow),
     Laptop(reverie_host::worker_laptop::LaptopWorkflow),
 }
@@ -94,6 +99,11 @@ impl StorageRegistry {
             .iter()
             .find(|entry| entry.paths.session() == session)
         {
+            if matches!(entry.owner, EntryOwner::Source(_)) {
+                return Err(StorageWorkflowError::refused(
+                    "WORKER_ORIGINAL_SOURCE_RETAINED",
+                ));
+            }
             if !entry.writer_checked || !matches!(entry.owner, EntryOwner::Direct(_)) {
                 return Err(StorageWorkflowError::refused(
                     "WORKER_STORAGE_CLEANUP_UNCONFIRMED",
@@ -176,6 +186,11 @@ impl StorageRegistry {
         if matches!(entries[index].owner, EntryOwner::Laptop(_)) {
             return Err(StorageWorkflowError::refused(
                 "WORKER_LAPTOP_STORAGE_RETAINED",
+            ));
+        }
+        if matches!(entries[index].owner, EntryOwner::Source(_)) {
+            return Err(StorageWorkflowError::refused(
+                "WORKER_ORIGINAL_SOURCE_RETAINED",
             ));
         }
         let entry = entries.remove(index);

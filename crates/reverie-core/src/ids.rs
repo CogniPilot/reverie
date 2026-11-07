@@ -63,6 +63,24 @@ impl ContainerId {
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub struct NativeOperationId(String);
 impl NativeOperationId {
+    /// Format supplied entropy with UUIDv4 version/variant bits. Entropy
+    /// acquisition belongs to the native caller; this value is only a name.
+    pub fn from_random_bytes(mut bytes: [u8; 16]) -> Self {
+        bytes[6] = (bytes[6] & 0x0f) | 0x40;
+        bytes[8] = (bytes[8] & 0x3f) | 0x80;
+        let hex = bytes
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
+        Self(format!(
+            "{}-{}-{}-{}-{}",
+            &hex[..8],
+            &hex[8..12],
+            &hex[12..16],
+            &hex[16..20],
+            &hex[20..]
+        ))
+    }
     pub fn parse(value: &str) -> Result<Self, ValueError> {
         if !canonical(value) {
             return Err(ValueError::NativeUuid);
@@ -81,6 +99,28 @@ impl NativeOperationId {
 mod tests {
     use super::*;
     const NIL: &str = "00000000-0000-0000-0000-000000000000";
+    #[test]
+    fn supplied_entropy_uuid_format_matches_actual_python_version_four() {
+        assert_eq!(
+            NativeOperationId::from_random_bytes([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
+                .as_str(),
+            "00000000-0000-4000-8000-000000000000"
+        );
+        assert_eq!(
+            NativeOperationId::from_random_bytes([
+                255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255
+            ])
+            .as_str(),
+            "ffffffff-ffff-4fff-bfff-ffffffffffff"
+        );
+        assert_eq!(
+            NativeOperationId::from_random_bytes([
+                0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15
+            ])
+            .as_str(),
+            "00010203-0405-4607-8809-0a0b0c0d0e0f"
+        );
+    }
     #[test]
     fn container_references_require_complete_lowercase_engine_ids() {
         assert!(ContainerId::parse(&"0".repeat(64)).is_ok());

@@ -68,6 +68,25 @@ impl CreateArguments {
     pub fn args(&self) -> &[MetadataText] {
         &self.args
     }
+    /// Source's two late insertions before the fixed four-word image tail.
+    /// Inputs are mount DATA; the real Host owner derives them from its retained
+    /// Nix result and fresh account observations before the telemetry boundary.
+    pub fn with_late_mounts(
+        &self,
+        nix: Option<&MetadataText>,
+        accounts: &[MetadataText],
+    ) -> Vec<MetadataText> {
+        let mut args = self.args.clone();
+        let offset = args.len() - 4;
+        let mut extra = Vec::new();
+        if let Some(nix) = nix {
+            extra.push(MetadataText::from_scalar_text("--mount"));
+            extra.push(bind(nix, &MetadataText::from_scalar_text("/nix"), false));
+        }
+        extra.extend_from_slice(accounts);
+        args.splice(offset..offset, extra);
+        args
+    }
 }
 /// Format valid upstream effective configuration plus storage-selected paths.
 /// This does not validate the whole worker domain or confer effect authority.

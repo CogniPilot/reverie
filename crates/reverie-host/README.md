@@ -329,9 +329,70 @@ closing them or acknowledging writer/capacity release. Last runtime/handle loss
 quarantines unreclaimed records for process lifetime instead of dropping their
 actual guards. This does not survive process exit or prove daemon reconciliation.
 The application supplies the atomic registry transition. Its complete canonical
-launch caller, create/private-record/start, stop/recovery, viewer and whole-service
-shutdown consumers remain required.
-No laptop-created/started object or selected backend is claimed by network success.
+launch caller, stop/recovery, viewer and whole-service shutdown consumers remain
+required. Network success alone cannot produce a created or started object.
+
+The following fixed create consumer advances only that same successful retained
+network record. It derives late account mounts from the retained original source,
+uses the exact earlier Nix result, checks current storage intent, and calls the
+same-runtime mandatory CommandTelemetry on the complete argv immediately before
+create. A successful reply creates a real `CreatedLaptop` even if stdout is not a
+canonical CID; failed or lost effect replies retain the record and cannot be
+replayed or reclaimed as an absent container. Private publication then writes the
+exclusive UUID launch record before runtime.json and checks every writer, anchor
+and held-parent close before allowing start. Both primary and finalizer errors
+remain attached to the same created resource record.
+
+Publication deliberately refuses preexisting runtime.json symlinks/hardlinks and
+foreign or group/world-writable launch parents before truncation. Actual original
+Python prefix controls establish that those otherwise-valid inputs were accepted
+there; these are explicit preservation corrections. Ordinary owned 0755 parents
+remain valid. Inode/link checks pin the observed entries but cannot exclude a
+later same-UID link or rename writer; the real installing lifecycle must serialize
+those writers. Failed publication never unlinks a name or loses created custody.
+
+`StartedContainer` acknowledges only the actual fixed engine start. It is not CLI
+readiness, completed memory/cold preparation, protected authorization or an App
+registry entry. Those real joins and the canonical pre-Nix App caller are still
+required. Fixed native pane argv DATA reuse worker-child --pane-exit without a
+new shell or program-selection endpoint.
+
+`configure_started_laptop_memory` accepts that same actual `StartedContainer`
+and advances its retained record once. It takes no caller config, name, CID or
+cgroup path. An absent effective policy performs no memory observations or
+effects, while the original deadline, stop deadline and cancellation still fence
+local completion. A refusal consumes the memory phase and retains the created
+owners; a renewed caller deadline cannot replay it. Selected policies require
+the full host hierarchy and an exact running
+engine identity before holding the PID incarnation, unified membership and
+no-follow cgroup directory. Swap-only policy opens no high-limit writer.
+
+A configured helper socket selects the existing identity-only Rust soft-limit
+helper; it never falls back to direct writes. Otherwise the private direct
+authority refreshes engine/local identity, checks the hard limit and original
+deadline, then performs one write with checked close. After writer admission,
+short writes, interruption, failed identity/readback and close errors become
+`MemoryEffectUnconfirmed` with the typed cause retained. Both routes independently
+use `ReservationKernel` for RAM/high/swap and ancestor readback, then refresh
+identity and check the held target close. Only that result constructs
+`ConfiguredMemory`; it does not complete cold storage, launch a child or publish
+application readiness. The installing application and later lifecycle joins
+remain required. Owned fixture controls do not establish installed enforcement.
+
+New-target cleanup accepts only the canonical CID retained from that actual
+create, never a recycled name or a caller CID. It preserves stop/inspect/kill/
+inspect order but requires an exact, known stopped state. Missing/failed inspect,
+unknown replies, and successful noncanonical create output cannot establish
+absence or release. This explicit conservative difference is bound to actual
+original ordinary-stop controls. Cleanup captures one original end and honors
+first-stop; repeats cannot renew it or replay effects. Cleanup enters a terminal
+state under the same record mutex before any settlement or native effect, so no
+later publication/start can revive it even when global stop is unset. A cached
+stopped result is valid only in that terminal stopped state. A prior unknown
+forward effect stays uncertain after local client settlement and cannot produce
+a stopped acknowledgement. Its local stopped result
+retains Office, Nix/storage and request ownership and provides no capacity,
+resource-release or whole-service acknowledgement.
 
 Protected-start qualification observes the captured old PID incarnation both
 before and after its fixed cgroup/events check, preserves all captured storage
@@ -342,3 +403,98 @@ UID-1000 differential witness establishes that Python `lexists` silently accepts
 an inaccessible ancestor over a populated cgroup. The Rust shared fixed-kernel
 reader deliberately preserves its PermissionDenied refusal instead of granting
 false absence credit. These are observations, not a held writer-release proof.
+# Worker recovery and lazy Office observations
+
+`worker_recovery` retains the actual Runtime origin for the original running-name
+census and optional single-container inspection. Raw recovered names, including
+bare/nil UUID spellings and last-name selection for one SID, remain membership
+data. They do not establish exact container/process custody. Recovery memory
+verification shares the existing native limits reader without imposing the
+inventory's stricter CID schema on the original ignored `Id` result.
+
+`OfficeService::from_worker` captures the same Runtime and defers the fixed server
+inspection until an actual forwarded request, after host credential processing.
+Its Company-local two-second cache preserves the original IP/scope codepoints;
+socket conversion reuses the existing Python IDNA2003 owner. Request futures and
+their native query/DNS threads share actual local/global request seats. Cancelling
+HTTP cannot free those seats or acknowledge close while owned native work remains.
+Checked Company close attempts every job and phone; unresolved owners survive an
+accidental service drop in process-lifetime quarantine. Neither this quarantine
+nor a closed phone establishes durable recovery or global shutdown.
+
+# Retained Office construction failures
+
+`bind_retained` returns a genuine failed-construction owner only after its actual
+registry insertion. That type cannot become a completed `OfficePhone` or a start
+grant. Known failures before ownership, or after confirmed constructor cleanup,
+return no owner. `close_construction` checks the exact Company and retained entry;
+even another Company on the same Runtime cannot close it. Consumed-close and
+unidentified-leaf failures remain negative across repeats. The compatibility
+`bind` retains its original constructor/error order and delegates the same owner.
+Recovery must keep its real storage resources while construction cleanup is
+unconfirmed; neither a failed-construction token nor successful local close
+acknowledges global release, durable reconciliation or authorization.
+
+`bind_worker_retained` has no directory argument: it uses only the raw
+`apiSocketRoot` captured by the same `from_worker` configuration. At the actual
+phone phase it preserves the original `Path(root)/SID` recursive mkdir effects
+and refuses a final SID symlink, then resolves the root with the existing Python
+path owner before the private anchored bind. Missing components before `..`
+are created; regular-file traversal fails before resolution. Created directories
+remain on later failures. Trusted fixed-address constructors and their direct
+bind restrictions are unchanged. Root resolution grants neither writer exclusion
+nor authorization, and the existing no-overwrite socket policy remains in force.
+
+# Telemetry consumers
+The worker constructor checks and retains the mandatory telemetry object's
+Runtime origin. An enabled collector serves the fixed hands route locally using
+the phone's constructor-selected SID; the trusted fixed-address constructor
+keeps its original absent-collector behavior. The closed native-job purpose
+retains actual request seats through thread settlement after HTTP cancellation.
+Company close/drop independently inspect the same collector's pending SQLite
+owners; a joined thread cannot forgive a refused database close.
+
+`worker_reports` implements fixed T/J dispatch on an actual owned accepted Unix
+connection, not a listener or generic command dispatcher. Actual kernel UID precedes
+frame/collector access. The shared 256 KiB transport check precedes allocation;
+the complete common frame precedes the existing 4 KiB request-purpose check.
+Original 10-second per-receive and whole-sendall budgets, plus first-stop clamping,
+are retained; partial send progress never renews that attempt's deadline. EOF and
+connection loss close quietly. Interrupted receive waits keep their original
+monotonic deadline; only positive byte progress begins another recv budget.
+The receive-attempt behavior follows the pinned
+[CPython 3.13.15 socket implementation](https://github.com/python/cpython/blob/v3.13.15/Modules/socketmodule.c#L822).
+Operation refusals send one E, and successful
+closed reports send J. Independent report admission still refuses rather than
+queuing another batch. Checked socket finalizers, bounded retained connections,
+and uncertain-close quarantine are separate from report success. A refused socket's
+unconfirmed close fences further admission and retains the same engine origin,
+even when no connection record was admitted; its consumed descriptor is never
+retried. Native kernel
+or filesystem latency is not claimed to have a hard execution bound.
+
+The same service's `accept` returns either an actually finalized report or an
+opaque `WorkerLaunchConnection`, retaining that J socket in the same bounded
+registry and installed engine origin. The request codec preserves original
+field/codepoint/ordering rules; an accepted request is not an allocation or
+start permit. Checked J close is terminal, and a refused close retains that
+record. Service close interrupts it but cannot acknowledge completion while
+the actual J owner remains. Nineteen original Python schema/encoding recipes
+are compared with full actual socket outcomes. Detailed CPython malformed-JSON
+and byte-decoding diagnostic text is still a separate compatibility obligation;
+the existing request codec retains only its typed JSON refusal.
+
+These consumers do not recover/register laptops, stop a source, create/start a
+container, mint API grants, or select a backend. Complete-create argv must still
+reach the actual collector immediately before the genuine create producer.
+
+`worker_source_stop::OriginalSourceStop` owns the actual original employee
+resource, same captured engine and original process baseline. Header inspection
+precedes the App's late policy resolution; distinct fixed `/proc` observations,
+immutable-CID stop/inspect/kill and exact metadata readback precede its terminal
+stopped phase. Wrong origin is refused before mutation. A failed or uncertain
+attempt cannot dispatch again or become stopped merely because its native call
+settled. Consuming the original resource is a separate one-shot phase, and the
+App must first close the actual Office/request owners and requalify its claim.
+Drop retains unknown actual resources in a process-lifetime quarantine; it is
+neither a durable fence nor global process/writer release acknowledgement.

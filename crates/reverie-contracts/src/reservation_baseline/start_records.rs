@@ -30,6 +30,46 @@ pub struct StartIntentRecord {
     operation: JournalId,
     bytes: Vec<u8>,
 }
+/// Existing exclusive source-stop attempt DATA; never reconstructs an owner.
+pub struct SourceStopIntentRecord {
+    operation: JournalId,
+    bytes: Vec<u8>,
+}
+impl SourceStopIntentRecord {
+    pub fn from_observed_data(
+        operation: &Operation,
+        baseline: &OriginalSourceBaseline,
+    ) -> Checked<Self> {
+        let operation = operation.data();
+        require(
+            operation.state == OperationState::Starting && operation.version.get() == 4,
+            StartDataError::Permit,
+        )?;
+        let value = Value(Node::Object(
+            [
+                (key("schema"), string("reverie-resource-source-stop-v1")),
+                (key("operationId"), string(operation.id.as_str())),
+                (
+                    key("sourceId"),
+                    string(baseline.source_container().as_str()),
+                ),
+                (key("state"), string("STOP_REQUESTED")),
+            ]
+            .into_iter()
+            .collect(),
+        ));
+        Ok(Self {
+            operation: operation.id.clone(),
+            bytes: worker_config::compact_data(&value),
+        })
+    }
+    pub fn operation_id(&self) -> &JournalId {
+        &self.operation
+    }
+    pub fn canonical_bytes(&self) -> &[u8] {
+        &self.bytes
+    }
+}
 impl StartIntentRecord {
     pub fn from_observed_data(
         operation: &Operation,

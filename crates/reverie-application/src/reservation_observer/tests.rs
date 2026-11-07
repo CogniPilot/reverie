@@ -5,6 +5,7 @@ use serde_json::{Value, json};
 use std::{collections::VecDeque, sync::Mutex};
 
 struct State {
+    engine: Option<ReadonlyEngine>,
     outputs: VecDeque<String>,
     events: Vec<String>,
     deadlines: Vec<Instant>,
@@ -20,6 +21,7 @@ struct State {
     laptop_outputs: VecDeque<reverie_host::broker_engine::LaptopInspectOutput>,
     start_checks: bool,
     old_release: Option<&'static str>,
+    process_starts: std::collections::BTreeMap<String, String>,
 }
 pub(crate) struct Fixture(Mutex<State>);
 impl Fixture {
@@ -33,6 +35,7 @@ impl Fixture {
     }
     pub(crate) fn new() -> Arc<Self> {
         Arc::new(Self(Mutex::new(State {
+            engine: None,
             outputs: VecDeque::new(),
             events: Vec::new(),
             deadlines: Vec::new(),
@@ -48,12 +51,26 @@ impl Fixture {
             laptop_outputs: VecDeque::new(),
             start_checks: false,
             old_release: None,
+            process_starts: std::collections::BTreeMap::new(),
         })))
     }
     pub(crate) fn observer(self: &Arc<Self>) -> NativeObserver {
         NativeObserver {
             source: Arc::new(self.clone()),
             cancellation: CancellationToken::new(),
+        }
+    }
+    /// Only the kernel observations remain synthetic. Every metadata query and
+    /// owned settlement uses the actual installing Runtime's captured client.
+    pub(crate) fn observer_using_engine(
+        self: &Arc<Self>,
+        engine: ReadonlyEngine,
+        cancellation: CancellationToken,
+    ) -> NativeObserver {
+        self.0.lock().unwrap().engine = Some(engine);
+        NativeObserver {
+            source: Arc::new(self.clone()),
+            cancellation,
         }
     }
     pub(crate) fn inventory(&self, rows: &[Value]) {
@@ -110,8 +127,27 @@ impl Fixture {
     pub(crate) fn old_release(&self, result: &'static str) {
         self.0.lock().unwrap().old_release = Some(result);
     }
+    /// Test DATA only. Allows the existing kernel fixture to retain a start
+    /// observed from an owned actual target without changing production reads.
+    pub(crate) fn process_start(&self, container: &str, start: &str) {
+        self.0
+            .lock()
+            .unwrap()
+            .process_starts
+            .insert(container.to_owned(), start.to_owned());
+    }
 }
 impl Source for Arc<Fixture> {
+    fn verify_recovery_limits(
+        &self,
+        _: &reverie_contracts::worker_recovery::RecoveryInspection,
+        _: Option<&ObservedMemoryPolicy>,
+        _: Instant,
+    ) -> Result<()> {
+        Err(ObserverError::Refused(
+            "FIXTURE_RECOVERY_LIMITS_NOT_SELECTED",
+        ))
+    }
     fn original_target_storage(
         &self,
         _: &StoragePaths,
@@ -173,11 +209,20 @@ impl Source for Arc<Fixture> {
     fn inspect_laptop(
         &self,
         name: &reverie_core::worker_laptop::WorkerContainerName,
-        _: Instant,
-        _: &CancellationToken,
+        end: Instant,
+        cancellation: &CancellationToken,
     ) -> Result<reverie_host::broker_engine::LaptopInspectOutput> {
         let mut state = self.0.lock().unwrap();
         state.events.push(format!("laptop:{}", name.as_str()));
+        if let Some(engine) = state.engine.clone() {
+            drop(state);
+            return Ok(reverie_host::broker_engine::inspect_laptop(
+                &engine,
+                name,
+                end,
+                cancellation,
+            )?);
+        }
         state
             .laptop_outputs
             .pop_front()
@@ -185,7 +230,12 @@ impl Source for Arc<Fixture> {
                 "OWNED_LAPTOP_INSPECTION_FIXTURE_EXHAUSTED",
             ))
     }
-    fn query(&self, query: EngineQuery<'_>, end: Instant, _: &CancellationToken) -> Result<String> {
+    fn query(
+        &self,
+        query: EngineQuery<'_>,
+        end: Instant,
+        cancellation: &CancellationToken,
+    ) -> Result<String> {
         let mut state = self.0.lock().unwrap();
         state.events.push(
             match query {
@@ -201,13 +251,22 @@ impl Source for Arc<Fixture> {
         if let Some(hook) = state.on_query.as_mut() {
             hook()?;
         }
+        if let Some(engine) = state.engine.clone() {
+            drop(state);
+            return Ok(engine.query(query, end, cancellation)?);
+        }
         state
             .outputs
             .pop_front()
             .ok_or(ObserverError::Refused("FIXTURE_QUERY_UNAVAILABLE"))
     }
-    fn settle_owned(&self, _: Instant) -> Result<()> {
-        self.0.lock().unwrap().events.push("settle".to_owned());
+    fn settle_owned(&self, end: Instant) -> Result<()> {
+        let mut state = self.0.lock().unwrap();
+        state.events.push("settle".to_owned());
+        if let Some(engine) = state.engine.clone() {
+            drop(state);
+            engine.settle_owned(end)?;
+        }
         Ok(())
     }
     fn host_root(&self, _: Instant) -> Result<HostAccounting> {
@@ -230,17 +289,21 @@ impl Source for Arc<Fixture> {
         policy: Option<&ObservedMemoryPolicy>,
         _: Instant,
     ) -> Result<NativeLimitBinding> {
-        self.0
-            .lock()
-            .unwrap()
-            .events
-            .push(format!("limits:{}", row.id().as_str()));
+        let start = {
+            let mut state = self.0.lock().unwrap();
+            state.events.push(format!("limits:{}", row.id().as_str()));
+            state
+                .process_starts
+                .get(row.id().as_str())
+                .cloned()
+                .unwrap_or_else(|| "77".to_owned())
+        };
         let zero = UnsignedInteger::from_u64(0);
         let declared = row.declarations(policy.map_or(&zero, ObservedMemoryPolicy::swap))?;
         Ok(NativeLimitBinding::from_observed_data(
             row,
             &declared,
-            "77",
+            &start,
             &PosixPath::from_scalar_text("owned"),
             policy,
         )?)

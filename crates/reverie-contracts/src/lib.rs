@@ -1,5 +1,6 @@
 //! Named legacy wire codecs. Decoded values and digests confer no authority.
 pub mod autoenv;
+pub mod autoenv_environment;
 pub mod broker_laptop;
 pub mod broker_resources;
 pub mod command_telemetry;
@@ -46,7 +47,10 @@ pub mod worker_child;
 pub mod worker_config;
 pub mod worker_intent;
 pub mod worker_launch;
+pub mod worker_memory;
 pub mod worker_nix;
+pub mod worker_recovery;
 pub mod worker_schema;
+pub mod worker_source_stop;
 pub mod worker_storage;
 pub mod worker_validation;

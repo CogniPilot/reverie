@@ -1,0 +1,1088 @@
+{
+  "scope": "Original Broker._stop_observed executed against owned scripted replies only. PID/start are frozen fixture DATA; this does not qualify a running process, effect grant, stopped container, lease release or launch.",
+  "sources": {
+    "python/reverie/worker.py": "6f22e845dad7a85ea963b1097e6cd1376d0550edf4b0bf44d4f925d3b56504d7",
+    "python/reverie/worker_resource_reservations.py": "89f4e9a90d85b790ee6f7d08fbe6dbe770aba54c0e264201e94ab571d3d9f2e3",
+    "python/reverie/worker_resources.py": "856bde3540b7f9dc0def8caefe41e6a35a350145c8038139dc7f922d4f863acb"
+  },
+  "config": {
+    "apiSocketRoot": "/tmp/nix-shell.ybT9GG/tmpz2wv3hgk/office",
+    "budgetMode": "pool",
+    "cgroupParent": "reverie-workers.slice",
+    "companyFile": "/tmp/nix-shell.ybT9GG/tmpz2wv3hgk/company.json",
+    "companyRoot": "/tmp/nix-shell.ybT9GG/tmpz2wv3hgk/company",
+    "cpus": 0,
+    "deployment": "test",
+    "gid": 100,
+    "image": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "maintenanceSessions": [],
+    "maxWorkers": 4,
+    "memoryMiB": 0,
+    "mounts": [
+      {
+        "destination": "/workspace",
+        "readOnly": false,
+        "source": "/tmp/nix-shell.ybT9GG/tmpz2wv3hgk/work"
+      }
+    ],
+    "pidsLimit": 128,
+    "poolMemoryMiB": 4096,
+    "poolTasksMax": 1024,
+    "scratchRoot": "/tmp/nix-shell.ybT9GG/tmpz2wv3hgk/scratch",
+    "serverContainer": "test-console",
+    "socket": "/tmp/nix-shell.ybT9GG/tmpz2wv3hgk/control/broker.sock",
+    "stateRoot": "/tmp/nix-shell.ybT9GG/tmpz2wv3hgk/workers",
+    "uid": 1000,
+    "version": 1
+  },
+  "session": "11111111-2222-3333-4444-555555555555",
+  "name": "test-agent-11111111-2222-3333-4444-555555555555",
+  "id": "0000000000000000000000000000000000000000000000000000000000000000",
+  "ownedPid": 294995,
+  "ownedStart": "31922913",
+  "cases": [
+    {
+      "name": "stop-confirms-stopped",
+      "before": "[{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-2222-3333-4444-555555555555\", \"reverie.worker-policy\": \"47f2c2ec568cbd57dec5d45e404657e7d14facf0cbfa9f3002ca8612ec79d0cf\"}}, \"HostConfig\": {\"Memory\": 512}, \"Mounts\": [], \"State\": {\"Running\": true, \"Pid\": 294995}}]",
+      "after": "[{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-2222-3333-4444-555555555555\", \"reverie.worker-policy\": \"47f2c2ec568cbd57dec5d45e404657e7d14facf0cbfa9f3002ca8612ec79d0cf\"}}, \"HostConfig\": {\"Memory\": 512}, \"Mounts\": [], \"State\": {\"Running\": false, \"Pid\": 0}}]",
+      "final": "[{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-2222-3333-4444-555555555555\", \"reverie.worker-policy\": \"47f2c2ec568cbd57dec5d45e404657e7d14facf0cbfa9f3002ca8612ec79d0cf\"}}, \"HostConfig\": {\"Memory\": 512}, \"Mounts\": [], \"State\": {\"Running\": false, \"Pid\": 0}}]",
+      "afterExit": 0,
+      "expectedProcess": {
+        "pid": 294995,
+        "start": "31922913"
+      },
+      "calls": [
+        {
+          "argv": [
+            "inspect",
+            "test-agent-11111111-2222-3333-4444-555555555555"
+          ],
+          "optional": false
+        },
+        {
+          "argv": [
+            "stop",
+            "--time",
+            "2",
+            "0000000000000000000000000000000000000000000000000000000000000000"
+          ],
+          "optional": true
+        },
+        {
+          "argv": [
+            "inspect",
+            "0000000000000000000000000000000000000000000000000000000000000000"
+          ],
+          "optional": true
+        }
+      ],
+      "accepted": true,
+      "value": {
+        "containerId": "0000000000000000000000000000000000000000000000000000000000000000",
+        "running": false,
+        "networkRetained": true
+      }
+    },
+    {
+      "name": "kill-after-same-process-remains",
+      "before": "[{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-2222-3333-4444-555555555555\", \"reverie.worker-policy\": \"47f2c2ec568cbd57dec5d45e404657e7d14facf0cbfa9f3002ca8612ec79d0cf\"}}, \"HostConfig\": {\"Memory\": 512}, \"Mounts\": [], \"State\": {\"Running\": true, \"Pid\": 294995}}]",
+      "after": "[{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-2222-3333-4444-555555555555\", \"reverie.worker-policy\": \"47f2c2ec568cbd57dec5d45e404657e7d14facf0cbfa9f3002ca8612ec79d0cf\"}}, \"HostConfig\": {\"Memory\": 512}, \"Mounts\": [], \"State\": {\"Running\": true, \"Pid\": 294995}}]",
+      "final": "[{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-2222-3333-4444-555555555555\", \"reverie.worker-policy\": \"47f2c2ec568cbd57dec5d45e404657e7d14facf0cbfa9f3002ca8612ec79d0cf\"}}, \"HostConfig\": {\"Memory\": 512}, \"Mounts\": [], \"State\": {\"Running\": false, \"Pid\": 0}}]",
+      "afterExit": 0,
+      "expectedProcess": {
+        "pid": 294995,
+        "start": "31922913"
+      },
+      "calls": [
+        {
+          "argv": [
+            "inspect",
+            "test-agent-11111111-2222-3333-4444-555555555555"
+          ],
+          "optional": false
+        },
+        {
+          "argv": [
+            "stop",
+            "--time",
+            "2",
+            "0000000000000000000000000000000000000000000000000000000000000000"
+          ],
+          "optional": true
+        },
+        {
+          "argv": [
+            "inspect",
+            "0000000000000000000000000000000000000000000000000000000000000000"
+          ],
+          "optional": true
+        },
+        {
+          "argv": [
+            "kill",
+            "0000000000000000000000000000000000000000000000000000000000000000"
+          ],
+          "optional": false
+        },
+        {
+          "argv": [
+            "inspect",
+            "0000000000000000000000000000000000000000000000000000000000000000"
+          ],
+          "optional": false
+        }
+      ],
+      "accepted": true,
+      "value": {
+        "containerId": "0000000000000000000000000000000000000000000000000000000000000000",
+        "running": false,
+        "networkRetained": true
+      }
+    },
+    {
+      "name": "already-stopped",
+      "before": "[{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-2222-3333-4444-555555555555\", \"reverie.worker-policy\": \"47f2c2ec568cbd57dec5d45e404657e7d14facf0cbfa9f3002ca8612ec79d0cf\"}}, \"HostConfig\": {\"Memory\": 512}, \"Mounts\": [], \"State\": {\"Running\": false, \"Pid\": 0}}]",
+      "after": "[{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-2222-3333-4444-555555555555\", \"reverie.worker-policy\": \"47f2c2ec568cbd57dec5d45e404657e7d14facf0cbfa9f3002ca8612ec79d0cf\"}}, \"HostConfig\": {\"Memory\": 512}, \"Mounts\": [], \"State\": {\"Running\": false, \"Pid\": 0}}]",
+      "final": "[{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-2222-3333-4444-555555555555\", \"reverie.worker-policy\": \"47f2c2ec568cbd57dec5d45e404657e7d14facf0cbfa9f3002ca8612ec79d0cf\"}}, \"HostConfig\": {\"Memory\": 512}, \"Mounts\": [], \"State\": {\"Running\": false, \"Pid\": 0}}]",
+      "afterExit": 0,
+      "expectedProcess": null,
+      "calls": [
+        {
+          "argv": [
+            "inspect",
+            "test-agent-11111111-2222-3333-4444-555555555555"
+          ],
+          "optional": false
+        }
+      ],
+      "accepted": true,
+      "value": {
+        "containerId": "0000000000000000000000000000000000000000000000000000000000000000",
+        "running": false,
+        "networkRetained": true
+      }
+    },
+    {
+      "name": "wrong-id",
+      "before": "[{\"Id\": \"1111111111111111111111111111111111111111111111111111111111111111\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-2222-3333-4444-555555555555\", \"reverie.worker-policy\": \"47f2c2ec568cbd57dec5d45e404657e7d14facf0cbfa9f3002ca8612ec79d0cf\"}}, \"HostConfig\": {\"Memory\": 512}, \"Mounts\": [], \"State\": {\"Running\": true, \"Pid\": 294995}}]",
+      "after": "[{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-2222-3333-4444-555555555555\", \"reverie.worker-policy\": \"47f2c2ec568cbd57dec5d45e404657e7d14facf0cbfa9f3002ca8612ec79d0cf\"}}, \"HostConfig\": {\"Memory\": 512}, \"Mounts\": [], \"State\": {\"Running\": false, \"Pid\": 0}}]",
+      "final": "[{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-2222-3333-4444-555555555555\", \"reverie.worker-policy\": \"47f2c2ec568cbd57dec5d45e404657e7d14facf0cbfa9f3002ca8612ec79d0cf\"}}, \"HostConfig\": {\"Memory\": 512}, \"Mounts\": [], \"State\": {\"Running\": false, \"Pid\": 0}}]",
+      "afterExit": 0,
+      "expectedProcess": {
+        "pid": 294995,
+        "start": "31922913"
+      },
+      "calls": [
+        {
+          "argv": [
+            "inspect",
+            "test-agent-11111111-2222-3333-4444-555555555555"
+          ],
+          "optional": false
+        }
+      ],
+      "accepted": false,
+      "kind": "ValueError",
+      "error": "Exact owned laptop identity changed"
+    },
+    {
+      "name": "wrong-name",
+      "before": "[{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"Name\": \"/other\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-2222-3333-4444-555555555555\", \"reverie.worker-policy\": \"47f2c2ec568cbd57dec5d45e404657e7d14facf0cbfa9f3002ca8612ec79d0cf\"}}, \"HostConfig\": {\"Memory\": 512}, \"Mounts\": [], \"State\": {\"Running\": true, \"Pid\": 294995}}]",
+      "after": "[{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-2222-3333-4444-555555555555\", \"reverie.worker-policy\": \"47f2c2ec568cbd57dec5d45e404657e7d14facf0cbfa9f3002ca8612ec79d0cf\"}}, \"HostConfig\": {\"Memory\": 512}, \"Mounts\": [], \"State\": {\"Running\": false, \"Pid\": 0}}]",
+      "final": "[{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-2222-3333-4444-555555555555\", \"reverie.worker-policy\": \"47f2c2ec568cbd57dec5d45e404657e7d14facf0cbfa9f3002ca8612ec79d0cf\"}}, \"HostConfig\": {\"Memory\": 512}, \"Mounts\": [], \"State\": {\"Running\": false, \"Pid\": 0}}]",
+      "afterExit": 0,
+      "expectedProcess": {
+        "pid": 294995,
+        "start": "31922913"
+      },
+      "calls": [
+        {
+          "argv": [
+            "inspect",
+            "test-agent-11111111-2222-3333-4444-555555555555"
+          ],
+          "optional": false
+        }
+      ],
+      "accepted": false,
+      "kind": "ValueError",
+      "error": "Exact owned laptop identity changed"
+    },
+    {
+      "name": "wrong-worker",
+      "before": "[{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"Labels\": {\"reverie.worker\": \"foreign\", \"reverie.session\": \"11111111-2222-3333-4444-555555555555\", \"reverie.worker-policy\": \"47f2c2ec568cbd57dec5d45e404657e7d14facf0cbfa9f3002ca8612ec79d0cf\"}}, \"HostConfig\": {\"Memory\": 512}, \"Mounts\": [], \"State\": {\"Running\": true, \"Pid\": 294995}}]",
+      "after": "[{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-2222-3333-4444-555555555555\", \"reverie.worker-policy\": \"47f2c2ec568cbd57dec5d45e404657e7d14facf0cbfa9f3002ca8612ec79d0cf\"}}, \"HostConfig\": {\"Memory\": 512}, \"Mounts\": [], \"State\": {\"Running\": false, \"Pid\": 0}}]",
+      "final": "[{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-2222-3333-4444-555555555555\", \"reverie.worker-policy\": \"47f2c2ec568cbd57dec5d45e404657e7d14facf0cbfa9f3002ca8612ec79d0cf\"}}, \"HostConfig\": {\"Memory\": 512}, \"Mounts\": [], \"State\": {\"Running\": false, \"Pid\": 0}}]",
+      "afterExit": 0,
+      "expectedProcess": {
+        "pid": 294995,
+        "start": "31922913"
+      },
+      "calls": [
+        {
+          "argv": [
+            "inspect",
+            "test-agent-11111111-2222-3333-4444-555555555555"
+          ],
+          "optional": false
+        }
+      ],
+      "accepted": false,
+      "kind": "ValueError",
+      "error": "Exact owned laptop identity changed"
+    },
+    {
+      "name": "wrong-session",
+      "before": "[{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"22222222-2222-3333-4444-555555555555\", \"reverie.worker-policy\": \"47f2c2ec568cbd57dec5d45e404657e7d14facf0cbfa9f3002ca8612ec79d0cf\"}}, \"HostConfig\": {\"Memory\": 512}, \"Mounts\": [], \"State\": {\"Running\": true, \"Pid\": 294995}}]",
+      "after": "[{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-2222-3333-4444-555555555555\", \"reverie.worker-policy\": \"47f2c2ec568cbd57dec5d45e404657e7d14facf0cbfa9f3002ca8612ec79d0cf\"}}, \"HostConfig\": {\"Memory\": 512}, \"Mounts\": [], \"State\": {\"Running\": false, \"Pid\": 0}}]",
+      "final": "[{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-2222-3333-4444-555555555555\", \"reverie.worker-policy\": \"47f2c2ec568cbd57dec5d45e404657e7d14facf0cbfa9f3002ca8612ec79d0cf\"}}, \"HostConfig\": {\"Memory\": 512}, \"Mounts\": [], \"State\": {\"Running\": false, \"Pid\": 0}}]",
+      "afterExit": 0,
+      "expectedProcess": {
+        "pid": 294995,
+        "start": "31922913"
+      },
+      "calls": [
+        {
+          "argv": [
+            "inspect",
+            "test-agent-11111111-2222-3333-4444-555555555555"
+          ],
+          "optional": false
+        }
+      ],
+      "accepted": false,
+      "kind": "ValueError",
+      "error": "Exact owned laptop identity changed"
+    },
+    {
+      "name": "wrong-policy",
+      "before": "[{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-2222-3333-4444-555555555555\", \"reverie.worker-policy\": \"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff\"}}, \"HostConfig\": {\"Memory\": 512}, \"Mounts\": [], \"State\": {\"Running\": true, \"Pid\": 294995}}]",
+      "after": "[{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-2222-3333-4444-555555555555\", \"reverie.worker-policy\": \"47f2c2ec568cbd57dec5d45e404657e7d14facf0cbfa9f3002ca8612ec79d0cf\"}}, \"HostConfig\": {\"Memory\": 512}, \"Mounts\": [], \"State\": {\"Running\": false, \"Pid\": 0}}]",
+      "final": "[{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-2222-3333-4444-555555555555\", \"reverie.worker-policy\": \"47f2c2ec568cbd57dec5d45e404657e7d14facf0cbfa9f3002ca8612ec79d0cf\"}}, \"HostConfig\": {\"Memory\": 512}, \"Mounts\": [], \"State\": {\"Running\": false, \"Pid\": 0}}]",
+      "afterExit": 0,
+      "expectedProcess": {
+        "pid": 294995,
+        "start": "31922913"
+      },
+      "calls": [
+        {
+          "argv": [
+            "inspect",
+            "test-agent-11111111-2222-3333-4444-555555555555"
+          ],
+          "optional": false
+        }
+      ],
+      "accepted": false,
+      "kind": "ValueError",
+      "error": "Exact owned laptop identity changed"
+    },
+    {
+      "name": "running-int",
+      "before": "[{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-2222-3333-4444-555555555555\", \"reverie.worker-policy\": \"47f2c2ec568cbd57dec5d45e404657e7d14facf0cbfa9f3002ca8612ec79d0cf\"}}, \"HostConfig\": {\"Memory\": 512}, \"Mounts\": [], \"State\": {\"Running\": 1, \"Pid\": 294995}}]",
+      "after": "[{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-2222-3333-4444-555555555555\", \"reverie.worker-policy\": \"47f2c2ec568cbd57dec5d45e404657e7d14facf0cbfa9f3002ca8612ec79d0cf\"}}, \"HostConfig\": {\"Memory\": 512}, \"Mounts\": [], \"State\": {\"Running\": false, \"Pid\": 0}}]",
+      "final": "[{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-2222-3333-4444-555555555555\", \"reverie.worker-policy\": \"47f2c2ec568cbd57dec5d45e404657e7d14facf0cbfa9f3002ca8612ec79d0cf\"}}, \"HostConfig\": {\"Memory\": 512}, \"Mounts\": [], \"State\": {\"Running\": false, \"Pid\": 0}}]",
+      "afterExit": 0,
+      "expectedProcess": {
+        "pid": 294995,
+        "start": "31922913"
+      },
+      "calls": [
+        {
+          "argv": [
+            "inspect",
+            "test-agent-11111111-2222-3333-4444-555555555555"
+          ],
+          "optional": false
+        }
+      ],
+      "accepted": false,
+      "kind": "ValueError",
+      "error": "Exact owned laptop state is unavailable"
+    },
+    {
+      "name": "running-null",
+      "before": "[{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-2222-3333-4444-555555555555\", \"reverie.worker-policy\": \"47f2c2ec568cbd57dec5d45e404657e7d14facf0cbfa9f3002ca8612ec79d0cf\"}}, \"HostConfig\": {\"Memory\": 512}, \"Mounts\": [], \"State\": {\"Running\": null, \"Pid\": 294995}}]",
+      "after": "[{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-2222-3333-4444-555555555555\", \"reverie.worker-policy\": \"47f2c2ec568cbd57dec5d45e404657e7d14facf0cbfa9f3002ca8612ec79d0cf\"}}, \"HostConfig\": {\"Memory\": 512}, \"Mounts\": [], \"State\": {\"Running\": false, \"Pid\": 0}}]",
+      "final": "[{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-2222-3333-4444-555555555555\", \"reverie.worker-policy\": \"47f2c2ec568cbd57dec5d45e404657e7d14facf0cbfa9f3002ca8612ec79d0cf\"}}, \"HostConfig\": {\"Memory\": 512}, \"Mounts\": [], \"State\": {\"Running\": false, \"Pid\": 0}}]",
+      "afterExit": 0,
+      "expectedProcess": {
+        "pid": 294995,
+        "start": "31922913"
+      },
+      "calls": [
+        {
+          "argv": [
+            "inspect",
+            "test-agent-11111111-2222-3333-4444-555555555555"
+          ],
+          "optional": false
+        }
+      ],
+      "accepted": false,
+      "kind": "ValueError",
+      "error": "Exact owned laptop state is unavailable"
+    },
+    {
+      "name": "pid-bool",
+      "before": "[{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-2222-3333-4444-555555555555\", \"reverie.worker-policy\": \"47f2c2ec568cbd57dec5d45e404657e7d14facf0cbfa9f3002ca8612ec79d0cf\"}}, \"HostConfig\": {\"Memory\": 512}, \"Mounts\": [], \"State\": {\"Running\": true, \"Pid\": true}}]",
+      "after": "[{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-2222-3333-4444-555555555555\", \"reverie.worker-policy\": \"47f2c2ec568cbd57dec5d45e404657e7d14facf0cbfa9f3002ca8612ec79d0cf\"}}, \"HostConfig\": {\"Memory\": 512}, \"Mounts\": [], \"State\": {\"Running\": false, \"Pid\": 0}}]",
+      "final": "[{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-2222-3333-4444-555555555555\", \"reverie.worker-policy\": \"47f2c2ec568cbd57dec5d45e404657e7d14facf0cbfa9f3002ca8612ec79d0cf\"}}, \"HostConfig\": {\"Memory\": 512}, \"Mounts\": [], \"State\": {\"Running\": false, \"Pid\": 0}}]",
+      "afterExit": 0,
+      "expectedProcess": {
+        "pid": 294995,
+        "start": "31922913"
+      },
+      "calls": [
+        {
+          "argv": [
+            "inspect",
+            "test-agent-11111111-2222-3333-4444-555555555555"
+          ],
+          "optional": false
+        }
+      ],
+      "accepted": false,
+      "kind": "ValueError",
+      "error": "Exact owned laptop state is unavailable"
+    },
+    {
+      "name": "pid-float",
+      "before": "[{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-2222-3333-4444-555555555555\", \"reverie.worker-policy\": \"47f2c2ec568cbd57dec5d45e404657e7d14facf0cbfa9f3002ca8612ec79d0cf\"}}, \"HostConfig\": {\"Memory\": 512}, \"Mounts\": [], \"State\": {\"Running\": true, \"Pid\": 294995.0}}]",
+      "after": "[{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-2222-3333-4444-555555555555\", \"reverie.worker-policy\": \"47f2c2ec568cbd57dec5d45e404657e7d14facf0cbfa9f3002ca8612ec79d0cf\"}}, \"HostConfig\": {\"Memory\": 512}, \"Mounts\": [], \"State\": {\"Running\": false, \"Pid\": 0}}]",
+      "final": "[{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-2222-3333-4444-555555555555\", \"reverie.worker-policy\": \"47f2c2ec568cbd57dec5d45e404657e7d14facf0cbfa9f3002ca8612ec79d0cf\"}}, \"HostConfig\": {\"Memory\": 512}, \"Mounts\": [], \"State\": {\"Running\": false, \"Pid\": 0}}]",
+      "afterExit": 0,
+      "expectedProcess": {
+        "pid": 294995,
+        "start": "31922913"
+      },
+      "calls": [
+        {
+          "argv": [
+            "inspect",
+            "test-agent-11111111-2222-3333-4444-555555555555"
+          ],
+          "optional": false
+        }
+      ],
+      "accepted": false,
+      "kind": "ValueError",
+      "error": "Exact owned laptop state is unavailable"
+    },
+    {
+      "name": "pid-zero",
+      "before": "[{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-2222-3333-4444-555555555555\", \"reverie.worker-policy\": \"47f2c2ec568cbd57dec5d45e404657e7d14facf0cbfa9f3002ca8612ec79d0cf\"}}, \"HostConfig\": {\"Memory\": 512}, \"Mounts\": [], \"State\": {\"Running\": true, \"Pid\": 0}}]",
+      "after": "[{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-2222-3333-4444-555555555555\", \"reverie.worker-policy\": \"47f2c2ec568cbd57dec5d45e404657e7d14facf0cbfa9f3002ca8612ec79d0cf\"}}, \"HostConfig\": {\"Memory\": 512}, \"Mounts\": [], \"State\": {\"Running\": false, \"Pid\": 0}}]",
+      "final": "[{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-2222-3333-4444-555555555555\", \"reverie.worker-policy\": \"47f2c2ec568cbd57dec5d45e404657e7d14facf0cbfa9f3002ca8612ec79d0cf\"}}, \"HostConfig\": {\"Memory\": 512}, \"Mounts\": [], \"State\": {\"Running\": false, \"Pid\": 0}}]",
+      "afterExit": 0,
+      "expectedProcess": {
+        "pid": 294995,
+        "start": "31922913"
+      },
+      "calls": [
+        {
+          "argv": [
+            "inspect",
+            "test-agent-11111111-2222-3333-4444-555555555555"
+          ],
+          "optional": false
+        }
+      ],
+      "accepted": false,
+      "kind": "ValueError",
+      "error": "Exact owned laptop state is unavailable"
+    },
+    {
+      "name": "image-drift",
+      "before": "[{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-2222-3333-4444-555555555555\", \"reverie.worker-policy\": \"47f2c2ec568cbd57dec5d45e404657e7d14facf0cbfa9f3002ca8612ec79d0cf\"}}, \"HostConfig\": {\"Memory\": 512}, \"Mounts\": [], \"State\": {\"Running\": true, \"Pid\": 294995}}]",
+      "after": "[{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\", \"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-2222-3333-4444-555555555555\", \"reverie.worker-policy\": \"47f2c2ec568cbd57dec5d45e404657e7d14facf0cbfa9f3002ca8612ec79d0cf\"}}, \"HostConfig\": {\"Memory\": 512}, \"Mounts\": [], \"State\": {\"Running\": false, \"Pid\": 0}}]",
+      "final": "[{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-2222-3333-4444-555555555555\", \"reverie.worker-policy\": \"47f2c2ec568cbd57dec5d45e404657e7d14facf0cbfa9f3002ca8612ec79d0cf\"}}, \"HostConfig\": {\"Memory\": 512}, \"Mounts\": [], \"State\": {\"Running\": false, \"Pid\": 0}}]",
+      "afterExit": 0,
+      "expectedProcess": {
+        "pid": 294995,
+        "start": "31922913"
+      },
+      "calls": [
+        {
+          "argv": [
+            "inspect",
+            "test-agent-11111111-2222-3333-4444-555555555555"
+          ],
+          "optional": false
+        },
+        {
+          "argv": [
+            "stop",
+            "--time",
+            "2",
+            "0000000000000000000000000000000000000000000000000000000000000000"
+          ],
+          "optional": true
+        },
+        {
+          "argv": [
+            "inspect",
+            "0000000000000000000000000000000000000000000000000000000000000000"
+          ],
+          "optional": true
+        }
+      ],
+      "accepted": false,
+      "kind": "RuntimeError",
+      "error": "Exact source laptop metadata changed"
+    },
+    {
+      "name": "config-drift",
+      "before": "[{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-2222-3333-4444-555555555555\", \"reverie.worker-policy\": \"47f2c2ec568cbd57dec5d45e404657e7d14facf0cbfa9f3002ca8612ec79d0cf\"}}, \"HostConfig\": {\"Memory\": 512}, \"Mounts\": [], \"State\": {\"Running\": true, \"Pid\": 294995}}]",
+      "after": "[{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {}, \"HostConfig\": {\"Memory\": 512}, \"Mounts\": [], \"State\": {\"Running\": false, \"Pid\": 0}}]",
+      "final": "[{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-2222-3333-4444-555555555555\", \"reverie.worker-policy\": \"47f2c2ec568cbd57dec5d45e404657e7d14facf0cbfa9f3002ca8612ec79d0cf\"}}, \"HostConfig\": {\"Memory\": 512}, \"Mounts\": [], \"State\": {\"Running\": false, \"Pid\": 0}}]",
+      "afterExit": 0,
+      "expectedProcess": {
+        "pid": 294995,
+        "start": "31922913"
+      },
+      "calls": [
+        {
+          "argv": [
+            "inspect",
+            "test-agent-11111111-2222-3333-4444-555555555555"
+          ],
+          "optional": false
+        },
+        {
+          "argv": [
+            "stop",
+            "--time",
+            "2",
+            "0000000000000000000000000000000000000000000000000000000000000000"
+          ],
+          "optional": true
+        },
+        {
+          "argv": [
+            "inspect",
+            "0000000000000000000000000000000000000000000000000000000000000000"
+          ],
+          "optional": true
+        }
+      ],
+      "accepted": false,
+      "kind": "RuntimeError",
+      "error": "Exact source laptop metadata changed"
+    },
+    {
+      "name": "hostconfig-drift",
+      "before": "[{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-2222-3333-4444-555555555555\", \"reverie.worker-policy\": \"47f2c2ec568cbd57dec5d45e404657e7d14facf0cbfa9f3002ca8612ec79d0cf\"}}, \"HostConfig\": {\"Memory\": 512}, \"Mounts\": [], \"State\": {\"Running\": true, \"Pid\": 294995}}]",
+      "after": "[{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-2222-3333-4444-555555555555\", \"reverie.worker-policy\": \"47f2c2ec568cbd57dec5d45e404657e7d14facf0cbfa9f3002ca8612ec79d0cf\"}}, \"HostConfig\": {\"Memory\": 1024}, \"Mounts\": [], \"State\": {\"Running\": false, \"Pid\": 0}}]",
+      "final": "[{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-2222-3333-4444-555555555555\", \"reverie.worker-policy\": \"47f2c2ec568cbd57dec5d45e404657e7d14facf0cbfa9f3002ca8612ec79d0cf\"}}, \"HostConfig\": {\"Memory\": 512}, \"Mounts\": [], \"State\": {\"Running\": false, \"Pid\": 0}}]",
+      "afterExit": 0,
+      "expectedProcess": {
+        "pid": 294995,
+        "start": "31922913"
+      },
+      "calls": [
+        {
+          "argv": [
+            "inspect",
+            "test-agent-11111111-2222-3333-4444-555555555555"
+          ],
+          "optional": false
+        },
+        {
+          "argv": [
+            "stop",
+            "--time",
+            "2",
+            "0000000000000000000000000000000000000000000000000000000000000000"
+          ],
+          "optional": true
+        },
+        {
+          "argv": [
+            "inspect",
+            "0000000000000000000000000000000000000000000000000000000000000000"
+          ],
+          "optional": true
+        }
+      ],
+      "accepted": false,
+      "kind": "RuntimeError",
+      "error": "Exact source laptop metadata changed"
+    },
+    {
+      "name": "mount-drift",
+      "before": "[{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-2222-3333-4444-555555555555\", \"reverie.worker-policy\": \"47f2c2ec568cbd57dec5d45e404657e7d14facf0cbfa9f3002ca8612ec79d0cf\"}}, \"HostConfig\": {\"Memory\": 512}, \"Mounts\": [], \"State\": {\"Running\": true, \"Pid\": 294995}}]",
+      "after": "[{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-2222-3333-4444-555555555555\", \"reverie.worker-policy\": \"47f2c2ec568cbd57dec5d45e404657e7d14facf0cbfa9f3002ca8612ec79d0cf\"}}, \"HostConfig\": {\"Memory\": 512}, \"Mounts\": [{\"Type\": \"bind\"}], \"State\": {\"Running\": false, \"Pid\": 0}}]",
+      "final": "[{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-2222-3333-4444-555555555555\", \"reverie.worker-policy\": \"47f2c2ec568cbd57dec5d45e404657e7d14facf0cbfa9f3002ca8612ec79d0cf\"}}, \"HostConfig\": {\"Memory\": 512}, \"Mounts\": [], \"State\": {\"Running\": false, \"Pid\": 0}}]",
+      "afterExit": 0,
+      "expectedProcess": {
+        "pid": 294995,
+        "start": "31922913"
+      },
+      "calls": [
+        {
+          "argv": [
+            "inspect",
+            "test-agent-11111111-2222-3333-4444-555555555555"
+          ],
+          "optional": false
+        },
+        {
+          "argv": [
+            "stop",
+            "--time",
+            "2",
+            "0000000000000000000000000000000000000000000000000000000000000000"
+          ],
+          "optional": true
+        },
+        {
+          "argv": [
+            "inspect",
+            "0000000000000000000000000000000000000000000000000000000000000000"
+          ],
+          "optional": true
+        }
+      ],
+      "accepted": false,
+      "kind": "RuntimeError",
+      "error": "Exact source laptop metadata changed"
+    },
+    {
+      "name": "after-running-int",
+      "before": "[{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-2222-3333-4444-555555555555\", \"reverie.worker-policy\": \"47f2c2ec568cbd57dec5d45e404657e7d14facf0cbfa9f3002ca8612ec79d0cf\"}}, \"HostConfig\": {\"Memory\": 512}, \"Mounts\": [], \"State\": {\"Running\": true, \"Pid\": 294995}}]",
+      "after": "[{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-2222-3333-4444-555555555555\", \"reverie.worker-policy\": \"47f2c2ec568cbd57dec5d45e404657e7d14facf0cbfa9f3002ca8612ec79d0cf\"}}, \"HostConfig\": {\"Memory\": 512}, \"Mounts\": [], \"State\": {\"Running\": 0, \"Pid\": 0}}]",
+      "final": "[{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-2222-3333-4444-555555555555\", \"reverie.worker-policy\": \"47f2c2ec568cbd57dec5d45e404657e7d14facf0cbfa9f3002ca8612ec79d0cf\"}}, \"HostConfig\": {\"Memory\": 512}, \"Mounts\": [], \"State\": {\"Running\": false, \"Pid\": 0}}]",
+      "afterExit": 0,
+      "expectedProcess": {
+        "pid": 294995,
+        "start": "31922913"
+      },
+      "calls": [
+        {
+          "argv": [
+            "inspect",
+            "test-agent-11111111-2222-3333-4444-555555555555"
+          ],
+          "optional": false
+        },
+        {
+          "argv": [
+            "stop",
+            "--time",
+            "2",
+            "0000000000000000000000000000000000000000000000000000000000000000"
+          ],
+          "optional": true
+        },
+        {
+          "argv": [
+            "inspect",
+            "0000000000000000000000000000000000000000000000000000000000000000"
+          ],
+          "optional": true
+        }
+      ],
+      "accepted": false,
+      "kind": "RuntimeError",
+      "error": "Exact source laptop state is unavailable"
+    },
+    {
+      "name": "after-pid-bool",
+      "before": "[{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-2222-3333-4444-555555555555\", \"reverie.worker-policy\": \"47f2c2ec568cbd57dec5d45e404657e7d14facf0cbfa9f3002ca8612ec79d0cf\"}}, \"HostConfig\": {\"Memory\": 512}, \"Mounts\": [], \"State\": {\"Running\": true, \"Pid\": 294995}}]",
+      "after": "[{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-2222-3333-4444-555555555555\", \"reverie.worker-policy\": \"47f2c2ec568cbd57dec5d45e404657e7d14facf0cbfa9f3002ca8612ec79d0cf\"}}, \"HostConfig\": {\"Memory\": 512}, \"Mounts\": [], \"State\": {\"Running\": false, \"Pid\": false}}]",
+      "final": "[{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-2222-3333-4444-555555555555\", \"reverie.worker-policy\": \"47f2c2ec568cbd57dec5d45e404657e7d14facf0cbfa9f3002ca8612ec79d0cf\"}}, \"HostConfig\": {\"Memory\": 512}, \"Mounts\": [], \"State\": {\"Running\": false, \"Pid\": 0}}]",
+      "afterExit": 0,
+      "expectedProcess": {
+        "pid": 294995,
+        "start": "31922913"
+      },
+      "calls": [
+        {
+          "argv": [
+            "inspect",
+            "test-agent-11111111-2222-3333-4444-555555555555"
+          ],
+          "optional": false
+        },
+        {
+          "argv": [
+            "stop",
+            "--time",
+            "2",
+            "0000000000000000000000000000000000000000000000000000000000000000"
+          ],
+          "optional": true
+        },
+        {
+          "argv": [
+            "inspect",
+            "0000000000000000000000000000000000000000000000000000000000000000"
+          ],
+          "optional": true
+        }
+      ],
+      "accepted": false,
+      "kind": "RuntimeError",
+      "error": "Exact source laptop state is unavailable"
+    },
+    {
+      "name": "after-pid-float",
+      "before": "[{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-2222-3333-4444-555555555555\", \"reverie.worker-policy\": \"47f2c2ec568cbd57dec5d45e404657e7d14facf0cbfa9f3002ca8612ec79d0cf\"}}, \"HostConfig\": {\"Memory\": 512}, \"Mounts\": [], \"State\": {\"Running\": true, \"Pid\": 294995}}]",
+      "after": "[{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-2222-3333-4444-555555555555\", \"reverie.worker-policy\": \"47f2c2ec568cbd57dec5d45e404657e7d14facf0cbfa9f3002ca8612ec79d0cf\"}}, \"HostConfig\": {\"Memory\": 512}, \"Mounts\": [], \"State\": {\"Running\": false, \"Pid\": 0.0}}]",
+      "final": "[{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-2222-3333-4444-555555555555\", \"reverie.worker-policy\": \"47f2c2ec568cbd57dec5d45e404657e7d14facf0cbfa9f3002ca8612ec79d0cf\"}}, \"HostConfig\": {\"Memory\": 512}, \"Mounts\": [], \"State\": {\"Running\": false, \"Pid\": 0}}]",
+      "afterExit": 0,
+      "expectedProcess": {
+        "pid": 294995,
+        "start": "31922913"
+      },
+      "calls": [
+        {
+          "argv": [
+            "inspect",
+            "test-agent-11111111-2222-3333-4444-555555555555"
+          ],
+          "optional": false
+        },
+        {
+          "argv": [
+            "stop",
+            "--time",
+            "2",
+            "0000000000000000000000000000000000000000000000000000000000000000"
+          ],
+          "optional": true
+        },
+        {
+          "argv": [
+            "inspect",
+            "0000000000000000000000000000000000000000000000000000000000000000"
+          ],
+          "optional": true
+        }
+      ],
+      "accepted": false,
+      "kind": "RuntimeError",
+      "error": "Exact source laptop state is unavailable"
+    },
+    {
+      "name": "different-process-before-kill",
+      "before": "[{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-2222-3333-4444-555555555555\", \"reverie.worker-policy\": \"47f2c2ec568cbd57dec5d45e404657e7d14facf0cbfa9f3002ca8612ec79d0cf\"}}, \"HostConfig\": {\"Memory\": 512}, \"Mounts\": [], \"State\": {\"Running\": true, \"Pid\": 294995}}]",
+      "after": "[{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-2222-3333-4444-555555555555\", \"reverie.worker-policy\": \"47f2c2ec568cbd57dec5d45e404657e7d14facf0cbfa9f3002ca8612ec79d0cf\"}}, \"HostConfig\": {\"Memory\": 512}, \"Mounts\": [], \"State\": {\"Running\": true, \"Pid\": 294996}}]",
+      "final": "[{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-2222-3333-4444-555555555555\", \"reverie.worker-policy\": \"47f2c2ec568cbd57dec5d45e404657e7d14facf0cbfa9f3002ca8612ec79d0cf\"}}, \"HostConfig\": {\"Memory\": 512}, \"Mounts\": [], \"State\": {\"Running\": false, \"Pid\": 0}}]",
+      "afterExit": 0,
+      "expectedProcess": {
+        "pid": 294995,
+        "start": "31922913"
+      },
+      "calls": [
+        {
+          "argv": [
+            "inspect",
+            "test-agent-11111111-2222-3333-4444-555555555555"
+          ],
+          "optional": false
+        },
+        {
+          "argv": [
+            "stop",
+            "--time",
+            "2",
+            "0000000000000000000000000000000000000000000000000000000000000000"
+          ],
+          "optional": true
+        },
+        {
+          "argv": [
+            "inspect",
+            "0000000000000000000000000000000000000000000000000000000000000000"
+          ],
+          "optional": true
+        }
+      ],
+      "accepted": false,
+      "kind": "RuntimeError",
+      "error": "Exact source process incarnation changed before kill"
+    },
+    {
+      "name": "optional-inspect-exit-refuses",
+      "before": "[{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-2222-3333-4444-555555555555\", \"reverie.worker-policy\": \"47f2c2ec568cbd57dec5d45e404657e7d14facf0cbfa9f3002ca8612ec79d0cf\"}}, \"HostConfig\": {\"Memory\": 512}, \"Mounts\": [], \"State\": {\"Running\": true, \"Pid\": 294995}}]",
+      "after": "[{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-2222-3333-4444-555555555555\", \"reverie.worker-policy\": \"47f2c2ec568cbd57dec5d45e404657e7d14facf0cbfa9f3002ca8612ec79d0cf\"}}, \"HostConfig\": {\"Memory\": 512}, \"Mounts\": [], \"State\": {\"Running\": false, \"Pid\": 0}}]",
+      "final": "[{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-2222-3333-4444-555555555555\", \"reverie.worker-policy\": \"47f2c2ec568cbd57dec5d45e404657e7d14facf0cbfa9f3002ca8612ec79d0cf\"}}, \"HostConfig\": {\"Memory\": 512}, \"Mounts\": [], \"State\": {\"Running\": false, \"Pid\": 0}}]",
+      "afterExit": 1,
+      "expectedProcess": {
+        "pid": 294995,
+        "start": "31922913"
+      },
+      "calls": [
+        {
+          "argv": [
+            "inspect",
+            "test-agent-11111111-2222-3333-4444-555555555555"
+          ],
+          "optional": false
+        },
+        {
+          "argv": [
+            "stop",
+            "--time",
+            "2",
+            "0000000000000000000000000000000000000000000000000000000000000000"
+          ],
+          "optional": true
+        },
+        {
+          "argv": [
+            "inspect",
+            "0000000000000000000000000000000000000000000000000000000000000000"
+          ],
+          "optional": true
+        }
+      ],
+      "accepted": false,
+      "kind": "RuntimeError",
+      "error": "Exact source laptop metadata changed"
+    },
+    {
+      "name": "initial-nonobject",
+      "before": "[null]",
+      "after": "[{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-2222-3333-4444-555555555555\", \"reverie.worker-policy\": \"47f2c2ec568cbd57dec5d45e404657e7d14facf0cbfa9f3002ca8612ec79d0cf\"}}, \"HostConfig\": {\"Memory\": 512}, \"Mounts\": [], \"State\": {\"Running\": false, \"Pid\": 0}}]",
+      "final": "[{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-2222-3333-4444-555555555555\", \"reverie.worker-policy\": \"47f2c2ec568cbd57dec5d45e404657e7d14facf0cbfa9f3002ca8612ec79d0cf\"}}, \"HostConfig\": {\"Memory\": 512}, \"Mounts\": [], \"State\": {\"Running\": false, \"Pid\": 0}}]",
+      "afterExit": 0,
+      "expectedProcess": {
+        "pid": 294995,
+        "start": "31922913"
+      },
+      "calls": [
+        {
+          "argv": [
+            "inspect",
+            "test-agent-11111111-2222-3333-4444-555555555555"
+          ],
+          "optional": false
+        }
+      ],
+      "accepted": false,
+      "kind": "AttributeError",
+      "error": "'NoneType' object has no attribute 'get'"
+    },
+    {
+      "name": "initial-not-array",
+      "before": "{}",
+      "after": "[{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-2222-3333-4444-555555555555\", \"reverie.worker-policy\": \"47f2c2ec568cbd57dec5d45e404657e7d14facf0cbfa9f3002ca8612ec79d0cf\"}}, \"HostConfig\": {\"Memory\": 512}, \"Mounts\": [], \"State\": {\"Running\": false, \"Pid\": 0}}]",
+      "final": "[{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-2222-3333-4444-555555555555\", \"reverie.worker-policy\": \"47f2c2ec568cbd57dec5d45e404657e7d14facf0cbfa9f3002ca8612ec79d0cf\"}}, \"HostConfig\": {\"Memory\": 512}, \"Mounts\": [], \"State\": {\"Running\": false, \"Pid\": 0}}]",
+      "afterExit": 0,
+      "expectedProcess": {
+        "pid": 294995,
+        "start": "31922913"
+      },
+      "calls": [
+        {
+          "argv": [
+            "inspect",
+            "test-agent-11111111-2222-3333-4444-555555555555"
+          ],
+          "optional": false
+        }
+      ],
+      "accepted": false,
+      "kind": "ValueError",
+      "error": "Exact owned laptop identity changed"
+    },
+    {
+      "name": "initial-two-rows",
+      "before": "[{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-2222-3333-4444-555555555555\", \"reverie.worker-policy\": \"47f2c2ec568cbd57dec5d45e404657e7d14facf0cbfa9f3002ca8612ec79d0cf\"}}, \"HostConfig\": {\"Memory\": 512}, \"Mounts\": [], \"State\": {\"Running\": true, \"Pid\": 294995}}, {\"Id\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-2222-3333-4444-555555555555\", \"reverie.worker-policy\": \"47f2c2ec568cbd57dec5d45e404657e7d14facf0cbfa9f3002ca8612ec79d0cf\"}}, \"HostConfig\": {\"Memory\": 512}, \"Mounts\": [], \"State\": {\"Running\": true, \"Pid\": 294995}}]",
+      "after": "[{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-2222-3333-4444-555555555555\", \"reverie.worker-policy\": \"47f2c2ec568cbd57dec5d45e404657e7d14facf0cbfa9f3002ca8612ec79d0cf\"}}, \"HostConfig\": {\"Memory\": 512}, \"Mounts\": [], \"State\": {\"Running\": false, \"Pid\": 0}}]",
+      "final": "[{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-2222-3333-4444-555555555555\", \"reverie.worker-policy\": \"47f2c2ec568cbd57dec5d45e404657e7d14facf0cbfa9f3002ca8612ec79d0cf\"}}, \"HostConfig\": {\"Memory\": 512}, \"Mounts\": [], \"State\": {\"Running\": false, \"Pid\": 0}}]",
+      "afterExit": 0,
+      "expectedProcess": {
+        "pid": 294995,
+        "start": "31922913"
+      },
+      "calls": [
+        {
+          "argv": [
+            "inspect",
+            "test-agent-11111111-2222-3333-4444-555555555555"
+          ],
+          "optional": false
+        }
+      ],
+      "accepted": false,
+      "kind": "ValueError",
+      "error": "Exact owned laptop identity changed"
+    },
+    {
+      "name": "after-nonobject",
+      "before": "[{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-2222-3333-4444-555555555555\", \"reverie.worker-policy\": \"47f2c2ec568cbd57dec5d45e404657e7d14facf0cbfa9f3002ca8612ec79d0cf\"}}, \"HostConfig\": {\"Memory\": 512}, \"Mounts\": [], \"State\": {\"Running\": true, \"Pid\": 294995}}]",
+      "after": "[[]]",
+      "final": "[{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-2222-3333-4444-555555555555\", \"reverie.worker-policy\": \"47f2c2ec568cbd57dec5d45e404657e7d14facf0cbfa9f3002ca8612ec79d0cf\"}}, \"HostConfig\": {\"Memory\": 512}, \"Mounts\": [], \"State\": {\"Running\": false, \"Pid\": 0}}]",
+      "afterExit": 0,
+      "expectedProcess": {
+        "pid": 294995,
+        "start": "31922913"
+      },
+      "calls": [
+        {
+          "argv": [
+            "inspect",
+            "test-agent-11111111-2222-3333-4444-555555555555"
+          ],
+          "optional": false
+        },
+        {
+          "argv": [
+            "stop",
+            "--time",
+            "2",
+            "0000000000000000000000000000000000000000000000000000000000000000"
+          ],
+          "optional": true
+        },
+        {
+          "argv": [
+            "inspect",
+            "0000000000000000000000000000000000000000000000000000000000000000"
+          ],
+          "optional": true
+        }
+      ],
+      "accepted": false,
+      "kind": "AttributeError",
+      "error": "'list' object has no attribute 'get'"
+    },
+    {
+      "name": "unused-nan",
+      "before": "[{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-2222-3333-4444-555555555555\", \"reverie.worker-policy\": \"47f2c2ec568cbd57dec5d45e404657e7d14facf0cbfa9f3002ca8612ec79d0cf\"}}, \"HostConfig\": {\"Memory\": 512}, \"Mounts\": [], \"State\": {\"Running\": true, \"Pid\": 294995}, \"opaque\": NaN}]",
+      "after": "[{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-2222-3333-4444-555555555555\", \"reverie.worker-policy\": \"47f2c2ec568cbd57dec5d45e404657e7d14facf0cbfa9f3002ca8612ec79d0cf\"}}, \"HostConfig\": {\"Memory\": 512}, \"Mounts\": [], \"State\": {\"Running\": false, \"Pid\": 0}}]",
+      "final": "[{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-2222-3333-4444-555555555555\", \"reverie.worker-policy\": \"47f2c2ec568cbd57dec5d45e404657e7d14facf0cbfa9f3002ca8612ec79d0cf\"}}, \"HostConfig\": {\"Memory\": 512}, \"Mounts\": [], \"State\": {\"Running\": false, \"Pid\": 0}}]",
+      "afterExit": 0,
+      "expectedProcess": {
+        "pid": 294995,
+        "start": "31922913"
+      },
+      "calls": [
+        {
+          "argv": [
+            "inspect",
+            "test-agent-11111111-2222-3333-4444-555555555555"
+          ],
+          "optional": false
+        },
+        {
+          "argv": [
+            "stop",
+            "--time",
+            "2",
+            "0000000000000000000000000000000000000000000000000000000000000000"
+          ],
+          "optional": true
+        },
+        {
+          "argv": [
+            "inspect",
+            "0000000000000000000000000000000000000000000000000000000000000000"
+          ],
+          "optional": true
+        }
+      ],
+      "accepted": true,
+      "value": {
+        "containerId": "0000000000000000000000000000000000000000000000000000000000000000",
+        "running": false,
+        "networkRetained": true
+      }
+    },
+    {
+      "name": "metadata-nan-singleton",
+      "before": "[{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-2222-3333-4444-555555555555\", \"reverie.worker-policy\": \"47f2c2ec568cbd57dec5d45e404657e7d14facf0cbfa9f3002ca8612ec79d0cf\"}}, \"HostConfig\": {\"Memory\": 512, \"opaque\": NaN}, \"Mounts\": [], \"State\": {\"Running\": true, \"Pid\": 294995}}]",
+      "after": "[{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-2222-3333-4444-555555555555\", \"reverie.worker-policy\": \"47f2c2ec568cbd57dec5d45e404657e7d14facf0cbfa9f3002ca8612ec79d0cf\"}}, \"HostConfig\": {\"Memory\": 512, \"opaque\": NaN}, \"Mounts\": [], \"State\": {\"Running\": false, \"Pid\": 0}}]",
+      "final": "[{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-2222-3333-4444-555555555555\", \"reverie.worker-policy\": \"47f2c2ec568cbd57dec5d45e404657e7d14facf0cbfa9f3002ca8612ec79d0cf\"}}, \"HostConfig\": {\"Memory\": 512}, \"Mounts\": [], \"State\": {\"Running\": false, \"Pid\": 0}}]",
+      "afterExit": 0,
+      "expectedProcess": {
+        "pid": 294995,
+        "start": "31922913"
+      },
+      "calls": [
+        {
+          "argv": [
+            "inspect",
+            "test-agent-11111111-2222-3333-4444-555555555555"
+          ],
+          "optional": false
+        },
+        {
+          "argv": [
+            "stop",
+            "--time",
+            "2",
+            "0000000000000000000000000000000000000000000000000000000000000000"
+          ],
+          "optional": true
+        },
+        {
+          "argv": [
+            "inspect",
+            "0000000000000000000000000000000000000000000000000000000000000000"
+          ],
+          "optional": true
+        }
+      ],
+      "accepted": true,
+      "value": {
+        "containerId": "0000000000000000000000000000000000000000000000000000000000000000",
+        "running": false,
+        "networkRetained": true
+      }
+    },
+    {
+      "name": "metadata-python-bool-float-equality",
+      "before": "[{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-2222-3333-4444-555555555555\", \"reverie.worker-policy\": \"47f2c2ec568cbd57dec5d45e404657e7d14facf0cbfa9f3002ca8612ec79d0cf\"}}, \"HostConfig\": {\"Memory\": true}, \"Mounts\": [], \"State\": {\"Running\": true, \"Pid\": 294995}}]",
+      "after": "[{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-2222-3333-4444-555555555555\", \"reverie.worker-policy\": \"47f2c2ec568cbd57dec5d45e404657e7d14facf0cbfa9f3002ca8612ec79d0cf\"}}, \"HostConfig\": {\"Memory\": 1.0}, \"Mounts\": [], \"State\": {\"Running\": false, \"Pid\": 0}}]",
+      "final": "[{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-2222-3333-4444-555555555555\", \"reverie.worker-policy\": \"47f2c2ec568cbd57dec5d45e404657e7d14facf0cbfa9f3002ca8612ec79d0cf\"}}, \"HostConfig\": {\"Memory\": 512}, \"Mounts\": [], \"State\": {\"Running\": false, \"Pid\": 0}}]",
+      "afterExit": 0,
+      "expectedProcess": {
+        "pid": 294995,
+        "start": "31922913"
+      },
+      "calls": [
+        {
+          "argv": [
+            "inspect",
+            "test-agent-11111111-2222-3333-4444-555555555555"
+          ],
+          "optional": false
+        },
+        {
+          "argv": [
+            "stop",
+            "--time",
+            "2",
+            "0000000000000000000000000000000000000000000000000000000000000000"
+          ],
+          "optional": true
+        },
+        {
+          "argv": [
+            "inspect",
+            "0000000000000000000000000000000000000000000000000000000000000000"
+          ],
+          "optional": true
+        }
+      ],
+      "accepted": true,
+      "value": {
+        "containerId": "0000000000000000000000000000000000000000000000000000000000000000",
+        "running": false,
+        "networkRetained": true
+      }
+    },
+    {
+      "name": "duplicate-state-lastwins",
+      "before": "[{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-2222-3333-4444-555555555555\", \"reverie.worker-policy\": \"47f2c2ec568cbd57dec5d45e404657e7d14facf0cbfa9f3002ca8612ec79d0cf\"}}, \"HostConfig\": {\"Memory\": 512}, \"Mounts\": [], \"State\": {\"Running\": true, \"Pid\": false, \"Pid\": 294995}}]",
+      "after": "[{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-2222-3333-4444-555555555555\", \"reverie.worker-policy\": \"47f2c2ec568cbd57dec5d45e404657e7d14facf0cbfa9f3002ca8612ec79d0cf\"}}, \"HostConfig\": {\"Memory\": 512}, \"Mounts\": [], \"State\": {\"Running\": false, \"Pid\": 0}}]",
+      "final": "[{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-2222-3333-4444-555555555555\", \"reverie.worker-policy\": \"47f2c2ec568cbd57dec5d45e404657e7d14facf0cbfa9f3002ca8612ec79d0cf\"}}, \"HostConfig\": {\"Memory\": 512}, \"Mounts\": [], \"State\": {\"Running\": false, \"Pid\": 0}}]",
+      "afterExit": 0,
+      "expectedProcess": {
+        "pid": 294995,
+        "start": "31922913"
+      },
+      "calls": [
+        {
+          "argv": [
+            "inspect",
+            "test-agent-11111111-2222-3333-4444-555555555555"
+          ],
+          "optional": false
+        },
+        {
+          "argv": [
+            "stop",
+            "--time",
+            "2",
+            "0000000000000000000000000000000000000000000000000000000000000000"
+          ],
+          "optional": true
+        },
+        {
+          "argv": [
+            "inspect",
+            "0000000000000000000000000000000000000000000000000000000000000000"
+          ],
+          "optional": true
+        }
+      ],
+      "accepted": true,
+      "value": {
+        "containerId": "0000000000000000000000000000000000000000000000000000000000000000",
+        "running": false,
+        "networkRetained": true
+      }
+    },
+    {
+      "name": "unrelated-raw-integer-4300",
+      "before": "[{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-2222-3333-4444-555555555555\", \"reverie.worker-policy\": \"47f2c2ec568cbd57dec5d45e404657e7d14facf0cbfa9f3002ca8612ec79d0cf\"}}, \"HostConfig\": {\"Memory\": 512}, \"Mounts\": [], \"State\": {\"Running\": true, \"Pid\": 294995},\"opaque\":1111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111}]",
+      "after": "[{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-2222-3333-4444-555555555555\", \"reverie.worker-policy\": \"47f2c2ec568cbd57dec5d45e404657e7d14facf0cbfa9f3002ca8612ec79d0cf\"}}, \"HostConfig\": {\"Memory\": 512}, \"Mounts\": [], \"State\": {\"Running\": false, \"Pid\": 0}}]",
+      "final": "[{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-2222-3333-4444-555555555555\", \"reverie.worker-policy\": \"47f2c2ec568cbd57dec5d45e404657e7d14facf0cbfa9f3002ca8612ec79d0cf\"}}, \"HostConfig\": {\"Memory\": 512}, \"Mounts\": [], \"State\": {\"Running\": false, \"Pid\": 0}}]",
+      "afterExit": 0,
+      "expectedProcess": {
+        "pid": 294995,
+        "start": "31922913"
+      },
+      "calls": [
+        {
+          "argv": [
+            "inspect",
+            "test-agent-11111111-2222-3333-4444-555555555555"
+          ],
+          "optional": false
+        },
+        {
+          "argv": [
+            "stop",
+            "--time",
+            "2",
+            "0000000000000000000000000000000000000000000000000000000000000000"
+          ],
+          "optional": true
+        },
+        {
+          "argv": [
+            "inspect",
+            "0000000000000000000000000000000000000000000000000000000000000000"
+          ],
+          "optional": true
+        }
+      ],
+      "accepted": true,
+      "value": {
+        "containerId": "0000000000000000000000000000000000000000000000000000000000000000",
+        "running": false,
+        "networkRetained": true
+      }
+    },
+    {
+      "name": "unrelated-raw-integer-4301",
+      "before": "[{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-2222-3333-4444-555555555555\", \"reverie.worker-policy\": \"47f2c2ec568cbd57dec5d45e404657e7d14facf0cbfa9f3002ca8612ec79d0cf\"}}, \"HostConfig\": {\"Memory\": 512}, \"Mounts\": [], \"State\": {\"Running\": true, \"Pid\": 294995},\"opaque\":11111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111}]",
+      "after": "[{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-2222-3333-4444-555555555555\", \"reverie.worker-policy\": \"47f2c2ec568cbd57dec5d45e404657e7d14facf0cbfa9f3002ca8612ec79d0cf\"}}, \"HostConfig\": {\"Memory\": 512}, \"Mounts\": [], \"State\": {\"Running\": false, \"Pid\": 0}}]",
+      "final": "[{\"Id\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"Name\": \"/test-agent-11111111-2222-3333-4444-555555555555\", \"Image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"Config\": {\"Labels\": {\"reverie.worker\": \"test\", \"reverie.session\": \"11111111-2222-3333-4444-555555555555\", \"reverie.worker-policy\": \"47f2c2ec568cbd57dec5d45e404657e7d14facf0cbfa9f3002ca8612ec79d0cf\"}}, \"HostConfig\": {\"Memory\": 512}, \"Mounts\": [], \"State\": {\"Running\": false, \"Pid\": 0}}]",
+      "afterExit": 0,
+      "expectedProcess": {
+        "pid": 294995,
+        "start": "31922913"
+      },
+      "calls": [
+        {
+          "argv": [
+            "inspect",
+            "test-agent-11111111-2222-3333-4444-555555555555"
+          ],
+          "optional": false
+        }
+      ],
+      "accepted": false,
+      "kind": "ValueError",
+      "error": "Exceeds the limit (4300 digits) for integer string conversion: value has 4301 digits; use sys.set_int_max_str_digits() to increase the limit"
+    }
+  ]
+}

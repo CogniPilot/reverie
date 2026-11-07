@@ -2,6 +2,8 @@ use super::*;
 use std::{error::Error, fmt};
 #[derive(Debug)]
 enum Cause {
+    Office(reverie_host::office::OfficeError),
+    SourceStop(Box<reverie_host::worker_source_stop::SourceStopError>),
     Gate(GateError),
     Owner(StorageOwnerError),
     Refused(&'static str),
@@ -26,6 +28,8 @@ impl StorageWorkflowError {
     }
     pub fn code(&self) -> &'static str {
         match &self.primary {
+            Cause::Office(_) => "RESOURCE_ORIGINAL_OFFICE_CLOSE_UNCONFIRMED",
+            Cause::SourceStop(error) => error.code(),
             Cause::Gate(error) => error.code(),
             Cause::Owner(error) => error.code(),
             Cause::Refused(code) => code,
@@ -44,6 +48,22 @@ impl StorageWorkflowError {
         match &self.primary {
             Cause::Gate(error) => Some(error),
             _ => None,
+        }
+    }
+}
+impl From<reverie_host::office::OfficeError> for StorageWorkflowError {
+    fn from(error: reverie_host::office::OfficeError) -> Self {
+        Self {
+            primary: Cause::Office(error),
+            cleanup: Vec::new(),
+        }
+    }
+}
+impl From<reverie_host::worker_source_stop::SourceStopError> for StorageWorkflowError {
+    fn from(error: reverie_host::worker_source_stop::SourceStopError) -> Self {
+        Self {
+            primary: Cause::SourceStop(Box::new(error)),
+            cleanup: vec![],
         }
     }
 }
@@ -71,6 +91,8 @@ impl fmt::Display for StorageWorkflowError {
 impl Error for StorageWorkflowError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match &self.primary {
+            Cause::Office(error) => Some(error),
+            Cause::SourceStop(error) => Some(error.as_ref()),
             Cause::Gate(error) => Some(error),
             Cause::Owner(error) => Some(error),
             Cause::Refused(_) => None,

@@ -12,8 +12,9 @@ use error::{Result, need};
 use reverie_contracts::{
     kernel_accounting::HostAccounting,
     reservation_engine::{
-        ContainerRow, InventoryDecoder, InventoryRows, NativeLimitBinding, NativeStorageBinding,
-        ObservedMemoryPolicy, ReservationConfiguration, StoppedState, inventory_ids,
+        ContainerRow, InventoryDecoder, InventoryRows, NativeLimitBinding, NativeLimitFields,
+        NativeStorageBinding, ObservedMemoryPolicy, ReservationConfiguration, StoppedState,
+        inventory_ids,
     },
     worker_config::{EffectiveWorkerConfig, policy_digest},
 };
@@ -260,13 +261,30 @@ impl ObservationContext {
     fn limits_at(&self, row: &ContainerRow, end: Instant) -> Result<NativeLimitBinding> {
         self.check(end)?;
         row.running_header()?;
-        let policy = self.memory_policy(row)?;
+        let policy = self.memory_policy_fields(&row.fields_for_limits())?;
         self.check(end)?;
         let result = self.observer.source.limits(row, policy.as_ref(), end)?;
         self.check(end)?;
         Ok(result)
     }
-    fn memory_policy(&self, row: &ContainerRow) -> Result<Option<ObservedMemoryPolicy>> {
+    pub(crate) fn verify_recovery_limits(
+        &self,
+        row: &reverie_contracts::worker_recovery::RecoveryInspection,
+    ) -> Result<()> {
+        let end = self.deadline(None)?;
+        let fields = row.fields_for_limits()?;
+        fields.running_header()?;
+        let policy = self.memory_policy_fields(&fields)?;
+        self.check(end)?;
+        self.observer
+            .source
+            .verify_recovery_limits(row, policy.as_ref(), end)?;
+        self.check(end)
+    }
+    fn memory_policy_fields(
+        &self,
+        row: &NativeLimitFields<'_>,
+    ) -> Result<Option<ObservedMemoryPolicy>> {
         if !self.config.memory_policies_enabled() {
             return Ok(None);
         }

@@ -4,7 +4,7 @@ mod facts;
 mod mapping;
 use unicode_normalization::UnicodeNormalization;
 #[derive(Debug)]
-pub(super) struct IdnaError;
+pub(crate) struct IdnaError;
 fn contains(ranges: &[(u32, u32)], value: char) -> bool {
     let cp = u32::from(value);
     let end = ranges.partition_point(|&(start, _)| start <= cp);
@@ -102,7 +102,7 @@ fn checked_label(value: String) -> Result<String, IdnaError> {
         Ok(value)
     }
 }
-pub(super) fn host_to_ascii(value: &str) -> Result<String, IdnaError> {
+pub(crate) fn host_to_ascii(value: &str) -> Result<String, IdnaError> {
     if value.is_empty() {
         return Ok(String::new());
     }

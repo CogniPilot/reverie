@@ -84,7 +84,15 @@ fn verify(portable: bool) -> Result<(), Box<dyn Error>> {
     let mut tests = vec!["test", "--locked"];
     tests.extend_from_slice(packages);
     tests.extend_from_slice(&["--all-targets", "--all-features"]);
-    step(&cargo, &tests, &root)
+    let mut command = Command::new(&cargo);
+    command.args(&tests).current_dir(&root);
+    #[cfg(unix)]
+    if !portable {
+        // Native fixtures own private children; keep their Unix socket paths
+        // below SUN_LEN even when Nix/CI supplies a deeply nested temp root.
+        command.env("TMPDIR", "/tmp");
+    }
+    run_command(&mut command)
 }
 
 fn step(program: &OsStr, arguments: &[&str], root: &Path) -> Result<(), Box<dyn Error>> {

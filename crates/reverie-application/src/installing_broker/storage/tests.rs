@@ -22,6 +22,9 @@ const EID: &str = "11111111-2222-4333-8444-555555555555";
 static NEXT: AtomicUsize = AtomicUsize::new(0);
 type BeforeLock = Box<dyn FnOnce()>;
 thread_local! {static BEFORE_BLOCKING_LOCK:std::cell::RefCell<Option<BeforeLock>>=std::cell::RefCell::new(None);}
+pub(in crate::installing_broker) fn observe_next_blocking_lock(hook: impl FnOnce() + 'static) {
+    BEFORE_BLOCKING_LOCK.with(|slot| *slot.borrow_mut() = Some(Box::new(hook)));
+}
 pub(super) fn before_blocking_lock() {
     BEFORE_BLOCKING_LOCK.with(|slot| {
         if let Some(hook) = slot.borrow_mut().take() {

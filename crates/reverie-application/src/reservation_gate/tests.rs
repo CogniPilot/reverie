@@ -12,8 +12,19 @@ use std::{
     time::Duration,
 };
 static NEXT: AtomicU64 = AtomicU64::new(0);
+impl ReservationGate {
+    pub(crate) fn use_kernel_fixture_for_test(
+        &mut self,
+        fixture: &Arc<Fixture>,
+        runtime: &reverie_host::worker_runtime::WorkerRuntime,
+    ) {
+        Arc::get_mut(&mut self.inner)
+            .expect("unshared freshly bootstrapped Gate")
+            .observer = fixture.observer_using_engine(runtime.readonly(), runtime.cancellation());
+    }
+}
 #[path = "tests_observation.rs"]
-mod observation_cases;
+pub(crate) mod observation_cases;
 pub(crate) struct Tree {
     pub(crate) root: PathBuf,
     pub(crate) raw: Vec<u8>,

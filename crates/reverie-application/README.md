@@ -340,3 +340,122 @@ available registry mutex during actual child I/O and retained resources at stop.
 The full canonical launch sequence and its telemetry/cold-temporary fences,
 private record/create/start, recovery, viewer and whole-service shutdown remain
 required before selecting the Rust worker service.
+# Recovery memory observations
+
+`worker_recovery::verify_recovered_memory` applies the original effective-config,
+namespace, repeated policy-digest, host-root and native-limit sequence to genuine
+same-Runtime recovery inspection data. It shares the existing resolver and kernel
+rule owners; no CID is invented to adapt the weaker legacy recovery data. The
+complete recovery transaction is owned by InstallingBroker as described below;
+source-stop and later create/start lifecycle still require their real producers.
+
+# Installing telemetry ownership and the protected read operation
+
+InstallingBroker captures the genuine CommandTelemetry from its consumed Runtime
+before optional Gate/marker construction, preserving the Python constructor's
+ordering. Disabled is captured configuration state, not an omitted or replacement
+collector. A failed constructor returns opaque BrokerBootstrapFailure retaining
+that same Runtime, snapshot and completed owners with its typed primary cause.
+Its checked close settles actual runtime work and independently checks SQLite
+owners before sealing. Ignoring an unsettled failure quarantines those owners;
+settlement never upgrades the failed constructor or grants launch/release.
+Office construction remains in its later recovery/new-laptop phase.
+
+`handle_command_failure_report` delegates a real accepted Unix connection to the
+fixed same-runtime T service and mandatory collector. It supplies no listener,
+wire dispatch completion, browser owner authorization or company-selected path.
+`close_command_telemetry` publishes the original first stop, seals/settles its actual
+shared T/J connection records and checks pending Store state. The listener/dispatcher must
+still join its actual caller-owned handler threads. This component result does not close
+other Office/laptop/resource constructors or acknowledge global shutdown.
+
+The original complete-create check remains mandatory after current running intent
+and all Nix/account mounts, immediately before actual create. This bounded cohort
+adds no data-to-start constructor; the actual protected/unreserved create and
+whole lifecycle producers must consume this retained collector when they land.
+
+`accept_worker_connection` is the actual fixed T/J caller over this same service,
+current snapshot, and mandatory collector. A J result retains its real socket
+and borrows its original broker; no request/configuration constructor exists.
+`begin_ordinary` consumes it through actual image refresh, non-attach GPU cold
+boundary, and real captured optional Gate admission. Entry failure retains that
+exact connection; successful prefix close consumes the actual allocation scope
+and socket without acknowledging storage, laptop, or global release.
+
+This prefix does not yet join storage wait/reuse, lifecycle active/generation
+state, Nix/network preparation, created publication/start, memory/cold completion,
+pane supervision, or committed Started registration. Protected L/source-stop
+joins and the real listener/global-stop producer also remain required. No wire
+selection or data-to-start permission follows from this bounded prefix.
+
+# Actual running-laptop recovery ownership
+
+`recover_laptops` uses the genuine mandatory-telemetry bootstrap and its same
+Runtime. It performs the original optional admission/recovery checks, running-name
+census, memory checks and ordered budget projections, then completes every selected
+storage claim/validation before opening any phone. The original separate effective
+configuration reads remain separate. Phones use the worker's captured socket root
+at the late construction phase. The ordered registry changes only after every
+constructor succeeds; a failed final admission check retains committed owners.
+
+Each production recovered entry contains a real Office service/phone and actual
+selected StorageClaim. The legacy storage branch adds no employee lease or lock
+tree. Names, including nil sessions without a Gate, remain membership DATA rather
+than exact CID/process or start authority. Test-only modeled membership refuses
+actual recovery and cannot manufacture a production entry.
+
+Failure cleanup attempts every newly created phone/construction and actual newly
+acquired claim. Native close uncertainty keeps its actual storage owners. Last
+broker Drop jointly retains the real installed snapshot/registry, storage registry,
+recovery/Office owners, mandatory collector and report service when those states
+are unresolved, contended or poisoned. An actual retained storage entry is included
+even when a failed census returned no claim handle. This is process-lifetime
+quarantine, without a normal-operation reference cycle or a durable death fence.
+
+Office/query settlement alone never releases a recovered running laptop's employee
+lease. Structured stop must own the real container, settle all actual native
+constructors/processes and close resource owners before acknowledging release.
+That whole-service stop, protected source stop, create/start, authenticated
+dispatcher and production selection remain separate obligations.
+
+The installed-Gate recovery controls use the real configured broker, same captured
+Runtime, actual admission/journal files and fixed native custody/mount reads.
+They cover held admission, success/failure final guards, nil and malformed-journal
+refusal, and dual body/poisoned-owner cleanup errors with consumed-flock checks.
+The controlled engine's empty inventory/name replies remain synthetic membership
+DATA; these controls establish no real running-container or start qualification.
+
+The named installing `retain_resource_draft` entry captures only a genuine
+recovered employee-storage owner. It retains the original admission and the
+lifecycle/registry locks while moving that exact acquired lease and Office owner
+into a source record BEFORE the durable reservation claim. The canonical claim,
+original baseline, admission finalizer and source join share that interval.
+Ordinary release refuses the source record; neither closing the retained store
+nor changing the employee's session reconstructs or releases the original lease.
+A known pre-claim refusal restores the same box. Any possible durable claim or
+failed join retains the source record and claim, with typed cleanup errors.
+
+The standalone Gate `retain_draft` remains a read-side claim producer without a
+source resource or effect authority. Actual Created/Started owners need their own
+same-record integration; they cannot become Direct owners from paths or status.
+The source-holder tests use the unchanged genuine bootstrap/recovery path and
+same captured metadata engine; only kernel observations are controlled data.
+Protected source stop, physical lease release, create/start and global shutdown
+acknowledgement are not provided by this resource/durable-claim join.
+
+`RetainedPreparation::stop_original_source` now consumes its actual private
+STARTING intent together with that registered original source. It publishes the
+existing source-stop attempt, qualifies the same claim again before dispatch,
+resolves policy at the original late phase, and retains one move-only Host stop
+owner inside the same source record. Native uncertainty, policy/PID/metadata
+drift, failed phone close and failed resource close retain the owner and durable
+claim; local client settlement cannot promote them to a stopped result or retry.
+The actual recovered Office phone rejects and joins its tracked work before the
+original employee lease can close. Final source removal follows the final native
+admission check. Returned facts retain capacity and are not target-start authority.
+
+Owning controls cover actual controlled child stop/kill/reap and physical employee
+flocks, plus a genuine installed-Gate publication/CAS/STARTING join for an already
+stopped source with explicitly synthetic kernel facts. They do not qualify a live
+Docker source stop, ordinary legacy/network stop, the complete source-to-target
+launch consumer, every process producer, global shutdown, or backend selection.

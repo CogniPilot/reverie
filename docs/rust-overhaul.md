@@ -92,6 +92,72 @@ The TypeScript resource diagnostics correction remains compatible with the
 later Rust backend. Remaining cohorts are pending; no source result here
 claims a complete Rust backend or an installed rollout.
 
+## Native integration map
+
+Use the existing owners below before adding another adapter or executor. Their
+source and component tests do not establish an installed native broker.
+
+| Operation | Existing Rust owner | Integration still required |
+| --- | --- | --- |
+| Broker bootstrap | `InstallingBroker::new` in `reverie-application`; consumes the actual validated snapshot and `WorkerRuntime`, captures mandatory telemetry before optional reservations, and retains failed construction resources | Service entry point, accepted connections and whole-service shutdown |
+| Running-laptop recovery | `InstallingBroker::recover_laptops`; ordered census/memory/budget checks, all storage claims before phones, atomic registry publication and retained cleanup owners; actual configured-Gate transaction controls | Actual listener/service invocation and real running-container canary |
+| Office phone | `OfficeService::from_worker` and `bind_worker_retained`; captured worker socket root, constructor-selected session and same-runtime native request jobs | Actual new-laptop producer and complete shutdown joins |
+| Failure reports | `handle_command_failure_report` and `close_command_telemetry`; fixed T operation, actual Unix peer identity and retained bounded connection/store owners | Listener dispatch, caller-owned handler joins and global stop acknowledgement |
+| Original launch resources | `InstallingBroker::retain_resource_draft` transfers the same storage and recovered Office owners into the existing source record before the durable claim | Protected old-source stop and the actual launch caller |
+| Storage, Nix and laptop effects | `reverie-host` retains the real Nix/storage/Office owners through network, complete-create telemetry, creation, checked metadata publication, start acknowledgement and immutable created-CID cleanup | Installing application caller, started-container memory, retained cold storage and native pane completion |
+| Employee resource policy | Existing effective-config, GPU/perf/memory projection, reservation gate and native observer owners | Actual started-container memory enforcement and owner GUI/API selection for remaining settings |
+| Memory tools | Native memory/MCP entry points, persistence, journal transport, startup services and an unselected fixed-purpose guest capsule | Real launch/image/context/grant join, collision-safe existing-data cutover and coordinated package selection |
+
+Recovery entries contain actual Office and storage resources. Recovered names
+are membership data; they do not establish a canonical container/process identity
+or permission to stop, create or start anything. Unresolved last-service Drop
+retains the joint owners, including telemetry/report services. Quarantine is not
+structured shutdown, a durable restart fence or released capacity.
+
+The create/start consumer must retain the same actual resources across Nix,
+network, complete-create telemetry, container creation, metadata publication,
+start, memory enforcement, cold-storage commit and worker-child launch. A
+successful create with noncanonical output still owns a container by its derived
+name; a lost reply cannot establish absence. Do not manufacture a replacement
+effect handle from status data or introduce another configuration source.
+Created-container cleanup enters a terminal state on that same resource record
+before settlement or engine effects. Publication and start cannot follow it,
+even without a global stop. Local client settlement cannot turn a prior unknown
+daemon effect into stopped proof, and a stopped result does not release resources
+or acknowledge whole-service shutdown.
+
+The guest capsule preserves the qualified Console module tree and closes the
+selected Node/native-library dependency graph. Its synthetic namespace controls
+exercise nonempty legacy memory and read-only byte preservation; they establish
+no installed grant or image origin. Native startup still needs an explicit
+metadata ownership/migration boundary: historical state keys colliding with the
+new readiness keys must be preserved or refused before mutation. General
+existing-instance migration remains unqualified until that consumer is complete.
+
+Consult the owning [application](../crates/reverie-application/README.md) and
+[host](../crates/reverie-host/README.md) documentation for exact phase and cleanup
+contracts. Full native completion also requires the remaining runtime/model,
+terminal, service and maintenance entry points in the cohort inventory above;
+passing a front-only trial does not retire those Python consumers.
+
+## Hybrid production selection
+
+The November 7, 2026 hybrid cutover selected the qualified Rust network front
+with the existing TypeScript application. Rust owns public listeners, transport
+buffers, backpressure and child supervision; HTTP application routes,
+authentication and company stores remain in TypeScript/Node. Rust worker command
+clients are also running. The existing Python worker broker and other legacy
+helpers remain active. Other Rust backend crates are not thereby selected as
+production services, and this is not the full native-backend migration.
+
+The owner-directed fix-forward cutover retained the original stopped container,
+all existing data mounts and an ordinary full console copy. Strict snapshot
+verification refused before producing an archive, so the operation explicitly
+reports `backup_verified: false`; no consistent-backup or automatic data-restore
+claim follows. Startup and browser login passed. One-employee chat, journal,
+dispatch, clean stop/restart, inventory and perf checks are separate acceptance.
+Exact installed identities and outcomes belong to private deployment receipts.
+
 ## Workspace and quality gate
 
 The [specification index](../spec/README.md) owns the adopted Rumoca rules:

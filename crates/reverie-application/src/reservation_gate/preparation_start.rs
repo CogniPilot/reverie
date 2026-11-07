@@ -30,6 +30,9 @@ struct StartOwner {
 #[derive(Clone)]
 pub struct ProtectedStartIntent(Arc<StartOwner>);
 impl ProtectedStartIntent {
+    pub(super) fn same_intent(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
     pub fn operation_id(&self) -> &JournalId {
         &self.0.operation
     }
@@ -43,6 +46,9 @@ pub struct StartQualificationFacts {
     target: ProfileSessionId,
 }
 impl StartQualificationFacts {
+    pub(super) fn source_running(&self) -> bool {
+        self.running
+    }
     pub fn state(&self) -> &'static str {
         if self.running {
             "SOURCE_RUNNING_NO_LAUNCH"

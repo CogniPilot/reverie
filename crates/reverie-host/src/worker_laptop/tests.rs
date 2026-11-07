@@ -1,3 +1,7 @@
+mod cleanup;
+mod create;
+mod publication;
+mod reference;
 use super::*;
 use crate::{
     engine_metadata::EngineBootstrap,
@@ -53,14 +57,14 @@ fn sid() -> ProfileSessionId {
 fn end() -> Instant {
     Instant::now() + Duration::from_secs(3)
 }
-struct Fixture {
-    root: PathBuf,
+pub(super) struct Fixture {
+    pub(super) root: PathBuf,
     runtime: Option<Arc<WorkerRuntime>>,
     office: OfficeService,
-    source: EffectiveWorkerConfig,
+    pub(super) source: EffectiveWorkerConfig,
 }
 impl Fixture {
-    fn new(mode: &str) -> Self {
+    pub(super) fn new(mode: &str) -> Self {
         let _ = program();
         let root = fs::canonicalize(std::env::temp_dir())
             .unwrap()
@@ -97,7 +101,7 @@ impl Fixture {
             source,
         }
     }
-    fn runtime(&self) -> &Arc<WorkerRuntime> {
+    pub(super) fn runtime(&self) -> &Arc<WorkerRuntime> {
         self.runtime.as_ref().unwrap()
     }
     fn resources(&self) -> (NixWorkflow, ObservedCreatePlan, WorkerRequest, OfficePhone) {
@@ -106,6 +110,13 @@ impl Fixture {
     fn resources_for(
         &self,
         session: &ProfileSessionId,
+    ) -> (NixWorkflow, ObservedCreatePlan, WorkerRequest, OfficePhone) {
+        self.resources_with_effective(session, self.source.clone())
+    }
+    pub(super) fn resources_with_effective(
+        &self,
+        session: &ProfileSessionId,
+        effective: EffectiveWorkerConfig,
     ) -> (NixWorkflow, ObservedCreatePlan, WorkerRequest, OfficePhone) {
         let mut storage = self
             .runtime()
@@ -116,7 +127,7 @@ impl Fixture {
         storage.prepare_storage().unwrap();
         let plan = self
             .runtime()
-            .prepare_laptop_plan(self.source.clone(), self.source.clone(), &storage)
+            .prepare_laptop_plan(self.source.clone(), effective, &storage)
             .unwrap();
         let guard = NixStoreGuard::acquire_launch(&self.source, session).unwrap();
         let nix = self
@@ -161,6 +172,11 @@ impl Fixture {
         guard.close().unwrap();
         storage.close(end()).unwrap();
         result
+    }
+    pub(super) fn retain_after_expired_stop(self) {
+        assert!(self.office.close(end()).is_err());
+        assert!(self.runtime().close(end()).is_err());
+        std::mem::forget(self);
     }
 }
 impl Drop for Fixture {
