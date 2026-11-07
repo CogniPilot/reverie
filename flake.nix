@@ -57,6 +57,8 @@
           };
         in packages // nativeWorkerPackages // {
           default = packages.reverie;
+          # Unselected native front; qualified together with its TS adapter.
+          rustFront = import ./nix/rust-front.nix { inherit pkgs; src = source; };
           # Optional tools: excluded from the runtime/image and never fetched by a chat toggle.
           chatPythonLsp = pkgs.pyright;
           capabilitiesAddon = import ./nix/capabilities-addon.nix { inherit pkgs; src = source; };
