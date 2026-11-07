@@ -58,6 +58,7 @@ pub mod worker_intent;
 pub mod worker_launch;
 pub mod worker_memory;
 pub mod worker_nix;
+pub mod worker_pool;
 pub mod worker_recovery;
 pub mod worker_resume;
 pub mod worker_schema;
