@@ -1,0 +1,46 @@
+{
+ "schema": 1,
+ "home_repo": "acmeproj",
+ "team": [
+  "alder",
+  "birch",
+  "cedar",
+  "dogwood",
+  "elm",
+  "fir",
+  "gale",
+  "hazel",
+  "iris",
+  "juniper",
+  "kelp",
+  "larch",
+  "maple",
+  "nettle"
+ ],
+ "internal": [
+  "acmeproj"
+ ],
+ "ai_words": [
+  "vendora",
+  "vendorb",
+  "vendorc",
+  "vendord"
+ ],
+ "ai_phrases": [
+  "coauthor-marker",
+  "made with tool"
+ ],
+ "path_markers": [
+  "/vault/agent-",
+  "drops/20{digit}{digit}-{digit}{digit}-{digit}{digit}",
+  "acmeproj_space",
+  "acmeproj-drops"
+ ],
+ "allow": [
+  "@scope/plugin-elm",
+  "lib-io-elm",
+  "embed-fir-002",
+  "SolverElm",
+  "PathElm"
+ ]
+}

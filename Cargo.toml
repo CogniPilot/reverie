@@ -14,6 +14,7 @@ members = [
     "crates/reverie-diagnostics",
     "crates/reverie-http",
     "crates/reverie-ops-cli",
+    "crates/reverie-namegate",
     "crates/xtask",
 ]
 resolver = "3"
@@ -45,6 +46,7 @@ http-body-util = "0.1.5"
 tokio = { version = "1.50", default-features = false, features = ["rt", "rt-multi-thread", "time", "net", "io-util", "process", "signal", "sync", "macros"] }
 reverie-core = { path = "crates/reverie-core" }
 reverie-contracts = { path = "crates/reverie-contracts" }
+reverie-namegate = { path = "crates/reverie-namegate" }
 reverie-store = { path = "crates/reverie-store" }
 reverie-host = { path = "crates/reverie-host" }
 reverie-diagnostics = { path = "crates/reverie-diagnostics" }

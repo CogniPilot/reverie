@@ -8,6 +8,12 @@ The front uses command-fds' single owned fd mapping to fd 3; its reviewed
 pre-exec syscall boundary stays in that dependency. The front's packaging gate
 must retain the upstream licenses and any notices alongside the executable.
 
+The release tooling's name gate (`crates/reverie-namegate`, run through `cargo xtask`)
+uses unicode-normalization 0.1.26 and unicode-properties 0.1.5 (MIT OR Apache-2.0;
+their Unicode data tables are under Unicode-3.0) and tinyvec 1.13.3 (Zlib OR
+Apache-2.0 OR MIT). It is a development tool and is not part of the runtime package.
+Cargo.lock pins the source checksums.
+
 Chat code highlighting includes highlight.js 11.12.0 (BSD-3-Clause), copyright
 2006 Ivan Sagalaev. Its license is retained at
 `apps/web/src/web/public/vendor/highlight-LICENSE.txt`; pinned inputs and hashes
