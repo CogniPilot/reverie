@@ -1,0 +1,366 @@
+{
+  "sourceSha256": "de33bc6c9cd272324cc56748f0c197af3ff69244529055c4b9b27aed3c1c7341",
+  "device": "nvidia.com/gpu=GPU-12345678-1234-5678-abcd-123456789abc",
+  "cases": [
+    {
+      "name": "valid",
+      "raw": "GPU UUID: GPU-12345678-1234-5678-abcd-123456789abc\nBus Location: 0000:01:ab.7\nDevice Minor: 0\nModel: Synthetic GPU\n",
+      "result": {
+        "uuid": "GPU-12345678-1234-5678-abcd-123456789abc",
+        "pci": "0000:01:ab.7",
+        "deviceMinor": "0",
+        "model": "Synthetic GPU"
+      }
+    },
+    {
+      "name": "uuid0",
+      "raw": "GPU UUID: GPU-12345678-1234-5678-ABCD-123456789ABC\nBus Location: 0000:01:ab.7\nDevice Minor: 0\nModel: Synthetic GPU\n",
+      "result": {
+        "uuid": "GPU-12345678-1234-5678-ABCD-123456789ABC",
+        "pci": "0000:01:ab.7",
+        "deviceMinor": "0",
+        "model": "Synthetic GPU"
+      }
+    },
+    {
+      "name": "uuid1",
+      "raw": "GPU UUID: gpu-12345678-1234-5678-abcd-123456789abc\nBus Location: 0000:01:ab.7\nDevice Minor: 0\nModel: Synthetic GPU\n",
+      "result": null
+    },
+    {
+      "name": "uuid2",
+      "raw": "GPU UUID: 12345678-1234-5678-abcd-123456789abc\nBus Location: 0000:01:ab.7\nDevice Minor: 0\nModel: Synthetic GPU\n",
+      "result": null
+    },
+    {
+      "name": "uuid3",
+      "raw": "GPU UUID: GPU-00000000-0000-0000-0000-000000000000\nBus Location: 0000:01:ab.7\nDevice Minor: 0\nModel: Synthetic GPU\n",
+      "result": null
+    },
+    {
+      "name": "uuid4",
+      "raw": "GPU UUID: GPU-12345678-1234-5678-abcd-123456789abcx\nBus Location: 0000:01:ab.7\nDevice Minor: 0\nModel: Synthetic GPU\n",
+      "result": null
+    },
+    {
+      "name": "uuid5",
+      "raw": "GPU UUID: GPU-12345678-1234-5678-abcd-123456789abc\n\nBus Location: 0000:01:ab.7\nDevice Minor: 0\nModel: Synthetic GPU\n",
+      "result": {
+        "uuid": "GPU-12345678-1234-5678-abcd-123456789abc",
+        "pci": "0000:01:ab.7",
+        "deviceMinor": "0",
+        "model": "Synthetic GPU"
+      }
+    },
+    {
+      "name": "uuid6",
+      "raw": "GPU UUID: \u2003GPU-12345678-1234-5678-abcd-123456789abc\u2003\nBus Location: 0000:01:ab.7\nDevice Minor: 0\nModel: Synthetic GPU\n",
+      "result": {
+        "uuid": "GPU-12345678-1234-5678-abcd-123456789abc",
+        "pci": "0000:01:ab.7",
+        "deviceMinor": "0",
+        "model": "Synthetic GPU"
+      }
+    },
+    {
+      "name": "pci0",
+      "raw": "GPU UUID: GPU-12345678-1234-5678-abcd-123456789abc\nBus Location: 0000:01:AB.0\nDevice Minor: 0\nModel: Synthetic GPU\n",
+      "result": {
+        "uuid": "GPU-12345678-1234-5678-abcd-123456789abc",
+        "pci": "0000:01:AB.0",
+        "deviceMinor": "0",
+        "model": "Synthetic GPU"
+      }
+    },
+    {
+      "name": "pci1",
+      "raw": "GPU UUID: GPU-12345678-1234-5678-abcd-123456789abc\nBus Location: 0000:01:ab.8\nDevice Minor: 0\nModel: Synthetic GPU\n",
+      "result": null
+    },
+    {
+      "name": "pci2",
+      "raw": "GPU UUID: GPU-12345678-1234-5678-abcd-123456789abc\nBus Location: 000:01:ab.0\nDevice Minor: 0\nModel: Synthetic GPU\n",
+      "result": null
+    },
+    {
+      "name": "pci3",
+      "raw": "GPU UUID: GPU-12345678-1234-5678-abcd-123456789abc\nBus Location: 0000:01:ab.00\nDevice Minor: 0\nModel: Synthetic GPU\n",
+      "result": null
+    },
+    {
+      "name": "pci4",
+      "raw": "GPU UUID: GPU-12345678-1234-5678-abcd-123456789abc\nBus Location: 0000:01:az.0\nDevice Minor: 0\nModel: Synthetic GPU\n",
+      "result": null
+    },
+    {
+      "name": "pci5",
+      "raw": "GPU UUID: GPU-12345678-1234-5678-abcd-123456789abc\nBus Location:  0000:01:ab.0 \nDevice Minor: 0\nModel: Synthetic GPU\n",
+      "result": {
+        "uuid": "GPU-12345678-1234-5678-abcd-123456789abc",
+        "pci": "0000:01:ab.0",
+        "deviceMinor": "0",
+        "model": "Synthetic GPU"
+      }
+    },
+    {
+      "name": "pci6",
+      "raw": "GPU UUID: GPU-12345678-1234-5678-abcd-123456789abc\nBus Location: \u20030000:01:ab.0\u2003\nDevice Minor: 0\nModel: Synthetic GPU\n",
+      "result": {
+        "uuid": "GPU-12345678-1234-5678-abcd-123456789abc",
+        "pci": "0000:01:ab.0",
+        "deviceMinor": "0",
+        "model": "Synthetic GPU"
+      }
+    },
+    {
+      "name": "minor0",
+      "raw": "GPU UUID: GPU-12345678-1234-5678-abcd-123456789abc\nBus Location: 0000:01:ab.7\nDevice Minor: \nModel: Synthetic GPU\n",
+      "result": null
+    },
+    {
+      "name": "minor1",
+      "raw": "GPU UUID: GPU-12345678-1234-5678-abcd-123456789abc\nBus Location: 0000:01:ab.7\nDevice Minor: 01\nModel: Synthetic GPU\n",
+      "result": {
+        "uuid": "GPU-12345678-1234-5678-abcd-123456789abc",
+        "pci": "0000:01:ab.7",
+        "deviceMinor": "01",
+        "model": "Synthetic GPU"
+      }
+    },
+    {
+      "name": "minor2",
+      "raw": "GPU UUID: GPU-12345678-1234-5678-abcd-123456789abc\nBus Location: 0000:01:ab.7\nDevice Minor: -1\nModel: Synthetic GPU\n",
+      "result": null
+    },
+    {
+      "name": "minor3",
+      "raw": "GPU UUID: GPU-12345678-1234-5678-abcd-123456789abc\nBus Location: 0000:01:ab.7\nDevice Minor: +1\nModel: Synthetic GPU\n",
+      "result": null
+    },
+    {
+      "name": "minor4",
+      "raw": "GPU UUID: GPU-12345678-1234-5678-abcd-123456789abc\nBus Location: 0000:01:ab.7\nDevice Minor: 1.0\nModel: Synthetic GPU\n",
+      "result": null
+    },
+    {
+      "name": "minor5",
+      "raw": "GPU UUID: GPU-12345678-1234-5678-abcd-123456789abc\nBus Location: 0000:01:ab.7\nDevice Minor: \u0661\u0662\nModel: Synthetic GPU\n",
+      "result": {
+        "uuid": "GPU-12345678-1234-5678-abcd-123456789abc",
+        "pci": "0000:01:ab.7",
+        "deviceMinor": "\u0661\u0662",
+        "model": "Synthetic GPU"
+      }
+    },
+    {
+      "name": "minor6",
+      "raw": "GPU UUID: GPU-12345678-1234-5678-abcd-123456789abc\nBus Location: 0000:01:ab.7\nDevice Minor: \uff11\uff12\nModel: Synthetic GPU\n",
+      "result": {
+        "uuid": "GPU-12345678-1234-5678-abcd-123456789abc",
+        "pci": "0000:01:ab.7",
+        "deviceMinor": "\uff11\uff12",
+        "model": "Synthetic GPU"
+      }
+    },
+    {
+      "name": "minor7",
+      "raw": "GPU UUID: GPU-12345678-1234-5678-abcd-123456789abc\nBus Location: 0000:01:ab.7\nDevice Minor: \u00b2\nModel: Synthetic GPU\n",
+      "result": null
+    },
+    {
+      "name": "minor8",
+      "raw": "GPU UUID: GPU-12345678-1234-5678-abcd-123456789abc\nBus Location: 0000:01:ab.7\nDevice Minor: \u20031\u2003\nModel: Synthetic GPU\n",
+      "result": {
+        "uuid": "GPU-12345678-1234-5678-abcd-123456789abc",
+        "pci": "0000:01:ab.7",
+        "deviceMinor": "1",
+        "model": "Synthetic GPU"
+      }
+    },
+    {
+      "name": "minor9",
+      "raw": "GPU UUID: GPU-12345678-1234-5678-abcd-123456789abc\nBus Location: 0000:01:ab.7\nDevice Minor: 1_0\nModel: Synthetic GPU\n",
+      "result": null
+    },
+    {
+      "name": "minor10",
+      "raw": "GPU UUID: GPU-12345678-1234-5678-abcd-123456789abc\nBus Location: 0000:01:ab.7\nDevice Minor: 1 0\nModel: Synthetic GPU\n",
+      "result": null
+    },
+    {
+      "name": "minor11",
+      "raw": "GPU UUID: GPU-12345678-1234-5678-abcd-123456789abc\nBus Location: 0000:01:ab.7\nDevice Minor: 0x1\nModel: Synthetic GPU\n",
+      "result": null
+    },
+    {
+      "name": "model0",
+      "raw": "GPU UUID: GPU-12345678-1234-5678-abcd-123456789abc\nBus Location: 0000:01:ab.7\nDevice Minor: 0\nModel: \n",
+      "result": {
+        "uuid": "GPU-12345678-1234-5678-abcd-123456789abc",
+        "pci": "0000:01:ab.7",
+        "deviceMinor": "0",
+        "model": ""
+      }
+    },
+    {
+      "name": "model1",
+      "raw": "GPU UUID: GPU-12345678-1234-5678-abcd-123456789abc\nBus Location: 0000:01:ab.7\nDevice Minor: 0\nModel: MMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMM\n",
+      "result": {
+        "uuid": "GPU-12345678-1234-5678-abcd-123456789abc",
+        "pci": "0000:01:ab.7",
+        "deviceMinor": "0",
+        "model": "MMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMM"
+      }
+    },
+    {
+      "name": "model2",
+      "raw": "GPU UUID: GPU-12345678-1234-5678-abcd-123456789abc\nBus Location: 0000:01:ab.7\nDevice Minor: 0\nModel: \u2003GPU\u2003\n",
+      "result": {
+        "uuid": "GPU-12345678-1234-5678-abcd-123456789abc",
+        "pci": "0000:01:ab.7",
+        "deviceMinor": "0",
+        "model": "GPU"
+      }
+    },
+    {
+      "name": "model3",
+      "raw": "GPU UUID: GPU-12345678-1234-5678-abcd-123456789abc\nBus Location: 0000:01:ab.7\nDevice Minor: 0\nModel: GPU\tTest\u001f\n",
+      "result": {
+        "uuid": "GPU-12345678-1234-5678-abcd-123456789abc",
+        "pci": "0000:01:ab.7",
+        "deviceMinor": "0",
+        "model": "GPU\tTest"
+      }
+    },
+    {
+      "name": "model4",
+      "raw": "GPU UUID: GPU-12345678-1234-5678-abcd-123456789abc\nBus Location: 0000:01:ab.7\nDevice Minor: 0\nModel: \u03a3\u03a3\n",
+      "result": {
+        "uuid": "GPU-12345678-1234-5678-abcd-123456789abc",
+        "pci": "0000:01:ab.7",
+        "deviceMinor": "0",
+        "model": "\u03a3\u03a3"
+      }
+    },
+    {
+      "name": "splitline-'\\r\\n'",
+      "raw": "GPU UUID: GPU-12345678-1234-5678-abcd-123456789abc\r\nBus Location: 0000:01:ab.7\r\nDevice Minor: 0\r\nModel: Synthetic GPU\r\n",
+      "result": {
+        "uuid": "GPU-12345678-1234-5678-abcd-123456789abc",
+        "pci": "0000:01:ab.7",
+        "deviceMinor": "0",
+        "model": "Synthetic GPU"
+      }
+    },
+    {
+      "name": "splitline-'\\r'",
+      "raw": "GPU UUID: GPU-12345678-1234-5678-abcd-123456789abc\rBus Location: 0000:01:ab.7\rDevice Minor: 0\rModel: Synthetic GPU\r",
+      "result": {
+        "uuid": "GPU-12345678-1234-5678-abcd-123456789abc",
+        "pci": "0000:01:ab.7",
+        "deviceMinor": "0",
+        "model": "Synthetic GPU"
+      }
+    },
+    {
+      "name": "splitline-'\\x0b'",
+      "raw": "GPU UUID: GPU-12345678-1234-5678-abcd-123456789abc\u000bBus Location: 0000:01:ab.7\u000bDevice Minor: 0\u000bModel: Synthetic GPU\u000b",
+      "result": {
+        "uuid": "GPU-12345678-1234-5678-abcd-123456789abc",
+        "pci": "0000:01:ab.7",
+        "deviceMinor": "0",
+        "model": "Synthetic GPU"
+      }
+    },
+    {
+      "name": "splitline-'\\x0c'",
+      "raw": "GPU UUID: GPU-12345678-1234-5678-abcd-123456789abc\fBus Location: 0000:01:ab.7\fDevice Minor: 0\fModel: Synthetic GPU\f",
+      "result": {
+        "uuid": "GPU-12345678-1234-5678-abcd-123456789abc",
+        "pci": "0000:01:ab.7",
+        "deviceMinor": "0",
+        "model": "Synthetic GPU"
+      }
+    },
+    {
+      "name": "splitline-'\\x1c'",
+      "raw": "GPU UUID: GPU-12345678-1234-5678-abcd-123456789abc\u001cBus Location: 0000:01:ab.7\u001cDevice Minor: 0\u001cModel: Synthetic GPU\u001c",
+      "result": {
+        "uuid": "GPU-12345678-1234-5678-abcd-123456789abc",
+        "pci": "0000:01:ab.7",
+        "deviceMinor": "0",
+        "model": "Synthetic GPU"
+      }
+    },
+    {
+      "name": "splitline-'\\x1d'",
+      "raw": "GPU UUID: GPU-12345678-1234-5678-abcd-123456789abc\u001dBus Location: 0000:01:ab.7\u001dDevice Minor: 0\u001dModel: Synthetic GPU\u001d",
+      "result": {
+        "uuid": "GPU-12345678-1234-5678-abcd-123456789abc",
+        "pci": "0000:01:ab.7",
+        "deviceMinor": "0",
+        "model": "Synthetic GPU"
+      }
+    },
+    {
+      "name": "splitline-'\\x1e'",
+      "raw": "GPU UUID: GPU-12345678-1234-5678-abcd-123456789abc\u001eBus Location: 0000:01:ab.7\u001eDevice Minor: 0\u001eModel: Synthetic GPU\u001e",
+      "result": {
+        "uuid": "GPU-12345678-1234-5678-abcd-123456789abc",
+        "pci": "0000:01:ab.7",
+        "deviceMinor": "0",
+        "model": "Synthetic GPU"
+      }
+    },
+    {
+      "name": "splitline-'\\x85'",
+      "raw": "GPU UUID: GPU-12345678-1234-5678-abcd-123456789abc\u0085Bus Location: 0000:01:ab.7\u0085Device Minor: 0\u0085Model: Synthetic GPU\u0085",
+      "result": {
+        "uuid": "GPU-12345678-1234-5678-abcd-123456789abc",
+        "pci": "0000:01:ab.7",
+        "deviceMinor": "0",
+        "model": "Synthetic GPU"
+      }
+    },
+    {
+      "name": "splitline-'\\u2028'",
+      "raw": "GPU UUID: GPU-12345678-1234-5678-abcd-123456789abc\u2028Bus Location: 0000:01:ab.7\u2028Device Minor: 0\u2028Model: Synthetic GPU\u2028",
+      "result": {
+        "uuid": "GPU-12345678-1234-5678-abcd-123456789abc",
+        "pci": "0000:01:ab.7",
+        "deviceMinor": "0",
+        "model": "Synthetic GPU"
+      }
+    },
+    {
+      "name": "splitline-'\\u2029'",
+      "raw": "GPU UUID: GPU-12345678-1234-5678-abcd-123456789abc\u2029Bus Location: 0000:01:ab.7\u2029Device Minor: 0\u2029Model: Synthetic GPU\u2029",
+      "result": {
+        "uuid": "GPU-12345678-1234-5678-abcd-123456789abc",
+        "pci": "0000:01:ab.7",
+        "deviceMinor": "0",
+        "model": "Synthetic GPU"
+      }
+    },
+    {
+      "name": "duplicate-last-wins",
+      "raw": "GPU UUID: bad\nGPU UUID: GPU-12345678-1234-5678-abcd-123456789abc\nBus Location: 0000:01:ab.7\nDevice Minor: 0\nModel: Synthetic GPU\n",
+      "result": {
+        "uuid": "GPU-12345678-1234-5678-abcd-123456789abc",
+        "pci": "0000:01:ab.7",
+        "deviceMinor": "0",
+        "model": "Synthetic GPU"
+      }
+    },
+    {
+      "name": "unrelated-line",
+      "raw": "GPU UUID: GPU-12345678-1234-5678-abcd-123456789abc\nBus Location: 0000:01:ab.7\nDevice Minor: 0\nModel: Synthetic GPU\nunrelated\n: colon\n",
+      "result": {
+        "uuid": "GPU-12345678-1234-5678-abcd-123456789abc",
+        "pci": "0000:01:ab.7",
+        "deviceMinor": "0",
+        "model": "Synthetic GPU"
+      }
+    }
+  ]
+}

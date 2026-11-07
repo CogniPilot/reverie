@@ -9,8 +9,8 @@ publish.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
-unicode-normalization = "0.1.26"
-unicode-properties = { version = "0.1.5", default-features = false, features = ["general-category"] }
+unicode-normalization.workspace = true
+unicode-properties.workspace = true
 
 [lints]
 workspace = true

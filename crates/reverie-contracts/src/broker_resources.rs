@@ -110,15 +110,49 @@ pub(crate) fn projection(data: &Value) -> Result<ResourceProjection> {
         ProjectionError::EmployeePolicyCount,
         ProfileEmployeeId::parse,
     )?;
-    let pool = if root.contains_key(&key("resourceReservations")) {
+    let pool = reservation_pool(root)?;
+    Ok(ResourceProjection::try_new(sessions, employees, pool)?)
+}
+fn reservation_pool(root: &Object) -> Result<Option<PoolLimits>> {
+    Ok(if root.contains_key(&key("resourceReservations")) {
         Some(PoolLimits::try_new(
             integer(root, "poolMemoryMiB")?,
             integer(root, "poolTasksMax")?,
         )?)
     } else {
         None
-    };
-    Ok(ResourceProjection::try_new(sessions, employees, pool)?)
+    })
+}
+/// Original direct map validator: globals are read only while projecting an
+/// actual entry, after all six declared fields of that entry are checked. Empty
+/// maps must not move later base/global failures before native rootless reads.
+pub(crate) fn validate_maps(data: &Value) -> Result<()> {
+    let root = object(data).ok_or(ResourceConfigError::ExpectedObject)?;
+    let sessions = map(
+        root,
+        "sessionResources",
+        MAX_SESSION_POLICIES,
+        ProjectionError::SessionPolicyCount,
+        ProfileSessionId::parse,
+    )?;
+    validate_entries(root, &sessions)?;
+    let employees = map(
+        root,
+        "employeeResources",
+        MAX_PROFILES,
+        ProjectionError::EmployeePolicyCount,
+        ProfileEmployeeId::parse,
+    )?;
+    validate_entries(root, &employees)
+}
+fn validate_entries<K: Ord>(root: &Object, entries: &BTreeMap<K, ResourceTemplate>) -> Result<()> {
+    if !entries.is_empty() {
+        let pool = reservation_pool(root)?;
+        for entry in entries.values() {
+            entry.resolve(pool)?;
+        }
+    }
+    Ok(())
 }
 impl BrokerResourceConfig {
     pub fn resources(&self) -> &ResourceProjection {
@@ -258,18 +292,11 @@ fn map<K: Ord>(
     Ok(result)
 }
 fn finite(data: &Value) -> Result<()> {
-    let mut pending = vec![data];
-    while let Some(value) = pending.pop() {
-        match &value.0 {
-            Node::Number(Number::Nan | Number::PositiveInfinity | Number::NegativeInfinity) => {
-                return Err(ResourceConfigError::NonfiniteData);
-            }
-            Node::Array(values) => pending.extend(values),
-            Node::Object(values) => pending.extend(values.values()),
-            _ => {}
-        }
+    if data.is_finite() {
+        Ok(())
+    } else {
+        Err(ResourceConfigError::NonfiniteData)
     }
-    Ok(())
 }
 fn replace(root: &mut Object, field: &str, id: &str, resource: &ResourceTemplate) {
     let value = root

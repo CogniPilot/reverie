@@ -1,0 +1,254 @@
+{
+  "source": "actual worker_storage/worker_tmp fixed functions, genuine unleased legacy session branch; no storage_guard, engine or live company; raw UTF8 byte snapshots preserve CRLF",
+  "python": "3.13.15 (main, Aug  5 2026, 12:25:43) [GCC 15.3.0]",
+  "storageSha256": "efdc16f1194a9880c4c2dffd4083ef4e407f49efbab423af724646318f5e1dc7",
+  "temporarySha256": "d9892df549af84a08fd40a7d7d58bd7f7099617a59a89c8437d28d9da89bb44f",
+  "companyText": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"desiredRunning\": true}]}",
+  "session": "00000000-0000-0000-0000-000000000000",
+  "cases": [
+    {
+      "recipe": "fresh",
+      "workspace": false,
+      "accepted": true,
+      "snapshot": [
+        {
+          "path": "company.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"desiredRunning\": true}]}"
+        },
+        {
+          "path": "scratch",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "scratch/00000000-0000-0000-0000-000000000000",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "scratch/00000000-0000-0000-0000-000000000000/tmp",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "scratch/00000000-0000-0000-0000-000000000000/tmp/owner-result",
+          "mode": 384,
+          "kind": "file",
+          "text": "retained task evidence"
+        },
+        {
+          "path": "state",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/00000000-0000-0000-0000-000000000000",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/00000000-0000-0000-0000-000000000000/home",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/00000000-0000-0000-0000-000000000000/home/AGENTS.md",
+          "mode": 384,
+          "kind": "file",
+          "text": "<!-- reverie-laptop-storage -->\n## Laptop storage\n\nThis persistent laptop belongs to your employee identity and survives model,\naccount and conversation/session changes. Those changes do not authorize a new\nidentity or new tool grants.\n\nPut temporary builds, disposable source checkouts, dependency caches and\nregenerable downloads in a task-specific directory under `/tmp`. Check shared\ndisk capacity before heavy work. Temporary storage may be wiped periodically;\nrecreate it and verify source revisions, input hashes and required tools at each\nrun. Use normal project commands and the provided environment defaults.\n\n`/tmp` is the laptop's own disk-backed disposable drive. `TMPDIR`, `TMP`\nand `TEMP` point to `/tmp`; `/scratch` remains disposable compatibility storage.\nNeither location is a durable home for unfinished source or retained results.\n\nKeep installed tools and profiles in your private `/nix` and `/home/agent`.\nUse the project's pinned `nix develop`, `nix build` or `nix run` first. Use\n`nix shell` for temporary tools and `nix profile install` only for tools you need\npersistently. Domain simulators and large project stacks belong in project\nflakes, not the base laptop. These are ordinary Linux paths; there is no apt\ncompatibility shim. Docker needs an actually approved usable engine, not just a\nclient binary. If the owner enabled rootless Docker, use\n`nix profile install .#workerDocker` from a Reverie checkout (or temporary\n`nix shell .#workerDocker`), run `dockerd-rootless`, then verify `docker info`\nbefore building or running containers. Keep that launcher running in another\nterminal. Its images and volumes live in durable `~/.local/share/docker`;\ninstalling the tools does not grant a missing host capability.\nQEMU software TCG can come from a project flake; KVM requires an\nexplicit optional capability and never implies access to all host devices.\n\nKeep repositories and retained results in explicitly granted durable `/workspace`\nor project paths, or private home storage. `/reverie_workspace` remains compatible;\n`~/workspace` may point there when that shared drive is granted. Existing project\nmounts and occupied paths are preserved. A project name or symlink does not\nprove durability; check its actual granted backing storage. Before cleanup,\nsave handoffs and preserve source, results and work still in progress. Do not\ndelete another task's data or move an active cache.\n\nKeep unique data, unpushed or uncommitted work, cited evidence, results and\none-attempt latches in verified durable workspace, project or private home storage.\nKeep configuration, credentials and installed tools outside disposable roots.\nPreserve and verify durable source, evidence and results before cleanup, then\nremove the task's registered disposable outputs after sealing results. Registration,\na path name or a Git ignore rule alone does not prove a file is disposable.\n\nCleanup must respect live task leases and protect active sockets, runtime state\nand credentials. Do not move or delete a live socket by hand. Do not clean another\ntask's files, shared caches or Nix store paths without specific preservation and\nownership checks.\n\nCredentials need explicit named grants outside disposable storage. Never paste\ncredential bytes into chat. A laptop/tool upgrade grants no mission or flight GO.\n<!-- /reverie-laptop-storage -->\n"
+        }
+      ]
+    },
+    {
+      "recipe": "workspace",
+      "workspace": true,
+      "accepted": true,
+      "snapshot": [
+        {
+          "path": "company.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"desiredRunning\": true}]}"
+        },
+        {
+          "path": "scratch",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "scratch/00000000-0000-0000-0000-000000000000",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "scratch/00000000-0000-0000-0000-000000000000/tmp",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "scratch/00000000-0000-0000-0000-000000000000/tmp/owner-result",
+          "mode": 384,
+          "kind": "file",
+          "text": "retained task evidence"
+        },
+        {
+          "path": "state",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/00000000-0000-0000-0000-000000000000",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/00000000-0000-0000-0000-000000000000/home",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/00000000-0000-0000-0000-000000000000/home/AGENTS.md",
+          "mode": 384,
+          "kind": "file",
+          "text": "<!-- reverie-laptop-storage -->\n## Laptop storage\n\nThis persistent laptop belongs to your employee identity and survives model,\naccount and conversation/session changes. Those changes do not authorize a new\nidentity or new tool grants.\n\nPut temporary builds, disposable source checkouts, dependency caches and\nregenerable downloads in a task-specific directory under `/tmp`. Check shared\ndisk capacity before heavy work. Temporary storage may be wiped periodically;\nrecreate it and verify source revisions, input hashes and required tools at each\nrun. Use normal project commands and the provided environment defaults.\n\n`/tmp` is the laptop's own disk-backed disposable drive. `TMPDIR`, `TMP`\nand `TEMP` point to `/tmp`; `/scratch` remains disposable compatibility storage.\nNeither location is a durable home for unfinished source or retained results.\n\nKeep installed tools and profiles in your private `/nix` and `/home/agent`.\nUse the project's pinned `nix develop`, `nix build` or `nix run` first. Use\n`nix shell` for temporary tools and `nix profile install` only for tools you need\npersistently. Domain simulators and large project stacks belong in project\nflakes, not the base laptop. These are ordinary Linux paths; there is no apt\ncompatibility shim. Docker needs an actually approved usable engine, not just a\nclient binary. If the owner enabled rootless Docker, use\n`nix profile install .#workerDocker` from a Reverie checkout (or temporary\n`nix shell .#workerDocker`), run `dockerd-rootless`, then verify `docker info`\nbefore building or running containers. Keep that launcher running in another\nterminal. Its images and volumes live in durable `~/.local/share/docker`;\ninstalling the tools does not grant a missing host capability.\nQEMU software TCG can come from a project flake; KVM requires an\nexplicit optional capability and never implies access to all host devices.\n\nKeep repositories and retained results in explicitly granted durable `/workspace`\nor project paths, or private home storage. `/reverie_workspace` remains compatible;\n`~/workspace` may point there when that shared drive is granted. Existing project\nmounts and occupied paths are preserved. A project name or symlink does not\nprove durability; check its actual granted backing storage. Before cleanup,\nsave handoffs and preserve source, results and work still in progress. Do not\ndelete another task's data or move an active cache.\n\nKeep unique data, unpushed or uncommitted work, cited evidence, results and\none-attempt latches in verified durable workspace, project or private home storage.\nKeep configuration, credentials and installed tools outside disposable roots.\nPreserve and verify durable source, evidence and results before cleanup, then\nremove the task's registered disposable outputs after sealing results. Registration,\na path name or a Git ignore rule alone does not prove a file is disposable.\n\nCleanup must respect live task leases and protect active sockets, runtime state\nand credentials. Do not move or delete a live socket by hand. Do not clean another\ntask's files, shared caches or Nix store paths without specific preservation and\nownership checks.\n\nCredentials need explicit named grants outside disposable storage. Never paste\ncredential bytes into chat. A laptop/tool upgrade grants no mission or flight GO.\n<!-- /reverie-laptop-storage -->\n"
+        },
+        {
+          "path": "state/00000000-0000-0000-0000-000000000000/home/workspace",
+          "mode": 511,
+          "kind": "link",
+          "target": "/reverie_workspace"
+        }
+      ]
+    },
+    {
+      "recipe": "occupied-owner",
+      "workspace": true,
+      "accepted": true,
+      "snapshot": [
+        {
+          "path": "company.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"desiredRunning\": true}]}"
+        },
+        {
+          "path": "scratch",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "scratch/00000000-0000-0000-0000-000000000000",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "scratch/00000000-0000-0000-0000-000000000000/tmp",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "scratch/00000000-0000-0000-0000-000000000000/tmp/owner-result",
+          "mode": 384,
+          "kind": "file",
+          "text": "retained task evidence"
+        },
+        {
+          "path": "state",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/00000000-0000-0000-0000-000000000000",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/00000000-0000-0000-0000-000000000000/home",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/00000000-0000-0000-0000-000000000000/home/AGENTS.md",
+          "mode": 384,
+          "kind": "file",
+          "text": "Owner guidance\r\nKeep \u03a9 results.\r\n\n\n<!-- reverie-laptop-storage -->\n## Laptop storage\n\nThis persistent laptop belongs to your employee identity and survives model,\naccount and conversation/session changes. Those changes do not authorize a new\nidentity or new tool grants.\n\nPut temporary builds, disposable source checkouts, dependency caches and\nregenerable downloads in a task-specific directory under `/tmp`. Check shared\ndisk capacity before heavy work. Temporary storage may be wiped periodically;\nrecreate it and verify source revisions, input hashes and required tools at each\nrun. Use normal project commands and the provided environment defaults.\n\n`/tmp` is the laptop's own disk-backed disposable drive. `TMPDIR`, `TMP`\nand `TEMP` point to `/tmp`; `/scratch` remains disposable compatibility storage.\nNeither location is a durable home for unfinished source or retained results.\n\nKeep installed tools and profiles in your private `/nix` and `/home/agent`.\nUse the project's pinned `nix develop`, `nix build` or `nix run` first. Use\n`nix shell` for temporary tools and `nix profile install` only for tools you need\npersistently. Domain simulators and large project stacks belong in project\nflakes, not the base laptop. These are ordinary Linux paths; there is no apt\ncompatibility shim. Docker needs an actually approved usable engine, not just a\nclient binary. If the owner enabled rootless Docker, use\n`nix profile install .#workerDocker` from a Reverie checkout (or temporary\n`nix shell .#workerDocker`), run `dockerd-rootless`, then verify `docker info`\nbefore building or running containers. Keep that launcher running in another\nterminal. Its images and volumes live in durable `~/.local/share/docker`;\ninstalling the tools does not grant a missing host capability.\nQEMU software TCG can come from a project flake; KVM requires an\nexplicit optional capability and never implies access to all host devices.\n\nKeep repositories and retained results in explicitly granted durable `/workspace`\nor project paths, or private home storage. `/reverie_workspace` remains compatible;\n`~/workspace` may point there when that shared drive is granted. Existing project\nmounts and occupied paths are preserved. A project name or symlink does not\nprove durability; check its actual granted backing storage. Before cleanup,\nsave handoffs and preserve source, results and work still in progress. Do not\ndelete another task's data or move an active cache.\n\nKeep unique data, unpushed or uncommitted work, cited evidence, results and\none-attempt latches in verified durable workspace, project or private home storage.\nKeep configuration, credentials and installed tools outside disposable roots.\nPreserve and verify durable source, evidence and results before cleanup, then\nremove the task's registered disposable outputs after sealing results. Registration,\na path name or a Git ignore rule alone does not prove a file is disposable.\n\nCleanup must respect live task leases and protect active sockets, runtime state\nand credentials. Do not move or delete a live socket by hand. Do not clean another\ntask's files, shared caches or Nix store paths without specific preservation and\nownership checks.\n\nCredentials need explicit named grants outside disposable storage. Never paste\ncredential bytes into chat. A laptop/tool upgrade grants no mission or flight GO.\n<!-- /reverie-laptop-storage -->\n"
+        },
+        {
+          "path": "state/00000000-0000-0000-0000-000000000000/home/workspace",
+          "mode": 384,
+          "kind": "file",
+          "text": "occupied owner workspace"
+        }
+      ]
+    },
+    {
+      "recipe": "repeat",
+      "workspace": true,
+      "accepted": true,
+      "snapshot": [
+        {
+          "path": "company.json",
+          "mode": 384,
+          "kind": "file",
+          "text": "{\"employees\": [{\"id\": \"11111111-2222-4333-8444-555555555555\", \"owner\": null, \"sessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"desiredRunning\": true}]}"
+        },
+        {
+          "path": "scratch",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "scratch/00000000-0000-0000-0000-000000000000",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "scratch/00000000-0000-0000-0000-000000000000/tmp",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "scratch/00000000-0000-0000-0000-000000000000/tmp/owner-result",
+          "mode": 384,
+          "kind": "file",
+          "text": "retained task evidence"
+        },
+        {
+          "path": "state",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/00000000-0000-0000-0000-000000000000",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/00000000-0000-0000-0000-000000000000/home",
+          "mode": 448,
+          "kind": "dir"
+        },
+        {
+          "path": "state/00000000-0000-0000-0000-000000000000/home/AGENTS.md",
+          "mode": 384,
+          "kind": "file",
+          "text": "Owner guidance\r\nKeep \u03a9 results.\r\n\n\n<!-- reverie-laptop-storage -->\n## Laptop storage\n\nThis persistent laptop belongs to your employee identity and survives model,\naccount and conversation/session changes. Those changes do not authorize a new\nidentity or new tool grants.\n\nPut temporary builds, disposable source checkouts, dependency caches and\nregenerable downloads in a task-specific directory under `/tmp`. Check shared\ndisk capacity before heavy work. Temporary storage may be wiped periodically;\nrecreate it and verify source revisions, input hashes and required tools at each\nrun. Use normal project commands and the provided environment defaults.\n\n`/tmp` is the laptop's own disk-backed disposable drive. `TMPDIR`, `TMP`\nand `TEMP` point to `/tmp`; `/scratch` remains disposable compatibility storage.\nNeither location is a durable home for unfinished source or retained results.\n\nKeep installed tools and profiles in your private `/nix` and `/home/agent`.\nUse the project's pinned `nix develop`, `nix build` or `nix run` first. Use\n`nix shell` for temporary tools and `nix profile install` only for tools you need\npersistently. Domain simulators and large project stacks belong in project\nflakes, not the base laptop. These are ordinary Linux paths; there is no apt\ncompatibility shim. Docker needs an actually approved usable engine, not just a\nclient binary. If the owner enabled rootless Docker, use\n`nix profile install .#workerDocker` from a Reverie checkout (or temporary\n`nix shell .#workerDocker`), run `dockerd-rootless`, then verify `docker info`\nbefore building or running containers. Keep that launcher running in another\nterminal. Its images and volumes live in durable `~/.local/share/docker`;\ninstalling the tools does not grant a missing host capability.\nQEMU software TCG can come from a project flake; KVM requires an\nexplicit optional capability and never implies access to all host devices.\n\nKeep repositories and retained results in explicitly granted durable `/workspace`\nor project paths, or private home storage. `/reverie_workspace` remains compatible;\n`~/workspace` may point there when that shared drive is granted. Existing project\nmounts and occupied paths are preserved. A project name or symlink does not\nprove durability; check its actual granted backing storage. Before cleanup,\nsave handoffs and preserve source, results and work still in progress. Do not\ndelete another task's data or move an active cache.\n\nKeep unique data, unpushed or uncommitted work, cited evidence, results and\none-attempt latches in verified durable workspace, project or private home storage.\nKeep configuration, credentials and installed tools outside disposable roots.\nPreserve and verify durable source, evidence and results before cleanup, then\nremove the task's registered disposable outputs after sealing results. Registration,\na path name or a Git ignore rule alone does not prove a file is disposable.\n\nCleanup must respect live task leases and protect active sockets, runtime state\nand credentials. Do not move or delete a live socket by hand. Do not clean another\ntask's files, shared caches or Nix store paths without specific preservation and\nownership checks.\n\nCredentials need explicit named grants outside disposable storage. Never paste\ncredential bytes into chat. A laptop/tool upgrade grants no mission or flight GO.\n<!-- /reverie-laptop-storage -->\n"
+        },
+        {
+          "path": "state/00000000-0000-0000-0000-000000000000/home/workspace",
+          "mode": 384,
+          "kind": "file",
+          "text": "occupied owner workspace"
+        }
+      ]
+    },
+    {
+      "recipe": "record-no-company",
+      "workspace": false,
+      "accepted": true,
+      "snapshot": []
+    }
+  ]
+}

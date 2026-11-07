@@ -69,6 +69,8 @@ let
         test/chat-bot-presets.test.ts test/cron-post-bot.test.ts test/cron-post-security.test.ts \
         test/chatroom-delivery-modes.test.ts test/routes/polling-membership.test.ts \
         test/company-service.test.ts test/company-office-enforced-auth.test.ts test/company-hierarchy.test.ts \
+        test/native-memory-journal-api.test.ts test/installed-memory-access.test.ts \
+        test/memory-bridge-settlement.test.ts test/memory-scope-config.test.ts \
         test/owner-auth-admin-grant.test.ts test/owner-auth-review.test.ts \
         test/experts-api.test.ts test/experts-delegated-server.test.ts test/delegated-session-create.test.ts test/self-update.test.ts \
         test/owner-auth-lock-portability.test.ts test/company-full-page.test.ts \
@@ -506,9 +508,18 @@ let
   # All client modes and the protected manifest move together; no Python branch.
   workerResourceClientManifest = workerNativeClientManifest;
   workerExec = workerNativeClient;
+  # Candidate only: source preparation/admission consumers still select the
+  # existing child entry point until the complete broker transition is reviewed.
+  workerNativeChild = import ./worker-child.nix { inherit pkgs src; };
+  # Same fixed native helper selected by the worker image; no shell fallback.
+  workerNativeNixStorePrepare = import ./nix-store-prepare.nix { inherit pkgs src; };
+  # Unselected until owner regex, installed lifecycle/auth and actual MCP/client
+  # consumers qualify together. No Python fallback inside this native package.
+  memoryNativeCli = import ./memory-cli.nix { inherit pkgs src console; };
   # The selected reverie-ops client (laptop runtime, console and opsCore).
   # The OPS daemon and grants remain server-owned.
   opsNativeCli = import ./ops-cli.nix { inherit pkgs src; };
+  mcpNativeCli = import ./mcp-cli.nix { inherit pkgs src console memoryNativeCli; };
   routinesNative = import ./routines.nix { inherit pkgs src; };
   workerChild = pkgs.writeShellScriptBin "reverie-worker-child" ''
     exec ${memory}/bin/python3 -m reverie.worker child "$@"
@@ -609,4 +620,4 @@ let
     done
   '';
 
-in { inherit reverie console memory memoryPackage runtime entrypoint kokoro hands handsTools workerExec workerResourceClientManifest workerNativeClient workerNativeClientManifest opsNativeCli routinesNative laptopTools rustRouteHandler; }
+in { inherit reverie console memory memoryPackage runtime entrypoint kokoro hands handsTools workerExec workerResourceClientManifest workerNativeClient workerNativeClientManifest workerNativeChild workerNativeNixStorePrepare memoryNativeCli mcpNativeCli opsNativeCli routinesNative laptopTools rustRouteHandler; }

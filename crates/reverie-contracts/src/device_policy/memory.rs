@@ -70,6 +70,17 @@ impl MemoryProjection {
 pub fn swap_bytes(policy: Option<&ProjectedMemoryPolicy>) -> u64 {
     policy.map_or(0, ProjectedMemoryPolicy::swap_bytes)
 }
+/// Read the finite swap field emitted by this owner's selected projection.
+/// The full worker loader forbids laptopMemoryPolicy as an input key, so an
+/// absent field means no selection; arbitrary Python extras are not a domain.
+pub fn projected_swap_bytes(resources: &EffectiveWorkerConfig) -> Result<u64> {
+    let Some(policy) = root(resources).get(&key("laptopMemoryPolicy")) else {
+        return Ok(0);
+    };
+    let policy = object(policy).ok_or(DeviceConfigError::MemoryShape)?;
+    let swap = integer(policy.get(&key("swapMiB")))?;
+    Ok(u64::from(swap) * reverie_core::operations::MIB)
+}
 /// Project using trusted storage identity, including historical employee storage.
 /// Selected high thresholds take the actual checked effective RAM policy and
 /// bind it to resource data. This is not an arbitrary-Python-object helper.

@@ -21,12 +21,15 @@ impl WorkerMount {
         self.read_only
     }
 }
-pub(super) fn declarations(fields: &Object) -> Result<Vec<WorkerMount>> {
+pub(super) fn declarations_observed<E: From<WorkerSchemaError>>(
+    fields: &Object,
+    mut observe: impl FnMut(&WorkerMount) -> std::result::Result<(), E>,
+) -> std::result::Result<Vec<WorkerMount>, E> {
     let Some(Value(Node::Array(values))) = field(fields, "mounts") else {
-        return Err(WorkerSchemaError::Mount);
+        return Err(WorkerSchemaError::Mount.into());
     };
     if values.is_empty() {
-        return Err(WorkerSchemaError::Mount);
+        return Err(WorkerSchemaError::Mount.into());
     }
     let mut destinations = BTreeSet::new();
     let mut mounts = Vec::new();
@@ -37,23 +40,28 @@ pub(super) fn declarations(fields: &Object) -> Result<Vec<WorkerMount>> {
                 .iter()
                 .all(|name| field(entry, name).is_some())
         {
-            return Err(WorkerSchemaError::Mount);
+            return Err(WorkerSchemaError::Mount.into());
         }
         let Some(Value(Node::Bool(read_only))) = field(entry, "readOnly") else {
-            return Err(WorkerSchemaError::Mount);
+            return Err(WorkerSchemaError::Mount.into());
         };
         let source = mount_path(field(entry, "source"))?;
         let target = mount_path(field(entry, "destination"))?;
-        let destination = MountTarget::try_new(target.0.clone())?;
-        destination.worker_destination()?;
+        let destination =
+            MountTarget::try_new(target.0.clone()).map_err(WorkerSchemaError::from)?;
+        destination
+            .worker_destination()
+            .map_err(WorkerSchemaError::from)?;
         if !destinations.insert(destination.clone()) {
-            return Err(WorkerSchemaError::Mount);
+            return Err(WorkerSchemaError::Mount.into());
         }
-        mounts.push(WorkerMount {
+        let mount = WorkerMount {
             source: MetadataText::from_text(source.clone()),
             destination,
             read_only: *read_only,
-        });
+        };
+        observe(&mount)?;
+        mounts.push(mount);
     }
     Ok(mounts)
 }

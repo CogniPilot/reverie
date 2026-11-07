@@ -1,0 +1,46 @@
+[
+  {
+    "source": "{\"defaultAction\":\"SCMP_ACT_ERRNO\",\"syscalls\":[]}",
+    "expected": "{\"defaultAction\": \"SCMP_ACT_ERRNO\", \"syscalls\": [{\"action\": \"SCMP_ACT_ALLOW\", \"names\": [\"clone\", \"unshare\", \"setns\", \"mount\", \"umount2\", \"pivot_root\", \"open_tree\", \"move_mount\", \"fsopen\", \"fsconfig\", \"fsmount\", \"fspick\", \"mount_setattr\", \"sethostname\", \"setdomainname\", \"mknod\", \"mknodat\"]}]}\n"
+  },
+  {
+    "source": "{\"defaultAction\":\"SCMP_ACT_ERRNO\",\"syscalls\":[{\"names\":[\"keyctl\",\"bpf\",\"perf_event_open\"],\"action\":\"SCMP_ACT_ERRNO\"}],\"unknown\":{\"z\":1,\"a\":\"\\u2603\"}}",
+    "expected": "{\"defaultAction\": \"SCMP_ACT_ERRNO\", \"syscalls\": [{\"action\": \"SCMP_ACT_ERRNO\", \"names\": [\"keyctl\", \"bpf\", \"perf_event_open\"]}, {\"action\": \"SCMP_ACT_ALLOW\", \"names\": [\"clone\", \"unshare\", \"setns\", \"mount\", \"umount2\", \"pivot_root\", \"open_tree\", \"move_mount\", \"fsopen\", \"fsconfig\", \"fsmount\", \"fspick\", \"mount_setattr\", \"sethostname\", \"setdomainname\", \"mknod\", \"mknodat\"]}], \"unknown\": {\"a\": \"\\u2603\", \"z\": 1}}\n"
+  },
+  {
+    "source": "{\"defaultAction\":\"SCMP_ACT_ALLOW\",\"syscalls\":[]}",
+    "expected": null
+  },
+  {
+    "source": "{\"defaultAction\":\"SCMP_ACT_ERRNO\"}",
+    "expected": null
+  },
+  {
+    "source": "{\"defaultAction\":\"SCMP_ACT_ERRNO\",\"syscalls\":null}",
+    "expected": null
+  },
+  {
+    "source": "{\"defaultAction\":\"SCMP_ACT_ERRNO\",\"syscalls\":{}}",
+    "expected": null
+  },
+  {
+    "source": "[]",
+    "expected": null
+  },
+  {
+    "source": "{\"defaultAction\":\"SCMP_ACT_ALLOW\",\"defaultAction\":\"SCMP_ACT_ERRNO\",\"syscalls\":[]}",
+    "expected": "{\"defaultAction\": \"SCMP_ACT_ERRNO\", \"syscalls\": [{\"action\": \"SCMP_ACT_ALLOW\", \"names\": [\"clone\", \"unshare\", \"setns\", \"mount\", \"umount2\", \"pivot_root\", \"open_tree\", \"move_mount\", \"fsopen\", \"fsconfig\", \"fsmount\", \"fspick\", \"mount_setattr\", \"sethostname\", \"setdomainname\", \"mknod\", \"mknodat\"]}]}\n"
+  },
+  {
+    "source": "{\"defaultAction\":\"SCMP_ACT_ERRNO\",\"syscalls\":[],\"unknown\":[NaN,Infinity,-Infinity,-0.0,1e+20,1e-07]}",
+    "expected": "{\"defaultAction\": \"SCMP_ACT_ERRNO\", \"syscalls\": [{\"action\": \"SCMP_ACT_ALLOW\", \"names\": [\"clone\", \"unshare\", \"setns\", \"mount\", \"umount2\", \"pivot_root\", \"open_tree\", \"move_mount\", \"fsopen\", \"fsconfig\", \"fsmount\", \"fspick\", \"mount_setattr\", \"sethostname\", \"setdomainname\", \"mknod\", \"mknodat\"]}], \"unknown\": [NaN, Infinity, -Infinity, -0.0, 1e+20, 1e-07]}\n"
+  },
+  {
+    "source": "﻿{\"defaultAction\":\"SCMP_ACT_ERRNO\",\"syscalls\":[]}",
+    "expected": null
+  },
+  {
+    "source": "{\"defaultAction\":\"SCMP_ACT_ERRNO\",\"syscalls\":[],\"surrogate\":\"\\ud800\",\"astral\":\"\\ud83d\\ude00\"}",
+    "expected": "{\"astral\": \"\\ud83d\\ude00\", \"defaultAction\": \"SCMP_ACT_ERRNO\", \"surrogate\": \"\\ud800\", \"syscalls\": [{\"action\": \"SCMP_ACT_ALLOW\", \"names\": [\"clone\", \"unshare\", \"setns\", \"mount\", \"umount2\", \"pivot_root\", \"open_tree\", \"move_mount\", \"fsopen\", \"fsconfig\", \"fsmount\", \"fspick\", \"mount_setattr\", \"sethostname\", \"setdomainname\", \"mknod\", \"mknodat\"]}]}\n"
+  }
+]

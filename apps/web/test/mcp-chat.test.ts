@@ -36,16 +36,16 @@ describe('plans tools (read-only)', () => {
     bankedResets: provider === 'openai' ? { availableCount: 2, earliestExpiresAt: null } : null,
     sessions: [{ id: SELF, name: 'alpha' }],
   });
-  const plans = { 'GET /api/v1/plans': () => ok({ generatedAt: 1, accounts: [ROW('Work', 'anthropic'), ROW('primary', 'openai')] }) };
+  const plans = { 'GET /api/v1/plans': () => ok({ generatedAt: 1, timeZone: 'America/New_York', accounts: [ROW('Work', 'anthropic'), ROW('primary', 'openai')] }) };
 
-  it('plans_list and plans_show are offered with the chat tools and print week, 5-hour, reset in ET and banked resets', async () => {
+  it('plans_list and plans_show are offered with the chat tools and print week, 5-hour, reset in the server timezone and banked resets', async () => {
     const { runner, calls } = run(cfg(), fake(plans));
     expect(buildToolDefinitions(['claude'], { chat: true }).map((t) => t.name)).toEqual(expect.arrayContaining(['plans_list', 'plans_show']));
     const list = await runner.run('plans_list', {});
     expect(list.isError).toBeFalsy();
     expect(list.text).toContain('week 40%');
     expect(list.text).toContain('5-hour 12%');
-    expect(list.text).toContain('resets Mon 19 Oct 00:00 ET');
+    expect(list.text).toContain('resets Mon 19 Oct 00:00 GMT-4');
     expect(list.text).toContain('banked resets: 2');
     const one = await runner.run('plans_show', { name: 'primary' });
     expect(one.text).toContain('primary');

@@ -1,6 +1,8 @@
 //! Reviewed Linux syscall boundary for existing private store custody.
 //! Unsafe is confined here; safe callers hold owned files and typed close roles.
 #![allow(unsafe_code)]
+mod cold;
+pub(crate) use cold::cold_directory_names;
 
 use crate::error::{Result, StoreError, StoreFault, finalized, need};
 use std::ffi::{CStr, CString, OsStr};
@@ -38,6 +40,14 @@ impl Stamp {
     pub(crate) fn same_inode(&self, other: &Self) -> bool {
         self.dev == other.dev && self.ino == other.ino
     }
+    /// The existing reservation terminal fence compares this five-field data
+    /// generation after its final native observation, without retaining a file.
+    pub(crate) fn same_generation(&self, other: &Self) -> bool {
+        self.same_inode(other)
+            && self.size == other.size
+            && self.mtime == other.mtime
+            && self.ctime == other.ctime
+    }
     fn private_directory(&self) -> bool {
         self.mode & libc::S_IFMT == libc::S_IFDIR
             && self.mode & 0o7777 == 0o700
@@ -50,7 +60,7 @@ impl Stamp {
             && self.links == 1
     }
 }
-fn uid() -> u32 {
+pub(crate) fn uid() -> u32 {
     // SAFETY: geteuid has no pointer or lifetime preconditions.
     unsafe { libc::geteuid() }
 }
@@ -314,7 +324,10 @@ impl Directory {
         let flags = if absent { libc::RENAME_NOREPLACE } else { 0 };
         // SAFETY: both names are terminated leaves in this held private directory.
         if unsafe {
-            libc::renameat2(
+            // Keep the same atomic syscall under glibc and static musl,
+            // whose libc does not export a renameat2 wrapper.
+            libc::syscall(
+                libc::SYS_renameat2,
                 self.file.as_raw_fd(),
                 source.as_ptr(),
                 self.file.as_raw_fd(),
@@ -342,31 +355,9 @@ impl Directory {
             0,
         )
         .map_err(StoreError::io)?;
-        let fd = file.into_raw_fd();
-        // SAFETY: fdopendir takes sole ownership of this newly opened descriptor
-        // on success; on failure it remains ours and is closed exactly once.
-        let directory = unsafe { libc::fdopendir(fd) };
-        if directory.is_null() {
-            let error = StoreError::io(io::Error::last_os_error());
-            return finalized(
-                Err(error),
-                close(
-                    unsafe { File::from_raw_fd(fd) },
-                    CloseRole::Walk,
-                    &self.path,
-                ),
-            );
-        }
-        let result = directory_names(directory, expected.as_bytes());
-        // SAFETY: this is the one live DIR allocated above. No use follows close.
-        let closed = if unsafe { libc::closedir(directory) } == 0 {
-            Ok(())
-        } else {
-            Err(StoreError::io(io::Error::last_os_error()))
-        };
-        #[cfg(test)]
-        let closed = finalized(closed, crate::faults::closed(CloseRole::Walk, &self.path));
-        finalized(result, closed)
+        scan_directory(file, &self.path, |directory| {
+            directory_names(directory, expected.as_bytes())
+        })
     }
     pub(crate) fn remove_temporary(&self, leaf: &str, owned: &Stamp) -> Result<()> {
         let Some(current) = self.stamp(leaf)? else {
@@ -388,6 +379,51 @@ impl Directory {
         close(self.file, role, &self.path)
     }
 }
+// Path.iterdir follows its directory argument, materializes all names in native
+// order, then closes the iterator before yielding. Keep only the prefix through
+// its first bound violation, but drain every entry/error before closing so later
+// enumeration failure still precedes the first metadata read like Path.iterdir.
+// This observation deliberately
+// adds no store/admission proof or stronger ancestor custody to that source phase.
+pub(crate) fn settlement_directory_names(path: &Path) -> Result<Vec<Vec<u8>>> {
+    let file = File::open(path).map_err(StoreError::io)?;
+    scan_directory(file, path, |directory| {
+        let mut names = Vec::new();
+        while let Some(name) = next_directory_name(directory)? {
+            if names.len() <= reverie_core::operations::MAX_SETTLEMENT_ENTRIES {
+                names.push(name);
+            }
+        }
+        Ok(names)
+    })
+}
+fn scan_directory<T>(
+    file: File,
+    path: &Path,
+    scan: impl FnOnce(*mut libc::DIR) -> Result<T>,
+) -> Result<T> {
+    let fd = file.into_raw_fd();
+    // SAFETY: fdopendir takes sole ownership of this newly opened descriptor
+    // on success; on failure it remains ours and is closed exactly once.
+    let directory = unsafe { libc::fdopendir(fd) };
+    if directory.is_null() {
+        let error = StoreError::io(io::Error::last_os_error());
+        return finalized(
+            Err(error),
+            close(unsafe { File::from_raw_fd(fd) }, CloseRole::Walk, path),
+        );
+    }
+    let result = scan(directory);
+    // SAFETY: this is the one live DIR allocated above. No use follows close.
+    let closed = if unsafe { libc::closedir(directory) } == 0 {
+        Ok(())
+    } else {
+        Err(StoreError::io(io::Error::last_os_error()))
+    };
+    #[cfg(test)]
+    let closed = finalized(closed, crate::faults::closed(CloseRole::Walk, path));
+    finalized(result, closed)
+}
 pub(crate) fn random_name(prefix: &str) -> Result<String> {
     let bytes = random_bytes()?;
     Ok(format!(
@@ -399,21 +435,11 @@ pub(crate) fn random_name(prefix: &str) -> Result<String> {
     ))
 }
 pub(crate) fn random_uuid() -> Result<String> {
-    let mut bytes = random_bytes()?;
-    bytes[6] = (bytes[6] & 0x0f) | 0x40;
-    bytes[8] = (bytes[8] & 0x3f) | 0x80;
-    let hex = bytes
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect::<String>();
-    Ok(format!(
-        "{}-{}-{}-{}-{}",
-        &hex[..8],
-        &hex[8..12],
-        &hex[12..16],
-        &hex[16..20],
-        &hex[20..]
-    ))
+    Ok(
+        reverie_core::ids::NativeOperationId::from_random_bytes(random_bytes()?)
+            .as_str()
+            .to_owned(),
+    )
 }
 pub(crate) fn random_bytes() -> Result<[u8; 16]> {
     let mut bytes = [0u8; 16];
@@ -426,6 +452,15 @@ pub(crate) fn random_bytes() -> Result<[u8; 16]> {
 }
 fn directory_names(directory: *mut libc::DIR, expected: &[u8]) -> Result<bool> {
     let mut seen = false;
+    while let Some(leaf) = next_directory_name(directory)? {
+        if leaf != expected || seen {
+            return Ok(false);
+        }
+        seen = true;
+    }
+    Ok(seen)
+}
+fn next_directory_name(directory: *mut libc::DIR) -> Result<Option<Vec<u8>>> {
     loop {
         // SAFETY: Linux's thread-local errno pointer is valid. readdir returns
         // either a valid DIR-owned entry until its next call, or null+errno.
@@ -436,7 +471,7 @@ fn directory_names(directory: *mut libc::DIR, expected: &[u8]) -> Result<bool> {
         if entry.is_null() {
             let error = io::Error::last_os_error();
             return if error.raw_os_error() == Some(0) {
-                Ok(seen)
+                Ok(None)
             } else {
                 Err(StoreError::io(error))
             };
@@ -445,10 +480,7 @@ fn directory_names(directory: *mut libc::DIR, expected: &[u8]) -> Result<bool> {
         if leaf == b"." || leaf == b".." {
             continue;
         }
-        if leaf != expected || seen {
-            return Ok(false);
-        }
-        seen = true;
+        return Ok(Some(leaf.to_vec()));
     }
 }
 pub(crate) fn read_bounded(file: &mut File, maximum: usize) -> Result<Vec<u8>> {

@@ -1,0 +1,62 @@
+[
+  {
+    "name": "malformed-company-before-state-spelling",
+    "companyRaw": "{",
+    "companyMode": 384,
+    "state": "state//./",
+    "scratch": "scratch",
+    "historyRaw": null,
+    "error": {
+      "type": "JSONDecodeError",
+      "message": "Expecting property name enclosed in double quotes: line 1 column 2 (char 1)"
+    }
+  },
+  {
+    "name": "bad-registry-before-state-spelling",
+    "companyRaw": "{\"employees\":false}",
+    "companyMode": 384,
+    "state": "state//./",
+    "scratch": "scratch",
+    "historyRaw": null,
+    "error": {
+      "type": "ValueError",
+      "message": "Canonical employee registry unavailable"
+    }
+  },
+  {
+    "name": "bad-company-custody-before-scratch-spelling",
+    "companyRaw": "{\"employees\":[]}",
+    "companyMode": 402,
+    "state": "state",
+    "scratch": "scratch//./",
+    "historyRaw": null,
+    "error": {
+      "type": "ValueError",
+      "message": "Trusted laptop metadata unavailable"
+    }
+  },
+  {
+    "name": "malformed-history-before-state-spelling",
+    "companyRaw": "{\"employees\":[]}",
+    "companyMode": 384,
+    "state": "state//./",
+    "scratch": "scratch",
+    "historyRaw": "{",
+    "error": {
+      "type": "JSONDecodeError",
+      "message": "Expecting property name enclosed in double quotes: line 1 column 2 (char 1)"
+    }
+  },
+  {
+    "name": "state-spelling-after-valid-company",
+    "companyRaw": "{\"employees\":[]}",
+    "companyMode": 384,
+    "state": "state//./",
+    "scratch": "scratch",
+    "historyRaw": null,
+    "error": {
+      "type": "ValueError",
+      "message": "Canonical laptop storage path required"
+    }
+  }
+]

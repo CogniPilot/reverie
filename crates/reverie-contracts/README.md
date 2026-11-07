@@ -1,5 +1,28 @@
 # Named compatibility codecs
 
+`worker_launch` decodes default bounded broker request bytes and prepares
+lossless create/tmux/account argv data from checked upstream configuration.
+Environment insertion order and raw path spelling survive; no plan is an
+admission, mount, owner or execution grant.
+
+`memory` preserves the existing SQLite memory metadata/source fields and the
+embedding request/response data contract. The one shared private JSON parser can
+retain a flat insertion-order companion graph: last-value duplicate replacement
+keeps the first key position, including nested replaced objects and lone-surrogate
+keys. Named memory fields use Python `str` JSON; HTTP response bytes retain the
+separate BOM/UTF16/32 detector. Both preserve the existing default Python constants
+and 4300-digit integer behavior. Other named parse policies remain unchanged.
+
+The graph, traversal and builder stay private. Public memory data exposes whole
+named fields and the specific dream-release change, with the original default
+spacing, truthiness, recall coercion and `as_dict` behavior. The latter omits the
+embedding. HTTP response dimensions are available before numerical coercion;
+response vectors retain the source's sequence and float conversion rules.
+
+This checkpoint contains no HTTP transport, provider probing, SQLite connection
+or selected service consumer. Runtime proxy/redirect/fallback behavior and complete
+database interoperability require their own composed service qualification.
+
 `operations_v1` preserves the closed resource-operation journal, compact sorted
 ASCII bytes and named request/observation/operation/scope fingerprints. It uses
 the existing private JSON/encoding owners, rejects duplicate fields, JSON floats,
@@ -175,13 +198,24 @@ full worker schema validator or an authorization interface.
 
 `worker_schema::WorkerEnvelope` now checks the complete pure envelope/base and
 mount declaration unit while retaining the captured data exactly. Its separate
-feature method reuses existing map/lease policy owners. Native source custody,
-remaining optional domains and full ordered validation remain open; see the
+feature method reuses existing map/lease policy owners. Native source custody
+and full ordered validation remain outside that envelope. The complete ordered
+application service now composes those purpose owners; see the
 [source-backed ownership audit](src/worker_schema/README.md).
 
 `rootless` ports the rootless option/profile/syscall, image-label and subordinate
 grant data rules, sharing mount and fixed perf owners. Its [compatibility audit](src/rootless/README.md)
 records parsing quirks, native observations and the remaining engine boundary.
+
+`reservation_control` retains the original READY binding's complete data and
+directory insertion order, arbitrary nonnegative inode integers, Python option
+equality and distinct configuration-domain digest. The domain excludes only
+the legacy top-level resource/image/browser fields; nested names remain hashed.
+Nonfinite included values and Python integer-to-string overflow refuse. The
+current-image data reader reuses strict bytes hooks separately from its image
+comparison so native code can preserve the required checked-close ordering.
+Neither schema, digest, insertion order nor parsed image conveys custody,
+held admission, completion or an effect grant.
 
 # Subscription profiles v1 JS codec
 
@@ -213,3 +247,95 @@ allowed statuses, so the handler sets no headers. An observation request names a
 handler needs after its own read, such as the CLI-registry modes, so TS keeps its original read order.
 Both readers decode the shared cases in `tests/fixtures/route-frames-v1/cases.json`, which were
 written independently of either encoder.
+`reservation_observation` owns original selected-employee data, finite compact
+source/pool hashes and read-side observation bytes. It retains raw employee
+fields/codepoints and nil profile-ID namespaces; the existing journal role
+decoder checks nonnil IDs only at its actual claim boundary. Resource CPU
+numeric equality remains distinct from kind-sensitive profile/hash identity.
+These data objects and digests cannot construct admission or native permits.
+
+`resource_reload` owns the exact resource-reload domain comparison and staged
+OLD6 data checks. Named stages leave native storage/effective resolution to the
+application at the source's actual boundaries. Config capture retains only the
+session-resource key insertion order needed by that native peer loop; duplicate
+and numeric parser policies and sorted config/policy hashes stay unchanged.
+These candidates are not installed configuration or permission to reload/start.
+
+`reservation_policy` preserves compact finite policy candidate bytes/hashes and
+the exact prepared receipt schema, separately from spaced full-worker hashes.
+`broker_laptop` preserves the optional inspect consumer's first-row, Running
+truthiness and identity-before-policy phases. `worker_intent` preserves the
+separate permissive company JSON text and strict detached plan-data rules of
+`Broker.allowed`; neither is the stronger storage identity/eligibility schema.
+None of these data objects mint an applied receipt, registered native laptop or
+effect authority.
+
+`storage_writers` owns the separate Broker writer census and launch-wait data
+rules: running-only 128-ID selection, default Python JSON string decoding,
+global ID-set checks followed by each row's original labels/tuple/mount phases,
+and the strict-metadata nine-field default-spaced binding projection. It keeps
+Python structural errors distinct from ordinary inventory refusals. Resolved
+mount inputs remain DATA and must come from the native resolver; no parsed
+labels, comparison bytes or empty inventory proves writer exclusion, registry
+ownership or launch permission. Synthetic fixtures record 66 actual source
+writer cases and 21 actual launch-binding cases, with source/interpreter hashes.
+
+## Memory instance and document data
+
+`memory_instance` preserves the closed instance schema, owner-selected text,
+initial-self extensions, nil employee IDs and identity-context formatting. Its
+phased header lets the host resolve/separate data_dir before later field checks.
+Organizational role/kind metadata always selects the ordinary chat harness and
+grants no tool or memory scope.
+
+`memory_documents` owns immutable document bodies, self-model drafts, sorted
+proposal bytes/hashes and the existing bounded developer brief. Unicode-false
+JSON shares the same private string/traversal owners as existing ASCII codecs;
+no serialize/reparse clone loses surrogate codepoints. Length bounds count
+Python characters; actual SQL text encoding remains a separate binding step.
+The original document fields/order, arbitrary historical names and unknown
+initial-self extensions remain data. No generic JSON mutation API, raw SQL,
+ballot approval boolean or owner/execution permit is exposed.
+
+`creation_budget` owns the legacy creation-peer JSON, raw cgroup-prefix,
+pool-counter and first-MemTotal DATA phases. Normal engine JSON retains the
+shared last-wins/4300/nonfinite parser, while RAM/total checks occur at their
+original phases. Python bool/float numeric equality is preserved for the
+outside-pool total; the later swap declaration check remains strict. Pool
+activation and creation use distinct legacy rules, sharing the existing
+Python integer syntax/table owner without imposing reservation counter bounds.
+The memory-policy owner reads only its generated finite projected swap field;
+the full worker input's closed header forbids supplying that internal field.
+None of these readers constructs native identity, effects or authority.
+
+`worker_storage::scratch_label_bytes` preserves the existing descriptive drive
+label's insertion order, spaced ASCII JSON and finite floating clock spelling.
+Six synthetic vectors evaluate the original Python call's actual AST. Nil IDs
+retain their existing profile namespace semantics. Descriptive label bytes do
+not establish employee ownership, filesystem custody or permission to start.
+
+`worker_launch::assert_network_labels` preserves the original successful
+optional-inspection branch: complete default Python JSON string decoding,
+first-row lookup, falsey-label fallback and exact worker/session comparison.
+Twenty-nine actual AST cases include ignored extra rows, raw integer limits,
+last-key-wins, nonfinite extras and wrong-shape/ownership priority. These labels
+remain descriptive data and cannot construct a native laptop or effect grant.
+
+`reservation_baseline` retains the original native/runtime DATA alongside the
+unchanged baseline encoding. Named start comparisons preserve Python dictionary
+numeric equality (including bool/int/float equality) before later native readers
+apply their strict rules. The named intent codec hashes finite baseline data only
+at the original late receipt phase; five original-Python fingerprint/byte vectors
+cover numeric provenance, lone-surrogate text and nonfinite refusal. It cannot
+manufacture a live claim, process birth, effect result or launch permit.
+# Recovery observation data
+
+`worker_recovery` names the original Broker running-name selection, optional
+inspect/confirmed-absence shapes and lazy Office IP literal projection. It keeps
+Python last-key-wins/4300-digit/string JSON semantics and arbitrary ignored
+inspection fields. The shared `NativeLimitFields` view is the existing limits
+rule owner; complete inventory rows still require their canonical CID. A recovery
+inspection's late `Id` presence check does not turn that value into CID custody.
+The checked-in corpus comes from actual unchanged Python methods with synthetic
+engine replies and owned local Office sockets, including eight complete recovery
+selection cases. No codec creates registration, start or authorization authority.

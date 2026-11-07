@@ -60,6 +60,7 @@
           voiceCiVerifier = import ./nix/voice-ci-verifier.nix { inherit pkgs; src = source; };
           # Unselected native front; qualified together with its TS adapter.
           rustFront = import ./nix/rust-front.nix { inherit pkgs; src = source; };
+          deployment = import ./nix/deployment.nix { inherit pkgs; src = source; };
           # Optional tools: excluded from the runtime/image and never fetched by a chat toggle.
           chatPythonLsp = pkgs.pyright;
           capabilitiesAddon = import ./nix/capabilities-addon.nix { inherit pkgs; src = source; };
@@ -117,6 +118,7 @@
             worker = true;
           };
           workerPython = import ./nix/worker-python.nix { inherit pkgs; memory = packages.memory; };
+          workerPerfImageTransport = pkgs.skopeo;
           browserRuntime = import ./nix/browser-runtime.nix { inherit pkgs; src = source; };
           workerGpuSupport = import ./nix/worker-gpu-support.nix { inherit pkgs; src = source; };
           workerGpuToolkit = pkgs.nvidia-container-toolkit;
@@ -344,6 +346,13 @@
         in {
           inherit (packages) reverie memoryPackage start update gpuPublisher previewProxy previewService prune pruneR12 cleanupObservations ownerTerminalCore;
           workerPythonRuntime = import ./nix/worker-python-check.nix { inherit pkgs; python = packages.workerPython; };
+          workerPerfTools = let perf = import ./nix/worker-perf.nix { inherit pkgs; };
+            in assert builtins.elem perf (import ./nix/worker-base-tools.nix { inherit pkgs; });
+              pkgs.runCommand "reverie-worker-perf-tool-check" { } ''
+                ${perf}/bin/perf version --build-options > "$out"
+                grep -Ei 'python:.*\[ *off *\]' "$out"
+                test ! -e ${perf}/libexec/perf-core/scripts/python
+              '';
           codexObserverSource = packages.codexObserver.tests.source;
           codexObserverVendor = packages.codexObserver.tests.vendor;
           collectService = pkgs.runCommand "reverie-collect-service-evaluation" {
@@ -480,7 +489,8 @@
               # CI's test runner and same-host timing for performance changes.
               pkgs.cargo-nextest pkgs.hyperfine
               # getfattr and getfacl: deployment snapshot tests read extended attributes and ACLs.
-              pkgs.attr pkgs.acl ];
+              pkgs.gnutar pkgs.attr pkgs.acl (pkgs.lib.getBin pkgs.util-linux)
+            ] ++ pkgs.lib.optionals pkgs.stdenv.isLinux [ pkgs.iproute2 ];
             shellHook = ''
               export PYTHONPATH="$PWD/python''${PYTHONPATH:+:$PYTHONPATH}"
               export REVERIE_LEASE_DIR="''${REVERIE_LEASE_DIR:-''${REVERIE_ROOT:-$HOME/reverie}/runtime/leases}"

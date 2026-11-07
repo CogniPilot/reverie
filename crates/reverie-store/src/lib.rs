@@ -5,11 +5,13 @@
 //! admission/authorization checks remain outside this crate.
 
 mod error;
+pub mod memory;
 pub mod operations;
 mod private_fs;
 pub mod profiles;
 pub mod storage_identity;
 mod transaction;
+pub mod worker_storage;
 
 pub use error::{StoreError, StoreFault};
 
@@ -17,3 +19,5 @@ pub use error::{StoreError, StoreFault};
 mod faults;
 #[cfg(test)]
 mod tests;
+
+pub mod command_failures;

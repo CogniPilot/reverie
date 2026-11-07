@@ -1,0 +1,198 @@
+[
+  {
+    "case": "null",
+    "owner": null,
+    "attempt": "52e035e9-a3d4-4b5a-89bf-a5867d635048",
+    "identity": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+    "session": "11111111-2222-4333-8444-555555555555",
+    "envelope": "/owned-retained-source/scratch/.reverie-retained-tmp/employee-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/52e035e9-a3d4-4b5a-89bf-a5867d635048",
+    "old": [
+      66308,
+      81265919
+    ],
+    "new": [
+      66308,
+      81265930
+    ],
+    "configDigest": "f2d38a8c0a664c92c77cb3331b2b9506e4944aae1a50e66cb462c7f26b074e54",
+    "reservationUntil": 1794127947.6975226,
+    "keep": "{\"purpose\": \"Retained old TMP; not disposable; separate reclamation admission required\"}",
+    "intent": "{\"attemptId\": \"52e035e9-a3d4-4b5a-89bf-a5867d635048\", \"configDigest\": \"f2d38a8c0a664c92c77cb3331b2b9506e4944aae1a50e66cb462c7f26b074e54\", \"deepTreeInspected\": false, \"freshStage\": \".cold-fresh-52e035e9-a3d4-4b5a-89bf-a5867d635048\", \"identity\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"oldDataDeleted\": false, \"oldDevice\": 66308, \"oldInode\": 81265919, \"owner\": null, \"referenceObservations\": {\"absenceOfReferencesProven\": false, \"allInitiallyEnumeratedProcessesVisited\": true, \"counts\": {\"fds\": 0, \"known\": 0, \"mapBytes\": 0, \"ownedProcesses\": 0, \"unixBytes\": 0, \"unknown\": 0}, \"knownReferences\": [], \"treeWalkPerformed\": false, \"unknownReferences\": []}, \"retainedData\": \"/owned-retained-source/scratch/.reverie-retained-tmp/employee-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/52e035e9-a3d4-4b5a-89bf-a5867d635048/data\", \"sessionId\": \"11111111-2222-4333-8444-555555555555\", \"state\": \"RETIREMENT_INTENT\", \"strategy\": \"retain-and-replace\", \"version\": 1}",
+    "prepared": "{\"attemptId\": \"52e035e9-a3d4-4b5a-89bf-a5867d635048\", \"deepTreeInspected\": false, \"identity\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"newDevice\": 66308, \"newInode\": 81265930, \"oldDataDeleted\": false, \"oldDevice\": 66308, \"oldInode\": 81265919, \"owner\": null, \"preservationMarker\": \"/owned-retained-source/scratch/.reverie-retained-tmp/employee-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/52e035e9-a3d4-4b5a-89bf-a5867d635048/.keep\", \"references\": {\"after\": {\"absenceOfReferencesProven\": false, \"allInitiallyEnumeratedProcessesVisited\": true, \"counts\": {\"fds\": 0, \"known\": 0, \"mapBytes\": 0, \"ownedProcesses\": 0, \"unixBytes\": 0, \"unknown\": 0}, \"knownReferences\": [], \"treeWalkPerformed\": false, \"unknownReferences\": []}, \"before\": {\"absenceOfReferencesProven\": false, \"allInitiallyEnumeratedProcessesVisited\": true, \"counts\": {\"fds\": 0, \"known\": 0, \"mapBytes\": 0, \"ownedProcesses\": 0, \"unixBytes\": 0, \"unknown\": 0}, \"knownReferences\": [], \"treeWalkPerformed\": false, \"unknownReferences\": []}}, \"reservationUntil\": 1794127947.6975226, \"retainedData\": \"/owned-retained-source/scratch/.reverie-retained-tmp/employee-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/52e035e9-a3d4-4b5a-89bf-a5867d635048/data\", \"sessionId\": \"11111111-2222-4333-8444-555555555555\", \"state\": \"OLD_TMP_RETAINED_FRESH_TMP_FENCED\", \"version\": 1}",
+    "pathRecord": "{\"version\": 1, \"path\": \"/owned-retained-source/scratch/.reverie-retained-tmp/employee-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/52e035e9-a3d4-4b5a-89bf-a5867d635048\", \"first_seen_utc\": 1794041547.6975558}\n",
+    "reservationRecord": "{\"version\": 1, \"path\": \"/owned-retained-source/scratch/.reverie-retained-tmp/employee-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/52e035e9-a3d4-4b5a-89bf-a5867d635048\", \"created_utc\": 1794041547.6975226, \"until_utc\": 1794127947.6975226, \"owner\": \"retained-cold-tmp\"}\n",
+    "native": {
+      "containerId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "image": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "pid": 123,
+      "startTick": "456"
+    },
+    "finishAccepted": true,
+    "bound": "{\"attemptId\": \"52e035e9-a3d4-4b5a-89bf-a5867d635048\", \"commitReferences\": [{\"absenceOfReferencesProven\": false, \"allInitiallyEnumeratedProcessesVisited\": true, \"counts\": {\"fds\": 0, \"known\": 0, \"mapBytes\": 0, \"ownedProcesses\": 0, \"unixBytes\": 0, \"unknown\": 0}, \"knownReferences\": [], \"treeWalkPerformed\": false, \"unknownReferences\": []}, {\"absenceOfReferencesProven\": false, \"allInitiallyEnumeratedProcessesVisited\": true, \"counts\": {\"fds\": 0, \"known\": 0, \"mapBytes\": 0, \"ownedProcesses\": 0, \"unixBytes\": 0, \"unknown\": 0}, \"knownReferences\": [], \"treeWalkPerformed\": false, \"unknownReferences\": []}], \"deepTreeInspected\": false, \"identity\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"nativeContainer\": {\"containerId\": \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\", \"image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"pid\": 123, \"startTick\": \"456\"}, \"newDevice\": 66308, \"newInode\": 81265930, \"oldDataDeleted\": false, \"oldDevice\": 66308, \"oldInode\": 81265919, \"owner\": null, \"permanentKeepMarker\": true, \"references\": {\"after\": {\"absenceOfReferencesProven\": false, \"allInitiallyEnumeratedProcessesVisited\": true, \"counts\": {\"fds\": 0, \"known\": 0, \"mapBytes\": 0, \"ownedProcesses\": 0, \"unixBytes\": 0, \"unknown\": 0}, \"knownReferences\": [], \"treeWalkPerformed\": false, \"unknownReferences\": []}, \"before\": {\"absenceOfReferencesProven\": false, \"allInitiallyEnumeratedProcessesVisited\": true, \"counts\": {\"fds\": 0, \"known\": 0, \"mapBytes\": 0, \"ownedProcesses\": 0, \"unixBytes\": 0, \"unknown\": 0}, \"knownReferences\": [], \"treeWalkPerformed\": false, \"unknownReferences\": []}}, \"requiresAbsentFenceForUse\": \"cold-tmp-cleanup.pending.json\", \"reservationUntil\": 1794127947.6975226, \"retainedData\": \"/owned-retained-source/scratch/.reverie-retained-tmp/employee-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/52e035e9-a3d4-4b5a-89bf-a5867d635048/data\", \"sessionId\": \"11111111-2222-4333-8444-555555555555\", \"state\": \"OLD_TMP_RETAINED_FRESH_TMP_BOUND_PENDING_RELEASE\", \"version\": 1}"
+  },
+  {
+    "case": "empty",
+    "owner": [],
+    "attempt": "e18e3dfa-d60b-414f-8340-c24b80921757",
+    "identity": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+    "session": "11111111-2222-4333-8444-555555555555",
+    "envelope": "/owned-retained-source/scratch/.reverie-retained-tmp/employee-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/e18e3dfa-d60b-414f-8340-c24b80921757",
+    "old": [
+      66308,
+      81265919
+    ],
+    "new": [
+      66308,
+      81265930
+    ],
+    "configDigest": "1c37c022588f5460b05dc128a6aae77503fc25cc7a3fb7d04e92790e4a043816",
+    "reservationUntil": 1794127947.7340946,
+    "keep": "{\"purpose\": \"Retained old TMP; not disposable; separate reclamation admission required\"}",
+    "intent": "{\"attemptId\": \"e18e3dfa-d60b-414f-8340-c24b80921757\", \"configDigest\": \"1c37c022588f5460b05dc128a6aae77503fc25cc7a3fb7d04e92790e4a043816\", \"deepTreeInspected\": false, \"freshStage\": \".cold-fresh-e18e3dfa-d60b-414f-8340-c24b80921757\", \"identity\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"oldDataDeleted\": false, \"oldDevice\": 66308, \"oldInode\": 81265919, \"owner\": \"\", \"referenceObservations\": {\"absenceOfReferencesProven\": false, \"allInitiallyEnumeratedProcessesVisited\": true, \"counts\": {\"fds\": 0, \"known\": 0, \"mapBytes\": 0, \"ownedProcesses\": 0, \"unixBytes\": 0, \"unknown\": 0}, \"knownReferences\": [], \"treeWalkPerformed\": false, \"unknownReferences\": []}, \"retainedData\": \"/owned-retained-source/scratch/.reverie-retained-tmp/employee-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/e18e3dfa-d60b-414f-8340-c24b80921757/data\", \"sessionId\": \"11111111-2222-4333-8444-555555555555\", \"state\": \"RETIREMENT_INTENT\", \"strategy\": \"retain-and-replace\", \"version\": 1}",
+    "prepared": "{\"attemptId\": \"e18e3dfa-d60b-414f-8340-c24b80921757\", \"deepTreeInspected\": false, \"identity\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"newDevice\": 66308, \"newInode\": 81265930, \"oldDataDeleted\": false, \"oldDevice\": 66308, \"oldInode\": 81265919, \"owner\": \"\", \"preservationMarker\": \"/owned-retained-source/scratch/.reverie-retained-tmp/employee-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/e18e3dfa-d60b-414f-8340-c24b80921757/.keep\", \"references\": {\"after\": {\"absenceOfReferencesProven\": false, \"allInitiallyEnumeratedProcessesVisited\": true, \"counts\": {\"fds\": 0, \"known\": 0, \"mapBytes\": 0, \"ownedProcesses\": 0, \"unixBytes\": 0, \"unknown\": 0}, \"knownReferences\": [], \"treeWalkPerformed\": false, \"unknownReferences\": []}, \"before\": {\"absenceOfReferencesProven\": false, \"allInitiallyEnumeratedProcessesVisited\": true, \"counts\": {\"fds\": 0, \"known\": 0, \"mapBytes\": 0, \"ownedProcesses\": 0, \"unixBytes\": 0, \"unknown\": 0}, \"knownReferences\": [], \"treeWalkPerformed\": false, \"unknownReferences\": []}}, \"reservationUntil\": 1794127947.7340946, \"retainedData\": \"/owned-retained-source/scratch/.reverie-retained-tmp/employee-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/e18e3dfa-d60b-414f-8340-c24b80921757/data\", \"sessionId\": \"11111111-2222-4333-8444-555555555555\", \"state\": \"OLD_TMP_RETAINED_FRESH_TMP_FENCED\", \"version\": 1}",
+    "pathRecord": "{\"version\": 1, \"path\": \"/owned-retained-source/scratch/.reverie-retained-tmp/employee-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/e18e3dfa-d60b-414f-8340-c24b80921757\", \"first_seen_utc\": 1794041547.7341275}\n",
+    "reservationRecord": "{\"version\": 1, \"path\": \"/owned-retained-source/scratch/.reverie-retained-tmp/employee-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/e18e3dfa-d60b-414f-8340-c24b80921757\", \"created_utc\": 1794041547.7340946, \"until_utc\": 1794127947.7340946, \"owner\": \"retained-cold-tmp\"}\n",
+    "native": {
+      "containerId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "image": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "pid": 123,
+      "startTick": "456"
+    },
+    "finishAccepted": true,
+    "bound": "{\"attemptId\": \"e18e3dfa-d60b-414f-8340-c24b80921757\", \"commitReferences\": [{\"absenceOfReferencesProven\": false, \"allInitiallyEnumeratedProcessesVisited\": true, \"counts\": {\"fds\": 0, \"known\": 0, \"mapBytes\": 0, \"ownedProcesses\": 0, \"unixBytes\": 0, \"unknown\": 0}, \"knownReferences\": [], \"treeWalkPerformed\": false, \"unknownReferences\": []}, {\"absenceOfReferencesProven\": false, \"allInitiallyEnumeratedProcessesVisited\": true, \"counts\": {\"fds\": 0, \"known\": 0, \"mapBytes\": 0, \"ownedProcesses\": 0, \"unixBytes\": 0, \"unknown\": 0}, \"knownReferences\": [], \"treeWalkPerformed\": false, \"unknownReferences\": []}], \"deepTreeInspected\": false, \"identity\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"nativeContainer\": {\"containerId\": \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\", \"image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"pid\": 123, \"startTick\": \"456\"}, \"newDevice\": 66308, \"newInode\": 81265930, \"oldDataDeleted\": false, \"oldDevice\": 66308, \"oldInode\": 81265919, \"owner\": \"\", \"permanentKeepMarker\": true, \"references\": {\"after\": {\"absenceOfReferencesProven\": false, \"allInitiallyEnumeratedProcessesVisited\": true, \"counts\": {\"fds\": 0, \"known\": 0, \"mapBytes\": 0, \"ownedProcesses\": 0, \"unixBytes\": 0, \"unknown\": 0}, \"knownReferences\": [], \"treeWalkPerformed\": false, \"unknownReferences\": []}, \"before\": {\"absenceOfReferencesProven\": false, \"allInitiallyEnumeratedProcessesVisited\": true, \"counts\": {\"fds\": 0, \"known\": 0, \"mapBytes\": 0, \"ownedProcesses\": 0, \"unixBytes\": 0, \"unknown\": 0}, \"knownReferences\": [], \"treeWalkPerformed\": false, \"unknownReferences\": []}}, \"requiresAbsentFenceForUse\": \"cold-tmp-cleanup.pending.json\", \"reservationUntil\": 1794127947.7340946, \"retainedData\": \"/owned-retained-source/scratch/.reverie-retained-tmp/employee-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/e18e3dfa-d60b-414f-8340-c24b80921757/data\", \"sessionId\": \"11111111-2222-4333-8444-555555555555\", \"state\": \"OLD_TMP_RETAINED_FRESH_TMP_BOUND_PENDING_RELEASE\", \"version\": 1}"
+  },
+  {
+    "case": "unicode-nul",
+    "owner": [
+      233,
+      0
+    ],
+    "attempt": "0a04eb4f-17fe-4566-a87e-7d415b808326",
+    "identity": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+    "session": "11111111-2222-4333-8444-555555555555",
+    "envelope": "/owned-retained-source/scratch/.reverie-retained-tmp/employee-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/0a04eb4f-17fe-4566-a87e-7d415b808326",
+    "old": [
+      66308,
+      81265919
+    ],
+    "new": [
+      66308,
+      81265930
+    ],
+    "configDigest": "00a1c2fd6989a99e9be9a576b5098b898d0575f110d0d3a09ad0be4f024b83d4",
+    "reservationUntil": 1794127947.7737012,
+    "keep": "{\"purpose\": \"Retained old TMP; not disposable; separate reclamation admission required\"}",
+    "intent": "{\"attemptId\": \"0a04eb4f-17fe-4566-a87e-7d415b808326\", \"configDigest\": \"00a1c2fd6989a99e9be9a576b5098b898d0575f110d0d3a09ad0be4f024b83d4\", \"deepTreeInspected\": false, \"freshStage\": \".cold-fresh-0a04eb4f-17fe-4566-a87e-7d415b808326\", \"identity\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"oldDataDeleted\": false, \"oldDevice\": 66308, \"oldInode\": 81265919, \"owner\": \"\\u00e9\\u0000\", \"referenceObservations\": {\"absenceOfReferencesProven\": false, \"allInitiallyEnumeratedProcessesVisited\": true, \"counts\": {\"fds\": 0, \"known\": 0, \"mapBytes\": 0, \"ownedProcesses\": 0, \"unixBytes\": 0, \"unknown\": 0}, \"knownReferences\": [], \"treeWalkPerformed\": false, \"unknownReferences\": []}, \"retainedData\": \"/owned-retained-source/scratch/.reverie-retained-tmp/employee-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/0a04eb4f-17fe-4566-a87e-7d415b808326/data\", \"sessionId\": \"11111111-2222-4333-8444-555555555555\", \"state\": \"RETIREMENT_INTENT\", \"strategy\": \"retain-and-replace\", \"version\": 1}",
+    "prepared": "{\"attemptId\": \"0a04eb4f-17fe-4566-a87e-7d415b808326\", \"deepTreeInspected\": false, \"identity\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"newDevice\": 66308, \"newInode\": 81265930, \"oldDataDeleted\": false, \"oldDevice\": 66308, \"oldInode\": 81265919, \"owner\": \"\\u00e9\\u0000\", \"preservationMarker\": \"/owned-retained-source/scratch/.reverie-retained-tmp/employee-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/0a04eb4f-17fe-4566-a87e-7d415b808326/.keep\", \"references\": {\"after\": {\"absenceOfReferencesProven\": false, \"allInitiallyEnumeratedProcessesVisited\": true, \"counts\": {\"fds\": 0, \"known\": 0, \"mapBytes\": 0, \"ownedProcesses\": 0, \"unixBytes\": 0, \"unknown\": 0}, \"knownReferences\": [], \"treeWalkPerformed\": false, \"unknownReferences\": []}, \"before\": {\"absenceOfReferencesProven\": false, \"allInitiallyEnumeratedProcessesVisited\": true, \"counts\": {\"fds\": 0, \"known\": 0, \"mapBytes\": 0, \"ownedProcesses\": 0, \"unixBytes\": 0, \"unknown\": 0}, \"knownReferences\": [], \"treeWalkPerformed\": false, \"unknownReferences\": []}}, \"reservationUntil\": 1794127947.7737012, \"retainedData\": \"/owned-retained-source/scratch/.reverie-retained-tmp/employee-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/0a04eb4f-17fe-4566-a87e-7d415b808326/data\", \"sessionId\": \"11111111-2222-4333-8444-555555555555\", \"state\": \"OLD_TMP_RETAINED_FRESH_TMP_FENCED\", \"version\": 1}",
+    "pathRecord": "{\"version\": 1, \"path\": \"/owned-retained-source/scratch/.reverie-retained-tmp/employee-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/0a04eb4f-17fe-4566-a87e-7d415b808326\", \"first_seen_utc\": 1794041547.773744}\n",
+    "reservationRecord": "{\"version\": 1, \"path\": \"/owned-retained-source/scratch/.reverie-retained-tmp/employee-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/0a04eb4f-17fe-4566-a87e-7d415b808326\", \"created_utc\": 1794041547.7737012, \"until_utc\": 1794127947.7737012, \"owner\": \"retained-cold-tmp\"}\n",
+    "native": {
+      "containerId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "image": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "pid": 123,
+      "startTick": "456"
+    },
+    "finishAccepted": true,
+    "bound": "{\"attemptId\": \"0a04eb4f-17fe-4566-a87e-7d415b808326\", \"commitReferences\": [{\"absenceOfReferencesProven\": false, \"allInitiallyEnumeratedProcessesVisited\": true, \"counts\": {\"fds\": 0, \"known\": 0, \"mapBytes\": 0, \"ownedProcesses\": 0, \"unixBytes\": 0, \"unknown\": 0}, \"knownReferences\": [], \"treeWalkPerformed\": false, \"unknownReferences\": []}, {\"absenceOfReferencesProven\": false, \"allInitiallyEnumeratedProcessesVisited\": true, \"counts\": {\"fds\": 0, \"known\": 0, \"mapBytes\": 0, \"ownedProcesses\": 0, \"unixBytes\": 0, \"unknown\": 0}, \"knownReferences\": [], \"treeWalkPerformed\": false, \"unknownReferences\": []}], \"deepTreeInspected\": false, \"identity\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"nativeContainer\": {\"containerId\": \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\", \"image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"pid\": 123, \"startTick\": \"456\"}, \"newDevice\": 66308, \"newInode\": 81265930, \"oldDataDeleted\": false, \"oldDevice\": 66308, \"oldInode\": 81265919, \"owner\": \"\\u00e9\\u0000\", \"permanentKeepMarker\": true, \"references\": {\"after\": {\"absenceOfReferencesProven\": false, \"allInitiallyEnumeratedProcessesVisited\": true, \"counts\": {\"fds\": 0, \"known\": 0, \"mapBytes\": 0, \"ownedProcesses\": 0, \"unixBytes\": 0, \"unknown\": 0}, \"knownReferences\": [], \"treeWalkPerformed\": false, \"unknownReferences\": []}, \"before\": {\"absenceOfReferencesProven\": false, \"allInitiallyEnumeratedProcessesVisited\": true, \"counts\": {\"fds\": 0, \"known\": 0, \"mapBytes\": 0, \"ownedProcesses\": 0, \"unixBytes\": 0, \"unknown\": 0}, \"knownReferences\": [], \"treeWalkPerformed\": false, \"unknownReferences\": []}}, \"requiresAbsentFenceForUse\": \"cold-tmp-cleanup.pending.json\", \"reservationUntil\": 1794127947.7737012, \"retainedData\": \"/owned-retained-source/scratch/.reverie-retained-tmp/employee-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/0a04eb4f-17fe-4566-a87e-7d415b808326/data\", \"sessionId\": \"11111111-2222-4333-8444-555555555555\", \"state\": \"OLD_TMP_RETAINED_FRESH_TMP_BOUND_PENDING_RELEASE\", \"version\": 1}"
+  },
+  {
+    "case": "lone-surrogate",
+    "owner": [
+      55296
+    ],
+    "attempt": "5ed39a0d-0fb2-4b3c-9d9a-e8d4c2357722",
+    "identity": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+    "session": "11111111-2222-4333-8444-555555555555",
+    "envelope": "/owned-retained-source/scratch/.reverie-retained-tmp/employee-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/5ed39a0d-0fb2-4b3c-9d9a-e8d4c2357722",
+    "old": [
+      66308,
+      81265919
+    ],
+    "new": [
+      66308,
+      81265930
+    ],
+    "configDigest": "66c664c2673c40ddca7d5d4ed22bc462ffabc7fbc069fe1b0c6069379db8ce1c",
+    "reservationUntil": 1794127947.8151138,
+    "keep": "{\"purpose\": \"Retained old TMP; not disposable; separate reclamation admission required\"}",
+    "intent": "{\"attemptId\": \"5ed39a0d-0fb2-4b3c-9d9a-e8d4c2357722\", \"configDigest\": \"66c664c2673c40ddca7d5d4ed22bc462ffabc7fbc069fe1b0c6069379db8ce1c\", \"deepTreeInspected\": false, \"freshStage\": \".cold-fresh-5ed39a0d-0fb2-4b3c-9d9a-e8d4c2357722\", \"identity\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"oldDataDeleted\": false, \"oldDevice\": 66308, \"oldInode\": 81265919, \"owner\": \"\\ud800\", \"referenceObservations\": {\"absenceOfReferencesProven\": false, \"allInitiallyEnumeratedProcessesVisited\": true, \"counts\": {\"fds\": 0, \"known\": 0, \"mapBytes\": 0, \"ownedProcesses\": 0, \"unixBytes\": 0, \"unknown\": 0}, \"knownReferences\": [], \"treeWalkPerformed\": false, \"unknownReferences\": []}, \"retainedData\": \"/owned-retained-source/scratch/.reverie-retained-tmp/employee-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/5ed39a0d-0fb2-4b3c-9d9a-e8d4c2357722/data\", \"sessionId\": \"11111111-2222-4333-8444-555555555555\", \"state\": \"RETIREMENT_INTENT\", \"strategy\": \"retain-and-replace\", \"version\": 1}",
+    "prepared": "{\"attemptId\": \"5ed39a0d-0fb2-4b3c-9d9a-e8d4c2357722\", \"deepTreeInspected\": false, \"identity\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"newDevice\": 66308, \"newInode\": 81265930, \"oldDataDeleted\": false, \"oldDevice\": 66308, \"oldInode\": 81265919, \"owner\": \"\\ud800\", \"preservationMarker\": \"/owned-retained-source/scratch/.reverie-retained-tmp/employee-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/5ed39a0d-0fb2-4b3c-9d9a-e8d4c2357722/.keep\", \"references\": {\"after\": {\"absenceOfReferencesProven\": false, \"allInitiallyEnumeratedProcessesVisited\": true, \"counts\": {\"fds\": 0, \"known\": 0, \"mapBytes\": 0, \"ownedProcesses\": 0, \"unixBytes\": 0, \"unknown\": 0}, \"knownReferences\": [], \"treeWalkPerformed\": false, \"unknownReferences\": []}, \"before\": {\"absenceOfReferencesProven\": false, \"allInitiallyEnumeratedProcessesVisited\": true, \"counts\": {\"fds\": 0, \"known\": 0, \"mapBytes\": 0, \"ownedProcesses\": 0, \"unixBytes\": 0, \"unknown\": 0}, \"knownReferences\": [], \"treeWalkPerformed\": false, \"unknownReferences\": []}}, \"reservationUntil\": 1794127947.8151138, \"retainedData\": \"/owned-retained-source/scratch/.reverie-retained-tmp/employee-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/5ed39a0d-0fb2-4b3c-9d9a-e8d4c2357722/data\", \"sessionId\": \"11111111-2222-4333-8444-555555555555\", \"state\": \"OLD_TMP_RETAINED_FRESH_TMP_FENCED\", \"version\": 1}",
+    "pathRecord": "{\"version\": 1, \"path\": \"/owned-retained-source/scratch/.reverie-retained-tmp/employee-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/5ed39a0d-0fb2-4b3c-9d9a-e8d4c2357722\", \"first_seen_utc\": 1794041547.8151584}\n",
+    "reservationRecord": "{\"version\": 1, \"path\": \"/owned-retained-source/scratch/.reverie-retained-tmp/employee-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/5ed39a0d-0fb2-4b3c-9d9a-e8d4c2357722\", \"created_utc\": 1794041547.8151138, \"until_utc\": 1794127947.8151138, \"owner\": \"retained-cold-tmp\"}\n",
+    "native": {
+      "containerId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "image": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "pid": 123,
+      "startTick": "456"
+    },
+    "finishAccepted": true,
+    "bound": "{\"attemptId\": \"5ed39a0d-0fb2-4b3c-9d9a-e8d4c2357722\", \"commitReferences\": [{\"absenceOfReferencesProven\": false, \"allInitiallyEnumeratedProcessesVisited\": true, \"counts\": {\"fds\": 0, \"known\": 0, \"mapBytes\": 0, \"ownedProcesses\": 0, \"unixBytes\": 0, \"unknown\": 0}, \"knownReferences\": [], \"treeWalkPerformed\": false, \"unknownReferences\": []}, {\"absenceOfReferencesProven\": false, \"allInitiallyEnumeratedProcessesVisited\": true, \"counts\": {\"fds\": 0, \"known\": 0, \"mapBytes\": 0, \"ownedProcesses\": 0, \"unixBytes\": 0, \"unknown\": 0}, \"knownReferences\": [], \"treeWalkPerformed\": false, \"unknownReferences\": []}], \"deepTreeInspected\": false, \"identity\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"nativeContainer\": {\"containerId\": \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\", \"image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"pid\": 123, \"startTick\": \"456\"}, \"newDevice\": 66308, \"newInode\": 81265930, \"oldDataDeleted\": false, \"oldDevice\": 66308, \"oldInode\": 81265919, \"owner\": \"\\ud800\", \"permanentKeepMarker\": true, \"references\": {\"after\": {\"absenceOfReferencesProven\": false, \"allInitiallyEnumeratedProcessesVisited\": true, \"counts\": {\"fds\": 0, \"known\": 0, \"mapBytes\": 0, \"ownedProcesses\": 0, \"unixBytes\": 0, \"unknown\": 0}, \"knownReferences\": [], \"treeWalkPerformed\": false, \"unknownReferences\": []}, \"before\": {\"absenceOfReferencesProven\": false, \"allInitiallyEnumeratedProcessesVisited\": true, \"counts\": {\"fds\": 0, \"known\": 0, \"mapBytes\": 0, \"ownedProcesses\": 0, \"unixBytes\": 0, \"unknown\": 0}, \"knownReferences\": [], \"treeWalkPerformed\": false, \"unknownReferences\": []}}, \"requiresAbsentFenceForUse\": \"cold-tmp-cleanup.pending.json\", \"reservationUntil\": 1794127947.8151138, \"retainedData\": \"/owned-retained-source/scratch/.reverie-retained-tmp/employee-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/5ed39a0d-0fb2-4b3c-9d9a-e8d4c2357722/data\", \"sessionId\": \"11111111-2222-4333-8444-555555555555\", \"state\": \"OLD_TMP_RETAINED_FRESH_TMP_BOUND_PENDING_RELEASE\", \"version\": 1}"
+  },
+  {
+    "case": "literal-pair",
+    "owner": [
+      55357,
+      56832
+    ],
+    "attempt": "4f0e577e-6847-4b70-9acc-b582f218b4cd",
+    "identity": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+    "session": "11111111-2222-4333-8444-555555555555",
+    "envelope": "/owned-retained-source/scratch/.reverie-retained-tmp/employee-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/4f0e577e-6847-4b70-9acc-b582f218b4cd",
+    "old": [
+      66308,
+      81265919
+    ],
+    "new": [
+      66308,
+      81265930
+    ],
+    "configDigest": "ce813049e7cf0e2ee1f1b365f789dcb1a4ca6bc7870b48a27b20b267877b2655",
+    "reservationUntil": 1794127947.8524687,
+    "keep": "{\"purpose\": \"Retained old TMP; not disposable; separate reclamation admission required\"}",
+    "intent": "{\"attemptId\": \"4f0e577e-6847-4b70-9acc-b582f218b4cd\", \"configDigest\": \"ce813049e7cf0e2ee1f1b365f789dcb1a4ca6bc7870b48a27b20b267877b2655\", \"deepTreeInspected\": false, \"freshStage\": \".cold-fresh-4f0e577e-6847-4b70-9acc-b582f218b4cd\", \"identity\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"oldDataDeleted\": false, \"oldDevice\": 66308, \"oldInode\": 81265919, \"owner\": \"\\ud83d\\ude00\", \"referenceObservations\": {\"absenceOfReferencesProven\": false, \"allInitiallyEnumeratedProcessesVisited\": true, \"counts\": {\"fds\": 0, \"known\": 0, \"mapBytes\": 0, \"ownedProcesses\": 0, \"unixBytes\": 0, \"unknown\": 0}, \"knownReferences\": [], \"treeWalkPerformed\": false, \"unknownReferences\": []}, \"retainedData\": \"/owned-retained-source/scratch/.reverie-retained-tmp/employee-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/4f0e577e-6847-4b70-9acc-b582f218b4cd/data\", \"sessionId\": \"11111111-2222-4333-8444-555555555555\", \"state\": \"RETIREMENT_INTENT\", \"strategy\": \"retain-and-replace\", \"version\": 1}",
+    "prepared": "{\"attemptId\": \"4f0e577e-6847-4b70-9acc-b582f218b4cd\", \"deepTreeInspected\": false, \"identity\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"newDevice\": 66308, \"newInode\": 81265930, \"oldDataDeleted\": false, \"oldDevice\": 66308, \"oldInode\": 81265919, \"owner\": \"\\ud83d\\ude00\", \"preservationMarker\": \"/owned-retained-source/scratch/.reverie-retained-tmp/employee-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/4f0e577e-6847-4b70-9acc-b582f218b4cd/.keep\", \"references\": {\"after\": {\"absenceOfReferencesProven\": false, \"allInitiallyEnumeratedProcessesVisited\": true, \"counts\": {\"fds\": 0, \"known\": 0, \"mapBytes\": 0, \"ownedProcesses\": 0, \"unixBytes\": 0, \"unknown\": 0}, \"knownReferences\": [], \"treeWalkPerformed\": false, \"unknownReferences\": []}, \"before\": {\"absenceOfReferencesProven\": false, \"allInitiallyEnumeratedProcessesVisited\": true, \"counts\": {\"fds\": 0, \"known\": 0, \"mapBytes\": 0, \"ownedProcesses\": 0, \"unixBytes\": 0, \"unknown\": 0}, \"knownReferences\": [], \"treeWalkPerformed\": false, \"unknownReferences\": []}}, \"reservationUntil\": 1794127947.8524687, \"retainedData\": \"/owned-retained-source/scratch/.reverie-retained-tmp/employee-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/4f0e577e-6847-4b70-9acc-b582f218b4cd/data\", \"sessionId\": \"11111111-2222-4333-8444-555555555555\", \"state\": \"OLD_TMP_RETAINED_FRESH_TMP_FENCED\", \"version\": 1}",
+    "pathRecord": "{\"version\": 1, \"path\": \"/owned-retained-source/scratch/.reverie-retained-tmp/employee-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/4f0e577e-6847-4b70-9acc-b582f218b4cd\", \"first_seen_utc\": 1794041547.8525205}\n",
+    "reservationRecord": "{\"version\": 1, \"path\": \"/owned-retained-source/scratch/.reverie-retained-tmp/employee-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/4f0e577e-6847-4b70-9acc-b582f218b4cd\", \"created_utc\": 1794041547.8524687, \"until_utc\": 1794127947.8524687, \"owner\": \"retained-cold-tmp\"}\n",
+    "native": {
+      "containerId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "image": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "pid": 123,
+      "startTick": "456"
+    },
+    "finishAccepted": false,
+    "finishError": "Cold temporary storage proof is unavailable"
+  },
+  {
+    "case": "scalar-nonbmp",
+    "owner": [
+      128512
+    ],
+    "attempt": "b4b77e6b-9d15-40a9-881e-fcb53e82c75d",
+    "identity": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+    "session": "11111111-2222-4333-8444-555555555555",
+    "envelope": "/owned-retained-source/scratch/.reverie-retained-tmp/employee-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/b4b77e6b-9d15-40a9-881e-fcb53e82c75d",
+    "old": [
+      66308,
+      81265919
+    ],
+    "new": [
+      66308,
+      81265930
+    ],
+    "configDigest": "57b4bb70d64088765b5dab02c57faf6dac45ac5655b4adb7c35249a1546c915c",
+    "reservationUntil": 1794127947.8869276,
+    "keep": "{\"purpose\": \"Retained old TMP; not disposable; separate reclamation admission required\"}",
+    "intent": "{\"attemptId\": \"b4b77e6b-9d15-40a9-881e-fcb53e82c75d\", \"configDigest\": \"57b4bb70d64088765b5dab02c57faf6dac45ac5655b4adb7c35249a1546c915c\", \"deepTreeInspected\": false, \"freshStage\": \".cold-fresh-b4b77e6b-9d15-40a9-881e-fcb53e82c75d\", \"identity\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"oldDataDeleted\": false, \"oldDevice\": 66308, \"oldInode\": 81265919, \"owner\": \"\\ud83d\\ude00\", \"referenceObservations\": {\"absenceOfReferencesProven\": false, \"allInitiallyEnumeratedProcessesVisited\": true, \"counts\": {\"fds\": 0, \"known\": 0, \"mapBytes\": 0, \"ownedProcesses\": 0, \"unixBytes\": 0, \"unknown\": 0}, \"knownReferences\": [], \"treeWalkPerformed\": false, \"unknownReferences\": []}, \"retainedData\": \"/owned-retained-source/scratch/.reverie-retained-tmp/employee-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/b4b77e6b-9d15-40a9-881e-fcb53e82c75d/data\", \"sessionId\": \"11111111-2222-4333-8444-555555555555\", \"state\": \"RETIREMENT_INTENT\", \"strategy\": \"retain-and-replace\", \"version\": 1}",
+    "prepared": "{\"attemptId\": \"b4b77e6b-9d15-40a9-881e-fcb53e82c75d\", \"deepTreeInspected\": false, \"identity\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"newDevice\": 66308, \"newInode\": 81265930, \"oldDataDeleted\": false, \"oldDevice\": 66308, \"oldInode\": 81265919, \"owner\": \"\\ud83d\\ude00\", \"preservationMarker\": \"/owned-retained-source/scratch/.reverie-retained-tmp/employee-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/b4b77e6b-9d15-40a9-881e-fcb53e82c75d/.keep\", \"references\": {\"after\": {\"absenceOfReferencesProven\": false, \"allInitiallyEnumeratedProcessesVisited\": true, \"counts\": {\"fds\": 0, \"known\": 0, \"mapBytes\": 0, \"ownedProcesses\": 0, \"unixBytes\": 0, \"unknown\": 0}, \"knownReferences\": [], \"treeWalkPerformed\": false, \"unknownReferences\": []}, \"before\": {\"absenceOfReferencesProven\": false, \"allInitiallyEnumeratedProcessesVisited\": true, \"counts\": {\"fds\": 0, \"known\": 0, \"mapBytes\": 0, \"ownedProcesses\": 0, \"unixBytes\": 0, \"unknown\": 0}, \"knownReferences\": [], \"treeWalkPerformed\": false, \"unknownReferences\": []}}, \"reservationUntil\": 1794127947.8869276, \"retainedData\": \"/owned-retained-source/scratch/.reverie-retained-tmp/employee-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/b4b77e6b-9d15-40a9-881e-fcb53e82c75d/data\", \"sessionId\": \"11111111-2222-4333-8444-555555555555\", \"state\": \"OLD_TMP_RETAINED_FRESH_TMP_FENCED\", \"version\": 1}",
+    "pathRecord": "{\"version\": 1, \"path\": \"/owned-retained-source/scratch/.reverie-retained-tmp/employee-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/b4b77e6b-9d15-40a9-881e-fcb53e82c75d\", \"first_seen_utc\": 1794041547.8869717}\n",
+    "reservationRecord": "{\"version\": 1, \"path\": \"/owned-retained-source/scratch/.reverie-retained-tmp/employee-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/b4b77e6b-9d15-40a9-881e-fcb53e82c75d\", \"created_utc\": 1794041547.8869276, \"until_utc\": 1794127947.8869276, \"owner\": \"retained-cold-tmp\"}\n",
+    "native": {
+      "containerId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "image": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "pid": 123,
+      "startTick": "456"
+    },
+    "finishAccepted": true,
+    "bound": "{\"attemptId\": \"b4b77e6b-9d15-40a9-881e-fcb53e82c75d\", \"commitReferences\": [{\"absenceOfReferencesProven\": false, \"allInitiallyEnumeratedProcessesVisited\": true, \"counts\": {\"fds\": 0, \"known\": 0, \"mapBytes\": 0, \"ownedProcesses\": 0, \"unixBytes\": 0, \"unknown\": 0}, \"knownReferences\": [], \"treeWalkPerformed\": false, \"unknownReferences\": []}, {\"absenceOfReferencesProven\": false, \"allInitiallyEnumeratedProcessesVisited\": true, \"counts\": {\"fds\": 0, \"known\": 0, \"mapBytes\": 0, \"ownedProcesses\": 0, \"unixBytes\": 0, \"unknown\": 0}, \"knownReferences\": [], \"treeWalkPerformed\": false, \"unknownReferences\": []}], \"deepTreeInspected\": false, \"identity\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"nativeContainer\": {\"containerId\": \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\", \"image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"pid\": 123, \"startTick\": \"456\"}, \"newDevice\": 66308, \"newInode\": 81265930, \"oldDataDeleted\": false, \"oldDevice\": 66308, \"oldInode\": 81265919, \"owner\": \"\\ud83d\\ude00\", \"permanentKeepMarker\": true, \"references\": {\"after\": {\"absenceOfReferencesProven\": false, \"allInitiallyEnumeratedProcessesVisited\": true, \"counts\": {\"fds\": 0, \"known\": 0, \"mapBytes\": 0, \"ownedProcesses\": 0, \"unixBytes\": 0, \"unknown\": 0}, \"knownReferences\": [], \"treeWalkPerformed\": false, \"unknownReferences\": []}, \"before\": {\"absenceOfReferencesProven\": false, \"allInitiallyEnumeratedProcessesVisited\": true, \"counts\": {\"fds\": 0, \"known\": 0, \"mapBytes\": 0, \"ownedProcesses\": 0, \"unixBytes\": 0, \"unknown\": 0}, \"knownReferences\": [], \"treeWalkPerformed\": false, \"unknownReferences\": []}}, \"requiresAbsentFenceForUse\": \"cold-tmp-cleanup.pending.json\", \"reservationUntil\": 1794127947.8869276, \"retainedData\": \"/owned-retained-source/scratch/.reverie-retained-tmp/employee-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/b4b77e6b-9d15-40a9-881e-fcb53e82c75d/data\", \"sessionId\": \"11111111-2222-4333-8444-555555555555\", \"state\": \"OLD_TMP_RETAINED_FRESH_TMP_BOUND_PENDING_RELEASE\", \"version\": 1}"
+  }
+]

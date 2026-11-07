@@ -55,23 +55,7 @@ impl Metadata {
             {
                 continue;
             }
-            let phase = text(field(row, "phase")).ok_or(IdentityDataError::PlanPhase)?;
-            if ![
-                "waiting",
-                "creating",
-                "starting",
-                "checking",
-                "stopping",
-                "completed",
-                "failed",
-                "recovery-required",
-                "quiescing",
-            ]
-            .iter()
-            .any(|value| phase.equals_ascii(value))
-            {
-                return Err(IdentityDataError::PlanPhase);
-            }
+            validate_phase(field(row, "phase"))?;
             let candidate = records
                 .records()
                 .iter()
@@ -90,5 +74,26 @@ impl Metadata {
             .iter()
             .find(|row| selected.contains(row.identity()))
             .cloned())
+    }
+}
+pub(crate) fn validate_phase(value: Option<&Value>) -> Result<()> {
+    let phase = text(value).ok_or(IdentityDataError::PlanPhase)?;
+    if [
+        "waiting",
+        "creating",
+        "starting",
+        "checking",
+        "stopping",
+        "completed",
+        "failed",
+        "recovery-required",
+        "quiescing",
+    ]
+    .iter()
+    .any(|value| phase.equals_ascii(value))
+    {
+        Ok(())
+    } else {
+        Err(IdentityDataError::PlanPhase)
     }
 }

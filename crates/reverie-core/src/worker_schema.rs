@@ -90,11 +90,54 @@ impl WorkerBase {
     pub fn max_workers(&self) -> u8 {
         self.maximum
     }
+    /// Source broker connection admission includes four control/viewer seats.
+    /// This is a configured bound, never permission to launch a worker.
+    pub fn connection_limit(&self) -> usize {
+        usize::from(self.maximum) + 4
+    }
     pub fn resources(&self) -> &ResourcePolicy {
         &self.resources
     }
 }
-fn name(value: &str, maximum: usize, container: bool) -> bool {
+
+/// The immutable identity/capacity of one installed worker service. Image and
+/// resources deliberately remain with the current validated configuration:
+/// both can change through their supported source refresh/reload paths.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct WorkerServiceIdentity {
+    deployment: String,
+    container: String,
+    ids: WorkerIds,
+    maximum: u8,
+    connections: usize,
+}
+impl WorkerServiceIdentity {
+    pub fn capture(base: &WorkerBase) -> Self {
+        Self {
+            deployment: base.deployment().to_owned(),
+            container: base.container().to_owned(),
+            ids: base.ids(),
+            maximum: base.max_workers(),
+            connections: base.connection_limit(),
+        }
+    }
+    pub fn deployment(&self) -> &str {
+        &self.deployment
+    }
+    pub fn container(&self) -> &str {
+        &self.container
+    }
+    pub fn ids(&self) -> WorkerIds {
+        self.ids
+    }
+    pub fn max_workers(&self) -> u8 {
+        self.maximum
+    }
+    pub fn connection_limit(&self) -> usize {
+        self.connections
+    }
+}
+pub(crate) fn name(value: &str, maximum: usize, container: bool) -> bool {
     let alphanumeric = |b: u8| {
         b.is_ascii_digit() || b.is_ascii_lowercase() || (container && b.is_ascii_uppercase())
     };
