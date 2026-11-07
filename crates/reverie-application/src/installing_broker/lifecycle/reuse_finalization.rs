@@ -32,6 +32,7 @@ impl LaptopLifecycle<'_> {
         let entry = self.guard.iter().find(|entry| &entry.session == session)?;
         match &entry.owner {
             LaptopOwner::Recovered(owner) => Some(owner.office.clone()),
+            LaptopOwner::Started(owner) => Some(owner.office.clone()),
             #[cfg(test)]
             LaptopOwner::Modeled => None,
         }
@@ -64,6 +65,15 @@ impl LaptopLifecycle<'_> {
                 if !original.is_some_and(|original| Arc::ptr_eq(original, &owner.office)) {
                     return Err(GateError::Refused("WORKER_REUSE_REGISTRATION_CHANGED").into());
                 }
+                owner.office.close_for_stopped_source(end)?;
+            }
+            LaptopOwner::Started(owner) => {
+                if !original.is_some_and(|original| Arc::ptr_eq(original, &owner.office)) {
+                    return Err(GateError::Refused("WORKER_REUSE_REGISTRATION_CHANGED").into());
+                }
+                // This existing component end is supplied after the actual
+                // caller's scope/lifecycle checks. The worker-purpose union
+                // must mint its default phone budget inside this exact branch.
                 owner.office.close_for_stopped_source(end)?;
             }
             #[cfg(test)]
