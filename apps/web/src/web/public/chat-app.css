@@ -557,6 +557,13 @@ html[data-skin='rose-pine-dawn'] .ca-root {
 .ca-company-settings { margin:auto; width:min(640px,calc(100vw - 32px)); max-width:none; max-height:80dvh; overflow:auto; box-sizing:border-box; }
 .ca-company-settings-head { display:flex; align-items:center; justify-content:space-between; gap:16px; }
 .ca-company-settings-head h2 { margin:0; font-size:20px; }
+.ca-fleet-resources { margin:16px 0; border-block:1px solid var(--ca-line); padding:12px 0; }
+.ca-fleet-form,.ca-fleet-policy { display:grid; gap:10px; min-width:0; }
+.ca-fleet-policy { border:1px solid var(--ca-line); border-radius:8px; padding:12px; }
+.ca-fleet-policy legend { font-weight:600; }
+.ca-fleet-policy .ca-label { min-width:0; }
+.ca-fleet-preview,.ca-fleet-operation { margin:12px 0; overflow-wrap:anywhere; }
+.ca-fleet-resources > button { margin:4px 8px 4px 0; }
 .ca-runtime-settings { margin:auto; width:min(600px,calc(100vw - 32px)); max-width:none; max-height:85dvh; overflow:auto; box-sizing:border-box; }
 .ca-runtime-settings h2 { margin:0 0 8px; font-size:20px; }
 .ca-runtime-form { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; margin:16px 0; }
