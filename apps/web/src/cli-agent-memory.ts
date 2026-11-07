@@ -8,7 +8,7 @@
  * and the skills that document this command see no change. Where this is stricter it says so (see `tighten`).
  */
 import type { Command } from 'commander';
-import { AgentGuardError, httpRequest, resolveAgentContext, type AgentDeps } from './cli-agent.js';
+import { AgentGuardError, httpRequest, resolveAgentContext, type AgentDeps, type ApiRequest } from './cli-agent.js';
 import { agentJournalRecall, agentJournalSave, journalRoom } from './cli-agent-journal.js';
 import { envValue } from './config/reverie-env.js';
 import { instanceDataDir, legacyRecall, parsePyJson, dumpPyJson, pyOsError, type PyJson } from './legacy-recall.js';
@@ -198,15 +198,45 @@ export async function agentMemory(deps: MemoryCliDeps): Promise<number> {
   }
 }
 
+/** Python bounded one whole journal command (its subprocess) to 60 seconds. */
+export const JOURNAL_BUDGET_MS = 60_000;
+/** The most one journal response may carry, enforced while it is read; python had no such cap. */
+export const JOURNAL_RESPONSE_MAX = 1024 * 1024;
+
+/**
+ * A transport whose every request in one journal command shares one absolute deadline (room resolution included) and
+ * the response cap. The transport destroys the request at its deadline or past the cap, so nothing is left running.
+ */
+export function budgeted(request: ApiRequest, budgetMs: number, clock: () => number = Date.now): ApiRequest {
+  const deadline = clock() + budgetMs;
+  return (ctx, options) => {
+    const left = Math.floor(deadline - clock());
+    if (left <= 0) return Promise.reject(new Error(`the journal command took longer than ${budgetMs} ms`));
+    const own = options.bounds;
+    return request(ctx, { ...options, bounds: {
+      maxBytes: Math.min(own?.maxBytes ?? JOURNAL_RESPONSE_MAX, JOURNAL_RESPONSE_MAX),
+      deadlineMs: Math.min(own?.deadlineMs ?? left, left),
+    } });
+  };
+}
+
+export interface SessionJournalOptions {
+  transport?: ApiRequest;
+  budgetMs?: number;
+  /** The credentials file reader resolveAgentContext uses; injectable so tests never read a real one. */
+  envFile?: () => Record<string, string>;
+}
+
 /** The journal as the session this process runs in, when the environment names one (python's test). */
-export function sessionJournal(env: NodeJS.ProcessEnv): JournalPort | undefined {
+export function sessionJournal(env: NodeJS.ProcessEnv, options: SessionJournalOptions = {}): JournalPort | undefined {
   if (!env.REVERIE_SESSION_ID) return undefined;
   return async (verb) => {
     const out: string[] = [];
     const err: string[] = [];
     let deps: AgentDeps;
     try {
-      deps = { ctx: resolveAgentContext(env), request: httpRequest, json: true,
+      deps = { ctx: resolveAgentContext(env, options.envFile),
+        request: budgeted(options.transport ?? httpRequest, options.budgetMs ?? JOURNAL_BUDGET_MS), json: true,
         io: { out: (line) => out.push(line), err: (line) => err.push(line) } };
     } catch (error) {
       if (error instanceof AgentGuardError) return { code: 4, out, err: [error.message] };
