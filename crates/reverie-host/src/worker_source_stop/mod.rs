@@ -3,6 +3,8 @@
 //! There is no separate Runtime source registry or caller-selected command.
 mod call;
 mod error;
+mod identity;
+mod ordinary;
 mod stop;
 #[cfg(test)]
 mod tests;
@@ -12,6 +14,10 @@ use crate::{
 };
 pub use error::SourceStopError;
 use error::{Result, need};
+use identity::StopIdentity;
+pub use ordinary::{
+    OrdinaryReplacementReturned, OrdinaryReplacementStop, OrdinaryStopRetainFailure,
+};
 use reverie_contracts::{
     worker_config::EffectiveWorkerConfig,
     worker_source_stop::{
@@ -38,9 +44,14 @@ enum Phase {
 /// Unknown calls and their exact resource owner survive local call settlement.
 #[must_use = "retain original source and its real pending calls until checked reconciliation"]
 pub struct OriginalSourceStop {
+    inner: ExactStopAttempt,
+}
+/// Private algorithm owner shared by two distinct actual resource transitions.
+/// Neither wrapper constructs the other's claim or application authority.
+struct ExactStopAttempt {
     origin: Arc<InstalledWorkerEngine>,
     storage: Option<Box<LaunchStorage>>,
-    name: SourceStopName,
+    name: StopIdentity,
     phase: Phase,
     deadline: Option<Instant>,
     inspection: Option<SourceStopInspection>,
@@ -82,26 +93,51 @@ impl WorkerRuntime {
             }));
         }
         Ok(OriginalSourceStop {
-            origin: self.installed_engine().clone(),
-            storage: Some(storage),
-            name,
-            phase: Phase::Held,
-            deadline,
-            inspection: None,
-            metadata: None,
-            original_start: None,
-            pending: None,
-            failure: None,
+            inner: ExactStopAttempt {
+                origin: self.installed_engine().clone(),
+                storage: Some(storage),
+                name: StopIdentity::Protected(name),
+                phase: Phase::Held,
+                deadline,
+                inspection: None,
+                metadata: None,
+                original_start: None,
+                pending: None,
+                failure: None,
+            },
         })
     }
 }
 impl OriginalSourceStop {
     pub fn policy_session(&self) -> &reverie_core::ids::ProfileSessionId {
-        self.name.session()
+        self.inner.name.session()
     }
     pub fn failure(&self) -> Option<&Arc<SourceStopError>> {
-        self.failure.as_ref()
+        self.inner.failure.as_ref()
     }
+    pub fn inspect(&mut self, runtime: &WorkerRuntime) -> Result<()> {
+        self.inner.inspect(runtime)
+    }
+    pub fn refuse_policy(&mut self, runtime: &WorkerRuntime) -> Result<()> {
+        self.inner.refuse_policy(runtime)
+    }
+    pub fn stop_after_policy(
+        &mut self,
+        runtime: &WorkerRuntime,
+        policy: &reverie_contracts::worker_config::WorkerPolicyDigest,
+    ) -> Result<()> {
+        self.inner.stop_after_policy(runtime, policy)
+    }
+    /// Only settle this protected owner's actual captured native call.
+    pub fn settle_native(&mut self, runtime: &WorkerRuntime, end: Instant) -> Result<()> {
+        self.inner.settle_native(runtime, end)
+    }
+    /// Application must requalify its original claim and all resource producers.
+    pub fn close_stopped_resource(&mut self, runtime: &WorkerRuntime, end: Instant) -> Result<()> {
+        self.inner.close_stopped_resource(runtime, end)
+    }
+}
+impl ExactStopAttempt {
     fn bound(&self, runtime: &WorkerRuntime) -> Result<()> {
         need(
             Arc::ptr_eq(&self.origin, runtime.installed_engine()),
@@ -124,7 +160,7 @@ impl OriginalSourceStop {
     }
     /// Check only this owner's actual captured native work. It cannot close a
     /// lease, resume an attempted stop or establish whole-service settlement.
-    pub fn settle_native(&mut self, runtime: &WorkerRuntime, end: Instant) -> Result<()> {
+    fn settle_native(&mut self, runtime: &WorkerRuntime, end: Instant) -> Result<()> {
         self.bound(runtime)?;
         if let Some(call) = &self.pending {
             self.origin
@@ -144,7 +180,7 @@ impl OriginalSourceStop {
     /// Only a known native stopped phase can attempt this actual resource close.
     /// Application must first requalify its SAME claim and inventory every actual
     /// producer. This confirms local consumption, never capacity/global release.
-    pub fn close_stopped_resource(&mut self, runtime: &WorkerRuntime, end: Instant) -> Result<()> {
+    fn close_stopped_resource(&mut self, runtime: &WorkerRuntime, end: Instant) -> Result<()> {
         self.bound(runtime)?;
         need(
             self.phase == Phase::Stopped,
@@ -170,7 +206,7 @@ impl OriginalSourceStop {
         }
     }
 }
-impl Drop for OriginalSourceStop {
+impl Drop for ExactStopAttempt {
     fn drop(&mut self) {
         // This is only process-lifetime quarantine, not a second active Runtime
         // registry or durable death fence. Existing STARTING/attempt readers

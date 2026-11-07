@@ -9,6 +9,7 @@ mod nix;
 mod observed;
 mod preparation;
 mod recovery_lifetime;
+mod replacement_stop;
 mod source;
 pub use observed::OwnedCreatePreparationError;
 pub(crate) use source::RegisteredSource;
@@ -21,6 +22,10 @@ pub use nix::{
     NetworkStorageError, NetworkStoragePreparation, NetworkStorageReclaimFailure,
     NetworkStorageRetainFailure, NetworkStorageReturned, NixStorageError, NixStoragePreparation,
     NixStorageReclaimFailure, NixStorageRetainFailure, NixStorageReturned,
+};
+pub use replacement_stop::{
+    ReplacementStopPreparation, ReplacementStopReclaimFailure, ReplacementStopRetainFailure,
+    ReplacementStopReturned,
 };
 use reverie_host::{
     worker_runtime::WorkerRuntime,
@@ -43,6 +48,7 @@ enum EntryOwner {
     Source(Arc<source::SourceRecord>),
     Nix(reverie_host::worker_nix::NixWorkflow),
     Laptop(reverie_host::worker_laptop::LaptopWorkflow),
+    ReplacementStop(Arc<Mutex<reverie_host::worker_source_stop::OrdinaryReplacementStop>>),
     Existing(Arc<reverie_host::worker_laptop::ExistingViewer>),
 }
 /// The original claim destination, shared by named resource transitions.
@@ -220,6 +226,11 @@ impl StorageRegistry {
         if matches!(entries[index].owner, EntryOwner::Source(_)) {
             return Err(StorageWorkflowError::refused(
                 "WORKER_ORIGINAL_SOURCE_RETAINED",
+            ));
+        }
+        if matches!(entries[index].owner, EntryOwner::ReplacementStop(_)) {
+            return Err(StorageWorkflowError::refused(
+                "WORKER_REPLACEMENT_STOP_RETAINED",
             ));
         }
         let entry = entries.remove(index);

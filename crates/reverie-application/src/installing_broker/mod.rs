@@ -41,7 +41,9 @@ pub use storage::{
     NetworkStorageError, NetworkStoragePreparation, NetworkStorageReclaimFailure,
     NetworkStorageRetainFailure, NetworkStorageReturned, NixStorageError, NixStoragePreparation,
     NixStorageReclaimFailure, NixStorageRetainFailure, NixStorageReturned,
-    OwnedCreatePreparationError, StorageClaim, StorageReleaseFailure, StorageWorkflowError,
+    OwnedCreatePreparationError, ReplacementStopPreparation, ReplacementStopReclaimFailure,
+    ReplacementStopRetainFailure, ReplacementStopReturned, StorageClaim, StorageReleaseFailure,
+    StorageWorkflowError,
 };
 pub use telemetry::TelemetryCloseError;
 struct CurrentInstalled {

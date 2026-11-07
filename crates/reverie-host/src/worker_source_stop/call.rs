@@ -4,7 +4,7 @@ use crate::{
     engine_metadata::{MAX_OUTPUT_BYTES, MAX_QUERY_SECONDS},
 };
 use std::{ffi::OsString, time::Duration};
-impl OriginalSourceStop {
+impl ExactStopAttempt {
     pub(super) fn read_end(&self) -> Instant {
         let end = Instant::now() + Duration::from_secs(MAX_QUERY_SECONDS);
         [self.deadline, self.origin.stop_deadline()]

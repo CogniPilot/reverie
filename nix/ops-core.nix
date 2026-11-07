@@ -1,5 +1,9 @@
 # Fixed ordinary-owner executor; this package installs no service, grant or policy.
 { pkgs, src }:
+let
+  # The expert-facing client is the native reverie-ops-cli; the daemon and installer remain here.
+  opsCli = import ./ops-cli.nix { inherit pkgs src; };
+in
 pkgs.runCommand "reverie-ops-core" { nativeBuildInputs = [ pkgs.makeWrapper pkgs.python3 ]; meta.platforms = pkgs.lib.platforms.linux; } ''
   mkdir -p "$out/lib/python/reverie" "$out/libexec" "$out/bin"
   cp ${src}/python/reverie/ops_*.py "$out/lib/python/reverie/"
@@ -10,7 +14,7 @@ pkgs.runCommand "reverie-ops-core" { nativeBuildInputs = [ pkgs.makeWrapper pkgs
   cat > "$out/libexec/ops-bootstrap.py" <<'PY'
 import pathlib,runpy,sys
 module=sys.argv.pop(1)
-if module not in ('reverie.ops_service','reverie.ops_installer','reverie.ops_cli'):raise SystemExit(2)
+if module not in ('reverie.ops_service','reverie.ops_installer'):raise SystemExit(2)
 sys.path.insert(0,str(pathlib.Path(__file__).resolve().parents[1]/'lib/python'))
 runpy.run_module(module,run_name='__main__')
 PY
@@ -21,7 +25,7 @@ manifest={'version':1,'systemctlExecutable':'${pkgs.systemd}/bin/systemctl','sou
 (root/'manifest.json').write_text(json.dumps(manifest,sort_keys=True,separators=(',',':'))+'\n')
 PY
   makeWrapper ${pkgs.python3}/bin/python3 "$out/bin/reverie-ops-daemon" --add-flags "-I -B $out/libexec/ops-bootstrap.py reverie.ops_service"
-  makeWrapper ${pkgs.python3}/bin/python3 "$out/bin/reverie-ops" --add-flags "-I -B $out/libexec/ops-bootstrap.py reverie.ops_cli"
+  ln -s ${opsCli}/bin/reverie-ops "$out/bin/reverie-ops"
   makeWrapper ${pkgs.python3}/bin/python3 "$out/bin/reverie-ops-service" --add-flags "-I -B $out/libexec/ops-bootstrap.py reverie.ops_installer" \
     --set REVERIE_OPS_LAUNCHER "$out/bin/reverie-ops-daemon" --set REVERIE_OPS_MANIFEST "$out/manifest.json" --prefix PATH : ${pkgs.lib.makeBinPath [ pkgs.systemd pkgs.nix ]}
   "$out/bin/reverie-ops-daemon" --help >/dev/null
