@@ -84,6 +84,14 @@ pub fn tmux_exec_args(
     command: &[MetadataText],
     attach: bool,
 ) -> Vec<MetadataText> {
+    tmux_exec_environment(name, command, attach, &[])
+}
+pub(super) fn tmux_exec_environment(
+    name: &reverie_core::worker_launch::ContainerReference<'_>,
+    command: &[MetadataText],
+    attach: bool,
+    environment: &[MetadataText],
+) -> Vec<MetadataText> {
     let mut args = vec![MetadataText::from_scalar_text("exec")];
     if attach {
         args.push(MetadataText::from_scalar_text("-it"));
@@ -101,6 +109,10 @@ pub fn tmux_exec_args(
         ]
         .map(MetadataText::from_scalar_text),
     );
+    for entry in environment {
+        args.push(MetadataText::from_scalar_text("--env"));
+        args.push(entry.clone());
+    }
     args.push(MetadataText::from_scalar_text(name.as_str()));
     args.extend(["/bin/tmux", "-u", "-L", "reverie-laptop"].map(MetadataText::from_scalar_text));
     args.extend_from_slice(command);

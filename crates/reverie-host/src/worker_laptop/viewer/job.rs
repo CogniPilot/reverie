@@ -19,7 +19,6 @@ struct State {
     cleanup_failure: Option<Arc<LaptopError>>,
     opaque: bool,
     term_sent: bool,
-    group_sent: bool,
 }
 struct ClosePlan {
     end: Instant,
@@ -54,6 +53,14 @@ impl Job {
         if super::test_hooks::input_close_failure() {
             process.refuse_input_close();
         }
+        #[cfg(test)]
+        if super::test_hooks::group_failure() {
+            process.refuse_group_result();
+        }
+        #[cfg(test)]
+        if super::test_hooks::probe_failure() {
+            process.refuse_probe_result();
+        }
         Arc::new(Self {
             capture: runtime.installed_engine().engine.client.viewer_capture(),
             origin: Arc::downgrade(runtime.installed_engine()),
@@ -67,7 +74,6 @@ impl Job {
                 cleanup_failure: None,
                 opaque: false,
                 term_sent: false,
-                group_sent: false,
             }),
             thread: Mutex::new(None),
             done: AtomicBool::new(false),
@@ -234,7 +240,7 @@ impl Job {
             std::thread::sleep(Duration::from_millis(1));
         }
     }
-    pub(super) fn failure(&self) -> Result<Option<Arc<LaptopError>>> {
+    pub(in crate::worker_laptop) fn failure(&self) -> Result<Option<Arc<LaptopError>>> {
         let state = self
             .state
             .try_lock()
@@ -265,13 +271,41 @@ impl Job {
         self.state.lock().unwrap().process.test_counts()
     }
     #[cfg(test)]
+    pub(in crate::worker_laptop) fn test_group_pending(&self) -> bool {
+        self.state.lock().unwrap().process.has_pending_native_work()
+    }
+    #[cfg(test)]
+    pub(in crate::worker_laptop) fn test_probe_count(&self) -> usize {
+        self.state.lock().unwrap().process.test_probes()
+    }
+    #[cfg(test)]
+    pub(in crate::worker_laptop) fn test_identity_consumed(&self) -> bool {
+        self.state.lock().unwrap().process.test_identity_consumed()
+    }
+    #[cfg(test)]
+    pub(in crate::worker_laptop) fn test_post_reap_group_signal(&self) -> Result<()> {
+        self.state
+            .lock()
+            .unwrap()
+            .process
+            .kill_group()
+            .map_err(LaptopError::Io)
+    }
+    #[cfg(test)]
+    pub(in crate::worker_laptop) fn test_kill_end(&self) -> Instant {
+        self.close.lock().unwrap().as_ref().unwrap().kill.unwrap()
+    }
+    #[cfg(test)]
     pub(in crate::worker_laptop) fn test_reap_exited(&self) -> Result<()> {
         // Owning fixture cleanup AFTER assertions of the actual expired product
         // budget/refusal. No signal/new grace; never used as product release.
         need(self.join()?, "TEST_CONSTRUCTOR_PENDING")?;
         let mut state = self.state.lock().unwrap();
         need(
-            state.process.reap().map_err(LaptopError::Io)?,
+            state
+                .process
+                .test_reap_abandoned()
+                .map_err(LaptopError::Io)?,
             "TEST_CHILD_STILL_RUNNING",
         )?;
         if let Some(pty) = state.pty.take() {
@@ -362,6 +396,7 @@ impl Job {
         loop {
             let bound = plan.end.min(requested);
             let end = self.clamp_deadline(bound)?;
+            let end = plan.kill.map_or(end, |kill| end.min(kill));
             if self.join()? && self.close_step(plan, end)? {
                 return Ok(());
             }
@@ -407,21 +442,23 @@ fn step(state: &mut State, plan: &mut ClosePlan, end: Instant) -> Result<bool> {
     }
     need(Instant::now() < end, "VIEWER_UNREAPED")?;
     state.process.finish_preparation();
-    if state.process.peek().map_err(LaptopError::Io)?.is_none() && !state.process.settled() {
+    let exited = state.process.peek().map_err(LaptopError::Io)?.is_some();
+    if !exited && !state.process.settled() {
         need(Instant::now() < end, "VIEWER_UNREAPED")?;
         if !state.term_sent {
             state.term_sent = true;
             state.process.terminate().map_err(LaptopError::Io)?;
         }
-        if Instant::now() >= plan.term && !state.group_sent {
-            state.group_sent = true;
-            plan.kill = Some((Instant::now() + Duration::from_millis(100)).min(end));
-            state.process.kill_group().map_err(LaptopError::Io)?;
-        }
-        if let Some(kill) = plan.kill {
-            need(Instant::now() < kill, "VIEWER_UNREAPED")?;
-        }
     }
+    // Compatibility correction: leader exit is not group completion. Keep its
+    // WNOWAIT pin through the final one-shot owned-group KILL decision even
+    // after TERM succeeded or the leader had already exited before close.
+    if state.process.needs_group_decision() && (exited || Instant::now() >= plan.term) {
+        plan.kill = Some((Instant::now() + Duration::from_millis(100)).min(end));
+        state.process.kill_group().map_err(LaptopError::Io)?;
+    }
+    let end = plan.kill.map_or(end, |kill| end.min(kill));
+    need(Instant::now() < end, "VIEWER_UNREAPED")?;
     if !state.process.reap().map_err(LaptopError::Io)? {
         return Ok(false);
     }
@@ -437,6 +474,13 @@ fn step(state: &mut State, plan: &mut ClosePlan, end: Instant) -> Result<bool> {
             }),
             None => close,
         });
+    }
+    if !state
+        .process
+        .observe_group_absent()
+        .map_err(LaptopError::Io)?
+    {
+        return Ok(false);
     }
     need(!state.opaque && state.process.settled(), "VIEWER_UNREAPED")?;
     Ok(true)

@@ -2,6 +2,7 @@
 //! subprocess. No Docker, company service, fabricated phase or raw PID permit.
 use super::*;
 mod admission;
+mod group;
 use crate::worker_storage::StorageLease;
 use reverie_core::worker_launch::TerminalSize;
 use std::sync::atomic::Ordering;
@@ -160,16 +161,15 @@ fn fixed_group_kill_follows_original_term_grace_and_never_targets_unrelated_chil
         return;
     }
     let fixture = Fixture::new("created-viewer-group");
-    let (_, _, released) = released(&fixture);
+    let (workflow, _, released) = released(&fixture);
     let viewer = start(&fixture, &released);
     let unrelated = Fixture::new("created-viewer-echo");
     let (_, _, other) = self::released(&unrelated);
     let other = start(&unrelated, &other);
     let before = Instant::now();
-    fixture
+    let result = fixture
         .runtime()
-        .close_laptop_viewer(&viewer, before + Duration::from_secs(8))
-        .unwrap();
+        .close_laptop_viewer(&viewer, before + Duration::from_secs(8));
     assert!(before.elapsed() >= Duration::from_secs(5));
     assert_eq!(
         fixture.runtime().laptop_viewer_status(&viewer).unwrap(),
@@ -182,6 +182,7 @@ fn fixed_group_kill_follows_original_term_grace_and_never_targets_unrelated_chil
             stat.rsplit_once(") ").unwrap().1.starts_with("Z ")
         })
     });
+    group::classify_group_close(&fixture, &workflow, result);
     assert_eq!(
         unrelated.runtime().laptop_viewer_status(&other).unwrap(),
         None
@@ -375,9 +376,9 @@ fn real_parent_descriptor_close_refusal_retains_child_and_never_retries_consumed
         .clone();
     assert!(job.close(fixture.runtime(), end()).is_err());
     assert_eq!(job.status().unwrap(), Some(-15));
-    assert_eq!(job.native_counts(), (1, 0));
+    assert_eq!(job.native_counts(), (1, 1));
     assert!(job.close(fixture.runtime(), end()).is_err());
-    assert_eq!(job.native_counts(), (1, 0));
+    assert_eq!(job.native_counts(), (1, 1));
     assert!(StorageLease::acquire_migration(&fixture.source, &sid()).is_err());
     assert!(fixture.runtime().close(end()).is_err());
 }

@@ -4,6 +4,7 @@ use std::{env,fs::{self,OpenOptions},io::Write,path::Path,time::{Instant,Duratio
 fn main() {
     let args=env::args().skip(1).collect::<Vec<_>>();
     if args==["--viewer-descendant"] { viewer_descendant();return; }
+    if args==["--viewer-early-group-control"] { viewer_early_group_control();return; }
     let mode=env::var("LAPTOP_FIXTURE_MODE").unwrap();
     let mut trace=OpenOptions::new().append(true).create(true).open("trace").unwrap();
     writeln!(trace,"{}",args.join("\0")).unwrap();drop(trace);
@@ -144,7 +145,14 @@ fn viewer_descendant() {
     // SAFETY: fixed SIGTERM ignore in this isolated owned fixture only.
     unsafe { signal(15,1); }
     fs::write("viewer-descendant",std::process::id().to_string()).unwrap();
-    std::thread::sleep(Duration::from_secs(20));
+    let end=Instant::now()+Duration::from_secs(20);
+    while Instant::now()<end && !Path::new("release-viewer-descendant").exists() {std::thread::sleep(Duration::from_millis(1));}
+}
+fn viewer_early_group_control() {
+    let _child=std::process::Command::new(env::current_exe().unwrap()).arg("--viewer-descendant").spawn().unwrap();
+    let end=Instant::now()+Duration::from_secs(3);
+    while !Path::new("viewer-descendant").exists() {assert!(Instant::now()<end);std::thread::sleep(Duration::from_millis(1));}
+    std::process::exit(7);
 }
 fn viewer(args:&[String],mode:&str) {
     use std::io::Read;
@@ -161,12 +169,13 @@ fn viewer(args:&[String],mode:&str) {
     let tail=stat.rsplit_once(") ").unwrap().1.split_whitespace().collect::<Vec<_>>();
     let pid=std::process::id().to_string();assert_eq!(tail[2],pid);assert_eq!(tail[3],pid);
     fs::write("viewer-identity",format!("{pid} {} {}",tail[2],tail[3])).unwrap();
-    if mode=="created-viewer-group" {
-        unsafe { signal(15,1); }
+    if mode=="created-viewer-group" || mode=="created-viewer-early-group" {
+        if mode=="created-viewer-group" {unsafe { signal(15,1); }}
         let _child=std::process::Command::new(env::current_exe().unwrap()).arg("--viewer-descendant").spawn().unwrap();
         let end=Instant::now()+Duration::from_secs(3);while !Path::new("viewer-descendant").exists() {assert!(Instant::now()<end);std::thread::sleep(Duration::from_millis(1));}
     }
     fs::write("viewer-ready",marker).unwrap();
+    if mode=="created-viewer-early-group" {std::process::exit(7);}
     if mode=="created-viewer-exit" { std::io::stdout().write_all(b"LAST").unwrap();std::process::exit(7); }
     if mode=="created-viewer-group" {std::thread::sleep(Duration::from_secs(20));return;}
     loop {

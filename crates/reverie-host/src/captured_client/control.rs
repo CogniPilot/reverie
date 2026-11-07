@@ -123,25 +123,7 @@ impl CapturedClient {
         if !job.same_capture(&self.bootstrap) {
             return Err(EngineError::new(EngineFault::Identity));
         }
-        let mut active = loop {
-            let end = viewer_deadline(job, deadline)?;
-            if Instant::now() >= end {
-                return Err(EngineError::pending(
-                    EngineFault::Deadline,
-                    CleanupFault::Supervisor,
-                ));
-            }
-            match self.active.try_lock() {
-                Ok(active) => break active,
-                Err(TryLockError::Poisoned(_)) => {
-                    return Err(EngineError::pending(
-                        EngineFault::Supervisor,
-                        CleanupFault::Supervisor,
-                    ));
-                }
-                Err(TryLockError::WouldBlock) => tick(end),
-            }
-        };
+        let mut active = self.viewer_slot(job, deadline)?;
         let same = matches!(active.as_ref(),Some(Active::ViewerConstructor(current)) if Arc::ptr_eq(current,job));
         if !same || self.closing.load(Ordering::Acquire) || !job.handoff_ready() {
             return Err(EngineError::pending(
@@ -162,23 +144,19 @@ impl CapturedClient {
         }
         job.close_captured(deadline)
             .map_err(|_| EngineError::pending(EngineFault::Finalization, CleanupFault::Unreaped))?;
+        let mut active = self.viewer_slot(job, deadline)?;
+        if matches!(active.as_ref(),Some(Active::ViewerConstructor(current)) if Arc::ptr_eq(current,job))
+        {
+            *active = None;
+        }
+        Ok(())
+    }
+    fn viewer_slot(
+        &self,
+        job: &crate::worker_laptop::ViewerJob,
+        deadline: Instant,
+    ) -> Result<std::sync::MutexGuard<'_, Option<Active>>> {
         loop {
-            match self.active.try_lock() {
-                Ok(mut active) => {
-                    if matches!(active.as_ref(),Some(Active::ViewerConstructor(current)) if Arc::ptr_eq(current,job))
-                    {
-                        *active = None;
-                    }
-                    return Ok(());
-                }
-                Err(TryLockError::Poisoned(_)) => {
-                    return Err(EngineError::pending(
-                        EngineFault::Supervisor,
-                        CleanupFault::Supervisor,
-                    ));
-                }
-                Err(TryLockError::WouldBlock) => {}
-            }
             let end = viewer_deadline(job, deadline)?;
             if Instant::now() >= end {
                 return Err(EngineError::pending(
@@ -186,7 +164,16 @@ impl CapturedClient {
                     CleanupFault::Supervisor,
                 ));
             }
-            tick(end);
+            match self.active.try_lock() {
+                Ok(active) => return Ok(active),
+                Err(TryLockError::Poisoned(_)) => {
+                    return Err(EngineError::pending(
+                        EngineFault::Supervisor,
+                        CleanupFault::Supervisor,
+                    ));
+                }
+                Err(TryLockError::WouldBlock) => tick(end),
+            }
         }
     }
     /// This does not clear a fence or turn a negative close into success. A

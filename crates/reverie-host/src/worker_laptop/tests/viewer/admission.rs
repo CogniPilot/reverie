@@ -277,3 +277,38 @@ fn old_query_settlement_cannot_clear_the_actual_pending_viewer_variant() {
         .close_laptop_viewer(&viewer, end())
         .unwrap();
 }
+#[test]
+fn consumed_close_uncertainty_is_refused_not_complete_and_drop_retains_actual_origin() {
+    if isolated("consumed_close_uncertainty_is_refused_not_complete_and_drop_retains_actual_origin")
+    {
+        return;
+    }
+    let fixture = Fixture::employee("created-viewer-echo");
+    let weak = Arc::downgrade(fixture.runtime().installed_engine());
+    let (workflow, _, released) = released(&fixture);
+    super::super::super::viewer::test_hooks::refuse_next_input_close();
+    assert!(matches!(
+        fixture
+            .runtime()
+            .start_laptop_viewer_session(&released, end())
+            .unwrap(),
+        ViewerStart::Retained
+    ));
+    let client = fixture.runtime().installed_engine().engine.client.clone();
+    assert!(
+        matches!(
+            client.shutdown(end()),
+            reverie_core::shutdown::ShutdownStatus::Refused(_)
+        ),
+        "consumed descriptor uncertainty is not a known live handle, and cannot become Complete"
+    );
+    assert!(fixture.runtime().close(end()).is_err());
+    drop(client);
+    drop(released);
+    drop(workflow);
+    drop(fixture);
+    assert!(
+        weak.upgrade().is_some(),
+        "actual created/storage/Office owners survive abandonment"
+    );
+}

@@ -6,6 +6,8 @@ thread_local! { static NEXT: RefCell<Option<Arc<Gate>>> = const { RefCell::new(N
 thread_local! { static INPUT_CLOSE: Cell<bool> = const { Cell::new(false) }; }
 thread_local! { static WRITE: RefCell<Option<Arc<Gate>>> = const { RefCell::new(None) }; }
 thread_local! { static BUSY: RefCell<Option<Arc<Gate>>> = const { RefCell::new(None) }; }
+thread_local! { static GROUP_FAILURE: Cell<bool> = const { Cell::new(false) }; }
+thread_local! { static PROBE_FAILURE: Cell<bool> = const { Cell::new(false) }; }
 pub(in crate::worker_laptop) fn next_constructor(gate: Arc<Gate>) {
     NEXT.with(|next| *next.borrow_mut() = Some(gate));
 }
@@ -38,4 +40,16 @@ pub(super) fn admission_busy() {
         gate.entered
             .store(true, std::sync::atomic::Ordering::Release);
     }
+}
+pub(in crate::worker_laptop) fn refuse_next_group_result() {
+    GROUP_FAILURE.set(true);
+}
+pub(in crate::worker_laptop) fn refuse_next_probe_result() {
+    PROBE_FAILURE.set(true);
+}
+pub(super) fn group_failure() -> bool {
+    GROUP_FAILURE.replace(false)
+}
+pub(super) fn probe_failure() -> bool {
+    PROBE_FAILURE.replace(false)
 }

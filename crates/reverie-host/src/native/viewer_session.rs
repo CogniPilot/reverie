@@ -14,6 +14,16 @@ use std::{
     },
     process::{Child, Command},
 };
+#[derive(Default)]
+enum Group {
+    #[default]
+    Unstarted,
+    Anchored,
+    DecisionUnconfirmed,
+    DecisionConfirmed(i32),
+    AwaitingGroupAbsence(i32),
+    Absent,
+}
 
 #[derive(Default)]
 pub(crate) struct ViewerProcess {
@@ -24,12 +34,19 @@ pub(crate) struct ViewerProcess {
     status: Option<ProcessStatus>,
     uncertain: bool,
     attempted: bool,
+    group: Group,
     #[cfg(test)]
     input_close_failure: bool,
     #[cfg(test)]
     input_closes: usize,
     #[cfg(test)]
     group_dispatches: usize,
+    #[cfg(test)]
+    group_failure: bool,
+    #[cfg(test)]
+    probe_failure: bool,
+    #[cfg(test)]
+    probes: usize,
 }
 impl ViewerProcess {
     pub(crate) fn prepare(&mut self, slave: BorrowedFd<'_>) -> io::Result<()> {
@@ -79,7 +96,10 @@ impl ViewerProcess {
         // Publish Child before any fallible parent finalizer. A late constructor
         // still owns this same struct under its registered job mutex.
         match result {
-            Ok(child) => self.child = Some(child),
+            Ok(child) => {
+                self.child = Some(child);
+                self.group = Group::Anchored;
+            }
             Err(error) => {
                 // An attempted constructor with no returned Child cannot mint
                 // a no-start/settled receipt. Preserve the original failure and
@@ -157,19 +177,30 @@ impl ViewerProcess {
         })
     }
     pub(crate) fn kill_group(&mut self) -> io::Result<()> {
-        if self.status.is_some() {
+        if self.status.is_some() || !matches!(self.group, Group::Anchored) {
             return Err(io::ErrorKind::NotConnected.into());
         }
-        reaping_policy()?;
-        // Successful waitid/WNOWAIT also verifies our original child is STILL
-        // waitable/live. SIGCHLD default and the service's exclusive child owner
-        // forbid an automatic/foreign reap between this check and killpg.
-        self.peek()?;
         let child = self.child.as_ref().ok_or(io::ErrorKind::NotConnected)?;
         let group = i32::try_from(child.id()).map_err(|_| io::ErrorKind::InvalidData)?;
         if group <= 1 {
             return Err(io::ErrorKind::InvalidData.into());
         }
+        // Closed one-shot transition BEFORE validation/dispatch. A failure may
+        // retain/reap the original child, but never retries a numeric signal.
+        self.group = Group::DecisionUnconfirmed;
+        let result = self.signal_anchored_group(group);
+        if result.is_ok() {
+            self.group = Group::DecisionConfirmed(group);
+        } else {
+            self.uncertain = true;
+        }
+        result
+    }
+    fn signal_anchored_group(&mut self, group: i32) -> io::Result<()> {
+        reaping_policy()?;
+        // These checks rely on the service's no-foreign-reaper invariant; they
+        // cannot exclude an independently mutated disposition or foreign wait.
+        self.peek()?;
         // SAFETY: this private Child was spawned ONLY with setsid before its
         // pidfd handoff. Its unreaped leader pins PID==PGID; no caller PID/name
         // enters here. Session leaders cannot change their own process group.
@@ -179,6 +210,10 @@ impl ViewerProcess {
         }
         let result = unsafe { libc::kill(-group, libc::SIGKILL) };
         if result == 0 || io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH) {
+            #[cfg(test)]
+            if self.group_failure {
+                return Err(io::Error::from_raw_os_error(libc::EIO));
+            }
             Ok(())
         } else {
             Err(io::Error::last_os_error())
@@ -188,12 +223,21 @@ impl ViewerProcess {
         if self.status.is_some() {
             return Ok(true);
         }
-        let Some(fd) = self.pidfd.as_ref() else {
+        let Some(_) = self.pidfd.as_ref() else {
             return Ok(self.child.is_none());
         };
+        let group = match self.group {
+            Group::DecisionConfirmed(group) => group,
+            _ => return Ok(false),
+        };
+        self.reap_identity(group)
+    }
+    fn reap_identity(&mut self, group: i32) -> io::Result<bool> {
+        let fd = self.pidfd.as_ref().ok_or(io::ErrorKind::NotConnected)?;
         if let Some(status) = process::reap_status(fd)? {
             self.status = Some(status);
             self.child = None;
+            self.group = Group::AwaitingGroupAbsence(group);
             // Consuming the descriptor after the terminal transition prevents
             // any later fixed signal. A refused close remains sticky.
             let fd = self.pidfd.take().expect("owned identity");
@@ -209,6 +253,7 @@ impl ViewerProcess {
             && self.pidfd.is_none()
             && self.input.is_none()
             && self.handshake.is_none()
+            && matches!(self.group, Group::Unstarted | Group::Absent)
     }
     pub(crate) fn handoff_ready(&self) -> bool {
         !self.uncertain
@@ -217,6 +262,7 @@ impl ViewerProcess {
             && self.status.is_none()
             && self.input.is_none()
             && self.handshake.is_none()
+            && matches!(self.group, Group::Anchored)
     }
     pub(crate) fn has_pending_native_work(&self) -> bool {
         self.child.is_some()
@@ -224,10 +270,69 @@ impl ViewerProcess {
             || self.input.is_some()
             || self.handshake.is_some()
             || (self.attempted && self.status.is_none())
+            || !matches!(self.group, Group::Unstarted | Group::Absent)
+    }
+    pub(crate) fn needs_group_decision(&self) -> bool {
+        matches!(self.group, Group::Anchored)
+    }
+    pub(crate) fn observe_group_absent(&mut self) -> io::Result<bool> {
+        let group = match self.group {
+            Group::Unstarted | Group::Absent => return Ok(true),
+            Group::AwaitingGroupAbsence(group) => group,
+            _ => return Ok(false),
+        };
+        // SAFETY: this closed state retains only the original Child-derived
+        // PGID. Signal ZERO is permanently fixed: no delivery occurs and no
+        // destructive operation is possible after reap. Kernel group existence
+        // prevents ESRCH while an old member remains; reuse only retains us.
+        let result = unsafe { libc::kill(-group, 0) };
+        #[cfg(test)]
+        {
+            self.probes += 1;
+            if self.probe_failure {
+                return Err(io::Error::from_raw_os_error(libc::EIO));
+            }
+        }
+        if result == 0 {
+            return Ok(false);
+        }
+        let error = io::Error::last_os_error();
+        if error.raw_os_error() == Some(libc::ESRCH) {
+            self.group = Group::Absent;
+            Ok(true)
+        } else {
+            Err(error)
+        }
+    }
+    #[cfg(test)]
+    pub(crate) fn test_reap_abandoned(&mut self) -> io::Result<bool> {
+        if self.status.is_some() {
+            return Ok(true);
+        }
+        let group = i32::try_from(self.child.as_ref().ok_or(io::ErrorKind::NotConnected)?.id())
+            .map_err(|_| io::ErrorKind::InvalidData)?;
+        self.uncertain = true;
+        self.reap_identity(group)
     }
     #[cfg(test)]
     pub(crate) fn refuse_input_close(&mut self) {
         self.input_close_failure = true;
+    }
+    #[cfg(test)]
+    pub(crate) fn refuse_group_result(&mut self) {
+        self.group_failure = true;
+    }
+    #[cfg(test)]
+    pub(crate) fn refuse_probe_result(&mut self) {
+        self.probe_failure = true;
+    }
+    #[cfg(test)]
+    pub(crate) fn test_probes(&self) -> usize {
+        self.probes
+    }
+    #[cfg(test)]
+    pub(crate) fn test_identity_consumed(&self) -> bool {
+        self.status.is_some() && self.child.is_none() && self.pidfd.is_none()
     }
     #[cfg(test)]
     pub(crate) fn external_reap(&self) -> io::Result<Option<ProcessStatus>> {
