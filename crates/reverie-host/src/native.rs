@@ -20,6 +20,7 @@ mod memory_namespace;
 mod memory_profile;
 pub(crate) mod ordered_exec;
 pub(crate) mod owned_process;
+pub(crate) mod viewer_session;
 pub(crate) use child_record::unlink as unlink_child_record;
 pub(crate) use child_record::{
     create_private as create_child_receipt, publish as publish_child_receipt,

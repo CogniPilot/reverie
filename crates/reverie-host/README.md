@@ -433,6 +433,18 @@ admission and publish canonical release before starting a viewer. Any later
 forward consumer must recheck the same record's current phase; an old token
 cannot revive a record that entered terminal container cleanup.
 
+`start_laptop_viewer_session` retains its concrete PTY/session constructor in
+the same bounded laptop record before native work. It shares the existing
+captured-client constructor slot, then hands the running viewer to that record
+after joined construction and checked finalizers. Forward I/O holds the same
+record through each operation. Cleanup retains the original leader until its
+final owned-group decision, then confirms group absence without further signal
+delivery. Failed or incomplete cleanup keeps the actual owners. See the
+[viewer boundary](src/worker_laptop/viewer/README.md) for the measured legacy
+cleanup correction, original deadlines and remaining transport/reuse joins.
+This created-only primitive does not establish application admission release,
+guest resize acknowledgement or whole-service/resource settlement.
+
 New-target cleanup accepts only the canonical CID retained from that actual
 create, never a recycled name or a caller CID. It preserves stop/inspect/kill/
 inspect order but requires an exact, known stopped state. Missing/failed inspect,

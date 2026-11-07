@@ -5,6 +5,7 @@ mod guard;
 mod pane;
 mod publication;
 mod reference;
+mod viewer;
 use super::*;
 use crate::{
     engine_metadata::EngineBootstrap,

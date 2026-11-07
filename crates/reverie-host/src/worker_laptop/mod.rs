@@ -14,6 +14,7 @@ mod publication;
 mod start;
 #[cfg(test)]
 mod tests;
+mod viewer;
 use crate::{
     installed_worker_engine::InstalledWorkerEngine,
     office::OfficePhone,
@@ -35,6 +36,8 @@ use std::{
     sync::{Arc, Mutex, OnceLock},
     time::Instant,
 };
+pub(crate) use viewer::ViewerJob;
+pub use viewer::{ViewerSession, ViewerStart};
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum LaptopNetworkProgress {
     Ready,
@@ -81,6 +84,7 @@ struct Record {
     settlement: Option<crate::engine_metadata::EngineError>,
     creation: Option<create::Creation>,
     cleanup: Option<cleanup::Cleanup>,
+    viewer: Option<Arc<viewer::ViewerJob>>,
 }
 impl Record {
     fn resources(&self) -> &Resources {
@@ -244,6 +248,7 @@ impl Workflows {
             settlement: None,
             creation: None,
             cleanup: None,
+            viewer: None,
         }));
         records.push(record.clone());
         Ok(LaptopWorkflow {
@@ -359,6 +364,15 @@ impl Workflows {
             record.outcome = Some(Err(Arc::new(LaptopError::Refused("WORKER_LAPTOP_STOPPED"))));
             record.phase = Phase::Known;
         }
+        let viewer = record.viewer.clone();
+        let viewer_result = viewer.map_or(Ok(()), |job| {
+            runtime
+                .installed_engine()
+                .engine
+                .client
+                .settle_viewer(&job, deadline)
+                .map_err(|error| LaptopError::Engine(error.into()))
+        });
         if let Some(call) = &record.pending {
             let deadline = runtime
                 .stop_deadline()
@@ -375,21 +389,24 @@ impl Workflows {
                 }
                 Err(error) => {
                     record.settlement = Some(error.clone().into());
-                    return Err(LaptopError::Engine(error.into()));
+                    return finalized(viewer_result, Err(LaptopError::Engine(error.into())));
                 }
             }
         }
         if !record.unknown && record.phase == Phase::Retained && record.outcome.is_some() {
             record.phase = Phase::Known;
         }
-        need(
-            !record.unknown
-                && record.phase != Phase::Running
-                && !record
-                    .creation
-                    .as_ref()
-                    .is_some_and(create::Creation::owns_created),
-            "WORKER_LAPTOP_RETAINED",
+        finalized(
+            viewer_result,
+            need(
+                !record.unknown
+                    && record.phase != Phase::Running
+                    && !record
+                        .creation
+                        .as_ref()
+                        .is_some_and(create::Creation::owns_created),
+                "WORKER_LAPTOP_RETAINED",
+            ),
         )
     }
 }
