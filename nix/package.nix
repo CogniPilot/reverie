@@ -262,7 +262,7 @@ let
       npm test -- test/location-overlay-commands.test.ts test/lru-map.test.ts test/markdown-anchors.test.ts test/markdown-sanitizer.test.ts \
         test/mcp-memory-tools.test.ts test/mcp-server.test.ts test/mcp-sync-registry.test.ts test/mcp-sync-targets.test.ts \
         test/mcp-sync.test.ts test/media-extension-parity.test.ts test/member-board-focus-server.test.ts test/member-board-focus.test.ts \
-        test/member-picker.test.ts test/memory-brief.test.ts test/memory-leak-prevention.test.ts test/memory-restart-drill.test.ts \
+        test/member-picker.test.ts test/memory-brief.test.ts test/memory-floors.test.ts test/memory-leak-prevention.test.ts test/memory-restart-drill.test.ts \
         test/message-agent-bar.test.ts test/message-read-aloud.test.ts test/mobile-case-sheet-keyboard-lift.test.ts \
         test/mobile-folder-chip.test.ts test/mobile-header-buttons-policy.test.ts test/mobile-ime-preview-structure.test.ts \
         test/mobile-ime-preview.test.ts test/mobile-keyboard-bottom-padding.test.ts test/mobile-phone-row.test.ts \
