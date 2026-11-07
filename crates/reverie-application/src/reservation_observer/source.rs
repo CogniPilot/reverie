@@ -100,6 +100,8 @@ impl Source for Installed {
         policy: Option<&ObservedMemoryPolicy>,
         end: Instant,
     ) -> Result<()> {
+        #[cfg(test)]
+        tests::installed_read("launch_limits");
         Ok(self.kernel.verify_launch_limits(row, policy, end)?)
     }
     fn verify_recovery_limits(
@@ -108,6 +110,8 @@ impl Source for Installed {
         policy: Option<&ObservedMemoryPolicy>,
         end: Instant,
     ) -> Result<()> {
+        #[cfg(test)]
+        tests::installed_read("recovery_limits");
         Ok(self.kernel.verify_recovery_limits(row, policy, end)?)
     }
     fn original_target_storage(
@@ -158,6 +162,8 @@ impl Source for Installed {
         Ok(self.engine.settle_owned(end)?)
     }
     fn host_root(&self, end: Instant) -> Result<HostAccounting> {
+        #[cfg(test)]
+        tests::installed_read("host_root");
         Ok(self.kernel.host_root(end)?)
     }
     fn mount_table(&self, end: Instant) -> Result<MountTable> {
