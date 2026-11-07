@@ -635,3 +635,11 @@ query/viewer cleanup reaches Closed. Actual App admission/current-source/receipt
 and handler/lifecycle owners remain mandatory; no global release follows from
 the Host stop result. Recovered/stop-all owners and full caller adoption are
 separate required integration work.
+
+The genuine broker callers use `retain_ordinary_laptop_stop_for_worker`,
+`retain_unobserved_ordinary_laptop_stop_for_worker` and
+`stop_existing_viewer_laptop_for_worker`. Like original `Broker.stop`, these
+choose no aggregate body deadline: each fixed client call retains 20 seconds,
+clipped to the service's actual first-stop budget. Existing `Instant` component
+entry points remain available with their explicit caller cap. Native settlement
+has its separate supplied cleanup end; it cannot retry effects or clear failure.

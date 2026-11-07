@@ -17,6 +17,9 @@ fn output(path: &str) {
     io::stdout().write_all(&fs::read(path).unwrap()).unwrap();
 }
 fn legacy(args: &[String], cid: &str, name: &str) {
+    if Path::new("legacy-query-delay").is_file() {
+        std::thread::sleep(Duration::from_millis(80));
+    }
     match args.iter().map(String::as_str).collect::<Vec<_>>().as_slice() {
         ["inspect", target] if *target == cid || *target == name => {
             if Path::new("legacy-missing").exists()
