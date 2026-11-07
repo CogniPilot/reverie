@@ -202,3 +202,154 @@ The resolver neither prepares storage nor writes lineage, acquires lifetime
 leases, publishes a migration, creates a sidecar/endpoint or selects a new
 production consumer. The caller supplies trusted native paths and remains
 responsible for authorization and consistency across its complete workflow.
+
+`StorageIdentityConfig::capture_worker_settings` retains same-captured worker
+path text as DATA and delays encoding/canonical checks to their original read
+phases. Company and history reads precede later state/scratch canonical refusal;
+indexed lineage first uses Python's normalized Path spelling. Non-encodable
+index lookups remain absent only for that existence test, while later actual
+canonical/read operations still refuse them. The strict eager `try_new` contract
+is unchanged. Both paths reuse the same metadata custody and pure `posix_text`
+conversion owners; neither establishes a lease or usable-path proof.
+
+`read_ordered_metadata` shares the exact native metadata reader and its named
+parser, retaining Python insertion order only for consumers whose subsequent
+native observations depend on that order. It exposes no parser choice or editor.
+`OperationStore::into_exact_terminal_stamp` consumes a fresh exact journal
+reader, closes both its reader lock and owned store, and retains dual errors
+before returning opaque original named-generation data. The terminal admission
+hook defaults to the ordinary full scope guard; only the actual Gate may supply
+its narrower held-admission check for this readonly phase. Ordinary snapshots
+and mutations retain their existing checks. The stamp cannot grant completion,
+capacity credit or effects; the caller must still perform its final native
+guards and then assert the original named stamp without reopening the journal.
+
+Fixed installed scope/capacity guards can retain their complete source failure
+through `JournalError::guard_failure`; stable codes still drive decisions.
+The boxed cause and outer secondary close errors remain available to trusted
+diagnostics. No callback, guard authority or completion proof is created by
+constructing an error value.
+
+## Employee and project memory persistence
+
+`memory::MemoryStore` preserves the existing memory SQLite schema, row IDs,
+native-endian float32 vector BLOBs, metadata/source JSON, claims, state, beliefs
+and dream summaries. Initialization migrates the legacy assistant column and
+schema version without resetting rows or re-embedding. Unknown extension tables
+(including documents and ballots) survive initialization, backup and restore.
+This uses ordinary SQLite filesystem behavior; it does not weaken or reuse the
+private profile store's stricter custody rules. The installing service selects
+and authorizes the employee/project namespace. No operator database editor or
+production consumer is introduced.
+
+Scalar convenience inputs coexist with lossless checked Python-text inputs for
+queries, model names, records and voice normalization. SQL TEXT binds still
+reject unencodable surrogates at their actual boundary, after embedding where
+the source does so. Source-ID JSON retains arbitrary integer width and existing
+`list(source_ids)` iteration. SQLite connection-local defaults explicitly match
+the legacy foreign-key and secure-delete settings. URI-looking names remain
+literal files; empty MemoryStore paths retain the source's directory refusal,
+while `:memory:` aliases remain ephemeral.
+
+Transactions preserve the existing commit points, including explicit operations
+that commit an outer atomic prefix and failed re-embedding that leaves a prefix
+uncommitted. A write's own transaction rolls back a failed COMMIT; explicit
+`atomic` leaves that failed transaction open, matching the two Python contexts.
+Retrieval uses the pinned CPython ranking policy, including NaN run ordering,
+and returns pre-touch access timestamps while committing the selected touch.
+
+The new curated `backup_to`/`restore_from` endpoints copy every SQLite table and
+original BLOB. Their caller authorizes paths and quiesces other writers for
+restore. Same-file, symlink/hardlink aliases and ephemeral snapshot names refuse;
+copying has a two-second budget instead of an unbounded busy loop. Restore first
+qualifies and migrates a private SQLite temporary. An error after attempting
+destination replacement reports uncertainty and retains the selected snapshot;
+it does not claim rollback or remove a recovery file. Checked connection-close
+errors retain primary and finalizer failures. Synthetic Python-created databases
+and an explicit reverse-interop qualification cover both language directions.
+
+`MemoryReader` opens an existing SQLite database READ_ONLY, including its live
+WAL. It never creates directories/tables, migrates, seeds, imports, reselects a
+model or touches last_accessed. Its retrieval shares the writer's exact query,
+scoring and ranking owners. Missing/partial boot data and a legacy assistant
+column refuse explicitly. Read-only SQLite may coordinate existing WAL/shared
+memory files; this does not promise a filesystem with no ancillary changes.
+
+`NativeMemoryRead` stages the actual read-only connection and its pinned source
+before schema qualification or model work. The application stores that owner
+first, then moves the same connection and anchors into the qualified profile
+and reader. Native reads recheck the held/named source around SQL; ordinary
+legacy readers retain their prior policy. SQLite closes before the anchors.
+An actual `SQLITE_BUSY` close keeps both resources pending, including in a typed
+pending-owner error from convenience constructors. A consumed anchor-close
+failure remains negative; closing cannot requalify the staged reader.
+
+`MemoryStartupStore` is the separate native startup owner. Its caller holds the
+actual exclusive installed lifecycle lock and has closed every other SQLite
+connection to this database in the process, including idle readers/writers.
+Legacy/raw writers must be quiesced at coordinated cutover. Neither sidecar
+absence nor a decoded metadata record establishes that condition. The curated
+application holds the lock until all actual database resources settle, closes
+its connections between operations, and fences admission after uncertainty.
+
+Preflight pins the selected database and existing sidecars before SQLite opens.
+Only when journal/WAL/shm are all absent does it choose a finite main-only
+immutable read; it checks the same main generation and all absences again.
+An existing sidecar is never hidden by immutable mode. Existing WAL/shm use
+read-only shared memory and disabled close checkpoints; unobservable recovery
+states refuse before writable fallback. Matching-owner root access may still
+update ctime in SQLite; generation changes conservatively refuse. Root sidecar
+owner/group mismatches or set-ID bits refuse before SQLite can change them.
+These observations do not promise all-root migration or metadata-inert access.
+Post-observation generation checks also run after SQL refusal to report
+observable stat-generation drift, including root ctime changes. They cannot
+detect arbitrary mmap changes to SHM bytes. An already mapped foreign RW node
+can bypass read-only-SHM behavior without changing stat timestamps; the actual
+paired control remains unadmitted and the quiesced raw-byte invariant is tested
+separately. Installed selection still requires the real producer to establish
+the closed legacy/native resource phase; a caller flag or matching row is no
+substitute for closing those actual resources.
+
+After checked read-only closure, the same owner opens the same held source for
+writing, checks its SQLite file identity and rechecks schema/metadata under
+`BEGIN IMMEDIATE` before the first schema or native write. The closed versioned
+`reverie_native_memory_v1` singleton stores phase and selected model separately
+from generic legacy `state`. Unknown schema/rows/types/versions refuse. Without
+this new owner, either historical `native_memory_*_v1` key refuses for every
+value, even matching `ready`/model strings; earlier unselected marker rows are
+not silently adopted or erased. A separately reviewed migration is required
+for those ambiguous records. Ordinary `MemoryStore` state APIs remain intact.
+Genuine native owners can repeat initialization and recover pending phases.
+The format is data, never authentication, a grant or an effect/shutdown receipt.
+
+`MemoryDocuments` implements the existing Reverie document/history/ballot tables
+on the same private connection. Revisions use real SQLite writer-reserved CAS;
+raw archived bodies, IDs, extra developer suffixes and tables survive. A
+`RecordedBallot` is constructed only by an actual vote on that same store and
+week; after reserving the SQLite writer and matching the requested revision,
+the named self writer prepares its change again from the current stored body.
+It checks the three-week persisted streak and exact proposal against that body,
+and uses that body's persona fallback and prior belief root. A concurrent update
+cannot turn a preflight no-core-change result into permission to revert its core.
+The original preflight checks still precede CAS conflicts. Digests, wire fields
+and booleans cannot mint a recorded ballot.
+Ordinary document operations retain source Connection-context commit/rollback
+semantics. The separate initial-identity CAS preserves a real outer transaction
+for curated startup; it never replaces an existing self document.
+
+The generic document `write` methods preserve trusted low-level compatibility,
+including arbitrary document names. They are not an end-user permission boundary:
+supported caller services must expose named plan/profile/self operations and must
+not route a generic `write("self", ...)` around the self-model checks.
+
+`atomic_immediate` reserves the writer before a startup idempotency-marker read.
+It preserves named transaction methods and exposes no SQL callback. Explicit
+checked connection closure remains required; dropping a handle is not a
+namespace shutdown acknowledgement.
+
+`OperationStore::into_native_start_snapshot` is a consuming fixed-purpose
+reader of the exact selected PREPARED/3 or STARTING/4 operation and full current
+document. Both its fresh journal lock and store close before it returns the
+opaque original named stamp, retaining primary and secondary finalizer errors.
+The stamp supplies data for the application's final metadata fence; it grants
+no operation handle, effect permission, retry, completion or reservation credit.

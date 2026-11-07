@@ -27,7 +27,7 @@ concurrency:
 jobs:
   image:
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    timeout-minutes: 120
     permissions:
       contents: read
     steps:
@@ -115,6 +115,12 @@ jobs:
             sleep 1
           done
           [ "$code" = 401 ] || { cat "$native_home/console.log"; exit 1; }
+
+      - name: Qualify real perf in the Nix worker image under task-v1 seccomp
+        env:
+          REVERIE_CI_RUNNER_ENVIRONMENT: ${{ runner.environment }}
+          CARGO_TARGET_DIR: ${{ runner.temp }}/reverie-perf-target
+        run: nix develop --command cargo xtask verify-worker-perf --ci
 
       - name: Smoke-test the pinned Codex runtime against generated launch commands
         timeout-minutes: 6

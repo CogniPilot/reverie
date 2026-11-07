@@ -1,0 +1,16 @@
+{
+  "scope": "Actual original storage preparation + prepare_store/private_store/store_path with inert synthetic engine replies and owned files only; no engine or namespace qualification",
+  "sourceSha256": "4a467f09fe0454e64a232d7a5f5b5a90b2c7f2e28dec58c0ae674c30289e5cef",
+  "returned": "$ROOT/state/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix",
+  "laterLookup": "$ROOT/scratch/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/nix",
+  "different": true,
+  "commands": [
+    "image",
+    "inspect",
+    "create",
+    "start",
+    "inspect",
+    "logs",
+    "rm"
+  ]
+}

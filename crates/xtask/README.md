@@ -11,6 +11,12 @@ runner invokes `cargo fmt`, strict workspace Clippy and workspace tests using
 explicit program/argument arrays, stopping at the first error or signalled child.
 It evaluates no shell text and contains no deployment or product logic.
 
+Invoke the runner through `cargo xtask`. It uses Cargo's current runtime package
+directory, so reusing a compiled runner cannot silently verify its old build
+checkout. Missing or relative package context refuses before starting tools.
+Keep targets specific to a checkout when recording source qualification: other
+compiled test fixtures can still retain their own build-time source paths.
+
 `cargo xtask verify-portable` runs the same checks for platform-neutral core,
 contracts and xtask. CI exercises this command on Linux, macOS and Windows.
 The full native workspace gate remains separate; Linux host adapters are not

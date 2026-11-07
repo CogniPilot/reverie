@@ -1,0 +1,174 @@
+{
+  "source": "python/reverie/worker_resource_reservations.py",
+  "sourceSha256": "89f4e9a90d85b790ee6f7d08fbe6dbe770aba54c0e264201e94ab571d3d9f2e3",
+  "scope": "Actual check_creation/check_launch methods; synthetic downstream data observations and owned empty host-job directory. No native/effect qualification.",
+  "cases": [
+    {
+      "name": "ordinary",
+      "mode": "admission",
+      "memoryMiB": 512,
+      "poolMemoryMiB": 4096,
+      "retainedMiB": 0,
+      "reserved": false,
+      "pending": false,
+      "nil": false,
+      "error": null,
+      "events": [
+        "document",
+        "active",
+        "guard",
+        "capacity",
+        "document",
+        "retained",
+        "inventory"
+      ]
+    },
+    {
+      "name": "at-boundary",
+      "mode": "admission",
+      "memoryMiB": 3584,
+      "poolMemoryMiB": 4096,
+      "retainedMiB": 0,
+      "reserved": false,
+      "pending": false,
+      "nil": false,
+      "error": null,
+      "events": [
+        "document",
+        "active",
+        "guard",
+        "capacity",
+        "document",
+        "retained",
+        "inventory"
+      ]
+    },
+    {
+      "name": "over-boundary",
+      "mode": "admission",
+      "memoryMiB": 3585,
+      "poolMemoryMiB": 4096,
+      "retainedMiB": 0,
+      "reserved": false,
+      "pending": false,
+      "nil": false,
+      "error": "RESERVATION_CAPACITY_EXHAUSTED",
+      "events": [
+        "document",
+        "active",
+        "guard",
+        "capacity",
+        "document",
+        "retained"
+      ]
+    },
+    {
+      "name": "at-retained-boundary",
+      "mode": "admission",
+      "memoryMiB": 3072,
+      "poolMemoryMiB": 4096,
+      "retainedMiB": 512,
+      "reserved": false,
+      "pending": false,
+      "nil": false,
+      "error": null,
+      "events": [
+        "document",
+        "active",
+        "guard",
+        "capacity",
+        "document",
+        "retained",
+        "inventory"
+      ]
+    },
+    {
+      "name": "over-retained-boundary",
+      "mode": "admission",
+      "memoryMiB": 3073,
+      "poolMemoryMiB": 4096,
+      "retainedMiB": 512,
+      "reserved": false,
+      "pending": false,
+      "nil": false,
+      "error": "RESERVATION_CAPACITY_EXHAUSTED",
+      "events": [
+        "document",
+        "active",
+        "guard",
+        "capacity",
+        "document",
+        "retained"
+      ]
+    },
+    {
+      "name": "wrong-mode",
+      "mode": "pool",
+      "memoryMiB": 512,
+      "poolMemoryMiB": 4096,
+      "retainedMiB": 0,
+      "reserved": false,
+      "pending": false,
+      "nil": false,
+      "error": "RESERVATION_ADMISSION_POLICY_REQUIRED",
+      "events": [
+        "document",
+        "active"
+      ]
+    },
+    {
+      "name": "wrong-pool",
+      "mode": "admission",
+      "memoryMiB": 512,
+      "poolMemoryMiB": 8192,
+      "retainedMiB": 0,
+      "reserved": false,
+      "pending": false,
+      "nil": false,
+      "error": "RESERVATION_ADMISSION_POLICY_REQUIRED",
+      "events": [
+        "document",
+        "active"
+      ]
+    },
+    {
+      "name": "host-job-priority",
+      "mode": "pool",
+      "memoryMiB": 512,
+      "poolMemoryMiB": 8192,
+      "retainedMiB": 0,
+      "reserved": false,
+      "pending": true,
+      "nil": false,
+      "error": "HOST_JOB_FINISH_REQUIRES_RECONCILIATION",
+      "events": []
+    },
+    {
+      "name": "reserved-target",
+      "mode": "admission",
+      "memoryMiB": 512,
+      "poolMemoryMiB": 4096,
+      "retainedMiB": 512,
+      "reserved": true,
+      "pending": false,
+      "nil": false,
+      "error": "RESOURCE_RESERVATION_REQUIRES_PROTECTED_RECONCILIATION",
+      "events": [
+        "document",
+        "active"
+      ]
+    },
+    {
+      "name": "nil-session",
+      "mode": "admission",
+      "memoryMiB": 512,
+      "poolMemoryMiB": 4096,
+      "retainedMiB": 0,
+      "reserved": false,
+      "pending": false,
+      "nil": true,
+      "error": "UUID",
+      "events": []
+    }
+  ]
+}

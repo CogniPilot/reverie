@@ -35,6 +35,11 @@ impl ResourceConfiguration {
         let resources = broker_resources::projection(source.as_value())?;
         Ok(Self { source, resources })
     }
+    /// Original launch selects the effective pool only by key presence.
+    pub fn has_resource_maps(&self) -> bool {
+        let root = root(&self.source);
+        root.contains_key(&key("sessionResources")) || root.contains_key(&key("employeeResources"))
+    }
     pub fn source(&self) -> &EffectiveWorkerConfig {
         &self.source
     }
@@ -69,20 +74,30 @@ impl ResourceConfiguration {
     /// Settings from this captured worker config, not separate request paths.
     /// They are data for the native reader and carry no owner/effect authority.
     pub fn identity_settings(&self) -> Result<ResourceIdentitySettings> {
-        let fields = root(&self.source);
-        let uid = match fields.get(&key("uid")) {
-            Some(Value(Node::Number(crate::legacy_json::Number::Integer(uid)))) => uid
-                .parse()
-                .map_err(|_| ResourceConfigError::ResourceShape)?,
-            _ => return Err(ResourceConfigError::ResourceShape),
-        };
-        Ok(ResourceIdentitySettings {
-            company: path(fields, "companyFile")?,
-            state: path(fields, "stateRoot")?,
-            scratch: path(fields, "scratchRoot")?,
-            uid,
-        })
+        ResourceIdentitySettings::capture_worker_config(&self.source)
     }
+    /// The existing six-field profile projection, reusing the same global-pool
+    /// presence rule as session/EID selection. No effective feature projection.
+    pub fn project_profile_policy(&self, policy: &ResourcePolicy) -> Result<ResourcePolicy> {
+        Ok(ResourceTemplate::from(policy).resolve(self.resources.reservation_pool())?)
+    }
+}
+/// Python numeric equality is intentional here: CPU0 and0.0 have equal resource
+/// ceilings even though their separate profile/policy digest bytes differ.
+pub fn same_non_memory_resources(
+    projected: &ResourcePolicy,
+    effective: &EffectiveWorkerConfig,
+) -> bool {
+    let fields = broker_resources::resource_fields(&ResourceTemplate::from(projected));
+    let current = root(effective);
+    fields
+        .iter()
+        .filter(|(name, _)| !name.equals_ascii("memoryMiB"))
+        .all(|(name, value)| {
+            current
+                .get(name)
+                .is_some_and(|current| value.python_eq(current))
+        })
 }
 /// Parse the already projected effective resource fields only when a consumer
 /// needs a checked ceiling. Unselected and swap-only policies need no such read.
@@ -96,6 +111,27 @@ pub struct ResourceIdentitySettings {
     uid: u32,
 }
 impl ResourceIdentitySettings {
+    /// Capture only identity DATA. Storage consumers must not validate unrelated
+    /// resource maps before their original filesystem/registry phases.
+    pub fn capture_worker_config(source: &EffectiveWorkerConfig) -> Result<Self> {
+        let fields = root(source);
+        let uid = match fields.get(&key("uid")) {
+            Some(Value(Node::Number(crate::legacy_json::Number::Integer(uid)))) => uid
+                .parse()
+                .map_err(|_| ResourceConfigError::ResourceShape)?,
+            _ => return Err(ResourceConfigError::ResourceShape),
+        };
+        Self::capture_known_uid(source, uid)
+    }
+    pub(crate) fn capture_known_uid(source: &EffectiveWorkerConfig, uid: u32) -> Result<Self> {
+        let fields = root(source);
+        Ok(Self {
+            company: path(fields, "companyFile")?,
+            state: path(fields, "stateRoot")?,
+            scratch: path(fields, "scratchRoot")?,
+            uid,
+        })
+    }
     pub fn company_file(&self) -> &MetadataText {
         &self.company
     }

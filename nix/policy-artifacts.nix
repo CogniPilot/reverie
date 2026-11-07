@@ -14,7 +14,7 @@ in pkgs.rustPlatform.buildRustPackage {
   cargoTestFlags = [ "-p" "reverie-policy-artifacts" ];
   doCheck = true;
   meta = {
-    description = "Build-only fixed task perf seccomp artifact producer";
+    description = "Build-only fixed Docker namespace and task perf seccomp producer";
     license = pkgs.lib.licenses.mit;
     platforms = pkgs.lib.platforms.linux;
     mainProgram = "reverie-policy-artifacts";

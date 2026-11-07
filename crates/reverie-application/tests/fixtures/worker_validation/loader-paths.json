@@ -1,0 +1,72 @@
+[
+  {
+    "name": "normal",
+    "path": "$ROOT/owner-config.json",
+    "normalized": "$ROOT/owner-config.json",
+    "accepted": true,
+    "error": null
+  },
+  {
+    "name": "trailing-slash",
+    "path": "$ROOT/owner-config.json/",
+    "normalized": "$ROOT/owner-config.json",
+    "accepted": true,
+    "error": null
+  },
+  {
+    "name": "terminal-dot",
+    "path": "$ROOT/owner-config.json/.",
+    "normalized": "$ROOT/owner-config.json",
+    "accepted": true,
+    "error": null
+  },
+  {
+    "name": "repeated-separators",
+    "path": "$ROOT//./owner-config.json",
+    "normalized": "$ROOT/owner-config.json",
+    "accepted": true,
+    "error": null
+  },
+  {
+    "name": "relative",
+    "path": "$REL/owner-config.json",
+    "normalized": "$REL/owner-config.json",
+    "accepted": true,
+    "error": null
+  },
+  {
+    "name": "relative-dot-trailing",
+    "path": "$REL/./owner-config.json/",
+    "normalized": "$REL/owner-config.json",
+    "accepted": true,
+    "error": null
+  },
+  {
+    "name": "parent-component",
+    "path": "$ROOT/work/../owner-config.json",
+    "normalized": "$ROOT/work/../owner-config.json",
+    "accepted": true,
+    "error": null
+  },
+  {
+    "name": "double-anchor",
+    "path": "/$ROOT/owner-config.json",
+    "normalized": "/$ROOT/owner-config.json",
+    "accepted": true,
+    "error": null
+  },
+  {
+    "name": "leaf-symlink",
+    "path": "$ROOT/alias.json",
+    "normalized": "$ROOT/alias.json",
+    "accepted": false,
+    "error": "ValueError"
+  },
+  {
+    "name": "missing",
+    "path": "$ROOT/missing.json",
+    "normalized": "$ROOT/missing.json",
+    "accepted": false,
+    "error": "FileNotFoundError"
+  }
+]

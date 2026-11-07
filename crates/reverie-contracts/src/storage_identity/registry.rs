@@ -72,7 +72,11 @@ enum SessionKey {
 fn session_key(value: &Value) -> Result<Option<SessionKey>> {
     match &value.0 {
         Node::Null => return Ok(None),
-        Node::String(value) => return Ok(Some(SessionKey::Text(MetadataText(value.clone())))),
+        Node::String(value) => {
+            return Ok(Some(SessionKey::Text(MetadataText::from_text(
+                value.clone(),
+            ))));
+        }
         _ => {}
     }
     Ok(Some(SessionKey::Numeric(

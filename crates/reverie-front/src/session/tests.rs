@@ -149,6 +149,12 @@ async fn qualify_half_close() {
     let mut response = Vec::new();
     client.read_to_end(&mut response).await.unwrap();
     assert_eq!(response, b"response");
+    // TCP EOF does not consume the channel's final write receipt. Keep the
+    // peer alive through that protocol barrier before clean channel teardown.
+    let receipt = h.peer.non_credit().await;
+    assert_eq!(receipt.generation, 1);
+    assert_eq!(receipt.id, id);
+    assert_eq!(receipt.body, Body::Written(response.len() as u64));
     assert_eq!(h.finish().await.unwrap(), SessionEnd::ChannelClosed);
 }
 

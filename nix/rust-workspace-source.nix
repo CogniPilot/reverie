@@ -1,6 +1,6 @@
 # Project one complete workspace-crate closure and its locked dependencies.
 # Callers list required crate directories; Cargo still validates that closure.
-{ pkgs, src, members }:
+{ pkgs, src, members, vendors ? [] }:
 let
   lib = pkgs.lib;
   original = src.origSrc or src;
@@ -17,6 +17,16 @@ let
     };
     manifest = builtins.fromTOML (builtins.readFile (original + "/crates/${name}/Cargo.toml"));
   }) members;
+  vendorPaths = map (name: let crateRoot = original + "/vendor/${name}"; in {
+    inherit name;
+    path = builtins.path {
+      path = crateRoot;
+      inherit name;
+      # Vendored Rust crates use the same Rust target/cache filter.
+      filter = path: type: keep
+        ("crates/${name}" + lib.removePrefix (toString crateRoot) (toString path)) type;
+    };
+  }) vendors;
   sections = value: [
     (value.dependencies or {})
     (value.dev-dependencies or {})
@@ -59,19 +69,24 @@ let
       inherit (manifest.workspace) resolver package lints;
       dependencies = lib.filterAttrs (name: _: builtins.elem name inheritedNames)
         manifest.workspace.dependencies;
-    };
+    } // lib.optionalAttrs (vendors != []) { exclude = map (name: "vendor/${name}") vendors; };
     inherit (manifest) profile;
   };
 in
 assert members != [] && builtins.length (lib.unique members) == builtins.length members;
+assert builtins.length (lib.unique vendors) == builtins.length vendors;
+assert lib.all (name: builtins.match "[a-zA-Z0-9_-]+" name != null) vendors;
 assert lib.all (crate: crate.manifest.package.name == crate.name) crates;
 assert lib.all (name: builtins.hasAttr name manifest.workspace.dependencies) inheritedNames;
 {
   inherit lockFile;
-  source = pkgs.runCommand "reverie-rust-workspace-source" {} ''
+  source = pkgs.runCommand "reverie-rust-workspace-source" {} (''
     mkdir -p "$out/crates"
     cp ${cargoManifest} "$out/Cargo.toml"
     cp ${lockFile} "$out/Cargo.lock"
     ${lib.concatMapStringsSep "\n" (crate: ''cp -r ${crate.path} "$out/crates/${crate.name}"'') crates}
-  '';
+  '' + lib.optionalString (vendors != []) ''
+      mkdir -p "$out/vendor"
+      ${lib.concatMapStringsSep "\n" (vendor: ''cp -r ${vendor.path} "$out/vendor/${vendor.name}"'') vendorPaths}
+  '');
 }

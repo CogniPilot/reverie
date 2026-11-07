@@ -1,0 +1,2701 @@
+{
+  "reference": "actual CPython3.13.15 encode(idna), Unicode3.2 nameprep; no UTS46",
+  "cases": [
+    {
+      "input": "",
+      "ascii": ""
+    },
+    {
+      "input": "localhost",
+      "ascii": "localhost"
+    },
+    {
+      "input": "LOCALHOST",
+      "ascii": "LOCALHOST"
+    },
+    {
+      "input": "lo\u00adcalhost",
+      "ascii": "localhost"
+    },
+    {
+      "input": "\uff4c\uff4f\uff43\uff41\uff4c\uff48\uff4f\uff53\uff54",
+      "ascii": "localhost"
+    },
+    {
+      "input": "b\u00fccher.de",
+      "ascii": "xn--bcher-kva.de"
+    },
+    {
+      "input": "fa\u00df.de",
+      "ascii": "fass.de"
+    },
+    {
+      "input": "FA\u00df.DE",
+      "ascii": "fass.DE"
+    },
+    {
+      "input": "\u1d48.example",
+      "ascii": "xn--s9f.example"
+    },
+    {
+      "input": "\ud87e\udc68.example",
+      "ascii": "xn--j74i.example"
+    },
+    {
+      "input": "\ud87e\udc74.example",
+      "ascii": "xn--x1t.example"
+    },
+    {
+      "input": "\ud87e\udd1f.example",
+      "ascii": "xn--kbo.example"
+    },
+    {
+      "input": "\ud87e\udd5f.example",
+      "ascii": "xn--xsz.example"
+    },
+    {
+      "input": "\ud87e\uddbf.example",
+      "ascii": "xn--bcq.example"
+    },
+    {
+      "input": "a\u0308.example",
+      "ascii": "xn--4ca.example"
+    },
+    {
+      "input": "\u00c5\u0327.example",
+      "ascii": "xn--5ca07i.example"
+    },
+    {
+      "input": "a..b",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": ".",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "a.",
+      "ascii": "a."
+    },
+    {
+      "input": "a\u3002",
+      "ascii": "a."
+    },
+    {
+      "input": "xn--\u00e9.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u05d0\u05d1\u05d2.example",
+      "ascii": "xn--4dbcd.example"
+    },
+    {
+      "input": "\u05d0a.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u05d01\u05d0.example",
+      "ascii": "xn--1-zhcb.example"
+    },
+    {
+      "input": "1\u05d0.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u05d01.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "a\u200c.example",
+      "ascii": "a.example"
+    },
+    {
+      "input": "a\u200d.example",
+      "ascii": "a.example"
+    },
+    {
+      "input": "a\u2060.example",
+      "ascii": "a.example"
+    },
+    {
+      "input": "a\u00a0b.example",
+      "ascii": "a b.example"
+    },
+    {
+      "input": "a\u202e.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\ud83d\ude00.example",
+      "ascii": "xn--e28h.example"
+    },
+    {
+      "input": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.example",
+      "ascii": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.example"
+    },
+    {
+      "input": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u200d\ud83d\ude00A\ufeff\u00df\u0327A\u0308.example",
+      "ascii": "xn--as-wia50c8831r.example"
+    },
+    {
+      "input": "\u0308\u05d0\u212a\u05d0.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\ud87e\udc68\u1d48\u0327\ud87e\udc68\u0308A.example",
+      "ascii": "xn--a-bcb6gz92jyx83cca.example"
+    },
+    {
+      "input": "a\u2060\u05d0\u00df\ud83d\ude00\u1680.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u1680\u03a3\ufeff\u03a3\u2060\u00df\u1d2c\u200c\u200c\u03c2\u212a.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u1d2c\u03a3\u03a3\u212a\ud83d\ude00\u212a\u0639\u200d\u0308\u2060\u00ad.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u212aa\u1d48\u1d48\u212a.example",
+      "ascii": "xn--kak-ecya.example"
+    },
+    {
+      "input": "\u0327\u0639\u2060.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u1680\u00df\u0308\u03a3a\u05d0\u0639\u212a.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u212a\u0639\u03a3\u03c2\u05d0\u0639\ud83d\ude00A\u212a\u03c2\ud87e\udc68.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u0639\u1680.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u00adA\u0130\u200d\u2060\ud87e\udc68.example",
+      "ascii": "xn--ai-sub28125c.example"
+    },
+    {
+      "input": "\u1680\u212a\u212aA\u00ad\u00df\u1d48A.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "a.example",
+      "ascii": "a.example"
+    },
+    {
+      "input": "\u00df\u200d\u05d0.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "A\u1d2c\ud87e\udc68\u0308A.example",
+      "ascii": "xn--aa-uub188xz183c.example"
+    },
+    {
+      "input": "\u00df\ud87e\udc68A.example",
+      "ascii": "xn--ssa-d275b.example"
+    },
+    {
+      "input": "\u05d0a.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u0639\u0130a\u1d2c\u1d48\u00df\u200d\u0308\u03a3\ud87e\udc68\u200c.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u1d48\u05d0\u2060\u212aA\u212a\u03a3.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u03c2\u00ad.example",
+      "ascii": "xn--4xa.example"
+    },
+    {
+      "input": "\u1d48\u00df\u00ad\u0639\ud83d\ude00\u1d2c.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u03a3\u0308\u1d2c.example",
+      "ascii": "xn--ssa78ar34d.example"
+    },
+    {
+      "input": "\u1680\u03c2A.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u0639A\u1d48\u03a3\u0639.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "a\u0130.example",
+      "ascii": "xn--ai-sub.example"
+    },
+    {
+      "input": "\u1d2c\u03a3\u0130\u212a\u1d2c\u00df\u03a3\u0327.example",
+      "ascii": "xn--ikss-qwc9qu5bfa2569cea.example"
+    },
+    {
+      "input": "\u03a3\u2060.example",
+      "ascii": "xn--4xa.example"
+    },
+    {
+      "input": "\u1d48\u03a3\ud87e\udc68\u0308\ufeff\u00df\u200d.example",
+      "ascii": "xn--ss-tub16ej74grv34d.example"
+    },
+    {
+      "input": "a\u03c2\u05d0\ufeff\ud87e\udc68\u05d0\u03c2\u0327\u200c\u2060.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u2060\u212a\u00df\u200c\u03a3\ud83d\ude00\u200c\u03a3\u00df\u00df\u212a.example",
+      "ascii": "xn--kssssssk-2ega25141l.example"
+    },
+    {
+      "input": "A\u00ad\u0327\u200cA\u2060\u03a3\u03c2.example",
+      "ascii": "xn--aa-ixb93da.example"
+    },
+    {
+      "input": "\ufeff\u0639\u03a3.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\ud83d\ude00\u200d\u200c.example",
+      "ascii": "xn--e28h.example"
+    },
+    {
+      "input": "\u2060\u2060\u00ad\u00ad\u0130\ufeff\u03c2\u200c\u00df\u00df\u1d48.example",
+      "ascii": "xn--issss-7fd03kn36j.example"
+    },
+    {
+      "input": "\u200d\ufeff.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "A\u0639\u1d48\u2060\u0639\u1680\ud83d\ude00\ud87e\udc68\u1680\u05d0\u00df.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u212a\ud83d\ude00\u00ad\u00ad\u00ad.example",
+      "ascii": "xn--k-jv3s.example"
+    },
+    {
+      "input": "\u1d48\u00ad\u200c\u0639\u03c2\u200d\u0639\ufeff\u200c.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u03a3a\u2060\u200d\u0130\u200d\u03c2\u03a3\u1d48\ufeff.example",
+      "ascii": "xn--ai-sub36edaa5486b.example"
+    },
+    {
+      "input": "\u212a\u200c\u2060.example",
+      "ascii": "k.example"
+    },
+    {
+      "input": "\u03a3\u0639\ud83d\ude00\u00df\u1d2c\u0639\u00ad\u1d2c\u1d2ca.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u0308\u212a\ud83d\ude00.example",
+      "ascii": "xn--k-bcb32349a.example"
+    },
+    {
+      "input": "\u0130\u0327\ufeffa\ufeffa.example",
+      "ascii": "xn--iaa-8dc3n.example"
+    },
+    {
+      "input": "\u200c\u1680\ud87e\udc68\ud83d\ude00\u0130.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u1d48.example",
+      "ascii": "xn--s9f.example"
+    },
+    {
+      "input": "A\u1d2c\u00ad.example",
+      "ascii": "xn--a-q8l.example"
+    },
+    {
+      "input": "a\u2060\u212a\u00ad.example",
+      "ascii": "ak.example"
+    },
+    {
+      "input": "\u05d0\u03a3\u05d0\u0308\u2060\u200c\u05d0\u1680\u2060\u200ca.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u200c\u1d2c\u0327\u200c\u1d48\u0639.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u212a\u0639\ud87e\udc68\ud83d\ude00\u2060.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u03c2\u00df\u00ad\u0308\u200d\u03a3\u00df\u2060\u05d0\u1680.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u05d0\u1680\u1d48\u0327\u212a\ud87e\udc68\u0130\u05d0\u00df.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u00df\u212a\u2060\u2060\u0308\u03c2\u03c2\u0308\u00df\u0327.example",
+      "ascii": "xn--ssks-85a26wa90ma.example"
+    },
+    {
+      "input": "\u2060A\ud83d\ude00.example",
+      "ascii": "xn--a-jv3s.example"
+    },
+    {
+      "input": "\u03a3\u200cA.example",
+      "ascii": "xn--a-zmb.example"
+    },
+    {
+      "input": "\u0639\u1d2ca\u00ad\u1d48\ud87e\udc68\u200c\u1d48\u212a.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u00ad\u00df\u0308\u200c\u0639\u00ad\u03c2a.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u03c2.example",
+      "ascii": "xn--4xa.example"
+    },
+    {
+      "input": "\u0130A\u200d\u00df\u0130\u03a3\u05d0\u1680\u05d0.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u0639\u0308\u212a\ud87e\udc68\u0308.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u1d48\u212a\u200d\u0639\u2060\u200c\u2060A\u00df.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\ud87e\udc68\u0327\u1d2c\u00df\u1680\u2060\u03a3\ud87e\udc68.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u03c2\u00ad\u0327\ud87e\udc68\u1680\ud83d\ude00\u0639\u0327\u03a3.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u00df\u0130a.example",
+      "ascii": "xn--ssia-swc.example"
+    },
+    {
+      "input": "A\u03c2\u200d\u0308\u1d48.example",
+      "ascii": "xn--a-ccb47cv03f.example"
+    },
+    {
+      "input": "\ud83d\ude00\ud83d\ude00.example",
+      "ascii": "xn--e28ha.example"
+    },
+    {
+      "input": "\u1680\u1d2c\ud83d\ude00aA\ud83d\ude00\u0308aA.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u200d\u0308\u0327A\ufeff\u03a3\u00df\u0639.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u03c2\u00ad\u0130\u1d2c.example",
+      "ascii": "xn--i-9bb67cg72f.example"
+    },
+    {
+      "input": "\ud87e\udc68\u0130.example",
+      "ascii": "xn--i-9bb31961b.example"
+    },
+    {
+      "input": "\u2060\u0308\u1680\u2060\u200d\u03c2\u00df\u0308\u00ad\u212aA.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u05d0\u03c2\u00df\u212a.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u0327a\u200da.example",
+      "ascii": "xn--aa-hxb.example"
+    },
+    {
+      "input": "\u05d0\ud87e\udc68.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u2060.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u00df\u1680\u1d2c\u200d\ud83d\ude00\u03c2\u200c\u1d2c.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u0308\u200d\u200d\u1d2c\u200c\ud83d\ude00\u1d48\ufeff.example",
+      "ascii": "xn--ssa894koc8361u.example"
+    },
+    {
+      "input": "\ud83d\ude00\u1680\u212a.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "A.example",
+      "ascii": "A.example"
+    },
+    {
+      "input": "\u1680a\u1d48\u212a.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\ud87e\udc68\u03c2\u0639\u200d\u0327\u1680\u00dfA\u212a\ud83d\ude00\u1680.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u00ad\u00ad\u0130\u03a3.example",
+      "ascii": "xn--i-9bb87c.example"
+    },
+    {
+      "input": "\u0639.example",
+      "ascii": "xn--4gb.example"
+    },
+    {
+      "input": "a\u00ad\u0308\u0327\u00df\ud87e\udc68.example",
+      "ascii": "xn--ss-uia03umx68h.example"
+    },
+    {
+      "input": "\ud83d\ude00\u0308\u05d0\ud83d\ude00A\u03c2\u05d0\u05d0\ufeffA.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u0130\u2060a\u212a\u03a3\u2060\u1d48\u05d0\u200d.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\ufeffa\u05d0\u00df\u0639\u00ad\u03c2.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\ud83d\ude00\u03a3\u0327.example",
+      "ascii": "xn--ota52a0868j.example"
+    },
+    {
+      "input": "a\u200dA\ud87e\udc68\u0308\u0327\ud83d\ude00\u03a3\ud83d\ude00\u200d.example",
+      "ascii": "xn--aa-vub7jn6as979sba9431d.example"
+    },
+    {
+      "input": "\u212a\u0639\u1d48\u2060\u200d\u05d0.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u1680\u05d0\u1680a\u00df\ud87e\udc68.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u0327\u200c\u1d2c\u212a\u0639\u2060.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\ud87e\udc68\u212a\u03a3\u00ad\u00ad\u0639\u200c\u2060\u0308\u0130.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u0308\u03c2\u0130A\u212a\u00ad\u0308\u00ad\u0639a.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u0130\u0639\u03c2\u00adA\ufeff\u0327\ud83d\ude00.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "a\u200d\u1680\u0327\u0327\ud83d\ude00.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u03a3\u0130.example",
+      "ascii": "xn--i-9bb67c.example"
+    },
+    {
+      "input": "\ud87e\udc68\u1d48\u00ad\u00ad\u200c\ud83d\ude00\u05d0.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u00df\u0327\ud87e\udc68a\u1d48\u03a3\u03a3.example",
+      "ascii": "xn--sa-fta36va0130bft48d.example"
+    },
+    {
+      "input": "A\ud87e\udc68\u212a\ud83d\ude00\u03a3.example",
+      "ascii": "xn--ak-wbc90312cxz4a.example"
+    },
+    {
+      "input": "\u212a\u05d0\u00df\u1680\u0327.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u2060a\u200d\u00ad.example",
+      "ascii": "a.example"
+    },
+    {
+      "input": "\ufeff\u00df\u03c2\u0130.example",
+      "ascii": "xn--ssi-bec25g.example"
+    },
+    {
+      "input": "\u2060\u200d\ud87e\udc68\u05d0\u00ad.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u00ad\u03a3\u00ada\u200d\ud87e\udc68\u2060\u03a3a\u0327.example",
+      "ascii": "xn--aa-jxb53db78512f.example"
+    },
+    {
+      "input": "\u0130\u00df\u0327\u0308\u0308.example",
+      "ascii": "xn--is-gta80ohaa.example"
+    },
+    {
+      "input": "\u200d\u1d2c\u0130\u1d2c\u00df\ufeff\ud83d\ude00\u0308.example",
+      "ascii": "xn--iss-8dch1621bca86497g.example"
+    },
+    {
+      "input": "a\u0308\u00df\u1d48\u0327\u0639\ud83d\ude00.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u03a3\ud87e\udc68\u200d\u0308A\u03c2\u212a\u03a3\ud87e\udc68\u0639\u03c2.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "a\u0308.example",
+      "ascii": "xn--4ca.example"
+    },
+    {
+      "input": "\ud87e\udc68\u0639a\u00ad.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "A\u1d2c\u0327\ud87e\udc68A\u2060.example",
+      "ascii": "xn--aa-ixb757x0183c.example"
+    },
+    {
+      "input": "\u1d2c\u00ad\u2060\u212a\u1d48\u0327\u1d2c\u03a3\u0639\u2060.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u0130\u2060\u200c\u03c2a\u0327\u1680\u212a\u00ad\u0327a.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u200c\u1680\u03a3\u03c2\u0639\u0327\u2060\u0130\u0308\ufeff.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\ufeff\u200c\u0639\u03a3.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u1680.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u00df\u1d48\u0639.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u00adA.example",
+      "ascii": "a.example"
+    },
+    {
+      "input": "\u0308\u0308\u00ad\u212a\u05d0\ufeff\u1680.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u200c\u00ad\u00df\u03c2\ud83d\ude00\u0639\u05d0\u212aa.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u2060\u0639\u00ad\u2060\u0639.example",
+      "ascii": "xn--4gba.example"
+    },
+    {
+      "input": "\u1d2ca\u0308\u03a3.example",
+      "ascii": "xn--4ca48ls37a.example"
+    },
+    {
+      "input": "\u1d2ca.example",
+      "ascii": "xn--a-p8l.example"
+    },
+    {
+      "input": "\u0639.example",
+      "ascii": "xn--4gb.example"
+    },
+    {
+      "input": "\u0639\u03c2\u2060\u00ad\u1680\u212a.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u05d0\ud83d\ude00\ud87e\udc68\ud87e\udc68\u00df\u03a3\ud87e\udc68\ufeff\u0308.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "A\u03a3\u0327\u200c\u2060\u1680\u0308\u212a\u05d0\u00df.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\ud87e\udc68\u0130\ufeff\u2060\u0639\u05d0\u03c2\ud83d\ude00\u05d0\u03c2\ud87e\udc68.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u1d2c\u05d0\ufeffa\u2060\u200d\u1d2c\u0308.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u0308\u1680a\u00ad\u00df\u03c2\u03a3\u00df.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u212a\u00ad\u00df\u200c\u1d2c\u0308\u0308.example",
+      "ascii": "xn--kss-feca4621b.example"
+    },
+    {
+      "input": "\u05d0a\ud83d\ude00\u03c2\u2060Aa.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u03a3\u200d\u00ad\u0130.example",
+      "ascii": "xn--i-9bb67c.example"
+    },
+    {
+      "input": "\ud83d\ude00\u212a\u0308\u200da\u0327.example",
+      "ascii": "xn--ka-uub9jz817x.example"
+    },
+    {
+      "input": "\ufeff.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u0327\u0327A\u212a\u2060\u0308\u200c\u200d\u0639.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u2060\u03c2.example",
+      "ascii": "xn--4xa.example"
+    },
+    {
+      "input": "\u212a\ufeff.example",
+      "ascii": "k.example"
+    },
+    {
+      "input": "\u212a\u0308\u03c2\u05d0.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u1d48\u0130\u2060\ud87e\udc68a\u0327\u0130\ud87e\udc68\u1d48.example",
+      "ascii": "xn--iai-8dcc4qt41pga32086iea.example"
+    },
+    {
+      "input": "\u0639\u0130\u1d48\u0639\u03a3\u00df\u0327.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\ud87e\udc68\u0639\u00dfa\u0639A\u03a3\u05d0a\u0308\ud87e\udc68.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u2060\u03a3\ufeff\u05d0\u0327\u200d\u2060\ud83d\ude00\u0639\u212a\u1d2c.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u200d\u0308\u05d0\u03c2\u1d48.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u200c.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u00ad\u200d\ud83d\ude00\u0327\u1d2c\u0308.example",
+      "ascii": "xn--ssa5d746htj64b.example"
+    },
+    {
+      "input": "\u0130A\u03c2\u1d2c\u0130.example",
+      "ascii": "xn--iai-8dcc04i999i.example"
+    },
+    {
+      "input": "\ufeff\u0327A\u0639\u212a\u00df\u00df\u0308\u0327.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u03a3\u1d48a\u0130\u200cA\u0639\u0308\u03c2.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "a\u0639a\u1d48A\u0130.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u200d\u03c2\u03a3\u03a3\u2060\u0327\u05d0\u0130.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u2060\u03c2\u212a\u1680.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u00ad\u0639\u05d0.example",
+      "ascii": "xn--4db3s.example"
+    },
+    {
+      "input": "a.example",
+      "ascii": "a.example"
+    },
+    {
+      "input": "\u1d48\u212a\u0327\u0308\u0308\u00ad\u00df.example",
+      "ascii": "xn--ss-ypa47pa1341b.example"
+    },
+    {
+      "input": "\u03c2a\u03c2\u1d48\u00df\ufeff\u00ad\u1680.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u0639\u03a3\u200d\ud83d\ude00\u0130.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u1680a\u0130\u00df\u0130\u0639\ufeff.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u1d48\u03a3\u0327.example",
+      "ascii": "xn--ota52ai76d.example"
+    },
+    {
+      "input": "\u0327\u05d0\u03c2\u1d48\u0327.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u1d2c\u03a3\ufeff\u200d.example",
+      "ascii": "xn--4xa321k.example"
+    },
+    {
+      "input": "\u03c2\u1d2c\u2060\u0639\u200d\u1680a\u05d0\u200c.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\ud83d\ude00\u2060\u03c2\u0639\u1680\ud83d\ude00\u1d48\u200c.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\ud83d\ude00A\ud87e\udc68\u03a3\u0308\u03a3\u2060\u1d2c.example",
+      "ascii": "xn--a-ccb47cb9363aj460dbblb.example"
+    },
+    {
+      "input": "\u00adA\ud87e\udc68\u0639\u03a3\u200d\ud83d\ude00\ufeff\u00ad\u00df\u1680.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u03a3\u0327\u1680\u05d0.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u1680\u0327.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u0639\u0130\ud87e\udc68\u05d0\u212a\u03c2\u1d48\ud83d\ude00\ud87e\udc68\u200d\u212a.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\ufeff\ud87e\udc68\u1d48\ufeff\ud87e\udc68.example",
+      "ascii": "xn--s9f1635sba.example"
+    },
+    {
+      "input": "\u0639\u03c2\u1680\u0639\u05d0\u0308\u03a3\u212a\u00ad\u00df.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u00ad\u1d48A\u1d2c\ud87e\udc68\u212a\u05d0\u200d.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u1680\u212a\u00ad.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u1d48.example",
+      "ascii": "xn--s9f.example"
+    },
+    {
+      "input": "\u0308\u1680A\u00ad\u2060\u200d\ud83d\ude00.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u0327.example",
+      "ascii": "xn--ota.example"
+    },
+    {
+      "input": "\u1680\u0308\u200c\ufeff\ud87e\udc68.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u1680\u1680\u1d2c\u03c2\ud83d\ude00a.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u0639\ud83d\ude00\u1d2c\u0130\u1d2ca\u1d48\u0327\ufeff\u2060\u05d0.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\ufeff\u00ad\u03c2.example",
+      "ascii": "xn--4xa.example"
+    },
+    {
+      "input": "\ud83d\ude00\u0130\u0327\ud83d\ude00\u1d2c.example",
+      "ascii": "xn--i-9bb9gz42j5b80cda.example"
+    },
+    {
+      "input": "\u1d48\u1680\u1d2c\u05d0\ud87e\udc68\u1680.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u200d\ud83d\ude00\u0639\u0639\u0130\u2060.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\ud83d\ude00\u0639\u0308aa\u00ad.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u00df\u00ad\u00adA\u0327\u00df\u200d\ud87e\udc68\u0327.example",
+      "ascii": "xn--ssass-rldc39929h.example"
+    },
+    {
+      "input": "\u1680\u00df\ud87e\udc68\u1680\u0308\u200d\u00df\u0308\ud87e\udc68.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u200c\u200cA\u212a.example",
+      "ascii": "ak.example"
+    },
+    {
+      "input": "\ud83d\ude00\u00df\u2060.example",
+      "ascii": "xn--ss-mo82a.example"
+    },
+    {
+      "input": "\u00ad\ud83d\ude00\ud87e\udc68AA.example",
+      "ascii": "xn--aa-mo82au63e.example"
+    },
+    {
+      "input": "a\u1d2c\u212a\u03c2\ud87e\udc68\u0327\u212a.example",
+      "ascii": "xn--akk-xhc39ed92i4y48d.example"
+    },
+    {
+      "input": "\u1d2ca.example",
+      "ascii": "xn--a-p8l.example"
+    },
+    {
+      "input": "\u200d\u00ad\ufeff\u212a\u1d48\u05d0.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u00ada\u0130.example",
+      "ascii": "xn--ai-sub.example"
+    },
+    {
+      "input": "a\u0327\u00ad\u200d\u200c\u05d0.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u200c\u200d\u00ad.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u0327\u1d2c.example",
+      "ascii": "xn--ota634k.example"
+    },
+    {
+      "input": "\ud83d\ude00\ufeffa\u05d0\u05d0.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u03a3\u212a\u1d2c\u2060\u05d0\u0308\u200d\u00ad\u200cA\ud87e\udc68.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u03c2\u03c2\u00ad\ufeff\u2060\u05d0\ud83d\ude00a\u212a\u0639\u2060.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u212a\u1d48\u0327A\u0130\u00ad\u200d\u00df.example",
+      "ascii": "xn--kaiss-9fd5ty59q.example"
+    },
+    {
+      "input": "A\ud87e\udc68\u0308\u0308.example",
+      "ascii": "xn--a-ccba67125c.example"
+    },
+    {
+      "input": "\u1d48A\u00df\u0327\u1680\u1d2c\u200d\u1680\u05d0.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\ud87e\udc68\u03c2\u0327\u200c\u0639\u1d48\ud83d\ude00\u03c2.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u200c\ufeff\u212a\u1d48\u03c2\u0327\u1d2c\u0327.example",
+      "ascii": "xn--k-3dba63do03hzea.example"
+    },
+    {
+      "input": "\u0308\u212aAa\u00ad.example",
+      "ascii": "xn--kaa-cec.example"
+    },
+    {
+      "input": "\ufeff\u1d48\u1d48\u0639\u00dfa\u03a3\u0130\u1680A\u0308.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u200c\u200c\ud83d\ude00\u03c2a\u0639a\u00ad.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u1d2c\u0308\ud87e\udc68\u03a3\u0308Aa\ud87e\udc68.example",
+      "ascii": "xn--aa-tuba84gd92i3y48dea.example"
+    },
+    {
+      "input": "\u03c2\u00df\u200d\u2060.example",
+      "ascii": "xn--ss-ubc.example"
+    },
+    {
+      "input": "\u1d2c\u00ad.example",
+      "ascii": "xn--z8f.example"
+    },
+    {
+      "input": "\u1d48a.example",
+      "ascii": "xn--a-bbm.example"
+    },
+    {
+      "input": "\u03a3\u1680\u2060\u200d\u00df\u0327\ud83d\ude00.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u2060\u0308\u0639\u0327\u03a3\u0130\u1d2c.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u00ad\u200c\u212a\u0327a\u1d2c\u212a\u1d2c.example",
+      "ascii": "xn--ak-ypa347zba.example"
+    },
+    {
+      "input": "\u2060a\ud83d\ude00\u200d\u0327\ufeff\ud83d\ude00\u0308\u0308\u2060\u0130.example",
+      "ascii": "xn--ai-subca8p25945aba.example"
+    },
+    {
+      "input": "\u0639\u03a3\u200c\ud87e\udc68\u1d2c\u212a\u1d48\u200d.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u2060\u1d2c\u1d48\u200cA\ufeff.example",
+      "ascii": "xn--a-p8lye.example"
+    },
+    {
+      "input": "\ud87e\udc68\u212aa\u1d2c.example",
+      "ascii": "xn--ka-h8r7486z.example"
+    },
+    {
+      "input": "\ufeff\ud83d\ude00\u200c\u200d\u0308\u212a\u0130.example",
+      "ascii": "xn--ki-subb39794d.example"
+    },
+    {
+      "input": "\ud87e\udc68\u2060\ud87e\udc68\u200c\u0327\u1680\u200c.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "a\u03c2.example",
+      "ascii": "xn--a-0mb.example"
+    },
+    {
+      "input": "\u0308\u05d0a\u00ad\u0639\ud83d\ude00.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u0130.example",
+      "ascii": "xn--i-9bb.example"
+    },
+    {
+      "input": "\u00ad\ud87e\udc68.example",
+      "ascii": "xn--j74i.example"
+    },
+    {
+      "input": "\u0639\u0130\ud83d\ude00\ud83d\ude00\ud87e\udc68\u00df\u03c2\u200c\u1d48\u0308a.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u200d\u00ad\u0130\u200c\u05d0\u0327\u0639\u0130.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u200c\ud87e\udc68\u0308\u0639.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\ud83d\ude00\ud87e\udc68\u0130.example",
+      "ascii": "xn--i-9bb32349auuya.example"
+    },
+    {
+      "input": "\u05d0\u0639\u1680\u0639.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u200c\u212a.example",
+      "ascii": "k.example"
+    },
+    {
+      "input": "aA\u03c2\u1680\u0130.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u0308\u03c2\ufeff\u1680\ud87e\udc68\ud83d\ude00\u00ad\u0308\ud87e\udc68\ufeff\u03a3.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u0639\u05d0\u0327.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u0308\u0639\u1680\u03a3\u05d0\u05d0\ufeff\u03a3\u1d48\u2060.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u0308\u200c\u05d0.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u200c\u0639.example",
+      "ascii": "xn--4gb.example"
+    },
+    {
+      "input": "\ufeff\u1680.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u00df\u200c\u0327\u1d2c\u200d\u0130\u212a\ud83d\ude00\u200c\ud83d\ude00\u1680.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "a\ufeff\u00ad\u03a3\u03a3a\u03c2\u03c2.example",
+      "ascii": "xn--aa-vbcaba.example"
+    },
+    {
+      "input": "\u200d\u00ada.example",
+      "ascii": "a.example"
+    },
+    {
+      "input": "\u1d2ca\ufeff\u1d2c\u00dfA\ufeff.example",
+      "ascii": "xn--assa-u73ab.example"
+    },
+    {
+      "input": "\u212a\u200c\u0639\u2060\ud83d\ude00\u212a\ufeff.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u2060A\u00ad.example",
+      "ascii": "a.example"
+    },
+    {
+      "input": "\ufeff.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u03a3\u2060\u0308\u03c2\u200d\u1d48\u200c\ud87e\udc68.example",
+      "ascii": "xn--ssa78ab642xzx83c.example"
+    },
+    {
+      "input": "\u0308\ud83d\ude00A\ud83d\ude00\ud83d\ude00\u1d2c\ufeff\ud83d\ude00\u0130\ud87e\udc68.example",
+      "ascii": "xn--ai-subb5754am460dbaab6146e.example"
+    },
+    {
+      "input": "\u212a\u212a\u0327\u1d2c\u0130\ufeff\u0308\u0327\u00df\u212a.example",
+      "ascii": "xn--kissk-o5a363aia1zy29u.example"
+    },
+    {
+      "input": "\u0327\ufeff\u1d48\u03c2\u0130a\u0130.example",
+      "ascii": "xn--iai-8dcc1q05bi47k.example"
+    },
+    {
+      "input": "a\u03c2\u200c\u03a3\u1d48\u05d0\ud87e\udc68.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u212a\u1680\u03a3aa\u05d0a\ud83d\ude00\u03c2\u03c2.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u200d\u0327.example",
+      "ascii": "xn--ota.example"
+    },
+    {
+      "input": "\u1680\u1d2c\u200c\u1680A\ufeff\u05d0\u0308\u03c2.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u03c2\u0639\u05d0\u200d.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u1d2c\u0327\u2060\u200c\u2060\ufeff.example",
+      "ascii": "xn--ota534k.example"
+    },
+    {
+      "input": "\u1d48\u0130\u1d48\u1d48\u200d\u1d2c.example",
+      "ascii": "xn--i-9bb391redca.example"
+    },
+    {
+      "input": "\u1d2c\ufeff\u0327Aa\u200c\u0308\u05d0\u0639\u0130\u05d0.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\ud87e\udc68\u212a.example",
+      "ascii": "xn--k-s55t.example"
+    },
+    {
+      "input": "\u0327a\ud83d\ude00\u200c\u05d0\u0130\u0130\u1680\u1d48\u03c2.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "a\ud83d\ude00\u1d2ca\u0308.example",
+      "ascii": "xn--a-0fa338suj64b.example"
+    },
+    {
+      "input": "\u05d0\ufeff\u0327\u212a\u00df\u1680\u212a.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "a\u0308\u03c2\u200d\u03a3\u0327\u05d0\u0130.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u00ad\u2060\u0639\u03c2\u0639\ufeff\ud83d\ude00A\u0327\u1d2ca.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u1680\u200c\u2060\u00ad\u0308.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\ufeff\u200d\u00ad\ud83d\ude00\u1d48\ud83d\ude00.example",
+      "ascii": "xn--s9f1182rba.example"
+    },
+    {
+      "input": "\u0639\u0639\ud83d\ude00\u03c2\u03c2\ufeffa\u0130\u0327.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u0308\u212a\u03a3a\u212a\u200c\u05d0\u0327.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u00ad\u00df\u0639.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u0327\u212a\u1d2c\u03c2\u1d48\ud87e\udc68.example",
+      "ascii": "xn--k-2db38b962fbeam0523a.example"
+    },
+    {
+      "input": "\u200d\u212a\u00df\u0327\u00df\u1d2c.example",
+      "ascii": "xn--ksss-65a8183b.example"
+    },
+    {
+      "input": "\u1d48\u2060\ud87e\udc68.example",
+      "ascii": "xn--s9f2635s.example"
+    },
+    {
+      "input": "\u03c2A\u0327\u200cA\u00ad\u03a3.example",
+      "ascii": "xn--aa-ixb63dd.example"
+    },
+    {
+      "input": "\u2060\u1680\u0308\u0130\u03c2\u0639\u0308.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u1680\ufeff\u00ad.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "a.example",
+      "ascii": "a.example"
+    },
+    {
+      "input": "\ud83d\ude00\u2060\u03c2\ud83d\ude00\u200c\u200c.example",
+      "ascii": "xn--4xa1126wba.example"
+    },
+    {
+      "input": "A\u1d48\u1d2c\u1d48\u2060\u03c2\u00ad\u0308\ufeff\u212a\u0308.example",
+      "ascii": "xn--ak-uubb64ge92iufab.example"
+    },
+    {
+      "input": "\u200d\u0130\ufeff\ud87e\udc68\u2060\u00df\u0639.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u03c2A\u200c\u1d2c\ud87e\udc68.example",
+      "ascii": "xn--a-zmb036qgg37b.example"
+    },
+    {
+      "input": "A\u0308\u1680\u200da\ud83d\ude00\ufeff\u03a3\u2060\u0308.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u0308\u00df\u00ad\u05d0.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u200c\ufeff\ufeff\u0639\u212a.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u0130\u03c2\u1680.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u200d\u200da\u0639.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u1d48\u00ad.example",
+      "ascii": "xn--s9f.example"
+    },
+    {
+      "input": "\u00df\u03a3\u200c\u00ad\u03c2a\u03a3\u2060\u00df\u1680\u2060.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u0130\u0327\ufeff\u200c\u2060\u1d48\ufeff\u1d48.example",
+      "ascii": "xn--i-9bb9g192ja.example"
+    },
+    {
+      "input": "\u1d48\u00df\u00df\u0130\u00df.example",
+      "ascii": "xn--ssssiss-bie7951d.example"
+    },
+    {
+      "input": "\u00ad.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u2060\u200d.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u200c\u2060\u00df\u0639\u0327.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u03a3.example",
+      "ascii": "xn--4xa.example"
+    },
+    {
+      "input": "\u1680\u200c.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u03a3\u2060\ud83d\ude00\ufeff\u0639\u1680\u200c\u05d0\u1d2c\u00df.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u0327\u1680\u00ad.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u0639\u0130\u0639\u200d\u00ad\u0130\u05d0.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u0130\ud87e\udc68\ud83d\ude00\u03c2\ufeff\u0130\u0327A\u2060.example",
+      "ascii": "xn--iia-8dcb5qy5bb026xjlub.example"
+    },
+    {
+      "input": "\u00df\u03c2.example",
+      "ascii": "xn--ss-wbc.example"
+    },
+    {
+      "input": "\ud87e\udc68\ufeffa\u0327\u1d2c\u1680\u1680\u200d.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u05d0\u05d0\u212a\u0130\u1d48\u0130\u03c2\u03c2\ufeff.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u00ad\u0308\u0639\u0327\u05d0.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u05d0\u03c2\u03a3\u1d48\ud87e\udc68\u1d2ca.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u200d\u1d48A\u00ad\u200c\ud83d\ude00\u1d48\u1680\u1d2c.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u00ad\u00df\u03c2\u1d2c\u05d0.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u212a\u03a3\u00df\ufeff\u0130\u1d2c\u212a\u0639.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u200d\u1d2c\ud87e\udc68\u0639\u03c2\u1680\u0130.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u1d48\u03c2\u03c2\u200d.example",
+      "ascii": "xn--4xaa117q.example"
+    },
+    {
+      "input": "\u2060.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u2060\u05d0\u03a3\u00df\u212a\u2060\u212a\u03c2\u00adA\u03c2.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u212a\ud83d\ude00\u05d0\ud83d\ude00\u1680\u2060\u2060A.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u200cA\u03a3\ufeff\u2060\u0130\u03c2\u0308\u0130\u1680.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u212aA\u200d\u03a3\u0327\u0130\u0308\ufeffa\u200d\u03c2.example",
+      "ascii": "xn--kaia-swcg8s69bfa.example"
+    },
+    {
+      "input": "\u03c2\u00ad\u0327\u03a3\u05d0\u1d48\u00ad\ud83d\ude00\ufeff\u03c2\u0308.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u200d\u1d48\u2060\u00dfA\u03a3\u1680\u0130\u0639.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u1680\u1d2c\u00df\u1680\u200c\u05d0\u0130\u2060\u03c2.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u00ad\u2060\ud83d\ude00\u1d2c\u00ad\u200ca\u0639\u0639\u0327A.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u1680\u0639\u2060\u00df\u0308\u212a\u212a.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\ufeff\u200c\u0327\u00ad\u2060\ud83d\ude00\u0308\ud87e\udc68\u00ad.example",
+      "ascii": "xn--ssa5ds772rvuya.example"
+    },
+    {
+      "input": "\ufeff\u1680\ud83d\ude00\u05d0a.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u0308\u1d2c\u1680A\u200d\u00ad.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "A\u200d\ud83d\ude00.example",
+      "ascii": "xn--a-jv3s.example"
+    },
+    {
+      "input": "\u05d0.example",
+      "ascii": "xn--4db.example"
+    },
+    {
+      "input": "\u03c2.example",
+      "ascii": "xn--4xa.example"
+    },
+    {
+      "input": "\u0327\ud87e\udc68\u2060\u0130\u200d\u1680\u03c2\u200d\u1d48\u200c\ud83d\ude00.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u0308\u03c2\u200c.example",
+      "ascii": "xn--ssa88a.example"
+    },
+    {
+      "input": "\u00ad\u05d0\u2060\u0130\u212a\u212a\u0639.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u0308\u00df\u1d48\u1d48\u03a3.example",
+      "ascii": "xn--ss-tub46ej74ga.example"
+    },
+    {
+      "input": "\ud87e\udc68.example",
+      "ascii": "xn--j74i.example"
+    },
+    {
+      "input": "\u1680a\u2060\u00ad\u0308.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u00ad\u03c2\u200c\u05d0\u212a.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "a\u03c2\u1d2c.example",
+      "ascii": "xn--a-0mb926q.example"
+    },
+    {
+      "input": "\u1680\u00df\u0130a\u1680.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\ufeff\u212a\u1d2c\u1d2c\u03a3a\u2060\u03a3\u03a3\u212a\u2060.example",
+      "ascii": "xn--kak-qzcba5466ba.example"
+    },
+    {
+      "input": "\u212aa\u0327\u200d\u1d2c\u00df\ud83d\ude00\u0308\ud83d\ude00.example",
+      "ascii": "xn--kass-ywc7p960pjr87dba.example"
+    },
+    {
+      "input": "\u1680\u0130\u0308\u03c2\ud83d\ude00\u0327\ufeff\u05d0.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u03c2\u03c2\ud87e\udc68\u1d2c\u0308\ud87e\udc68\u200cA\u0327\u200c\u212a.example",
+      "ascii": "xn--ak-tub9j75aa9466blx91eca.example"
+    },
+    {
+      "input": "\u0327.example",
+      "ascii": "xn--ota.example"
+    },
+    {
+      "input": "\u0130\u212a\ufeff\ufeff\u1d2c\u05d0\u212a\u00df\u0639\u03a3\ud83d\ude00.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u0130\u0308\u00ad\u05d0.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u212a\u1d48\ufeff\u0327A\ud87e\udc68\u00ad.example",
+      "ascii": "xn--ka-ixb968x1x83c.example"
+    },
+    {
+      "input": "\ufeff\u212a\u0327\u0327.example",
+      "ascii": "xn--ifa60h.example"
+    },
+    {
+      "input": "\u0327.example",
+      "ascii": "xn--ota.example"
+    },
+    {
+      "input": "\u2060.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u05d0\u05d0\u2060\u1d2c\u03a3.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u03a3\u0327\u05d0\u2060\u0308\u03c2A.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u1d48a.example",
+      "ascii": "xn--a-bbm.example"
+    },
+    {
+      "input": "\u00ad\ud83d\ude00\u00df.example",
+      "ascii": "xn--ss-mo82a.example"
+    },
+    {
+      "input": "\u00df\u1680\ud83d\ude00\u0130\u03a3\u212a\u00df\u00ad.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u0327\u200da\u200ca\u0308.example",
+      "ascii": "xn--a-0fa94o.example"
+    },
+    {
+      "input": "\u200d\ud87e\udc68\ud87e\udc68\u0130\u0639\ud83d\ude00.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "A\ud87e\udc68.example",
+      "ascii": "xn--a-t55t.example"
+    },
+    {
+      "input": "\u05d0\u2060\u05d0A\u200c\u05d0\u1d48\u00ad\u1680.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "a\u1d48\ufeff.example",
+      "ascii": "xn--a-cbm.example"
+    },
+    {
+      "input": "\u0327\u1680\u212a.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u1680\u0308\ufeff\ufeff\u0130\u0639\u1680.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u0308a\u03c2\ud83d\ude00\u2060\ufeff\u0308\ud87e\udc68\u200c.example",
+      "ascii": "xn--a-bcbb16ek533p54eb.example"
+    },
+    {
+      "input": "\ufeff\u05d0\u1680\u200d\u1680\u0308.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u0327\u03a3\u0130\ud87e\udc68\u03a3\u200d\ud83d\ude00a.example",
+      "ascii": "xn--ia-rub0km6aca75930gdgrb.example"
+    },
+    {
+      "input": "A\u03a3\u00df\u00ad\u00df\u1d2c\u00df\u0308\u1680\u2060\u1d2c.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u0639\u0308\u1d48.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u0327\ud83d\ude00\u2060.example",
+      "ascii": "xn--ota4256w.example"
+    },
+    {
+      "input": "\ud83d\ude00\u03a3.example",
+      "ascii": "xn--4xa1126w.example"
+    },
+    {
+      "input": "A\u00ad\u1d48\u200c\u0130\ufeff.example",
+      "ascii": "xn--ai-sub699x.example"
+    },
+    {
+      "input": "\u1d2c\u2060\u1d2c\u03c2\u0327.example",
+      "ascii": "xn--ota52ao46da.example"
+    },
+    {
+      "input": "\u0130A.example",
+      "ascii": "xn--ia-rub.example"
+    },
+    {
+      "input": "\u0639aa\ud87e\udc68\u1680A\u0639\u0639\u1d2c.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u1680\u200d\u200c\u05d0\u1d48\u0327\u0308\u0130.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u05d0\u200d\u2060\u200dA\ud87e\udc68\u2060\ud83d\ude00\u03a3\u1680\u00df.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "a\u03a3\u2060\u00df\u1d48\u0327.example",
+      "ascii": "xn--ass-yhc19e933i.example"
+    },
+    {
+      "input": "A.example",
+      "ascii": "A.example"
+    },
+    {
+      "input": "\u2060\u05d0\u212a\u00ad\u200c\ufeff\u200c.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "A\u1680\u200c\u0639\ud87e\udc68A\u200c\u0327\u0327\u03a3.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "A\u0327.example",
+      "ascii": "xn--a-3db.example"
+    },
+    {
+      "input": "\u0327\ud83d\ude00.example",
+      "ascii": "xn--ota4256w.example"
+    },
+    {
+      "input": "\u212a\u1d2c\u05d0\u1d2c\ud87e\udc68\u200c.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u200d.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u03a3\u00df\u1680\ud87e\udc68A\u200d.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u1680A\u00df\u212a.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u00ad\u03c2\u05d0\u00adA\u0308\u03c2\u2060\ud83d\ude00\u03c2\u0308.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u05d0\u200c\u05d0\u0308\u05d0\ud83d\ude00\u05d0\u1d48\u03a3\ufeff\u212a.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "a\u0327\u0130\u05d0\u05d0a\u03a3\u00df\u1d48a.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u05d0\u03a3\u1d48\u200c\ufeff\ud87e\udc68\u2060.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u1680\u0308\u0308\u0327.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u03c2\u212a\u200d\u00ad\u200c\u03c2\u0327\u200d\u05d0.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u1d2c\u0327\u200d\u00df\u212a\u0308\u1680A\u1d48\ud83d\ude00.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\ud87e\udc68\u0639\u05d0a\u05d0\u0130A.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "a\ufeff\u0130\u00adA\u1680\u1d2c\u200d\ufeff\ufeff\u0327.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\ud83d\ude00\u2060\u200d\ud87e\udc68\ufeff\u00df\u03c2\ud87e\udc68\u212a\u0308a.example",
+      "ascii": "xn--sska-xwc43iz703ufgrbda.example"
+    },
+    {
+      "input": "\u1680\u212aa\u1d2c\u1d2c\u1d2c\u0327\u200c\u200c\u0327a.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "A\ud87e\udc68\u200d\u2060\u03a3\u1680\ud83d\ude00\u200d\ufeff\u03c2.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u0130\ud87e\udc68\u200d\u200c\u212a\u00ad.example",
+      "ascii": "xn--ik-rub28125c.example"
+    },
+    {
+      "input": "\u0130.example",
+      "ascii": "xn--i-9bb.example"
+    },
+    {
+      "input": "\ud83d\ude00\u1d2c\u00ad.example",
+      "ascii": "xn--z8f9582r.example"
+    },
+    {
+      "input": "\u200c\u200c\u03a3\u200d\u0130.example",
+      "ascii": "xn--i-9bb67c.example"
+    },
+    {
+      "input": "\u03a3.example",
+      "ascii": "xn--4xa.example"
+    },
+    {
+      "input": "\u1680\u212a\u05d0.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u0639\ud83d\ude00\ufeff.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u0308\u00df\u1d2c\ud87e\udc68\u0130\u00df\u212a\ufeff\u1680\u200c.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u1d2c\u0639.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u0130\u1d48A\u03a3\u00ad\ud83d\ude00\u03c2A\u2060\u05d0.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u200d\ud87e\udc68\ud83d\ude00\u05d0\u00ad.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u0327\u0639.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "A\u2060\u2060\u0130\u200d.example",
+      "ascii": "xn--ai-sub.example"
+    },
+    {
+      "input": "\u00df\u0327\u00df.example",
+      "ascii": "xn--sss-sza.example"
+    },
+    {
+      "input": "\u0130\u2060.example",
+      "ascii": "xn--i-9bb.example"
+    },
+    {
+      "input": "\u0308\u200c\ud87e\udc68\u03c2\u00dfA\u200d\ufeff\ud87e\udc68\u1d2c.example",
+      "ascii": "xn--ssa-cec94gi92ixy48dea.example"
+    },
+    {
+      "input": "A\u200c\u00ad\u00df\u2060\u00df.example",
+      "ascii": "assss.example"
+    },
+    {
+      "input": "\u0130\u200d\u1680a\u200c\u1680.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u03a3.example",
+      "ascii": "xn--4xa.example"
+    },
+    {
+      "input": "\u00df\u00dfa\ud87e\udc68\ud83d\ude00\u1680\u03a3.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u00df\u00ad\u00ad\u00ad.example",
+      "ascii": "ss.example"
+    },
+    {
+      "input": "\u200c\u200c\u0327A\u0639\u05d0\ud87e\udc68\u200d\u1680.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u05d0\u05d0\u200d\u1d2c\u0639\u03a3\u0130.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u1680\u2060\ud87e\udc68\u05d0a\ud83d\ude00\u200c\u1680\u212a\u200d\u2060.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u200c\u00ad\u00ad\u200c\u00df\u0639\u200c\u200c.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u0639\u1d2c\u212a\ud87e\udc68\u0639\u03c2\ud87e\udc68.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u2060\u2060\u03c2\u200d\u0639\u1d48\u03a3\u200d\ud87e\udc68\u00ad\u0308.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u1d48\u03c2\u212a\u0327\u03a3\u0308\u2060\u1d48\u00ad.example",
+      "ascii": "xn--ifa44g8pb6773aea.example"
+    },
+    {
+      "input": "\u0130\u00df\u1d48\u03a3a\u0308a\u212a\u1d2c\u0639.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "A\u1d2cAa\u1d48\ud83d\ude00\ud87e\udc68.example",
+      "ascii": "xn--aaa-57xwgy7631a99kb.example"
+    },
+    {
+      "input": "\u2060a\u03a3\u03a3\u2060\ud83d\ude00\ufeff\u0130\u1d48.example",
+      "ascii": "xn--ai-sub46ea4130bes54d.example"
+    },
+    {
+      "input": "\u0130\u1d2c.example",
+      "ascii": "xn--i-9bb391r.example"
+    },
+    {
+      "input": "aa\u00adA\ud87e\udc68\u200d.example",
+      "ascii": "xn--aaa-e275b.example"
+    },
+    {
+      "input": "\ufeff\u1d2c\u0327\u200c\u1680Aa\u0639.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "A\u1680\u0308\u0308\u03c2.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "A\u0327.example",
+      "ascii": "xn--a-3db.example"
+    },
+    {
+      "input": "\u00df.example",
+      "ascii": "ss.example"
+    },
+    {
+      "input": "\u200c\u0308\ud83d\ude00.example",
+      "ascii": "xn--ssa6856w.example"
+    },
+    {
+      "input": "\u200c\u1d48\u00dfA\u0308\ufeff\ufeff\u0327\u0327\u00df.example",
+      "ascii": "xn--ssss-moa885aa1264c.example"
+    },
+    {
+      "input": "\ufeff\u0130\u0130\u1680\u2060\u200d\u00dfA\u00ad\u0639\u0639.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u00df.example",
+      "ascii": "ss.example"
+    },
+    {
+      "input": "\u00ad\u1d48\u0639.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u2060\u1680\u00ad\u03a3\u03a3A\u2060\u05d0\ud83d\ude00\u00ada.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u200d\u0639\u05d0.example",
+      "ascii": "xn--4db3s.example"
+    },
+    {
+      "input": "\u05d0\u200c\u0327\u03a3\u0327A\u212a\u03c2\u1680.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u0639\ud83d\ude00A\ud83d\ude00\u00ad\u1680\u2060\u05d0\u05d0\u0308\u200c.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "a\u03a3\u1d2c\u212aa\ufeff.example",
+      "ascii": "xn--aka-qzc9363a.example"
+    },
+    {
+      "input": "\u2060\u200d.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u0327A\u1d2ca.example",
+      "ascii": "xn--aa-hxb957x.example"
+    },
+    {
+      "input": "\u0308\ud87e\udc68\u00df\ud87e\udc68\u03c2\u1d48\u2060A\u212a.example",
+      "ascii": "xn--ssak-uwc83iv40j3q91eca.example"
+    },
+    {
+      "input": "\ud83d\ude00\u0130.example",
+      "ascii": "xn--i-9bb32349a.example"
+    },
+    {
+      "input": "\u05d0\ud83d\ude00\u1680\u212a\u1680\u00ad\u0308\u03c2.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\ufeff\u05d0\u1680aa\u200d\u2060.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\ud83d\ude00\u00ad\u2060\ud83d\ude00\u200d\ufeff\u03a3\u0639\u05d0\u200c.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u0639\ud83d\ude00\ufeff\ud83d\ude00\ud87e\udc68\u00df\u0327\u05d0.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u212a\u00ad\u03c2\u00df\u0130\u200c.example",
+      "ascii": "xn--kssi-twc83i.example"
+    },
+    {
+      "input": "\ud87e\udc68a\u03c2\u0639\u200c\u200d\u0327\u212a.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u05d0\u05d0\u200c\u0308\u1680.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\ud87e\udc68\u0327.example",
+      "ascii": "xn--ota3851y.example"
+    },
+    {
+      "input": "\u212a\u200c\ud87e\udc68\u0327\u05d0\u200ca.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u00df\u0327\u200c\u0130\u03c2\u03a3\u1d48\ud83d\ude00.example",
+      "ascii": "xn--si-fta11o40aa5486b2k87d.example"
+    },
+    {
+      "input": "\u2060\u2060\u03c2\u212a\u1d48\u1d48\u1d2c\u200d\u1d48\u200c\u05d0.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\ufeff\u1d2c\u0639\u03c2\u200c\u0130\u03c2.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u05d0\u03c2\u00ad\u1d2c\u00df\u05d0.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u0130a\u0327\ud83d\ude00\u00df\u1d2c\ufeff.example",
+      "ascii": "xn--iass-qwc7ql70per87d.example"
+    },
+    {
+      "input": "\u200c\u00df\u0327a\u0327\u0130\u1680\u0130\u2060\u0327\ufeff.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u200d\ud87e\udc68\u2060\u1d2ca\u0327.example",
+      "ascii": "xn--a-3db590rfg37b.example"
+    },
+    {
+      "input": "\u03c2\u200d\u1680\u0130.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u0639\u05d0\u2060\u1d48\u2060a\u1d2c\u0130\u200c\u200c.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u05d0a\u0639\u00ad\u0308\u0130\u05d0a.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u00ad\u200d\ud83d\ude00\u1d2c\u1d2c\u0327.example",
+      "ascii": "xn--ota534ka88259b.example"
+    },
+    {
+      "input": "\u05d0\u200d\u200c\u0130.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u212a\u1680\u00df\u03a3\u0130a\u1d48\u0639.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u03c2\u200c\u03c2\ufeff\u0308a\u0639.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u0130\ufeff\u03a3\ufeffa\ud87e\udc68\u0327\u05d0\ud83d\ude00.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u200d.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u03c2\u212a\u0130\u1d2c\u05d0\u2060\u0639.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u0327\u00df\u00ad\ud87e\udc68\u03a3A\u0130\u2060\u0639A.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u05d0\u1d48\u03c2\u05d0\u0639\u1d48\u0308\u1d48.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u0308\ud87e\udc68\u03a3\u212a\u00df\u03a3\u05d0.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u1d48\u00ad.example",
+      "ascii": "xn--s9f.example"
+    },
+    {
+      "input": "\u00df\u0639\u03c2\u212a\u200c\u1680\u05d0\u1680\u2060\ud87e\udc68.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u00ada\u00dfA.example",
+      "ascii": "assa.example"
+    },
+    {
+      "input": "\u212aA\u1d2c\u1d48A.example",
+      "ascii": "xn--kaa-67xug.example"
+    },
+    {
+      "input": "aaA\u0639\u00df\u0130\u2060.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u0308\ud83d\ude00\ufeff\u03c2\u1d48A\ud87e\udc68\u03a3a\u212a.example",
+      "ascii": "xn--aak-cec94gba3486b0k87dnlwb.example"
+    },
+    {
+      "input": "a\u00df\u05d0\u05d0\ufeff.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u00ad\u0130\u00df\u03c2\u0327\u03c2\u212a\u0130A\u200c.example",
+      "ascii": "xn--isskia-pyde9zt9cba.example"
+    },
+    {
+      "input": "\u00df\u212a\u0639\u05d0\ud87e\udc68\u0130\ud83d\ude00.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\ud87e\udc68\u00df\u03a3\u1d48\u212a\u03a3\u2060\u2060\u1d2c.example",
+      "ascii": "xn--ssk-rzcb4410bsfam6660b.example"
+    },
+    {
+      "input": "\u0639\ud83d\ude00\u1680\u200d\u1d48\u0308\u212a\ud83d\ude00\ud87e\udc68\u200c\u200c.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\ufeff\ud87e\udc68\u200c\u03c2\u00df\u05d0.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\ufeff\u05d0\u03c2\u0308\u0327.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u200c\u00df\u0639a\u0308\u1d48.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u0327\ufeff\u200d.example",
+      "ascii": "xn--ota.example"
+    },
+    {
+      "input": "\u2060\ud87e\udc68.example",
+      "ascii": "xn--j74i.example"
+    },
+    {
+      "input": "\u03a3\u1d48\ud83d\ude00\u1d48\u0308\u0130\ud87e\udc68\u05d0\u1d48.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\ud83d\ude00a\u1d48\u1680.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u00ada\u0639\u200c\u03a3a.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\ufeff\u0308\u0130\u0130\u00dfA\u0130.example",
+      "ascii": "xn--iissai-pydbeb.example"
+    },
+    {
+      "input": "\u05d0\u1680\u00ad\u200dAA\u00ad.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u0639\u00dfA.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u0308\u1680\u1d48\ud83d\ude00\ud83d\ude00\u2060\u200dA\u1680\u200c\u00ad.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u0327\u05d0\u00ad\u0639.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u1d48\u05d0\u1d48\u200d.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\u0327\u1d48a\u00df.example",
+      "ascii": "xn--ass-vhc9554a.example"
+    },
+    {
+      "input": "\u0308\u200da.example",
+      "ascii": "xn--a-bcb.example"
+    },
+    {
+      "input": "\u03c2\ud83d\ude00A\ud83d\ude00\u200d\u1d48\u03a3\ufeff\u212a\u0308\ufeff.example",
+      "ascii": "xn--ak-vub95eba1130bfs54dba.example"
+    },
+    {
+      "input": "a\ud87e\udc68\u2060\u1d2cA\u2060\u03a3\u0130\u0327\u200c\ud83d\ude00.example",
+      "ascii": "xn--aai-bec3n80b741kmr87ddlwb.example"
+    },
+    {
+      "input": "\u0308\ud83d\ude00\ud83d\ude00\u1d2c\u00ad\u00df\u0130\ud83d\ude00.example",
+      "ascii": "xn--ssi-becb6621b1x59caf.example"
+    },
+    {
+      "input": "\u0000.example",
+      "ascii": "\u0000.example"
+    },
+    {
+      "input": "\u1eef.example",
+      "ascii": "xn--vmg.example"
+    },
+    {
+      "input": "\u3dde.example",
+      "ascii": "xn--42m.example"
+    },
+    {
+      "input": "\u5ccd.example",
+      "ascii": "xn--ekt.example"
+    },
+    {
+      "input": "\u7bbc.example",
+      "ascii": "xn--n0z.example"
+    },
+    {
+      "input": "\u9aab.example",
+      "ascii": "xn--wh6a.example"
+    },
+    {
+      "input": "\ub99a.example",
+      "ascii": "xn--5x2b.example"
+    },
+    {
+      "input": "\uf778.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\ud805\ude67.example",
+      "ascii": "xn--xc2d.example"
+    },
+    {
+      "input": "\ud80d\udd56.example",
+      "ascii": "xn--6s8d.example"
+    },
+    {
+      "input": "\ud815\udc45.example",
+      "ascii": "xn--g94e.example"
+    },
+    {
+      "input": "\ud81c\udf34.example",
+      "ascii": "xn--pq1f.example"
+    },
+    {
+      "input": "\ud824\ude23.example",
+      "ascii": "xn--y67f.example"
+    },
+    {
+      "input": "\ud82c\udd12.example",
+      "ascii": "xn--7n4g.example"
+    },
+    {
+      "input": "\ud834\udc01.example",
+      "ascii": "xn--h40h.example"
+    },
+    {
+      "input": "\ud83b\udef0.example",
+      "ascii": "xn--ql7h.example"
+    },
+    {
+      "input": "\ud843\udddf.example",
+      "ascii": "xn--z13i.example"
+    },
+    {
+      "input": "\ud84b\udcce.example",
+      "ascii": "xn--8i0j.example"
+    },
+    {
+      "input": "\ud852\udfbd.example",
+      "ascii": "xn--iz6j.example"
+    },
+    {
+      "input": "\ud85a\udeac.example",
+      "ascii": "xn--rg3k.example"
+    },
+    {
+      "input": "\ud862\udd9b.example",
+      "ascii": "xn--0w9k.example"
+    },
+    {
+      "input": "\ud86a\udc8a.example",
+      "ascii": "xn--9d6l.example"
+    },
+    {
+      "input": "\ud871\udf79.example",
+      "ascii": "xn--ju2m.example"
+    },
+    {
+      "input": "\ud879\ude68.example",
+      "ascii": "xn--sb9m.example"
+    },
+    {
+      "input": "\ud881\udd57.example",
+      "ascii": "xn--1r5n.example"
+    },
+    {
+      "input": "\ud889\udc46.example",
+      "ascii": "xn--b81o.example"
+    },
+    {
+      "input": "\ud890\udf35.example",
+      "ascii": "xn--kp8o.example"
+    },
+    {
+      "input": "\ud898\ude24.example",
+      "ascii": "xn--t54p.example"
+    },
+    {
+      "input": "\ud8a0\udd13.example",
+      "ascii": "xn--2m1q.example"
+    },
+    {
+      "input": "\ud8a8\udc02.example",
+      "ascii": "xn--c37q.example"
+    },
+    {
+      "input": "\ud8af\udef1.example",
+      "ascii": "xn--lk4r.example"
+    },
+    {
+      "input": "\ud8b7\udde0.example",
+      "ascii": "xn--u00s.example"
+    },
+    {
+      "input": "\ud8bf\udccf.example",
+      "ascii": "xn--3h7s.example"
+    },
+    {
+      "input": "\ud8c6\udfbe.example",
+      "ascii": "xn--dy3t.example"
+    },
+    {
+      "input": "\ud8ce\udead.example",
+      "ascii": "xn--mf0u.example"
+    },
+    {
+      "input": "\ud8d6\udd9c.example",
+      "ascii": "xn--vv6u.example"
+    },
+    {
+      "input": "\ud8de\udc8b.example",
+      "ascii": "xn--4c3v.example"
+    },
+    {
+      "input": "\ud8e5\udf7a.example",
+      "ascii": "xn--et9v.example"
+    },
+    {
+      "input": "\ud8ed\ude69.example",
+      "ascii": "xn--n95w.example"
+    },
+    {
+      "input": "\ud8f5\udd58.example",
+      "ascii": "xn--wq2x.example"
+    },
+    {
+      "input": "\ud8fd\udc47.example",
+      "ascii": "xn--568x.example"
+    },
+    {
+      "input": "\ud904\udf36.example",
+      "ascii": "xn--fo5y.example"
+    },
+    {
+      "input": "\ud90c\ude25.example",
+      "ascii": "xn--o41z.example"
+    },
+    {
+      "input": "\ud914\udd14.example",
+      "ascii": "xn--xl8z.example"
+    },
+    {
+      "input": "\ud91c\udc03.example",
+      "ascii": "xn--6140a.example"
+    },
+    {
+      "input": "\ud923\udef2.example",
+      "ascii": "xn--gj11a.example"
+    },
+    {
+      "input": "\ud92b\udde1.example",
+      "ascii": "xn--pz71a.example"
+    },
+    {
+      "input": "\ud933\udcd0.example",
+      "ascii": "xn--yg42a.example"
+    },
+    {
+      "input": "\ud93a\udfbf.example",
+      "ascii": "xn--7w03a.example"
+    },
+    {
+      "input": "\ud942\udeae.example",
+      "ascii": "xn--he73a.example"
+    },
+    {
+      "input": "\ud94a\udd9d.example",
+      "ascii": "xn--qu34a.example"
+    },
+    {
+      "input": "\ud952\udc8c.example",
+      "ascii": "xn--zb05a.example"
+    },
+    {
+      "input": "\ud959\udf7b.example",
+      "ascii": "xn--8r65a.example"
+    },
+    {
+      "input": "\ud961\ude6a.example",
+      "ascii": "xn--i826a.example"
+    },
+    {
+      "input": "\ud969\udd59.example",
+      "ascii": "xn--rp96a.example"
+    },
+    {
+      "input": "\ud971\udc48.example",
+      "ascii": "xn--0557a.example"
+    },
+    {
+      "input": "\ud978\udf37.example",
+      "ascii": "xn--9m28a.example"
+    },
+    {
+      "input": "\ud980\ude26.example",
+      "ascii": "xn--j388a.example"
+    },
+    {
+      "input": "\ud988\udd15.example",
+      "ascii": "xn--sk59a.example"
+    },
+    {
+      "input": "\ud990\udc04.example",
+      "ascii": "xn--1010b.example"
+    },
+    {
+      "input": "\ud997\udef3.example",
+      "ascii": "xn--bi80b.example"
+    },
+    {
+      "input": "\ud99f\udde2.example",
+      "ascii": "xn--ky41b.example"
+    },
+    {
+      "input": "\ud9a7\udcd1.example",
+      "ascii": "xn--tf12b.example"
+    },
+    {
+      "input": "\ud9ae\udfc0.example",
+      "ascii": "xn--2v72b.example"
+    },
+    {
+      "input": "\ud9b6\udeaf.example",
+      "ascii": "xn--cd43b.example"
+    },
+    {
+      "input": "\ud9be\udd9e.example",
+      "ascii": "xn--lt04b.example"
+    },
+    {
+      "input": "\ud9c6\udc8d.example",
+      "ascii": "xn--u964b.example"
+    },
+    {
+      "input": "\ud9cd\udf7c.example",
+      "ascii": "xn--3q35b.example"
+    },
+    {
+      "input": "\ud9d5\ude6b.example",
+      "ascii": "xn--d795b.example"
+    },
+    {
+      "input": "\ud9dd\udd5a.example",
+      "ascii": "xn--mo66b.example"
+    },
+    {
+      "input": "\ud9e5\udc49.example",
+      "ascii": "xn--v427b.example"
+    },
+    {
+      "input": "\ud9ec\udf38.example",
+      "ascii": "xn--4l97b.example"
+    },
+    {
+      "input": "\ud9f4\ude27.example",
+      "ascii": "xn--e258b.example"
+    },
+    {
+      "input": "\ud9fc\udd16.example",
+      "ascii": "xn--nj29b.example"
+    },
+    {
+      "input": "\uda04\udc05.example",
+      "ascii": "xn--wz89b.example"
+    },
+    {
+      "input": "\uda0b\udef4.example",
+      "ascii": "xn--5g50c.example"
+    },
+    {
+      "input": "\uda13\udde3.example",
+      "ascii": "xn--fx11c.example"
+    },
+    {
+      "input": "\uda1b\udcd2.example",
+      "ascii": "xn--oe81c.example"
+    },
+    {
+      "input": "\uda22\udfc1.example",
+      "ascii": "xn--xu42c.example"
+    },
+    {
+      "input": "\uda2a\udeb0.example",
+      "ascii": "xn--6b13c.example"
+    },
+    {
+      "input": "\uda32\udd9f.example",
+      "ascii": "xn--gs73c.example"
+    },
+    {
+      "input": "\uda3a\udc8e.example",
+      "ascii": "xn--p834c.example"
+    },
+    {
+      "input": "\uda41\udf7d.example",
+      "ascii": "xn--yp05c.example"
+    },
+    {
+      "input": "\uda49\ude6c.example",
+      "ascii": "xn--7565c.example"
+    },
+    {
+      "input": "\uda51\udd5b.example",
+      "ascii": "xn--hn36c.example"
+    },
+    {
+      "input": "\uda59\udc4a.example",
+      "ascii": "xn--q396c.example"
+    },
+    {
+      "input": "\uda60\udf39.example",
+      "ascii": "xn--zk67c.example"
+    },
+    {
+      "input": "\uda68\ude28.example",
+      "ascii": "xn--8028c.example"
+    },
+    {
+      "input": "\uda70\udd17.example",
+      "ascii": "xn--ii98c.example"
+    },
+    {
+      "input": "\uda78\udc06.example",
+      "ascii": "xn--ry59c.example"
+    },
+    {
+      "input": "\uda7f\udef5.example",
+      "ascii": "xn--0f20d.example"
+    },
+    {
+      "input": "\uda87\udde4.example",
+      "ascii": "xn--9v80d.example"
+    },
+    {
+      "input": "\uda8f\udcd3.example",
+      "ascii": "xn--jd51d.example"
+    },
+    {
+      "input": "\uda96\udfc2.example",
+      "ascii": "xn--st12d.example"
+    },
+    {
+      "input": "\uda9e\udeb1.example",
+      "ascii": "xn--1972d.example"
+    },
+    {
+      "input": "\udaa6\udda0.example",
+      "ascii": "xn--br43d.example"
+    },
+    {
+      "input": "\udaae\udc8f.example",
+      "ascii": "xn--k704d.example"
+    },
+    {
+      "input": "\udab5\udf7e.example",
+      "ascii": "xn--to74d.example"
+    },
+    {
+      "input": "\udabd\ude6d.example",
+      "ascii": "xn--2435d.example"
+    },
+    {
+      "input": "\udac5\udd5c.example",
+      "ascii": "xn--cm06d.example"
+    },
+    {
+      "input": "\udacd\udc4b.example",
+      "ascii": "xn--l266d.example"
+    },
+    {
+      "input": "\udad4\udf3a.example",
+      "ascii": "xn--uj37d.example"
+    },
+    {
+      "input": "\udadc\ude29.example",
+      "ascii": "xn--3z97d.example"
+    },
+    {
+      "input": "\udae4\udd18.example",
+      "ascii": "xn--dh68d.example"
+    },
+    {
+      "input": "\udaec\udc07.example",
+      "ascii": "xn--mx29d.example"
+    },
+    {
+      "input": "\udaf3\udef6.example",
+      "ascii": "xn--ve99d.example"
+    },
+    {
+      "input": "\udafb\udde5.example",
+      "ascii": "xn--4u50e.example"
+    },
+    {
+      "input": "\udb03\udcd4.example",
+      "ascii": "xn--ec21e.example"
+    },
+    {
+      "input": "\udb0a\udfc3.example",
+      "ascii": "xn--ns81e.example"
+    },
+    {
+      "input": "\udb12\udeb2.example",
+      "ascii": "xn--w842e.example"
+    },
+    {
+      "input": "\udb1a\udda1.example",
+      "ascii": "xn--5p13e.example"
+    },
+    {
+      "input": "\udb22\udc90.example",
+      "ascii": "xn--f673e.example"
+    },
+    {
+      "input": "\udb29\udf7f.example",
+      "ascii": "xn--on44e.example"
+    },
+    {
+      "input": "\udb31\ude6e.example",
+      "ascii": "xn--x305e.example"
+    },
+    {
+      "input": "\udb39\udd5d.example",
+      "ascii": "xn--6k75e.example"
+    },
+    {
+      "input": "\udb41\udc4c.example",
+      "ascii": "xn--g136e.example"
+    },
+    {
+      "input": "\udb48\udf3b.example",
+      "ascii": "xn--pi07e.example"
+    },
+    {
+      "input": "\udb50\ude2a.example",
+      "ascii": "xn--yy67e.example"
+    },
+    {
+      "input": "\udb58\udd19.example",
+      "ascii": "xn--7f38e.example"
+    },
+    {
+      "input": "\udb60\udc08.example",
+      "ascii": "xn--hw98e.example"
+    },
+    {
+      "input": "\udb67\udef7.example",
+      "ascii": "xn--qd69e.example"
+    },
+    {
+      "input": "\udb6f\udde6.example",
+      "ascii": "xn--zt20f.example"
+    },
+    {
+      "input": "\udb77\udcd5.example",
+      "ascii": "xn--8980f.example"
+    },
+    {
+      "input": "\udb7e\udfc4.example",
+      "ascii": "xn--ir51f.example"
+    },
+    {
+      "input": "\udb86\udeb3.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\udb8e\udda2.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\udb96\udc91.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\udb9d\udf80.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\udba5\ude6f.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\udbad\udd5e.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\udbb5\udc4d.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\udbbc\udf3c.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\udbc4\ude2b.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\udbcc\udd1a.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\udbd4\udc09.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\udbdb\udef8.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\udbe3\udde7.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\udbeb\udcd6.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\udbf2\udfc5.example",
+      "error": "UnicodeEncodeError"
+    },
+    {
+      "input": "\udbfa\udeb4.example",
+      "error": "UnicodeEncodeError"
+    }
+  ]
+}

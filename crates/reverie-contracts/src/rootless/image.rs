@@ -9,6 +9,25 @@ impl RootlessImage {
         let value = legacy_json::decode_rootless_profile(raw).map_err(|_| RootlessError::Json)?;
         Ok(Self(value))
     }
+    /// The original broker's singleton image-inspection envelope and exact
+    /// selected image check. This is DATA, not current engine/image authority.
+    pub fn decode_inspection(raw: &[u8], expected: &MetadataText) -> Result<Self> {
+        let mut value =
+            legacy_json::decode_engine_inventory(raw).map_err(|_| RootlessError::Json)?;
+        let Node::Array(rows) = &mut value.0 else {
+            return Err(RootlessError::Image);
+        };
+        if rows.len() != 1 {
+            return Err(RootlessError::Image);
+        }
+        let row = rows.pop().expect("checked singleton image");
+        let fields = object(&row).map_err(|_| RootlessError::Image)?;
+        if !matches!(field(fields, "Id"), Some(Value(Node::String(actual))) if actual.0 == expected.codepoints())
+        {
+            return Err(RootlessError::Image);
+        }
+        Ok(Self(row))
+    }
 }
 pub struct ImageMappings {
     uid: ImageInteger,

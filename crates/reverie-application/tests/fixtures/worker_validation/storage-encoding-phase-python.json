@@ -1,0 +1,118 @@
+[
+  {
+    "key": "stateRoot",
+    "tail": [
+      47,
+      98,
+      97,
+      100,
+      55296
+    ],
+    "historyError": {
+      "type": "JSONDecodeError",
+      "message": "Expecting property name enclosed in double quotes: line 1 column 2 (char 1)"
+    },
+    "afterHistoryError": {
+      "type": "UnicodeEncodeError",
+      "message": "'utf-8' codec can't encode character '\\ud800' in position 65: surrogates not allowed"
+    }
+  },
+  {
+    "key": "stateRoot",
+    "tail": [
+      47,
+      98,
+      97,
+      100,
+      55296,
+      47,
+      47,
+      46,
+      47
+    ],
+    "historyError": {
+      "type": "JSONDecodeError",
+      "message": "Expecting property name enclosed in double quotes: line 1 column 2 (char 1)"
+    },
+    "afterHistoryError": {
+      "type": "ValueError",
+      "message": "Canonical laptop storage path required"
+    }
+  },
+  {
+    "key": "stateRoot",
+    "tail": [
+      47,
+      98,
+      97,
+      100,
+      0
+    ],
+    "historyError": {
+      "type": "JSONDecodeError",
+      "message": "Expecting property name enclosed in double quotes: line 1 column 2 (char 1)"
+    },
+    "afterHistoryError": {
+      "type": "ValueError",
+      "message": "lstat: embedded null character in path"
+    }
+  },
+  {
+    "key": "scratchRoot",
+    "tail": [
+      47,
+      98,
+      97,
+      100,
+      55296
+    ],
+    "historyError": {
+      "type": "JSONDecodeError",
+      "message": "Expecting property name enclosed in double quotes: line 1 column 2 (char 1)"
+    },
+    "afterHistoryError": {
+      "type": "UnicodeEncodeError",
+      "message": "'utf-8' codec can't encode character '\\ud800' in position 65: surrogates not allowed"
+    }
+  },
+  {
+    "key": "scratchRoot",
+    "tail": [
+      47,
+      98,
+      97,
+      100,
+      55296,
+      47,
+      47,
+      46,
+      47
+    ],
+    "historyError": {
+      "type": "JSONDecodeError",
+      "message": "Expecting property name enclosed in double quotes: line 1 column 2 (char 1)"
+    },
+    "afterHistoryError": {
+      "type": "ValueError",
+      "message": "Canonical laptop storage path required"
+    }
+  },
+  {
+    "key": "scratchRoot",
+    "tail": [
+      47,
+      98,
+      97,
+      100,
+      0
+    ],
+    "historyError": {
+      "type": "JSONDecodeError",
+      "message": "Expecting property name enclosed in double quotes: line 1 column 2 (char 1)"
+    },
+    "afterHistoryError": {
+      "type": "ValueError",
+      "message": "lstat: embedded null character in path"
+    }
+  }
+]

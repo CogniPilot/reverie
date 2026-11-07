@@ -100,14 +100,25 @@ pub struct ObservationData {
 pub struct CapacityObservation(ObservationData);
 impl CapacityObservation {
     pub fn try_new(data: ObservationData) -> Result<Self> {
-        need(data.budget_bytes > 0, "POSITIVE_MEMORY")?;
-        validate_allocated_commitment(data.current_memory_bytes, data.committed_bytes)?;
-        need(data.committed_bytes <= data.budget_bytes, "POOL_CAPACITY")?;
+        validate_observation_capacity(
+            data.budget_bytes,
+            data.committed_bytes,
+            data.current_memory_bytes,
+        )?;
         Ok(Self(data))
     }
     pub fn data(&self) -> &ObservationData {
         &self.0
     }
+}
+pub fn validate_observation_capacity(
+    budget: u64,
+    committed: u64,
+    allocated: MemoryBytes,
+) -> Result<()> {
+    need(budget > 0, "POSITIVE_MEMORY")?;
+    validate_allocated_commitment(allocated, committed)?;
+    need(committed <= budget, "POOL_CAPACITY")
 }
 pub fn validate_allocated_commitment(allocated: MemoryBytes, committed: u64) -> Result<()> {
     need(allocated.get() <= committed, "POOL_CAPACITY")
