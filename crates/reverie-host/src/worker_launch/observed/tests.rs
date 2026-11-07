@@ -44,6 +44,78 @@ impl Tree {
         .unwrap();
         WorkerRuntime::new(InstalledWorkerEngine::new(capture), envelope.base())
     }
+    fn controlled_runtime(&self) -> WorkerRuntime {
+        let source = self.source();
+        let envelope = WorkerEnvelope::capture(source).unwrap();
+        let program = self.0.join("storage-writer");
+        if !program.exists() {
+            fs::hard_link(crate::engine_metadata::tests::program(), &program).unwrap();
+        }
+        let capture =
+            EngineBootstrap::from_service(program.as_os_str(), BTreeMap::new(), self.0.clone())
+                .unwrap();
+        WorkerRuntime::new(InstalledWorkerEngine::new(capture), envelope.base())
+    }
+}
+
+#[test]
+fn sealed_existing_inspection_is_from_actual_fixed_query_and_rejects_other_runtime_or_plan_observation()
+ {
+    let tree = Tree::new();
+    let runtime = tree.controlled_runtime();
+    let other = tree.controlled_runtime();
+    let source = tree.source();
+    let storage = runtime
+        .resolve_storage(&source, &sid())
+        .unwrap()
+        .into_legacy()
+        .unwrap();
+    let plan = runtime
+        .prepare_laptop_plan(source.clone(), source.clone(), &storage)
+        .unwrap();
+    let second = runtime
+        .prepare_laptop_plan(source.clone(), source, &storage)
+        .unwrap();
+    fs::write(tree.0.join("inspect.out"), serde_json::to_vec(&json!([{"Config":{"Labels":{"reverie.worker":"demo","reverie.session":sid().as_str()}},"State":{"Running":false}},42])).unwrap()).unwrap();
+    assert!(matches!(
+        plan.inspect_existing(&other, end()),
+        Err(ExistingObservationError::Origin)
+    ));
+    assert!(
+        !tree.0.join("calls.txt").exists(),
+        "wrong runtime refused before native constructor"
+    );
+    let observed = plan.inspect_existing(&runtime, end()).unwrap().unwrap();
+    observed.assert_plan(&runtime, &plan).unwrap();
+    assert!(observed.assert_plan(&runtime, &second).is_err());
+    assert!(observed.assert_plan(&other, &plan).is_err());
+    assert!(!observed.data().running().unwrap());
+    let calls = fs::read_to_string(tree.0.join("calls.txt")).unwrap();
+    assert_eq!(calls, format!("inspect\0demo-agent-{}\n", sid().as_str()));
+    storage.close(end()).unwrap();
+    runtime.close(end()).unwrap();
+    other.close(end()).unwrap();
+}
+
+#[test]
+fn sealed_existing_optional_nonzero_ignores_unparseable_stdout_without_changing_same_client_policy()
+{
+    let tree = Tree::new();
+    let runtime = tree.controlled_runtime();
+    let source = tree.source();
+    let storage = runtime
+        .resolve_storage(&source, &sid())
+        .unwrap()
+        .into_legacy()
+        .unwrap();
+    let plan = runtime
+        .prepare_laptop_plan(source.clone(), source, &storage)
+        .unwrap();
+    fs::write(tree.0.join("inspect.out"), b"not JSON").unwrap();
+    fs::write(tree.0.join("inspect.out.status"), b"7").unwrap();
+    assert!(plan.inspect_existing(&runtime, end()).unwrap().is_none());
+    storage.close(end()).unwrap();
+    runtime.close(end()).unwrap();
 }
 impl Drop for Tree {
     fn drop(&mut self) {
