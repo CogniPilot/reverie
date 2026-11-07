@@ -664,3 +664,9 @@ choose no aggregate body deadline: each fixed client call retains 20 seconds,
 clipped to the service's actual first-stop budget. Existing `Instant` component
 entry points remain available with their explicit caller cap. Native settlement
 has its separate supplied cleanup end; it cannot retry effects or clear failure.
+The genuine worker path also waits for shared-client admission only after a
+typed before-start Busy result with no captured call and no possible start.
+This uses the same original per-query end, rechecks the live first-stop bound,
+and dispatches no command while waiting. Admitted tickets and every other error
+remain failed without replay. Exact-source and bounded component admission
+behavior is unchanged.

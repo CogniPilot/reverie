@@ -2,6 +2,7 @@
 use super::*;
 use crate::worker_launch::{ExistingLaptopInspection, ObservedCreatePlan};
 use std::fs;
+mod concurrency;
 fn inputs(
     fixture: &Fixture,
 ) -> (
