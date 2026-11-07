@@ -2,6 +2,7 @@
 // configuration change, privileged container, extra capability or shell.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
+import { realpathSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 
 export const workload = 'const end=process.hrtime.bigint()+750000000n;let n=1;while(process.hrtime.bigint()<end){for(let i=1;i<10000;i++)n=Math.imul(n+i,i)|0;}process.stdout.write(String(n));';
@@ -92,4 +93,4 @@ export function main(args) {
   assert.deepEqual(inventory(deployment), before, 'running laptop inventory changed during acceptance');
   assert.equal(failures.length, 0, `${failures.length}/${before.length} running laptops failed real perf; no laptop was installed, restarted or reconfigured`);
 }
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) main(process.argv.slice(2));
+if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) main(process.argv.slice(2));
