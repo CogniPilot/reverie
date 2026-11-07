@@ -1,5 +1,7 @@
 //! Original Engine.get json.loads(bytes) metadata, never a native capability.
 use super::*;
+mod website;
+pub use website::QualifiedWebsiteMetadata;
 pub const MAX_ENGINE_BODY: usize = 2 * 1024 * 1024;
 pub struct EngineMetadata(Value);
 impl EngineMetadata {

@@ -7,7 +7,7 @@ mod tests;
 mod website;
 use crate::legacy_json::{self, Node, Number, Text, Value};
 pub use facts::{ArtifactReference, EngineSelection, InstalledFactsDocument};
-pub use metadata::{EngineMetadata, MAX_ENGINE_BODY};
+pub use metadata::{EngineMetadata, MAX_ENGINE_BODY, QualifiedWebsiteMetadata};
 use reverie_core::{PythonText, decimal::UnsignedInteger, operations::JournalDigest};
 use std::{collections::BTreeMap, fmt};
 pub use website::{CodeFile, ProgramSelection, WebsiteSelection};
