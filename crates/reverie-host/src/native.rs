@@ -20,6 +20,8 @@ mod lease;
 mod memory_namespace;
 mod memory_profile;
 mod rename;
+pub(crate) mod socket_entry;
+pub(crate) mod worker_directory;
 pub(crate) use cold_temporary::{
     install as install_cold_temporary, retire as retire_cold_temporary,
 };

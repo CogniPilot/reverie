@@ -700,3 +700,20 @@ does not certify all App/Office/storage cleanup. Unknown Drop or restoration
 retains the actual guard/origin and refuses replacement. The actual listener,
 all command producers, supervisor and complete service close remain required
 before replacing the Python broker entry point.
+
+Broker socket preparation and bind retain the same runtime through failed
+constructors, checked descriptor close and pinned-name cleanup. The listener
+registers each actual accepted connection directly in the existing reports
+inventory before any peer/frame work; it adds no second connection cap.
+The App startup prefix performs actual signal installation, pool checking,
+socket preparation and recovery in source order, and does not bind before
+recovery. Supervisor, lease-peer, complete verbs and final service close are
+still required before this prefix can become a runnable broker.
+
+The stale probe deliberately uses a newly owned nonblocking socket. Unlike the
+legacy blocking connect, a full/in-progress foreign backlog refuses startup
+without waiting, unlinking or chmodding the foreign name. Only ECONNREFUSED
+permits removal of its pinned matching inode. This is a startup availability
+correction, not a hard filesystem/kernel latency guarantee. As for Office,
+metadata comparison is not atomic against later same-UID namespace writers;
+the actual service lifecycle must exclude those competing writers.
