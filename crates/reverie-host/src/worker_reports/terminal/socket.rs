@@ -42,7 +42,7 @@ impl<'a> Socket<'a> {
     pub(super) fn exit(&mut self, bytes: &[u8]) -> Result<()> {
         self.send(b'X', bytes)
     }
-    pub(super) fn error(&mut self, message: &str) -> Result<()> {
+    pub(in crate::worker_reports) fn error(&mut self, message: &str) -> Result<()> {
         self.send(b'E', &message.as_bytes()[..message.len().min(1000)])
     }
     fn send(&mut self, kind: u8, bytes: &[u8]) -> Result<()> {
