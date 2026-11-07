@@ -14,7 +14,7 @@ use reverie_core::{
     device_policy::{ProjectedMemoryPolicy, SoftMemoryPolicy},
     operations::{JournalDigest, MIB},
     profiles::ResourceProfile,
-    resources::{BudgetMode, ResourceTemplate},
+    resources::{BudgetMode, ResourcePolicy, ResourceTemplate},
 };
 use std::{collections::BTreeMap, fmt};
 
@@ -51,6 +51,7 @@ type Result<T> = std::result::Result<T, RamMigrationError>;
 /// its native source, current owner, canonical claim and pool/provisioning owner.
 pub struct RamMigrationPolicy {
     profile: ResourceProfile,
+    target: ResourcePolicy,
     memory: ProjectedMemoryPolicy,
     bytes: Vec<u8>,
     digest: JournalDigest,
@@ -63,14 +64,25 @@ impl RamMigrationPolicy {
         source: &NativeLimitBinding,
         effective: &EffectiveWorkerConfig,
     ) -> Result<Self> {
-        let target = profile.resources();
-        if target.budget_mode() != BudgetMode::Pool
-            || target.memory_mib() == 0
-            || target.memory_mib() != target.pool_memory_mib()
-            || target.cpus().nano_cpus() != 0
+        let approved = profile.resources();
+        if approved.budget_mode() != BudgetMode::Admission
+            || approved.memory_mib() == 0
+            || approved.memory_mib() != approved.pool_memory_mib()
+            || approved.cpus().nano_cpus() != 0
         {
             return Err(RamMigrationError::Pool);
         }
+        // The legacy approval/reservation stays Admission and HARD. Only this
+        // separate new-purpose selection projects the target into Pool mode.
+        let target = ResourcePolicy::try_new(
+            BudgetMode::Pool,
+            approved.memory_mib(),
+            approved.pids_limit(),
+            approved.cpus(),
+            approved.pool_memory_mib(),
+            approved.pool_tasks_max(),
+        )
+        .map_err(|_| RamMigrationError::Pool)?;
         let original = resource_config::checked_effective_policy(effective)
             .map_err(|_| RamMigrationError::Source)?;
         if original.memory_mib() == 0
@@ -91,11 +103,12 @@ impl RamMigrationPolicy {
             .as_ref()
             .map_or(0, ProjectedMemoryPolicy::swap_pool_mib);
         let memory = SoftMemoryPolicy::try_new(Some(high), swap)
-            .and_then(|policy| policy.project(pool, Some(target)))
+            .and_then(|policy| policy.project(pool, Some(&target)))
             .map_err(|_| RamMigrationError::Memory)?;
-        let (bytes, digest) = record::encode(profile, source, effective, &memory)?;
+        let (bytes, digest) = record::encode(profile, &target, source, effective, &memory)?;
         Ok(Self {
             profile: profile.clone(),
+            target,
             memory,
             bytes,
             digest,
@@ -112,6 +125,9 @@ impl RamMigrationPolicy {
     }
     pub fn memory(&self) -> &ProjectedMemoryPolicy {
         &self.memory
+    }
+    pub fn target_resources(&self) -> &ResourcePolicy {
+        &self.target
     }
     /// Modify only the selected unused target SID in an already staged DATA
     /// candidate. No EID policy, peer, old SID, profile or domain is rewritten.
@@ -140,9 +156,7 @@ impl RamMigrationPolicy {
         sessions.insert(
             key(target.as_str()),
             crate::session_resources_v2::wrap(
-                broker_resources::resource_fields(&ResourceTemplate::from(
-                    self.profile.resources(),
-                )),
+                broker_resources::resource_fields(&ResourceTemplate::from(&self.target)),
                 Some(memory::projected_value(&self.memory)),
             ),
         );

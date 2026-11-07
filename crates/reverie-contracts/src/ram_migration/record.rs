@@ -1,6 +1,7 @@
 use super::*;
 pub(super) fn encode(
     profile: &ResourceProfile,
+    target: &ResourcePolicy,
     source: &NativeLimitBinding,
     effective: &EffectiveWorkerConfig,
     memory: &ProjectedMemoryPolicy,
@@ -9,7 +10,7 @@ pub(super) fn encode(
     let source_digest = crate::reservation_control::fingerprint(source.data())
         .map_err(|_| RamMigrationError::Fingerprint)?;
     let fields = BTreeMap::from([
-        (key("schema"), string("reverie-ram-migration-policy-v1")),
+        (key("schema"), string("reverie-ram-migration-policy-v2")),
         (
             key("profileDigest"),
             string(
@@ -35,6 +36,12 @@ pub(super) fn encode(
             string(&worker_config::policy_digest(effective).to_hex()),
         ),
         (key("memoryPolicy"), memory::projected_value(memory)),
+        (
+            key("targetResources"),
+            Value(Node::Object(broker_resources::resource_fields(
+                &ResourceTemplate::from(target),
+            ))),
+        ),
     ]);
     let value = Value(Node::Object(fields));
     let digest = crate::reservation_control::fingerprint(&value)

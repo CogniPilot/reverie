@@ -24,7 +24,7 @@ fn ram_preparing(
     let mut profiles: Value =
         serde_json::from_slice(&fs::read(setup.tree.root.join(profile_path)).unwrap()).unwrap();
     let target = &mut profiles["profiles"][setup.employee().as_str()]["resources"];
-    target["budgetMode"] = json!("pool");
+    target["budgetMode"] = json!("admission");
     target["memoryMiB"] = json!(49_152);
     target["poolMemoryMiB"] = json!(49_152);
     target["cpus"] = json!(0);
@@ -55,6 +55,14 @@ fn real_ram_migration_cas_binds_old_allocation_and_changes_only_target_session_s
     );
     let (setup, _fixture, gate, mut claim, path) = ram_preparing(512, None);
     let policy = claim.ram_migration_policy().unwrap();
+    assert_eq!(
+        policy.profile().resources().budget_mode(),
+        reverie_core::resources::BudgetMode::Admission
+    );
+    assert_eq!(
+        policy.target_resources().budget_mode(),
+        reverie_core::resources::BudgetMode::Pool
+    );
     assert_eq!(policy.memory().policy().memory_high_mib(), Some(512));
     assert_eq!(policy.memory().policy().swap_mib(), 0);
     let before: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
@@ -245,9 +253,13 @@ fn actual_source_ram_selection_refuses_unlimited_partial_pool_and_quota_target_d
         claim.profile().binding().current_session(),
     )
     .unwrap();
-    for (hard, quota) in [(0, 0), (24_576, 0), (49_152, 1)] {
+    for (mode, hard, quota) in [
+        (BudgetMode::Pool, 0, 0),
+        (BudgetMode::Admission, 24_576, 0),
+        (BudgetMode::Admission, 49_152, 1),
+    ] {
         let resources = ResourcePolicy::try_new(
-            BudgetMode::Pool,
+            mode,
             hard,
             claim.profile().resources().pids_limit(),
             CpuQuota::from_integer(quota).unwrap(),
