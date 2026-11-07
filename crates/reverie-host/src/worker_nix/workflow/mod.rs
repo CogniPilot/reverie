@@ -6,6 +6,8 @@ mod drive;
 mod image;
 mod log;
 mod post_copy;
+mod stopped_remove;
+pub use stopped_remove::RemovedStoppedLaptop;
 #[cfg(test)]
 mod tests;
 use super::*;
@@ -55,6 +57,7 @@ enum CleanupStage {
     Expired,
 }
 struct Record {
+    stopped_removal: stopped_remove::RemovalState,
     id: u64,
     resources: Option<Resources>,
     prepared: EffectiveWorkerConfig,
@@ -270,6 +273,7 @@ impl Workflows {
         };
         let session = resources.guard.session().clone();
         let record = Arc::new(Mutex::new(Record {
+            stopped_removal: stopped_remove::RemovalState::default(),
             id,
             resources: Some(resources),
             prepared,

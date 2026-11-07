@@ -3,6 +3,7 @@ use super::*;
 use crate::worker_launch::{ExistingLaptopInspection, ObservedCreatePlan};
 use std::fs;
 mod concurrency;
+mod removal;
 fn inputs(
     fixture: &Fixture,
 ) -> (

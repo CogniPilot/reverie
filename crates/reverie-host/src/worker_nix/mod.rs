@@ -7,7 +7,7 @@ mod workflow;
 pub(crate) use workflow::Workflows;
 pub use workflow::{
     NixDisposition, NixImageQualification, NixProgress, NixReclaimFailure, NixRetainFailure,
-    NixReturned, NixWorkflow,
+    NixReturned, NixWorkflow, RemovedStoppedLaptop,
 };
 #[cfg(test)]
 mod tests;

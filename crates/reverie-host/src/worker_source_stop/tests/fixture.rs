@@ -66,8 +66,15 @@ pub(super) struct Fixture {
     pub(super) row: Value,
     pub(super) start: String,
     target: Option<JoinHandle<()>>,
+    retained_runtime_expected: bool,
 }
 impl Fixture {
+    pub(super) fn expect_retained_runtime(&mut self) {
+        self.retained_runtime_expected = true;
+    }
+    pub(super) fn fixed_target_program(&self) -> &'static Path {
+        program()
+    }
     pub(super) fn release_target(&mut self) {
         fs::write(self.root.join("release-source"), b"owned known exit").unwrap();
         if let Some(target) = self.target.take() {
@@ -155,6 +162,7 @@ impl Fixture {
             row,
             start,
             target: Some(target),
+            retained_runtime_expected: false,
         };
         fixture.write_rows("before.json", &fixture.row);
         fixture.write_stopped("after.json");
@@ -246,7 +254,12 @@ impl Drop for Fixture {
         if let Some(target) = self.target.take() {
             target.join().unwrap();
         }
-        self.runtime.close(end()).unwrap();
+        let closed = self.runtime.close(end());
+        if self.retained_runtime_expected {
+            assert!(closed.is_err(), "unknown Nix resource must remain counted");
+        } else {
+            closed.unwrap();
+        }
         fs::remove_dir_all(&self.root).unwrap();
     }
 }

@@ -33,8 +33,19 @@ pub struct OrdinaryReplacementReturned {
     storage: Box<LaunchStorage>,
     plan: ObservedCreatePlan,
     process: ExistingProcessIncarnation,
+    removal: StoppedLaptopRemoval,
 }
 impl OrdinaryReplacementReturned {
+    pub fn into_cold_parts(
+        self,
+    ) -> (
+        Box<LaunchStorage>,
+        ObservedCreatePlan,
+        ExistingProcessIncarnation,
+        StoppedLaptopRemoval,
+    ) {
+        (self.storage, self.plan, self.process, self.removal)
+    }
     pub fn into_parts(
         self,
     ) -> (
@@ -144,6 +155,7 @@ impl OrdinaryReplacementStop {
             "WORKER_ORDINARY_STOP_UNCONFIRMED",
         )?;
         self.inner.settle_native(runtime, end)?;
+        let removal = StoppedLaptopRemoval::exact(&mut self.inner);
         let storage = self.inner.storage.take().expect("actual stopped resource");
         let plan = self.plan.take().expect("actual original plan");
         let process = self.process.take().expect("actual original process");
@@ -152,6 +164,7 @@ impl OrdinaryReplacementStop {
             storage,
             plan,
             process,
+            removal,
         })
     }
 }
