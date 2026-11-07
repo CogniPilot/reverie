@@ -3,9 +3,9 @@ use super::scan::{Plan, Scanned, gpu_uuid};
 use super::{
     HistoryRefused, HistoryRequest, HistorySource, MAX_ROWS, ObservationConfig, field, integer,
 };
-use crate::legacy_json::{Node, Value};
+use crate::legacy_json::{Node, Text, Value};
 use crate::python_number::PythonNumber;
-use crate::worker_config::python_float_repr;
+use crate::worker_config::{python_float_repr, python_json_string};
 use std::collections::{BTreeMap, BTreeSet};
 
 /// `{'min', 'avg', 'max', 'n'}` with the original number objects.
@@ -291,18 +291,7 @@ impl Writer {
         self.0.push(':');
     }
     fn string(&mut self, text: &str) {
-        self.0.push('"');
-        for c in text.chars() {
-            match c {
-                '"' => self.0.push_str("\\\""),
-                '\\' => self.0.push_str("\\\\"),
-                c if (c as u32) < 0x20 || !c.is_ascii() => {
-                    self.0.push_str(&format!("\\u{:04x}", c as u32))
-                }
-                c => self.0.push(c),
-            }
-        }
-        self.0.push('"');
+        python_json_string(&Text(text.chars().map(u32::from).collect()), &mut self.0);
     }
     fn number(&mut self, number: PythonNumber) {
         match number {

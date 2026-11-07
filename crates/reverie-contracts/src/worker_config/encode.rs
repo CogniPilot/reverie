@@ -103,7 +103,7 @@ fn array<'a>(
         }
     }
 }
-fn string(text: &Text, result: &mut String) {
+pub(crate) fn string(text: &Text, result: &mut String) {
     result.push('"');
     for &codepoint in &text.0 {
         match codepoint {
