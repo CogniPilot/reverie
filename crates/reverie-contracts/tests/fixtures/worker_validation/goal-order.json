@@ -1,0 +1,62 @@
+[
+  {
+    "raw": "{\"paths\":{\"z\":{\"host\":\"/first\"},\"a\":{\"host\":\"/second\"}}}",
+    "parsed": true,
+    "hosts": [
+      "/first",
+      "/second"
+    ],
+    "error": null
+  },
+  {
+    "raw": "{\"before\":{\"nested\":[{},[1,2]]},\"paths\":{\"z\":{\"host\":\"/first\"},\"a\":{}}}",
+    "parsed": true,
+    "hosts": [
+      "/first"
+    ],
+    "error": "KeyError"
+  },
+  {
+    "raw": "{\"paths\":{\"\\ud800\":{\"host\":\"/surrogate-key\"},\"a\":{\"host\":\"/last\"}}}",
+    "parsed": true,
+    "hosts": [
+      "/surrogate-key",
+      "/last"
+    ],
+    "error": null
+  },
+  {
+    "raw": "{\"paths\":{\"z\":false,\"a\":{\"host\":\"/never\"}}}",
+    "parsed": true,
+    "hosts": [],
+    "error": "TypeError"
+  },
+  {
+    "raw": "{\"paths\":{}}",
+    "parsed": true,
+    "hosts": [],
+    "error": null
+  },
+  {
+    "raw": "{\"paths\":[]}",
+    "parsed": true,
+    "hosts": [],
+    "error": "AttributeError"
+  },
+  {
+    "raw": "{\"paths\":{\"10\":{\"host\":\"/ten\"},\"2\":{\"host\":\"/two\"},\"1\":{\"host\":\"/one\"}}}",
+    "parsed": true,
+    "hosts": [
+      "/ten",
+      "/two",
+      "/one"
+    ],
+    "error": null
+  },
+  {
+    "raw": "{\"paths\":{\"same\":{\"host\":\"/one\"},\"same\":{\"host\":\"/two\"}}}",
+    "parsed": false,
+    "hosts": [],
+    "error": "Refusal"
+  }
+]

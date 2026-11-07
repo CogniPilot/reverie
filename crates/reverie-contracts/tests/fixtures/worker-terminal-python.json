@@ -1,0 +1,585 @@
+{
+  "source": "python/reverie/worker.py",
+  "clients": [
+    {
+      "text": "",
+      "value": []
+    },
+    {
+      "text": "\n",
+      "value": null
+    },
+    {
+      "text": "77 80 24",
+      "value": [
+        [
+          77,
+          80,
+          24
+        ]
+      ]
+    },
+    {
+      "text": "77 80 24\n",
+      "value": [
+        [
+          77,
+          80,
+          24
+        ]
+      ]
+    },
+    {
+      "text": "77 80 24\r\n",
+      "value": [
+        [
+          77,
+          80,
+          24
+        ]
+      ]
+    },
+    {
+      "text": "1 1 1\r\n2 9999 9999",
+      "value": [
+        [
+          1,
+          1,
+          1
+        ],
+        [
+          2,
+          9999,
+          9999
+        ]
+      ]
+    },
+    {
+      "text": "9999999999 9999 9999",
+      "value": [
+        [
+          9999999999,
+          9999,
+          9999
+        ]
+      ]
+    },
+    {
+      "text": "10000000000 80 24",
+      "value": null
+    },
+    {
+      "text": "0 80 24",
+      "value": null
+    },
+    {
+      "text": "01 80 24",
+      "value": null
+    },
+    {
+      "text": "77 0 24",
+      "value": null
+    },
+    {
+      "text": "77 080 24",
+      "value": null
+    },
+    {
+      "text": "77 80 0",
+      "value": null
+    },
+    {
+      "text": "77 80 10000",
+      "value": null
+    },
+    {
+      "text": "77 80 24 ",
+      "value": null
+    },
+    {
+      "text": " 77 80 24",
+      "value": null
+    },
+    {
+      "text": "77  80 24",
+      "value": null
+    },
+    {
+      "text": "77\t80 24",
+      "value": null
+    },
+    {
+      "text": "77 80 24\n\n",
+      "value": null
+    },
+    {
+      "text": "77 80 24\nBAD",
+      "value": null
+    },
+    {
+      "text": "\uff17\uff17 80 24",
+      "value": null
+    },
+    {
+      "text": "77 \uff18\uff10 24",
+      "value": null
+    },
+    {
+      "text": "77 80 24\u001f",
+      "value": null
+    },
+    {
+      "text": "77 80 24\n",
+      "value": [
+        [
+          77,
+          80,
+          24
+        ]
+      ]
+    },
+    {
+      "text": "77 80 24\n88 120 40",
+      "value": [
+        [
+          77,
+          80,
+          24
+        ],
+        [
+          88,
+          120,
+          40
+        ]
+      ]
+    },
+    {
+      "text": "\n77 80 24",
+      "value": null
+    },
+    {
+      "text": "77 80 24\r",
+      "value": [
+        [
+          77,
+          80,
+          24
+        ]
+      ]
+    },
+    {
+      "text": "77 80 24\r88 120 40",
+      "value": [
+        [
+          77,
+          80,
+          24
+        ],
+        [
+          88,
+          120,
+          40
+        ]
+      ]
+    },
+    {
+      "text": "\r77 80 24",
+      "value": null
+    },
+    {
+      "text": "77 80 24\r\n",
+      "value": [
+        [
+          77,
+          80,
+          24
+        ]
+      ]
+    },
+    {
+      "text": "77 80 24\r\n88 120 40",
+      "value": [
+        [
+          77,
+          80,
+          24
+        ],
+        [
+          88,
+          120,
+          40
+        ]
+      ]
+    },
+    {
+      "text": "\r\n77 80 24",
+      "value": null
+    },
+    {
+      "text": "77 80 24\u000b",
+      "value": [
+        [
+          77,
+          80,
+          24
+        ]
+      ]
+    },
+    {
+      "text": "77 80 24\u000b88 120 40",
+      "value": [
+        [
+          77,
+          80,
+          24
+        ],
+        [
+          88,
+          120,
+          40
+        ]
+      ]
+    },
+    {
+      "text": "\u000b77 80 24",
+      "value": null
+    },
+    {
+      "text": "77 80 24\f",
+      "value": [
+        [
+          77,
+          80,
+          24
+        ]
+      ]
+    },
+    {
+      "text": "77 80 24\f88 120 40",
+      "value": [
+        [
+          77,
+          80,
+          24
+        ],
+        [
+          88,
+          120,
+          40
+        ]
+      ]
+    },
+    {
+      "text": "\f77 80 24",
+      "value": null
+    },
+    {
+      "text": "77 80 24\u001c",
+      "value": [
+        [
+          77,
+          80,
+          24
+        ]
+      ]
+    },
+    {
+      "text": "77 80 24\u001c88 120 40",
+      "value": [
+        [
+          77,
+          80,
+          24
+        ],
+        [
+          88,
+          120,
+          40
+        ]
+      ]
+    },
+    {
+      "text": "\u001c77 80 24",
+      "value": null
+    },
+    {
+      "text": "77 80 24\u001d",
+      "value": [
+        [
+          77,
+          80,
+          24
+        ]
+      ]
+    },
+    {
+      "text": "77 80 24\u001d88 120 40",
+      "value": [
+        [
+          77,
+          80,
+          24
+        ],
+        [
+          88,
+          120,
+          40
+        ]
+      ]
+    },
+    {
+      "text": "\u001d77 80 24",
+      "value": null
+    },
+    {
+      "text": "77 80 24\u001e",
+      "value": [
+        [
+          77,
+          80,
+          24
+        ]
+      ]
+    },
+    {
+      "text": "77 80 24\u001e88 120 40",
+      "value": [
+        [
+          77,
+          80,
+          24
+        ],
+        [
+          88,
+          120,
+          40
+        ]
+      ]
+    },
+    {
+      "text": "\u001e77 80 24",
+      "value": null
+    },
+    {
+      "text": "77 80 24\u0085",
+      "value": [
+        [
+          77,
+          80,
+          24
+        ]
+      ]
+    },
+    {
+      "text": "77 80 24\u008588 120 40",
+      "value": [
+        [
+          77,
+          80,
+          24
+        ],
+        [
+          88,
+          120,
+          40
+        ]
+      ]
+    },
+    {
+      "text": "\u008577 80 24",
+      "value": null
+    },
+    {
+      "text": "77 80 24\u2028",
+      "value": [
+        [
+          77,
+          80,
+          24
+        ]
+      ]
+    },
+    {
+      "text": "77 80 24\u202888 120 40",
+      "value": [
+        [
+          77,
+          80,
+          24
+        ],
+        [
+          88,
+          120,
+          40
+        ]
+      ]
+    },
+    {
+      "text": "\u202877 80 24",
+      "value": null
+    },
+    {
+      "text": "77 80 24\u2029",
+      "value": [
+        [
+          77,
+          80,
+          24
+        ]
+      ]
+    },
+    {
+      "text": "77 80 24\u202988 120 40",
+      "value": [
+        [
+          77,
+          80,
+          24
+        ],
+        [
+          88,
+          120,
+          40
+        ]
+      ]
+    },
+    {
+      "text": "\u202977 80 24",
+      "value": null
+    }
+  ],
+  "resize": [
+    {
+      "hex": "5b38302c2032345d",
+      "size": [
+        80,
+        24
+      ]
+    },
+    {
+      "hex": "5b312c20313030305d",
+      "size": [
+        1,
+        1000
+      ]
+    },
+    {
+      "hex": "5b313030302c20315d",
+      "size": [
+        1000,
+        1
+      ]
+    },
+    {
+      "hex": "5b302c2032345d",
+      "error": "Invalid resize"
+    },
+    {
+      "hex": "5b313030312c2032345d",
+      "error": "Invalid resize"
+    },
+    {
+      "hex": "5b2d312c20325d",
+      "error": "Invalid resize"
+    },
+    {
+      "hex": "5b747275652c2032345d",
+      "error": "Invalid resize"
+    },
+    {
+      "hex": "5b38302c2066616c73655d",
+      "error": "Invalid resize"
+    },
+    {
+      "hex": "5b38302e302c2032345d",
+      "error": "Invalid resize"
+    },
+    {
+      "hex": "5b223830222c2032345d",
+      "error": "Invalid resize"
+    },
+    {
+      "hex": "5b5d",
+      "error": "not enough values to unpack (expected 2, got 0)"
+    },
+    {
+      "hex": "5b38305d",
+      "error": "not enough values to unpack (expected 2, got 1)"
+    },
+    {
+      "hex": "5b312c20322c20335d",
+      "error": "too many values to unpack (expected 2)"
+    },
+    {
+      "hex": "7b7d",
+      "error": "not enough values to unpack (expected 2, got 0)"
+    },
+    {
+      "hex": "7b22636f6c73223a2038302c2022726f7773223a2032347d",
+      "error": "Invalid resize"
+    },
+    {
+      "hex": "22383022",
+      "error": "Invalid resize"
+    },
+    {
+      "hex": "227822",
+      "error": "not enough values to unpack (expected 2, got 1)"
+    },
+    {
+      "hex": "2222",
+      "error": "not enough values to unpack (expected 2, got 0)"
+    },
+    {
+      "hex": "6e756c6c",
+      "error": "Worker transport failed"
+    },
+    {
+      "hex": "3432",
+      "error": "Worker transport failed"
+    },
+    {
+      "hex": "4e614e",
+      "error": "Worker transport failed"
+    },
+    {
+      "hex": "5b313030303030303030303030303030303030303030303030303030303030302c2032345d",
+      "error": "Invalid resize"
+    },
+    {
+      "hex": "efbbbf5b3133322c34335d",
+      "size": [
+        132,
+        43
+      ]
+    },
+    {
+      "hex": "fffe5b003100330032002c00340033005d00",
+      "size": [
+        132,
+        43
+      ]
+    },
+    {
+      "hex": "005b003100330032002c00340033005d",
+      "size": [
+        132,
+        43
+      ]
+    },
+    {
+      "hex": "fffe00005b0000003100000033000000320000002c00000034000000330000005d000000",
+      "size": [
+        132,
+        43
+      ]
+    },
+    {
+      "hex": "0000005b0000003100000033000000320000002c00000034000000330000005d",
+      "size": [
+        132,
+        43
+      ]
+    }
+  ]
+}

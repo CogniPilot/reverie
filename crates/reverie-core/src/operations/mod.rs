@@ -10,6 +10,7 @@ pub use operation::{
 };
 use std::fmt;
 pub const MAX_OPERATIONS: usize = 256;
+pub const MAX_SETTLEMENT_ENTRIES: usize = 4096;
 pub const MIB: u64 = 1_048_576;
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct OperationError(&'static str);

@@ -1,5 +1,6 @@
 //! The existing ops_cli.call urlsplit checks, not an arbitrary HTTP client.
 use crate::{Result, Unavailable};
+use reverie_core::{PythonText, memory_configuration::ConfigInteger};
 #[derive(Debug, Eq, PartialEq)]
 pub(crate) struct OfficePhone {
     host: String,
@@ -44,18 +45,11 @@ impl OfficePhone {
             if !port.bytes().all(|b| b.is_ascii_digit()) {
                 return Err(Unavailable);
             }
-            // This purpose has already admitted only ASCII decimal digits.
-            // Count leading zeroes against Python's original4300 digit bound
-            // before parsing the remaining value into its actual port range.
-            if port.len() > 4300 {
-                return Err(Unavailable);
-            }
-            let significant = port.trim_start_matches('0');
-            let port = if significant.is_empty() {
-                0
-            } else {
-                significant.parse::<u16>().map_err(|_| Unavailable)?
-            };
+            // Reuse the checked Python decimal conversion owner: leading
+            // zeroes still count toward its frozen integer digit bound.
+            let number =
+                ConfigInteger::parse(&PythonText::from_scalar_text(port)).ok_or(Unavailable)?;
+            let port = number.as_str().parse::<u16>().map_err(|_| Unavailable)?;
             if port == 0 { 80 } else { port }
         };
         Ok(Self { host, port })

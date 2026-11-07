@@ -1,16 +1,18 @@
+use super::input_path::InputPath;
 use super::{DEFAULT_METADATA_LIMIT, IdentityFault, Result, canonical, need, read_metadata};
 use reverie_contracts::storage_identity::{CompanyRecords, CurrentEmployee, MetadataText};
 use reverie_core::ids::{ProfileEmployeeId, ProfileSessionId};
 use std::fs;
 use std::io;
+use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 
 /// Paths selected by the trusted native caller, not a request's employee/path.
 #[derive(Clone, Debug)]
 pub struct StorageIdentityConfig {
-    company_file: PathBuf,
-    state_root: PathBuf,
-    scratch_root: PathBuf,
+    company_file: InputPath,
+    state_root: InputPath,
+    scratch_root: InputPath,
     uid: u32,
 }
 impl StorageIdentityConfig {
@@ -21,11 +23,24 @@ impl StorageIdentityConfig {
         uid: u32,
     ) -> Result<Self> {
         Ok(Self {
-            company_file: canonical(&company_file)?,
-            state_root: canonical(&state_root)?,
-            scratch_root: canonical(&scratch_root)?,
+            company_file: InputPath::Native(canonical(&company_file)?),
+            state_root: InputPath::Native(canonical(&state_root)?),
+            scratch_root: InputPath::Native(canonical(&scratch_root)?),
             uid,
         })
+    }
+    /// Same captured worker DATA only, for the original lazy selection phases.
+    /// This makes no encoding/canonicality/custody assertion; those checks run
+    /// at each actual resolver/read operation. Strict try_new is unchanged.
+    pub fn capture_worker_settings(
+        settings: &reverie_contracts::resource_config::ResourceIdentitySettings,
+    ) -> Self {
+        Self {
+            company_file: InputPath::WorkerText(settings.company_file().clone()),
+            state_root: InputPath::WorkerText(settings.state_root().clone()),
+            scratch_root: InputPath::WorkerText(settings.scratch_root().clone()),
+            uid: settings.uid(),
+        }
     }
 }
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -99,9 +114,17 @@ impl StoragePaths {
     }
 }
 pub fn company_records(config: &StorageIdentityConfig) -> Result<CompanyRecords> {
-    Ok(
-        read_metadata(&config.company_file, config.uid, DEFAULT_METADATA_LIMIT)?
-            .company_records()?,
+    Ok(read_company_metadata(config)?.company_records()?)
+}
+/// Original company metadata DATA, for purpose-specific selection order. This
+/// is not a globally validated registry, selected employee or owner grant.
+pub fn read_company_metadata(
+    config: &StorageIdentityConfig,
+) -> Result<reverie_contracts::storage_identity::Metadata> {
+    read_metadata(
+        &config.company_file.raw()?,
+        config.uid,
+        DEFAULT_METADATA_LIMIT,
     )
 }
 pub fn storage_paths(
@@ -110,11 +133,16 @@ pub fn storage_paths(
 ) -> Result<StoragePaths> {
     let records = company_records(config)?;
     let mut selected = records.by_session(session).cloned();
-    let indexed = config
-        .state_root
-        .join(session.as_str())
-        .join("storage-owner.json");
-    if present(&indexed)? {
+    let indexed = match config.state_root.pathlike() {
+        Ok(path) => Some(path.join(session.as_str()).join("storage-owner.json")),
+        // pathlib.exists/is_symlink treat an unencodable Python path as
+        // absent. Canonical(raw stateRoot) still refuses at its later phase.
+        Err(error) if error.kind() == io::ErrorKind::InvalidInput => None,
+        Err(error) => return Err(error.into()),
+    };
+    if let Some(indexed) = indexed
+        && present(&indexed)?
+    {
         let binding = read_metadata(&indexed, config.uid, 65536)?.storage_owner(session)?;
         let indexed = records.by_binding(binding.employee(), binding.owner());
         need(
@@ -123,13 +151,16 @@ pub fn storage_paths(
         )?;
         selected = indexed.cloned();
     }
-    let journal = config.company_file.with_file_name("plan-moves.json");
+    let journal = config
+        .company_file
+        .pathlike()?
+        .with_file_name("plan-moves.json");
     if selected.is_none() && present(&journal)? {
         selected = read_metadata(&journal, config.uid, 1024 * 1024)?
             .historical_employee(&records, session)?;
     }
-    let base = canonical(&config.state_root)?;
-    let scratch = canonical(&config.scratch_root)?;
+    let base = canonical(&config.state_root.raw()?)?;
+    let scratch = canonical(&config.scratch_root.raw()?)?;
     let (identity, root, scratch, owner) = match selected {
         Some(row) => {
             let employee = row.canonical_identity()?;
@@ -166,10 +197,12 @@ pub fn storage_start_allowed(config: &StorageIdentityConfig, paths: &StoragePath
     let Some(employee) = paths.employee() else {
         return Ok(true);
     };
-    Ok(
-        read_metadata(&config.company_file, config.uid, DEFAULT_METADATA_LIMIT)?
-            .current_start_allowed(employee, paths.session(), paths.owner())?,
-    )
+    Ok(read_metadata(
+        &config.company_file.raw()?,
+        config.uid,
+        DEFAULT_METADATA_LIMIT,
+    )?
+    .current_start_allowed(employee, paths.session(), paths.owner())?)
 }
 pub fn current_employee(
     config: &StorageIdentityConfig,
@@ -179,25 +212,40 @@ pub fn current_employee(
     let Some(employee) = paths.employee() else {
         return Ok(None);
     };
-    let first = read_metadata(&config.company_file, config.uid, DEFAULT_METADATA_LIMIT)?
-        .current_employee(employee, session, paths.owner())?;
+    let company = config.company_file.raw()?;
+    let first = read_metadata(&company, config.uid, DEFAULT_METADATA_LIMIT)?.current_employee(
+        employee,
+        session,
+        paths.owner(),
+    )?;
     #[cfg(test)]
-    super::tests::hit(super::tests::Point::CurrentSelected, &config.company_file)?;
+    super::tests::hit(super::tests::Point::CurrentSelected, &company)?;
     need(
         storage_paths(config, session)? == paths,
         IdentityFault::CurrentBindingChanged,
     )?;
-    let second = read_metadata(&config.company_file, config.uid, DEFAULT_METADATA_LIMIT)?
-        .current_employee(employee, session, paths.owner())?;
+    let second = read_metadata(&company, config.uid, DEFAULT_METADATA_LIMIT)?.current_employee(
+        employee,
+        session,
+        paths.owner(),
+    )?;
     need(second == first, IdentityFault::CurrentBindingChanged)?;
     Ok(first)
 }
 fn present(path: &Path) -> Result<bool> {
+    // Python's Path lookup catches its embedded-NUL ValueError as absence;
+    // this is not a metadata-read or canonical-path acceptance.
+    if path.as_os_str().as_bytes().contains(&0) {
+        return Ok(false);
+    }
     match fs::symlink_metadata(path) {
         Ok(_) => Ok(true),
         Err(error)
             if error.kind() == io::ErrorKind::NotFound
-                || error.raw_os_error() == Some(libc::ENOTDIR) =>
+                || matches!(
+                    error.raw_os_error(),
+                    Some(libc::ENOTDIR | libc::EBADF | libc::ELOOP)
+                ) =>
         {
             Ok(false)
         }

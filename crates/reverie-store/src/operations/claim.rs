@@ -140,17 +140,5 @@ impl OperationStore {
     }
 }
 fn occupied(document: &OperationDocument) -> BTreeSet<JournalId> {
-    document
-        .operations()
-        .values()
-        .flat_map(|op| {
-            let data = op.data();
-            [
-                data.id.clone(),
-                data.reservation_id.clone(),
-                data.reserved_sid.clone(),
-                data.observation.data().current_sid.clone(),
-            ]
-        })
-        .collect()
+    document.role_ids().cloned().collect()
 }

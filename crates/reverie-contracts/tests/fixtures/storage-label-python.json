@@ -1,0 +1,56 @@
+{
+  "source": "python/reverie/worker.py:2099",
+  "sourceSha256": "6f22e845dad7a85ea963b1097e6cd1376d0550edf4b0bf44d4f925d3b56504d7",
+  "pythonVersion": "3.13.15",
+  "method": "Actual AST write_text argument evaluated with synthetic descriptive fields and fixed clock; no filesystem effect or live data",
+  "cases": [
+    {
+      "kind": "session",
+      "employeeId": null,
+      "sessionId": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+      "createdAt": 1.25,
+      "bytes": "{\"ownerSessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"purpose\": \"Laptop scratch; release leased tasks with a handoff before pruning\", \"createdAt\": 1.25}",
+      "sha256": "ef379ba72af9a02c1c6c92c2780c2f464e9b0e7c507734a9ead9f8f9f8ccb67c"
+    },
+    {
+      "kind": "employee",
+      "employeeId": "11111111-2222-4333-8444-555555555555",
+      "sessionId": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+      "createdAt": 1700000000.1234567,
+      "bytes": "{\"ownerEmployeeId\": \"11111111-2222-4333-8444-555555555555\", \"purpose\": \"Laptop scratch; release leased tasks with a handoff before pruning\", \"createdAt\": 1700000000.1234567}",
+      "sha256": "395afefb2746a2156297bcdaf0372435a6a2780d72335cf1c99a9a1b36d59df5"
+    },
+    {
+      "kind": "session",
+      "employeeId": null,
+      "sessionId": "00000000-0000-0000-0000-000000000000",
+      "createdAt": 0.0,
+      "bytes": "{\"ownerSessionId\": \"00000000-0000-0000-0000-000000000000\", \"purpose\": \"Laptop scratch; release leased tasks with a handoff before pruning\", \"createdAt\": 0.0}",
+      "sha256": "c060251da2d9e0d28cdf121fe739da098a461bbb002cfd47389075f12c6719cd"
+    },
+    {
+      "kind": "employee",
+      "employeeId": "00000000-0000-0000-0000-000000000000",
+      "sessionId": "00000000-0000-0000-0000-000000000000",
+      "createdAt": -0.0,
+      "bytes": "{\"ownerEmployeeId\": \"00000000-0000-0000-0000-000000000000\", \"purpose\": \"Laptop scratch; release leased tasks with a handoff before pruning\", \"createdAt\": -0.0}",
+      "sha256": "6898c694228551572747d23c979ac3c546c17d80212eb689819787e48b64faa5"
+    },
+    {
+      "kind": "session",
+      "employeeId": null,
+      "sessionId": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+      "createdAt": 1e-07,
+      "bytes": "{\"ownerSessionId\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"purpose\": \"Laptop scratch; release leased tasks with a handoff before pruning\", \"createdAt\": 1e-07}",
+      "sha256": "cb633890f3d17b75544983f286622b5bc40418193660b8242e6b8c3c73d83028"
+    },
+    {
+      "kind": "employee",
+      "employeeId": "11111111-2222-4333-8444-555555555555",
+      "sessionId": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+      "createdAt": -10.75,
+      "bytes": "{\"ownerEmployeeId\": \"11111111-2222-4333-8444-555555555555\", \"purpose\": \"Laptop scratch; release leased tasks with a handoff before pruning\", \"createdAt\": -10.75}",
+      "sha256": "d454394e3cc5bdea0d851a29c259aadb6c93fad31465715fc6284f1f47ab6aea"
+    }
+  ]
+}

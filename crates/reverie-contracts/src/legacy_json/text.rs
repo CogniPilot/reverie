@@ -46,6 +46,13 @@ fn append(codepoint: u32, result: &mut Vec<u8>) -> Result<(), Error> {
     }
     Ok(())
 }
+pub(super) fn python_text(value: reverie_core::PythonTextRef<'_>) -> Vec<u8> {
+    let mut output = Vec::new();
+    for &point in value.codepoints().iter() {
+        append(point, &mut output).expect("checked Python text codepoints");
+    }
+    output
+}
 enum Encoding {
     Utf8(usize),
     Utf16(bool, usize),

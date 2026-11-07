@@ -10,11 +10,11 @@ import type { CompanyService } from './company-service.js';
 import { servicePurposeScope } from './company-types.js';
 import { GoalAccessError, type GoalAuthentication } from './goal-access.js';
 import { GoalLifecycleError, type GoalLifecycle } from './goal-lifecycle.js';
-import { GoalNonceStore, type GoalNonceStoreOptions } from './goal-nonce-store.js';
-import { serviceIssuers, serviceNonces, type LoadedServiceAuth } from './service-auth-config.js';
+import { type LoadedServiceAuth } from './service-auth-config.js';
+import { createServiceAuthorization, type ServiceAuthorizationOptions } from './service-authorization.js';
+import { MEMORY_READ_PURPOSE } from './memory-scope-config.js';
 import {
   ServiceGrantAuthentication,
-  canonicalServiceGrantSource,
   type ServiceEmployeeBinding,
   type ServiceGrantPorts,
 } from './service-grant-auth.js';
@@ -169,6 +169,16 @@ export function registerServiceGrantSetupPage(
         ...(row.resources.length ? { resources: row.resources } : {}),
         expiresAt: now + row.expiresInHours * 3600_000,
       };
+      if (
+        row.purpose === MEMORY_READ_PURPOSE &&
+        setup.loaded.memoryScopes &&
+        !setup.loaded.memoryScopes.acceptsGrant({
+          ...body,
+          resources: row.resources,
+          employeeIds: ids.map((e) => e?.id ?? ''),
+        })
+      )
+        problems.push('memory scope needs one employee and installed resources from one configured instance');
       const who = ids.map((e, i) =>
         e ? `${escape(e.label)} (${escape(e.id)})` : `<b>${escape(row.employees[i]!)}?</b>`
       );
@@ -201,22 +211,8 @@ credentials:'same-origin',headers:{'content-type':'application/json'},body:b.dat
  * standing in for custody. Without that provisioning the caller passes nothing and every decision is unavailable. */
 export function createServiceDecisions(
   loaded: LoadedServiceAuth,
-  options: {
-    readonly company: Pick<CompanyService, 'store'>;
-    readonly custody: Pick<GoalAuthentication, 'assertPrivateCustody'>;
-    readonly nonce: GoalNonceStoreOptions;
-    readonly now?: () => number;
-  }
+  options: ServiceAuthorizationOptions
 ): ServiceDecisions {
-  const source = canonicalServiceGrantSource({ company: options.company, custody: options.custody });
-  const auth = new ServiceGrantAuthentication(
-    {
-      issuer: serviceIssuers(loaded),
-      ...source,
-      nonces: serviceNonces(new GoalNonceStore(options.nonce)),
-      ...(options.now ? { now: options.now } : {}),
-    },
-    loaded.purposes
-  );
-  return new ServiceDecisions({ loaded, auth, binding: source.binding });
+  const shared = createServiceAuthorization(loaded, options);
+  return new ServiceDecisions({ loaded, auth: shared.auth, binding: shared.source.binding });
 }

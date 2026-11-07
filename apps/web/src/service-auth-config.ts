@@ -11,6 +11,7 @@ import { z } from 'zod';
 import { SERVICE_PURPOSE_NAME, type ServicePurposes } from './company-types.js';
 import type { GoalNonceKey } from './goal-broker-auth.js';
 import type { ServiceIssuer, ServiceNonceKey, ServiceGrantPorts } from './service-grant-auth.js';
+import { MEMORY_READ_PURPOSE, MemoryScopeCatalog, MemoryScopeConfigSchema } from './memory-scope-config.js';
 
 const ID = z.string().regex(/^[A-Za-z0-9_.:-]{1,56}$/); // 'service:' + principal must fit the nonce store's 64-char issuer
 const EPOCH = z.string().regex(/^[A-Za-z0-9_.:-]{1,64}$/);
@@ -37,6 +38,8 @@ export const ServiceAuthConfigSchema = z
       .array(z.object({ principal: ID, epoch: EPOCH, key: path }).strict())
       .max(32)
       .refine((items) => new Set(items.map((p) => p.principal)).size === items.length, 'principals are unique'),
+    /** Explicit installation resource DATA. Existing owner grants remain the only authority. */
+    memoryScopes: MemoryScopeConfigSchema.optional(),
     /** Owner setup page rows: proposed grants the owner issues with one click each. Never issued automatically.
      * employees are exact employee ids or exact unique display names, resolved to current ids when the page renders. */
     setupGrants: z
@@ -59,6 +62,15 @@ export const ServiceAuthConfigSchema = z
   })
   .strict()
   .superRefine((config, ctx) => {
+    if (
+      config.memoryScopes &&
+      (config.purposes[MEMORY_READ_PURPOSE]?.scope !== 'employees+resources' ||
+        !config.principals.some((row) => row.principal === config.memoryScopes!.principal))
+    )
+      ctx.addIssue({
+        code: 'custom',
+        message: 'Memory scopes require their configured publisher and employees+resources purpose',
+      });
     const actions = Object.values(config.purposes).flatMap((p) => (p.action ? [p.action] : []));
     if (new Set(actions).size !== actions.length)
       ctx.addIssue({ code: 'custom', message: 'actions map to one purpose' });
@@ -72,6 +84,7 @@ export interface LoadedServiceAuth {
   readonly purposes: ServicePurposes;
   /** Owners trusted for keys: root, plus serviceUid when declared and equal to this process's uid. */
   readonly trustedUids: readonly number[];
+  readonly memoryScopes?: MemoryScopeCatalog;
   /** Exact configured action name (e.g. reverie.ops.website.restart) to its purpose, or undefined. */
   purposeFor(action: string): string | undefined;
 }
@@ -127,6 +140,14 @@ export function loadServiceAuthConfig(file: string, options: TrustOptions = {}):
     digest: createHash('sha256').update(bytes).digest('hex'),
     purposes: Object.freeze(purposes),
     trustedUids: Object.freeze([...trustedUids]),
+    ...(config.memoryScopes
+      ? {
+          memoryScopes: MemoryScopeCatalog.configured(
+            config.memoryScopes,
+            config.principals.find((row) => row.principal === config.memoryScopes!.principal)!
+          ),
+        }
+      : {}),
     purposeFor: (action: string) => actions.get(action),
   });
 }

@@ -23,6 +23,7 @@ with pkgs; [
   openssh         # ssh scp
   rsync           # rsync
   strace          # strace
+  (import ./worker-perf.nix { inherit pkgs; }) # perf stat/record/report, no Python scripting
   gdb             # gdb
   cmake ninja pkg-config   # cmake ninja pkg-config
   perl            # perl
