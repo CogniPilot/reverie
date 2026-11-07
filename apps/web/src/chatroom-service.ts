@@ -59,7 +59,7 @@ import { PendingDeliveryStore } from './chatroom-pending-delivery.js';
 import { ChatArchive, zoneWeek } from './chat-archive.js';
 import { ChatDb, ChatDbSyncError, importLegacy, readArchive, standingLines, type JournalLine, type SyncChanges } from './chat-db.js';
 import { sharedAttachmentPath } from './shared-attachments.js';
-import { ChatroomDelivery, buildBriefing, paneAcceptsChat, modePollsChat, roomLabel, senderLabel, wakeRecipients, isAddressedVoiceTurn, renderForRecipient, DELIVERY_WAIT_TEXT, SPOKEN_TURN_HINT, answerLinkHint, type DeliverySession, type DeliveryWaitReason } from './chatroom-delivery.js';
+import { ChatroomDelivery, buildBriefing, paneAcceptsChat, modePollsChat, roomLabel, senderLabel, wakeRecipients, isAddressedVoiceTurn, renderForRecipient, DELIVERY_WAIT_TEXT, replyHintFor, type DeliverySession, type DeliveryWaitReason } from './chatroom-delivery.js';
 import { quoteForPane } from './pane-quote.js';
 import { messageWithEmployeeIdentity, stampEmployeeSender, type ChatIdentityLookup } from './chat-message-identity.js';
 
@@ -674,6 +674,7 @@ export class ChatroomService {
           continue;
         const senderId = message.from.kind === 'agent' ? message.from.sessionId : undefined;
         const coordinator = senderId && room.members.some((m) => m.sessionId === senderId && m.role === 'coordinator');
+        const replyHint = replyHintFor(room, message, sessionId, this.nameOf);
         const priority = owner && direct ? 6 : isDm(room) ? 5 : direct ? 4 : owner ? 3 : coordinator ? 2 : 1;
         candidates.push({
           priority,
@@ -688,9 +689,8 @@ export class ChatroomService {
           sourceDigest,
           attention,
           transport: held.has(key) ? 'delivery-unconfirmed' : queued.has(key) ? 'queued' : belowSeenCursor ? 'unknown' : 'unread',
-          // Messages are no longer typed into panes, so a verified spoken owner turn's voice context reaches the member here.
-          ...(message.from.kind === 'user' && message.from.mark === 'owner_spoken'
-            ? { replyHint: `${SPOKEN_TURN_HINT} ${answerLinkHint(message.id)}` } : {}),
+          // Messages are no longer typed into panes, so the hint a typed line carried reaches the member here.
+          ...(replyHint ? { replyHint } : {}),
         });
       }
     }

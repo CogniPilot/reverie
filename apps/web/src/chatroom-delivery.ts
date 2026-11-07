@@ -258,18 +258,33 @@ export function renderForRecipient(
   // A reply says which message it answers, on the same line.
   const original = message.replyTo ? room.messages.find((m) => m.id === message.replyTo && !m.deleted) : undefined;
   const quoted = original ? ` (replying to ${senderLabel(original.from)}${quoteOf(original)})` : '';
+  // Keep the reply hint outside the quote.
+  const hint = replyHintFor(room, message, recipientId, nameOf);
+  return `${from}${role}${to === undefined ? '' : ` -> ${to}`}${quoted}: ${text}${files}${hint ? ` ${hint}` : ''}`;
+}
+
+/**
+ * What a recipient must know to answer this message, or '' when nothing: a spoken owner turn's voice context, and the
+ * reply command for a message whose answer must be linked to it. Both the rendered line and the hook payload carry it.
+ */
+export function replyHintFor(
+  room: ChatRoom,
+  message: ChatMessage,
+  recipientId: string,
+  nameOf: (id: string) => string
+): string {
   // Only a turn the server found the verified owner speaking (owner_spoken, owner-auth/marks.ts) gets this turn's voice
-  // context, outside the quote. A body's own `spoken` is a request, never evidence: an unsigned post gets no hint.
-  const voice = message.from.kind === 'user' && message.from.mark === 'owner_spoken' ? ` ${SPOKEN_TURN_HINT}` : '';
+  // context. A body's own `spoken` is a request, never evidence: an unsigned post gets no voice hint.
+  const voice = message.from.kind === 'user' && message.from.mark === 'owner_spoken' ? SPOKEN_TURN_HINT : '';
   // An assignment marker names its ledger entry, not the chat message an answer must link to.
   const assignmentCheckin = !message.deleted && message.from.kind === 'bot'
     && message.to !== 'all' && message.to.includes(recipientId)
     && /^\[assignment-checkin:[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}\] /.test(message.text)
     && message.text.includes('Reply directly to this message with On track');
-  // Keep the reply command outside the quote, with the actual stored message identity.
+  // The reply command names the actual stored message identity.
   const link = (message.from.kind === 'user' && message.spoken) || isAddressedVoiceTurn(room, message, recipientId, nameOf) || assignmentCheckin
-    ? ` ${answerLinkHint(message.id)}` : '';
-  return `${from}${role}${to === undefined ? '' : ` -> ${to}`}${quoted}: ${text}${files}${voice}${link}`;
+    ? answerLinkHint(message.id) : '';
+  return [voice, link].filter(Boolean).join(' ');
 }
 
 /** The one-line prompt a flush writes for a set of pending fragments. */
