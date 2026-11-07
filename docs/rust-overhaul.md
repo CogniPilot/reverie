@@ -92,6 +92,40 @@ The TypeScript resource diagnostics correction remains compatible with the
 later Rust backend. Remaining cohorts are pending; no source result here
 claims a complete Rust backend or an installed rollout.
 
+## Native integration map
+
+Use the existing owners below before adding another adapter or executor. Their
+source and component tests do not establish an installed native broker.
+
+| Operation | Existing Rust owner | Integration still required |
+| --- | --- | --- |
+| Broker bootstrap | `InstallingBroker::new` in `reverie-application`; consumes the actual validated snapshot and `WorkerRuntime`, captures mandatory telemetry before optional reservations, and retains failed construction resources | Service entry point, accepted connections and whole-service shutdown |
+| Running-laptop recovery | `InstallingBroker::recover_laptops`; ordered census/memory/budget checks, all storage claims before phones, atomic registry publication and retained cleanup owners | Installed Gate transaction qualification and actual listener/service invocation |
+| Office phone | `OfficeService::from_worker` and `bind_worker_retained`; captured worker socket root, constructor-selected session and same-runtime native request jobs | Actual new-laptop producer and complete shutdown joins |
+| Failure reports | `handle_command_failure_report` and `close_command_telemetry`; fixed T operation, actual Unix peer identity and retained bounded connection/store owners | Listener dispatch, caller-owned handler joins and global stop acknowledgement |
+| Storage, Nix and network | `reverie-host` storage/Nix/laptop workflows and `InstallingBroker` storage registry retain the actual resource records | Contiguous create/start, protected old-source stop, new-created cleanup and retained cold storage |
+| Employee resource policy | Existing effective-config, GPU/perf/memory projection, reservation gate and native observer owners | Actual started-container memory enforcement and owner GUI/API selection for remaining settings |
+| Memory tools | Native memory/MCP entry points, persistence, journal transport and startup services | Guest image/context/grant join, existing-data cutover and coordinated package selection |
+
+Recovery entries contain actual Office and storage resources. Recovered names
+are membership data; they do not establish a canonical container/process identity
+or permission to stop, create or start anything. Unresolved last-service Drop
+retains the joint owners, including telemetry/report services. Quarantine is not
+structured shutdown, a durable restart fence or released capacity.
+
+The create/start consumer must retain the same actual resources across Nix,
+network, complete-create telemetry, container creation, metadata publication,
+start, memory enforcement, cold-storage commit and worker-child launch. A
+successful create with noncanonical output still owns a container by its derived
+name; a lost reply cannot establish absence. Do not manufacture a replacement
+effect handle from status data or introduce another configuration source.
+
+Consult the owning [application](../crates/reverie-application/README.md) and
+[host](../crates/reverie-host/README.md) documentation for exact phase and cleanup
+contracts. Full native completion also requires the remaining runtime/model,
+terminal, service and maintenance entry points in the cohort inventory above;
+passing a front-only trial does not retire those Python consumers.
+
 ## Workspace and quality gate
 
 The [specification index](../spec/README.md) owns the adopted Rumoca rules:
