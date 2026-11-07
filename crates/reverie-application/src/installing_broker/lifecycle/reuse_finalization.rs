@@ -1,12 +1,17 @@
 //! Actual reuse cleanup, not a public lifecycle/storage permission.
 use super::*;
 use std::time::Instant;
+#[cfg(test)]
+mod tests;
 impl InstalledWorker {
     pub(in crate::installing_broker) fn cleanup_lifecycle(
         &self,
         runtime: &reverie_host::worker_runtime::WorkerRuntime,
     ) -> Result<LaptopLifecycle<'_>, GateError> {
-        let Some(end) = runtime.stop_deadline() else {
+        let observed = runtime.stop_deadline();
+        #[cfg(test)]
+        tests::captured(observed);
+        let Some(end) = observed else {
             return self.lifecycle();
         };
         self.cleanup_lifecycle_until(end)
