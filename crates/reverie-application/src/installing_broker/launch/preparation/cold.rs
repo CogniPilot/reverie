@@ -14,6 +14,7 @@ use reverie_host::{
     worker_source_stop::StoppedLaptopRemoval,
 };
 mod error;
+mod finalizer;
 mod memory;
 mod network;
 mod nix;
@@ -32,6 +33,19 @@ struct ColdScope<'a> {
     current: Arc<ValidatedWorkerSnapshot>,
     resources: EffectiveWorkerConfig,
     receipt: Option<reverie_host::worker_storage::LaunchReceiptObservation>,
+    registration: Option<Arc<RecoveredOffice>>,
+    original: OriginalRuntime,
+    budget: CreationBudget,
+}
+enum OriginalRuntime {
+    Running,
+    Stopped,
+    Absent,
+}
+enum CreationBudget {
+    Initial,
+    ReplacementPending,
+    ReplacementConfirmed,
 }
 struct Direct {
     storage: StorageClaim,
@@ -65,7 +79,15 @@ enum Resources {
     Stopped(Stopped),
     PreparingNix(PreparingNix),
     CopyingNix(CopyingNix),
+    NetworkHeld(Arc<storage::NetworkStoragePreparation>),
     Network(Arc<storage::NetworkStoragePreparation>),
+    Returned(ReturnedStorage),
+}
+struct ReturnedStorage {
+    storage: StorageClaim,
+    plan: ObservedCreatePlan,
+    guard: Option<NixStoreGuard>,
+    phone: Option<reverie_host::office::OfficePhone>,
 }
 struct ColdBody<'a> {
     scope: ColdScope<'a>,
@@ -75,7 +97,9 @@ struct ColdBody<'a> {
     construction: Option<(Arc<OfficeService>, OfficeConstruction)>,
     network_phone: Option<reverie_host::office::OfficePhone>,
     creation: Option<CreationContext>,
+    started: Option<Arc<StartedLaptop>>,
     memory: Option<MemoryJoin>,
+    allocation_unconfirmed: bool,
 }
 struct CreationContext {
     created: CreatedLaptop,
@@ -146,6 +170,15 @@ impl<'a> ColdBody<'a> {
             mut storage,
             lifecycle,
         } = claimed;
+        let registration =
+            lifecycle.capture_reuse_registration(preparing.admitted.request().session());
+        let (original, budget) = match &target {
+            ExistingColdTarget::DeadPane(_) | ExistingColdTarget::RunningCompleted(_) => {
+                (OriginalRuntime::Running, CreationBudget::ReplacementPending)
+            }
+            ExistingColdTarget::Absent => (OriginalRuntime::Absent, CreationBudget::Initial),
+            ExistingColdTarget::Stopped(_) => (OriginalRuntime::Stopped, CreationBudget::Initial),
+        };
         Self {
             scope: ColdScope {
                 preparing,
@@ -154,6 +187,9 @@ impl<'a> ColdBody<'a> {
                 current,
                 resources,
                 receipt,
+                registration,
+                original,
+                budget,
             },
             lifecycle: Some(lifecycle),
             resources: Some(Resources::Direct(Direct {
@@ -165,7 +201,9 @@ impl<'a> ColdBody<'a> {
             construction: None,
             network_phone: None,
             creation: None,
+            started: None,
             memory: None,
+            allocation_unconfirmed: false,
         }
     }
     fn broker(&self) -> &'a InstallingBroker {
@@ -190,6 +228,7 @@ impl<'a> ColdBody<'a> {
         if let Some(admission) = self.scope.preparing.admitted.admission.take()
             && let Err(error) = admission.close()
         {
+            self.allocation_unconfirmed = true;
             return Err(Box::new(ColdLaunchFailure {
                 owner: self,
                 cause: error.into(),

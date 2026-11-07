@@ -5,14 +5,14 @@ use reverie_host::worker_laptop::{ViewerSession, ViewerStart};
 
 #[must_use = "retain the whole created resource and original handler through finally"]
 pub struct ViewingCold<'a> {
-    owner: AllocationClosedCold<'a>,
-    session: ViewerSession,
+    pub(super) owner: AllocationClosedCold<'a>,
+    pub(super) session: ViewerSession,
 }
 
 #[must_use = "viewer refusal retains the actual released allocation and resource owners"]
 pub struct ColdViewerFailure<'a> {
-    owner: AllocationClosedCold<'a>,
-    cause: ColdError,
+    pub(super) owner: AllocationClosedCold<'a>,
+    pub(super) cause: ColdError,
 }
 
 impl<'a> AllocationClosedCold<'a> {

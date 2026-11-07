@@ -99,6 +99,9 @@ impl<'a> ColdBody<'a> {
             office: self.office.as_ref().expect("actual phone").clone(),
             created: self.creation.take().expect("actual Created").created,
         });
+        // Admission can still fail after registration. The failure keeps the
+        // actual Created/pane owner, without a later SID/path reconstruction.
+        self.started = Some(started.clone());
         let entry = LaptopRegistration {
             session: sid,
             name,

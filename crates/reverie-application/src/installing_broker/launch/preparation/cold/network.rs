@@ -33,7 +33,7 @@ impl ColdBody<'_> {
             removal,
         } = input;
         match preparation.retain_network_for_connection(plan, phone, &connection) {
-            Ok(preparation) => self.resources = Some(Resources::Network(Arc::new(preparation))),
+            Ok(preparation) => self.resources = Some(Resources::NetworkHeld(Arc::new(preparation))),
             Err(failure) => {
                 let (preparation, plan, _request, phone, error) = failure.into_parts();
                 self.network_phone = Some(phone);
@@ -46,7 +46,12 @@ impl ColdBody<'_> {
                 return Err(error.into());
             }
         }
-        let network = self.network();
+        let Some(Resources::NetworkHeld(network)) = self.resources.take() else {
+            unreachable!("new retained network has not been dispatched");
+        };
+        self.resources = Some(Resources::Network(network.clone()));
+        // Retain attempted ownership BEFORE the first possible native call.
+        // Finally cannot treat a failed or lost response as undispatched.
         match network.run_for_connection(&connection)? {
             LaptopNetworkProgress::Ready => {}
             LaptopNetworkProgress::Rejected | LaptopNetworkProgress::Retained => {
@@ -108,7 +113,8 @@ impl ColdBody<'_> {
         }
     }
     pub(super) fn network(&self) -> Arc<storage::NetworkStoragePreparation> {
-        let Some(Resources::Network(network)) = &self.resources else {
+        let Some(Resources::Network(network) | Resources::NetworkHeld(network)) = &self.resources
+        else {
             unreachable!("actual network resources retained");
         };
         network.clone()

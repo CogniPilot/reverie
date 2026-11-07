@@ -180,7 +180,7 @@ impl ColdBody<'_> {
             .check(&self.scope.preparing, self.lifecycle())
             .map_err(Into::into)
     }
-    fn check_after_running_stop(&self) -> Result<(), ColdError> {
+    fn check_after_running_stop(&mut self) -> Result<(), ColdError> {
         self.wait_current()?;
         let Resources::Stopped(input) = self.resources.as_ref().expect("known actual stop") else {
             unreachable!()
@@ -217,7 +217,8 @@ impl ColdBody<'_> {
                 &self.scope.resources,
                 self.scope.preparing.admitted.admission.as_ref(),
             )
-            .map_err(PreparationError::from)
-            .map_err(Into::into)
+            .map_err(PreparationError::from)?;
+        self.scope.budget = CreationBudget::ReplacementConfirmed;
+        Ok(())
     }
 }

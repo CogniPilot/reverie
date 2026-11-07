@@ -15,6 +15,97 @@ use reverie_host::{
 };
 type Result<T> = std::result::Result<T, NetworkStorageError>;
 impl NetworkStoragePreparation {
+    pub(in crate::installing_broker) fn created_completed(
+        &self,
+        created: &CreatedLaptop,
+    ) -> Result<bool> {
+        self.check()?;
+        let observed = self
+            .destination
+            .registry()
+            .runtime
+            .observe_created_laptop_receipt(created)
+            .map_err(NetworkStorageError::Host)?;
+        if !observed.same_workflow(&self.workflow) {
+            return Err(NetworkStorageError::Host(LaptopError::Refused(
+                "WORKER_CREATED_RECEIPT_ORIGIN",
+            )));
+        }
+        Ok(observed.is_file())
+    }
+    pub(in crate::installing_broker) fn created_target(
+        &self,
+        created: &CreatedLaptop,
+    ) -> Result<WorkerContainerName> {
+        self.check()?;
+        if !created.same_workflow(&self.workflow) {
+            return Err(NetworkStorageError::Host(LaptopError::Refused(
+                "WORKER_CREATED_ORIGIN",
+            )));
+        }
+        self.destination
+            .registry()
+            .runtime
+            .created_laptop_stop_target(created)
+            .map_err(NetworkStorageError::Host)
+    }
+    pub(in crate::installing_broker) fn stop_created_under_admission(
+        &self,
+        created: &CreatedLaptop,
+        connection: &WorkerLaunchConnection,
+        admission: &crate::installing_broker::WorkerStopAdmission<'_>,
+        broker: &InstallingBroker,
+    ) -> Result<reverie_host::worker_laptop::CreatedCleanup> {
+        if !Arc::ptr_eq(self.destination.registry(), &broker.storage) {
+            return Err(NetworkStorageError::Host(LaptopError::Refused(
+                "WORKER_STOP_STORAGE_ORIGIN",
+            )));
+        }
+        admission
+            .assert_broker(broker)
+            .map_err(StorageWorkflowError::from)
+            .map_err(NixStorageError::from)
+            .map_err(NetworkStorageError::Nix)?;
+        let target = self.created_target(created)?;
+        admission
+            .assert_target(&target)
+            .map_err(StorageWorkflowError::from)
+            .map_err(NixStorageError::from)
+            .map_err(NetworkStorageError::Nix)?;
+        self.destination
+            .registry()
+            .runtime
+            .stop_created_laptop_for_worker(created, connection)
+            .map_err(NetworkStorageError::Host)
+    }
+    pub(in crate::installing_broker) fn cleanup_nix_guard(
+        &self,
+        connection: &WorkerLaunchConnection,
+    ) -> Result<()> {
+        // Cleanup revalidates actual Host identity without forward registry/J
+        // progress as a precondition for owned local finalizers.
+        self.destination
+            .registry()
+            .runtime
+            .cleanup_laptop_nix_guard_for_worker(&self.workflow, connection)
+            .map_err(NetworkStorageError::Host)
+    }
+    pub(in crate::installing_broker) fn close_created_viewer(
+        &self,
+        created: &CreatedLaptop,
+        end: Instant,
+    ) -> Result<()> {
+        if !created.same_workflow(&self.workflow) {
+            return Err(NetworkStorageError::Host(LaptopError::Refused(
+                "WORKER_CREATED_ORIGIN",
+            )));
+        }
+        self.destination
+            .registry()
+            .runtime
+            .close_created_laptop_viewer(created, end)
+            .map_err(NetworkStorageError::Host)
+    }
     pub(in crate::installing_broker) fn start_viewer(
         &self,
         pane: &NixReleasedPane,

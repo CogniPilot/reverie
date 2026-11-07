@@ -1,6 +1,7 @@
 //! Actual atomic Nix-to-laptop resource ownership. No native query runs while
 //! the registry lock is held; no status/path creates a replacement resource.
 use super::*;
+mod abort_held;
 mod cold;
 use reverie_contracts::worker_launch::WorkerRequest;
 use reverie_host::{
