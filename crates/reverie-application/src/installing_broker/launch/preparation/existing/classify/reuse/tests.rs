@@ -15,6 +15,46 @@ fn reusable<'a>(tree: &Tree, broker: &'a InstallingBroker) -> ReusableWorkerLaun
     reuse
 }
 #[test]
+fn actual_worker_constructor_keeps_whole_reuse_and_original_connection_until_checked_restore() {
+    crate::test_process::owning_case!(
+        actual_worker_constructor_keeps_whole_reuse_and_original_connection_until_checked_restore
+    );
+    let tree = Tree::new();
+    let broker = broker(&tree);
+    let reuse = reusable(&tree, &broker);
+    let connection = reuse
+        .inspected
+        .observed
+        .claimed
+        .preparing
+        .admitted
+        .request
+        .connection
+        .clone();
+    let viewing = reuse
+        .prepare_viewer()
+        .unwrap()
+        .close_allocation()
+        .unwrap()
+        .start_for_worker()
+        .unwrap();
+    assert!(Arc::ptr_eq(viewing.relay_connection(), &connection));
+    assert!(viewing.owner.retained.scope.active.is_some());
+    assert!(
+        broker.close_command_telemetry(end()).is_err(),
+        "actual native construction does not release the same counted handler Hold"
+    );
+    let restored = viewing.close_native_component(end()).unwrap();
+    assert!(restored.scope.active.is_some());
+    assert!(Arc::ptr_eq(
+        &restored.scope.preparing.admitted.request.connection,
+        &connection
+    ));
+    assert!(connection.assert_open(&broker.storage.runtime).is_ok());
+    finish(restored);
+    broker.close_command_telemetry(end()).unwrap();
+}
+#[test]
 fn genuine_whole_reuse_relay_returns_same_scope_after_io_and_eof_without_cleanup_credit() {
     crate::test_process::owning_case!(
         genuine_whole_reuse_relay_returns_same_scope_after_io_and_eof_without_cleanup_credit

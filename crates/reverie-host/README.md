@@ -740,3 +740,13 @@ call, storage and guard; native settlement permits neither retry nor success.
 Only checked success mints `RemovedStoppedLaptop`, bound to that same record.
 These components do not implement the outer Cold/J continuation or select a
 native backend, and they grant no storage release or global shutdown receipt.
+
+The actual created and existing worker viewer constructors accept the original
+accepted J connection and choose no aggregate construction deadline. Their
+shared admission, constructor wait and identity-checked slot handoff observe
+the same runtime's live first-stop deadline. Existing caller-bounded component
+constructors retain their supplied ceiling. A Busy query remains owned by its
+original captured call; waiting neither cancels nor replays it. A stopped or
+uncertain viewer constructor remains in the same laptop/native inventory with
+its real storage and job. This timing join does not establish App allocation
+release, complete handler cleanup, storage release or global shutdown.
