@@ -10,6 +10,7 @@ fn actual_wrong_j_transfer_returns_all_once_observed_inputs_before_same_owner_su
     );
     let tree = Tree::new();
     let broker = broker(&tree);
+    let runtime = &broker.storage.runtime;
     let (_first_client, cold) = classified(&broker);
     let first = cold.prepare_cold().unwrap();
     let original = first.started.clone();
@@ -39,9 +40,7 @@ fn actual_wrong_j_transfer_returns_all_once_observed_inputs_before_same_owner_su
         current,
         plan,
     } = observed;
-    let failure = broker
-        .storage
-        .runtime
+    let failure = runtime
         .transfer_started_laptop_relay(
             &original.created,
             plan,
@@ -53,14 +52,10 @@ fn actual_wrong_j_transfer_returns_all_once_observed_inputs_before_same_owner_su
         .unwrap();
     let (plan, previous, receipt, cause) = failure.into_parts();
     assert_eq!(cause.to_string(), "VIEWER_CONNECTION_RUNTIME_CHANGED");
-    previous
-        .assert_plan(&broker.storage.runtime, &plan)
-        .unwrap();
+    previous.assert_plan(runtime, &plan).unwrap();
     assert_eq!(plan.storage(), claimed.storage.as_ref().unwrap().paths());
     assert!(!receipt.exists() && lease_held(&broker));
-    let borrowed = broker
-        .storage
-        .runtime
+    let borrowed = runtime
         .borrow_started_laptop_storage(
             &original.created,
             &claimed.preparing.admitted.request.connection,
@@ -105,6 +100,21 @@ fn actual_wrong_j_transfer_returns_all_once_observed_inputs_before_same_owner_su
         .unwrap()
         .release_for_worker()
         .unwrap();
+    let result = finish_returned_inputs(claimed, current, plan, previous, receipt, resources);
+    assert!(result.storage_retained() && !result.completed() && lease_held(&broker));
+    teardown_fixture_office(&original);
+}
+
+/// Only actual returned observations and the original whole claim/lifecycle/J
+/// enter this restoration. No lookup or observation is replayed after refusal.
+fn finish_returned_inputs(
+    claimed: ClaimedWorkerLaunch<'_>,
+    current: Arc<ValidatedWorkerSnapshot>,
+    plan: ObservedCreatePlan,
+    previous: reverie_host::worker_launch::ExistingLaptopInspection,
+    receipt: reverie_host::worker_storage::LaunchReceiptObservation,
+    resources: EffectiveWorkerConfig,
+) -> ReuseHandlerClosed {
     let reuse = ReusableWorkerLaunch {
         receipt: Some(receipt),
         inspected: InspectedWorkerLaunch {
@@ -117,18 +127,13 @@ fn actual_wrong_j_transfer_returns_all_once_observed_inputs_before_same_owner_su
         },
         resources,
     };
-    let result = reuse
+    reuse
         .prepare_viewer()
         .unwrap()
         .close_allocation()
         .unwrap()
         .finalize_for_worker()
-        .unwrap();
-    assert!(result.storage_retained() && !result.completed() && lease_held(&broker));
-    original
-        .office
-        .close_for_stopped_source(super::super::super::tests::end())
-        .unwrap();
+        .unwrap()
 }
 
 #[test]
@@ -225,6 +230,12 @@ fn actual_live_cold_finalize_then_new_j_reuses_same_resource_and_preserves_origi
         1
     );
     // Fixture-only producer teardown; the genuine live resource stays held.
+    teardown_fixture_office(&original);
+}
+
+/// Synthetic producer teardown after the assertions; no laptop stop or
+/// employee lease release credit follows from this Office-only joined close.
+fn teardown_fixture_office(original: &StartedLaptop) {
     original
         .office
         .close_for_stopped_source(super::super::super::tests::end())

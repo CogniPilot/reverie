@@ -25,6 +25,9 @@ pub struct StartedRelayTransferFailure {
     cause: LaptopError,
 }
 impl StartedRelayTransferFailure {
+    pub fn code(&self) -> &'static str {
+        self.cause.code()
+    }
     pub fn into_parts(
         self,
     ) -> (
@@ -39,6 +42,16 @@ impl StartedRelayTransferFailure {
             self.inputs.receipt,
             self.cause,
         )
+    }
+}
+impl std::fmt::Display for StartedRelayTransferFailure {
+    fn fmt(&self, out: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.cause.fmt(out)
+    }
+}
+impl std::error::Error for StartedRelayTransferFailure {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&self.cause)
     }
 }
 impl std::fmt::Debug for StartedRelayTransferFailure {
