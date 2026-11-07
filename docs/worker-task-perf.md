@@ -35,6 +35,11 @@ nix develop --command cargo xtask verify-worker-perf --deployment DEPLOYMENT
 
 The test performs real `perf stat`, `perf record` and `perf report` with positive
 `task-clock:u` counts and actual samples from a fixed, short user-space workload.
+Recording uses `--per-thread --all-user`: the task-only seccomp policy requires
+CPU `-1`, while perf's default recording opens per-CPU buffers. The kernel's
+[perf record documentation](https://raw.githubusercontent.com/torvalds/linux/v6.12/tools/perf/Documentation/perf-record.txt)
+describes these options. Use them when recording a laptop task; this acceptance
+does not grant per-CPU or system-wide profiling.
 It uses a nonroot process, no effective/permitted capabilities, active seccomp
 and no admin/perfmon/ptrace capabilities in its bounding set. The image fixture
 also enforces no-new-privileges, drops all capabilities and uses the

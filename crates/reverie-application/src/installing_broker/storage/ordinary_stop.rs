@@ -5,6 +5,11 @@ use reverie_host::{
     worker_launch::{ExistingLaptopInspection, ObservedCreatePlan},
     worker_source_stop::{OrdinaryLaptopStop, StoppedLaptopRemoval},
 };
+type RetainFailure = Box<(
+    ObservedCreatePlan,
+    Option<ExistingLaptopInspection>,
+    StorageWorkflowError,
+)>;
 pub(in crate::installing_broker) struct OrdinaryStopPreparation {
     destination: ClaimDestination,
     native: Arc<Mutex<OrdinaryLaptopStop>>,
@@ -39,7 +44,7 @@ impl OrdinaryStopRetainFailure {
 }
 impl OrdinaryStopReclaimFailure {
     pub(in crate::installing_broker) fn into_parts(
-        self: Box<Self>,
+        self,
     ) -> (OrdinaryStopPreparation, StorageWorkflowError) {
         (self.preparation, self.cause)
     }
@@ -188,19 +193,22 @@ impl StorageClaim {
                         destination,
                         native,
                     }),
-                    Err((plan, previous, cause)) => Err(Box::new(OrdinaryStopRetainFailure {
-                        claim: StorageClaim {
-                            state: ClaimState::Registered {
-                                registry,
-                                identity,
-                                paths,
-                                newly_claimed,
+                    Err(failure) => {
+                        let (plan, previous, cause) = *failure;
+                        Err(Box::new(OrdinaryStopRetainFailure {
+                            claim: StorageClaim {
+                                state: ClaimState::Registered {
+                                    registry,
+                                    identity,
+                                    paths,
+                                    newly_claimed,
+                                },
                             },
-                        },
-                        plan,
-                        previous,
-                        cause,
-                    })),
+                            plan,
+                            previous,
+                            cause,
+                        }))
+                    }
                 }
             }
         }
@@ -212,29 +220,22 @@ impl StorageRegistry {
         identity: &Arc<()>,
         plan: ObservedCreatePlan,
         previous: Option<ExistingLaptopInspection>,
-    ) -> Result<
-        Arc<Mutex<OrdinaryLaptopStop>>,
-        (
-            ObservedCreatePlan,
-            Option<ExistingLaptopInspection>,
-            StorageWorkflowError,
-        ),
-    > {
+    ) -> Result<Arc<Mutex<OrdinaryLaptopStop>>, RetainFailure> {
         let mut entries = match self.lock(self.runtime.stop_deadline()) {
             Ok(entries) => entries,
-            Err(cause) => return Err((plan, previous, cause)),
+            Err(cause) => return Err(Box::new((plan, previous, cause))),
         };
         let index = match selected(&entries, identity) {
             Ok(index) => index,
-            Err(cause) => return Err((plan, previous, cause)),
+            Err(cause) => return Err(Box::new((plan, previous, cause))),
         };
         if !entries[index].writer_checked || !matches!(entries[index].owner, EntryOwner::Direct(_))
         {
-            return Err((
+            return Err(Box::new((
                 plan,
                 previous,
                 StorageWorkflowError::refused("WORKER_ORDINARY_STOP_RETAINED"),
-            ));
+            )));
         }
         let mut entry = entries.remove(index);
         let EntryOwner::Direct(owner) = entry.owner else {
@@ -251,7 +252,7 @@ impl StorageRegistry {
                 let (owner, plan, previous, cause) = failure.into_parts();
                 entry.owner = EntryOwner::Direct(owner);
                 entries.insert(index, entry);
-                Err((plan, previous, cause.into()))
+                Err(Box::new((plan, previous, cause.into())))
             }
         }
     }

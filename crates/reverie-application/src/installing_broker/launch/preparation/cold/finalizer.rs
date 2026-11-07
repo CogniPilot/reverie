@@ -3,9 +3,9 @@
 use super::*;
 use crate::installing_broker::launch::preparation::finalization::CleanupBudget;
 use reverie_host::worker_laptop::{CreatedCleanup, StoppedCreatedLaptop};
+mod created;
 mod direct;
 mod entry;
-mod created;
 mod original;
 mod prefix;
 mod preparation_failure;
@@ -70,9 +70,15 @@ impl<'a> ColdFinalizationFailure<'a> {
     pub(super) fn retained_preparation(owner: Box<PreparationFailure<'a>>) -> Box<Self> {
         Box::new(Self {
             cleanup: Finalizer {
-                owner: Owner::Preparation(owner), primary: None, body_causes: Vec::new(),
+                owner: Owner::Preparation(owner),
+                primary: None,
+                body_causes: Vec::new(),
                 errors: vec![ColdError::Refused("WORKER_PREPARATION_RESOURCE_RETAINED")],
-                completed: None, stopped: None, target: None, original_remainder: None, returned: None,
+                completed: None,
+                stopped: None,
+                target: None,
+                original_remainder: None,
+                returned: None,
             },
         })
     }
@@ -83,15 +89,18 @@ impl<'a> ColdFinalizationFailure<'a> {
         }
     }
     pub fn cleanup_error_count(&self) -> usize {
-        self.cleanup.errors.len() + match &self.cleanup.owner {
-            Owner::Preparation(owner) => owner.cleanup.len(),
-            _ => 0,
-        }
+        self.cleanup.errors.len()
+            + match &self.cleanup.owner {
+                Owner::Preparation(owner) => owner.cleanup.len(),
+                _ => 0,
+            }
     }
 }
 impl std::fmt::Debug for ColdFinalizationFailure<'_> {
     fn fmt(&self, out: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        if let Owner::Preparation(owner) = &self.cleanup.owner { return owner.fmt(out); }
+        if let Owner::Preparation(owner) = &self.cleanup.owner {
+            return owner.fmt(out);
+        }
         out.debug_struct("ColdFinalizationFailure")
             .field("session", self.request().session())
             .field("primary", &self.cleanup.primary)
@@ -102,7 +111,9 @@ impl std::fmt::Debug for ColdFinalizationFailure<'_> {
 }
 impl std::fmt::Display for ColdFinalizationFailure<'_> {
     fn fmt(&self, out: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        if let Owner::Preparation(owner) = &self.cleanup.owner { return owner.fmt(out); }
+        if let Owner::Preparation(owner) = &self.cleanup.owner {
+            return owner.fmt(out);
+        }
         if let Some(primary) = &self.cleanup.primary {
             write!(out, "{primary}; ")?;
         }
@@ -110,10 +121,14 @@ impl std::fmt::Display for ColdFinalizationFailure<'_> {
             write!(out, "{error}; ")?;
         }
         match self.cleanup.resource() {
-            Some(Resources::FinalStorageFailed { failure, .. }) => write!(out, "{}; ", failure.cause())?,
+            Some(Resources::FinalStorageFailed { failure, .. }) => {
+                write!(out, "{}; ", failure.cause())?
+            }
             Some(Resources::CreatedReturnFailed(failure)) => write!(out, "{failure:?}; ")?,
             Some(Resources::Finalized { plan, retained, .. }) => write!(
-                out, "storage disposition for {}: retained={retained}; ", plan.session(),
+                out,
+                "storage disposition for {}: retained={retained}; ",
+                plan.session(),
             )?,
             _ => {}
         }
@@ -122,12 +137,20 @@ impl std::fmt::Display for ColdFinalizationFailure<'_> {
 }
 impl std::error::Error for ColdFinalizationFailure<'_> {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        if let Owner::Preparation(owner) = &self.cleanup.owner { return Some(owner.as_ref().cause()); }
-        if let Some(primary) = &self.cleanup.primary { return Some(primary); }
+        if let Owner::Preparation(owner) = &self.cleanup.owner {
+            return Some(owner.as_ref().cause());
+        }
+        if let Some(primary) = &self.cleanup.primary {
+            return Some(primary);
+        }
         match self.cleanup.resource() {
             Some(Resources::CreatedReturnFailed(failure)) => Some(failure.cause()),
             Some(Resources::FinalStorageFailed { failure, .. }) => Some(failure.cause()),
-            _ => self.cleanup.errors.first().map(|cause| cause as &dyn std::error::Error),
+            _ => self
+                .cleanup
+                .errors
+                .first()
+                .map(|cause| cause as &dyn std::error::Error),
         }
     }
 }
@@ -138,7 +161,9 @@ impl<'a> Owner<'a> {
             Self::Closed(owner) => &owner.scope,
             Self::Viewing(owner) => &owner.owner.scope,
             Self::Classified(owner) => &owner.scope,
-            Self::Preparation(_) => unreachable!("retained early failure has no fabricated Cold scope"),
+            Self::Preparation(_) => {
+                unreachable!("retained early failure has no fabricated Cold scope")
+            }
         }
     }
     fn scope_mut(&mut self) -> &mut ColdScope<'a> {
@@ -147,7 +172,9 @@ impl<'a> Owner<'a> {
             Self::Closed(owner) => &mut owner.scope,
             Self::Viewing(owner) => &mut owner.owner.scope,
             Self::Classified(owner) => &mut owner.scope,
-            Self::Preparation(_) => unreachable!("retained early failure has no fabricated Cold scope"),
+            Self::Preparation(_) => {
+                unreachable!("retained early failure has no fabricated Cold scope")
+            }
         }
     }
     fn started(&self) -> Option<&Arc<StartedLaptop>> {
@@ -207,7 +234,10 @@ impl<'a> Owner<'a> {
         let scope = self.scope();
         let owned = self.created().is_some() || !matches!(scope.original, OriginalRuntime::Absent);
         owned
-            && !matches!(scope.budget, CreationBudget::Unconfirmed | CreationBudget::ReplacementPending)
+            && !matches!(
+                scope.budget,
+                CreationBudget::Unconfirmed | CreationBudget::ReplacementPending
+            )
             && self.remove_registration(completed)
     }
 }
@@ -281,7 +311,9 @@ impl Finalizer<'_> {
     }
     fn capture_target(&mut self) {
         let plan = match self.owner.resource() {
-            Some(Resources::OriginalCleanup { plan, .. } | Resources::UnobservedCleanup { plan, .. }) => Some(plan),
+            Some(
+                Resources::OriginalCleanup { plan, .. } | Resources::UnobservedCleanup { plan, .. },
+            ) => Some(plan),
             Some(Resources::Direct(input)) => Some(&input.plan),
             Some(Resources::Stopped(input)) => Some(&input.plan),
             Some(Resources::PreparingNix(input)) => Some(&input.stopped.plan),
@@ -297,7 +329,8 @@ impl Finalizer<'_> {
                     self.owner.scope().current.configuration(),
                 )
             {
-                self.errors.push(ColdError::Refused("WORKER_COLD_PLAN_SOURCE_CHANGED"));
+                self.errors
+                    .push(ColdError::Refused("WORKER_COLD_PLAN_SOURCE_CHANGED"));
                 return;
             }
             self.target = Some(WorkerContainerName::from_launch_name_data(
@@ -409,7 +442,9 @@ impl Finalizer<'_> {
         }
     }
     fn cleanup_request(&mut self) {
-        let (Some(created), Some(network)) = (self.owner.created(), self.owner.network()) else { return; };
+        let (Some(created), Some(network)) = (self.owner.created(), self.owner.network()) else {
+            return;
+        };
         // The actual retained publication chooses whether source started was
         // reached; no caller bool, nonce or filesystem path selects deletion.
         if let Err(error) = network.cleanup_created_request(created) {

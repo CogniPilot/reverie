@@ -56,24 +56,55 @@ impl Record {
         collector: &CommandTelemetry,
         configuration: &reverie_contracts::worker_config::EffectiveWorkerConfig,
     ) -> Result<Option<reverie_contracts::worker_launch::WorkerRequest>> {
+        match self.read_initial(service, collector, configuration, false)? {
+            super::service_connection::InitialRequest::ReportCompleted => Ok(None),
+            super::service_connection::InitialRequest::Launch(request) => Ok(Some(request)),
+            super::service_connection::InitialRequest::Service { .. } => {
+                unreachable!("legacy reader refuses other purposes before handoff")
+            }
+        }
+    }
+    pub(super) fn read_service_request(
+        &self,
+        service: &WorkerReportService,
+        collector: &CommandTelemetry,
+        configuration: &reverie_contracts::worker_config::EffectiveWorkerConfig,
+    ) -> Result<super::service_connection::InitialRequest> {
+        self.read_initial(service, collector, configuration, true)
+    }
+    fn read_initial(
+        &self,
+        service: &WorkerReportService,
+        collector: &CommandTelemetry,
+        configuration: &reverie_contracts::worker_config::EffectiveWorkerConfig,
+        service_verbs: bool,
+    ) -> Result<super::service_connection::InitialRequest> {
+        use super::service_connection::InitialRequest;
         let mut slot = self.lock(&self.stream);
         let stream = slot.as_mut().ok_or(WorkerReportError::Unconfirmed)?;
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             self.prepare(stream)?;
-            wire::authenticate(service, stream)?;
+            let peer = wire::authenticate(service, stream)?;
             collector.assert_engine(&service.engine)?;
             let (header, payload) = wire::receive(service, stream)?;
             match header.kind() {
                 b'T' => {
                     wire::report(service, stream, collector, &payload)?;
-                    Ok(None)
+                    Ok(InitialRequest::ReportCompleted)
                 }
                 b'J' => {
                     reverie_contracts::worker_launch::WorkerRequest::decode(&payload, configuration)
-                        .map(Some)
+                        .map(InitialRequest::Launch)
                         .map_err(WorkerReportError::Launch)
                 }
-                _ => Err(WorkerReportError::LaunchKind),
+                kind => match super::WorkerServicePurpose::from_kind(kind) {
+                    Some(purpose) if service_verbs => Ok(InitialRequest::Service {
+                        purpose,
+                        payload,
+                        peer,
+                    }),
+                    _ => Err(WorkerReportError::LaunchKind),
+                },
             }
         }))
         .unwrap_or_else(|_| {

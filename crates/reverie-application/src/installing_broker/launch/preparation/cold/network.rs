@@ -4,6 +4,10 @@ use super::*;
 use reverie_host::worker_laptop::{ColdPreparation, LaptopNetworkProgress};
 impl ColdBody<'_> {
     pub(super) fn prepare_network(&mut self) -> Result<(), ColdError> {
+        self.retain_network()?;
+        self.run_retained_network()
+    }
+    pub(super) fn retain_network(&mut self) -> Result<(), ColdError> {
         // The removal proof belongs to the still-held successful Nix record.
         // Validate it before Office construction or actual resource transfer.
         let Resources::CopyingNix(input) =
@@ -19,7 +23,11 @@ impl ColdBody<'_> {
             }
         }
         self.open_office()?;
-        let office = self.office.as_ref().expect("actual completed Office");
+        let office = self
+            .office
+            .as_ref()
+            .expect("actual completed Office")
+            .owner();
         let phone = office._office.retain_phone(&office._phone)?;
         let connection = self.scope.preparing.admitted.request.connection.clone();
         let Resources::CopyingNix(input) = self.resources.take().expect("actual copied resources")
@@ -46,6 +54,10 @@ impl ColdBody<'_> {
                 return Err(error.into());
             }
         }
+        Ok(())
+    }
+    fn run_retained_network(&mut self) -> Result<(), ColdError> {
+        let connection = self.scope.preparing.admitted.request.connection.clone();
         let Some(Resources::NetworkHeld(network)) = self.resources.take() else {
             unreachable!("new retained network has not been dispatched");
         };
@@ -89,20 +101,23 @@ impl ColdBody<'_> {
                 }
             };
             let phone = office._office.retain_phone(&office._phone)?;
-            self.office = Some(Arc::new(RecoveredOffice {
-                _phone: phone,
-                _office: office._office.clone(),
-            }));
+            self.office = Some(ColdOffice::Retained {
+                original: office.clone(),
+                alias: Arc::new(RecoveredOffice {
+                    _phone: phone,
+                    _office: office._office.clone(),
+                }),
+            });
             return Ok(());
         }
         let current = self.broker().configuration()?;
         let office = self.broker().recovery.office(self.broker(), &current)?;
         match office.bind_worker_retained(sid.clone()) {
             Ok(phone) => {
-                self.office = Some(Arc::new(RecoveredOffice {
+                self.office = Some(ColdOffice::Constructed(Arc::new(RecoveredOffice {
                     _phone: phone,
                     _office: office,
-                }));
+                })));
                 Ok(())
             }
             Err(failure) => {

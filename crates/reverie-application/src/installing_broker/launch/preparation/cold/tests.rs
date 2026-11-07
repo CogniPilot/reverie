@@ -5,6 +5,7 @@ use reverie_host::worker_storage::StorageLease;
 use std::fs;
 const SID: &str = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
 const EID: &str = "11111111-2222-4333-8444-555555555555";
+mod finalization;
 fn broker(tree: &Tree) -> InstallingBroker {
     let mut raw: serde_json::Value = serde_json::from_slice(&tree.raw).unwrap();
     raw.as_object_mut().unwrap().remove("resourceReservations");
@@ -35,15 +36,20 @@ fn classified(broker: &InstallingBroker) -> (std::os::unix::net::UnixStream, Col
     else {
         panic!("actual initial Cold classification");
     };
-    assert!(matches!(cold.target, ExistingColdTarget::Absent));
+    assert!(matches!(cold.target(), ExistingColdTarget::Absent));
     (client, cold)
 }
 fn lease_held(broker: &InstallingBroker) -> bool {
-    StorageLease::acquire_launch(
+    match StorageLease::acquire_launch(
         broker.configuration().unwrap().configuration(),
         &ProfileSessionId::parse(SID).unwrap(),
-    )
-    .is_err()
+    ) {
+        Ok(lease) => {
+            lease.close().unwrap();
+            false
+        }
+        Err(_) => true,
+    }
 }
 #[test]
 fn accepted_cold_reaches_actual_created_pane_guard_and_registered_owner_with_same_j_and_lease() {
@@ -138,6 +144,7 @@ fn nonzero_actual_create_retains_same_unknown_record_and_never_publishes_or_star
         .office
         .as_ref()
         .unwrap()
+        .owner()
         .close_for_stopped_source(super::super::tests::end())
         .unwrap();
     assert!(lease_held(&broker));

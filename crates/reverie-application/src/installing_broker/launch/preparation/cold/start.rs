@@ -101,7 +101,7 @@ impl<'a> ColdBody<'a> {
         let started = Arc::new(StartedLaptop {
             network,
             pane: creation.pane.expect("actual pane and guard completion"),
-            office: self.office.as_ref().expect("actual phone").clone(),
+            office: self.office.as_ref().expect("actual phone").owner().clone(),
             created: creation.created,
         });
         // Admission can still fail after registration. The failure keeps the

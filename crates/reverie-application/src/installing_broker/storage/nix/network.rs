@@ -4,7 +4,9 @@ use super::*;
 mod abort_held;
 mod cold;
 mod created_return;
-pub(in crate::installing_broker) use created_return::{CreatedStorageReturned, CreatedStorageFinishFailure};
+pub(in crate::installing_broker) use created_return::{
+    CreatedStorageFinishFailure, CreatedStorageReturned,
+};
 use reverie_contracts::worker_launch::WorkerRequest;
 use reverie_host::{
     office::OfficePhone,

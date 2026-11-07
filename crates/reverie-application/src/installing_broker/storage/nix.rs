@@ -7,8 +7,10 @@ use reverie_host::worker_nix::{NixDisposition, NixError, NixProgress, NixStoreGu
 mod cold;
 mod error;
 mod network;
-pub(in crate::installing_broker) use network::{CreatedStorageReturned, CreatedStorageFinishFailure};
 pub use error::{NixStorageError, NixStorageReclaimFailure, NixStorageRetainFailure};
+pub(in crate::installing_broker) use network::{
+    CreatedStorageFinishFailure, CreatedStorageReturned,
+};
 pub use network::{
     NetworkStorageError, NetworkStoragePreparation, NetworkStorageReclaimFailure,
     NetworkStorageRetainFailure, NetworkStorageReturned,

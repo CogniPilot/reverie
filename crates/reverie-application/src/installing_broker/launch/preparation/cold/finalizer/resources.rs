@@ -3,15 +3,15 @@
 use super::*;
 impl Finalizer<'_> {
     pub(super) fn close_guard(&mut self) {
-        if let Some(network) = self.owner.network() {
-            if self.owner.created().is_some() {
-                if let Err(error) = network
-                    .cleanup_nix_guard(&self.owner.scope().preparing.admitted.request.connection)
-                {
-                    self.errors.push(error.into());
-                }
-                return;
+        if let Some(network) = self.owner.network()
+            && self.owner.created().is_some()
+        {
+            if let Err(error) =
+                network.cleanup_nix_guard(&self.owner.scope().preparing.admitted.request.connection)
+            {
+                self.errors.push(error.into());
             }
+            return;
         }
         let Owner::Body(owner) = &mut self.owner else {
             return;

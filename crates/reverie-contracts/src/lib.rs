@@ -9,6 +9,7 @@ pub mod creation_budget;
 pub mod device_policy;
 mod digest;
 pub mod docker_profile;
+pub mod goal_custody;
 pub mod gpu_access;
 pub mod host_jobs;
 pub mod js_json;

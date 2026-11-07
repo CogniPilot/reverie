@@ -72,11 +72,7 @@ impl ColdBody<'_> {
                     Ok(native) => self.resources = Some(Resources::Replacement(native)),
                     Err(failure) => {
                         let (storage, plan, process, cause) = failure.into_parts();
-                        let target = if dead {
-                            ExistingColdTarget::DeadPane(process)
-                        } else {
-                            ExistingColdTarget::RunningCompleted(process)
-                        };
+                        let target = restored_running_target(process, dead);
                         self.resources = Some(Resources::Direct(Direct {
                             storage,
                             plan,
@@ -222,5 +218,16 @@ impl ColdBody<'_> {
             .map_err(PreparationError::from)?;
         self.scope.budget = CreationBudget::ReplacementConfirmed;
         Ok(())
+    }
+}
+
+fn restored_running_target(
+    process: reverie_host::worker_launch::ExistingProcessIncarnation,
+    dead: bool,
+) -> ExistingColdTarget {
+    if dead {
+        ExistingColdTarget::DeadPane(process)
+    } else {
+        ExistingColdTarget::RunningCompleted(process)
     }
 }

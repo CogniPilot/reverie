@@ -31,7 +31,7 @@ pub struct ColdWorkerLaunch<'a> {
         Option<reverie_host::worker_storage::LaunchReceiptObservation>,
     pub(in crate::installing_broker::launch::preparation) inspected: InspectedWorkerLaunch<'a>,
     pub(in crate::installing_broker::launch::preparation) resources: EffectiveWorkerConfig,
-    pub(in crate::installing_broker::launch::preparation) target: ExistingColdTarget,
+    pub(in crate::installing_broker::launch::preparation) target: Box<ExistingColdTarget>,
 }
 /// Closed original-source branch, never fabricated from CID/PID/path DATA.
 /// The actual ColdWorkerLaunch owns this with its original accepted resources.
@@ -92,7 +92,7 @@ impl<'a> RuntimeWorkerLaunch<'a> {
                     receipt: self.receipt,
                     inspected: self.verified.existing,
                     resources,
-                    target,
+                    target: Box::new(target),
                 }))
             }
             Err(cause) => Err(self.into_failure(cause)),
@@ -249,14 +249,14 @@ impl<'a> ColdWorkerLaunch<'a> {
         &self.target
     }
     pub fn previous_process(&self) -> Option<&ExistingProcessIncarnation> {
-        match &self.target {
+        match self.target.as_ref() {
             ExistingColdTarget::DeadPane(process)
             | ExistingColdTarget::RunningCompleted(process) => Some(process),
             ExistingColdTarget::Absent | ExistingColdTarget::Stopped(_) => None,
         }
     }
     pub fn has_dead_inner(&self) -> bool {
-        matches!(self.target, ExistingColdTarget::DeadPane(_))
+        matches!(self.target.as_ref(), ExistingColdTarget::DeadPane(_))
     }
     pub fn abort(self) -> Box<PreparationFailure<'a>> {
         self.inspected

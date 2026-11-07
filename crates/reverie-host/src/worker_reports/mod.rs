@@ -11,6 +11,10 @@ pub use listener::{
 };
 mod record;
 mod registered;
+mod service_connection;
+pub use service_connection::{
+    AcceptedWorkerServiceConnection, WorkerPeer, WorkerServiceConnection, WorkerServicePurpose,
+};
 mod retention;
 pub(crate) mod terminal;
 pub use terminal::{ViewerRelay, ViewerRelayEnd, ViewerRelayError, ViewerRelayEvent};

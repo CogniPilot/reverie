@@ -1,4 +1,4 @@
-//! A genuine accepted J may retain its existing admission through the actual
+//! A genuine accepted worker connection may retain its existing admission through the actual
 //! application lifecycle. There is no second cap, fd duplication or wire key.
 use super::*;
 
@@ -15,7 +15,7 @@ pub enum WorkerLaunchClose {
     SocketClosedLifecycleHeld,
     SocketClosedHandlerRetained,
 }
-/// Only a genuine accepted J connection can issue this one-shot resource.
+/// Only a genuine accepted worker connection can issue this one-shot resource.
 /// Default Drop leaves the strong Held identity in the SAME counted record;
 /// the caller must retain it with unknown actual resources, not reconstruct it
 /// later from a SID, request or descriptor number.

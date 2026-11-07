@@ -14,11 +14,10 @@ mod viewer;
 pub use error::{LaunchAdmissionFailure, WorkerDispatchError};
 pub use preparation::{
     AllocationClosedCold, AllocationClosedReuse, ClassifiedWorkerLaunch, ColdFinalizationFailure,
-    ColdHandlerClosed, ColdLaunchFailure,
-    ColdViewerFailure, ColdWorkerLaunch, ExistingColdTarget, InspectedWorkerLaunch,
-    PreparationFailure as LaunchPreparationFailure, PreparedReuseViewer, RestoredReuse,
-    ReusableWorkerLaunch, ReuseFinalizationFailure, ReuseHandlerClosed, ReuseViewerFailure,
-    ViewingCold, ViewingReuse,
+    ColdHandlerClosed, ColdLaunchFailure, ColdViewerFailure, ColdWorkerLaunch, ExistingColdTarget,
+    InspectedWorkerLaunch, PreparationFailure as LaunchPreparationFailure, PreparedReuseViewer,
+    RestoredReuse, ReusableWorkerLaunch, ReuseFinalizationFailure, ReuseHandlerClosed,
+    ReuseViewerFailure, ViewingCold, ViewingReuse,
 };
 pub use viewer::{ColdRelayReturned, ReuseRelayError, ReuseRelayReturned, WorkerViewerRelayError};
 #[cfg(test)]
