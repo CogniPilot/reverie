@@ -52,6 +52,76 @@ fn plan(runtime: &WorkerRuntime, tree: &Tree, storage: &LaunchStorage) -> Observ
 }
 
 #[test]
+fn second_dead_pane_query_uses_original_raw_id_before_canonical_stop_validation() {
+    let tree = Tree::new();
+    let runtime = tree.controlled_runtime();
+    let other = tree.controlled_runtime();
+    let storage = runtime
+        .resolve_storage(&tree.source(), &sid())
+        .unwrap()
+        .into_legacy()
+        .unwrap();
+    let plan = plan(&runtime, &tree, &storage);
+    let mut target = Target::new(&tree);
+    row(&tree, target.pid(), Some(json!("raw-original-id")));
+    let captured = plan
+        .inspect_existing(&runtime, deadline())
+        .unwrap()
+        .unwrap()
+        .capture_dead_pane_process(&runtime, &plan, deadline())
+        .unwrap();
+    assert!(captured.data().canonical_id().is_none());
+    let initial = fs::read(tree.0.join("calls.txt")).unwrap();
+    assert!(
+        captured
+            .observe_dead_pane_again(&other, &plan, deadline())
+            .is_err()
+    );
+    assert_eq!(fs::read(tree.0.join("calls.txt")).unwrap(), initial);
+    fs::write(tree.0.join("pane.out"), b"1\n").unwrap();
+    assert_eq!(
+        captured
+            .observe_dead_pane_again(&runtime, &plan, deadline())
+            .unwrap(),
+        ExistingPaneState::Dead
+    );
+    fs::write(tree.0.join("pane.out"), b"0\n").unwrap();
+    assert_eq!(
+        captured
+            .observe_dead_pane_again(&runtime, &plan, deadline())
+            .unwrap(),
+        ExistingPaneState::Live
+    );
+    let calls = fs::read_to_string(tree.0.join("calls.txt")).unwrap();
+    assert_eq!(calls.lines().count(), 3);
+    for call in calls.lines().skip(1) {
+        let args = call.split('\0').collect::<Vec<_>>();
+        assert_eq!(args[9], "raw-original-id");
+        assert_eq!(
+            &args[args.len() - 5..],
+            ["display-message", "-p", "-t", "office", "#{pane_dead}"]
+        );
+    }
+    row(&tree, target.pid(), Some(json!(null)));
+    let invalid = plan
+        .inspect_existing(&runtime, deadline())
+        .unwrap()
+        .unwrap()
+        .capture_dead_pane_process(&runtime, &plan, deadline())
+        .unwrap();
+    let calls = fs::read(tree.0.join("calls.txt")).unwrap();
+    assert!(matches!(
+        invalid.observe_dead_pane_again(&runtime, &plan, deadline()),
+        Err(ExistingObservationError::Data(LaptopReadError::Structure))
+    ));
+    assert_eq!(fs::read(tree.0.join("calls.txt")).unwrap(), calls);
+    target.stop();
+    storage.close(end()).unwrap();
+    runtime.close(end()).unwrap();
+    other.close(end()).unwrap();
+}
+
+#[test]
 fn actual_dead_and_running_capture_keep_kernel_incarnation_without_an_extra_engine_query() {
     let tree = Tree::new();
     let runtime = tree.controlled_runtime();

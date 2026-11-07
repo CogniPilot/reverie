@@ -15,6 +15,25 @@ pub struct ExistingProcessIncarnation {
     start: String,
 }
 impl ExistingProcessIncarnation {
+    /// Fixed second dead-pane observation, before wait_current and strict stop
+    /// identity validation. It cannot signal, remove or reconstruct a target.
+    pub fn observe_dead_pane_again(
+        &self,
+        runtime: &WorkerRuntime,
+        plan: &ObservedCreatePlan,
+        supplied: Instant,
+    ) -> std::result::Result<super::ExistingPaneState, ExistingObservationError> {
+        self.assert_plan(runtime, plan)?;
+        let end = runtime
+            .stop_deadline()
+            .map_or(supplied, |stop| supplied.min(stop));
+        let args = self
+            .observed
+            .data
+            .dead_pane_recheck_arguments()
+            .map_err(ExistingObservationError::Data)?;
+        super::pane::observe(runtime, args, end)
+    }
     pub(crate) fn assert_plan(
         &self,
         runtime: &WorkerRuntime,

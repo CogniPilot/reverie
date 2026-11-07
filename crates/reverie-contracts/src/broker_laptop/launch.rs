@@ -20,6 +20,18 @@ impl LaunchLaptopInspection {
     pub fn require_id_field(&self) -> Result<(), LaptopReadError> {
         field(&self.0, "Id").map(|_| ())
     }
+    /// Source's SECOND pane query targets the first observation's raw Id before
+    /// the later strict stop identity check. These fixed arguments are DATA.
+    pub fn dead_pane_recheck_arguments(
+        &self,
+    ) -> Result<Vec<crate::storage_identity::MetadataText>, LaptopReadError> {
+        let Value(Node::String(target)) = field(&self.0, "Id")? else {
+            return Err(LaptopReadError::Structure);
+        };
+        Ok(crate::worker_launch::dead_pane_recheck(
+            &crate::storage_identity::MetadataText::from_text(target.clone()),
+        ))
+    }
     /// Parse all returned JSON, consume only [0], and perform the original
     /// ownership-label check before any State, runtime-file or pane lookup.
     pub fn decode_owned(

@@ -22,34 +22,41 @@ impl ExistingLaptopInspection {
             &words,
             false,
         );
-        let args = args
-            .iter()
-            .map(|word| native::python_path(word.codepoints()).map(|path| path.into_os_string()))
-            .collect::<std::io::Result<Vec<_>>>()
-            .map_err(|_| ExistingObservationError::Origin)?;
-        let output = runtime
-            .installed_engine()
-            .engine
-            .client
-            .run(
-                args,
-                end,
-                &runtime.cancellation(),
-                Policy {
-                    maximum: Duration::from_secs(MAX_QUERY_SECONDS),
-                    maximum_output: MAX_OUTPUT_BYTES,
-                    successful_exit: false,
-                },
-            )
-            .map_err(|error| ExistingObservationError::Engine(error.into()))?;
-        if output.succeeded {
-            let text = std::str::from_utf8(&output.stdout).expect("captured UTF8 policy");
-            match reverie_contracts::kernel_accounting::strip(text) {
-                "0" => return Ok(ExistingPaneState::Live),
-                "1" => return Ok(ExistingPaneState::Dead),
-                _ => {}
-            }
-        }
-        Ok(ExistingPaneState::Unavailable)
+        observe(runtime, args, end)
     }
+}
+pub(super) fn observe(
+    runtime: &WorkerRuntime,
+    args: Vec<MetadataText>,
+    end: Instant,
+) -> std::result::Result<ExistingPaneState, ExistingObservationError> {
+    let args = args
+        .iter()
+        .map(|word| native::python_path(word.codepoints()).map(|path| path.into_os_string()))
+        .collect::<std::io::Result<Vec<_>>>()
+        .map_err(|_| ExistingObservationError::Origin)?;
+    let output = runtime
+        .installed_engine()
+        .engine
+        .client
+        .run(
+            args,
+            end,
+            &runtime.cancellation(),
+            Policy {
+                maximum: Duration::from_secs(MAX_QUERY_SECONDS),
+                maximum_output: MAX_OUTPUT_BYTES,
+                successful_exit: false,
+            },
+        )
+        .map_err(|error| ExistingObservationError::Engine(error.into()))?;
+    if output.succeeded {
+        let text = std::str::from_utf8(&output.stdout).expect("captured UTF8 policy");
+        match reverie_contracts::kernel_accounting::strip(text) {
+            "0" => return Ok(ExistingPaneState::Live),
+            "1" => return Ok(ExistingPaneState::Dead),
+            _ => {}
+        }
+    }
+    Ok(ExistingPaneState::Unavailable)
 }
