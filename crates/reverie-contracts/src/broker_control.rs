@@ -62,10 +62,17 @@ pub enum ControlRefusal {
     Message(&'static str),
     /// A non-refusal failure: the fixed transport E text.
     Transport,
-    /// The payload is not JSON. The legacy handler sends the JSON decoder's
-    /// own message here; this native route sends a fixed refusal instead.
+    /// The payload does not decode: a JSON syntax error, empty input, or bytes
+    /// that fail Python's bytes detection (invalid UTF-8, truncated UTF-16).
+    /// Named wire difference, by owner disposition: the legacy handler sends
+    /// the decoder's own message; the native reply is exactly
+    /// [`UNDECODABLE_REFUSAL`]. A BOM-prefixed payload that decodes is not
+    /// covered and routes like any other.
     InvalidJson,
 }
+
+/// The fixed E text for every C payload that does not decode.
+pub const UNDECODABLE_REFUSAL: &str = "Invalid office power request";
 
 /// Classify one C payload as `json.loads(bytes)` (last duplicate wins) and
 /// the legacy handler's ordered checks would.

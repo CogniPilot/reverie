@@ -153,8 +153,42 @@ fn stop_shapes() {
     );
 }
 
+// The named difference (owner disposition): every undecodable payload is
+// InvalidJson, whose E text is exactly UNDECODABLE_REFUSAL. The legacy texts
+// these replace, from CPython 3.13.15 json.loads, are noted per case.
 #[test]
-fn malformed_json_is_the_labelled_difference() {
-    // The legacy handler sends the decoder's own text here.
-    assert_eq!(route(b"not json"), Err(ControlRefusal::InvalidJson));
+fn undecodable_payloads_are_the_named_difference() {
+    let cases: [(&[u8], &str); 5] = [
+        (b"not json", "Expecting value: line 1 column 1 (char 0)"),
+        (b"", "Expecting value: line 1 column 1 (char 0)"),
+        (
+            br#"{"action": "status""#,
+            "Expecting ',' delimiter: line 1 column 20 (char 19)",
+        ),
+        (
+            b"{\"action\": \"st\xffatus\"}",
+            "'utf-8' codec can't decode byte 0xff in position 14",
+        ),
+        (
+            b"\xff\xfe\x00",
+            "'utf-16-le' codec can't decode byte 0x00 in position 2",
+        ),
+    ];
+    for (raw, legacy) in cases {
+        assert_eq!(route(raw), Err(ControlRefusal::InvalidJson), "{legacy}");
+    }
+    assert_eq!(UNDECODABLE_REFUSAL, "Invalid office power request");
+}
+
+// Parity, not the difference: json.loads(bytes) detects a BOM, so these decode.
+#[test]
+fn bom_prefixed_payloads_decode_like_python() {
+    let mut utf8 = b"\xef\xbb\xbf".to_vec();
+    utf8.extend_from_slice(br#"{"action": "status"}"#);
+    assert_eq!(route(&utf8), power(text("status"), None));
+    let mut utf16 = vec![0xff, 0xfe];
+    for unit in r#"{"action": "status"}"#.encode_utf16() {
+        utf16.extend_from_slice(&unit.to_le_bytes());
+    }
+    assert_eq!(route(&utf16), power(text("status"), None));
 }
