@@ -7,11 +7,14 @@ pub(in crate::installing_broker) use existing_viewer::{
 };
 mod nix;
 mod observed;
+mod ordinary_stop;
 mod preparation;
 mod recovery_lifetime;
 mod replacement_stop;
-mod ordinary_stop;
-pub use ordinary_stop::{OrdinaryStopPreparation, OrdinaryStopReturned, OrdinaryStopRetainFailure, OrdinaryStopReclaimFailure};
+pub use ordinary_stop::{
+    OrdinaryStopPreparation, OrdinaryStopReclaimFailure, OrdinaryStopRetainFailure,
+    OrdinaryStopReturned,
+};
 mod source;
 pub use observed::OwnedCreatePreparationError;
 pub(crate) use source::RegisteredSource;

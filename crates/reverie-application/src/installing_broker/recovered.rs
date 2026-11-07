@@ -34,7 +34,7 @@ impl RecoveryOwners {
             uncertain: Mutex::new(Vec::new()),
         }
     }
-    fn office(
+    pub(super) fn office(
         &self,
         broker: &InstallingBroker,
         snapshot: &ValidatedWorkerSnapshot,
@@ -84,6 +84,7 @@ pub(super) struct RecoveredLaptop {
 }
 pub(super) enum LaptopOwner {
     Recovered(Box<RecoveredLaptop>),
+    Started(Arc<super::launch::StartedLaptop>),
     #[cfg(test)]
     Modeled,
 }
@@ -129,6 +130,18 @@ impl InstallingBroker {
         // Existing source serve performs recovery before publishing its broker
         // listener. This lifecycle owner also excludes a competing publication.
         let mut lifecycle = self.installed.lifecycle()?;
+        // Startup recovery cannot replace a live newly-started SAME-record
+        // owner with a reconstructed Direct claim. Its resource borrower is a
+        // separate required service consumer, not recovery membership DATA.
+        if lifecycle
+            .guard
+            .iter()
+            .any(|entry| matches!(entry.owner, LaptopOwner::Started(_)))
+        {
+            return Err(RecoveryError::Refused(
+                "WORKER_RECOVERY_STARTED_RESOURCE_ACTIVE",
+            ));
+        }
         // This is the actual startup recovery boundary. Hold THIS guard through
         // publication, so no pending J can appear after a separate early check.
         // A tracked pending name is never a recovered storage/Office owner.

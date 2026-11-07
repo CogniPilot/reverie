@@ -6,16 +6,24 @@ impl WorkerRuntime {
     pub fn recheck_nix_launch_storage(&self, workflow: &NixWorkflow) -> Result<()> {
         let workflows = self.nix_workflows();
         workflows.bound(self, workflow)?;
-        let record = workflow.record.try_lock()
+        let record = workflow
+            .record
+            .try_lock()
             .map_err(|_| NixError::Refused(NixFault::Retained))?;
-        need(record.phase == Phase::Known && !record.turn && matches!(&record.outcome, Some(Ok(_))), NixFault::Retained)?;
+        need(
+            record.phase == Phase::Known && !record.turn && matches!(&record.outcome, Some(Ok(_))),
+            NixFault::Retained,
+        )?;
         let storage = &record.resources().storage;
         let selected = self.resolve_storage(&record.prepared, &workflow.session)?;
         need(selected.paths() == storage.paths(), NixFault::StoreBinding)?;
         let settings = ResourceIdentitySettings::capture_worker_config(&record.prepared)
             .map_err(crate::worker_storage::StorageOwnerError::Settings)?;
         let config = StorageIdentityConfig::capture_worker_settings(&settings);
-        need(storage_identity::storage_start_allowed(&config, storage.paths())?, NixFault::StoreBinding)?;
+        need(
+            storage_identity::storage_start_allowed(&config, storage.paths())?,
+            NixFault::StoreBinding,
+        )?;
         if storage.paths().employee().is_some() {
             self.check_storage_writers(storage, None)?;
         }

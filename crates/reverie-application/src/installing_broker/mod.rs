@@ -24,11 +24,11 @@ use crate::{
 pub use creation::CreationBudgetError;
 pub(crate) use image_refresh::LoadedLaunchImage;
 pub use launch::{
-    AdmittedWorkerLaunch, AllocationClosedReuse, ClassifiedWorkerLaunch, ColdWorkerLaunch,
-    ExistingColdTarget, InspectedWorkerLaunch, LaunchAdmissionFailure, LaunchPreparationFailure,
-    PreparedReuseViewer, ReceivedWorkerLaunch, RestoredReuse, ReusableWorkerLaunch,
-    ReuseRelayError, ReuseRelayReturned, ReuseViewerFailure, ViewingReuse,
-    WorkerConnectionDispatch, WorkerDispatchError,
+    AdmittedWorkerLaunch, AllocationClosedCold, AllocationClosedReuse, ClassifiedWorkerLaunch,
+    ColdLaunchFailure, ColdWorkerLaunch, ExistingColdTarget, InspectedWorkerLaunch,
+    LaunchAdmissionFailure, LaunchPreparationFailure, PreparedReuseViewer, ReceivedWorkerLaunch,
+    RestoredReuse, ReusableWorkerLaunch, ReuseRelayError, ReuseRelayReturned, ReuseViewerFailure,
+    ViewingReuse, WorkerConnectionDispatch, WorkerDispatchError,
 };
 pub(crate) use lifecycle::LaptopLifecycle;
 use lifecycle::LaptopState;

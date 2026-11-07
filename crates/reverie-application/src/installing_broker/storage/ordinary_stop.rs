@@ -26,7 +26,14 @@ pub struct OrdinaryStopReclaimFailure {
     cause: StorageWorkflowError,
 }
 impl OrdinaryStopRetainFailure {
-    pub fn into_parts(self: Box<Self>) -> (StorageClaim, ObservedCreatePlan, ExistingLaptopInspection, StorageWorkflowError) {
+    pub fn into_parts(
+        self: Box<Self>,
+    ) -> (
+        StorageClaim,
+        ObservedCreatePlan,
+        ExistingLaptopInspection,
+        StorageWorkflowError,
+    ) {
         (self.claim, self.plan, self.previous, self.cause)
     }
 }
@@ -36,7 +43,14 @@ impl OrdinaryStopReclaimFailure {
     }
 }
 impl OrdinaryStopReturned {
-    pub fn into_cold_parts(self) -> (StorageClaim, ObservedCreatePlan, Option<ExistingLaptopInspection>, StoppedLaptopRemoval) {
+    pub fn into_cold_parts(
+        self,
+    ) -> (
+        StorageClaim,
+        ObservedCreatePlan,
+        Option<ExistingLaptopInspection>,
+        StoppedLaptopRemoval,
+    ) {
         // The actual observed input remains retained through confirmed stop;
         // the removal owner carries its stopped identity, not its DATA row.
         (self.claim, self.plan, self.previous, self.removal)
@@ -46,12 +60,17 @@ impl OrdinaryStopPreparation {
     pub fn stop_after_admission(&self) -> Result<(), StorageWorkflowError> {
         let registry = self.destination.registry();
         self.check_entry()?;
-        self.native.try_lock()
+        self.native
+            .try_lock()
             .map_err(|_| StorageWorkflowError::refused("WORKER_ORDINARY_STOP_RETAINED"))?
-            .stop_after_admission(&registry.runtime).map_err(Into::into)
+            .stop_after_admission(&registry.runtime)
+            .map_err(Into::into)
     }
     fn check_entry(&self) -> Result<(), StorageWorkflowError> {
-        if let ClaimDestination::Registered { registry, identity, .. } = &self.destination {
+        if let ClaimDestination::Registered {
+            registry, identity, ..
+        } = &self.destination
+        {
             let entries = registry.lock(registry.runtime.stop_deadline())?;
             let index = selected(&entries, identity)?;
             same_native(&entries[index], &self.native)?;
@@ -60,51 +79,106 @@ impl OrdinaryStopPreparation {
     }
     pub fn settle_native(&self, end: Instant) -> Result<(), StorageWorkflowError> {
         self.check_entry()?;
-        self.native.try_lock()
+        self.native
+            .try_lock()
             .map_err(|_| StorageWorkflowError::refused("WORKER_ORDINARY_STOP_RETAINED"))?
-            .settle_native(&self.destination.registry().runtime, end).map_err(Into::into)
+            .settle_native(&self.destination.registry().runtime, end)
+            .map_err(Into::into)
     }
-    pub fn reclaim(self, end: Instant) -> Result<OrdinaryStopReturned, Box<OrdinaryStopReclaimFailure>> {
+    pub fn reclaim(
+        self,
+        end: Instant,
+    ) -> Result<OrdinaryStopReturned, Box<OrdinaryStopReclaimFailure>> {
         let result = match &self.destination {
-            ClaimDestination::Legacy { registry } => self.native.try_lock()
+            ClaimDestination::Legacy { registry } => self
+                .native
+                .try_lock()
                 .map_err(|_| StorageWorkflowError::refused("WORKER_ORDINARY_STOP_RETAINED"))
                 .and_then(|mut native| {
-                    let (owner, plan, previous, removal) = native.take_stopped(&registry.runtime, end)?.into_cold_parts();
+                    let (owner, plan, previous, removal) = native
+                        .take_stopped(&registry.runtime, end)?
+                        .into_cold_parts();
                     Ok(OrdinaryStopReturned {
-                        claim: StorageClaim { state: ClaimState::Legacy { registry: registry.clone(), owner } },
-                        plan, previous, removal,
+                        claim: StorageClaim {
+                            state: ClaimState::Legacy {
+                                registry: registry.clone(),
+                                owner,
+                            },
+                        },
+                        plan,
+                        previous,
+                        removal,
                     })
                 }),
-            ClaimDestination::Registered { registry, identity, newly_claimed } =>
-                registry.reclaim_ordinary_stop(identity, &self.native, *newly_claimed, end),
+            ClaimDestination::Registered {
+                registry,
+                identity,
+                newly_claimed,
+            } => registry.reclaim_ordinary_stop(identity, &self.native, *newly_claimed, end),
         };
-        result.map_err(|cause| Box::new(OrdinaryStopReclaimFailure { preparation: self, cause }))
+        result.map_err(|cause| {
+            Box::new(OrdinaryStopReclaimFailure {
+                preparation: self,
+                cause,
+            })
+        })
     }
 }
 impl StorageClaim {
-    pub fn retain_ordinary_stop(self, plan: ObservedCreatePlan, previous: ExistingLaptopInspection)
-        -> Result<OrdinaryStopPreparation, Box<OrdinaryStopRetainFailure>> {
+    pub fn retain_ordinary_stop(
+        self,
+        plan: ObservedCreatePlan,
+        previous: ExistingLaptopInspection,
+    ) -> Result<OrdinaryStopPreparation, Box<OrdinaryStopRetainFailure>> {
         match self.state {
-            ClaimState::Legacy { registry, owner } =>
-                match registry.runtime.retain_ordinary_laptop_stop_for_worker(owner, plan, previous) {
-                    Ok(native) => Ok(OrdinaryStopPreparation {
-                        destination: ClaimDestination::Legacy { registry }, native: Arc::new(Mutex::new(native)),
-                    }),
-                    Err(failure) => {
-                        let (owner, plan, previous, cause) = failure.into_parts();
-                        Err(Box::new(OrdinaryStopRetainFailure {
-                            claim: StorageClaim { state: ClaimState::Legacy { registry, owner } },
-                            plan, previous: previous.expect("actual observed input returned"), cause: cause.into(),
-                        }))
-                    }
-                },
-            ClaimState::Registered { registry, identity, paths, newly_claimed } => {
-                let destination = ClaimDestination::Registered { registry: registry.clone(), identity: identity.clone(), newly_claimed };
+            ClaimState::Legacy { registry, owner } => match registry
+                .runtime
+                .retain_ordinary_laptop_stop_for_worker(owner, plan, previous)
+            {
+                Ok(native) => Ok(OrdinaryStopPreparation {
+                    destination: ClaimDestination::Legacy { registry },
+                    native: Arc::new(Mutex::new(native)),
+                }),
+                Err(failure) => {
+                    let (owner, plan, previous, cause) = failure.into_parts();
+                    Err(Box::new(OrdinaryStopRetainFailure {
+                        claim: StorageClaim {
+                            state: ClaimState::Legacy { registry, owner },
+                        },
+                        plan,
+                        previous: previous.expect("actual observed input returned"),
+                        cause: cause.into(),
+                    }))
+                }
+            },
+            ClaimState::Registered {
+                registry,
+                identity,
+                paths,
+                newly_claimed,
+            } => {
+                let destination = ClaimDestination::Registered {
+                    registry: registry.clone(),
+                    identity: identity.clone(),
+                    newly_claimed,
+                };
                 match registry.retain_ordinary_stop(&identity, plan, previous) {
-                    Ok(native) => Ok(OrdinaryStopPreparation { destination, native }),
+                    Ok(native) => Ok(OrdinaryStopPreparation {
+                        destination,
+                        native,
+                    }),
                     Err((plan, previous, cause)) => Err(Box::new(OrdinaryStopRetainFailure {
-                        claim: StorageClaim { state: ClaimState::Registered { registry, identity, paths, newly_claimed } },
-                        plan, previous, cause,
+                        claim: StorageClaim {
+                            state: ClaimState::Registered {
+                                registry,
+                                identity,
+                                paths,
+                                newly_claimed,
+                            },
+                        },
+                        plan,
+                        previous,
+                        cause,
                     })),
                 }
             }
@@ -112,49 +186,96 @@ impl StorageClaim {
     }
 }
 impl StorageRegistry {
-    fn retain_ordinary_stop(&self, identity: &Arc<()>, plan: ObservedCreatePlan, previous: ExistingLaptopInspection)
-        -> Result<Arc<Mutex<OrdinaryLaptopStop>>, (ObservedCreatePlan, ExistingLaptopInspection, StorageWorkflowError)> {
+    fn retain_ordinary_stop(
+        &self,
+        identity: &Arc<()>,
+        plan: ObservedCreatePlan,
+        previous: ExistingLaptopInspection,
+    ) -> Result<
+        Arc<Mutex<OrdinaryLaptopStop>>,
+        (
+            ObservedCreatePlan,
+            ExistingLaptopInspection,
+            StorageWorkflowError,
+        ),
+    > {
         let mut entries = match self.lock(self.runtime.stop_deadline()) {
-            Ok(entries) => entries, Err(cause) => return Err((plan, previous, cause)),
+            Ok(entries) => entries,
+            Err(cause) => return Err((plan, previous, cause)),
         };
         let index = match selected(&entries, identity) {
-            Ok(index) => index, Err(cause) => return Err((plan, previous, cause)),
+            Ok(index) => index,
+            Err(cause) => return Err((plan, previous, cause)),
         };
-        if !entries[index].writer_checked || !matches!(entries[index].owner, EntryOwner::Direct(_)) {
-            return Err((plan, previous, StorageWorkflowError::refused("WORKER_ORDINARY_STOP_RETAINED")));
+        if !entries[index].writer_checked || !matches!(entries[index].owner, EntryOwner::Direct(_))
+        {
+            return Err((
+                plan,
+                previous,
+                StorageWorkflowError::refused("WORKER_ORDINARY_STOP_RETAINED"),
+            ));
         }
         let mut entry = entries.remove(index);
-        let EntryOwner::Direct(owner) = entry.owner else { unreachable!("checked actual Direct owner") };
-        match self.runtime.retain_ordinary_laptop_stop_for_worker(owner, plan, previous) {
+        let EntryOwner::Direct(owner) = entry.owner else {
+            unreachable!("checked actual Direct owner")
+        };
+        match self
+            .runtime
+            .retain_ordinary_laptop_stop_for_worker(owner, plan, previous)
+        {
             Ok(native) => {
                 let native = Arc::new(Mutex::new(native));
-                entry.owner = EntryOwner::OrdinaryStop(native.clone()); entries.insert(index, entry);
+                entry.owner = EntryOwner::OrdinaryStop(native.clone());
+                entries.insert(index, entry);
                 Ok(native)
             }
             Err(failure) => {
                 let (owner, plan, previous, cause) = failure.into_parts();
-                entry.owner = EntryOwner::Direct(owner); entries.insert(index, entry);
+                entry.owner = EntryOwner::Direct(owner);
+                entries.insert(index, entry);
                 Err((plan, previous.expect("same observed input"), cause.into()))
             }
         }
     }
-    fn reclaim_ordinary_stop(self: &Arc<Self>, identity: &Arc<()>, native: &Arc<Mutex<OrdinaryLaptopStop>>, newly_claimed: bool, end: Instant)
-        -> Result<OrdinaryStopReturned, StorageWorkflowError> {
+    fn reclaim_ordinary_stop(
+        self: &Arc<Self>,
+        identity: &Arc<()>,
+        native: &Arc<Mutex<OrdinaryLaptopStop>>,
+        newly_claimed: bool,
+        end: Instant,
+    ) -> Result<OrdinaryStopReturned, StorageWorkflowError> {
         let mut entries = self.lock(self.runtime.stop_deadline())?;
         let index = selected(&entries, identity)?;
         same_native(&entries[index], native)?;
-        let mut native = native.try_lock()
+        let mut native = native
+            .try_lock()
             .map_err(|_| StorageWorkflowError::refused("WORKER_ORDINARY_STOP_RETAINED"))?;
-        let (owner, plan, previous, removal) = native.take_stopped(&self.runtime, end)?.into_cold_parts();
+        let (owner, plan, previous, removal) =
+            native.take_stopped(&self.runtime, end)?.into_cold_parts();
         entries[index].owner = EntryOwner::Direct(owner);
-        Ok(OrdinaryStopReturned { claim: self.handle(&entries[index], newly_claimed), plan, previous, removal })
+        Ok(OrdinaryStopReturned {
+            claim: self.handle(&entries[index], newly_claimed),
+            plan,
+            previous,
+            removal,
+        })
     }
 }
 fn selected(entries: &[Entry], identity: &Arc<()>) -> Result<usize, StorageWorkflowError> {
-    entries.iter().position(|entry| Arc::ptr_eq(&entry.identity, identity))
+    entries
+        .iter()
+        .position(|entry| Arc::ptr_eq(&entry.identity, identity))
         .ok_or_else(|| StorageWorkflowError::refused("WORKER_STORAGE_CLAIM_CHANGED"))
 }
-fn same_native(entry: &Entry, native: &Arc<Mutex<OrdinaryLaptopStop>>) -> Result<(), StorageWorkflowError> {
-    if matches!(&entry.owner, EntryOwner::OrdinaryStop(actual) if Arc::ptr_eq(actual, native)) { Ok(()) }
-    else { Err(StorageWorkflowError::refused("WORKER_ORDINARY_STOP_CHANGED")) }
+fn same_native(
+    entry: &Entry,
+    native: &Arc<Mutex<OrdinaryLaptopStop>>,
+) -> Result<(), StorageWorkflowError> {
+    if matches!(&entry.owner, EntryOwner::OrdinaryStop(actual) if Arc::ptr_eq(actual, native)) {
+        Ok(())
+    } else {
+        Err(StorageWorkflowError::refused(
+            "WORKER_ORDINARY_STOP_CHANGED",
+        ))
+    }
 }

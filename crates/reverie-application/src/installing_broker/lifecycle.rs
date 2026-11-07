@@ -252,15 +252,32 @@ impl<'a> LaptopLifecycle<'a> {
             return Err(GateError::Refused("WORKER_BROKER_ACTIVE_ORIGIN"));
         }
         let connection = context.lifecycle_connection(self)?;
-        connection.assert_same_lifecycle_record(&token.hold)
+        connection
+            .assert_same_lifecycle_record(&token.hold)
             .map_err(|_| GateError::Refused("WORKER_BROKER_PREPARATION_HOLD_CHANGED"))?;
         if !Arc::ptr_eq(&connection, &token.connection)
             || context.request().session() != &token.session
-            || self.guard.active.iter().filter(|entry| entry.session == token.session
-                && Arc::ptr_eq(&entry.identity, &token.identity)
-                && Arc::ptr_eq(&entry.connection, &connection)).count() != 1
-            || self.guard.pending.iter().filter(|entry| entry.session == token.session
-                && Arc::ptr_eq(&entry.identity, &token.identity)).count() != 1 {
+            || self
+                .guard
+                .active
+                .iter()
+                .filter(|entry| {
+                    entry.session == token.session
+                        && Arc::ptr_eq(&entry.identity, &token.identity)
+                        && Arc::ptr_eq(&entry.connection, &connection)
+                })
+                .count()
+                != 1
+            || self
+                .guard
+                .pending
+                .iter()
+                .filter(|entry| {
+                    entry.session == token.session && Arc::ptr_eq(&entry.identity, &token.identity)
+                })
+                .count()
+                != 1
+        {
             return Err(GateError::Refused("WORKER_BROKER_ACTIVE_CHANGED"));
         }
         Ok(())

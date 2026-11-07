@@ -78,6 +78,11 @@ fn original<'a>(
         ))?;
     match &selected.owner {
         LaptopOwner::Recovered(owner) => Ok(owner),
+        // Staging refusal: the completed Started source borrower must retain
+        // its actual Host record; it must never fabricate a Recovered/Direct.
+        LaptopOwner::Started(_) => Err(SourceDraftError::Refused(
+            "RESOURCE_STARTED_SOURCE_BORROW_REQUIRED",
+        )),
         #[cfg(test)]
         LaptopOwner::Modeled => Err(SourceDraftError::Refused(
             "RESOURCE_ORIGINAL_SOURCE_OWNER_REQUIRED",
