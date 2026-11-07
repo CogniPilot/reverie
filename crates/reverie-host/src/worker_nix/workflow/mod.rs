@@ -173,6 +173,9 @@ impl NixReturned {
     pub(crate) fn laptop_storage(&self) -> &LaunchStorage {
         &self.resources.storage
     }
+    pub(crate) fn laptop_storage_mut(&mut self) -> &mut LaunchStorage {
+        &mut self.resources.storage
+    }
     /// The actual moved guard/storage resources, never a replacement from paths.
     pub(crate) fn assert_cold_resources_current(&self) -> Result<()> {
         self.resources.guard.assert_current()?;

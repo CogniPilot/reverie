@@ -17,6 +17,11 @@ pub(super) struct GuardConsumed {
     outcome: std::result::Result<NixDisposition, NixError>,
     prepared: Option<PathBuf>,
     close: CloseState,
+    failure: Option<Arc<LaptopError>>,
+}
+pub(super) struct ClosedGuardMetadata {
+    outcome: std::result::Result<NixDisposition, NixError>,
+    prepared: Option<PathBuf>,
 }
 #[derive(Clone, Copy, Eq, PartialEq)]
 enum CloseState {
@@ -25,6 +30,51 @@ enum CloseState {
     Unconfirmed,
 }
 impl NixOwnership {
+    pub(super) fn into_closed_storage(self) -> LaunchStorage {
+        self.into_closed_parts().0
+    }
+    pub(super) fn into_closed_parts(self) -> (LaunchStorage, ClosedGuardMetadata) {
+        let Self::GuardConsumed(data) = self else {
+            unreachable!("actual closed guard checked under the same record mutex")
+        };
+        assert!(data.close == CloseState::Confirmed && data.outcome.is_ok());
+        (
+            data.storage,
+            ClosedGuardMetadata {
+                outcome: data.outcome,
+                prepared: data.prepared,
+            },
+        )
+    }
+    pub(super) fn restore_closed_storage(
+        storage: LaunchStorage,
+        data: ClosedGuardMetadata,
+    ) -> Self {
+        Self::GuardConsumed(Box::new(GuardConsumed {
+            storage,
+            outcome: data.outcome,
+            prepared: data.prepared,
+            close: CloseState::Confirmed,
+            failure: None,
+        }))
+    }
+    pub(super) fn guard_close_confirmed(&self) -> bool {
+        matches!(self,Self::GuardConsumed(data) if data.close==CloseState::Confirmed && data.outcome.is_ok())
+    }
+    pub(super) fn require_guard_close(&self) -> Result<()> {
+        match self {
+            Self::GuardConsumed(data)
+                if data.close == CloseState::Confirmed && data.outcome.is_ok() =>
+            {
+                Ok(())
+            }
+            Self::GuardConsumed(data) => Err(data.failure.as_ref().map_or(
+                LaptopError::Refused("WORKER_LAPTOP_NIX_GUARD_RETAINED"),
+                |error| LaptopError::Recorded(error.clone()),
+            )),
+            Self::Held(_) => Err(LaptopError::Refused("WORKER_LAPTOP_NIX_GUARD_HELD")),
+        }
+    }
     pub(super) fn held(&self) -> Result<&NixReturned> {
         match self {
             Self::Held(nix) => Ok(nix),
@@ -37,6 +87,12 @@ impl NixOwnership {
             Self::GuardConsumed(data) => &data.storage,
         }
     }
+    pub(super) fn storage_mut(&mut self) -> &mut LaunchStorage {
+        match self {
+            Self::Held(nix) => nix.laptop_storage_mut(),
+            Self::GuardConsumed(data) => &mut data.storage,
+        }
+    }
     pub(super) fn prepared_path(&self) -> Option<&Path> {
         match self {
             Self::Held(nix) => nix.prepared_path(),
@@ -46,7 +102,7 @@ impl NixOwnership {
             Self::GuardConsumed(_) => None,
         }
     }
-    fn finish_close(&mut self, result: std::result::Result<(), NixError>) -> Result<()> {
+    pub(super) fn finish_close(&mut self, result: std::result::Result<(), NixError>) -> Result<()> {
         let Self::GuardConsumed(data) = self else {
             unreachable!("actual remainder retained before guard close")
         };
@@ -57,7 +113,9 @@ impl NixOwnership {
             }
             Err(error) => {
                 data.close = CloseState::Unconfirmed;
-                Err(LaptopError::Nix(error))
+                let error = Arc::new(LaptopError::Nix(error));
+                data.failure = Some(error.clone());
+                Err(LaptopError::Recorded(error))
             }
         }
     }
@@ -113,7 +171,13 @@ impl Workflows {
         let result = run(runtime, &mut record, deadline);
         record.unknown |= record.resources().nix.unconfirmed();
         let succeeded = result.is_ok();
-        record.outcome = Some(result.map_err(Arc::new));
+        // The consumed guard already retains this exact original error Arc.
+        // Keep the existing workflow.failure() enum surface, not an extra
+        // Recorded envelope around the actual Nix/finalizer cause.
+        record.outcome = Some(result.map_err(|error| match error {
+            LaptopError::Recorded(error) => error,
+            error => Arc::new(error),
+        }));
         if !succeeded || record.unknown {
             record.phase = Phase::Retained;
             return Ok(NixGuardRelease::Retained);
@@ -148,7 +212,7 @@ fn guard_budget(runtime: &WorkerRuntime, budget: CallBudget) -> Result<()> {
         .check(runtime)
         .map_err(|_| LaptopError::Refused("WORKER_LAPTOP_NIX_GUARD_DEADLINE"))
 }
-fn consume(record: &mut Record) -> NixStoreGuard {
+pub(super) fn consume(record: &mut Record) -> NixStoreGuard {
     // This is an infallible move under the same mutex, with no external call,
     // before guard.close can observe/refuse/consume either descriptor. No
     // guard-consumed variant can ever be returned as a NixReturned owner.
@@ -169,6 +233,7 @@ fn consume(record: &mut Record) -> NixStoreGuard {
             outcome,
             prepared,
             close: CloseState::Closing,
+            failure: None,
         })),
         plan,
         request,

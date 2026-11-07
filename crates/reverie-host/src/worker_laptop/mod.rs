@@ -20,6 +20,19 @@ mod network;
 mod pane;
 mod publication;
 mod start;
+mod started_transfer;
+mod storage;
+mod storage_cleanup;
+pub use started_transfer::{StartedOrdinaryStopTransferred, StartedReplacementStopTransferred};
+mod started_source;
+pub use started_source::{
+    StartedLaptopSource, StartedSourceStopTransferred, StartedSourceStorageBorrow,
+};
+pub use storage::StartedStorageBorrow;
+mod created_receipt;
+pub use created_receipt::CreatedReceiptObservation;
+mod created_finalization;
+pub use created_finalization::{CreatedStorageObservation, StoppedCreatedReturned};
 #[cfg(test)]
 mod tests;
 mod viewer;
@@ -41,7 +54,7 @@ use error::{Result, finalized, need};
 pub use existing_viewer::{
     ExistingRelayRetainFailure, ExistingRelayReturned, ExistingStorageObservation, ExistingViewer,
     ExistingViewerReceiptObservation, ExistingViewerRetainFailure, ExistingViewerReturned,
-    ExistingViewerStart,
+    ExistingViewerStart, StartedRelayTransferred,
 };
 pub use guard::{NixGuardRelease, NixReleasedPane};
 pub use memory::{
@@ -95,6 +108,8 @@ struct Inputs {
     office: OfficePhone,
 }
 struct Record {
+    source_attachment: Option<Arc<()>>,
+    finalization: created_finalization::StorageCheck,
     cold: cold_prepare::Stage,
     resources: Option<Resources>,
     phase: Phase,
@@ -125,9 +140,13 @@ type RecordOwner = Arc<Mutex<Record>>;
 #[derive(Clone)]
 enum RetainedRecord {
     Created(RecordOwner),
+    Source(RecordOwner),
     Existing(existing_viewer::ExistingRecordOwner),
 }
 impl RetainedRecord {
+    fn is_source(&self, record: &RecordOwner) -> bool {
+        matches!(self,Self::Source(current) if Arc::ptr_eq(current,record))
+    }
     fn is_created(&self, record: &RecordOwner) -> bool {
         matches!(self,Self::Created(current) if Arc::ptr_eq(current,record))
     }
@@ -280,6 +299,8 @@ impl Workflows {
             connection,
         };
         let record = Arc::new(Mutex::new(Record {
+            source_attachment: None,
+            finalization: Default::default(),
             cold: Default::default(),
             resources: Some(resources),
             phase: Phase::Held,
@@ -390,7 +411,9 @@ impl Workflows {
         let mut result = Ok(());
         for record in records {
             let settled = match record {
-                RetainedRecord::Created(record) => self.settle_record(runtime, &record, deadline),
+                RetainedRecord::Created(record) | RetainedRecord::Source(record) => {
+                    self.settle_record(runtime, &record, deadline)
+                }
                 RetainedRecord::Existing(record) => {
                     existing_viewer::settle_retained(runtime, &record, deadline)
                 }
