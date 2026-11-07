@@ -1,5 +1,15 @@
 # Linux native adapters
 
+Chat-image observations use the same captured engine and fixed inspect query,
+actual process birth and namespace inode checks, selected employee storage and
+registered Office phone. Request IDs, mount projections and generation serials
+remain DATA. Office fetches use three fixed GETs over its pinned Unix endpoint;
+raw framing checks preserve duplicate-header and body limits before the shared
+HTTP parser can normalize them. Each cache owns its checked filesystem custody
+and joinable expiry thread. A cache-limit refusal remains recoverable, while
+uncertain close/publication retains its actual owner and cannot become success
+through a repeated close. These components do not select the installed actor.
+
 `captured_client` privately owns the pipe capture and retained child settlement
 used by `engine_metadata`. Its command snapshot, argv and per-call output/deadline
 policy come from fixed purpose wrappers. It exposes no public arbitrary-command

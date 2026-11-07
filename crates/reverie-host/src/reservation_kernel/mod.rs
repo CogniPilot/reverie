@@ -196,6 +196,19 @@ fn pid_start(source: &impl Source, pid: &UnsignedInteger, end: Instant) -> Resul
 pub(crate) fn existing_process_start(pid: &UnsignedInteger, end: Instant) -> Result<String> {
     pid_start(&Installed, pid, end)
 }
+/// M's Path.read_text is UTF-8, including a non-ASCII kernel comm field. Reuse
+/// the same held file reader and process token parser without the distinct
+/// protected/ordinary stop purpose's whole-file ASCII policy.
+pub(crate) fn chat_image_process_start(pid: &UnsignedInteger, end: Instant) -> Result<String> {
+    need(!pid.is_zero(), "RESERVATION_NATIVE_PID")?;
+    Ok(kernel_accounting::process_start(&text(
+        &Installed,
+        &path(&format!("{PROC}/{}/stat", pid.as_str())),
+        65536,
+        false,
+        end,
+    )?)?)
+}
 fn table(source: &impl Source, end: Instant) -> Result<MountTable> {
     table_at(source, "self", end)
 }

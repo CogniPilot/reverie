@@ -54,10 +54,10 @@ impl Stamp {
             && self.uid == uid()
     }
     pub(crate) fn private_file(&self) -> bool {
-        self.mode & libc::S_IFMT == libc::S_IFREG
-            && self.mode & 0o7777 == 0o600
-            && self.uid == uid()
-            && self.links == 1
+        self.owned_regular() && self.mode & 0o7777 == 0o600
+    }
+    pub(crate) fn owned_regular(&self) -> bool {
+        self.mode & libc::S_IFMT == libc::S_IFREG && self.uid == uid() && self.links == 1
     }
 }
 pub(crate) fn uid() -> u32 {
@@ -108,10 +108,10 @@ pub(crate) fn close(file: File, role: CloseRole, path: &Path) -> Result<()> {
         Err(StoreError::io(io::Error::last_os_error()))
     };
     #[cfg(test)]
-    crate::faults::closed(role, path)?;
+    let result = finalized(result, crate::faults::closed(role, path));
     #[cfg(not(test))]
     let _ = (role, path);
-    result
+    result.map_err(StoreError::unconfirmed_close)
 }
 pub(crate) fn private_stamp(file: &File) -> Result<Stamp> {
     let value = Stamp::from_metadata(&file.metadata().map_err(StoreError::io)?);
@@ -191,6 +191,71 @@ impl Directory {
     }
     pub(crate) fn path(&self) -> &Path {
         &self.path
+    }
+    pub(crate) fn identity(&self) -> [u64; 2] {
+        [self.identity.dev, self.identity.ino]
+    }
+    /// Fixed M cache child below the held parent, without path-walking again
+    /// during mkdir. Subsequent opens still validate the original named parent.
+    pub(crate) fn prepare_image_child(&self) -> Result<std::path::PathBuf> {
+        use std::os::unix::fs::DirBuilderExt;
+        self.check()?;
+        let selected = format!(
+            "/proc/self/fd/{}/{}",
+            self.file.as_raw_fd(),
+            reverie_core::chat_images::CACHE_NAME
+        );
+        match std::fs::DirBuilder::new().mode(0o700).create(selected) {
+            Ok(()) => (),
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => (),
+            Err(error) => return Err(StoreError::io(error)),
+        }
+        self.check()?;
+        Ok(self.path.join(reverie_core::chat_images::CACHE_NAME))
+    }
+    pub(crate) fn image_names(&self) -> Result<Vec<Vec<u8>>> {
+        let file = open_at(
+            self.file.as_raw_fd(),
+            OsStr::new("."),
+            libc::O_RDONLY | libc::O_DIRECTORY,
+            0,
+        )
+        .map_err(StoreError::io)?;
+        scan_directory(file, &self.path, |stream| {
+            let mut names = Vec::new();
+            while let Some(name) = next_directory_name(stream)? {
+                names.push(name);
+            }
+            Ok(names)
+        })
+    }
+    /// Original image cache opens do not repair permissions masked by umask.
+    pub(crate) fn create_image_file(&self, leaf: &str) -> Result<File> {
+        open_at(
+            self.file.as_raw_fd(),
+            OsStr::new(leaf),
+            libc::O_RDWR | libc::O_CREAT | libc::O_EXCL,
+            0o600,
+        )
+        .map_err(StoreError::io)
+    }
+    pub(crate) fn lock_images(&self) -> Result<File> {
+        let name = ".chat-image-custody.lock";
+        let file = match self.create_image_file(name) {
+            Ok(file) => file,
+            Err(StoreError::Io { source, .. }) if source.kind() == io::ErrorKind::AlreadyExists => {
+                self.read_write_lock(name)?
+            }
+            Err(error) => return Err(error),
+        };
+        let result = private_stamp(&file).and_then(|stamp| {
+            need(stamp.size == 0, StoreFault::PrivateFile)?;
+            self.lock_file(&file, name)
+        });
+        match result {
+            Ok(()) => Ok(file),
+            Err(error) => finalized(Err(error), close(file, CloseRole::Lock, &self.path)),
+        }
     }
     pub(crate) fn check(&self) -> Result<()> {
         let other = Self::open(&self.path).map_err(|cause| StoreError::DirectoryRecheck {
@@ -422,7 +487,7 @@ fn scan_directory<T>(
     };
     #[cfg(test)]
     let closed = finalized(closed, crate::faults::closed(CloseRole::Walk, path));
-    finalized(result, closed)
+    finalized(result, closed.map_err(StoreError::unconfirmed_close))
 }
 pub(crate) fn random_name(prefix: &str) -> Result<String> {
     let bytes = random_bytes()?;

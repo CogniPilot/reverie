@@ -42,6 +42,7 @@ struct BootstrapOwner {
     installed: Arc<InstalledWorker>,
     runtime: WorkerRuntime,
     telemetry: Option<Arc<CommandTelemetry>>,
+    images: Option<Arc<chat_images::ChatImages>>,
 }
 /// Owns the SAME consumed Runtime, original installed snapshot and all complete
 /// startup owners. No raw-runtime/authority extractor or replacement constructor.
@@ -155,6 +156,9 @@ impl Drop for BrokerBootstrapFailure {
 }
 impl BootstrapOwner {
     fn prepare(&mut self) -> Result<Option<ReservationGate>, BrokerBootstrapCause> {
+        // Original WorkerChatImages is the inert manager allocation BEFORE
+        // mandatory telemetry and configured Gate. No cache/thread is opened.
+        self.images = Some(Arc::new(chat_images::ChatImages::new()));
         let current = self
             .installed
             .snapshot()
@@ -200,6 +204,7 @@ impl InstallingBroker {
             installed: InstalledWorker::capture(snapshot),
             runtime,
             telemetry: None,
+            images: None,
         };
         let gate = match owner.prepare() {
             Ok(gate) => gate,
@@ -224,6 +229,7 @@ impl InstallingBroker {
             reports,
             recovery: Arc::new(RecoveryOwners::new()),
             goals: Arc::new(reverie_host::goal_custody::GoalCustodyState::new()),
+            images: owner.images.expect("actual pre-telemetry image manager"),
         })
     }
 }

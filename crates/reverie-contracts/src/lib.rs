@@ -3,6 +3,7 @@ pub mod autoenv;
 pub mod autoenv_environment;
 pub mod broker_laptop;
 pub mod broker_resources;
+pub mod chat_images;
 pub mod collector_state;
 pub mod command_telemetry;
 pub mod creation_budget;

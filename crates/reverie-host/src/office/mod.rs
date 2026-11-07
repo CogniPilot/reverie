@@ -27,7 +27,9 @@ mod construction;
 mod retention;
 pub use construction::{OfficeBindFailure, OfficeConstruction};
 mod credentials;
+mod images;
 mod io_timeout;
+pub use images::{OfficeImageBinding, OfficeImageError, OfficeImageReader};
 mod native_jobs;
 mod policy;
 mod proxy;
@@ -138,6 +140,7 @@ pub struct OfficePhone {
     owned: Arc<OwnedOffice>,
     origin: Arc<InstalledWorkerEngine>,
     session: ProfileSessionId,
+    endpoint: (PathBuf, Option<[u64; 2]>),
 }
 impl OfficeService {
     /// The same service-captured worker engine supplies stop/cancellation;
@@ -243,6 +246,7 @@ impl OfficeService {
                 return Err(error);
             }
         };
+        let endpoint = socket.observation();
         let live_requests = Arc::new(AtomicUsize::new(0));
         let context = server::Context::new(
             Arc::clone(&self.company),
@@ -287,6 +291,7 @@ impl OfficeService {
             owned,
             origin: Arc::clone(&self.company.engine),
             session,
+            endpoint,
         };
         if let Err(error) = self.require_running() {
             phone.request_close();

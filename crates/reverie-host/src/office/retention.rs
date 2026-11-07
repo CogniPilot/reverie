@@ -24,6 +24,7 @@ impl OfficeService {
             owned: owned.clone(),
             origin: phone.origin.clone(),
             session: phone.session.clone(),
+            endpoint: phone.endpoint.clone(),
         })
     }
 }

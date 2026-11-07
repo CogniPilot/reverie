@@ -4,6 +4,7 @@
 //! The installing application supplies an existing private directory, and its
 //! admission/authorization checks remain outside this crate.
 
+pub mod chat_images;
 mod error;
 pub mod memory;
 pub mod operations;

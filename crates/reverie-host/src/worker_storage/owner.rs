@@ -123,7 +123,7 @@ pub struct StorageSelection {
     paths: StoragePaths,
 }
 impl StorageSelection {
-    pub(super) fn assert_runtime(&self, runtime: &WorkerRuntime) -> OwnerResult<()> {
+    pub(crate) fn assert_runtime(&self, runtime: &WorkerRuntime) -> OwnerResult<()> {
         if !Arc::ptr_eq(&self.engine, runtime.installed_engine()) {
             return Err(StorageOwnerError::Refused(
                 "WORKER_STORAGE_RUNTIME_BINDING_CHANGED",
