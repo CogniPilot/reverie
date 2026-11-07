@@ -145,6 +145,12 @@ pub struct NixReturned {
     prepared_store: Option<PathBuf>,
 }
 impl NixReturned {
+    /// The actual moved guard/storage resources, never a replacement from paths.
+    pub(crate) fn assert_cold_resources_current(&self) -> Result<()> {
+        self.resources.guard.assert_current()?;
+        self.resources.storage.require_no_cold_pending()?;
+        Ok(())
+    }
     pub(crate) fn runtime_directory(&self) -> Result<PathBuf> {
         self.resources.guard.directory()
     }

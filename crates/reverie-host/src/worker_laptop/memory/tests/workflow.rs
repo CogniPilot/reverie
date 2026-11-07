@@ -5,6 +5,7 @@ use reverie_core::ids::ProfileSessionId;
 use serde_json::json;
 use std::cell::Cell;
 mod absent;
+mod cold;
 const SID: &str = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
 
 struct ObservedKernel {
