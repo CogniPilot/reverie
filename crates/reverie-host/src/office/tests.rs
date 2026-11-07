@@ -4,6 +4,7 @@
 mod construction;
 #[path = "native_tests.rs"]
 mod native;
+mod telemetry;
 use super::*;
 use crate::engine_metadata::EngineBootstrap;
 use reverie_core::{

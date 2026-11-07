@@ -15,6 +15,11 @@ pub(in crate::office) enum Purpose {
         name: String,
     },
     Socket(OfficeAddressData),
+    Telemetry {
+        collector: Arc<crate::command_telemetry::CommandTelemetry>,
+        session: reverie_core::ids::ProfileSessionId,
+        body: Vec<u8>,
+    },
 }
 struct State {
     closed: bool,
@@ -42,6 +47,22 @@ impl NativeJobs {
         lifetime: Arc<RequestLifetime>,
     ) -> Result<Arc<NativeJob>> {
         self.start(Purpose::Socket(address), lifetime)
+    }
+    pub(super) fn telemetry(
+        &self,
+        collector: Arc<crate::command_telemetry::CommandTelemetry>,
+        session: reverie_core::ids::ProfileSessionId,
+        body: Vec<u8>,
+        lifetime: Arc<RequestLifetime>,
+    ) -> Result<Arc<NativeJob>> {
+        self.start(
+            Purpose::Telemetry {
+                collector,
+                session,
+                body,
+            },
+            lifetime,
+        )
     }
     fn start(&self, purpose: Purpose, lifetime: Arc<RequestLifetime>) -> Result<Arc<NativeJob>> {
         let mut state = self.0.lock().map_err(|_| OfficeError::Unconfirmed)?;

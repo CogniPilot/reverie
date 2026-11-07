@@ -13,6 +13,8 @@ use std::path::{Path, PathBuf};
 mod child_record;
 pub(crate) mod child_signals;
 mod control;
+#[cfg(test)]
+pub(crate) mod interrupted_test;
 mod lease;
 mod memory_namespace;
 mod memory_profile;
