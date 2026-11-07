@@ -521,6 +521,12 @@ including peer EOF and errors. A completed receipt triggers actual stop before
 viewer reaping. Fresh storage observations and stop admission precede closing
 the exact Office owner captured under the original lifecycle lock. A failed stop,
 changed registration or unconfirmed close retains the resource and handler Hold.
+Without a completion receipt, reuse preserves the original Office registration.
+If that Office remains and the laptop is observed stopped, Rust also retains the
+physical storage and handler Hold with `WORKER_REUSE_OFFICE_RETAINED`: an idle
+phone can still accept future requests. This is a deliberate stronger writer
+fence than Python's independent stopped-storage release. It grants no automatic
+recovery or claim that the Office has quiesced.
 The component close API alone does not select these effects from EOF, X, an
 earlier receipt or local client settlement. Last-owner Drop
 quarantines the existing resource and counted connection owners in this process.
@@ -560,6 +566,8 @@ until the matching finalizer concludes. Known live ownership transfer differs
 from physical lease closure, and both differ from global shutdown completion.
 Direct-prefix failures and the genuine Cold/Started continuation still need their
 whole-owner cleanup consumers before complete broker selection.
+Shared cleanup timing bounds explicit lifecycle-lock acquisition; it does not
+give the preceding worker stop/admission path a whole-handler deadline.
 
 The private ordinary-stop allocation consumer follows Broker.stop's generic
 admission then check_stop sequence, with no launch SID, image, GPU or creation

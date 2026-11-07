@@ -62,7 +62,7 @@ impl Tree {
         let (root, broker) = Self::bootstrap_parts(names, mode, memory, pool);
         Self { root, broker }
     }
-    fn bootstrap_parts(
+    pub(in crate::installing_broker) fn bootstrap_parts(
         names: &str,
         mode: &str,
         memory: u32,

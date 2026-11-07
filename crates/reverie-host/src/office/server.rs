@@ -94,11 +94,14 @@ impl PreparedOffice {
         // consume/drop its sole descriptor before our checked finalizer.
         let result = self.runtime.block_on(serve(&self.listener, self.context));
         let closed = close_listener(self.listener);
-        let removed = self.socket.remove();
+        let removed = self.socket.remove().map_err(super::socket::socket_error);
         super::finalized(result, super::finalized(closed, removed))
     }
     fn close(mut self) -> Result<()> {
-        super::finalized(close_listener(self.listener), self.socket.remove())
+        super::finalized(
+            close_listener(self.listener),
+            self.socket.remove().map_err(super::socket::socket_error),
+        )
     }
 }
 pub(super) fn spawn(

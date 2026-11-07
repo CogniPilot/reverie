@@ -1,43 +1,12 @@
 //! Original finally ordering over the whole actual accepted reuse owner.
 use super::*;
+use crate::installing_broker::launch::preparation::finalization::CleanupBudget;
 use reverie_host::worker_laptop::ExistingStorageObservation;
 mod registration;
 #[cfg(test)]
 thread_local! {
     pub(super) static REGISTRATION_PAUSE: std::cell::RefCell<Option<crate::test_process::PausePoint<()>>> = const { std::cell::RefCell::new(None) };
 }
-#[derive(Clone, Copy)]
-enum CleanupBudget {
-    Bounded(Instant),
-    Worker,
-}
-impl CleanupBudget {
-    fn phase(self, milliseconds: u64) -> Instant {
-        match self {
-            Self::Bounded(end) => end,
-            Self::Worker => Instant::now() + std::time::Duration::from_millis(milliseconds),
-        }
-    }
-    fn close_request(
-        self,
-        request: &ReceivedWorkerLaunch<'_>,
-    ) -> Result<(), reverie_host::worker_reports::WorkerReportError> {
-        match self {
-            Self::Bounded(end) => request.close(end),
-            Self::Worker => request.close_for_worker(),
-        }
-    }
-    fn release_hold(
-        self,
-        token: &mut ActiveLaunchToken<'_>,
-    ) -> Result<(), reverie_host::worker_reports::WorkerReportError> {
-        match self {
-            Self::Bounded(end) => token.release_handler_hold(end),
-            Self::Worker => token.release_handler_hold_for_worker(),
-        }
-    }
-}
-
 enum Owner<'a> {
     Native {
         retained: RetainedReuse<'a>,
@@ -227,13 +196,31 @@ fn finish<'a>(
         target: None,
     };
     cleanup.close_native(budget);
-    cleanup.metadata();
+    cleanup.metadata(budget);
     let observation = cleanup.observe_storage();
-    if cleanup.errors.is_empty() && observation.as_ref().is_some_and(|value| !value.is_live()) {
+    if cleanup.completed
+        && cleanup.errors.is_empty()
+        && observation.as_ref().is_some_and(|value| !value.is_live())
+    {
+        // Reuse starts with existing_running=true. The original finally only
+        // removes its Office/laptop registration after a completion receipt;
+        // a stopped observation alone cannot authorize that separate effect.
         // A fresh stop scope precedes lifecycle acquisition and remains held
         // through the original Office producer's checked close. A prior stop
         // refusal never grants this separate shared-registration effect.
         cleanup.close_registration(budget);
+    }
+    if !cleanup.completed
+        && observation.as_ref().is_some_and(|value| !value.is_live())
+        && cleanup.owner.scope().registration.is_some()
+    {
+        // The original finally retains this Office without a receipt. Its
+        // still-listening owner can admit future requests, so idle-now cannot
+        // authorize physical storage consumption. Preserve the Box and Hold
+        // for explicit recovery instead of forgetting that producer.
+        cleanup.errors.push(Error::Gate(GateError::Refused(
+            "WORKER_REUSE_OFFICE_RETAINED",
+        )));
     }
     let mut storage_retained = false;
     if cleanup.errors.is_empty()

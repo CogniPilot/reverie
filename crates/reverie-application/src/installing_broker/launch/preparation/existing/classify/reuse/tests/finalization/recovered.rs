@@ -171,15 +171,16 @@ fn failed_actual_stop_preserves_original_recovered_phone_and_registration() {
 }
 
 #[test]
-fn stopped_without_receipt_requires_fresh_scope_before_shared_office_or_storage_cleanup() {
+fn completed_reuse_requires_fresh_scope_before_shared_office_or_storage_cleanup() {
     crate::test_process::owning_case!(
-        stopped_without_receipt_requires_fresh_scope_before_shared_office_or_storage_cleanup
+        completed_reuse_requires_fresh_scope_before_shared_office_or_storage_cleanup
     );
     let tree = Tree::new();
     let broker = broker(&tree);
     let office = recover(&tree, &broker);
     let provider = Provider::new(&tree);
     let reuse = reusable(&tree, &broker);
+    let exit = receipt(&reuse);
     let source = reuse.inspected.observed.current.configuration().clone();
     let owner = reuse.prepare_viewer().unwrap().close_allocation().unwrap();
     enable(&tree, provider.child.id());
@@ -189,6 +190,8 @@ fn stopped_without_receipt_requires_fresh_scope_before_shared_office_or_storage_
     );
     wait_file(&tree.root.join("provider-exited"));
     tree.write("stopped-provider", "a".repeat(64).as_bytes());
+    fs::create_dir_all(exit.parent().unwrap()).unwrap();
+    fs::write(exit, b"0").unwrap();
     tree.write(
         "state/resource-reservation-control.json",
         b"late prior control requires reconciliation",
@@ -211,6 +214,48 @@ fn stopped_without_receipt_requires_fresh_scope_before_shared_office_or_storage_
     );
     assert!(original_still_registered && phone_present);
     assert!(!lease_is_free(&source));
+    assert!(broker.close_command_telemetry(end()).is_err());
+}
+
+#[test]
+fn stopped_without_receipt_preserves_original_recovered_office_and_registration() {
+    crate::test_process::owning_case!(
+        stopped_without_receipt_preserves_original_recovered_office_and_registration
+    );
+    let tree = Tree::new();
+    let broker = broker(&tree);
+    let office = recover(&tree, &broker);
+    let provider = Provider::new(&tree);
+    let reuse = reusable(&tree, &broker);
+    let source = reuse.inspected.observed.current.configuration().clone();
+    let owner = reuse.prepare_viewer().unwrap().close_allocation().unwrap();
+    enable(&tree, provider.child.id());
+    tree.write("release-provider", b"actual independent provider exit");
+    wait_file(&tree.root.join("provider-exited"));
+    tree.write("stopped-provider", "a".repeat(64).as_bytes());
+    let result = owner.finalize_for_worker();
+    let original_still_registered = {
+        let life = broker.installed.lifecycle().unwrap();
+        life.guard.iter().any(|entry| {
+            matches!(&entry.owner,
+            crate::installing_broker::recovered::LaptopOwner::Recovered(owner)
+                if Arc::ptr_eq(&owner.office._office, &office))
+        })
+    };
+    let phone_present = tree
+        .root
+        .join("office")
+        .join(SID)
+        .join("office.sock")
+        .exists();
+    let lease_free = lease_is_free(&source);
+    // Settle the genuine Office before assertions; a failed discriminator must
+    // not strand the owned fixture's phone/query tasks.
+    close_office(&office);
+    assert!(original_still_registered && phone_present);
+    let failure = result.expect_err("retained Office may admit future requests");
+    assert!(failure.to_string().contains("WORKER_REUSE_OFFICE_RETAINED"));
+    assert!(!lease_free);
     assert!(broker.close_command_telemetry(end()).is_err());
 }
 

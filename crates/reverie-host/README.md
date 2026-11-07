@@ -724,3 +724,30 @@ call, storage and guard; native settlement permits neither retry nor success.
 Only checked success mints `RemovedStoppedLaptop`, bound to that same record.
 These components do not implement the outer Cold/J continuation or select a
 native backend, and they grant no storage release or global shutdown receipt.
+
+Broker socket preparation and bind retain the same runtime through failed
+constructors, checked descriptor close and pinned-name cleanup. The listener
+registers each actual accepted connection directly in the existing reports
+inventory before any peer/frame work; it adds no second connection cap.
+The App startup prefix performs actual signal installation, pool checking,
+socket preparation and recovery in source order, and does not bind before
+recovery. Supervisor, lease-peer, complete verbs and final service close are
+still required before this prefix can become a runnable broker.
+
+The stale probe deliberately uses a newly owned nonblocking socket. Unlike the
+legacy blocking connect, a full/in-progress foreign backlog refuses startup
+without waiting, unlinking or chmodding the foreign name. Only ECONNREFUSED
+permits removal of its pinned matching inode. This is a startup availability
+correction, not a hard filesystem/kernel latency guarantee. As for Office,
+metadata comparison is not atomic against later same-UID namespace writers;
+the actual service lifecycle must exclude those competing writers.
+
+The actual created and existing worker viewer constructors accept the original
+accepted J connection and choose no aggregate construction deadline. Their
+shared admission, constructor wait and identity-checked slot handoff observe
+the same runtime's live first-stop deadline. Existing caller-bounded component
+constructors retain their supplied ceiling. A Busy query remains owned by its
+original captured call; waiting neither cancels nor replays it. A stopped or
+uncertain viewer constructor remains in the same laptop/native inventory with
+its real storage and job. This timing join does not establish App allocation
+release, complete handler cleanup, storage release or global shutdown.
