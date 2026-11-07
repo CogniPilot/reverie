@@ -1,6 +1,10 @@
 //! The installing service's actual storage registry. A claim retains real
 //! resources; labels, returned paths and this handle do not authorize launch.
 mod error;
+mod existing_viewer;
+pub(in crate::installing_broker) use existing_viewer::{
+    ExistingStorageError, ExistingStoragePreparation, ExistingStorageReturned,
+};
 mod nix;
 mod observed;
 mod preparation;
@@ -45,6 +49,7 @@ enum EntryOwner {
     Nix(reverie_host::worker_nix::NixWorkflow),
     Laptop(reverie_host::worker_laptop::LaptopWorkflow),
     ReplacementStop(Arc<Mutex<reverie_host::worker_source_stop::OrdinaryReplacementStop>>),
+    Existing(Arc<reverie_host::worker_laptop::ExistingViewer>),
 }
 /// The original claim destination, shared by named resource transitions.
 /// These private fields describe where to restore custody, never permission.
@@ -211,6 +216,11 @@ impl StorageRegistry {
         if matches!(entries[index].owner, EntryOwner::Laptop(_)) {
             return Err(StorageWorkflowError::refused(
                 "WORKER_LAPTOP_STORAGE_RETAINED",
+            ));
+        }
+        if matches!(entries[index].owner, EntryOwner::Existing(_)) {
+            return Err(StorageWorkflowError::refused(
+                "WORKER_EXISTING_VIEWER_RETAINED",
             ));
         }
         if matches!(entries[index].owner, EntryOwner::Source(_)) {

@@ -1,6 +1,7 @@
 //! Genuine storage + observed-plan/first-inspect reuse, without Nix, Office
 //! phone, Created/Pane/guard tokens or host daemon access.
 use super::*;
+mod relay;
 use crate::{
     worker_launch::ExistingLaptopInspection,
     worker_storage::{LaunchStorage, StorageLease},

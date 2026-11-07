@@ -11,8 +11,9 @@ mod error;
 mod preparation;
 pub use error::{LaunchAdmissionFailure, WorkerDispatchError};
 pub use preparation::{
-    ClassifiedWorkerLaunch, ColdWorkerLaunch, ExistingColdTarget, InspectedWorkerLaunch,
-    PreparationFailure as LaunchPreparationFailure, ReusableWorkerLaunch,
+    AllocationClosedReuse, ClassifiedWorkerLaunch, ColdWorkerLaunch, ExistingColdTarget,
+    InspectedWorkerLaunch, PreparationFailure as LaunchPreparationFailure, PreparedReuseViewer,
+    RestoredReuse, ReusableWorkerLaunch, ReuseViewerFailure, ViewingReuse,
 };
 #[cfg(test)]
 mod tests;

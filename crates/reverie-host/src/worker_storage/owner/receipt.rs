@@ -9,10 +9,26 @@ use std::{
 };
 
 pub struct LaunchReceiptObservation {
+    engine: Arc<InstalledWorkerEngine>,
+    owner: Arc<()>,
     exit: PosixPath,
     exists: bool,
 }
 impl LaunchReceiptObservation {
+    /// Pure original resource/Runtime binding only. Matching paths cannot
+    /// recreate it; this proves no live pane, admission or writer quiescence.
+    pub(crate) fn assert_storage_owner(
+        &self,
+        runtime: &WorkerRuntime,
+        storage: &LaunchStorage,
+    ) -> OwnerResult<()> {
+        if !Arc::ptr_eq(&self.engine, runtime.installed_engine())
+            || !Arc::ptr_eq(&self.owner, storage.owner_identity())
+        {
+            return Err(StorageOwnerError::Refused("WORKER_RECEIPT_OWNER_CHANGED"));
+        }
+        storage.assert_binding(runtime, &storage.source, storage.paths.session())
+    }
     pub fn exit_path_data(&self) -> &PosixPath {
         &self.exit
     }
@@ -50,7 +66,12 @@ impl LaunchStorage {
             .join(&PosixPath::from_scalar_text(".reverie-launch"))
             .join(&exit);
         let exists = exists(&exit)?;
-        Ok(LaunchReceiptObservation { exit, exists })
+        Ok(LaunchReceiptObservation {
+            engine: self.engine.clone(),
+            owner: self.owner_identity().clone(),
+            exit,
+            exists,
+        })
     }
 }
 fn read_text(path: &Path) -> OwnerResult<Vec<u8>> {
