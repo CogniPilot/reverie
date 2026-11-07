@@ -20,8 +20,14 @@ export interface TurnSummaryMessage {
   sourceDigest?: string;
   attention?: NoticeAttention;
   transport?: 'unread' | 'queued' | 'delivery-unconfirmed' | 'unknown';
-  /** Reverie's own reply instruction for this message (a verified spoken owner turn), outside the quoted excerpt. */
+  /** Reverie's own reply instruction for this message (replyHintFor), outside the quoted excerpt. */
   replyHint?: string;
+  /** The message this one answers, as its typed line said; the member reads it with chat read. */
+  replyTo?: string;
+  /** A poll's question, numbered options and vote command, whole (pollSummary), as its typed line carried them. */
+  poll?: string;
+  /** The message's attachments as paths the member can open (attachmentLabels), as its typed line carried them. */
+  attachments?: string[];
 }
 export interface TurnSummary {
   phoneMode: AlertMode;
@@ -34,6 +40,8 @@ export interface TurnSummary {
   historyCoverage?: NoticeHistoryCoverage;
   /** Pending room briefings carried by the member's own hook payload (hookTurnSummary), ahead of the messages. */
   briefings?: Array<{ roomId: string; room: string; text: string; truncated: boolean }>;
+  /** Pending Reverie notices carried whole by the member's own hook payload (hookTurnSummary), after any briefing. */
+  notices?: Array<{ roomId: string; room: string; text: string }>;
   /** Only the explicit history inspection endpoint; all eligible examined sources remain inspectable. */
   sourceReferences?: Array<{ roomId: string; messageId: string; at: number; sourceDigest: string }>;
 }

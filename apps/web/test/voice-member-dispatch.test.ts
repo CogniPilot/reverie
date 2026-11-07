@@ -9,7 +9,7 @@ import Fastify from 'fastify';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { registerVoiceTurnRoutes } from '../src/web/routes/voice-turn-routes.js';
-import { DELIVERY_POLL_MS, isAddressedVoiceTurn } from '../src/chatroom-delivery.js';
+import { DELIVERY_POLL_MS, isAddressedVoiceTurn, answerLinkHint } from '../src/chatroom-delivery.js';
 import { wakePayload } from './helpers/wake-payload.js';
 
 const VOICE = '00000000-0000-4000-8000-000000000001';
@@ -128,7 +128,11 @@ it('a verified spoken owner turn carries its voice reply hint in the hook payloa
   const spoken = summary.messages.find((m) => m.messageId === asked.id);
   expect(spoken?.replyHint).toContain('spoken in car mode');
   expect(spoken?.replyHint).toContain(`--reply-to ${asked.id}`);
-  expect(summary.messages.find((m) => m.messageId === typed.id)?.replyHint).toBeUndefined();
+  // A typed post addressed to the voice member still names the id its answer must link to, as its typed line did, but
+  // carries no spoken-turn voice context.
+  const typedHint = summary.messages.find((m) => m.messageId === typed.id)?.replyHint;
+  expect(typedHint).toBe(answerLinkHint(typed.id));
+  expect(typedHint).not.toContain('spoken in car mode');
   expect(summary.text).toContain('spoken in car mode');
   pane.isWorking = false;
   await vi.advanceTimersByTimeAsync(1100);

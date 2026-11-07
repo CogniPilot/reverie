@@ -124,7 +124,15 @@ interface Pending {
    * queued until the member's own turn summary includes it (briefShown).
    */
   brief?: boolean;
-  /** A briefing a wake already went in for: it waits for the member's turn summary without waking the member again. */
+  /**
+   * A Reverie notice whose text is not a stored chat message (a coordinator handoff, a newcomer to direct, an edit, an action
+   * on the member's own message). Like a briefing it is never typed: it stays queued until the member's own turn summary
+   * includes it (noticesShown).
+   */
+  notice?: boolean;
+  /** A notice's own identity: it is cleared only when the hook payload included this exact notice. */
+  noticeId?: string;
+  /** A briefing or notice a wake already went in for: it waits for the member's turn summary without waking it again. */
   woken?: boolean;
   /** The chat message this fragment renders, so a deleted message can be withdrawn before it is typed. */
   messageId?: string;
@@ -151,6 +159,11 @@ export const MAX_DELIVERY_CHARS = 3000;
 export const MAX_PENDING_PER_SESSION = 100;
 /** How many passive (read-later) fragments a session keeps; the oldest drop first. They stay in the room history. */
 export const MAX_PASSIVE_PER_SESSION = 40;
+/**
+ * At most this many Reverie notices wait per session for its hook; the oldest go first, and the next notice block says how many
+ * were dropped (a notice has no copy in the room history to fall back on).
+ */
+export const MAX_NOTICES_PER_SESSION = 32;
 /** A passive fragment this old is stale and is dropped instead of being typed into the next prompt. */
 export const PASSIVE_MAX_AGE_MS = 6 * 60 * 60 * 1000;
 /** Messages whose receivers are remembered (to tell them of an edit). */
@@ -241,12 +254,7 @@ export function renderForRecipient(
   if (message.to === 'all') to = undefined;
   else if (message.to.length === 1 && message.to[0] === recipientId) to = 'you';
   else to = describeRecipients(message, nameOf);
-  // Attachments reach an agent as absolute paths it can read, still on the one line.
-  // A linked file is the shared-drive file itself (same path in every laptop), so even a picture is named by that path.
-  const files = (message.attachments ?? []).map((a) => a.linked ? ` [linked file: ${quoteForPane(a.path, 400)}]` : isChatRaster(a)
-    ? imagePaths.has(a.id) ? ` [attached: ${quoteForPane(imagePaths.get(a.id)!, 400)}]`
-      : ` [attached image: ${quoteForPane(a.name, 200)} (local image unavailable; re-read to request a fresh path)]`
-    : ` [attached: ${quoteForPane(sharedAttachmentPath(room.id, a), 400)}]`).join('');
+  const files = attachmentLabels(room, message, imagePaths).map((label) => ` ${label}`).join('');
   // An attachment-only message says so in Reverie's own words, outside any quote (the sender wrote nothing).
   const text = message.poll
     ? quoteForPane(pollSummary(message))
@@ -261,6 +269,18 @@ export function renderForRecipient(
   // Keep the reply hint outside the quote.
   const hint = replyHintFor(room, message, recipientId, nameOf);
   return `${from}${role}${to === undefined ? '' : ` -> ${to}`}${quoted}: ${text}${files}${hint ? ` ${hint}` : ''}`;
+}
+
+/**
+ * The message's attachments as an agent reads them: absolute paths it can open, one bracketed label each. A linked file is the
+ * shared-drive file itself (same path in every laptop), so even a picture is named by that path. Both the rendered line and
+ * the hook payload carry these.
+ */
+export function attachmentLabels(room: ChatRoom, message: ChatMessage, imagePaths: ReadonlyMap<string, string> = new Map()): string[] {
+  return (message.attachments ?? []).map((a) => a.linked ? `[linked file: ${quoteForPane(a.path, 400)}]` : isChatRaster(a)
+    ? imagePaths.has(a.id) ? `[attached: ${quoteForPane(imagePaths.get(a.id)!, 400)}]`
+      : `[attached image: ${quoteForPane(a.name, 200)} (local image unavailable; re-read to request a fresh path)]`
+    : `[attached: ${quoteForPane(sharedAttachmentPath(room.id, a), 400)}]`);
 }
 
 /**
@@ -566,8 +586,15 @@ export interface DeliveryStall { reason: DeliveryWaitReason; since: number; room
  * Queues per session and flushes them into idle panes. Owns one interval timer;
  * `stop()` clears it.
  */
+/** What reaches its member only through the turn summary, never the pane: a briefing or a Reverie notice. */
+function carriedByHook(p: { brief?: boolean; notice?: boolean }): boolean {
+  return !!p.brief || !!p.notice;
+}
+
 export class ChatroomDelivery {
   private queues = new Map<string, Pending[]>();
+  /** Notices a session lost to the queue bounds since its hook last showed notices (droppedNotices). */
+  private noticeDrops = new Map<string, number>();
   private lastDelivered = new Map<string, number>();
   /** The rooms the most recent line written to each session came from (one entry per room, in order of appearance). */
   private lastRooms = new Map<string, { roomIds: string[]; at: number }>();
@@ -776,12 +803,14 @@ export class ChatroomDelivery {
     const preparing = this.preparing.get(sessionId);
     if (preparing) preparing.splice(0, preparing.length, ...preparing.filter(p => !(p.roomId === roomId && p.messageId && read.has(p.messageId))));
     const queue = this.queues.get(sessionId);
-    if (queue) this.queues.set(sessionId, queue.filter((p) => !(p.roomId === roomId && p.messageId && read.has(p.messageId))));
+    // A notice about a message is not that message: reading the message leaves the notice for the hook.
+    if (queue) this.queues.set(sessionId, queue.filter((p) => p.notice || !(p.roomId === roomId && p.messageId && read.has(p.messageId))));
   }
 
   /** Drop a session's queue (it left the room, or was deleted). */
   forget(sessionId: string): void {
     this.durable((store) => store.forget(sessionId));
+    this.noticeDrops.delete(sessionId);
     this.inspectionHolds.delete(sessionId);
     this.activeWrites.delete(sessionId);
     this.queues.delete(sessionId);
@@ -807,7 +836,7 @@ export class ChatroomDelivery {
     sessionId: string,
     room: { id: string; name: string; kind?: 'dm'; dm?: string[] },
     text: string | (() => string),
-    options: { brief?: boolean; localImages?: boolean; messageId?: string; passive?: boolean; noReply?: boolean; durable?: boolean; deliveryId?: string; at?: number } = {}
+    options: { brief?: boolean; notice?: boolean; localImages?: boolean; messageId?: string; passive?: boolean; noReply?: boolean; durable?: boolean; deliveryId?: string; at?: number } = {}
   ): void {
     if (this.deps.allowFragment?.(sessionId, room.id, options.messageId) === false) {
       if (options.deliveryId) this.durable((store) => store.remove([options.deliveryId!]));
@@ -825,7 +854,7 @@ export class ChatroomDelivery {
       id: deliveryId, sessionId, roomId: room.id, messageId: options.messageId!,
       passive: !!options.passive, at, state: 'queued',
     }));
-    queue.push({ deliveryId, roomId: room.id, roomName: deliveryRoomName(room), text, localImages: options.localImages, brief: options.brief, messageId: options.messageId, passive: options.passive, noReply: options.noReply, at });
+    queue.push({ deliveryId, roomId: room.id, roomName: deliveryRoomName(room), text, localImages: options.localImages, brief: options.brief, notice: options.notice, noticeId: options.notice ? randomUUID() : undefined, messageId: options.messageId, passive: options.passive, noReply: options.noReply, at });
     const candidates = queue.slice();
     if (options.passive) {
       // Older read-later fragments go first, so a quiet member never loses a wake-up message to a pile of them.
@@ -835,6 +864,7 @@ export class ChatroomDelivery {
         queue = queue.filter((p) => !(p.passive && extra-- > 0));
       }
     }
+    if (options.notice) queue = this.boundNotices(sessionId, queue);
     // Over the bound: the read-later context goes first (oldest first); a message that wakes the member, an @mention or an addressed
     // one is only dropped when nothing held is left (and then the oldest, as the bound always did).
     let over = queue.length - MAX_PENDING_PER_SESSION;
@@ -847,7 +877,11 @@ export class ChatroomDelivery {
         queue = queue.filter((p) => !(p.passive && n-- > 0));
         over -= dropHeld;
       }
-      if (over > 0) queue.splice(0, over);
+      if (over > 0) {
+        const lost = queue.slice(0, over).filter((p) => p.notice).length;
+        if (lost) this.noticeDrops.set(sessionId, (this.noticeDrops.get(sessionId) ?? 0) + lost);
+        queue.splice(0, over);
+      }
     }
     this.discard(candidates.filter((p) => !queue.includes(p)));
     this.queues.set(sessionId, queue);
@@ -870,6 +904,36 @@ export class ChatroomDelivery {
     return (this.queues.get(sessionId) ?? [])
       .filter((p) => p.brief)
       .map((p) => ({ roomId: p.roomId, roomName: p.roomName, text: pendingText(p) }));
+  }
+
+  /** Keep at most MAX_NOTICES_PER_SESSION notices, dropping the oldest and counting them for the next notice block. */
+  private boundNotices(sessionId: string, queue: Pending[]): Pending[] {
+    let extra = queue.filter((p) => p.notice).length - MAX_NOTICES_PER_SESSION;
+    if (extra <= 0) return queue;
+    this.noticeDrops.set(sessionId, (this.noticeDrops.get(sessionId) ?? 0) + extra);
+    return queue.filter((p) => !(p.notice && extra-- > 0));
+  }
+
+  /** The notices still waiting for this session, oldest first; they stay queued until noticesShown. */
+  pendingNotices(sessionId: string): Array<{ id: string; roomId: string; roomName: string; text: string }> {
+    return (this.queues.get(sessionId) ?? [])
+      .filter((p) => p.notice)
+      .map((p) => ({ id: p.noticeId!, roomId: p.roomId, roomName: p.roomName, text: pendingText(p) }));
+  }
+
+  /** How many older notices this session lost to MAX_NOTICES_PER_SESSION since its hook last showed notices. */
+  droppedNotices(sessionId: string): number {
+    return this.noticeDrops.get(sessionId) ?? 0;
+  }
+
+  /** Exactly these notices were included in the session's own hook payload, so they are delivered; the rest stay. */
+  noticesShown(sessionId: string, ids: readonly string[]): void {
+    this.noticeDrops.delete(sessionId);
+    const queue = this.queues.get(sessionId);
+    if (!queue) return;
+    const kept = queue.filter((p) => !(p.notice && ids.includes(p.noticeId!)));
+    if (kept.length) this.queues.set(sessionId, kept);
+    else this.queues.delete(sessionId);
   }
 
   /** These rooms' briefings were included in the session's own hook payload, so they are delivered. */
@@ -1001,12 +1065,13 @@ export class ChatroomDelivery {
     }
     if (!paneWakes(session.mode)) {
       // No empty composer can be proven for this CLI, so nothing is typed at all. Its member gets the messages through the
-      // harness hooks on its next turn: messages stay in the room history and their queue is dropped, but a briefing exists
-      // only here, so it stays queued for the turn summary (as if woken: it neither wakes the member nor counts as stalled).
-      const briefs = queue.filter((p) => p.brief);
-      this.discard(queue.filter((p) => !p.brief));
-      for (const b of briefs) b.woken = true;
-      if (briefs.length) this.queues.set(sessionId, briefs);
+      // harness hooks on its next turn: messages stay in the room history and their queue is dropped, but a briefing or a
+      // notice exists only here, so it stays queued for the turn summary (as if woken: it neither wakes the member nor counts
+      // as stalled).
+      const hookItems = queue.filter(carriedByHook);
+      this.discard(queue.filter((p) => !carriedByHook(p)));
+      for (const b of hookItems) b.woken = true;
+      if (hookItems.length) this.queues.set(sessionId, hookItems);
       else this.queues.delete(sessionId);
       return false;
     }
@@ -1026,11 +1091,11 @@ export class ChatroomDelivery {
     const now = (this.deps.now ?? Date.now)();
     const last = this.lastDelivered.get(sessionId) ?? 0;
     if (now - last < DELIVERY_SPACING_MS) return false;
-    // Briefings stay queued for the member's turn summary, even while this wake is in flight (its own prompt hook can read
-    // them before the write returns); the wake stands for them but does not carry them.
-    const briefs = queue.filter((p) => p.brief);
-    const batch = queue.filter((p) => !p.brief);
-    if (briefs.length) this.queues.set(sessionId, briefs);
+    // Briefings and notices stay queued for the member's turn summary, even while this wake is in flight (its own prompt hook
+    // can read them before the write returns); the wake stands for them but does not carry them.
+    const hookItems = queue.filter(carriedByHook);
+    const batch = queue.filter((p) => !carriedByHook(p));
+    if (hookItems.length) this.queues.set(sessionId, hookItems);
     else this.queues.delete(sessionId);
     // The messages that wake the member must fit in the line: keep the newest read-later ones up to half of it, drop the older ones
     // (they stay in the room history, `chat read`).
@@ -1047,7 +1112,7 @@ export class ChatroomDelivery {
         this.omitted.set(sessionId, (this.omitted.get(sessionId) ?? 0) + 1);
       }
     }
-    // Held and dropped messages are not announced in the pane either: `chat read` shows the member everything.
+    // Dropped messages are not announced in the pane: once this wake goes in, the member's hook says how many (below).
     const lost = this.omitted.get(sessionId) ?? 0;
     this.omitted.delete(sessionId);
     this.inFlight.add(sessionId);
@@ -1072,7 +1137,7 @@ export class ChatroomDelivery {
       const rejected = batch.filter(item => item.messageId && this.deps.messageVisible?.(sessionId, item.roomId, item.messageId) === false);
       this.discard(rejected);
       batch.splice(0, batch.length, ...batch.filter(item => !rejected.includes(item)));
-      if (!batch.length && !briefs.some((b) => !b.woken)) return false;
+      if (!batch.length && !hookItems.some((b) => !b.woken)) return false;
       // Image HTTP can yield to a read, room removal, plan move or another turn.
       // No pane attempt or uncertainty barrier exists yet, so a held batch stays queued.
       const lateWait = this.promptPauses.has(sessionId) ? 'paused'
@@ -1146,7 +1211,14 @@ export class ChatroomDelivery {
       if (ok) for (const roomId of new Set(chat.map((p) => p.roomId))) this.deps.onWoken?.(sessionId, roomId, now);
       if (ok) this.noteReceived(sessionId, batch.slice(0, taken));
       if (ok) this.waits.delete(sessionId);
-      if (ok) for (const b of briefs) b.woken = true;
+      if (ok) for (const b of hookItems) b.woken = true;
+      if (ok && lost > 0 && batch[0]) {
+        // This wake stands for the count too: it waits, woken, for the member's hook.
+        const held = this.queues.get(sessionId) ?? [];
+        held.push({ roomId: batch[0].roomId, roomName: batch[0].roomName, notice: true, noticeId: randomUUID(), woken: true,
+          text: `SYSTEM: ${lost} earlier message${lost === 1 ? '' : 's'} not shown (read them with reverie agent chat read)` });
+        this.queues.set(sessionId, this.boundNotices(sessionId, held));
+      }
       if (!ok && refused && !submitted) {
         // Refused at the write before any key (not idle, or the composer not provably empty): nothing reached the pane,
         // so these identities are queued again rather than made uncertain.

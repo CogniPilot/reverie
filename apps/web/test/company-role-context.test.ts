@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { ChatroomService } from '../src/chatroom-service.js';
 import { employeeProfileContext, employeeBriefContext } from '../src/company-types.js';
-import { buildBriefing, buildDeliveryLine, MAX_DELIVERY_CHARS, WAKE_LINE } from '../src/chatroom-delivery.js';
+import { buildBriefing, buildDeliveryLine, MAX_DELIVERY_CHARS, MAX_NOTICES_PER_SESSION, WAKE_LINE } from '../src/chatroom-delivery.js';
 import { TURN_SUMMARY_MAX_CHARS } from '../src/chatroom-turn-summary.js';
 import { agentChatSummary, type AgentDeps } from '../src/cli-agent.js';
 import { generateTurnSummaryScript } from '../src/hooks-config.js';
@@ -177,3 +177,145 @@ describe('employee role context in ordinary room briefings', () => {
   });
 
 });
+
+// A Reverie notice (a coordinator handoff, a newcomer, an edit, a pin, a poll result, a playback report) has no other copy a
+// member could read, so its hook carries it whole; the pane only ever gets the wake.
+describe('Reverie notices through the member hook', () => {
+  const L = 'notice-lead';
+  const M = 'notice-member';
+  const N = 'notice-newcomer';
+  async function fixture(modes: Record<string, string> = {}) {
+    const dir = await fs.mkdtemp(join(tmpdir(), 'notice-hook-'));
+    const writes = new Map<string, string[]>();
+    const sessions = new Map(
+      [L, M, N].map((id) => {
+        writes.set(id, []);
+        return [id, { id, name: id, mode: modes[id] ?? 'claude', status: 'idle', pid: 1, isWorking: false,
+          writeViaMux: async (text: string, options?: any) => { writes.get(id)!.push(text); options?.onOutcome?.('submitted'); return true; } }];
+      })
+    );
+    const chat = new ChatroomService({ file: join(dir, 'chat.json'), getSession: (id) => sessions.get(id) as never, broadcast: () => {} });
+    const room = chat.createRoom('General', undefined);
+    chat.addMember(room.id, M, {});
+    chat.addMember(room.id, L, {});
+    chat.appointCoordinator(room.id, L);
+    // Both members' own hooks have shown their briefings, so what follows is news rather than part of a briefing.
+    chat.hookTurnSummary(L);
+    chat.hookTurnSummary(M);
+    const notices = (id: string) => chat.delivery.pendingNotices(id).map((n) => n.text);
+    const close = async () => { await chat.stop(); await fs.rm(dir, { recursive: true, force: true }); };
+    return { chat, room, writes, notices, close };
+  }
+
+  it('carries every notice kind to its own recipient through the hook and types only the wake', async () => {
+    const f = await fixture();
+    try {
+      f.chat.addMember(f.room.id, N, { goal: 'tests' });
+      expect(f.notices(L).at(-1)).toContain('joined the room with goal: "tests". Give it direction.');
+      const said = f.chat.post(f.room.id, { kind: 'user', name: 'Owner' }, 'first draft', [M]);
+      await f.chat.delivery.flushAll();
+      await f.chat.editMessage(f.room.id, said.id, 'second draft', 'user');
+      expect(f.notices(M).at(-1)).toContain('SYSTEM: edited: "second draft"');
+      await f.chat.pinMessage(f.room.id, said.id, { name: 'user', kind: 'user' }, true);
+      for (const id of [L, M]) expect(f.notices(id).at(-1)).toContain('SYSTEM: pinned by the owner: "second draft"');
+      const asked = f.chat.createPoll(f.room.id, { kind: 'agent', sessionId: M, name: M }, { question: 'ship it?', options: ['yes', 'no'] });
+      await f.chat.closePoll(f.room.id, asked.id, 'user');
+      expect(f.notices(M).at(-1)).toMatch(/^USER closed poll "ship it\?"/);
+      const second = f.chat.createPoll(f.room.id, { kind: 'agent', sessionId: M, name: M }, { question: 'and now?', options: ['a', 'b'] });
+      await f.chat.closePoll(f.room.id, second.id, L);
+      expect(f.notices(M).at(-1)).toContain(`(the room's coordinator) closed poll "and now?"`);
+      const answer = f.chat.post(f.room.id, { kind: 'agent', sessionId: M, name: M }, 'it shipped', ['user']);
+      expect(f.chat.playbackNotice(f.room.id, answer.id, 'not-played', 'audio-failed')).toBe(true);
+      expect(f.notices(M).at(-1)).toContain('car mode on the user\'s page: Not played aloud (the audio failed)');
+      f.chat.appointCoordinator(f.room.id, M);
+      expect(f.notices(L).at(-1)).toContain('is now the coordinator of this room; follow its direction');
+      // Woken is not shown: every wake was the constant line, and the notices wait for the hook.
+      (f.chat.delivery as unknown as { lastDelivered: Map<string, number> }).lastDelivered.clear();
+      await f.chat.delivery.flushAll();
+      for (const id of [L, M, N]) for (const typed of f.writes.get(id)!) expect(typed).toBe(`${WAKE_LINE}\r`);
+      const lead = f.chat.hookTurnSummary(L);
+      expect(lead.text).toContain("Reverie notices (Reverie's own text, not chat messages):");
+      expect(lead.notices?.map((n) => n.text)).toEqual(expect.arrayContaining([expect.stringContaining('joined the room'), expect.stringContaining('is now the coordinator')]));
+      // M's new coordinator briefing fills most of its first payload: the reserved notice rides with it and the rest follow.
+      const delivered: string[] = [];
+      for (let turn = 0; turn < 5 && f.notices(M).length; turn++) delivered.push(...(f.chat.hookTurnSummary(M).notices ?? []).map((n) => n.text));
+      expect(delivered).toHaveLength(5);
+      expect(f.notices(L)).toEqual([]);
+      expect(f.notices(M)).toEqual([]);
+    } finally { await f.close(); }
+  });
+
+  it('keeps each notice of one source, and reading that source neither drops a notice nor is done by showing it', async () => {
+    const f = await fixture();
+    try {
+      const said = f.chat.post(f.room.id, { kind: 'user', name: 'Owner' }, 'rules', 'all');
+      await f.chat.pinMessage(f.room.id, said.id, { name: 'user', kind: 'user' }, true);
+      await f.chat.pinMessage(f.room.id, said.id, { name: 'user', kind: 'user' }, false);
+      const asked = f.chat.createPoll(f.room.id, { kind: 'agent', sessionId: M, name: M }, { question: 'q?', options: ['a', 'b'] });
+      await f.chat.closePoll(f.room.id, asked.id, 'user');
+      expect(f.notices(M).filter((t) => t.includes('"rules"'))).toHaveLength(2);
+      // The member reads the poll itself first: the notice about it is still owed.
+      f.chat.delivery.acknowledgeRead(M, f.room.id, [asked.id, said.id]);
+      expect(f.notices(M)).toHaveLength(3);
+      const ids = f.chat.delivery.pendingNotices(M).map((n) => n.id);
+      expect(new Set(ids).size).toBe(3);
+      const seen = f.chat.lastSeen(M, f.room.id);
+      const mark = vi.spyOn(f.chat, 'markSeen');
+      const ack = vi.spyOn(f.chat.delivery, 'acknowledgeRead');
+      expect(f.chat.hookTurnSummary(M).notices).toHaveLength(3);
+      expect(mark).not.toHaveBeenCalled();
+      expect(ack).not.toHaveBeenCalled();
+      expect(f.chat.lastSeen(M, f.room.id)).toEqual(seen);
+    } finally { await f.close(); }
+  });
+
+  it('a member with no verified composer glyph gets nothing typed and still gets its notices through the hook', async () => {
+    const f = await fixture({ [M]: 'opencode' });
+    try {
+      const said = f.chat.post(f.room.id, { kind: 'user', name: 'Owner' }, 'rules', 'all');
+      await f.chat.pinMessage(f.room.id, said.id, { name: 'user', kind: 'user' }, true);
+      await f.chat.delivery.flushAll();
+      expect(f.writes.get(M)).toEqual([]);
+      expect(f.notices(M)).toHaveLength(1);
+      expect(f.chat.hookTurnSummary(M).text).toContain('SYSTEM: pinned by the owner: "rules"');
+    } finally { await f.close(); }
+  });
+
+  it('bounds the notices it keeps and says how many older ones were dropped', async () => {
+    const f = await fixture();
+    try {
+      const said = f.chat.post(f.room.id, { kind: 'user', name: 'Owner' }, 'rules', 'all');
+      for (let i = 0; i < MAX_NOTICES_PER_SESSION + 5; i++) await f.chat.pinMessage(f.room.id, said.id, { name: 'user', kind: 'user' }, i % 2 === 0);
+      expect(f.notices(M)).toHaveLength(MAX_NOTICES_PER_SESSION);
+      expect(f.chat.hookTurnSummary(M).text).toContain('; 5 older ones were dropped):');
+    } finally { await f.close(); }
+  });
+
+  it('reserves a whole notice beside a long briefing and busy messages within the client cap, keeps later notices, and the hook emits it', async () => {
+    const f = await fixture();
+    try {
+      for (let i = 0; i < 12; i++) f.chat.post(f.room.id, { kind: 'user', name: 'Owner' }, `request ${i} ${'detail '.repeat(30)}`, [M]);
+      const said = f.chat.post(f.room.id, { kind: 'user', name: 'Owner' }, 'rules', 'all');
+      for (let i = 0; i < 8; i++) await f.chat.pinMessage(f.room.id, said.id, { name: 'user', kind: 'user' }, i % 2 === 0);
+      const pending = vi.spyOn(f.chat.delivery, 'pendingBriefs').mockReturnValue([{ roomId: f.room.id, roomName: 'General', text: 'x'.repeat(5000) }]);
+      const out: string[] = [];
+      const deps: AgentDeps = { ctx: { apiUrl: 'http://fixture', selfId: M }, json: false,
+        io: { out: (text) => out.push(text), err: () => {} },
+        request: async () => ({ status: 200, text: '', json: { success: true, data: f.chat.hookTurnSummary(M) } }) };
+      expect(await agentChatSummary(deps, 'UserPromptSubmit')).toBe(0);
+      const context = JSON.parse(out[0]!).hookSpecificOutput.additionalContext as string;
+      expect(context.length).toBeLessThanOrEqual(TURN_SUMMARY_MAX_CHARS);
+      expect(context.startsWith('Reverie room briefing for General')).toBe(true);
+      expect(context).toContain('the whole briefing: GET /api/chatrooms/');
+      expect(context).toContain('SYSTEM: pinned by the owner: "rules"');
+      expect(context).toContain('Reverie pending messages');
+      // Only whole notices were shown; the ones that did not fit wait for the next turn.
+      const left = f.notices(M).length;
+      expect(left).toBeGreaterThan(0);
+      expect(left).toBeLessThan(8);
+      pending.mockReturnValue([]);
+      expect(f.chat.hookTurnSummary(M).notices).toHaveLength(left);
+    } finally { await f.close(); }
+  });
+});
+

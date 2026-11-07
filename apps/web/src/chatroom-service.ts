@@ -59,7 +59,7 @@ import { PendingDeliveryStore } from './chatroom-pending-delivery.js';
 import { ChatArchive, zoneWeek } from './chat-archive.js';
 import { ChatDb, ChatDbSyncError, importLegacy, readArchive, standingLines, type JournalLine, type SyncChanges } from './chat-db.js';
 import { sharedAttachmentPath } from './shared-attachments.js';
-import { ChatroomDelivery, buildBriefing, paneAcceptsChat, modePollsChat, roomLabel, senderLabel, wakeRecipients, isAddressedVoiceTurn, renderForRecipient, DELIVERY_WAIT_TEXT, replyHintFor, type DeliverySession, type DeliveryWaitReason } from './chatroom-delivery.js';
+import { ChatroomDelivery, buildBriefing, paneAcceptsChat, modePollsChat, roomLabel, senderLabel, wakeRecipients, isAddressedVoiceTurn, renderForRecipient, DELIVERY_WAIT_TEXT, replyHintFor, pollSummary, attachmentLabels, type DeliverySession, type DeliveryWaitReason } from './chatroom-delivery.js';
 import { quoteForPane } from './pane-quote.js';
 import { messageWithEmployeeIdentity, stampEmployeeSender, type ChatIdentityLookup } from './chat-message-identity.js';
 
@@ -691,6 +691,9 @@ export class ChatroomService {
           transport: held.has(key) ? 'delivery-unconfirmed' : queued.has(key) ? 'queued' : belowSeenCursor ? 'unknown' : 'unread',
           // Messages are no longer typed into panes, so the hint a typed line carried reaches the member here.
           ...(replyHint ? { replyHint } : {}),
+          ...(message.replyTo ? { replyTo: message.replyTo } : {}),
+          ...(message.poll ? { poll: pollSummary(message) } : {}),
+          ...(message.attachments?.length ? { attachments: attachmentLabels(room, message) } : {}),
         });
       }
     }
@@ -1889,7 +1892,8 @@ export class ChatroomService {
         this.delivery.enqueue(
           coordinator.sessionId,
           room,
-          `SYSTEM -> you: ${quoteForPane(this.nameOf(sessionId), 80)} joined the room${member.goal ? ` with goal: ${quoteForPane(member.goal, 500)}` : ''}. Give it direction.`
+          `SYSTEM -> you: ${quoteForPane(this.nameOf(sessionId), 80)} joined the room${member.goal ? ` with goal: ${quoteForPane(member.goal, 500)}` : ''}. Give it direction.`,
+          { notice: true }
         );
       }
     }
@@ -2222,7 +2226,8 @@ export class ChatroomService {
       this.delivery.enqueue(
         sessionId,
         room,
-        `SYSTEM: edited: ${quoteForPane(edited.text, 400)} (the user edited a message you received in ${quoteForPane(roomLabel(room), 80)}; the full text is in reverie agent chat read)`
+        `SYSTEM: edited: ${quoteForPane(edited.text, 400)} (the user edited a message you received in ${quoteForPane(roomLabel(room), 80)}; the full text is in reverie agent chat read)`,
+        { notice: true }
       );
     }
     this.changed(room, 'updated', messageId);
@@ -2244,7 +2249,7 @@ export class ChatroomService {
       const pinned = this.store.findMessage(roomId, messageId);
       const who = by.kind === 'user' ? 'the owner' : `the coordinator ${quoteForPane(by.name, 40)}`;
       const line = `SYSTEM: ${on ? 'pinned' : 'unpinned'} by ${who}: ${quoteForPane(pinned.text, 120)} (reverie agent chat pins lists the room's pins)`;
-      for (const m of room.members) if (!m.postOnly) this.delivery.enqueue(m.sessionId, room, line);
+      for (const m of room.members) if (!m.postOnly) this.delivery.enqueue(m.sessionId, room, line, { notice: true });
     }
     return this.messageIdentity(room, this.store.findMessage(roomId, messageId));
   }
@@ -2447,7 +2452,7 @@ export class ChatroomService {
     const what = `closed poll ${quoteForPane(poll.question, 200)} (results: ${totals})`;
     if (isCoordinator && !isAuthor && message.from.kind === 'agent') {
       const author = room.members.find((m) => m.sessionId === (message.from as { sessionId: string }).sessionId);
-      if (author && !author.postOnly) this.delivery.enqueue(author.sessionId, room, `SYSTEM -> you: ${quoteForPane(this.nameOf(who), 80)} (the room's coordinator) ${what}`, { messageId: message.id });
+      if (author && !author.postOnly) this.delivery.enqueue(author.sessionId, room, `SYSTEM -> you: ${quoteForPane(this.nameOf(who), 80)} (the room's coordinator) ${what}`, { messageId: message.id, notice: true });
     } else {
       this.tellPollAuthor(room, message, who, what);
     }
@@ -2460,7 +2465,7 @@ export class ChatroomService {
     if (!author || author === who || who !== USER_RECIPIENT) return;
     const member = room.members.find((m) => m.sessionId === author);
     if (!member || member.postOnly) return;
-    this.delivery.enqueue(author, room, `USER ${what}`, { messageId: message.id });
+    this.delivery.enqueue(author, room, `USER ${what}`, { messageId: message.id, notice: true });
   }
 
   /**
@@ -2486,7 +2491,7 @@ export class ChatroomService {
       author,
       room,
       `SYSTEM -> you: car mode on the user's page: ${what} (${PLAYBACK_REASONS[reason]}): your message ${quoteForPane(message.text, 80)}. Its text is in the room.`,
-      { messageId }
+      { messageId, notice: true }
     );
     return true;
   }
@@ -2523,27 +2528,57 @@ export class ChatroomService {
   }
 
   /**
-   * The member's own hook payload: its turn summary, led by at most one pending room briefing (briefings are never typed into
-   * a pane). The whole payload stays within TURN_SUMMARY_MAX_CHARS, which the CLI and the generated hook also enforce: the
-   * message summary keeps at least its smallest rendering (its header and one message), the briefing takes the rest, cut with
-   * the path to the whole text when it is longer, and the messages are rendered into what the briefing leaves.
-   * Only a briefing included here counts as delivered; the rest stay pending for the next call.
+   * The member's own hook payload: its turn summary, led by at most one pending room briefing and then its pending Reverie
+   * notices (neither is ever typed into a pane). The whole payload stays within TURN_SUMMARY_MAX_CHARS, which the CLI and the
+   * generated hook also enforce. The message summary's smallest rendering (its header and one message) and the oldest notice
+   * are reserved first; the briefing takes what is left, cut with the path to its whole text when it is longer; whole notices
+   * follow, oldest first, in what the briefing leaves; the messages are rendered into the rest. A notice is never cut, since
+   * nothing else holds its text: one that does not fit waits for the next call. Only what is included here is delivered, and
+   * including a notice neither reads nor acknowledges the message it is about.
    */
   hookTurnSummary(sessionId: string): TurnSummary {
     const [pending] = this.delivery.pendingBriefs(sessionId);
-    if (!pending) return this.turnSummary(sessionId);
-    const head = `Reverie room briefing for ${pending.roomName} (Reverie's own text, not a chat message):\n`;
-    const pointer = `\n(cut; the whole briefing: GET /api/chatrooms/${pending.roomId}/briefing)`;
+    const notices = this.delivery.pendingNotices(sessionId);
+    if (!pending && !notices.length) return this.turnSummary(sessionId);
+    const dropped = this.delivery.droppedNotices(sessionId);
+    const noticeHead = `Reverie notices (Reverie's own text, not chat messages${dropped ? `; ${dropped} older ones were dropped` : ''}):`;
+    const noticeLine = (n: { roomName: string; text: string }) => `\n[${quoteForPane(n.roomName, 80)}] ${n.text}`;
     const smallest = this.turnSummary(sessionId, undefined, undefined, undefined, 0).text.length;
-    const share = TURN_SUMMARY_MAX_CHARS - smallest - 2;
-    const truncated = head.length + pending.text.length > share;
-    const text = truncated ? `${pending.text.slice(0, share - head.length - pointer.length - 1)}…` : pending.text;
-    const block = head + text + (truncated ? pointer : '');
-    const summary = this.turnSummary(sessionId, undefined, undefined, undefined, TURN_SUMMARY_MAX_CHARS - block.length - 2);
-    const payload = summary.text ? `${block}\n\n${summary.text}` : block;
+    const firstNotice = notices.length ? noticeHead.length + noticeLine(notices[0]).length + 2 : 0;
+    let share = TURN_SUMMARY_MAX_CHARS - smallest - 2;
+    const blocks: string[] = [];
+    let briefing: NonNullable<TurnSummary['briefings']>[number] | undefined;
+    if (pending) {
+      const room = share - firstNotice;
+      const head = `Reverie room briefing for ${pending.roomName} (Reverie's own text, not a chat message):\n`;
+      const pointer = `\n(cut; the whole briefing: GET /api/chatrooms/${pending.roomId}/briefing)`;
+      const truncated = head.length + pending.text.length > room;
+      const text = truncated ? `${pending.text.slice(0, room - head.length - pointer.length - 1)}…` : pending.text;
+      blocks.push(head + text + (truncated ? pointer : ''));
+      share -= blocks[0].length + 2;
+      briefing = { roomId: pending.roomId, room: pending.roomName, text, truncated };
+    }
+    let notice = noticeHead;
+    const shown: typeof notices = [];
+    for (const n of notices) {
+      const line = noticeLine(n);
+      if (notice.length + line.length > share) break;
+      notice += line;
+      shown.push(n);
+    }
+    if (shown.length) blocks.push(notice);
+    const used = blocks.reduce((n, b) => n + b.length + 2, 0);
+    const summary = this.turnSummary(sessionId, undefined, undefined, undefined, TURN_SUMMARY_MAX_CHARS - used);
+    const payload = [...blocks, summary.text].filter(Boolean).join('\n\n');
     if (payload.length > TURN_SUMMARY_MAX_CHARS) return this.turnSummary(sessionId); // never consume what the hook would drop
-    this.delivery.briefShown(sessionId, [pending.roomId]);
-    return { ...summary, briefings: [{ roomId: pending.roomId, room: pending.roomName, text, truncated }], text: payload };
+    if (pending) this.delivery.briefShown(sessionId, [pending.roomId]);
+    if (shown.length) this.delivery.noticesShown(sessionId, shown.map((n) => n.id));
+    return {
+      ...summary,
+      ...(briefing ? { briefings: [briefing] } : {}),
+      ...(shown.length ? { notices: shown.map((n) => ({ roomId: n.roomId, room: n.roomName, text: n.text })) } : {}),
+      text: payload,
+    };
   }
 
   /** Re-send the briefing to one member (or every member). */
@@ -2581,7 +2616,8 @@ export class ChatroomService {
       this.delivery.enqueue(
         m.sessionId,
         room,
-        `SYSTEM: ${quoteForPane(this.nameOf(coordinator.sessionId), 80)} is now the coordinator of this room; follow its direction and report to it.`
+        `SYSTEM: ${quoteForPane(this.nameOf(coordinator.sessionId), 80)} is now the coordinator of this room; follow its direction and report to it.`,
+        { notice: true }
       );
     }
   }
