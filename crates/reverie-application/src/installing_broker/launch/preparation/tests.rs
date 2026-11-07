@@ -7,10 +7,16 @@ use reverie_host::{
 };
 use std::{collections::BTreeMap, fs, time::Duration};
 thread_local! { static BUSY: std::cell::RefCell<Option<std::sync::mpsc::SyncSender<()>>> = const { std::cell::RefCell::new(None) }; }
+thread_local! { pub(super) static BUSY_PAUSE: std::cell::RefCell<Option<crate::test_process::PausePoint<()>>> = const { std::cell::RefCell::new(None) }; }
 pub(super) fn storage_busy() {
     BUSY.with(|slot| {
         if let Some(signal) = slot.borrow_mut().take() {
             let _ = signal.send(());
+        }
+    });
+    BUSY_PAUSE.with(|slot| {
+        if let Some(pause) = slot.borrow_mut().take() {
+            pause.wait(());
         }
     });
 }
