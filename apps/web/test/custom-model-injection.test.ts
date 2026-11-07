@@ -107,6 +107,9 @@ describe('buildCustomModelInjection', () => {
     if (result.kind !== 'env') throw new Error('unreachable');
     const parsed = JSON.parse(result.envOverrides.OPENCODE_CONFIG_CONTENT);
     expect(parsed.model).toBe('custom/qwen3');
+    expect(parsed.enabled_providers).toContain('custom');
+    expect(parsed.provider.custom.npm).toBe('@ai-sdk/openai-compatible');
+    expect(parsed.provider.custom.name).toBe('Custom Endpoint');
     expect(parsed.provider.custom.options.baseURL).toBe('http://192.168.1.50:8080/v1');
     expect(parsed.provider.custom.options.apiKey).toBe('my-key');
     expect(parsed.provider.custom.models.qwen3).toEqual({});
