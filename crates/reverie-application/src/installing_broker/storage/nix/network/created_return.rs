@@ -17,6 +17,17 @@ pub(in crate::installing_broker) struct CreatedStorageFinishFailure {
 impl CreatedStorageFinishFailure {
     pub(in crate::installing_broker) fn cause(&self) -> &NetworkStorageError { &self.cause }
 }
+impl std::fmt::Debug for CreatedStorageFinishFailure {
+    fn fmt(&self, out: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        out.debug_struct("CreatedStorageFinishFailure")
+            .field("session", self.returned.plan.session())
+            .field("storage_kind", &self.returned.claim.paths().kind())
+            .field("live_at_checked_return", &self.returned.decision.live)
+            .field("original_native_error", &self.returned.primary)
+            .field("cause", &self.cause)
+            .finish_non_exhaustive()
+    }
+}
 impl CreatedStorageReturned {
     pub(in crate::installing_broker) fn finish_storage(
         self, end: Instant,
