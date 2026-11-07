@@ -213,6 +213,13 @@ fn old_viewer_settlement_cannot_cancel_or_clear_a_new_actual_query() {
         .client
         .settle_viewer(&job, end())
         .unwrap();
+    fixture
+        .runtime()
+        .installed_engine()
+        .engine
+        .client
+        .require_viewer_released(&job)
+        .unwrap();
     assert!(!query.task.as_ref().unwrap().is_finished());
     assert_eq!(job.status().unwrap(), Some(-15));
     query.release();
