@@ -21,6 +21,9 @@ fn legacy(args: &[String], cid: &str, name: &str) {
         std::thread::sleep(Duration::from_millis(80));
     }
     match args.iter().map(String::as_str).collect::<Vec<_>>().as_slice() {
+        ["ps", "-aq", "--no-trunc"] => {
+            fs::write("metadata-entered",b"actual unrelated fixed native query").unwrap();wait("release-metadata");
+        }
         ["inspect", target] if *target == cid || *target == name => {
             if Path::new("legacy-missing").exists()
                 || (Path::new("stop-requested").exists() && Path::new("legacy-failed-inspect").exists())

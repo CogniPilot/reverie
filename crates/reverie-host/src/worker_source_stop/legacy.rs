@@ -128,6 +128,10 @@ impl OrdinaryStopAttempt {
         required: bool,
     ) -> Result<crate::captured_client::CapturedOutput> {
         let end = self.clipped(Instant::now() + Duration::from_secs(20));
-        call::captured(&self.origin, end, &mut self.pending, args, required)
+        if self.deadline.is_none() {
+            call::captured_for_worker(&self.origin, end, &mut self.pending, args, required)
+        } else {
+            call::captured(&self.origin, end, &mut self.pending, args, required)
+        }
     }
 }
