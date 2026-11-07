@@ -3,6 +3,11 @@
 //! lease for the laptop lifetime and independently inspect actual writers.
 //! See the module README for compatible inputs, failure custody and remaining
 //! actual broker integration obligations.
+mod cold_tmp;
+#[cfg(test)]
+pub(crate) fn fail_cold_finalizer_for_owned_test() {
+    cold_tmp::FAIL_FINALIZER.with(|flag| flag.set(true));
+}
 mod error;
 pub(crate) mod fs;
 mod owner;
@@ -11,8 +16,8 @@ mod writers;
 pub use wait_binding::read_launch_wait_binding;
 mod prepare;
 pub use owner::{
-    LaunchStorage, StorageAcquireFailure, StorageCloseFailure, StorageOwnerError,
-    StorageOwnershipKind, StorageSelection,
+    LaunchReceiptObservation, LaunchStorage, StorageAcquireFailure, StorageCloseFailure,
+    StorageOwnerError, StorageOwnershipKind, StorageSelection,
 };
 mod label;
 mod temporary;

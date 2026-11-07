@@ -24,6 +24,13 @@ pub enum StorageFault {
     InstructionCustody,
     InstructionChanged,
     ScratchLabelChanged,
+    ColdTree,
+    ColdMount,
+    ColdBound,
+    ColdDeadline,
+    ColdPreservation,
+    ColdLease,
+    ColdReference,
 }
 #[derive(Debug)]
 pub enum StorageError {
@@ -36,6 +43,7 @@ pub enum StorageError {
     LabelClock(reverie_contracts::worker_storage::ScratchLabelClockError),
     Entropy(reverie_store::StoreError),
     PathText(reverie_contracts::reservation_engine::EngineDataError),
+    ColdFilesystem(reverie_store::StoreError),
     Finalization {
         primary: Box<Self>,
         secondary: Box<Self>,
@@ -71,6 +79,7 @@ impl std::error::Error for StorageError {
             Self::LabelClock(error) => Some(error),
             Self::Entropy(error) => Some(error),
             Self::PathText(error) => Some(error),
+            Self::ColdFilesystem(error) => Some(error),
             Self::Finalization { primary, .. } | Self::PartialEffects(primary) => Some(primary),
             Self::Refused(_) => None,
         }

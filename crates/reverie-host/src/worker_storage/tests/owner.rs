@@ -1,6 +1,8 @@
 use super::*;
 mod cold;
+mod cold_admission;
 mod preparation;
+mod receipt;
 use crate::{
     engine_metadata::{CancellationToken, EngineBootstrap, EngineQuery},
     installed_worker_engine::InstalledWorkerEngine,

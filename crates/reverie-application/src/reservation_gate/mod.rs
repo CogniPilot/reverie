@@ -13,6 +13,7 @@ mod host_jobs;
 mod image_refresh;
 mod launch;
 mod observation;
+mod ordinary_stop;
 mod preparation;
 mod preparation_draft;
 pub(crate) use preparation_draft::{DraftRetentionFailure, EnteredResourceDraft};

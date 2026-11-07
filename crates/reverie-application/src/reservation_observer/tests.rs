@@ -3,6 +3,15 @@ use reverie_contracts::{kernel_mounts::MountTable, worker_config};
 use reverie_core::{decimal::UnsignedInteger, ids::ProfileSessionId, posix_path::PosixPath};
 use serde_json::{Value, json};
 use std::{collections::VecDeque, sync::Mutex};
+thread_local! {
+    static INSTALLED_READS: std::cell::RefCell<Vec<&'static str>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+pub(crate) fn installed_read(role: &'static str) {
+    INSTALLED_READS.with(|reads| reads.borrow_mut().push(role));
+}
+pub(crate) fn take_installed_reads() -> Vec<&'static str> {
+    INSTALLED_READS.with(|reads| std::mem::take(&mut *reads.borrow_mut()))
+}
 
 struct State {
     engine: Option<ReadonlyEngine>,
@@ -138,6 +147,14 @@ impl Fixture {
     }
 }
 impl Source for Arc<Fixture> {
+    fn verify_launch_limits(
+        &self,
+        _: &reverie_contracts::broker_laptop::LaunchLaptopInspection,
+        _: Option<&ObservedMemoryPolicy>,
+        _: Instant,
+    ) -> Result<()> {
+        Err(ObserverError::Refused("FIXTURE_LAUNCH_LIMITS_NOT_SELECTED"))
+    }
     fn verify_recovery_limits(
         &self,
         _: &reverie_contracts::worker_recovery::RecoveryInspection,

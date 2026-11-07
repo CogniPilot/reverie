@@ -158,7 +158,7 @@ impl PreparationError {
         self
     }
 }
-fn reserve_descriptor(
+pub(super) fn reserve_descriptor(
     fd: OwnedFd,
     minimum: RawFd,
     mut finalizer: impl FnMut(OwnedFd) -> io::Result<()>,
@@ -257,6 +257,22 @@ impl Handshake {
         unsafe {
             command.pre_exec(move || send_identity(fd));
         }
+    }
+    /// Closed interactive viewer purpose: the same child becomes a fresh
+    /// session/group leader BEFORE transferring its exact pidfd to its owner.
+    pub(super) fn configure_viewer(&self, command: &mut Command) {
+        // SAFETY: setsid is async-signal-safe, uses no captured parent state,
+        // and runs before the existing fixed identity handoff and exact exec.
+        unsafe {
+            command.pre_exec(|| {
+                if libc::setsid() < 0 {
+                    Err(io::Error::last_os_error())
+                } else {
+                    Ok(())
+                }
+            });
+        }
+        self.configure(command);
     }
     pub(crate) fn receive(&self) -> std::result::Result<OwnedFd, ReceiveError> {
         receive_identity(

@@ -1,10 +1,25 @@
 //! J's first inspect phase: Config/Labels precede Running even for a stopped
 //! row. This is observation DATA; labels and a canonical ID grant no effects.
 use super::*;
-use reverie_core::ids::ContainerId;
+use reverie_core::{decimal::UnsignedInteger, ids::ContainerId};
 
 pub struct LaunchLaptopInspection(Value);
 impl LaunchLaptopInspection {
+    /// Exact-int positive PID declaration DATA, without observing /proc or
+    /// inventing an actual process incarnation from the reply.
+    pub fn positive_process_id(&self) -> Result<UnsignedInteger, LaptopReadError> {
+        let Value(Node::Number(crate::legacy_json::Number::Integer(raw))) =
+            field(field(&self.0, "State")?, "Pid")?
+        else {
+            return Err(LaptopReadError::Process);
+        };
+        UnsignedInteger::parse(raw)
+            .filter(|pid| !pid.is_zero())
+            .ok_or(LaptopReadError::Process)
+    }
+    pub fn require_id_field(&self) -> Result<(), LaptopReadError> {
+        field(&self.0, "Id").map(|_| ())
+    }
     /// Parse all returned JSON, consume only [0], and perform the original
     /// ownership-label check before any State, runtime-file or pane lookup.
     pub fn decode_owned(
@@ -58,5 +73,21 @@ impl LaunchLaptopInspection {
             labels: Some(labels),
         }
         .assert_policy(wanted)
+    }
+    /// Exact parsed declarations DATA for the existing native limits reader.
+    pub fn fields_for_limits(
+        &self,
+    ) -> Result<
+        crate::reservation_engine::NativeLimitFields<'_>,
+        crate::reservation_engine::EngineDataError,
+    > {
+        crate::reservation_engine::NativeLimitFields::from_data(&self.0)
+    }
+    pub fn assert_native_result_data(
+        &self,
+    ) -> Result<(), crate::reservation_engine::EngineDataError> {
+        field(&self.0, "Id")
+            .map(|_| ())
+            .map_err(|_| crate::reservation_engine::EngineDataError::Structure)
     }
 }

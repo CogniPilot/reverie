@@ -307,6 +307,16 @@ the bootstrap identity. This observation still grants no API/admission/start
 permission; real moved resource owners and supervised lifecycle results remain
 necessary. The compatibility argument API delegates the same observation owner.
 
+`ObservedCreatePlan::inspect_existing` seals the original optional first inspect
+to that exact plan observation, engine and storage owner. Its consuming dead-pane
+and running-replacement capture methods preserve their distinct ID-check order
+before the shared fixed `/proc` process-start reader. The resulting
+`ExistingProcessIncarnation` retains the real observation and process readback;
+another plan or a new storage acquisition at the same paths cannot recreate it.
+Its getters and binding check remain data/provenance, not freshness or stop
+permission. An ordinary stop still needs the actual application admission,
+resource custody, repeated pane checks and fresh native/policy observations.
+
 Each actual `LaunchStorage` also has a private per-acquisition identity, minted
 only after successful lease acquisition or genuine service legacy resolution.
 The observed plan retains that identity across moves and Nix preparation; a
@@ -388,6 +398,29 @@ identity and check the held target close. Only that result constructs
 application readiness. The installing application and later lifecycle joins
 remain required. Owned fixture controls do not establish installed enforcement.
 
+`prepare_laptop_cold_temporary` advances the same known network record before
+creation. Opt-in `clear` requires its real employee storage lease, complete fixed
+engine census, canonical mount/process observations and all configured kernel
+lease barriers. Its iterative metadata walk retains the original 4096-entry,
+2-GiB and nominal 10-second limits. Preservation markers, hardlinks, mounts,
+changed custody and unknown same-UID references refuse. Pending evidence is
+durable before deletion; completion and every checked finalizer precede the last
+pending unlink. Partial/error outcomes retain the same resource record and never
+mint preparation or cold-commit success. Creation and post-memory cold commit
+require the actual same-source report carried by that storage owner.
+
+Clear's legacy regular metadata symlinks, uncapped text JSON, last-key-wins and
+loose reservation/holder grammar remain supported. FIFO/device/socket metadata
+now refuses before payload open: the original could block beyond its nominal
+deadline. Deadline checks do not bound an individual kernel filesystem syscall
+or codec call. Iteration avoids interpreter recursion exhaustion; it adds no
+new depth cap. These observations still rely on the original trusted host and
+serialized lifecycle boundary, not immunity to privileged/same-UID rename races.
+Absent policy remains non-destructive and independently fenced.
+`retain-and-replace` still refuses until its full pre-Office preparation and
+post-memory confirmation are implemented. This checkpoint supplies no installed
+selection, data migration, context/grant publisher or complete cold-feature claim.
+
 `release_laptop_nix_guard` consumes only the original guard after the same
 record's acknowledged pane startup. It moves the actual storage, original Nix
 outcome and prepared path into that record before attempting checked descriptor
@@ -399,6 +432,18 @@ caller must publish any protected CLI-start receipt first, then actually release
 admission and publish canonical release before starting a viewer. Any later
 forward consumer must recheck the same record's current phase; an old token
 cannot revive a record that entered terminal container cleanup.
+
+`start_laptop_viewer_session` retains its concrete PTY/session constructor in
+the same bounded laptop record before native work. It shares the existing
+captured-client constructor slot, then hands the running viewer to that record
+after joined construction and checked finalizers. Forward I/O holds the same
+record through each operation. Cleanup retains the original leader until its
+final owned-group decision, then confirms group absence without further signal
+delivery. Failed or incomplete cleanup keeps the actual owners. See the
+[viewer boundary](src/worker_laptop/viewer/README.md) for the measured legacy
+cleanup correction, original deadlines and remaining transport/reuse joins.
+This created-only primitive does not establish application admission release,
+guest resize acknowledgement or whole-service/resource settlement.
 
 New-target cleanup accepts only the canonical CID retained from that actual
 create, never a recycled name or a caller CID. It preserves stop/inspect/kill/
@@ -519,3 +564,20 @@ settled. Consuming the original resource is a separate one-shot phase, and the
 App must first close the actual Office/request owners and requalify its claim.
 Drop retains unknown actual resources in a process-lifetime quarantine; it is
 neither a durable fence nor global process/writer release acknowledgement.
+
+`retain_existing_viewer` moves the original storage box, observed plan, request
+and sealed first inspection into the same bounded laptop inventory used by
+created viewers. It performs only pure origin/binding checks. The App must
+retain its actual classified reuse, J/hold, lifecycle and admission owners and
+complete admission release before calling `start_existing_viewer`. This branch
+creates no Office phone or Nix/created-container token. Both viewer origins use
+the same fixed native session, PTY, captured-client constructor slot and I/O.
+
+`close_existing_viewer` terminally fences the record and settles its exact job;
+it does not release storage or acknowledge global completion. A reclaim guard
+keeps the same box counted until `into_parts` moves it once under both retained
+mutex guards. The App must validate/hold its registry before this infallible
+restoration step. Dropping that guard leaves the box in the record. Unknown
+construction or descriptor close retains the box and job. Actual reused-viewer
+App transfer, transport/replacement/drain and recovered-viewer producers remain
+required; no backend selection follows from this Host component.

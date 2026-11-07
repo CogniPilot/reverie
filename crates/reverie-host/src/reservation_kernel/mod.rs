@@ -1,6 +1,7 @@
 //! Fixed Linux reservation kernel/filesystem observations. These are snapshots,
 //! not retained native grants, leases, process effects or admission authority.
 mod baseline;
+mod cold;
 mod custody;
 mod limits;
 mod source_release;
@@ -190,11 +191,19 @@ fn pid_start(source: &impl Source, pid: &UnsignedInteger, end: Instant) -> Resul
         end,
     )?)?)
 }
+/// Same fixed ASCII/65536 _pid read; only the sealed existing-laptop observer
+/// calls this within Host. No public request-selected root or PID endpoint.
+pub(crate) fn existing_process_start(pid: &UnsignedInteger, end: Instant) -> Result<String> {
+    pid_start(&Installed, pid, end)
+}
 fn table(source: &impl Source, end: Instant) -> Result<MountTable> {
-    let stat = path("/proc/self/stat");
+    table_at(source, "self", end)
+}
+fn table_at(source: &impl Source, pid: &str, end: Instant) -> Result<MountTable> {
+    let stat = path(&format!("/proc/{pid}/stat"));
     let before = kernel_accounting::process_start(&text(source, &stat, 65536, false, end)?)?;
     check(end)?;
-    let raw = source.read(&path("/proc/self/mountinfo"), MAX_MOUNT_BYTES)?;
+    let raw = source.read(&path(&format!("/proc/{pid}/mountinfo")), MAX_MOUNT_BYTES)?;
     check(end)?;
     need(raw.len() <= MAX_MOUNT_BYTES, "RESERVATION_NATIVE_BOUND")?;
     let points = native::python_text(Path::new(std::ffi::OsStr::from_bytes(&raw)));
@@ -206,12 +215,34 @@ fn table(source: &impl Source, end: Instant) -> Result<MountTable> {
     Ok(table)
 }
 pub struct ReservationKernel;
+fn verify_launch(
+    source: &impl Source,
+    row: &reverie_contracts::broker_laptop::LaunchLaptopInspection,
+    policy: Option<&ObservedMemoryPolicy>,
+    end: Instant,
+) -> Result<()> {
+    limits::verify_fields(source, &row.fields_for_limits()?, policy, end)?;
+    // Source indexes Id after all physical reads; presence is enough for this
+    // discarded limits result. Never manufacture a canonical CID here.
+    row.assert_native_result_data()?;
+    Ok(())
+}
 impl Default for ReservationKernel {
     fn default() -> Self {
         Self::new()
     }
 }
 impl ReservationKernel {
+    /// J's memory-only read over the exact parsed row. This uses the existing
+    /// physical algorithm and grants no container effect or CID ownership.
+    pub fn verify_launch_limits(
+        &self,
+        row: &reverie_contracts::broker_laptop::LaunchLaptopInspection,
+        policy: Option<&ObservedMemoryPolicy>,
+        end: Instant,
+    ) -> Result<()> {
+        verify_launch(&Installed, row, policy, end)
+    }
     /// Fixed /proc observation of an original baseline process. This is data,
     /// not process ownership or permission to send any signal.
     pub fn original_process_start(
