@@ -91,9 +91,12 @@
     return new Promise((resolve) => {
       let offset = 0;
       let settled = false;
+      // Replies xterm makes to the probes in this history are dropped until it ends.
+      const endReplay = global.ReverieTerminalInput?.beginTerminalReplay?.(terminal) || (() => {});
       const settle = () => {
         if (settled) return;
         settled = true;
+        endReplay();
         setCancel?.(null);
         resolve();
       };
@@ -624,7 +627,7 @@
     // persisted. Same predicates as the primary pane (terminal-ui.js onData).
     _onTerminalData(data) {
       const input = global.ReverieTerminalInput;
-      if (input?.shouldSuppressTerminalQueryResponse?.(data)) return;
+      if (input?.shouldSuppressTerminalQueryResponse?.(data, this.terminal)) return;
       const app = global.app;
       if (input?.isTerminalFocusOrMouseReport?.(data)) {
         app?._sendInputEphemeral?.(this.sessionId, data);
