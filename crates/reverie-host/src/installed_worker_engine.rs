@@ -4,13 +4,18 @@
 //! named effects still require their actual owned-resource/phase producers.
 use crate::engine_metadata::{CancellationToken, EngineBootstrap, EngineError, ReadonlyEngine};
 use std::{
-    sync::OnceLock,
+    sync::{
+        OnceLock,
+        atomic::{AtomicBool, Ordering},
+    },
     time::{Duration, Instant},
 };
 pub struct InstalledWorkerEngine {
     pub(crate) engine: ReadonlyEngine,
     cancellation: CancellationToken,
     first_stop: OnceLock<Instant>,
+    broker_signals: OnceLock<()>,
+    closed_confirmed: AtomicBool,
 }
 impl InstalledWorkerEngine {
     pub fn new(bootstrap: EngineBootstrap) -> Self {
@@ -18,6 +23,8 @@ impl InstalledWorkerEngine {
             engine: ReadonlyEngine::new(bootstrap),
             cancellation: CancellationToken::new(),
             first_stop: OnceLock::new(),
+            broker_signals: OnceLock::new(),
+            closed_confirmed: AtomicBool::new(false),
         }
     }
     pub fn readonly(&self) -> ReadonlyEngine {
@@ -32,12 +39,25 @@ impl InstalledWorkerEngine {
     pub fn request_stop(&self) -> Instant {
         let first = *self.first_stop.get_or_init(Instant::now);
         self.cancellation.cancel();
-        first + Duration::from_secs(34)
+        self.stop_deadline()
+            .unwrap_or(first + Duration::from_secs(34))
     }
     pub fn stop_deadline(&self) -> Option<Instant> {
-        self.first_stop
+        let requested = self
+            .first_stop
             .get()
-            .map(|first| *first + Duration::from_secs(34))
+            .map(|first| *first + Duration::from_secs(34));
+        match (requested, self.cancellation.worker_signal_deadline()) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (Some(a), None) | (None, Some(a)) => Some(a),
+            (None, None) => None,
+        }
+    }
+    pub(crate) fn reserve_broker_signals(&self) -> bool {
+        self.broker_signals.set(()).is_ok()
+    }
+    pub(crate) fn signal_restoration_ready(&self) -> bool {
+        self.closed_confirmed.load(Ordering::Acquire)
     }
     pub fn settle_owned(&self, deadline: Instant) -> Result<(), EngineError> {
         self.engine.settle_owned(self.settlement_deadline(deadline))
@@ -57,6 +77,10 @@ impl InstalledWorkerEngine {
     /// stays unconfirmed; later settlement cannot reopen or forgive that call.
     pub fn close(&self, deadline: Instant) -> Result<(), EngineError> {
         self.request_stop();
-        self.engine.close(self.settlement_deadline(deadline))
+        let result = self.engine.close(self.settlement_deadline(deadline));
+        if result.is_ok() {
+            self.closed_confirmed.store(true, Ordering::Release);
+        }
+        result
     }
 }

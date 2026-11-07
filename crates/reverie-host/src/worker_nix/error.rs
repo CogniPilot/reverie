@@ -36,6 +36,7 @@ pub enum NixError {
     Owner(crate::worker_storage::StorageOwnerError),
     Intent(crate::worker_intent::IntentHostError),
     Rootless(crate::rootless::RootlessHostError),
+    StoppedRemoval(std::sync::Arc<crate::worker_source_stop::SourceStopError>),
     Finalization {
         primary: Box<Self>,
         secondary: Box<Self>,

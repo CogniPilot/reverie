@@ -67,6 +67,13 @@ pub(crate) fn isolate_cold_namespace(name: &str) -> bool {
         .create(&root)
         .unwrap();
     let original = std::fs::symlink_metadata(&root).unwrap();
+    let executable = if retained_mount_case(name) {
+        // The fixed test overmounts /tmp. Its executable must not itself be a
+        // real reference beneath that mount, regardless of Cargo's target path.
+        copy_namespace_executable(&root)
+    } else {
+        std::env::current_exe().unwrap()
+    };
     let mut command = std::process::Command::new("unshare");
     command.args([
         "--user",
@@ -90,7 +97,7 @@ pub(crate) fn isolate_cold_namespace(name: &str) -> bool {
         );
     }
     let output = command
-        .arg(std::env::current_exe().unwrap())
+        .arg(&executable)
         .args(["--exact", name, "--test-threads=1", "--nocapture"])
         .env(MARKER, name)
         .env(
@@ -123,6 +130,75 @@ pub(crate) fn isolate_cold_namespace(name: &str) -> bool {
     // terminated; only this uniquely created test root is removed.
     std::fs::remove_dir_all(root).unwrap();
     true
+}
+/// Copy only the actual current test ELF into the uniquely owned fixture.
+/// No caller-selected executable or production/reference-reader change.
+fn copy_namespace_executable(root: &std::path::Path) -> std::path::PathBuf {
+    use std::{
+        fs::{File, OpenOptions},
+        io::{Seek, SeekFrom},
+        os::unix::fs::{MetadataExt, OpenOptionsExt},
+    };
+    let mut source = File::open(std::env::current_exe().unwrap()).unwrap();
+    let original = source.metadata().unwrap();
+    assert!(original.is_file());
+    let path = root.join("namespace-tests.elf");
+    let mut output = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create_new(true)
+        .mode(0o700)
+        .open(&path)
+        .unwrap();
+    assert_eq!(
+        std::io::copy(&mut source, &mut output).unwrap(),
+        original.len()
+    );
+    output.sync_all().unwrap();
+    source.seek(SeekFrom::Start(0)).unwrap();
+    output.seek(SeekFrom::Start(0)).unwrap();
+    assert_eq!(
+        executable_digest(&mut source),
+        executable_digest(&mut output)
+    );
+    let current = source.metadata().unwrap();
+    assert_eq!(
+        (
+            current.dev(),
+            current.ino(),
+            current.len(),
+            current.mtime(),
+            current.mtime_nsec(),
+            current.ctime(),
+            current.ctime_nsec()
+        ),
+        (
+            original.dev(),
+            original.ino(),
+            original.len(),
+            original.mtime(),
+            original.mtime_nsec(),
+            original.ctime(),
+            original.ctime_nsec()
+        )
+    );
+    crate::native::close(source).unwrap();
+    crate::native::close(output).unwrap();
+    path
+}
+fn executable_digest(file: &mut std::fs::File) -> [u8; 32] {
+    use sha2::{Digest, Sha256};
+    use std::io::Read;
+    let mut digest = Sha256::new();
+    let mut buffer = [0; 64 * 1024];
+    loop {
+        let count = file.read(&mut buffer).unwrap();
+        if count == 0 {
+            break;
+        }
+        digest.update(&buffer[..count]);
+    }
+    digest.finalize().into()
 }
 fn retained_mount_case(name: &str) -> bool {
     name.starts_with("worker_laptop::tests::cold_prepare::retained::finish::")

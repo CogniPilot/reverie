@@ -9,7 +9,7 @@ use std::{
     path::{Component, Path, PathBuf},
 };
 
-pub(super) struct Target {
+pub(in crate::worker_laptop) struct Target {
     directory: File,
     pid: u32,
     proc: PathBuf,
@@ -20,6 +20,9 @@ pub(super) struct Target {
     leaf: (u64, u64),
 }
 impl Target {
+    pub(super) fn process_id(&self) -> u32 {
+        self.pid
+    }
     pub(super) fn open(pid: u32) -> Result<Self> {
         Self::capture(pid, Path::new("/proc"), Path::new("/sys/fs/cgroup"))
     }

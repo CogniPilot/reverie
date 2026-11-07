@@ -8,11 +8,11 @@ mod helper;
 mod target;
 mod workflow;
 static NEXT: AtomicU64 = AtomicU64::new(0);
-struct KernelFixture {
-    root: PathBuf,
+pub(super) struct KernelFixture {
+    pub(super) root: PathBuf,
 }
 impl KernelFixture {
-    fn new() -> Self {
+    pub(super) fn new() -> Self {
         let root = std::env::temp_dir().join(format!(
             "started-memory-{}-{}",
             std::process::id(),
@@ -39,7 +39,7 @@ impl KernelFixture {
         }
         Self { root }
     }
-    fn target(&self) -> super::target::Target {
+    pub(super) fn target(&self) -> super::target::Target {
         super::target::Target::capture(321, &self.root.join("proc"), &self.root.join("cgroup"))
             .unwrap()
     }

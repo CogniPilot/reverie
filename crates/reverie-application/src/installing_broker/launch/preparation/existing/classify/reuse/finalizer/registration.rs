@@ -10,28 +10,19 @@ fn pause_registration() {
     });
 }
 impl Finalizer<'_> {
-    pub(super) fn metadata(&mut self) {
-        let result = (|| {
-            let scope = self.owner.scope();
-            let broker = scope.preparing.broker();
-            let mut lifecycle = broker
-                .installed
-                .cleanup_lifecycle(&broker.storage.runtime)?;
-            if let Some(token) = &scope.active {
-                lifecycle.finalize_active(token)?;
-            }
-            Ok(())
-        })();
+    pub(super) fn metadata(&mut self, budget: CleanupBudget) {
+        let scope = self.owner.scope();
+        let result = budget.metadata(&scope.preparing, scope.active.as_ref());
         if let Err(error) = result {
             self.errors.push(Error::Gate(error));
         }
     }
-    pub(super) fn close_registration(&mut self, end: Instant) {
-        if let Err(error) = self.close_registration_inner(end) {
+    pub(super) fn close_registration(&mut self, budget: CleanupBudget) {
+        if let Err(error) = self.close_registration_inner(budget) {
             self.errors.push(Error::Gate(error));
         }
     }
-    fn close_registration_inner(&self, end: Instant) -> Result<(), GateError> {
+    fn close_registration_inner(&self, budget: CleanupBudget) -> Result<(), GateError> {
         let scope = self.owner.scope();
         let broker = scope.preparing.broker();
         let target = self
@@ -46,16 +37,25 @@ impl Finalizer<'_> {
             admission.assert_target(target)?;
             #[cfg(test)]
             pause_registration();
-            let mut lifecycle = broker
-                .installed
-                .cleanup_lifecycle(&broker.storage.runtime)?;
+            let mut lifecycle = budget.lifecycle(broker)?;
             let token = scope
                 .active
                 .as_ref()
                 .ok_or(GateError::Refused("WORKER_REUSE_ACTIVE_REQUIRED"))?;
-            lifecycle
-                .close_reuse_registration(token, target, scope.registration.as_ref(), end)
-                .map_err(|error| GateError::OriginalSource(Box::new(error)))
+            let closed = match budget {
+                CleanupBudget::Bounded(end) => lifecycle.close_reuse_registration(
+                    token,
+                    target,
+                    scope.registration.as_ref(),
+                    end,
+                ),
+                CleanupBudget::Worker => lifecycle.close_reuse_registration_for_worker(
+                    token,
+                    target,
+                    scope.registration.as_ref(),
+                ),
+            };
+            closed.map_err(|error| GateError::OriginalSource(Box::new(error)))
         })();
         let closed = if body.is_ok() {
             admission.close()

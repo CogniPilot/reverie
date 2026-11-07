@@ -5,7 +5,7 @@ use reverie_core::{
     worker_schema::WorkerIds,
 };
 use std::{collections::BTreeMap, fs, time::Duration};
-fn base(image: char, memory: u32) -> WorkerBase {
+pub(super) fn base(image: char, memory: u32) -> WorkerBase {
     WorkerBase::try_new(
         "fixture".into(),
         "fixture-server".into(),

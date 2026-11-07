@@ -341,3 +341,49 @@ fn malformed_receipt_relay_error_still_runs_actual_completed_cleanup_without_sen
         broker.close_command_telemetry(end()).unwrap();
     }
 }
+
+#[test]
+fn bounded_finalizer_refuses_contended_lifecycle_without_waiting_for_its_later_release() {
+    crate::test_process::owning_case!(
+        bounded_finalizer_refuses_contended_lifecycle_without_waiting_for_its_later_release
+    );
+    let tree = Tree::new();
+    let broker = broker(&tree);
+    employee(&tree);
+    let provider = Provider::new(&tree);
+    let reuse = reusable(&tree, &broker);
+    let source = reuse.inspected.observed.current.configuration().clone();
+    let owner = reuse.prepare_viewer().unwrap().close_allocation().unwrap();
+    enable(&tree, provider.child.id());
+    let installed = broker.installed.clone();
+    let (ready, acquired) = std::sync::mpsc::sync_channel(1);
+    let (release, resume) = std::sync::mpsc::sync_channel(1);
+    let (result, released_by_caller) = std::thread::scope(|scope| {
+        let holder = scope.spawn(move || {
+            let _lifecycle = installed.lifecycle().unwrap();
+            ready.send(()).unwrap();
+            // A real old blocking implementation eventually returns, so a
+            // failed discriminator cannot leave an owned test thread hanging.
+            resume.recv_timeout(Duration::from_secs(5)).is_ok()
+        });
+        acquired.recv_timeout(Duration::from_secs(5)).unwrap();
+        let result = owner.finalize(Instant::now() + Duration::from_millis(50));
+        let _sent = release.send(());
+        (result, holder.join().unwrap())
+    });
+    assert!(
+        released_by_caller,
+        "finalizer must return before the owned lock's fallback release"
+    );
+    let failure = result.expect_err("actual component lifecycle ceiling must refuse");
+    assert!(failure.cleanup_error_count() > 0);
+    assert!(
+        reverie_host::worker_storage::StorageLease::acquire_migration(
+            &source,
+            &ProfileSessionId::parse(SID).unwrap(),
+        )
+        .is_err()
+    );
+    assert!(broker.close_command_telemetry(end()).is_err());
+    drop(failure);
+}
