@@ -62,6 +62,12 @@ pub enum LaptopError {
     Io(std::io::Error),
     Publication(crate::worker_child::ChildError),
     Observation(crate::ObservationError),
+    MemoryKernel(crate::reservation_kernel::ReservationKernelError),
+    MemoryData(reverie_contracts::reservation_engine::EngineDataError),
+    MemoryIdentity(reverie_contracts::worker_recovery::RecoveryDataError),
+    MemoryHelperSelection(reverie_contracts::worker_validation::WorkerValidationError),
+    MemoryHelperRefused(String),
+    MemoryEffectUnconfirmed(Box<Self>),
     Recorded(std::sync::Arc<Self>),
     Finalization {
         primary: Box<Self>,
@@ -76,6 +82,7 @@ impl std::fmt::Display for LaptopError {
 impl LaptopError {
     pub(super) fn unconfirmed_native(&self) -> bool {
         match self {
+            Self::MemoryEffectUnconfirmed(_) => true,
             Self::Observation(_) => true,
             Self::Publication(error) => !error.cleanup_faults().is_empty(),
             Self::Finalization { primary, secondary } => {
@@ -101,6 +108,12 @@ impl LaptopError {
             Self::Io(_) => "WORKER_LAPTOP_IO",
             Self::Publication(_) => "WORKER_LAPTOP_LAUNCH_PUBLICATION",
             Self::Observation(_) => "WORKER_LAPTOP_NATIVE_FINALIZATION",
+            Self::MemoryKernel(error) => error.code(),
+            Self::MemoryData(error) => error.code(),
+            Self::MemoryIdentity(error) => error.code(),
+            Self::MemoryHelperSelection(_) => "LAPTOP_SOFT_LIMIT_HELPER_SELECTION",
+            Self::MemoryHelperRefused(_) => "LAPTOP_SOFT_LIMIT_HELPER_REFUSED",
+            Self::MemoryEffectUnconfirmed(_) => "LAPTOP_MEMORY_EFFECT_UNCONFIRMED",
             Self::Recorded(error) => error.code(),
             Self::Finalization { primary, .. } => primary.code(),
         }
@@ -123,6 +136,12 @@ impl std::error::Error for LaptopError {
             Self::Io(error) => Some(error),
             Self::Publication(error) => Some(error),
             Self::Observation(error) => Some(error),
+            Self::MemoryKernel(error) => Some(error),
+            Self::MemoryData(error) => Some(error),
+            Self::MemoryIdentity(error) => Some(error),
+            Self::MemoryHelperSelection(error) => Some(error),
+            Self::MemoryHelperRefused(_) => None,
+            Self::MemoryEffectUnconfirmed(error) => Some(error.as_ref()),
             Self::Recorded(error) => Some(error.as_ref()),
             Self::Finalization { primary, .. } => Some(primary.as_ref()),
         }

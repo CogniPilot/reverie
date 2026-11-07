@@ -4,7 +4,7 @@ use super::*;
 use reverie_core::ids::ContainerId;
 #[must_use = "retain actual started container resources until checked stop"]
 pub struct StartedContainer {
-    workflow: LaptopWorkflow,
+    pub(super) workflow: LaptopWorkflow,
     container: Option<ContainerId>,
 }
 impl StartedContainer {

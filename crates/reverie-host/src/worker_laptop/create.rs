@@ -14,6 +14,8 @@ pub(super) enum CreateStage {
     Published,
     Starting,
     Started,
+    ConfiguringMemory,
+    MemoryConfigured,
 }
 pub(super) struct Creation {
     created: bool,

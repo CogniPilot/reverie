@@ -357,6 +357,28 @@ registry entry. Those real joins and the canonical pre-Nix App caller are still
 required. Fixed native pane argv DATA reuse worker-child --pane-exit without a
 new shell or program-selection endpoint.
 
+`configure_started_laptop_memory` accepts that same actual `StartedContainer`
+and advances its retained record once. It takes no caller config, name, CID or
+cgroup path. An absent effective policy performs no memory observations or
+effects, while the original deadline, stop deadline and cancellation still fence
+local completion. A refusal consumes the memory phase and retains the created
+owners; a renewed caller deadline cannot replay it. Selected policies require
+the full host hierarchy and an exact running
+engine identity before holding the PID incarnation, unified membership and
+no-follow cgroup directory. Swap-only policy opens no high-limit writer.
+
+A configured helper socket selects the existing identity-only Rust soft-limit
+helper; it never falls back to direct writes. Otherwise the private direct
+authority refreshes engine/local identity, checks the hard limit and original
+deadline, then performs one write with checked close. After writer admission,
+short writes, interruption, failed identity/readback and close errors become
+`MemoryEffectUnconfirmed` with the typed cause retained. Both routes independently
+use `ReservationKernel` for RAM/high/swap and ancestor readback, then refresh
+identity and check the held target close. Only that result constructs
+`ConfiguredMemory`; it does not complete cold storage, launch a child or publish
+application readiness. The installing application and later lifecycle joins
+remain required. Owned fixture controls do not establish installed enforcement.
+
 New-target cleanup accepts only the canonical CID retained from that actual
 create, never a recycled name or a caller CID. It preserves stop/inspect/kill/
 inspect order but requires an exact, known stopped state. Missing/failed inspect,

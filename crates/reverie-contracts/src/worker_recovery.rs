@@ -1,4 +1,5 @@
 //! Actual Broker recovery/inspect DATA shapes, not CID ownership or grants.
+mod started;
 use crate::{
     kernel_accounting,
     legacy_json::{self, Node, Text, Value},
