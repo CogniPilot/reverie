@@ -15,7 +15,7 @@ use std::time::Duration;
 
 #[must_use = "retain the same container and original resources until checked stop"]
 pub struct ConfiguredMemory {
-    workflow: LaptopWorkflow,
+    pub(super) workflow: LaptopWorkflow,
 }
 impl ConfiguredMemory {
     pub fn same_workflow(&self, other: &LaptopWorkflow) -> bool {

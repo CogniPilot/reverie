@@ -1,6 +1,7 @@
 //! Fixed laptop effects retain actual Nix/storage/Office owners before the
 //! first native client. InstallingBroker still owns admission and authorization.
 mod cleanup;
+mod cold;
 mod create;
 mod error;
 mod memory;
@@ -17,6 +18,7 @@ use crate::{
     worker_runtime::WorkerRuntime,
 };
 pub use cleanup::{CreatedCleanup, StoppedCreatedLaptop};
+pub use cold::{ColdCommit, ColdCommitted};
 pub use create::{CreatedLaptop, LaptopCreation};
 pub use error::{CreateTelemetryFailure, LaptopError, TelemetryCause};
 use error::{Result, finalized, need};
