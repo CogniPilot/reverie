@@ -31,7 +31,38 @@ pub(crate) fn observe_with_ancestors(
     let name = path.file_name().ok_or(crate::ObservationError::Refused(
         ObservationFault::CanonicalPath,
     ))?;
-    let parent = directory(parent_path)?;
+    observe_at(path, parent_path, name, maximum, allowed, None)
+}
+pub(crate) fn observe_ops_private(path: &Path, maximum: usize, uid: u32) -> Result<Vec<u8>> {
+    let parent = path.parent().ok_or(crate::ObservationError::Refused(
+        ObservationFault::CanonicalPath,
+    ))?;
+    need(parent != Path::new("/"), ObservationFault::CanonicalPath)?;
+    let name = path.file_name().ok_or(crate::ObservationError::Refused(
+        ObservationFault::CanonicalPath,
+    ))?;
+    Ok(observe_at(
+        path,
+        parent,
+        name,
+        maximum,
+        |m| {
+            use std::os::unix::fs::MetadataExt;
+            m.uid() == uid && m.nlink() == 1 && m.mode() & 0o077 == 0
+        },
+        Some(uid),
+    )?
+    .bytes)
+}
+fn observe_at(
+    path: &Path,
+    parent_path: &Path,
+    name: &OsStr,
+    maximum: usize,
+    allowed: impl Fn(&Metadata) -> bool,
+    directory_uid: Option<u32>,
+) -> Result<Snapshot> {
+    let parent = directory(parent_path, directory_uid)?;
     let opened = open_at(parent.as_raw_fd(), name, libc::O_RDONLY | libc::O_NONBLOCK);
     let result = match opened {
         Ok(mut file) => {
@@ -42,7 +73,7 @@ pub(crate) fn observe_with_ancestors(
     };
     finalized(result, close(parent))
 }
-fn directory(path: &Path) -> Result<File> {
+fn directory(path: &Path, uid: Option<u32>) -> Result<File> {
     let mut parent = open_at(
         libc::AT_FDCWD,
         OsStr::new("/"),
@@ -60,6 +91,38 @@ fn directory(path: &Path) -> Result<File> {
             (Err(error), closed) => return finalized(Err(error.into()), closed),
             (Ok(child), Err(error)) => return finalized(Err(error), close(child)),
         };
+        let checked = if let Some(uid) = uid {
+            use std::os::unix::fs::MetadataExt;
+            parent
+                .metadata()
+                .map_err(crate::ObservationError::from)
+                .and_then(|metadata| {
+                    need(
+                        [0, uid].contains(&metadata.uid()) && metadata.mode() & 0o022 == 0,
+                        ObservationFault::ArtifactCustody,
+                    )
+                })
+        } else {
+            Ok(())
+        };
+        if let Err(error) = checked {
+            return finalized(Err(error), close(parent));
+        }
+    }
+    if let Some(uid) = uid {
+        use std::os::unix::fs::MetadataExt;
+        let checked = parent
+            .metadata()
+            .map_err(crate::ObservationError::from)
+            .and_then(|metadata| {
+                need(
+                    metadata.uid() == uid && metadata.mode() & 0o077 == 0,
+                    ObservationFault::ArtifactCustody,
+                )
+            });
+        if let Err(error) = checked {
+            return finalized(Err(error), close(parent));
+        }
     }
     Ok(parent)
 }

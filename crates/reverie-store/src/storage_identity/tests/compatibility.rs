@@ -10,12 +10,14 @@ fn searchable_metadata_ancestors_do_not_require_directory_listing_permission() {
     tree.write(&path, "{\"employees\":[]}");
     fs::set_permissions(&parent, fs::Permissions::from_mode(0o111)).unwrap();
     let result = read_metadata(&path, uid(), DEFAULT_METADATA_LIMIT);
+    let ordered = read_ordered_metadata(&path, uid(), DEFAULT_METADATA_LIMIT);
     fs::set_permissions(&parent, fs::Permissions::from_mode(0o700)).unwrap();
     assert!(
         result.is_ok(),
         "search-only metadata parent refused: {}",
         result.err().unwrap().code()
     );
+    assert!(ordered.is_ok());
     assert_eq!(tree.fd_count(), 0);
 }
 

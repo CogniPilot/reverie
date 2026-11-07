@@ -1,0 +1,21 @@
+{
+  "origin": "Actual frozen Python NativeObserver fixed metadata projections at f047ba67; synthetic checked container IDs only",
+  "inventory": [
+    "ps",
+    "-aq",
+    "--no-trunc"
+  ],
+  "inspect": [
+    "inspect",
+    "--format",
+    "{\"Id\":{{json .Id}},\"Name\":{{json .Name}},\"Image\":{{json .Image}},\"Config\":{\"Labels\":{{json .Config.Labels}}},\"State\":{\"Running\":{{json .State.Running}},\"Pid\":{{json .State.Pid}}},\"Mounts\":{{json .Mounts}},\"HostConfig\":{\"Memory\":{{json .HostConfig.Memory}},\"MemorySwap\":{{json .HostConfig.MemorySwap}},\"PidsLimit\":{{json .HostConfig.PidsLimit}},\"NanoCpus\":{{json .HostConfig.NanoCpus}}}}",
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "0000000000000000000000000000000000000000000000000000000000000000"
+  ],
+  "stopped": [
+    "inspect",
+    "--format",
+    "{\"Id\":{{json .Id}},\"Name\":{{json .Name}},\"Image\":{{json .Image}},\"Config\":{\"Labels\":{{json .Config.Labels}}},\"State\":{\"Running\":{{json .State.Running}},\"Pid\":{{json .State.Pid}},\"Status\":{{json .State.Status}},\"StartedAt\":{{json .State.StartedAt}},\"Paused\":{{json .State.Paused}},\"Restarting\":{{json .State.Restarting}},\"Dead\":{{json .State.Dead}}},\"Mounts\":{{json .Mounts}},\"HostConfig\":{\"Memory\":{{json .HostConfig.Memory}},\"MemorySwap\":{{json .HostConfig.MemorySwap}},\"PidsLimit\":{{json .HostConfig.PidsLimit}},\"NanoCpus\":{{json .HostConfig.NanoCpus}}}}",
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  ]
+}

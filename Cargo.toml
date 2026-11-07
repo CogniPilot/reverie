@@ -10,17 +10,26 @@ members = [
     "crates/reverie-application",
     "crates/reverie-routes",
     "crates/reverie-worker-client",
+    "crates/reverie-worker-child",
+    "crates/reverie-nix-store-prepare",
+    "crates/reverie-memory-cli",
     "crates/reverie-front",
-    "crates/reverie-diagnostics",
     "crates/reverie-http",
     "crates/reverie-ops-cli",
+    "crates/reverie-mcp-cli",
+    "crates/reverie-python-regex",
+    "crates/reverie-memory-capsule",
+    "crates/reverie-diagnostics",
+    "crates/reverie-deployment",
     "crates/reverie-namegate",
     "crates/reverie-observations",
     "crates/reverie-voice-ci",
     "crates/reverie-commit-policy",
+    "crates/reverie-routines",
     "crates/reverie-lease-cli",
     "crates/xtask",
 ]
+exclude = ["vendor/rustpython-sre-engine", "vendor/rustpython-wtf8"]
 resolver = "3"
 
 [workspace.package]
@@ -32,26 +41,41 @@ publish = false
 clap = { version = "4.5", features = ["derive"] }
 libc = "0.2"
 nix = { version = "0.31.3", default-features = false }
-rustls = { version = "0.23", default-features = false, features = ["std", "ring", "tls12"] }
-tokio-rustls = { version = "0.26.6", default-features = false, features = ["ring", "tls12"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["raw_value", "float_roundtrip"] }
 toml = "0.9"
 sha2 = "0.10"
+libyaml-safer = "=0.3.0"
+regex-lite = "=0.1.9"
+blake2 = "0.10.6"
+unicode_names2 = "=1.2.2"
+rustpython-sre_engine = { path = "vendor/rustpython-sre-engine" }
+rustpython-wtf8 = { path = "vendor/rustpython-wtf8" }
+reverie-python-regex = { path = "crates/reverie-python-regex" }
+rusqlite = { version = "0.41.1", features = ["bundled", "backup"] }
 command-fds = "0.3.3"
 http = "1.4"
+hyper = { version = "1.12", default-features = false, features = ["client", "server", "http1"] }
+hyper-util = { version = "0.1.21", default-features = false, features = ["tokio"] }
+http-body-util = "0.1.5"
 bytes = "1.11"
+tokio = { version = "1.50", default-features = false, features = ["rt", "rt-multi-thread", "time", "net", "io-util", "process", "signal", "sync", "macros"] }
+tokio-rustls = { version = "0.26.6", default-features = false, features = ["ring", "tls12"] }
+base64 = "0.22"
+socket2 = "0.6.5"
+unicode-normalization = "=0.1.26"
+unicode-properties = { version = "=0.1.5", default-features = false, features = ["general-category"] }
+idna = "=1.1.0"
+rustls = { version = "0.23", default-features = false, features = ["std", "ring", "tls12"] }
+rustls-platform-verifier = "0.7.1"
 reverie-http = { path = "crates/reverie-http" }
 getrandom = "=0.2.17"
 uuid = { version = "=1.18.1", default-features = false }
-hyper = { version = "1.12", default-features = false, features = ["client", "http1"] }
-hyper-util = { version = "0.1.21", default-features = false, features = ["tokio"] }
-http-body-util = "0.1.5"
-tokio = { version = "1.50", default-features = false, features = ["rt", "rt-multi-thread", "time", "net", "io-util", "process", "signal", "sync", "macros"] }
 reverie-core = { path = "crates/reverie-core" }
 reverie-contracts = { path = "crates/reverie-contracts" }
 reverie-store = { path = "crates/reverie-store" }
 reverie-host = { path = "crates/reverie-host" }
+reverie-application = { path = "crates/reverie-application" }
 reverie-diagnostics = { path = "crates/reverie-diagnostics" }
 
 # Derived from CogniPilot/rumoca 0bab7e08c42dced38488abd298a4b9bb77d2b0cc.

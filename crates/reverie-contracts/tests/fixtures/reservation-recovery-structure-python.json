@@ -1,0 +1,285 @@
+[
+  {
+    "name": "missing-employees",
+    "company": {},
+    "outcome": "structural",
+    "legacyException": "KeyError",
+    "detail": "'employees'"
+  },
+  {
+    "name": "root-array",
+    "company": [],
+    "outcome": "structural",
+    "legacyException": "TypeError",
+    "detail": "list indices must be integers or slices, not str"
+  },
+  {
+    "name": "root-null",
+    "company": null,
+    "outcome": "structural",
+    "legacyException": "TypeError",
+    "detail": "'NoneType' object is not subscriptable"
+  },
+  {
+    "name": "noniterable-null",
+    "company": {
+      "employees": null
+    },
+    "outcome": "structural",
+    "legacyException": "TypeError",
+    "detail": "'NoneType' object is not iterable"
+  },
+  {
+    "name": "noniterable-bool",
+    "company": {
+      "employees": false
+    },
+    "outcome": "structural",
+    "legacyException": "TypeError",
+    "detail": "'bool' object is not iterable"
+  },
+  {
+    "name": "noniterable-int",
+    "company": {
+      "employees": 3
+    },
+    "outcome": "structural",
+    "legacyException": "TypeError",
+    "detail": "'int' object is not iterable"
+  },
+  {
+    "name": "noniterable-float",
+    "company": {
+      "employees": 3.0
+    },
+    "outcome": "structural",
+    "legacyException": "TypeError",
+    "detail": "'float' object is not iterable"
+  },
+  {
+    "name": "row-null",
+    "company": {
+      "employees": [
+        null
+      ]
+    },
+    "outcome": "structural",
+    "legacyException": "AttributeError",
+    "detail": "'NoneType' object has no attribute 'get'"
+  },
+  {
+    "name": "row-bool",
+    "company": {
+      "employees": [
+        false
+      ]
+    },
+    "outcome": "structural",
+    "legacyException": "AttributeError",
+    "detail": "'bool' object has no attribute 'get'"
+  },
+  {
+    "name": "row-int",
+    "company": {
+      "employees": [
+        3
+      ]
+    },
+    "outcome": "structural",
+    "legacyException": "AttributeError",
+    "detail": "'int' object has no attribute 'get'"
+  },
+  {
+    "name": "row-array",
+    "company": {
+      "employees": [
+        []
+      ]
+    },
+    "outcome": "structural",
+    "legacyException": "AttributeError",
+    "detail": "'list' object has no attribute 'get'"
+  },
+  {
+    "name": "row-text",
+    "company": {
+      "employees": [
+        ""
+      ]
+    },
+    "outcome": "structural",
+    "legacyException": "AttributeError",
+    "detail": "'str' object has no attribute 'get'"
+  },
+  {
+    "name": "empty-dict",
+    "company": {
+      "employees": {}
+    },
+    "outcome": "unavailable"
+  },
+  {
+    "name": "empty-text",
+    "company": {
+      "employees": ""
+    },
+    "outcome": "unavailable"
+  },
+  {
+    "name": "empty-array",
+    "company": {
+      "employees": []
+    },
+    "outcome": "unavailable"
+  },
+  {
+    "name": "empty-row",
+    "company": {
+      "employees": [
+        {}
+      ]
+    },
+    "outcome": "unavailable"
+  },
+  {
+    "name": "nonempty-dict",
+    "company": {
+      "employees": {
+        "key": 1
+      }
+    },
+    "outcome": "structural",
+    "legacyException": "AttributeError",
+    "detail": "'str' object has no attribute 'get'"
+  },
+  {
+    "name": "nonempty-text",
+    "company": {
+      "employees": "x"
+    },
+    "outcome": "structural",
+    "legacyException": "AttributeError",
+    "detail": "'str' object has no attribute 'get'"
+  },
+  {
+    "name": "matched-before-bad-row",
+    "company": {
+      "employees": [
+        {
+          "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          "owner": "fixture-owner",
+          "sessionId": "11111111-2222-3333-4444-555555555555",
+          "sessionGeneration": 1,
+          "desiredRunning": true,
+          "onVacation": false
+        },
+        null
+      ]
+    },
+    "outcome": "unavailable"
+  },
+  {
+    "name": "bad-row-before-matched",
+    "company": {
+      "employees": [
+        null,
+        {
+          "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          "owner": "fixture-owner",
+          "sessionId": "11111111-2222-3333-4444-555555555555",
+          "sessionGeneration": 1,
+          "desiredRunning": true,
+          "onVacation": false
+        }
+      ]
+    },
+    "outcome": "structural",
+    "legacyException": "AttributeError",
+    "detail": "'NoneType' object has no attribute 'get'"
+  },
+  {
+    "name": "generation-missing",
+    "company": {
+      "employees": [
+        {
+          "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          "owner": "fixture-owner",
+          "sessionId": "11111111-2222-3333-4444-555555555555",
+          "desiredRunning": true,
+          "onVacation": false
+        }
+      ]
+    },
+    "outcome": "unavailable"
+  },
+  {
+    "name": "generation-zero",
+    "company": {
+      "employees": [
+        {
+          "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          "owner": "fixture-owner",
+          "sessionId": "11111111-2222-3333-4444-555555555555",
+          "sessionGeneration": 0,
+          "desiredRunning": true,
+          "onVacation": false
+        }
+      ]
+    },
+    "outcome": "unavailable"
+  },
+  {
+    "name": "generation-bool",
+    "company": {
+      "employees": [
+        {
+          "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          "owner": "fixture-owner",
+          "sessionId": "11111111-2222-3333-4444-555555555555",
+          "sessionGeneration": false,
+          "desiredRunning": true,
+          "onVacation": false
+        }
+      ]
+    },
+    "outcome": "unavailable"
+  },
+  {
+    "name": "stopped-owner-intent",
+    "company": {
+      "employees": [
+        {
+          "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          "owner": "fixture-owner",
+          "sessionId": "11111111-2222-3333-4444-555555555555",
+          "sessionGeneration": 1,
+          "desiredRunning": false,
+          "onVacation": false
+        }
+      ]
+    },
+    "outcome": "unavailable"
+  },
+  {
+    "name": "missing-file",
+    "company": "MISSING_OWNED_FILE",
+    "outcome": "unavailable"
+  },
+  {
+    "name": "matched-missing-session",
+    "company": {
+      "employees": [
+        {
+          "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          "owner": "fixture-owner",
+          "sessionGeneration": 1,
+          "desiredRunning": true,
+          "onVacation": false
+        }
+      ]
+    },
+    "outcome": "structural",
+    "legacyException": "KeyError",
+    "detail": "'sessionId'"
+  }
+]

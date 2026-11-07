@@ -1,6 +1,8 @@
 use super::{IdentityError, IdentityFault, Result, finalized, need};
 use crate::private_fs::{self, CloseRole, Stamp};
-use reverie_contracts::storage_identity::{Metadata, decode_metadata};
+use reverie_contracts::storage_identity::{
+    IdentityDataError, Metadata, OrderedMetadata, decode_metadata, decode_ordered_metadata,
+};
 use std::ffi::OsStr;
 use std::fs::{self, File};
 use std::io::{self, Read};
@@ -46,12 +48,31 @@ pub fn canonical(path: &Path) -> Result<PathBuf> {
 /// Read owned, single-link, non-group/world-writable regular metadata. This is
 /// deliberately distinct from the profile store's mode0600/euid-only contract.
 pub fn read_metadata(path: &Path, uid: u32, maximum: usize) -> Result<Metadata> {
+    read_with(path, uid, maximum, decode_metadata)
+}
+/// The same custody and checked-close owner with a fixed ordered-data parser;
+/// callers cannot supply a parser callback or disable any filesystem checks.
+pub fn read_ordered_metadata(path: &Path, uid: u32, maximum: usize) -> Result<OrderedMetadata> {
+    read_with(path, uid, maximum, decode_ordered_metadata)
+}
+fn read_with<T>(
+    path: &Path,
+    uid: u32,
+    maximum: usize,
+    parse: fn(&[u8]) -> std::result::Result<T, IdentityDataError>,
+) -> Result<T> {
     let path = canonical(path)?;
     let mut file = open_read(&path)?;
-    let value = read_current(&mut file, &path, uid, maximum);
+    let value = read_current(&mut file, &path, uid, maximum, parse);
     finalized(value, private_fs::close(file, CloseRole::Data, &path))
 }
-fn read_current(file: &mut File, path: &Path, uid: u32, maximum: usize) -> Result<Metadata> {
+fn read_current<T>(
+    file: &mut File,
+    path: &Path,
+    uid: u32,
+    maximum: usize,
+    parse: fn(&[u8]) -> std::result::Result<T, IdentityDataError>,
+) -> Result<T> {
     let before = file.metadata()?;
     need(
         before.is_file()
@@ -80,7 +101,7 @@ fn read_current(file: &mut File, path: &Path, uid: u32, maximum: usize) -> Resul
             && Stamp::from_metadata(&after) == Stamp::from_metadata(&named),
         IdentityFault::MetadataChanged,
     )?;
-    Ok(decode_metadata(&bytes)?)
+    Ok(parse(&bytes)?)
 }
 #[cfg(test)]
 fn tests_hit(point: super::tests::Point, path: &Path) -> Result<()> {

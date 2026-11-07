@@ -73,6 +73,33 @@ fn help_invalid_arguments_and_invalid_profile_do_not_create_outputs() {
     assert!(!tree.0.join("task-perf-seccomp.json").exists());
     assert!(!tree.0.join("worker-perf-profile.json").exists());
 }
+
+#[test]
+fn read_only_verification_refuses_mixed_modes_and_bad_manifest_without_writing() {
+    let tree = Tree::new();
+    let manifest = tree.0.join("worker-perf-profile.json");
+    let original = b"{\"version\":1,\"purpose\":\"foreign\"}";
+    fs::write(&manifest, original).unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_reverie-policy-artifacts"))
+        .arg("--verify-manifest")
+        .arg(&manifest)
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty());
+    assert_eq!(fs::read(&manifest).unwrap(), original);
+    assert!(!tree.0.join("task-perf-seccomp.json").exists());
+    assert_eq!(
+        tree.command()
+            .arg("--verify-manifest")
+            .arg(&manifest)
+            .status()
+            .unwrap()
+            .code(),
+        Some(2)
+    );
+    assert_eq!(fs::read(&manifest).unwrap(), original);
+}
 #[cfg(unix)]
 #[test]
 fn existing_output_symlink_and_manifest_are_not_followed_or_replaced() {

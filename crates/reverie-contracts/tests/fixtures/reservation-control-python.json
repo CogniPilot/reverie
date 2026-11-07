@@ -1,0 +1,291 @@
+[
+  {
+    "name": "baseline",
+    "config": "{\"resourceReservations\": {\"directory\": \"/owned/control\", \"companyId\": \"11111111-2222-4333-8444-555555555555\", \"poolId\": \"22222222-2222-4333-8444-555555555555\", \"ownerScopeDigest\": \"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\", \"hostReserveMiB\": 1}, \"stateRoot\": \"/owned/state\", \"uid\": 1000, \"deployment\": \"office\", \"image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"budgetMode\": \"admission\", \"memoryMiB\": 512, \"pidsLimit\": 128, \"cpus\": 0, \"poolMemoryMiB\": 2048, \"poolTasksMax\": 1024, \"opaque\": {\"image\": \"nested-kept\", \"text\": \"\\u4e2d\\ud800\\ud83d\\ude00\", \"zero\": -0.0}}",
+    "marker": "{\"schema\": \"reverie-resource-control-v1\", \"state\": \"READY\", \"option\": {\"directory\": \"/owned/control\", \"companyId\": \"11111111-2222-4333-8444-555555555555\", \"poolId\": \"22222222-2222-4333-8444-555555555555\", \"ownerScopeDigest\": \"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\", \"hostReserveMiB\": 1}, \"directories\": {\".\": [1, 2], \"profiles\": [1, 3], \"operations\": [1, 4]}, \"admissionLock\": [1, 5], \"stateDirectory\": [1, 6], \"locks\": {\"profiles\": [1, 7], \"operations\": [1, 8]}, \"configurationDigest\": \"e82c13da7ba95165a08d159f8b3ddd561920d9ba8572fe94e5b50b214ff53ccd\"}",
+    "error": null,
+    "domain": "e82c13da7ba95165a08d159f8b3ddd561920d9ba8572fe94e5b50b214ff53ccd",
+    "order": [
+      ".",
+      "profiles",
+      "operations"
+    ]
+  },
+  {
+    "name": "order-.,profiles,operations",
+    "config": "{\"resourceReservations\": {\"directory\": \"/owned/control\", \"companyId\": \"11111111-2222-4333-8444-555555555555\", \"poolId\": \"22222222-2222-4333-8444-555555555555\", \"ownerScopeDigest\": \"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\", \"hostReserveMiB\": 1}, \"stateRoot\": \"/owned/state\", \"uid\": 1000, \"deployment\": \"office\", \"image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"budgetMode\": \"admission\", \"memoryMiB\": 512, \"pidsLimit\": 128, \"cpus\": 0, \"poolMemoryMiB\": 2048, \"poolTasksMax\": 1024, \"opaque\": {\"image\": \"nested-kept\", \"text\": \"\\u4e2d\\ud800\\ud83d\\ude00\", \"zero\": -0.0}}",
+    "marker": "{\"schema\": \"reverie-resource-control-v1\", \"state\": \"READY\", \"option\": {\"directory\": \"/owned/control\", \"companyId\": \"11111111-2222-4333-8444-555555555555\", \"poolId\": \"22222222-2222-4333-8444-555555555555\", \"ownerScopeDigest\": \"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\", \"hostReserveMiB\": 1}, \"directories\": {\".\": [1, 2], \"profiles\": [1, 3], \"operations\": [1, 4]}, \"admissionLock\": [1, 5], \"stateDirectory\": [1, 6], \"locks\": {\"profiles\": [1, 7], \"operations\": [1, 8]}, \"configurationDigest\": \"e82c13da7ba95165a08d159f8b3ddd561920d9ba8572fe94e5b50b214ff53ccd\"}",
+    "error": null,
+    "domain": "e82c13da7ba95165a08d159f8b3ddd561920d9ba8572fe94e5b50b214ff53ccd",
+    "order": [
+      ".",
+      "profiles",
+      "operations"
+    ]
+  },
+  {
+    "name": "order-.,operations,profiles",
+    "config": "{\"resourceReservations\": {\"directory\": \"/owned/control\", \"companyId\": \"11111111-2222-4333-8444-555555555555\", \"poolId\": \"22222222-2222-4333-8444-555555555555\", \"ownerScopeDigest\": \"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\", \"hostReserveMiB\": 1}, \"stateRoot\": \"/owned/state\", \"uid\": 1000, \"deployment\": \"office\", \"image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"budgetMode\": \"admission\", \"memoryMiB\": 512, \"pidsLimit\": 128, \"cpus\": 0, \"poolMemoryMiB\": 2048, \"poolTasksMax\": 1024, \"opaque\": {\"image\": \"nested-kept\", \"text\": \"\\u4e2d\\ud800\\ud83d\\ude00\", \"zero\": -0.0}}",
+    "marker": "{\"schema\": \"reverie-resource-control-v1\", \"state\": \"READY\", \"option\": {\"directory\": \"/owned/control\", \"companyId\": \"11111111-2222-4333-8444-555555555555\", \"poolId\": \"22222222-2222-4333-8444-555555555555\", \"ownerScopeDigest\": \"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\", \"hostReserveMiB\": 1}, \"directories\": {\".\": [1, 2], \"operations\": [1, 4], \"profiles\": [1, 3]}, \"admissionLock\": [1, 5], \"stateDirectory\": [1, 6], \"locks\": {\"profiles\": [1, 7], \"operations\": [1, 8]}, \"configurationDigest\": \"e82c13da7ba95165a08d159f8b3ddd561920d9ba8572fe94e5b50b214ff53ccd\"}",
+    "error": null,
+    "domain": "e82c13da7ba95165a08d159f8b3ddd561920d9ba8572fe94e5b50b214ff53ccd",
+    "order": [
+      ".",
+      "operations",
+      "profiles"
+    ]
+  },
+  {
+    "name": "order-profiles,.,operations",
+    "config": "{\"resourceReservations\": {\"directory\": \"/owned/control\", \"companyId\": \"11111111-2222-4333-8444-555555555555\", \"poolId\": \"22222222-2222-4333-8444-555555555555\", \"ownerScopeDigest\": \"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\", \"hostReserveMiB\": 1}, \"stateRoot\": \"/owned/state\", \"uid\": 1000, \"deployment\": \"office\", \"image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"budgetMode\": \"admission\", \"memoryMiB\": 512, \"pidsLimit\": 128, \"cpus\": 0, \"poolMemoryMiB\": 2048, \"poolTasksMax\": 1024, \"opaque\": {\"image\": \"nested-kept\", \"text\": \"\\u4e2d\\ud800\\ud83d\\ude00\", \"zero\": -0.0}}",
+    "marker": "{\"schema\": \"reverie-resource-control-v1\", \"state\": \"READY\", \"option\": {\"directory\": \"/owned/control\", \"companyId\": \"11111111-2222-4333-8444-555555555555\", \"poolId\": \"22222222-2222-4333-8444-555555555555\", \"ownerScopeDigest\": \"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\", \"hostReserveMiB\": 1}, \"directories\": {\"profiles\": [1, 3], \".\": [1, 2], \"operations\": [1, 4]}, \"admissionLock\": [1, 5], \"stateDirectory\": [1, 6], \"locks\": {\"profiles\": [1, 7], \"operations\": [1, 8]}, \"configurationDigest\": \"e82c13da7ba95165a08d159f8b3ddd561920d9ba8572fe94e5b50b214ff53ccd\"}",
+    "error": null,
+    "domain": "e82c13da7ba95165a08d159f8b3ddd561920d9ba8572fe94e5b50b214ff53ccd",
+    "order": [
+      "profiles",
+      ".",
+      "operations"
+    ]
+  },
+  {
+    "name": "order-profiles,operations,.",
+    "config": "{\"resourceReservations\": {\"directory\": \"/owned/control\", \"companyId\": \"11111111-2222-4333-8444-555555555555\", \"poolId\": \"22222222-2222-4333-8444-555555555555\", \"ownerScopeDigest\": \"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\", \"hostReserveMiB\": 1}, \"stateRoot\": \"/owned/state\", \"uid\": 1000, \"deployment\": \"office\", \"image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"budgetMode\": \"admission\", \"memoryMiB\": 512, \"pidsLimit\": 128, \"cpus\": 0, \"poolMemoryMiB\": 2048, \"poolTasksMax\": 1024, \"opaque\": {\"image\": \"nested-kept\", \"text\": \"\\u4e2d\\ud800\\ud83d\\ude00\", \"zero\": -0.0}}",
+    "marker": "{\"schema\": \"reverie-resource-control-v1\", \"state\": \"READY\", \"option\": {\"directory\": \"/owned/control\", \"companyId\": \"11111111-2222-4333-8444-555555555555\", \"poolId\": \"22222222-2222-4333-8444-555555555555\", \"ownerScopeDigest\": \"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\", \"hostReserveMiB\": 1}, \"directories\": {\"profiles\": [1, 3], \"operations\": [1, 4], \".\": [1, 2]}, \"admissionLock\": [1, 5], \"stateDirectory\": [1, 6], \"locks\": {\"profiles\": [1, 7], \"operations\": [1, 8]}, \"configurationDigest\": \"e82c13da7ba95165a08d159f8b3ddd561920d9ba8572fe94e5b50b214ff53ccd\"}",
+    "error": null,
+    "domain": "e82c13da7ba95165a08d159f8b3ddd561920d9ba8572fe94e5b50b214ff53ccd",
+    "order": [
+      "profiles",
+      "operations",
+      "."
+    ]
+  },
+  {
+    "name": "order-operations,.,profiles",
+    "config": "{\"resourceReservations\": {\"directory\": \"/owned/control\", \"companyId\": \"11111111-2222-4333-8444-555555555555\", \"poolId\": \"22222222-2222-4333-8444-555555555555\", \"ownerScopeDigest\": \"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\", \"hostReserveMiB\": 1}, \"stateRoot\": \"/owned/state\", \"uid\": 1000, \"deployment\": \"office\", \"image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"budgetMode\": \"admission\", \"memoryMiB\": 512, \"pidsLimit\": 128, \"cpus\": 0, \"poolMemoryMiB\": 2048, \"poolTasksMax\": 1024, \"opaque\": {\"image\": \"nested-kept\", \"text\": \"\\u4e2d\\ud800\\ud83d\\ude00\", \"zero\": -0.0}}",
+    "marker": "{\"schema\": \"reverie-resource-control-v1\", \"state\": \"READY\", \"option\": {\"directory\": \"/owned/control\", \"companyId\": \"11111111-2222-4333-8444-555555555555\", \"poolId\": \"22222222-2222-4333-8444-555555555555\", \"ownerScopeDigest\": \"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\", \"hostReserveMiB\": 1}, \"directories\": {\"operations\": [1, 4], \".\": [1, 2], \"profiles\": [1, 3]}, \"admissionLock\": [1, 5], \"stateDirectory\": [1, 6], \"locks\": {\"profiles\": [1, 7], \"operations\": [1, 8]}, \"configurationDigest\": \"e82c13da7ba95165a08d159f8b3ddd561920d9ba8572fe94e5b50b214ff53ccd\"}",
+    "error": null,
+    "domain": "e82c13da7ba95165a08d159f8b3ddd561920d9ba8572fe94e5b50b214ff53ccd",
+    "order": [
+      "operations",
+      ".",
+      "profiles"
+    ]
+  },
+  {
+    "name": "order-operations,profiles,.",
+    "config": "{\"resourceReservations\": {\"directory\": \"/owned/control\", \"companyId\": \"11111111-2222-4333-8444-555555555555\", \"poolId\": \"22222222-2222-4333-8444-555555555555\", \"ownerScopeDigest\": \"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\", \"hostReserveMiB\": 1}, \"stateRoot\": \"/owned/state\", \"uid\": 1000, \"deployment\": \"office\", \"image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"budgetMode\": \"admission\", \"memoryMiB\": 512, \"pidsLimit\": 128, \"cpus\": 0, \"poolMemoryMiB\": 2048, \"poolTasksMax\": 1024, \"opaque\": {\"image\": \"nested-kept\", \"text\": \"\\u4e2d\\ud800\\ud83d\\ude00\", \"zero\": -0.0}}",
+    "marker": "{\"schema\": \"reverie-resource-control-v1\", \"state\": \"READY\", \"option\": {\"directory\": \"/owned/control\", \"companyId\": \"11111111-2222-4333-8444-555555555555\", \"poolId\": \"22222222-2222-4333-8444-555555555555\", \"ownerScopeDigest\": \"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\", \"hostReserveMiB\": 1}, \"directories\": {\"operations\": [1, 4], \"profiles\": [1, 3], \".\": [1, 2]}, \"admissionLock\": [1, 5], \"stateDirectory\": [1, 6], \"locks\": {\"profiles\": [1, 7], \"operations\": [1, 8]}, \"configurationDigest\": \"e82c13da7ba95165a08d159f8b3ddd561920d9ba8572fe94e5b50b214ff53ccd\"}",
+    "error": null,
+    "domain": "e82c13da7ba95165a08d159f8b3ddd561920d9ba8572fe94e5b50b214ff53ccd",
+    "order": [
+      "operations",
+      "profiles",
+      "."
+    ]
+  },
+  {
+    "name": "option-bool-equality",
+    "config": "{\"resourceReservations\": {\"directory\": \"/owned/control\", \"companyId\": \"11111111-2222-4333-8444-555555555555\", \"poolId\": \"22222222-2222-4333-8444-555555555555\", \"ownerScopeDigest\": \"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\", \"hostReserveMiB\": 1}, \"stateRoot\": \"/owned/state\", \"uid\": 1000, \"deployment\": \"office\", \"image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"budgetMode\": \"admission\", \"memoryMiB\": 512, \"pidsLimit\": 128, \"cpus\": 0, \"poolMemoryMiB\": 2048, \"poolTasksMax\": 1024, \"opaque\": {\"image\": \"nested-kept\", \"text\": \"\\u4e2d\\ud800\\ud83d\\ude00\", \"zero\": -0.0}}",
+    "marker": "{\"schema\": \"reverie-resource-control-v1\", \"state\": \"READY\", \"option\": {\"directory\": \"/owned/control\", \"companyId\": \"11111111-2222-4333-8444-555555555555\", \"poolId\": \"22222222-2222-4333-8444-555555555555\", \"ownerScopeDigest\": \"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\", \"hostReserveMiB\": true}, \"directories\": {\".\": [1, 2], \"profiles\": [1, 3], \"operations\": [1, 4]}, \"admissionLock\": [1, 5], \"stateDirectory\": [1, 6], \"locks\": {\"profiles\": [1, 7], \"operations\": [1, 8]}, \"configurationDigest\": \"e82c13da7ba95165a08d159f8b3ddd561920d9ba8572fe94e5b50b214ff53ccd\"}",
+    "error": null,
+    "domain": "e82c13da7ba95165a08d159f8b3ddd561920d9ba8572fe94e5b50b214ff53ccd",
+    "order": [
+      ".",
+      "profiles",
+      "operations"
+    ]
+  },
+  {
+    "name": "option-float-equality",
+    "config": "{\"resourceReservations\": {\"directory\": \"/owned/control\", \"companyId\": \"11111111-2222-4333-8444-555555555555\", \"poolId\": \"22222222-2222-4333-8444-555555555555\", \"ownerScopeDigest\": \"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\", \"hostReserveMiB\": 1}, \"stateRoot\": \"/owned/state\", \"uid\": 1000, \"deployment\": \"office\", \"image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"budgetMode\": \"admission\", \"memoryMiB\": 512, \"pidsLimit\": 128, \"cpus\": 0, \"poolMemoryMiB\": 2048, \"poolTasksMax\": 1024, \"opaque\": {\"image\": \"nested-kept\", \"text\": \"\\u4e2d\\ud800\\ud83d\\ude00\", \"zero\": -0.0}}",
+    "marker": "{\"schema\": \"reverie-resource-control-v1\", \"state\": \"READY\", \"option\": {\"directory\": \"/owned/control\", \"companyId\": \"11111111-2222-4333-8444-555555555555\", \"poolId\": \"22222222-2222-4333-8444-555555555555\", \"ownerScopeDigest\": \"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\", \"hostReserveMiB\": 1.0}, \"directories\": {\".\": [1, 2], \"profiles\": [1, 3], \"operations\": [1, 4]}, \"admissionLock\": [1, 5], \"stateDirectory\": [1, 6], \"locks\": {\"profiles\": [1, 7], \"operations\": [1, 8]}, \"configurationDigest\": \"e82c13da7ba95165a08d159f8b3ddd561920d9ba8572fe94e5b50b214ff53ccd\"}",
+    "error": null,
+    "domain": "e82c13da7ba95165a08d159f8b3ddd561920d9ba8572fe94e5b50b214ff53ccd",
+    "order": [
+      ".",
+      "profiles",
+      "operations"
+    ]
+  },
+  {
+    "name": "wide-inode-data",
+    "config": "{\"resourceReservations\": {\"directory\": \"/owned/control\", \"companyId\": \"11111111-2222-4333-8444-555555555555\", \"poolId\": \"22222222-2222-4333-8444-555555555555\", \"ownerScopeDigest\": \"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\", \"hostReserveMiB\": 1}, \"stateRoot\": \"/owned/state\", \"uid\": 1000, \"deployment\": \"office\", \"image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"budgetMode\": \"admission\", \"memoryMiB\": 512, \"pidsLimit\": 128, \"cpus\": 0, \"poolMemoryMiB\": 2048, \"poolTasksMax\": 1024, \"opaque\": {\"image\": \"nested-kept\", \"text\": \"\\u4e2d\\ud800\\ud83d\\ude00\", \"zero\": -0.0}}",
+    "marker": "{\"schema\": \"reverie-resource-control-v1\", \"state\": \"READY\", \"option\": {\"directory\": \"/owned/control\", \"companyId\": \"11111111-2222-4333-8444-555555555555\", \"poolId\": \"22222222-2222-4333-8444-555555555555\", \"ownerScopeDigest\": \"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\", \"hostReserveMiB\": 1}, \"directories\": {\".\": [1, 2], \"profiles\": [18446744073709551616, 18446744073709551616], \"operations\": [1, 4]}, \"admissionLock\": [1, 5], \"stateDirectory\": [1, 6], \"locks\": {\"profiles\": [1, 7], \"operations\": [1, 8]}, \"configurationDigest\": \"e82c13da7ba95165a08d159f8b3ddd561920d9ba8572fe94e5b50b214ff53ccd\"}",
+    "error": null,
+    "domain": "e82c13da7ba95165a08d159f8b3ddd561920d9ba8572fe94e5b50b214ff53ccd",
+    "order": [
+      ".",
+      "profiles",
+      "operations"
+    ]
+  },
+  {
+    "name": "directory-bool",
+    "config": "{\"resourceReservations\": {\"directory\": \"/owned/control\", \"companyId\": \"11111111-2222-4333-8444-555555555555\", \"poolId\": \"22222222-2222-4333-8444-555555555555\", \"ownerScopeDigest\": \"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\", \"hostReserveMiB\": 1}, \"stateRoot\": \"/owned/state\", \"uid\": 1000, \"deployment\": \"office\", \"image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"budgetMode\": \"admission\", \"memoryMiB\": 512, \"pidsLimit\": 128, \"cpus\": 0, \"poolMemoryMiB\": 2048, \"poolTasksMax\": 1024, \"opaque\": {\"image\": \"nested-kept\", \"text\": \"\\u4e2d\\ud800\\ud83d\\ude00\", \"zero\": -0.0}}",
+    "marker": "{\"schema\": \"reverie-resource-control-v1\", \"state\": \"READY\", \"option\": {\"directory\": \"/owned/control\", \"companyId\": \"11111111-2222-4333-8444-555555555555\", \"poolId\": \"22222222-2222-4333-8444-555555555555\", \"ownerScopeDigest\": \"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\", \"hostReserveMiB\": 1}, \"directories\": {\".\": [1, 2], \"profiles\": [true, 3], \"operations\": [1, 4]}, \"admissionLock\": [1, 5], \"stateDirectory\": [1, 6], \"locks\": {\"profiles\": [1, 7], \"operations\": [1, 8]}, \"configurationDigest\": \"e82c13da7ba95165a08d159f8b3ddd561920d9ba8572fe94e5b50b214ff53ccd\"}",
+    "error": "RESERVATION_BINDING_SCHEMA",
+    "domain": "e82c13da7ba95165a08d159f8b3ddd561920d9ba8572fe94e5b50b214ff53ccd",
+    "order": [
+      ".",
+      "profiles",
+      "operations"
+    ]
+  },
+  {
+    "name": "lock-negative",
+    "config": "{\"resourceReservations\": {\"directory\": \"/owned/control\", \"companyId\": \"11111111-2222-4333-8444-555555555555\", \"poolId\": \"22222222-2222-4333-8444-555555555555\", \"ownerScopeDigest\": \"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\", \"hostReserveMiB\": 1}, \"stateRoot\": \"/owned/state\", \"uid\": 1000, \"deployment\": \"office\", \"image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"budgetMode\": \"admission\", \"memoryMiB\": 512, \"pidsLimit\": 128, \"cpus\": 0, \"poolMemoryMiB\": 2048, \"poolTasksMax\": 1024, \"opaque\": {\"image\": \"nested-kept\", \"text\": \"\\u4e2d\\ud800\\ud83d\\ude00\", \"zero\": -0.0}}",
+    "marker": "{\"schema\": \"reverie-resource-control-v1\", \"state\": \"READY\", \"option\": {\"directory\": \"/owned/control\", \"companyId\": \"11111111-2222-4333-8444-555555555555\", \"poolId\": \"22222222-2222-4333-8444-555555555555\", \"ownerScopeDigest\": \"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\", \"hostReserveMiB\": 1}, \"directories\": {\".\": [1, 2], \"profiles\": [1, 3], \"operations\": [1, 4]}, \"admissionLock\": [1, 5], \"stateDirectory\": [1, 6], \"locks\": {\"profiles\": [1, -1], \"operations\": [1, 8]}, \"configurationDigest\": \"e82c13da7ba95165a08d159f8b3ddd561920d9ba8572fe94e5b50b214ff53ccd\"}",
+    "error": "RESERVATION_BINDING_SCHEMA",
+    "domain": "e82c13da7ba95165a08d159f8b3ddd561920d9ba8572fe94e5b50b214ff53ccd",
+    "order": [
+      ".",
+      "profiles",
+      "operations"
+    ]
+  },
+  {
+    "name": "directory-extra",
+    "config": "{\"resourceReservations\": {\"directory\": \"/owned/control\", \"companyId\": \"11111111-2222-4333-8444-555555555555\", \"poolId\": \"22222222-2222-4333-8444-555555555555\", \"ownerScopeDigest\": \"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\", \"hostReserveMiB\": 1}, \"stateRoot\": \"/owned/state\", \"uid\": 1000, \"deployment\": \"office\", \"image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"budgetMode\": \"admission\", \"memoryMiB\": 512, \"pidsLimit\": 128, \"cpus\": 0, \"poolMemoryMiB\": 2048, \"poolTasksMax\": 1024, \"opaque\": {\"image\": \"nested-kept\", \"text\": \"\\u4e2d\\ud800\\ud83d\\ude00\", \"zero\": -0.0}}",
+    "marker": "{\"schema\": \"reverie-resource-control-v1\", \"state\": \"READY\", \"option\": {\"directory\": \"/owned/control\", \"companyId\": \"11111111-2222-4333-8444-555555555555\", \"poolId\": \"22222222-2222-4333-8444-555555555555\", \"ownerScopeDigest\": \"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\", \"hostReserveMiB\": 1}, \"directories\": {\".\": [1, 2], \"profiles\": [1, 3], \"operations\": [1, 4], \"other\": [1, 9]}, \"admissionLock\": [1, 5], \"stateDirectory\": [1, 6], \"locks\": {\"profiles\": [1, 7], \"operations\": [1, 8]}, \"configurationDigest\": \"e82c13da7ba95165a08d159f8b3ddd561920d9ba8572fe94e5b50b214ff53ccd\"}",
+    "error": "RESERVATION_BINDING_SCHEMA",
+    "domain": "e82c13da7ba95165a08d159f8b3ddd561920d9ba8572fe94e5b50b214ff53ccd",
+    "order": [
+      ".",
+      "profiles",
+      "operations",
+      "other"
+    ]
+  },
+  {
+    "name": "marker-extra",
+    "config": "{\"resourceReservations\": {\"directory\": \"/owned/control\", \"companyId\": \"11111111-2222-4333-8444-555555555555\", \"poolId\": \"22222222-2222-4333-8444-555555555555\", \"ownerScopeDigest\": \"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\", \"hostReserveMiB\": 1}, \"stateRoot\": \"/owned/state\", \"uid\": 1000, \"deployment\": \"office\", \"image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"budgetMode\": \"admission\", \"memoryMiB\": 512, \"pidsLimit\": 128, \"cpus\": 0, \"poolMemoryMiB\": 2048, \"poolTasksMax\": 1024, \"opaque\": {\"image\": \"nested-kept\", \"text\": \"\\u4e2d\\ud800\\ud83d\\ude00\", \"zero\": -0.0}}",
+    "marker": "{\"schema\": \"reverie-resource-control-v1\", \"state\": \"READY\", \"option\": {\"directory\": \"/owned/control\", \"companyId\": \"11111111-2222-4333-8444-555555555555\", \"poolId\": \"22222222-2222-4333-8444-555555555555\", \"ownerScopeDigest\": \"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\", \"hostReserveMiB\": 1}, \"directories\": {\".\": [1, 2], \"profiles\": [1, 3], \"operations\": [1, 4]}, \"admissionLock\": [1, 5], \"stateDirectory\": [1, 6], \"locks\": {\"profiles\": [1, 7], \"operations\": [1, 8]}, \"configurationDigest\": \"e82c13da7ba95165a08d159f8b3ddd561920d9ba8572fe94e5b50b214ff53ccd\", \"extra\": 1}",
+    "error": "RESERVATION_BINDING_SCHEMA",
+    "domain": "e82c13da7ba95165a08d159f8b3ddd561920d9ba8572fe94e5b50b214ff53ccd",
+    "order": [
+      ".",
+      "profiles",
+      "operations"
+    ]
+  },
+  {
+    "name": "not-ready",
+    "config": "{\"resourceReservations\": {\"directory\": \"/owned/control\", \"companyId\": \"11111111-2222-4333-8444-555555555555\", \"poolId\": \"22222222-2222-4333-8444-555555555555\", \"ownerScopeDigest\": \"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\", \"hostReserveMiB\": 1}, \"stateRoot\": \"/owned/state\", \"uid\": 1000, \"deployment\": \"office\", \"image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"budgetMode\": \"admission\", \"memoryMiB\": 512, \"pidsLimit\": 128, \"cpus\": 0, \"poolMemoryMiB\": 2048, \"poolTasksMax\": 1024, \"opaque\": {\"image\": \"nested-kept\", \"text\": \"\\u4e2d\\ud800\\ud83d\\ude00\", \"zero\": -0.0}}",
+    "marker": "{\"schema\": \"reverie-resource-control-v1\", \"state\": \"PROVISIONING\", \"option\": {\"directory\": \"/owned/control\", \"companyId\": \"11111111-2222-4333-8444-555555555555\", \"poolId\": \"22222222-2222-4333-8444-555555555555\", \"ownerScopeDigest\": \"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\", \"hostReserveMiB\": 1}, \"directories\": {\".\": [1, 2], \"profiles\": [1, 3], \"operations\": [1, 4]}, \"admissionLock\": [1, 5], \"stateDirectory\": [1, 6], \"locks\": {\"profiles\": [1, 7], \"operations\": [1, 8]}, \"configurationDigest\": \"e82c13da7ba95165a08d159f8b3ddd561920d9ba8572fe94e5b50b214ff53ccd\"}",
+    "error": "RESERVATION_CONTROL_NOT_READY",
+    "domain": "e82c13da7ba95165a08d159f8b3ddd561920d9ba8572fe94e5b50b214ff53ccd",
+    "order": [
+      ".",
+      "profiles",
+      "operations"
+    ]
+  },
+  {
+    "name": "wrong-schema",
+    "config": "{\"resourceReservations\": {\"directory\": \"/owned/control\", \"companyId\": \"11111111-2222-4333-8444-555555555555\", \"poolId\": \"22222222-2222-4333-8444-555555555555\", \"ownerScopeDigest\": \"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\", \"hostReserveMiB\": 1}, \"stateRoot\": \"/owned/state\", \"uid\": 1000, \"deployment\": \"office\", \"image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"budgetMode\": \"admission\", \"memoryMiB\": 512, \"pidsLimit\": 128, \"cpus\": 0, \"poolMemoryMiB\": 2048, \"poolTasksMax\": 1024, \"opaque\": {\"image\": \"nested-kept\", \"text\": \"\\u4e2d\\ud800\\ud83d\\ude00\", \"zero\": -0.0}}",
+    "marker": "{\"schema\": \"wrong\", \"state\": \"READY\", \"option\": {\"directory\": \"/owned/control\", \"companyId\": \"11111111-2222-4333-8444-555555555555\", \"poolId\": \"22222222-2222-4333-8444-555555555555\", \"ownerScopeDigest\": \"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\", \"hostReserveMiB\": 1}, \"directories\": {\".\": [1, 2], \"profiles\": [1, 3], \"operations\": [1, 4]}, \"admissionLock\": [1, 5], \"stateDirectory\": [1, 6], \"locks\": {\"profiles\": [1, 7], \"operations\": [1, 8]}, \"configurationDigest\": \"e82c13da7ba95165a08d159f8b3ddd561920d9ba8572fe94e5b50b214ff53ccd\"}",
+    "error": "RESERVATION_CONTROL_NOT_READY",
+    "domain": "e82c13da7ba95165a08d159f8b3ddd561920d9ba8572fe94e5b50b214ff53ccd",
+    "order": [
+      ".",
+      "profiles",
+      "operations"
+    ]
+  },
+  {
+    "name": "domain-changed",
+    "config": "{\"resourceReservations\": {\"directory\": \"/owned/control\", \"companyId\": \"11111111-2222-4333-8444-555555555555\", \"poolId\": \"22222222-2222-4333-8444-555555555555\", \"ownerScopeDigest\": \"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\", \"hostReserveMiB\": 1}, \"stateRoot\": \"/owned/state\", \"uid\": 1000, \"deployment\": \"office\", \"image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"budgetMode\": \"admission\", \"memoryMiB\": 512, \"pidsLimit\": 128, \"cpus\": 0, \"poolMemoryMiB\": 2048, \"poolTasksMax\": 1024, \"opaque\": {\"image\": \"nested-kept\", \"text\": \"\\u4e2d\\ud800\\ud83d\\ude00\", \"zero\": -0.0}}",
+    "marker": "{\"schema\": \"reverie-resource-control-v1\", \"state\": \"READY\", \"option\": {\"directory\": \"/owned/control\", \"companyId\": \"11111111-2222-4333-8444-555555555555\", \"poolId\": \"22222222-2222-4333-8444-555555555555\", \"ownerScopeDigest\": \"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\", \"hostReserveMiB\": 1}, \"directories\": {\".\": [1, 2], \"profiles\": [1, 3], \"operations\": [1, 4]}, \"admissionLock\": [1, 5], \"stateDirectory\": [1, 6], \"locks\": {\"profiles\": [1, 7], \"operations\": [1, 8]}, \"configurationDigest\": \"0000000000000000000000000000000000000000000000000000000000000000\"}",
+    "error": "RESERVATION_DOMAIN_CHANGED",
+    "domain": "e82c13da7ba95165a08d159f8b3ddd561920d9ba8572fe94e5b50b214ff53ccd",
+    "order": [
+      ".",
+      "profiles",
+      "operations"
+    ]
+  },
+  {
+    "name": "option-extra",
+    "config": "{\"resourceReservations\": {\"directory\": \"/owned/control\", \"companyId\": \"11111111-2222-4333-8444-555555555555\", \"poolId\": \"22222222-2222-4333-8444-555555555555\", \"ownerScopeDigest\": \"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\", \"hostReserveMiB\": 1}, \"stateRoot\": \"/owned/state\", \"uid\": 1000, \"deployment\": \"office\", \"image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"budgetMode\": \"admission\", \"memoryMiB\": 512, \"pidsLimit\": 128, \"cpus\": 0, \"poolMemoryMiB\": 2048, \"poolTasksMax\": 1024, \"opaque\": {\"image\": \"nested-kept\", \"text\": \"\\u4e2d\\ud800\\ud83d\\ude00\", \"zero\": -0.0}}",
+    "marker": "{\"schema\": \"reverie-resource-control-v1\", \"state\": \"READY\", \"option\": {\"directory\": \"/owned/control\", \"companyId\": \"11111111-2222-4333-8444-555555555555\", \"poolId\": \"22222222-2222-4333-8444-555555555555\", \"ownerScopeDigest\": \"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\", \"hostReserveMiB\": 1, \"extra\": 1}, \"directories\": {\".\": [1, 2], \"profiles\": [1, 3], \"operations\": [1, 4]}, \"admissionLock\": [1, 5], \"stateDirectory\": [1, 6], \"locks\": {\"profiles\": [1, 7], \"operations\": [1, 8]}, \"configurationDigest\": \"e82c13da7ba95165a08d159f8b3ddd561920d9ba8572fe94e5b50b214ff53ccd\"}",
+    "error": "RESERVATION_CONTROL_NOT_READY",
+    "domain": "e82c13da7ba95165a08d159f8b3ddd561920d9ba8572fe94e5b50b214ff53ccd",
+    "order": [
+      ".",
+      "profiles",
+      "operations"
+    ]
+  },
+  {
+    "name": "not-ready-before-bad-inode",
+    "config": "{\"resourceReservations\": {\"directory\": \"/owned/control\", \"companyId\": \"11111111-2222-4333-8444-555555555555\", \"poolId\": \"22222222-2222-4333-8444-555555555555\", \"ownerScopeDigest\": \"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\", \"hostReserveMiB\": 1}, \"stateRoot\": \"/owned/state\", \"uid\": 1000, \"deployment\": \"office\", \"image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"budgetMode\": \"admission\", \"memoryMiB\": 512, \"pidsLimit\": 128, \"cpus\": 0, \"poolMemoryMiB\": 2048, \"poolTasksMax\": 1024, \"opaque\": {\"image\": \"nested-kept\", \"text\": \"\\u4e2d\\ud800\\ud83d\\ude00\", \"zero\": -0.0}}",
+    "marker": "{\"schema\": \"reverie-resource-control-v1\", \"state\": \"PROVISIONING\", \"option\": {\"directory\": \"/owned/control\", \"companyId\": \"11111111-2222-4333-8444-555555555555\", \"poolId\": \"22222222-2222-4333-8444-555555555555\", \"ownerScopeDigest\": \"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\", \"hostReserveMiB\": 1}, \"directories\": {\".\": [1, 2], \"profiles\": [true, 1], \"operations\": [1, 4]}, \"admissionLock\": [1, 5], \"stateDirectory\": [1, 6], \"locks\": {\"profiles\": [1, 7], \"operations\": [1, 8]}, \"configurationDigest\": \"e82c13da7ba95165a08d159f8b3ddd561920d9ba8572fe94e5b50b214ff53ccd\"}",
+    "error": "RESERVATION_CONTROL_NOT_READY",
+    "domain": "e82c13da7ba95165a08d159f8b3ddd561920d9ba8572fe94e5b50b214ff53ccd",
+    "order": [
+      ".",
+      "profiles",
+      "operations"
+    ]
+  },
+  {
+    "name": "ignored-image",
+    "config": "{\"resourceReservations\": {\"directory\": \"/owned/control\", \"companyId\": \"11111111-2222-4333-8444-555555555555\", \"poolId\": \"22222222-2222-4333-8444-555555555555\", \"ownerScopeDigest\": \"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\", \"hostReserveMiB\": 1}, \"stateRoot\": \"/owned/state\", \"uid\": 1000, \"deployment\": \"office\", \"image\": \"other-image\", \"budgetMode\": \"admission\", \"memoryMiB\": 512, \"pidsLimit\": 128, \"cpus\": 0, \"poolMemoryMiB\": 2048, \"poolTasksMax\": 1024, \"opaque\": {\"image\": \"nested-kept\", \"text\": \"\\u4e2d\\ud800\\ud83d\\ude00\", \"zero\": -0.0}}",
+    "marker": "{\"schema\": \"reverie-resource-control-v1\", \"state\": \"READY\", \"option\": {\"directory\": \"/owned/control\", \"companyId\": \"11111111-2222-4333-8444-555555555555\", \"poolId\": \"22222222-2222-4333-8444-555555555555\", \"ownerScopeDigest\": \"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\", \"hostReserveMiB\": 1}, \"directories\": {\".\": [1, 2], \"profiles\": [1, 3], \"operations\": [1, 4]}, \"admissionLock\": [1, 5], \"stateDirectory\": [1, 6], \"locks\": {\"profiles\": [1, 7], \"operations\": [1, 8]}, \"configurationDigest\": \"e82c13da7ba95165a08d159f8b3ddd561920d9ba8572fe94e5b50b214ff53ccd\"}",
+    "error": null,
+    "domain": "e82c13da7ba95165a08d159f8b3ddd561920d9ba8572fe94e5b50b214ff53ccd",
+    "order": [
+      ".",
+      "profiles",
+      "operations"
+    ]
+  },
+  {
+    "name": "ignored-nan-memory",
+    "config": "{\"resourceReservations\": {\"directory\": \"/owned/control\", \"companyId\": \"11111111-2222-4333-8444-555555555555\", \"poolId\": \"22222222-2222-4333-8444-555555555555\", \"ownerScopeDigest\": \"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\", \"hostReserveMiB\": 1}, \"stateRoot\": \"/owned/state\", \"uid\": 1000, \"deployment\": \"office\", \"image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"budgetMode\": \"admission\", \"memoryMiB\": NaN, \"pidsLimit\": 128, \"cpus\": 0, \"poolMemoryMiB\": 2048, \"poolTasksMax\": 1024, \"opaque\": {\"image\": \"nested-kept\", \"text\": \"\\u4e2d\\ud800\\ud83d\\ude00\", \"zero\": -0.0}}",
+    "marker": "{\"schema\": \"reverie-resource-control-v1\", \"state\": \"READY\", \"option\": {\"directory\": \"/owned/control\", \"companyId\": \"11111111-2222-4333-8444-555555555555\", \"poolId\": \"22222222-2222-4333-8444-555555555555\", \"ownerScopeDigest\": \"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\", \"hostReserveMiB\": 1}, \"directories\": {\".\": [1, 2], \"profiles\": [1, 3], \"operations\": [1, 4]}, \"admissionLock\": [1, 5], \"stateDirectory\": [1, 6], \"locks\": {\"profiles\": [1, 7], \"operations\": [1, 8]}, \"configurationDigest\": \"e82c13da7ba95165a08d159f8b3ddd561920d9ba8572fe94e5b50b214ff53ccd\"}",
+    "error": null,
+    "domain": "e82c13da7ba95165a08d159f8b3ddd561920d9ba8572fe94e5b50b214ff53ccd",
+    "order": [
+      ".",
+      "profiles",
+      "operations"
+    ]
+  },
+  {
+    "name": "included-gpu",
+    "config": "{\"resourceReservations\": {\"directory\": \"/owned/control\", \"companyId\": \"11111111-2222-4333-8444-555555555555\", \"poolId\": \"22222222-2222-4333-8444-555555555555\", \"ownerScopeDigest\": \"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\", \"hostReserveMiB\": 1}, \"stateRoot\": \"/owned/state\", \"uid\": 1000, \"deployment\": \"office\", \"image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"budgetMode\": \"admission\", \"memoryMiB\": 512, \"pidsLimit\": 128, \"cpus\": 0, \"poolMemoryMiB\": 2048, \"poolTasksMax\": 1024, \"opaque\": {\"image\": \"nested-kept\", \"text\": \"\\u4e2d\\ud800\\ud83d\\ude00\", \"zero\": -0.0}, \"employeeGpuGrants\": {\"opaque\": true}}",
+    "marker": "{\"schema\": \"reverie-resource-control-v1\", \"state\": \"READY\", \"option\": {\"directory\": \"/owned/control\", \"companyId\": \"11111111-2222-4333-8444-555555555555\", \"poolId\": \"22222222-2222-4333-8444-555555555555\", \"ownerScopeDigest\": \"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\", \"hostReserveMiB\": 1}, \"directories\": {\".\": [1, 2], \"profiles\": [1, 3], \"operations\": [1, 4]}, \"admissionLock\": [1, 5], \"stateDirectory\": [1, 6], \"locks\": {\"profiles\": [1, 7], \"operations\": [1, 8]}, \"configurationDigest\": \"2885b8ed031c7431b840dbf25d9bec5052ee883e2b53fb853c2f01183e7589d4\"}",
+    "error": null,
+    "domain": "2885b8ed031c7431b840dbf25d9bec5052ee883e2b53fb853c2f01183e7589d4",
+    "order": [
+      ".",
+      "profiles",
+      "operations"
+    ]
+  },
+  {
+    "name": "included-nonfinite",
+    "config": "{\"resourceReservations\": {\"directory\": \"/owned/control\", \"companyId\": \"11111111-2222-4333-8444-555555555555\", \"poolId\": \"22222222-2222-4333-8444-555555555555\", \"ownerScopeDigest\": \"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\", \"hostReserveMiB\": 1}, \"stateRoot\": \"/owned/state\", \"uid\": 1000, \"deployment\": \"office\", \"image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"budgetMode\": \"admission\", \"memoryMiB\": 512, \"pidsLimit\": 128, \"cpus\": 0, \"poolMemoryMiB\": 2048, \"poolTasksMax\": 1024, \"opaque\": [NaN]}",
+    "marker": "{\"schema\": \"reverie-resource-control-v1\", \"state\": \"READY\", \"option\": {\"directory\": \"/owned/control\", \"companyId\": \"11111111-2222-4333-8444-555555555555\", \"poolId\": \"22222222-2222-4333-8444-555555555555\", \"ownerScopeDigest\": \"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\", \"hostReserveMiB\": 1}, \"directories\": {\".\": [1, 2], \"profiles\": [1, 3], \"operations\": [1, 4]}, \"admissionLock\": [1, 5], \"stateDirectory\": [1, 6], \"locks\": {\"profiles\": [1, 7], \"operations\": [1, 8]}, \"configurationDigest\": \"e82c13da7ba95165a08d159f8b3ddd561920d9ba8572fe94e5b50b214ff53ccd\"}",
+    "error": "RESERVATION_DOMAIN_FINGERPRINT",
+    "domain": null,
+    "order": [
+      ".",
+      "profiles",
+      "operations"
+    ]
+  },
+  {
+    "name": "programmatic-domain-integer-conversion",
+    "config": "{\"resourceReservations\": {\"directory\": \"/owned/control\", \"companyId\": \"11111111-2222-4333-8444-555555555555\", \"poolId\": \"22222222-2222-4333-8444-555555555555\", \"ownerScopeDigest\": \"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\", \"hostReserveMiB\": 1}, \"stateRoot\": \"/owned/state\", \"uid\": 1000, \"deployment\": \"office\", \"image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"budgetMode\": \"admission\", \"memoryMiB\": 512, \"pidsLimit\": 128, \"cpus\": 0, \"poolMemoryMiB\": 2048, \"poolTasksMax\": 1024, \"opaque\": {\"image\": \"nested-kept\", \"text\": \"\\u4e2d\\ud800\\ud83d\\ude00\", \"zero\": -0.0},\"opaqueInteger\":77777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777}",
+    "marker": "{\"schema\": \"reverie-resource-control-v1\", \"state\": \"READY\", \"option\": {\"directory\": \"/owned/control\", \"companyId\": \"11111111-2222-4333-8444-555555555555\", \"poolId\": \"22222222-2222-4333-8444-555555555555\", \"ownerScopeDigest\": \"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\", \"hostReserveMiB\": 1}, \"directories\": {\".\": [1, 2], \"profiles\": [1, 3], \"operations\": [1, 4]}, \"admissionLock\": [1, 5], \"stateDirectory\": [1, 6], \"locks\": {\"profiles\": [1, 7], \"operations\": [1, 8]}, \"configurationDigest\": \"e82c13da7ba95165a08d159f8b3ddd561920d9ba8572fe94e5b50b214ff53ccd\"}",
+    "error": "RESERVATION_DOMAIN_FINGERPRINT",
+    "domain": null,
+    "order": [
+      ".",
+      "profiles",
+      "operations"
+    ]
+  }
+]

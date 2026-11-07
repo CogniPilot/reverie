@@ -1,6 +1,5 @@
 use crate::legacy_json::{Node, Number, Text, Value};
 use std::collections::BTreeMap;
-use std::fmt::Write;
 
 enum Part<'a> {
     Value(&'a Value),
@@ -104,46 +103,13 @@ fn array<'a>(
     }
 }
 pub(crate) fn string(text: &Text, result: &mut String) {
-    result.push('"');
-    for &codepoint in &text.0 {
-        match codepoint {
-            8 => result.push_str("\\b"),
-            9 => result.push_str("\\t"),
-            10 => result.push_str("\\n"),
-            12 => result.push_str("\\f"),
-            13 => result.push_str("\\r"),
-            34 => result.push_str("\\\""),
-            92 => result.push_str("\\\\"),
-            32..=126 => result.push(char::from_u32(codepoint).expect("ASCII")),
-            0..=0xffff => {
-                write!(result, "\\u{codepoint:04x}").expect("String write");
-            }
-            _ => {
-                let scalar = codepoint - 0x10000;
-                write!(
-                    result,
-                    "\\u{:04x}\\u{:04x}",
-                    0xd800 + (scalar >> 10),
-                    0xdc00 + (scalar & 0x3ff)
-                )
-                .expect("String write");
-            }
-        }
-    }
-    result.push('"');
+    result.extend(
+        quoted_text(text, true)
+            .0
+            .into_iter()
+            .map(|cp| char::from_u32(cp).expect("ASCII JSON string")),
+    );
 }
-// Rust Debug provides shortest round-trip digits, including integral floats and
-// signed zero. Python uses a signed, at-least-two-digit exponent at the same
-// display thresholds; no JSON number is passed through a lossy Value conversion.
-pub(crate) fn float(value: f64) -> String {
-    let text = format!("{value:?}");
-    let Some((mantissa, exponent)) = text.split_once('e') else {
-        return text;
-    };
-    let exponent: i32 = exponent.parse().expect("finite Debug exponent");
-    format!("{mantissa}e{exponent:+03}")
-}
-
 pub(super) fn quoted_text(text: &Text, ascii: bool) -> Text {
     let mut result = vec![34];
     for &codepoint in &text.0 {
@@ -175,4 +141,15 @@ pub(super) fn quoted_text(text: &Text, ascii: bool) -> Text {
     }
     result.push(34);
     Text(result)
+}
+// Rust Debug provides shortest round-trip digits, including integral floats and
+// signed zero. Python uses a signed, at-least-two-digit exponent at the same
+// display thresholds; no JSON number is passed through a lossy Value conversion.
+pub(crate) fn float(value: f64) -> String {
+    let text = format!("{value:?}");
+    let Some((mantissa, exponent)) = text.split_once('e') else {
+        return text;
+    };
+    let exponent: i32 = exponent.parse().expect("finite Debug exponent");
+    format!("{mantissa}e{exponent:+03}")
 }

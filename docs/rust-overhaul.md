@@ -79,9 +79,105 @@ admission, reservation, effect and reconciliation consumers migrate. See
 [`reverie-application`](../crates/reverie-application/README.md) for the exact
 service boundary and compatibility evidence.
 
+The memory persistence cohort adds native MemoryStore/ProjectMemory and history
+import libraries plus the configured HTTP(S)/hashed embedding adapters. Synthetic
+legacy databases, reverse-language writes, all-table backup/restore and model/
+vector/ranking fixtures qualify source compatibility. The active Python callers
+remain selected; employee namespaces, authorization, consistent live snapshots
+and single-writer cutover still belong to the coordinated service migration.
+Incidental non-HTTP urllib endpoint schemes need a supported-settings inventory
+and named adapter or explicit compatibility decision before that selection.
+
 The TypeScript resource diagnostics correction remains compatible with the
 later Rust backend. Remaining cohorts are pending; no source result here
 claims a complete Rust backend or an installed rollout.
+
+## Native integration map
+
+Use the existing owners below before adding another adapter or executor. Their
+source and component tests do not establish an installed native broker.
+
+| Operation | Existing Rust owner | Integration still required |
+| --- | --- | --- |
+| Broker bootstrap | `InstallingBroker::new` in `reverie-application`; consumes the actual validated snapshot and `WorkerRuntime`, captures mandatory telemetry before optional reservations, and retains failed construction resources | Service entry point, accepted connections and whole-service shutdown |
+| Running-laptop recovery | `InstallingBroker::recover_laptops`; ordered census/memory/budget checks, all storage claims before phones, atomic registry publication and retained cleanup owners; actual configured-Gate transaction controls | Actual listener/service invocation and real running-container canary |
+| Office phone | `OfficeService::from_worker` and `bind_worker_retained`; captured worker socket root, constructor-selected session and same-runtime native request jobs | Actual new-laptop producer and complete shutdown joins |
+| Accepted worker connections | `accept_worker_connection` dispatches actual T/J sockets with peer UID checked before frame handling; `ReceivedWorkerLaunch::begin_ordinary` performs image refresh, queued GPU cold boundary and optional admission | Complete listener/handler lifecycle and remaining protocol verbs |
+| OPS command client | The runtime, console and opsCore packages select the native `reverie-ops`; the Python client and console registration are removed, with a retirement-closure policy in xtask | Python OPS daemon/installer replacement and live installed acceptance |
+| Ordinary launch preparation | `prepare_prefix` and `classify_existing` retain the same actual J, counted hold, storage, admission and lifecycle guard through the original wait, first inspect, running policy/memory, runtime/exit, pane/attach, process capture and budget sequence; closed cold targets retain original observations | Ordinary stop, whole cold/Nix/body continuation, actual admission release, registration and viewer |
+| Running replacement stop ownership | `OrdinaryReplacementStop` shares the private exact-process algorithm with the protected stop owner; `retain_replacement_stop` retains the same box/plan/incarnation in the App registry and restores that original box only after known stop | Actual cold/J admission and late-policy caller, dead-pane repeat, stopped legacy/name/network stop, and complete cleanup/finalization |
+| Failure reports | `handle_command_failure_report` and `close_command_telemetry`; fixed T operation, actual Unix peer identity and retained bounded connection/store owners | Caller-owned handler joins and global stop acknowledgement |
+| Original launch resources | `retain_resource_draft` transfers the same storage and recovered Office owners before the durable claim; `RetainedPreparation::stop_original_source` consumes the same protected intent, checks exact process identity, closes the phone before the original lease, and retains the claim after release | Protected launch dispatch, target creation and live container qualification |
+| Storage, Nix and laptop effects | `reverie-host` retains the real Nix/storage/Office owners through network, complete-create telemetry, creation, checked metadata publication, start acknowledgement, native pane startup, original Nix guard finalization and immutable created-CID cleanup | Installing application caller, retained cold storage, actual admission/canonical release, and viewer handoff |
+| Rootless image qualification | `NixStoragePreparation::qualify_rootless_image` checks the selected singleton image on the same retained Nix record before the installing caller unlocks for preparation; enabled Nix work refuses a missing qualification | Actual launch caller and live rootless engine qualification |
+| Cold storage | `prepare_laptop_cold_temporary` performs enabled clear on the same storage/Nix/network record, with real lease barriers, repeated engine/mount/process observations, durable pending/completion evidence and checked finalizers; creation and post-memory commit require that owner's proof. Absent policy preserves existing fences | Retain-and-replace preparation before Office and confirmation after memory, whole application continuation, and installed acceptance |
+| Native pane | `start_laptop_pane` derives both fixed tmux commands from the same cold-committed record and published nonce; the Rust worker child writes its exit receipt and retains the pane without a shell supervisor | Actual installing continuation, protected CLI receipt, Nix guard close, admission release, registration and terminal viewer |
+| Nix guard finalization | `release_laptop_nix_guard` consumes the real original guard after acknowledged pane startup, retains the same storage before fallible close, and preserves created-CID cleanup after confirmed or uncertain close | Installing protected CLI receipt before close, actual admission/canonical release afterward, and a viewer consumer that rechecks the current retained record |
+| Native viewer session | Created and existing origins share one bounded inventory and captured-client constructor slot; classified reuse retains its original J/Hold, receipt and same storage box through relay and actual finalization. Fresh receipt/stop-before-reap, exact recovered Office ownership, fresh stop admission and branded final storage transfer retain uncertainty | Cold/Started reuse, direct-prefix cleanup, complete service adoption, confirmed guest resize and live OCI acceptance |
+| Employee resource policy | Existing effective-config, GPU/perf/memory projection, reservation gate and native observer owners; `configure_started_laptop_memory` applies and reads back memory policy on the same actual started record | Installing caller sequence and owner GUI/API selection for remaining settings |
+| Memory tools | Native memory/MCP entry points, persistence, journal transport, staged startup/read owners and an unselected fixed-purpose guest capsule; existing-data and reverse-language compatibility controls | Actual prior-writer shutdown, real launch/image/context/grant join and coordinated package selection |
+
+Recovery entries contain actual Office and storage resources. Recovered names
+are membership data; they do not establish a canonical container/process identity
+or permission to stop, create or start anything. Unresolved last-service Drop
+retains the joint owners, including telemetry/report services. Quarantine is not
+structured shutdown, a durable restart fence or released capacity.
+
+The create/start consumer must retain the same actual resources across Nix,
+network, complete-create telemetry, container creation, metadata publication,
+start, memory enforcement, cold-storage commit and worker-child launch. A
+successful create with noncanonical output still owns a container by its derived
+name; a lost reply cannot establish absence. Do not manufacture a replacement
+effect handle from status data or introduce another configuration source.
+Created-container cleanup enters a terminal state on that same resource record
+before settlement or engine effects. Publication and start cannot follow it,
+even without a global stop. Local client settlement cannot turn a prior unknown
+daemon effect into stopped proof, and a stopped result does not release resources
+or acknowledge whole-service shutdown.
+
+The guest capsule preserves the qualified Console module tree and closes the
+selected Node/native-library dependency graph. Its synthetic namespace controls
+exercise nonempty legacy memory and read-only byte preservation; they establish
+no installed grant or image origin. Native startup now uses one versioned SQL
+metadata namespace. Historical generic readiness keys and foreign or malformed
+native metadata refuse before migration; ordinary legacy state APIs remain
+compatible. The staged reader and startup owners retain their actual SQLite
+connection and source descriptors when close is pending, and an uncertain
+consumed finalizer remains negative. A nonempty legacy fixture exercises
+reinitialization, original row IDs, documents, claims, history, extension tables
+and exact vector bytes, alongside actual Python-to-Rust and reverse writes.
+
+These memory controls require quiesced legacy writers. An independent control
+demonstrates that a same-process foreign SQLite handle can change shared-memory
+bytes without observable stat-generation drift. The installing lifecycle must
+stop and settle the actual prior workloads before a fresh native process adopts
+the namespace. Neither a metadata row, the cooperative scope lock nor successful
+source tests establish that production handoff. General existing-instance
+migration remains unqualified until this actual consumer is complete.
+
+Consult the owning [application](../crates/reverie-application/README.md) and
+[host](../crates/reverie-host/README.md) documentation for exact phase and cleanup
+contracts. Full native completion also requires the remaining runtime/model,
+terminal, service and maintenance entry points in the cohort inventory above;
+passing a front-only trial does not retire those Python consumers.
+
+## Hybrid production selection
+
+The November 7, 2026 hybrid cutover selected the qualified Rust network front
+with the existing TypeScript application. Rust owns public listeners, transport
+buffers, backpressure and child supervision; HTTP application routes,
+authentication and company stores remain in TypeScript/Node. Rust worker command
+clients are also running. The existing Python worker broker, Kokoro speech
+service and other legacy helpers remain active. Other Rust backend crates are not thereby selected as
+production services, and this is not the full native-backend migration.
+
+The owner-directed fix-forward cutover retained the original stopped container,
+all existing data mounts and an ordinary full console copy. Strict snapshot
+verification refused before producing an archive, so the operation explicitly
+reports `backup_verified: false`; no consistent-backup or automatic data-restore
+claim follows. Startup and browser login passed. One-employee chat, journal,
+dispatch, clean stop/restart, inventory and perf checks are separate acceptance.
+Exact installed identities and outcomes belong to private deployment receipts.
 
 ## Workspace and quality gate
 
@@ -102,6 +198,21 @@ staged-index conversions, are rejected by the Rust PR workflow under SPEC_0008
 while legacy implementations are being retired. The portable gate exercises
 core/contracts/routes, shared HTTP, the OPS CLI and xtask on Linux, macOS and Windows; native host adapters have their
 separate Linux gate. Neither gate proves unported runtime paths are portable.
+
+The native Ubuntu24.04 GitHub-hosted job explicitly runs `cargo xtask
+prepare-ci-userns` before verification. Ubuntu's AppArmor restriction can remove
+namespace capabilities and deny the memory fixture's UID map. The task loads a
+fixed `userns` profile attached only to the exact root-owned, readonly Nix
+util-linux `unshare` selected by the declared development environment. It uses
+fixed noninteractive sudo/AppArmor argv and bounded profile stdin; it changes no
+sysctl or global AppArmor switch and writes no policy file. The profile lasts
+only for the disposable runner lifetime. Environment checks prevent accidental
+local/self-hosted invocation; they are declarations, and ordinary sudo remains
+the administrative permission boundary. This task is never automatic in local
+verification or product startup. The actual root UID, raw SQLite/sidecar bytes,
+and set-ID refusal checks remain required and unchanged; a local pass does not
+qualify the hosted AppArmor setup. See Ubuntu's [restriction description](https://discourse.ubuntu.com/t/understanding-apparmor-user-namespace-restriction/58007)
+and the [Ubuntu24.04 profile syntax](https://manpages.ubuntu.com/manpages/noble/man5/apparmor.d.5.html).
 
 Independent adversarial review is required for changed authorization and native
 effects. Cover malformed requests, revoked/stale authority, process/path swaps,
