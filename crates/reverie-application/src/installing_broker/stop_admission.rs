@@ -6,6 +6,7 @@ use crate::reservation_gate::OrdinaryStopAdmission;
 #[must_use = "retain through actual stop body and checked admission finalization"]
 pub(crate) struct WorkerStopAdmission<'a> {
     broker: &'a InstallingBroker,
+    target: WorkerContainerName,
     gate: Option<OrdinaryStopAdmission>,
 }
 impl InstallingBroker {
@@ -17,7 +18,7 @@ impl InstallingBroker {
             Some(gate) => Some(gate.admit_ordinary_stop(
                 &self.installed,
                 target,
-                self.storage.runtime.stop_deadline(),
+                Some(&self.storage.runtime.stop_budget()),
             )?),
             None => {
                 // A truly disabled installation has no allocation scope. An
@@ -35,27 +36,33 @@ impl InstallingBroker {
                 None
             }
         };
-        Ok(WorkerStopAdmission { broker: self, gate })
+        Ok(WorkerStopAdmission {
+            broker: self,
+            target: target.clone(),
+            gate,
+        })
     }
 }
 impl WorkerStopAdmission<'_> {
+    pub(crate) fn assert_target(&self, target: &WorkerContainerName) -> Result<(), GateError> {
+        if self.target != *target {
+            return Err(GateError::Refused("WORKER_STOP_ADMISSION_TARGET"));
+        }
+        Ok(())
+    }
     pub(crate) fn assert_broker(&self, broker: &InstallingBroker) -> Result<(), GateError> {
         if !std::ptr::eq(self.broker, broker) {
             return Err(GateError::Refused("WORKER_STOP_ADMISSION_ORIGIN"));
         }
         if let Some(gate) = &self.gate {
             gate.assert_origin(&broker.installed)?;
+            gate.assert_runtime(&broker.storage.runtime)?;
         }
         Ok(())
     }
     pub(crate) fn close(self) -> Result<(), GateError> {
         match self.gate {
-            Some(gate) => {
-                match gate.tighten_native_ceiling(self.broker.storage.runtime.stop_deadline()) {
-                    Ok(()) => gate.close(),
-                    Err(cause) => gate.fail(cause),
-                }
-            }
+            Some(gate) => gate.close(),
             None => Ok(()),
         }
     }

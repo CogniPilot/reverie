@@ -22,6 +22,15 @@ fn actual_installed_stop_scope_owns_common_flock_without_launch_image_gpu_or_sid
     let other = configured(&other_tree);
     let scope: WorkerStopAdmission<'_> = broker.admit_ordinary_stop(&name(&broker)).unwrap();
     scope.assert_broker(&broker).unwrap();
+    scope.assert_target(&name(&broker)).unwrap();
+    let other_name = WorkerContainerName::for_session(
+        broker.configuration().unwrap().envelope().base(),
+        &ProfileSessionId::parse("99999999-1111-4111-8111-111111111111").unwrap(),
+    );
+    assert_eq!(
+        scope.assert_target(&other_name).unwrap_err().code(),
+        "WORKER_STOP_ADMISSION_TARGET"
+    );
     assert_eq!(
         scope.assert_broker(&other).unwrap_err().code(),
         "WORKER_STOP_ADMISSION_ORIGIN"

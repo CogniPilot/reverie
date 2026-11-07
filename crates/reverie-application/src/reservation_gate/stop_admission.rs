@@ -2,6 +2,7 @@
 //! fence, not process custody, stop authority, or global release evidence.
 use super::*;
 use reverie_core::worker_laptop::WorkerContainerName;
+use reverie_host::worker_runtime::{WorkerRuntime, WorkerStopBudget};
 
 enum Scope {
     Owned(admission::Admission),
@@ -12,6 +13,7 @@ pub(crate) struct OrdinaryStopAdmission {
     gate: Arc<Inner>,
     active: Arc<Active>,
     scope: Scope,
+    budget: Option<WorkerStopBudget>,
 }
 impl ReservationGate {
     /// This closed consumer never runs launch SID/image/GPU/creation checks.
@@ -20,7 +22,7 @@ impl ReservationGate {
         &self,
         installed: &Arc<crate::installing_broker::InstalledWorker>,
         target: &WorkerContainerName,
-        native_ceiling: Option<Instant>,
+        native_budget: Option<&WorkerStopBudget>,
     ) -> Result<OrdinaryStopAdmission> {
         need(
             Arc::ptr_eq(installed, &self.inner.installed),
@@ -40,7 +42,7 @@ impl ReservationGate {
         let (scope, active) = if let Some(active) = borrowed {
             (Scope::Borrowed, active)
         } else {
-            let admission = self.inner.admit_stop(native_ceiling)?;
+            let admission = self.inner.admit_stop(native_budget)?;
             let active = match self.inner.held(None) {
                 Ok(active) => active,
                 Err(cause) => return admission.conclude(Err(cause)),
@@ -51,9 +53,10 @@ impl ReservationGate {
             gate: self.inner.clone(),
             active,
             scope,
+            budget: native_budget.cloned(),
         };
         let checked = scope
-            .tighten_native_ceiling(native_ceiling)
+            .inherit_native_budget(native_budget)
             .and_then(|()| scope.gate.check_ordinary_stop(target.as_str()));
         match checked {
             Ok(()) => Ok(scope),
@@ -76,16 +79,25 @@ impl OrdinaryStopAdmission {
             "RESERVATION_ADMISSION_LOCK_REQUIRED",
         )
     }
-    /// A global first-stop bound may tighten the existing original context; it
-    /// cannot reset the operation clock, replace the observer or extend a bound.
-    pub(crate) fn tighten_native_ceiling(&self, ceiling: Option<Instant>) -> Result<()> {
+    pub(crate) fn assert_runtime(&self, runtime: &WorkerRuntime) -> Result<()> {
+        need(
+            self.budget
+                .as_ref()
+                .is_some_and(|budget| budget.same_runtime(runtime)),
+            "WORKER_STOP_ADMISSION_ORIGIN",
+        )
+    }
+    /// Install only the actual service's read-only first-stop view. An outer
+    /// operation budget and the same observer/census origin remain unchanged.
+    fn inherit_native_budget(&self, budget: Option<&WorkerStopBudget>) -> Result<()> {
         self.assert_origin(&self.gate.installed)?;
-        let mut deadline = self
-            .active
-            .deadline
-            .lock()
-            .map_err(|_| GateError::Refused("RESERVATION_ADMISSION_UNAVAILABLE"))?;
-        *deadline = [*deadline, ceiling].into_iter().flatten().min();
+        if let Some(budget) = budget {
+            self.active
+                .context
+                .lock()
+                .map_err(|_| GateError::Refused("RESERVATION_ADMISSION_UNAVAILABLE"))?
+                .inherit_worker_stop_budget(budget)?;
+        }
         Ok(())
     }
     pub(crate) fn close(self) -> Result<()> {

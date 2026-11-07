@@ -19,6 +19,20 @@ fn free(gate: &ReservationGate) {
     let mut lock = AdmissionLock::acquire(&gate.inner.config().unwrap()).unwrap();
     lock.close().unwrap();
 }
+fn runtime(setup: &Setup, gate: &ReservationGate) -> reverie_host::worker_runtime::WorkerRuntime {
+    let snapshot = gate.inner.installed.snapshot().unwrap();
+    reverie_host::worker_runtime::WorkerRuntime::new(
+        reverie_host::installed_worker_engine::InstalledWorkerEngine::new(
+            reverie_host::engine_metadata::EngineBootstrap::from_service(
+                crate::test_process::engine_program().as_os_str(),
+                std::collections::BTreeMap::new(),
+                setup.tree.root.clone(),
+            )
+            .unwrap(),
+        ),
+        snapshot.envelope().base(),
+    )
+}
 #[test]
 fn actual_stop_entry_matches_generic_guard_then_check_stop_without_launch_sid_phase() {
     crate::test_process::owning_case!(
@@ -206,35 +220,91 @@ fn failed_success_guard_still_closes_real_flock_and_poison_preserves_both_causes
     lock.close().unwrap();
 }
 #[test]
-fn stop_native_ceiling_is_inherited_without_renewal_and_expired_native_scope_is_not_entry_rejection()
- {
-    crate::test_process::owning_case!(stop_native_ceiling_is_inherited_without_renewal_and_expired_native_scope_is_not_entry_rejection);
+fn stop_native_budget_observes_later_actual_first_stop_for_every_native_call_without_body_reset() {
+    crate::test_process::owning_case!(stop_native_budget_observes_later_actual_first_stop_for_every_native_call_without_body_reset);
     let (setup, fixture, gate) = prepared();
     let name = target(&gate, &source_session(&setup));
-    let end = Instant::now() + std::time::Duration::from_secs(20);
+    // Actual stop producer; this standalone Gate still uses its established
+    // controlled native facts. No running workload or source-process grant.
+    let snapshot = gate.inner.installed.snapshot().unwrap();
+    let runtime = runtime(&setup, &gate);
+    let budget = runtime.stop_budget();
+    let unbounded_reference = gate
+        .inner
+        .observer
+        .capture(snapshot.configuration().clone(), None);
     let scope = gate
-        .admit_ordinary_stop(&gate.inner.installed, &name, Some(end))
+        .admit_ordinary_stop(&gate.inner.installed, &name, Some(&budget))
         .unwrap();
-    assert_eq!(
-        *gate.inner.held(None).unwrap().deadline.lock().unwrap(),
-        Some(end)
+    scope.assert_runtime(&runtime).unwrap();
+    assert!(
+        gate.inner
+            .held(None)
+            .unwrap()
+            .deadline
+            .lock()
+            .unwrap()
+            .is_none()
     );
-    scope
-        .tighten_native_ceiling(Some(end + std::time::Duration::from_secs(20)))
-        .unwrap();
-    assert_eq!(
-        *gate.inner.held(None).unwrap().deadline.lock().unwrap(),
-        Some(end)
+    let first = runtime.request_stop();
+    // A fresh default30s call after >4s would exceed first-stop+34. Wait on
+    // the genuine producer rather than mutating a production/test clock.
+    std::thread::sleep(std::time::Duration::from_secs(5));
+    assert!(
+        unbounded_reference.deadline(None).unwrap() > first,
+        "real reference call crossed the original first-stop ceiling"
     );
+    let before = fixture.deadlines().len();
+    gate.inner.guard(None).unwrap();
     scope.close().unwrap();
-    assert!(fixture.deadlines().iter().all(|value| *value <= end));
+    let observed = fixture.deadlines();
+    assert!(!observed[before..].is_empty());
+    assert!(observed[before..].iter().all(|value| *value <= first));
+    assert_eq!(runtime.request_stop(), first);
+    free(&gate);
+    runtime.close(first).unwrap();
+}
+#[test]
+fn borrowed_stop_cannot_replace_original_active_budget_with_a_different_runtime_view() {
+    crate::test_process::owning_case!(
+        borrowed_stop_cannot_replace_original_active_budget_with_a_different_runtime_view
+    );
+    let (setup, fixture, gate) = prepared();
+    let name = target(&gate, &source_session(&setup));
+    let runtime = runtime(&setup, &gate);
+    let foreign = self::runtime(&setup, &gate);
+    let budget = runtime.stop_budget();
+    let outer = gate.inner.admit(AdmissionBounds::default()).unwrap();
+    let scope = gate
+        .admit_ordinary_stop(&gate.inner.installed, &name, Some(&budget))
+        .unwrap();
+    scope.assert_runtime(&runtime).unwrap();
+    assert_eq!(
+        scope.assert_runtime(&foreign).unwrap_err().code(),
+        "WORKER_STOP_ADMISSION_ORIGIN"
+    );
     let before = fixture.events().len();
-    let expired = Instant::now() - std::time::Duration::from_millis(1);
     let error = gate
-        .admit_ordinary_stop(&gate.inner.installed, &name, Some(expired))
+        .admit_ordinary_stop(&gate.inner.installed, &name, Some(&foreign.stop_budget()))
         .err()
         .unwrap();
-    assert_eq!(error.code(), "RESERVATION_OBSERVATION_DEADLINE");
+    assert_eq!(error.code(), "RESERVATION_STOP_CONTEXT_ORIGIN");
     assert_eq!(fixture.events().len(), before);
+    gate.inner
+        .held(None)
+        .unwrap()
+        .context
+        .lock()
+        .unwrap()
+        .inherit_worker_stop_budget(&budget)
+        .unwrap();
+    scope.close().unwrap();
+    outer.finish().unwrap();
     free(&gate);
+    runtime
+        .close(Instant::now() + std::time::Duration::from_secs(2))
+        .unwrap();
+    foreign
+        .close(Instant::now() + std::time::Duration::from_secs(2))
+        .unwrap();
 }
