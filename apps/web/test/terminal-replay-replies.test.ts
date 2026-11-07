@@ -113,6 +113,28 @@ describe('terminal probe replies', () => {
     }
   });
 
+  it('keeps a replay abandoned for a newer one open until its queued chunks are parsed', async () => {
+    const { app, input } = loadHarness();
+    const term = new Terminal(sizeReporting);
+    app.terminal = term;
+    const seen = record(input, term);
+    // Yield synchronously and abandon at the third slice, so the two slices
+    // holding the probes are still queued, unparsed, when the newer write wins.
+    let yields = 0;
+    app._safeYield = (fn: () => void) => {
+      if (++yields === 3) app._chunkedWriteGen++;
+      fn();
+    };
+    const probes = PROBES.join('');
+    const result = await app.chunkedTerminalWrite(probes + 'x'.repeat(256), Math.ceil(probes.length / 2));
+    expect(result.completed).toBe(false);
+    await new Promise<void>((done) => term.write('', () => done()));
+    await flush();
+    expect(seen.filter((s) => s.forwarded)).toEqual([]);
+    expect(input.isTerminalReplaying(term)).toBe(false);
+    term.dispose();
+  });
+
   it('still forwards a live reply outside the known families once the replay is over', async () => {
     const { app, input } = loadHarness();
     const term = new Terminal(sizeReporting);
@@ -133,6 +155,7 @@ describe('terminal probe replies', () => {
     const end = input.beginTerminalReplay(term);
     expect(input.shouldSuppressTerminalQueryResponse(windowReport, term)).toBe(true);
     for (const typed of ['a', 'hello', '\r', ESC, ESC + '[A', ESC + 'OB', ESC + '[1;5C', ESC + '[3~',
+      ESC + '[Z', ESC + '\r', ESC + 'x', ESC + 'OP', ESC + '[15~', ESC + '[3;5~',
       ESC + '[200~pasted' + ESC + '[201~', ESC + '[<0;3;4M', ESC + '[I']) {
       expect(input.shouldSuppressTerminalQueryResponse(typed, term), JSON.stringify(typed)).toBe(false);
     }

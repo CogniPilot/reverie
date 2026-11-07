@@ -345,15 +345,22 @@
     return !!terminal && (replayDepth.get(terminal) || 0) > 0;
   }
 
-  // During a replay every escape sequence xterm emits is dropped, whatever the
-  // probe it answers, except what a person can be producing at that moment: a
-  // navigation key, a bracketed paste, or a mouse or focus report. Printable
-  // input and a bare Esc always pass.
+  // Every reply xterm makes is a control string: CSI, OSC, DCS, APC or PM. During
+  // a replay any of those is dropped, whatever the probe it answers, except the
+  // keys a person can be pressing at that moment, which share the CSI shape: the
+  // navigation keys (isComposerNavKey), Shift+Tab, the tilde keys (F5 and up,
+  // Insert, Delete, PgUp, PgDn, with modifiers), a bracketed paste, and mouse and
+  // focus reports. No reply ends in `Z` or `~`. Printable input, a bare Esc,
+  // Alt+key and the SS3 keys (F1-F4) are not control strings and always pass.
+  const REPLY_INTRODUCER_RE = /^\x1b[[\]P_^]/;
+  const SHIFT_TAB = '\x1b[Z';
+  const TILDE_KEY_RE = /^\x1b\[\d+(?:;\d+)?~$/;
   function isReplayReply(data) {
     return (
       typeof data === 'string' &&
-      data.length > 1 &&
-      data.charCodeAt(0) === 0x1b &&
+      REPLY_INTRODUCER_RE.test(data) &&
+      data !== SHIFT_TAB &&
+      !TILDE_KEY_RE.test(data) &&
       !isComposerNavKey(data) &&
       !isTerminalFocusOrMouseReport(data) &&
       !data.startsWith(BRACKETED_PASTE_START)
