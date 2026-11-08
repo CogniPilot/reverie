@@ -31,6 +31,7 @@ pub mod reservation_control;
 pub mod reservation_kernel;
 pub mod rootless;
 pub mod task_perf;
+pub mod task_workspace;
 #[cfg(target_os = "linux")]
 pub mod terminal_pty;
 #[cfg(test)]
