@@ -61,6 +61,9 @@ let
     nativeCheckInputs = [ pkgs.git pkgs.tmux pkgs.curl pkgs.which pkgs.procps (lib.getBin pkgs.util-linux) ];
     checkPhase = ''
       runHook preCheck
+      # Two test files at a time (config/vitest.ci.config.ts); test/setup.ts gives each file its own HOME, temp and
+      # tmux socket directory, and every server binds port 0 (test/test-ports-guard.test.ts).
+      export NIX_TEST_FILE_WORKERS=2
       npm test -- test/fixed-resume-message.test.ts test/recovery-authority.test.ts \
         test/recovery-transaction.test.ts test/recovery-operation-clock.test.ts test/recovery-ledger-client.test.ts \
         test/rest-canonical-metadata.test.ts \
@@ -453,7 +456,18 @@ let
     nativeCheckInputs = [ pkgs.bash pkgs.coreutils pkgs.git pkgs.nodejs_22 pkgs.tmux pkgs.jq (lib.getBin pkgs.util-linux) pkgs.python3Packages.pillow pkgs.python3Packages.aiohttp ];
     postPatch = "patchShebangs ../scripts ../docker ../.github/ci";
     checkPhase = ''
-      (cd ..; PYTHONPATH="$PWD/python" PYTHONWARNINGS=ignore::ResourceWarning ${pythonCheckEnvironment}/bin/python3 -m unittest discover -s tests -t .)
+      # The modules discovery would load (test*.py in tests/ and its packages), in chunks of 12, two unittest processes
+      # at a time so the suite uses two cores. Each chunk gets its own temp and tmux socket directory and prints its
+      # output when it ends, so a failure reads as one block; xargs fails the build if any chunk fails.
+      (cd ..
+        for f in $(find tests -name 'test*.py' | sort); do
+          d=$(dirname "$f")
+          while [ "$d" != . ] && [ -f "$d/__init__.py" ]; do d=$(dirname "$d"); done
+          if [ "$d" = . ]; then echo "''${f%.py}" | tr / .; fi
+        done | PYTHONPATH="$PWD/python" PYTHONWARNINGS=ignore::ResourceWarning xargs -n 12 -P 2 sh -c '
+          dir=$(mktemp -d); status=0
+          TMPDIR=$dir TMUX_TMPDIR=$dir ${pythonCheckEnvironment}/bin/python3 -m unittest "$@" >"$dir/log" 2>&1 || status=$?
+          cat "$dir/log"; exit "$status"' unittest-chunk)
       (cd ..; node --test tests/test_web_install_manifest.mjs tests/test_cli_installer.mjs tests/test_reverie_start.mjs tests/test_recovery_scripts.mjs tests/test_opencode_plugin.mjs tests/test_model_relay.mjs tests/test_voice_ci_launch.mjs)
     '';
   };
