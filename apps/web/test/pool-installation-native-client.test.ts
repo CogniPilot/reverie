@@ -198,7 +198,7 @@ it('refuses a guest before opening a B connection', async () => {
 });
 it('does not answer a foreign nomination and can view the unchanged correctly nominated offer later', async () => {
   mode = 'foreign';
-  expect((await post('view', {})).statusCode).toBe(503);
+  expect((await post('view', {})).statusCode).toBe(403);
   expect(views).toBe(0);
   expect(consents).toBe(0);
   mode = 'normal';
