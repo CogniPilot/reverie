@@ -143,10 +143,26 @@ impl Fixture {
     }
 
     fn check_env(&self, seal: &str, head: &str, extra: &[&str], envs: &[(&str, &str)]) -> Output {
+        self.command(seal, head, extra)
+            .envs(envs.iter().copied())
+            .output()
+            .unwrap()
+    }
+
+    /// The check command against this fixture's packet, store and lists.
+    fn command(&self, seal: &str, head: &str, extra: &[&str]) -> Command {
+        let (packet, store) = (self.root.join("packet"), self.root.join("store.git"));
+        let mut command = self.command_at(seal, head, &packet, &store);
+        command.args(extra);
+        command
+    }
+
+    fn command_at(&self, seal: &str, head: &str, packet: &Path, store: &Path) -> Command {
         let tree = git(&self.work(), &["rev-parse", &format!("{head}^{{tree}}")]);
         let lists_sha = sha256_hex(LISTS.as_bytes());
         let root = &self.root;
-        Command::new(env!("CARGO_BIN_EXE_reverie-publish"))
+        let mut command = Command::new(env!("CARGO_BIN_EXE_reverie-publish"));
+        command
             .args([
                 "check",
                 "--repo",
@@ -160,15 +176,21 @@ impl Fixture {
             ])
             .args(["--tree", &tree[..12], "--lists-sha256", &lists_sha])
             .arg("--packet")
-            .arg(root.join("packet"))
+            .arg(packet)
             .arg("--git-dir")
-            .arg(root.join("store.git"))
+            .arg(store)
             .arg("--lists")
-            .arg(root.join("lists.json"))
-            .args(extra)
-            .envs(envs.iter().copied())
-            .output()
+            .arg(root.join("lists.json"));
+        command
+    }
+
+    /// Bundle copies left in the store.
+    fn copies(&self) -> Vec<String> {
+        fs::read_dir(self.root.join("store.git"))
             .unwrap()
+            .map(|e| e.unwrap().file_name().into_string().unwrap())
+            .filter(|n| n.starts_with("publish-packet-"))
+            .collect()
     }
 
     /// An approval record for `head` against `base`, covering `title` and `body`.
@@ -635,4 +657,87 @@ fn a_hook_inside_the_object_store_does_not_run() {
             "the store's hook ran ({mark})"
         );
     }
+}
+
+#[test]
+fn a_packet_or_store_reached_through_a_symlink_refuses() {
+    use std::os::unix::fs::symlink;
+    let f = Fixture::new("root-alias");
+    let head = f.commit("b.txt", "two\n", &format!("Add b\n\n{SIGNOFF}"));
+    let seal = f.seal("Add b", "Adds b.\n");
+    symlink(f.root.join("packet"), f.root.join("packet-alias")).unwrap();
+    symlink(&f.root, f.root.join("up")).unwrap();
+    symlink(f.root.join("store.git"), f.root.join("store-alias")).unwrap();
+    let (packet, store) = (f.root.join("packet"), f.root.join("store.git"));
+    for (packet, store) in [
+        (f.root.join("packet-alias"), store.clone()),
+        (f.root.join("up/packet"), store.clone()),
+        (packet.clone(), f.root.join("store-alias")),
+        (packet.clone(), f.root.join("up/store.git")),
+    ] {
+        let out = f
+            .command_at(&seal, &head, &packet, &store)
+            .output()
+            .unwrap();
+        refused(&out, "is a symlink; the path must not pass through one");
+    }
+    let out = f.check(&seal, &head, &[]);
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+}
+
+#[test]
+fn an_existing_entry_in_the_store_is_never_written_through() {
+    use std::os::unix::fs::symlink;
+    let f = Fixture::new("copy-escape");
+    let head = f.commit("b.txt", "two\n", &format!("Add b\n\n{SIGNOFF}"));
+    let seal = f.seal("Add b", "Adds b.\n");
+    let store = f.root.join("store.git");
+    fs::write(f.root.join("outside-canary"), "outside\n").unwrap();
+    symlink(
+        f.root.join("outside-canary"),
+        store.join("publish-packet.bundle"),
+    )
+    .unwrap();
+    fs::write(store.join("publish-packet-kept.bundle"), "kept\n").unwrap();
+    let out = f.check(&seal, &head, &[]);
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    assert_eq!(
+        fs::read(f.root.join("outside-canary")).unwrap(),
+        b"outside\n"
+    );
+    assert_eq!(
+        fs::read(store.join("publish-packet-kept.bundle")).unwrap(),
+        b"kept\n"
+    );
+    assert_eq!(f.copies(), ["publish-packet-kept.bundle"]);
+}
+
+#[test]
+fn concurrent_checks_on_one_store_share_no_copy_and_leave_none() {
+    let f = Fixture::new("concurrent");
+    let head = f.commit("b.txt", "two\n", &format!("Add b\n\n{SIGNOFF}"));
+    let seal = f.seal("Add b", "Adds b.\n");
+    let children: Vec<_> = (0..2)
+        .map(|_| {
+            f.command(&seal, &head, &[])
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .spawn()
+                .unwrap()
+        })
+        .collect();
+    for child in children {
+        let out = child.wait_with_output().unwrap();
+        assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    }
+    assert!(f.copies().is_empty(), "{:?}", f.copies());
+    let runs = git(
+        &f.root.join("store.git"),
+        &["for-each-ref", "--format=%(refname)", "refs/publish/check/"],
+    );
+    let runs: std::collections::BTreeSet<_> = runs
+        .lines()
+        .map(|r| r.split('/').nth(3).unwrap().to_owned())
+        .collect();
+    assert_eq!(runs.len(), 2, "{runs:?}");
 }

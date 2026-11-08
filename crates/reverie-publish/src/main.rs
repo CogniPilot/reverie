@@ -1,6 +1,7 @@
 //! `reverie-publish`: reviewed publication from sealed packets. This release has `check`, which
 //! runs every shared check against a packet and an object store. It writes only into that local
-//! store (a private copy of the bundle and its imported refs) and nothing anywhere else.
+//! store (the imported objects and refs, through a private bundle copy it removes) and nothing
+//! anywhere else.
 use clap::{Parser, Subcommand};
 use reverie_namegate::{Kind, Lists};
 use reverie_publish::{
@@ -29,13 +30,14 @@ enum Action {
 
 #[derive(clap::Args)]
 struct Check {
-    /// The sealed packet directory.
+    /// The sealed packet directory; its path must not pass through a symlink.
     #[arg(long)]
     packet: PathBuf,
     /// The packet's seal: leading hex digits of sha256(SHA256SUMS), at least 8.
     #[arg(long)]
     seal: String,
-    /// The bare object store the bundle is imported into.
+    /// The bare object store the bundle is imported into; its path must not pass through a
+    /// symlink.
     #[arg(long)]
     git_dir: PathBuf,
     /// The target repository, OWNER/NAME.
@@ -81,11 +83,9 @@ fn check(o: &Check) -> Result<serde_json::Value, String> {
     let lists =
         Lists::load(&o.lists, &o.lists_sha256).map_err(|e| format!("namegate lists: {e:?}"))?;
     let packet = Packet::open(&o.packet, &o.seal)?;
-    let git = Git::new(&o.git_dir);
+    let git = Git::open(&o.git_dir)?;
     // git reads a private copy of the verified bytes, never the packet's path.
-    let bundle = o.git_dir.join("publish-packet.bundle");
-    std::fs::write(&bundle, packet.bundle()?).map_err(|e| format!("{}: {e}", bundle.display()))?;
-    git.import_bundle(&bundle, "check")?;
+    git.import_bundle(&packet.bundle()?, "check")?;
     let head = git.run([
         "rev-parse",
         "--verify",

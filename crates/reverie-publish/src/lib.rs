@@ -8,6 +8,7 @@
 //! so nothing private is compiled in.
 pub mod approval;
 pub mod commits;
+pub mod custody;
 pub mod git;
 pub mod github;
 pub mod packet;
