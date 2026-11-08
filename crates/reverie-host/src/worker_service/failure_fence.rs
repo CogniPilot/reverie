@@ -89,6 +89,25 @@ pub(super) fn assert_pending_permits_startup(path: &Path) -> Result<()> {
         native::close(file).map_err(|e| WorkerServiceError::Io(std::io::Error::other(e))),
     )
 }
+pub(super) fn assert_generation_not_retired(path: &Path) -> Result<()> {
+    match fs::symlink_metadata(path) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error.into()),
+        Ok(_) => Err(WorkerServiceError::Refused(
+            "NATIVE_SERVICE_GENERATION_ROLLED_BACK",
+        )),
+    }
+}
+pub(super) fn assert_failure_absent(path: &Path) -> Result<()> {
+    match fs::symlink_metadata(path) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error.into()),
+        Ok(_) => Err(WorkerServiceError::Refused(
+            "NATIVE_SERVICE_PREVIOUS_FAILURE_REQUIRES_RECOVERY",
+        )),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -122,24 +141,5 @@ mod tests {
             fs::remove_file(&path).unwrap();
         }
         fs::remove_dir(root).unwrap();
-    }
-}
-
-pub(super) fn assert_generation_not_retired(path: &Path) -> Result<()> {
-    match fs::symlink_metadata(path) {
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(error.into()),
-        Ok(_) => Err(WorkerServiceError::Refused(
-            "NATIVE_SERVICE_GENERATION_ROLLED_BACK",
-        )),
-    }
-}
-pub(super) fn assert_failure_absent(path: &Path) -> Result<()> {
-    match fs::symlink_metadata(path) {
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(error.into()),
-        Ok(_) => Err(WorkerServiceError::Refused(
-            "NATIVE_SERVICE_PREVIOUS_FAILURE_REQUIRES_RECOVERY",
-        )),
     }
 }
