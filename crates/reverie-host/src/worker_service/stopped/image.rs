@@ -67,6 +67,16 @@ impl StoppedWorkerService {
     }
 }
 impl ImageServiceMaintenance {
+    /// Only original named source/generation/pending/process fences; this
+    /// opens no FD and cannot repeat a manager query inside the final rename.
+    pub(crate) fn assert_publication_current(&self, source: &Path) -> Result<()> {
+        need(
+            self.source() == source,
+            "NATIVE_SERVICE_IMAGE_SOURCE_CHANGED",
+        )?;
+        private(source, false)?;
+        self.proof.assert_image_fence()
+    }
     pub fn source(&self) -> &Path {
         self.proof.source()
     }

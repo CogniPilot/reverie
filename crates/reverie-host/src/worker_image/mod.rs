@@ -2,6 +2,8 @@
 //! maintenance, service, image-load or worker permission.
 mod error;
 mod maintenance;
+mod rename;
+pub(crate) use rename::ImageRenameFence;
 mod terminal;
 #[cfg(test)]
 mod tests;
@@ -280,7 +282,7 @@ impl ImageControlFiles {
         pending: &ImagePendingFile,
     ) -> Result<ImagePublication> {
         self.live()?;
-        let result = self.publish_image(intent, expected, pending);
+        let result = self.publish_image(intent, expected, pending, None);
         self.finish(result)
     }
     fn publish_image(
@@ -288,6 +290,7 @@ impl ImageControlFiles {
         intent: &ImagePinTransition,
         expected: &ImageFileStamp,
         pending: &ImagePendingFile,
+        fence: Option<&mut ImageRenameFence<'_>>,
     ) -> Result<ImagePublication> {
         require(
             self.owner().pending_attempted && !self.owner().configuration_attempted,
@@ -319,6 +322,7 @@ impl ImageControlFiles {
             expected.gid,
             end,
             pending.file.as_ref().expect("checked original pending"),
+            fence,
         )
         .map_err(ImageFileError::shared)?;
         require(Instant::now() < end, "WORKER_IMAGE_DEADLINE").map_err(ImageFileError::unknown)?;

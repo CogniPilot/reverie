@@ -40,6 +40,7 @@ pub enum GpuHostError {
     Journal(reverie_store::operations::JournalError),
     Physical(reverie_core::gpu_access::GpuAccessError),
     Engine(crate::engine_metadata::EngineError),
+    ImageFence(Box<crate::worker_image::ImageFileError>),
     Finalized {
         primary: Box<Self>,
         secondary: Box<Self>,
@@ -58,6 +59,7 @@ impl GpuHostError {
             Self::Journal(error) => error.code(),
             Self::Physical(error) => error.code(),
             Self::Engine(error) => error.code(),
+            Self::ImageFence(error) => error.code(),
             Self::Finalized { primary, .. } => primary.code(),
             Self::PublicationUnknown(_) => "GPU_PUBLICATION_UNCONFIRMED",
         }
@@ -65,6 +67,7 @@ impl GpuHostError {
     pub fn is_uncertain(&self) -> bool {
         match self {
             Self::PublicationUnknown(_) => true,
+            Self::ImageFence(error) => error.is_uncertain(),
             Self::Finalized { primary, secondary } => {
                 primary.is_uncertain() || secondary.is_uncertain()
             }

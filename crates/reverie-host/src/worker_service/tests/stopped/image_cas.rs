@@ -93,9 +93,13 @@ fn maintained_cas_must_refuse_late_replacement_of_every_original_outer_fence() {
                 root.join("reverie").join(relative),
             );
         }
-        // Tests-first predecessor: this is the lower path selected by the old
-        // App, which currently cannot see either outer owner after temp-write.
-        let result = files.publish_configuration(&intent, before.stamp(), &pending);
+        let result = files.publish_maintained_configuration(
+            &intent,
+            before.stamp(),
+            &pending,
+            &mut locks,
+            &service,
+        );
         crate::gpu_access::clear_image_fixture_faults();
         let bytes = fs::read(&source).unwrap();
         if target.is_none() {
@@ -113,7 +117,7 @@ fn maintained_cas_must_refuse_late_replacement_of_every_original_outer_fence() {
         let service_close = service.close();
         match service_close {
             Ok(closed) if target.is_none() => {
-                closed.release().unwrap();
+                let _closed_service = closed.release().unwrap();
             }
             Ok(closed) => drop(closed),
             Err(mut failure) => {
