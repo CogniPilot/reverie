@@ -2,6 +2,8 @@
 //! correlate this owner; no cursor constructs a claim or authorizes a launch.
 use super::*;
 use reverie_core::{ids::NativeOperationId, operations::JournalId};
+#[cfg(test)]
+mod tests;
 
 #[derive(Default)]
 pub(super) struct OperationCursor {
