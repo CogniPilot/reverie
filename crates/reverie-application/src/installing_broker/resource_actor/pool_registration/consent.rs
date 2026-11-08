@@ -46,6 +46,17 @@ fn expiry(expires: u64) -> Result<()> {
         "POOL_INSTALLATION_OWNER_EXPIRED",
     )
 }
+fn offer_expiry(deadline: Instant) -> std::result::Result<u64, Cause> {
+    let now = epoch_ms().map_err(Cause::Website)?;
+    let remaining = u64::try_from(
+        deadline
+            .saturating_duration_since(Instant::now())
+            .as_millis(),
+    )
+    .map_err(|_| Cause::Refused("POOL_INSTALLATION_CLOCK_UNAVAILABLE"))?;
+    now.checked_add(remaining)
+        .ok_or(Cause::Refused("POOL_INSTALLATION_CLOCK_UNAVAILABLE"))
+}
 fn receive_when_ready(
     frame: &mut Frame<'_>,
     pin: &PoolRegistrationPin,
@@ -88,16 +99,7 @@ impl<'a> PoolRegistrationFailure<'a> {
             .map_err(ResourceActorError::from)
             .map_err(Cause::Website)?;
         let view = offer.bind_view(view_request).map_err(Cause::Offer)?;
-        let now = epoch_ms().map_err(Cause::Website)?;
-        let remaining = u64::try_from(
-            self.deadline
-                .saturating_duration_since(Instant::now())
-                .as_millis(),
-        )
-        .map_err(|_| Cause::Refused("POOL_INSTALLATION_CLOCK_UNAVAILABLE"))?;
-        let expires = now
-            .checked_add(remaining)
-            .ok_or(Cause::Refused("POOL_INSTALLATION_CLOCK_UNAVAILABLE"))?;
+        let expires = offer_expiry(self.deadline)?;
         let first = offer
             .offer_frame(&view, expires, false)
             .map_err(Cause::Website)?;
