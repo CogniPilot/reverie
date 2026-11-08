@@ -1,11 +1,14 @@
 # Explicit versioned rootless task perf image acceptance
 
-`cargo xtask verify-worker-perf --rootless-image ...` only invokes the exact
+`cargo xtask verify-worker-perf --rootless-image ... --task-perf-policy task-v2`
+selects full ordinary multithreaded recording. The thin task only invokes the exact
 ignored Host test with its declared image, provenance, policy, Docker-tools,
 Coreutils and closure inputs. Xtask contains no engine/policy/resource logic.
 No test is part of the ordinary suite unless explicitly selected.
-The default selector remains task-v1. A trailing `--task-perf-policy task-v2`
-chooses the separate v2 test, which refuses a v1 manifest rather than falling back.
+The default selector remains the legacy restricted task-v1 case, which cannot
+satisfy this full recording workflow. Its inherited-record refusal is a policy
+restriction, not a host limitation or successful capability test. The explicit
+v2 case refuses a v1 manifest rather than falling back.
 
 The Rust fixture checks the loaded actual Engine image ID against the declared
 immutable worker-image provenance's selected configuration and every RootFS

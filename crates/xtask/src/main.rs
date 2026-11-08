@@ -71,7 +71,7 @@ fn run() -> Result<(), Box<dyn Error>> {
 
 fn help() {
     println!(
-        "cargo xtask verify-worker-perf --rootless-image sha256:IMAGE --policy-manifest PATH --image-provenance PATH --docker-tools NIX_PACKAGE --native-coreutils NIX_PACKAGE --closure JSON --core-closure JSON [--task-perf-policy task-v1|task-v2]\n  Explicit isolated Rust-owned rootless image acceptance: actual nonroot versioned task perf stat/record/report and one native inner-container workload. Uses only declared immutable public Nix artifacts and disposable containers; never prepares host settings. Kernel/package/runtime refusal is a failure, not a passed skip."
+        "cargo xtask verify-worker-perf --rootless-image sha256:IMAGE --policy-manifest PATH --image-provenance PATH --docker-tools NIX_PACKAGE --native-coreutils NIX_PACKAGE --closure JSON --core-closure JSON --task-perf-policy task-v2\n  Full multithread recording requires task-v2. Omitted policy retains the legacy task-v1 restricted/negative selector; its recording refusal is not a host limitation or capability pass. Explicit isolated Rust-owned rootless image acceptance: actual nonroot versioned task perf stat/record/report and one native inner-container workload. Uses only declared immutable public Nix artifacts and disposable containers; never prepares host settings. Kernel/package/runtime refusal is a failure, not a passed skip."
     );
     println!(
         "cargo xtask verify-worker-perf --ci\n  Disposable Ubuntu24.04 GitHub-hosted runner only: prepare host support, build the Nix image/policy, import under an owned temporary tag, verify real perf, and clean up on either outcome. Refuses local/self-hosted use."

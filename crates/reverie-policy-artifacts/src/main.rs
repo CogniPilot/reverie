@@ -31,7 +31,7 @@ struct Arguments {
     /// Docker mode: absent output file for the fixed namespace profile.
     #[arg(long, conflicts_with_all = ["output_directory", "system"])]
     docker_profile_output: Option<PathBuf>,
-    /// Read-only validation of generated task-v1 bytes for native acceptance.
+    /// Read-only validation of generated versioned task perf bytes for acceptance.
     #[arg(long, conflicts_with_all = ["base_profile", "output_directory", "system", "docker_profile_output"])]
     verify_manifest: Option<PathBuf>,
 }
