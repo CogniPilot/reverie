@@ -77,7 +77,7 @@ impl WorkerPoolPolicy {
             && self
                 .employee_memory_high_mi_b
                 .iter()
-                .all(|(employee, high)| uuid(employee) && (1..=MEMORY_MAX_MIB).contains(high));
+                .all(|(employee, high)| uuid(employee) && (1..MEMORY_MAX_MIB).contains(high));
         valid.then_some(()).ok_or(PoolPolicyError)
     }
 
@@ -239,6 +239,19 @@ mod tests {
             let mut changed = policy();
             changed.allowed_cpus = cpus;
             assert!(changed.validate().is_err());
+        }
+    }
+
+    #[test]
+    fn employee_soft_threshold_must_be_strictly_below_the_borrowing_ceiling() {
+        for (high, accepted) in [(0, false), (1, true), (49_151, true), (49_152, false)] {
+            let mut selected = policy();
+            *selected
+                .employee_memory_high_mi_b
+                .values_mut()
+                .next()
+                .unwrap() = high;
+            assert_eq!(selected.validate().is_ok(), accepted);
         }
     }
 }

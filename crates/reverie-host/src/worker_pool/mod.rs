@@ -4,11 +4,13 @@
 mod controller_limits;
 mod directory;
 mod engine;
+mod member;
 mod namespace;
 mod policy;
 #[cfg(test)]
 mod tests;
 use directory::PoolDirectory;
+pub use member::{OpenedPoolMember, PoolMemberFailure, PoolMemberLimits};
 pub use policy::{ControllerPoolPolicy, ControllerPoolPolicyFailure};
 use reverie_contracts::worker_pool::WorkerPoolPolicy;
 use std::{fmt, io};

@@ -101,7 +101,7 @@ impl PoolDirectory {
         self.anchor_start = process_start(pid)?;
         self.assert_anchor_only(anchor, pid)
     }
-    fn parent(&self) -> Result<&File> {
+    pub(super) fn parent(&self) -> Result<&File> {
         self.parent
             .as_ref()
             .ok_or(PoolError::Refused("WORKER_POOL_DIRECTORY_CLOSED"))
@@ -257,6 +257,9 @@ impl PoolDirectory {
     pub(super) fn identity(&self) -> (u64, u64) {
         self.identity
     }
+    pub(super) fn memory_nodes(&self) -> &[u32] {
+        &self.memory_nodes
+    }
     pub(super) fn close(&mut self) -> Result<()> {
         let anchor = self
             .anchor
@@ -289,7 +292,7 @@ impl PoolDirectory {
         need(!self.close_unknown, "WORKER_POOL_CLOSE_UNKNOWN")
     }
 }
-fn identity(file: &File) -> Result<(u64, u64)> {
+pub(super) fn identity(file: &File) -> Result<(u64, u64)> {
     let metadata = file.metadata()?;
     need(
         metadata.is_dir() && metadata.uid() == 0,
@@ -321,7 +324,7 @@ pub(super) fn bounded_path(path: &str, max: usize) -> Result<String> {
     let result = read(&file, max);
     finalized(result, native::close(file).map_err(Into::into))
 }
-fn process_start(pid: u32) -> Result<String> {
+pub(super) fn process_start(pid: u32) -> Result<String> {
     let stat = bounded_path(&format!("/proc/{pid}/stat"), 65_536)?;
     reverie_contracts::kernel_accounting::process_start(&stat)
         .map_err(|_| PoolError::Refused("WORKER_POOL_ANCHOR_PID_UNKNOWN"))

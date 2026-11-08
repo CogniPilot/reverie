@@ -69,3 +69,14 @@ constructor refusal. Checked metadata cleanup remains distinct from pool/outer
 operation completion. Consumed-close uncertainty is sticky even after other
 descriptors close, and default failure destruction retains its actual owner.
 Pool close terminally fences its installed stage before any fallible close.
+
+`OpenedPoolMember` is a separate read-only pre-pane metadata owner. It borrows
+the actual installed parent, retains the original leaf directory, and checks
+the process PID/start, parent membership, scope inode and exact physical
+high/max/swap/task/CPU limits before and after parent observation. The selected
+employee's high threshold comes from the retained policy; CPU weight and task
+expectations are checked data, never permission. A single init PID does not
+prove idle code or an approved image. This owner still needs the actual Created,
+Engine spec, start and memory-phase joins before pane execution. It performs no
+writes and supplies no admission or launch token. Refusal fences its original
+owner; checked metadata close never acknowledges worker or pool settlement.
