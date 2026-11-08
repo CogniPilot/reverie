@@ -41,7 +41,9 @@ it('explicitly enrolls only the current legacy owner, preserving the account and
     expect(principal.accountId).not.toBe('00000000-0000-0000-0000-000000000000');
     expect(response.json()).toEqual({ success: true, data: principal });
     expect(JSON.parse(await readFile(store.file, 'utf8'))).toEqual({ ...before, accountId: principal.accountId });
-    expect(() => controller.result({} as never, '10000000-0000-4000-8000-000000000001')).toThrow();
+    const guest = await app.inject({ method: 'POST', url: '/api/company/resources/fleet/installation/enroll',
+      headers: { host: 'localhost', origin: 'http://localhost' }, payload: { enroll: true } });
+    expect(guest.statusCode).toBe(403);
   } finally {
     controller.close();
     auth.logout(token);
