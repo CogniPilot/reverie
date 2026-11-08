@@ -37,7 +37,7 @@ impl ResourceActorError {
             Self::RetainedCompanyClose(e) => e.code(),
             Self::RetainedKernelClose(e) => e.code(),
             Self::RetainedControlClose(e) => e.code(),
-            Self::GateFinalization { primary, .. } => primary.code(),
+            Self::GateFinalization { .. } => "RESERVATION_ADMISSION_FINALIZATION",
             Self::Finalization { .. } => "RESOURCE_ACTOR_FINALIZATION",
         }
     }

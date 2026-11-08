@@ -28,8 +28,8 @@ or reconciliation API. A consuming current check returns the whole owner on
 failure; attempted failure Drop quarantines its original evidence and cause.
 The actual Host pending owner also latches the first typed consumed-close cause;
 later checks refuse before another native read. Gate finalization preserves both
-causes and the original primary code, and the existing Q failure reader retains
-typed control-close opacity without manufacturing an authenticated operation.
+causes and the original Gate finalization code. The existing Q failure reader
+retains typed control-close opacity without manufacturing an authenticated operation.
 
 The unchanged legacy Gate also refuses this distinct pending purpose. Ordinary
 J takes `resource_admission`; storage waits close then reacquire it; Nix copying
