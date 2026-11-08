@@ -3,6 +3,8 @@
 //! not a Gate, storage lease, stop receipt or global shutdown acknowledgement.
 mod bootstrap;
 mod client;
+#[cfg(test)]
+mod close_classification_tests;
 mod controller_limits;
 pub use client::{ActivatedController, ControllerActivationFailure, ControllerStatusData};
 pub(crate) mod directory;
