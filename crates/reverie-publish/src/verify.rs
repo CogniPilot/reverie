@@ -37,7 +37,7 @@ pub fn verify(input: &Inputs<'_>) -> Result<Verified, String> {
     let packet = Packet::open(input.packet, input.seal)?;
     let git = input.git;
     // git reads a private copy of the verified bytes, never the packet's path.
-    git.import_bundle(&packet.bundle()?, "packet")?;
+    let imported = git.import_bundle(&packet.bundle()?, "packet")?;
     let head = git.run([
         "rev-parse",
         "--verify",
@@ -46,6 +46,10 @@ pub fn verify(input: &Inputs<'_>) -> Result<Verified, String> {
     ])?;
     if head != input.head {
         return Err("--head must be the full id of a commit in the bundle".into());
+    }
+    // Not just any commit in the store: the tip of a ref the sealed bundle itself carries.
+    if !git.is_imported_tip(&imported, &head)? {
+        return Err("--head must be the tip of a ref in the sealed bundle".into());
     }
     let tree = git.run(["rev-parse", &format!("{head}^{{tree}}")])?;
     if input.tree.len() < 8 || !tree.starts_with(input.tree) {
