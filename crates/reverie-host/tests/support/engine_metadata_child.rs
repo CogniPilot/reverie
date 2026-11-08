@@ -26,6 +26,16 @@ fn main() {
     let executable = env::current_exe().unwrap();
     let mode = executable.file_name().unwrap().to_str().unwrap();
     match mode {
+        "native-worker-manager-legacy" | "native-worker-manager-slow" => {
+            if args == ["--user", "stop", "reverie-worker-broker.service"] {
+                let mut trace = std::fs::OpenOptions::new().append(true).create(true).open("manager-stops").unwrap();writeln!(trace,"original-stop").unwrap();
+                if mode == "native-worker-manager-slow" { std::thread::sleep(Duration::from_millis(1500)); }
+                std::fs::write("manager-stopped", b"known controlled stop").unwrap();return;
+            }
+            assert_eq!(args, ["--user", "show", "reverie-worker-broker.service", "--property=LoadState", "--property=ActiveState", "--property=SubState", "--property=FragmentPath"]);
+            let (active,sub)=if std::path::Path::new("manager-stopped").exists(){("inactive","dead")}else{("active","running")};
+            print!("LoadState=loaded\nActiveState={active}\nSubState={sub}\nFragmentPath=/nix/store/old-worker/share/systemd/user/reverie-worker-broker.service\n");
+        },
         "native-worker-manager" => {
             assert_eq!(args, ["--user", "show", "reverie-worker-broker.service", "--property=LoadState", "--property=ActiveState", "--property=SubState", "--property=FragmentPath"]);
             print!("LoadState=loaded\nActiveState=active\nSubState=running\nFragmentPath=/nix/store/old-worker/share/systemd/user/reverie-worker-broker.service\n");

@@ -80,13 +80,20 @@ fn completed_job_requires_actual_action_specific_state() {
 }
 
 fn fixture() -> (State, PathBuf, PathBuf) {
+    fixture_mode("native-worker-manager")
+}
+fn fixture_mode(mode: &str) -> (State, PathBuf, PathBuf) {
+    assert!(matches!(
+        mode,
+        "native-worker-manager" | "native-worker-manager-legacy" | "native-worker-manager-slow"
+    ));
     let root = std::env::temp_dir().join(format!(
         "native-worker-manager-{}-{}",
         std::process::id(),
         crate::resource_facts::fresh_owner_nonce().unwrap().as_str()
     ));
     fs::DirBuilder::new().mode(0o700).create(&root).unwrap();
-    let program = root.join("native-worker-manager");
+    let program = root.join(mode);
     fs::hard_link(crate::engine_metadata::tests::program(), &program).unwrap();
     let command =
         InstalledCommand::from_snapshot(program.as_os_str(), Vec::new(), root.clone(), false)
@@ -192,4 +199,158 @@ fn rollback_collision_never_replaces_history_or_moves_original_unit() {
     fs::remove_dir(from).unwrap();
     fs::remove_dir(to).unwrap();
     fs::remove_dir(root).unwrap();
+}
+
+#[test]
+fn actual_known_predecessor_stop_uses_only_original_unit_and_preserves_generation() {
+    let (mut state, root, program) = fixture_mode("native-worker-manager-legacy");
+    prepare_predecessor(&state);
+    let result = state.run(WorkerServiceAction::Stop);
+    let closed = state.close();
+    let trace = fs::read(root.join("manager-stops"));
+    let generation = fs::read_link(root.join(".config/systemd/user").join(UNIT));
+    let previous = state.previous.clone();
+    let finished = if result.is_ok() && closed.is_ok() {
+        state.finish_attempt()
+    } else {
+        Ok(())
+    };
+    cleanup_predecessor(root, program);
+    assert!(closed.is_ok());
+    assert!(result.is_ok(), "{result:?}");
+    assert!(finished.is_ok());
+    assert_eq!(trace.unwrap(), b"original-stop\n");
+    assert_eq!(generation.unwrap(), previous.unwrap());
+}
+fn prepare_predecessor(state: &State) {
+    for path in [
+        state.home.join(".config/systemd/user"),
+        state.home.join(".config/reverie"),
+    ] {
+        fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(path)
+            .unwrap();
+    }
+    std::os::unix::fs::symlink(
+        state.previous.as_ref().unwrap(),
+        state.home.join(".config/systemd/user").join(UNIT),
+    )
+    .unwrap();
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(state.home.join(".config/reverie/worker-broker.env"))
+        .unwrap();
+    file.write_all(environment(&state.source).unwrap().as_bytes())
+        .unwrap();
+    file.sync_all().unwrap();
+    native::close(file).unwrap();
+}
+fn cleanup_predecessor(root: PathBuf, program: PathBuf) {
+    fs::remove_file(root.join(".config/systemd/user").join(UNIT)).unwrap();
+    fs::remove_file(root.join(".config/reverie/worker-broker.env")).unwrap();
+    for path in ["manager-stops", "manager-stopped"] {
+        if root.join(path).exists() {
+            fs::remove_file(root.join(path)).unwrap();
+        }
+    }
+    for path in [
+        ".config/systemd/user",
+        ".config/systemd",
+        ".config/reverie",
+        ".config",
+        "worker-pool/service",
+        "worker-pool",
+    ] {
+        if root.join(path).is_dir() {
+            fs::remove_dir(root.join(path)).unwrap();
+        }
+    }
+    fs::remove_file(program).unwrap();
+    fs::remove_dir(root).unwrap();
+}
+#[test]
+fn actual_packaged_alias_keeps_nix_store_argv0_dispatch() {
+    let target = std::env::split_paths(&std::env::var_os("PATH").unwrap())
+        .filter_map(|directory| fs::canonicalize(directory.join("nix-store")).ok())
+        .find(|path| {
+            path.starts_with("/nix/store") && path.file_name().is_some_and(|name| name == "nix")
+        })
+        .expect("qualified Nix development environment required");
+    let alias = target.with_file_name("nix-store");
+    assert_ne!(alias, alias.canonicalize().unwrap());
+    immutable_tool(&alias).unwrap();
+    let root = std::env::temp_dir().join(format!(
+        "native-alias-{}-{}",
+        std::process::id(),
+        crate::resource_facts::fresh_owner_nonce().unwrap().as_str()
+    ));
+    fs::DirBuilder::new().mode(0o700).create(&root).unwrap();
+    let untrusted = root.join("nix-store");
+    std::os::unix::fs::symlink(&alias, &untrusted).unwrap();
+    assert!(immutable_tool(&untrusted).is_err());
+    let command =
+        InstalledCommand::from_snapshot(alias.as_os_str(), Vec::new(), root.clone(), false)
+            .unwrap();
+    let client = CapturedClient::new(command);
+    let end = Instant::now() + Duration::from_secs(5);
+    let output = client.run_scoped(
+        vec!["--version".into()],
+        end,
+        &CancellationToken::new(),
+        Policy {
+            maximum: Duration::from_secs(3),
+            maximum_output: 65536,
+            successful_exit: true,
+        },
+    );
+    let close = client.close(end);
+    assert!(close.is_ok());
+    let output = match output {
+        Ok(output) => output,
+        Err(failure) => {
+            let error = failure.error.to_string();
+            std::mem::forget(failure);
+            panic!("{error}")
+        }
+    };
+    assert!(
+        String::from_utf8(output.stdout)
+            .unwrap()
+            .starts_with("nix-store (Nix) ")
+    );
+    fs::remove_file(untrusted).unwrap();
+    fs::remove_dir(root).unwrap();
+}
+#[test]
+fn actual_slow_predecessor_stop_keeps_original_end_pending_and_single_attempt() {
+    let (mut state, root, program) = fixture_mode("native-worker-manager-slow");
+    prepare_predecessor(&state);
+    let end = Instant::now() + Duration::from_millis(500);
+    state.end = end;
+    let body = state.run(WorkerServiceAction::Stop);
+    std::thread::sleep(Duration::from_millis(1800));
+    let close = state.close();
+    let trace = fs::read(root.join("manager-stops"));
+    let original_end = state.end;
+    let uncertain = state.uncertain;
+    let pending = state.folder().join("pending");
+    let pending_retained = pending.is_file();
+    if state.call.is_some() || state.pin_call.is_some() || !state.files.is_empty() {
+        eprintln!("retained original controlled fixture: {}", root.display());
+        std::mem::forget(state);
+        panic!("original controlled native owner did not settle");
+    }
+    if pending_retained {
+        fs::remove_file(pending).unwrap();
+    }
+    cleanup_predecessor(root, program);
+    assert!(body.is_err());
+    assert!(close.is_err());
+    assert!(uncertain && pending_retained);
+    assert_eq!(original_end, end);
+    assert_eq!(trace.unwrap(), b"original-stop\n");
 }

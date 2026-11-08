@@ -158,6 +158,20 @@ mod tests {
         );
     }
     #[test]
+    fn curated_service_exposes_happy_path_rollback() {
+        let parsed = Arguments::try_parse_from([
+            "broker",
+            "service",
+            "rollback",
+            "--config",
+            "/owner/reverie/broker.json",
+        ]);
+        assert!(
+            parsed.is_ok(),
+            "curated service rollback command must be available"
+        );
+    }
+    #[test]
     fn installation_role_has_fixed_name_config_and_no_nomination_override() {
         let arguments = Arguments::try_parse_from([
             "broker",
