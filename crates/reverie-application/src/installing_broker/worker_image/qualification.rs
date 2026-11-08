@@ -34,6 +34,7 @@ impl InstallingBroker {
             input: ImmutableInputObserver::default(),
             end,
             failed: false,
+            recheck_close_failure: None,
             preview_files: None,
             preview: None,
             file_close_failure: None,
@@ -51,6 +52,20 @@ impl InstallingBroker {
     }
 }
 impl Qualification<'_> {
+    pub(super) fn latch_recheck_failure(
+        &mut self,
+        cause: WorkerImageQualificationError,
+    ) -> WorkerImageQualificationError {
+        self.failed = true;
+        if cause.has_unconfirmed_close() {
+            let first = self
+                .recheck_close_failure
+                .get_or_insert_with(|| Rc::new(cause));
+            WorkerImageQualificationError::Retained(first.clone())
+        } else {
+            cause
+        }
+    }
     pub(super) fn observe(&mut self, end: Instant) -> Result<()> {
         need(!self.failed, "WORKER_IMAGE_QUALIFICATION_RETAINED")?;
         let end = end.min(self.end);
@@ -135,6 +150,17 @@ impl Qualification<'_> {
             || self.input.assert_finalized().map_err(Into::into),
             |error| Err(WorkerImageQualificationError::ImageFiles(error.clone())),
         );
+        let retained = self.recheck_close_failure.as_ref().map_or(Ok(()), |cause| {
+            Err(WorkerImageQualificationError::Retained(cause.clone()))
+        });
+        let input = match (retained, input) {
+            (Ok(()), Ok(())) => Ok(()),
+            (Err(e), Ok(())) | (Ok(()), Err(e)) => Err(e),
+            (Err(a), Err(b)) => Err(WorkerImageQualificationError::Finalization(
+                Box::new(a),
+                Box::new(b),
+            )),
+        };
         let query = self.context.settle_metadata_owned(end).map_err(Into::into);
         let original = match (input, query) {
             (Ok(()), Ok(())) => Ok(()),
@@ -161,11 +187,10 @@ impl<'a> QualifiedWorkerImage<'a> {
     }
     pub fn assert_current(&mut self, end: Instant) -> Result<()> {
         let owner = self.owner.as_mut().expect("qualified owner");
-        let result = owner.observe(end);
-        if result.is_err() {
-            owner.failed = true;
+        match owner.observe(end) {
+            Ok(()) => Ok(()),
+            Err(cause) => Err(owner.latch_recheck_failure(cause)),
         }
-        result
     }
     pub fn close(
         mut self,

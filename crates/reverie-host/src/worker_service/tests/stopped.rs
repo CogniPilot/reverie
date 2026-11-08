@@ -1,4 +1,5 @@
 use super::*;
+mod image_cas;
 use std::os::unix::fs::PermissionsExt;
 
 fn native_image_fixture() -> (super::super::StoppedWorkerService, PathBuf, PathBuf) {

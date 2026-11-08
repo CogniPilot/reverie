@@ -179,6 +179,41 @@ impl ImageTransitionRecord {
         })();
         self.keep(result)
     }
+    pub(super) fn publish_maintained_configuration(
+        self: &Arc<Self>,
+        locks: &mut reverie_host::worker_image::ImageMaintenanceLocks,
+        service: &reverie_host::worker_service::ImageServiceMaintenance,
+    ) -> Result<()> {
+        self.current()?;
+        let result = (|| {
+            let mut state = self.lock()?;
+            let Files {
+                files,
+                stamp,
+                pending,
+                publication,
+                ..
+            } = &mut *state;
+            let pending = pending
+                .as_ref()
+                .ok_or(GateError::Refused("WORKER_IMAGE_PENDING_CHANGED"))?;
+            let stamp = stamp
+                .as_ref()
+                .ok_or(GateError::Refused("WORKER_IMAGE_SOURCE_CHANGED"))?;
+            *publication = Some(files.publish_maintained_configuration(
+                &self.intent,
+                stamp,
+                pending,
+                locks,
+                service,
+            )?);
+            Ok(())
+        })();
+        self.keep(result)
+    }
+    /// Isolated file/admission mechanism controls do not mint maintenance or
+    /// service owners. The actual application only uses the maintained path.
+    #[cfg(test)]
     pub(super) fn publish_configuration(self: &Arc<Self>) -> Result<()> {
         self.current()?;
         let result = (|| {

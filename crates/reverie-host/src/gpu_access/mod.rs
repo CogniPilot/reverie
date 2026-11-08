@@ -5,6 +5,8 @@ mod consumers;
 mod current;
 mod files;
 #[cfg(test)]
+pub(crate) use files::image_path_swap_before_cas_fixture_fault;
+#[cfg(test)]
 pub(crate) use files::image_pending_swap_before_cas_fixture_fault;
 pub(crate) use files::open_parent as open_control_parent;
 pub(crate) use files::replace_image_configuration;
@@ -38,6 +40,7 @@ pub enum GpuHostError {
     Journal(reverie_store::operations::JournalError),
     Physical(reverie_core::gpu_access::GpuAccessError),
     Engine(crate::engine_metadata::EngineError),
+    ImageFence(Box<crate::worker_image::ImageFileError>),
     Finalized {
         primary: Box<Self>,
         secondary: Box<Self>,
@@ -56,6 +59,7 @@ impl GpuHostError {
             Self::Journal(error) => error.code(),
             Self::Physical(error) => error.code(),
             Self::Engine(error) => error.code(),
+            Self::ImageFence(error) => error.code(),
             Self::Finalized { primary, .. } => primary.code(),
             Self::PublicationUnknown(_) => "GPU_PUBLICATION_UNCONFIRMED",
         }
@@ -63,6 +67,7 @@ impl GpuHostError {
     pub fn is_uncertain(&self) -> bool {
         match self {
             Self::PublicationUnknown(_) => true,
+            Self::ImageFence(error) => error.is_uncertain(),
             Self::Finalized { primary, secondary } => {
                 primary.is_uncertain() || secondary.is_uncertain()
             }

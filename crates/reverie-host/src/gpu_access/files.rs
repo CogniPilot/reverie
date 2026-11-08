@@ -145,7 +145,7 @@ impl GpuControlFiles {
 /// No failure path unlinks a named candidate. Parent FD, writer and temporary
 /// evidence are checked/retained; unknown rename/fsync is not rolled back.
 fn replace(path: &Path, bytes: &[u8], expected: Option<&GpuFileStamp>) -> Result<()> {
-    replace_mode(path, bytes, expected, None).map(|_| ())
+    replace_mode(path, bytes, expected, None, None).map(|_| ())
 }
 /// The image purpose shares the original writer, with additional exact named
 /// readback and original group/deadline checks. GPU calls retain their mode.
@@ -156,9 +156,16 @@ pub(crate) fn replace_image_configuration(
     group: u32,
     end: std::time::Instant,
     pending: &crate::private_pending::PendingFile,
+    fence: Option<&mut crate::worker_image::ImageRenameFence<'_>>,
 ) -> Result<GpuFileStamp> {
-    replace_mode(path, bytes, Some(expected), Some((group, end, pending)))?
-        .ok_or(GpuHostError::Refused("WORKER_IMAGE_READBACK_REQUIRED"))
+    replace_mode(
+        path,
+        bytes,
+        Some(expected),
+        Some((group, end, pending)),
+        fence,
+    )?
+    .ok_or(GpuHostError::Refused("WORKER_IMAGE_READBACK_REQUIRED"))
 }
 fn replace_mode(
     path: &Path,
@@ -169,6 +176,7 @@ fn replace_mode(
         std::time::Instant,
         &crate::private_pending::PendingFile,
     )>,
+    mut fence: Option<&mut crate::worker_image::ImageRenameFence<'_>>,
 ) -> Result<Option<GpuFileStamp>> {
     let parent = path
         .parent()
@@ -214,6 +222,11 @@ fn replace_mode(
             image_current(image)?;
             if let Some((_, _, pending)) = image {
                 pending.assert_current().map_err(pending::gpu_error)?;
+            }
+            if let Some(fence) = fence.as_mut() {
+                fence
+                    .assert_current()
+                    .map_err(|e| GpuHostError::ImageFence(Box::new(e)))?;
             }
             attempted = true;
             native::replace_policy(&directory, &temporary.name, leaf)?;
@@ -319,6 +332,17 @@ pub(crate) fn image_pending_swap_before_cas_fixture_fault() {
         let bytes = fs::read(&pending)?;
         fs::rename(&pending, parent.join("original-pending"))?;
         fs::write(pending, bytes)?;
+        Ok(())
+    });
+}
+#[cfg(test)]
+pub(crate) fn image_path_swap_before_cas_fixture_fault(path: PathBuf) {
+    tests::hook(tests::Point::BeforeCas, move |_, _| {
+        use std::os::unix::fs::PermissionsExt;
+        let bytes = fs::read(&path)?;
+        fs::rename(&path, path.with_extension("original-fixture"))?;
+        fs::write(&path, bytes)?;
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o600))?;
         Ok(())
     });
 }

@@ -100,13 +100,23 @@ impl<'a> Owner<'a> {
         self.protected = Some(record.protected_stores()?);
         Ok(())
     }
-    fn publish(&mut self, end: Instant) -> Result<()> {
+    fn prepare_publication(&mut self, end: Instant) -> Result<()> {
         let record = self.record.as_ref().expect("actual entered record");
         let body = (|| {
             record.publish_pending(end)?;
             let rows = self.gate.inner.image_idle()?;
-            need(record.rows.equivalent(&rows), "WORKER_IMAGE_NATIVE_CHANGED")?;
-            record.publish_configuration()?;
+            need(record.rows.equivalent(&rows), "WORKER_IMAGE_NATIVE_CHANGED")
+        })();
+        record.keep(body)
+    }
+    fn publish(
+        &mut self,
+        locks: &mut reverie_host::worker_image::ImageMaintenanceLocks,
+        service: &reverie_host::worker_service::ImageServiceMaintenance,
+    ) -> Result<()> {
+        let record = self.record.as_ref().expect("actual entered record");
+        let body = (|| {
+            record.publish_maintained_configuration(locks, service)?;
             self.gate
                 .inner
                 .publish_image_record(record, self.lifecycle.as_ref().expect("actual lifecycle"))
@@ -129,11 +139,21 @@ impl ImageGateFailure<'_> {
     }
 }
 impl ImageGateTransition<'_> {
-    pub(crate) fn publish(&mut self, end: Instant) -> Result<()> {
+    pub(crate) fn prepare_publication(&mut self, end: Instant) -> Result<()> {
         self.owner
             .as_mut()
             .expect("actual transition owner")
-            .publish(end)
+            .prepare_publication(end)
+    }
+    pub(crate) fn publish(
+        &mut self,
+        locks: &mut reverie_host::worker_image::ImageMaintenanceLocks,
+        service: &reverie_host::worker_service::ImageServiceMaintenance,
+    ) -> Result<()> {
+        self.owner
+            .as_mut()
+            .expect("actual transition owner")
+            .publish(locks, service)
     }
     pub(crate) fn close_components(&mut self) -> Result<()> {
         self.owner

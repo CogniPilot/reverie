@@ -123,3 +123,44 @@ fn foreign_file_owner_cannot_enter_an_otherwise_identical_preview() {
     assert!(!pending(&tree).exists());
     assert!(!pending(&foreign).exists());
 }
+
+#[test]
+fn postpending_phase_failure_keeps_original_pending_and_blocks_reentry_after_known_close() {
+    let tree = Tree::new();
+    let source = source();
+    let gate = tree.gate(&source, true);
+    let (files, preview) = preview(&gate, &tree);
+    let mut entered = gate
+        .enter_image_switch(
+            files,
+            preview,
+            operation(),
+            Instant::now() + Duration::from_secs(15),
+        )
+        .unwrap_or_else(|error| panic!("{}", error.cause()));
+    entered
+        .prepare_publication(Instant::now() + Duration::from_secs(15))
+        .unwrap();
+    let original = fs::read(pending(&tree)).unwrap();
+    let error = entered
+        .prepare_publication(Instant::now() + Duration::from_secs(15))
+        .expect_err("same pending phase is irreversible");
+    assert_eq!(error.code(), "WORKER_IMAGE_PUBLICATION_PHASE");
+    let before_close = source.events();
+    entered.close_components().unwrap();
+    assert_eq!(
+        source.events(),
+        before_close,
+        "body failure cleanup starts no new observation"
+    );
+    assert_eq!(fs::read(pending(&tree)).unwrap(), original);
+    assert_eq!(fs::read(tree.root.join("worker.json")).unwrap(), tree.raw);
+    let refusal = gate
+        .inner
+        .admit(AdmissionBounds::default())
+        .err()
+        .expect("actual retained transition blocks new work");
+    assert_eq!(refusal.code(), "WORKER_IMAGE_REQUIRES_RECONCILIATION");
+    assert_eq!(source.events(), before_close);
+    assert_eq!(fs::read(pending(&tree)).unwrap(), original);
+}

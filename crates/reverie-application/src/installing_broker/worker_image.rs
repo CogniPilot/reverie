@@ -7,7 +7,10 @@ use reverie_contracts::{
     worker_image_switch::WorkerImageId,
 };
 use reverie_host::website_facts::{ImmutableInputKind, ImmutableInputObserver};
-use std::time::{Duration, Instant};
+use std::{
+    rc::Rc,
+    time::{Duration, Instant},
+};
 mod apply;
 mod broker_close;
 pub use broker_close::{ClosedOfflineImageInspection, OfflineImageInspectionFailure};
@@ -40,6 +43,7 @@ struct Qualification<'a> {
     context: ObservationContext,
     end: Instant,
     failed: bool,
+    recheck_close_failure: Option<Rc<WorkerImageQualificationError>>,
     preview_files: Option<reverie_host::worker_image::ImageControlFiles>,
     preview: Option<crate::reservation_gate::ImageSwitchPreview>,
     file_close_failure: Option<reverie_host::worker_image::ImageFileError>,

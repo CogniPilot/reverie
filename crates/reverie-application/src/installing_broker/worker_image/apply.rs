@@ -112,6 +112,13 @@ impl<'a> Owner<'a> {
         operation: JournalId,
     ) -> std::result::Result<OfflineImageSwitchClosed, OfflineImageSwitchError<'a>> {
         self.enter(expected, operation)?;
+        self.gate
+            .as_mut()
+            .expect("actual R transition")
+            .prepare_publication(self.end)
+            .map_err(OfflineImageSwitchError::gate)?;
+        // Native census may have waited. Revalidate the SAME actual service
+        // and locks now, then pass them into the Host final-rename boundary.
         self.service
             .as_mut()
             .expect("original service fence")
@@ -125,7 +132,10 @@ impl<'a> Owner<'a> {
         self.gate
             .as_mut()
             .expect("actual R transition")
-            .publish(self.end)
+            .publish(
+                self.locks.as_mut().expect("same deployment locks"),
+                self.service.as_ref().expect("same service fence"),
+            )
             .map_err(OfflineImageSwitchError::gate)?;
         // Full native image recheck precedes the final R boundary. After that
         // boundary, only original component finalizers/metadata stamps run.

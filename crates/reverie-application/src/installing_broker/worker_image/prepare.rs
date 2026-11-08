@@ -130,10 +130,10 @@ impl<'a> PreparedOfflineImageSwitch<'a> {
                 Box::new(b),
             )),
         };
-        if result.is_err() {
-            owner.failed = true;
+        match result {
+            Ok(()) => Ok(()),
+            Err(cause) => Err(owner.latch_recheck_failure(cause)),
         }
-        result
     }
     pub fn preview_digest(&self) -> &JournalDigest {
         self.owner

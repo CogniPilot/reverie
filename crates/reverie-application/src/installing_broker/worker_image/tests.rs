@@ -161,3 +161,40 @@ fn inspection_controller_slot_contention_refuses_before_runtime_stop_or_native_q
         .close_offline_image_inspection(Instant::now() + Duration::from_secs(2))
         .unwrap();
 }
+
+#[test]
+fn typed_stateless_recheck_close_failure_keeps_original_qualifier_after_known_component_close() {
+    let tree = Tree::new();
+    let broker = broker(&tree);
+    let end = Instant::now() + Duration::from_secs(2);
+    let mut failure = broker
+        .qualify_worker_image(
+            reference(),
+            reference(),
+            WorkerImageId::parse(&format!("sha256:{}", "b".repeat(64))).unwrap(),
+            end,
+        )
+        .err()
+        .expect("real original qualifier retained before invalid reference");
+    // Typed notification control only. Actual native consumed-close mechanics
+    // are separately owned by Host; this never fabricates a qualified image.
+    let notification = WorkerImageQualificationError::Rootless(
+        reverie_host::rootless::RootlessHostError::Observation(
+            reverie_host::ObservationError::CloseUnconfirmed {
+                cause: std::io::Error::other("typed stateless close notification"),
+            },
+        ),
+    );
+    let returned = failure
+        .owner
+        .as_mut()
+        .unwrap()
+        .latch_recheck_failure(notification);
+    assert!(returned.has_unconfirmed_close());
+    assert!(failure.close_components(end).is_err());
+    assert!(failure.owner.is_some());
+    assert!(failure.close_components(end).is_err());
+    assert!(failure.owner.is_some());
+    assert_eq!(fs::read(tree.root.join("worker.json")).unwrap(), tree.raw);
+    broker.storage.runtime.close(end).unwrap();
+}

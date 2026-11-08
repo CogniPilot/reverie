@@ -11,6 +11,7 @@ enum Cause {
     Configuration(EngineDataError),
     Data(IdentityDataError),
     Transition(reverie_contracts::worker_image_switch::ImageDataError),
+    Service(crate::worker_service::WorkerServiceError),
     Pending(PendingError),
     Identity(reverie_store::storage_identity::IdentityError),
     Finalized(ImageFileError, ImageFileError),
@@ -19,6 +20,9 @@ enum Cause {
 #[derive(Clone, Debug)]
 pub struct ImageFileError(Arc<Cause>);
 impl ImageFileError {
+    pub(super) fn service(error: crate::worker_service::WorkerServiceError) -> Self {
+        Self(Arc::new(Cause::Service(error)))
+    }
     pub(super) fn refused(code: &'static str) -> Self {
         Self(Arc::new(Cause::Refused(code)))
     }
@@ -55,6 +59,7 @@ impl ImageFileError {
             Cause::Configuration(e) => e.code(),
             Cause::Data(_) => "WORKER_IMAGE_FILE_DATA",
             Cause::Transition(e) => e.code(),
+            Cause::Service(e) => service_code(e),
             Cause::Pending(_) => "WORKER_IMAGE_PENDING_UNCONFIRMED",
             Cause::Identity(e) => e.code(),
             Cause::Finalized(primary, _) => primary.code(),
@@ -102,6 +107,7 @@ fn shared_close(e: &gpu_access::GpuHostError) -> bool {
         E::Metadata(e) => e.has_unconfirmed_close(),
         E::Finalized { primary, secondary } => shared_close(primary) || shared_close(secondary),
         E::PublicationUnknown(e) => shared_close(e),
+        E::ImageFence(e) => e.has_unconfirmed_close(),
         _ => false,
     }
 }
@@ -129,11 +135,21 @@ impl std::error::Error for ImageFileError {
             Cause::Configuration(e) => Some(e),
             Cause::Data(e) => Some(e),
             Cause::Transition(e) => Some(e),
+            Cause::Service(e) => Some(e),
             Cause::Identity(e) => Some(e),
             Cause::Finalized(a, _) => Some(a),
             Cause::PublicationUnknown(error) => Some(error),
             _ => None,
         }
+    }
+}
+fn service_code(error: &crate::worker_service::WorkerServiceError) -> &'static str {
+    use crate::worker_service::WorkerServiceError as E;
+    match error {
+        E::Refused(code) => code,
+        E::Io(_) => "WORKER_IMAGE_SERVICE_METADATA_IO",
+        E::Engine(e) => e.code(),
+        E::Finalization(primary, _) => service_code(primary),
     }
 }
 pub(super) fn not_found(error: &ImageFileError) -> bool {

@@ -9,6 +9,7 @@ pub enum WorkerImageQualificationError {
     ImageFiles(reverie_host::worker_image::ImageFileError),
     Refused(&'static str),
     Finalization(Box<Self>, Box<Self>),
+    Retained(Rc<Self>),
 }
 impl WorkerImageQualificationError {
     pub(super) fn has_unconfirmed_close(&self) -> bool {
@@ -19,6 +20,7 @@ impl WorkerImageQualificationError {
             Self::ImageFiles(e) => e.has_unconfirmed_close(),
             Self::Rootless(e) => crate::worker_validation::rootless_close_unknown(e),
             Self::Finalization(a, b) => a.has_unconfirmed_close() || b.has_unconfirmed_close(),
+            Self::Retained(e) => e.has_unconfirmed_close(),
             _ => false,
         }
     }
@@ -32,6 +34,7 @@ impl WorkerImageQualificationError {
             Self::ImageFiles(e) => e.code(),
             Self::Refused(code) => code,
             Self::Finalization(..) => "WORKER_IMAGE_QUALIFICATION_FINALIZATION",
+            Self::Retained(e) => e.code(),
         }
     }
 }
