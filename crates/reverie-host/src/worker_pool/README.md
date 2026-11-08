@@ -112,6 +112,12 @@ listener while this slot remains held, rather than hiding abandoned native FDs.
 native immutable executable observation and original process snapshot. The App
 `BrokerControllerBootstrap` also retains the actual InstallingBroker and checks
 its loader-selected source against fixed native `broker --config` raw argv.
+The distinct installation-offer constructor requires original
+`offer-pool-v1 --config SOURCE` argv instead. Its private closed role is retained
+with the process observation and cannot be changed or selected by decoded data.
+Calling it from the ordinary service refuses on the original argv digest; no
+new command is exposed until the actual retained offer and consent path exist.
+Neither origin type establishes an owner's identity or administration consent.
 Only the compile-bound `REVERIE_FIXED_NATIVE_WORKER_BROKER_MANIFEST` may select
 the native program; missing packaging refuses before sockets. No current package
 provides that selector yet. Its native executable and no-self-exec invariant

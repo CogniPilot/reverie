@@ -22,11 +22,13 @@ use std::{
 /// Populated only by the native broker package. Runtime environment variables,
 /// wire paths and alternate executable selection are deliberately unavailable.
 const PROGRAM: Option<&str> = option_env!("REVERIE_FIXED_NATIVE_WORKER_BROKER_MANIFEST");
+mod arguments;
 #[cfg(test)]
 mod tests;
 
 #[must_use = "retain the actual binding through controller bootstrap and uncertainty"]
 pub struct BrokerBootstrapBinding {
+    role: arguments::Role,
     engine: Arc<InstalledWorkerEngine>,
     stop: WorkerStopBudget,
     manifest: Option<File>,
@@ -44,7 +46,28 @@ impl WorkerRuntime {
         &self,
         end: Instant,
     ) -> std::result::Result<BrokerBootstrapBinding, Box<BrokerBootstrapFailure>> {
-        let mut owner = BrokerBootstrapBinding::unopened(self);
+        self.retain_pool_bootstrap(end, arguments::Role::Broker)
+    }
+    /// Distinct explicit installation-offer origin. This cannot adopt an
+    /// ordinary service process: its original argv must select the versioned
+    /// offer role. Origin observation still grants no administration authority.
+    pub fn retain_pool_installation_offer_bootstrap(
+        &self,
+        source: &Path,
+        end: Instant,
+    ) -> std::result::Result<BrokerBootstrapBinding, Box<BrokerBootstrapFailure>> {
+        let mut owner = self.retain_pool_bootstrap(end, arguments::Role::InstallationOfferV1)?;
+        match owner.assert_registered_source(self, source, end) {
+            Ok(()) => Ok(owner),
+            Err(primary) => Err(Box::new(BrokerBootstrapFailure { owner, primary })),
+        }
+    }
+    fn retain_pool_bootstrap(
+        &self,
+        end: Instant,
+        role: arguments::Role,
+    ) -> std::result::Result<BrokerBootstrapBinding, Box<BrokerBootstrapFailure>> {
+        let mut owner = BrokerBootstrapBinding::for_role(self, role);
         match owner.capture(self, end, PROGRAM) {
             Ok(()) => Ok(owner),
             Err(primary) => Err(Box::new(BrokerBootstrapFailure { owner, primary })),
@@ -52,8 +75,13 @@ impl WorkerRuntime {
     }
 }
 impl BrokerBootstrapBinding {
+    #[cfg(test)]
     fn unopened(runtime: &WorkerRuntime) -> Self {
+        Self::for_role(runtime, arguments::Role::Broker)
+    }
+    fn for_role(runtime: &WorkerRuntime, role: arguments::Role) -> Self {
         Self {
+            role,
             engine: runtime.installed_engine().clone(),
             stop: runtime.stop_budget(),
             manifest: None,
@@ -253,27 +281,11 @@ impl BrokerBootstrapBinding {
         source: &Path,
         end: Instant,
     ) -> Result<()> {
-        use sha2::{Digest, Sha256};
-        use std::os::unix::ffi::OsStrExt;
         self.assert_current(runtime, end)?;
         let program = self.program.as_ref().expect("qualified actual origin");
         let executable = native::python_path(program.code().path.codepoints())?;
-        let mut hash = Sha256::new();
-        for argument in [
-            executable.as_os_str(),
-            std::ffi::OsStr::new("broker"),
-            std::ffi::OsStr::new("--config"),
-            source.as_os_str(),
-        ] {
-            need(
-                !argument.as_bytes().contains(&0),
-                "WORKER_POOL_BROKER_ARGUMENTS",
-            )?;
-            hash.update(argument.as_bytes());
-            hash.update([0]);
-        }
         need(
-            format!("{:x}", hash.finalize())
+            self.role.source_digest(&executable, source)?
                 == self
                     .process
                     .as_ref()

@@ -129,6 +129,18 @@ impl BrokerServiceStartup {
     ) -> Result<BrokerControllerBootstrap, Box<BrokerControllerBootstrapFailure>> {
         self.owner.broker.retain_pool_controller_bootstrap(end)
     }
+    /// Separate explicit installation origin. The resulting nonclone owner
+    /// must remain in the outer service/offer, outside InstallingBroker's Arc,
+    /// so it cannot form a cycle with the broker it retains. No web consent or
+    /// host administration grant is supplied by this observation.
+    pub fn retain_pool_installation_offer_bootstrap(
+        &self,
+        end: Instant,
+    ) -> Result<BrokerControllerBootstrap, Box<BrokerControllerBootstrapFailure>> {
+        self.owner
+            .broker
+            .retain_pool_installation_offer_bootstrap(end)
+    }
     /// Recovery inventory DATA, not proof that the supervisor/lease-peer and
     /// all protocol producers exist or that listening/readiness has started.
     pub fn recovered(&self) -> &RecoverySummary {

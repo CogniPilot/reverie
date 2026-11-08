@@ -7,6 +7,10 @@ use reverie_host::worker_pool::{
 };
 use std::time::Instant;
 
+enum BootstrapKind {
+    Service,
+    InstallationOffer,
+}
 #[must_use = "retain the original installing broker and bootstrap binding"]
 pub struct BrokerControllerBootstrap {
     broker: Arc<InstallingBroker>,
@@ -52,6 +56,22 @@ impl InstallingBroker {
         self: &Arc<Self>,
         end: Instant,
     ) -> Result<BrokerControllerBootstrap, Box<BrokerControllerBootstrapFailure>> {
+        self.retain_pool_bootstrap(end, BootstrapKind::Service)
+    }
+    /// Origin for a future explicit OS-owner installation offer. The host
+    /// observer requires that distinct versioned role in the original argv;
+    /// an ordinary running broker cannot promote itself by calling this API.
+    pub fn retain_pool_installation_offer_bootstrap(
+        self: &Arc<Self>,
+        end: Instant,
+    ) -> Result<BrokerControllerBootstrap, Box<BrokerControllerBootstrapFailure>> {
+        self.retain_pool_bootstrap(end, BootstrapKind::InstallationOffer)
+    }
+    fn retain_pool_bootstrap(
+        self: &Arc<Self>,
+        end: Instant,
+        kind: BootstrapKind,
+    ) -> Result<BrokerControllerBootstrap, Box<BrokerControllerBootstrapFailure>> {
         let source = self
             .configuration()
             .map_err(|cause| {
@@ -72,17 +92,20 @@ impl InstallingBroker {
                     ),
                 })
             })?;
-        let binding = self
-            .storage
-            .runtime
-            .retain_pool_controller_bootstrap(end)
-            .map_err(|cause| {
-                Box::new(BrokerControllerBootstrapFailure {
-                    owner: None,
-                    unopened_broker: Some(Arc::clone(self)),
-                    cause: BrokerControllerBootstrapCause::Native(cause),
-                })
-            })?;
+        let runtime = &self.storage.runtime;
+        let binding = match kind {
+            BootstrapKind::Service => runtime.retain_pool_controller_bootstrap(end),
+            BootstrapKind::InstallationOffer => {
+                runtime.retain_pool_installation_offer_bootstrap(&source, end)
+            }
+        }
+        .map_err(|cause| {
+            Box::new(BrokerControllerBootstrapFailure {
+                owner: None,
+                unopened_broker: Some(Arc::clone(self)),
+                cause: BrokerControllerBootstrapCause::Native(cause),
+            })
+        })?;
         let mut owner = BrokerControllerBootstrap {
             broker: Arc::clone(self),
             source,
