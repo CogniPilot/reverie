@@ -7,7 +7,7 @@ use nix::fcntl::{Flock, FlockArg};
 use std::fs::{self, DirBuilder, File, OpenOptions};
 use std::io::{self, Write};
 use std::os::fd::{AsFd, AsRawFd, BorrowedFd, RawFd};
-use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
+use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 #[cfg(test)]
@@ -128,7 +128,8 @@ impl TaskWorkspaces {
         Ok(path)
     }
     /// Take the workspace's operation lock at once, or refuse while another
-    /// operation holds it. The lock file is private and never removed.
+    /// operation holds it. The lock file is never removed, and is made 0600
+    /// once held, even if it already existed with wider permissions.
     pub fn operation(&self, name: &str) -> Result<OperationLock> {
         self.path(name)?;
         let file = OpenOptions::new()
@@ -138,14 +139,18 @@ impl TaskWorkspaces {
             .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
             .open(self.root.join(".ops").join(format!("{name}.lock")))?;
         match Flock::lock(file, FlockArg::LockExclusiveNonblock) {
-            Ok(lock) => Ok(OperationLock { lock }),
+            Ok(lock) => {
+                lock.set_permissions(fs::Permissions::from_mode(0o600))?;
+                Ok(OperationLock { lock })
+            }
             Err((_, nix::errno::Errno::EWOULDBLOCK)) => Err(WorkspaceError::Busy(name.to_owned())),
             Err((_, error)) => Err(io::Error::from(error).into()),
         }
     }
     /// Replace the workspace metadata durably: write and sync a temporary
     /// file, rename it over `.reverie-task.json`, then sync the directory.
-    /// `json` is one JSON document; a newline is appended.
+    /// `json` is one JSON document; a newline is appended. The file is 0600,
+    /// even if a stale temporary file had wider permissions.
     pub fn write(&self, workspace: &Path, json: &[u8]) -> Result<()> {
         let temp = workspace.join(".reverie-task.json.tmp");
         let mut file = OpenOptions::new()
@@ -155,6 +160,7 @@ impl TaskWorkspaces {
             .mode(0o600)
             .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
             .open(&temp)?;
+        file.set_permissions(fs::Permissions::from_mode(0o600))?;
         file.write_all(json)?;
         file.write_all(b"\n")?;
         file.sync_all()?;

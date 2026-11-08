@@ -98,6 +98,30 @@ fn the_operation_lock_refuses_a_second_holder_at_once_and_frees_on_drop() {
 }
 
 #[test]
+fn files_left_with_wider_permissions_are_made_private() {
+    // As Python's open() leaves them under umask 022.
+    let workspaces = TaskWorkspaces::open(&scratch().join("tasks")).unwrap();
+    let lock = workspaces.root().join(".ops").join("job.lock");
+    fs::write(&lock, b"").unwrap();
+    fs::set_permissions(&lock, fs::Permissions::from_mode(0o644)).unwrap();
+    let held = workspaces.operation("job").unwrap();
+    assert_eq!(mode(&lock), 0o600);
+    drop(held);
+    let job = workspaces.path("job").unwrap();
+    fs::create_dir(&job).unwrap();
+    let temp = job.join(".reverie-task.json.tmp");
+    fs::write(&temp, b"stale").unwrap();
+    fs::set_permissions(&temp, fs::Permissions::from_mode(0o644)).unwrap();
+    workspaces.write(&job, b"{}").unwrap();
+    assert_eq!(mode(&job.join(METADATA)), 0o600);
+    assert_eq!(
+        fs::read(job.join(METADATA)).unwrap(),
+        b"{}
+"
+    );
+}
+
+#[test]
 fn write_replaces_the_metadata_durably_and_leaves_no_temporary() {
     let workspaces = TaskWorkspaces::open(&scratch().join("tasks")).unwrap();
     let job = workspaces.path("job").unwrap();
