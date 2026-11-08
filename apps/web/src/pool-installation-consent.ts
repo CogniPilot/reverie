@@ -5,6 +5,7 @@ import {
   POOL_INSTALLATION_CONSENT_PURPOSE,
   ResourceOwnerAuthority,
   type PoolInstallationConsentContext,
+  type PoolInstallationOfferContext,
 } from './resource-owner-authority.js';
 
 const UUID = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/;
@@ -84,6 +85,54 @@ export function answerPoolInstallationChallenge(
     requestDigest: context.requestDigest,
     principal: context.principal,
     consent: true as const,
+    ownerScopeDigest: context.ownerScopeDigest,
+    expiresAtEpochMs: context.expiresAtEpochMs,
+  });
+}
+
+/** Separate view proof: deliberately contains no consent field. */
+export function answerPoolInstallationViewChallenge(
+  authority: ResourceOwnerAuthority,
+  context: PoolInstallationOfferContext,
+  challenge: unknown
+) {
+  authority.assertContext(context);
+  need(context.purpose === POOL_INSTALLATION_CONSENT_PURPOSE && context.stage === 'offer');
+  need(challenge && typeof challenge === 'object' && !Array.isArray(challenge));
+  need(
+    Object.keys(challenge).sort().join(',') ===
+      'kind,nonce,offerNonce,principal,purpose,requestDigest,requestId,version'
+  );
+  const value = challenge as Record<string, unknown>;
+  need(
+    value.kind === 'pool-installation-view-check' &&
+      value.purpose === context.purpose &&
+      value.version === 1 &&
+      value.requestId === context.requestId &&
+      value.offerNonce === context.offerNonce &&
+      value.requestDigest === context.requestDigest &&
+      typeof value.nonce === 'string' &&
+      UUID.test(value.nonce) &&
+      value.nonce !== NIL_UUID
+  );
+  need(value.principal && typeof value.principal === 'object' && !Array.isArray(value.principal));
+  need(Object.keys(value.principal).sort().join(',') === 'accountId,personId,sessionEpoch');
+  const principal = value.principal as Record<string, unknown>;
+  need(
+    principal.accountId === context.principal.accountId &&
+      principal.personId === context.principal.personId &&
+      principal.sessionEpoch === context.principal.sessionEpoch
+  );
+  authority.assertContext(context);
+  return Object.freeze({
+    kind: 'pool-installation-view-current' as const,
+    purpose: context.purpose,
+    version: 1 as const,
+    requestId: context.requestId,
+    nonce: value.nonce,
+    offerNonce: context.offerNonce,
+    requestDigest: context.requestDigest,
+    principal: context.principal,
     ownerScopeDigest: context.ownerScopeDigest,
     expiresAtEpochMs: context.expiresAtEpochMs,
   });

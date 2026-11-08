@@ -2,6 +2,29 @@ use super::*;
 use std::os::fd::{AsFd, AsRawFd};
 
 impl WorkerActorChannel {
+    /// B-only idle readiness. Human view/consent may pause on the same socket;
+    /// no receive, descriptor clone, new hold or ordinary-Q timeout changes.
+    pub fn pool_registration_frame_ready(&self, deadline: Instant) -> Result<bool> {
+        if self.purpose != Purpose::PoolRegistrationWebsite || !self.greeted {
+            return Err(WorkerReportError::Unconfirmed);
+        }
+        let remaining = self.remaining(deadline)?;
+        let slot = self.connection.record.terminal_stream()?;
+        let stream = slot.as_ref().ok_or(WorkerReportError::Unconfirmed)?;
+        let mut fds = [nix::poll::PollFd::new(stream.as_fd(), nix::poll::PollFlags::POLLIN)];
+        match nix::poll::poll(&mut fds, remaining.as_millis().clamp(1, 50) as u16) {
+            Ok(_) => {
+                self.remaining(deadline)?;
+                let flags = fds[0].revents().ok_or(WorkerReportError::Unconfirmed)?;
+                if flags.intersects(nix::poll::PollFlags::POLLERR | nix::poll::PollFlags::POLLNVAL) {
+                    return Err(WorkerReportError::Unconfirmed);
+                }
+                Ok(flags.intersects(nix::poll::PollFlags::POLLIN | nix::poll::PollFlags::POLLHUP))
+            }
+            Err(nix::errno::Errno::EINTR) => Ok(false),
+            Err(error) => Err(std::io::Error::from(error).into()),
+        }
+    }
     pub fn greet(&mut self, deadline: Instant) -> Result<()> {
         if self.greeted {
             return Err(WorkerReportError::Unconfirmed);

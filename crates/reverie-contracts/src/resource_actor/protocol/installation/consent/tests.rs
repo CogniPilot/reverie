@@ -175,3 +175,15 @@ fn employee_approval_and_duplicate_lossless_frames_cannot_substitute_for_global_
         "policy":{},
     }))).is_err());
 }
+
+#[test]
+fn configured_result_keeps_original_correlation_and_requires_object_observations() {
+    let selected = decode(&request()).unwrap();
+    let observed = br#"{"memoryMaxMiB":49152,"cpuWeight":100}"#;
+    let result = selected.configured_reply(observed).unwrap();
+    let value: Json = serde_json::from_slice(&result.canonical().unwrap()).unwrap();
+    assert_eq!(value, json!({"kind":"pool-installation-result","purpose":POOL_INSTALLATION_CONSENT_PURPOSE,
+        "version":1,"requestId":REQUEST,"phase":"pool-configured","observed":{"memoryMaxMiB":49152,"cpuWeight":100}}));
+    assert!(selected.configured_reply(b"null").is_err());
+    assert!(selected.configured_reply(b"[]").is_err());
+}

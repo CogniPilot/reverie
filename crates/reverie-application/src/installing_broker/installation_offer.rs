@@ -18,6 +18,7 @@ enum Origin {
     Unopened,
     Retained(Box<BrokerControllerBootstrap>),
     Failed(Box<BrokerControllerBootstrapFailure>),
+    Transferred,
 }
 #[must_use = "retain the original broker, nominated request and publication"]
 pub struct BrokerInstallationOffer {
@@ -217,8 +218,10 @@ impl BrokerInstallationOffer {
     /// Terminal metadata close only. No broker/resource stop, offer replay,
     /// provider release or global shutdown acknowledgment is implied.
     pub fn close_origin_metadata(&mut self) -> Result<(), reverie_host::worker_pool::PoolError> {
+        if matches!(self.origin, Origin::Transferred) { return Ok(()); }
         self.metadata_closed = true;
         match &mut self.origin {
+            Origin::Transferred => return Ok(()),
             Origin::Unopened => Ok(()),
             Origin::Retained(origin) => origin.close_origin_metadata(),
             Origin::Failed(failure) => failure.close_origin_metadata(),
