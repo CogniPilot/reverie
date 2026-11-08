@@ -15,7 +15,7 @@ enum Owner<'a> {
     Incoming(WorkerServiceConnection),
     Entry(Box<ResourceActorFailure<'a>>),
     Joined {
-        website: InstalledPoolRegistrationWebsite<'a>,
+        website: Box<InstalledPoolRegistrationWebsite<'a>>,
         pin: Option<PoolRegistrationPin>,
     },
 }
@@ -191,7 +191,7 @@ impl<'a> PoolRegistrationFailure<'a> {
         ) {
             Ok(frame) => {
                 self.owner = Owner::Joined {
-                    website: InstalledPoolRegistrationWebsite { frame },
+                    website: Box::new(InstalledPoolRegistrationWebsite { frame }),
                     pin: None,
                 }
             }
