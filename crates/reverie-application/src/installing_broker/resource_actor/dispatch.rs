@@ -72,9 +72,11 @@ impl std::fmt::Display for ResourceOperationFailure<'_> {
     fn fmt(&self, out: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match &self.owner {
             Owner::Entry(owner) => write!(out, "Q entry retained: {}", owner.cause())?,
-            Owner::Operation(owner) => {
-                write!(out, "Q request {} retained", owner.request().request_id())?
-            }
+            Owner::Operation(owner) => write!(
+                out,
+                "Q request {} retained",
+                owner.request().request_id().as_str()
+            )?,
         }
         if let Some(primary) = &self.primary {
             write!(out, ": {primary}")?;

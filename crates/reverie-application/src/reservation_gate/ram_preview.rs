@@ -34,6 +34,25 @@ pub(super) struct RamPreviewGuard<'a, 'q> {
     operation: &'a AuthenticatedResourceOperation<'q>,
 }
 impl RamPreviewGuard<'_, '_> {
+    pub(super) fn check_profile(
+        &self,
+        resources: &reverie_core::resources::ResourcePolicy,
+    ) -> Result<()> {
+        let ResourceRequestSelection::Preview {
+            requested_memory_mib,
+            ..
+        } = self.operation.request().selection()
+        else {
+            return Err(GateError::Refused("RESOURCE_RAM_PREVIEW_REQUIRED"));
+        };
+        need(
+            resources.memory_mib() == *requested_memory_mib
+                && resources.memory_mib() != 0
+                && resources.memory_mib() == resources.pool_memory_mib()
+                && resources.cpus().nano_cpus() == 0,
+            "RAM_MIGRATION_BURST_POOL_REQUIRED",
+        )
+    }
     pub(super) fn check(&self, inner: &Arc<Inner>) -> Result<()> {
         need(
             Arc::ptr_eq(&self.gate.inner, inner),
@@ -41,6 +60,16 @@ impl RamPreviewGuard<'_, '_> {
         )?;
         self.operation
             .assert_reservation_gate(self.gate)
+            .map_err(|error| GateError::Refused(error.code()))?;
+        let current = self
+            .operation
+            .current_owner()
+            .map_err(|error| GateError::Refused(error.code()))?;
+        storage_identity::read_company_metadata(&inner.identity)?
+            .require_resource_owner(self.operation.request().employee_id(), current.owner())
+            .map_err(|error| GateError::Refused(error.code()))?;
+        self.operation
+            .assert_live()
             .map_err(|error| GateError::Refused(error.code()))
     }
     pub(super) fn observe_policy(

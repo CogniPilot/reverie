@@ -23,7 +23,8 @@ impl AuthenticatedResourceOperation<'_> {
         let gate = broker
             .resource_reservations()?
             .ok_or(ResourceActorError::Refused("RESOURCE_ACTOR_GATE_REQUIRED"))?;
-        let ram = gate.draft_ram_operation(self)?;
+        let observed = gate.draft_ram_operation(self).map_err(Into::into);
+        let ram = self.website.frame.retain_stateless_result(observed)?;
         self.assert_current()?;
         let preview = ram.preview();
         Ok(self.request.preview_reply(RamPreviewFields {

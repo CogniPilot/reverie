@@ -6,6 +6,7 @@ use reverie_host::reservation_kernel::ReservationKernelError;
 use reverie_store::storage_identity::IdentityError;
 #[derive(Clone)]
 pub(super) enum RetainedClose {
+    Gate(Arc<GateError>),
     Company(Arc<IdentityError>),
     Kernel(Arc<ReservationKernelError>),
     Control(Arc<reverie_host::reservation_control::ControlHostError>),
@@ -13,6 +14,7 @@ pub(super) enum RetainedClose {
 impl RetainedClose {
     pub(super) fn error(&self) -> ResourceActorError {
         match self {
+            Self::Gate(error) => ResourceActorError::RetainedGateClose(Arc::clone(error)),
             Self::Company(error) => ResourceActorError::RetainedCompanyClose(Arc::clone(error)),
             Self::Kernel(error) => ResourceActorError::RetainedKernelClose(Arc::clone(error)),
             Self::Control(error) => ResourceActorError::RetainedControlClose(Arc::clone(error)),
@@ -43,6 +45,9 @@ impl Frame<'_> {
             ResourceActorError::RetainedControlClose(error) => {
                 self.retain_close(RetainedClose::Control(error))
             }
+            ResourceActorError::RetainedGateClose(error) => {
+                self.retain_close(RetainedClose::Gate(error))
+            }
             ResourceActorError::GateFinalization { primary, secondary } => {
                 ResourceActorError::GateFinalization {
                     primary: Box::new(self.retain_stateless_error(*primary)),
@@ -71,6 +76,9 @@ impl Frame<'_> {
                     primary: Box::new(self.retain_gate_error(*primary)),
                     secondary: Box::new(self.retain_gate_error(*secondary)),
                 }
+            }
+            other if super::error::gate_close_unknown(&other) => {
+                self.retain_close(RetainedClose::Gate(Arc::new(other)))
             }
             other => other.into(),
         }

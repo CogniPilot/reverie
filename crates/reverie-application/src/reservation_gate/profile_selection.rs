@@ -89,13 +89,8 @@ impl Inner {
             resources.budget_mode() == BudgetMode::Admission,
             "RESOURCE_PREPARATION_ADMISSION_REQUIRED",
         )?;
-        if authority.is_some() {
-            need(
-                resources.memory_mib() != 0
-                    && resources.memory_mib() == resources.pool_memory_mib()
-                    && resources.cpus().nano_cpus() == 0,
-                "RAM_MIGRATION_BURST_POOL_REQUIRED",
-            )?;
+        if let Some(authority) = authority {
+            authority.check_profile(&resources)?;
         }
         let target = allocate_profile_target()?;
         let target = ProfileSessionId::parse(target.as_str()).expect("checked new role");
