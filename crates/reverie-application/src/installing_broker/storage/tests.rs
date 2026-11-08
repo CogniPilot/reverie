@@ -50,6 +50,8 @@ mod network_cases;
 mod nix_cases;
 #[path = "replacement_stop/tests.rs"]
 mod replacement_stop_cases;
+#[path = "stopped_ram/tests.rs"]
+mod stopped_ram_cases;
 struct Tree(PathBuf);
 impl Tree {
     fn new() -> Self {
