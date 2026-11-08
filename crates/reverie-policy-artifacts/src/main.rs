@@ -7,6 +7,7 @@ use reverie_contracts::task_perf_v1::{
 use std::path::{Path, PathBuf};
 mod output;
 mod verify;
+mod worker_child;
 
 #[derive(Parser)]
 #[command(
@@ -36,7 +37,12 @@ struct Arguments {
     verify_manifest: Option<PathBuf>,
 }
 fn main() {
-    if let Err(error) = run(Arguments::parse()) {
+    let result = if worker_child::requested() {
+        worker_child::run()
+    } else {
+        run(Arguments::parse())
+    };
+    if let Err(error) = result {
         eprintln!("POLICY_ARTIFACT_BUILD_REFUSED: {error}");
         std::process::exit(1);
     }

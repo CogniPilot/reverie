@@ -5,6 +5,8 @@ let
   idmap = import ./worker-idmap.nix { inherit pkgs; };
   imagePython = if worker then import ./worker-python.nix { inherit pkgs memory; } else memory;
   laptopTools = import ./laptop-tools.nix { inherit pkgs src; };
+  childArtifacts = import ./policy-artifacts.nix { inherit pkgs src; };
+  childManifest = if worker then "${runtime.workerChild}/share/reverie/worker-child-program.json" else null;
   # Kernel-start the untouched Claude/Bun ELF so /proc/self/exe names Claude,
   # not ld-linux (its bundled grep/find shims use process.execPath).
   claudeInterpreter = if pkgs.stdenv.hostPlatform.isx86_64 then "/lib64/ld-linux-x86-64.so.2"
@@ -136,6 +138,13 @@ pkgs.dockerTools.buildLayeredImage {
       ln -s ${pkgs.stdenv.cc.bintools.dynamicLinker} .${claudeInterpreter}
     ''}
     ${pkgs.lib.optionalString worker ''
+      # Bind the actual final guest alias, not a label or a candidate package.
+      ${childArtifacts}/bin/reverie-policy-artifacts verify-worker-child-root \
+        --program "$PWD/bin/reverie-worker-child" --manifest ${childManifest}
+      test ! -e opt/reverie/worker-child && test ! -L opt/reverie/worker-child
+      mkdir opt/reverie/worker-child
+      cp ${childManifest} opt/reverie/worker-child/program.json
+      chmod 444 opt/reverie/worker-child/program.json
       # Keep the interactive aliases and pytest on the laptop-only interpreter.
       for command in python python3 ${pkgs.python3.executable} pytest py.test; do
         test -L "bin/$command"
@@ -177,6 +186,11 @@ pkgs.dockerTools.buildLayeredImage {
     REGISTRY
   '';
   fakeRootCommands = ''
+    ${pkgs.lib.optionalString worker ''
+      chown -R 0:0 opt/reverie/worker-child
+      chmod 755 opt/reverie/worker-child
+      chmod 444 opt/reverie/worker-child/program.json
+    ''}
     ${pkgs.lib.optionalString (memoryGuestCapsule != null) ''
       chown -R 0:0 opt/reverie/memory
       chmod -R a-w opt/reverie/memory
@@ -240,6 +254,8 @@ pkgs.dockerTools.buildLayeredImage {
       "org.reverie.worker.uid" = toString uid;
       "org.reverie.worker.gid" = toString gid;
       "org.reverie.worker.rootless-docker" = if rootlessDocker == null then "0" else "1";
+    } // pkgs.lib.optionalAttrs worker {
+      "org.reverie.worker.child-manifest" = childManifest;
     } // pkgs.lib.optionalAttrs (!worker && (resourceReplacement || ownerTerminalWebsite != null)) {
       "org.reverie.website.runtime" = if ownerTerminalWebsite == null then "resource"
         else if builtins.elem "--resource-replacement" ownerTerminalWebsite.webArgs then "resource-terminal"

@@ -453,39 +453,3 @@ export function createMemoryTools(
     }
   }
 }
-
-/** Preserve both callers' typed injection ports; environment-only opt-in uses
- * main's in-process path, while installed bootstrap passes a checked bridge. */
-export function createMemoryTools(
-  config: BridgeMemoryToolsConfig,
-  runner?: BridgeRunner,
-  journal?: JournalPort,
-  access?: InstalledMemoryAccess
-): ReturnType<typeof createBridgeMemoryTools>;
-export function createMemoryTools(
-  config: InProcessMemoryToolsConfig,
-  recall?: LegacyRecall,
-  journal?: JournalPort,
-  screen?: (text: string, home: string) => string
-): ReturnType<typeof createInProcessMemoryTools>;
-export function createMemoryTools(
-  config: MemoryToolsConfig,
-  port?: BridgeRunner | LegacyRecall,
-  journal?: JournalPort,
-  policy?: InstalledMemoryAccess | ((text: string, home: string) => string)
-) {
-  if (config.native || config.python !== undefined) {
-    return createBridgeMemoryTools(
-      config,
-      port as BridgeRunner | undefined,
-      journal,
-      policy as InstalledMemoryAccess | undefined
-    );
-  }
-  return createInProcessMemoryTools(
-    config,
-    port as LegacyRecall | undefined,
-    journal,
-    policy as ((text: string, home: string) => string) | undefined
-  );
-}

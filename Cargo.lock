@@ -1298,6 +1298,11 @@ dependencies = [
  "clap",
  "libc",
  "reverie-contracts",
+ "reverie-core",
+ "reverie-elf-bundle",
+ "serde",
+ "serde_json",
+ "sha2",
 ]
 
 [[package]]

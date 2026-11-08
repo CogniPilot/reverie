@@ -533,8 +533,7 @@ let
   # All client modes and the protected manifest move together; no Python branch.
   workerResourceClientManifest = workerNativeClientManifest;
   workerExec = workerNativeClient;
-  # Candidate only: source preparation/admission consumers still select the
-  # existing child entry point until the complete broker transition is reviewed.
+  # The broker's --pane-exit lifecycle and the bare-record ABI use one native helper.
   workerNativeChild = import ./worker-child.nix { inherit pkgs src; };
   # Same fixed native helper selected by the worker image; no shell fallback.
   workerNativeNixStorePrepare = import ./nix-store-prepare.nix { inherit pkgs src; };
@@ -547,9 +546,7 @@ let
   mcpNativeCli = import ./mcp-cli.nix { inherit pkgs src console memoryNativeCli; };
   routinesNative = import ./routines.nix { inherit pkgs src; };
   muxNative = import ./mux.nix { inherit pkgs src; };
-  workerChild = pkgs.writeShellScriptBin "reverie-worker-child" ''
-    exec ${memory}/bin/python3 -m reverie.worker child "$@"
-  '';
+  workerChild = workerNativeChild;
   # NSS 3.131.1 drops the emSign ECC Root CA - C3, emSign ECC Root CA - G3 and emSign Root CA - C1 roots after the
   # eMudhra intermediate CA compromise (Python CVE-2026-115557). The pinned nixpkgs carries 3.126; only the bundled
   # certdata.txt differs, so this is data-only and nothing else is rebuilt against it.
@@ -573,7 +570,7 @@ let
       cacert lockTools ] ++ providerLaunchers;
     pathsToLink = [ "/bin" "/share" ];
     # The images' /etc/ssl/certs comes from this same bundle (nix/image.nix).
-    passthru = { inherit cacert; };
+    passthru = { inherit cacert workerChild; };
   };
   entrypoint = pkgs.writeShellScript "reverie-start" (builtins.readFile (src + "/docker/entrypoint.sh"));
   requestUpdate = pkgs.writeShellApplication {
@@ -665,4 +662,4 @@ let
     done
   '';
 
-in { inherit reverie console memory memoryPackage runtime entrypoint kokoro hands handsTools workerExec workerResourceClientManifest workerNativeClient workerNativeClientManifest workerNativeChild workerNativeNixStorePrepare memoryNativeCli mcpNativeCli opsNativeCli routinesNative muxNative laptopTools rustRouteHandler; }
+in { inherit reverie console memory memoryPackage runtime entrypoint kokoro hands handsTools workerExec workerResourceClientManifest workerNativeClient workerNativeClientManifest workerChild workerNativeChild workerNativeNixStorePrepare memoryNativeCli mcpNativeCli opsNativeCli routinesNative muxNative laptopTools rustRouteHandler; }
