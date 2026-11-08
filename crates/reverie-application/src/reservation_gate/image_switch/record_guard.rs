@@ -7,7 +7,10 @@ impl Inner {
             .map_err(|_| GateError::Refused("WORKER_IMAGE_REQUIRES_RECONCILIATION"))?;
         need(failed.is_none(), "WORKER_IMAGE_REQUIRES_RECONCILIATION")
     }
-    pub(in crate::reservation_gate) fn image_or_gpu_pending_current(&self, active: &Arc<Active>) -> Result<()> {
+    pub(in crate::reservation_gate) fn image_or_gpu_pending_current(
+        &self,
+        active: &Arc<Active>,
+    ) -> Result<()> {
         let image = active
             .image_transition
             .lock()
