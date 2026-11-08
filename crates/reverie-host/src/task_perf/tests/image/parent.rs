@@ -225,27 +225,7 @@ impl Fixture {
         assert_eq!(row["State"]["Running"], true);
         assert_eq!(row["Config"]["User"], "1000:100");
         let host = &row["HostConfig"];
-        assert_eq!(host["Privileged"], false);
-        assert_eq!(host["ReadonlyRootfs"], true);
-        assert_eq!(host["NetworkMode"], "none");
-        assert_eq!(host["CapDrop"], serde_json::json!(["ALL"]));
-        let mut caps = host["CapAdd"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|v| {
-                let name = v.as_str().unwrap();
-                name.strip_prefix("CAP_").unwrap_or(name)
-            })
-            .collect::<Vec<_>>();
-        caps.sort_unstable();
-        assert_eq!(caps, ["SETGID", "SETUID"]);
-        let options = host["SecurityOpt"].as_array().unwrap();
-        assert!(options.iter().any(|v| v == "systempaths=unconfined"));
-        assert!(!options.iter().any(|v| {
-            v.as_str()
-                .is_some_and(|s| s.starts_with("no-new-privileges"))
-        }));
+        self.inspect_security(host);
         let pid = row["State"]["Pid"].as_u64().unwrap();
         assert!(pid > 1);
         let group = fs::read_to_string(format!("/proc/{pid}/cgroup")).unwrap();
@@ -267,6 +247,63 @@ impl Fixture {
             "OWNED_ROOTLESS_PERF_CONTAINER originalCID={id} pid={pid} image={}",
             self.inputs.image
         );
+    }
+    fn inspect_security(&self, host: &Value) {
+        assert_eq!(host["Privileged"], false);
+        assert_eq!(host["ReadonlyRootfs"], true);
+        assert_eq!(host["NetworkMode"], "none");
+        assert_eq!(host["CapDrop"], serde_json::json!(["ALL"]));
+        let mut caps = host["CapAdd"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| {
+                let name = v.as_str().unwrap();
+                name.strip_prefix("CAP_").unwrap_or(name)
+            })
+            .collect::<Vec<_>>();
+        caps.sort_unstable();
+        assert_eq!(caps, ["SETGID", "SETUID"]);
+        let options = host["SecurityOpt"].as_array().unwrap();
+        println!(
+            "OUTER_SECURITY_READBACK optionCount={} devices={}",
+            options.len(),
+            host["Devices"]
+        );
+        assert_eq!(options.len(), 1, "only selected task-v1 seccomp option");
+        let actual = options[0]
+            .as_str()
+            .unwrap()
+            .strip_prefix("seccomp=")
+            .unwrap();
+        let selected = self
+            .inputs
+            .security
+            .windows(2)
+            .filter(|pair| pair[0] == "--security-opt")
+            .filter_map(|pair| pair[1].strip_prefix("seccomp="))
+            .collect::<Vec<_>>();
+        assert_eq!(selected.len(), 1);
+        let expected: Value = serde_json::from_slice(&fs::read(selected[0]).unwrap()).unwrap();
+        assert_eq!(serde_json::from_str::<Value>(actual).unwrap(), expected);
+        assert_eq!(
+            host["Devices"],
+            serde_json::json!([{
+                "PathOnHost":"/dev/net/tun", "PathInContainer":"/dev/net/tun",
+                "CgroupPermissions":"rw"
+            }])
+        );
+        // Docker CLI consumes systempaths=unconfined into these two fields.
+        println!(
+            "OUTER_SYSTEM_PATHS masked={} readonly={}",
+            host["MaskedPaths"], host["ReadonlyPaths"]
+        );
+        assert_eq!(host["MaskedPaths"], serde_json::json!([]));
+        assert_eq!(host["ReadonlyPaths"], serde_json::json!([]));
+        assert!(!options.iter().any(|v| {
+            v.as_str()
+                .is_some_and(|s| s.starts_with("no-new-privileges"))
+        }));
     }
     fn wait_exit(&mut self) {
         let end = Instant::now() + Duration::from_secs(180);
