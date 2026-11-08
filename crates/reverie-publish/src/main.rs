@@ -103,12 +103,7 @@ fn check(o: &Check) -> Result<serde_json::Value, String> {
     if o.tree.len() < 8 || !tree.starts_with(&o.tree) {
         return Err("the head's tree is not the reviewed tree".into());
     }
-    let base = git.run([
-        "rev-parse",
-        "--verify",
-        "--end-of-options",
-        &format!("{}^{{commit}}", o.base),
-    ])?;
+    let base = git.store_revision(&o.base)?;
     let checked = commits::check_range(&git, &lists, name, &[&head, "--not", &base], &head)?;
     let text = packet.text()?;
     if let Some((title, body)) = &text {
