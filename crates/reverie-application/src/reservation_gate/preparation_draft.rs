@@ -71,7 +71,9 @@ impl EnteredResourceDraft<'_> {
         );
         let result = match body {
             Err(error) => self.admission.conclude(Err(error)),
-            Ok(context) => self.gate.retain_context(self.admission, context),
+            Ok(context) => self
+                .gate
+                .retain_context(self.admission, context, self.draft),
         };
         result.map_err(|error| {
             let may_have_claimed = claimed || journal_uncertain(&error);
