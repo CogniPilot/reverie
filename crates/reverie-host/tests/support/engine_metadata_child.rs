@@ -26,6 +26,20 @@ fn main() {
     let executable = env::current_exe().unwrap();
     let mode = executable.file_name().unwrap().to_str().unwrap();
     match mode {
+        "native-worker-service-bus" => {
+            assert_eq!(args.len(), 7);
+            assert_eq!(&args[..3], ["--user", "--json=short", "get-property"]);
+            let property = args[6].as_str();
+            let active = std::path::Path::new("manager-started").exists();
+            match property {
+                "MainPID" | "ControlPID" => println!("{{\"type\":\"u\",\"data\":{}}}", if active { 42 } else { 0 }),
+                "Job" => println!("{}", r#"{"type":"(uo)","data":[0,"/"]}"#),
+                "ExecStart" => println!("{}", r#"{"type":"a(sasbttttuii)","data":[["/nix/store/old-broker/bin/reverie-worker-broker",["/nix/store/old-broker/bin/reverie-worker-broker","--config","${REVERIE_WORKER_CONFIG}"],false,0,0,0,0,0,0,0]]}"#),
+                "ExecStartPre" => println!("{}", r#"{"type":"a(sasbttttuii)","data":[]}"#),
+                "EnvironmentFiles" => println!("{{\"type\":\"a(sb)\",\"data\":[[{:?},false]]}}", std::env::current_dir().unwrap().join(".config/reverie/worker-broker.env").to_str().unwrap()),
+                _ => panic!("unexpected fixed manager property"),
+            }
+        },
         "native-worker-manager-rollback" => {
             if args == ["--user", "daemon-reload"] { std::fs::write("manager-reloaded", b"known fixed reload").unwrap();return; }
             if args == ["--user", "start", "reverie-worker-broker.service"] { std::fs::write("manager-started", b"known fixed start").unwrap();return; }
