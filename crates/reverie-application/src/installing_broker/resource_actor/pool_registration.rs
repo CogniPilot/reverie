@@ -31,6 +31,7 @@ impl Owner<'_> {
     }
 }
 pub(in crate::installing_broker) enum Cause {
+    ControllerInstalled,
     Offer(BrokerInstallationOfferCause),
     Website(ResourceActorError),
     Pin(WorkerActorPinError),
@@ -40,6 +41,7 @@ pub(in crate::installing_broker) enum Cause {
 impl std::fmt::Display for Cause {
     fn fmt(&self, out: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::ControllerInstalled => out.write_str("POOL_CONTROLLER_INSTALLED"),
             Self::Offer(cause) => cause.fmt(out),
             Self::Website(cause) => cause.fmt(out),
             Self::Pin(cause) => cause.fmt(out),
@@ -190,9 +192,7 @@ impl InstallingBroker {
             cleanup_failures: 0,
             deadline,
         });
-        if let Err(cause) = failure.prepare(self) {
-            failure.primary = cause;
-        }
+        failure.primary = match failure.prepare(self) { Ok(()) => Cause::ControllerInstalled, Err(cause) => cause };
         failure
     }
 }
