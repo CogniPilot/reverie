@@ -183,14 +183,20 @@ fn mint_merge_main(o: &MintMergeMain) -> Result<serde_json::Value, String> {
     let lists =
         Lists::load(&o.lists, &o.lists_sha256).map_err(|e| format!("namegate lists: {e:?}"))?;
     let git = Git::open(&o.git_dir)?;
-    // Hold the parent before anything is minted, so a bad --out refuses first.
-    let parent = o
+    // Hold the parent before anything is minted, so a bad --out refuses first, and keep it: the
+    // packet directory is made and written through this descriptor, never by path again.
+    let parent_path = o
         .out
         .parent()
         .filter(|p| !p.as_os_str().is_empty())
         .unwrap_or(std::path::Path::new("."));
-    Held::open(parent)?;
-    if o.out.symlink_metadata().is_ok() {
+    let leaf = o
+        .out
+        .file_name()
+        .and_then(|n| n.to_str())
+        .ok_or_else(|| format!("{}: --out must end in a plain name", o.out.display()))?;
+    let parent = Held::open(parent_path)?;
+    if parent.has(leaf)? {
         return Err(format!(
             "{} exists: a sealed packet is never rewritten",
             o.out.display()
@@ -204,8 +210,14 @@ fn mint_merge_main(o: &MintMergeMain) -> Result<serde_json::Value, String> {
         &o.main,
         &format!("Merge main into {}", o.branch),
     )?;
-    std::fs::create_dir(&o.out).map_err(|e| format!("{}: {e}", o.out.display()))?;
-    let out = Held::open(&o.out)?;
+    // If the parent's path now names another directory, refuse before making anything anywhere.
+    if !Held::open(parent_path).is_ok_and(|now| parent.same_dir(&now).unwrap_or(false)) {
+        return Err(format!(
+            "{} no longer names the directory held for --out; nothing was written",
+            parent_path.display()
+        ));
+    }
+    let out = parent.create_dir_new(leaf)?;
     let bundle = git.bytes([
         "bundle",
         "create",
@@ -248,6 +260,14 @@ fn mint_merge_main(o: &MintMergeMain) -> Result<serde_json::Value, String> {
         sums.push_str(&format!("{}  {file}\n", sha256_hex(bytes)));
     }
     out.write_new("SHA256SUMS", sums.as_bytes())?;
+    // A swap after the directory was made leaves the packet in the held parent, and whatever now
+    // sits at --out untouched; report that rather than a packet at a path that is not it.
+    if !Held::open(&o.out).is_ok_and(|now| out.same_dir(&now).unwrap_or(false)) {
+        return Err(format!(
+            "{} no longer names the packet just written in the held directory; inspect both",
+            o.out.display()
+        ));
+    }
     let mut summary = summary;
     summary["packet"] = serde_json::json!(o.out);
     summary["seal"] = serde_json::json!(&sha256_hex(sums.as_bytes())[..8]);

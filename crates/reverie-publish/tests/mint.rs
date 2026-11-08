@@ -111,7 +111,19 @@ impl Repo {
     }
 
     fn mint(&self, head: &str, main: &str, branch: &str, out: &Path) -> Output {
+        self.mint_env(head, main, branch, out, &[])
+    }
+
+    fn mint_env(
+        &self,
+        head: &str,
+        main: &str,
+        branch: &str,
+        out: &Path,
+        envs: &[(&str, &std::ffi::OsStr)],
+    ) -> Output {
         Command::new(env!("CARGO_BIN_EXE_reverie-publish"))
+            .envs(envs.iter().copied())
             .args([
                 "mint-merge-main",
                 "--repo",
@@ -319,5 +331,111 @@ fn bad_inputs_refuse_before_anything_is_minted() {
     assert!(
         minted.is_empty(),
         "nothing is minted for a refused input: {minted}"
+    );
+}
+
+/// The first `name` on PATH.
+fn on_path(name: &str) -> PathBuf {
+    std::env::var_os("PATH")
+        .and_then(|paths| {
+            std::env::split_paths(&paths)
+                .map(|p| p.join(name))
+                .find(|p| p.is_file())
+        })
+        .unwrap_or_else(|| panic!("{name} on PATH"))
+}
+
+/// Mints with a `git` first on PATH that runs the real one, but just before the first git call
+/// naming `at` renames `swap` to `<swap>.held` and puts a symlink to `to` in its place.
+fn mint_swapping(repo: &Repo, out: &Path, at: &str, swap: &Path, to: &Path) -> Output {
+    use std::os::unix::fs::PermissionsExt;
+    let (head, main) = repo.load();
+    let shims = repo.root.join("shims");
+    fs::create_dir_all(&shims).unwrap();
+    let shim = shims.join("git");
+    fs::write(
+        &shim,
+        "#!/bin/sh\nfor arg in \"$@\"; do\n  if [ \"$arg\" = \"$SWAP_AT\" ] && [ ! -L \"$SWAP_PATH\" ]; then\n    mv \"$SWAP_PATH\" \"$SWAP_PATH.held\" && ln -s \"$SWAP_TO\" \"$SWAP_PATH\"\n  fi\ndone\nexec \"$REAL_GIT\" \"$@\"\n",
+    )
+    .unwrap();
+    fs::set_permissions(&shim, fs::Permissions::from_mode(0o755)).unwrap();
+    let path = std::env::join_paths(
+        std::iter::once(shims).chain(std::env::split_paths(&std::env::var_os("PATH").unwrap())),
+    )
+    .unwrap();
+    let real = on_path("git");
+    repo.mint_env(
+        &head,
+        &main,
+        "topic",
+        out,
+        &[
+            ("PATH", path.as_os_str()),
+            ("REAL_GIT", real.as_os_str()),
+            ("SWAP_AT", at.as_ref()),
+            ("SWAP_PATH", swap.as_os_str()),
+            ("SWAP_TO", to.as_os_str()),
+        ],
+    )
+}
+
+fn entries(dir: &Path) -> Vec<String> {
+    let mut names: Vec<String> = fs::read_dir(dir)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    names.sort();
+    names
+}
+
+#[test]
+fn a_parent_swapped_while_minting_refuses_and_nothing_is_made_anywhere() {
+    let repo = diverged("swap-parent");
+    let parent = repo.root.join("drop");
+    let outside = repo.root.join("outside");
+    fs::create_dir(&parent).unwrap();
+    fs::create_dir(&outside).unwrap();
+    fs::write(outside.join("kept.txt"), "outside\n").unwrap();
+    let out = parent.join("packet");
+    // At commit-tree the checked parent is moved away and its name becomes a symlink outside.
+    refused(
+        &mint_swapping(&repo, &out, "commit-tree", &parent, &outside),
+        "no longer names the directory held for --out",
+    );
+    assert!(
+        parent.symlink_metadata().unwrap().file_type().is_symlink(),
+        "the swap ran"
+    );
+    assert!(entries(&repo.root.join("drop.held")).is_empty());
+    assert_eq!(entries(&outside), ["kept.txt"]);
+    assert_eq!(fs::read(outside.join("kept.txt")).unwrap(), b"outside\n");
+}
+
+#[test]
+fn a_packet_swapped_after_it_is_made_is_written_only_where_it_is_held() {
+    let repo = diverged("swap-packet");
+    let outside = repo.root.join("outside");
+    fs::create_dir(&outside).unwrap();
+    let out = repo.root.join("packet");
+    // At bundle, after the packet directory is made, it is moved away and its name becomes a
+    // symlink outside: the files go into the held directory, the outside stays empty, and the
+    // run refuses because --out no longer names what was written.
+    refused(
+        &mint_swapping(&repo, &out, "bundle", &out, &outside),
+        "no longer names the packet just written",
+    );
+    assert!(entries(&outside).is_empty());
+    let held = repo.root.join("packet.held");
+    assert_eq!(
+        entries(&held),
+        [
+            "DELTA-U0.diff",
+            "MAIN-DELTA-U0.diff",
+            "MERGE-COMMIT.txt",
+            "REMERGE.diff",
+            "SHA256SUMS",
+            "SUMMARY.json",
+            "source.bundle"
+        ]
     );
 }
