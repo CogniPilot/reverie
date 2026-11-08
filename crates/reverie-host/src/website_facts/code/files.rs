@@ -43,13 +43,27 @@ pub(in crate::website_facts) fn nix_path(value: &PythonText) -> Result<PathBuf> 
     Ok(native::python_path(value.codepoints())?)
 }
 pub(super) fn open_image(root: &File, path: &Path) -> Result<File> {
-    let how = OpenHow::new()
-        .flags(OFlag::O_RDONLY | OFlag::O_NONBLOCK | OFlag::O_CLOEXEC)
-        .resolve(
-            ResolveFlag::RESOLVE_IN_ROOT
-                | ResolveFlag::RESOLVE_NO_MAGICLINKS
-                | ResolveFlag::RESOLVE_NO_SYMLINKS,
-        );
+    image_leaf(
+        root,
+        path,
+        OFlag::O_RDONLY | OFlag::O_NONBLOCK | OFlag::O_CLOEXEC,
+    )
+}
+/// O_PATH|NOFOLLOW permits observing only the final symlink itself; every
+/// parent remains subject to the original no-symlink/no-magic-link walk.
+pub(in crate::website_facts) fn open_image_link(root: &File, path: &Path) -> Result<File> {
+    image_leaf(
+        root,
+        path,
+        OFlag::O_PATH | OFlag::O_NOFOLLOW | OFlag::O_CLOEXEC,
+    )
+}
+fn image_leaf(root: &File, path: &Path, flags: OFlag) -> Result<File> {
+    let how = OpenHow::new().flags(flags).resolve(
+        ResolveFlag::RESOLVE_IN_ROOT
+            | ResolveFlag::RESOLVE_NO_MAGICLINKS
+            | ResolveFlag::RESOLVE_NO_SYMLINKS,
+    );
     Ok(File::from(
         openat2(root, path, how).map_err(io::Error::from)?,
     ))
