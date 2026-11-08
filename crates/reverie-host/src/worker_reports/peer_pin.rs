@@ -42,9 +42,13 @@ pub(super) fn socket_ended(stream: &UnixStream) -> Result<bool> {
 /// Poll and peek are non-consuming and use only this SAME borrowed socket;
 /// the legacy input/EOF helper above keeps its separate drain semantics.
 pub(super) fn socket_disconnected(stream: &UnixStream) -> Result<bool> {
+    // The pinned nix version does not name Linux RDHUP. Retain its real ABI
+    // bit when requesting events; revents() returns None for that unknown bit,
+    // which MUST refuse currentness rather than drop it and accept buffered data.
+    let read_hangup = nix::poll::PollFlags::from_bits_retain(libc::POLLRDHUP);
     let mut fds = [nix::poll::PollFd::new(
         stream.as_fd(),
-        nix::poll::PollFlags::POLLIN | nix::poll::PollFlags::POLLRDHUP,
+        nix::poll::PollFlags::POLLIN | read_hangup,
     )];
     let ready = nix::poll::poll(&mut fds, nix::poll::PollTimeout::ZERO)
         .map_err(|error| WorkerReportError::Io(error.into()))?;
@@ -53,7 +57,7 @@ pub(super) fn socket_disconnected(stream: &UnixStream) -> Result<bool> {
         if flags.intersects(nix::poll::PollFlags::POLLERR | nix::poll::PollFlags::POLLNVAL) {
             return Err(WorkerReportError::Unconfirmed);
         }
-        if flags.intersects(nix::poll::PollFlags::POLLHUP | nix::poll::PollFlags::POLLRDHUP) {
+        if flags.intersects(nix::poll::PollFlags::POLLHUP | read_hangup) {
             return Ok(true);
         }
     }
