@@ -12,6 +12,7 @@ mod history;
 mod host_jobs;
 mod image_refresh;
 mod image_switch;
+pub(crate) use image_switch::ImageSwitchPreview;
 mod launch;
 mod observation;
 mod ordinary_stop;

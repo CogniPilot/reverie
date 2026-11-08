@@ -34,6 +34,9 @@ impl InstallingBroker {
             input: ImmutableInputObserver::default(),
             end,
             failed: false,
+            preview_files: None,
+            preview: None,
+            file_close_failure: None,
         });
         if let Err(cause) = owner.observe(end) {
             owner.failed = true;
@@ -46,7 +49,7 @@ impl InstallingBroker {
     }
 }
 impl Qualification<'_> {
-    fn observe(&mut self, end: Instant) -> Result<()> {
+    pub(super) fn observe(&mut self, end: Instant) -> Result<()> {
         need(!self.failed, "WORKER_IMAGE_QUALIFICATION_RETAINED")?;
         let end = end.min(self.end);
         let now = Instant::now();
@@ -56,6 +59,8 @@ impl Qualification<'_> {
         )?;
         self.context
             .assert_worker_runtime(&self.broker.storage.runtime)?;
+        self.context
+            .inherit_worker_stop_budget(&self.broker.storage.runtime.stop_budget())?;
         let current = self.broker.configuration()?;
         need(
             current.source_path() == self.before.source_path()
@@ -124,7 +129,10 @@ impl Qualification<'_> {
         Ok(())
     }
     pub(super) fn close(&self, end: Instant) -> Result<()> {
-        let input = self.input.assert_finalized().map_err(Into::into);
+        let input = self.file_close_failure.as_ref().map_or_else(
+            || self.input.assert_finalized().map_err(Into::into),
+            |error| Err(WorkerImageQualificationError::ImageFiles(error.clone())),
+        );
         let query = self.context.settle_metadata_owned(end).map_err(Into::into);
         match (input, query) {
             (Ok(()), Ok(())) => Ok(()),

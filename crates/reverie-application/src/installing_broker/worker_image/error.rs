@@ -6,6 +6,7 @@ pub enum WorkerImageQualificationError {
     Native(reverie_host::website_facts::WebsiteFactsError),
     Observer(crate::reservation_observer::ObserverError),
     Rootless(reverie_host::rootless::RootlessHostError),
+    ImageFiles(reverie_host::worker_image::ImageFileError),
     Refused(&'static str),
     Finalization(Box<Self>, Box<Self>),
 }
@@ -17,6 +18,7 @@ impl WorkerImageQualificationError {
             Self::Native(e) => e.code(),
             Self::Observer(e) => e.code(),
             Self::Rootless(e) => e.code(),
+            Self::ImageFiles(e) => e.code(),
             Self::Refused(code) => code,
             Self::Finalization(..) => "WORKER_IMAGE_QUALIFICATION_FINALIZATION",
         }

@@ -15,7 +15,8 @@ pub use goal_custody::{GoalCustodyHandlerClosed, GoalCustodyHandlerFailure};
 mod image_refresh;
 mod worker_image;
 pub use worker_image::{
-    QualifiedWorkerImage, WorkerImageQualificationError, WorkerImageQualificationFailure,
+    PreparedOfflineImageSwitch, QualifiedWorkerImage, WorkerImageQualificationError,
+    WorkerImageQualificationFailure,
 };
 mod installed_controller;
 pub use installed_controller::ControllerInstallFailure;

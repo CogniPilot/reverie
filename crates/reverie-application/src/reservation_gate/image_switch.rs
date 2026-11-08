@@ -2,6 +2,8 @@
 //! their own purposes; an image selection is not effect or pending authority.
 use super::*;
 use reverie_contracts::reservation_engine::StoppedFlag;
+mod preview;
+pub(crate) use preview::ImageSwitchPreview;
 impl Inner {
     /// Read under the original actual R admission. The public offline owner
     /// must separately retain its registered-service interlock and image proof.

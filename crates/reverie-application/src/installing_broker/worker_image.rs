@@ -9,6 +9,7 @@ use reverie_contracts::{
 use reverie_host::website_facts::{ImmutableInputKind, ImmutableInputObserver};
 use std::time::{Duration, Instant};
 mod error;
+mod prepare;
 mod qualification;
 #[cfg(test)]
 mod tests;
@@ -17,6 +18,11 @@ type Result<T> = std::result::Result<T, WorkerImageQualificationError>;
 /// Owns the SAME native input observer/context used to qualify an exact loaded
 /// image. It cannot be deserialized, cloned or constructed from profile DATA.
 pub struct QualifiedWorkerImage<'a> {
+    owner: Option<Box<Qualification<'a>>>,
+}
+/// Frozen readonly preview owned by the original native qualifier. It is not
+/// deserializable and cannot publish without the real service/lock/R owners.
+pub struct PreparedOfflineImageSwitch<'a> {
     owner: Option<Box<Qualification<'a>>>,
 }
 struct Qualification<'a> {
@@ -29,6 +35,16 @@ struct Qualification<'a> {
     context: ObservationContext,
     end: Instant,
     failed: bool,
+    preview_files: Option<reverie_host::worker_image::ImageControlFiles>,
+    preview: Option<crate::reservation_gate::ImageSwitchPreview>,
+    file_close_failure: Option<reverie_host::worker_image::ImageFileError>,
+}
+impl Drop for PreparedOfflineImageSwitch<'_> {
+    fn drop(&mut self) {
+        if let Some(owner) = self.owner.take() {
+            std::mem::forget(owner);
+        }
+    }
 }
 impl Drop for QualifiedWorkerImage<'_> {
     fn drop(&mut self) {
