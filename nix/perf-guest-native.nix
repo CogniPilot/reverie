@@ -25,7 +25,7 @@ in pkgs.pkgsStatic.rustPlatform.buildRustPackage {
     unset NIX_CFLAGS_COMPILE NIX_LDFLAGS
   '';
   postCheck = ''
-    cargo test --locked --release --target ${pkgs.stdenv.hostPlatform.rust.rustcTarget} \
+    cargo test --locked --release --target ${pkgs.pkgsStatic.stdenv.hostPlatform.rust.rustcTarget} \
       -p reverie-worker-init
   '';
   meta = {
