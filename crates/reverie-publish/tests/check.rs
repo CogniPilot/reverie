@@ -222,6 +222,44 @@ fn a_store_merge_driver_cannot_hide_a_conflict() {
 }
 
 #[test]
+fn ambient_user_attributes_cannot_hide_a_conflict() {
+    let f = Fixture::new("ambient-attributes");
+    let head = f.commit("a.txt", "topic\n", &format!("Change a\n\n{SIGNOFF}"));
+    let seal = f.seal("Change a", "Changes a.\n");
+    let work = f.work();
+    git(&work, &["checkout", "-q", "main"]);
+    fs::write(work.join("a.txt"), "main moved\n").unwrap();
+    git(
+        &work,
+        &["commit", "-q", "-am", &format!("Move main\n\n{SIGNOFF}")],
+    );
+    git(
+        &f.root.join("store.git"),
+        &[
+            "fetch",
+            "-q",
+            work.to_str().unwrap(),
+            "+main:refs/heads/main",
+        ],
+    );
+    refused(&f.check(&seal, &head, &[]), "does not merge cleanly");
+    // The same conflict with a union merge named in the user's attributes, by XDG and by HOME.
+    let xdg = f.root.join("xdg");
+    fs::create_dir_all(xdg.join("git")).unwrap();
+    fs::write(xdg.join("git/attributes"), "a.txt merge=union\n").unwrap();
+    let home = f.root.join("home");
+    fs::create_dir_all(home.join(".config/git")).unwrap();
+    fs::write(home.join(".config/git/attributes"), "a.txt merge=union\n").unwrap();
+    for envs in [
+        vec![("XDG_CONFIG_HOME", xdg.to_str().unwrap())],
+        vec![("HOME", home.to_str().unwrap())],
+    ] {
+        let out = f.check_env(&seal, &head, &[], &envs);
+        refused(&out, "does not merge cleanly");
+    }
+}
+
+#[test]
 fn the_approval_record_binds_the_exact_commit_patch_title_and_body() {
     let f = Fixture::new("approval");
     let head = f.commit("b.txt", "two\n", &format!("Add b\n\n{SIGNOFF}"));
