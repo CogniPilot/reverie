@@ -6,10 +6,10 @@ use super::*;
 #[test]
 fn installed_generation_must_be_inactive_and_exact_before_replacement() {
     let old = Path::new("/nix/store/old-worker/share/systemd/user/reverie-worker-broker.service");
-    assert!(ObservedUnit::decode("LoadState=loaded\nActiveState=inactive\nSubState=dead\nFragmentPath=/nix/store/old-worker/share/systemd/user/reverie-worker-broker.service\nDropInPaths=\n").unwrap().require_replaceable(Some(old)).is_ok());
+    assert!(ObservedUnit::decode("LoadState=loaded\nActiveState=inactive\nSubState=dead\nFragmentPath=/nix/store/old-worker/share/systemd/user/reverie-worker-broker.service\nDropInPaths=\nNeedDaemonReload=no\n").unwrap().require_replaceable(Some(old)).is_ok());
     for raw in [
-        "LoadState=loaded\nActiveState=active\nSubState=running\nFragmentPath=/nix/store/old-worker/share/systemd/user/reverie-worker-broker.service\nDropInPaths=\n",
-        "LoadState=loaded\nActiveState=inactive\nSubState=dead\nFragmentPath=/etc/systemd/user/foreign.service\nDropInPaths=\n",
+        "LoadState=loaded\nActiveState=active\nSubState=running\nFragmentPath=/nix/store/old-worker/share/systemd/user/reverie-worker-broker.service\nDropInPaths=\nNeedDaemonReload=no\n",
+        "LoadState=loaded\nActiveState=inactive\nSubState=dead\nFragmentPath=/etc/systemd/user/foreign.service\nDropInPaths=\nNeedDaemonReload=no\n",
     ] {
         assert!(
             ObservedUnit::decode(raw)
@@ -20,7 +20,7 @@ fn installed_generation_must_be_inactive_and_exact_before_replacement() {
     }
     assert!(
         ObservedUnit::decode(
-            "LoadState=not-found\nActiveState=inactive\nSubState=dead\nFragmentPath=\nDropInPaths=\n"
+            "LoadState=not-found\nActiveState=inactive\nSubState=dead\nFragmentPath=\nDropInPaths=\nNeedDaemonReload=no\n"
         )
         .unwrap()
         .require_replaceable(None)
@@ -61,7 +61,7 @@ fn actual_captured_active_manager_refuses_before_any_selection_write() {
 
 #[test]
 fn completed_job_requires_actual_action_specific_state() {
-    let dead=ObservedUnit::decode("LoadState=loaded\nActiveState=inactive\nSubState=dead\nFragmentPath=/nix/store/known/unit\nDropInPaths=\n").unwrap();
+    let dead=ObservedUnit::decode("LoadState=loaded\nActiveState=inactive\nSubState=dead\nFragmentPath=/nix/store/known/unit\nDropInPaths=\nNeedDaemonReload=no\n").unwrap();
     assert!(
         dead.require_action_finished(&WorkerServiceAction::Stop)
             .is_ok()
@@ -70,7 +70,7 @@ fn completed_job_requires_actual_action_specific_state() {
         dead.require_action_finished(&WorkerServiceAction::Start)
             .is_err()
     );
-    let live=ObservedUnit::decode("LoadState=loaded\nActiveState=active\nSubState=running\nFragmentPath=/nix/store/known/unit\nDropInPaths=\n").unwrap();
+    let live=ObservedUnit::decode("LoadState=loaded\nActiveState=active\nSubState=running\nFragmentPath=/nix/store/known/unit\nDropInPaths=\nNeedDaemonReload=no\n").unwrap();
     assert!(
         live.require_action_finished(&WorkerServiceAction::Start)
             .is_ok()
@@ -497,10 +497,10 @@ fn write_owned_test(path: &Path, bytes: &[u8]) {
 }
 #[test]
 fn effective_unit_dropins_cannot_hide_behind_unchanged_packaged_fragment() {
-    let unchanged = "LoadState=loaded\nActiveState=inactive\nSubState=dead\nFragmentPath=/nix/store/known/unit\nDropInPaths=\n";
+    let unchanged = "LoadState=loaded\nActiveState=inactive\nSubState=dead\nFragmentPath=/nix/store/known/unit\nDropInPaths=\nNeedDaemonReload=no\n";
     assert!(ObservedUnit::decode(unchanged).is_ok());
     let overridden = unchanged.replace(
-        "DropInPaths=\n",
+        "DropInPaths=\nNeedDaemonReload=no\n",
         "DropInPaths=/owner/.config/systemd/user/reverie-worker-broker.service.d/override.conf\n",
     );
     assert!(ObservedUnit::decode(&overridden).is_err());

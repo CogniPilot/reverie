@@ -29,11 +29,11 @@ fn main() {
         "native-worker-manager-rollback" => {
             if args == ["--user", "daemon-reload"] { std::fs::write("manager-reloaded", b"known fixed reload").unwrap();return; }
             if args == ["--user", "start", "reverie-worker-broker.service"] { std::fs::write("manager-started", b"known fixed start").unwrap();return; }
-            assert_eq!(args, ["--user", "show", "reverie-worker-broker.service", "--property=LoadState", "--property=ActiveState", "--property=SubState", "--property=FragmentPath", "--property=DropInPaths"]);
+            assert_eq!(args, ["--user", "show", "reverie-worker-broker.service", "--property=LoadState", "--property=ActiveState", "--property=SubState", "--property=FragmentPath", "--property=DropInPaths", "--property=NeedDaemonReload"]);
             let target=std::fs::read_link(".config/systemd/user/reverie-worker-broker.service").unwrap();
             let (active,sub)=if std::path::Path::new("manager-started").exists(){("active","running")}else{("inactive","dead")};
             let fragment=if std::path::Path::new("manager-fragment-link").is_file(){env::current_dir().unwrap().join(".config/systemd/user/reverie-worker-broker.service")}else{target};
-            print!("LoadState=loaded\nActiveState={active}\nSubState={sub}\nFragmentPath={}\nDropInPaths=\n",fragment.display());
+            print!("LoadState=loaded\nActiveState={active}\nSubState={sub}\nFragmentPath={}\nDropInPaths=\nNeedDaemonReload=no\n",fragment.display());
         },
         "native-worker-manager-legacy" | "native-worker-manager-slow" => {
             if args == ["--user", "stop", "reverie-worker-broker.service"] {
@@ -41,13 +41,13 @@ fn main() {
                 if mode == "native-worker-manager-slow" { std::thread::sleep(Duration::from_millis(1500)); }
                 std::fs::write("manager-stopped", b"known controlled stop").unwrap();return;
             }
-            assert_eq!(args, ["--user", "show", "reverie-worker-broker.service", "--property=LoadState", "--property=ActiveState", "--property=SubState", "--property=FragmentPath", "--property=DropInPaths"]);
+            assert_eq!(args, ["--user", "show", "reverie-worker-broker.service", "--property=LoadState", "--property=ActiveState", "--property=SubState", "--property=FragmentPath", "--property=DropInPaths", "--property=NeedDaemonReload"]);
             let (active,sub)=if std::path::Path::new("manager-stopped").exists(){("inactive","dead")}else{("active","running")};
-            print!("LoadState=loaded\nActiveState={active}\nSubState={sub}\nFragmentPath=/nix/store/old-worker/share/systemd/user/reverie-worker-broker.service\nDropInPaths=\n");
+            print!("LoadState=loaded\nActiveState={active}\nSubState={sub}\nFragmentPath=/nix/store/old-worker/share/systemd/user/reverie-worker-broker.service\nDropInPaths=\nNeedDaemonReload=no\n");
         },
         "native-worker-manager" => {
-            assert_eq!(args, ["--user", "show", "reverie-worker-broker.service", "--property=LoadState", "--property=ActiveState", "--property=SubState", "--property=FragmentPath", "--property=DropInPaths"]);
-            print!("LoadState=loaded\nActiveState=active\nSubState=running\nFragmentPath=/nix/store/old-worker/share/systemd/user/reverie-worker-broker.service\nDropInPaths=\n");
+            assert_eq!(args, ["--user", "show", "reverie-worker-broker.service", "--property=LoadState", "--property=ActiveState", "--property=SubState", "--property=FragmentPath", "--property=DropInPaths", "--property=NeedDaemonReload"]);
+            print!("LoadState=loaded\nActiveState=active\nSubState=running\nFragmentPath=/nix/store/old-worker/share/systemd/user/reverie-worker-broker.service\nDropInPaths=\nNeedDaemonReload=no\n");
         },
         "telemetry-bootstrap-pending" => {
             assert_eq!(args.first().map(String::as_str), Some("ps"));

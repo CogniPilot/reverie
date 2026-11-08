@@ -15,12 +15,21 @@ impl ObservedUnit {
             need(
                 matches!(
                     key,
-                    "LoadState" | "ActiveState" | "SubState" | "FragmentPath" | "DropInPaths"
+                    "LoadState"
+                        | "ActiveState"
+                        | "SubState"
+                        | "FragmentPath"
+                        | "DropInPaths"
+                        | "NeedDaemonReload"
                 ) && values.insert(key, value).is_none(),
                 "NATIVE_SERVICE_MANAGER_REPLY",
             )?;
         }
-        need(values.len() == 5, "NATIVE_SERVICE_MANAGER_REPLY")?;
+        need(values.len() == 6, "NATIVE_SERVICE_MANAGER_REPLY")?;
+        need(
+            values["NeedDaemonReload"] == "no",
+            "NATIVE_SERVICE_STALE_MANAGER_UNIT",
+        )?;
         need(
             values["DropInPaths"].is_empty(),
             "NATIVE_SERVICE_DROPIN_OVERRIDE_REFUSED",
@@ -102,8 +111,29 @@ impl State {
             "--property=SubState",
             "--property=FragmentPath",
             "--property=DropInPaths",
+            "--property=NeedDaemonReload",
         ])?;
-        ObservedUnit::decode(&raw)
+        let mut observed = ObservedUnit::decode(&raw)?;
+        if observed.fragment == self.home.join(".config/systemd/user").join(UNIT) {
+            let target = self.selected_unit_link()?;
+            need(
+                target == self.unit || self.previous.as_ref() == Some(&target),
+                "NATIVE_SERVICE_UNKNOWN_GENERATION",
+            )?;
+            observed.fragment = target;
+        }
+        Ok(observed)
+    }
+    fn selected_unit_link(&self) -> Result<PathBuf> {
+        let link = self.home.join(".config/systemd/user").join(UNIT);
+        let m = fs::symlink_metadata(&link)?;
+        need(
+            m.file_type().is_symlink()
+                && m.uid() == nix::unistd::geteuid().as_raw()
+                && m.nlink() == 1,
+            "NATIVE_SERVICE_UNIT_LINK_CHANGED",
+        )?;
+        Ok(fs::read_link(link)?)
     }
     pub(super) fn assert_stoppable(&mut self, observed: &ObservedUnit) -> Result<()> {
         if observed.fragment == self.unit {
@@ -116,13 +146,8 @@ impl State {
             observed.load == "loaded" && observed.fragment == *previous,
             "NATIVE_SERVICE_UNKNOWN_PREDECESSOR",
         )?;
-        let link = self.home.join(".config/systemd/user").join(UNIT);
-        let m = fs::symlink_metadata(&link)?;
         need(
-            m.file_type().is_symlink()
-                && m.uid() == nix::unistd::geteuid().as_raw()
-                && m.nlink() == 1
-                && fs::read_link(&link)? == *previous,
+            self.selected_unit_link()? == *previous,
             "NATIVE_SERVICE_PREDECESSOR_LINK_CHANGED",
         )?;
         self.assert_legacy_selection()
@@ -139,9 +164,8 @@ impl State {
             observed.load == "loaded" && observed.fragment == self.unit,
             "NATIVE_SERVICE_CURRENT_GENERATION_REQUIRED",
         )?;
-        let link = self.home.join(".config/systemd/user").join(UNIT);
         need(
-            fs::read_link(link)? == self.unit,
+            self.selected_unit_link()? == self.unit,
             "NATIVE_SERVICE_CURRENT_UNIT_REQUIRED",
         )?;
         let path = self.root.join("worker-pool/service/environment");
