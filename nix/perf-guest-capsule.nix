@@ -16,6 +16,7 @@ in pkgs.runCommand "reverie-perf-guest-capsule" {
 } ''
   reverie-perf-capsule \
     --checker ${native}/bin/reverie-perf-check --perf ${perf}/bin/perf \
+    --worker-init ${native}/bin/reverie-worker-init \
     --closure ${closure}/store-paths --notices ${notices} \
     --patchelf ${pkgs.patchelf}/bin/patchelf --readelf ${pkgs.binutils}/bin/readelf \
     --output "$out"

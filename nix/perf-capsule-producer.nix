@@ -11,7 +11,7 @@ in pkgs.rustPlatform.buildRustPackage {
   src = workspace.source;
   cargoLock.lockFile = workspace.lockFile;
   cargoBuildFlags = [ "-p" "reverie-perf-capsule" ];
-  cargoTestFlags = [ "-p" "reverie-elf-bundle" ];
+  cargoTestFlags = [ "-p" "reverie-elf-bundle" "-p" "reverie-perf-capsule" ];
   postCheck = ''
     REVERIE_TEST_CAPSULE_ORIGINS=${originFixture} \
     REVERIE_TEST_CAPSULE_PATCHELF=${pkgs.patchelf}/bin/patchelf \

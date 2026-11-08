@@ -1,0 +1,12 @@
+[package]
+name = "reverie-worker-init"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+nix = { workspace = true, features = ["signal", "process", "poll"] }
+
+[lints]
+workspace = true

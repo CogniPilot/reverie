@@ -11,14 +11,11 @@ pub(crate) fn build(args: Arguments) -> Result<()> {
     let tools = Tools::new(&args.patchelf, &args.readelf)?;
     let perf = immutable_input(&args.perf)?;
     let checker = immutable_input(&args.checker)?;
+    let worker_init = immutable_input(&args.worker_init)?;
     let closure = immutable_input(&args.closure)?;
     let architecture = executable_machine(&perf)?;
-    if executable_machine(&checker)? != architecture
-        || tools.interpreter(&checker)?.is_some()
-        || tools.dynamic(&checker)? && !tools.patch(&["--print-needed"], &checker)?.is_empty()
-    {
-        return Err(refused("static same-architecture Rust checker required"));
-    }
+    require_static(&checker, architecture, &tools)?;
+    require_static(&worker_init, architecture, &tools)?;
     let interpreter = tools
         .interpreter(&perf)?
         .ok_or_else(|| refused("dynamic perf ELF interpreter required"))?;
@@ -46,9 +43,11 @@ pub(crate) fn build(args: Arguments) -> Result<()> {
     copy(&perf, &target.join("bin/perf"))?;
     LAYOUT.relocate(&target.join("bin/perf"), loader, &tools)?;
     copy(&checker, &target.join("bin/reverie-perf-check"))?;
+    copy(&worker_init, &target.join("bin/reverie-worker-init"))?;
     let mut artifacts = vec![
         artifact(&perf, &target, Path::new("bin/perf"))?,
         artifact(&checker, &target, Path::new("bin/reverie-perf-check"))?,
+        artifact(&worker_init, &target, Path::new("bin/reverie-worker-init"))?,
     ];
     for (name, source) in libraries.selected() {
         artifacts.push(artifact(source, &target, &Path::new("lib").join(name))?);
@@ -61,7 +60,7 @@ pub(crate) fn build(args: Arguments) -> Result<()> {
         )?);
     }
     let inventory = serde_json::json!({
-        "schema": "reverie-perf-guest-capsule-build-v1",
+        "schema": "reverie-perf-guest-capsule-build-v2",
         "purpose": "unselected-image-data-no-grant-or-attestation",
         "prefix": LAYOUT.prefix(),
         "absentFallback": LAYOUT.absent_fallback(),
@@ -74,6 +73,18 @@ pub(crate) fn build(args: Arguments) -> Result<()> {
         serde_json::to_vec_pretty(&inventory)?,
     )?;
     readonly(&args.output)
+}
+
+fn require_static(path: &Path, architecture: u16, tools: &Tools) -> Result<()> {
+    if executable_machine(path)? != architecture
+        || tools.interpreter(path)?.is_some()
+        || tools.dynamic(path)? && !tools.patch(&["--print-needed"], path)?.is_empty()
+    {
+        return Err(refused(
+            "static same-architecture checker and worker init required",
+        ));
+    }
+    Ok(())
 }
 
 #[derive(serde::Serialize)]
