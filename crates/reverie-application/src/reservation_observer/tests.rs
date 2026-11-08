@@ -158,6 +158,21 @@ impl Fixture {
     }
 }
 impl Source for Arc<Fixture> {
+    fn assert_worker_runtime(
+        &self,
+        runtime: &reverie_host::worker_runtime::WorkerRuntime,
+    ) -> Result<()> {
+        let engine = self
+            .0
+            .lock()
+            .unwrap()
+            .engine
+            .clone()
+            .ok_or(ObserverError::Refused(
+                "RESERVATION_OBSERVATION_RUNTIME_ORIGIN",
+            ))?;
+        Ok(engine.assert_worker_runtime(runtime)?)
+    }
     fn verify_launch_limits(
         &self,
         _: &reverie_contracts::broker_laptop::LaunchLaptopInspection,

@@ -95,6 +95,34 @@ impl InstalledWorker {
     }
 }
 impl<'a> LaptopLifecycle<'a> {
+    pub(super) fn stopped_ram_generation(
+        &self,
+        sid: &ProfileSessionId,
+    ) -> Result<LaunchGeneration, GateError> {
+        self.check_stopped_ram_available(sid)?;
+        Ok(self.guard.generation.clone())
+    }
+    pub(super) fn check_stopped_ram_available(
+        &self,
+        sid: &ProfileSessionId,
+    ) -> Result<(), GateError> {
+        if self.guard.draining
+            || self.guard.active.iter().any(|entry| &entry.session == sid)
+            || self.guard.pending.iter().any(|entry| &entry.session == sid)
+        {
+            return Err(GateError::Refused(
+                "RAM_STOPPED_SOURCE_ATTACHED_OR_DRAINING",
+            ));
+        }
+        if self
+            .guard
+            .iter()
+            .any(|entry| &entry.session == sid && !matches!(entry.owner, LaptopOwner::Recovered(_)))
+        {
+            return Err(GateError::Refused("RAM_STOPPED_SOURCE_OWNER_UNSUPPORTED"));
+        }
+        Ok(())
+    }
     pub(crate) fn belongs_to(&self, owner: &InstalledWorker) -> bool {
         std::ptr::eq(self.owner, owner)
     }

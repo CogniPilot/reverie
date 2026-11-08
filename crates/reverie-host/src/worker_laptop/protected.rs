@@ -80,6 +80,11 @@ impl ProtectedCreatedObservation {
     }
 }
 impl ProtectedCliObservation {
+    /// Identity only. The caller still owns actual admission/canonical release;
+    /// neither this comparison nor the local guard token releases capacity.
+    pub fn same_released(&self, released: &NixReleasedPane) -> bool {
+        self.created.workflow.same_workflow(&released.workflow)
+    }
     pub fn same_created(&self, created: &ProtectedCreatedObservation) -> bool {
         self.created.same_facts(created)
     }

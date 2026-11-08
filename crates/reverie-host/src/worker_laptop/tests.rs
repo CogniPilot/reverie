@@ -7,6 +7,7 @@ mod direct_finalization;
 mod existing_viewer;
 mod guard;
 mod pane;
+mod protected;
 mod publication;
 mod reference;
 mod viewer;

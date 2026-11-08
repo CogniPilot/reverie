@@ -3,6 +3,10 @@ use reverie_contracts::kernel_mounts::MountTable;
 use reverie_core::{decimal::UnsignedInteger, ids::ProfileSessionId};
 use reverie_host::reservation_kernel::{CustodyPaths, ReservationKernel};
 pub(super) trait Source: Send + Sync {
+    fn assert_worker_runtime(
+        &self,
+        runtime: &reverie_host::worker_runtime::WorkerRuntime,
+    ) -> Result<()>;
     fn verify_launch_limits(
         &self,
         row: &reverie_contracts::broker_laptop::LaunchLaptopInspection,
@@ -113,6 +117,12 @@ impl Installed {
     }
 }
 impl Source for Installed {
+    fn assert_worker_runtime(
+        &self,
+        runtime: &reverie_host::worker_runtime::WorkerRuntime,
+    ) -> Result<()> {
+        Ok(self.engine.assert_worker_runtime(runtime)?)
+    }
     fn verify_launch_limits(
         &self,
         row: &reverie_contracts::broker_laptop::LaunchLaptopInspection,
