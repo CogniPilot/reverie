@@ -433,6 +433,8 @@ export interface TerminalMultiplexer extends EventEmitter {
    * text instead of just the visible single-screen frame (COD-47).
    */
   capturePaneBuffer?(muxName: string, paneTarget?: string, opts?: PaneCaptureOptions): string | null;
+  /** Type keystrokes into one pane of a session (a teammate's), literally, each carriage return as Enter. */
+  sendInputToPane?(muxName: string, paneTarget: string, input: string): boolean;
 
   /**
    * Capture the active pane's current tmux buffer with ANSI escape codes preserved.
