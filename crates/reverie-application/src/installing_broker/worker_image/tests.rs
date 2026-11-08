@@ -115,3 +115,33 @@ fn composed_file_error_walks_both_branches_without_classifying_known_io_as_close
         .close(Instant::now() + Duration::from_secs(2))
         .unwrap();
 }
+
+#[test]
+fn offline_inspection_closes_the_real_fresh_broker_once_without_changing_ready_or_querying() {
+    let tree = Tree::new();
+    let broker = broker(&tree);
+    let marker = fs::read(tree.root.join("state/resource-reservation-control.json")).unwrap();
+    let calls = fs::read(tree.root.join("calls.txt")).ok();
+    broker.close_offline_image_inspection(Instant::now() + Duration::from_secs(2)).unwrap();
+    let stop = broker.storage.runtime.stop_deadline().expect("actual runtime closed");
+    let failure = broker.close_offline_image_inspection(Instant::now() + Duration::from_secs(2))
+        .err().expect("original close attempt is one-shot");
+    assert_eq!(failure.cause().code(), "WORKER_IMAGE_REQUIRES_UNSTARTED_BROKER");
+    assert_eq!(broker.storage.runtime.stop_deadline(), Some(stop));
+    assert_eq!(fs::read(tree.root.join("calls.txt")).ok(), calls);
+    assert_eq!(fs::read(tree.root.join("worker.json")).unwrap(), tree.raw);
+    assert_eq!(fs::read(tree.root.join("state/resource-reservation-control.json")).unwrap(), marker);
+}
+
+#[test]
+fn inspection_controller_slot_contention_refuses_before_runtime_stop_or_native_query() {
+    let tree = Tree::new();
+    let broker = broker(&tree);
+    let original_slot = broker.controller.lock().unwrap();
+    let failure = broker.close_offline_image_inspection(Instant::now() + Duration::from_secs(2))
+        .err().expect("same original slot must be exclusively held");
+    assert_eq!(failure.cause().code(), "WORKER_CONTROLLER_SLOT_UNAVAILABLE");
+    assert!(broker.storage.runtime.stop_deadline().is_none());
+    drop(original_slot);
+    broker.close_offline_image_inspection(Instant::now() + Duration::from_secs(2)).unwrap();
+}
