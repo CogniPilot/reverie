@@ -8,7 +8,7 @@ mod process;
 mod protocol;
 pub use protocol::{
     CurrentResourceOwner, RAM_POOL_PURPOSE, RamPreviewFields, ResourceOperationRequest,
-    ResourceRequestSelection, decode_ram_pool_hello,
+    ResourceOwnerPrincipal, ResourceRequestSelection, decode_ram_pool_hello,
 };
 mod provenance;
 mod settings;

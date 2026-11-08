@@ -1,5 +1,6 @@
 use super::*;
 use serde_json::{Value as Json, json};
+mod principal;
 const EID: &str = "11111111-2222-4333-8444-555555555555";
 const RID: &str = "22222222-2222-4333-8444-555555555555";
 const NONCE: &str = "33333333-2222-4333-8444-555555555555";
@@ -19,7 +20,7 @@ fn request(value: &Json) -> ResourceOperationRequest {
     ResourceOperationRequest::decode(&human(value)).unwrap()
 }
 fn reply(value: &Json) -> Json {
-    json!({"kind":"resource-owner-current","requestId":RID,"nonce":NONCE,"purpose":RAM_POOL_PURPOSE,"stage":if value["verb"]=="draft"{"preview"}else{"apply"},"owner":null,"ownerScopeDigest":"d".repeat(64),"expiresAtEpochMs":1800000000000u64,"approval":value.get("approval").cloned().unwrap_or(Json::Null)})
+    json!({"kind":"resource-owner-current","requestId":RID,"nonce":NONCE,"purpose":RAM_POOL_PURPOSE,"stage":if value["verb"]=="draft"{"preview"}else{"apply"},"owner":null,"ownerScopeDigest":"d".repeat(64),"expiresAtEpochMs":1800000000000u64,"approval":value.get("approval").cloned().unwrap_or(Json::Null),"principal":{"accountId":EID,"personId":"owner","sessionEpoch":0}})
 }
 
 #[test]

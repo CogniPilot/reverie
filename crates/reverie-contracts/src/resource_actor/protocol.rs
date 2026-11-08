@@ -9,11 +9,13 @@ use reverie_core::{
 };
 mod approval;
 mod owner;
+mod principal;
 mod reply;
 pub use reply::RamPreviewFields;
 #[cfg(test)]
 mod tests;
 pub use owner::CurrentResourceOwner;
+pub use principal::ResourceOwnerPrincipal;
 pub const RAM_POOL_PURPOSE: &str = "resource-ram-pool-v2";
 
 #[derive(Clone, Debug, Eq, PartialEq)]
