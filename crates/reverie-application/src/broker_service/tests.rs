@@ -20,6 +20,7 @@ struct Fake {
     block_lease: AtomicBool,
     lease_closes: AtomicUsize,
     watchdog_exits: AtomicUsize,
+    stop: AtomicBool,
 }
 impl Fake {
     fn me() -> u32 {
@@ -81,6 +82,9 @@ impl BrokerCore for Fake {
     // The real first-stop contract: repeated calls never extend the budget.
     fn request_stop(&self) -> Instant {
         *self.first_stop.get_or_init(Instant::now) + self.budget.unwrap_or(Duration::from_secs(5))
+    }
+    fn stop_requested(&self) -> bool {
+        self.stop.load(Ordering::Acquire)
     }
     fn close_lease_peer(&self) -> bool {
         self.lease_closes.fetch_add(1, Ordering::SeqCst);
@@ -206,6 +210,52 @@ fn startup_runs_in_the_legacy_order_and_close_removes_the_socket() {
     assert_eq!(fs::symlink_metadata(&socket).unwrap().mode() & 0o777, 0o600);
     service.request_close();
     assert_eq!(handle.join().unwrap(), Ok(()));
+    assert!(fs::symlink_metadata(&socket).is_err());
+}
+
+/// Join `serve`, bounded: a service that ignored the stop would serve until closed.
+fn joined(
+    service: &BrokerService,
+    handle: JoinHandle<Result<(), ServiceError>>,
+) -> Result<(), ServiceError> {
+    let start = Instant::now();
+    while !handle.is_finished() && start.elapsed() < Duration::from_secs(3) {
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    if !handle.is_finished() {
+        service.request_close();
+        let _ = handle.join();
+        panic!("serve kept running after the stop was requested");
+    }
+    handle.join().unwrap()
+}
+
+#[test]
+fn a_stop_requested_before_listening_closes_without_binding() {
+    let core = Arc::new(Fake::default());
+    core.stop.store(true, Ordering::Release);
+    let socket = scratch("stop-early");
+    let service = Arc::new(BrokerService::new(
+        core.clone(),
+        all_owners(),
+        socket.clone(),
+    ));
+    let serving = service.clone();
+    let handle = std::thread::spawn(move || serving.serve());
+    assert_eq!(joined(&service, handle), Ok(()));
+    assert_eq!(core.log(), ["check_pool", "recover"]);
+    assert!(fs::symlink_metadata(&socket).is_err());
+}
+
+#[test]
+fn a_stop_requested_while_serving_closes_the_service() {
+    let core = Arc::new(Fake::default());
+    let socket = scratch("stop-serving");
+    let (service, handle) = running(core.clone(), all_owners(), &socket);
+    core.stop.store(true, Ordering::Release);
+    assert_eq!(joined(&service, handle), Ok(()));
+    assert!(service.closing_flag().load(Ordering::Acquire));
+    assert_eq!(core.watchdog_exits.load(Ordering::SeqCst), 1);
     assert!(fs::symlink_metadata(&socket).is_err());
 }
 
