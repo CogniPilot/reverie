@@ -500,8 +500,13 @@ fn effective_unit_dropins_cannot_hide_behind_unchanged_packaged_fragment() {
     let unchanged = "LoadState=loaded\nActiveState=inactive\nSubState=dead\nFragmentPath=/nix/store/known/unit\nDropInPaths=\nNeedDaemonReload=no\n";
     assert!(ObservedUnit::decode(unchanged).is_ok());
     let overridden = unchanged.replace(
-        "DropInPaths=\nNeedDaemonReload=no\n",
+        "DropInPaths=\n",
         "DropInPaths=/owner/.config/systemd/user/reverie-worker-broker.service.d/override.conf\n",
     );
-    assert!(ObservedUnit::decode(&overridden).is_err());
+    assert!(matches!(
+        ObservedUnit::decode(&overridden),
+        Err(WorkerServiceError::Refused(
+            "NATIVE_SERVICE_DROPIN_OVERRIDE_REFUSED"
+        ))
+    ));
 }
