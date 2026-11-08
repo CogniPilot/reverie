@@ -4,6 +4,57 @@ use std::os::unix::fs::{PermissionsExt, symlink};
 use std::sync::atomic::{AtomicU64, Ordering};
 static NEXT: AtomicU64 = AtomicU64::new(0);
 #[test]
+fn reservation_close_uncertainty_preserves_actual_consumed_close_and_kernel_tag() {
+    let tree = Tree::new();
+    tree.write(b"owned bytes", 0o600);
+    test_faults::set(None, true);
+    let error = read_reservation(&tree.file(), 64).unwrap_err();
+    assert_eq!(tree.descriptors(), 0);
+    assert!(matches!(error, ObservationError::CloseUnconfirmed { .. }));
+    assert_eq!(error.code(), "HOST_ARTIFACT_IO");
+    let kernel = crate::reservation_kernel::ReservationKernelError::from(error);
+    assert!(kernel.has_unconfirmed_close());
+    assert_eq!(read_reservation(&tree.file(), 64).unwrap(), b"owned bytes");
+    assert!(
+        kernel.has_unconfirmed_close(),
+        "a new read cannot clear the old error"
+    );
+}
+#[test]
+fn reservation_close_uncertainty_keeps_secondary_bound_failure_and_storage_tag() {
+    let tree = Tree::new();
+    tree.write(b"owned bytes", 0o600);
+    test_faults::set(None, true);
+    let error = read_reservation(&tree.file(), 0).unwrap_err();
+    assert_eq!(tree.descriptors(), 0);
+    assert!(error.has_unconfirmed_close());
+    let ObservationError::Finalization { primary, secondary } = &error else {
+        panic!("both original errors must survive")
+    };
+    assert_eq!(primary.code(), "RESERVATION_NATIVE_BOUND");
+    assert!(matches!(
+        &**secondary,
+        ObservationError::CloseUnconfirmed { .. }
+    ));
+    let stored = crate::worker_storage::StorageError::from(error);
+    assert!(
+        matches!(stored, crate::worker_storage::StorageError::Finalization { secondary, .. }
+        if matches!(*secondary, crate::worker_storage::StorageError::CloseUnconfirmed { .. }))
+    );
+}
+#[test]
+fn reservation_close_uncertainty_does_not_classify_known_io_or_schema_refusal() {
+    let tree = Tree::new();
+    let missing = read_reservation(&tree.file(), 64).unwrap_err();
+    assert!(!missing.has_unconfirmed_close());
+    tree.write(b"owned bytes", 0o600);
+    let bounded = read_reservation(&tree.file(), 0).unwrap_err();
+    assert!(!bounded.has_unconfirmed_close());
+    let dual = finalized::<()>(Err(missing), Err(bounded)).unwrap_err();
+    assert!(!dual.has_unconfirmed_close());
+    assert_eq!(tree.descriptors(), 0);
+}
+#[test]
 fn python_native_path_encoding_is_lossless_and_separate_from_path_policy() {
     use std::os::unix::ffi::OsStrExt;
     assert_eq!(

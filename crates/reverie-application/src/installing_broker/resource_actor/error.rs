@@ -10,6 +10,7 @@ pub enum ResourceActorError {
     Channel(reverie_host::worker_reports::WorkerReportError),
     Observer(crate::reservation_observer::ObserverError),
     Frame(reverie_contracts::human_protocol::HumanFrameError),
+    RetainedClose(Arc<Self>),
     Finalization {
         primary: Box<Self>,
         secondary: Box<Self>,
@@ -27,7 +28,21 @@ impl ResourceActorError {
             Self::Channel(e) => e.code(),
             Self::Observer(e) => e.code(),
             Self::Frame(e) => e.code(),
+            Self::RetainedClose(e) => e.code(),
             Self::Finalization { .. } => "RESOURCE_ACTOR_FINALIZATION",
+        }
+    }
+    pub(super) fn has_unconfirmed_close(&self) -> bool {
+        match self {
+            Self::Gate(error) => {
+                matches!(&**error, GateError::Identity(error) if error.has_unconfirmed_close())
+            }
+            Self::Observer(error) => error.has_unconfirmed_close(),
+            Self::RetainedClose(error) => error.has_unconfirmed_close(),
+            Self::Finalization { primary, secondary } => {
+                primary.has_unconfirmed_close() || secondary.has_unconfirmed_close()
+            }
+            _ => false,
         }
     }
 }
@@ -36,7 +51,15 @@ impl std::fmt::Display for ResourceActorError {
         f.write_str(self.code())
     }
 }
-impl std::error::Error for ResourceActorError {}
+impl std::error::Error for ResourceActorError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::RetainedClose(error) => Some(&**error),
+            Self::Finalization { primary, .. } => Some(&**primary),
+            _ => None,
+        }
+    }
+}
 impl From<GateError> for ResourceActorError {
     fn from(e: GateError) -> Self {
         Self::Gate(Box::new(e))

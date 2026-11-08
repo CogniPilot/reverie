@@ -114,11 +114,13 @@ impl Frame<'_> {
                 == bindings.installed.website.image,
             "RESOURCE_ACTOR_IMAGE_CHANGED",
         )?;
-        let rows = self
+        let custody = self
             .context
             .as_ref()
             .expect("bound native context")
-            .custody(Some(end))?;
+            .custody(Some(end))
+            .map_err(Into::into);
+        let rows = self.retain_stateless_result(custody)?;
         let name = format!(
             "/{}",
             ReservationConfiguration::capture(

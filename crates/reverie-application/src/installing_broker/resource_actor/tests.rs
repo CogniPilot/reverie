@@ -16,6 +16,7 @@ use std::{
 struct Fixture {
     broker: InstallingBroker,
     tree: Tree,
+    retained: bool,
 }
 impl Fixture {
     fn new() -> Self {
@@ -40,6 +41,7 @@ impl Fixture {
         Self {
             broker: InstallingBroker::new(snapshot, runtime).unwrap(),
             tree,
+            retained: false,
         }
     }
     fn accept(&self, purpose: u8, raw: &[u8]) -> (UnixStream, WorkerServiceConnection) {
@@ -73,9 +75,86 @@ impl Fixture {
 }
 impl Drop for Fixture {
     fn drop(&mut self) {
-        self.broker.reports.close(end()).unwrap();
-        self.broker.storage.runtime.close(end()).unwrap();
+        let reports = self.broker.reports.close(end());
+        let runtime = self.broker.storage.runtime.close(end());
+        runtime.unwrap();
+        if self.retained {
+            assert!(
+                reports.is_err(),
+                "original unknown owner must remain counted"
+            );
+        } else {
+            reports.unwrap();
+        }
     }
+}
+#[test]
+fn actual_q_record_retains_stateless_close_error_after_disconnect_and_repeated_close() {
+    crate::test_process::owning_case!(
+        actual_q_record_retains_stateless_close_error_after_disconnect_and_repeated_close
+    );
+    let mut fixture = Fixture::new();
+    // Negative latch composition only: actual native close production is
+    // separately measured by Host and Store controls, not fabricated here.
+    let cause = reverie_host::ObservationError::CloseUnconfirmed {
+        cause: std::io::Error::other("typed consumed-close witness"),
+    };
+    let kernel = reverie_host::reservation_kernel::ReservationKernelError::from(cause);
+    let observed = crate::reservation_observer::ObserverError::from(kernel);
+    fixture.retained = true;
+    for cause in [observed.into(), company_close_error()] {
+        let (mut client, connection) = fixture.accept(b'Q', b"{}");
+        let mut failure = fixture
+            .broker
+            .prepare_resource_website(connection)
+            .err()
+            .unwrap();
+        let body = failure.frame.retain_stateless_result::<()>(Err(cause));
+        let first = failure.close_channel_component(end());
+        let eof = client.read(&mut [0]);
+        let repeated = failure.close_channel_component(end());
+        let retained = failure.frame.unconfirmed.as_ref().map(Arc::clone);
+        assert!(body.unwrap_err().has_unconfirmed_close());
+        assert!(first.unwrap_err().has_unconfirmed_close());
+        assert_eq!(eof.unwrap(), 0, "same original socket must still close");
+        assert!(repeated.unwrap_err().has_unconfirmed_close());
+        assert!(Arc::ptr_eq(
+            retained.as_ref().unwrap(),
+            failure.frame.unconfirmed.as_ref().unwrap()
+        ));
+    }
+}
+fn company_close_error() -> ResourceActorError {
+    use reverie_store::{StoreError, StoreFault, storage_identity::IdentityError};
+    let error = IdentityError::Finalization {
+        primary: Box::new(IdentityError::Io(std::io::Error::other("known body error"))),
+        secondary: Box::new(IdentityError::Custody(StoreError::CloseUnconfirmed {
+            cause: Box::new(StoreError::Refused(StoreFault::PrivateFile)),
+        })),
+    };
+    GateError::from(error).into()
+}
+#[test]
+fn actual_q_record_known_stateless_io_remains_closeable_without_native_or_owner_grant() {
+    crate::test_process::owning_case!(
+        actual_q_record_known_stateless_io_remains_closeable_without_native_or_owner_grant
+    );
+    let fixture = Fixture::new();
+    let (mut client, connection) = fixture.accept(b'Q', b"{}");
+    let mut failure = fixture
+        .broker
+        .prepare_resource_website(connection)
+        .err()
+        .unwrap();
+    let cause = reverie_host::ObservationError::Io(std::io::Error::other("ordinary IO"));
+    let kernel = reverie_host::reservation_kernel::ReservationKernelError::from(cause);
+    let observed = crate::reservation_observer::ObserverError::from(kernel);
+    let body = failure
+        .frame
+        .retain_stateless_result::<()>(Err(observed.into()));
+    assert!(!body.unwrap_err().has_unconfirmed_close());
+    assert!(failure.frame.unconfirmed.is_none());
+    close(&mut failure, &mut client);
 }
 fn end() -> Instant {
     Instant::now() + Duration::from_secs(3)
