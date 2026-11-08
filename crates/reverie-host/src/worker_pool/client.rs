@@ -13,7 +13,7 @@ use serde::Serialize;
 use std::{
     ffi::OsString,
     fs::File,
-    io::{Read, Write},
+    io::Write,
     os::{
         fd::{AsRawFd, OwnedFd},
         unix::{fs::MetadataExt, net::UnixStream},
@@ -31,6 +31,9 @@ pub struct ControllerStatusData {
 }
 /// Owns actual origin/client and opened physical parent, not a JSON grant.
 pub struct ActivatedController {
+    owner: Option<Box<ControllerState>>,
+}
+struct ControllerState {
     binding: BrokerBootstrapBinding,
     publication: ControllerBirthPublication,
     policy: WorkerPoolPolicy,
@@ -66,7 +69,7 @@ impl BrokerBootstrapBinding {
     ) -> std::result::Result<ActivatedController, Box<ControllerActivationFailure>> {
         let policy = publication.birth_data().policy().clone();
         let query = runtime.installed_engine().readonly().capture_query_owner();
-        let mut owner = ActivatedController {
+        let mut owner = ControllerState {
             binding: self,
             publication,
             policy: policy.clone(),
@@ -89,12 +92,50 @@ impl BrokerBootstrapBinding {
             original_end: end.min(Instant::now() + Duration::from_secs(20)),
         };
         match owner.activate(runtime, host_reserve_mib) {
-            Ok(()) => Ok(owner),
-            Err(primary) => Err(Box::new(ControllerActivationFailure { owner, primary })),
+            Ok(()) => Ok(ActivatedController {
+                owner: Some(Box::new(owner)),
+            }),
+            Err(primary) => {
+                owner.close_unknown |= primary.close_unknown();
+                Err(Box::new(ControllerActivationFailure {
+                    owner: ActivatedController {
+                        owner: Some(Box::new(owner)),
+                    },
+                    primary,
+                }))
+            }
         }
     }
 }
 impl ActivatedController {
+    fn state(&self) -> &ControllerState {
+        self.owner.as_ref().expect("original controller state")
+    }
+    fn state_mut(&mut self) -> &mut ControllerState {
+        self.owner.as_mut().expect("original controller state")
+    }
+    pub fn policy_data(&self) -> &WorkerPoolPolicy {
+        self.state().policy_data()
+    }
+    pub fn status_data(&self) -> ControllerStatusData {
+        self.state().status_data()
+    }
+    pub fn assert_current(&mut self, runtime: &WorkerRuntime, end: Instant) -> Result<()> {
+        self.state_mut().assert_current(runtime, end)
+    }
+    pub fn close_components(&mut self, end: Instant) -> Result<()> {
+        self.state_mut().close_components(end)
+    }
+    pub(crate) fn configure_target(
+        &mut self,
+        runtime: &WorkerRuntime,
+        target: &crate::worker_laptop::CreatedPoolTarget<'_>,
+        end: Instant,
+    ) -> Result<member::MemberObservation> {
+        self.state_mut().configure_target(runtime, target, end)
+    }
+}
+impl ControllerState {
     pub fn policy_data(&self) -> &WorkerPoolPolicy {
         &self.policy
     }
@@ -225,20 +266,58 @@ impl ActivatedController {
     ) -> Result<()> {
         let path = std::path::Path::new(&self.policy.instance_root)
             .join("worker-pool/control/controller.sock");
+        let address = nix::sys::socket::UnixAddr::new(&path).map_err(std::io::Error::from)?;
         loop {
             need(
                 Instant::now() < end,
                 "WORKER_POOL_CONTROLLER_CONNECT_DEADLINE",
             )?;
-            match UnixStream::connect(&path) {
-                Ok(stream) => {
-                    self.client = Some(stream);
+            let fd = nix::sys::socket::socket(
+                nix::sys::socket::AddressFamily::Unix,
+                nix::sys::socket::SockType::Stream,
+                nix::sys::socket::SockFlag::SOCK_NONBLOCK
+                    | nix::sys::socket::SockFlag::SOCK_CLOEXEC,
+                None,
+            )
+            .map_err(std::io::Error::from)?;
+            self.client = Some(UnixStream::from(fd));
+            let socket = self.client.as_ref().expect("stored before connect");
+            match nix::sys::socket::connect(socket.as_raw_fd(), &address) {
+                Ok(()) => break,
+                Err(nix::errno::Errno::EINPROGRESS) => {
+                    use std::os::fd::AsFd;
+                    loop {
+                        need(
+                            Instant::now() < end,
+                            "WORKER_POOL_CONTROLLER_CONNECT_DEADLINE",
+                        )?;
+                        let mut ready = [nix::poll::PollFd::new(
+                            socket.as_fd(),
+                            nix::poll::PollFlags::POLLOUT,
+                        )];
+                        if nix::poll::poll(&mut ready, 10u16).map_err(std::io::Error::from)? > 0 {
+                            let error = nix::sys::socket::getsockopt(
+                                socket,
+                                nix::sys::socket::sockopt::SocketError,
+                            )
+                            .map_err(std::io::Error::from)?;
+                            if error != 0 {
+                                return Err(std::io::Error::from_raw_os_error(error).into());
+                            }
+                            break;
+                        }
+                    }
                     break;
                 }
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                    std::thread::sleep(Duration::from_millis(10))
+                Err(nix::errno::Errno::ENOENT) => {
+                    let socket = self.client.take().expect("original failed connect");
+                    if let Err(error) = native::close(File::from(OwnedFd::from(socket))) {
+                        self.close_unknown = true;
+                        return Err(PoolError::MetadataClose(Box::new(error.into())));
+                    }
+                    std::thread::sleep(Duration::from_millis(10));
                 }
-                Err(error) => return Err(error.into()),
+                Err(error) => return Err(std::io::Error::from(error).into()),
             }
         }
         let metadata = std::fs::symlink_metadata(&path)?;
@@ -476,8 +555,11 @@ impl ControllerActivationFailure {
 }
 impl Drop for ActivatedController {
     fn drop(&mut self) {
-        std::mem::forget(self.client.take());
-        std::mem::forget(self.pidfd.take());
+        // The whole original attempt includes daemon facts, query/call owners,
+        // bootstrap and publication, not just its currently open descriptors.
+        if let Some(owner) = self.owner.take() {
+            std::mem::forget(owner);
+        }
     }
 }
 fn hex(value: [u8; 32]) -> String {

@@ -1,5 +1,5 @@
 use super::*;
-impl ActivatedController {
+impl ControllerState {
     pub(super) fn exchange(
         &mut self,
         command: serde_json::Value,

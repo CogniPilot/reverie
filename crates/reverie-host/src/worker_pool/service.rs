@@ -37,7 +37,13 @@ impl State {
 }
 impl Drop for State {
     fn drop(&mut self) {
-        std::mem::forget(self.directory.take());
+        std::mem::forget((
+            self.directory.take(),
+            std::mem::take(&mut self.anchor),
+            self.member_failure.take(),
+            std::mem::take(&mut self.member_attempted),
+            self.primary.take(),
+        ));
     }
 }
 /// Constructed only by consuming an actually authenticated original broker

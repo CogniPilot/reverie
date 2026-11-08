@@ -7,7 +7,7 @@ pub(crate) struct MemberObservation {
     pub(crate) high: u64,
     pub(crate) group: String,
 }
-impl ActivatedController {
+impl ControllerState {
     pub(crate) fn configure_target(
         &mut self,
         runtime: &WorkerRuntime,
