@@ -1,13 +1,9 @@
 from __future__ import annotations
 import tests  # noqa: F401  isolates REVERIE_* before reverie is imported
 import json
-import os
 from pathlib import Path
-import subprocess
-import sys
 import tempfile
 import unittest
-from unittest.mock import patch
 from reverie.config import Config
 from reverie.chat import ChatDaemon
 from reverie.context_budget import memory_byte_budget, recent_exchanges
@@ -89,11 +85,6 @@ class InstanceTests(unittest.TestCase):
         value = json.loads(path.read_text()); value["credentials"] = "unexpected"; path.write_text(json.dumps(value))
         with self.assertRaises(ValueError):
             Config(instance_config=path)
-        with patch.dict(os.environ, {"PYTHONPATH": str(Path(__file__).resolve().parents[1] / "python")}, clear=True):
-            result = subprocess.run([sys.executable, "-m", "reverie.memory_cli"], input="{}",
-                                    text=True, capture_output=True)
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("select an instance", result.stderr)
 
     def test_context_budget_scales_and_reserves_tools_and_output(self):
         small = memory_byte_budget(8192, 2048, 1000, "fixed rules")

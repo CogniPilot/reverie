@@ -1,0 +1,5 @@
+{"receipt_id": "old", "utc": "2026-10-01T00:00:00Z"}
+{"receipt_id": "edge", "utc": "2026-10-16T00:00:00Z"}
+{"receipt_id": "undated", "utc": "UNAVAILABLE"}
+{"receipt_id": "missing"}
+{"receipt_id": "recent", "utc": "2026-10-25T00:00:00Z"}
