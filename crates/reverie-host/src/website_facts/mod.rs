@@ -16,6 +16,7 @@ pub use input::{
     ImmutableInputKind, ImmutableInputObserver, ObservedBrokerProgram, ObservedImmutableInput,
     ObservedNativeClient,
 };
+pub use process::ProviderProcessObservation;
 #[cfg(test)]
 pub(crate) use process::tests::metadata as process_test_metadata;
 pub use process::{PeerInitSnapshot, PeerProcessSnapshot, ProcessSnapshot, WebsiteProcessObserver};

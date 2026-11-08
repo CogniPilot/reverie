@@ -131,6 +131,28 @@ impl ObservedRow<'_> {
     }
 }
 impl ObservationContext {
+    pub(crate) fn provider_process(
+        &self,
+        observer: &mut reverie_host::website_facts::WebsiteProcessObserver,
+        row: &ObservedRow<'_>,
+        end: Instant,
+    ) -> std::result::Result<
+        reverie_host::website_facts::ProviderProcessObservation,
+        reverie_host::website_facts::WebsiteFactsError,
+    > {
+        let convert =
+            |e: ObserverError| reverie_host::website_facts::WebsiteFactsError::Refused(e.code());
+        let end = self.deadline(Some(end)).map_err(convert)?;
+        let result = self.observer.source.provider_process(
+            self.metadata.as_deref(),
+            observer,
+            self.checked_row(row).map_err(convert)?,
+            end,
+            &self.observer.cancellation,
+        )?;
+        self.check(end).map_err(convert)?;
+        Ok(result)
+    }
     /// Exact calls owned by THIS observation context only. Whole Runtime
     /// shutdown retains its separate global settlement operation.
     pub(crate) fn settle_metadata_owned(&self, end: Instant) -> Result<()> {

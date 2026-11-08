@@ -10,7 +10,7 @@ use std::{
 fn path(pid: &UnsignedInteger, leaf: &str) -> String {
     format!("/proc/{}/{leaf}", pid.as_str())
 }
-fn bytes(
+pub(super) fn bytes(
     files: &mut Descriptors,
     pid: &UnsignedInteger,
     leaf: &str,
@@ -31,7 +31,7 @@ fn bytes(
     check(end)?;
     Ok(raw)
 }
-fn identity(
+pub(super) fn identity(
     files: &mut Descriptors,
     pid: &UnsignedInteger,
     leaf: &str,

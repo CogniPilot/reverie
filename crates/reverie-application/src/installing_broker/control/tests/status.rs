@@ -17,11 +17,7 @@ fn reply(client: &mut UnixStream) -> Response {
 fn observe(request: &[u8], names: &str) -> Observation {
     observe_company(request, names, None)
 }
-fn observe_company(
-    request: &[u8],
-    names: &str,
-    company: Option<serde_json::Value>,
-) -> Observation {
+fn observe_company(request: &[u8], names: &str, company: Option<serde_json::Value>) -> Observation {
     let (root, broker) = recovered::tests::Tree::bootstrap_parts("", "admission", 512, 4096);
     std::fs::write(root.join("names.out"), names).unwrap();
     if let Some(company) = company {

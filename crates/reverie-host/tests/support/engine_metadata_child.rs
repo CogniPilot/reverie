@@ -108,7 +108,7 @@ fn main() {
                     std::thread::sleep(Duration::from_millis(2));
                 }
             }
-            let name=match args.first().map(String::as_str){Some("ps")=>"ps.out",Some("inspect")=>"inspect.out",Some("exec") if args.ends_with(&["display-message", "-p", "-t", "office", "#{pane_dead}"].map(str::to_owned)) => "pane.out",_=>std::process::exit(81)};
+            let name=match args.first().map(String::as_str){Some("ps")=>"ps.out",Some("inspect")=>"inspect.out",Some("top") if args.len()==4&&args[2..]==["-eo","pid,ppid"]=>"provider-top.out",Some("exec") if args.ends_with(&["display-message", "-p", "-t", "office", "#{pane_dead}|#{pane_pid}"].map(str::to_owned)) => "provider-pane.out",Some("exec") if args.ends_with(&["display-message", "-p", "-t", "office", "#{pane_dead}"].map(str::to_owned)) => "pane.out",_=>std::process::exit(81)};
             let raw=fs::read(name).unwrap();
             if mode=="cold-admission" && name=="inspect.out" && std::path::Path::new("inspect.next").exists() {fs::rename("inspect.next","inspect.out").unwrap();}
             io::stdout().write_all(&raw).unwrap();

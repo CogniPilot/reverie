@@ -49,10 +49,38 @@ pub enum EngineQuery<'a> {
     TelemetryInventory,
     TelemetryInspect(&'a reverie_core::command_telemetry::TelemetryContainerId),
     WorkerPoolInspect(&'a ContainerId),
+    ProviderPane(&'a ContainerId),
+    ProviderTop(&'a ContainerId),
 }
 impl EngineQuery<'_> {
     fn arguments(self) -> Result<Vec<OsString>> {
         let (format, ids) = match self {
+            Self::ProviderPane(id) => {
+                return Ok([
+                    "exec",
+                    "--env",
+                    "LANG=C.UTF-8",
+                    "--env",
+                    "LC_ALL=C.UTF-8",
+                    id.as_str(),
+                    "/bin/tmux",
+                    "-u",
+                    "-L",
+                    "reverie-laptop",
+                    "display-message",
+                    "-p",
+                    "-t",
+                    "office",
+                    "#{pane_dead}|#{pane_pid}",
+                ]
+                .map(Into::into)
+                .to_vec());
+            }
+            Self::ProviderTop(id) => {
+                return Ok(["top", id.as_str(), "-eo", "pid,ppid"]
+                    .map(Into::into)
+                    .to_vec());
+            }
             Self::InventoryIds => return Ok(["ps", "-aq", "--no-trunc"].map(Into::into).to_vec()),
             Self::TelemetryInventory => {
                 return Ok([

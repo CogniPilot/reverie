@@ -3,6 +3,21 @@ use reverie_contracts::kernel_mounts::MountTable;
 use reverie_core::{decimal::UnsignedInteger, ids::ProfileSessionId};
 use reverie_host::reservation_kernel::{CustodyPaths, ReservationKernel};
 pub(super) trait Source: Send + Sync {
+    fn provider_process(
+        &self,
+        _owner: Option<&reverie_host::engine_metadata::MetadataQueryOwner>,
+        _observer: &mut reverie_host::website_facts::WebsiteProcessObserver,
+        _row: &ContainerRow,
+        _end: Instant,
+        _cancellation: &CancellationToken,
+    ) -> std::result::Result<
+        reverie_host::website_facts::ProviderProcessObservation,
+        reverie_host::website_facts::WebsiteFactsError,
+    > {
+        Err(reverie_host::website_facts::WebsiteFactsError::Refused(
+            "PROVIDER_NATIVE_SOURCE_REQUIRED",
+        ))
+    }
     fn capture_metadata_owner(&self) -> Option<reverie_host::engine_metadata::MetadataQueryOwner>;
     fn settle_metadata_owner(
         &self,
@@ -125,6 +140,22 @@ impl Installed {
     }
 }
 impl Source for Installed {
+    fn provider_process(
+        &self,
+        owner: Option<&reverie_host::engine_metadata::MetadataQueryOwner>,
+        observer: &mut reverie_host::website_facts::WebsiteProcessObserver,
+        row: &ContainerRow,
+        end: Instant,
+        cancellation: &CancellationToken,
+    ) -> std::result::Result<
+        reverie_host::website_facts::ProviderProcessObservation,
+        reverie_host::website_facts::WebsiteFactsError,
+    > {
+        let owner = owner.ok_or(reverie_host::website_facts::WebsiteFactsError::Refused(
+            "RESERVATION_METADATA_OWNER_REQUIRED",
+        ))?;
+        observer.observe_provider(&self.engine, owner, row, end, cancellation)
+    }
     fn capture_metadata_owner(&self) -> Option<reverie_host::engine_metadata::MetadataQueryOwner> {
         Some(self.engine.capture_query_owner())
     }

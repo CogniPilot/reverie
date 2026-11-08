@@ -83,7 +83,7 @@ fn actual_self_snapshot_matches_kernel_executable_namespaces_and_raw_cmdline_has
         format!("{:x}", Sha256::digest(argv))
     );
 }
-fn finish(child: &mut Child) -> TestResult<std::process::ExitStatus> {
+pub(super) fn finish(child: &mut Child) -> TestResult<std::process::ExitStatus> {
     let input = child
         .stdin
         .take()
@@ -115,7 +115,7 @@ fn reap(child: &mut Child) -> TestResult<std::process::ExitStatus> {
         std::thread::sleep(Duration::from_millis(2));
     }
 }
-fn child(ready: bool) -> Child {
+pub(super) fn child(ready: bool) -> Child {
     Command::new(std::env::current_exe().unwrap())
         .args([
             "--ignored",
@@ -132,7 +132,7 @@ fn child(ready: bool) -> Child {
         .spawn()
         .unwrap()
 }
-fn await_ready(output: &OwnedFd, deadline: Instant) -> TestResult<()> {
+pub(super) fn await_ready(output: &OwnedFd, deadline: Instant) -> TestResult<()> {
     process::nonblocking(output).map_err(|error| error.to_string())?;
     let mut raw = Vec::new();
     loop {

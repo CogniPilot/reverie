@@ -1,7 +1,9 @@
 //! Read-only process snapshots, never website, program or owner authority.
 mod ancestry;
+mod provider;
 mod read;
 pub use ancestry::PeerInitSnapshot;
+pub use provider::ProviderProcessObservation;
 #[cfg(test)]
 pub(crate) mod tests;
 use super::{

@@ -9,8 +9,8 @@ mod tests;
 use crate::StoreError;
 pub use metadata::{DEFAULT_METADATA_LIMIT, canonical, read_metadata, read_ordered_metadata};
 pub use resolver::{
-    StorageIdentityConfig, StorageKind, StoragePaths, company_records, current_employee,
-    read_company_metadata, storage_paths, storage_start_allowed,
+    ProviderRuntimeObservation, StorageIdentityConfig, StorageKind, StoragePaths, company_records,
+    current_employee, read_company_metadata, storage_paths, storage_start_allowed,
 };
 use reverie_contracts::storage_identity::IdentityDataError;
 use std::{fmt, io};

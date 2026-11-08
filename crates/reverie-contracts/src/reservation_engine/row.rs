@@ -61,6 +61,17 @@ impl ContainerRow {
     pub fn running_header(&self) -> Result<()> {
         self.fields_for_limits().running_header()
     }
+    pub fn provider_running_header(&self) -> Result<()> {
+        self.running_header()?;
+        let state = self.state()?;
+        if ["Paused", "Restarting", "Dead"]
+            .iter()
+            .any(|name| !matches!(field(state, name), Some(Value(Node::Bool(false)))))
+        {
+            return Err(EngineDataError::State);
+        }
+        Ok(())
+    }
     pub fn memory_matches(&self, expected: &UnsignedInteger) -> Result<bool> {
         self.fields_for_limits().memory_matches(expected)
     }

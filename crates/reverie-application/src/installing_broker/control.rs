@@ -24,6 +24,8 @@ enum Cause {
     Native(SourceStopError),
     Report(reverie_host::worker_reports::WorkerReportError),
     Identity(Arc<reverie_store::storage_identity::IdentityError>),
+    Observation(Arc<crate::reservation_observer::ObserverError>),
+    Provider(Arc<reverie_host::website_facts::WebsiteFactsError>),
     Refused(&'static str),
 }
 impl fmt::Display for Cause {
@@ -34,6 +36,8 @@ impl fmt::Display for Cause {
             Self::Native(e) => e.fmt(out),
             Self::Report(e) => e.fmt(out),
             Self::Identity(e) => e.fmt(out),
+            Self::Observation(e) => e.fmt(out),
+            Self::Provider(e) => e.fmt(out),
             Self::Refused(e) => out.write_str(e),
         }
     }
@@ -75,6 +79,7 @@ struct Frame<'a> {
     completed: bool,
     finalization_failed: bool,
     identity_unknown: Option<Arc<reverie_store::storage_identity::IdentityError>>,
+    health: Option<query::HealthReaders>,
 }
 pub(in crate::installing_broker) struct ControlFailure<'a> {
     owner: Option<Box<Frame<'a>>>,
@@ -109,6 +114,7 @@ impl InstallingBroker {
             completed: false,
             finalization_failed: false,
             identity_unknown: None,
+            health: None,
         });
         match owner.run() {
             Ok(()) => Ok(()),
@@ -304,6 +310,7 @@ impl Frame<'_> {
     }
     fn close_transport(&mut self) -> Result<(), Cause> {
         self.connection.close_socket_for_worker()?;
+        self.close_health_readers()?;
         if let Some(cause) = &self.identity_unknown {
             return Err(Cause::Identity(Arc::clone(cause)));
         }
@@ -386,6 +393,7 @@ impl Drop for Frame<'_> {
                 self.admission.take(),
                 self.hold.take(),
                 self.census.take(),
+                self.health.take(),
                 self.loose.take(),
                 std::mem::take(&mut self.originals),
                 std::mem::take(&mut self.seats),
