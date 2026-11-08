@@ -110,7 +110,7 @@ impl State {
         }
     }
     fn restore_pending(&mut self, path: &Path) -> Result<()> {
-        match OpenOptions::new()
+        let file = match OpenOptions::new()
             .write(true)
             .create_new(true)
             .mode(0o600)
@@ -126,7 +126,20 @@ impl State {
             }
             Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => Ok(()),
             Err(error) => Err(error.into()),
+        };
+        let parent = (|| {
+            let n = self.open_directory(&self.folder())?;
+            self.files[n].sync_all().map_err(WorkerServiceError::Io)
+        })();
+        let synced = finalized(file, parent);
+        let mut closed = Ok(());
+        while let Some(file) = self.files.pop() {
+            let next =
+                native::close(file).map_err(|e| WorkerServiceError::Io(std::io::Error::other(e)));
+            self.uncertain |= next.is_err();
+            closed = finalized(closed, next);
         }
+        finalized(synced, closed)
     }
     pub(super) fn install(&mut self, observed: ObservedUnit) -> Result<()> {
         observed.require_replaceable(self.previous.as_deref())?;
