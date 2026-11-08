@@ -10,10 +10,7 @@ use reverie_host::{
         StoppedServiceFailure, WorkerServiceError,
     },
 };
-use std::{
-    path::Path,
-    sync::{MutexGuard, atomic::Ordering},
-};
+use std::path::Path;
 mod error;
 mod finish;
 pub use error::{OfflineImageSwitchError, OfflineImageSwitchFailure};
@@ -25,12 +22,10 @@ struct Owner<'a> {
     closed_locks: Option<ClosedImageMaintenance>,
     gate: Option<ImageGateTransition<'a>>,
     closed_gate: Option<ImageGateClosed>,
-    controller: Option<MutexGuard<'a, Option<reverie_host::worker_pool::ActivatedController>>>,
+    broker_close: super::broker_close::UnstartedImageBroker<'a>,
     end: Instant,
     old_image: WorkerImageId,
     digest: JournalDigest,
-    broker_close_attempted: bool,
-    broker_close_errors: Vec<BrokerServiceError>,
 }
 #[derive(Debug)]
 pub struct OfflineImageSwitchClosed {
@@ -77,6 +72,7 @@ impl<'a> PreparedOfflineImageSwitch<'a> {
             .clone();
         let old_image = WorkerImageId::parse(qualification.before.envelope().base().image())
             .expect("validated exact source image");
+        let broker_close = super::broker_close::UnstartedImageBroker::new(qualification.broker);
         let mut owner = Box::new(Owner {
             qualification,
             service: Some(service),
@@ -85,12 +81,10 @@ impl<'a> PreparedOfflineImageSwitch<'a> {
             closed_locks: None,
             gate: None,
             closed_gate: None,
-            controller: None,
+            broker_close,
             end,
             old_image,
             digest,
-            broker_close_attempted: false,
-            broker_close_errors: Vec::new(),
         });
         let body = owner.run(expected_preview, operation);
         match body {
@@ -182,22 +176,7 @@ impl<'a> Owner<'a> {
             .observe(self.end)
             .map_err(OfflineImageSwitchError::qualification)?;
         let broker = self.broker();
-        let controller = broker
-            .controller
-            .try_lock()
-            .map_err(|_| OfflineImageSwitchError::refused("WORKER_CONTROLLER_SLOT_UNAVAILABLE"))?;
-        require(
-            controller.is_none(),
-            "WORKER_IMAGE_INSTALLED_CONTROLLER_REQUIRES_MAINTENANCE",
-        )?;
-        require(
-            broker
-                .service_start_claimed
-                .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
-                .is_ok(),
-            "WORKER_IMAGE_REQUIRES_UNSTARTED_BROKER",
-        )?;
-        self.controller = Some(controller);
+        self.broker_close.claim()?;
         self.locks = Some(
             ImageMaintenanceLocks::capture(
                 &source,

@@ -31,7 +31,7 @@ impl<'a> OfflineImageSwitchError<'a> {
             Cause::Finalized(..) => "WORKER_IMAGE_FINALIZATION_RETAINED",
         }
     }
-    pub(super) fn refused(v: &'static str) -> Self {
+    pub(in crate::installing_broker::worker_image) fn refused(v: &'static str) -> Self {
         Self {
             kind: Cause::Refused(v),
         }
@@ -41,7 +41,7 @@ impl<'a> OfflineImageSwitchError<'a> {
             kind: Cause::Qualification(v),
         }
     }
-    pub(super) fn gate(v: GateError) -> Self {
+    pub(in crate::installing_broker::worker_image) fn gate(v: GateError) -> Self {
         Self {
             kind: Cause::Gate(v),
         }
@@ -71,12 +71,12 @@ impl<'a> OfflineImageSwitchError<'a> {
             kind: Cause::Files(v),
         }
     }
-    pub(super) fn broker(v: Vec<BrokerServiceError>) -> Self {
+    pub(in crate::installing_broker::worker_image) fn broker(v: Vec<BrokerServiceError>) -> Self {
         Self {
             kind: Cause::Broker(v),
         }
     }
-    pub(super) fn finalized(a: Self, b: Self) -> Self {
+    pub(in crate::installing_broker::worker_image) fn finalized(a: Self, b: Self) -> Self {
         Self {
             kind: Cause::Finalized(Box::new(a), Box::new(b)),
         }

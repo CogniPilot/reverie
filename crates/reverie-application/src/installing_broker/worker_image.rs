@@ -9,6 +9,8 @@ use reverie_contracts::{
 use reverie_host::website_facts::{ImmutableInputKind, ImmutableInputObserver};
 use std::time::{Duration, Instant};
 mod apply;
+mod broker_close;
+pub use broker_close::{ClosedOfflineImageInspection, OfflineImageInspectionFailure};
 mod error;
 mod preflight;
 mod prepare;
