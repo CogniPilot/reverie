@@ -3,7 +3,7 @@
 use crate::rule::Facts;
 use std::{
     collections::BTreeSet,
-    fs,
+    fs, io,
     path::{Path, PathBuf},
 };
 
@@ -60,12 +60,43 @@ fn kib_field(text: &str, name: &str) -> Option<u64> {
     kib.checked_mul(1024)
 }
 
-/// The process start time (clock ticks since boot, field 22 of `stat`); with the pid it names one
-/// process, so a reused pid is told apart.
+/// What `/proc` says about a pid. Only `Gone` and a different `Started` prove a holder stale;
+/// anything the gate cannot read is `Unknown`, and the caller must not treat it as gone.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Process {
+    Gone,
+    /// The start time (clock ticks since boot, field 22 of `stat`); with the pid it names one
+    /// process, so a reused pid is told apart.
+    Started(u64),
+    Unknown(String),
+}
+
+pub fn process(proc: &Path, pid: u32) -> Process {
+    let path = proc.join(pid.to_string()).join("stat");
+    match fs::read_to_string(&path) {
+        // ENOENT: no such pid; ESRCH: it exited while being read.
+        Err(error)
+            if error.kind() == io::ErrorKind::NotFound
+                || error.raw_os_error() == Some(nix::libc::ESRCH) =>
+        {
+            Process::Gone
+        }
+        Err(error) => Process::Unknown(format!("{}: {error}", path.display())),
+        Ok(stat) => stat
+            .rfind(')')
+            .and_then(|end| stat[end + 1..].split_whitespace().nth(19)?.parse().ok())
+            .map_or_else(
+                || Process::Unknown(format!("{}: no start time", path.display())),
+                Process::Started,
+            ),
+    }
+}
+
 pub fn start_time(proc: &Path, pid: u32) -> Option<u64> {
-    let stat = fs::read_to_string(proc.join(pid.to_string()).join("stat")).ok()?;
-    let after_name = &stat[stat.rfind(')')? + 1..];
-    after_name.split_whitespace().nth(19)?.parse().ok()
+    match process(proc, pid) {
+        Process::Started(start) => Some(start),
+        Process::Gone | Process::Unknown(_) => None,
+    }
 }
 
 /// Summed `Pss_Anon` over the process and all its descendants, or None if any of them could not
@@ -181,6 +212,18 @@ mod tests {
         )
         .unwrap();
         assert_eq!(start_time(&roots.proc, 42), Some(22));
+    }
+
+    #[test]
+    fn only_a_missing_pid_is_gone_and_an_unparsable_stat_is_unknown() {
+        let (_dir, roots) = fake("100\n", "anon 1\nkernel 2\nsock 0\n");
+        assert_eq!(process(&roots.proc, 7), Process::Gone);
+        fs::create_dir_all(roots.proc.join("7")).unwrap();
+        fs::write(roots.proc.join("7/stat"), "7 (x) R 1").unwrap();
+        assert!(matches!(process(&roots.proc, 7), Process::Unknown(_)));
+        fs::remove_file(roots.proc.join("7/stat")).unwrap();
+        fs::create_dir(roots.proc.join("7/stat")).unwrap();
+        assert!(matches!(process(&roots.proc, 7), Process::Unknown(_)));
     }
 
     /// A temporary directory removed on drop, without a test-only dependency.

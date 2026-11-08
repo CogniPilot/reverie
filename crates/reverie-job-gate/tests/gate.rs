@@ -47,10 +47,14 @@ impl Seat {
     }
 
     fn job(&self, args: &[&str]) -> Output {
+        self.job_seeing(Path::new("/proc"), args)
+    }
+
+    fn job_seeing(&self, proc: &Path, args: &[&str]) -> Output {
         Command::new(env!("CARGO_BIN_EXE_reverie-job"))
             .args(args)
             .env("REVERIE_JOB_CGROUP_ROOT", self.root.join("cgroup"))
-            .env("REVERIE_JOB_PROC_ROOT", "/proc")
+            .env("REVERIE_JOB_PROC_ROOT", proc)
             .env("REVERIE_JOB_LEDGER", self.ledger())
             .output()
             .unwrap()
@@ -172,6 +176,95 @@ fn a_holder_whose_process_is_gone_or_reused_is_released() {
     let out = seat.job(&["run", "--estimate", "20m", "--wait-secs", "0", "--", "true"]);
     assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
     assert!(seat.holders().is_empty());
+}
+
+/// Runs a 20 MiB job on a 100 MiB seat (limit 90 MiB) next to a ledger entry the gate cannot
+/// classify: it must refuse without running the command and keep the entry.
+fn refuses_and_keeps(seat: &Seat, proc: &Path, name: &str) {
+    let marker = seat.root.join("ran");
+    let out = seat.job_seeing(
+        proc,
+        &[
+            "run",
+            "--estimate",
+            "20m",
+            "--wait-secs",
+            "0",
+            "--",
+            "touch",
+            marker.to_str().unwrap(),
+        ],
+    );
+    assert_eq!(out.status.code(), Some(75), "{}", stderr(&out));
+    assert!(
+        stderr(&out).contains("could not be checked"),
+        "{}",
+        stderr(&out)
+    );
+    assert!(stderr(&out).contains(name), "{}", stderr(&out));
+    assert!(!marker.exists(), "the command ran");
+    assert!(
+        seat.holders().contains(&name.to_string()),
+        "{:?}",
+        seat.holders()
+    );
+}
+
+#[test]
+fn an_unreadable_live_reservation_is_kept_and_refuses() {
+    use std::os::unix::fs::PermissionsExt;
+    let seat = Seat::new("unreadable-holder", &format!("{}\n", 100 * MIB), &stat(1));
+    let entry = Entry {
+        reservation: 80 * MIB,
+        ..me()
+    };
+    seat.hold(entry);
+    let name = format!("{}.json", entry.pid);
+    let file = seat.ledger().join(&name);
+    fs::set_permissions(&file, fs::Permissions::from_mode(0o000)).unwrap();
+    if fs::read(&file).is_ok() {
+        // Running with permission checks bypassed: nothing here can be unreadable.
+        return;
+    }
+    refuses_and_keeps(&seat, Path::new("/proc"), &name);
+    fs::set_permissions(&file, fs::Permissions::from_mode(0o600)).unwrap();
+}
+
+#[test]
+fn a_malformed_reservation_is_kept_and_refuses() {
+    let seat = Seat::new("malformed-holder", &format!("{}\n", 100 * MIB), &stat(1));
+    fs::write(
+        seat.ledger().join("4242.json"),
+        b"{\"pid\": 4242, \"start\"",
+    )
+    .unwrap();
+    refuses_and_keeps(&seat, Path::new("/proc"), "4242.json");
+}
+
+#[test]
+fn a_reservation_filed_under_another_pid_is_kept_and_refuses() {
+    let seat = Seat::new("misfiled-holder", &format!("{}\n", 100 * MIB), &stat(1));
+    let entry = me();
+    fs::write(
+        seat.ledger().join("4242.json"),
+        serde_json::to_vec(&entry).unwrap(),
+    )
+    .unwrap();
+    refuses_and_keeps(&seat, Path::new("/proc"), "4242.json");
+}
+
+#[test]
+fn a_holder_whose_process_state_is_unknown_is_kept_and_refuses() {
+    let seat = Seat::new("unknown-stat", &format!("{}\n", 100 * MIB), &stat(1));
+    let proc = seat.root.join("proc");
+    fs::create_dir_all(proc.join("4242")).unwrap();
+    fs::write(proc.join("4242/stat"), "4242 (cargo) S 1").unwrap();
+    seat.hold(Entry {
+        pid: 4242,
+        start: 99,
+        reservation: 80 * MIB,
+    });
+    refuses_and_keeps(&seat, &proc, "4242.json");
 }
 
 #[test]

@@ -1,7 +1,12 @@
 //! The reservation ledger: one file per admitted job in a per-seat directory, guarded by an
 //! exclusive flock on `lock` for every read-decide-write. A holder whose pid no longer names the
 //! same process (gone, or reused with another start time) is stale and is removed under the lock.
-use crate::facts::start_time;
+//! An entry the gate cannot read, parse or check against `/proc` is kept, and admission refuses
+//! until it can be classified: deleting it could free a live job's reservation.
+use crate::{
+    GateError,
+    facts::{Process, process},
+};
 use serde::{Deserialize, Serialize};
 use std::{
     fs::{self, File, OpenOptions},
@@ -50,20 +55,25 @@ impl Ledger {
         Ok(Locked { _lock: lock })
     }
 
-    /// Live entries, after removing stale ones. Call with the lock held.
-    pub fn live(&self, _held: &Locked, proc: &Path) -> io::Result<Vec<Entry>> {
+    /// Live entries, after removing stale ones; refuses on any entry it cannot classify. Call
+    /// with the lock held.
+    pub fn live(&self, _held: &Locked, proc: &Path) -> Result<Vec<Entry>, GateError> {
         let mut live = Vec::new();
         for item in fs::read_dir(&self.dir)? {
             let path = item?.path();
             if path.extension().is_none_or(|ext| ext != "json") {
                 continue;
             }
-            let entry = fs::read(&path)
-                .ok()
-                .and_then(|bytes| serde_json::from_slice::<Entry>(&bytes).ok());
-            match entry {
-                Some(entry) if start_time(proc, entry.pid) == Some(entry.start) => live.push(entry),
-                _ => fs::remove_file(&path)?,
+            match classify(&path, proc) {
+                Holder::Live(entry) => live.push(entry),
+                Holder::Stale => fs::remove_file(&path)?,
+                Holder::Removed => {}
+                Holder::Unknown(why) => {
+                    return Err(GateError::UnknownHolder(format!(
+                        "{}: {why}; remove it if no job holds it",
+                        path.display()
+                    )));
+                }
             }
         }
         live.sort_by_key(|entry| entry.pid);
@@ -81,6 +91,39 @@ impl Ledger {
         match fs::remove_file(self.dir.join(format!("{pid}.json"))) {
             Err(error) if error.kind() != io::ErrorKind::NotFound => Err(error),
             _ => Ok(()),
+        }
+    }
+}
+
+enum Holder {
+    Live(Entry),
+    /// Proven gone, or its pid reused by another process.
+    Stale,
+    /// Already removed by someone else.
+    Removed,
+    Unknown(String),
+}
+
+fn classify(path: &Path, proc: &Path) -> Holder {
+    let bytes = match fs::read(path) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Holder::Removed,
+        Err(error) => return Holder::Unknown(format!("unreadable ({error})")),
+    };
+    let entry: Entry = match serde_json::from_slice(&bytes) {
+        Ok(entry) => entry,
+        Err(error) => return Holder::Unknown(format!("not a reservation ({error})")),
+    };
+    // `remove` and `add` find an entry by its file name, so a mismatch is not ours to judge.
+    if path.file_stem().and_then(|stem| stem.to_str()) != Some(entry.pid.to_string().as_str()) {
+        return Holder::Unknown(format!("holds pid {} under another name", entry.pid));
+    }
+    match process(proc, entry.pid) {
+        Process::Gone => Holder::Stale,
+        Process::Started(start) if start == entry.start => Holder::Live(entry),
+        Process::Started(_) => Holder::Stale,
+        Process::Unknown(why) => {
+            Holder::Unknown(format!("pid {} not checkable ({why})", entry.pid))
         }
     }
 }

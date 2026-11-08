@@ -19,7 +19,7 @@ const NOT_RUN: u8 = 75;
 #[command(
     about = "Run a heavy command (build, test suite) only when this seat has memory room for it.",
     long_about = "Reserve the command's estimated memory in this seat's ledger, wait until every reservation and the seat's non-reclaimable usage fit under a fraction of its memory cap, run the command, and release the reservation when it exits. The gate never kills or limits anything; a command started without it is seen only through measured usage.",
-    after_long_help = "EXAMPLES:\n  reverie-job run --estimate 800m -- cargo test -p reverie-namegate\n  reverie-job status\n\nEXIT STATUS:\n  run: the command's own status, or 75 when the gate did not run it\n  (refused, timed out waiting, or memory facts unreadable). A command that itself\n  exits 75 looks the same. A command killed by a signal exits 128 + the signal\n  (137 for an OOM kill). A reservation the gate fails to release after the\n  command ran only warns: it lapses when the gate process exits.\n\nLEDGER:\n  REVERIE_JOB_LEDGER, else $XDG_RUNTIME_DIR/reverie-job, else\n  ~/.local/state/reverie-job, else a per-user directory under /tmp."
+    after_long_help = "EXAMPLES:\n  reverie-job run --estimate 800m -- cargo test -p reverie-namegate\n  reverie-job status\n\nEXIT STATUS:\n  run: the command's own status, or 75 when the gate did not run it\n  (refused, timed out waiting, memory facts unreadable, or a reservation in the\n  ledger that cannot be read or checked; that file is kept, and the error names it).\n  A command that itself exits 75 looks the same. A command killed by a signal exits 128 + the signal\n  (137 for an OOM kill). A reservation the gate fails to release after the\n  command ran only warns: it lapses when the gate process exits.\n\nLEDGER:\n  REVERIE_JOB_LEDGER, else $XDG_RUNTIME_DIR/reverie-job, else\n  ~/.local/state/reverie-job, else a per-user directory under /tmp."
 )]
 struct Arguments {
     #[command(subcommand)]
@@ -97,6 +97,9 @@ fn main() -> ExitCode {
 fn describe(error: GateError) -> String {
     match error {
         GateError::Unreadable(why) => format!("memory facts unreadable, refusing: {}", why.0),
+        GateError::UnknownHolder(why) => {
+            format!("reservation could not be checked, refusing: {why}")
+        }
         GateError::Io(error) => format!("ledger unavailable: {error}"),
     }
 }

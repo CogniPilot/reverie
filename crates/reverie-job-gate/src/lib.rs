@@ -28,6 +28,8 @@ pub struct Attempt {
 #[derive(Debug)]
 pub enum GateError {
     Unreadable(Unreadable),
+    /// A ledger entry that could not be read, parsed or checked against `/proc`; it is kept.
+    UnknownHolder(String),
     Io(io::Error),
 }
 
