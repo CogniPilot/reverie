@@ -99,7 +99,7 @@ pub(super) fn run(action: Action) -> Result<(), Box<dyn std::error::Error>> {
     let end = Instant::now() + Duration::from_secs(300);
     let broker = installing_owner(&selection.config)?;
     let qualified = broker.qualify_worker_image(base, annex, image, end)?;
-    let prepared = qualified.prepare_offline_switch()?;
+    let mut prepared = qualified.prepare_offline_switch()?;
     match request {
         Request::Preview => {
             let digest = prepared.preview_digest().as_str().to_owned();
