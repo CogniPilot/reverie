@@ -54,3 +54,11 @@ read-only outside that hierarchy; no company data is mounted. This fixture does
 not mint InstalledWorkerPool, Q authority or a production provider fence. Known
 CID cleanup may leave empty implicit runtime slice objects; those are recorded
 as residual metadata, not manually removed or described as complete removal.
+
+Controller policy open returns either the validated owner or an owned partial
+failure. The failure retains the same opened directory/file, captured controller
+and Engine owner, plus its primary cause; it closes nothing automatically on a
+constructor refusal. Checked metadata cleanup remains distinct from pool/outer
+operation completion. Consumed-close uncertainty is sticky even after other
+descriptors close, and default failure destruction retains its actual owner.
+Pool close terminally fences its installed stage before any fallible close.

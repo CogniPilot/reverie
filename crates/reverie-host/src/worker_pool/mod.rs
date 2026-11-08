@@ -8,7 +8,7 @@ mod policy;
 #[cfg(test)]
 mod tests;
 use directory::PoolDirectory;
-pub use policy::ControllerPoolPolicy;
+pub use policy::{ControllerPoolPolicy, ControllerPoolPolicyFailure};
 use reverie_contracts::worker_pool::WorkerPoolPolicy;
 use std::{fmt, io};
 
@@ -18,6 +18,7 @@ pub enum PoolError {
     Io(io::Error),
     Observation(crate::ObservationError),
     Finalization(Box<PoolError>, Box<PoolError>),
+    MetadataClose(Box<PoolError>),
 }
 impl fmt::Display for PoolError {
     fn fmt(&self, output: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -30,6 +31,7 @@ impl std::error::Error for PoolError {
             Self::Io(error) => Some(error),
             Self::Observation(error) => Some(error),
             Self::Finalization(primary, _) => Some(primary),
+            Self::MetadataClose(error) => Some(error),
             Self::Refused(_) => None,
         }
     }
@@ -41,6 +43,16 @@ impl PoolError {
             Self::Io(_) => "WORKER_POOL_IO_UNKNOWN",
             Self::Observation(_) => "WORKER_POOL_CLOSE_UNKNOWN",
             Self::Finalization(_, _) => "WORKER_POOL_FINALIZATION_UNKNOWN",
+            Self::MetadataClose(_) => "WORKER_POOL_CLOSE_UNKNOWN",
+        }
+    }
+    fn close_unknown(&self) -> bool {
+        match self {
+            Self::MetadataClose(_) => true,
+            Self::Finalization(primary, secondary) => {
+                primary.close_unknown() || secondary.close_unknown()
+            }
+            _ => false,
         }
     }
 }
@@ -61,10 +73,11 @@ fn need(value: bool, code: &'static str) -> Result<()> {
 fn finalized<T>(result: Result<T>, closed: Result<()>) -> Result<T> {
     match (result, closed) {
         (Ok(value), Ok(())) => Ok(value),
-        (Err(error), Ok(())) | (Ok(_), Err(error)) => Err(error),
+        (Err(error), Ok(())) => Err(error),
+        (Ok(_), Err(error)) => Err(PoolError::MetadataClose(Box::new(error))),
         (Err(primary), Err(secondary)) => Err(PoolError::Finalization(
             Box::new(primary),
-            Box::new(secondary),
+            Box::new(PoolError::MetadataClose(Box::new(secondary))),
         )),
     }
 }
@@ -76,6 +89,8 @@ enum InstallationStage {
     Attempted,
     Confirmed,
     Refused,
+    Closing,
+    Closed,
 }
 
 /// Owns the actual controller policy and kernel directory before the first
@@ -167,8 +182,13 @@ impl OpenedWorkerPool {
     }
 
     pub fn close(&mut self) -> Result<()> {
+        // Terminal before any fallible close: neither stale installed borrows
+        // nor a previously Confirmed stage may perform forward observations.
+        self.stage = InstallationStage::Closing;
         let directory = self.directory.close();
-        finalized(directory, self.policy.close())
+        finalized(directory, self.policy.close())?;
+        self.stage = InstallationStage::Closed;
+        Ok(())
     }
 }
 

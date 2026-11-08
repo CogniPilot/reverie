@@ -25,6 +25,23 @@ pub(super) struct EngineObserver {
     opaque: AtomicBool,
 }
 impl EngineObserver {
+    #[cfg(test)]
+    pub(super) fn unconnected_test_owner() -> Self {
+        Self {
+            runtime: tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap(),
+            socket_identity: (0, 0),
+            opaque: AtomicBool::new(false),
+        }
+    }
+    pub(super) fn require_closed(&self) -> Result<()> {
+        need(
+            !self.opaque.load(Ordering::Acquire),
+            "WORKER_POOL_ENGINE_CLOSE_UNKNOWN",
+        )
+    }
     pub(super) fn capture() -> Result<Self> {
         let socket_identity = socket_identity()?;
         let runtime = tokio::runtime::Builder::new_current_thread()
@@ -126,7 +143,9 @@ impl EngineObserver {
             Ok(stream) => {
                 crate::native::close(File::from(OwnedFd::from(stream))).map_err(Into::into)
             }
-            Err(error) => Err(error.into()),
+            // Conversion consumed the only Tokio stream; its default Drop is
+            // not a checked native close receipt.
+            Err(error) => Err(PoolError::MetadataClose(Box::new(error.into()))),
         };
         finalized(result, closed)
     }
