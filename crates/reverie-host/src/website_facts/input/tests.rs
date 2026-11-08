@@ -1,6 +1,16 @@
 //! Explicit native fixture controls: immutable existing store inputs only.
 //! These never write the store, execute a program or fabricate root ownership.
 use super::*;
+#[test]
+fn worker_child_elf_header_checks_actual_machine_and_rejects_class_byte_order_and_version(){
+    let mut file=std::fs::File::open(std::env::current_exe().unwrap()).unwrap();
+    let mut header=[0;64];std::io::Read::read_exact(&mut file,&mut header).unwrap();
+    let machine=u16::from_le_bytes([header[18],header[19]]);
+    require_worker_child_header(&header,machine).unwrap();
+    assert!(require_worker_child_header(&header,if machine==62{183}else{62}).is_err());
+    for (index,value) in [(0,0),(4,1),(5,2),(6,0)]{let mut changed=header;changed[index]=value;assert!(require_worker_child_header(&changed,machine).is_err());}
+    assert!(require_worker_child_header(&header[..20],machine).is_err());
+}
 use reverie_core::PythonText;
 use serde_json::json;
 use sha2::{Digest, Sha256};
