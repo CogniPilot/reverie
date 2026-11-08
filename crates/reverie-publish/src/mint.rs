@@ -72,8 +72,9 @@ pub fn change_lines(diff: &str) -> Vec<&str> {
     out
 }
 
-/// Mints the merge of `main` into `head` with `subject`, checks it, and keeps it reachable under
-/// `refs/publish/mint/<commit>`. Refuses a conflicted merge (those are resolved and reviewed by
+/// Mints the merge of `main` into `head` with `subject`, checks it, and names it
+/// `refs/publish/mint/<commit>` in this run's private git directory, from which the packet's bundle
+/// is made; the commit's objects stay in the store. Refuses a conflicted merge (those are resolved and reviewed by
 /// hand), a criss-cross history, and a merge whose delta is not main's own change.
 pub fn mint(
     git: &Git,

@@ -1,6 +1,6 @@
 //! `reverie-publish`: reviewed publication from sealed packets. `check` runs every shared check
-//! against a packet and an object store, and writes only into that local store (the imported
-//! objects and refs, through a private bundle copy it removes). `mint-merge-main` makes and checks
+//! against a packet and an object store, and writes only the imported objects into that local store
+//! (through a private bundle copy it removes; refs stay in a private git directory). `mint-merge-main` makes and checks
 //! the merge of main into a PR head in a local store and writes a new sealed packet for review.
 use clap::{Parser, Subcommand};
 use reverie_namegate::{Kind, Lists};
@@ -138,12 +138,7 @@ fn check(o: &Check) -> Result<serde_json::Value, String> {
     if o.tree.len() < 8 || !tree.starts_with(&o.tree) {
         return Err("the head's tree is not the reviewed tree".into());
     }
-    let base = git.run([
-        "rev-parse",
-        "--verify",
-        "--end-of-options",
-        &format!("{}^{{commit}}", o.base),
-    ])?;
+    let base = git.store_revision(&o.base)?;
     let checked = commits::check_range(&git, &lists, name, &[&head, "--not", &base], &head)?;
     let text = packet.text()?;
     if let Some((title, body)) = &text {
