@@ -59,6 +59,11 @@ impl HeldProtectedWorkerLaunch {
     }
 }
 impl ProtectedLaunchPeerPin {
+    /// Exact original service identity only; no stream, descriptor or new
+    /// lifecycle authority is exposed by this metadata check.
+    pub fn assert_service(&self, expected: &Arc<WorkerReportService>) -> Result<()> {
+        self.source().assert_service(expected)
+    }
     #[cfg(test)]
     pub(in crate::worker_reports) fn test_descriptor(&self) -> Option<std::os::fd::RawFd> {
         use std::os::fd::AsRawFd;
