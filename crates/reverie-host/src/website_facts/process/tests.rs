@@ -15,7 +15,7 @@ use std::{
 fn end() -> Instant {
     Instant::now() + Duration::from_secs(5)
 }
-fn metadata(pid: u32) -> QualifiedWebsiteMetadata {
+pub(crate) fn metadata(pid: u32) -> QualifiedWebsiteMetadata {
     let config = json!({"User":"1000:100","Env":[]});
     let host = json!({"OomKillDisable":false,"ReadonlyRootfs":true,"Privileged":false,
         "CapDrop":["ALL"],"CapAdd":null,"PidMode":"private","SecurityOpt":["no-new-privileges"]});
