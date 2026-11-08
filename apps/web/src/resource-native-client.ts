@@ -14,15 +14,22 @@ import type {PlanMoveRecord} from './plan-move.js';
 import {ResourceWorkerLaunch} from './resource-worker-launch.js';
 import {ResourceSessionReadiness} from './resource-readiness.js';
 import {ResourceOwnerAuthority, assertResourceOperation, type ResourceApproval,
-  type ResourceOwnerBinding, type ResourceOwnerContext, type ResourcePreviewContext} from './resource-owner-authority.js';
+  type ResourceOwnerBinding, type ResourceOwnerContext, type ResourcePreviewContext,
+  type AnyResourceContext, type RamResourceOwnerContext, type RamResourcePreviewContext} from './resource-owner-authority.js';
 
 const MAX_FRAME = 64 * 1024;
 const UUID = z.string().uuid().refine(value => value.toLowerCase() === value);
 const Approval = z.object({employeeId: UUID, draftId: UUID, operationId: UUID, reservationId: UUID,
   targetSid: UUID, profileVersion: z.string().regex(/^[1-9][0-9]{0,15}$/),
   profileDigest: z.string().regex(/^[a-f0-9]{64}$/), previewDigest: z.string().regex(/^[a-f0-9]{64}$/)}).strict();
+const RamApproval = Approval.extend({ramPolicyDigest: z.string().regex(/^[a-f0-9]{64}$/),
+  profileVersion: z.string().regex(/^[1-9][0-9]{0,19}$/).refine(value => BigInt(value) <= 18446744073709551615n)}).strict();
 const Check = z.object({kind: z.literal('resource-owner-check'), requestId: UUID, nonce: UUID,
   stage: z.enum(['preview', 'apply']), employeeId: UUID, approval: Approval.nullable()}).strict();
+const RamCheck = Check.extend({approval: RamApproval.nullable()}).strict();
+const RamDraft = z.object({employeeId: UUID, idempotencyKey: UUID,
+  memoryMiB: z.number().int().min(512).max(1_048_576)}).strict();
+const RamClaim = z.object({approval: RamApproval}).strict();
 const Reply = z.object({kind: z.literal('resource-result'), requestId: UUID,
   value: z.unknown()}).strict();
 const Refusal = z.object({kind: z.literal('resource-refused'), requestId: UUID,
@@ -83,8 +90,8 @@ function canonical(value: unknown): string {
   return JSON.stringify(value).replace(/[\u007f-\uffff]/g, character =>
     '\\u' + character.charCodeAt(0).toString(16).padStart(4, '0'));
 }
-function encode(value: unknown): Buffer {
-  const raw = Buffer.from(canonical(value)); need(raw.length > 0 && raw.length <= MAX_FRAME);
+function encode(value: unknown, maximum: number): Buffer {
+  const raw = Buffer.from(canonical(value)); need(raw.length > 0 && raw.length <= maximum);
   const header = Buffer.alloc(4); header.writeUInt32BE(raw.length); return Buffer.concat([header, raw]);
 }
 
@@ -148,14 +155,15 @@ interface Pending {
 export class ResourceNativeClient {
   readonly #socket: Socket;
   readonly #authority: ResourceOwnerAuthority;
-  readonly #context: ResourceOwnerContext | ResourcePreviewContext;
+  readonly #context: AnyResourceContext;
   readonly #untrack: () => void;
   #buffer = Buffer.alloc(0);
   #ready = false;
   #closed = false;
   #pending?: Pending;
+  #frames = 0;
   constructor(token: symbol, socket: Socket, authority: ResourceOwnerAuthority,
-    context: ResourceOwnerContext | ResourcePreviewContext) {
+    context: AnyResourceContext) {
     need(token === MINT && socket instanceof Socket && authority instanceof ResourceOwnerAuthority);
     authority.assertContext(context);
     this.#socket = socket; this.#authority = authority; this.#context = context;
@@ -165,6 +173,16 @@ export class ResourceNativeClient {
   }
   static async open(path: string, authority: ResourceOwnerAuthority,
     context: ResourceOwnerContext | ResourcePreviewContext): Promise<ResourceNativeClient> {
+    need(context.purpose === 'resource-replacement-v1');
+    return this.#open(path, authority, context);
+  }
+  static async openRam(path: string, authority: ResourceOwnerAuthority,
+    context: RamResourceOwnerContext | RamResourcePreviewContext): Promise<ResourceNativeClient> {
+    need(context.purpose === 'resource-ram-pool-v2');
+    return this.#open(path, authority, context);
+  }
+  static async #open(path: string, authority: ResourceOwnerAuthority,
+    context: AnyResourceContext): Promise<ResourceNativeClient> {
     authority.assertContext(context);
     need(isAbsolute(path) && normalize(path) === path && !/[\0\r\n]/.test(path) && process.getuid);
     const before = await lstat(path, {bigint: true});
@@ -181,7 +199,8 @@ export class ResourceNativeClient {
       need(before.dev === after.dev && before.ino === after.ino && before.mode === after.mode && before.uid === after.uid);
       authority.assertContext(context);
       // First-frame purpose has no owner/session values or generic operation.
-      const raw = Buffer.from('{"purpose":"resource-replacement-v1","version":1}');
+      const raw = Buffer.from(JSON.stringify({purpose: context.purpose,
+        version: context.purpose === 'resource-ram-pool-v2' ? 2 : 1}));
       const header = Buffer.alloc(5); header[0] = 'Q'.charCodeAt(0); header.writeUInt32BE(raw.length, 1);
       socket.write(Buffer.concat([header, raw])); return client;
     } catch (error) {client.close(); throw error;}
@@ -194,10 +213,12 @@ export class ResourceNativeClient {
   }
   #write(value: unknown): void {
     need(!this.#closed && !this.#socket.destroyed); this.#authority.assertContext(this.#context);
-    this.#socket.write(encode(value));
+    this.#countFrame(); this.#socket.write(encode(value, this.#maximumFrame()));
   }
+  #maximumFrame(): number {return this.#context.purpose === 'resource-ram-pool-v2' ? 8192 : MAX_FRAME;}
+  #countFrame(): void {if (this.#context.purpose === 'resource-ram-pool-v2') need(++this.#frames <= 2048);}
   #data(chunk: Buffer): void {
-    need(!this.#closed && chunk.length + this.#buffer.length <= MAX_FRAME + 10);
+    need(!this.#closed && chunk.length + this.#buffer.length <= this.#maximumFrame() + 10);
     this.#buffer = Buffer.concat([this.#buffer, chunk]);
     if (!this.#ready) {
       const greeting = Buffer.from('RESOURCE_READY\n');
@@ -208,12 +229,12 @@ export class ResourceNativeClient {
       if (this.#pending) this.#flushRequest();
     }
     while (this.#buffer.length >= 4) {
-      const size = this.#buffer.readUInt32BE(0); need(size > 0 && size <= MAX_FRAME);
+      const size = this.#buffer.readUInt32BE(0); need(size > 0 && size <= this.#maximumFrame());
       if (this.#buffer.length < size + 4) return;
       const raw = this.#buffer.subarray(4, size + 4); this.#buffer = this.#buffer.subarray(size + 4);
       const text = new TextDecoder('utf-8', {fatal: true}).decode(raw), value: unknown = JSON.parse(text);
       // Reject duplicate-key/noncanonical frames before interpreting any proof.
-      need(canonical(value) === text); this.#message(value);
+      need(canonical(value) === text); this.#countFrame(); this.#message(value);
     }
   }
   #request?: Readonly<Record<string, unknown>>;
@@ -221,8 +242,9 @@ export class ResourceNativeClient {
   #message(value: unknown): void {
     const pending = this.#pending; need(pending && performance.now() < pending.deadline && !pending.resultSeen);
     this.#authority.assertContext(this.#context);
-    if (Check.safeParse(value).success) {
-      const check = Check.parse(value); need(check.requestId === pending.id && !pending.challenges.has(check.nonce) &&
+    const checkSchema = this.#context.purpose === 'resource-ram-pool-v2' ? RamCheck : Check;
+    if (checkSchema.safeParse(value).success) {
+      const check = checkSchema.parse(value); need(check.requestId === pending.id && !pending.challenges.has(check.nonce) &&
         pending.challenges.size < 256 && check.stage === this.#context.stage);
       pending.challenges.add(check.nonce);
       const approval: Readonly<ResourceApproval> | null = this.#context.stage === 'apply' ? this.#context.approval : null;
@@ -232,6 +254,7 @@ export class ResourceNativeClient {
         purpose: this.#context.purpose, stage: this.#context.stage, owner: this.#context.owner ?? null,
         ownerScopeDigest: this.#context.ownerScopeDigest, expiresAtEpochMs: this.#context.expiresAtEpochMs, approval});
     } else if (Readiness.safeParse(value).success) {
+      need(this.#context.purpose === 'resource-replacement-v1');
       const check = Readiness.parse(value);
       need(check.requestId === pending.id && pending.readiness && this.#context.stage === 'apply' &&
         check.operationId === this.#context.approval.operationId &&
@@ -244,6 +267,7 @@ export class ResourceNativeClient {
           stage: check.stage, proof});
       }).catch(error => this.close(error as Error));
     } else if (Command.safeParse(value).success) {
+      need(this.#context.purpose === 'resource-replacement-v1');
       const command = Command.parse(value);
       need(command.requestId === pending.id && pending.launch && !pending.challenges.has(command.nonce) &&
         pending.challenges.size < 256);
@@ -252,6 +276,7 @@ export class ResourceNativeClient {
       this.#write({kind: 'resource-command-current', requestId: pending.id,
         nonce: command.nonce, commandDigest: command.commandDigest});
     } else if (Launch.safeParse(value).success) {
+      need(this.#context.purpose === 'resource-replacement-v1');
       const launch = Launch.parse(value); need(launch.requestId === pending.id && pending.launch);
       pending.launch.begin(launch.reference);
     } else if (Refusal.safeParse(value).success) {
@@ -271,7 +296,7 @@ export class ResourceNativeClient {
   }
   /** Closed native verbs only; caller references remain non-authorizing. */
   async historicalCompletion(record: Readonly<PlanMoveRecord>): Promise<ResourceHistoricalSettlement> {
-    need(registered.has(this) && this.#context.stage === 'preview' &&
+    need(registered.has(this) && this.#context.purpose === 'resource-replacement-v1' && this.#context.stage === 'preview' &&
       this.#context.employeeId === record.employeeId && this.#context.owner === record.owner);
     const facts = Completion.parse(await this.request('completion', {employeeId: record.employeeId, operationId: record.id}));
     this.#authority.assertContext(this.#context);
@@ -284,6 +309,19 @@ export class ResourceNativeClient {
     readiness?: ResourceSessionReadiness): Promise<unknown> {
     need(registered.has(this) && !this.#closed && !this.#pending && !this.#request);
     this.#authority.assertContext(this.#context);
+    let selectedFields = fields;
+    if (this.#context.purpose === 'resource-ram-pool-v2') {
+      need((verb === 'draft' || verb === 'claim') && launch === undefined && readiness === undefined);
+      if (verb === 'draft') {
+        const selected = RamDraft.parse(fields);
+        need(this.#context.stage === 'preview' && selected.employeeId === this.#context.employeeId);
+        selectedFields = Object.freeze(selected);
+      } else {
+        const selected = RamClaim.parse(fields);
+        need(this.#context.stage === 'apply' && isDeepStrictEqual(selected.approval, this.#context.approval));
+        selectedFields = Object.freeze({approval: Object.freeze(selected.approval)});
+      }
+    }
     need(['draft','claim','publication','prepare','source-stop','start','verify','finalize','completion'].includes(verb) &&
       this.#context.stage === (verb === 'draft' || verb === 'completion' ? 'preview' : 'apply') &&
       Object.keys(fields).every(key => !['kind', 'requestId', 'verb'].includes(key)) &&
@@ -296,7 +334,7 @@ export class ResourceNativeClient {
       this.#pending = {id, resolve, reject, timer, deadline: performance.now() + remaining,
         challenges: new Set(), resultSeen: false, ...(launch ? {launch} : {})};
       if (readiness) this.#pending = {...this.#pending, readiness};
-      this.#request = Object.freeze({kind: 'resource-operation', requestId: id, verb, ...fields});
+      this.#request = Object.freeze({kind: 'resource-operation', requestId: id, verb, ...selectedFields});
       try {if (this.#ready) this.#flushRequest();}
       catch (error) {this.close(error as Error);}
     });

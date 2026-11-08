@@ -9,22 +9,27 @@ import {randomUUID} from 'node:crypto';
 import {afterEach, beforeEach, expect, it} from 'vitest';
 import {OwnerAuthService} from '../src/owner-auth/service.js';
 import {OwnerAuthStore} from '../src/owner-auth/store.js';
-import {ResourceOwnerAuthority, type ResourceOwnerContext, type ResourcePreviewContext} from '../src/resource-owner-authority.js';
+import {ResourceOwnerAuthority, type ResourceOwnerContext, type ResourcePreviewContext,
+  type RamResourceOwnerContext, type RamResourcePreviewContext} from '../src/resource-owner-authority.js';
 import {ResourceNativeClient, ResourceHistoricalSettlement} from '../src/resource-native-client.js';
+import {RamResourceNativeClient} from '../src/resource-ram-native-client.js';
 import {PlanMoves, type PlanMoveRecord, type PlanMovePort} from '../src/plan-move.js';
 
 let directory: string, path: string, app: FastifyInstance, server: Server, auth: OwnerAuthService;
 let authority: ResourceOwnerAuthority, preview: ResourcePreviewContext, apply: ResourceOwnerContext;
-let token: string, peers: Set<Socket>, clients: ResourceNativeClient[];
+let token: string, peers: Set<Socket>, clients: {close(): void}[];
+let ramPreview: RamResourcePreviewContext, ramApply: RamResourceOwnerContext;
+let purpose: 'resource-replacement-v1' | 'resource-ram-pool-v2';
 const approval = {employeeId: randomUUID(), draftId: randomUUID(), operationId: randomUUID(), reservationId: randomUUID(),
   targetSid: randomUUID(), profileVersion: '1', profileDigest: 'a'.repeat(64), previewDigest: 'b'.repeat(64)};
+const ramApproval = {...approval, ramPolicyDigest: 'c'.repeat(64)};
 type Frame = Record<string, unknown>;
 let received: Frame[], behavior: (socket: Socket, frame: Frame) => void;
 const frame = (value: unknown) => {
   const raw = Buffer.from(JSON.stringify(value)), header = Buffer.alloc(4); header.writeUInt32BE(raw.length);
   return Buffer.concat([header, raw]);
 };
-function check(socket: Socket, operation: Frame, selected = approval) {
+function check(socket: Socket, operation: Frame, selected = purpose === 'resource-ram-pool-v2' ? ramApproval : approval) {
   socket.write(frame({kind: 'resource-owner-check', requestId: operation.requestId, nonce: randomUUID(),
     stage: ['draft','completion'].includes(String(operation.verb)) ? 'preview' : 'apply', employeeId: selected.employeeId,
     approval: ['draft','completion'].includes(String(operation.verb)) ? null : selected}));
@@ -36,10 +41,16 @@ beforeEach(async () => {
   token = await auth.setup('FixtureOwner', 'Quasar!fixture-8-passphrase', 'Quasar!fixture-8-passphrase', '127.0.0.1');
   authority = new ResourceOwnerAuthority(auth); app = Fastify(); await app.register(cookie);
   app.post('/capture', async request => {preview = authority.capturePreview(request, approval.employeeId);
-    apply = authority.capture(request, approval); return {};});
+    apply = authority.capture(request, approval);
+    ramPreview = authority.captureRamPreview(request, approval.employeeId);
+    ramApply = authority.captureRam(request, ramApproval); return {};});
+  app.post('/ram-approval', async (request, reply) => {
+    try {authority.captureRam(request, request.body as typeof ramApproval); return {};}
+    catch {return reply.code(403).send({error: 'refused'});}
+  });
   expect((await app.inject({method: 'POST', url: '/capture', headers: {host: 'localhost',
     origin: 'http://localhost', cookie: 'reverie_owner=' + token}})).statusCode).toBe(200);
-  peers = new Set(); clients = []; received = [];
+  peers = new Set(); clients = []; received = []; purpose = 'resource-replacement-v1';
   behavior = (socket, value) => {
     if (value.kind === 'resource-operation') check(socket, value);
     else socket.write(frame({kind: 'resource-result', requestId: value.requestId,
@@ -54,7 +65,8 @@ beforeEach(async () => {
         if (buffer.length < 5) return;
         const size = buffer.readUInt32BE(1); if (buffer.length < size + 5) return;
         expect(buffer[0]).toBe('Q'.charCodeAt(0));
-        expect(JSON.parse(buffer.subarray(5, size + 5).toString())).toEqual({purpose: 'resource-replacement-v1', version: 1});
+        expect(JSON.parse(buffer.subarray(5, size + 5).toString())).toEqual({purpose,
+          version: purpose === 'resource-ram-pool-v2' ? 2 : 1});
         buffer = buffer.subarray(size + 5); purpose = true; socket.write('RESOURCE_READY\n');
       }
       while (buffer.length >= 4) {
@@ -74,6 +86,79 @@ afterEach(async () => {
 async function open(context: ResourceOwnerContext | ResourcePreviewContext = preview) {
   const client = await ResourceNativeClient.open(path, authority, context); clients.push(client); return client;
 }
+async function openRam(context: RamResourceOwnerContext | RamResourcePreviewContext = ramPreview) {
+  purpose = 'resource-ram-pool-v2';
+  const client = await RamResourceNativeClient.open(path, authority, context); clients.push(client); return client;
+}
+
+it('RAM-v2 sends the explicit purpose and bounded soft-memory draft with the actual current owner', async () => {
+  const client = await openRam(), key = randomUUID();
+  await expect(client.draft(key, 4096)).resolves.toEqual({state: 'CONTROLLED_SOURCE_RESPONSE', capacityHeld: false});
+  expect(received[0]).toMatchObject({verb: 'draft', employeeId: approval.employeeId,
+    idempotencyKey: key, memoryMiB: 4096});
+  expect(received[1]).toMatchObject({purpose: 'resource-ram-pool-v2', approval: null,
+    ownerScopeDigest: ramPreview.ownerScopeDigest});
+  expect(JSON.stringify(received)).not.toContain(token);
+});
+it('RAM-v2 binds all nine Apply references and keeps legacy binding and contexts purpose-scoped', async () => {
+  const client = await openRam(ramApply); await client.claim();
+  expect(received[1].approval).toEqual(ramApproval);
+  expect(() => authority.bind(ramApply as never)).toThrow();
+  expect(() => authority.assertSameSession(ramApply, apply)).toThrow();
+  await expect(ResourceNativeClient.open(path, authority, ramPreview as never)).rejects.toThrow();
+  await expect(ResourceNativeClient.openRam(path, authority, preview as never)).rejects.toThrow();
+  await expect(RamResourceNativeClient.open(path, authority, {...ramPreview})).rejects.toThrow();
+});
+it('RAM-v2 requires its policy digest and refuses extra approval keys at real owner capture', async () => {
+  for (const payload of [approval, {...ramApproval, ramPolicyDigest: 'invalid'},
+    {...ramApproval, available: true}, {...ramApproval, profileVersion: '01'},
+    {...ramApproval, profileVersion: '18446744073709551616'}]) {
+    const response = await app.inject({method: 'POST', url: '/ram-approval', payload,
+      headers: {host: 'localhost', origin: 'http://localhost', cookie: 'reverie_owner=' + token}});
+    expect(response.statusCode).toBe(403);
+  }
+  const maximum = await app.inject({method: 'POST', url: '/ram-approval',
+    payload: {...ramApproval, profileVersion: '18446744073709551615'},
+    headers: {host: 'localhost', origin: 'http://localhost', cookie: 'reverie_owner=' + token}});
+  expect(maximum.statusCode).toBe(200);
+});
+it('RAM-v2 refuses legacy or changed policy challenges without returning an owner proof', async () => {
+  for (const changed of [approval, {...ramApproval, ramPolicyDigest: 'd'.repeat(64)}]) {
+    behavior = (socket, value) => {if (value.kind === 'resource-operation') check(socket, value, changed);};
+    const client = await openRam(ramApply);
+    await expect(client.claim()).rejects.toThrow();
+  }
+  expect(received).toHaveLength(2);
+  expect(received.every(row => row.kind === 'resource-operation')).toBe(true);
+});
+it('RAM-v2 rejects unknown verbs, mismatched selections and malformed drafts before writing', async () => {
+  purpose = 'resource-ram-pool-v2';
+  const client = await ResourceNativeClient.openRam(path, authority, ramPreview); clients.push(client);
+  for (const fields of [{employeeId: approval.employeeId, idempotencyKey: randomUUID()},
+    {employeeId: randomUUID(), idempotencyKey: randomUUID(), memoryMiB: 1024},
+    {employeeId: approval.employeeId, idempotencyKey: randomUUID(), memoryMiB: 511},
+    {employeeId: approval.employeeId, idempotencyKey: randomUUID(), memoryMiB: 1024, available: true}])
+    await expect(client.request('draft', fields)).rejects.toThrow();
+  await expect(client.request('completion', {employeeId: approval.employeeId, operationId: randomUUID()})).rejects.toThrow();
+  await expect(client.request('claim', {approval: ramApproval})).rejects.toThrow();
+  expect(received).toHaveLength(0);
+  const applyClient = await ResourceNativeClient.openRam(path, authority, ramApply); clients.push(applyClient);
+  await expect(applyClient.request('claim', {approval: {...ramApproval, ramPolicyDigest: 'd'.repeat(64)}})).rejects.toThrow();
+  await expect(applyClient.request('publication', {approval: ramApproval})).rejects.toThrow();
+  expect(received).toHaveLength(0);
+});
+it('RAM-v2 actual logout cancels its tracked socket before another proof', async () => {
+  behavior = (_socket, value) => {if (value.kind === 'resource-operation') auth.logout(token);};
+  const client = await openRam(ramApply); await expect(client.claim()).rejects.toThrow();
+  expect(received).toHaveLength(1);
+});
+it('RAM-v2 refuses an oversized incoming frame before accepting a result', async () => {
+  behavior = (socket, value) => {if (value.kind === 'resource-operation') {
+    const header = Buffer.alloc(4); header.writeUInt32BE(8193); socket.write(header);
+  }};
+  const client = await openRam(); await expect(client.draft(randomUUID(), 512)).rejects.toThrow();
+  expect(received).toHaveLength(1);
+});
 
 it('uses the actual current owner context for a distinct preview proof without a capacity hold', async () => {
   const client = await open();

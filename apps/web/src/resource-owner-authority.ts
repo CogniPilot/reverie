@@ -10,6 +10,8 @@ import { OWNER_COOKIE, SERVICE_HEADER, sameOrigin } from './owner-auth/policy.js
 import { ownerFor } from './web/route-helpers.js';
 
 const PURPOSE = 'resource-replacement-v1';
+const RAM_PURPOSE = 'resource-ram-pool-v2';
+type ResourcePurpose = typeof PURPOSE | typeof RAM_PURPOSE;
 const UUID = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/;
 const HEX = /^[a-f0-9]{64}$/;
 const digest = (value: string) => createHash('sha256').update(value).digest('hex');
@@ -32,9 +34,12 @@ export interface ResourceApproval {
   readonly profileDigest: string;
   readonly previewDigest: string;
 }
+export interface RamResourceApproval extends ResourceApproval {
+  readonly ramPolicyDigest: string;
+}
 
-interface ResourceContext {
-  readonly purpose: typeof PURPOSE;
+interface ResourceContext<P extends ResourcePurpose = typeof PURPOSE> {
+  readonly purpose: P;
   readonly owner: string | undefined;
   readonly ownerScopeDigest: string;
   readonly expiresAtEpochMs: number;
@@ -48,12 +53,22 @@ export interface ResourcePreviewContext extends ResourceContext {
   readonly stage: 'preview';
   readonly employeeId: string;
 }
+export interface RamResourceOwnerContext extends ResourceContext<typeof RAM_PURPOSE> {
+  readonly stage: 'apply';
+  readonly approval: Readonly<RamResourceApproval>;
+}
+export interface RamResourcePreviewContext extends ResourceContext<typeof RAM_PURPOSE> {
+  readonly stage: 'preview';
+  readonly employeeId: string;
+}
+export type AnyResourceContext = ResourceOwnerContext | ResourcePreviewContext |
+  RamResourceOwnerContext | RamResourcePreviewContext;
 
 /** Process-local authority join. A serialized scope digest never recreates it. */
 export class ResourceOwnerBinding {
   readonly #context: ResourceOwnerContext;
   constructor(token: symbol, context: ResourceOwnerContext) {
-    need(token === MINT);
+    need(token === MINT && context.purpose === PURPOSE);
     this.#context = context; bindings.set(this, context); Object.freeze(this);
   }
   get digest(): string { return this.#context.ownerScopeDigest; }
@@ -123,26 +138,43 @@ export class ResourceOwnerAuthority {
     return JSON.stringify([owner, identity.id, identity.username, identity.role, identity.primary]);
   }
   capture(request: FastifyRequest, approved: ResourceApproval): ResourceOwnerContext {
-    need(Object.keys(approved).sort().join(',') ===
-      'draftId,employeeId,operationId,previewDigest,profileDigest,profileVersion,reservationId,targetSid');
+    this.#approval(approved, false);
+    return this.#capture(request, {stage: 'apply' as const, approval: Object.freeze({...approved})}, PURPOSE);
+  }
+  captureRam(request: FastifyRequest, approved: RamResourceApproval): RamResourceOwnerContext {
+    this.#approval(approved, true);
+    return this.#capture(request, {stage: 'apply' as const, approval: Object.freeze({...approved})}, RAM_PURPOSE);
+  }
+  #approval(approved: ResourceApproval, ram: boolean): void {
+    const keys = 'draftId,employeeId,operationId,previewDigest,profileDigest,profileVersion,' +
+      (ram ? 'ramPolicyDigest,' : '') + 'reservationId,targetSid';
+    need(Object.keys(approved).sort().join(',') === keys);
     for (const key of ['draftId', 'employeeId', 'operationId', 'reservationId', 'targetSid'] as const)
       need(typeof approved[key] === 'string' && UUID.test(approved[key]));
+    const version = approved.profileVersion;
+    const validVersion = ram
+      ? typeof version === 'string' && /^[1-9][0-9]{0,19}$/.test(version) && BigInt(version) <= 18446744073709551615n
+      : /^[1-9][0-9]{0,15}$/.test(version) && Number.isSafeInteger(Number(version));
     need(new Set([approved.draftId, approved.operationId, approved.reservationId, approved.targetSid]).size === 4 &&
       HEX.test(approved.previewDigest) && HEX.test(approved.profileDigest) &&
-      /^[1-9][0-9]{0,15}$/.test(approved.profileVersion) &&
-      Number.isSafeInteger(Number(approved.profileVersion)));
-    return this.#capture(request, {stage: 'apply' as const, approval: Object.freeze({...approved})});
+      validVersion);
+    if (ram) need(HEX.test((approved as RamResourceApproval).ramPolicyDigest));
   }
   capturePreview(request: FastifyRequest, employeeId: string): ResourcePreviewContext {
     need(typeof employeeId === 'string' && UUID.test(employeeId));
-    return this.#capture(request, {stage: 'preview' as const, employeeId});
+    return this.#capture(request, {stage: 'preview' as const, employeeId}, PURPOSE);
+  }
+  captureRamPreview(request: FastifyRequest, employeeId: string): RamResourcePreviewContext {
+    need(typeof employeeId === 'string' && UUID.test(employeeId));
+    return this.#capture(request, {stage: 'preview' as const, employeeId}, RAM_PURPOSE);
   }
   requestOwner(request: FastifyRequest): string | undefined {
     const token = request.cookies?.[OWNER_COOKIE]; need(typeof token === 'string' && token.length > 0 && token.length <= 4096);
     this.#identity(request, token); return ownerFor(request);
   }
-  #capture<T extends {stage: 'apply'; approval: Readonly<ResourceApproval>} | {stage: 'preview'; employeeId: string}>(
-    request: FastifyRequest, selected: T): Readonly<ResourceContext & T> {
+  #capture<P extends ResourcePurpose,
+    T extends {stage: 'apply'; approval: Readonly<ResourceApproval>} | {stage: 'preview'; employeeId: string}>(
+    request: FastifyRequest, selected: T, purpose: P): Readonly<ResourceContext<P> & T> {
     const token = request.cookies?.[OWNER_COOKIE];
     need(typeof token === 'string' && token.length > 0 && token.length <= 4096);
     const identity = this.#identity(request, token), owner = ownerFor(request);
@@ -152,33 +184,33 @@ export class ResourceOwnerAuthority {
       need(this.#contexts.has(context) && Date.now() >= issued && Date.now() < expires &&
         this.#identity(request, token) === identity);
     };
-    const context = Object.freeze({purpose: PURPOSE, owner,
+    const context = Object.freeze({purpose, owner,
       ownerScopeDigest: digest(this.#epoch + identity + randomBytes(32).toString('hex')),
       ...selected, expiresAtEpochMs: expires, assertCurrent,
       toJSON: () => { throw new Error('Resource owner context is server-private'); },
       [inspect.custom]: () => '[Private resource owner context]',
-    }) as Readonly<ResourceContext & T>;
+    }) as Readonly<ResourceContext<P> & T>;
     this.#contexts.add(context);
     this.#sessions.set(context, {account: this.#auth.forSession(token), token});
     assertCurrent();
     return context;
   }
-  assertContext(context: ResourceOwnerContext | ResourcePreviewContext): void {
+  assertContext(context: AnyResourceContext): void {
     need(this.#contexts.has(context));
     context.assertCurrent();
   }
-  assertSameSession(left: ResourceOwnerContext | ResourcePreviewContext,
-    right: ResourceOwnerContext | ResourcePreviewContext): void {
+  assertSameSession(left: AnyResourceContext, right: AnyResourceContext): void {
     this.assertContext(left); this.assertContext(right);
     const a = this.#sessions.get(left), b = this.#sessions.get(right);
-    need(a && b && a.account === b.account && a.token === b.token && left.owner === right.owner);
+    need(a && b && a.account === b.account && a.token === b.token && left.owner === right.owner &&
+      left.purpose === right.purpose);
   }
   bind(context: ResourceOwnerContext): ResourceOwnerBinding {
     this.assertContext(context);
-    need(context.stage === 'apply');
+    need(context.stage === 'apply' && context.purpose === PURPOSE);
     return new ResourceOwnerBinding(MINT, context);
   }
-  track(context: ResourceOwnerContext | ResourcePreviewContext, socket: Socket): () => void {
+  track(context: AnyResourceContext, socket: Socket): () => void {
     this.assertContext(context);
     need(socket instanceof Socket && !socket.destroyed);
     const source = this.#sessions.get(context); need(source);
