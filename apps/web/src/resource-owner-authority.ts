@@ -1,7 +1,7 @@
 /** Current human-owner proof for the distinct private resource purpose.
  * No route, broker connection, installation or native grant is created here.
  */
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { inspect } from 'node:util';
 import { Socket } from 'node:net';
 import type { FastifyRequest } from 'fastify';
@@ -11,7 +11,8 @@ import { ownerFor } from './web/route-helpers.js';
 
 const PURPOSE = 'resource-replacement-v1';
 const RAM_PURPOSE = 'resource-ram-pool-v2';
-type ResourcePurpose = typeof PURPOSE | typeof RAM_PURPOSE;
+export const POOL_INSTALLATION_CONSENT_PURPOSE = 'host-pool-installation-consent-v1';
+type ResourcePurpose = typeof PURPOSE | typeof RAM_PURPOSE | typeof POOL_INSTALLATION_CONSENT_PURPOSE;
 const UUID = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/;
 const NIL_UUID = '00000000-0000-0000-0000-000000000000';
 const HEX = /^[a-f0-9]{64}$/;
@@ -72,7 +73,30 @@ export interface ResourceOwnerPrincipal {
   readonly personId: string;
   readonly sessionEpoch: number;
 }
-type PrincipalFor<P extends ResourcePurpose> = P extends typeof RAM_PURPOSE
+/** Nomination/offer DATA. Its actual native origin and one-shot B-channel
+ * ownership must be checked by the retained native offer consumer. */
+export interface PoolInstallationOfferData {
+  readonly offerNonce: string;
+  readonly requestDigest: string;
+  readonly principal: Readonly<ResourceOwnerPrincipal>;
+}
+interface PoolInstallationSelection {
+  readonly requestId: string;
+  readonly offerNonce: string;
+  readonly requestDigest: string;
+}
+export interface PoolInstallationOfferContext
+  extends ResourceContext<typeof POOL_INSTALLATION_CONSENT_PURPOSE>, PoolInstallationSelection {
+  readonly stage: 'offer';
+  readonly principal: Readonly<ResourceOwnerPrincipal>;
+}
+export interface PoolInstallationConsentContext
+  extends ResourceContext<typeof POOL_INSTALLATION_CONSENT_PURPOSE>, PoolInstallationSelection {
+  readonly stage: 'consent';
+  readonly consent: true;
+  readonly principal: Readonly<ResourceOwnerPrincipal>;
+}
+type PrincipalFor<P extends ResourcePurpose> = P extends typeof RAM_PURPOSE | typeof POOL_INSTALLATION_CONSENT_PURPOSE
   ? { readonly principal: Readonly<ResourceOwnerPrincipal> }
   : object;
 /** Website metadata/command correlation DATA. Only the retained owner binding
@@ -90,6 +114,7 @@ export type AnyResourceContext =
   | ResourcePreviewContext
   | RamResourceOwnerContext
   | RamResourcePreviewContext;
+type AuthorityContext = AnyResourceContext | PoolInstallationOfferContext | PoolInstallationConsentContext;
 
 /** Process-local authority join. A serialized scope digest never recreates it. */
 export class ResourceOwnerBinding {
@@ -217,6 +242,8 @@ export class ResourceOwnerAuthority {
   readonly #auth: OwnerAuthService;
   readonly #epoch = randomBytes(32).toString('hex');
   readonly #contexts = new WeakSet<object>();
+  readonly #poolViews = new WeakSet<object>();
+  readonly #consentedPoolViews = new WeakSet<object>();
   readonly #sessions = new WeakMap<object, { account: OwnerAuthService; token: string }>();
   readonly #channels = new Map<Socket, Map<string, { account: OwnerAuthService; count: number }>>();
   #closed = false;
@@ -257,8 +284,8 @@ export class ResourceOwnerAuthority {
     const owner = ownerFor(request);
     need(owner === undefined || owner === identity.username);
     const human = [owner, identity.id, identity.username, identity.role, identity.primary];
-    if (purpose === RAM_PURPOSE) {
-      // New RAM authority additionally pins the canonical account birth and
+    if (purpose !== PURPOSE) {
+      // The distinct RAM and global-consent purposes pin canonical account birth and
       // current Office person. This read never enrolls a legacy account, and
       // deliberately has no ordinary-identity/cache fallback.
       const current = this.#auth.registrationIdentity(token);
@@ -318,6 +345,78 @@ export class ResourceOwnerAuthority {
     need(typeof employeeId === 'string' && UUID.test(employeeId));
     return this.#capture(request, { stage: 'preview' as const, employeeId }, RAM_PURPOSE);
   }
+  capturePoolInstallationOffer(
+    request: FastifyRequest,
+    nominated: PoolInstallationOfferData
+  ): PoolInstallationOfferContext {
+    need(Object.keys(nominated).sort().join(',') === 'offerNonce,principal,requestDigest');
+    need(
+      typeof nominated.offerNonce === 'string' &&
+        UUID.test(nominated.offerNonce) &&
+        nominated.offerNonce !== NIL_UUID &&
+        typeof nominated.requestDigest === 'string' &&
+        HEX.test(nominated.requestDigest) &&
+        nominated.principal &&
+        Object.keys(nominated.principal).sort().join(',') === 'accountId,personId,sessionEpoch'
+    );
+    const context = this.#capture(
+      request,
+      {
+        stage: 'offer' as const,
+        requestId: randomUUID(),
+        offerNonce: nominated.offerNonce,
+        requestDigest: nominated.requestDigest,
+      },
+      POOL_INSTALLATION_CONSENT_PURPOSE
+    );
+    need(
+      context.principal.accountId === nominated.principal.accountId &&
+        context.principal.personId === nominated.principal.personId &&
+        context.principal.sessionEpoch === nominated.principal.sessionEpoch
+    );
+    this.#poolViews.add(context);
+    return context;
+  }
+  capturePoolInstallationConsent(
+    request: FastifyRequest,
+    viewed: PoolInstallationOfferContext
+  ): PoolInstallationConsentContext {
+    need(this.#poolViews.has(viewed) && !this.#consentedPoolViews.has(viewed));
+    this.assertContext(viewed);
+    need(viewed.purpose === POOL_INSTALLATION_CONSENT_PURPOSE && viewed.stage === 'offer');
+    const body = request.body;
+    need(body && typeof body === 'object' && !Array.isArray(body));
+    need(Object.keys(body).sort().join(',') === 'consent,offerNonce,requestDigest');
+    const selected = body as Record<string, unknown>;
+    need(
+      selected.consent === true &&
+        selected.offerNonce === viewed.offerNonce &&
+        selected.requestDigest === viewed.requestDigest
+    );
+    const context = this.#capture(
+      request,
+      {
+        stage: 'consent' as const,
+        consent: true as const,
+        requestId: viewed.requestId,
+        offerNonce: viewed.offerNonce,
+        requestDigest: viewed.requestDigest,
+      },
+      POOL_INSTALLATION_CONSENT_PURPOSE,
+      viewed.expiresAtEpochMs
+    );
+    this.assertSameSession(viewed, context);
+    need(
+      context.principal.accountId === viewed.principal.accountId &&
+        context.principal.personId === viewed.principal.personId &&
+        context.principal.sessionEpoch === viewed.principal.sessionEpoch
+    );
+    // Only the original authenticated session can consume this private view.
+    // A guest or another cookie cannot consume it by attempting a POST.
+    this.#consentedPoolViews.add(viewed);
+    viewed.assertCurrent();
+    return context;
+  }
   requestOwner(request: FastifyRequest): string | undefined {
     const token = request.cookies?.[OWNER_COOKIE];
     need(typeof token === 'string' && token.length > 0 && token.length <= 4096);
@@ -326,15 +425,23 @@ export class ResourceOwnerAuthority {
   }
   #capture<
     P extends ResourcePurpose,
-    T extends { stage: 'apply'; approval: Readonly<ResourceApproval> } | { stage: 'preview'; employeeId: string },
-  >(request: FastifyRequest, selected: T, purpose: P): Readonly<ResourceContext<P> & T> & PrincipalFor<P> {
+    T extends
+      | { stage: 'apply'; approval: Readonly<ResourceApproval> }
+      | { stage: 'preview'; employeeId: string }
+      | (PoolInstallationSelection & ({ stage: 'offer' } | { stage: 'consent'; consent: true })),
+  >(
+    request: FastifyRequest,
+    selected: T,
+    purpose: P,
+    originalExpiry?: number
+  ): Readonly<ResourceContext<P> & T> & PrincipalFor<P> {
     const token = request.cookies?.[OWNER_COOKIE];
     need(typeof token === 'string' && token.length > 0 && token.length <= 4096);
     const identity = this.#identity(request, token, purpose),
       owner = ownerFor(request);
     const issued = Date.now(),
-      expires = issued + 300_000;
-    need(Number.isSafeInteger(issued) && Number.isSafeInteger(expires));
+      expires = Math.min(issued + 300_000, originalExpiry ?? issued + 300_000);
+    need(Number.isSafeInteger(issued) && Number.isSafeInteger(expires) && expires > issued);
     const assertCurrent = () => {
       need(
         this.#contexts.has(context) &&
@@ -361,11 +468,11 @@ export class ResourceOwnerAuthority {
     assertCurrent();
     return context;
   }
-  assertContext(context: AnyResourceContext): void {
+  assertContext(context: AuthorityContext): void {
     need(this.#contexts.has(context));
     context.assertCurrent();
   }
-  assertSameSession(left: AnyResourceContext, right: AnyResourceContext): void {
+  assertSameSession(left: AuthorityContext, right: AuthorityContext): void {
     this.assertContext(left);
     this.assertContext(right);
     const a = this.#sessions.get(left),
@@ -389,7 +496,7 @@ export class ResourceOwnerAuthority {
     need(context.stage === 'apply' && context.purpose === RAM_PURPOSE);
     return new RamResourceOwnerBinding(MINT, context);
   }
-  track(context: AnyResourceContext, socket: Socket): () => void {
+  track(context: AuthorityContext, socket: Socket): () => void {
     this.assertContext(context);
     need(socket instanceof Socket && !socket.destroyed);
     const source = this.#sessions.get(context);
