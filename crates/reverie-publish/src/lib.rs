@@ -15,6 +15,7 @@ pub mod github;
 pub mod packet;
 pub mod pull;
 pub mod record;
+pub mod text;
 pub mod verify;
 
 use sha2::{Digest, Sha256};
