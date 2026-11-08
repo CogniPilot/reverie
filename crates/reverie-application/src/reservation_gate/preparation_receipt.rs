@@ -82,12 +82,25 @@ impl CommittedPolicy {
         policy: &reverie_contracts::ram_migration::RamMigrationPolicy,
         expected_before: &Arc<ValidatedWorkerSnapshot>,
     ) -> Result<Arc<ValidatedWorkerSnapshot>> {
+        let gate = broker
+            .resource_reservations()
+            .and_then(|gate| gate.ok_or(GateError::Refused("RAM_PUBLICATION_OWNER_CHANGED")));
+        self.rebase_ram_snapshot(gate, claim, policy, expected_before)
+    }
+    pub(super) fn rebase_ram_snapshot(
+        &mut self,
+        gate: Result<&ReservationGate>,
+        claim: &RetainedPreparation,
+        policy: &reverie_contracts::ram_migration::RamMigrationPolicy,
+        expected_before: &Arc<ValidatedWorkerSnapshot>,
+    ) -> Result<Arc<ValidatedWorkerSnapshot>> {
         need(
             self.rebase == SnapshotRebase::Unused,
             "RAM_PUBLICATION_REBASE_ALREADY_ATTEMPTED",
         )?;
         self.rebase = SnapshotRebase::Attempted;
-        let result = self.observe_ram_snapshot(broker, claim, policy, expected_before);
+        let result =
+            gate.and_then(|gate| self.observe_ram_snapshot(gate, claim, policy, expected_before));
         self.rebase = if result.is_ok() {
             SnapshotRebase::Adopted
         } else {
@@ -97,14 +110,11 @@ impl CommittedPolicy {
     }
     fn observe_ram_snapshot(
         &self,
-        broker: &crate::installing_broker::InstallingBroker,
+        gate: &ReservationGate,
         claim: &RetainedPreparation,
         policy: &reverie_contracts::ram_migration::RamMigrationPolicy,
         expected_before: &Arc<ValidatedWorkerSnapshot>,
     ) -> Result<Arc<ValidatedWorkerSnapshot>> {
-        let gate = broker
-            .resource_reservations()?
-            .ok_or(GateError::Refused("RAM_PUBLICATION_OWNER_CHANGED"))?;
         {
             let state = gate
                 .inner
