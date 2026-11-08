@@ -70,7 +70,7 @@ impl GpuPendingFile {
         self.file.release(Some(self.end)).map_err(gpu_error)
     }
 }
-fn gpu_error(error: PendingError) -> GpuHostError {
+pub(super) fn gpu_error(error: PendingError) -> GpuHostError {
     match error {
         PendingError::Io(error) => error.into(),
         PendingError::Native(error) => error.into(),

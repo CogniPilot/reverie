@@ -43,4 +43,11 @@ impl PrivateFileStamp {
             && self.uid == owner
             && self.links == 1
     }
+    /// Only for a file retained by the SAME actual descriptor across its one
+    /// known rename. Linux may update ctime; all other recorded facts must stay.
+    pub(crate) fn same_renamed_file(&self, before: &Self) -> bool {
+        let mut renamed = self.clone();
+        renamed.ctime = before.ctime;
+        renamed == *before
+    }
 }

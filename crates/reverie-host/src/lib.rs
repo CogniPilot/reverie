@@ -45,6 +45,7 @@ mod test_process;
 pub mod website_facts;
 pub mod worker_child;
 pub mod worker_identity;
+pub mod worker_image;
 #[cfg(all(test, target_os = "linux"))]
 mod worker_init_tests;
 pub mod worker_intent;

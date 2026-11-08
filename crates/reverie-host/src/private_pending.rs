@@ -74,16 +74,23 @@ impl PendingFile {
     pub(crate) fn unreleased(&self) -> bool {
         self.release == Release::NotSubmitted
     }
-    /// LAST cooperative unlink, after domain-specific terminal checks. There
-    /// is no owned descriptor close after unlink and no Drop/retry cleanup.
-    pub(crate) fn release(&mut self, end: Option<Instant>) -> Result<()> {
+    pub(crate) fn confirmed(&self) -> bool {
+        self.release == Release::Confirmed
+    }
+    pub(crate) fn assert_current(&self) -> Result<()> {
         if !self.unreleased() {
             return Err(PendingError::AlreadyAttempted);
         }
-        let stamp = native::PrivateFileStamp::of(&fs::symlink_metadata(&self.path)?);
-        if stamp != self.stamp {
+        let named = native::PrivateFileStamp::of(&fs::symlink_metadata(&self.path)?);
+        if named != self.stamp {
             return Err(PendingError::Changed);
         }
+        Ok(())
+    }
+    /// LAST cooperative unlink, after domain-specific terminal checks. There
+    /// is no owned descriptor close after unlink and no Drop/retry cleanup.
+    pub(crate) fn release(&mut self, end: Option<Instant>) -> Result<()> {
+        self.assert_current()?;
         if end.is_some_and(|end| Instant::now() >= end) {
             return Err(PendingError::Deadline);
         }
