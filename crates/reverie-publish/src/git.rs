@@ -7,9 +7,10 @@
 //!
 //! git never reads the store's own config, attributes or refs either: every command runs against a
 //! fresh private git directory (`Private`) whose only config is what `git init` writes, with the
-//! store's objects (`GIT_OBJECT_DIRECTORY`). A `url.*.insteadOf`, `protocol.*`, `core.attributesFile`,
-//! merge driver or `include.path` placed in the store therefore changes nothing a check or fetch
-//! does.
+//! store's objects (`GIT_OBJECT_DIRECTORY`). A `url.*.insteadOf`, `pushInsteadOf`, `protocol.*`,
+//! `core.attributesFile`, merge driver or `include.path` placed in the store therefore changes
+//! nothing a check, fetch or push does. Network commands (`fetch`, `ls-remote`, `push`) each get a
+//! further fresh directory of their own (`Transport`).
 use crate::custody::Held;
 use std::{
     collections::BTreeSet,
@@ -73,10 +74,10 @@ impl Git {
             private: Private::create()?,
         };
         let init = git
-            .base_command()
-            .arg("--git-dir")
-            .arg(&git.private.0)
-            .args(["init", "--quiet", "--bare", "--template="])
+            .command_in(
+                git.private.0.as_os_str(),
+                ["init", "--quiet", "--bare", "--template="],
+            )
             .output()
             .map_err(|e| format!("could not run git: {e}"))?;
         if !init.status.success() {
@@ -160,18 +161,18 @@ impl Git {
         I: IntoIterator<Item = S>,
         S: AsRef<OsStr>,
     {
-        let mut command = self.base_command();
-        command
-            .arg("--git-dir")
-            .arg(&self.private.0)
-            // Relative to the held store git starts in.
-            .env("GIT_OBJECT_DIRECTORY", "objects")
-            .args(args);
+        let mut command = self.command_in(self.private.0.as_os_str(), args);
+        // Relative to the held store git starts in.
+        command.env("GIT_OBJECT_DIRECTORY", "objects");
         command
     }
 
-    /// git started inside the held store with the scrubbed environment and no repository yet.
-    fn base_command(&self) -> Command {
+    /// git started inside the held store, with `git_dir` as its repository.
+    fn command_in<I, S>(&self, git_dir: &OsStr, args: I) -> Command
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<OsStr>,
+    {
         let mut command = Command::new("git");
         for (key, _) in std::env::vars_os() {
             let name = key.to_string_lossy();
@@ -191,7 +192,10 @@ impl Git {
             .env("GIT_NO_REPLACE_OBJECTS", "1")
             .args(["-c", "credential.helper=", "-c", "core.hooksPath=/dev/null"])
             .args(["-c", "core.attributesFile=/dev/null"])
-            .current_dir(self.store.proc_path());
+            .arg("--git-dir")
+            .arg(git_dir)
+            .current_dir(self.store.proc_path())
+            .args(args);
         command
     }
 
@@ -240,6 +244,138 @@ impl Git {
         S: AsRef<OsStr>,
     {
         Ok(self.output(args)?.status.success())
+    }
+
+    /// `git push <url> <refspec>` without force. With `token_file`, git asks this binary for the
+    /// credentials (`GIT_ASKPASS`, answered by `askpass::answer`), so the token never reaches argv,
+    /// the environment of anything but this binary, or a shell. Returns (success, stderr).
+    pub fn push(
+        &self,
+        url: &str,
+        refspec: &str,
+        token_file: Option<&Path>,
+    ) -> Result<(bool, String), String> {
+        self.push_with(url, refspec, None, token_file)
+    }
+
+    /// Creates `reference` at `head` on the remote only if it does not exist there. git sends the
+    /// all-zero old id for it, so the remote refuses if the branch appeared after any earlier
+    /// check, even when the update would be a fast-forward. Returns (success, stderr).
+    pub fn push_new(
+        &self,
+        url: &str,
+        head: &str,
+        reference: &str,
+        token_file: Option<&Path>,
+    ) -> Result<(bool, String), String> {
+        let lease = format!("--force-with-lease={reference}:");
+        self.push_with(
+            url,
+            &format!("{head}:{reference}"),
+            Some(&lease),
+            token_file,
+        )
+    }
+
+    fn push_with(
+        &self,
+        url: &str,
+        refspec: &str,
+        lease: Option<&str>,
+        token_file: Option<&Path>,
+    ) -> Result<(bool, String), String> {
+        if refspec.starts_with('+') || refspec.contains(":+") {
+            return Err("a forced refspec is never pushed".into());
+        }
+        // A redirect is never followed, so credentials go only to the URL given.
+        let mut args = vec!["-c", "http.followRedirects=false", "push", "--porcelain"];
+        args.extend(lease);
+        args.extend([url, refspec]);
+        let transport = self.transport()?;
+        let mut command = transport.command(args);
+        if let Some(token_file) = token_file {
+            let me =
+                std::env::current_exe().map_err(|e| format!("cannot find this binary: {e}"))?;
+            command
+                .env("GIT_ASKPASS", me)
+                .env(crate::askpass::MODE, "1")
+                // git and its askpass child start in the held store, so a relative path would
+                // name a file there.
+                .env(
+                    crate::askpass::TOKEN_FILE,
+                    std::path::absolute(token_file)
+                        .map_err(|e| format!("token file: {}", e.kind()))?,
+                );
+        }
+        let output = command
+            .output()
+            .map_err(|e| format!("could not run git: {e}"))?;
+        Ok((
+            output.status.success(),
+            String::from_utf8_lossy(&output.stderr).into_owned(),
+        ))
+    }
+
+    /// The commit a remote ref points at, or None when the ref does not exist.
+    pub fn remote_ref(&self, url: &str, reference: &str) -> Result<Option<String>, String> {
+        let listed = self.transport()?.run(["ls-remote", url, reference])?;
+        Ok(listed
+            .lines()
+            .find(|line| line.split_whitespace().nth(1) == Some(reference))
+            .and_then(|line| line.split_whitespace().next())
+            .map(str::to_owned))
+    }
+
+    /// Fetches one remote branch into the store's objects and returns its commit.
+    pub fn fetch_branch(&self, url: &str, branch: &str, label: &str) -> Result<String, String> {
+        let transport = self.transport()?;
+        // The refs this run already holds, so the fetch asks only for what is missing.
+        let mut tips: Vec<String> = self
+            .run(["for-each-ref", "--format=%(objectname)"])?
+            .lines()
+            .map(str::to_owned)
+            .collect();
+        tips.sort();
+        tips.dedup();
+        let packed: String = tips
+            .iter()
+            .enumerate()
+            .map(|(i, tip)| format!("{tip} refs/have/{i:08}\n"))
+            .collect();
+        std::fs::write(transport.dir.join("packed-refs"), packed)
+            .map_err(|e| format!("transport refs: {}", e.kind()))?;
+        let local = format!("refs/publish/{label}");
+        transport.run([
+            "fetch",
+            "--quiet",
+            "--no-tags",
+            url,
+            &format!("+refs/heads/{branch}:{local}"),
+        ])?;
+        transport.run(["rev-parse", "--verify", &format!("{local}^{{commit}}")])
+    }
+
+    /// A fresh private git directory for one network command: mode 0700 under the temporary
+    /// directory, created new, with no template, so it holds only the config `git init` writes.
+    fn transport(&self) -> Result<Transport<'_>, String> {
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        let mut last = String::new();
+        for _ in 0..8 {
+            let nanos = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.as_nanos());
+            let n = NEXT.fetch_add(1, Ordering::Relaxed);
+            let dir = std::env::temp_dir().join(format!(
+                "reverie-publish-transport-{}-{nanos:x}-{n}",
+                std::process::id()
+            ));
+            match std::fs::DirBuilder::new().mode(0o700).create(&dir) {
+                Ok(()) => return Transport { git: self, dir }.init(),
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => last = e.to_string(),
+                Err(e) => return Err(format!("transport directory: {e}")),
+            }
+        }
+        Err(format!("transport directory: {last}"))
     }
 
     /// Writes `bytes` to a new private bundle file in the store, verifies it and fetches all its
@@ -292,6 +428,72 @@ impl Git {
             prefix,
         ])?;
         Ok(tips.lines().any(|tip| tip == commit))
+    }
+}
+
+/// A private git directory that network commands use instead of the store's: git reads its
+/// fresh config, never the store's, while objects are still read from and written to the store
+/// (`GIT_OBJECT_DIRECTORY`, relative to the held store git starts in). Removed when dropped.
+struct Transport<'g> {
+    git: &'g Git,
+    dir: PathBuf,
+}
+
+impl Transport<'_> {
+    /// `git init` with no template, so the directory holds only the config it writes. On
+    /// failure the directory is dropped, which removes it.
+    fn init(self) -> Result<Self, String> {
+        let init = self
+            .git
+            .command_in(
+                self.dir.as_os_str(),
+                ["init", "--quiet", "--bare", "--template="],
+            )
+            .output()
+            .map_err(|e| format!("could not run git: {e}"))?;
+        if !init.status.success() {
+            return Err(format!(
+                "git init failed: {}",
+                String::from_utf8_lossy(&init.stderr).trim()
+            ));
+        }
+        Ok(self)
+    }
+
+    fn command<I, S>(&self, args: I) -> Command
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<OsStr>,
+    {
+        let mut command = self.git.command_in(self.dir.as_os_str(), args);
+        command.env("GIT_OBJECT_DIRECTORY", "objects");
+        command
+    }
+
+    fn run<I, S>(&self, args: I) -> Result<String, String>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<OsStr>,
+    {
+        let output = self
+            .command(args)
+            .output()
+            .map_err(|e| format!("could not run git: {e}"))?;
+        if !output.status.success() {
+            return Err(format!(
+                "git failed: {}",
+                String::from_utf8_lossy(&output.stderr).trim()
+            ));
+        }
+        Ok(String::from_utf8_lossy(&output.stdout)
+            .trim_end_matches('\n')
+            .to_owned())
+    }
+}
+
+impl Drop for Transport<'_> {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.dir);
     }
 }
 
@@ -383,5 +585,16 @@ mod tests {
         drop(git);
         assert!(!private.exists());
         let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_forced_refspec_is_refused_before_git_runs() {
+        let git = Git::open(&std::env::temp_dir()).unwrap();
+        for refspec in ["+abc:refs/heads/x", "abc:+refs/heads/x"] {
+            let error = git
+                .push("/nonexistent/remote.git", refspec, None)
+                .unwrap_err();
+            assert!(error.contains("never pushed"), "{error}");
+        }
     }
 }

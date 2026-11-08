@@ -7,12 +7,14 @@
 //! token reaches curl only on stdin. Paths to the object store, token and records are arguments,
 //! so nothing private is compiled in.
 pub mod approval;
+pub mod askpass;
 pub mod commits;
 pub mod custody;
 pub mod git;
 pub mod github;
 pub mod packet;
 pub mod record;
+pub mod verify;
 
 use sha2::{Digest, Sha256};
 

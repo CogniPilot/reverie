@@ -11,7 +11,8 @@ use std::{
     process::{Command, Stdio},
 };
 
-const API: &str = "https://api.github.com";
+/// GitHub's API. The only other base accepted is a loopback address, for tests.
+pub const API: &str = "https://api.github.com";
 
 /// curl's whole argv: `-q` must come first so no `~/.curlrc` (trace, extra headers, redirects)
 /// is read, and everything else, the token included, comes from stdin.
@@ -28,16 +29,25 @@ pub trait Transport {
 pub struct Curl {
     token_file: PathBuf,
     scratch: PathBuf,
+    api: String,
 }
 
 impl Curl {
     /// `token_file` holds only the token; `scratch` is a private directory for request bodies,
-    /// held for each request that has one.
-    pub fn new(token_file: &Path, scratch: &Path) -> Self {
-        Self {
+    /// held for each request that has one; `api` is [`API`] or an `http://127.0.0.1:PORT` test
+    /// server, so a mistyped base can never send the token to another host.
+    pub fn new(token_file: &Path, scratch: &Path, api: &str) -> Result<Self, String> {
+        let loopback = api
+            .strip_prefix("http://127.0.0.1:")
+            .is_some_and(|port| !port.is_empty() && port.bytes().all(|b| b.is_ascii_digit()));
+        if api != API && !loopback {
+            return Err(format!("the API base must be {API}"));
+        }
+        Ok(Self {
             token_file: token_file.to_path_buf(),
             scratch: scratch.to_path_buf(),
-        }
+            api: api.to_owned(),
+        })
     }
 }
 
@@ -108,7 +118,7 @@ impl Transport for Curl {
             _ => None,
         };
         let name = body_file.as_ref().map(|file| Path::new(file.name()));
-        let config = config(method, &format!("{API}{path}"), token, name)?;
+        let config = config(method, &format!("{}{path}", self.api), token, name)?;
         let output = run_curl(&config, scratch.as_ref().map(Held::proc_path).as_deref())?;
         let (body, status) = output.rsplit_once('\n').ok_or("curl printed no status")?;
         let status = status
