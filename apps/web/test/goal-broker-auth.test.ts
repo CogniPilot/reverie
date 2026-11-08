@@ -112,22 +112,23 @@ const denied = (operation: Promise<unknown>) =>
   expect(operation).rejects.toMatchObject({ code: 'GOAL_FORBIDDEN', status: 403 });
 
 // Component mode uses real codecs with synthetic key/binding/clock/transport; it is not Office signing.
-function fixtureForward(mode: 'component-proof' | 'restricted-office', input: Record<string, unknown>) {
+// One interpreter answers every input in order, each forwarded on its own.
+function fixtureForward(mode: 'component-proof' | 'restricted-office', inputs: Record<string, unknown>[]) {
   const args = ['-B', '-m', 'tests.goal_broker_fixture'];
   if (mode === 'component-proof') args.push('--component-proof');
   return JSON.parse(
     execFileSync('python3', args, {
       cwd: goalFixtureRepository(import.meta.dirname),
-      input: JSON.stringify(input),
+      input: JSON.stringify(inputs),
       encoding: 'utf8',
-      timeout: 5000,
+      timeout: 5000 * inputs.length,
       env: { PATH: process.env.PATH, HOME: process.env.HOME, PYTHONDONTWRITEBYTECODE: '1' },
     })
   );
 }
 
-const componentProof = (input: Record<string, unknown>) => fixtureForward('component-proof', input);
-const restrictedOffice = (input: Record<string, unknown>) => fixtureForward('restricted-office', input);
+const componentProof = (input: Record<string, unknown>) => fixtureForward('component-proof', [input])[0];
+const restrictedOffice = (input: Record<string, unknown>) => fixtureForward('restricted-office', [input])[0];
 
 describe('purpose-separated broker Goal boundary', () => {
   const canonicalRoutes = (value: string): Array<{ method: 'GET' | 'POST'; target: string; route: string }> => [
@@ -154,9 +155,14 @@ describe('purpose-separated broker Goal boundary', () => {
     'synthetic proof component → server accepts canonical route identifiers of length%s',
     async (size) => {
       const value = 'Aa0_.:-'.repeat(15).slice(0, size);
-      for (const { method, target, route } of canonicalRoutes(value)) {
+      const routes = canonicalRoutes(value);
+      const forwards = fixtureForward(
+        'component-proof',
+        routes.map(({ method, target }) => ({ method, target, body: method === 'GET' ? '' : '{}' }))
+      );
+      for (const [index, { method, target, route }] of routes.entries()) {
         expect(isBrokerGoalRequest(method, target)).toBe(true);
-        const forwarded = componentProof({ method, target, body: method === 'GET' ? '' : '{}' });
+        const forwarded = forwards[index];
         expect(forwarded.target).toBe(target);
         const f = fixture();
         const app = Fastify();
@@ -189,14 +195,13 @@ describe('purpose-separated broker Goal boundary', () => {
   it.each(['x'.repeat(101), 'bad%41', 'bad/name', 'bad name', 'bad\n', 'nonascii-é', 'bad?extra=1'])(
     'both languages reject overlong or invalid canonical route identifier %s',
     async (value) => {
-      for (const { method, target } of canonicalRoutes(value)) {
+      const routes = canonicalRoutes(value);
+      const inputs = routes.map(({ method, target }) => ({ method, target, body: method === 'GET' ? '' : '{}' }));
+      const refusal = { refused: 403, upstream: false, environmentReads: 0 };
+      for (const mode of ['component-proof', 'restricted-office'] as const)
+        expect(fixtureForward(mode, inputs)).toEqual(inputs.map(() => refusal));
+      for (const { method, target } of routes) {
         expect(isBrokerGoalRequest(method, target), target).toBe(false);
-        for (const forward of [componentProof, restrictedOffice])
-          expect(forward({ method, target, body: method === 'GET' ? '' : '{}' })).toEqual({
-            refused: 403,
-            upstream: false,
-            environmentReads: 0,
-          });
         const f = fixture();
         const body = method === 'GET' ? Buffer.alloc(0) : Buffer.from('{}');
         await denied(f.auth.verify({}, { method, target, body, assertion: token({ 6: method, 7: target }, body) }));

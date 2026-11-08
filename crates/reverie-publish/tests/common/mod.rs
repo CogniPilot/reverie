@@ -2,10 +2,15 @@
 //! invented words. Each test binary uses part of it.
 #![allow(dead_code)]
 use reverie_publish::sha256_hex;
+use serde_json::Value;
 use std::{
     fs,
+    io::{BufRead, BufReader, Read, Write},
+    net::{TcpListener, TcpStream},
     path::{Path, PathBuf},
     process::{Command, Output},
+    sync::{Arc, Mutex},
+    thread,
 };
 
 pub(crate) const JAMES_NAME: &str = "James Goppert";
@@ -262,4 +267,69 @@ impl Fixture {
         fs::write(&path, approval.to_string()).unwrap();
         path.to_string_lossy().into_owned()
     }
+}
+
+/// One request the fake API received: method, path, Authorization header and JSON body.
+#[derive(Debug, Clone)]
+pub(crate) struct Seen {
+    pub(crate) method: String,
+    pub(crate) path: String,
+    pub(crate) authorization: String,
+    pub(crate) body: Value,
+}
+
+/// Reads one HTTP request: method, path, Authorization header and JSON body.
+pub(crate) fn read_request(stream: &TcpStream) -> Seen {
+    let mut reader = BufReader::new(stream.try_clone().unwrap());
+    let mut line = String::new();
+    reader.read_line(&mut line).unwrap();
+    let mut parts = line.split_whitespace();
+    let method = parts.next().unwrap_or("").to_owned();
+    let path = parts.next().unwrap_or("").to_owned();
+    let (mut length, mut authorization) = (0, String::new());
+    for header in reader.by_ref().lines().map(Result::unwrap) {
+        if header.is_empty() {
+            break;
+        }
+        let (name, value) = header.split_once(':').unwrap_or((&header, ""));
+        if name.eq_ignore_ascii_case("content-length") {
+            length = value.trim().parse().unwrap();
+        } else if name.eq_ignore_ascii_case("authorization") {
+            authorization = value.trim().to_owned();
+        }
+    }
+    let mut body = vec![0; length];
+    reader.read_exact(&mut body).unwrap();
+    let body = serde_json::from_slice(&body).unwrap_or(Value::Null);
+    Seen {
+        method,
+        path,
+        authorization,
+        body,
+    }
+}
+
+/// Serves requests on a loopback port, answering each with `reply(request)`.
+pub(crate) fn fake_api(
+    reply: impl Fn(&Seen) -> Value + Send + 'static,
+) -> (String, Arc<Mutex<Vec<Seen>>>) {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let base = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let log = Arc::clone(&seen);
+    thread::spawn(move || {
+        for stream in listener.incoming() {
+            let mut stream = stream.unwrap();
+            let request = read_request(&stream);
+            let answer = reply(&request).to_string();
+            log.lock().unwrap().push(request);
+            write!(
+                stream,
+                "HTTP/1.1 201 Created\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{answer}",
+                answer.len()
+            )
+            .unwrap();
+        }
+    });
+    (base, seen)
 }

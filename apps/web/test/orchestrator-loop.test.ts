@@ -252,14 +252,20 @@ function createMockMux() {
 }
 
 // Wait for a specific event to be emitted
-function waitForEvent(emitter: EventEmitter, event: string, timeout = 5000): Promise<unknown[]> {
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error(`Timeout waiting for event "${event}"`)), timeout);
-    emitter.once(event, (...args: unknown[]) => {
-      clearTimeout(timer);
-      resolve(args);
-    });
+/**
+ * Waits for `event` while moving the fake clock on in 100 ms steps, since the loop polls, delays
+ * and times out on timers; refuses once `timeout` ms of loop time have passed without it.
+ */
+async function waitForEvent(emitter: EventEmitter, event: string, timeout = 5000): Promise<unknown[]> {
+  let fired: unknown[] | undefined;
+  emitter.once(event, (...args: unknown[]) => {
+    fired = args;
   });
+  for (let waited = 0; fired === undefined; waited += 100) {
+    if (waited >= timeout) throw new Error(`Timeout waiting for event "${event}"`);
+    await vi.advanceTimersByTimeAsync(100);
+  }
+  return fired;
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -270,6 +276,9 @@ describe('OrchestratorLoop', () => {
   let loop: OrchestratorLoop;
 
   beforeEach(() => {
+    // The loop's poll interval, post-phase delay and timeouts run on this fake clock: each test moves
+    // it on explicitly, so nothing waits in real time.
+    vi.useFakeTimers();
     vi.clearAllMocks();
     taskIdCounter = 0;
     mockTaskQueue._tasks.clear();
@@ -280,6 +289,7 @@ describe('OrchestratorLoop', () => {
 
   afterEach(() => {
     loop.destroy();
+    vi.useRealTimers();
   });
 
   // ═══════════════════════════════════════════════════════════════
@@ -565,12 +575,12 @@ describe('OrchestratorLoop', () => {
       await loop.approve();
 
       // Wait for poll to detect completion (2s) but pause before verify runs (1s delay)
-      await new Promise((resolve) => setTimeout(resolve, 2500));
+      await vi.advanceTimersByTimeAsync(2500);
       loop.pause();
       expect(loop.state).toBe('paused');
 
       // Wait past where verify would have fired — state should still be paused
-      await new Promise((resolve) => setTimeout(resolve, 2000));
+      await vi.advanceTimersByTimeAsync(2000);
       expect(loop.state).toBe('paused');
     });
   });
@@ -633,7 +643,10 @@ describe('OrchestratorLoop', () => {
       await loop.start('Goal');
       await loop.approve();
 
-      await loop.skipPhase('phase-1');
+      // Skipping advances to the next phase, which waits 2 s after compacting the sessions.
+      const skipped = loop.skipPhase('phase-1');
+      await vi.advanceTimersByTimeAsync(2000);
+      await skipped;
 
       const phase = loop.getPlan()!.phases[0];
       expect(phase.status).toBe('skipped');
@@ -707,7 +720,7 @@ describe('OrchestratorLoop', () => {
       await loop.start('Goal');
 
       // Wait for poll (2s) + post-phase delay (1s) + buffer
-      await new Promise((resolve) => setTimeout(resolve, 5000));
+      await vi.advanceTimersByTimeAsync(5000);
 
       // Phase 1 has no criteria → should pass without verification
       expect(loop.state).toBe('completed');
@@ -920,7 +933,7 @@ describe('OrchestratorLoop', () => {
 
       // Should fail because no sessions available
       // Wait for state to settle
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      await vi.advanceTimersByTimeAsync(100);
       expect(loop.state).toBe('failed');
     });
   });
@@ -1027,7 +1040,7 @@ describe('OrchestratorLoop', () => {
       await loop.start('Goal');
 
       // Wait for poll to detect failure, increment retries, re-queue, and detect completion
-      await new Promise((resolve) => setTimeout(resolve, 8000));
+      await vi.advanceTimersByTimeAsync(8000);
 
       // The task should have been retried (addTask called more than once)
       expect(callCount).toBeGreaterThan(1);
@@ -1069,7 +1082,7 @@ describe('OrchestratorLoop', () => {
       await loop.start('Goal');
 
       // Wait for: task fail × 3 (retry twice) → phase error → phase retry → task fail × 1 → finally succeed
-      await new Promise((resolve) => setTimeout(resolve, 20000));
+      await vi.advanceTimersByTimeAsync(20000);
 
       // addTask should have been called multiple times (initial + retries + phase retry)
       expect(addTaskCallCount).toBeGreaterThan(2);
@@ -1113,7 +1126,7 @@ describe('OrchestratorLoop', () => {
       await loop.start('Goal');
 
       // Wait for poll + verification
-      await new Promise((resolve) => setTimeout(resolve, 8000));
+      await vi.advanceTimersByTimeAsync(8000);
 
       expect(mockVerifierInstance.verifyPhase).toHaveBeenCalled();
       expect(events).toContain('verifying');
@@ -1161,7 +1174,7 @@ describe('OrchestratorLoop', () => {
       await loop.start('Goal');
 
       // Wait for: execute → verify → fail → replan → re-execute → verify → pass
-      await new Promise((resolve) => setTimeout(resolve, 15000));
+      await vi.advanceTimersByTimeAsync(15000);
 
       expect(states).toContain('replanning');
       expect(mockVerifierInstance.verifyPhase).toHaveBeenCalledTimes(2);
@@ -1195,7 +1208,7 @@ describe('OrchestratorLoop', () => {
       mockPlannerInstance.generatePlan.mockResolvedValue(plan);
       await loop.start('Goal');
 
-      await new Promise((resolve) => setTimeout(resolve, 8000));
+      await vi.advanceTimersByTimeAsync(8000);
 
       expect(loop.state).toBe('failed');
       expect(loop.getStats().phasesFailed).toBeGreaterThanOrEqual(1);
@@ -1234,7 +1247,7 @@ describe('OrchestratorLoop', () => {
       await loop.start('Goal');
 
       // Wait for both phases: 2 × (2s poll + 1s post-phase delay) + buffer
-      await new Promise((resolve) => setTimeout(resolve, 12000));
+      await vi.advanceTimersByTimeAsync(12000);
 
       expect(phasesStarted).toContain('phase-1');
       expect(phasesStarted).toContain('phase-2');
@@ -1268,7 +1281,7 @@ describe('OrchestratorLoop', () => {
       await loop.start('Goal');
 
       // Wait for both phases + compact delay
-      await new Promise((resolve) => setTimeout(resolve, 14000));
+      await vi.advanceTimersByTimeAsync(14000);
 
       // writeViaMux('/compact') should have been called between phases
       expect(mockSession.writeViaMux).toHaveBeenCalledWith('/compact', { opencodeGuard: true });
@@ -1458,7 +1471,7 @@ describe('OrchestratorLoop', () => {
       await loop.start('Goal');
 
       // Wait for the error to propagate
-      await new Promise((resolve) => setTimeout(resolve, 3000));
+      await vi.advanceTimersByTimeAsync(3000);
 
       // Phase should have failed or be retrying
       const phase = loop.getPlan()!.phases[0];
@@ -1502,7 +1515,7 @@ describe('OrchestratorLoop', () => {
       await loop.start('Goal');
 
       // Wait for poll + verification attempt + 10s session wait + fallback
-      await new Promise((resolve) => setTimeout(resolve, 18000));
+      await vi.advanceTimersByTimeAsync(18000);
 
       // Should still complete (skip verification when no sessions)
       expect(loop.state).toBe('completed');
@@ -1568,7 +1581,7 @@ describe('OrchestratorLoop', () => {
       mockPlannerInstance.generatePlan.mockResolvedValue(plan);
       await loop.start('Goal');
 
-      await new Promise((resolve) => setTimeout(resolve, 6000));
+      await vi.advanceTimersByTimeAsync(6000);
 
       expect(completedPhases).toContain('phase-1');
     });
@@ -1599,7 +1612,7 @@ describe('OrchestratorLoop', () => {
       mockPlannerInstance.generatePlan.mockResolvedValue(plan);
       await loop.start('Goal');
 
-      await new Promise((resolve) => setTimeout(resolve, 8000));
+      await vi.advanceTimersByTimeAsync(8000);
 
       expect(loop.state).toBe('failed');
       expect(failedPhases.length).toBeGreaterThanOrEqual(1);

@@ -85,9 +85,12 @@ def component_proof(request):
 if __name__ == '__main__':
     import sys
     if sys.argv[1:] == ['--component-proof']:
-        result = component_proof(json.load(sys.stdin))
+        handle = component_proof
     elif not sys.argv[1:]:
-        result = forward(json.load(sys.stdin))
+        handle = forward
     else:
         raise ValueError('Unknown offline fixture mode')
+    request = json.load(sys.stdin)
+    # A list is answered with a list, so one interpreter serves many cases; each call stands alone.
+    result = [handle(each) for each in request] if isinstance(request, list) else handle(request)
     print(json.dumps(result, sort_keys=True))

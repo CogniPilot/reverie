@@ -14,6 +14,7 @@ pub mod git;
 pub mod github;
 pub mod mint;
 pub mod packet;
+pub mod pull;
 pub mod record;
 pub mod verify;
 
