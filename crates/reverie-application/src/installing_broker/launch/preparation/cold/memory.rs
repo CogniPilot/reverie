@@ -24,6 +24,7 @@ impl ColdBody<'_> {
             .as_ref()
             .expect("actual start ACK");
         let configured = self.broker().configure_controller_member(
+            source.configuration(),
             &self.creation.as_ref().expect("actual creation").created,
             started,
             &connection,

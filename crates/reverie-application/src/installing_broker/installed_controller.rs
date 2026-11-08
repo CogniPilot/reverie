@@ -35,11 +35,18 @@ impl std::error::Error for ControllerInstallFailure {}
 impl InstallingBroker {
     pub(in crate::installing_broker) fn configure_controller_member(
         &self,
+        source: &reverie_contracts::worker_config::EffectiveWorkerConfig,
         created: &CreatedLaptop,
         started: &StartedContainer,
         connection: &WorkerLaunchConnection,
         end: Instant,
     ) -> Result<Option<ControllerMemberConfigured>, PoolError> {
+        if reverie_contracts::worker_pool::WorkerPoolProvider::from_config(source)
+            .map_err(|_| PoolError::Refused("WORKER_POOL_PROVIDER_INVALID"))?
+            .is_none()
+        {
+            return Ok(None);
+        }
         let mut slot = self
             .controller
             .try_lock()

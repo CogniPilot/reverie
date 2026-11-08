@@ -6,6 +6,17 @@ use reverie_host::worker_laptop::{
 };
 impl<'a> ColdBody<'a> {
     pub(super) fn start_body(&mut self) -> Result<Arc<StartedLaptop>, ColdError> {
+        let source = self.broker().configuration()?;
+        if reverie_contracts::worker_pool::WorkerPoolProvider::from_config(source.configuration())
+            .map_err(|_| ColdError::Refused("WORKER_POOL_PROVIDER_INVALID"))?
+            .is_some()
+        {
+            // A parsed policy or an installed controller is not the missing
+            // fleet maintenance/admission owner. Never fall back to legacy.
+            return Err(ColdError::Refused(
+                "WORKER_POOL_PROVIDER_MAINTENANCE_REQUIRED",
+            ));
+        }
         let network = self.network();
         let connection = self.scope.preparing.admitted.request.connection.clone();
         // Complete late argv and the mandatory same-runtime telemetry check
