@@ -195,12 +195,7 @@ export interface OwnerRegistrationIdentity {
   readonly sessionEpoch: number;
 }
 
-const RegistrationAccountSchema = z.object({
-  version: z.literal(1),
-  accountId: z.string().uuid().optional(),
-  epoch: z.number().int().positive(),
-  mustChange: z.literal(false),
-});
+const RegistrationAccountSchema = MessageOwnerAccountSchema.extend({ accountId: z.string().uuid().optional() });
 
 export class OwnerAuthService {
   private readonly sessions = new Map<string, Session>();

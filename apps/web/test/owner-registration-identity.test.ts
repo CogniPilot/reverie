@@ -152,3 +152,13 @@ it('refuses an account incarnation substitution even when username and epoch are
   await expect(auth.enrollRegistrationIdentity(primary)).rejects.toThrow();
   expect(store.readCurrent()!.accountId).not.toBe(original.accountId);
 });
+
+it('refuses malformed credential fields in valid current JSON without using a session cache', async () => {
+  const current = JSON.parse(await readFile(store.file, 'utf8'));
+  current.password.hash = 'not-a-password-hash';
+  const raw = JSON.stringify(current);
+  await writeFile(store.file, raw);
+  expect(() => auth.registrationIdentity(primary)).toThrow();
+  await expect(auth.enrollRegistrationIdentity(primary)).rejects.toThrow();
+  expect(await readFile(store.file, 'utf8')).toBe(raw);
+});
