@@ -19,6 +19,7 @@ struct ProgramDocument {
     version: u32,
     purpose: String,
     executable: String,
+    #[serde(rename = "executableSHA256")]
     executable_sha256: String,
     bytes: u64,
 }
@@ -60,7 +61,13 @@ impl BrokerProgramData {
         ProgramDocument {
             version: 1,
             purpose: PROGRAM_PURPOSE.into(),
-            executable: self.code.path.scalar_text().expect("scalar path"),
+            executable: self
+                .code
+                .path
+                .as_text_ref()
+                .scalar_text()
+                .expect("validated scalar program path")
+                .into_owned(),
             executable_sha256: self.code.sha256.as_str().into(),
             bytes: self.code.bytes,
         }

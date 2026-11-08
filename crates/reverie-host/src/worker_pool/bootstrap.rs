@@ -180,6 +180,11 @@ impl BrokerBootstrapBinding {
             Arc::ptr_eq(&self.engine, runtime.installed_engine()),
             "WORKER_POOL_BROKER_RUNTIME_CHANGED",
         )?;
+        let ids = runtime.worker_identity().ids();
+        need(
+            ids.uid() == native::uid() && ids.gid() == nix::unistd::getgid().as_raw(),
+            "WORKER_POOL_NATIVE_BROKER_IDS",
+        )?;
         self.pidfd_live()?;
         let program = self
             .program
