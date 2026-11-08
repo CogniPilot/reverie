@@ -72,7 +72,12 @@ impl Case {
             .as_mut()
             .unwrap()
             .use_kernel_fixture_for_test(&kernel, &broker.storage.runtime);
-        let mut row = json!({"Id":"c".repeat(64),"Name":format!("/fixture-agent-{SID}"),"Image":format!("sha256:{}","a".repeat(64)),"Config":{"Labels":{"reverie.worker":"fixture","reverie.session":SID,"reverie.employee":EID,"reverie.worker-policy":worker_config::policy_digest(&marker_config).to_hex()}},"State":{"Running":false,"Pid":0},"Mounts":[],"HostConfig":{"Memory":536870912u64,"MemorySwap":536870912u64,"PidsLimit":128,"NanoCpus":0}});
+        let effective = crate::resource_staging::effective_config(
+            broker.configuration().unwrap().configuration().clone(),
+            &ProfileSessionId::parse(SID).unwrap(),
+        )
+        .unwrap();
+        let mut row = json!({"Id":"c".repeat(64),"Name":format!("/fixture-agent-{SID}"),"Image":format!("sha256:{}","a".repeat(64)),"Config":{"Labels":{"reverie.worker":"fixture","reverie.session":SID,"reverie.employee":EID,"reverie.worker-policy":worker_config::policy_digest(&effective).to_hex()}},"State":{"Running":false,"Pid":0},"Mounts":[],"HostConfig":{"Memory":536870912u64,"MemorySwap":536870912u64,"PidsLimit":128,"NanoCpus":0}});
         tree.write("ram-row.out", &serde_json::to_vec(&row).unwrap());
         row["State"] = json!({"Running":false,"Pid":0,"Status":"exited","StartedAt":"2026-11-07T00:00:00Z","Paused":false,"Restarting":false,"Dead":false});
         tree.write("ram-stopped.out", &serde_json::to_vec(&row).unwrap());
