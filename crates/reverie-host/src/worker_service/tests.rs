@@ -493,3 +493,13 @@ fn write_owned_test(path: &Path, bytes: &[u8]) {
     file.sync_all().unwrap();
     native::close(file).unwrap();
 }
+#[test]
+fn effective_unit_dropins_cannot_hide_behind_unchanged_packaged_fragment() {
+    let unchanged = "LoadState=loaded\nActiveState=inactive\nSubState=dead\nFragmentPath=/nix/store/known/unit\nDropInPaths=\n";
+    assert!(ObservedUnit::decode(unchanged).is_ok());
+    let overridden = unchanged.replace(
+        "DropInPaths=\n",
+        "DropInPaths=/owner/.config/systemd/user/reverie-worker-broker.service.d/override.conf\n",
+    );
+    assert!(ObservedUnit::decode(&overridden).is_err());
+}
