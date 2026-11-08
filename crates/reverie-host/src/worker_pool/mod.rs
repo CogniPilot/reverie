@@ -1,6 +1,7 @@
 //! Docker-controller cgroup ownership. Public policy/anchor values are data;
 //! the installed witness retains the actual opened kernel directory. This is
 //! not a Gate, storage lease, stop receipt or global shutdown acknowledgement.
+mod controller_limits;
 mod directory;
 mod engine;
 mod namespace;

@@ -18,6 +18,13 @@ identity rather than requiring access to another UID's root/exe/ns symlinks.
 The root-peer Engine must independently attest the same controller CID/PID,
 image, namespace configuration, confinement and exact binds.
 
+Its own fixed outside contribution is bounded separately: 256MiB hard RAM,
+zero swap, 128 tasks, no CPU quota and the policy CPU set. Current policy checks
+join Engine declarations to the same controller PID/start and actual cgroup2
+scope limits before and after policy observation. Kernel CPU ranges are compared
+as sets. This does not account for website/recovery reserves or establish
+aggregate host headroom or parent-once admission.
+
 Only a nonsecret immutable policy-version directory is mounted read-only.
 `~/reverie` remains private0700; `worker-pool/policies` is brokerUID:GID0750,
 with immutable `<sha256>.json` files0440. Neither broker credentials nor its

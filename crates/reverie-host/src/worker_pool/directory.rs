@@ -297,7 +297,7 @@ fn identity(file: &File) -> Result<(u64, u64)> {
     )?;
     Ok((metadata.dev(), metadata.ino()))
 }
-fn read_at(parent: &File, name: &str) -> Result<String> {
+pub(super) fn read_at(parent: &File, name: &str) -> Result<String> {
     let file = native::open_at(
         parent.as_raw_fd(),
         OsStr::new(name),
@@ -337,7 +337,7 @@ fn write_at(parent: &File, name: &str, value: &[u8]) -> Result<()> {
         .and_then(|count| need(count == value.len(), "WORKER_POOL_WRITE_PARTIAL"));
     finalized(result, native::close(file).map_err(Into::into))
 }
-fn parse_cpus(raw: &str) -> Result<Vec<u32>> {
+pub(super) fn parse_cpus(raw: &str) -> Result<Vec<u32>> {
     let mut cpus = Vec::new();
     for part in raw.split(',') {
         let (start, end) = part.split_once('-').unwrap_or((part, part));
