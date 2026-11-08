@@ -1,6 +1,7 @@
 //! Linux host observations and owned resources. Neither grants owner or
 //! admission authority; installing services own their actual effect boundaries.
 pub mod broker_engine;
+pub mod broker_listener;
 mod captured_client;
 pub mod command_telemetry;
 pub mod creation_budget;

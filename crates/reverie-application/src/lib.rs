@@ -1,6 +1,7 @@
 //! Application workflows over the same contracts, stores and native adapters.
 //! Callers retain owner authorization, whole worker-domain validation and native
 //! admission/effect custody. Returned candidates do not establish those powers.
+pub mod broker_service;
 pub mod installing_broker;
 pub mod memory_import;
 pub mod memory_lifecycle;
