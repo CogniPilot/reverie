@@ -172,6 +172,7 @@ impl std::error::Error for PoolPolicyError {}
 
 #[cfg(test)]
 mod tests {
+    mod provider;
     use super::*;
 
     pub(super) fn policy() -> WorkerPoolPolicy {
