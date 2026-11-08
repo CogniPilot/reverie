@@ -1,8 +1,8 @@
 //! Image-only offline maintenance DATA. These values grant no filesystem,
 //! engine, admission, service or human-owner operation authority.
+mod deployment;
 mod pin;
 mod transition;
-mod deployment;
 pub use deployment::DeploymentCompanyData;
 pub use pin::WorkerImageId;
 use std::fmt;
