@@ -10,6 +10,10 @@ name = "reverie-resource-history"
 path = "src/bin/reverie-resource-history.rs"
 
 [[bin]]
+name = "reverie-prune-receipts"
+path = "src/bin/reverie-prune-receipts.rs"
+
+[[bin]]
 name = "reverie-collect"
 path = "src/bin/reverie-collect.rs"
 
