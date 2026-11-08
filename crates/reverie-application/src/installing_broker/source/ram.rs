@@ -40,8 +40,16 @@ impl std::fmt::Debug for RamSourceDraftFailure {
                 "policy",
                 &self.policy.as_ref().map(RamMigrationPolicy::digest),
             );
-        if let RamSourceCause::Restore { primary, secondary } = &self.cause {
-            debug.field("primary", primary).field("cleanup", secondary);
+        match &self.cause {
+            RamSourceCause::Source(cause) => {
+                debug.field("cause", cause);
+            }
+            RamSourceCause::Retention(owner) => {
+                debug.field("retention", owner);
+            }
+            RamSourceCause::Restore { primary, secondary } => {
+                debug.field("primary", primary).field("cleanup", secondary);
+            }
         }
         debug.finish_non_exhaustive()
     }

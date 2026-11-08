@@ -7,7 +7,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 mod claim;
 mod preview;
 mod receipt;
-pub use claim::{ClaimedRamOperation, RamClaimFailure};
+pub use claim::{ClaimedRamOperation, RamClaimFailure, RamPreparationFailure};
 pub use receipt::{CommittedRamFailure, CommittedRamOperation};
 
 #[must_use = "move the whole actual Q owner with the operation; do not reconstruct from IDs"]
