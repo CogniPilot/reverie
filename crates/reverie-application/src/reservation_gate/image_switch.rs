@@ -5,7 +5,7 @@ use reverie_contracts::reservation_engine::StoppedFlag;
 impl Inner {
     /// Read under the original actual R admission. The public offline owner
     /// must separately retain its registered-service interlock and image proof.
-    pub(super) fn image_idle(&self) -> Result<ObservedInventory> {
+    pub(super) fn image_idle(self: &Arc<Self>) -> Result<ObservedInventory> {
         self.held(None)?;
         self.require_host_job_idle()?;
         need(
