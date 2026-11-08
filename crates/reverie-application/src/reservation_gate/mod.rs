@@ -34,6 +34,7 @@ pub use preparation_stop::SourceStopFacts;
 mod profile_selection;
 mod ram_authority;
 mod ram_claim;
+mod ram_journal;
 pub(crate) use ram_claim::{EnteredRamDraft, RamDraftRetentionFailure};
 mod ram_preview;
 pub use ram_preview::RamDraftPreview;

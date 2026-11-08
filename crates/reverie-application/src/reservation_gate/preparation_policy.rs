@@ -32,7 +32,7 @@ impl RetainedPreparation {
             "RESOURCE_PREPARATION_ACK_CONTEXT_REQUIRED",
         ))?;
         need(
-            self.store.is_some()
+            self.journal_available()
                 && phase.published
                 && phase.installed
                 && self.live.load(Ordering::Acquire),
@@ -54,18 +54,11 @@ impl RetainedPreparation {
             need(slot.is_none(), "RESOURCE_PREPARATION_ACK_CONTEXT_REQUIRED")?;
             *slot = Some(fence.clone());
         }
-        let result = self
-            .store
-            .as_ref()
-            .expect("live retained store")
-            .record_ack(
-                &gate.scope,
-                &self.handle,
+        let result = self.journal_record_ack(
                 reverie_core::operations::Effect::Prepare,
                 record.digest().clone(),
                 self.view.record().data().version,
-            )
-            .map_err(Into::into);
+            );
         let closed = match active.policy_ack.lock() {
             Ok(mut slot) => {
                 let owned = slot
@@ -103,7 +96,7 @@ impl RetainedPreparation {
         };
         validate_bound_policy(&phase.binding, expected)?;
         need(
-            self.store.is_some(),
+            self.journal_available(),
             "RESOURCE_PREPARATION_ACTIVE_HANDLE_REQUIRED",
         )
     }

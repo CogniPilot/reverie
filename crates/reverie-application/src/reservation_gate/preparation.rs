@@ -23,7 +23,9 @@ pub struct RetainedPreparation {
     pub(super) draft: reverie_contracts::reservation_draft::DraftRecord,
     pub(super) gate: Arc<Inner>,
     pub(super) store: Option<OperationStore>,
-    pub(super) handle: OperationHandle,
+    pub(super) handle: Option<OperationHandle>,
+    pub(super) scope_guard: Option<Arc<super::guard::InstalledGuard>>,
+    pub(super) ram_journal: Option<super::ram_journal::SharedJournal>,
     pub(super) view: OperationView,
     pub(super) terminal: TerminalClaim,
     before: EffectiveWorkerConfig,
@@ -46,11 +48,19 @@ impl RetainedPreparation {
             .ram_authority
             .as_ref()
             .map_or_else(AdmissionBounds::default, |authority| authority.bounds());
-        let admission = self.gate.admit(bounds)?;
+        let mut admission = self.gate.admit(bounds)?;
         if let Some(authority) = &self.ram_authority
             && let Err(error) = admission.bind_ram_authority(authority)
         {
             return admission.conclude(Err(error));
+        }
+        if let Some(journal) = &self.ram_journal {
+            let resumed = (|| {
+                admission.retain_ram_journal(self, journal.clone())?;
+                journal.lock().map_err(|_| GateError::Refused("RAM_JOURNAL_UNAVAILABLE"))?
+                    .resume(super::guard::installed(&self.gate))
+            })();
+            if let Err(error) = resumed { return admission.conclude(Err(error)); }
         }
         Ok(admission)
     }
@@ -64,7 +74,7 @@ impl RetainedPreparation {
         &self.view
     }
     pub fn operation_id(&self) -> &JournalId {
-        self.handle.operation_id()
+        &self.view.record().data().id
     }
     pub fn scope(&self) -> &OperationScope {
         &self.gate.scope
@@ -88,6 +98,9 @@ impl RetainedPreparation {
     }
     pub(super) fn close_owned(&mut self) -> Result<()> {
         self.live.store(false, std::sync::atomic::Ordering::Release);
+        if let Some(journal) = &self.ram_journal {
+            return journal.lock().map_err(|_| GateError::Refused("RAM_JOURNAL_UNAVAILABLE"))?.close_component();
+        }
         match self.store.take() {
             Some(store) => store.close().map_err(Into::into),
             None => Ok(()),
@@ -175,7 +188,9 @@ impl ReservationGate {
             draft,
             gate: self.inner.clone(),
             store: Some(context.store),
-            handle: context.handle.expect("checked handle"),
+            handle: context.handle,
+            scope_guard: Some(context.scope_guard),
+            ram_journal: None,
             view: context.view,
             terminal: context.terminal,
             before,

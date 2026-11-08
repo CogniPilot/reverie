@@ -1,5 +1,5 @@
 use super::*;
-struct InstalledGuard {
+pub(super) struct InstalledGuard {
     gate: Weak<Inner>,
     purpose: JournalPurpose,
 }
@@ -11,7 +11,7 @@ enum JournalPurpose {
     },
     Unavailable,
 }
-pub(super) fn installed(gate: &Arc<Inner>) -> Arc<dyn ScopeGuard> {
+pub(super) fn installed(gate: &Arc<Inner>) -> Arc<InstalledGuard> {
     let purpose =
         match gate.state.lock() {
             Ok(state) => match state.active.as_ref() {
@@ -33,9 +33,41 @@ pub(super) fn installed(gate: &Arc<Inner>) -> Arc<dyn ScopeGuard> {
         purpose,
     })
 }
+impl reverie_store::operations::RamClaimScope for InstalledGuard {
+    fn assert_ram_claim_scope(&self, scope: &OperationScope) -> std::result::Result<(), JournalError> {
+        let checked = (|| {
+            need(matches!(&self.purpose, JournalPurpose::Ram { .. }), "RESOURCE_RAM_JOURNAL_PURPOSE_CHANGED")?;
+            let gate = self.gate.upgrade().ok_or(GateError::Refused("RESERVATION_ADMISSION_LOCK_REQUIRED"))?;
+            self.assert_purpose(&gate, scope)
+        })();
+        checked.map_err(|error| JournalError::guard_failure(error.code(), error))
+    }
+    fn assert_ram_claim_successor(&self, prior: &Self, scope: &OperationScope) -> std::result::Result<(), JournalError> {
+        let checked = (|| {
+            let (
+                JournalPurpose::Ram { authority: next, active: next_active },
+                JournalPurpose::Ram { authority: old, active: old_active },
+            ) = (&self.purpose, &prior.purpose) else {
+                return Err(GateError::Refused("RESOURCE_RAM_JOURNAL_PURPOSE_CHANGED"));
+            };
+            need(Weak::ptr_eq(&self.gate, &prior.gate) && Weak::ptr_eq(next, old)
+                && !Weak::ptr_eq(next_active, old_active), "RESOURCE_RAM_JOURNAL_PURPOSE_CHANGED")?;
+            let gate = self.gate.upgrade().ok_or(GateError::Refused("RESERVATION_ADMISSION_LOCK_REQUIRED"))?;
+            let active = gate.held(Some(scope))?;
+            need(next_active.upgrade().is_some_and(|own| Arc::ptr_eq(&own, &active)), "RESOURCE_RAM_JOURNAL_PURPOSE_CHANGED")
+        })();
+        checked.map_err(|error| JournalError::guard_failure(error.code(), error))
+    }
+}
 impl InstalledGuard {
     fn assert_purpose(&self, gate: &Arc<Inner>, scope: &OperationScope) -> Result<()> {
-        let active = gate.held(Some(scope))?;
+        let active = match gate.held(Some(scope)) {
+            Ok(active) => active,
+            // Preserve ordinary guard failure ordering: the original full
+            // guard below remains responsible for its missing/wrong scope.
+            Err(_) if matches!(&self.purpose, JournalPurpose::Ordinary) => return Ok(()),
+            Err(error) => return Err(error),
+        };
         if let JournalPurpose::Ram {
             active: original, ..
         } = &self.purpose
@@ -90,7 +122,9 @@ impl ScopeGuard for InstalledGuard {
             .gate
             .upgrade()
             .ok_or_else(|| JournalError::refusal("RESERVATION_ADMISSION_LOCK_REQUIRED"))?;
-        self.assert_purpose(&gate, scope)
+        gate.held(Some(scope))
+            .map(|_| ())
+            .and_then(|()| self.assert_purpose(&gate, scope))
             .map_err(|error| JournalError::guard_failure(error.code(), error))
     }
 }

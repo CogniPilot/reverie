@@ -68,7 +68,7 @@ impl RetainedPreparation {
     /// closes the retained store and keeps the existing durable reservation.
     pub fn begin_native_start(&mut self) -> Result<ProtectedStartIntent> {
         need(
-            self.store.is_some() && self.live.load(Ordering::Acquire),
+            self.journal_available() && self.live.load(Ordering::Acquire),
             "RESOURCE_PREPARATION_ACTIVE_HANDLE_REQUIRED",
         )?;
         need(
@@ -99,13 +99,7 @@ impl RetainedPreparation {
             // Preserve original precedence: failed probe does not latch an
             // attempted journal effect, while every actual effect is one-shot.
             self.start_attempted = true;
-            self.view = self
-                .store
-                .as_ref()
-                .expect("live retained store")
-                .begin_effect(
-                    &gate.scope,
-                    &self.handle,
+            self.view = self.journal_begin_effect(
                     Effect::Start,
                     self.view.record().data().version,
                 )?;
@@ -170,7 +164,7 @@ impl RetainedPreparation {
     }
     fn assert_start_phase(&self, state: OperationState, version: u64) -> Result<()> {
         need(
-            self.store.is_some()
+            self.journal_available()
                 && self.live.load(Ordering::Acquire)
                 && self.view.record().data().state == state
                 && self.view.record().data().version.get() == version,

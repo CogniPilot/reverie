@@ -132,7 +132,7 @@ impl CommittedPolicy {
         need(
             Arc::ptr_eq(&gate.inner, &claim.gate)
                 && self.operation_id() == claim.operation_id()
-                && claim.store.is_some()
+                && claim.journal_available()
                 && self.owner.upgrade().is_some_and(|owner| {
                     Arc::ptr_eq(&owner, &claim.live) && owner.load(Ordering::Acquire)
                 })
@@ -203,7 +203,7 @@ impl RetainedPreparation {
             .map_err(crate::resource_staging::ResourceServiceError::from)?
             .to_hex();
         need(
-            self.store.is_some()
+            self.journal_available()
                 && self.live.load(Ordering::Acquire)
                 && employee_id == self.profile().binding().employee()
                 && *draft_id == self.draft.id()

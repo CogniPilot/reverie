@@ -62,7 +62,7 @@ impl RetainedPreparation {
         policy: Option<&RamMigrationPolicy>,
     ) -> Result<StagedPreparation> {
         need(
-            self.store.is_some(),
+            self.journal_available(),
             "RESOURCE_PREPARATION_ACTIVE_HANDLE_REQUIRED",
         )?;
         need(self.published, "RESOURCE_PREPARATION_PUBLICATION_REQUIRED")?;

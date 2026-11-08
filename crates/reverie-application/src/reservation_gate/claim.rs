@@ -32,6 +32,7 @@ pub(super) struct ClaimedContext {
     pub(super) handle: Option<OperationHandle>,
     pub(super) terminal: TerminalClaim,
     pub(super) store: OperationStore,
+    pub(super) scope_guard: Arc<super::guard::InstalledGuard>,
 }
 impl CapacityObserver for ClaimCapacity {
     fn observe(
@@ -137,7 +138,7 @@ impl Inner {
             approved: profile.clone(),
             native: Mutex::new(None),
         });
-        let store = self.claim_store(capacity.clone())?;
+        let (store, scope_guard) = self.claim_store(capacity.clone())?;
         let result = (|| {
             let request = match draft {
                 Some(record) => record.request()?,
@@ -175,16 +176,19 @@ impl Inner {
                 handle,
                 terminal,
                 store,
+                scope_guard,
             }),
             Err(error) => finalized(Err(error), store.close().map_err(Into::into)),
         }
     }
-    fn claim_store(self: &Arc<Self>, observer: Arc<ClaimCapacity>) -> Result<OperationStore> {
-        Ok(OperationStore::open(
+    fn claim_store(self: &Arc<Self>, observer: Arc<ClaimCapacity>) -> Result<(OperationStore, Arc<super::guard::InstalledGuard>)> {
+        let scope_guard = super::guard::installed(self);
+        let store = OperationStore::open(
             reservation_control::operation_directory(self.config()?.as_ref())?,
-            super::guard::installed(self),
+            scope_guard.clone(),
             Some(observer),
-        )?)
+        )?;
+        Ok((store, scope_guard))
     }
     pub(super) fn observe_claim(
         &self,

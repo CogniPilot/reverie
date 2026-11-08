@@ -25,7 +25,7 @@ impl RetainedPreparation {
         policy: Option<&reverie_contracts::ram_migration::RamMigrationPolicy>,
     ) -> Result<CommittedPolicy> {
         need(
-            self.store.is_some(),
+            self.journal_available(),
             "RESOURCE_PREPARATION_ACTIVE_HANDLE_REQUIRED",
         )?;
         need(self.published, "RESOURCE_PREPARATION_PUBLICATION_REQUIRED")?;

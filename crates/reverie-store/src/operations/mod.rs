@@ -6,6 +6,8 @@ mod confirmation;
 mod draft;
 mod error;
 mod io;
+mod ram_claim;
+pub use ram_claim::{RamClaimJournal, RamClaimJournalFailure, RamClaimScope, SuspendedRamClaimJournal};
 mod terminal;
 mod transition;
 use crate::private_fs::{self, CloseRole, Directory, Stamp};

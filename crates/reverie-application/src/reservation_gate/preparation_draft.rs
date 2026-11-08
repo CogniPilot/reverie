@@ -60,6 +60,7 @@ impl EnteredResourceDraft<'_> {
         Box<super::ram_claim::RamDraftRetentionFailure>,
     > {
         use super::ram_claim::{RamDraftRetentionFailure, RamPartialClaim};
+        let mut admission = self.admission;
         let mut claimed = false;
         let result = self.gate.inner.claim_reservation(
             &self.draft.key(),
@@ -75,7 +76,7 @@ impl EnteredResourceDraft<'_> {
         let context = match result {
             Ok(context) => context,
             Err(cause) => {
-                let cause = self.admission.conclude::<()>(Err(cause)).unwrap_err();
+                let cause = admission.conclude::<()>(Err(cause)).unwrap_err();
                 return Err(Box::new(RamDraftRetentionFailure {
                     may_have_claimed: claimed || journal_uncertain(&cause),
                     cause,
@@ -88,7 +89,7 @@ impl EnteredResourceDraft<'_> {
         let captured = match self.gate.capture_preparation_context(&context) {
             Ok(captured) => captured,
             Err(cause) => {
-                let cause = self.admission.conclude::<()>(Err(cause)).unwrap_err();
+                let cause = admission.conclude::<()>(Err(cause)).unwrap_err();
                 return Err(Box::new(RamDraftRetentionFailure {
                     cause,
                     may_have_claimed: true,
@@ -102,7 +103,11 @@ impl EnteredResourceDraft<'_> {
             .gate
             .retained_preparation(context, self.draft, captured);
         claim.ram_authority = Some(journal.clone());
-        match self.admission.finish_claim(&claim.terminal) {
+        if let Err(cause) = claim.install_ram_journal(&mut admission) {
+            let cause = admission.conclude::<()>(Err(cause)).unwrap_err();
+            return Err(Box::new(RamDraftRetentionFailure { cause, may_have_claimed: true, policy, journal, partial: RamPartialClaim::Preparation(Box::new(claim)) }));
+        }
+        match admission.finish_claim(&claim.terminal) {
             Ok(()) => Ok((claim, policy)),
             Err(cause) => Err(Box::new(RamDraftRetentionFailure {
                 cause,
@@ -197,6 +202,7 @@ impl EnteredResourceDraft<'_> {
 fn journal_uncertain(error: &GateError) -> bool {
     match error {
         GateError::Journal(error) => error.is_uncertain(),
+        GateError::SharedJournal(error) => error.is_uncertain(),
         GateError::ClaimUncertain { .. } => true,
         GateError::Finalization { primary, secondary } => {
             journal_uncertain(primary) || journal_uncertain(secondary)

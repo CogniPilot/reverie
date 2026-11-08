@@ -86,6 +86,7 @@ pub(super) fn gate_close_unknown(error: &GateError) -> bool {
         GateError::Actor(error) => error.has_unconfirmed_close(),
         GateError::Profile(error) => error.has_unconfirmed_close(),
         GateError::Journal(error) => journal_close_unknown(error),
+        GateError::SharedJournal(error) => journal_close_unknown(error),
         GateError::Observer(error) => error.has_unconfirmed_close(),
         GateError::Identity(error) => error.has_unconfirmed_close(),
         GateError::Control(error) => error.has_unconfirmed_close(),

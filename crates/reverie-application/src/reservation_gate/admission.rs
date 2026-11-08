@@ -23,6 +23,7 @@ pub(super) struct Admission {
     gate: Arc<Inner>,
     active: Arc<Active>,
     finished: bool,
+    ram_journal: Option<super::ram_journal::SharedJournal>,
     _thread: std::marker::PhantomData<std::rc::Rc<()>>,
 }
 pub(super) struct Entering {
@@ -182,6 +183,23 @@ impl Inner {
     }
 }
 impl Admission {
+    pub(super) fn retain_ram_journal(
+        &mut self,
+        claim: &RetainedPreparation,
+        journal: super::ram_journal::SharedJournal,
+    ) -> Result<()> {
+        need(
+            self.ram_journal.is_none() && Arc::ptr_eq(&self.gate, &claim.gate)
+                && claim.ram_journal.as_ref().is_some_and(|own| Arc::ptr_eq(own, &journal))
+                && claim.ram_authority.as_ref().is_some_and(|authority| {
+                    self.active.ram_authority.lock().is_ok_and(|selected| selected.as_ref()
+                        .is_some_and(|own| Weak::ptr_eq(own, &Arc::downgrade(authority))))
+                }),
+            "RAM_JOURNAL_ADMISSION_CHANGED",
+        )?;
+        self.ram_journal = Some(journal);
+        Ok(())
+    }
     pub(super) fn bind_ram_authority(
         &self,
         authority: &Arc<super::ram_authority::RamJournalAuthority>,
@@ -276,6 +294,9 @@ impl Admission {
         finalized(result, self.cleanup())
     }
     fn cleanup(&self) -> Result<()> {
+        let suspended = self.ram_journal.as_ref().map_or(Ok(()), |journal| {
+            journal.try_lock().map_err(|_| GateError::Refused("RAM_JOURNAL_UNAVAILABLE"))?.suspend()
+        });
         // Revoke this exact journal purpose before any fallible native close.
         // Escaped store guards cannot borrow the next admission's authority.
         let revoked = self.revoke_ram_authority();
@@ -302,7 +323,7 @@ impl Admission {
             }
         };
         self.gate.changed.notify_all();
-        finalized(revoked, finalized(closed, released))
+        finalized(suspended, finalized(revoked, finalized(closed, released)))
     }
 }
 impl Entry {
@@ -350,6 +371,7 @@ impl Entry {
             gate: self.gate.clone(),
             active,
             finished: false,
+            ram_journal: None,
             _thread: std::marker::PhantomData,
         })
     }

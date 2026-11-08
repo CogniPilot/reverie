@@ -30,7 +30,7 @@ pub struct PreparationIntentFacts {
 impl RetainedPreparation {
     fn require_live(&self) -> Result<()> {
         need(
-            self.store.is_some(),
+            self.journal_available(),
             "RESOURCE_PREPARATION_ACTIVE_HANDLE_REQUIRED",
         )
     }
@@ -75,10 +75,7 @@ impl RetainedPreparation {
             observed.canonical_bytes() == self.terminal.observed.canonical_bytes(),
             "RESOURCE_PREPARATION_SOURCE_CHANGED",
         )?;
-        let store = self.store.as_ref().expect("live retained store");
-        self.view = store.begin_effect(
-            &self.gate.scope,
-            &self.handle,
+        self.view = self.journal_begin_effect(
             Effect::Prepare,
             self.view.record().data().version,
         )?;
@@ -92,7 +89,7 @@ impl RetainedPreparation {
         let signature =
             reservation_control::publish_publication(self.gate.config()?.as_ref(), &receipt)?;
         self.publication = Some(PublicationBoundary { receipt, signature });
-        store.confirm_preparation(&self.gate.scope, &self.view)?;
+        self.journal_confirm_preparation()?;
         Ok(())
     }
     /// Observe the normal server's exact intended rebind. This does not perform
@@ -125,7 +122,7 @@ impl Inner {
         phase: PublicationPhase,
     ) -> Result<()> {
         need(
-            Arc::ptr_eq(self, &claim.gate) && claim.store.is_some(),
+            Arc::ptr_eq(self, &claim.gate) && claim.journal_available(),
             "RESOURCE_PREPARATION_BOUNDARY_REQUIRED",
         )?;
         let boundary = claim
