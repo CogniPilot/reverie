@@ -1,8 +1,8 @@
 { pkgs, src }:
 # The four console-free host tools, built in one cargo invocation so reverie-host and its closure
 # compile once for all of them. Each tool's own nix file links its binary from here. They resolve
-# the same features alone as together (reverie-host carries the lease tool's nix "signal"), so
-# sharing the build changes no binary.
+# the same features alone as together: reverie-host carries the lease tool's nix "signal", so the
+# other tools now also compile nix's signal and process modules.
 let
   # Only these packages' crate closure, so an unrelated change keeps the cached build.
   workspace = import ./rust-workspace-source.nix {
