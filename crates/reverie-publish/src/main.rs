@@ -91,7 +91,8 @@ struct NewPr {
     /// contain its current tip.
     #[arg(long, default_value = "main")]
     base_branch: String,
-    /// Where to fetch and push; defaults to https://github.com/OWNER/NAME.git.
+    /// Where to fetch and push; defaults to https://github.com/OWNER/NAME.git. Only that URL is
+    /// ever given the token; a local path or file:// URL (for tests) is pushed without it.
     #[arg(long)]
     remote_url: Option<String>,
     /// Directory for the intent, push result and PR readback records.
@@ -185,14 +186,30 @@ fn check(o: &Check) -> Result<Value, String> {
     .summary)
 }
 
+/// Where to fetch and push, and whether the token may be used there: only the approved
+/// repository's GitHub URL is given credentials. A local path or file:// URL is accepted without
+/// them; any other URL is refused, so the token never goes to an unapproved destination.
+fn remote(remote_url: Option<&str>, repo: &str) -> Result<(String, bool), String> {
+    let approved = format!("https://github.com/{repo}.git");
+    match remote_url {
+        None => Ok((approved, true)),
+        Some(url) if url == approved => Ok((approved, true)),
+        Some(url)
+            if url.starts_with("file:///") || (url.starts_with('/') && !url.contains("::")) =>
+        {
+            Ok((url.to_owned(), false))
+        }
+        Some(url) => Err(format!(
+            "--remote-url {url} is neither {approved} nor a local path; the token is never sent elsewhere"
+        )),
+    }
+}
+
 fn new_pr(o: &NewPr) -> Result<Value, String> {
     let c = &o.common;
     let git = Git::open(&c.git_dir)?;
     let lists = lists(c)?;
-    let url = o
-        .remote_url
-        .clone()
-        .unwrap_or_else(|| format!("https://github.com/{}.git", c.repo));
+    let (url, credentials) = remote(o.remote_url.as_deref(), &c.repo)?;
     let base = git.fetch_branch(&url, &o.base_branch, "base")?;
     let verified = run_verify(c, &git, &lists, &base, Some(&o.approval))?;
     let (title, body) = verified
@@ -217,7 +234,7 @@ fn new_pr(o: &NewPr) -> Result<Value, String> {
     let curl = Curl::new(&o.token_file, &o.records, &o.api_base)?;
     let token =
         std::fs::read_to_string(&o.token_file).map_err(|e| format!("token file: {}", e.kind()))?;
-    askpass::answer("Password", &token)?;
+    askpass::token(&token)?;
     if o.dry {
         return Ok(summary);
     }
@@ -232,7 +249,8 @@ fn new_pr(o: &NewPr) -> Result<Value, String> {
         "packetSeal": c.seal,
         "approval": o.approval,
     }))?;
-    let (pushed, stderr) = git.push(&url, &format!("{head}:{reference}"), Some(&o.token_file))?;
+    let token_file = credentials.then_some(o.token_file.as_path());
+    let (pushed, stderr) = git.push_new(&url, &head, &reference, token_file)?;
     records.result(
         "PUSH-RESULT.json",
         &json!({ "ok": pushed, "stderr": stderr }),
@@ -247,18 +265,28 @@ fn new_pr(o: &NewPr) -> Result<Value, String> {
         transport: &curl,
         name: c.repo.clone(),
     };
-    let pr = api.call(
+    let created = api.call(
         "POST",
         "/pulls",
         Some(&json!({ "title": title, "head": o.branch, "base": o.base_branch, "body": body, "draft": true })),
     )?;
+    records.result("PR-CREATED.json", &created)?;
+    let number = created["number"]
+        .as_u64()
+        .ok_or("the API returned no PR number; inspect PR-CREATED.json")?;
+    // A fresh read of the PR, not the creation response, is what is checked and kept.
+    let pr = api.call("GET", &format!("/pulls/{number}"), None)?;
     records.result("PR-READBACK.json", &pr)?;
     let reads = |pointer: &str, want: &Value| pr.pointer(pointer) == Some(want);
-    if !(reads("/head/sha", &json!(head))
+    if !(reads("/number", &json!(number))
+        && reads("/state", &json!("open"))
+        && reads("/base/repo/full_name", &json!(c.repo))
+        && reads("/base/ref", &json!(o.base_branch))
+        && reads("/head/ref", &json!(o.branch))
+        && reads("/head/sha", &json!(head))
         && reads("/title", &json!(title))
         && reads("/body", &json!(body))
-        && reads("/draft", &json!(true))
-        && reads("/base/ref", &json!(o.base_branch)))
+        && reads("/draft", &json!(true)))
     {
         return Err("the new PR does not read back as published; inspect PR-READBACK.json".into());
     }

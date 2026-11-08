@@ -113,10 +113,43 @@ impl Git {
         refspec: &str,
         token_file: Option<&Path>,
     ) -> Result<(bool, String), String> {
+        self.push_with(url, refspec, None, token_file)
+    }
+
+    /// Creates `reference` at `head` on the remote only if it does not exist there. git sends the
+    /// all-zero old id for it, so the remote refuses if the branch appeared after any earlier
+    /// check, even when the update would be a fast-forward. Returns (success, stderr).
+    pub fn push_new(
+        &self,
+        url: &str,
+        head: &str,
+        reference: &str,
+        token_file: Option<&Path>,
+    ) -> Result<(bool, String), String> {
+        let lease = format!("--force-with-lease={reference}:");
+        self.push_with(
+            url,
+            &format!("{head}:{reference}"),
+            Some(&lease),
+            token_file,
+        )
+    }
+
+    fn push_with(
+        &self,
+        url: &str,
+        refspec: &str,
+        lease: Option<&str>,
+        token_file: Option<&Path>,
+    ) -> Result<(bool, String), String> {
         if refspec.starts_with('+') || refspec.contains(":+") {
             return Err("a forced refspec is never pushed".into());
         }
-        let mut command = self.command(["push", "--porcelain", url, refspec]);
+        // A redirect is never followed, so credentials go only to the URL given.
+        let mut args = vec!["-c", "http.followRedirects=false", "push", "--porcelain"];
+        args.extend(lease);
+        args.extend([url, refspec]);
+        let mut command = self.command(args);
         if let Some(token_file) = token_file {
             let me =
                 std::env::current_exe().map_err(|e| format!("cannot find this binary: {e}"))?;
