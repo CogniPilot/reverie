@@ -1,6 +1,9 @@
 //! GitHub REST calls through `curl`. The token never appears in argv or in the environment: curl
 //! reads its whole configuration, Authorization header included, from stdin (`--config -`), and a
-//! request body comes from a private temporary file named in that configuration.
+//! request body comes from a private temporary file named in that configuration. That file is
+//! created new in a held scratch directory (see `custody`), and curl starts inside that directory
+//! and names the file relatively, so a later swap of the directory's path cannot change the body.
+use crate::custody::Held;
 use serde_json::Value;
 use std::{
     io::Write,
@@ -30,9 +33,9 @@ pub struct Curl {
 }
 
 impl Curl {
-    /// `token_file` holds only the token; `scratch` is a private directory for request bodies;
-    /// `api` is [`API`] or an `http://127.0.0.1:PORT` test server, so a mistyped base can never
-    /// send the token to another host.
+    /// `token_file` holds only the token; `scratch` is a private directory for request bodies,
+    /// held for each request that has one; `api` is [`API`] or an `http://127.0.0.1:PORT` test
+    /// server, so a mistyped base can never send the token to another host.
     pub fn new(token_file: &Path, scratch: &Path, api: &str) -> Result<Self, String> {
         let loopback = api
             .strip_prefix("http://127.0.0.1:")
@@ -105,27 +108,17 @@ impl Transport for Curl {
         if token.is_empty() || token.contains(char::is_whitespace) {
             return Err("the token file must hold one token".into());
         }
+        let scratch = Held::open(&self.scratch)?;
+        // Removed when it drops, after curl has run.
         let body_file = match body {
             None => None,
             Some(value) => {
-                let path = self
-                    .scratch
-                    .join(format!("request-{}.json", std::process::id()));
-                write_private(&path, value.to_string().as_bytes())?;
-                Some(path)
+                Some(scratch.create_unique("request", "json", value.to_string().as_bytes())?)
             }
         };
-        let config = config(
-            method,
-            &format!("{}{path}", self.api),
-            token,
-            body_file.as_deref(),
-        )?;
-        let result = run_curl(&config);
-        if let Some(path) = body_file {
-            let _ = std::fs::remove_file(path);
-        }
-        let output = result?;
+        let name = body_file.as_ref().map(|file| Path::new(file.name()));
+        let config = config(method, &format!("{}{path}", self.api), token, name)?;
+        let output = run_curl(&config, &scratch.proc_path())?;
         let (body, status) = output.rsplit_once('\n').ok_or("curl printed no status")?;
         let status = status
             .trim()
@@ -135,9 +128,10 @@ impl Transport for Curl {
     }
 }
 
-fn run_curl(config: &str) -> Result<String, String> {
+fn run_curl(config: &str, cwd: &Path) -> Result<String, String> {
     let mut child = Command::new("curl")
         .args(CURL_ARGS)
+        .current_dir(cwd)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -157,18 +151,6 @@ fn run_curl(config: &str) -> Result<String, String> {
         ));
     }
     String::from_utf8(output.stdout).map_err(|_| "curl output is not UTF-8".into())
-}
-
-fn write_private(path: &Path, bytes: &[u8]) -> Result<(), String> {
-    use std::os::unix::fs::OpenOptionsExt;
-    let mut file = std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(0o600)
-        .open(path)
-        .map_err(|e| format!("{}: {e}", path.display()))?;
-    file.write_all(bytes)
-        .map_err(|e| format!("{}: {e}", path.display()))
 }
 
 /// One repository's API, over a transport.

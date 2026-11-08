@@ -1,54 +1,49 @@
 //! Intent and result records around each write. The intent is written before the write and is
 //! never overwritten: a second attempt refuses until someone has inspected the first, because a
 //! write whose outcome is unknown must not be repeated blindly.
+//!
+//! The records directory is held (see `custody`), and every record is created new and no-follow,
+//! so a symlink on its path or at a record's name is refused, and nothing is overwritten.
+use crate::custody::Held;
+use nix::errno::Errno;
 use serde_json::Value;
-use std::{
-    fs::{self, OpenOptions},
-    io::Write,
-    path::{Path, PathBuf},
-};
+use std::{fs, path::Path};
 
 #[derive(Debug)]
 pub struct Records {
-    dir: PathBuf,
+    dir: Held,
 }
 
 impl Records {
     pub fn new(dir: &Path) -> Result<Self, String> {
         fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
         Ok(Self {
-            dir: dir.to_path_buf(),
+            dir: Held::open(dir)?,
         })
     }
 
     /// Writes `INTENT.json`, refusing if one already exists.
     pub fn intent(&self, intent: &Value) -> Result<(), String> {
-        let path = self.dir.join("INTENT.json");
-        let mut file = OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&path)
+        let text = serde_json::to_string_pretty(intent).map_err(|e| e.to_string())?;
+        self.dir
+            .write_new("INTENT.json", text.as_bytes())
             .map_err(|e| {
-                if e.kind() == std::io::ErrorKind::AlreadyExists {
+                if e.ends_with(Errno::EEXIST.desc()) {
                     format!(
-                        "{} exists: inspect the earlier attempt before any retry",
-                        path.display()
+                        "{}/INTENT.json exists: inspect the earlier attempt before any retry",
+                        self.dir.path().display()
                     )
                 } else {
-                    format!("{}: {e}", path.display())
+                    e
                 }
-            })?;
-        let text = serde_json::to_string_pretty(intent).map_err(|e| e.to_string())?;
-        file.write_all(text.as_bytes())
-            .and_then(|()| file.sync_all())
-            .map_err(|e| format!("{}: {e}", path.display()))
+            })
     }
 
-    /// Writes a named result record (overwriting, since results are read back, not trusted).
+    /// Writes a named result record. One attempt writes each name once, so an existing record
+    /// refuses like everything else here.
     pub fn result(&self, name: &str, value: &Value) -> Result<(), String> {
-        let path = self.dir.join(name);
         let text = serde_json::to_string_pretty(value).map_err(|e| e.to_string())?;
-        fs::write(&path, text).map_err(|e| format!("{}: {e}", path.display()))
+        self.dir.write_new(name, text.as_bytes())
     }
 }
 
@@ -70,5 +65,34 @@ mod tests {
             .result("RESULT.json", &serde_json::json!({"rc": 0}))
             .unwrap();
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_record_never_writes_through_a_symlink_or_over_an_existing_file() {
+        use std::os::unix::fs::symlink;
+        let root =
+            std::env::temp_dir().join(format!("publish-records-link-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(root.join("records")).unwrap();
+        fs::write(root.join("canary"), "outside\n").unwrap();
+        symlink(root.join("canary"), root.join("records/PUSH-RESULT.json")).unwrap();
+        fs::write(root.join("records/PR-READBACK.json"), "kept\n").unwrap();
+        let records = Records::new(&root.join("records")).unwrap();
+        for name in ["PUSH-RESULT.json", "PR-READBACK.json"] {
+            assert!(
+                records
+                    .result(name, &serde_json::json!({"ok": true}))
+                    .is_err()
+            );
+        }
+        assert_eq!(fs::read(root.join("canary")).unwrap(), b"outside\n");
+        assert_eq!(
+            fs::read(root.join("records/PR-READBACK.json")).unwrap(),
+            b"kept\n"
+        );
+        symlink(root.join("records"), root.join("alias")).unwrap();
+        let error = Records::new(&root.join("alias")).unwrap_err();
+        assert!(error.contains("is a symlink"), "{error}");
+        let _ = fs::remove_dir_all(&root);
     }
 }
