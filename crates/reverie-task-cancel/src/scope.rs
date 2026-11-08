@@ -3,13 +3,16 @@
 //! check and the owned stop. Every tool call runs with a clean bus environment and is bounded by
 //! the controller's absolute deadline.
 use crate::validate::{Result, TOOLS, hex, need};
+use nix::errno::Errno;
+use nix::poll::{PollFd, PollFlags, PollTimeout, poll};
 use serde_json::{Map, Value};
 use std::collections::BTreeMap;
 use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::io::{self, Read};
+use std::os::fd::AsFd;
 use std::path::{Component, Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{Child, ChildStdout, Command, ExitStatus, Stdio};
 use std::time::{Duration, Instant};
 #[cfg(test)]
 mod tests;
@@ -90,7 +93,9 @@ pub(crate) fn remaining(deadline: Instant, maximum: Duration) -> Result<Duration
 }
 
 /// Run systemctl with the clean bus environment and at most `SHOW_LIMIT + 1` bytes of its output
-/// kept, killing it at `timeout`. Returns its exit code (-1 for a signal) and output.
+/// kept. One deadline, `timeout` from now, covers both reading its output to the end and its exit,
+/// so a descendant that keeps the output open cannot outlast it; the child is killed when it passes.
+/// Returns the exit code (-1 for a signal) and the output.
 fn systemctl(tools: &Tools, args: &[&str], timeout: Duration) -> Result<(i32, Vec<u8>)> {
     let program = tools.get("systemctl");
     let mut child = Command::new(program)
@@ -102,32 +107,59 @@ fn systemctl(tools: &Tools, args: &[&str], timeout: Duration) -> Result<(i32, Ve
         .stderr(Stdio::null())
         .spawn()
         .map_err(|error| format!("{} unavailable: {error}", program.display()))?;
-    let mut stdout = child.stdout.take().expect("piped stdout");
-    let reader = std::thread::spawn(move || {
-        let mut output = Vec::new();
-        let _ = stdout
-            .by_ref()
-            .take(SHOW_LIMIT as u64 + 1)
-            .read_to_end(&mut output);
-        let _ = io::copy(&mut stdout, &mut io::sink());
-        output
-    });
     let end = Instant::now() + timeout;
-    let status = loop {
-        if let Some(status) = child.try_wait().map_err(|error| error.to_string())? {
-            break status;
-        }
-        if Instant::now() >= end {
+    let mut stdout = child.stdout.take().expect("piped stdout");
+    let captured = capture(&mut stdout, end);
+    drop(stdout);
+    match captured.and_then(|output| exited(&mut child, end).map(|status| (status, output))) {
+        Ok((status, output)) => Ok((status.code().unwrap_or(-1), output)),
+        Err(reason) => {
             let _ = child.kill();
             let _ = child.wait();
-            return Err(format!("{} exceeded its deadline", program.display()));
+            Err(format!("{} {reason}", program.display()))
+        }
+    }
+}
+
+/// Read `stdout` to its end by `end`, keeping at most `SHOW_LIMIT + 1` bytes.
+fn capture(stdout: &mut ChildStdout, end: Instant) -> std::result::Result<Vec<u8>, &'static str> {
+    let mut output = Vec::new();
+    let mut buffer = [0_u8; 8192];
+    loop {
+        let left = end.saturating_duration_since(Instant::now());
+        if left.is_zero() {
+            return Err("exceeded its deadline");
+        }
+        let wait = PollTimeout::try_from(left).unwrap_or(PollTimeout::MAX);
+        let mut ready = [PollFd::new(stdout.as_fd(), PollFlags::POLLIN)];
+        match poll(&mut ready, wait) {
+            Ok(0) | Err(Errno::EINTR) => continue,
+            Ok(_) => {}
+            Err(_) => return Err("output unreadable"),
+        }
+        match stdout.read(&mut buffer) {
+            Ok(0) => return Ok(output),
+            Ok(read) => {
+                let keep = (SHOW_LIMIT + 1).saturating_sub(output.len()).min(read);
+                output.extend_from_slice(&buffer[..keep]);
+            }
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
+            Err(_) => return Err("output unreadable"),
+        }
+    }
+}
+
+/// The child's exit status by `end`.
+fn exited(child: &mut Child, end: Instant) -> std::result::Result<ExitStatus, &'static str> {
+    loop {
+        if let Some(status) = child.try_wait().map_err(|_| "exit unreadable")? {
+            return Ok(status);
+        }
+        if Instant::now() >= end {
+            return Err("exceeded its deadline");
         }
         std::thread::sleep(Duration::from_millis(10));
-    };
-    let output = reader
-        .join()
-        .map_err(|_| "tool output reader failed".to_owned())?;
-    Ok((status.code().unwrap_or(-1), output))
+    }
 }
 
 /// Parse `key=value` lines: every line has a separator and no key repeats.

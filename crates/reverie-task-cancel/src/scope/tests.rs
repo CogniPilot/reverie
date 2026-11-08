@@ -338,6 +338,46 @@ fn a_slow_or_oversized_show_is_bounded() {
 }
 
 #[test]
+fn a_descendant_holding_the_output_open_cannot_outlast_the_deadline() {
+    let bus = Bus::new();
+    bus.set("show", &show(&props()));
+    bus.set("show.linger", "3000");
+    let started = Instant::now();
+    let error = query(
+        &bus.tools,
+        UNIT,
+        Instant::now() + Duration::from_millis(300),
+    )
+    .unwrap_err();
+    assert!(error.ends_with("exceeded its deadline"), "{error}");
+    assert!(
+        started.elapsed() < Duration::from_secs(2),
+        "{:?}",
+        started.elapsed()
+    );
+}
+
+#[test]
+fn a_child_that_closes_its_output_but_keeps_running_is_killed_at_the_deadline() {
+    let bus = Bus::new();
+    bus.set("show", &show(&props()));
+    bus.set("show.hold", "3000");
+    let started = Instant::now();
+    let error = query(
+        &bus.tools,
+        UNIT,
+        Instant::now() + Duration::from_millis(300),
+    )
+    .unwrap_err();
+    assert!(error.ends_with("exceeded its deadline"), "{error}");
+    assert!(
+        started.elapsed() < Duration::from_secs(2),
+        "{:?}",
+        started.elapsed()
+    );
+}
+
+#[test]
 fn a_rebound_scope_cannot_receive_stop() {
     let bus = Bus::new();
     let binding = capture_scope(&props(), UNIT).unwrap();
