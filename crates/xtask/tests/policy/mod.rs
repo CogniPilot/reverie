@@ -5,3 +5,4 @@ mod script_migration;
 mod size;
 mod spec;
 mod worker_package;
+mod workspace_members;
