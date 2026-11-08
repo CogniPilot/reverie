@@ -1123,6 +1123,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "reverie-local-model"
+version = "0.1.0"
+dependencies = [
+ "getrandom",
+ "libc",
+ "nix",
+ "serde_json",
+ "socket2",
+]
+
+[[package]]
 name = "reverie-mcp-cli"
 version = "0.1.0"
 dependencies = [
