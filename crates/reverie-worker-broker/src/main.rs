@@ -111,6 +111,17 @@ fn serve(config: PathBuf, offer: bool) -> Result<(), Box<dyn std::error::Error>>
 mod tests {
     use super::*;
     #[test]
+    fn config_check_requires_an_explicit_source_and_accepts_no_engine_override() {
+        assert!(Arguments::try_parse_from([
+            "broker", "check-config", "--config", "/owner/reverie/broker.json"
+        ]).is_ok());
+        assert!(Arguments::try_parse_from(["broker", "check-config"]).is_err());
+        assert!(Arguments::try_parse_from([
+            "broker", "check-config", "--config", "/owner/reverie/broker.json",
+            "--engine", "/caller/program"
+        ]).is_err());
+    }
+    #[test]
     fn installation_role_has_fixed_name_config_and_no_nomination_override() {
         let arguments = Arguments::try_parse_from([
             "broker",
