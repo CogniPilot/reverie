@@ -35,7 +35,10 @@ use crate::{
 };
 pub use error::WorkerReportError;
 use error::{Result, finalized};
-pub use handler::WorkerHandlerConstruction;
+pub use handler::{
+    WorkerHandlerCommand, WorkerHandlerConstruction, WorkerHandlerDisposition, WorkerHandlerInbox,
+    WorkerHandlerRequest,
+};
 pub use launch::{AcceptedWorkerConnection, WorkerLaunchConnection};
 use record::Record;
 pub use registered::{RegisteredWorkerConnection, WorkerHandlersProgress};

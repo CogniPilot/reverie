@@ -15,6 +15,7 @@ mod error;
 mod existing_viewer;
 pub(crate) mod final_storage;
 mod guard;
+mod handler_settlement;
 mod memory;
 mod network;
 mod pane;
@@ -455,6 +456,10 @@ impl Workflows {
         let mut record = record
             .try_lock()
             .map_err(|_| LaptopError::Refused("WORKER_LAPTOP_RETAINED"))?;
+        need(
+            record.phase != Phase::FinalizingStarted,
+            "WORKER_STARTED_FINAL_STORAGE_RETAINED",
+        )?;
         if record.phase == Phase::Held && runtime.cancellation().is_cancelled() {
             record.outcome = Some(Err(Arc::new(LaptopError::Refused("WORKER_LAPTOP_STOPPED"))));
             record.phase = Phase::Known;

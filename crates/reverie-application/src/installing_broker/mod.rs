@@ -21,7 +21,10 @@ pub use pool_controller::{
 mod recovered;
 pub mod resource_actor;
 mod service;
-pub use service::{BrokerServiceStartup, BrokerStartupCause, BrokerStartupFailure};
+pub use service::{
+    BrokerService, BrokerServiceClosed, BrokerServiceError, BrokerServiceFailure,
+    BrokerServiceStartup, BrokerStartupCause, BrokerStartupFailure,
+};
 pub(crate) mod source;
 mod stop_admission;
 mod stopped_ram;

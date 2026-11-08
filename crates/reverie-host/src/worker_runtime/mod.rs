@@ -8,7 +8,9 @@ use crate::{
 };
 use reverie_core::worker_schema::{WorkerBase, WorkerServiceIdentity};
 use std::{sync::Arc, time::Instant};
+pub(crate) mod settlement;
 mod signals;
+pub use settlement::NativeSettlementProgress;
 pub use signals::{BrokerSignalError, BrokerSignalFailure, BrokerSignals};
 #[cfg(test)]
 mod tests;

@@ -37,6 +37,16 @@ pub(in crate::installing_broker) struct ExistingStoragePreparation {
     predecessor_office: Option<reverie_host::office::OfficePhone>,
 }
 impl ExistingStoragePreparation {
+    pub(in crate::installing_broker) fn settle_handler_native(
+        &self,
+    ) -> Result<reverie_host::worker_runtime::NativeSettlementProgress, ExistingStorageError> {
+        self.check()?;
+        Ok(self
+            .destination
+            .registry()
+            .runtime
+            .settle_existing_native_for_handler(&self.viewer)?)
+    }
     pub(in crate::installing_broker) fn failure(
         &self,
     ) -> Result<Option<Arc<LaptopError>>, LaptopError> {
