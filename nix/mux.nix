@@ -14,6 +14,12 @@ pkgs.rustPlatform.buildRustPackage {
   cargoBuildFlags = [ "-p" "reverie-mux" ];
   cargoTestFlags = [ "-p" "reverie-mux" ];
   doCheck = true;
+  # The console's runtime runs its tmux server with pkgs.tmux; the client here is the same build,
+  # so it always finds a tmux and speaks the server's protocol.
+  nativeBuildInputs = [ pkgs.makeWrapper ];
+  postInstall = ''
+    wrapProgram "$out/bin/reverie-mux" --prefix PATH : ${pkgs.tmux}/bin
+  '';
   meta = {
     description = "List, inspect, attach and kill the Reverie console's tmux sessions";
     mainProgram = "reverie-mux";

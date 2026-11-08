@@ -42,7 +42,9 @@ pub enum Target {
 
 /// What the tool touches outside its own memory.
 pub trait Host {
-    /// Runs tmux on `socket` with `args`; stdout on success, `None` on any failure.
+    /// Whether tmux itself can run (`tmux -V`), independent of any server.
+    fn tmux_available(&mut self) -> Result<(), Error>;
+    /// Runs tmux on `socket` with `args`; stdout on success, `None` when it ran and failed.
     fn tmux(&mut self, socket: &str, args: &[&str]) -> Option<String>;
     /// Sends `signal` to `target`, ignoring a process that is already gone.
     fn signal(&mut self, target: Target, signal: Signal);
@@ -77,11 +79,9 @@ impl Instance {
                     .filter(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '-')
                     .take(32)
                     .collect();
-                if safe.is_empty() {
-                    safe
-                } else {
-                    format!("-{safe}")
-                }
+                // A non-empty name always adds the dash, even when nothing of it is safe, as the
+                // console's own resolver does.
+                format!("-{safe}")
             })
             .unwrap_or_default();
         let data = set("REVERIE_DATA_DIR")
@@ -348,6 +348,9 @@ pub fn kill(
     sessions: &mut Sessions,
     selected: &[usize],
 ) -> Result<Vec<String>, Error> {
+    // Without a working tmux every session would look already gone and its record would be
+    // dropped; refuse before touching anything.
+    host.tmux_available()?;
     let own = own_session(host, instance);
     let mut report = Vec::new();
     let mut removed = Vec::new();

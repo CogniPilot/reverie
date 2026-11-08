@@ -19,6 +19,19 @@ fn parent_of(pid: i32) -> Option<i32> {
 struct System;
 
 impl Host for System {
+    fn tmux_available(&mut self) -> Result<(), Error> {
+        let output = Command::new("tmux")
+            .arg("-V")
+            .stdin(Stdio::null())
+            .stderr(Stdio::null())
+            .output()
+            .map_err(|error| Error(format!("tmux is not available: {error}")))?;
+        if !output.status.success() {
+            return Err(Error(format!("tmux -V failed: {}", output.status)));
+        }
+        Ok(())
+    }
+
     fn tmux(&mut self, socket: &str, args: &[&str]) -> Option<String> {
         let output = Command::new("tmux")
             .arg("-L")
@@ -94,6 +107,8 @@ fn run(args: &[String]) -> Result<(), Error> {
         println!("{USAGE}");
         return Ok(());
     }
+    // Every command reads tmux state; without tmux, alive and dead cannot be told apart.
+    host.tmux_available()?;
     let mut sessions = Sessions::load(&instance.sessions_file)?;
     match command {
         "list" | "ls" => print!("{}", list(&mut host, &instance, &sessions)),

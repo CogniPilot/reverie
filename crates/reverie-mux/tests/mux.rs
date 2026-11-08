@@ -1,6 +1,7 @@
 //! reverie-mux against a recording host and a real session file in a scratch directory.
 use reverie_mux::{
-    Host, Instance, Sessions, Signal, Target, format_duration, info, kill, list, parse_selection,
+    Error, Host, Instance, Sessions, Signal, Target, format_duration, info, kill, list,
+    parse_selection,
 };
 use std::collections::BTreeSet;
 use std::fs;
@@ -30,9 +31,20 @@ struct Fake {
     own: Option<String>,
     children: Vec<i32>,
     calls: Vec<String>,
+    tmux_missing: bool,
 }
 
 impl Host for Fake {
+    fn tmux_available(&mut self) -> Result<(), Error> {
+        self.calls.push("tmux -V".into());
+        if self.tmux_missing {
+            Err(Error(
+                "tmux is not available: No such file or directory".into(),
+            ))
+        } else {
+            Ok(())
+        }
+    }
     fn tmux(&mut self, socket: &str, args: &[&str]) -> Option<String> {
         self.calls
             .push(format!("tmux -L {socket} {}", args.join(" ")));
@@ -96,6 +108,19 @@ fn the_instance_is_resolved_as_the_console_resolves_it() {
     let plain = Instance::resolve(&env(&[]), home);
     assert_eq!(plain.sessions_file, home.join(".reverie/mux-sessions.json"));
     assert_eq!(plain.socket, "reverie");
+    // A non-empty name with nothing safe in it still adds the dash, as the console does.
+    for unsafe_name in ["!!!", "日本語"] {
+        let leftover = Instance::resolve(
+            &|name: &str| (name == "REVERIE_INSTANCE").then(|| unsafe_name.to_owned()),
+            home,
+        );
+        assert_eq!(
+            leftover.sessions_file,
+            home.join(".reverie-/mux-sessions.json"),
+            "{unsafe_name}"
+        );
+        assert_eq!(leftover.socket, "reverie-", "{unsafe_name}");
+    }
     let named = Instance::resolve(&env(&[("REVERIE_INSTANCE", "beta/../x")]), home);
     assert_eq!(
         named.sessions_file,
@@ -278,6 +303,23 @@ fn outside_tmux_nothing_counts_as_the_tools_own_session() {
             .iter()
             .any(|call| call.contains("display-message"))
     );
+}
+
+#[test]
+fn a_missing_tmux_refuses_before_any_record_or_process_is_touched() {
+    let scratch = Scratch::new("no-tmux");
+    let records = [record(1, 4001), record(2, 4002)];
+    let instance = instance(&scratch.0, &records);
+    let before = fs::read_to_string(&instance.sessions_file).unwrap();
+    let mut sessions = Sessions::load(&instance.sessions_file).unwrap();
+    let mut host = Fake {
+        tmux_missing: true,
+        ..Fake::default()
+    };
+    let refused = kill(&mut host, &instance, &mut sessions, &[0, 1]).unwrap_err();
+    assert!(refused.0.contains("tmux is not available"), "{refused}");
+    assert_eq!(fs::read_to_string(&instance.sessions_file).unwrap(), before);
+    assert_eq!(host.calls, ["tmux -V"]);
 }
 
 #[test]
