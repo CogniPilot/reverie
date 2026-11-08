@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { ChatroomService, type ChatSessionLike } from '../src/chatroom-service.js';
 import { PendingDeliveryStore } from '../src/chatroom-pending-delivery.js';
 import { ChatroomDelivery, MAX_PENDING_PER_SESSION, type DeliverySession } from '../src/chatroom-delivery.js';
+import { wakePayload } from './helpers/wake-payload.js';
 import { sqlite } from '../src/chat-db.js';
 import ts from 'typescript';
 import { runInNewContext } from 'node:vm';
@@ -19,7 +20,9 @@ afterEach(async () => {
 
 function fixture(database = false) {
   const dir = mkdtempSync(join(tmpdir(), 'delivery-recovery-'));
+  // Each entry is what one wake stood for, read from the member's own hook payload (wakePayload).
   const writes: Record<string, string[]> = { alice: [], bob: [] };
+  let current: ChatroomService | undefined;
   let clock = 1_000_000;
   let outcome: 'submitted' | 'stranded' | 'unverified' | 'none' = 'submitted';
   let fail = false;
@@ -36,7 +39,7 @@ function fixture(database = false) {
       isWorking: true,
       writeViaMux: async (text, options) => {
         if (fail) return false;
-        writes[id].push(text);
+        writes[id].push(wakePayload(current, id, text));
         if (options?.onOutcome) confirmations.push((outcome) => options.onOutcome!(outcome));
         if (outcome !== 'none') options?.onOutcome?.(outcome);
         return true;
@@ -58,6 +61,7 @@ function fixture(database = false) {
     });
     await s.init();
     services.add(s);
+    current = s;
     return s;
   };
   const stop = async (s: ChatroomService) => {
@@ -191,7 +195,7 @@ for (const database of [false, true])
       expect(f.writes.alice[0]).not.toContain('already read task');
     });
 
-    it('does not resend the submitted half of a batch after another restart', async () => {
+    it('one wake stands for a whole batch, and a submitted batch is not resent after another restart', async () => {
       const f = fixture(database);
       const a = await f.create();
       const room = a.createRoom('Workshop', undefined);
@@ -202,14 +206,14 @@ for (const database of [false, true])
       f.ready();
       const b = await f.create();
       await b.delivery.flushAll();
+      // No line to overflow: the constant wake carries both, however long they are.
       expect(f.writes.alice).toHaveLength(1);
       expect(f.writes.alice[0]).toContain('first ');
+      expect(f.writes.alice[0]).toContain('second ');
       await f.stop(b);
       const c = await f.create();
       await c.delivery.flushAll();
-      expect(f.writes.alice).toHaveLength(2);
-      expect(f.writes.alice[1]).toContain('second ');
-      expect(f.writes.alice[1]).not.toContain('first ');
+      expect(f.writes.alice).toHaveLength(1);
     });
 
     it('a pull read resolves uncertain identities without another startup warning', async () => {

@@ -1098,6 +1098,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "reverie-job-gate"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "nix",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "reverie-laptop-tools"
 version = "0.1.0"
 dependencies = [
@@ -1107,6 +1117,30 @@ dependencies = [
  "reverie-core",
  "sha2",
  "toml",
+]
+
+[[package]]
+name = "reverie-lease-cli"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "nix",
+ "reverie-contracts",
+ "reverie-core",
+ "reverie-host",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "reverie-local-model"
+version = "0.1.0"
+dependencies = [
+ "getrandom",
+ "libc",
+ "nix",
+ "serde_json",
+ "socket2",
 ]
 
 [[package]]
@@ -1140,6 +1174,14 @@ dependencies = [
  "reverie-diagnostics",
  "reverie-host",
  "rusqlite",
+ "serde_json",
+]
+
+[[package]]
+name = "reverie-mux"
+version = "0.1.0"
+dependencies = [
+ "nix",
  "serde_json",
 ]
 

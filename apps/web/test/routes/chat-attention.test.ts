@@ -104,6 +104,8 @@ it('configuration-OFF preserves stored receipts while stripping public reads, mu
 it.each(['mention', 'address', 'reply', 'everyone', 'dm'])('wakes only the caller on a new %s with IDs only', async (kind) => {
   const f = await fixture();
   try {
+    // On Ring every one of these reaches the caller; the Vibrate default would hold all but the mention.
+    await f.service.setAlertMode(A, 'ring', 3600_000);
     const own = f.emit(f.room, { from: { kind: 'agent', sessionId: A, name: 'Jester' }, text: 'earlier' });
     if (kind === 'dm') { f.room.kind = 'dm'; f.room.dm = ['user', A]; }
     const { pending } = await f.wait();

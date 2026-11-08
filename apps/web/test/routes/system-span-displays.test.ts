@@ -2,20 +2,25 @@ import { trustedFixtureOwner } from '../helpers/trusted-owner-fixture.js';
 /**
  * POST /api/system/span-displays (multi-monitor launcher) + resolveSpanUrl.
  *
- * The route shells out to scripts/span-reverie.sh, so we mock child_process.spawn
- * to avoid actually opening a browser (and to assert the sanitized URL passed to
- * it). process.platform is overridden per-case so the macOS-only guard is tested
- * deterministically regardless of where the suite runs.
+ * The route calls src/span-displays.ts, mocked here so no browser opens; the
+ * module itself is covered in test/span-displays.test.ts. process.platform is
+ * overridden per-case so the macOS-only guard is tested deterministically
+ * regardless of where the suite runs.
  *
  * Port: N/A (app.inject).
  */
 import { describe, it, expect, afterEach, vi } from 'vitest';
 
-const spawnMock = vi.hoisted(() => vi.fn(() => ({ on: vi.fn(), unref: vi.fn() })));
-vi.mock('node:child_process', async (orig) => {
-  const actual = await orig<typeof import('node:child_process')>();
-  return { ...actual, spawn: spawnMock };
-});
+const span = vi.hoisted(() => ({
+  spanDisplays: vi.fn(async (url: string) => ({
+    url,
+    union: { x: 0, y: 0, width: 10, height: 10 },
+    bin: '/b',
+    pid: 1,
+  })),
+  systemSpanHost: vi.fn(() => ({ marker: 'system host' })),
+}));
+vi.mock('../../src/span-displays.js', () => span);
 
 import { createRouteTestHarness } from './_route-test-utils.js';
 import { registerSystemRoutes, resolveSpanUrl } from '../../src/web/routes/system-routes.js';
@@ -26,7 +31,7 @@ function setPlatform(p: NodeJS.Platform) {
 }
 afterEach(() => {
   setPlatform(REAL_PLATFORM);
-  spawnMock.mockClear();
+  span.spanDisplays.mockClear();
 });
 
 describe('resolveSpanUrl', () => {
@@ -53,11 +58,11 @@ describe('POST /api/system/span-displays', () => {
     expect(res.statusCode).toBe(400);
     expect(res.json().success).toBe(false);
     expect(res.json().error).toMatch(/macOS/i);
-    expect(spawnMock).not.toHaveBeenCalled();
+    expect(span.spanDisplays).not.toHaveBeenCalled();
     await app.close();
   });
 
-  it('spawns the launcher with the sanitized localhost URL on darwin', async () => {
+  it('launches the spanning window at the sanitized localhost URL on darwin', async () => {
     setPlatform('darwin');
     const { app } = await createRouteTestHarness((app, ctx) => registerSystemRoutes(app, ctx, trustedFixtureOwner));
     const res = await app.inject({
@@ -70,11 +75,22 @@ describe('POST /api/system/span-displays', () => {
     // { success:true, data:{ url } } in production. At the route-handler layer the
     // harness sees the bare return, so we assert on body.url directly.
     expect(res.json()).toMatchObject({ url: 'http://localhost:5000' });
-    expect(spawnMock).toHaveBeenCalledTimes(1);
-    const [cmd, args] = spawnMock.mock.calls[0] as [string, string[]];
-    expect(cmd).toBe('bash');
-    expect(args[0]).toMatch(/span-reverie\.sh$/);
-    expect(args[1]).toBe('http://localhost:5000');
+    expect(span.spanDisplays).toHaveBeenCalledTimes(1);
+    expect(span.spanDisplays.mock.calls[0]).toEqual(['http://localhost:5000', { marker: 'system host' }]);
+    await app.close();
+  });
+
+  it('reports a failed launch instead of claiming the window opened', async () => {
+    setPlatform('darwin');
+    span.spanDisplays.mockRejectedValueOnce(new Error("No Chrome-family browser found (BROWSER='')"));
+    const { app } = await createRouteTestHarness((app, ctx) => registerSystemRoutes(app, ctx, trustedFixtureOwner));
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/system/span-displays',
+      headers: { host: 'localhost:5000' },
+    });
+    expect(res.statusCode).toBe(500);
+    expect(res.json().error).toContain('No Chrome-family browser found');
     await app.close();
   });
 });

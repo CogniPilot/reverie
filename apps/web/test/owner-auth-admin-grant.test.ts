@@ -37,7 +37,6 @@ const OWNER_ONLY: Array<[string, string]> = [
   ['PUT', '/api/company/settings'], // the CTO
   ['POST', '/api/company/employees/:id/retire'],
   ['POST', '/api/company/employees/:id/memories'],
-  ['PUT', '/api/company/employees/:id/thread'],
   ['PUT', '/api/settings'],
   ['POST', '/api/sessions/:id/mode'],
   ['POST', '/api/clis'],

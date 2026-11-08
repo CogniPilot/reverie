@@ -26,7 +26,9 @@ describe('chatroom playback notices', () => {
   let service: ChatroomService;
   let clock: number;
   const events: Array<{ event: string; data: Record<string, unknown> }> = [];
-  const panes = (id: string): string => (ctx.sessions.get(id) as unknown as { writeBuffer: string[] }).writeBuffer.join('');
+  // A playback report is a Reverie notice: it reaches its author through the hook payload, never the pane. Nothing here
+  // calls the hook, so a member's pending notices only grow.
+  const panes = (id: string): string => service.delivery.pendingNotices(id).map((n) => n.text).join('\n');
 
   beforeEach(async () => {
     clock = 1_000_000;

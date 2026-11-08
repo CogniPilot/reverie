@@ -9,7 +9,7 @@ import { TmuxManager } from './src/tmux-manager.js';
 import { CompanyStore } from './src/company-store.js';
 import { CompanyService } from './src/company-service.js';
 import { WorkerViewerReconnect, registerWorkerViewerReconnect } from './src/worker-viewer-reconnect.js';
-import { ChatroomDelivery } from './src/chatroom-delivery.js';
+import { ChatroomDelivery, WAKE_LINE } from './src/chatroom-delivery.js';
 import { PendingDeliveryStore } from './src/chatroom-pending-delivery.js';
 import { expertRuntimeRecipe } from './src/expert-runtime-recipe.js';
 import { recordOwnerStop, ownerStopPending, useOwnerStopJournal } from './src/owner-stop-journal.js';
@@ -223,7 +223,9 @@ try {
       .filter(Boolean)
       .map((x) => JSON.parse(x));
   assert.equal(inputs().length, 1);
-  assert(inputs()[0].text.includes('native-accept-once'));
+  // The provider gets the constant wake once; the message itself reaches it only through its hook.
+  assert(inputs()[0].text.includes(WAKE_LINE));
+  assert(!inputs()[0].text.includes('native-accept-once'));
   assert.equal(inputs()[0].pid, providerPID);
   await delivery.flushAll();
   await sleep(2300);

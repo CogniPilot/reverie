@@ -133,7 +133,7 @@ import {
 import { DEFAULT_TMUX_HISTORY_LIMIT } from './config/terminal-history.js';
 import { EXEC_TIMEOUT_MS } from './config/exec-timeout.js';
 import { getCli } from './config/cli-registry/registry.js';
-import { composerIsEmpty, SubmitVerifier } from './session-submit-verifier.js';
+import { composerGlyphVerified, composerIsEmpty, SubmitVerifier } from './session-submit-verifier.js';
 import { withWriteGate } from './submit-settle.js';
 import { compileVersionRegex } from './config/cli-registry/patterns.js';
 import { resolveSessionCliVersion } from './utils/cli-resolver.js';
@@ -5302,7 +5302,7 @@ export class Session extends EventEmitter {
     if ((this._workerBacked && this._paneExit) || this._otherMuxWrite(ownId)) return false;
     if (!composer) return true;
     const glyph = getCli(this.mode)?.capabilities.workDetect?.promptGlyph ?? '';
-    if ((glyph !== '›' && glyph !== '❯') || !this._mux || !this._muxSession) return false;
+    if (!composerGlyphVerified(glyph) || !this._mux || !this._muxSession) return false;
     return composerIsEmpty(this._mux.capturePaneText?.(this._muxSession.muxName, undefined, { escapes: true }), glyph);
   }
 

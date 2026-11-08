@@ -12,20 +12,19 @@ type Unavailability = 'forbidden' | 'unsupported-server' | 'unavailable' | 'inva
 export async function agentCredentialStatus(deps: AgentDeps): Promise<number> {
   let reason: Unavailability = 'unavailable';
   try {
+    // Identity only: the full Board grows with every card and once outgrew this command's bound.
     const identity = await deps.request(deps.ctx, {
       method: 'GET',
-      path: '/api/board',
-      bounds: { maxBytes: 1024 * 1024, deadlineMs: 10000 },
+      path: '/api/board/identity',
+      bounds: { maxBytes: 16 * 1024, deadlineMs: 10000 },
     });
     if (identity.status === 401 || identity.status === 403) {
       reason = 'forbidden';
       throw Error();
     }
     const actor = (
-      identity.json?.data as
-        | { capabilities?: { identity?: { kind?: string; sessionId?: string; employeeId?: string } } }
-        | undefined
-    )?.capabilities?.identity;
+      identity.json?.data as { identity?: { kind?: string; sessionId?: string; employeeId?: string } } | undefined
+    )?.identity;
     if (
       identity.status !== 200 ||
       !identity.json?.success ||

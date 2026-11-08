@@ -43,16 +43,17 @@
             runtimeInputs = [ pkgs.nodejs_22 ];
             text = ''exec node --experimental-strip-types ${source}/apps/host/gpu-publisher.ts "$@"'';
           };
+          localModelProgram = import ./nix/local-model.nix { inherit pkgs; src = source; };
           localModel = pkgs.writeShellApplication {
             name = "reverie-local-model";
-            runtimeInputs = [ pkgs.python3 pkgs.nix pkgs.coreutils pkgs.docker-client pkgs.systemd ];
+            runtimeInputs = [ pkgs.nix pkgs.coreutils pkgs.docker-client pkgs.systemd ];
             text = ''
               export REVERIE_MODEL_NIXPKGS=${llama-nixpkgs}
               export REVERIE_MODEL_BUILD_EXPR=${source}/nix/local-model-runtime.nix
               export REVERIE_MODEL_SYSTEM=${system}
               REVERIE_MODEL_LAUNCHER="$(readlink -f "$0")"
               export REVERIE_MODEL_LAUNCHER
-              exec python3 ${source}/apps/host/local-model.py "$@"
+              exec ${localModelProgram}/bin/reverie-local-model "$@"
             '';
           };
         in packages // nativeWorkerPackages // {
@@ -64,8 +65,15 @@
           # Optional tools: excluded from the runtime/image and never fetched by a chat toggle.
           chatPythonLsp = pkgs.pyright;
           capabilitiesAddon = import ./nix/capabilities-addon.nix { inherit pkgs; src = source; };
-          prune = import ./nix/prune.nix { inherit pkgs; src = source; };
-          pruneR12 = import ./nix/prune-r12.nix { inherit pkgs; src = source; };
+          leaseCli = import ./nix/lease-cli.nix { inherit pkgs; src = source; };
+          prune = import ./nix/prune.nix {
+            inherit pkgs; src = source;
+            leaseCli = self.packages.${system}.leaseCli;
+          };
+          pruneR12 = import ./nix/prune-r12.nix {
+            inherit pkgs; src = source;
+            leaseCli = self.packages.${system}.leaseCli;
+          };
           pruneHost = import ./nix/prune-host.nix { inherit pkgs; src = source; };
           pruneDeclared = import ./nix/prune-declared.nix {
             inherit pkgs; src = source;

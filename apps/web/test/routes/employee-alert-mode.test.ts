@@ -46,10 +46,11 @@ it('own-mode API refuses missing/unbound callers and caps leases without changin
     const privateRoom = service.createRoom('private', undefined);
     const denied = await app.inject({ method: 'GET', url: `/api/chatrooms/${privateRoom.id}`, headers });
     expect(denied.statusCode).toBe(404);
+    // An explicit Ring is a lease like the others; once it ends, the Vibrate default applies.
     expect(
-      (await app.inject({ method: 'POST', url, headers, payload: { mode: 'ring', durationMs: 1 } })).json().data
+      (await app.inject({ method: 'POST', url, headers, payload: { mode: 'ring', durationMs: 60000 } })).json().data
         .alertMode
-    ).toBeNull();
+    ).toMatchObject({ mode: 'ring', source: 'lease', then: 'vibrate' });
   } finally {
     await service.stop();
     await app.close();

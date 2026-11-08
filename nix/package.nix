@@ -61,6 +61,9 @@ let
     nativeCheckInputs = [ pkgs.git pkgs.tmux pkgs.curl pkgs.which pkgs.procps (lib.getBin pkgs.util-linux) ];
     checkPhase = ''
       runHook preCheck
+      # Two test files at a time (config/vitest.ci.config.ts); test/setup.ts gives each file its own HOME, temp and
+      # tmux socket directory, and every server binds port 0 (test/test-ports-guard.test.ts).
+      export NIX_TEST_FILE_WORKERS=2
       npm test -- test/fixed-resume-message.test.ts test/recovery-authority.test.ts \
         test/recovery-transaction.test.ts test/recovery-operation-clock.test.ts test/recovery-ledger-client.test.ts \
         test/rest-canonical-metadata.test.ts \
@@ -244,7 +247,8 @@ let
         test/effort-injection.test.ts test/embassy-guest-client.test.ts test/embassy-guest-policy.test.ts test/embassy-guest-ui.test.ts \
         test/embassy-pairing-api-client.test.ts test/embassy-pairing-cancel-fence.test.ts test/embassy-pairing-cold-retirement.test.ts \
         test/embassy-pairing-protocol.test.ts test/embassy-pairing.test.ts test/embassy-qr.test.ts test/embassy-sidebar-errors.test.ts \
-        test/employee-alert-mode.test.ts test/employee-journal-correction-chains.test.ts test/employee-journal-routes.test.ts \
+        test/employee-alert-mode-commit.test.ts test/employee-alert-mode.test.ts test/employee-journal-correction-chains.test.ts \
+        test/employee-journal-routes.test.ts \
         test/employee-journal.test.ts test/entrance-animations.test.ts test/env-overrides-schema.test.ts test/file-browser-hidden.test.ts \
         test/file-browser-search.test.ts test/file-editing-policy.test.ts test/file-link-click.test.ts test/file-path-link-forms.test.ts \
         test/file-picker-root-home.test.ts test/file-preview-detach.test.ts test/file-preview-html-page.test.ts \
@@ -294,7 +298,7 @@ let
         test/remote-auto-reconnect.test.ts test/remote-discover-attach.test.ts test/remote-files.test.ts test/remote-hosts.test.ts \
         test/remote-kill-command.test.ts test/remote-pane-history.test.ts test/remote-shared-sessions.test.ts \
         test/remote-ssh-limiter.test.ts test/remote-ssh-options.test.ts test/repo-status.test.ts test/respawn-adaptive-timing.test.ts \
-        test/respawn-controller.test.ts test/respawn-health.test.ts test/respawn-metrics.test.ts
+        test/respawn-controller.test.ts test/respawn-health.test.ts test/respawn-metrics.test.ts test/retired-retention.test.ts
       npm test -- test/respawn-patterns.test.ts test/respawn-pty-breaker.test.ts test/respawn-session-id-collision.test.ts \
         test/respawn-stop-race.test.ts test/respawn-team-awareness.test.ts test/response-viewer-external-links.test.ts \
         test/response-viewer-file-links.test.ts test/response-viewer-last-turn.test.ts test/response-viewer-transcript.test.ts \
@@ -353,7 +357,8 @@ let
       npm test -- test/session-switcher.test.ts test/session-trust-dialog.test.ts test/session-wait-registry.test.ts \
         test/session-watching.test.ts test/session-worktree-label.test.ts test/session.test.ts test/settings-apply-button.test.ts \
         test/shell-scroll-history-pull.test.ts test/shell-session-launch.test.ts test/shift-enter-keypress-swallowed.test.ts \
-        test/shortcut-registry-overlay.test.ts test/signal-target.test.ts test/skin-themes.test.ts test/spawned-tabs-follow-setting.test.ts \
+        test/shortcut-registry-overlay.test.ts test/signal-target.test.ts test/skin-themes.test.ts test/span-displays.test.ts \
+        test/spawned-tabs-follow-setting.test.ts \
         test/split-pane-auto-collapse-unit.test.ts test/split-pane-headers.test.ts test/split-pane-helpers.test.ts \
         test/split-pane-hidden-button-css.test.ts test/split-pane-per-device-setting.test.ts \
         test/split-pane-picker-listener-leak-unit.test.ts test/spreadsheet-preview.test.ts \
@@ -378,7 +383,8 @@ let
         test/terminal-font.test.ts test/terminal-history-schema.test.ts test/terminal-history.test.ts \
         test/terminal-keycode229-recovery.test.ts test/terminal-layout-css.test.ts test/terminal-link-provider-target.test.ts \
         test/terminal-logical-line.test.ts test/terminal-osc52-clipboard.test.ts test/terminal-parsing.test.ts \
-        test/terminal-pty-geometry.test.ts test/terminal-resilience.test.ts test/terminal-resize-observer-survives-init.test.ts \
+        test/terminal-pty-geometry.test.ts test/terminal-replay-replies.test.ts test/terminal-resilience.test.ts \
+        test/terminal-resize-observer-survives-init.test.ts \
         test/terminal-scroll-intent.test.ts test/terminal-scroll-routing.test.ts test/terminal-shift-drag-selection.test.ts \
         test/terminal-tile-input.test.ts test/terminal-tile-scroll.test.ts test/terminal-tile-unit.test.ts test/terminal-touch-tap.test.ts \
         test/test-env-isolation.test.ts test/test-ports-guard.test.ts test/test-suite-partition.test.ts test/tile-grid-attach.test.ts \
@@ -450,7 +456,18 @@ let
     nativeCheckInputs = [ pkgs.bash pkgs.coreutils pkgs.git pkgs.nodejs_22 pkgs.tmux pkgs.jq (lib.getBin pkgs.util-linux) pkgs.python3Packages.pillow pkgs.python3Packages.aiohttp ];
     postPatch = "patchShebangs ../scripts ../docker ../.github/ci";
     checkPhase = ''
-      (cd ..; PYTHONPATH="$PWD/python" PYTHONWARNINGS=ignore::ResourceWarning ${pythonCheckEnvironment}/bin/python3 -m unittest discover -s tests -t .)
+      # The modules discovery would load (test*.py in tests/ and its packages), in chunks of 12, two unittest processes
+      # at a time so the suite uses two cores. Each chunk gets its own temp and tmux socket directory and prints its
+      # output when it ends, so a failure reads as one block; xargs fails the build if any chunk fails.
+      (cd ..
+        for f in $(find tests -name 'test*.py' | sort); do
+          d=$(dirname "$f")
+          while [ "$d" != . ] && [ -f "$d/__init__.py" ]; do d=$(dirname "$d"); done
+          if [ "$d" = . ]; then echo "''${f%.py}" | tr / .; fi
+        done | PYTHONPATH="$PWD/python" PYTHONWARNINGS=ignore::ResourceWarning xargs -n 12 -P 2 sh -c '
+          dir=$(mktemp -d); status=0
+          TMPDIR=$dir TMUX_TMPDIR=$dir ${pythonCheckEnvironment}/bin/python3 -m unittest "$@" >"$dir/log" 2>&1 || status=$?
+          cat "$dir/log"; exit "$status"' unittest-chunk)
       (cd ..; node --test tests/test_web_install_manifest.mjs tests/test_cli_installer.mjs tests/test_reverie_start.mjs tests/test_recovery_scripts.mjs tests/test_opencode_plugin.mjs tests/test_model_relay.mjs tests/test_voice_ci_launch.mjs)
     '';
   };
@@ -521,6 +538,7 @@ let
   opsNativeCli = import ./ops-cli.nix { inherit pkgs src; };
   mcpNativeCli = import ./mcp-cli.nix { inherit pkgs src console memoryNativeCli; };
   routinesNative = import ./routines.nix { inherit pkgs src; };
+  muxNative = import ./mux.nix { inherit pkgs src; };
   workerChild = pkgs.writeShellScriptBin "reverie-worker-child" ''
     exec ${memory}/bin/python3 -m reverie.worker child "$@"
   '';
@@ -631,10 +649,12 @@ let
     echo "reverie-memory smoke passed: no instance and a missing instance both refuse with exit 1"
     # The host routines tick (docs/routines.md) is native; the owner links it from this package.
     ln -s ${routinesNative}/bin/reverie-routines "$out/bin/reverie-routines"
+    # Terminal session tool (list, info, attach, kill); works with or without the console running.
+    ln -s ${muxNative}/bin/reverie-mux "$out/bin/reverie-mux"
     for command in ${memory}/bin/reverie-*; do
       makeWrapper "$command" "$out/bin/$(basename "$command")" \
         --prefix PATH : ${runtime}/bin
     done
   '';
 
-in { inherit reverie console memory memoryPackage runtime entrypoint kokoro hands handsTools workerExec workerResourceClientManifest workerNativeClient workerNativeClientManifest workerNativeChild workerNativeNixStorePrepare memoryNativeCli mcpNativeCli opsNativeCli routinesNative laptopTools rustRouteHandler; }
+in { inherit reverie console memory memoryPackage runtime entrypoint kokoro hands handsTools workerExec workerResourceClientManifest workerNativeClient workerNativeClientManifest workerNativeChild workerNativeNixStorePrepare memoryNativeCli mcpNativeCli opsNativeCli routinesNative muxNative laptopTools rustRouteHandler; }

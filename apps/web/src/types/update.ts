@@ -1,15 +1,11 @@
 /**
  * @fileoverview Types for the in-app self-updater.
  *
- * Reverie can update itself from the web UI (App Settings → Updates). The flow
- * is driven by a detached `scripts/self-update.sh` that outlives the service
- * restart it triggers, and a status file at `~/.reverie/update-status.json`
- * (see `dataPath('update-status.json')`) that the browser polls across the
- * restart boundary.
- *
- * The Docker Compose deployment updates in place too (same script, same status
- * file) — see `docs/docker-self-update.md` for how the container restarts itself
- * and what the environment gate refuses.
+ * App Settings → Updates reports that Reverie does not update itself in place:
+ * a Nix package upgrade or a rebuilt image replaces the install. The status file
+ * at `~/.reverie/update-status.json` (see `dataPath('update-status.json')`) is
+ * still read so a status left by an older updater settles. See
+ * `docs/docker-self-update.md`.
  *
  * Backend logic: `src/web/self-update.ts`. Routes: `src/web/routes/system-routes.ts`
  * (`/api/system/update/check`, `POST /api/system/update`, `/api/system/update/status`).

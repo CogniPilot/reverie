@@ -77,7 +77,7 @@ The framework is Swift-only, so all VM work lives in a SwiftPM package (`package
 - `start <case>` / `stop` / `status` / `ip`: lifecycle + vmnet NAT; `ip` reports the guest SSH endpoint.
 - `export <case>` / `import`: flatten overlay + workspace tar + manifest, credentials excluded (mirror of docker-export).
 
-A VM dies with its owning process, so `start` spawns a DETACHED per-VM runner process (analog of the detached `scripts/self-update.sh` trick) rather than a monolithic daemon; `status` talks to it over a unix socket in the instance data dir (`dataPath()`, never a hardcoded `~/.reverie` path).
+A VM dies with its owning process, so `start` spawns a DETACHED per-VM runner process rather than a monolithic daemon; `status` talks to it over a unix socket in the instance data dir (`dataPath()`, never a hardcoded `~/.reverie` path).
 
 ### Key decision 3: multi-guest, and GUI is a first-class mode (REVISED 2026-07-29 by the repo owner)
 

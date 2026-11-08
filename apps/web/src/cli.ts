@@ -915,6 +915,32 @@ program
 // ============ TUI ============
 
 program
+  .command('span [url]')
+  .description('Open a Reverie window across all displays on this Mac (for a server elsewhere, pass its URL)')
+  .action(async (url: string | undefined) => {
+    if (process.platform !== 'darwin') {
+      console.error('reverie span opens the window on this machine and needs macOS.');
+      process.exitCode = 1;
+      return;
+    }
+    const { spanDisplays, systemSpanHost } = await import('./span-displays.js');
+    try {
+      const launch = await spanDisplays(url ?? 'http://localhost:5000', systemSpanHost());
+      const { x, y, width, height } = launch.union;
+      console.log(`Display union: position ${x},${y}  size ${width}x${height}`);
+      console.log(`Browser: ${launch.bin}`);
+      console.log(`URL:     ${launch.url}`);
+      console.log(`Launched spanning window (pid ${launch.pid ?? 'unknown'}).`);
+      console.log(
+        "If it filled only one monitor, turn off 'Displays have separate Spaces', log out and in, and run it again."
+      );
+    } catch (error) {
+      console.error(error instanceof Error ? error.message : String(error));
+      process.exitCode = 1;
+    }
+  });
+
+program
   .command('tui')
   .argument('[n]', 'attach straight to the nth session of `reverie tui --list`')
   .description('Terminal dashboard for your sessions (the web UI remains the primary surface)')

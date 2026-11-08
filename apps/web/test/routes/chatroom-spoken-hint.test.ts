@@ -12,6 +12,7 @@ import { join } from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import { createRouteTestHarness } from './_route-test-utils.js';
 import { createMockSession, type MockRouteContext } from '../mocks/index.js';
+import { recordCarried } from '../helpers/wake-payload.js';
 import { ChatroomService } from '../../src/chatroom-service.js';
 import { ChatFileStore } from '../../src/chatroom-files.js';
 import { SPOKEN_TURN_HINT, renderForRecipient, answerLinkHint } from '../../src/chatroom-delivery.js';
@@ -36,6 +37,7 @@ describe('spoken-turn hint on delivery', () => {
   let ctx: MockRouteContext;
   let service: ChatroomService;
   let roomId: string;
+  const carried = new Map<string, string[]>();
   let owner: string;
   let clock: number;
 
@@ -71,6 +73,7 @@ describe('spoken-turn hint on delivery', () => {
     ] as const) {
       const s = createMockSession(id);
       s.name = name;
+      carried.set(id, recordCarried(s as never, () => service));
       ctx.sessions.set(id, s as never);
     }
     roomId = service.createRoom('r1', undefined).id;
@@ -111,18 +114,18 @@ describe('spoken-turn hint on delivery', () => {
     expect(res.statusCode).toBe(200);
     return res.json().data.message as ChatMessage;
   };
-  /** Everything written into a member's pane so far, after delivery has run. */
+  /** Everything a member's hook carried so far, after delivery has run; its pane only ever gets the wake line. */
   const pane = async (id: string) => {
     clock += 10_000;
     await service.delivery.flushAll();
-    return (ctx.sessions.get(id) as unknown as { writeBuffer: string[] }).writeBuffer.join('');
+    return (carried.get(id) ?? []).join('\n');
   };
 
   it('delivers the hint after a verified owner spoken turn', async () => {
     const m = await post('how is the deploy', { cookie: owner, spoken: true });
     expect(m.from).toEqual({ kind: 'user', name: 'user', mark: 'owner_spoken' });
     const written = await pane(ALPHA);
-    expect(written).toContain(`"how is the deploy" ${SPOKEN_TURN_HINT}`);
+    expect(written).toContain(`user: how is the deploy ${SPOKEN_TURN_HINT}`);
   });
 
   it('gives no hint to an unsigned headerless body claiming spoken', async () => {
@@ -130,7 +133,7 @@ describe('spoken-turn hint on delivery', () => {
     expect(m.from).toEqual({ kind: 'user', name: 'user' });
     expect(m.spoken).toBe(true); // the request is stored as made; it is not evidence
     const written = await pane(ALPHA);
-    expect(written).toContain('"ordinary API post"');
+    expect(written).toContain('user: ordinary API post');
     expect(written).not.toContain('spoken in car mode');
   });
 
@@ -145,7 +148,7 @@ describe('spoken-turn hint on delivery', () => {
     expect(m.from.kind).toBe('agent');
     expect(m.spoken).toBeUndefined();
     const written = await pane(ALPHA);
-    expect(written).toContain('"@alpha agent post"');
+    expect(written).toContain('beta: @alpha agent post');
     expect(written).not.toContain('spoken in car mode');
   });
 
