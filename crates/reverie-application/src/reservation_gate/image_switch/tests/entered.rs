@@ -35,13 +35,20 @@ fn preview(
 fn operation() -> JournalId {
     JournalId::parse("aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee").unwrap()
 }
+fn source() -> Arc<Fixture> {
+    let source = Fixture::new();
+    for _ in 0..96 {
+        source.inventory(&[]);
+    }
+    source
+}
 fn pending(tree: &Tree) -> std::path::PathBuf {
     tree.root.join("state/resource-reservation-control.pending")
 }
 #[test]
 fn entered_image_owner_aborts_original_admission_without_publication_or_marker_change() {
     let tree = Tree::new();
-    let source = fixture(&[]);
+    let source = source();
     let gate = tree.gate(&source, true);
     let marker = fs::read(tree.root.join("state/resource-reservation-control.json")).unwrap();
     let inode = fs::metadata(tree.root.join("state/resource-reservation-control.json"))
@@ -68,7 +75,7 @@ fn entered_image_owner_aborts_original_admission_without_publication_or_marker_c
 #[test]
 fn changed_source_after_real_preview_refuses_before_pending_and_retains_foreign_bytes() {
     let tree = Tree::new();
-    let source = fixture(&[]);
+    let source = source();
     let gate = tree.gate(&source, true);
     let (files, preview) = preview(&gate, &tree);
     let mut changed = tree.raw.clone();
@@ -91,7 +98,7 @@ fn changed_source_after_real_preview_refuses_before_pending_and_retains_foreign_
 fn foreign_file_owner_cannot_enter_an_otherwise_identical_preview() {
     let tree = Tree::new();
     let foreign = Tree::new();
-    let source = fixture(&[]);
+    let source = source();
     let gate = tree.gate(&source, true);
     let (_, preview) = preview(&gate, &tree);
     let before = gate.inner.installed.snapshot().unwrap();
