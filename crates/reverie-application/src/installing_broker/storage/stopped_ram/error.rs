@@ -64,15 +64,6 @@ impl StoppedRamRetainFailure {
         (self.claim, self.context, self.cause)
     }
 }
-pub(crate) struct StoppedRamAdvanceFailure {
-    pub(super) owner: StoppedRamSource,
-    pub(super) cause: Arc<StoppedRamError>,
-}
-impl StoppedRamAdvanceFailure {
-    pub(crate) fn into_parts(self: Box<Self>) -> (StoppedRamSource, Arc<StoppedRamError>) {
-        (self.owner, self.cause)
-    }
-}
 pub(crate) struct StoppedRamRestoreFailure {
     pub(super) owner: StoppedRamSource,
     pub(super) cause: Arc<StoppedRamError>,

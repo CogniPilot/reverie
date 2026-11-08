@@ -5,15 +5,10 @@ pub(super) enum Outcome {
     Observed(Arc<StoppedRamObservation>),
     Failed(Arc<StoppedRamError>),
 }
-pub(super) enum Phase {
-    Unclaimed,
-    Retained,
-}
 pub(super) struct Held {
     pub(super) owner: Box<LaunchStorage>,
     pub(super) context: ObservationContext,
     pub(super) outcome: Outcome,
-    pub(super) phase: Phase,
 }
 pub(in crate::installing_broker::storage) struct Record {
     pub(super) held: Option<Held>,
@@ -85,13 +80,6 @@ impl Held {
             self.outcome = Outcome::Failed(error.clone());
         }
         result
-    }
-    pub(super) fn observed(&self) -> StopResult<Arc<StoppedRamObservation>> {
-        match &self.outcome {
-            Outcome::Observed(value) => Ok(value.clone()),
-            Outcome::Fresh => Err(refused("RAM_STOPPED_SOURCE_OBSERVATION_REQUIRED")),
-            Outcome::Failed(error) => Err(error.clone()),
-        }
     }
     pub(super) fn primary(&self) -> Option<Arc<StoppedRamError>> {
         match &self.outcome {

@@ -63,31 +63,6 @@ pub(super) fn check_record(
     Ok(index)
 }
 impl StoppedRamSource {
-    /// Pure one-way custody transfer before ANY durable claim attempt. The
-    /// retained type exposes no unclaimed restore method or raw lease.
-    pub(crate) fn retain_for_claim(
-        self,
-    ) -> std::result::Result<RetainedStoppedRamSource, Box<StoppedRamAdvanceFailure>> {
-        let result = self.advance();
-        match result {
-            Ok(()) => Ok(RetainedStoppedRamSource { source: self }),
-            Err(cause) => Err(Box::new(StoppedRamAdvanceFailure { owner: self, cause })),
-        }
-    }
-    fn advance(&self) -> StopResult<()> {
-        self.assert_entry()?;
-        let mut record = self
-            .record
-            .try_lock()
-            .map_err(|_| refused("RAM_STOPPED_SOURCE_IN_USE_OR_POISONED"))?;
-        let held = record.held()?;
-        if !matches!(held.phase, Phase::Unclaimed) {
-            return Err(refused("RAM_STOPPED_SOURCE_ALREADY_RETAINED"));
-        }
-        held.observed()?;
-        held.phase = Phase::Retained;
-        Ok(())
-    }
     /// Restoration returns custody to Direct, never closes the physical lease
     /// or supplies stopped/absence/capacity permission. A known body failure
     /// remains in the returned report; uncertain native cleanup retains self.
@@ -110,9 +85,6 @@ impl StoppedRamSource {
             .try_lock()
             .map_err(|_| refused("RAM_STOPPED_SOURCE_IN_USE_OR_POISONED"))?;
         let held = record.held()?;
-        if !matches!(held.phase, Phase::Unclaimed) {
-            return Err(refused("RAM_STOPPED_SOURCE_ALREADY_RETAINED"));
-        }
         let primary = held.primary();
         let cleanup = (|| {
             held.context.settle_stopped_ram(end).map_err(native)?;

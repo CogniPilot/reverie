@@ -6,12 +6,10 @@ use reverie_contracts::worker_config::EffectiveWorkerConfig;
 mod error;
 mod record;
 mod transition;
-pub(crate) use error::{
-    StoppedRamAdvanceFailure, StoppedRamError, StoppedRamRestoreFailure, StoppedRamRetainFailure,
-};
+pub(crate) use error::{StoppedRamError, StoppedRamRestoreFailure, StoppedRamRetainFailure};
 use error::{finalized, native, refused, storage};
 pub(super) use record::Record;
-use record::{Held, Outcome, Phase};
+use record::{Held, Outcome};
 type StopResult<T> = std::result::Result<T, Arc<StoppedRamError>>;
 #[must_use = "retain the whole source and actual claim on native uncertainty"]
 pub(crate) struct StoppedRamSource {
@@ -20,10 +18,6 @@ pub(crate) struct StoppedRamSource {
     identity: Arc<()>,
     record: Arc<Mutex<Record>>,
     configuration: EffectiveWorkerConfig,
-}
-#[must_use = "retained stopped custody has no unclaimed restore or release right"]
-pub(crate) struct RetainedStoppedRamSource {
-    source: StoppedRamSource,
 }
 pub(crate) struct RestoredStoppedRamSource {
     claim: StorageClaim,
@@ -92,7 +86,6 @@ impl StorageClaim {
                         owner,
                         context,
                         outcome: Outcome::Fresh,
-                        phase: Phase::Unclaimed,
                     }),
                 }));
                 entry.owner = EntryOwner::StoppedRam(record.clone());
@@ -138,25 +131,5 @@ impl StoppedRamSource {
             .lock(self.registry.runtime.stop_deadline())
             .map_err(storage)?;
         transition::check_record(&entries, &self.identity, &self.record).map(|_| ())
-    }
-}
-impl RetainedStoppedRamSource {
-    pub(crate) fn configuration(&self) -> &EffectiveWorkerConfig {
-        self.source.configuration()
-    }
-    pub(crate) fn paths(&self) -> &StoragePaths {
-        self.source.paths()
-    }
-    pub(crate) fn observation(&self) -> StopResult<Arc<StoppedRamObservation>> {
-        self.source.assert_entry()?;
-        self.source
-            .record
-            .try_lock()
-            .map_err(|_| refused("RAM_STOPPED_SOURCE_IN_USE_OR_POISONED"))?
-            .held()?
-            .observed()
-    }
-    pub(crate) fn assert_current(&mut self) -> StopResult<()> {
-        self.source.assert_current()
     }
 }
