@@ -98,17 +98,18 @@ impl Transport for Curl {
         if token.is_empty() || token.contains(char::is_whitespace) {
             return Err("the token file must hold one token".into());
         }
-        let scratch = Held::open(&self.scratch)?;
+        // Only a request with a body needs the scratch directory, so a read needs none to exist.
+        let scratch = body.map(|_| Held::open(&self.scratch)).transpose()?;
         // Removed when it drops, after curl has run.
-        let body_file = match body {
-            None => None,
-            Some(value) => {
-                Some(scratch.create_unique("request", "json", value.to_string().as_bytes())?)
+        let body_file = match (body, &scratch) {
+            (Some(value), Some(dir)) => {
+                Some(dir.create_unique("request", "json", value.to_string().as_bytes())?)
             }
+            _ => None,
         };
         let name = body_file.as_ref().map(|file| Path::new(file.name()));
         let config = config(method, &format!("{API}{path}"), token, name)?;
-        let output = run_curl(&config, &scratch.proc_path())?;
+        let output = run_curl(&config, scratch.as_ref().map(Held::proc_path).as_deref())?;
         let (body, status) = output.rsplit_once('\n').ok_or("curl printed no status")?;
         let status = status
             .trim()
@@ -118,10 +119,14 @@ impl Transport for Curl {
     }
 }
 
-fn run_curl(config: &str, cwd: &Path) -> Result<String, String> {
-    let mut child = Command::new("curl")
+/// Runs curl, inside `cwd` when a request body is named relative to it.
+fn run_curl(config: &str, cwd: Option<&Path>) -> Result<String, String> {
+    let mut command = Command::new("curl");
+    if let Some(cwd) = cwd {
+        command.current_dir(cwd);
+    }
+    let mut child = command
         .args(CURL_ARGS)
-        .current_dir(cwd)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

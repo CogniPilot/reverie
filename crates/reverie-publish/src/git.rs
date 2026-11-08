@@ -127,6 +127,17 @@ impl Git {
         ])?;
         Ok(prefix)
     }
+
+    /// Whether `commit` is the tip of a ref under `prefix` (a tag peeled to its commit): what an
+    /// `import_bundle` of this run brought in, as opposed to anything else already in the store.
+    pub fn is_imported_tip(&self, prefix: &str, commit: &str) -> Result<bool, String> {
+        let tips = self.run([
+            "for-each-ref",
+            "--format=%(objectname)%0a%(*objectname)",
+            prefix,
+        ])?;
+        Ok(tips.lines().any(|tip| tip == commit))
+    }
 }
 
 #[cfg(test)]

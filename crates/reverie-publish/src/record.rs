@@ -7,7 +7,7 @@
 use crate::custody::Held;
 use nix::errno::Errno;
 use serde_json::Value;
-use std::{fs, path::Path};
+use std::path::Path;
 
 #[derive(Debug)]
 pub struct Records {
@@ -15,10 +15,10 @@ pub struct Records {
 }
 
 impl Records {
+    /// Holds `dir`, creating any missing part of it inside held parents.
     pub fn new(dir: &Path) -> Result<Self, String> {
-        fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
         Ok(Self {
-            dir: Held::open(dir)?,
+            dir: Held::open_or_create(dir)?,
         })
     }
 
@@ -50,6 +50,7 @@ impl Records {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
 
     #[test]
     fn a_second_intent_refuses_until_the_first_is_inspected() {
@@ -93,6 +94,9 @@ mod tests {
         symlink(root.join("records"), root.join("alias")).unwrap();
         let error = Records::new(&root.join("alias")).unwrap_err();
         assert!(error.contains("is a symlink"), "{error}");
+        let error = Records::new(&root.join("alias/records/new")).unwrap_err();
+        assert!(error.contains("is a symlink"), "{error}");
+        assert!(!root.join("records/records").exists());
         let _ = fs::remove_dir_all(&root);
     }
 }

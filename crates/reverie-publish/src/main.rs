@@ -85,7 +85,7 @@ fn check(o: &Check) -> Result<serde_json::Value, String> {
     let packet = Packet::open(&o.packet, &o.seal)?;
     let git = Git::open(&o.git_dir)?;
     // git reads a private copy of the verified bytes, never the packet's path.
-    git.import_bundle(&packet.bundle()?, "check")?;
+    let imported = git.import_bundle(&packet.bundle()?, "check")?;
     let head = git.run([
         "rev-parse",
         "--verify",
@@ -94,6 +94,10 @@ fn check(o: &Check) -> Result<serde_json::Value, String> {
     ])?;
     if head != o.head {
         return Err("--head must be the full id of a commit in the bundle".into());
+    }
+    // Not just any commit in the store: the tip of a ref the sealed bundle itself carries.
+    if !git.is_imported_tip(&imported, &head)? {
+        return Err("--head must be the tip of a ref in the sealed bundle".into());
     }
     let tree = git.run(["rev-parse", &format!("{head}^{{tree}}")])?;
     if o.tree.len() < 8 || !tree.starts_with(&o.tree) {
