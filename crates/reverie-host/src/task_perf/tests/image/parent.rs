@@ -241,7 +241,13 @@ impl Fixture {
         caps.sort_unstable();
         assert_eq!(caps, ["SETGID", "SETUID"]);
         let options = host["SecurityOpt"].as_array().unwrap();
-        assert!(options.iter().any(|v| v == "systempaths=unconfined"));
+        // Docker CLI consumes systempaths=unconfined into these two fields.
+        println!(
+            "OUTER_SYSTEM_PATHS masked={} readonly={}",
+            host["MaskedPaths"], host["ReadonlyPaths"]
+        );
+        assert_eq!(host["MaskedPaths"], serde_json::json!([]));
+        assert_eq!(host["ReadonlyPaths"], serde_json::json!([]));
         assert!(!options.iter().any(|v| {
             v.as_str()
                 .is_some_and(|s| s.starts_with("no-new-privileges"))
