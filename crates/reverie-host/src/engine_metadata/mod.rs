@@ -48,6 +48,7 @@ pub enum EngineQuery<'a> {
     GpuInformation,
     TelemetryInventory,
     TelemetryInspect(&'a reverie_core::command_telemetry::TelemetryContainerId),
+    WorkerPoolInspect(&'a ContainerId),
 }
 impl EngineQuery<'_> {
     fn arguments(self) -> Result<Vec<OsString>> {
@@ -66,6 +67,9 @@ impl EngineQuery<'_> {
                 .to_vec());
             }
             Self::TelemetryInspect(id) => {
+                return Ok(["inspect", id.as_str()].map(Into::into).to_vec());
+            }
+            Self::WorkerPoolInspect(id) => {
                 return Ok(["inspect", id.as_str()].map(Into::into).to_vec());
             }
             Self::GpuInformation => {

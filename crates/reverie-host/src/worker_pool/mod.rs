@@ -2,8 +2,10 @@
 //! the installed witness retains the actual opened kernel directory. This is
 //! not a Gate, storage lease, stop receipt or global shutdown acknowledgement.
 mod bootstrap;
+mod client;
 mod controller_limits;
-mod directory;
+pub use client::{ActivatedController, ControllerActivationFailure, ControllerStatusData};
+pub(crate) mod directory;
 mod endpoint;
 mod engine;
 mod installation_request;
@@ -12,6 +14,8 @@ mod member;
 mod namespace;
 mod policy;
 mod publication;
+mod service;
+pub use service::{ControllerServing, ControllerServingFailure};
 #[cfg(test)]
 mod tests;
 pub use bootstrap::{BrokerBootstrapBinding, BrokerBootstrapFailure};
@@ -33,6 +37,7 @@ pub enum PoolError {
     Finalization(Box<PoolError>, Box<PoolError>),
     MetadataClose(Box<PoolError>),
     BootstrapFacts(Box<crate::website_facts::WebsiteFactsError>),
+    Engine(crate::engine_metadata::EngineError),
 }
 impl fmt::Display for PoolError {
     fn fmt(&self, output: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -47,6 +52,7 @@ impl std::error::Error for PoolError {
             Self::Finalization(primary, _) => Some(primary),
             Self::MetadataClose(error) => Some(error),
             Self::BootstrapFacts(error) => Some(error),
+            Self::Engine(error) => Some(error),
             Self::Refused(_) => None,
         }
     }
@@ -60,9 +66,10 @@ impl PoolError {
             Self::Finalization(_, _) => "WORKER_POOL_FINALIZATION_UNKNOWN",
             Self::MetadataClose(_) => "WORKER_POOL_CLOSE_UNKNOWN",
             Self::BootstrapFacts(error) => error.code(),
+            Self::Engine(_) => "WORKER_POOL_CAPTURED_ENGINE",
         }
     }
-    fn close_unknown(&self) -> bool {
+    pub(crate) fn close_unknown(&self) -> bool {
         match self {
             Self::MetadataClose(_) => true,
             Self::Finalization(primary, secondary) => {
@@ -197,7 +204,13 @@ impl OpenedWorkerPool {
         self.directory
             .assert_anchor_current(&self.anchor_id, self.anchor_pid)?;
         self.directory.assert_limits(self.policy.data())?;
-        Ok(InstalledWorkerPool { owner: self })
+        Ok(InstalledWorkerPool {
+            policy: &self.policy,
+            directory: &self.directory,
+            anchor_id: &self.anchor_id,
+            anchor_pid: self.anchor_pid,
+            stage: &self.stage,
+        })
     }
 
     pub fn close(&mut self) -> Result<()> {
@@ -229,23 +242,37 @@ impl PoolCaptureFailure {
 /// Borrow of the actual retained controller/kernel owner. No serde constructor
 /// or reply/ID conversion can create this witness.
 pub struct InstalledWorkerPool<'a> {
-    owner: &'a OpenedWorkerPool,
+    policy: &'a ControllerPoolPolicy,
+    directory: &'a PoolDirectory,
+    anchor_id: &'a str,
+    anchor_pid: u32,
+    stage: &'a InstallationStage,
 }
-impl InstalledWorkerPool<'_> {
+impl<'a> InstalledWorkerPool<'a> {
+    fn borrow_view(&self) -> Self {
+        Self {
+            policy: self.policy,
+            directory: self.directory,
+            anchor_id: self.anchor_id,
+            anchor_pid: self.anchor_pid,
+            stage: self.stage,
+        }
+    }
     pub fn reobserve(&self) -> Result<()> {
-        self.owner.policy.assert_current()?;
-        self.owner
-            .policy
-            .assert_anchor(&self.owner.anchor_id, self.owner.anchor_pid)?;
-        self.owner
-            .directory
-            .assert_anchor_current(&self.owner.anchor_id, self.owner.anchor_pid)?;
-        self.owner.directory.assert_limits(self.owner.policy.data())
+        need(
+            *self.stage == InstallationStage::Confirmed,
+            "WORKER_POOL_INSTALLATION_UNKNOWN",
+        )?;
+        self.policy.assert_current()?;
+        self.policy.assert_anchor(self.anchor_id, self.anchor_pid)?;
+        self.directory
+            .assert_anchor_current(self.anchor_id, self.anchor_pid)?;
+        self.directory.assert_limits(self.policy.data())
     }
     pub fn policy_data(&self) -> &WorkerPoolPolicy {
-        self.owner.policy.data()
+        self.policy.data()
     }
     pub fn kernel_identity(&self) -> (u64, u64) {
-        self.owner.directory.identity()
+        self.directory.identity()
     }
 }

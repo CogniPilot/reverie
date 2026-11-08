@@ -18,6 +18,7 @@ use std::{
 
 const DIRECTORY: &str = "/run/reverie-worker-pool/control";
 const LEAF: &str = "controller.sock";
+mod protocol;
 #[cfg(test)]
 mod tests;
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -282,6 +283,12 @@ impl ControllerPeer<'_> {
     }
     pub fn close(&mut self) -> Result<()> {
         self.native.close()
+    }
+}
+impl<'a> ControllerPeer<'a> {
+    pub fn into_serving(self) -> super::service::ControllerServing<'a> {
+        let policy = self.endpoint.policy;
+        super::service::ControllerServing::new(self, policy)
     }
 }
 impl PeerNative<'_> {

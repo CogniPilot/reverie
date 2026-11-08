@@ -24,7 +24,7 @@ pub struct ControllerPoolPolicy {
     close_unknown: AtomicBool,
     closed: bool,
     controller: super::namespace::ControllerProcessObservation,
-    engine: super::engine::EngineObserver,
+    pub(super) engine: super::engine::EngineObserver,
 }
 impl ControllerPoolPolicy {
     /// Startup supplies the hash of the owner-selected read-only Docker bind.
@@ -84,6 +84,14 @@ impl ControllerPoolPolicy {
     }
     pub(super) fn broker_birth(&self) -> Result<&reverie_contracts::worker_pool::BrokerBirthData> {
         self.assert_current()?;
+        self.birth
+            .as_ref()
+            .map(|birth| birth.broker())
+            .ok_or(PoolError::Refused("WORKER_POOL_SERVICE_V2_REQUIRED"))
+    }
+    pub(super) fn bound_broker_data(
+        &self,
+    ) -> Result<&reverie_contracts::worker_pool::BrokerBirthData> {
         self.birth
             .as_ref()
             .map(|birth| birth.broker())

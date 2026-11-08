@@ -27,6 +27,7 @@ impl PoolMemberLimits {
 #[derive(Eq, PartialEq)]
 enum Stage {
     Opening,
+    Configuring,
     Verified,
     Refused,
     Closing,
@@ -38,7 +39,7 @@ enum Stage {
 /// the existing Created/start/memory owners and join this observation there;
 /// CID/PID data cannot create any of those tokens.
 pub struct OpenedPoolMember<'pool> {
-    pool: &'pool InstalledWorkerPool<'pool>,
+    pool: InstalledWorkerPool<'pool>,
     directory: Option<File>,
     identity: (u64, u64),
     id: String,
@@ -51,7 +52,7 @@ pub struct OpenedPoolMember<'pool> {
 }
 impl<'pool> OpenedPoolMember<'pool> {
     pub fn capture(
-        pool: &'pool InstalledWorkerPool<'pool>,
+        pool: &InstalledWorkerPool<'pool>,
         employee: &str,
         id: &str,
         pid: u32,
@@ -59,7 +60,7 @@ impl<'pool> OpenedPoolMember<'pool> {
     ) -> std::result::Result<Self, Box<PoolMemberFailure<'pool>>> {
         // Retain the partial owner before opening its first descriptor.
         let mut owner = Self {
-            pool,
+            pool: pool.borrow_view(),
             directory: None,
             identity: (0, 0),
             id: id.into(),
@@ -70,7 +71,7 @@ impl<'pool> OpenedPoolMember<'pool> {
             stage: Stage::Opening,
             close_unknown: false,
         };
-        let result = owner.acquire(employee);
+        let result = owner.acquire(employee).and_then(|()| owner.observe());
         match result {
             Ok(()) => {
                 owner.stage = Stage::Verified;
@@ -87,7 +88,7 @@ impl<'pool> OpenedPoolMember<'pool> {
         self.pool.reobserve()?;
         need(
             reverie_contracts::worker_pool::hex_id(&self.id)
-                && self.id != self.pool.owner.anchor_id
+                && self.id != self.pool.anchor_id
                 && self.pid > 1,
             "WORKER_POOL_MEMBER_IDENTITY",
         )?;
@@ -105,7 +106,86 @@ impl<'pool> OpenedPoolMember<'pool> {
         self.directory = Some(self.open_named()?);
         self.identity = directory::identity(self.file()?)?;
         self.start = directory::process_start(self.pid)?;
-        self.observe()
+        self.assert_process()
+    }
+    /// Fixed native controller path only, after original broker authorization
+    /// and global maintenance. Holds the same leaf FD before the first write.
+    pub(super) fn configure_new(
+        pool: &InstalledWorkerPool<'pool>,
+        employee: &str,
+        id: &str,
+        pid: u32,
+        limits: PoolMemberLimits,
+        end: std::time::Instant,
+    ) -> std::result::Result<Self, Box<PoolMemberFailure<'pool>>> {
+        let mut owner = Self {
+            pool: pool.borrow_view(),
+            directory: None,
+            identity: (0, 0),
+            id: id.into(),
+            pid,
+            start: String::new(),
+            high: 0,
+            limits,
+            stage: Stage::Opening,
+            close_unknown: false,
+        };
+        let result = owner.acquire(employee).and_then(|()| owner.configure(end));
+        match result {
+            Ok(()) => {
+                owner.stage = Stage::Verified;
+                Ok(owner)
+            }
+            Err(primary) => {
+                owner.stage = Stage::Refused;
+                owner.close_unknown |= primary.close_unknown();
+                Err(Box::new(PoolMemberFailure { owner, primary }))
+            }
+        }
+    }
+    fn configure(&mut self, end: std::time::Instant) -> Result<()> {
+        self.pool.reobserve()?;
+        for (name, expected) in [
+            (
+                "memory.max",
+                (u64::from(self.pool.policy_data().memory_max_mi_b) * 1_048_576).to_string(),
+            ),
+            ("memory.swap.max", "0".into()),
+            ("pids.max", self.limits.tasks_max.to_string()),
+            ("cpu.max", "max 100000".into()),
+        ] {
+            need(
+                directory::read_at(self.file()?, name)?.trim() == expected,
+                "WORKER_POOL_MEMBER_HARD_LIMIT",
+            )?;
+        }
+        let nodes = self
+            .pool
+            .directory
+            .memory_nodes()
+            .iter()
+            .map(u32::to_string)
+            .collect::<Vec<_>>()
+            .join(",");
+        self.stage = Stage::Configuring;
+        for (name, value) in [
+            ("cpuset.mems", nodes),
+            ("cpuset.cpus", self.pool.policy_data().cpu_list()),
+            ("memory.high", self.high.to_string()),
+            ("cpu.weight", self.limits.cpu_weight.to_string()),
+        ] {
+            self.assert_identity()?;
+            need(
+                std::time::Instant::now() < end,
+                "WORKER_POOL_MEMBER_DEADLINE",
+            )?;
+            directory::write_at(self.file()?, name, value.as_bytes())?;
+        }
+        self.observe()?;
+        need(
+            std::time::Instant::now() < end,
+            "WORKER_POOL_MEMBER_DEADLINE",
+        )
     }
     fn file(&self) -> Result<&File> {
         self.directory
@@ -114,7 +194,7 @@ impl<'pool> OpenedPoolMember<'pool> {
     }
     fn open_named(&self) -> Result<File> {
         Ok(native::open_at(
-            self.pool.owner.directory.parent()?.as_raw_fd(),
+            self.pool.directory.parent()?.as_raw_fd(),
             OsStr::new(&format!("docker-{}.scope", self.id)),
             nix::libc::O_RDONLY | nix::libc::O_DIRECTORY,
         )?)
@@ -133,6 +213,12 @@ impl<'pool> OpenedPoolMember<'pool> {
         )
     }
     fn observe(&self) -> Result<()> {
+        self.assert_identity()?;
+        self.assert_limits()?;
+        self.assert_process()?;
+        self.pool.reobserve()
+    }
+    fn assert_identity(&self) -> Result<()> {
         self.pool.reobserve()?;
         self.assert_process()?;
         need(
@@ -145,7 +231,6 @@ impl<'pool> OpenedPoolMember<'pool> {
                 directory::identity(&named)? == self.identity,
                 "WORKER_POOL_MEMBER_DIRECTORY_REBOUND",
             )?;
-            self.assert_limits()?;
             self.assert_process()?;
             self.pool.reobserve()
         })();
@@ -179,7 +264,7 @@ impl<'pool> OpenedPoolMember<'pool> {
         for name in ["cpuset.mems", "cpuset.mems.effective"] {
             need(
                 directory::parse_cpus(directory::read_at(self.file()?, name)?.trim())?
-                    == self.pool.owner.directory.memory_nodes(),
+                    == self.pool.directory.memory_nodes(),
                 "WORKER_POOL_MEMBER_MEMORY_NODE_PLACEMENT",
             )?;
         }
@@ -238,11 +323,53 @@ pub struct PoolMemberFailure<'pool> {
     owner: OpenedPoolMember<'pool>,
     primary: PoolError,
 }
+/// Remaining metadata custody after a failed member body. No forward
+/// observation or capacity proof survives this consuming transition.
+pub(super) struct MemberComponent {
+    directory: Option<File>,
+    close_unknown: bool,
+    primary: PoolError,
+}
+impl MemberComponent {
+    pub(super) fn close(&mut self) -> Result<()> {
+        let result = self
+            .directory
+            .take()
+            .map(native::close)
+            .transpose()
+            .map(|_| ())
+            .map_err(PoolError::from);
+        self.close_unknown |= result.is_err();
+        result?;
+        need(!self.close_unknown, "WORKER_POOL_MEMBER_CLOSE_UNKNOWN")
+    }
+    pub(super) fn cause(&self) -> &PoolError {
+        &self.primary
+    }
+}
+impl Drop for MemberComponent {
+    fn drop(&mut self) {
+        std::mem::forget(self.directory.take());
+    }
+}
+impl OpenedPoolMember<'_> {
+    pub(super) fn into_component(mut self, primary: PoolError) -> MemberComponent {
+        MemberComponent {
+            directory: self.directory.take(),
+            close_unknown: self.close_unknown,
+            primary,
+        }
+    }
+}
 impl PoolMemberFailure<'_> {
     pub fn primary_error(&self) -> &PoolError {
         &self.primary
     }
     pub fn close(&mut self) -> Result<()> {
         self.owner.close()
+    }
+    pub(super) fn into_component(self: Box<Self>) -> MemberComponent {
+        let Self { owner, primary } = *self;
+        owner.into_component(primary)
     }
 }

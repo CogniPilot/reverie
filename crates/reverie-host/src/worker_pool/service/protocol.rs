@@ -1,0 +1,192 @@
+//! Closed controller messages. These are correlation/selection DATA, never a
+//! serialized consent, maintenance fence, Created owner or pool capability.
+use super::super::*;
+use reverie_core::operations::JournalId;
+use serde::{Deserialize, Serialize};
+
+pub(in crate::worker_pool) const MAX_FRAME: usize = 8192;
+const PURPOSE: &str = "reverie-worker-pool-control-v1";
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
+struct Envelope {
+    version: u8,
+    purpose: String,
+    deadline_monotonic_ns: u64,
+    request: Request,
+}
+pub(in crate::worker_pool) struct Received {
+    pub(in crate::worker_pool) request: Request,
+    pub(in crate::worker_pool) end: std::time::Instant,
+}
+#[derive(Deserialize)]
+#[serde(
+    tag = "verb",
+    deny_unknown_fields,
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub(in crate::worker_pool) enum Request {
+    Status {
+        request_id: String,
+    },
+    ContinueOriginal {
+        request_id: String,
+    },
+    Close {
+        request_id: String,
+    },
+    Activate {
+        request_id: String,
+        host_reserve_mi_b: u32,
+    },
+    ConfigureMember {
+        request_id: String,
+        employee: String,
+        session: String,
+        container: String,
+    },
+    ObserveMember {
+        request_id: String,
+        employee: String,
+        session: String,
+        container: String,
+    },
+}
+impl Request {
+    pub(in crate::worker_pool) fn decode(raw: &[u8]) -> Result<Received> {
+        need(
+            !raw.is_empty() && raw.len() <= MAX_FRAME,
+            "WORKER_POOL_CONTROL_FRAME_BOUND",
+        )?;
+        let envelope: Envelope = serde_json::from_slice(raw)
+            .map_err(|_| PoolError::Refused("WORKER_POOL_CONTROL_FRAME"))?;
+        need(
+            envelope.version == 1 && envelope.purpose == PURPOSE,
+            "WORKER_POOL_CONTROL_VERSION",
+        )?;
+        let before = std::time::Instant::now();
+        let remaining = envelope
+            .deadline_monotonic_ns
+            .saturating_sub(monotonic_ns()?)
+            .min(20_000_000_000);
+        let end = before + std::time::Duration::from_nanos(remaining);
+        let value = envelope.request;
+        need(
+            JournalId::parse(value.id()).is_ok(),
+            "WORKER_POOL_CONTROL_REQUEST_ID",
+        )?;
+        match &value {
+            Self::Activate {
+                host_reserve_mi_b, ..
+            } => need(
+                *host_reserve_mi_b >= 256,
+                "WORKER_POOL_CONTROL_HOST_RESERVE",
+            )?,
+            Self::ConfigureMember {
+                employee,
+                session,
+                container,
+                ..
+            }
+            | Self::ObserveMember {
+                employee,
+                session,
+                container,
+                ..
+            } => {
+                need(
+                    reverie_core::ids::ProfileEmployeeId::parse(employee).is_ok()
+                        && reverie_core::ids::ProfileSessionId::parse(session).is_ok()
+                        && reverie_contracts::worker_pool::hex_id(container),
+                    "WORKER_POOL_CONTROL_MEMBER",
+                )?;
+            }
+            Self::Status { .. } | Self::ContinueOriginal { .. } | Self::Close { .. } => (),
+        }
+        Ok(Received {
+            request: value,
+            end,
+        })
+    }
+    pub(in crate::worker_pool) fn id(&self) -> &str {
+        match self {
+            Self::Status { request_id }
+            | Self::ContinueOriginal { request_id }
+            | Self::Close { request_id }
+            | Self::Activate { request_id, .. }
+            | Self::ConfigureMember { request_id, .. }
+            | Self::ObserveMember { request_id, .. } => request_id,
+        }
+    }
+}
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(in crate::worker_pool) struct Reply<'a> {
+    pub(in crate::worker_pool) version: u8,
+    pub(in crate::worker_pool) request_id: &'a str,
+    pub(in crate::worker_pool) phase: &'a str,
+    pub(in crate::worker_pool) known: bool,
+    pub(in crate::worker_pool) primary_error: Option<&'static str>,
+    pub(in crate::worker_pool) anchor: Option<AnchorData>,
+}
+#[derive(Serialize)]
+pub(in crate::worker_pool) struct AnchorData {
+    pub(in crate::worker_pool) container: String,
+    pub(in crate::worker_pool) pid: u32,
+}
+pub(in crate::worker_pool) fn monotonic_ns() -> Result<u64> {
+    let value = nix::time::clock_gettime(nix::time::ClockId::CLOCK_MONOTONIC)
+        .map_err(std::io::Error::from)?;
+    u64::try_from(value.tv_sec())
+        .ok()
+        .and_then(|seconds| seconds.checked_mul(1_000_000_000))
+        .and_then(|seconds| {
+            u64::try_from(value.tv_nsec())
+                .ok()
+                .and_then(|ns| seconds.checked_add(ns))
+        })
+        .ok_or(PoolError::Refused("WORKER_POOL_CLOCK"))
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    fn frame(request: serde_json::Value, deadline: u64) -> Vec<u8> {
+        serde_json::to_vec(&serde_json::json!({"version":1,"purpose":PURPOSE,"deadlineMonotonicNs":deadline,"request":request})).unwrap()
+    }
+    #[test]
+    fn closed_protocol_refuses_unversioned_unknown_commands_and_extra_members() {
+        let request =
+            serde_json::json!({"verb":"status","requestId":"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"});
+        assert!(
+            Request::decode(&frame(
+                request.clone(),
+                monotonic_ns().unwrap() + 1_000_000_000
+            ))
+            .is_ok()
+        );
+        for request in [
+            serde_json::json!({"verb":"exec","requestId":"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee","command":"true"}),
+            serde_json::json!({"verb":"status","requestId":"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee","owner":true}),
+        ] {
+            assert!(Request::decode(&frame(request, 0)).is_err());
+        }
+        assert!(Request::decode(br#"{"request":{"verb":"status"}}"#).is_err());
+    }
+    #[test]
+    fn expired_sender_deadline_is_not_renewed_at_receiver() {
+        let received=Request::decode(&frame(serde_json::json!({"verb":"activate","requestId":"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee","hostReserveMiB":4096}),0)).unwrap();
+        assert!(received.end <= std::time::Instant::now());
+        assert!(super::super::check(received.end).is_err());
+    }
+    #[test]
+    fn receiver_caps_sender_budget_even_for_maximum_integer() {
+        let before = std::time::Instant::now();
+        let received = Request::decode(&frame(
+            serde_json::json!({"verb":"status","requestId":"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"}),
+            u64::MAX,
+        ))
+        .unwrap();
+        assert!(received.end <= before + std::time::Duration::from_secs(21));
+    }
+}

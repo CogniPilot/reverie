@@ -201,6 +201,20 @@ impl PoolDirectory {
         self.assert_current()
     }
     pub(super) fn configure(&self, policy: &WorkerPoolPolicy) -> Result<()> {
+        self.configure_bound(policy, None)
+    }
+    pub(super) fn configure_until(
+        &self,
+        policy: &WorkerPoolPolicy,
+        end: std::time::Instant,
+    ) -> Result<()> {
+        self.configure_bound(policy, Some(end))
+    }
+    fn configure_bound(
+        &self,
+        policy: &WorkerPoolPolicy,
+        end: Option<std::time::Instant>,
+    ) -> Result<()> {
         let max = (u64::from(policy.memory_max_mi_b) * 1_048_576).to_string();
         for (name, value) in [
             ("memory.max", max),
@@ -220,6 +234,10 @@ impl PoolDirectory {
             ("cpuset.cpus", policy.cpu_list()),
         ] {
             self.assert_current()?;
+            need(
+                end.is_none_or(|end| std::time::Instant::now() < end),
+                "WORKER_POOL_ACTIVATION_DEADLINE",
+            )?;
             write_at(self.parent()?, name, value.as_bytes())?;
         }
         Ok(())
@@ -300,7 +318,7 @@ pub(super) fn identity(file: &File) -> Result<(u64, u64)> {
     )?;
     Ok((metadata.dev(), metadata.ino()))
 }
-pub(super) fn read_at(parent: &File, name: &str) -> Result<String> {
+pub(crate) fn read_at(parent: &File, name: &str) -> Result<String> {
     let file = native::open_at(
         parent.as_raw_fd(),
         OsStr::new(name),
@@ -315,7 +333,7 @@ fn read(file: &File, max: usize) -> Result<String> {
     need(raw.len() <= max, "WORKER_POOL_READ_BOUND")?;
     String::from_utf8(raw).map_err(|_| PoolError::Refused("WORKER_POOL_READ_ENCODING"))
 }
-pub(super) fn bounded_path(path: &str, max: usize) -> Result<String> {
+pub(crate) fn bounded_path(path: &str, max: usize) -> Result<String> {
     let file = native::open_at(
         nix::libc::AT_FDCWD,
         Path::new(path).as_os_str(),
@@ -324,12 +342,12 @@ pub(super) fn bounded_path(path: &str, max: usize) -> Result<String> {
     let result = read(&file, max);
     finalized(result, native::close(file).map_err(Into::into))
 }
-pub(super) fn process_start(pid: u32) -> Result<String> {
+pub(crate) fn process_start(pid: u32) -> Result<String> {
     let stat = bounded_path(&format!("/proc/{pid}/stat"), 65_536)?;
     reverie_contracts::kernel_accounting::process_start(&stat)
         .map_err(|_| PoolError::Refused("WORKER_POOL_ANCHOR_PID_UNKNOWN"))
 }
-fn write_at(parent: &File, name: &str, value: &[u8]) -> Result<()> {
+pub(super) fn write_at(parent: &File, name: &str, value: &[u8]) -> Result<()> {
     let file = native::open_at(
         parent.as_raw_fd(),
         OsStr::new(name),

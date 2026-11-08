@@ -23,8 +23,65 @@ pub(super) struct EngineObserver {
     runtime: Runtime,
     socket_identity: (u64, u64),
     opaque: AtomicBool,
+    effect_reply: std::sync::Mutex<Option<(u16, Vec<u8>)>>,
 }
 impl EngineObserver {
+    pub(super) fn inspect(&self, id: &str) -> Result<Vec<u8>> {
+        need(
+            reverie_contracts::worker_pool::hex_id(id),
+            "WORKER_POOL_CONTAINER_ID",
+        )?;
+        self.read(&format!("/containers/{id}/json"))
+    }
+    pub(super) fn inventory(&self) -> Result<Vec<u8>> {
+        self.read("/containers/json?all=1")
+    }
+    pub(super) fn create_anchor(&self, policy: &WorkerPoolPolicy, digest: &str) -> Result<Vec<u8>> {
+        let body = serde_json::to_vec(&serde_json::json!({"Image":policy.anchor_image,"User":format!("{}:{}",policy.broker_uid,policy.broker_gid),"Entrypoint":["/bin/sleep"],"Cmd":["infinity"],"Env":["PATH=/bin","LANG=C.UTF-8"],"Labels":{"reverie.pool.anchor":policy.deployment,"reverie.pool.birth-policy":digest},"HostConfig":{"CgroupParent":policy.parent_slice(),"ReadonlyRootfs":true,"NetworkMode":"none","CapDrop":["ALL"],"SecurityOpt":["no-new-privileges:true"],"Memory":67108864,"MemorySwap":67108864,"PidsLimit":16,"CpuShares":2,"NanoCpus":0,"CpusetCpus":policy.cpu_list(),"RestartPolicy":{"Name":"no"}}})).map_err(|_|PoolError::Refused("WORKER_POOL_ANCHOR_BODY"))?;
+        self.effect(
+            &format!("/containers/create?name={}", policy.anchor_name()),
+            &body,
+            201,
+        )
+    }
+    pub(super) fn start_anchor(&self, id: &str) -> Result<()> {
+        need(
+            reverie_contracts::worker_pool::hex_id(id),
+            "WORKER_POOL_ANCHOR_IDENTITY",
+        )?;
+        self.effect(&format!("/containers/{id}/start"), &[], 204)
+            .map(|_| ())
+    }
+    fn effect(&self, target: &str, body: &[u8], expected: u16) -> Result<Vec<u8>> {
+        need(
+            !self.opaque.load(Ordering::Acquire) && socket_identity()? == self.socket_identity,
+            "WORKER_POOL_ENGINE_CLOSE_UNKNOWN",
+        )?;
+        let mut retained = self
+            .effect_reply
+            .lock()
+            .map_err(|_| PoolError::Refused("WORKER_POOL_ENGINE_REPLY_RETAINED"))?;
+        *retained = None;
+        let result =
+            self.runtime
+                .block_on(self.exchange(target, "POST", body, Some(&mut retained)));
+        if result.is_err() {
+            self.opaque.store(true, Ordering::Release);
+        }
+        let (status, raw) = result?;
+        need(
+            socket_identity()? == self.socket_identity,
+            "WORKER_POOL_ENGINE_SOCKET_CHANGED",
+        )?;
+        if status != expected {
+            // An effect result is never retried. A daemon 5xx may have acted.
+            if status >= 500 {
+                self.opaque.store(true, Ordering::Release);
+            }
+            return Err(PoolError::Refused("WORKER_POOL_ENGINE_EFFECT_REFUSED"));
+        }
+        Ok(raw)
+    }
     #[cfg(test)]
     pub(super) fn unconnected_test_owner() -> Self {
         Self {
@@ -34,6 +91,7 @@ impl EngineObserver {
                 .unwrap(),
             socket_identity: (0, 0),
             opaque: AtomicBool::new(false),
+            effect_reply: std::sync::Mutex::new(None),
         }
     }
     pub(super) fn require_closed(&self) -> Result<()> {
@@ -51,6 +109,7 @@ impl EngineObserver {
             runtime,
             socket_identity,
             opaque: AtomicBool::new(false),
+            effect_reply: std::sync::Mutex::new(None),
         })
     }
     pub(super) fn verify(
@@ -120,7 +179,13 @@ impl EngineObserver {
             socket_identity()? == self.socket_identity,
             "WORKER_POOL_ENGINE_SOCKET_CHANGED",
         )?;
-        let result = self.runtime.block_on(self.exchange(target));
+        let result = self
+            .runtime
+            .block_on(self.exchange(target, "GET", &[], None))
+            .and_then(|(status, raw)| {
+                need(status == 200, "WORKER_POOL_ENGINE_REFUSED")?;
+                Ok(raw)
+            });
         if result.is_err() {
             self.opaque.store(true, Ordering::Release);
         }
@@ -131,14 +196,33 @@ impl EngineObserver {
         )?;
         Ok(bytes)
     }
-    async fn exchange(&self, target: &str) -> Result<Vec<u8>> {
+    async fn exchange(
+        &self,
+        target: &str,
+        method: &'static str,
+        body: &[u8],
+        retained: Option<&mut Option<(u16, Vec<u8>)>>,
+    ) -> Result<(u16, Vec<u8>)> {
         let mut stream = tokio::time::timeout(Duration::from_secs(2), UnixStream::connect(SOCKET))
             .await
             .map_err(|_| PoolError::Refused("WORKER_POOL_ENGINE_CONNECT_TIMEOUT"))??;
-        let result = tokio::time::timeout(Duration::from_secs(2), query(&mut stream, target))
-            .await
-            .map_err(|_| PoolError::Refused("WORKER_POOL_ENGINE_READ_TIMEOUT"))
-            .and_then(|value| value);
+        let result = tokio::time::timeout(
+            Duration::from_secs(2),
+            query(&mut stream, target, method, body),
+        )
+        .await
+        .map_err(|_| PoolError::Refused("WORKER_POOL_ENGINE_READ_TIMEOUT"))
+        .and_then(|value| value);
+        // Preserve the original daemon response BEFORE any checked close or
+        // later CID/status parse. The allocation below clones retained bytes.
+        let result = result.map(|reply| {
+            if let Some(slot) = retained {
+                *slot = Some(reply);
+                slot.as_ref().expect("original response retained").clone()
+            } else {
+                reply
+            }
+        });
         let closed = match stream.into_std() {
             Ok(stream) => {
                 crate::native::close(File::from(OwnedFd::from(stream))).map_err(Into::into)
@@ -161,7 +245,12 @@ fn socket_identity() -> Result<(u64, u64)> {
     )?;
     Ok((metadata.dev(), metadata.ino()))
 }
-async fn query(stream: &mut UnixStream, target: &str) -> Result<Vec<u8>> {
+async fn query(
+    stream: &mut UnixStream,
+    target: &str,
+    method: &'static str,
+    body: &[u8],
+) -> Result<(u16, Vec<u8>)> {
     let peer = nix::sys::socket::getsockopt(&*stream, nix::sys::socket::sockopt::PeerCredentials)
         .map_err(|_| PoolError::Refused("WORKER_POOL_ENGINE_PEER_UNKNOWN"))?;
     need(
@@ -172,7 +261,7 @@ async fn query(stream: &mut UnixStream, target: &str) -> Result<Vec<u8>> {
         .await
         .map_err(|_| PoolError::Refused("WORKER_POOL_ENGINE_HTTP"))?;
     tokio::pin!(connection);
-    let response = send(&mut sender, target);
+    let response = send(&mut sender, target, method, body);
     tokio::pin!(response);
     tokio::select! {
         biased;
@@ -180,22 +269,25 @@ async fn query(stream: &mut UnixStream, target: &str) -> Result<Vec<u8>> {
         _closed = &mut connection => response.await,
     }
 }
-async fn send(sender: &mut http1::SendRequest<Full<Bytes>>, target: &str) -> Result<Vec<u8>> {
+async fn send(
+    sender: &mut http1::SendRequest<Full<Bytes>>,
+    target: &str,
+    method: &'static str,
+    payload: &[u8],
+) -> Result<(u16, Vec<u8>)> {
     let request = Request::builder()
-        .method("GET")
+        .method(method)
         .uri(target)
         .header("host", "localhost")
         .header("connection", "close")
-        .body(Full::new(Bytes::new()))
+        .header("content-type", "application/json")
+        .body(Full::new(Bytes::copy_from_slice(payload)))
         .map_err(|_| PoolError::Refused("WORKER_POOL_ENGINE_HTTP"))?;
     let response = sender
         .send_request(request)
         .await
         .map_err(|_| PoolError::Refused("WORKER_POOL_ENGINE_REPLY_UNKNOWN"))?;
-    need(
-        response.status().as_u16() == 200,
-        "WORKER_POOL_ENGINE_REFUSED",
-    )?;
+    let status = response.status().as_u16();
     let mut body = response.into_body();
     let mut raw = Vec::new();
     while let Some(frame) = body.frame().await {
@@ -208,5 +300,5 @@ async fn send(sender: &mut http1::SendRequest<Full<Bytes>>, target: &str) -> Res
             raw.extend_from_slice(&data);
         }
     }
-    Ok(raw)
+    Ok((status, raw))
 }

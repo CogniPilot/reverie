@@ -29,8 +29,8 @@ mod tests;
 #[must_use = "retain the actual binding through controller bootstrap and uncertainty"]
 pub struct BrokerBootstrapBinding {
     role: arguments::Role,
-    engine: Arc<InstalledWorkerEngine>,
-    stop: WorkerStopBudget,
+    pub(super) engine: Arc<InstalledWorkerEngine>,
+    pub(super) stop: WorkerStopBudget,
     manifest: Option<File>,
     pair: [Option<UnixStream>; 2],
     pidfd: Option<OwnedFd>,
