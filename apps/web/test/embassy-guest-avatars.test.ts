@@ -12,7 +12,8 @@ import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { AvatarError, AvatarStore, MAX_AVATAR_BYTES } from '../src/agent-avatars.js';
-import { EMBASSY_GUEST_AVATAR_URL, EmbassyGuestAvatars } from '../src/embassy-guest-avatars.js';
+import { EMBASSY_GUEST_AVATAR_URL, EmbassyGuestAvatars, GuestLifecycleError } from '../src/embassy-guest-avatars.js';
+import { writePrivate } from '../src/embassy-guest-client.js';
 import { EmbassyHost, type EmbassyChannelCall } from '../src/embassy-host.js';
 import type { EmbassyPairing } from '../src/embassy-pairing.js';
 import { registerEmbassyPairingRoutes } from '../src/web/routes/embassy-pairing-routes.js';
@@ -51,15 +52,27 @@ function fakeChannel() {
     { id: 'inv-rejected', requestId: REJECTED, requestState: 'rejected', revoked: false },
   ];
   const base = `/embassy/channel/rooms/${ROOM}`;
-  // A held invites read answers with the state at the moment it was asked, but only once released: an embassy
-  // reply that arrives late, after a revoke or close has completed meanwhile.
-  let held: { asked: () => void; released: Promise<void> } | undefined;
-  const holdNextInvites = () => {
+  // A held call answers with the state at the moment it was asked, but only once released: an embassy reply that
+  // arrives late, after a revoke or close has completed meanwhile. A failed invites read answers 503.
+  type Hold = { asked: () => void; released: Promise<void> };
+  const hold = () => {
     let release!: () => void;
     let asked!: () => void;
     const askedP = new Promise<void>((done) => (asked = done));
-    held = { asked, released: new Promise<void>((done) => (release = done)) };
-    return { asked: askedP, release };
+    return { hold: { asked, released: new Promise<void>((done) => (release = done)) }, asked: askedP, release };
+  };
+  const invitesPlan: (Hold | 'fail')[] = [];
+  let heldDelete: Hold | undefined;
+  const holdNextInvites = () => {
+    const { hold: next, ...control } = hold();
+    invitesPlan.push(next);
+    return control;
+  };
+  const failNextInvites = () => invitesPlan.push('fail');
+  const holdNextDelete = () => {
+    const { hold: next, ...control } = hold();
+    heldDelete = next;
+    return control;
   };
   const transport = async (call: EmbassyChannelCall) => {
     if (call.method === 'GET' && call.path === base)
@@ -73,16 +86,22 @@ function fakeChannel() {
           guest: { company: 'Robotronix', identity: 'Zorblat' },
         })),
       };
-      const hold = held;
-      held = undefined;
-      if (hold) {
-        hold.asked();
-        await hold.released;
+      const next = invitesPlan.shift();
+      if (next === 'fail') return { status: 503, body: { error: { code: 'UNAVAILABLE', message: 'x' } } };
+      if (next) {
+        next.asked();
+        await next.released;
       }
       return { status: 200, body };
     }
     const revoke = call.path.match(new RegExp(`^${base}/invites/(.+)$`));
     if (call.method === 'DELETE' && revoke) {
+      const next = heldDelete;
+      heldDelete = undefined;
+      if (next) {
+        next.asked();
+        await next.released;
+      }
       const invite = invites.find((i) => i.id === revoke[1]);
       if (!invite) return { status: 404, body: { error: { code: 'NOT_FOUND', message: 'x' } } };
       invite.revoked = true;
@@ -94,7 +113,7 @@ function fakeChannel() {
     }
     return { status: 404, body: { error: { code: 'NOT_FOUND', message: 'x' } } };
   };
-  return { transport, invites, holdNextInvites };
+  return { transport, invites, holdNextInvites, failNextInvites, holdNextDelete };
 }
 
 async function setup() {
@@ -186,6 +205,66 @@ describe('EmbassyGuestAvatars', () => {
     expect(await avatars.urls()).toEqual({});
     writeFileSync(join(dir, 'map.json'), '{"v":3,"versions":{}}');
     await expect(avatars.urls()).rejects.toThrow('refusing to reset');
+  });
+
+  it('writes no picture while a fence is open, and a token taken before it closes stays stale', async () => {
+    const dir = temp();
+    const avatars = new EmbassyGuestAvatars(new AvatarStore(join(dir, 'pics')), join(dir, 'map.json'));
+    const before = avatars.token(APPROVED);
+    const close = avatars.fence();
+    const during = avatars.token(APPROVED);
+    await expect(avatars.set(avatars.token(APPROVED), PNG)).rejects.toBeInstanceOf(GuestLifecycleError);
+    close();
+    close(); // closing twice changes nothing more
+    await expect(avatars.set(before, PNG)).rejects.toBeInstanceOf(GuestLifecycleError);
+    await expect(avatars.set(during, PNG)).rejects.toBeInstanceOf(GuestLifecycleError);
+    expect(await avatars.set(avatars.token(APPROVED), PNG)).toMatch(EMBASSY_GUEST_AVATAR_URL);
+  });
+
+  it('an older version whose file could not be deleted stays owned, and the next removal deletes it', async () => {
+    const dir = temp();
+    let now = 1000;
+    const avatars = new EmbassyGuestAvatars(new AvatarStore(join(dir, 'pics')), join(dir, 'map.json'), () => now);
+    await avatars.set(avatars.token(APPROVED), PNG);
+    // The first version's file cannot be deleted while it is replaced: a directory stands in its place.
+    const first = join(dir, 'pics', `guest-${APPROVED}-1000.png`);
+    rmSync(first);
+    mkdirSync(first);
+    now = 2000;
+    expect(await avatars.set(avatars.token(APPROVED), JPEG)).toBe(`/api/embassy-host/guests/${APPROVED}/avatar?v=2000`);
+    rmSync(first, { recursive: true });
+    writeFileSync(first, PNG);
+    expect(await avatars.removeAll()).toBe(1);
+    expect(readdirSync(join(dir, 'pics'))).toEqual([]);
+    expect(await avatars.removeAll()).toBe(0);
+  });
+
+  it('a new version whose switch failed stays owned while the old one serves, and the next removal deletes both', async () => {
+    const dir = temp();
+    let now = 1000;
+    let failSwitch = false;
+    let writes = 0;
+    const avatars = new EmbassyGuestAvatars(
+      new AvatarStore(join(dir, 'pics')),
+      join(dir, 'map.json'),
+      () => now,
+      async (file, value) => {
+        // The second inventory write of an upload makes its version current.
+        if (failSwitch && ++writes === 2) throw new Error('disk full');
+        await writePrivate(file, value);
+      }
+    );
+    const first = await avatars.set(avatars.token(APPROVED), PNG);
+    now = 2000;
+    failSwitch = true;
+    await expect(avatars.set(avatars.token(APPROVED), JPEG)).rejects.toThrow('disk full');
+    expect(await avatars.urls()).toEqual({ [APPROVED]: first });
+    expect((await avatars.get(APPROVED))?.type).toBe('image/png');
+    expect(readdirSync(join(dir, 'pics')).sort()).toEqual([`guest-${APPROVED}-1000.png`, `guest-${APPROVED}-2000.jpg`]);
+    failSwitch = false;
+    expect(await avatars.remove(APPROVED)).toBe(true);
+    expect(readdirSync(join(dir, 'pics'))).toEqual([]);
+    expect(await avatars.urls()).toEqual({});
   });
 });
 
@@ -303,6 +382,28 @@ describe('embassy guest pictures across a revoke, a close or a failed write', ()
       expect(await t.avatars.urls()).toEqual({});
     });
   }
+
+  it('an upload checked during a revoke whose guest is unknown never brings the picture back', async () => {
+    const t = await setup();
+    t.channel.failNextInvites(); // the revoke cannot tell whose invite it is, before the delete
+    const deleting = t.channel.holdNextDelete();
+    const revoke = t.call({ method: 'DELETE', url: '/api/embassy-host/invites/inv-approved' });
+    await deleting.asked;
+    const check = t.channel.holdNextInvites();
+    const upload = t.put(APPROVED, PNG);
+    await check.asked; // the upload's guest check answers "approved": the delete has not landed
+    t.channel.failNextInvites(); // nor after it
+    deleting.release();
+    expect((await revoke).statusCode).toBe(200);
+    check.release();
+    const refused = await upload;
+    expect(refused.statusCode).toBe(409);
+    expect(refused.json().errorCode).toBe('GUEST_CHANGED');
+    expect(t.stored()).toEqual([]);
+    expect(await t.avatars.urls()).toEqual({});
+    // The fence closed with the revoke: another guest's picture is set again.
+    expect((await t.put(CLAIMED, PNG)).statusCode).toBe(200);
+  });
 
   it.skipIf(root)('a failed map write while replacing a picture leaves the old URL serving the old bytes', async () => {
     const t = await setup();

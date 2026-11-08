@@ -166,7 +166,7 @@ export interface EmbassyHostDeps {
     urls(): Promise<Record<string, string>>;
     revoke(requestId: string): Promise<boolean>;
     removeAll(): Promise<number>;
-    fenceAll(): void;
+    fence(): () => void;
   };
 }
 
@@ -396,11 +396,15 @@ export class EmbassyHost {
         .then((all) => all.find((invite) => invite.id === inviteId)?.requestId ?? null)
         .catch(() => null);
     let requestId = avatars ? await guestOf() : null;
-    // Guest unknown: fence every upload in flight rather than miss this one.
-    if (avatars && !requestId) avatars.fenceAll();
-    await this.call('DELETE', `/invites/${inviteId}`);
-    if (avatars && !requestId) requestId = await guestOf();
-    if (requestId) await avatars?.revoke(requestId);
+    // Guest unknown: no picture is written by any upload until this revoke is done, rather than miss this guest's.
+    const close = avatars && !requestId ? avatars.fence() : undefined;
+    try {
+      await this.call('DELETE', `/invites/${inviteId}`);
+      if (avatars && !requestId) requestId = await guestOf();
+      if (requestId) await avatars?.revoke(requestId);
+    } finally {
+      close?.();
+    }
     return { revoked: true };
   }
 
