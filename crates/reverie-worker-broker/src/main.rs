@@ -144,6 +144,33 @@ fn serve(config: PathBuf, offer: bool) -> Result<(), Box<dyn std::error::Error>>
 mod tests {
     use super::*;
     #[test]
+    fn image_preview_accepts_exact_pinned_profile_inputs_without_an_engine_override() {
+        let args = ["broker", "image", "preview", "--config", "/owner/reverie/broker.json",
+            "--provenance", "/nix/store/profile/worker-image.json", "--provenance-sha256",
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "--child-annex", "/nix/store/profile/worker-child-image.json", "--child-annex-sha256",
+            "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "--image", "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"];
+        assert!(Arguments::try_parse_from(args).is_ok());
+        let mut foreign = args.to_vec();
+        foreign.extend(["--engine", "/caller/program"]);
+        assert!(Arguments::try_parse_from(foreign).is_err());
+    }
+    #[test]
+    fn image_apply_requires_the_explicit_preview_and_original_operation() {
+        let args = ["broker", "image", "apply", "--config", "/owner/reverie/broker.json",
+            "--provenance", "/nix/store/profile/worker-image.json", "--provenance-sha256",
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "--child-annex", "/nix/store/profile/worker-child-image.json", "--child-annex-sha256",
+            "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "--image", "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"];
+        assert!(Arguments::try_parse_from(args).is_err());
+        let mut selected = args.to_vec();
+        selected.extend(["--expected-preview", "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+            "--operation-id", "10000000-0000-4000-8000-000000000001"]);
+        assert!(Arguments::try_parse_from(selected).is_ok());
+    }
+    #[test]
     fn config_check_requires_an_explicit_source_and_accepts_no_engine_override() {
         assert!(
             Arguments::try_parse_from([
