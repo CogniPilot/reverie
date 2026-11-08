@@ -1,12 +1,30 @@
 //! Fixed build-only native child artifact producer acceptance.
-use std::{fs, os::unix::fs::PermissionsExt, path::PathBuf, process::Command};
+use std::{
+    fs,
+    os::unix::fs::{DirBuilderExt, PermissionsExt},
+    path::PathBuf,
+    process::Command,
+    time::{SystemTime, UNIX_EPOCH},
+};
+
+fn private_tree() -> PathBuf {
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!(
+        "worker-child-program-{}-{nonce}",
+        std::process::id()
+    ));
+    fs::DirBuilder::new().mode(0o700).create(&root).unwrap();
+    root
+}
 
 #[test]
 #[ignore = "requires the declared immutable native worker child package"]
 fn actual_native_program_manifest_is_exclusive_and_paired_root_is_verified() {
     let program = PathBuf::from(std::env::var_os("NIX_REVERIE_TEST_NATIVE_WORKER_CHILD").unwrap());
-    let root = std::env::temp_dir().join(format!("worker-child-program-{}", std::process::id()));
-    fs::create_dir(&root).unwrap();
+    let root = private_tree();
     let manifest = root.join("program.json");
     let produce = || {
         Command::new(env!("CARGO_BIN_EXE_reverie-policy-artifacts"))
@@ -20,10 +38,10 @@ fn actual_native_program_manifest_is_exclusive_and_paired_root_is_verified() {
     };
     let first = produce();
     if !first.status.success() {
-        fs::remove_dir(root).unwrap();
         panic!(
-            "native child manifest missing: {}",
-            String::from_utf8_lossy(&first.stderr)
+            "native child manifest missing: {}; retained {}",
+            String::from_utf8_lossy(&first.stderr),
+            root.display()
         );
     }
     let original = fs::read(&manifest).unwrap();
