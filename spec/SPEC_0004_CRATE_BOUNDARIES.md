@@ -13,7 +13,7 @@ Use Rumoca-style crates as dependency and collaboration guardrails.
 | Rule | Owner/Where | Brief justification |
 | --- | --- | --- |
 | Put Rust crates under crates/reverie-*; keep crates/xtask | Workspace | Predictable layout |
-| List members explicitly and keep one lockfile | Root manifest | Reviewed build graph |
+| Name members by the one crates/* glob and keep one lockfile | Root manifest | Reviewed build graph; no member-list merge conflicts |
 | Centralize shared dependency versions in workspace dependencies | Root manifest | No version drift |
 | Give each policy, store and algorithm one owner | Owning crate | DRY |
 | Direct dependencies toward lower-level contracts without cycles | Manifests | Compiler-enforced boundaries |
