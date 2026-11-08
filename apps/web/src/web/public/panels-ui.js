@@ -2452,15 +2452,28 @@ Object.assign(ReverieApp.prototype, {
       setTimeout(() => {
         try { fitAddon.fit(); } catch {}
 
-        // Fetch initial pane buffer
-        fetch(`/api/sessions/${sessionId}/teammate-pane-buffer/${encodeURIComponent(paneInfo.paneTarget)}`)
-          .then(r => r.json())
-          .then(resp => {
-            if (resp.success && resp.data?.buffer) {
-              try { terminal.write(resp.data.buffer); } catch {}
-            }
-          })
-          .catch(err => console.error('[TeammateTerminal] Failed to fetch buffer:', err));
+        // The teammate writes to its own pane, not through this window: read the pane now, then again
+        // every 2 s while the window is in the page, redrawing only when it changed.
+        let shown = null;
+        const refresh = () => {
+          const entry = this.teammateTerminals.get(agentId);
+          if (!document.contains(body) || !entry) {
+            if (entry?.refreshTimer) clearInterval(entry.refreshTimer);
+            return;
+          }
+          fetch(`/api/sessions/${sessionId}/teammate-pane-buffer/${encodeURIComponent(paneInfo.paneTarget)}`)
+            .then(r => r.json())
+            .then(resp => {
+              const buffer = resp?.success ? resp.data?.buffer : null;
+              if (typeof buffer !== 'string' || buffer === shown) return;
+              shown = buffer;
+              try { terminal.reset(); terminal.write(buffer); } catch {}
+            })
+            .catch(err => console.error('[TeammateTerminal] Failed to fetch buffer:', err));
+        };
+        refresh();
+        const entry = this.teammateTerminals.get(agentId);
+        if (entry) entry.refreshTimer = setInterval(refresh, 2000);
 
         // Flush any data that arrived while terminal was initializing
         for (const chunk of pendingData) {
@@ -2625,9 +2638,25 @@ Object.assign(ReverieApp.prototype, {
     });
   },
 
-  /** Rebuild the teammate lookup map from all team configs */
+  /** Load the agent teams the server watches (GET /api/teams), then rebuild the teammate maps. */
+  async loadTeams() {
+    try {
+      const resp = await (await fetch('/api/teams')).json();
+      if (!resp?.success || !Array.isArray(resp.data)) return;
+      this.teams.clear();
+      for (const team of resp.data) {
+        if (team?.name && Array.isArray(team.members)) this.teams.set(team.name, team);
+      }
+      this.rebuildTeammateMap();
+    } catch {
+      /* teams stay as they were; the next team event rebuilds them */
+    }
+  },
+
+  /** Rebuild the teammate lookup maps from all team configs */
   rebuildTeammateMap() {
     this.teammateMap.clear();
+    this.teammatePanesByName.clear();
     for (const [teamName, team] of this.teams) {
       for (const member of team.members) {
         if (member.agentType !== 'team-lead') {
@@ -2638,6 +2667,14 @@ Object.assign(ReverieApp.prototype, {
             teamName,
             agentId: member.agentId,
           });
+          // A teammate in its own tmux pane of the lead's session opens as a terminal window.
+          if (team.leadSessionId && /^%\d+$/.test(member.tmuxPaneId || '')) {
+            this.teammatePanesByName.set(member.name, {
+              paneTarget: member.tmuxPaneId,
+              sessionId: team.leadSessionId,
+              color: member.color || 'blue',
+            });
+          }
         }
       }
     }

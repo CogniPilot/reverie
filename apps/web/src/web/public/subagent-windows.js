@@ -511,7 +511,8 @@ Object.assign(ReverieApp.prototype, {
       windowData._lazySessionId = termData.sessionId;
     }
 
-    // Dispose the resize observer
+    // Stop re-reading the pane, then dispose the resize observer
+    if (termData.refreshTimer) clearInterval(termData.refreshTimer);
     if (termData.resizeObserver) {
       termData.resizeObserver.disconnect();
     }
@@ -958,6 +959,7 @@ Object.assign(ReverieApp.prototype, {
 
     // Clean up all teammate terminals
     for (const [, termData] of this.teammateTerminals) {
+      if (termData.refreshTimer) clearInterval(termData.refreshTimer);
       if (termData.resizeObserver) termData.resizeObserver.disconnect();
       if (termData.terminal) {
         try {

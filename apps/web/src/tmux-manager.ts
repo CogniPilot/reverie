@@ -445,6 +445,23 @@ export function resolveTmuxPaneTarget(muxName: string, paneTarget?: string): str
 }
 
 /**
+ * The `send-keys` arguments that type `input` into a pane. Keystrokes arrive a chunk at a time from
+ * a terminal: each piece of text goes in literally, spaces included, and each carriage return is its
+ * own Enter, in order. Line feeds are dropped.
+ */
+export function paneSendKeysArgs(input: string): string[] {
+  const args: string[] = [];
+  input
+    .replace(/\n/g, '')
+    .split('\r')
+    .forEach((text, index) => {
+      if (index > 0) args.push('Enter');
+      if (text) args.push(`-l ${shellescape(text)}`);
+    });
+  return args;
+}
+
+/**
  * Pick the active pane id from `tmux list-panes -F '#{pane_id}:#{pane_active}'`
  * output (lines like `%0:1`). Returns the pane id whose active flag is 1.
  */
@@ -4039,25 +4056,8 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
     const tmux = this.tmux();
 
     try {
-      const hasCarriageReturn = input.includes('\r');
-      const textPart = input.replace(/\r/g, '').replace(/\n/g, '').trimEnd();
-
-      if (textPart && hasCarriageReturn) {
-        execSync(`${tmux} send-keys -t ${shellescape(target)} -l ${shellescape(textPart)}`, {
-          encoding: 'utf-8',
-          timeout: EXEC_TIMEOUT_MS,
-        });
-        execSync(`${tmux} send-keys -t ${shellescape(target)} Enter`, {
-          encoding: 'utf-8',
-          timeout: EXEC_TIMEOUT_MS,
-        });
-      } else if (textPart) {
-        execSync(`${tmux} send-keys -t ${shellescape(target)} -l ${shellescape(textPart)}`, {
-          encoding: 'utf-8',
-          timeout: EXEC_TIMEOUT_MS,
-        });
-      } else if (hasCarriageReturn) {
-        execSync(`${tmux} send-keys -t ${shellescape(target)} Enter`, {
+      for (const args of paneSendKeysArgs(input)) {
+        execSync(`${tmux} send-keys -t ${shellescape(target)} ${args}`, {
           encoding: 'utf-8',
           timeout: EXEC_TIMEOUT_MS,
         });
