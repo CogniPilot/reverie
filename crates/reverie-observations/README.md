@@ -91,3 +91,21 @@ reverie-observations [--config ~/reverie/resource-history/config.json] \
 - Any refusal prints `User observation operation refused or unavailable` and
   exits 2. Units from the earlier Python release can be stopped and disabled;
   `install` migrates them only when they are exactly that release's bytes.
+
+## Prune receipts
+
+`reverie-prune-receipts` replaces `python/reverie/cleanup/receipts.py`. It turns
+reverie-prune run summaries (`--log-dir`) and A1 exception reports (`--a1`)
+into path-free, unauthenticated receipt records appended to `--out`:
+
+```console
+reverie-prune-receipts --log-dir /var/lib/reverie-prune-declared/logs \
+  --out /var/lib/reverie-collect/producer-receipts.jsonl [--context CONTEXT.json]
+```
+
+The records, their `receipt_id`, duplicate and conflict detection, retention
+(`--max-entries`, `--max-bytes`, `--max-age-days`), the summary line and the exit
+codes (0 ok, 1 refusals, 2 usage, 3 output UNKNOWN) match the Python adapter
+byte for byte, so an existing receipts file continues unchanged. An uncaught
+error prints one line instead of a traceback and still exits 1. The records
+themselves are data in `reverie_contracts::prune_receipts`.

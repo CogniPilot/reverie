@@ -10,7 +10,7 @@ pkgs.rustPlatform.buildRustPackage {
   # The USER units' fixed systemctl, baked into reverie-observations.
   REVERIE_SYSTEMCTL = "${pkgs.systemd}/bin/systemctl";
   meta = {
-    description = "Native host resource collector, USER observations, resource history reader and collector state initializer";
+    description = "Native host resource collector, USER observations, resource history reader, collector state initializer and prune receipts";
     license = pkgs.lib.licenses.mit;
     platforms = pkgs.lib.platforms.linux;
     mainProgram = "reverie-resource-history";
