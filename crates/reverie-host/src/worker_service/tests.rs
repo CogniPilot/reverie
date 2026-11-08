@@ -312,7 +312,7 @@ fn actual_packaged_alias_keeps_nix_store_argv0_dispatch() {
     let output = match output {
         Ok(output) => output,
         Err(failure) => {
-            let error = failure.error.to_string();
+            let error = format!("{:?}", failure.error);
             std::mem::forget(failure);
             panic!("{error}")
         }
