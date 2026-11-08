@@ -1308,6 +1308,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "reverie-task-cancel"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
 name = "reverie-voice-ci"
 version = "0.1.0"
 dependencies = [
