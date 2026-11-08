@@ -118,6 +118,15 @@ impl StartupOwner {
     }
 }
 impl BrokerServiceStartup {
+    /// Reuse the actual startup's existing broker Arc, so a later consuming
+    /// startup→running transition can move while this origin owner remains.
+    /// Signals, listener, recovery and service readiness remain separate.
+    pub fn retain_pool_controller_bootstrap(
+        &self,
+        end: Instant,
+    ) -> Result<BrokerControllerBootstrap, Box<BrokerControllerBootstrapFailure>> {
+        self.owner.broker.retain_pool_controller_bootstrap(end)
+    }
     /// Recovery inventory DATA, not proof that the supervisor/lease-peer and
     /// all protocol producers exist or that listening/readiness has started.
     pub fn recovered(&self) -> &RecoverySummary {
