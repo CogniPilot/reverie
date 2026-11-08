@@ -10,6 +10,8 @@ use reverie_host::website_facts::{ImmutableInputKind, ImmutableInputObserver};
 use std::time::{Duration, Instant};
 mod error;
 mod qualification;
+#[cfg(test)]
+mod tests;
 pub use error::{WorkerImageQualificationError, WorkerImageQualificationFailure};
 type Result<T> = std::result::Result<T, WorkerImageQualificationError>;
 /// Owns the SAME native input observer/context used to qualify an exact loaded
