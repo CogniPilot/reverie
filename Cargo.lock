@@ -1206,6 +1206,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "reverie-publish"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "reverie-namegate",
+ "serde",
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
 name = "reverie-python-regex"
 version = "0.1.0"
 dependencies = [
