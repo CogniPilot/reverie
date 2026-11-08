@@ -2,6 +2,7 @@
 //! owner and actual STARTING/source-stop methods. No parsed result mints it.
 use super::*;
 use crate::reservation_gate::{ProtectedStartIntent, SourceStopFacts};
+mod qualification;
 
 struct StartAttempt<'a> {
     operation: CommittedRamOperation<'a>,
@@ -43,6 +44,7 @@ pub struct PreparedResourceStart<'a> {
     intent: ProtectedStartIntent,
     released: SourceStopFacts,
     command_attempted: bool,
+    qualification: Option<qualification::LaunchPeer>,
 }
 struct FailedStart<'a> {
     attempt: StartAttempt<'a>,
@@ -78,6 +80,7 @@ impl<'a> CommittedRamOperation<'a> {
             intent: intent.expect("actual STARTING outcome"),
             released: released.expect("actual source-release outcome"),
             command_attempted: false,
+            qualification: None,
         })
     }
 }
@@ -147,9 +150,10 @@ impl PreparedResourceStart<'_> {
     }
     pub fn assert_current(&mut self) -> Result<()> {
         let result = self
-            .operation
-            .assert_current()
-            .and_then(|()| self.assert_release());
+            .assert_launch_phase_current()
+            .and_then(|()| self.operation.assert_current())
+            .and_then(|()| self.assert_release())
+            .and_then(|()| self.assert_launch_peer_current());
         self.operation.owner_mut().auth.website.frame.failed |= result.is_err();
         result
     }
@@ -157,12 +161,20 @@ impl PreparedResourceStart<'_> {
         let result = self
             .operation
             .assert_live()
-            .and_then(|()| self.assert_release());
+            .and_then(|()| self.assert_release())
+            .and_then(|()| self.assert_launch_peer_live());
         self.operation.owner_mut().auth.website.frame.failed |= result.is_err();
         result
     }
     pub fn disconnect_for_worker(&mut self) -> Result<WorkerLaunchClose> {
-        self.operation.disconnect_for_worker()
+        let mut known = None;
+        let disconnected = self
+            .operation
+            .disconnect_for_worker()
+            .map(|result| known = Some(result));
+        let peer = self.close_launch_peer_component();
+        error::finalized(disconnected, peer)?;
+        Ok(known.expect("actual original Q socket component closed"))
     }
 }
 impl ResourceStartFailure<'_> {
