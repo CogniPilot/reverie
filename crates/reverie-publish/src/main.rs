@@ -42,7 +42,8 @@ enum Action {
     /// that title; it is read back.
     IssueCreate(TextArgs),
     /// Comment the packet's COMMENT.md on an open issue or PR and close it (a PR is closed
-    /// unmerged, and must still be at --head); both are read back.
+    /// unmerged, and must still be at --head); the saved comment is read back by its id, and the
+    /// issue or PR by its number.
     IssueClose(IssueClose),
 }
 
@@ -287,15 +288,32 @@ fn same_labels(value: &Value, want: &[String]) -> bool {
     label_names(value) == want
 }
 
+/// Checks that an issue or PR read for `number` names that number: the path asked for is not
+/// evidence of what came back.
+fn same_number(value: &Value, number: u64, what: &str) -> Result<(), String> {
+    match value["number"].as_u64() {
+        Some(n) if n == number => Ok(()),
+        Some(n) => Err(format!("{what} {number} reads back as number {n}")),
+        None => Err(format!("{what} {number} reads back with no number")),
+    }
+}
+
+/// Checks that `pr` is PR `number`, open and unmerged, at `head`.
+fn check_open_pr(pr: &Value, number: u64, head: &str) -> Result<(), String> {
+    same_number(pr, number, "PR")?;
+    if str_at(pr, "/state") != Some("open") || pr["merged"] == json!(true) {
+        return Err(format!("PR {number} is not open"));
+    }
+    if str_at(pr, "/head/sha") != Some(head) {
+        return Err(format!("PR {number} is not at --head: it moved"));
+    }
+    Ok(())
+}
+
 /// Checks that the PR is open at `head`; returns it.
 fn open_pr_at(api: &Repo<'_>, number: u64, head: &str) -> Result<Value, String> {
     let pr = api.call("GET", &format!("/pulls/{number}"), None)?;
-    if str_at(&pr, "/state") != Some("open") || pr["merged"] == json!(true) {
-        return Err(format!("PR {number} is not open"));
-    }
-    if str_at(&pr, "/head/sha") != Some(head) {
-        return Err(format!("PR {number} is not at --head: it moved"));
-    }
+    check_open_pr(&pr, number, head)?;
     Ok(pr)
 }
 
@@ -357,8 +375,9 @@ fn pr_text(o: &PrText) -> Result<Value, String> {
         )?;
         records.result("LABELS-RESULT.json", &result)?;
     }
-    let pr = open_pr_at(&api, o.pr, &o.head)?;
+    let pr = api.call("GET", &format!("/pulls/{}", o.pr), None)?;
     records.result("PR-READBACK.json", &pr)?;
+    check_open_pr(&pr, o.pr, &o.head).map_err(|e| format!("{e}; inspect PR-READBACK.json"))?;
     let reads = |pointer: &str, want: &Option<String>| {
         want.as_deref()
             .is_none_or(|want| str_at(&pr, pointer) == Some(want))
@@ -424,6 +443,11 @@ fn issue_create(o: &TextArgs) -> Result<Value, String> {
         .ok_or("the new issue has no number")?;
     let issue = api.call("GET", &format!("/issues/{number}"), None)?;
     records.result("ISSUE-READBACK.json", &issue)?;
+    same_number(&issue, number, "the new issue")
+        .map_err(|e| format!("{e}; inspect ISSUE-READBACK.json"))?;
+    if issue.get("pull_request").is_some() {
+        return Err("the new issue reads back as a PR; inspect ISSUE-READBACK.json".into());
+    }
     let labels_ok = labels
         .as_ref()
         .is_none_or(|names| same_labels(&issue, names));
@@ -445,6 +469,7 @@ fn issue_create(o: &TextArgs) -> Result<Value, String> {
 /// For `issue-close`: the issue, and the PR when the number is one (open, unmerged, at --head).
 fn close_target(api: &Repo<'_>, o: &IssueClose) -> Result<Option<String>, String> {
     let issue = api.call("GET", &format!("/issues/{}", o.number), None)?;
+    same_number(&issue, o.number, "issue")?;
     if str_at(&issue, "/state") != Some("open") {
         return Err(format!("{} is not open", o.number));
     }
@@ -515,8 +540,22 @@ fn issue_close(o: &IssueClose) -> Result<Value, String> {
         Some(&json!({ "body": comment })),
     )?;
     records.result("COMMENT-RESULT.json", &posted)?;
-    if str_at(&posted, "/body") != Some(comment) {
-        return Err("the comment does not read back; inspect COMMENT-RESULT.json".into());
+    // The POST's echo is not what GitHub kept: read the saved comment back by its id, and check
+    // it is this text on this issue before closing. An uncertain comment is never posted again.
+    let id = posted["id"]
+        .as_u64()
+        .ok_or("the posted comment has no id; inspect COMMENT-RESULT.json")?;
+    let saved = api.call("GET", &format!("/issues/comments/{id}"), None)?;
+    records.result("COMMENT-READBACK.json", &saved)?;
+    let target = format!("/repos/{}/issues/{}", o.text.repo, o.number);
+    if saved["id"].as_u64() != Some(id)
+        || str_at(&saved, "/body") != Some(comment)
+        || !str_at(&saved, "/issue_url").is_some_and(|url| url.ends_with(&target))
+    {
+        return Err(
+            "the saved comment is not this text on this issue; inspect COMMENT-READBACK.json"
+                .into(),
+        );
     }
     if let Some(head) = &head {
         open_pr_at(&api, o.number, head)?;
@@ -529,12 +568,15 @@ fn issue_close(o: &IssueClose) -> Result<Value, String> {
     records.result("CLOSE-RESULT.json", &closed)?;
     let issue = api.call("GET", &format!("/issues/{}", o.number), None)?;
     records.result("CLOSE-READBACK.json", &issue)?;
+    same_number(&issue, o.number, "issue")
+        .map_err(|e| format!("{e}; inspect CLOSE-READBACK.json"))?;
     if str_at(&issue, "/state") != Some("closed") {
         return Err("it does not read back as closed; inspect CLOSE-READBACK.json".into());
     }
     if let Some(head) = &head {
         let pr = api.call("GET", &format!("/pulls/{}", o.number), None)?;
         records.result("PR-READBACK.json", &pr)?;
+        same_number(&pr, o.number, "PR").map_err(|e| format!("{e}; inspect PR-READBACK.json"))?;
         if pr["merged"] != json!(false) || str_at(&pr, "/head/sha") != Some(head.as_str()) {
             return Err("the PR does not read back closed unmerged at --head".into());
         }

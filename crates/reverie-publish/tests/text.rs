@@ -58,6 +58,16 @@ struct Hub {
     comments: Vec<(u64, String)>,
     /// When false, writes are answered but change nothing, so readbacks differ.
     applies_writes: bool,
+    /// Alters a reply before it is sent.
+    rewrite: Option<Rewrite>,
+}
+
+/// Alters a reply in place; the flag says whether any write came before it.
+type Rewrite = fn(&Seen, &mut Value, bool);
+
+/// GitHub's address for issue `number`'s comments to point back at.
+fn issue_url(number: u64) -> String {
+    format!("https://api.github.com/repos/owner/demo/issues/{number}")
 }
 
 impl Hub {
@@ -74,6 +84,7 @@ impl Hub {
             })],
             comments: Vec::new(),
             applies_writes: true,
+            rewrite: None,
         }
     }
 
@@ -86,6 +97,21 @@ impl Hub {
 
     fn issue(&mut self, number: u64) -> Option<&mut Value> {
         self.issues.iter_mut().find(|i| i["number"] == number)
+    }
+
+    /// `GET /issues/comments/ID`: one saved comment, by the id its POST returned.
+    fn saved_comment(&self, path: &str) -> (u16, Value) {
+        let id: usize = path
+            .trim_start_matches("/issues/comments/")
+            .parse()
+            .unwrap_or(0);
+        match id.checked_sub(100).and_then(|i| self.comments.get(i)) {
+            Some((number, body)) => (
+                200,
+                json!({ "id": id, "body": body, "issue_url": issue_url(*number) }),
+            ),
+            None => (404, json!({ "message": "Not Found" })),
+        }
     }
 
     fn reply(&mut self, seen: &Seen) -> (u16, Value) {
@@ -141,19 +167,25 @@ impl Hub {
                 let list: Vec<Value> = self
                     .comments
                     .iter()
-                    .filter(|(n, _)| *n == number)
-                    .map(|(_, body)| json!({ "body": body }))
+                    .enumerate()
+                    .filter(|(_, (n, _))| *n == number)
+                    .map(|(i, (_, body))| json!({ "id": 100 + i, "body": body, "issue_url": issue_url(number) }))
                     .collect();
                 (200, json!(list))
             }
             ("POST", other) if other.ends_with("/comments") => {
                 let number: u64 = other.split('/').nth(2).unwrap().parse().unwrap();
                 let body = seen.body["body"].as_str().unwrap().to_owned();
+                let id = 100 + self.comments.len();
                 if apply {
                     self.comments.push((number, body.clone()));
                 }
-                (201, json!({ "body": body }))
+                (
+                    201,
+                    json!({ "id": id, "body": body, "issue_url": issue_url(number) }),
+                )
             }
+            ("GET", other) if other.starts_with("/issues/comments/") => self.saved_comment(other),
             ("PATCH", "/issues/7") => {
                 if apply {
                     self.pr["state"] = json!("closed");
@@ -178,6 +210,18 @@ impl Hub {
 
 type Shared = Arc<Mutex<(Hub, Vec<Seen>)>>;
 
+/// The hub's reply to `seen`, after any rewrite; the request is kept for the test to inspect.
+fn answer(shared: &Shared, seen: Seen) -> (u16, Value) {
+    let mut state = shared.lock().unwrap();
+    let mut reply = state.0.reply(&seen);
+    let wrote = state.1.iter().any(|s| s.method != "GET");
+    if let Some(rewrite) = state.0.rewrite {
+        rewrite(&seen, &mut reply.1, wrote);
+    }
+    state.1.push(seen);
+    reply
+}
+
 fn serve(hub: Hub) -> (String, Shared) {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let base = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
@@ -187,12 +231,7 @@ fn serve(hub: Hub) -> (String, Shared) {
         for stream in listener.incoming() {
             let mut stream = stream.unwrap();
             let seen = read_request(&stream);
-            let (status, answer) = {
-                let mut state = shared.lock().unwrap();
-                let reply = state.0.reply(&seen);
-                state.1.push(seen);
-                reply
-            };
+            let (status, answer) = answer(&shared, seen);
             let answer = answer.to_string();
             write!(
                 stream,
@@ -499,6 +538,7 @@ fn an_issue_is_commented_and_closed_and_a_repeat_comment_refuses() {
         &[
             "INTENT.json",
             "COMMENT-RESULT.json",
+            "COMMENT-READBACK.json",
             "CLOSE-RESULT.json",
             "CLOSE-READBACK.json",
         ],
@@ -533,4 +573,200 @@ fn a_pr_is_closed_unmerged_only_at_its_head() {
     assert_eq!(pr["state"], "closed");
     assert_eq!(pr["merged"], false);
     has(&case.records(), &["PR-READBACK.json"]);
+}
+
+/// The path below the repository, for rewrites.
+fn below(seen: &Seen) -> &str {
+    seen.path.strip_prefix("/repos/owner/demo").unwrap_or("")
+}
+
+const CLOSE_FILES: [(&str, &str); 1] = [("COMMENT.md", "Done in a later change.\n")];
+
+/// Runs issue-close on issue 3 against a hub with `rewrite`; returns the case and the hub state.
+fn close_with(name: &str, rewrite: Rewrite) -> (Case, Shared, Output) {
+    let case = Case::new(name, &CLOSE_FILES);
+    case.approve("issue-close", Some(3), None, &CLOSE_FILES);
+    let mut hub = Hub::new();
+    hub.rewrite = Some(rewrite);
+    let (api, state) = serve(hub);
+    let out = case.run(&api, "issue-close", &["--number", "3"]);
+    (case, state, out)
+}
+
+#[test]
+fn a_comment_kept_with_other_text_refuses_before_closing() {
+    // The POST echoes the approved text, but GitHub keeps something else.
+    let (case, state, out) = close_with("comment-other-text", |seen, reply, _| {
+        if below(seen).starts_with("/issues/comments/") {
+            reply["body"] = json!("Something else.\n");
+        }
+    });
+    refused(&out, "inspect COMMENT-READBACK.json");
+    assert_eq!(writes(&state), ["POST /repos/owner/demo/issues/3/comments"]);
+    has(
+        &case.records(),
+        &["COMMENT-RESULT.json", "COMMENT-READBACK.json"],
+    );
+    assert!(!case.records().join("CLOSE-RESULT.json").exists());
+}
+
+#[test]
+fn a_comment_kept_on_another_issue_or_under_another_id_refuses_before_closing() {
+    let (_, state, out) = close_with("comment-other-issue", |seen, reply, _| {
+        if below(seen).starts_with("/issues/comments/") {
+            reply["issue_url"] = json!(issue_url(4));
+        }
+    });
+    refused(&out, "not this text on this issue");
+    assert_eq!(writes(&state), ["POST /repos/owner/demo/issues/3/comments"]);
+    let (_, state, out) = close_with("comment-other-id", |seen, reply, _| {
+        if below(seen).starts_with("/issues/comments/") {
+            reply["id"] = json!(101);
+        }
+    });
+    refused(&out, "not this text on this issue");
+    assert_eq!(writes(&state), ["POST /repos/owner/demo/issues/3/comments"]);
+}
+
+#[test]
+fn a_posted_comment_without_an_id_refuses_and_is_not_posted_again() {
+    let (case, state, out) = close_with("comment-no-id", |seen, reply, _| {
+        if seen.method == "POST" {
+            reply.as_object_mut().unwrap().remove("id");
+        }
+    });
+    refused(&out, "has no id");
+    assert_eq!(writes(&state), ["POST /repos/owner/demo/issues/3/comments"]);
+    let reads = state
+        .lock()
+        .unwrap()
+        .1
+        .iter()
+        .filter(|s| s.path.contains("/issues/comments/"))
+        .count();
+    assert_eq!(reads, 0);
+    has(&case.records(), &["COMMENT-RESULT.json"]);
+}
+
+#[test]
+fn an_issue_that_reads_as_another_number_or_none_refuses_before_any_write() {
+    let (case, state, out) = close_with("issue-wrong-number", |seen, reply, _| {
+        if seen.method == "GET" && below(seen) == "/issues/3" {
+            reply["number"] = json!(99);
+        }
+    });
+    refused(&out, "issue 3 reads back as number 99");
+    assert!(writes(&state).is_empty());
+    assert!(!case.records().exists());
+    let (case, state, out) = close_with("issue-no-number", |seen, reply, _| {
+        if seen.method == "GET" && below(seen) == "/issues/3" {
+            reply.as_object_mut().unwrap().remove("number");
+        }
+    });
+    refused(&out, "issue 3 reads back with no number");
+    assert!(writes(&state).is_empty());
+    assert!(!case.records().exists());
+}
+
+#[test]
+fn a_closed_issue_that_reads_back_as_another_number_is_reported() {
+    let (case, state, out) = close_with("close-wrong-number", |seen, reply, wrote| {
+        if wrote && seen.method == "GET" && below(seen) == "/issues/3" {
+            reply["number"] = json!(99);
+        }
+    });
+    refused(&out, "inspect CLOSE-READBACK.json");
+    assert_eq!(
+        writes(&state),
+        [
+            "POST /repos/owner/demo/issues/3/comments",
+            "PATCH /repos/owner/demo/issues/3"
+        ]
+    );
+    has(&case.records(), &["CLOSE-READBACK.json"]);
+}
+
+#[test]
+fn a_pr_that_reads_as_another_number_refuses_before_writing_and_after() {
+    let case = Case::new("pr-wrong-number", &PR_FILES);
+    case.approve("pr-text", Some(7), Some(HEAD), &PR_FILES);
+    let mut hub = Hub::new();
+    hub.rewrite = Some(|seen, reply, _| {
+        if seen.method == "GET" && below(seen) == "/pulls/7" {
+            reply["number"] = json!(8);
+        }
+    });
+    let (api, state) = serve(hub);
+    refused(
+        &case.run(&api, "pr-text", &["--pr", "7", "--head", HEAD]),
+        "PR 7 reads back as number 8",
+    );
+    assert!(writes(&state).is_empty());
+    assert!(!case.records().exists());
+
+    let case = Case::new("pr-readback-number", &PR_FILES);
+    case.approve("pr-text", Some(7), Some(HEAD), &PR_FILES);
+    let mut hub = Hub::new();
+    hub.rewrite = Some(|seen, reply, wrote| {
+        if wrote && seen.method == "GET" && below(seen) == "/pulls/7" {
+            reply["number"] = json!(8);
+        }
+    });
+    let (api, _) = serve(hub);
+    refused(
+        &case.run(&api, "pr-text", &["--pr", "7", "--head", HEAD]),
+        "inspect PR-READBACK.json",
+    );
+    has(&case.records(), &["PR-READBACK.json"]);
+}
+
+#[test]
+fn a_closed_pr_that_reads_back_as_another_number_is_reported() {
+    let files = [("COMMENT.md", "Superseded.\n")];
+    let case = Case::new("close-pr-number", &files);
+    case.approve("issue-close", Some(7), Some(HEAD), &files);
+    let mut hub = Hub::new();
+    hub.rewrite = Some(|seen, reply, wrote| {
+        if wrote && seen.method == "GET" && below(seen) == "/pulls/7" {
+            reply["number"] = json!(8);
+        }
+    });
+    let (api, _) = serve(hub);
+    refused(
+        &case.run(&api, "issue-close", &["--number", "7", "--head", HEAD]),
+        "PR 7 reads back as number 8",
+    );
+}
+
+#[test]
+fn a_new_issue_that_reads_back_as_another_number_or_as_a_pr_is_reported() {
+    let files = [("TITLE.txt", "Follow up\n"), ("BODY.md", "Details.\n")];
+    let rewrites: [(Rewrite, &str); 2] = [
+        (
+            |seen, reply, _| {
+                if seen.method == "GET" && below(seen) == "/issues/9" {
+                    reply["number"] = json!(10);
+                }
+            },
+            "the new issue 9 reads back as number 10",
+        ),
+        (
+            |seen, reply, _| {
+                if seen.method == "GET" && below(seen) == "/issues/9" {
+                    reply["pull_request"] = json!({});
+                }
+            },
+            "reads back as a PR",
+        ),
+    ];
+    for (i, (rewrite, why)) in rewrites.into_iter().enumerate() {
+        let case = Case::new(&format!("create-identity-{i}"), &files);
+        case.approve("issue-create", None, None, &files);
+        let mut hub = Hub::new();
+        hub.rewrite = Some(rewrite);
+        let (api, state) = serve(hub);
+        refused(&case.run(&api, "issue-create", &[]), why);
+        assert_eq!(writes(&state), ["POST /repos/owner/demo/issues"]);
+        has(&case.records(), &["ISSUE-READBACK.json"]);
+    }
 }
