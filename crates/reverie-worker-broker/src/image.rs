@@ -105,6 +105,7 @@ pub(super) fn run(action: Action) -> Result<(), Box<dyn std::error::Error>> {
             let digest = prepared.preview_digest().as_str().to_owned();
             let image = prepared.image().as_str().to_owned();
             prepared.close(end)?;
+            broker.close_offline_image_inspection(end)?;
             println!(
                 "{}",
                 serde_json::json!({"previewDigest":digest,"image":image,
@@ -114,6 +115,7 @@ pub(super) fn run(action: Action) -> Result<(), Box<dyn std::error::Error>> {
         Request::Apply { preview, operation } => {
             if prepared.preview_digest() != &preview {
                 prepared.close(end)?;
+                broker.close_offline_image_inspection(end)?;
                 return Err("NATIVE_IMAGE_PREVIEW_CHANGED".into());
             }
             prepared.assert_current(end)?;
