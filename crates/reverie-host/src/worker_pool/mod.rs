@@ -9,6 +9,7 @@ mod engine;
 mod member;
 mod namespace;
 mod policy;
+mod publication;
 #[cfg(test)]
 mod tests;
 pub use bootstrap::{BrokerBootstrapBinding, BrokerBootstrapFailure};
@@ -18,6 +19,7 @@ pub use endpoint::{
 };
 pub use member::{OpenedPoolMember, PoolMemberFailure, PoolMemberLimits};
 pub use policy::{ControllerPoolPolicy, ControllerPoolPolicyFailure};
+pub use publication::{ControllerBirthPublication, PublishedControllerBirthData};
 use reverie_contracts::worker_pool::WorkerPoolPolicy;
 use std::{fmt, io};
 

@@ -1,7 +1,10 @@
 //! Original installed broker bootstrap only. This confers neither root owner
 //! consent nor host registration, Fleet/Q maintenance or pool activation.
 use super::*;
-use reverie_host::worker_pool::{BrokerBootstrapBinding, BrokerBootstrapFailure};
+use reverie_host::worker_pool::{
+    BrokerBootstrapBinding, BrokerBootstrapFailure, ControllerBirthPublication,
+    PublishedControllerBirthData,
+};
 use std::time::Instant;
 
 #[must_use = "retain the original installing broker and bootstrap binding"]
@@ -10,6 +13,8 @@ pub struct BrokerControllerBootstrap {
     source: std::path::PathBuf,
     binding: BrokerBootstrapBinding,
     origin_closed: bool,
+    birth_attempted: bool,
+    publication: Option<ControllerBirthPublication>,
 }
 pub struct BrokerControllerBootstrapFailure {
     owner: Option<BrokerControllerBootstrap>,
@@ -83,6 +88,8 @@ impl InstallingBroker {
             source,
             binding,
             origin_closed: false,
+            birth_attempted: false,
+            publication: None,
         };
         match owner.assert_current(end) {
             Ok(()) => Ok(owner),
@@ -126,9 +133,53 @@ impl BrokerControllerBootstrap {
             .map_err(BrokerControllerBootstrapCause::Observation)
     }
     pub fn close_origin_metadata(&mut self) -> Result<(), reverie_host::worker_pool::PoolError> {
-        let result = self.binding.close();
+        let publication = self
+            .publication
+            .as_mut()
+            .map_or(Ok(()), ControllerBirthPublication::close);
+        let binding = self.binding.close();
+        let result = match (publication, binding) {
+            (Ok(()), Ok(())) => Ok(()),
+            (Err(error), Ok(())) | (Ok(()), Err(error)) => Err(error),
+            (Err(first), Err(second)) => Err(reverie_host::worker_pool::PoolError::Finalization(
+                Box::new(first),
+                Box::new(second),
+            )),
+        };
         self.origin_closed |= result.is_ok();
         result
+    }
+    /// Publish only the original bootstrap's immutable birth input beneath
+    /// ~/reverie. The actual partial file owner is retained here before effects.
+    /// This is not registration consent, policy activation or a kernel grant.
+    pub fn publish_birth_metadata(
+        &mut self,
+        policy: reverie_contracts::worker_pool::WorkerPoolPolicy,
+        end: Instant,
+    ) -> Result<PublishedControllerBirthData, BrokerControllerBootstrapCause> {
+        if self.birth_attempted {
+            return Err(BrokerControllerBootstrapCause::Refused(
+                "WORKER_POOL_PUBLICATION_REPLAYED",
+            ));
+        }
+        self.birth_attempted = true;
+        self.assert_current(end)?;
+        self.publication = Some(
+            self.binding
+                .prepare_birth_publication(&self.broker.storage.runtime, &self.source, policy, end)
+                .map_err(BrokerControllerBootstrapCause::Observation)?,
+        );
+        self.publication
+            .as_mut()
+            .expect("owner retained before publication")
+            .publish()
+            .map_err(BrokerControllerBootstrapCause::Observation)?;
+        self.assert_current(end)?;
+        self.publication
+            .as_ref()
+            .expect("same publication")
+            .reference_data()
+            .map_err(BrokerControllerBootstrapCause::Observation)
     }
 }
 impl Drop for BrokerControllerBootstrap {
