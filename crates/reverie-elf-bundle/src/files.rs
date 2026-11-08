@@ -36,3 +36,53 @@ pub fn copy(source: &Path, target: &Path) -> Result<()> {
     )?;
     Ok(())
 }
+
+/// Executable build root, distinct from a same-architecture object/library.
+/// Maintained readelf still validates its program headers during assembly.
+pub fn executable_machine(path: &Path) -> Result<u16> {
+    let architecture = machine(path)?.ok_or_else(|| refused("executable ELF required"))?;
+    let mut header = [0; 32];
+    fs::File::open(path)?.read_exact(&mut header)?;
+    if fs::metadata(path)?.mode() & 0o111 == 0 || !executable_header(&header) {
+        return Err(refused("executable ELF type, entry and file mode required"));
+    }
+    Ok(architecture)
+}
+
+fn executable_header(header: &[u8; 32]) -> bool {
+    let kind = u16::from_le_bytes([header[16], header[17]]);
+    let entry = match header[4] {
+        1 => u64::from(u32::from_le_bytes(
+            header[24..28].try_into().expect("fixed header"),
+        )),
+        2 => u64::from_le_bytes(header[24..32].try_into().expect("fixed header")),
+        _ => return false,
+    };
+    matches!(kind, 2 | 3) && entry != 0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn executable_root_refuses_relocatable_objects_zero_entries_and_unknown_classes() {
+        // DATA only, never executed or represented as a complete ELF.
+        let mut header = [0; 32];
+        header[4] = 2;
+        header[16] = 2;
+        header[24] = 1;
+        assert!(executable_header(&header));
+        header[16] = 3;
+        assert!(executable_header(&header));
+        header[16] = 1; // ET_REL can otherwise have no interpreter/DT_NEEDED.
+        assert!(!executable_header(&header));
+        header[16] = 2;
+        header[24] = 0;
+        assert!(!executable_header(&header));
+        header[24] = 1;
+        header[4] = 0;
+        assert!(!executable_header(&header));
+        header[4] = 1;
+        assert!(executable_header(&header));
+    }
+}

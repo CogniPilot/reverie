@@ -1,6 +1,7 @@
 use crate::{Arguments, Result, refused};
 use reverie_elf_bundle::{
-    ImageLayout, Libraries, Tools, copy, digest, immutable_input, machine, readonly, tree,
+    ImageLayout, Libraries, Tools, copy, digest, executable_machine, immutable_input, machine,
+    readonly, tree,
 };
 use std::{fs, path::Path};
 
@@ -11,8 +12,8 @@ pub(crate) fn build(args: Arguments) -> Result<()> {
     let perf = immutable_input(&args.perf)?;
     let checker = immutable_input(&args.checker)?;
     let closure = immutable_input(&args.closure)?;
-    let architecture = machine(&perf)?.ok_or_else(|| refused("actual perf ELF required"))?;
-    if machine(&checker)? != Some(architecture)
+    let architecture = executable_machine(&perf)?;
+    if executable_machine(&checker)? != architecture
         || tools.interpreter(&checker)?.is_some()
         || tools.dynamic(&checker)? && !tools.patch(&["--print-needed"], &checker)?.is_empty()
     {

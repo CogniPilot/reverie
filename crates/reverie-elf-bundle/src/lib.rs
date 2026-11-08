@@ -8,7 +8,7 @@ mod libraries;
 mod tools;
 mod tree;
 
-pub use files::{copy, digest, machine};
+pub use files::{copy, digest, executable_machine, machine};
 pub use image::ImageLayout;
 pub use libraries::Libraries;
 pub use tools::{Tools, immutable_input};
