@@ -3,6 +3,11 @@
 use super::*;
 use crate::worker_pool::WorkerPoolPolicy;
 use sha2::{Digest, Sha256};
+mod consent;
+pub use consent::{
+    CurrentPoolInstallationConsent, POOL_INSTALLATION_CONSENT_PURPOSE,
+    PoolInstallationConsentRequest,
+};
 
 pub const POOL_INSTALLATION_REQUEST_PURPOSE: &str = "host-pool-installation-request-v1";
 

@@ -25,6 +25,7 @@ let authority: ResourceOwnerAuthority, preview: ResourcePreviewContext, apply: R
 let token: string, peers: Set<Socket>, clients: { close(): void }[];
 let ramPreview: RamResourcePreviewContext, ramApply: RamResourceOwnerContext;
 let purpose: 'resource-replacement-v1' | 'resource-ram-pool-v2';
+let ramReference: string;
 const approval = {
   employeeId: randomUUID(),
   draftId: randomUUID(),
@@ -100,6 +101,7 @@ beforeEach(async () => {
   clients = [];
   received = [];
   purpose = 'resource-replacement-v1';
+  ramReference = randomUUID();
   behavior = (socket, value) => {
     if (value.kind === 'resource-operation') check(socket, value);
     else
@@ -107,7 +109,15 @@ beforeEach(async () => {
         frame({
           kind: 'resource-result',
           requestId: value.requestId,
-          value: { state: 'CONTROLLED_SOURCE_RESPONSE', capacityHeld: false },
+          value:
+            purpose === 'resource-ram-pool-v2' && value.approval !== null
+              ? {
+                  reference: ramReference,
+                  sessionId: ramApproval.targetSid,
+                  state: 'PREPARING',
+                  publicationIntentDigest: 'e'.repeat(64),
+                }
+              : { state: 'CONTROLLED_SOURCE_RESPONSE', capacityHeld: false },
         })
       );
   };
@@ -178,13 +188,18 @@ it('RAM-v2 sends the explicit purpose and bounded soft-memory draft with the act
     purpose: 'resource-ram-pool-v2',
     approval: null,
     ownerScopeDigest: ramPreview.ownerScopeDigest,
+    principal: ramPreview.principal,
   });
+  const { accountId, personId, sessionEpoch } = auth.registrationIdentity(token);
+  expect(received[1].principal).toEqual({ accountId, personId, sessionEpoch });
+  expect(Object.isFrozen(ramPreview.principal)).toBe(true);
   expect(JSON.stringify(received)).not.toContain(token);
 });
 it('RAM-v2 binds all nine Apply references and keeps legacy binding and contexts purpose-scoped', async () => {
   const client = await openRam(ramApply);
   await client.claim();
   expect(received[1].approval).toEqual(ramApproval);
+  expect(received[1].principal).toEqual(ramApply.principal);
   expect(() => authority.bind(ramApply as never)).toThrow();
   expect(() => authority.assertSameSession(ramApply, apply)).toThrow();
   await expect(ResourceNativeClient.open(path, authority, ramPreview as never)).rejects.toThrow();
@@ -271,12 +286,131 @@ it('RAM-v2 refuses an oversized incoming frame before accepting a result', async
   expect(received).toHaveLength(1);
 });
 
+it('RAM-v2 retains one original reply reference across distinct correlated publication, prepare and stop requests', async () => {
+  const client = await openRam(ramApply);
+  const selected = await client.claim();
+  expect(selected.reference).toBe(ramReference);
+  await client.publication();
+  await client.prepare();
+  await client.sourceStop();
+  const operations = received.filter((row) => row.kind === 'resource-operation');
+  expect(operations.map((row) => row.verb)).toEqual(['claim', 'publication', 'prepare', 'source-stop']);
+  expect(new Set(operations.map((row) => row.requestId)).size).toBe(4);
+  for (const operation of operations.slice(1))
+    expect(operation).toEqual({
+      kind: 'resource-operation',
+      requestId: operation.requestId,
+      verb: operation.verb,
+      reference: ramReference,
+    });
+  for (const current of received.filter((row) => row.kind === 'resource-owner-current')) {
+    expect(current.approval).toEqual(ramApproval);
+    expect(current.principal).toEqual(ramApply.principal);
+  }
+});
+it('RAM-v2 rejects out-of-order and repeated continuation calls before writing', async () => {
+  const client = await openRam(ramApply);
+  await expect(client.prepare()).rejects.toThrow();
+  expect(received).toHaveLength(0);
+  await client.claim();
+  await expect(client.claim()).rejects.toThrow();
+  await expect(client.prepare()).rejects.toThrow();
+  expect(received.filter((row) => row.kind === 'resource-operation')).toHaveLength(1);
+  await client.publication();
+  await expect(client.publication()).rejects.toThrow();
+  expect(received.filter((row) => row.kind === 'resource-operation')).toHaveLength(2);
+});
+it('RAM-v2 rejects malformed, substituted or colliding claim reference DATA without replay', async () => {
+  for (const changed of [
+    { reference: ramReference },
+    {
+      reference: '00000000-0000-0000-0000-000000000000',
+      sessionId: ramApproval.targetSid,
+      state: 'PREPARING',
+      publicationIntentDigest: 'e'.repeat(64),
+    },
+    {
+      reference: ramApproval.operationId,
+      sessionId: ramApproval.targetSid,
+      state: 'PREPARING',
+      publicationIntentDigest: 'e'.repeat(64),
+    },
+    { reference: ramReference, sessionId: randomUUID(), state: 'PREPARING', publicationIntentDigest: 'e'.repeat(64) },
+    {
+      reference: ramReference,
+      sessionId: ramApproval.targetSid,
+      state: 'PREPARING',
+      publicationIntentDigest: 'e'.repeat(64),
+      ready: true,
+    },
+  ]) {
+    behavior = (socket, value) => {
+      if (value.kind === 'resource-operation') check(socket, value);
+      else socket.write(frame({ kind: 'resource-result', requestId: value.requestId, value: changed }));
+    };
+    const client = await openRam(ramApply);
+    await expect(client.claim()).rejects.toThrow();
+    const count = received.length;
+    await expect(client.claim()).rejects.toThrow();
+    await expect(client.publication()).rejects.toThrow();
+    expect(received).toHaveLength(count);
+  }
+});
+it('RAM-v2 actual logout after publication prevents a new continuation proof or request', async () => {
+  const client = await openRam(ramApply);
+  await client.claim();
+  await client.publication();
+  const count = received.length;
+  auth.logout(token);
+  await expect(client.prepare()).rejects.toThrow();
+  expect(received).toHaveLength(count);
+});
+it('RAM-v2 cannot use an unregistered launch-shaped object to send a start request', async () => {
+  const client = await openRam(ramApply);
+  await client.claim();
+  await client.publication();
+  await client.prepare();
+  await client.sourceStop();
+  const count = received.length;
+  await expect(
+    Reflect.apply(client.start, client, [Object.freeze({ begin: () => undefined, wait: async () => undefined })])
+  ).rejects.toThrow();
+  expect(received).toHaveLength(count);
+});
+for (const useRam of [true, false])
+  it(`a ${useRam ? 'RAM' : 'legacy'} pending claim cannot answer a RAM command without its actual task`, async () => {
+    behavior = (socket, value) => {
+      if (value.kind === 'resource-operation')
+        socket.write(
+          frame({
+            kind: 'resource-command-check',
+            requestId: value.requestId,
+            nonce: randomUUID(),
+            purpose: 'resource-ram-pool-v2',
+            stage: 'apply',
+            employeeId: ramApproval.employeeId,
+            reference: ramReference,
+            sessionId: ramApproval.targetSid,
+            cwd: '/owned',
+            commandDigest: 'd'.repeat(64),
+            requestDigest: 'f'.repeat(64),
+            approval: ramApproval,
+          })
+        );
+    };
+    if (useRam) await expect((await openRam(ramApply)).claim()).rejects.toThrow();
+    else await expect((await open(apply)).request('claim', { approval })).rejects.toThrow();
+    expect(received).toHaveLength(1);
+    expect(received[0].kind).toBe('resource-operation');
+  });
+
 it('uses the actual current owner context for a distinct preview proof without a capacity hold', async () => {
   const client = await open();
   await expect(
     client.request('draft', { employeeId: approval.employeeId, idempotencyKey: randomUUID() })
   ).resolves.toEqual({ state: 'CONTROLLED_SOURCE_RESPONSE', capacityHeld: false });
   expect(received.map((value) => value.kind)).toEqual(['resource-operation', 'resource-owner-current']);
+  expect(received[1]).not.toHaveProperty('principal');
   expect(received[1]).toMatchObject({
     purpose: 'resource-replacement-v1',
     stage: 'preview',

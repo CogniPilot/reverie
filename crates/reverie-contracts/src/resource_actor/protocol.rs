@@ -20,7 +20,10 @@ mod reply;
 pub use reply::RamPreviewFields;
 #[cfg(test)]
 mod tests;
-pub use installation::{POOL_INSTALLATION_REQUEST_PURPOSE, PoolInstallationRequestData};
+pub use installation::{
+    CurrentPoolInstallationConsent, POOL_INSTALLATION_CONSENT_PURPOSE,
+    POOL_INSTALLATION_REQUEST_PURPOSE, PoolInstallationConsentRequest, PoolInstallationRequestData,
+};
 pub use owner::CurrentResourceOwner;
 pub use principal::ResourceOwnerPrincipal;
 pub use registration::{POOL_REGISTRATION_PURPOSE, decode_pool_registration_hello};

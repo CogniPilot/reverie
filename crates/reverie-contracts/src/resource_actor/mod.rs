@@ -7,7 +7,8 @@ mod native_client;
 mod process;
 mod protocol;
 pub use protocol::{
-    CurrentResourceOwner, POOL_INSTALLATION_REQUEST_PURPOSE, POOL_REGISTRATION_PURPOSE,
+    CurrentPoolInstallationConsent, CurrentResourceOwner, POOL_INSTALLATION_CONSENT_PURPOSE,
+    POOL_INSTALLATION_REQUEST_PURPOSE, POOL_REGISTRATION_PURPOSE, PoolInstallationConsentRequest,
     PoolInstallationRequestData, RAM_POOL_PURPOSE, RamLaunchCommandData, RamPreviewFields,
     ResourceContinuationRequest, ResourceContinuationVerb, ResourceOperationRequest,
     ResourceOwnerPrincipal, ResourceRequestSelection, decode_pool_registration_hello,

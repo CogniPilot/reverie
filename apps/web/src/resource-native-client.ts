@@ -13,6 +13,7 @@ import { Session } from './session.js';
 import type { PlanMoveRecord } from './plan-move.js';
 import { ResourceWorkerLaunch } from './resource-worker-launch.js';
 import { ResourceSessionReadiness } from './resource-readiness.js';
+import { RamResourceSessionLaunchTask } from './resource-ram-session.js';
 import {
   ResourceOwnerAuthority,
   assertResourceOperation,
@@ -63,6 +64,11 @@ const RamDraft = z
   .object({ employeeId: UUID, idempotencyKey: UUID, memoryMiB: z.number().int().min(512).max(1_048_576) })
   .strict();
 const RamClaim = z.object({ approval: RamApproval }).strict();
+const RamReference = z
+  .object({
+    reference: UUID.refine((value) => value !== '00000000-0000-0000-0000-000000000000'),
+  })
+  .strict();
 const Reply = z.object({ kind: z.literal('resource-result'), requestId: UUID, value: z.unknown() }).strict();
 const Refusal = z
   .object({ kind: z.literal('resource-refused'), requestId: UUID, reason: z.string().regex(/^[A-Z][A-Z0-9_]{0,95}$/) })
@@ -78,6 +84,14 @@ const Command = z
     commandDigest: z.string().regex(/^[a-f0-9]{64}$/),
   })
   .strict();
+const RamCommand = Command.extend({
+  purpose: z.literal('resource-ram-pool-v2'),
+  stage: z.literal('apply'),
+  employeeId: UUID,
+  reference: RamReference.shape.reference,
+  requestDigest: z.string().regex(/^[a-f0-9]{64}$/),
+  approval: RamApproval,
+}).strict();
 const Readiness = z
   .object({
     kind: z.literal('resource-readiness-check'),
@@ -229,6 +243,7 @@ export class ResourceSessionLaunchTask {
         !session.muxName
     );
     assertResourceOperation(binding, record.owner, record);
+    launch.assertLegacyOperation(binding, record);
     UUID.parse(reference);
     this.#session = session;
     this.#launch = launch;
@@ -268,7 +283,8 @@ interface Pending {
   readonly resolve: (value: unknown) => void;
   readonly reject: (error: Error) => void;
   readonly timer: ReturnType<typeof setTimeout>;
-  readonly launch?: ResourceSessionLaunchTask;
+  readonly launch?: ResourceSessionLaunchTask | RamResourceSessionLaunchTask;
+  readonly ramReference?: string;
   readonly readiness?: ResourceSessionReadiness;
   readonly challenges: Set<string>;
   resultSeen: boolean;
@@ -391,6 +407,48 @@ export class ResourceNativeClient {
   #maximumFrame(): number {
     return this.#context.purpose === 'resource-ram-pool-v2' ? 8192 : MAX_FRAME;
   }
+  #ramCommand(command: z.infer<typeof RamCommand>, pending: Pending): void {
+    need(this.#context.purpose === 'resource-ram-pool-v2' && this.#context.stage === 'apply');
+    need(
+      command.requestId === pending.id &&
+        command.reference === pending.ramReference &&
+        command.employeeId === this.#context.approval.employeeId &&
+        command.sessionId === this.#context.approval.targetSid &&
+        isDeepStrictEqual(command.approval, this.#context.approval) &&
+        pending.launch instanceof RamResourceSessionLaunchTask &&
+        !pending.challenges.has(command.nonce) &&
+        pending.challenges.size < 256
+    );
+    pending.challenges.add(command.nonce);
+    RamResourceSessionLaunchTask.prototype.assertContext.call(pending.launch, this.#context, command.reference);
+    RamResourceSessionLaunchTask.prototype.assertCommand.call(
+      pending.launch,
+      command.commandDigest,
+      command.sessionId,
+      command.cwd
+    );
+    // The task independently checks the actual normal-Session command tuple.
+    // requestDigest correlates the native SAME-Held envelope, not a separate
+    // website approval of arbitrary environment/terminal policy.
+    this.#write({
+      kind: 'resource-command-current',
+      requestId: pending.id,
+      nonce: command.nonce,
+      purpose: this.#context.purpose,
+      stage: this.#context.stage,
+      owner: this.#context.owner ?? null,
+      ownerScopeDigest: this.#context.ownerScopeDigest,
+      expiresAtEpochMs: this.#context.expiresAtEpochMs,
+      approval: this.#context.approval,
+      principal: this.#context.principal,
+      employeeId: command.employeeId,
+      reference: command.reference,
+      sessionId: command.sessionId,
+      cwd: command.cwd,
+      commandDigest: command.commandDigest,
+      requestDigest: command.requestDigest,
+    });
+  }
   #countFrame(): void {
     if (this.#context.purpose === 'resource-ram-pool-v2') need(++this.#frames <= 2048);
   }
@@ -449,7 +507,7 @@ export class ResourceNativeClient {
         check.employeeId === (approval?.employeeId ?? (this.#context as ResourcePreviewContext).employeeId) &&
           isDeepStrictEqual(check.approval, approval)
       );
-      this.#write({
+      const ownerReply = {
         kind: 'resource-owner-current',
         requestId: pending.id,
         nonce: check.nonce,
@@ -459,7 +517,12 @@ export class ResourceNativeClient {
         ownerScopeDigest: this.#context.ownerScopeDigest,
         expiresAtEpochMs: this.#context.expiresAtEpochMs,
         approval,
-      });
+      };
+      if (this.#context.purpose === 'resource-ram-pool-v2') {
+        this.#write({ ...ownerReply, principal: this.#context.principal });
+      } else {
+        this.#write(ownerReply);
+      }
     } else if (Readiness.safeParse(value).success) {
       need(this.#context.purpose === 'resource-replacement-v1');
       const check = Readiness.parse(value);
@@ -487,6 +550,8 @@ export class ResourceNativeClient {
           });
         })
         .catch((error) => this.close(error as Error));
+    } else if (RamCommand.safeParse(value).success) {
+      this.#ramCommand(RamCommand.parse(value), pending);
     } else if (Command.safeParse(value).success) {
       need(this.#context.purpose === 'resource-replacement-v1');
       const command = Command.parse(value);
@@ -505,9 +570,16 @@ export class ResourceNativeClient {
         commandDigest: command.commandDigest,
       });
     } else if (Launch.safeParse(value).success) {
-      need(this.#context.purpose === 'resource-replacement-v1');
       const launch = Launch.parse(value);
       need(launch.requestId === pending.id && pending.launch);
+      if (this.#context.purpose === 'resource-ram-pool-v2') {
+        need(
+          this.#context.stage === 'apply' &&
+            pending.launch instanceof RamResourceSessionLaunchTask &&
+            launch.reference === pending.ramReference
+        );
+        RamResourceSessionLaunchTask.prototype.assertContext.call(pending.launch, this.#context, launch.reference);
+      } else need(pending.launch instanceof ResourceSessionLaunchTask);
       pending.launch.begin(launch.reference);
     } else if (Refusal.safeParse(value).success) {
       const refused = Refusal.parse(value);
@@ -561,22 +633,38 @@ export class ResourceNativeClient {
       | 'finalize'
       | 'completion',
     fields: Readonly<Record<string, unknown>>,
-    launch?: ResourceSessionLaunchTask,
+    launch?: ResourceSessionLaunchTask | RamResourceSessionLaunchTask,
     readiness?: ResourceSessionReadiness
   ): Promise<unknown> {
     need(registered.has(this) && !this.#closed && !this.#pending && !this.#request);
     this.#authority.assertContext(this.#context);
     let selectedFields = fields;
+    let ramReference: string | undefined;
     if (this.#context.purpose === 'resource-ram-pool-v2') {
-      need((verb === 'draft' || verb === 'claim') && launch === undefined && readiness === undefined);
+      need(readiness === undefined);
       if (verb === 'draft') {
         const selected = RamDraft.parse(fields);
-        need(this.#context.stage === 'preview' && selected.employeeId === this.#context.employeeId);
+        need(
+          this.#context.stage === 'preview' && selected.employeeId === this.#context.employeeId && launch === undefined
+        );
         selectedFields = Object.freeze(selected);
-      } else {
+      } else if (verb === 'claim') {
         const selected = RamClaim.parse(fields);
-        need(this.#context.stage === 'apply' && isDeepStrictEqual(selected.approval, this.#context.approval));
+        need(
+          this.#context.stage === 'apply' &&
+            isDeepStrictEqual(selected.approval, this.#context.approval) &&
+            launch === undefined
+        );
         selectedFields = Object.freeze({ approval: Object.freeze(selected.approval) });
+      } else {
+        need(['publication', 'prepare', 'source-stop', 'start'].includes(verb) && this.#context.stage === 'apply');
+        const selected = RamReference.parse(fields);
+        if (verb === 'start') {
+          need(launch instanceof RamResourceSessionLaunchTask);
+          RamResourceSessionLaunchTask.prototype.assertContext.call(launch, this.#context, selected.reference);
+        } else need(launch === undefined);
+        ramReference = selected.reference;
+        selectedFields = Object.freeze(selected);
       }
     }
     need(
@@ -585,7 +673,11 @@ export class ResourceNativeClient {
       ) &&
         this.#context.stage === (verb === 'draft' || verb === 'completion' ? 'preview' : 'apply') &&
         Object.keys(fields).every((key) => !['kind', 'requestId', 'verb'].includes(key)) &&
-        (verb === 'start' ? launch instanceof ResourceSessionLaunchTask : launch === undefined) &&
+        (verb === 'start'
+          ? this.#context.purpose === 'resource-ram-pool-v2'
+            ? launch instanceof RamResourceSessionLaunchTask
+            : launch instanceof ResourceSessionLaunchTask
+          : launch === undefined) &&
         (['verify', 'finalize'].includes(verb)
           ? readiness instanceof ResourceSessionReadiness
           : readiness === undefined)
@@ -607,6 +699,7 @@ export class ResourceNativeClient {
         challenges: new Set(),
         resultSeen: false,
         ...(launch ? { launch } : {}),
+        ...(ramReference ? { ramReference } : {}),
       };
       if (readiness) this.#pending = { ...this.#pending, readiness };
       this.#request = Object.freeze({ kind: 'resource-operation', requestId: id, verb, ...selectedFields });
