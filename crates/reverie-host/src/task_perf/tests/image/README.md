@@ -21,6 +21,10 @@ checks the original CID, actual running state and physical cgroup readbacks:
 1536MiB hard RAM, swap0, pids512, no CPU quota and effective CPUs0-7. Only then
 does it profile the fixed finite native Rust workload using real per-task
 user-space perf stat, record and report, requiring positive counts and samples.
+Recording explicitly inherits into the Rust harness's workload thread. It uses
+the ordinary per-CPU buffers with 64 pages each; `--per-thread` would disable
+inheritance and miss that thread. Each completed stat/report is logged before
+the next phase so a later refusal preserves the earlier actual measurements.
 
 It also starts the separately prepared immutable rootless Docker package,
 checks its real rootless info/VFS driver and kernel socket peer/sub-ID maps,

@@ -85,12 +85,13 @@ fn perf() {
                 .is_ok_and(|value| value > 0.0)),
         "{raw}"
     );
+    println!("ACTUAL_PERF_STAT {raw}");
     let mut record = Command::new("/bin/perf");
     record
         .args([
             "record",
             "--quiet",
-            "--per-thread",
+            "--inherit",
             "--all-user",
             "--mmap-pages",
             "64",
@@ -114,6 +115,7 @@ fn perf() {
         "/tmp/perf-owned/perf.data",
     ]))
     .unwrap();
+    println!("ACTUAL_PERF_REPORT {report}");
     assert!(report.contains("task-clock:u"));
     assert!(
         report
@@ -124,8 +126,6 @@ fn perf() {
                 .starts_with(['1', '2', '3', '4', '5', '6', '7', '8', '9'])),
         "{report}"
     );
-    println!("ACTUAL_PERF_STAT {raw}");
-    println!("ACTUAL_PERF_REPORT {report}");
 }
 
 struct Daemon {
