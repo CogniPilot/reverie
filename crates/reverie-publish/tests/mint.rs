@@ -346,19 +346,21 @@ fn on_path(name: &str) -> PathBuf {
 }
 
 /// Mints with a `git` first on PATH that runs the real one, but just before the first git call
-/// naming `at` renames `swap` to `<swap>.held` and puts a symlink to `to` in its place.
+/// naming `at` renames `swap` to `<swap>.held` and puts a symlink to `to` in its place. That `git`
+/// is tests/support/git_swap.rs, built here with rustc.
 fn mint_swapping(repo: &Repo, out: &Path, at: &str, swap: &Path, to: &Path) -> Output {
-    use std::os::unix::fs::PermissionsExt;
     let (head, main) = repo.load();
     let shims = repo.root.join("shims");
     fs::create_dir_all(&shims).unwrap();
-    let shim = shims.join("git");
-    fs::write(
-        &shim,
-        "#!/bin/sh\nfor arg in \"$@\"; do\n  if [ \"$arg\" = \"$SWAP_AT\" ] && [ ! -L \"$SWAP_PATH\" ]; then\n    mv \"$SWAP_PATH\" \"$SWAP_PATH.held\" && ln -s \"$SWAP_TO\" \"$SWAP_PATH\"\n  fi\ndone\nexec \"$REAL_GIT\" \"$@\"\n",
-    )
-    .unwrap();
-    fs::set_permissions(&shim, fs::Permissions::from_mode(0o755)).unwrap();
+    let source = repo.root.join("git_swap.rs");
+    fs::write(&source, include_str!("support/git_swap.rs")).unwrap();
+    let built = Command::new("rustc")
+        .args(["--edition=2024", "-o"])
+        .arg(shims.join("git"))
+        .arg(&source)
+        .status()
+        .unwrap();
+    assert!(built.success(), "the git shim builds");
     let path = std::env::join_paths(
         std::iter::once(shims).chain(std::env::split_paths(&std::env::var_os("PATH").unwrap())),
     )
