@@ -14,11 +14,14 @@ pub(super) struct PoolDirectory {
     root: Option<File>,
     parent: Option<File>,
     anchor: Option<File>,
+    ancestors: Vec<File>,
+    components: Vec<String>,
     name: String,
     identity: (u64, u64),
     anchor_identity: (u64, u64),
     anchor_start: String,
     close_unknown: bool,
+    memory_nodes: Vec<u32>,
 }
 impl PoolDirectory {
     pub(super) fn unopened(policy: &WorkerPoolPolicy) -> Self {
@@ -26,14 +29,22 @@ impl PoolDirectory {
             root: None,
             parent: None,
             anchor: None,
-            name: policy.parent_slice(),
+            ancestors: Vec::new(),
+            components: policy.parent_components(),
+            name: policy.parent_cgroup_relative(),
             identity: (0, 0),
             anchor_identity: (0, 0),
             anchor_start: String::new(),
             close_unknown: false,
+            memory_nodes: Vec::new(),
         }
     }
-    pub(super) fn acquire(&mut self, anchor: &str, pid: u32) -> Result<()> {
+    pub(super) fn acquire(
+        &mut self,
+        policy: &WorkerPoolPolicy,
+        anchor: &str,
+        pid: u32,
+    ) -> Result<()> {
         self.root = Some(native::open_at(
             nix::libc::AT_FDCWD,
             OsStr::new("/sys/fs/cgroup"),
@@ -49,11 +60,31 @@ impl PoolDirectory {
             filesystem.filesystem_type() == nix::sys::statfs::CGROUP2_SUPER_MAGIC,
             "WORKER_POOL_CGROUP2_REQUIRED",
         )?;
-        self.parent = Some(native::open_at(
-            root.as_raw_fd(),
-            OsStr::new(&self.name),
-            nix::libc::O_RDONLY | nix::libc::O_DIRECTORY,
-        )?);
+        let available = parse_cpus(read_at(root, "cpuset.cpus.effective")?.trim())?;
+        need(
+            policy
+                .allowed_cpus
+                .iter()
+                .all(|cpu| available.binary_search(cpu).is_ok()),
+            "WORKER_POOL_CPU_UNAVAILABLE",
+        )?;
+        self.memory_nodes = parse_cpus(read_at(root, "cpuset.mems.effective")?.trim())?;
+        self.ancestors
+            .try_reserve(self.components.len())
+            .map_err(|_| PoolError::Refused("WORKER_POOL_DIRECTORY_CAPACITY"))?;
+        for (index, name) in self.components.iter().enumerate() {
+            let from = self.ancestors.last().unwrap_or(root);
+            let child = native::open_at(
+                from.as_raw_fd(),
+                OsStr::new(name),
+                nix::libc::O_RDONLY | nix::libc::O_DIRECTORY,
+            )?;
+            if index + 1 == self.components.len() {
+                self.parent = Some(child);
+            } else {
+                self.ancestors.push(child);
+            }
+        }
         self.identity = identity(self.parent()?)?;
         self.anchor = Some(native::open_at(
             self.parent()?.as_raw_fd(),
@@ -78,9 +109,33 @@ impl PoolDirectory {
             .root
             .as_ref()
             .ok_or(PoolError::Refused("WORKER_POOL_DIRECTORY_CLOSED"))?;
+        for (index, original) in self.ancestors.iter().enumerate() {
+            let from = if index == 0 {
+                root
+            } else {
+                &self.ancestors[index - 1]
+            };
+            let named = native::open_at(
+                from.as_raw_fd(),
+                OsStr::new(&self.components[index]),
+                nix::libc::O_RDONLY | nix::libc::O_DIRECTORY,
+            )?;
+            let result = (|| {
+                need(
+                    identity(&named)? == identity(original)?,
+                    "WORKER_POOL_ANCESTOR_REBOUND",
+                )
+            })();
+            finalized(result, native::close(named).map_err(Into::into))?;
+        }
+        let from = self.ancestors.last().unwrap_or(root);
+        let name = self
+            .components
+            .last()
+            .ok_or(PoolError::Refused("WORKER_POOL_DIRECTORY_CLOSED"))?;
         let named = native::open_at(
-            root.as_raw_fd(),
-            OsStr::new(&self.name),
+            from.as_raw_fd(),
+            OsStr::new(name),
             nix::libc::O_RDONLY | nix::libc::O_DIRECTORY,
         )?;
         let result = (|| {
@@ -148,9 +203,18 @@ impl PoolDirectory {
         for (name, value) in [
             ("memory.max", max),
             ("memory.swap.max", "0".into()),
+            ("pids.max", policy.pool_tasks_max.to_string()),
             ("memory.high", "max".into()),
             ("cpu.max", "max 100000".into()),
             ("cpu.weight", policy.cpu_weight.to_string()),
+            (
+                "cpuset.mems",
+                self.memory_nodes
+                    .iter()
+                    .map(u32::to_string)
+                    .collect::<Vec<_>>()
+                    .join(","),
+            ),
             ("cpuset.cpus", policy.cpu_list()),
         ] {
             self.assert_current()?;
@@ -164,6 +228,7 @@ impl PoolDirectory {
         for (name, expected) in [
             ("memory.max", max),
             ("memory.swap.max", "0".into()),
+            ("pids.max", policy.pool_tasks_max.to_string()),
             ("memory.high", "max".into()),
             ("cpu.max", "max 100000".into()),
             ("cpu.weight", policy.cpu_weight.to_string()),
@@ -174,8 +239,17 @@ impl PoolDirectory {
             )?;
         }
         // Kernel canonicalizes CPU lists into ranges; compare physical sets.
-        let actual = parse_cpus(read_at(self.parent()?, "cpuset.cpus.effective")?.trim())?;
-        need(actual == policy.allowed_cpus, "WORKER_POOL_CPU_PLACEMENT")?;
+        for name in ["cpuset.cpus", "cpuset.cpus.effective"] {
+            let actual = parse_cpus(read_at(self.parent()?, name)?.trim())?;
+            need(actual == policy.allowed_cpus, "WORKER_POOL_CPU_PLACEMENT")?;
+        }
+        for name in ["cpuset.mems", "cpuset.mems.effective"] {
+            let actual = parse_cpus(read_at(self.parent()?, name)?.trim())?;
+            need(
+                actual == self.memory_nodes,
+                "WORKER_POOL_MEMORY_NODE_PLACEMENT",
+            )?;
+        }
         self.assert_current()
     }
     pub(super) fn identity(&self) -> (u64, u64) {
@@ -196,6 +270,10 @@ impl PoolDirectory {
             .transpose()
             .map(|_| ())
             .map_err(Into::into);
+        let mut ancestors = Ok(());
+        for file in self.ancestors.drain(..).rev() {
+            ancestors = finalized(ancestors, native::close(file).map_err(Into::into));
+        }
         let root = self
             .root
             .take()
@@ -203,7 +281,7 @@ impl PoolDirectory {
             .transpose()
             .map(|_| ())
             .map_err(Into::into);
-        let result = finalized(finalized(anchor, parent), root);
+        let result = finalized(finalized(finalized(anchor, parent), ancestors), root);
         self.close_unknown |= result.is_err();
         result?;
         need(!self.close_unknown, "WORKER_POOL_CLOSE_UNKNOWN")
@@ -232,7 +310,7 @@ fn read(file: &File, max: usize) -> Result<String> {
     need(raw.len() <= max, "WORKER_POOL_READ_BOUND")?;
     String::from_utf8(raw).map_err(|_| PoolError::Refused("WORKER_POOL_READ_ENCODING"))
 }
-fn bounded_path(path: &str, max: usize) -> Result<String> {
+pub(super) fn bounded_path(path: &str, max: usize) -> Result<String> {
     let file = native::open_at(
         nix::libc::AT_FDCWD,
         Path::new(path).as_os_str(),

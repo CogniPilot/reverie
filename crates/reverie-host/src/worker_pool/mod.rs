@@ -2,8 +2,11 @@
 //! the installed witness retains the actual opened kernel directory. This is
 //! not a Gate, storage lease, stop receipt or global shutdown acknowledgement.
 mod directory;
+mod engine;
 mod namespace;
 mod policy;
+#[cfg(test)]
+mod tests;
 use directory::PoolDirectory;
 pub use policy::ControllerPoolPolicy;
 use reverie_contracts::worker_pool::WorkerPoolPolicy;
@@ -108,7 +111,10 @@ impl OpenedWorkerPool {
                 reverie_contracts::worker_pool::hex_id(anchor_id) && anchor_pid > 1,
                 "WORKER_POOL_ANCHOR_IDENTITY",
             )?;
-            owner.directory.acquire(anchor_id, anchor_pid)
+            owner.policy.assert_anchor(anchor_id, anchor_pid)?;
+            owner
+                .directory
+                .acquire(owner.policy.data(), anchor_id, anchor_pid)
         })();
         match result {
             Ok(()) => {
@@ -130,11 +136,15 @@ impl OpenedWorkerPool {
             "WORKER_POOL_ATTEMPT_ALREADY_EXISTS",
         )?;
         self.policy.assert_current()?;
+        self.policy
+            .assert_anchor(&self.anchor_id, self.anchor_pid)?;
         self.directory
             .assert_anchor_only(&self.anchor_id, self.anchor_pid)?;
         self.stage = InstallationStage::Attempted;
         self.directory.configure(self.policy.data())?;
         self.policy.assert_current()?;
+        self.policy
+            .assert_anchor(&self.anchor_id, self.anchor_pid)?;
         self.directory
             .assert_anchor_only(&self.anchor_id, self.anchor_pid)?;
         self.directory.assert_limits(self.policy.data())?;
@@ -148,6 +158,8 @@ impl OpenedWorkerPool {
             "WORKER_POOL_INSTALLATION_UNKNOWN",
         )?;
         self.policy.assert_current()?;
+        self.policy
+            .assert_anchor(&self.anchor_id, self.anchor_pid)?;
         self.directory
             .assert_anchor_current(&self.anchor_id, self.anchor_pid)?;
         self.directory.assert_limits(self.policy.data())?;
@@ -183,6 +195,9 @@ pub struct InstalledWorkerPool<'a> {
 impl InstalledWorkerPool<'_> {
     pub fn reobserve(&self) -> Result<()> {
         self.owner.policy.assert_current()?;
+        self.owner
+            .policy
+            .assert_anchor(&self.owner.anchor_id, self.owner.anchor_pid)?;
         self.owner
             .directory
             .assert_anchor_current(&self.owner.anchor_id, self.owner.anchor_pid)?;

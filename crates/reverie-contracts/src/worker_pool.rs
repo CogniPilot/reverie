@@ -1,11 +1,16 @@
 //! Closed Docker worker-pool configuration. These values are data, never an
 //! installed-controller, maintenance, admission or kernel-readback capability.
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
+mod engine;
+pub use engine::validate_anchor_inspection;
+pub use engine::{
+    validate_controller_inspection, validate_engine_information, website_process_data,
+};
 
 pub const PURPOSE: &str = "reverie-docker-worker-pool-v1";
 pub const MEMORY_MAX_MIB: u32 = 49_152;
+pub const TASKS_MAX: u32 = 8192;
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
@@ -13,11 +18,15 @@ pub struct WorkerPoolPolicy {
     pub version: u32,
     pub purpose: String,
     pub deployment: String,
+    pub instance_root: String,
     pub engine_id: String,
     pub anchor_image: String,
+    pub controller_image: String,
     pub website_container: String,
     pub broker_uid: u32,
+    pub broker_gid: u32,
     pub memory_max_mi_b: u32,
+    pub pool_tasks_max: u32,
     pub cpu_weight: u32,
     pub allowed_cpus: Vec<u32>,
     pub employee_memory_high_mi_b: BTreeMap<String, u32>,
@@ -40,14 +49,21 @@ impl WorkerPoolPolicy {
         let valid = self.version == 1
             && self.purpose == PURPOSE
             && identifier(&self.deployment)
+            && instance_root(&self.instance_root)
             && uuid(&self.engine_id)
             && self
                 .anchor_image
                 .strip_prefix("sha256:")
                 .is_some_and(hex_id)
+            && self
+                .controller_image
+                .strip_prefix("sha256:")
+                .is_some_and(hex_id)
             && hex_id(&self.website_container)
             && self.broker_uid > 0
+            && self.broker_gid > 0
             && self.memory_max_mi_b == MEMORY_MAX_MIB
+            && self.pool_tasks_max == TASKS_MAX
             && (1..=10_000).contains(&self.cpu_weight)
             && !self.allowed_cpus.is_empty()
             && self.allowed_cpus.len() <= 4096
@@ -62,19 +78,32 @@ impl WorkerPoolPolicy {
         valid.then_some(()).ok_or(PoolPolicyError)
     }
 
-    /// Stable, hierarchy-safe name derived from the actual deployment identity.
-    /// Policy changes preserve the same parent instead of creating a second pool.
+    /// Preserve the registered parent's R-domain spelling. Actual systemd
+    /// placement expands dashes into an anchored hierarchy; this is only data.
     pub fn parent_slice(&self) -> String {
-        let digest = Sha256::digest(self.deployment.as_bytes());
-        let suffix: String = digest[..12]
-            .iter()
-            .map(|byte| format!("{byte:02x}"))
-            .collect();
-        format!("reverieworkers{suffix}.slice")
+        format!("{}-workers.slice", self.deployment)
+    }
+    pub fn parent_components(&self) -> Vec<String> {
+        let mut prefix = String::new();
+        let mut parts = Vec::new();
+        for part in self.deployment.split('-').chain(std::iter::once("workers")) {
+            if !prefix.is_empty() {
+                prefix.push('-');
+            }
+            prefix.push_str(part);
+            parts.push(format!("{prefix}.slice"));
+        }
+        parts
+    }
+    pub fn parent_cgroup_relative(&self) -> String {
+        self.parent_components().join("/")
     }
 
     pub fn anchor_name(&self) -> String {
         format!("{}-pool-anchor", self.deployment)
+    }
+    pub fn controller_name(&self) -> String {
+        format!("{}-resource-controller", self.deployment)
     }
 
     pub fn cpu_list(&self) -> String {
@@ -96,6 +125,8 @@ pub fn hex_id(value: &str) -> bool {
 fn identifier(value: &str) -> bool {
     (1..=40).contains(&value.len())
         && value.as_bytes()[0].is_ascii_alphanumeric()
+        && !value.ends_with('-')
+        && !value.contains("--")
         && value
             .bytes()
             .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
@@ -120,6 +151,16 @@ impl std::fmt::Display for PoolPolicyError {
         output.write_str("WORKER_POOL_POLICY_INVALID")
     }
 }
+fn instance_root(value: &str) -> bool {
+    value.len() <= 4096
+        && value.starts_with('/')
+        && value.ends_with("/reverie")
+        && !value.contains('\0')
+        && value
+            .split('/')
+            .skip(1)
+            .all(|part| !part.is_empty() && part != "." && part != "..")
+}
 impl std::error::Error for PoolPolicyError {}
 
 #[cfg(test)]
@@ -131,11 +172,15 @@ mod tests {
             version: 1,
             purpose: PURPOSE.into(),
             deployment: "owned-fixture".into(),
+            instance_root: "/home/fixture/reverie".into(),
             engine_id: "11111111-1111-4111-8111-111111111111".into(),
             anchor_image: format!("sha256:{}", "a".repeat(64)),
+            controller_image: format!("sha256:{}", "c".repeat(64)),
             website_container: "b".repeat(64),
             broker_uid: 1000,
+            broker_gid: 100,
             memory_max_mi_b: MEMORY_MAX_MIB,
+            pool_tasks_max: TASKS_MAX,
             cpu_weight: 100,
             allowed_cpus: vec![0, 1],
             employee_memory_high_mi_b: BTreeMap::from([(
@@ -160,7 +205,11 @@ mod tests {
         assert_eq!(changed.parent_slice(), original.parent_slice());
         changed.deployment = "another-fixture".into();
         assert_ne!(changed.parent_slice(), original.parent_slice());
-        assert!(!original.parent_slice().contains('-'));
+        assert_eq!(original.parent_slice(), "owned-fixture-workers.slice");
+        assert_eq!(
+            original.parent_cgroup_relative(),
+            "owned.slice/owned-fixture.slice/owned-fixture-workers.slice"
+        );
         assert_eq!(original.cpu_list(), "0,1");
     }
 
