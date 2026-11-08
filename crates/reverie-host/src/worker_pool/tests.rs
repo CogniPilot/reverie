@@ -1,5 +1,5 @@
 //! Explicit Docker owning fixture. Never selected by the ordinary test gate.
-mod docker;
+use crate::test_docker as docker;
 mod fixture;
 use super::*;
 

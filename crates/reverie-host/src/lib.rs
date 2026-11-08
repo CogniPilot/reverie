@@ -36,6 +36,8 @@ pub mod task_perf;
 #[cfg(target_os = "linux")]
 pub mod terminal_pty;
 #[cfg(test)]
+mod test_docker;
+#[cfg(test)]
 mod test_process;
 pub mod website_facts;
 pub mod worker_child;

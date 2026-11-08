@@ -1,5 +1,5 @@
-//! Fixed Docker tool and endpoint, bounded exact owned subprocesses. This is
-//! fixture orchestration, not a product engine/command callback interface.
+//! Shared controlled-test capture and fixed Docker endpoint. This cfg(test)
+//! module is never a product engine/command callback interface.
 use crate::native::owned_process as process;
 use std::{
     io,
@@ -17,8 +17,12 @@ pub(super) fn command() -> Command {
     command
 }
 pub(super) fn run(args: &[&str]) -> std::result::Result<String, String> {
-    let mut child = command()
-        .args(args)
+    capture(command().args(args))
+}
+/// Private controlled-test command capture. Product engine authority never
+/// reaches this module; each owning test constructs its fixed purpose argv.
+pub(super) fn capture(command: &mut Command) -> std::result::Result<String, String> {
+    let mut child = command
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -104,7 +108,10 @@ fn outcome(
     if status.success() {
         String::from_utf8(out).map_err(|e| e.to_string())
     } else {
-        Err(format!("Docker refused: {}", String::from_utf8_lossy(&err)))
+        Err(format!(
+            "owned subprocess refused: {}",
+            String::from_utf8_lossy(&err)
+        ))
     }
 }
 impl Drop for Captured {

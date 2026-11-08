@@ -36,6 +36,11 @@ fn run() -> Result<(), Box<dyn Error>> {
         [command, mode] if command == "verify-worker-perf" && mode == "--ci" => {
             worker_perf::image_ci(&workspace_root()?)?;
         }
+        [command, mode, rest @ ..]
+            if command == "verify-worker-perf" && mode == "--rootless-image" =>
+        {
+            worker_perf::rootless_image(&workspace_root()?, rest)?;
+        }
         [command, mode, value, policy, manifest]
             if command == "verify-worker-perf"
                 && mode == "--image"
@@ -65,6 +70,9 @@ fn run() -> Result<(), Box<dyn Error>> {
 }
 
 fn help() {
+    println!(
+        "cargo xtask verify-worker-perf --rootless-image sha256:IMAGE --policy-manifest PATH --image-provenance PATH --docker-tools NIX_PACKAGE --native-coreutils NIX_PACKAGE --closure JSON --core-closure JSON\n  Explicit isolated Rust-owned rootless image acceptance: actual nonroot task-v1 perf stat/record/report and one native inner-container workload. Uses only declared immutable public Nix artifacts and disposable containers; never prepares host settings. Kernel/package/runtime refusal is a failure, not a passed skip."
+    );
     println!(
         "cargo xtask verify-worker-perf --ci\n  Disposable Ubuntu24.04 GitHub-hosted runner only: prepare host support, build the Nix image/policy, import under an owned temporary tag, verify real perf, and clean up on either outcome. Refuses local/self-hosted use."
     );

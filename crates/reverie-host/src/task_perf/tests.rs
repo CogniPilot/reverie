@@ -1,4 +1,5 @@
 use super::*;
+mod image;
 use reverie_contracts::worker_config::encode_config;
 use serde_json::json;
 use sha2::{Digest, Sha256};
