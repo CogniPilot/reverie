@@ -9,7 +9,7 @@ pub enum WorkerImageQualificationError {
     ImageFiles(reverie_host::worker_image::ImageFileError),
     Refused(&'static str),
     Finalization(Box<Self>, Box<Self>),
-    Retained(Arc<Self>),
+    Retained(Rc<Self>),
 }
 impl WorkerImageQualificationError {
     pub(super) fn has_unconfirmed_close(&self) -> bool {

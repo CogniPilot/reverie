@@ -60,7 +60,7 @@ impl Qualification<'_> {
         if cause.has_unconfirmed_close() {
             let first = self
                 .recheck_close_failure
-                .get_or_insert_with(|| Arc::new(cause));
+                .get_or_insert_with(|| Rc::new(cause));
             WorkerImageQualificationError::Retained(first.clone())
         } else {
             cause
