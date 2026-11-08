@@ -1059,11 +1059,25 @@ function caIconImage(icon, urlFn) {
   if (/^\/api\/(?:v1\/)?workspace-icons\/[0-9a-f]{32}(?:\?v=[0-9]{1,16})?$/.test(s)) return urlFn ? urlFn(s) : s;
   // The owner's picture, kept on the server: /api/owner-avatar/<32 hex>?v=<ms>.
   if (/^\/api\/(?:v1\/)?owner-avatar\/[0-9a-f]{32}(?:\?v=[0-9]{1,16})?$/.test(s)) return urlFn ? urlFn(s) : s;
+  // The picture the hosting owner set for an embassy guest: /api/embassy-host/guests/<request id>/avatar?v=<ms>.
+  if (/^\/api\/embassy-host\/guests\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/avatar\?v=[0-9]{1,16}$/.test(s)) return urlFn ? urlFn(s) : s;
   if (s.startsWith('img:')) {
     const path = s.slice(4);
     if (/^\/api\/[A-Za-z0-9._~/-]+$/.test(path) && !path.includes('..') && !path.includes('//')) return urlFn ? urlFn(path) : path;
   }
   return '';
+}
+
+/** The hosting owner's guest pictures from the host status, by request id. An entry is kept only when its URL is that
+ * very guest's own picture route, so a wrong or foreign URL can never stand in for a guest's picture. */
+function caGuestAvatars(map) {
+  const out = {};
+  if (!map || typeof map !== 'object' || Array.isArray(map)) return out;
+  for (const [id, url] of Object.entries(map).slice(0, 1000)) {
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(id) || typeof url !== 'string') continue;
+    if (new RegExp(`^/api/embassy-host/guests/${id}/avatar\\?v=[0-9]{1,16}$`).test(url) && caIconImage(url)) out[id] = url;
+  }
+  return out;
 }
 
 function caDiskBytes(value) {
@@ -4973,6 +4987,12 @@ class ReverieChatApp {
     if ((from.kind === 'user' || from.kind === 'human') && (from.humanId || this.humanSelf)) {
       const id = from.humanId || 'owner';
       return this.humanAvatar(this.channelHumans().find(p => p.id === id) || { id, name, avatar: id === 'owner' ? this.ownerAvatar : undefined }, opts?.size);
+    }
+    if (from.kind === 'external' && from.avatar) {
+      // An embassy guest the hosting owner gave a picture; a URL caIconImage does not accept keeps the initial.
+      const el = this.app._chatAvatar(undefined, name, opts);
+      this.fillAvatar(el, from.avatar);
+      return el;
     }
     return from.kind === 'user' ? this.userAvatar(opts?.size, opts?.state) : this.app._chatAvatar(from.sessionId, name, opts);
   }
@@ -11401,8 +11421,11 @@ class ReverieEmbassyView {
     if (!values.length) this.feed.append(this.el('p', 'ca-feed-empty', 'This is the start of the shared room. Say hello.'));
     for (const p of values) {
       const own = this.ownVerified.get(this.selected)?.has(p.ackId) === true;
+      // In the hosted room, a guest's post shows the picture the owner set for that guest's pairing request.
+      const avatar = !own && this.selected === '__host__' && p.author?.kind === 'guest' && typeof p.author.requestId === 'string'
+        ? this.pairing?.host?.guestAvatars?.[p.author.requestId] : undefined;
       const row = this.shell.messageEl({ id: `embassy:${this.selected}:${p.ackId}`, at: Number(p.at) || Date.now(), to: 'all',
-        from: { kind: own ? 'user' : 'external', name: `${p.author?.company || 'External'} · ${p.author?.identity || 'Guest'}` }, text: p.text, external: true, own }, true);
+        from: { kind: own ? 'user' : 'external', name: `${p.author?.company || 'External'} · ${p.author?.identity || 'Guest'}`, ...(avatar ? { avatar } : {}) }, text: p.text, external: true, own }, true);
       row.classList.add('eg-post'); row.dataset.post = p.ackId; this.feed.append(row);
     }
     this.feed.scrollTop = pinned ? this.feed.scrollHeight : top;
@@ -11799,7 +11822,8 @@ class ReverieEmbassyPairingView {
           const room = host.data.room;
           if (!room || typeof room.id !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(room.id) || typeof room.name !== 'string') throw Error();
           this.host = { status: 'ready', origin, builtin: host.data.builtin === true, needsAdvertisedOrigin, room: { id: room.id, name: room.name.slice(0, 200) },
-            ...(typeof host.data.bindingId === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(host.data.bindingId) ? { bindingId: host.data.bindingId } : {}) };
+            ...(typeof host.data.bindingId === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(host.data.bindingId) ? { bindingId: host.data.bindingId } : {}),
+            guestAvatars: caGuestAvatars(host.data.guestAvatars) };
         } catch { this.host = { status: 'unreachable' }; }
       } else this.host = { status: host.ok && host.data?.status === 'unconfigured' ? 'unconfigured' : 'unreachable' };
       if (pending.ok) {
