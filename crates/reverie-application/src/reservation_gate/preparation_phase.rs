@@ -75,10 +75,8 @@ impl RetainedPreparation {
             observed.canonical_bytes() == self.terminal.observed.canonical_bytes(),
             "RESOURCE_PREPARATION_SOURCE_CHANGED",
         )?;
-        self.view = self.journal_begin_effect(
-            Effect::Prepare,
-            self.view.record().data().version,
-        )?;
+        self.view =
+            self.journal_begin_effect(Effect::Prepare, self.view.record().data().version)?;
         let receipt = PublicationIntent::from_observed_data(PublicationFields {
             operation: self.view.record(),
             profile: &self.terminal.profile,

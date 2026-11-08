@@ -57,10 +57,14 @@ impl RetainedPreparation {
         if let Some(journal) = &self.ram_journal {
             let resumed = (|| {
                 admission.retain_ram_journal(self, journal.clone())?;
-                journal.lock().map_err(|_| GateError::Refused("RAM_JOURNAL_UNAVAILABLE"))?
+                journal
+                    .lock()
+                    .map_err(|_| GateError::Refused("RAM_JOURNAL_UNAVAILABLE"))?
                     .resume(super::guard::installed(&self.gate))
             })();
-            if let Err(error) = resumed { return admission.conclude(Err(error)); }
+            if let Err(error) = resumed {
+                return admission.conclude(Err(error));
+            }
         }
         Ok(admission)
     }
@@ -99,7 +103,10 @@ impl RetainedPreparation {
     pub(super) fn close_owned(&mut self) -> Result<()> {
         self.live.store(false, std::sync::atomic::Ordering::Release);
         if let Some(journal) = &self.ram_journal {
-            return journal.lock().map_err(|_| GateError::Refused("RAM_JOURNAL_UNAVAILABLE"))?.close_component();
+            return journal
+                .lock()
+                .map_err(|_| GateError::Refused("RAM_JOURNAL_UNAVAILABLE"))?
+                .close_component();
         }
         match self.store.take() {
             Some(store) => store.close().map_err(Into::into),

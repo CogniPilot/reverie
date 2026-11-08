@@ -181,7 +181,10 @@ impl Inner {
             Err(error) => finalized(Err(error), store.close().map_err(Into::into)),
         }
     }
-    fn claim_store(self: &Arc<Self>, observer: Arc<ClaimCapacity>) -> Result<(OperationStore, Arc<super::guard::InstalledGuard>)> {
+    fn claim_store(
+        self: &Arc<Self>,
+        observer: Arc<ClaimCapacity>,
+    ) -> Result<(OperationStore, Arc<super::guard::InstalledGuard>)> {
         let scope_guard = super::guard::installed(self);
         let store = OperationStore::open(
             reservation_control::operation_directory(self.config()?.as_ref())?,

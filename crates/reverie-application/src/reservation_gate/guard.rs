@@ -34,27 +34,59 @@ pub(super) fn installed(gate: &Arc<Inner>) -> Arc<InstalledGuard> {
     })
 }
 impl reverie_store::operations::RamClaimScope for InstalledGuard {
-    fn assert_ram_claim_scope(&self, scope: &OperationScope) -> std::result::Result<(), JournalError> {
+    fn assert_ram_claim_scope(
+        &self,
+        scope: &OperationScope,
+    ) -> std::result::Result<(), JournalError> {
         let checked = (|| {
-            need(matches!(&self.purpose, JournalPurpose::Ram { .. }), "RESOURCE_RAM_JOURNAL_PURPOSE_CHANGED")?;
-            let gate = self.gate.upgrade().ok_or(GateError::Refused("RESERVATION_ADMISSION_LOCK_REQUIRED"))?;
+            need(
+                matches!(&self.purpose, JournalPurpose::Ram { .. }),
+                "RESOURCE_RAM_JOURNAL_PURPOSE_CHANGED",
+            )?;
+            let gate = self
+                .gate
+                .upgrade()
+                .ok_or(GateError::Refused("RESERVATION_ADMISSION_LOCK_REQUIRED"))?;
             self.assert_purpose(&gate, scope)
         })();
         checked.map_err(|error| JournalError::guard_failure(error.code(), error))
     }
-    fn assert_ram_claim_successor(&self, prior: &Self, scope: &OperationScope) -> std::result::Result<(), JournalError> {
+    fn assert_ram_claim_successor(
+        &self,
+        prior: &Self,
+        scope: &OperationScope,
+    ) -> std::result::Result<(), JournalError> {
         let checked = (|| {
             let (
-                JournalPurpose::Ram { authority: next, active: next_active },
-                JournalPurpose::Ram { authority: old, active: old_active },
-            ) = (&self.purpose, &prior.purpose) else {
+                JournalPurpose::Ram {
+                    authority: next,
+                    active: next_active,
+                },
+                JournalPurpose::Ram {
+                    authority: old,
+                    active: old_active,
+                },
+            ) = (&self.purpose, &prior.purpose)
+            else {
                 return Err(GateError::Refused("RESOURCE_RAM_JOURNAL_PURPOSE_CHANGED"));
             };
-            need(Weak::ptr_eq(&self.gate, &prior.gate) && Weak::ptr_eq(next, old)
-                && !Weak::ptr_eq(next_active, old_active), "RESOURCE_RAM_JOURNAL_PURPOSE_CHANGED")?;
-            let gate = self.gate.upgrade().ok_or(GateError::Refused("RESERVATION_ADMISSION_LOCK_REQUIRED"))?;
+            need(
+                Weak::ptr_eq(&self.gate, &prior.gate)
+                    && Weak::ptr_eq(next, old)
+                    && !Weak::ptr_eq(next_active, old_active),
+                "RESOURCE_RAM_JOURNAL_PURPOSE_CHANGED",
+            )?;
+            let gate = self
+                .gate
+                .upgrade()
+                .ok_or(GateError::Refused("RESERVATION_ADMISSION_LOCK_REQUIRED"))?;
             let active = gate.held(Some(scope))?;
-            need(next_active.upgrade().is_some_and(|own| Arc::ptr_eq(&own, &active)), "RESOURCE_RAM_JOURNAL_PURPOSE_CHANGED")
+            need(
+                next_active
+                    .upgrade()
+                    .is_some_and(|own| Arc::ptr_eq(&own, &active)),
+                "RESOURCE_RAM_JOURNAL_PURPOSE_CHANGED",
+            )
         })();
         checked.map_err(|error| JournalError::guard_failure(error.code(), error))
     }

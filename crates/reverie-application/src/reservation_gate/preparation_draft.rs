@@ -105,7 +105,13 @@ impl EnteredResourceDraft<'_> {
         claim.ram_authority = Some(journal.clone());
         if let Err(cause) = claim.install_ram_journal(&mut admission) {
             let cause = admission.conclude::<()>(Err(cause)).unwrap_err();
-            return Err(Box::new(RamDraftRetentionFailure { cause, may_have_claimed: true, policy, journal, partial: RamPartialClaim::Preparation(Box::new(claim)) }));
+            return Err(Box::new(RamDraftRetentionFailure {
+                cause,
+                may_have_claimed: true,
+                policy,
+                journal,
+                partial: RamPartialClaim::Preparation(Box::new(claim)),
+            }));
         }
         match admission.finish_claim(&claim.terminal) {
             Ok(()) => Ok((claim, policy)),

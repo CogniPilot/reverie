@@ -55,10 +55,10 @@ impl RetainedPreparation {
             *slot = Some(fence.clone());
         }
         let result = self.journal_record_ack(
-                reverie_core::operations::Effect::Prepare,
-                record.digest().clone(),
-                self.view.record().data().version,
-            );
+            reverie_core::operations::Effect::Prepare,
+            record.digest().clone(),
+            self.view.record().data().version,
+        );
         let closed = match active.policy_ack.lock() {
             Ok(mut slot) => {
                 let owned = slot

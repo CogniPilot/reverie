@@ -99,10 +99,8 @@ impl RetainedPreparation {
             // Preserve original precedence: failed probe does not latch an
             // attempted journal effect, while every actual effect is one-shot.
             self.start_attempted = true;
-            self.view = self.journal_begin_effect(
-                    Effect::Start,
-                    self.view.record().data().version,
-                )?;
+            self.view =
+                self.journal_begin_effect(Effect::Start, self.view.record().data().version)?;
             let intent = ProtectedStartIntent(Arc::new(StartOwner {
                 gate: Arc::downgrade(&gate),
                 live: Arc::downgrade(&self.live),

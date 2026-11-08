@@ -189,11 +189,18 @@ impl Admission {
         journal: super::ram_journal::SharedJournal,
     ) -> Result<()> {
         need(
-            self.ram_journal.is_none() && Arc::ptr_eq(&self.gate, &claim.gate)
-                && claim.ram_journal.as_ref().is_some_and(|own| Arc::ptr_eq(own, &journal))
+            self.ram_journal.is_none()
+                && Arc::ptr_eq(&self.gate, &claim.gate)
+                && claim
+                    .ram_journal
+                    .as_ref()
+                    .is_some_and(|own| Arc::ptr_eq(own, &journal))
                 && claim.ram_authority.as_ref().is_some_and(|authority| {
-                    self.active.ram_authority.lock().is_ok_and(|selected| selected.as_ref()
-                        .is_some_and(|own| Weak::ptr_eq(own, &Arc::downgrade(authority))))
+                    self.active.ram_authority.lock().is_ok_and(|selected| {
+                        selected
+                            .as_ref()
+                            .is_some_and(|own| Weak::ptr_eq(own, &Arc::downgrade(authority)))
+                    })
                 }),
             "RAM_JOURNAL_ADMISSION_CHANGED",
         )?;
@@ -295,7 +302,10 @@ impl Admission {
     }
     fn cleanup(&self) -> Result<()> {
         let suspended = self.ram_journal.as_ref().map_or(Ok(()), |journal| {
-            journal.try_lock().map_err(|_| GateError::Refused("RAM_JOURNAL_UNAVAILABLE"))?.suspend()
+            journal
+                .try_lock()
+                .map_err(|_| GateError::Refused("RAM_JOURNAL_UNAVAILABLE"))?
+                .suspend()
         });
         // Revoke this exact journal purpose before any fallible native close.
         // Escaped store guards cannot borrow the next admission's authority.
