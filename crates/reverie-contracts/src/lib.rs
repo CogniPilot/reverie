@@ -29,6 +29,7 @@ pub mod office_plan;
 pub mod operations_v1;
 pub mod ops_command;
 pub mod profiles_v1;
+pub mod prune;
 mod python_number;
 pub mod reservation_baseline;
 pub mod reservation_control;
