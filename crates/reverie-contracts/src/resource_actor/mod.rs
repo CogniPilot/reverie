@@ -16,6 +16,8 @@ pub use protocol::{
     decode_pool_registration_hello, decode_ram_pool_hello,
 };
 mod provenance;
+mod worker_image;
+pub use worker_image::WorkerImageProvenance;
 mod settings;
 #[cfg(test)]
 mod tests;
