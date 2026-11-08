@@ -24,6 +24,13 @@ struct Arguments {
 }
 #[derive(Subcommand)]
 enum Role {
+    /// Validate an existing configuration and print its snapshot digest as JSON.
+    /// Reads the file and its declared host paths without starting the broker.
+    CheckConfig {
+        /// Owner-custodied configuration file; validation preserves its bytes.
+        #[arg(long, value_name = "FILE")]
+        config: PathBuf,
+    },
     /// Run the native service from an actual owner-custodied configuration.
     Broker {
         #[arg(long)]
@@ -59,6 +66,23 @@ fn main() -> ExitCode {
 }
 fn run(arguments: Arguments) -> Result<(), Box<dyn std::error::Error>> {
     match arguments.command {
+        Role::CheckConfig { config } => {
+            let snapshot = load_owner_config(&config).map_err(|error| {
+                eprintln!("Configuration validation stage: {:?}", error.stage());
+                error
+            })?;
+            println!(
+                "{}",
+                serde_json::json!({
+                    "valid": true,
+                    "source": snapshot.source_path().and_then(std::path::Path::to_str),
+                    "configurationDigest": reverie_contracts::worker_config::config_digest(
+                        snapshot.configuration()
+                    ).to_hex()
+                })
+            );
+            Ok(())
+        }
         Role::OriginManifest => Ok(manifest::publish()?),
         Role::ServiceUnit => Ok(manifest::publish_service_unit()?),
         Role::Service { action, config } => service::run(action, &config),
@@ -112,14 +136,27 @@ mod tests {
     use super::*;
     #[test]
     fn config_check_requires_an_explicit_source_and_accepts_no_engine_override() {
-        assert!(Arguments::try_parse_from([
-            "broker", "check-config", "--config", "/owner/reverie/broker.json"
-        ]).is_ok());
+        assert!(
+            Arguments::try_parse_from([
+                "broker",
+                "check-config",
+                "--config",
+                "/owner/reverie/broker.json"
+            ])
+            .is_ok()
+        );
         assert!(Arguments::try_parse_from(["broker", "check-config"]).is_err());
-        assert!(Arguments::try_parse_from([
-            "broker", "check-config", "--config", "/owner/reverie/broker.json",
-            "--engine", "/caller/program"
-        ]).is_err());
+        assert!(
+            Arguments::try_parse_from([
+                "broker",
+                "check-config",
+                "--config",
+                "/owner/reverie/broker.json",
+                "--engine",
+                "/caller/program"
+            ])
+            .is_err()
+        );
     }
     #[test]
     fn installation_role_has_fixed_name_config_and_no_nomination_override() {
