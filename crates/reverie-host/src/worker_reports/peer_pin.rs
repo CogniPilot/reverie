@@ -37,3 +37,25 @@ pub(super) fn socket_ended(stream: &UnixStream) -> Result<bool> {
         Err(error) => Err(std::io::Error::from(error).into()),
     }
 }
+
+/// A forward-work guard must see peer FIN even while unread input remains.
+/// Poll and peek are non-consuming and use only this SAME borrowed socket;
+/// the legacy input/EOF helper above keeps its separate drain semantics.
+pub(super) fn socket_disconnected(stream: &UnixStream) -> Result<bool> {
+    let mut fds = [nix::poll::PollFd::new(
+        stream.as_fd(),
+        nix::poll::PollFlags::POLLIN | nix::poll::PollFlags::POLLRDHUP,
+    )];
+    let ready = nix::poll::poll(&mut fds, nix::poll::PollTimeout::ZERO)
+        .map_err(|error| WorkerReportError::Io(error.into()))?;
+    if ready != 0 {
+        let flags = fds[0].revents().ok_or(WorkerReportError::Unconfirmed)?;
+        if flags.intersects(nix::poll::PollFlags::POLLERR | nix::poll::PollFlags::POLLNVAL) {
+            return Err(WorkerReportError::Unconfirmed);
+        }
+        if flags.intersects(nix::poll::PollFlags::POLLHUP | nix::poll::PollFlags::POLLRDHUP) {
+            return Ok(true);
+        }
+    }
+    socket_ended(stream)
+}
