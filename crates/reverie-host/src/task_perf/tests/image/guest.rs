@@ -286,7 +286,7 @@ fn inner_native_workload(daemon: &Daemon) {
     let id = inspected[0]["Id"].as_str().unwrap();
     assert!(
         id.strip_prefix("sha256:")
-            .is_some_and(reverie_contracts::worker_pool::hex_id)
+            .is_some_and(|value| reverie_core::ids::ContainerId::parse(value).is_ok())
     );
     assert_eq!(
         inspected[0]["Config"]["Entrypoint"],
@@ -318,7 +318,7 @@ fn inner_native_workload(daemon: &Daemon) {
     let borrowed: Vec<&str> = args.iter().map(String::as_str).collect();
     let cid = daemon.query(&borrowed).unwrap();
     let cid = cid.trim();
-    assert!(reverie_contracts::worker_pool::hex_id(cid));
+    assert!(reverie_core::ids::ContainerId::parse(cid).is_ok());
     daemon.query(&["start", "--attach", cid]).unwrap();
     let row: serde_json::Value =
         serde_json::from_str(&daemon.query(&["inspect", cid]).unwrap()).unwrap();

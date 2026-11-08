@@ -178,7 +178,7 @@ impl Fixture {
         self.create_attempted = true;
         let raw = docker::run(&borrowed).unwrap();
         let id = raw.trim().to_owned();
-        assert!(reverie_contracts::worker_pool::hex_id(&id));
+        assert!(reverie_core::ids::ContainerId::parse(&id).is_ok());
         self.id = Some(id);
     }
     fn start(&mut self) {

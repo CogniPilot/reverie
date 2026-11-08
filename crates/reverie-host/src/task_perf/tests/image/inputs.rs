@@ -25,7 +25,7 @@ impl Inputs {
         assert!(
             image
                 .strip_prefix("sha256:")
-                .is_some_and(reverie_contracts::worker_pool::hex_id)
+                .is_some_and(|value| reverie_core::ids::ContainerId::parse(value).is_ok())
         );
         let provenance: Value =
             serde_json::from_slice(&immutable_file("REVERIE_PERF_FIXTURE_PROVENANCE", 65_536))
