@@ -151,3 +151,32 @@ it('validates closed controller semantics and refuses paths, unsafe handoffs and
     expect(response.statusCode).toBe(400);
   }
 });
+it('accepts an explicit unbounded pool threshold without enabling rollout or nullable employee thresholds', async () => {
+  const unbounded = { ...preview, pool: { ...preview.pool, memoryHighMiB: null } };
+  expect(FleetPreviewRequestSchema.safeParse(unbounded).success).toBe(true);
+  expect(FleetPreviewRequestSchema.safeParse(preview).success).toBe(true);
+  const before = await readFile(join(directory, 'company.json'));
+  const accepted = await app.inject({
+    method: 'POST',
+    url: '/api/company/resources/fleet/preview',
+    headers: headers(),
+    payload: unbounded,
+  });
+  expect(accepted.statusCode).toBe(503);
+  expect(accepted.json()).toMatchObject({ success: false, code: 'FLEET_HOST_SETUP_REQUIRED' });
+  for (const memoryHighMiB of [undefined, 0, 8192, Infinity]) {
+    expect(FleetPreviewRequestSchema.safeParse({ ...preview, pool: { ...preview.pool, memoryHighMiB } }).success).toBe(
+      false
+    );
+  }
+  const employeeNull = { ...unbounded, policies: [{ ...preview.policies[0], memoryHighMiB: null }] };
+  expect(FleetPreviewRequestSchema.safeParse(employeeNull).success).toBe(false);
+  const refused = await app.inject({
+    method: 'POST',
+    url: '/api/company/resources/fleet/preview',
+    headers: headers(),
+    payload: employeeNull,
+  });
+  expect(refused.statusCode).toBe(400);
+  expect(await readFile(join(directory, 'company.json'))).toEqual(before);
+});

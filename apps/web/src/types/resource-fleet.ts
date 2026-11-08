@@ -18,16 +18,19 @@ export const FleetPolicySchema = z
   });
 export const FleetPoolSchema = z
   .object({
-    memoryHighMiB: MemoryMiB,
+    // Required null means a known unbounded parent soft threshold, not unknown.
+    memoryHighMiB: MemoryMiB.nullable(),
     memoryMaxMiB: MemoryMiB,
     cpuWeight: CpuWeight,
     allowedCpus: z.array(z.number().int().min(0).max(65535)).min(1).max(4096),
   })
   .strict()
   .refine(
-    (value) => value.memoryHighMiB < value.memoryMaxMiB && new Set(value.allowedCpus).size === value.allowedCpus.length,
+    (value) =>
+      (value.memoryHighMiB === null || value.memoryHighMiB < value.memoryMaxMiB) &&
+      new Set(value.allowedCpus).size === value.allowedCpus.length,
     {
-      message: 'Use a soft threshold below the pool ceiling and unique CPU identifiers',
+      message: 'Use an unbounded soft threshold or one below the pool ceiling, and unique CPU identifiers',
     }
   );
 export const FleetPreviewRequestSchema = z
@@ -99,6 +102,7 @@ export interface FleetStatus {
   canPreview: boolean;
   blockers: FleetBlocker[];
   images: Array<{ id: string; label: string }>;
+  /** Outer null is unavailable/unknown; an object's high=null is known unbounded. */
   pool: { desired: FleetPool | null; observed: FleetPool | null };
   employees: FleetEmployee[];
   /** Null means host history could not be read; it is never proof of no pending rollout. */
