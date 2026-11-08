@@ -175,6 +175,6 @@ impl ObservationContext {
         Ok(selected)
     }
     pub(crate) fn settle_stopped_ram(&self, end: Instant) -> Result<()> {
-        self.observer.source.settle_owned(end)
+        self.settle_metadata_owned(end)
     }
 }
