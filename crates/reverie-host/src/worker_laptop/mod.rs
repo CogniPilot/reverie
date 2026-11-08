@@ -15,6 +15,7 @@ pub(crate) use controller::CreatedPoolTarget;
 mod create;
 mod direct_finalization;
 mod error;
+pub use error::{ControllerPoolCause, ControllerPoolFailure};
 mod existing_viewer;
 pub(crate) mod final_storage;
 mod guard;

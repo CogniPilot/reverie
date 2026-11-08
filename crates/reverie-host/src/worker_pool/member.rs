@@ -368,8 +368,8 @@ impl PoolMemberFailure<'_> {
     pub fn close(&mut self) -> Result<()> {
         self.owner.close()
     }
-    pub(super) fn into_component(self: Box<Self>) -> MemberComponent {
-        let Self { owner, primary } = *self;
+    pub(super) fn into_component(self) -> MemberComponent {
+        let Self { owner, primary } = self;
         owner.into_component(primary)
     }
 }

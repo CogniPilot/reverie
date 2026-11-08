@@ -74,7 +74,7 @@ impl State {
         };
         match member {
             Err(owner) => {
-                self.member_failure = Some(owner.into_component());
+                self.member_failure = Some((*owner).into_component());
                 return Err(PoolError::Refused("WORKER_POOL_MEMBER_RETAINED"));
             }
             Ok(mut owner) => {

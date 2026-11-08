@@ -136,10 +136,10 @@ impl ActivatedController {
     }
 }
 impl ControllerState {
-    pub fn policy_data(&self) -> &WorkerPoolPolicy {
+    fn policy_data(&self) -> &WorkerPoolPolicy {
         &self.policy
     }
-    pub fn status_data(&self) -> ControllerStatusData {
+    fn status_data(&self) -> ControllerStatusData {
         ControllerStatusData {
             active: self.active,
             controller_id: self.controller.as_ref().map(|id| id.as_str().into()),
@@ -424,7 +424,7 @@ impl ControllerState {
         )?;
         self.directory.assert_limits(&self.policy)
     }
-    pub fn assert_current(&mut self, runtime: &WorkerRuntime, end: Instant) -> Result<()> {
+    fn assert_current(&mut self, runtime: &WorkerRuntime, end: Instant) -> Result<()> {
         need(
             self.active && !self.close_unknown && !self.effect_unknown,
             "WORKER_POOL_CONTROLLER_NOT_ACTIVE",
@@ -437,7 +437,7 @@ impl ControllerState {
         )?;
         self.directory.assert_limits(&self.policy)
     }
-    pub fn close_components(&mut self, end: Instant) -> Result<()> {
+    fn close_components(&mut self, end: Instant) -> Result<()> {
         self.active = false;
         let end = *self.cleanup_end.get_or_insert_with(|| {
             self.binding
@@ -551,10 +551,10 @@ impl ControllerState {
     }
 }
 impl ControllerActivationFailure {
-    pub fn primary_error(&self) -> &PoolError {
+    fn primary_error(&self) -> &PoolError {
         &self.primary
     }
-    pub fn close_components(&mut self, end: Instant) -> Result<()> {
+    fn close_components(&mut self, end: Instant) -> Result<()> {
         self.owner.close_components(end)
     }
 }

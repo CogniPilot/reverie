@@ -33,9 +33,6 @@ impl EngineObserver {
         )?;
         self.read(&format!("/containers/{id}/json"))
     }
-    pub(super) fn inventory(&self) -> Result<Vec<u8>> {
-        self.read("/containers/json?all=1")
-    }
     pub(super) fn create_anchor(&self, policy: &WorkerPoolPolicy, digest: &str) -> Result<Vec<u8>> {
         let body = serde_json::to_vec(&serde_json::json!({"Image":policy.anchor_image,"User":format!("{}:{}",policy.broker_uid,policy.broker_gid),"Entrypoint":["/bin/sleep"],"Cmd":["infinity"],"Env":["PATH=/bin","LANG=C.UTF-8"],"Labels":{"reverie.pool.anchor":policy.deployment,"reverie.pool.birth-policy":digest},"HostConfig":{"CgroupParent":policy.parent_slice(),"ReadonlyRootfs":true,"NetworkMode":"none","CapDrop":["ALL"],"SecurityOpt":["no-new-privileges:true"],"Memory":67108864,"MemorySwap":67108864,"PidsLimit":16,"CpuShares":2,"NanoCpus":0,"CpusetCpus":policy.cpu_list(),"RestartPolicy":{"Name":"no"}}})).map_err(|_|PoolError::Refused("WORKER_POOL_ANCHOR_BODY"))?;
         self.effect(

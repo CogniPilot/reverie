@@ -17,6 +17,11 @@ struct State {
     primary: Option<PoolError>,
 }
 impl State {
+    fn continue_original(&mut self) -> Result<()> {
+        self.member_failure
+            .as_mut()
+            .map_or(Ok(()), super::member::MemberComponent::close)
+    }
     fn phase(&self) -> &'static str {
         if self.stage == InstallationStage::Confirmed {
             "active"
@@ -107,10 +112,7 @@ impl<'a> ControllerServing<'a> {
                 }
                 protocol::Request::ContinueOriginal { .. } => {
                     phase = "retained";
-                    self.state
-                        .member_failure
-                        .as_mut()
-                        .map_or(Ok(()), super::member::MemberComponent::close)
+                    self.state.continue_original()
                 }
                 protocol::Request::Close { .. } => {
                     close = true;
