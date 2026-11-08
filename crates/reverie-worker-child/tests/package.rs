@@ -8,6 +8,10 @@ fn selected_public_runtime_child_is_native_and_supports_pane_exit() {
         std::env::var_os("NIX_REVERIE_TEST_SELECTED_WORKER_CHILD")
             .expect("use cargo xtask verify-worker-child-package"),
     );
+    assert!(
+        fs::read(&selected).unwrap().starts_with(b"\x7fELF"),
+        "runtime selects a non-ELF worker child"
+    );
     let native = PathBuf::from(
         std::env::var_os("NIX_REVERIE_TEST_NATIVE_WORKER_CHILD")
             .expect("use cargo xtask verify-worker-child-package"),
@@ -16,7 +20,6 @@ fn selected_public_runtime_child_is_native_and_supports_pane_exit() {
     let native = fs::canonicalize(native).unwrap();
     assert!(selected.starts_with("/nix/store") && native.starts_with("/nix/store"));
     assert_eq!(selected, native, "runtime selects a different worker child");
-    assert!(fs::read(&selected).unwrap().starts_with(b"\x7fELF"));
     let help = Command::new(&selected).arg("--help").output().unwrap();
     assert!(help.status.success());
     assert!(
