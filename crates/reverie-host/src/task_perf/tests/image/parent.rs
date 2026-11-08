@@ -88,6 +88,11 @@ impl Fixture {
             serde_json::to_vec(&owner.inputs.core_closure).unwrap(),
         )
         .unwrap();
+        for name in ["rootfs.tar", "core-closure.json"] {
+            // Nonsecret fixture inputs must remain readable when CI's host
+            // UID/umask differs from the image's fixed employee UID1000.
+            fs::set_permissions(owner.root.join(name), fs::Permissions::from_mode(0o444)).unwrap();
+        }
         owner
     }
     fn create(&mut self) {
