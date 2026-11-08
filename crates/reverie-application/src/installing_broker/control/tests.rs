@@ -1,5 +1,6 @@
 //! Actual accepted C Record and fixed native empty census; no live engine.
 use super::*;
+mod status;
 use reverie_core::worker_wire::WorkerFrameHeader;
 use std::{
     io::{Read, Write},

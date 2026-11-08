@@ -1,0 +1,72 @@
+//! Genuine accepted C plus the existing fixed Rust metadata child. No live
+//! engine, callback, manufactured runtime or lifecycle mutation is selected.
+use super::*;
+
+fn reply(client: &mut UnixStream) -> Result<(u8, serde_json::Value), String> {
+    let mut header = [0; 5];
+    client.read_exact(&mut header).map_err(|e| e.to_string())?;
+    let header = WorkerFrameHeader::decode(header);
+    let mut raw = vec![0; header.payload_length() as usize];
+    client.read_exact(&mut raw).map_err(|e| e.to_string())?;
+    serde_json::from_slice(&raw)
+        .map(|value| (header.kind(), value))
+        .map_err(|e| format!("{}: {e}", String::from_utf8_lossy(&raw)))
+}
+fn observe(request: &[u8], names: &str) -> (Result<(), String>, Result<(u8, serde_json::Value), String>, String) {
+    let (root, broker) = recovered::tests::Tree::bootstrap_parts("", "admission", 512, 4096);
+    std::fs::write(root.join("names.out"), names).unwrap();
+    let broker = Arc::new(broker);
+    let (mut client, connection) = incoming(&broker, request);
+    let result = broker.handle_control(connection).map_err(|mut failure| {
+        let _ = failure.reconcile();
+        failure.to_string()
+    });
+    let response = reply(&mut client);
+    let calls = std::fs::read_to_string(root.join("calls.txt")).unwrap_or_default();
+    let closed = finish(root, broker, client);
+    closed.unwrap();
+    (result, response, calls)
+}
+
+#[test]
+fn actual_empty_status_is_read_only_and_keeps_the_existing_response_shape() {
+    crate::test_process::owning_case!(actual_empty_status_is_read_only_and_keeps_the_existing_response_shape);
+    let (body, response, calls) = observe(br#"{"action":"status"}"#, "");
+    body.unwrap();
+    assert_eq!(response.unwrap(), (b'J', serde_json::json!({"runningLaptops":0,
+        "runningSessionIds":[],"offlineGraceSeconds":600})));
+    assert!(calls.lines().all(|line| !line.starts_with("stop\0") && !line.starts_with("rm\0")));
+    assert!(calls.lines().any(|line| line.starts_with("ps\0")));
+}
+#[test]
+fn actual_empty_company_health_returns_no_fabricated_provider_or_ready_flag() {
+    crate::test_process::owning_case!(actual_empty_company_health_returns_no_fabricated_provider_or_ready_flag);
+    let (body, response, calls) = observe(br#"{"action":"provider-health"}"#, "");
+    body.unwrap();
+    assert_eq!(response.unwrap(), (b'J', serde_json::json!({"providerHealth":{
+        "version":1,"purpose":"worker-provider-health-v1","providers":[]}})));
+    assert!(calls.lines().all(|line| !line.starts_with("stop\0") && !line.starts_with("rm\0")));
+}
+#[test]
+fn validated_unsupported_stop_returns_definitive_nondispatch_without_any_native_call() {
+    crate::test_process::owning_case!(validated_unsupported_stop_returns_definitive_nondispatch_without_any_native_call);
+    let (body, response, calls) = observe(br#"{"action":"stop-agent","sessionId":"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee","notAfter":1800000000000,"fence":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}"#, "");
+    body.unwrap();
+    let (kind, value) = response.unwrap();
+    assert_eq!(kind, b'J');
+    assert_eq!(value["action"], "stop-agent");
+    assert_eq!(value["success"], false);
+    assert_eq!(value["dispatched"], false);
+    assert!(value.get("stopped").is_none());
+    assert!(value.get("paneDead").is_none());
+    assert!(calls.is_empty());
+}
+#[test]
+fn malformed_native_status_census_never_returns_a_successful_inventory() {
+    crate::test_process::owning_case!(malformed_native_status_census_never_returns_a_successful_inventory);
+    let (body, response, calls) = observe(br#"{"action":"status"}"#, "foreign-container\n");
+    assert!(body.is_err());
+    assert!(response.is_err());
+    assert!(calls.lines().any(|line| line.starts_with("ps\0")));
+    assert!(calls.lines().all(|line| !line.starts_with("stop\0") && !line.starts_with("rm\0")));
+}
