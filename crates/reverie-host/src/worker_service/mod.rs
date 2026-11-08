@@ -228,7 +228,7 @@ impl State {
             WorkerServiceAction::Install => self.install(observed)?,
             WorkerServiceAction::Start | WorkerServiceAction::Stop => {
                 self.assert_installed(&observed)?;
-                self.begin_attempt()?;
+                self.begin_attempt(&action)?;
                 self.attempted = true;
                 self.command(&[
                     if matches!(action, WorkerServiceAction::Start) {
@@ -284,10 +284,10 @@ impl State {
                 .map_err(|error| WorkerServiceError::Engine(error.into())),
         );
         while let Some(file) = self.files.pop() {
-            result = finalized(
-                result,
-                native::close(file).map_err(|e| WorkerServiceError::Io(std::io::Error::other(e))),
-            );
+            let closed =
+                native::close(file).map_err(|e| WorkerServiceError::Io(std::io::Error::other(e)));
+            self.uncertain |= closed.is_err();
+            result = finalized(result, closed);
         }
         result = finalized(
             result,
@@ -350,4 +350,13 @@ fn immutable_tool(path: &Path) -> Result<()> {
         "NATIVE_SERVICE_PACKAGED_TOOL_REQUIRED",
     )?;
     immutable(&path.canonicalize()?)
+}
+
+fn pending_bytes(action: &WorkerServiceAction) -> &'static [u8] {
+    match action {
+        WorkerServiceAction::Install => b"NATIVE_SERVICE_INSTALL_PENDING_V1\n",
+        WorkerServiceAction::Start => b"NATIVE_SERVICE_START_PENDING_V1\n",
+        WorkerServiceAction::Stop => b"NATIVE_SERVICE_STOP_PENDING_V1\n",
+        WorkerServiceAction::Status => b"NATIVE_SERVICE_READONLY_V1\n",
+    }
 }

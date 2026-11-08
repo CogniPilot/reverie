@@ -56,13 +56,12 @@ impl State {
         file.sync_all()?;
         Ok(())
     }
-    pub(super) fn begin_attempt(&mut self) -> Result<()> {
+    pub(super) fn begin_attempt(&mut self, action: &WorkerServiceAction) -> Result<()> {
         let folder = self.folder();
         private(&folder, true)?;
-        self.exclusive(
-            &folder.join("pending"),
-            b"NATIVE_SERVICE_ORIGINAL_ATTEMPT_V1\n",
-        )?;
+        self.exclusive(&folder.join("pending"), pending_bytes(action))?;
+        let m = self.files.last().expect("original pending").metadata()?;
+        self.pending_identity = Some((m.dev(), m.ino()));
         let n = self.open_directory(&folder)?;
         self.files[n].sync_all()?;
         self.marker = true;
@@ -70,15 +69,64 @@ impl State {
     }
     pub(super) fn finish_attempt(&mut self) -> Result<()> {
         need(
-            self.marker && !self.uncertain,
+            self.marker
+                && !self.uncertain
+                && self.files.is_empty()
+                && self.call.is_none()
+                && self.pin_call.is_none(),
             "NATIVE_SERVICE_ORIGINAL_ATTEMPT_RETAINED",
         )?;
-        fs::remove_file(self.folder().join("pending"))?;
-        let folder = self.folder();
-        let n = self.open_directory(&folder)?;
-        self.files[n].sync_all()?;
-        self.marker = false;
-        Ok(())
+        let path = self.folder().join("pending");
+        let m = fs::symlink_metadata(&path)?;
+        need(
+            self.pending_identity == Some((m.dev(), m.ino())) && m.is_file(),
+            "NATIVE_SERVICE_PENDING_CHANGED",
+        )?;
+        let directory = native::open_at(
+            libc::AT_FDCWD,
+            self.folder().as_os_str(),
+            libc::O_RDONLY | libc::O_DIRECTORY,
+        )?;
+        self.files.push(directory);
+        let body = fs::remove_file(&path)
+            .and_then(|()| {
+                self.files
+                    .last()
+                    .expect("retained clear directory")
+                    .sync_all()
+            })
+            .map_err(WorkerServiceError::Io);
+        let closed = native::close(self.files.pop().expect("same clear directory"))
+            .map_err(|e| WorkerServiceError::Io(std::io::Error::other(e)));
+        match finalized(body, closed) {
+            Ok(()) => {
+                self.marker = false;
+                Ok(())
+            }
+            Err(primary) => {
+                self.uncertain = true;
+                finalized(Err(primary), self.restore_pending(&path))
+            }
+        }
+    }
+    fn restore_pending(&mut self, path: &Path) -> Result<()> {
+        match OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
+            .open(path)
+        {
+            Ok(file) => {
+                self.files.push(file);
+                let f = self.files.last_mut().expect("retained restoration");
+                f.write_all(b"NATIVE_SERVICE_CLEAR_UNKNOWN_V1\n")
+                    .and_then(|()| f.sync_all())
+                    .map_err(WorkerServiceError::Io)
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => Ok(()),
+            Err(error) => Err(error.into()),
+        }
     }
     pub(super) fn install(&mut self, observed: ObservedUnit) -> Result<()> {
         observed.require_replaceable(self.previous.as_deref())?;
@@ -104,7 +152,7 @@ impl State {
                 "NATIVE_SERVICE_UNREGISTERED_UNIT_EXISTS",
             )?;
         }
-        self.begin_attempt()?;
+        self.begin_attempt(&WorkerServiceAction::Install)?;
         self.pin_package()?;
         // Preserve the original exact predecessor and selection; no overwrite.
         self.exclusive(
@@ -121,7 +169,15 @@ impl State {
                 self.read_private(&old_environment)? == environment(&self.source)?,
                 "NATIVE_SERVICE_PREDECESSOR_SOURCE_CHANGED",
             )?;
-            fs::rename(&link, folder.join("previous-unit"))?;
+            let from = native::open_at(
+                libc::AT_FDCWD,
+                units.as_os_str(),
+                libc::O_RDONLY | libc::O_DIRECTORY,
+            )?;
+            self.files.push(from);
+            let from = self.files.len() - 1;
+            let to = self.open_directory(&folder)?;
+            native::retain_predecessor(&self.files[from], &self.files[to])?;
         }
         std::os::unix::fs::symlink(&self.unit, &link)?;
         std::os::unix::fs::symlink(&self.unit, folder.join("native-package"))?;
@@ -138,7 +194,7 @@ impl State {
         self.command(&["daemon-reload"])?;
         let observed = self.observe()?;
         self.assert_installed(&observed)?;
-        self.finish_attempt()
+        observed.require_action_finished(&WorkerServiceAction::Install)
     }
 }
 

@@ -273,3 +273,6 @@ pub(crate) mod test_faults {
 
 #[cfg(test)]
 mod tests;
+
+mod worker_service;
+pub(crate) use worker_service::retain_predecessor;
