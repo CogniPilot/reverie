@@ -2,6 +2,8 @@
 //! constructor has no wire-selected engine/program, callbacks or owner flag.
 //! Qualifying a website does not authorize an employee resource operation.
 mod custody;
+mod dispatch;
+pub use dispatch::{ResourceOperationClosed, ResourceOperationFailure};
 mod error;
 #[cfg(test)]
 mod native_fixture;

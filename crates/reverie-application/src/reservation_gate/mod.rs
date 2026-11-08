@@ -32,6 +32,8 @@ mod preparation_stop;
 pub use preparation_start::{ProtectedStartIntent, StartQualificationFacts};
 pub use preparation_stop::SourceStopFacts;
 mod profile_selection;
+mod ram_preview;
+pub use ram_preview::RamDraftPreview;
 mod recovery;
 mod recovery_admission;
 pub(crate) use recovery_admission::RecoveryAdmission;

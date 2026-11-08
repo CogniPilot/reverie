@@ -42,6 +42,14 @@ impl ReservationGate {
 }
 impl Inner {
     fn select_profile(self: &Arc<Self>, employee: &JournalId, memory: u32) -> Result<()> {
+        self.select_profile_checked(employee, memory, None)
+    }
+    pub(super) fn select_profile_checked(
+        self: &Arc<Self>,
+        employee: &JournalId,
+        memory: u32,
+        authority: Option<&super::ram_preview::RamPreviewGuard<'_, '_>>,
+    ) -> Result<()> {
         need(
             (512..=1_048_576).contains(&memory),
             "RESOURCE_PREPARATION_RAM_REQUEST",
@@ -81,6 +89,14 @@ impl Inner {
             resources.budget_mode() == BudgetMode::Admission,
             "RESOURCE_PREPARATION_ADMISSION_REQUIRED",
         )?;
+        if authority.is_some() {
+            need(
+                resources.memory_mib() != 0
+                    && resources.memory_mib() == resources.pool_memory_mib()
+                    && resources.cpus().nano_cpus() == 0,
+                "RAM_MIGRATION_BURST_POOL_REQUIRED",
+            )?;
+        }
         let target = allocate_profile_target()?;
         let target = ProfileSessionId::parse(target.as_str()).expect("checked new role");
         need(
@@ -131,6 +147,9 @@ impl Inner {
                 old.map(|profile| profile.binding().clone()),
             )
             .map_err(reverie_store::StoreError::Profile)?;
+            if let Some(authority) = authority {
+                authority.check(self)?;
+            }
             profiles.put(&intent)?;
             Ok(())
         })();

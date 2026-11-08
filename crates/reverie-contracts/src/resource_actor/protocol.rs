@@ -9,6 +9,8 @@ use reverie_core::{
 };
 mod approval;
 mod owner;
+mod reply;
+pub use reply::RamPreviewFields;
 #[cfg(test)]
 mod tests;
 pub use owner::CurrentResourceOwner;

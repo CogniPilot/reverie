@@ -4,6 +4,7 @@ use super::*;
 use reverie_contracts::resource_config::ResourceIdentitySettings;
 use reverie_store::storage_identity::{self, StorageIdentityConfig};
 use std::time::{SystemTime, UNIX_EPOCH};
+mod preview;
 mod receipt;
 pub use receipt::{CommittedRamFailure, CommittedRamOperation};
 
@@ -60,6 +61,20 @@ impl<'a> InstalledResourceWebsite<'a> {
     }
 }
 impl AuthenticatedResourceOperation<'_> {
+    pub(crate) fn assert_reservation_gate(
+        &self,
+        gate: &crate::reservation_gate::ReservationGate,
+    ) -> Result<()> {
+        need(
+            self.website
+                .frame
+                .broker
+                .resource_reservations()?
+                .is_some_and(|actual| std::ptr::eq(actual, gate)),
+            "RESOURCE_ACTOR_GATE_CHANGED",
+        )?;
+        self.assert_live()
+    }
     /// Immutable selection decoded from this channel's actual request. A
     /// caller-supplied employee/approval cannot substitute for this selection.
     pub fn request(&self) -> &ResourceOperationRequest {

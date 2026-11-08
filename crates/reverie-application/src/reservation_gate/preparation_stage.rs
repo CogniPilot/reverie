@@ -45,15 +45,11 @@ impl RetainedPreparation {
     /// caller must approve its exact digest and retain fresh authority; this
     /// observation is no write, native pool or launch permission.
     pub fn ram_migration_policy(&self) -> Result<RamMigrationPolicy> {
-        let original = crate::resource_staging::effective_config(
-            self.source_configuration().clone(),
-            self.profile().binding().current_session(),
-        )?;
-        Ok(RamMigrationPolicy::from_observed(
+        ram_policy_from_source(
             self.profile(),
             self.original_baseline().native(),
-            &original,
-        )?)
+            self.source_configuration(),
+        )
     }
     pub fn stage_ram_configuration(
         &self,
@@ -183,4 +179,18 @@ impl RetainedPreparation {
         }
         Ok(candidate.into_configuration())
     }
+}
+
+pub(super) fn ram_policy_from_source(
+    profile: &reverie_core::profiles::ResourceProfile,
+    source: &reverie_contracts::reservation_engine::NativeLimitBinding,
+    configuration: &EffectiveWorkerConfig,
+) -> Result<RamMigrationPolicy> {
+    let original = crate::resource_staging::effective_config(
+        configuration.clone(),
+        profile.binding().current_session(),
+    )?;
+    Ok(RamMigrationPolicy::from_observed(
+        profile, source, &original,
+    )?)
 }
