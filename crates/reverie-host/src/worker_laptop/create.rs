@@ -82,6 +82,17 @@ impl Workflows {
                 && record.creation.is_none(),
             "WORKER_LAPTOP_CREATE_PHASE",
         )?;
+        // The retained plan may precede the App's latest source read. Until a
+        // genuine provider-maintenance owner is joined, neither snapshot may
+        // turn native-provider selection into an ordinary legacy create.
+        let provider = reverie_contracts::worker_pool::WorkerPoolProvider::from_config(
+            record.resources().plan.source(),
+        )
+        .map_err(|_| LaptopError::Refused("WORKER_POOL_PROVIDER_INVALID"))?;
+        need(
+            provider.is_none(),
+            "WORKER_POOL_PROVIDER_MAINTENANCE_REQUIRED",
+        )?;
         // Retain the one-shot phase before the first possible constructor.
         record.creation = Some(Creation {
             created: false,
