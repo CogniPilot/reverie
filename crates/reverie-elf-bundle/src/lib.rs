@@ -3,10 +3,12 @@
 //! never runtime identity, installation consent, or execution authority.
 #![forbid(unsafe_code)]
 mod files;
+mod image;
 mod libraries;
 mod tools;
 
 pub use files::{copy, digest, machine};
+pub use image::ImageLayout;
 pub use libraries::Libraries;
 pub use tools::{Tools, immutable_input};
 

@@ -1,4 +1,5 @@
 //! Fixed installed perf artifact observations and current-employee bracketing.
+pub mod guest;
 use crate::{ObservationError, native};
 use reverie_contracts::storage_identity::CurrentEmployee;
 use reverie_contracts::task_perf_v1::{

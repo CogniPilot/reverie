@@ -21,6 +21,7 @@ members = [
     "crates/reverie-python-regex",
     "crates/reverie-memory-capsule",
     "crates/reverie-elf-bundle",
+    "crates/reverie-perf-check",
     "crates/reverie-diagnostics",
     "crates/reverie-deployment",
     "crates/reverie-namegate",
