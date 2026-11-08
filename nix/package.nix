@@ -127,6 +127,7 @@ let
         test/plan-move-runtime.test.ts test/plan-move-composer.test.ts test/plan-move-routes.test.ts test/plan-move-company.test.ts test/plan-move-launch.test.ts \
         test/plan-move-resources.test.ts test/plan-move-resource-runtime.test.ts \
         test/resource-owner-authority.test.ts test/resource-owner-office-authority.test.ts test/resource-native-client.test.ts \
+        test/owner-registration-identity.test.ts test/owner-registration-durability.test.ts \
         test/company-resource-binding-cas.test.ts test/resource-session-publication.test.ts \
         test/resource-replacement-controller.test.ts test/company-laptop-memory-ui.test.ts \
         test/company-resource-fleet-ui.test.ts test/resource-fleet-schema.test.ts test/resource-fleet-service.test.ts \
