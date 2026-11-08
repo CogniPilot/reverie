@@ -123,12 +123,17 @@ impl Pr {
     }
 
     fn run(&self, api: &str, old: &str, extra: &[&str]) -> Output {
+        self.command(api, old, extra).output().unwrap()
+    }
+
+    fn command(&self, api: &str, old: &str, extra: &[&str]) -> Command {
         let root = &self.fixture.root;
         let tree = git(
             &self.fixture.work(),
             &["rev-parse", &format!("{}^{{tree}}", self.head)],
         );
-        Command::new(env!("CARGO_BIN_EXE_reverie-publish"))
+        let mut command = Command::new(env!("CARGO_BIN_EXE_reverie-publish"));
+        command
             .args(["push-ff", "--repo", "owner/demo", "--pr", "7", "--old", old])
             .args(["--head", &self.head, "--seal", &self.seal, "--tree", &tree])
             .args(["--api-base", api, "--lists-sha256"])
@@ -141,17 +146,26 @@ impl Pr {
             .arg(root.join("lists.json"))
             .arg("--approval")
             .arg(root.join("approval.json"))
-            .arg("--remote-url")
-            .arg(self.remote())
-            .arg("--base-url")
-            .arg(self.remote())
             .arg("--records")
             .arg(self.records())
             .arg("--token-file")
             .arg(root.join("token"))
-            .args(extra)
-            .output()
-            .unwrap()
+            .args(extra);
+        // No request leaves this machine: any https remote goes to a closed local port, while the
+        // loopback API is reached directly.
+        for proxy in ["https_proxy", "HTTPS_PROXY", "http_proxy", "ALL_PROXY"] {
+            command.env(proxy, "http://127.0.0.1:9");
+        }
+        command
+            .env("no_proxy", "127.0.0.1")
+            .env("NO_PROXY", "127.0.0.1");
+        // The local bare remote, token-free, unless the test names its own.
+        for flag in ["--remote-url", "--base-url"] {
+            if !extra.contains(&flag) {
+                command.arg(flag).arg(self.remote());
+            }
+        }
+        command
     }
 
     /// Moves `topic` on the remote to a new commit made from `main`.
@@ -312,4 +326,125 @@ fn an_approval_for_another_head_refuses_before_any_write() {
     refused(&p.run(&api, &p.old, &[]), "approval");
     assert_eq!(p.branch(), p.old);
     assert!(!p.records().exists());
+}
+
+#[test]
+fn a_push_url_other_than_the_pr_head_repository_refuses_before_any_write() {
+    for url in [
+        "https://github.com/zorblat/demo.git",
+        "https://foreign.example.invalid/owner/demo.git",
+        "https://github.com/owner/demo",
+        "ssh://git@github.com/owner/demo.git",
+        "relative/remote.git",
+    ] {
+        let p = prepared("push-url");
+        let (api, seen) = p.api(SAME_REPO);
+        refused(&p.run(&api, &p.old, &["--remote-url", url]), "--remote-url");
+        assert_eq!(p.branch(), p.old, "{url}");
+        assert!(!p.records().exists(), "{url}");
+        // Only the PR read happened: nothing was written to the API.
+        assert_eq!(methods(&seen), ["GET /repos/owner/demo/pulls/7"], "{url}");
+    }
+}
+
+#[test]
+fn a_fork_pr_pushes_only_to_the_fork_not_the_base_repository() {
+    let p = prepared("fork-url");
+    let (api, seen) = p.api(Api {
+        head_repo: "zorblat/demo",
+        can_modify: true,
+        ..SAME_REPO
+    });
+    let out = p.run(
+        &api,
+        &p.old,
+        &["--remote-url", "https://github.com/owner/demo.git"],
+    );
+    refused(&out, "is neither https://github.com/zorblat/demo.git");
+    assert_eq!(p.branch(), p.old);
+    assert!(!p.records().exists());
+    assert_eq!(methods(&seen), ["GET /repos/owner/demo/pulls/7"]);
+}
+
+#[test]
+fn a_base_url_other_than_the_base_repository_refuses_before_any_write() {
+    let p = prepared("base-url");
+    let (api, _) = p.api(SAME_REPO);
+    refused(
+        &p.run(
+            &api,
+            &p.old,
+            &[
+                "--base-url",
+                "https://foreign.example.invalid/owner/demo.git",
+            ],
+        ),
+        "--base-url",
+    );
+    assert_eq!(p.branch(), p.old);
+    assert!(!p.records().exists());
+}
+
+#[test]
+fn the_head_repository_url_is_accepted_for_a_fork_and_the_base_repo_alike() {
+    // Past the destination check, the fetch reaches only the closed local proxy and fails there.
+    for (head_repo, url) in [
+        ("owner/demo", "https://github.com/owner/demo.git"),
+        ("zorblat/demo", "https://github.com/zorblat/demo.git"),
+    ] {
+        let p = prepared("head-url");
+        let (api, _) = p.api(Api {
+            head_repo,
+            can_modify: true,
+            ..SAME_REPO
+        });
+        let out = p.run(&api, &p.old, &["--remote-url", url]);
+        assert_eq!(out.status.code(), Some(1), "{url}");
+        let why = stderr(&out);
+        assert!(!why.contains("is neither"), "{url}: {why}");
+        assert!(why.contains("git failed"), "{url}: {why}");
+        assert!(
+            why.contains("over proxy 127.0.0.1"),
+            "{url} left this machine: {why}"
+        );
+        assert_eq!(p.branch(), p.old, "{url}");
+        assert!(!p.records().exists(), "{url}");
+    }
+}
+
+#[test]
+fn a_local_remote_is_pushed_without_the_token_wiring() {
+    let p = prepared("local-token-free");
+    // A git on PATH that notes whether each push was given git's credential prompt helper.
+    let real = std::env::split_paths(&std::env::var_os("PATH").unwrap())
+        .map(|dir| dir.join("git"))
+        .find(|git| git.is_file())
+        .unwrap();
+    let shim = p.fixture.root.join("shim");
+    fs::create_dir(&shim).unwrap();
+    let log = p.fixture.root.join("askpass.log");
+    let script = format!(
+        "#!/bin/sh\ncase \" $* \" in *\" push \"*) if [ -n \"$GIT_ASKPASS\" ]; then echo askpass >> \"{log}\"; else echo none >> \"{log}\"; fi ;; esac\nexec \"{real}\" \"$@\"\n",
+        log = log.display(),
+        real = real.display(),
+    );
+    fs::write(shim.join("git"), script).unwrap();
+    fs::set_permissions(
+        shim.join("git"),
+        std::os::unix::fs::PermissionsExt::from_mode(0o755),
+    )
+    .unwrap();
+    let path = std::env::join_paths(
+        std::iter::once(shim).chain(std::env::split_paths(&std::env::var_os("PATH").unwrap())),
+    )
+    .unwrap();
+    let (api, _) = p.api(SAME_REPO);
+    let out = p
+        .command(&api, &p.old, &[])
+        .env("PATH", path)
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    assert_eq!(p.branch(), p.head);
+    assert_eq!(fs::read_to_string(&log).unwrap(), "none\n");
 }

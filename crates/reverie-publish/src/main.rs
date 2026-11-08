@@ -127,10 +127,13 @@ struct PushFf {
     /// The PR's current head (full id): the PR and its branch must still point here.
     #[arg(long)]
     old: String,
-    /// Where to push; defaults to https://github.com/<the PR's head repository>.git.
+    /// Where to push; defaults to https://github.com/<the PR's head repository>.git, the base
+    /// repository or the fork its maintainers may push to. Only that URL is ever given the token;
+    /// a local path or file:// URL (for tests) is pushed without it, and any other URL refuses.
     #[arg(long)]
     remote_url: Option<String>,
-    /// Where to fetch the PR's base branch; defaults to https://github.com/OWNER/NAME.git.
+    /// Where to fetch the PR's base branch; defaults to https://github.com/OWNER/NAME.git. The same
+    /// rule applies, though a fetch never carries the token.
     #[arg(long)]
     base_url: Option<String>,
     /// Directory for the intent, push result and PR readback records.
@@ -228,10 +231,10 @@ fn check(o: &Check) -> Result<Value, String> {
     .summary)
 }
 
-/// Where to fetch and push, and whether the token may be used there: only the approved
-/// repository's GitHub URL is given credentials. A local path or file:// URL is accepted without
-/// them; any other URL is refused, so the token never goes to an unapproved destination.
-fn remote(remote_url: Option<&str>, repo: &str) -> Result<(String, bool), String> {
+/// Where to fetch and push for `flag`, and whether the token may be used there: only `repo`'s
+/// GitHub URL is given credentials. A local path or file:// URL is accepted without them; any other
+/// URL is refused, so the token never goes to an unapproved destination.
+fn remote(flag: &str, remote_url: Option<&str>, repo: &str) -> Result<(String, bool), String> {
     let approved = format!("https://github.com/{repo}.git");
     match remote_url {
         None => Ok((approved, true)),
@@ -242,7 +245,7 @@ fn remote(remote_url: Option<&str>, repo: &str) -> Result<(String, bool), String
             Ok((url.to_owned(), false))
         }
         Some(url) => Err(format!(
-            "--remote-url {url} is neither {approved} nor a local path; the token is never sent elsewhere"
+            "{flag} {url} is neither {approved} nor a local path; the token is never sent elsewhere"
         )),
     }
 }
@@ -251,7 +254,7 @@ fn new_pr(o: &NewPr) -> Result<Value, String> {
     let c = &o.common;
     let git = Git::open(&c.git_dir)?;
     let lists = lists(c)?;
-    let (url, credentials) = remote(o.remote_url.as_deref(), &c.repo)?;
+    let (url, credentials) = remote("--remote-url", o.remote_url.as_deref(), &c.repo)?;
     let base = git.fetch_branch(&url, &o.base_branch, "base")?;
     let verified = run_verify(c, &git, &lists, &base, Some(&o.approval))?;
     let (title, body) = verified
@@ -342,6 +345,8 @@ fn new_pr(o: &NewPr) -> Result<Value, String> {
 struct Ready {
     target: Target,
     url: String,
+    /// Whether `url` is the PR head repository's GitHub URL, the only push given the token.
+    credentials: bool,
     head: String,
     base: String,
     text: Option<(String, String)>,
@@ -364,14 +369,9 @@ fn prepare_ff(o: &PushFf, git: &Git, api: &Repo<'_>) -> Result<Ready, String> {
         &c.repo,
         &o.old,
     )?;
-    let url = o
-        .remote_url
-        .clone()
-        .unwrap_or_else(|| format!("https://github.com/{}.git", target.repo));
-    let base_url = o
-        .base_url
-        .clone()
-        .unwrap_or_else(|| format!("https://github.com/{}.git", c.repo));
+    // The push goes only to the repository the PR itself names as its head.
+    let (url, credentials) = remote("--remote-url", o.remote_url.as_deref(), &target.repo)?;
+    let (base_url, _) = remote("--base-url", o.base_url.as_deref(), &c.repo)?;
     let base = git.fetch_branch(&base_url, &target.base, "base")?;
     if git.fetch_branch(&url, &target.branch, "remote")? != o.old {
         return Err(format!(
@@ -393,6 +393,7 @@ fn prepare_ff(o: &PushFf, git: &Git, api: &Repo<'_>) -> Result<Ready, String> {
     Ok(Ready {
         target,
         url,
+        credentials,
         head,
         base,
         text: verified.text,
@@ -417,6 +418,7 @@ fn push_ff(o: &PushFf) -> Result<Value, String> {
     let Ready {
         target,
         url,
+        credentials,
         head,
         base,
         text,
@@ -438,7 +440,8 @@ fn push_ff(o: &PushFf) -> Result<Value, String> {
         "packetSeal": c.seal,
         "approval": o.approval,
     }))?;
-    let (pushed, stderr) = git.push(&url, &format!("{head}:{reference}"), Some(&o.token_file))?;
+    let token_file = credentials.then_some(o.token_file.as_path());
+    let (pushed, stderr) = git.push(&url, &format!("{head}:{reference}"), token_file)?;
     records.result(
         "PUSH-RESULT.json",
         &json!({ "ok": pushed, "stderr": stderr }),
@@ -495,4 +498,43 @@ fn read_back(api: &Repo<'_>, path: &str, head: &str) -> Result<Value, String> {
         pr = api.call("GET", path, None)?;
     }
     Ok(pr)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::remote;
+
+    #[test]
+    fn only_the_named_repository_url_gets_the_token() {
+        for repo in ["owner/demo", "zorblat/demo"] {
+            let approved = format!("https://github.com/{repo}.git");
+            assert_eq!(
+                remote("--remote-url", None, repo),
+                Ok((approved.clone(), true))
+            );
+            assert_eq!(
+                remote("--remote-url", Some(&approved), repo),
+                Ok((approved, true))
+            );
+        }
+        // A fork's PR pushes to the fork; the base repository's URL is then another destination.
+        assert!(
+            remote(
+                "--remote-url",
+                Some("https://github.com/owner/demo.git"),
+                "zorblat/demo"
+            )
+            .is_err()
+        );
+        assert_eq!(
+            remote("--base-url", Some("/srv/remote.git"), "owner/demo"),
+            Ok(("/srv/remote.git".to_owned(), false))
+        );
+        let refused = remote(
+            "--base-url",
+            Some("https://foreign.example.invalid/x.git"),
+            "owner/demo",
+        );
+        assert!(refused.unwrap_err().starts_with("--base-url "));
+    }
 }
