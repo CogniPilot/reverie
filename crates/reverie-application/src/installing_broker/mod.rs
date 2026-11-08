@@ -12,6 +12,10 @@ mod goal_custody;
 mod gpu_access;
 pub use goal_custody::{GoalCustodyHandlerClosed, GoalCustodyHandlerFailure};
 mod image_refresh;
+mod installation_offer;
+pub use installation_offer::{
+    BrokerInstallationOffer, BrokerInstallationOfferCause, BrokerInstallationOfferFailure,
+};
 mod launch;
 mod lifecycle;
 mod pool_controller;
@@ -177,6 +181,9 @@ impl InstalledWorker {
     }
 }
 pub struct InstallingBroker {
+    // One actual service-start attempt for this original broker. Never reset
+    // on refusal, local close, Arc clone/drop, or a failed recovery prefix.
+    service_start_claimed: std::sync::atomic::AtomicBool,
     installed: Arc<InstalledWorker>,
     gate: Option<ReservationGate>,
     storage: Arc<storage::StorageRegistry>,

@@ -1,54 +1,96 @@
 //! SIGTERM/service finally does not secretly issue C stop-laptops. Actual
 //! runtime resources must independently close; unresolved owners stay retained.
 use super::*;
+
+/// Created only at the checked core-service close point below. This borrows
+/// the actual Arc; it cannot be constructed from wire data or metadata closure.
+pub(in crate::installing_broker) struct ClosedBrokerResources<'a> {
+    broker: &'a Arc<InstallingBroker>,
+}
+impl ClosedBrokerResources<'_> {
+    pub(in crate::installing_broker) fn same_broker(&self, broker: &Arc<InstallingBroker>) -> bool {
+        Arc::ptr_eq(self.broker, broker)
+    }
+}
+#[cfg(test)]
+mod tests;
+
 impl BrokerService {
     pub(super) fn shutdown(
         &mut self,
         errors: &mut Vec<BrokerServiceError>,
     ) -> Result<BrokerServiceClosed, ()> {
-        let broker = &self.startup.owner.broker;
-        let end = broker.storage.runtime.request_stop();
+        // Full finally is admitted once. Reconciliation must address original
+        // remaining owners, never replay this entire pass or its body.
+        if self.shutdown_attempted {
+            return Err(());
+        }
+        self.shutdown_attempted = true;
+        let end = self.startup.owner.broker.storage.runtime.request_stop();
         let signal = self
             .startup
             .owner
             .signals
             .as_ref()
             .and_then(BrokerSignals::termination_signal);
-        if let Err(error) = self.listener.close() {
-            errors.push(BrokerServiceError::Listener(error));
-        }
-        // Interrupt real accepted sockets before asking original handler stacks
-        // to reconcile. A thread/data response cannot satisfy Record settlement.
-        if let Err(error) = broker.reports.interrupt_worker_handlers(end) {
-            errors.push(BrokerServiceError::Handler(error));
-        }
-        if let Err(error) = broker.reports.reconcile_worker_handlers(end) {
-            errors.push(BrokerServiceError::Handler(error));
-        }
-        if let Err(error) = broker.reports.close(end) {
-            errors.push(BrokerServiceError::Handler(error));
-        }
-        if let Err(error) = broker.close_command_telemetry(end) {
-            errors.push(BrokerServiceError::Telemetry(error));
-        }
-        if let Err(error) = broker.close_chat_images(end) {
-            errors.push(BrokerServiceError::Images(error));
-        }
-        if let Err(error) = broker.recovery.close_service_owners(broker, end) {
-            errors.push(BrokerServiceError::Recovery(error));
-        }
-        let runtime_closed = match broker.storage.runtime.close(end) {
-            Ok(()) => true,
-            Err(error) => {
-                errors.push(BrokerServiceError::Runtime(error));
-                false
-            }
+        let components_closed = self.close_application_components(end, errors);
+        let broker = &self.startup.owner.broker;
+        let runtime_closed = if components_closed {
+            record_close(
+                broker
+                    .storage
+                    .runtime
+                    .close(end)
+                    .map_err(BrokerServiceError::Runtime),
+                errors,
+            )
+        } else {
+            // All original native tickets are attempted, while cleanup
+            // admission remains usable by unresolved actual App/report owners.
+            record_close(
+                broker
+                    .storage
+                    .runtime
+                    .settle_owned(end)
+                    .map_err(BrokerServiceError::Runtime),
+                errors,
+            );
+            false
         };
-        if runtime_closed
-            && let Some(signals) = &mut self.startup.owner.signals
-            && let Err(error) = signals.finish_after_runtime_close()
-        {
-            errors.push(BrokerServiceError::Signal(error));
+        let signals_closed = if runtime_closed {
+            record_close(
+                self.startup
+                    .owner
+                    .signals
+                    .as_mut()
+                    .map_or(Ok(()), BrokerSignals::finish_after_runtime_close)
+                    .map_err(BrokerServiceError::Signal),
+                errors,
+            )
+        } else {
+            false
+        };
+        if components_closed && runtime_closed && signals_closed {
+            // Only actual close results produce the same-Arc witness. A
+            // historical body error neither grants nor disproves closure.
+            let closed = ClosedBrokerResources { broker };
+            if let Some(offer) = &mut self.startup.owner.installation_offer {
+                record_close(
+                    offer
+                        .close_after_service(&closed)
+                        .map_err(BrokerServiceError::InstallationOffer),
+                    errors,
+                );
+            }
+        } else {
+            // Component-only metadata close never releases the actual broker.
+            record_close(
+                self.startup
+                    .owner
+                    .close_installation_origin_metadata()
+                    .map_err(BrokerServiceError::InstallationOffer),
+                errors,
+            );
         }
         if errors.is_empty() {
             Ok(BrokerServiceClosed {
@@ -56,6 +98,73 @@ impl BrokerService {
             })
         } else {
             Err(())
+        }
+    }
+    fn close_application_components(
+        &mut self,
+        end: std::time::Instant,
+        errors: &mut Vec<BrokerServiceError>,
+    ) -> bool {
+        let broker = &self.startup.owner.broker;
+        let listener = record_close(
+            self.listener.close().map_err(BrokerServiceError::Listener),
+            errors,
+        );
+        // Diagnostics survive, while only the actual final ReportService.close
+        // result establishes closure of its socket/Hold/handler owners.
+        record_close(
+            broker
+                .reports
+                .interrupt_worker_handlers(end)
+                .map_err(BrokerServiceError::Handler),
+            errors,
+        );
+        record_close(
+            broker
+                .reports
+                .reconcile_worker_handlers(end)
+                .map(|_| ())
+                .map_err(BrokerServiceError::Handler),
+            errors,
+        );
+        let reports = record_close(
+            broker
+                .reports
+                .close(end)
+                .map_err(BrokerServiceError::Handler),
+            errors,
+        );
+        let telemetry = record_close(
+            broker
+                .close_command_telemetry(end)
+                .map_err(BrokerServiceError::Telemetry),
+            errors,
+        );
+        let images = record_close(
+            broker
+                .close_chat_images(end)
+                .map_err(BrokerServiceError::Images),
+            errors,
+        );
+        let recovery = record_close(
+            broker
+                .recovery
+                .close_service_owners(broker, end)
+                .map_err(BrokerServiceError::Recovery),
+            errors,
+        );
+        listener && reports && telemetry && images && recovery
+    }
+}
+fn record_close(
+    result: Result<(), BrokerServiceError>,
+    errors: &mut Vec<BrokerServiceError>,
+) -> bool {
+    match result {
+        Ok(()) => true,
+        Err(error) => {
+            errors.push(error);
+            false
         }
     }
 }

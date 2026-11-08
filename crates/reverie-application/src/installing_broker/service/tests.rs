@@ -49,13 +49,26 @@ fn actual_startup_prepares_parent_then_waits_for_recovery_before_any_listener_ex
         return;
     }
     let (root, broker) = setup();
+    let broker = Arc::new(broker);
     let socket = root.join("control/broker.sock");
     fs::write(root.join("names.hold"), b"owned").unwrap();
     let source = root.clone();
+    let alias = Arc::clone(&broker);
     let mut startup = std::thread::scope(|scope| {
         let observe = scope.spawn(move || {
             let _release = Release(source.join("names.release"));
             wait(&source.join("names.started"));
+            // The original startup is actually blocked in its captured names
+            // read. This SAME Arc alias must refuse before another native
+            // signal owner, pool check, recovery query or listener is created.
+            let refused = alias.prepare_shared_service().err().unwrap();
+            assert!(matches!(
+                refused.cause(),
+                BrokerStartupCause::AlreadyAttempted
+            ));
+            assert!(Arc::ptr_eq(&alias, &refused.owner.broker));
+            assert!(refused.owner.signals.is_none() && refused.owner.listener.is_none());
+            drop(refused);
             assert!(
                 source.join("control").is_dir(),
                 "raw parent phase precedes actual recovery"
@@ -66,10 +79,11 @@ fn actual_startup_prepares_parent_then_waits_for_recovery_before_any_listener_ex
                     .is_err()
             );
         });
-        let startup = broker.prepare_service().unwrap();
+        let startup = broker.prepare_shared_service().unwrap();
         observe.join().unwrap();
         startup
     });
+    assert!(Arc::ptr_eq(&broker, &startup.owner.broker));
     assert_eq!(
         (
             startup.recovered().selected(),
@@ -88,6 +102,17 @@ fn actual_startup_prepares_parent_then_waits_for_recovery_before_any_listener_ex
     );
     close(&mut startup.owner);
     drop(startup);
+    // Checked local closure does not renew service-start authority, even
+    // while the original outer bootstrap still retains this SAME Arc.
+    let refused = broker.prepare_shared_service().err().unwrap();
+    assert!(matches!(
+        refused.cause(),
+        BrokerStartupCause::AlreadyAttempted
+    ));
+    assert!(Arc::ptr_eq(&broker, &refused.owner.broker));
+    assert!(refused.owner.signals.is_none() && refused.owner.listener.is_none());
+    drop(refused);
+    drop(broker);
     fs::remove_dir_all(root).unwrap();
 }
 #[test]
@@ -98,10 +123,23 @@ fn actual_bad_parent_refuses_before_recovery_and_keeps_same_runtime_until_checke
         return;
     }
     let (root, broker) = setup();
+    let broker = Arc::new(broker);
     fs::create_dir(root.join("control")).unwrap();
     fs::set_permissions(root.join("control"), fs::Permissions::from_mode(0o755)).unwrap();
-    let mut failure = broker.prepare_service().err().unwrap();
+    let mut failure = broker.prepare_shared_service().err().unwrap();
     assert!(matches!(failure.cause(), BrokerStartupCause::Listener(_)));
+    assert!(Arc::ptr_eq(&broker, &failure.owner.broker));
+    // Even correcting the owned parent cannot reopen a consumed attempt or
+    // replace the original partial signal/listener owners with fresh ones.
+    fs::set_permissions(root.join("control"), fs::Permissions::from_mode(0o700)).unwrap();
+    let refused = broker.prepare_shared_service().err().unwrap();
+    assert!(matches!(
+        refused.cause(),
+        BrokerStartupCause::AlreadyAttempted
+    ));
+    assert!(Arc::ptr_eq(&broker, &refused.owner.broker));
+    assert!(refused.owner.signals.is_none() && refused.owner.listener.is_none());
+    drop(refused);
     assert!(
         !root.join("calls.txt").exists(),
         "no recovery native constructor before socket-parent acceptance"

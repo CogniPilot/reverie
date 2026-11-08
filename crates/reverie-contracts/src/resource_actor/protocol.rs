@@ -12,6 +12,7 @@ mod command;
 mod continuation;
 pub use command::RamLaunchCommandData;
 pub use continuation::{ResourceContinuationRequest, ResourceContinuationVerb};
+mod installation;
 mod owner;
 mod principal;
 mod registration;
@@ -19,6 +20,7 @@ mod reply;
 pub use reply::RamPreviewFields;
 #[cfg(test)]
 mod tests;
+pub use installation::{POOL_INSTALLATION_REQUEST_PURPOSE, PoolInstallationRequestData};
 pub use owner::CurrentResourceOwner;
 pub use principal::ResourceOwnerPrincipal;
 pub use registration::{POOL_REGISTRATION_PURPOSE, decode_pool_registration_hello};

@@ -20,7 +20,8 @@ mod peer_pin;
 mod resume;
 mod service_connection;
 pub use resume::{
-    ResourceJournalError, ResourceJournalPin, WorkerActorChannel, WorkerActorChannelFailure,
+    PoolRegistrationPin, ResourceJournalError, ResourceJournalPin, WorkerActorChannel,
+    WorkerActorChannelFailure, WorkerActorPinError,
 };
 pub use service_connection::{
     AcceptedWorkerServiceConnection, WorkerPeer, WorkerServiceConnection, WorkerServicePurpose,
