@@ -49,7 +49,7 @@ impl Qualification<'_> {
                 Ok(())
             }
             Err(cause) => {
-                if let GateError::ImageFiles(error) = &cause
+                if let Some(error) = image_file_error(&cause)
                     && error.has_unconfirmed_close()
                 {
                     self.file_close_failure = Some(error.clone());
@@ -57,6 +57,34 @@ impl Qualification<'_> {
                 Err(cause.into())
             }
         }
+    }
+}
+/// Preserve the original typed file cause through the actual admission's
+/// finalization tree. Prefer an intrinsic close failure from EITHER branch;
+/// a known body I/O error must not hide the cleanup branch's close opacity.
+pub(super) fn image_file_error(
+    error: &GateError,
+) -> Option<&reverie_host::worker_image::ImageFileError> {
+    match error {
+        GateError::ImageFiles(error) => Some(error),
+        GateError::ImageTransition(error) => image_file_error(error),
+        GateError::Finalization { primary, secondary } => {
+            let first = image_file_error(primary);
+            let second = image_file_error(secondary);
+            first
+                .filter(|error| error.has_unconfirmed_close())
+                .or_else(|| second.filter(|error| error.has_unconfirmed_close()))
+                .or(first)
+                .or(second)
+        }
+        GateError::ClaimUncertain { cause }
+        | GateError::GpuApplyUncertain { cause }
+        | GateError::NativeStartIntentUncertain { cause }
+        | GateError::NativeSourceStopUncertain { cause }
+        | GateError::PreparationConfigUncertain { cause }
+        | GateError::PreparationIntentUncertain { cause }
+        | GateError::PreparationPublicationUncertain { cause } => image_file_error(cause),
+        _ => None,
     }
 }
 impl<'a> PreparedOfflineImageSwitch<'a> {

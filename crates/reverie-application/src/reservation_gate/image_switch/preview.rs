@@ -4,6 +4,7 @@ use super::*;
 use reverie_contracts::{
     resource_actor::ArtifactReference, worker_config, worker_image_switch::WorkerImageId,
 };
+use reverie_core::operations::JournalDigest;
 use reverie_host::worker_image::{ImageControlFiles, ImageFileStamp};
 use sha2::{Digest, Sha256};
 pub(crate) struct ImageSwitchPreview {

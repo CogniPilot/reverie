@@ -58,6 +58,7 @@ impl WorkerImageProvenance {
             )?;
         }
         code(field(&before, "archive")?)?;
+        code(field(&after, "archive")?)?;
         factory::validate(field(&before, "factory")?, field(&before, "imageSpec")?)?;
         factory::validate(field(&after, "factory")?, field(&after, "imageSpec")?)?;
         let toolkit = factory::toolkit(field(&before, "toolkit")?)?;
@@ -132,6 +133,15 @@ impl WorkerImageProvenance {
             &["version", "purpose", "abi", "program", "elfMachine"],
         )?;
         purpose(&value, "worker-child-program-v1")?;
+        need(
+            code(field(&value, "program")?)? == self.program,
+            "WORKER_IMAGE_PROGRAM_BINDING",
+        )?;
+        let machine = unsigned(field(&value, "elfMachine")?)?;
+        need(
+            machine == unsigned(field(&self.child, "elfMachine")?)?,
+            "WORKER_IMAGE_PROGRAM_BINDING",
+        )?;
         for name in ["version", "purpose", "abi", "program", "elfMachine"] {
             need(
                 field(&value, name)?.python_eq(field(&self.child, name)?),
