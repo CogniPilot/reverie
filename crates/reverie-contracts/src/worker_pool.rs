@@ -11,6 +11,9 @@ pub use engine::{
 pub const PURPOSE: &str = "reverie-docker-worker-pool-v1";
 pub const MEMORY_MAX_MIB: u32 = 49_152;
 pub const TASKS_MAX: u32 = 8192;
+/// Fixed controller contribution OUTSIDE the employee worker parent.
+pub const CONTROLLER_MEMORY_BYTES: u64 = 256 * 1_048_576;
+pub const CONTROLLER_TASKS_MAX: u32 = 128;
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]

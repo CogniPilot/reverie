@@ -96,6 +96,7 @@ impl ControllerPoolPolicy {
             super::namespace::assert_controller_namespaces()? == self.controller,
             "WORKER_POOL_CONTROLLER_CHANGED",
         )?;
+        super::controller_limits::observe(&self.controller, &self.data)?;
         self.engine
             .verify(&self.data, &self.controller, self.digest)?;
         let file = self
@@ -147,7 +148,8 @@ impl ControllerPoolPolicy {
                 "WORKER_POOL_POLICY_VERSION_REBOUND",
             )
         })();
-        finalized(result, native::close(named).map_err(Into::into))
+        finalized(result, native::close(named).map_err(Into::into))?;
+        super::controller_limits::observe(&self.controller, &self.data)
     }
     /// Finalize only these opened metadata descriptors. This stops no anchor
     /// or worker and does not complete maintenance or release pool capacity.
