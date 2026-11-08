@@ -17,6 +17,13 @@ fn main() {
         return;
     }
     if source_stop(&args) { return; }
+    if fs::exists("control-stop-absent").unwrap() {
+        match args.iter().map(String::as_str).collect::<Vec<_>>().as_slice() {
+            ["inspect", "test-agent-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"] | ["network", "inspect", "test-agent-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee-lan"] => std::process::exit(1),
+            ["ps", "--all", "--no-trunc", "--format", "{{.ID}} {{.Names}}"] | ["network", "ls", "--no-trunc", "--format", "{{.ID}} {{.Name}}"] => return,
+            _ => panic!("unexpected control stop query {args:?}"),
+        }
+    }
     let file = match args
         .iter()
         .map(String::as_str)

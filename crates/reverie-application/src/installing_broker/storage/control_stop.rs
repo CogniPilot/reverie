@@ -2,6 +2,8 @@
 use super::*;
 use reverie_contracts::worker_config::EffectiveWorkerConfig;
 use reverie_host::{office::OfficePhone, worker_source_stop::ControlLaptopStop};
+#[cfg(test)]
+mod tests;
 
 pub(in crate::installing_broker) struct ControlStorageStop {
     destination: ClaimDestination,
