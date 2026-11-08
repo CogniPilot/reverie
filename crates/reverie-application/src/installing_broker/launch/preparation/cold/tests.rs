@@ -19,6 +19,10 @@ fn broker_with_provider(tree: &Tree, provider: Option<serde_json::Value>) -> Ins
     raw["budgetMode"] = serde_json::json!("admission");
     raw["memoryMiB"] = serde_json::json!(512);
     if let Some(provider) = provider {
+        let policy = reverie_contracts::worker_pool::WorkerPoolPolicy::decode(
+            &serde_json::to_vec(&provider["policy"]).unwrap(),
+        ).unwrap();
+        raw["cgroupParent"] = serde_json::json!(policy.parent_slice());
         raw["workerPoolProvider"] = provider;
     }
     let broker = super::super::tests::broker_configuration(tree, &raw);

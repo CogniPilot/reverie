@@ -14,7 +14,7 @@ pub use os_source::OsPoolInstallationFailure;
 mod shared;
 pub(in crate::installing_broker) use shared::{RegistrationOfferGuard, SharedInstallationOffer};
 #[cfg(test)]
-mod tests;
+pub(in crate::installing_broker) mod tests;
 
 enum Origin {
     Unopened,

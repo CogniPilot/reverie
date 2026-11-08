@@ -1,7 +1,7 @@
 //! Real installing broker/runtime; a past original deadline must refuse before
 //! native origin, nonce or publication. No successful native offer is forged.
 use super::*;
-pub(super) fn request() -> PoolInstallationRequestData {
+pub(in crate::installing_broker) fn request() -> PoolInstallationRequestData {
     let data = serde_json::json!({"purpose":"host-pool-installation-request-v1","version":1,
         "principal":{"accountId":"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
             "personId":"owner","sessionEpoch":3},
