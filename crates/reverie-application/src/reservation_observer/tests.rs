@@ -158,6 +158,33 @@ impl Fixture {
     }
 }
 impl Source for Arc<Fixture> {
+    fn capture_metadata_owner(&self) -> Option<reverie_host::engine_metadata::MetadataQueryOwner> {
+        self.0
+            .lock()
+            .unwrap()
+            .engine
+            .as_ref()
+            .map(ReadonlyEngine::capture_query_owner)
+    }
+    fn settle_metadata_owner(
+        &self,
+        owner: Option<&reverie_host::engine_metadata::MetadataQueryOwner>,
+        end: Instant,
+    ) -> Result<()> {
+        let mut state = self.0.lock().unwrap();
+        state.events.push("settle".to_owned());
+        if let Some(engine) = state.engine.clone() {
+            drop(state);
+            let owner = owner.ok_or(ObserverError::Refused(
+                "RESERVATION_METADATA_OWNER_REQUIRED",
+            ))?;
+            owner.assert_engine(&engine)?;
+            owner.settle_owned(end)?;
+        } else {
+            need(owner.is_none(), "RESERVATION_METADATA_OWNER_ORIGIN")?;
+        }
+        Ok(())
+    }
     fn assert_worker_runtime(
         &self,
         runtime: &reverie_host::worker_runtime::WorkerRuntime,
@@ -251,6 +278,7 @@ impl Source for Arc<Fixture> {
     }
     fn inspect_laptop(
         &self,
+        owner: Option<&reverie_host::engine_metadata::MetadataQueryOwner>,
         name: &reverie_core::worker_laptop::WorkerContainerName,
         end: Instant,
         cancellation: &CancellationToken,
@@ -259,12 +287,11 @@ impl Source for Arc<Fixture> {
         state.events.push(format!("laptop:{}", name.as_str()));
         if let Some(engine) = state.engine.clone() {
             drop(state);
-            return Ok(reverie_host::broker_engine::inspect_laptop(
-                &engine,
-                name,
-                end,
-                cancellation,
-            )?);
+            let owner = owner.ok_or(ObserverError::Refused(
+                "RESERVATION_METADATA_OWNER_REQUIRED",
+            ))?;
+            owner.assert_engine(&engine)?;
+            return Ok(owner.inspect_laptop(name, end, cancellation)?);
         }
         state
             .laptop_outputs
@@ -275,6 +302,7 @@ impl Source for Arc<Fixture> {
     }
     fn query(
         &self,
+        owner: Option<&reverie_host::engine_metadata::MetadataQueryOwner>,
         query: EngineQuery<'_>,
         end: Instant,
         cancellation: &CancellationToken,
@@ -296,7 +324,11 @@ impl Source for Arc<Fixture> {
         }
         if let Some(engine) = state.engine.clone() {
             drop(state);
-            return Ok(engine.query(query, end, cancellation)?);
+            let owner = owner.ok_or(ObserverError::Refused(
+                "RESERVATION_METADATA_OWNER_REQUIRED",
+            ))?;
+            owner.assert_engine(&engine)?;
+            return Ok(owner.query(query, end, cancellation)?);
         }
         state
             .outputs

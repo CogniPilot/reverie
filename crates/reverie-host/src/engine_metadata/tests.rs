@@ -14,6 +14,8 @@ use std::{
 };
 
 pub(super) use crate::captured_client::test_hooks::{Gate, Hooks};
+#[path = "owner/tests.rs"]
+mod owner_cases;
 static NEXT: AtomicUsize = AtomicUsize::new(0);
 static FIXTURE: OnceLock<PathBuf> = OnceLock::new();
 pub(crate) fn program() -> &'static Path {

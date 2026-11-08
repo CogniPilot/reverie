@@ -35,7 +35,7 @@ pub fn inspect_laptop(
     let result = engine
         .client
         .run(
-            vec![OsString::from("inspect"), OsString::from(name.as_str())],
+            inspect_laptop_arguments(name),
             deadline,
             cancellation,
             Policy {
@@ -50,4 +50,7 @@ pub fn inspect_laptop(
         stdout: result.stdout,
         succeeded: result.succeeded,
     })
+}
+pub(crate) fn inspect_laptop_arguments(name: &WorkerContainerName) -> Vec<OsString> {
+    vec![OsString::from("inspect"), OsString::from(name.as_str())]
 }

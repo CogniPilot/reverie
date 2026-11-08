@@ -169,6 +169,45 @@ fn changed_census_is_sticky_but_known_abort_preserves_primary_and_original_lease
 }
 
 #[test]
+fn selected_foreign_binding_live_pid_malformed_name_and_wrong_hard_refuse_without_absence() {
+    crate::test_process::owning_case!(
+        selected_foreign_binding_live_pid_malformed_name_and_wrong_hard_refuse_without_absence
+    );
+    for (path, value, expected) in [
+        (
+            "/Config/Labels/reverie.employee",
+            json!("22222222-2222-4333-8444-555555555555"),
+            "RAM_STOPPED_SOURCE_IDENTITY",
+        ),
+        ("/State/Pid", json!(42), "RESERVATION_STOPPED_ROW"),
+        ("/Name", json!(null), "RESERVATION_COMPLETE_INVENTORY"),
+        (
+            "/HostConfig/Memory",
+            json!(1024 * 1_048_576_u64),
+            "RESERVATION_NATIVE_FINITE_LIMITS",
+        ),
+    ] {
+        let tree = Tree::new();
+        let registry = tree.registry();
+        let config = source(&tree);
+        let claim = registry.claim(&config, &sid(SID)).unwrap();
+        enable(&tree, &config, true);
+        for file in ["ram-row.out", "ram-stopped.out"] {
+            let mut row: serde_json::Value =
+                serde_json::from_slice(&fs::read(tree.0.join(file)).unwrap()).unwrap();
+            *row.pointer_mut(path).unwrap() = value.clone();
+            tree.write(file, &serde_json::to_vec(&row).unwrap());
+        }
+        let mut owner = begin(claim, &registry, config.clone());
+        let error = owner.observe().err().unwrap();
+        assert_eq!(error.code(), expected);
+        assert!(StorageLease::acquire_launch(&config, &sid(SID)).is_err());
+        assert!(!registry.known_empty_for_service_drop());
+        finish(owner, &registry, Some(expected));
+    }
+}
+
+#[test]
 fn actual_paused_native_query_releases_global_registry_but_fences_stale_alias() {
     crate::test_process::owning_case!(
         actual_paused_native_query_releases_global_registry_but_fences_stale_alias

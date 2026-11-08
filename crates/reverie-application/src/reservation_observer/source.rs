@@ -3,6 +3,12 @@ use reverie_contracts::kernel_mounts::MountTable;
 use reverie_core::{decimal::UnsignedInteger, ids::ProfileSessionId};
 use reverie_host::reservation_kernel::{CustodyPaths, ReservationKernel};
 pub(super) trait Source: Send + Sync {
+    fn capture_metadata_owner(&self) -> Option<reverie_host::engine_metadata::MetadataQueryOwner>;
+    fn settle_metadata_owner(
+        &self,
+        owner: Option<&reverie_host::engine_metadata::MetadataQueryOwner>,
+        end: Instant,
+    ) -> Result<()>;
     fn assert_worker_runtime(
         &self,
         runtime: &reverie_host::worker_runtime::WorkerRuntime,
@@ -38,12 +44,14 @@ pub(super) trait Source: Send + Sync {
     ) -> Result<()>;
     fn inspect_laptop(
         &self,
+        owner: Option<&reverie_host::engine_metadata::MetadataQueryOwner>,
         name: &reverie_core::worker_laptop::WorkerContainerName,
         end: Instant,
         cancellation: &CancellationToken,
     ) -> Result<reverie_host::broker_engine::LaptopInspectOutput>;
     fn query(
         &self,
+        owner: Option<&reverie_host::engine_metadata::MetadataQueryOwner>,
         query: EngineQuery<'_>,
         end: Instant,
         cancellation: &CancellationToken,
@@ -117,6 +125,20 @@ impl Installed {
     }
 }
 impl Source for Installed {
+    fn capture_metadata_owner(&self) -> Option<reverie_host::engine_metadata::MetadataQueryOwner> {
+        Some(self.engine.capture_query_owner())
+    }
+    fn settle_metadata_owner(
+        &self,
+        owner: Option<&reverie_host::engine_metadata::MetadataQueryOwner>,
+        end: Instant,
+    ) -> Result<()> {
+        let owner = owner.ok_or(ObserverError::Refused(
+            "RESERVATION_METADATA_OWNER_REQUIRED",
+        ))?;
+        owner.assert_engine(&self.engine)?;
+        Ok(owner.settle_owned(end)?)
+    }
     fn assert_worker_runtime(
         &self,
         runtime: &reverie_host::worker_runtime::WorkerRuntime,
@@ -168,24 +190,29 @@ impl Source for Installed {
     }
     fn inspect_laptop(
         &self,
+        owner: Option<&reverie_host::engine_metadata::MetadataQueryOwner>,
         name: &reverie_core::worker_laptop::WorkerContainerName,
         end: Instant,
         cancellation: &CancellationToken,
     ) -> Result<reverie_host::broker_engine::LaptopInspectOutput> {
-        Ok(reverie_host::broker_engine::inspect_laptop(
-            &self.engine,
-            name,
-            end,
-            cancellation,
-        )?)
+        let owner = owner.ok_or(ObserverError::Refused(
+            "RESERVATION_METADATA_OWNER_REQUIRED",
+        ))?;
+        owner.assert_engine(&self.engine)?;
+        Ok(owner.inspect_laptop(name, end, cancellation)?)
     }
     fn query(
         &self,
+        owner: Option<&reverie_host::engine_metadata::MetadataQueryOwner>,
         query: EngineQuery<'_>,
         end: Instant,
         cancellation: &CancellationToken,
     ) -> Result<String> {
-        Ok(self.engine.query(query, end, cancellation)?)
+        let owner = owner.ok_or(ObserverError::Refused(
+            "RESERVATION_METADATA_OWNER_REQUIRED",
+        ))?;
+        owner.assert_engine(&self.engine)?;
+        Ok(owner.query(query, end, cancellation)?)
     }
     fn settle_owned(&self, end: Instant) -> Result<()> {
         Ok(self.engine.settle_owned(end)?)

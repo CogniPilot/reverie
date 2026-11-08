@@ -147,7 +147,7 @@ impl Frame<'_> {
                 engine.assert_finalized().map_err(Into::into)
             }),
             self.context.as_ref().map_or(Ok(()), |context| {
-                context.settle_actor_metadata(end).map_err(Into::into)
+                context.settle_metadata_owned(end).map_err(Into::into)
             }),
         ];
         let readers = readers.into_iter().fold(Ok(()), error::finalized);
