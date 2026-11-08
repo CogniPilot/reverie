@@ -174,6 +174,9 @@ impl RegisteredSource {
     }
 }
 impl SourceAttachment<'_> {
+    pub(in crate::installing_broker) fn retained_source(&self) -> RegisteredSource {
+        self.source.clone()
+    }
     pub(in crate::installing_broker) fn restore_unclaimed(
         mut self,
     ) -> Result<(), StorageWorkflowError> {

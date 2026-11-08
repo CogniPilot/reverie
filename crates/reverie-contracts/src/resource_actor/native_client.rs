@@ -1,5 +1,9 @@
 //! Exact immutable native-client v2 manifest DATA. Native file custody, digest,
 //! executable bits and ELF checks are independent mandatory observations.
+//! The purpose/version text does not prove the connected-client no-self-exec /
+//! no-socket-delegation contract. Consumers relying on that lifetime invariant
+//! require the reviewed package's actual source-to-ELF/provenance binding (see
+//! reverie-worker-client/README.md), followed by original socket/pidfd guards.
 use super::*;
 pub struct NativeResourceClientManifest {
     executable: PythonText,

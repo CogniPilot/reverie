@@ -7,6 +7,7 @@ pub(super) fn record_lock_contended() {
 }
 mod launch;
 mod listener;
+mod protected_peer;
 mod reference;
 mod resume_channel;
 mod retention;

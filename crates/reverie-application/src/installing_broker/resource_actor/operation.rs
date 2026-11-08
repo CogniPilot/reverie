@@ -2,10 +2,18 @@
 //! canonical request. Neither decoded selections nor a callback mint this type.
 use super::*;
 use reverie_contracts::resource_config::ResourceIdentitySettings;
+use reverie_core::ids::NativeOperationId;
 use reverie_store::storage_identity::{self, StorageIdentityConfig};
 use std::time::{SystemTime, UNIX_EPOCH};
+mod claim;
+mod cursor;
+mod preview;
 mod receipt;
-pub use receipt::{CommittedRamFailure, CommittedRamOperation};
+mod reference;
+pub use claim::{ClaimedRamOperation, RamClaimFailure, RamPreparationFailure};
+pub use receipt::{
+    CommittedRamFailure, CommittedRamOperation, PreparedResourceStart, ResourceStartFailure,
+};
 
 #[must_use = "move the whole actual Q owner with the operation; do not reconstruct from IDs"]
 pub struct AuthenticatedResourceOperation<'a> {
@@ -13,6 +21,8 @@ pub struct AuthenticatedResourceOperation<'a> {
     request: ResourceOperationRequest,
     owner: Option<CurrentResourceOwner>,
     checks: usize,
+    cursor: cursor::OperationCursor,
+    reference: Option<NativeOperationId>,
 }
 impl<'a> InstalledResourceWebsite<'a> {
     /// One pending action owns the SAME channel. A future L rendezvous must
@@ -49,6 +59,8 @@ impl<'a> InstalledResourceWebsite<'a> {
             request,
             owner: None,
             checks: 0,
+            cursor: cursor::OperationCursor::default(),
+            reference: None,
         };
         match operation.assert_current() {
             Ok(()) => Ok(operation),
@@ -60,6 +72,20 @@ impl<'a> InstalledResourceWebsite<'a> {
     }
 }
 impl AuthenticatedResourceOperation<'_> {
+    pub(crate) fn assert_reservation_gate(
+        &self,
+        gate: &crate::reservation_gate::ReservationGate,
+    ) -> Result<()> {
+        need(
+            self.website
+                .frame
+                .broker
+                .resource_reservations()?
+                .is_some_and(|actual| std::ptr::eq(actual, gate)),
+            "RESOURCE_ACTOR_GATE_CHANGED",
+        )?;
+        self.assert_live()
+    }
     /// Immutable selection decoded from this channel's actual request. A
     /// caller-supplied employee/approval cannot substitute for this selection.
     pub fn request(&self) -> &ResourceOperationRequest {
@@ -92,10 +118,22 @@ impl AuthenticatedResourceOperation<'_> {
         self.checks += 1;
         need(self.checks <= 256, "RESOURCE_ACTOR_CHALLENGE_BOUND")?;
         let nonce = reverie_host::resource_facts::fresh_owner_nonce()?;
-        frame.send(&self.request.owner_challenge(&nonce)?, end)?;
-        let current = self
-            .request
-            .parse_owner_reply(&frame.receive(end)?, &nonce)?;
+        let challenge = match self.cursor.current() {
+            Some(next) => self.request.continuation_owner_challenge(next, &nonce)?,
+            None => self.request.owner_challenge(&nonce)?,
+        };
+        frame.send(&challenge, end)?;
+        let reply = frame.receive(end)?;
+        let current = match self.cursor.current() {
+            Some(next) => self
+                .request
+                .parse_continuation_owner_reply(&reply, next, &nonce)?,
+            None => self.request.parse_owner_reply(&reply, &nonce)?,
+        };
+        self.validate_owner(current)
+    }
+    fn validate_owner(&mut self, current: CurrentResourceOwner) -> Result<()> {
+        let frame = &mut self.website.frame;
         expiry(&current)?;
         let settings = ResourceIdentitySettings::capture_worker_config(
             frame

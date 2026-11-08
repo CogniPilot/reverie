@@ -2,6 +2,8 @@
 //! constructor has no wire-selected engine/program, callbacks or owner flag.
 //! Qualifying a website does not authorize an employee resource operation.
 mod custody;
+mod dispatch;
+pub use dispatch::{ResourceOperationClosed, ResourceOperationFailure};
 mod error;
 #[cfg(test)]
 mod native_fixture;
@@ -14,7 +16,11 @@ use super::*;
 use crate::reservation_observer::ObservationContext;
 pub use error::{ResourceActorError, ResourceActorFailure};
 use error::{Result, need};
-pub use operation::{AuthenticatedResourceOperation, CommittedRamFailure, CommittedRamOperation};
+pub use operation::{
+    AuthenticatedResourceOperation, ClaimedRamOperation, CommittedRamFailure,
+    CommittedRamOperation, PreparedResourceStart, RamClaimFailure, RamPreparationFailure,
+    ResourceStartFailure,
+};
 use reverie_contracts::{human_protocol::HumanFrame, resource_actor::*};
 use reverie_host::{
     resource_facts::InstalledFactsObserver,

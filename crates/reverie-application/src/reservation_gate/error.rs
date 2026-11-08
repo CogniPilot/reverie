@@ -1,6 +1,7 @@
 use super::*;
 #[derive(Debug)]
 pub enum GateError {
+    Actor(Box<reverie_host::worker_reports::ResourceJournalError>),
     RamPolicy(reverie_contracts::ram_migration::RamMigrationError),
     OriginalSource(Box<crate::installing_broker::StorageWorkflowError>),
     SourceStopData(reverie_contracts::worker_source_stop::SourceStopDataError),
@@ -50,6 +51,7 @@ pub enum GateError {
     Image(ImageHostError),
     Observer(ObserverError),
     Journal(JournalError),
+    SharedJournal(Arc<JournalError>),
     Policy(WorkerValidationError),
     Configuration(EngineDataError),
     Refused(&'static str),
@@ -64,6 +66,7 @@ pub enum GateError {
 impl GateError {
     pub fn code(&self) -> &'static str {
         match self {
+            Self::Actor(error) => error.code(),
             Self::RamPolicy(error) => error.code(),
             Self::OriginalSource(error) => error.code(),
             Self::SourceStopData(error) => error.code(),
@@ -111,6 +114,7 @@ impl GateError {
             Self::Image(error) => error.code(),
             Self::Observer(error) => error.code(),
             Self::Journal(error) => error.code(),
+            Self::SharedJournal(error) => error.code(),
             Self::Policy(_) => "WORKER_VALIDATION_DATA",
             Self::Configuration(error) => error.code(),
             Self::Refused(code) => code,
@@ -127,6 +131,7 @@ impl std::fmt::Display for GateError {
 impl std::error::Error for GateError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
+            Self::Actor(error) => Some(error.as_ref()),
             Self::RamPolicy(error) => Some(error),
             Self::OriginalSource(error) => Some(error.as_ref()),
             Self::SourceStopData(error) => Some(error),
@@ -164,6 +169,7 @@ impl std::error::Error for GateError {
             Self::Image(error) => Some(error),
             Self::Observer(error) => Some(error),
             Self::Journal(error) => Some(error),
+            Self::SharedJournal(error) => Some(error.as_ref()),
             Self::Policy(error) => Some(error),
             Self::Configuration(error) => Some(error),
             Self::Finalization { primary, .. } => Some(primary),

@@ -90,7 +90,9 @@ impl StoreError {
             cause: Box::new(self),
         }
     }
-    pub(crate) fn has_unconfirmed_close(&self) -> bool {
+    /// Intrinsic consumed-close uncertainty, including secondary finalizers.
+    /// Ordinary I/O and publication uncertainty alone do not satisfy it.
+    pub fn has_unconfirmed_close(&self) -> bool {
         match self {
             Self::CloseUnconfirmed { .. } => true,
             Self::Finalization { primary, secondary } => {

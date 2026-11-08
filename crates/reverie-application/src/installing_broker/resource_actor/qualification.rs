@@ -1,6 +1,7 @@
 use super::*;
 use reverie_core::operations::JournalDigest;
 use reverie_host::website_facts::{ImmutableInputKind, WebsiteMetadataRoute};
+mod protected_launch;
 
 impl Frame<'_> {
     pub(super) fn prepare(&mut self) -> Result<()> {

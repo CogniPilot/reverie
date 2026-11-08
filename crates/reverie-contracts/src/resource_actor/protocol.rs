@@ -8,10 +8,16 @@ use reverie_core::{
     revision::ProfileVersion,
 };
 mod approval;
+mod command;
+mod continuation;
+pub use command::RamLaunchCommandData;
+pub use continuation::{ResourceContinuationRequest, ResourceContinuationVerb};
 mod installation;
 mod owner;
 mod principal;
 mod registration;
+mod reply;
+pub use reply::RamPreviewFields;
 #[cfg(test)]
 mod tests;
 pub use installation::{POOL_INSTALLATION_REQUEST_PURPOSE, PoolInstallationRequestData};

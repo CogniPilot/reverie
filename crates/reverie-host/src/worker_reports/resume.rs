@@ -3,10 +3,12 @@
 //! Domain owners must qualify the installed program and recheck its process
 //! before and after every receive chunk; no verifier callback is accepted here.
 mod io;
+mod resource_journal;
+pub use resource_journal::{ResourceJournalError, ResourceJournalPin};
+mod shared_peer;
 #[cfg(test)]
 pub(super) mod test_hooks;
 use super::*;
-use std::os::fd::OwnedFd;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum Purpose {
@@ -26,7 +28,7 @@ enum ClosePhase {
 pub struct WorkerActorChannel {
     connection: WorkerServiceConnection,
     hold: WorkerLaunchHold,
-    peer: Option<OwnedFd>,
+    peer: Option<Arc<shared_peer::SharedActorPeer>>,
     purpose: Purpose,
     greeted: bool,
     failed: bool,
@@ -147,16 +149,9 @@ impl WorkerActorChannel {
         let stream = slot.as_ref().ok_or(WorkerReportError::Unconfirmed)?;
         nix::sys::socket::setsockopt(stream, nix::sys::socket::sockopt::PassCred, &true)
             .map_err(|error| WorkerReportError::Io(error.into()))?;
-        self.peer = Some(
-            nix::sys::socket::getsockopt(stream, nix::sys::socket::sockopt::PeerPidfd).map_err(
-                |error| match error {
-                    nix::errno::Errno::ENOPROTOOPT | nix::errno::Errno::EINVAL => {
-                        WorkerReportError::ChannelCapability
-                    }
-                    _ => WorkerReportError::Io(error.into()),
-                },
-            )?,
-        );
+        self.peer = Some(Arc::new(shared_peer::SharedActorPeer::new(
+            super::peer_pin::acquire(stream)?,
+        )));
         self.require_live()
     }
     fn require_live(&self) -> Result<()> {
@@ -165,18 +160,7 @@ impl WorkerActorChannel {
         }
         self.connection.record.require_terminal_hold()?;
         let peer = self.peer.as_ref().ok_or(WorkerReportError::Unconfirmed)?;
-        use std::os::fd::AsFd;
-        let mut fds = [nix::poll::PollFd::new(
-            peer.as_fd(),
-            nix::poll::PollFlags::POLLIN,
-        )];
-        let ready = nix::poll::poll(&mut fds, nix::poll::PollTimeout::ZERO)
-            .map_err(|error| WorkerReportError::Io(error.into()))?;
-        if ready == 0 {
-            Ok(())
-        } else {
-            Err(WorkerReportError::Peer)
-        }
+        peer.require_alive()
     }
     /// Adjacent cancellation observation for the actual action owner. This
     /// cannot replace that owner's fresh code, process, scope and target checks.
@@ -239,11 +223,14 @@ impl WorkerActorChannel {
                 } else {
                     socket
                 };
-            let peer = self.peer.take().map_or(Ok(()), |peer| {
-                crate::native::owned_process::close(peer).map_err(WorkerReportError::Io)
-            });
+            let peer = self.peer.as_ref().map_or(Ok(()), |peer| peer.close());
+            if matches!(peer, Err(WorkerReportError::ChannelClosePending)) && !self.opaque() {
+                return Err(WorkerReportError::ChannelClosePending);
+            }
             if peer.is_err() {
                 self.connection.record.mark_opaque();
+            } else {
+                self.peer = None;
             }
             if let Err(error) = finalized(socket, peer) {
                 self.close = ClosePhase::Unconfirmed;

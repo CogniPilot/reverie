@@ -37,6 +37,26 @@ fn resource(error: crate::installing_broker::StorageWorkflowError) -> GateError 
     GateError::OriginalSource(Box::new(error))
 }
 impl RetainedPreparation {
+    /// Same retained known source-release outcome only. A new launch must
+    /// still reobserve native liveness/membership under its actual admission.
+    pub(crate) fn assert_original_source_released(
+        &self,
+        intent: &ProtectedStartIntent,
+        released: &SourceStopFacts,
+    ) -> Result<()> {
+        need(
+            self.source_stop_phase == SourceStopPhase::Released
+                && self
+                    .start_owner
+                    .as_ref()
+                    .is_some_and(|own| own.same_intent(intent))
+                && released.operation_id() == self.operation_id()
+                && intent.operation_id() == self.operation_id()
+                && self.live.load(std::sync::atomic::Ordering::Acquire)
+                && self.journal_available(),
+            "RESOURCE_NATIVE_SOURCE_RELEASE_REQUIRED",
+        )
+    }
     /// Actual same-claim, source-resource and one-attempt sequence. This is an
     /// installing primitive, not owner/API authentication or a target start.
     pub fn stop_original_source(
@@ -80,7 +100,7 @@ impl RetainedPreparation {
         intent: &ProtectedStartIntent,
     ) -> Result<()> {
         let gate = self.gate.clone();
-        let admission = gate.admit(AdmissionBounds::default())?;
+        let admission = self.admit_preparation()?;
         let body = (|| {
             let state = self.qualify_intent(intent, true)?;
             self.source_stop_phase = SourceStopPhase::Attempted;

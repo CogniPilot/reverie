@@ -8,7 +8,8 @@ mod process;
 mod protocol;
 pub use protocol::{
     CurrentResourceOwner, POOL_INSTALLATION_REQUEST_PURPOSE, POOL_REGISTRATION_PURPOSE,
-    PoolInstallationRequestData, RAM_POOL_PURPOSE, ResourceOperationRequest,
+    PoolInstallationRequestData, RAM_POOL_PURPOSE, RamLaunchCommandData, RamPreviewFields,
+    ResourceContinuationRequest, ResourceContinuationVerb, ResourceOperationRequest,
     ResourceOwnerPrincipal, ResourceRequestSelection, decode_pool_registration_hello,
     decode_ram_pool_hello,
 };

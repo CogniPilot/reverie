@@ -30,7 +30,7 @@ pub struct PreparationIntentFacts {
 impl RetainedPreparation {
     fn require_live(&self) -> Result<()> {
         need(
-            self.store.is_some(),
+            self.journal_available(),
             "RESOURCE_PREPARATION_ACTIVE_HANDLE_REQUIRED",
         )
     }
@@ -52,8 +52,7 @@ impl RetainedPreparation {
         }
     }
     fn prepare_attempt(&mut self) -> Result<PreparationIntentFacts> {
-        let gate = self.gate.clone();
-        let admission = gate.admit(AdmissionBounds::default())?;
+        let admission = self.admit_preparation()?;
         match self.prepare_body() {
             Ok(()) => admission.finish_preparation(self, PublicationPhase::Before)?,
             Err(error) => return admission.conclude(Err(error)),
@@ -76,13 +75,8 @@ impl RetainedPreparation {
             observed.canonical_bytes() == self.terminal.observed.canonical_bytes(),
             "RESOURCE_PREPARATION_SOURCE_CHANGED",
         )?;
-        let store = self.store.as_ref().expect("live retained store");
-        self.view = store.begin_effect(
-            &self.gate.scope,
-            &self.handle,
-            Effect::Prepare,
-            self.view.record().data().version,
-        )?;
+        self.view =
+            self.journal_begin_effect(Effect::Prepare, self.view.record().data().version)?;
         let receipt = PublicationIntent::from_observed_data(PublicationFields {
             operation: self.view.record(),
             profile: &self.terminal.profile,
@@ -93,7 +87,7 @@ impl RetainedPreparation {
         let signature =
             reservation_control::publish_publication(self.gate.config()?.as_ref(), &receipt)?;
         self.publication = Some(PublicationBoundary { receipt, signature });
-        store.confirm_preparation(&self.gate.scope, &self.view)?;
+        self.journal_confirm_preparation()?;
         Ok(())
     }
     /// Observe the normal server's exact intended rebind. This does not perform
@@ -105,7 +99,7 @@ impl RetainedPreparation {
             "RESOURCE_PREPARATION_INTENT_REQUIRED",
         )?;
         let result = (|| {
-            let admission = self.gate.admit(AdmissionBounds::default())?;
+            let admission = self.admit_preparation()?;
             admission.finish_preparation(self, PublicationPhase::After)
         })();
         match result {
@@ -126,7 +120,7 @@ impl Inner {
         phase: PublicationPhase,
     ) -> Result<()> {
         need(
-            Arc::ptr_eq(self, &claim.gate) && claim.store.is_some(),
+            Arc::ptr_eq(self, &claim.gate) && claim.journal_available(),
             "RESOURCE_PREPARATION_BOUNDARY_REQUIRED",
         )?;
         let boundary = claim

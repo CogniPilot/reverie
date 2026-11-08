@@ -1,6 +1,7 @@
 use super::*;
 #[derive(Debug)]
 pub enum ResourceActorError {
+    RetainedGateClose(Arc<GateError>),
     Refused(&'static str),
     Gate(Box<GateError>),
     Data(ResourceActorDataError),
@@ -25,6 +26,7 @@ pub enum ResourceActorError {
 impl ResourceActorError {
     pub fn code(&self) -> &'static str {
         match self {
+            Self::RetainedGateClose(error) => error.code(),
             Self::Refused(code) => code,
             Self::Gate(e) => e.code(),
             Self::Data(e) => e.code(),
@@ -43,8 +45,10 @@ impl ResourceActorError {
     }
     pub(super) fn has_unconfirmed_close(&self) -> bool {
         match self {
+            Self::RetainedGateClose(error) => gate_close_unknown(error),
             Self::Gate(error) => gate_close_unknown(error),
             Self::Observer(error) => error.has_unconfirmed_close(),
+            Self::Channel(error) => error.has_unconfirmed_close(),
             Self::RetainedCompanyClose(error) => error.has_unconfirmed_close(),
             Self::RetainedKernelClose(error) => error.has_unconfirmed_close(),
             Self::RetainedControlClose(error) => error.has_unconfirmed_close(),
@@ -64,6 +68,7 @@ impl std::fmt::Display for ResourceActorError {
 impl std::error::Error for ResourceActorError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
+            Self::RetainedGateClose(error) => Some(&**error),
             Self::Gate(error) => Some(&**error),
             Self::Observer(error) => Some(error),
             Self::RetainedCompanyClose(error) => Some(&**error),
@@ -76,14 +81,42 @@ impl std::error::Error for ResourceActorError {
         }
     }
 }
-fn gate_close_unknown(error: &GateError) -> bool {
+pub(super) fn gate_close_unknown(error: &GateError) -> bool {
     match error {
+        GateError::Actor(error) => error.has_unconfirmed_close(),
+        GateError::Profile(error) => error.has_unconfirmed_close(),
+        GateError::Journal(error) => journal_close_unknown(error),
+        GateError::SharedJournal(error) => journal_close_unknown(error),
+        GateError::Observer(error) => error.has_unconfirmed_close(),
         GateError::Identity(error) => error.has_unconfirmed_close(),
         GateError::Control(error) => error.has_unconfirmed_close(),
         GateError::Finalization { primary, secondary } => {
             gate_close_unknown(primary) || gate_close_unknown(secondary)
         }
+        GateError::ClaimUncertain { cause }
+        | GateError::PreparationConfigUncertain { cause }
+        | GateError::PreparationIntentUncertain { cause }
+        | GateError::PreparationPublicationUncertain { cause }
+        | GateError::NativeStartIntentUncertain { cause }
+        | GateError::NativeSourceStopUncertain { cause }
+        | GateError::GpuApplyUncertain { cause } => gate_close_unknown(cause),
         _ => false,
+    }
+}
+fn journal_close_unknown(error: &reverie_store::operations::JournalError) -> bool {
+    use reverie_store::operations::JournalError;
+    match error {
+        JournalError::Filesystem(error) => error.has_unconfirmed_close(),
+        JournalError::Finalization { primary, secondary } => {
+            journal_close_unknown(primary) || journal_close_unknown(secondary)
+        }
+        JournalError::CommitUncertain { cause } => journal_close_unknown(cause),
+        // Store deliberately retains the original typed application guard
+        // without depending on Application. Recognize only that exact type.
+        JournalError::ScopeGuard { cause, .. } => cause
+            .downcast_ref::<GateError>()
+            .is_some_and(gate_close_unknown),
+        JournalError::Refused(_) => false,
     }
 }
 impl From<GateError> for ResourceActorError {

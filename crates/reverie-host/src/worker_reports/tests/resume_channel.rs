@@ -5,6 +5,7 @@ mod ancestry;
 mod budgets;
 mod pool_registration;
 mod process_snapshot;
+mod resource_journal;
 
 fn accepted(
     fixture: &Fixture,
@@ -25,12 +26,19 @@ fn channel(
     fixture: &Fixture,
     service: &Arc<WorkerReportService>,
 ) -> (UnixStream, WorkerActorChannel) {
-    let (mut client, server) = fixture.sockets();
-    send(
-        &mut client,
-        b'Q',
+    channel_with_payload(
+        fixture,
+        service,
         br#"{"purpose":"resource-replacement-v1","version":1}"#,
-    );
+    )
+}
+fn channel_with_payload(
+    fixture: &Fixture,
+    service: &Arc<WorkerReportService>,
+    payload: &[u8],
+) -> (UnixStream, WorkerActorChannel) {
+    let (mut client, server) = fixture.sockets();
+    send(&mut client, b'Q', payload);
     let mut channel = accepted(fixture, service, server)
         .retain_resource_website_channel(&fixture.runtime)
         .ok()

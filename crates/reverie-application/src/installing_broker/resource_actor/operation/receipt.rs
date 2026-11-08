@@ -3,6 +3,8 @@
 use super::*;
 use crate::reservation_gate::{CommittedPolicy, RetainedPreparation};
 use reverie_contracts::ram_migration::RamMigrationPolicy;
+mod start;
+pub use start::{PreparedResourceStart, ResourceStartFailure};
 
 struct CommittedRamOwner<'a> {
     auth: AuthenticatedResourceOperation<'a>,
