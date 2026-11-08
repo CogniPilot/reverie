@@ -22,7 +22,13 @@ pub(super) fn run(action: Action, config: &Path) -> Result<(), Box<dyn std::erro
         Action::Stop => WorkerServiceAction::Stop,
         Action::Status => WorkerServiceAction::Status,
     };
-    match run_native_worker_service(source, action, Instant::now() + Duration::from_secs(20)) {
+    let maximum = if matches!(action, WorkerServiceAction::Stop) {
+        45
+    } else {
+        20
+    };
+    let end = Instant::now() + Duration::from_secs(maximum);
+    match run_native_worker_service(source, action, end) {
         Ok(status) => {
             println!("{status}");
             Ok(())

@@ -68,7 +68,7 @@ impl State {
             self.end,
             &CancellationToken::new(),
             Policy {
-                maximum: Duration::from_secs(5),
+                maximum: Duration::from_secs(if args.first() == Some(&"stop") { 40 } else { 5 }),
                 maximum_output: 65_536,
                 successful_exit: false,
             },
@@ -99,6 +99,35 @@ impl State {
         ])?;
         ObservedUnit::decode(&raw)
     }
+    pub(super) fn assert_stoppable(&mut self, observed: &ObservedUnit) -> Result<()> {
+        if observed.fragment == self.unit {
+            return self.assert_installed(observed);
+        }
+        let previous = self.previous.as_ref().ok_or(WorkerServiceError::Refused(
+            "NATIVE_SERVICE_PREDECESSOR_NOT_PACKAGED",
+        ))?;
+        need(
+            observed.load == "loaded" && observed.fragment == *previous,
+            "NATIVE_SERVICE_UNKNOWN_PREDECESSOR",
+        )?;
+        let link = self.home.join(".config/systemd/user").join(UNIT);
+        let m = fs::symlink_metadata(&link)?;
+        need(
+            m.file_type().is_symlink()
+                && m.uid() == nix::unistd::geteuid().as_raw()
+                && m.nlink() == 1
+                && fs::read_link(&link)? == *previous,
+            "NATIVE_SERVICE_PREDECESSOR_LINK_CHANGED",
+        )?;
+        self.assert_legacy_selection()
+    }
+    pub(super) fn assert_legacy_selection(&mut self) -> Result<()> {
+        let path = self.home.join(".config/reverie/worker-broker.env");
+        need(
+            self.read_private(&path)? == environment(&self.source)?,
+            "NATIVE_SERVICE_PREDECESSOR_SOURCE_CHANGED",
+        )
+    }
     pub(super) fn assert_installed(&mut self, observed: &ObservedUnit) -> Result<()> {
         need(
             observed.load == "loaded" && observed.fragment == self.unit,
@@ -126,6 +155,8 @@ impl State {
             .nth(4)
             .ok_or(WorkerServiceError::Refused("NATIVE_SERVICE_PACKAGE_ROOT"))?;
         let args = vec![
+            OsString::from("--store"),
+            OsString::from("daemon"),
             OsString::from("--add-root"),
             self.folder().join("gcroot").into_os_string(),
             OsString::from("--indirect"),

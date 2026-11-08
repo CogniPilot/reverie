@@ -124,7 +124,7 @@ pub fn run_native_worker_service(
     action: WorkerServiceAction,
     end: Instant,
 ) -> std::result::Result<String, Box<WorkerServiceFailure>> {
-    let mut state = match State::capture(source, end) {
+    let mut state = match State::capture(source, end, &action) {
         Ok(state) => Box::new(state),
         Err(primary) => {
             return Err(Box::new(WorkerServiceFailure {
@@ -150,7 +150,7 @@ pub fn run_native_worker_service(
     }
 }
 impl State {
-    fn capture(source: &Path, end: Instant) -> Result<Self> {
+    fn capture(source: &Path, end: Instant, action: &WorkerServiceAction) -> Result<Self> {
         need(
             !nix::unistd::geteuid().is_root(),
             "NATIVE_SERVICE_ORDINARY_OWNER_REQUIRED",
@@ -190,24 +190,35 @@ impl State {
         immutable_tool(&pin_program)?;
         let pin = InstalledCommand::from_snapshot(
             pin_program.as_os_str(),
-            std::env::vars_os().collect(),
+            manager_environment(&home),
             home.clone(),
             false,
         )
         .ok_or(WorkerServiceError::Refused("NATIVE_SERVICE_PIN_CAPTURE"))?;
+        let previous = option_env!("REVERIE_FIXED_PREVIOUS_WORKER_SERVICE_UNIT").map(PathBuf::from);
+        if let Some(path) = previous.as_ref() {
+            immutable(path)?;
+        }
         Ok(Self {
             home,
             root,
             source,
             unit,
-            previous: option_env!("REVERIE_FIXED_PREVIOUS_WORKER_SERVICE_UNIT").map(PathBuf::from),
+            previous,
             client: Arc::new(CapturedClient::new(command)),
             pin: Arc::new(CapturedClient::new(pin)),
             pin_call: None,
             call: None,
             files: Vec::new(),
             last: None,
-            end: end.min(Instant::now() + Duration::from_secs(20)),
+            end: end.min(
+                Instant::now()
+                    + Duration::from_secs(if matches!(action, WorkerServiceAction::Stop) {
+                        45
+                    } else {
+                        20
+                    }),
+            ),
             attempted: false,
             uncertain: false,
             marker: false,
@@ -227,7 +238,11 @@ impl State {
         match action {
             WorkerServiceAction::Install => self.install(observed)?,
             WorkerServiceAction::Start | WorkerServiceAction::Stop => {
-                self.assert_installed(&observed)?;
+                if matches!(action, WorkerServiceAction::Stop) {
+                    self.assert_stoppable(&observed)?;
+                } else {
+                    self.assert_installed(&observed)?;
+                }
                 self.begin_attempt(&action)?;
                 self.attempted = true;
                 self.command(&[
@@ -239,7 +254,15 @@ impl State {
                     UNIT,
                 ])?;
                 let current = self.observe()?;
-                self.assert_installed(&current)?;
+                need(
+                    current.fragment == observed.fragment,
+                    "NATIVE_SERVICE_GENERATION_CHANGED_DURING_COMMAND",
+                )?;
+                if matches!(action, WorkerServiceAction::Stop) {
+                    self.assert_stoppable(&current)?;
+                } else {
+                    self.assert_installed(&current)?;
+                }
                 current.require_action_finished(&action)?;
             }
             WorkerServiceAction::Status => unreachable!(),

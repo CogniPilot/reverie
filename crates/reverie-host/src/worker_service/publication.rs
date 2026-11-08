@@ -58,6 +58,10 @@ impl State {
     }
     pub(super) fn begin_attempt(&mut self, action: &WorkerServiceAction) -> Result<()> {
         let folder = self.folder();
+        fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(&folder)?;
         private(&folder, true)?;
         self.exclusive(&folder.join("pending"), pending_bytes(action))?;
         let m = self.files.last().expect("original pending").metadata()?;
