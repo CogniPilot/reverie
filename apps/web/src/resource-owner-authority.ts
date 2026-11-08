@@ -13,6 +13,7 @@ const PURPOSE = 'resource-replacement-v1';
 const RAM_PURPOSE = 'resource-ram-pool-v2';
 type ResourcePurpose = typeof PURPOSE | typeof RAM_PURPOSE;
 const UUID = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/;
+const NIL_UUID = '00000000-0000-0000-0000-000000000000';
 const HEX = /^[a-f0-9]{64}$/;
 const digest = (value: string) => createHash('sha256').update(value).digest('hex');
 const MINT = Symbol('resource-owner-binding');
@@ -195,7 +196,8 @@ export class ResourceOwnerAuthority {
       const current = this.#auth.registrationIdentity(token);
       need(
         UUID.test(current.accountId) &&
-          (current.personId === 'owner' || UUID.test(current.personId)) &&
+          current.accountId !== NIL_UUID &&
+          (current.personId === 'owner' || (UUID.test(current.personId) && current.personId !== NIL_UUID)) &&
           current.personId === identity.id &&
           Number.isSafeInteger(current.sessionEpoch) &&
           current.sessionEpoch >= 0

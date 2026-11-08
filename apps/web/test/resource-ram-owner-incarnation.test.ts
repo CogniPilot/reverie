@@ -236,3 +236,15 @@ it('precisely refuses unenrolled RAM without writes and uses only the explicit c
   expect(JSON.parse(await readFile(store.file, 'utf8'))).toEqual({ ...JSON.parse(raw), accountId: enrolled.accountId });
   for (const mode of ['ram-preview', 'ram-apply'] as const) expect((await capture(mode)).statusCode).toBe(200);
 });
+it('rejects a NIL current account principal without silently replacing it or changing v1', async () => {
+  const nil = '00000000-0000-0000-0000-000000000000';
+  await store.update((account) => {
+    account.accountId = nil;
+  });
+  auth.logout(primary);
+  primary = (await auth.login('fixture-primary', password, '127.0.0.1')).session!;
+  expect(auth.registrationIdentity(primary).accountId).toBe(nil);
+  const raw = await readFile(store.file, 'utf8');
+  for (const mode of modes) expect((await capture(mode)).statusCode).toBe(mode.startsWith('legacy') ? 200 : 403);
+  expect(await readFile(store.file, 'utf8')).toBe(raw);
+});
