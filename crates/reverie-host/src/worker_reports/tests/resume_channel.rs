@@ -4,6 +4,7 @@ use reverie_contracts::human_protocol::HumanFrame;
 mod ancestry;
 mod budgets;
 mod pool_registration;
+mod pool_registration_pin;
 mod process_snapshot;
 mod resource_journal;
 

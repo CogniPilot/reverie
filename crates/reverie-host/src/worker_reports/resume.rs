@@ -2,7 +2,11 @@
 //! This is the original counted Record, not a process, file or action grant.
 //! Domain owners must qualify the installed program and recheck its process
 //! before and after every receive chunk; no verifier callback is accepted here.
+mod current_pin;
 mod io;
+pub use current_pin::WorkerActorPinError;
+mod pool_registration;
+pub use pool_registration::PoolRegistrationPin;
 mod resource_journal;
 pub use resource_journal::{ResourceJournalError, ResourceJournalPin};
 mod shared_peer;

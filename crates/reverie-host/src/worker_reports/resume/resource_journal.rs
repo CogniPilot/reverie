@@ -1,50 +1,13 @@
 //! Weak native observation for an actual resource operation's journal guard.
-//! Native read-only cancellation observation. This is not cookie approval,
-//! installed-program qualification, Gate admission or a resource capability.
+//! This is not cookie approval, program qualification, admission or a grant.
 use super::*;
-use std::sync::Weak;
-
-/// Retains the complete original error, including any native owner it carries.
-/// WorkerReportError can contain a Send-only telemetry store; the mutex keeps
-/// that owner intact when this diagnostic is retained by a shared Gate record.
-#[derive(Debug)]
-pub struct ResourceJournalError {
-    code: &'static str,
-    cause: Mutex<WorkerReportError>,
-}
-impl From<WorkerReportError> for ResourceJournalError {
-    fn from(cause: WorkerReportError) -> Self {
-        Self {
-            code: cause.code(),
-            cause: Mutex::new(cause),
-        }
-    }
-}
-impl ResourceJournalError {
-    pub fn code(&self) -> &'static str {
-        self.code
-    }
-    pub fn has_unconfirmed_close(&self) -> bool {
-        let cause = self
-            .cause
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        cause.has_unconfirmed_close()
-    }
-}
-impl std::fmt::Display for ResourceJournalError {
-    fn fmt(&self, out: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        out.write_str(self.code)
-    }
-}
-impl std::error::Error for ResourceJournalError {}
+/// Preserve the existing Q diagnostic API; the shared typed transport cause
+/// is not a journal, registration or owner capability.
+pub type ResourceJournalError = WorkerActorPinError;
 type JournalResult<T> = std::result::Result<T, ResourceJournalError>;
 
 pub struct ResourceJournalPin {
-    service: Weak<WorkerReportService>,
-    record: Weak<Record>,
-    hold: Weak<()>,
-    peer: Weak<super::shared_peer::SharedActorPeer>,
+    native: super::current_pin::ActorCurrentPin,
 }
 impl WorkerActorChannel {
     /// The actual authenticated App owner invokes this only after its fresh
@@ -67,65 +30,18 @@ impl WorkerActorChannel {
         {
             return Err(WorkerReportError::Unconfirmed);
         }
-        self.require_connected()?;
-        let peer = self.peer.as_ref().ok_or(WorkerReportError::Unconfirmed)?;
-        let pin = ResourceJournalPin {
-            service: Arc::downgrade(&self.connection.service),
-            record: Arc::downgrade(&self.connection.record),
-            hold: Arc::downgrade(&self.hold.identity),
-            peer: Arc::downgrade(peer),
-        };
-        pin.current()?;
-        Ok(pin)
+        Ok(ResourceJournalPin {
+            native: super::current_pin::ActorCurrentPin::capture(
+                self,
+                super::current_pin::PinPurpose::ResourceJournal,
+            )?,
+        })
     }
 }
 impl ResourceJournalPin {
-    /// Try-locks only, zero-time pidfd polls and nonblocking EOF observation on
-    /// the exact original socket. The actual Gate additionally binds this pin
-    /// to its SAME Active/operation, current company owner and fixed expiry.
+    /// Exact original weak native currentness only. The actual Gate additionally
+    /// binds this Q pin to SAME Active/operation, current company and expiry.
     pub fn assert_current(&self) -> JournalResult<()> {
-        self.current().map_err(Into::into)
+        self.native.current().map_err(Into::into)
     }
-    fn current(&self) -> Result<()> {
-        let service = self
-            .service
-            .upgrade()
-            .ok_or(WorkerReportError::Unconfirmed)?;
-        let record = self
-            .record
-            .upgrade()
-            .ok_or(WorkerReportError::Unconfirmed)?;
-        let hold = self.hold.upgrade().ok_or(WorkerReportError::Unconfirmed)?;
-        let peer = self.peer.upgrade().ok_or(WorkerReportError::Unconfirmed)?;
-        assert_member(&service, &record)?;
-        record.assert_lifecycle_hold(&hold)?;
-        peer.require_alive()?;
-        let stream = record.terminal_stream()?;
-        let socket = stream.as_ref().ok_or(WorkerReportError::Unconfirmed)?;
-        if super::super::peer_pin::socket_disconnected(socket)? {
-            return Err(WorkerReportError::Peer);
-        }
-        drop(stream);
-        peer.require_alive()?;
-        record.assert_lifecycle_hold(&hold)?;
-        assert_member(&service, &record)
-    }
-}
-fn assert_member(service: &Arc<WorkerReportService>, record: &Arc<Record>) -> Result<()> {
-    if service.stopping() {
-        return Err(WorkerReportError::Stopping);
-    }
-    if service.opaque.load(Ordering::Acquire) {
-        return Err(WorkerReportError::Unconfirmed);
-    }
-    let records = service.records.try_lock().map_err(|error| {
-        if matches!(error, TryLockError::Poisoned(_)) {
-            service.opaque.store(true, Ordering::Release);
-        }
-        WorkerReportError::Unconfirmed
-    })?;
-    if !records.iter().any(|original| Arc::ptr_eq(original, record)) {
-        return Err(WorkerReportError::Unconfirmed);
-    }
-    Ok(())
 }
