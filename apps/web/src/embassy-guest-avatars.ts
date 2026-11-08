@@ -17,7 +17,8 @@
  * embassy before it writes, so it carries a lifecycle token taken before that check: revoking that guest or closing
  * the room meanwhile makes the token stale, and the write refuses rather than bring a picture back. A revoke whose
  * guest is not known yet holds a fence for its whole duration instead: no picture is written while it is open, and
- * every token taken before it closes is stale.
+ * every token taken before it closes is stale. Such a revoke also joins any write already past its checks and then
+ * deletes the pictures of every guest that is no longer current (see EmbassyHost).
  */
 import fs from 'node:fs/promises';
 import { z } from 'zod';
@@ -91,6 +92,17 @@ export class EmbassyGuestAvatars {
 
   private key(requestId: string, version: number): string {
     return `guest-${requestId}-${version}`;
+  }
+
+  /** Resolves once every write already admitted or queued has finished. Writes are serialized, so this joins an
+   * upload that passed its checks before a fence opened. */
+  settle(): Promise<void> {
+    return this.locked(async () => {});
+  }
+
+  /** Every guest with a picture or a file still listed, by request id. */
+  async guestIds(): Promise<string[]> {
+    return Object.keys(await this.guests());
   }
 
   /** Every guest's picture URL, by request id. */

@@ -140,6 +140,11 @@ export type EmbassyHostInviteState =
   | 'revoked'
   | 'rejected';
 
+/** A current guest of the hosted room: the invite is not revoked and its pairing is approved or claimed (connected). */
+function currentGuest(invite: z.infer<typeof Invite>): boolean {
+  return !invite.revoked && (invite.requestState === 'approved' || invite.requestState === 'claimed');
+}
+
 /** The console's honest state for one pair invite: `connected` is the embassy's `claimed`; an invite with no
  * request is open, expired or revoked. */
 export function embassyHostInviteState(invite: z.infer<typeof Invite>, now: number): EmbassyHostInviteState {
@@ -167,6 +172,8 @@ export interface EmbassyHostDeps {
     revoke(requestId: string): Promise<boolean>;
     removeAll(): Promise<number>;
     fence(): () => void;
+    settle(): Promise<void>;
+    guestIds(): Promise<string[]>;
   };
 }
 
@@ -377,12 +384,7 @@ export class EmbassyHost {
   async requireGuest(requestId: string): Promise<void> {
     const guest =
       UUID.test(requestId) &&
-      (await this.invites()).some(
-        (invite) =>
-          invite.requestId === requestId &&
-          !invite.revoked &&
-          (invite.requestState === 'approved' || invite.requestState === 'claimed')
-      );
+      (await this.invites()).some((invite) => invite.requestId === requestId && currentGuest(invite));
     if (!guest) throw new EmbassyPairError(404, 'NOT_FOUND', 'Not an approved guest of this room');
   }
 
@@ -402,10 +404,31 @@ export class EmbassyHost {
       await this.call('DELETE', `/invites/${inviteId}`);
       if (avatars && !requestId) requestId = await guestOf();
       if (requestId) await avatars?.revoke(requestId);
+      else if (avatars) await this.reconcileGuestAvatars(avatars);
     } finally {
       close?.();
     }
     return { revoked: true };
+  }
+
+  /** After a revoke whose guest could not be named: join any upload already writing, then delete the picture of
+   * every guest that is no longer current. If the embassy cannot be asked, the invite is revoked but the cleanup is
+   * reported as unresolved; revoking again finishes it. */
+  private async reconcileGuestAvatars(avatars: NonNullable<EmbassyHostDeps['guestAvatars']>): Promise<void> {
+    await avatars.settle();
+    let current: Set<string>;
+    try {
+      current = new Set(
+        (await this.invites()).flatMap((invite) => (invite.requestId && currentGuest(invite) ? [invite.requestId] : []))
+      );
+    } catch {
+      throw new EmbassyPairError(
+        503,
+        'GUEST_PICTURES_UNRESOLVED',
+        "The invite was revoked, but its guest's picture could not be checked; revoke it again to finish"
+      );
+    }
+    for (const id of await avatars.guestIds()) if (!current.has(id)) await avatars.revoke(id);
   }
 
   /** A scanned request QR must name this host's own origin; a typed code needs no origin. */

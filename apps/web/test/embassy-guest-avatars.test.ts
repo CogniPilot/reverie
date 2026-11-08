@@ -31,6 +31,27 @@ const PNG = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a
 const JPEG = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.from('zorblat')]);
 const SVG = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>');
 
+/** An AvatarStore whose next put, once started, waits until released: a write already past its checks. */
+class HeldStore extends AvatarStore {
+  private hold?: { asked: () => void; released: Promise<void> };
+  holdNextPut() {
+    let release!: () => void;
+    let asked!: () => void;
+    const askedP = new Promise<void>((done) => (asked = done));
+    this.hold = { asked, released: new Promise<void>((done) => (release = done)) };
+    return { asked: askedP, release };
+  }
+  override async put(sessionId: string, data: Buffer): Promise<void> {
+    const hold = this.hold;
+    this.hold = undefined;
+    if (hold) {
+      hold.asked();
+      await hold.released;
+    }
+    return super.put(sessionId, data);
+  }
+}
+
 const dirs: string[] = [];
 const temp = () => {
   const dir = mkdtempSync(join(tmpdir(), 'embassy-guest-avatars-'));
@@ -119,9 +140,29 @@ function fakeChannel() {
 async function setup() {
   const dir = temp();
   const channel = fakeChannel();
+  const store = new HeldStore(join(dir, 'embassy-guest-avatars'));
+  // The next inventory write can be held once it has started: a write admitted but not yet listed.
+  let heldSave: { asked: () => void; released: Promise<void> } | undefined;
+  const holdNextSave = () => {
+    let release!: () => void;
+    let asked!: () => void;
+    const askedP = new Promise<void>((done) => (asked = done));
+    heldSave = { asked, released: new Promise<void>((done) => (release = done)) };
+    return { asked: askedP, release };
+  };
   const avatars = new EmbassyGuestAvatars(
-    new AvatarStore(join(dir, 'embassy-guest-avatars')),
-    join(dir, 'embassy-host', 'guest-avatars.json')
+    store,
+    join(dir, 'embassy-host', 'guest-avatars.json'),
+    Date.now,
+    async (file, value) => {
+      const hold = heldSave;
+      heldSave = undefined;
+      if (hold) {
+        hold.asked();
+        await hold.released;
+      }
+      await writePrivate(file, value);
+    }
   );
   const host = new EmbassyHost({
     dir: join(dir, 'embassy-channel'),
@@ -162,7 +203,7 @@ async function setup() {
       return [];
     }
   };
-  return { dir, app, host, avatars, state, call, put, image, stored, channel };
+  return { dir, app, host, avatars, store, holdNextSave, state, call, put, image, stored, channel };
 }
 
 describe('EmbassyGuestAvatars', () => {
@@ -219,6 +260,23 @@ describe('EmbassyGuestAvatars', () => {
     await expect(avatars.set(before, PNG)).rejects.toBeInstanceOf(GuestLifecycleError);
     await expect(avatars.set(during, PNG)).rejects.toBeInstanceOf(GuestLifecycleError);
     expect(await avatars.set(avatars.token(APPROVED), PNG)).toMatch(EMBASSY_GUEST_AVATAR_URL);
+  });
+
+  it('settle resolves only once a write already past its checks has finished', async () => {
+    const dir = temp();
+    const store = new HeldStore(join(dir, 'pics'));
+    const avatars = new EmbassyGuestAvatars(store, join(dir, 'map.json'));
+    const held = store.holdNextPut();
+    const write = avatars.set(avatars.token(APPROVED), PNG);
+    await held.asked;
+    let settled = false;
+    const settle = avatars.settle().then(() => (settled = true));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(settled).toBe(false);
+    held.release();
+    await write;
+    await settle;
+    expect(await avatars.guestIds()).toEqual([APPROVED]);
   });
 
   it('an older version whose file could not be deleted stays owned, and the next removal deletes it', async () => {
@@ -403,6 +461,69 @@ describe('embassy guest pictures across a revoke, a close or a failed write', ()
     expect(await t.avatars.urls()).toEqual({});
     // The fence closed with the revoke: another guest's picture is set again.
     expect((await t.put(CLAIMED, PNG)).statusCode).toBe(200);
+  });
+
+  it('an upload already writing when a revoke cannot name its guest finishes first and is then deleted', async () => {
+    const t = await setup();
+    const held = t.store.holdNextPut();
+    const upload = t.put(APPROVED, PNG);
+    await held.asked; // past the guest check and the fence check, writing its file
+    t.channel.failNextInvites(); // the revoke cannot tell whose invite it is, before the delete
+    t.channel.failNextInvites(); // nor after it
+    let returned = false;
+    const revoke = t.call({ method: 'DELETE', url: '/api/embassy-host/invites/inv-approved' }).then((res) => {
+      returned = true;
+      return res;
+    });
+    const invite = t.channel.invites.find((i) => i.id === 'inv-approved')!;
+    while (!invite.revoked) await new Promise((resolve) => setTimeout(resolve, 5));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(returned).toBe(false); // the revoke waits for the write it cannot rule out
+    held.release();
+    expect((await upload).statusCode).toBe(200);
+    expect((await revoke).statusCode).toBe(200);
+    expect(t.stored()).toEqual([]);
+    expect((await t.image(APPROVED)).statusCode).toBe(404);
+    expect(await t.avatars.urls()).toEqual({});
+  });
+
+  it('an upload admitted but not yet listed when a revoke cannot name its guest is joined and then deleted', async () => {
+    const t = await setup();
+    const held = t.holdNextSave();
+    const upload = t.put(APPROVED, PNG);
+    await held.asked; // past its checks, about to list its new version: nothing on disk names it yet
+    t.channel.failNextInvites();
+    t.channel.failNextInvites();
+    let returned = false;
+    const revoke = t.call({ method: 'DELETE', url: '/api/embassy-host/invites/inv-approved' }).then((res) => {
+      returned = true;
+      return res;
+    });
+    const invite = t.channel.invites.find((i) => i.id === 'inv-approved')!;
+    while (!invite.revoked) await new Promise((resolve) => setTimeout(resolve, 5));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(returned).toBe(false);
+    held.release();
+    expect((await upload).statusCode).toBe(200);
+    expect((await revoke).statusCode).toBe(200);
+    expect(t.stored()).toEqual([]);
+    expect(await t.avatars.urls()).toEqual({});
+  });
+
+  it('when the embassy cannot be asked after an unknown-guest revoke, the cleanup is reported and a second revoke finishes it', async () => {
+    const t = await setup();
+    await t.put(APPROVED, PNG);
+    t.channel.failNextInvites(); // before the delete
+    t.channel.failNextInvites(); // after it
+    t.channel.failNextInvites(); // and when checking which pictures still have a guest
+    const unresolved = await t.call({ method: 'DELETE', url: '/api/embassy-host/invites/inv-approved' });
+    expect(unresolved.statusCode).toBe(503);
+    expect(unresolved.json().errorCode).toBe('GUEST_PICTURES_UNRESOLVED');
+    expect(t.stored()).toEqual([`guest-${APPROVED}.png`]);
+    const again = await t.call({ method: 'DELETE', url: '/api/embassy-host/invites/inv-approved' });
+    expect(again.statusCode).toBe(200);
+    expect(t.stored()).toEqual([]);
+    expect(await t.avatars.urls()).toEqual({});
   });
 
   it.skipIf(root)('a failed map write while replacing a picture leaves the old URL serving the old bytes', async () => {
