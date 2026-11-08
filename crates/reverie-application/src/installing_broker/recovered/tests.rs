@@ -27,10 +27,7 @@ const FIRST: &str = "11111111-2222-3333-4444-555555555555";
 const SECOND: &str = "22222222-2222-3333-4444-555555555555";
 pub(in crate::installing_broker) fn program() -> &'static Path {
     PROGRAM.get_or_init(|| {
-        let root = fs::canonicalize(std::env::temp_dir())
-            .unwrap()
-            .join(format!("recovery-child-build-{}", std::process::id()));
-        fs::create_dir(&root).unwrap();
+        let root = crate::test_process::fixture_directory("recovery-child-build");
         let source = root.join("child.rs");
         fs::write(
             &source,

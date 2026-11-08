@@ -59,7 +59,8 @@ pub(crate) fn engine_program() -> &'static Path {
 /// Atomically allocate a fresh private test directory. A recycled PID must
 /// never adopt, delete or overwrite an earlier fixture's files.
 pub(crate) fn fixture_directory(label: &str) -> PathBuf {
-    fixture_directory_in(&std::env::temp_dir(), label)
+    let parent = std::fs::canonicalize(std::env::temp_dir()).expect("actual temporary root");
+    fixture_directory_in(&parent, label)
 }
 fn fixture_directory_in(parent: &Path, label: &str) -> PathBuf {
     assert!(

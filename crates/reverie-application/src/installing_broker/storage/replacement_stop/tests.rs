@@ -12,8 +12,7 @@ use std::{
 fn stop_program() -> &'static Path {
     static PROGRAM: OnceLock<PathBuf> = OnceLock::new();
     PROGRAM.get_or_init(|| {
-        let root = std::env::temp_dir().join(format!("app-stop-build-{}", std::process::id()));
-        fs::create_dir(&root).unwrap();
+        let root = crate::test_process::fixture_directory("app-stop-build");
         let source = root.join("child.rs");
         fs::write(
             &source,
