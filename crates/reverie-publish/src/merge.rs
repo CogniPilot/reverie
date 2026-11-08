@@ -45,6 +45,29 @@ pub fn ready(pr: &Value, number: u64, head: &str, title: &str, body: &str) -> Re
     }
 }
 
+/// Checks that `pr` targets the approved operation: a PR in `repo` onto `branch`, whose base is at
+/// `base`. A retargeted PR, a base that moved since the review, or a missing field refuses.
+pub fn targets(pr: &Value, repo: &str, branch: &str, base: &str) -> Result<(), String> {
+    if str_at(pr, "/base/repo/full_name") != Some(repo) {
+        return Err(format!("the PR's base is not in {repo}"));
+    }
+    match str_at(pr, "/base/ref") {
+        Some(target) if target == branch => {}
+        target => {
+            return Err(format!(
+                "the PR targets {}, not the approved branch {branch}",
+                target.unwrap_or("no branch")
+            ));
+        }
+    }
+    if str_at(pr, "/base/sha") != Some(base) {
+        return Err(format!(
+            "the PR's base {branch} is not at the approved base: it moved, or the approval is for another base"
+        ));
+    }
+    Ok(())
+}
+
 /// Checks that every check run on `head` completed as success, neutral or skipped (at least one,
 /// and all of them on this one page), and that the commit's combined status is success or it has
 /// no statuses at all. Returns the number of check runs.
@@ -142,13 +165,16 @@ pub fn merge_reply(result: &Value) -> Result<String, String> {
 }
 
 /// The readback: PR `number` is merged at `head` with `sha` as its merge commit, and that commit
-/// is a merge commit, two parents, the second being `head` (not a squash or a rebase).
+/// is a merge commit, two parents, the second being `head` (not a squash or a rebase) and the first
+/// being the approved `base`. GitHub's merge is conditioned on the head only, so a base that moved
+/// between the checks and the merge shows here, after the fact.
 pub fn merged(
     pr: &Value,
     commit: &Value,
     number: u64,
     head: &str,
     sha: &str,
+    base: &str,
 ) -> Result<(), String> {
     if pr["number"].as_u64() != Some(number)
         || pr["merged"] != Value::Bool(true)
@@ -174,6 +200,13 @@ pub fn merged(
     if str_at(commit, "/sha") != Some(sha) || !second_is_head {
         return Err(
             "the merge does not read back as a merge commit of --head; inspect MERGE-COMMIT-READBACK.json"
+                .into(),
+        );
+    }
+    if parents.as_deref().is_some_and(|p| p[0] != base) {
+        return Err(
+            "a merge was made, but onto a base other than the approved one (it moved after the checks): \
+             it is not the reviewed operation; inspect MERGE-COMMIT-READBACK.json and do not retry"
                 .into(),
         );
     }
@@ -295,7 +328,7 @@ mod tests {
         let after = json!({ "number": 7, "merged": true, "merge_commit_sha": SHA, "head": { "sha": HEAD } });
         let base = "3333333333333333333333333333333333333333";
         let commit = |parents: &[&str]| json!({ "sha": SHA, "parents": parents.iter().map(|p| json!({ "sha": p })).collect::<Vec<_>>() });
-        assert!(merged(&after, &commit(&[base, HEAD]), 7, HEAD, SHA).is_ok());
+        assert!(merged(&after, &commit(&[base, HEAD]), 7, HEAD, SHA, base).is_ok());
         // Malformed, missing or extra parent entries are refused, never skipped.
         let raw = |parents: Value| json!({ "sha": SHA, "parents": parents });
         for parents in [
@@ -310,15 +343,57 @@ mod tests {
             Value::Null,
         ] {
             assert!(
-                merged(&after, &raw(parents.clone()), 7, HEAD, SHA).is_err(),
+                merged(&after, &raw(parents.clone()), 7, HEAD, SHA, base).is_err(),
                 "{parents}"
             );
         }
         // A squash (one parent) or a rebase (head is not a parent) is not a merge commit.
-        assert!(merged(&after, &commit(&[base]), 7, HEAD, SHA).is_err());
-        assert!(merged(&after, &commit(&[base, base]), 7, HEAD, SHA).is_err());
+        assert!(merged(&after, &commit(&[base]), 7, HEAD, SHA, base).is_err());
+        assert!(merged(&after, &commit(&[base, base]), 7, HEAD, SHA, base).is_err());
         let mut other = after.clone();
         other["merge_commit_sha"] = json!(base);
-        assert!(merged(&other, &commit(&[base, HEAD]), 7, HEAD, SHA).is_err());
+        assert!(merged(&other, &commit(&[base, HEAD]), 7, HEAD, SHA, base).is_err());
+        // A merge onto any first parent but the approved base is reported as not the reviewed one.
+        let moved = "4444444444444444444444444444444444444444";
+        let wrong = merged(&after, &commit(&[moved, HEAD]), 7, HEAD, SHA, base).unwrap_err();
+        assert!(wrong.contains("other than the approved one"), "{wrong}");
+        assert!(wrong.contains("do not retry"), "{wrong}");
+    }
+
+    #[test]
+    fn only_a_pr_onto_the_approved_branch_at_the_approved_base_is_the_target() {
+        const BASE: &str = "3333333333333333333333333333333333333333";
+        let target = |repo: &str, branch: &str, sha: &str| json!({ "base": { "ref": branch, "sha": sha, "repo": { "full_name": repo } } });
+        assert!(
+            targets(
+                &target("owner/demo", "main", BASE),
+                "owner/demo",
+                "main",
+                BASE
+            )
+            .is_ok()
+        );
+        let moved = "4444444444444444444444444444444444444444";
+        for (pr, why) in [
+            (target("owner/demo", "release", moved), "targets release"),
+            (target("owner/demo", "release", BASE), "targets release"),
+            (
+                target("owner/demo", "main", moved),
+                "not at the approved base",
+            ),
+            (target("other/demo", "main", BASE), "not in owner/demo"),
+            (
+                json!({ "base": { "repo": { "full_name": "owner/demo" }, "sha": BASE } }),
+                "targets no branch",
+            ),
+            (
+                json!({ "base": { "repo": { "full_name": "owner/demo" }, "ref": "main" } }),
+                "not at the approved base",
+            ),
+            (json!({}), "not in owner/demo"),
+        ] {
+            let refusal = targets(&pr, "owner/demo", "main", BASE).unwrap_err();
+            assert!(refusal.contains(why), "{pr}: {refusal}");
+        }
     }
 }

@@ -31,6 +31,10 @@ pub struct Approval {
     /// without it, so a review GO for publishing never doubles as a merge.
     #[serde(default)]
     pub merge_pr: Option<u64>,
+    /// The branch that PR must target, in a record that authorizes a merge: the PR's base must be
+    /// this branch, at `base`, so a retargeted PR, or one whose base moved, never inherits the GO.
+    #[serde(default)]
+    pub merge_base_branch: Option<String>,
     /// Who approved, and where (message ids or receipt seals), for the record.
     pub reviews: Vec<String>,
 }

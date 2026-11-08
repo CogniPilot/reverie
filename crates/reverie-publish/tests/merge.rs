@@ -157,6 +157,7 @@ impl Case {
         });
         if let Some(pr) = merge_pr {
             record["mergePr"] = json!(pr);
+            record["mergeBaseBranch"] = json!("main");
         }
         fs::write(self.root.join("approval.json"), record.to_string()).unwrap();
     }
@@ -266,6 +267,7 @@ impl Hub {
                 "number": 7, "state": "open", "merged": false, "draft": false, "title": TITLE,
                 "body": BODY, "head": { "sha": case.head }, "mergeable": true,
                 "mergeable_state": "clean", "merge_commit_sha": null,
+                "base": { "ref": "main", "sha": case.base, "repo": { "full_name": "owner/demo" } },
             }),
             base: case.base.clone(),
             comments: json!([{ "id": 1, "body": "Looks good." }]),
@@ -449,6 +451,106 @@ fn only_an_approval_that_names_this_pr_authorizes_a_merge() {
         "nothing is asked of GitHub without the approval"
     );
     assert!(!case.records().exists());
+}
+
+#[test]
+fn a_merge_approval_must_name_the_branch_it_targets() {
+    let case = Case::new("approval-branch");
+    let (api, state) = serve(Hub::new(&case));
+    let approval = case.root.join("approval.json");
+    let mut record: Value = serde_json::from_slice(&fs::read(&approval).unwrap()).unwrap();
+    record.as_object_mut().unwrap().remove("mergeBaseBranch");
+    fs::write(&approval, record.to_string()).unwrap();
+    refused(
+        &case.run(&api, &[]),
+        "does not name the branch the merge targets",
+    );
+    assert!(requests(&state).is_empty());
+    assert!(!case.records().exists());
+}
+
+/// A commit other than the approved base, for a PR whose base is somewhere else.
+const OTHER_BASE: &str = "5555555555555555555555555555555555555555";
+
+#[test]
+fn a_pr_that_targets_another_branch_or_base_refuses_before_writing() {
+    // Retargeted to another branch at another commit, and main moved on. The head,
+    // title, body, checks, packet and approval are all the reviewed ones.
+    let cases: [(&str, Rewrite, &str); 4] = [
+        (
+            "retargeted",
+            |s, r| {
+                if s.path.ends_with("/pulls/7") {
+                    r["base"]["ref"] = json!("release");
+                    r["base"]["sha"] = json!(OTHER_BASE);
+                }
+            },
+            "targets release, not the approved branch main",
+        ),
+        (
+            "moved-base",
+            |s, r| {
+                if s.path.ends_with("/pulls/7") {
+                    r["base"]["sha"] = json!(OTHER_BASE);
+                }
+            },
+            "not at the approved base",
+        ),
+        (
+            "missing-base",
+            |s, r| {
+                if s.path.ends_with("/pulls/7") {
+                    r.as_object_mut().unwrap().remove("base");
+                }
+            },
+            "the PR's base is not in owner/demo",
+        ),
+        (
+            "other-repo",
+            |s, r| {
+                if s.path.ends_with("/pulls/7") {
+                    r["base"]["repo"]["full_name"] = json!("fork/demo");
+                }
+            },
+            "the PR's base is not in owner/demo",
+        ),
+    ];
+    for (name, rewrite, why) in cases {
+        refuses_before_writing(name, rewrite, why);
+    }
+}
+
+#[test]
+fn a_base_that_moves_after_the_checks_is_reported_never_as_the_reviewed_merge() {
+    // The PR reads at the approved base, so the merge is sent; GitHub conditions it on the head
+    // only, and the commit comes back on another first parent. The merge is reported as not the
+    // reviewed operation, with every record kept, and nothing is retried.
+    let case = Case::new("base-moved-after");
+    let mut hub = Hub::new(&case);
+    hub.rewrite = Some(|s, r| {
+        if s.path.ends_with(MERGE_SHA) {
+            r["parents"][0]["sha"] = json!(OTHER_BASE);
+        }
+    });
+    let (api, state) = serve(hub);
+    refused(
+        &case.run(&api, &[]),
+        "onto a base other than the approved one",
+    );
+    assert_eq!(writes(&state), ["PUT /repos/owner/demo/pulls/7/merge"]);
+    has(
+        &case.records(),
+        &[
+            "INTENT.json",
+            "MERGE-RESULT.json",
+            "PR-READBACK.json",
+            "MERGE-COMMIT-READBACK.json",
+        ],
+    );
+    let intent: Value =
+        serde_json::from_slice(&fs::read(case.records().join("INTENT.json")).unwrap()).unwrap();
+    assert_eq!(intent["baseBranch"], "main");
+    assert_eq!(intent["base"], json!(case.base));
 }
 
 #[test]
@@ -636,6 +738,7 @@ fn records_swapped_at_the_approval_path_never_combine_into_a_merge() {
     let work = case.root.join("work");
     let mut wrong_target: Value = serde_json::from_slice(&publication_only).unwrap();
     wrong_target["mergePr"] = json!(7);
+    wrong_target["mergeBaseBranch"] = json!("main");
     wrong_target["head"] = json!(case.base);
     wrong_target["tree"] = json!(git(
         &work,

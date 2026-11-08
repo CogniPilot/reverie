@@ -210,6 +210,10 @@ fn merge(o: &Merge) -> Result<Value, String> {
             o.pr
         ));
     }
+    let branch = approval
+        .merge_base_branch
+        .as_deref()
+        .ok_or("the approval record does not name the branch the merge targets")?;
     // Every packet check, the approval against the exact head, base, title and body included.
     let (mut summary, text) = verify_packet(&o.check, Some(&approval))?;
     let (title, body) =
@@ -225,6 +229,8 @@ fn merge(o: &Merge) -> Result<Value, String> {
     let (number, head) = (o.pr, o.check.head.as_str());
     let pr = api.call("GET", &format!("/pulls/{number}"), None)?;
     merge::ready(&pr, number, head, &title, &body)?;
+    // verify_packet has already bound approval.base to the full id of --base in the store.
+    merge::targets(&pr, &o.check.repo, branch, &approval.base)?;
     let runs = api.call(
         "GET",
         &format!("/commits/{head}/check-runs?per_page=100"),
@@ -261,6 +267,8 @@ fn merge(o: &Merge) -> Result<Value, String> {
         "repo": o.check.repo,
         "pr": number,
         "head": head,
+        "baseBranch": branch,
+        "base": approval.base,
         "mergeMethod": "merge",
         "packetSeal": o.check.seal,
         "approval": path,
@@ -277,7 +285,7 @@ fn merge(o: &Merge) -> Result<Value, String> {
     records.result("PR-READBACK.json", &after)?;
     let commit = api.call("GET", &format!("/commits/{sha}"), None)?;
     records.result("MERGE-COMMIT-READBACK.json", &commit)?;
-    merge::merged(&after, &commit, number, head, &sha)?;
+    merge::merged(&after, &commit, number, head, &sha, &approval.base)?;
     summary["merged"] = json!(true);
     summary["mergeCommit"] = json!(sha);
     Ok(summary)
