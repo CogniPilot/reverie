@@ -15,6 +15,7 @@ mod image_refresh;
 mod launch;
 mod lifecycle;
 mod recovered;
+pub mod resource_actor;
 mod service;
 pub use service::{BrokerServiceStartup, BrokerStartupCause, BrokerStartupFailure};
 pub(crate) mod source;

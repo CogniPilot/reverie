@@ -129,6 +129,11 @@ impl ObservedRow<'_> {
     }
 }
 impl ObservationContext {
+    /// Explicitly settle this retained actor's original metadata producer.
+    /// This grants no resource release, capacity credit or effect permission.
+    pub(crate) fn settle_actor_metadata(&self, end: Instant) -> Result<()> {
+        self.observer.settle_owned(end)
+    }
     pub(crate) fn original_target_storage(
         &self,
         paths: &StoragePaths,

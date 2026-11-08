@@ -1,5 +1,6 @@
 //! Read-only same-kernel website observations. Neither installer-selected DATA
 //! nor successful metadata requests authenticate a website or authorize work.
+mod alias;
 mod code;
 mod engine;
 mod files;
@@ -9,6 +10,7 @@ mod process;
 mod tests;
 mod transport;
 use crate::native;
+pub use alias::{ImmutableAliasObserver, ObservedCodeAlias};
 pub use code::{ImmutableCodeObserver, ObservedCodeFile};
 pub use input::{
     ImmutableInputKind, ImmutableInputObserver, ObservedImmutableInput, ObservedNativeClient,

@@ -48,6 +48,9 @@ pub struct ImmutableInputObserver {
     close_uncertain: bool,
 }
 impl ImmutableInputObserver {
+    pub fn assert_finalized(&self) -> Result<()> {
+        need(!self.close_uncertain, "IMMUTABLE_INPUT_CLOSE_UNCONFIRMED")
+    }
     pub fn observe_artifact(
         &mut self,
         selected: &ArtifactReference,

@@ -187,6 +187,32 @@ impl WorkerActorChannel {
         self.ended()
     }
     pub fn close_for_worker(&mut self) -> Result<WorkerLaunchClose> {
+        self.close_sockets()?;
+        if self.close == ClosePhase::SocketsClosed {
+            self.release_hold()?;
+        }
+        let handler = self.connection.record.handler_settled();
+        if !self.connection.record.socket_closed_known() {
+            self.close = ClosePhase::Unconfirmed;
+            return Err(WorkerReportError::Unconfirmed);
+        }
+        Ok(if handler {
+            WorkerLaunchClose::Complete
+        } else {
+            WorkerLaunchClose::SocketClosedHandlerRetained
+        })
+    }
+    /// Close this exact socket and pinned peer while retaining the SAME counted
+    /// lifecycle hold for a domain's uncertain native resources. No domain
+    /// settlement, hold release or global shutdown acknowledgement is granted.
+    pub fn disconnect_for_worker(&mut self) -> Result<WorkerLaunchClose> {
+        if self.close == ClosePhase::Finished {
+            return Err(WorkerReportError::Unconfirmed);
+        }
+        self.close_sockets()?;
+        Ok(WorkerLaunchClose::SocketClosedLifecycleHeld)
+    }
+    fn close_sockets(&mut self) -> Result<()> {
         self.failed = true;
         if self.close == ClosePhase::Unconfirmed {
             return Err(WorkerReportError::Unconfirmed);
@@ -215,19 +241,7 @@ impl WorkerActorChannel {
             }
             self.close = ClosePhase::SocketsClosed;
         }
-        if self.close == ClosePhase::SocketsClosed {
-            self.release_hold()?;
-        }
-        let handler = self.connection.record.handler_settled();
-        if !self.connection.record.socket_closed_known() {
-            self.close = ClosePhase::Unconfirmed;
-            return Err(WorkerReportError::Unconfirmed);
-        }
-        Ok(if handler {
-            WorkerLaunchClose::Complete
-        } else {
-            WorkerLaunchClose::SocketClosedHandlerRetained
-        })
+        Ok(())
     }
     fn release_hold(&mut self) -> Result<()> {
         if let Err(error) = self.hold.release_for_worker() {
