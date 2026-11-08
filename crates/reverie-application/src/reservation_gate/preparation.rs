@@ -103,10 +103,11 @@ impl RetainedPreparation {
     pub(super) fn close_owned(&mut self) -> Result<()> {
         self.live.store(false, std::sync::atomic::Ordering::Release);
         if let Some(journal) = &self.ram_journal {
-            return journal
+            let mut owner = journal
                 .lock()
-                .map_err(|_| GateError::Refused("RAM_JOURNAL_UNAVAILABLE"))?
-                .close_component();
+                .map_err(|_| GateError::Refused("RAM_JOURNAL_UNAVAILABLE"))?;
+            owner.quarantine()?;
+            return owner.close_component();
         }
         match self.store.take() {
             Some(store) => store.close().map_err(Into::into),

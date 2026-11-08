@@ -32,6 +32,12 @@ pub struct RamClaimJournal<G: RamClaimScope> {
 pub struct SuspendedRamClaimJournal<G: RamClaimScope> {
     owner: Option<Box<Owner<G>>>,
 }
+/// An abort moves custody without any new validation or native read. Only
+/// component cleanup remains available; this owner can never resume a phase.
+#[must_use = "retain aborted journal custody until its components settle"]
+pub struct AbortedRamClaimJournal<G: RamClaimScope> {
+    owner: Option<Box<Owner<G>>>,
+}
 #[must_use = "failure retains the same native directory, actual handle and first cause"]
 pub struct RamClaimJournalFailure<G: RamClaimScope> {
     owner: Option<Box<Owner<G>>>,
@@ -90,6 +96,11 @@ fn failure<G: RamClaimScope>(
     })
 }
 impl<G: RamClaimScope> RamClaimJournal<G> {
+    pub fn abort(mut self) -> AbortedRamClaimJournal<G> {
+        AbortedRamClaimJournal {
+            owner: self.owner.take(),
+        }
+    }
     pub fn retain(
         store: OperationStore,
         handle: OperationHandle,
@@ -174,6 +185,11 @@ impl<G: RamClaimScope> RamClaimJournal<G> {
     }
 }
 impl<G: RamClaimScope> SuspendedRamClaimJournal<G> {
+    pub fn abort(mut self) -> AbortedRamClaimJournal<G> {
+        AbortedRamClaimJournal {
+            owner: self.owner.take(),
+        }
+    }
     pub fn resume(
         mut self,
         guard: Arc<G>,
@@ -225,6 +241,21 @@ impl<G: RamClaimScope> RamClaimJournalFailure<G> {
             .as_mut()
             .expect("whole failed RAM journal")
             .close_component()
+    }
+}
+impl<G: RamClaimScope> AbortedRamClaimJournal<G> {
+    pub fn close_component(&mut self) -> std::result::Result<(), Arc<JournalError>> {
+        self.owner
+            .as_mut()
+            .expect("whole aborted RAM journal")
+            .close_component()
+    }
+}
+impl<G: RamClaimScope> Drop for AbortedRamClaimJournal<G> {
+    fn drop(&mut self) {
+        if let Some(owner) = self.owner.take() {
+            std::mem::forget(owner);
+        }
     }
 }
 impl<G: RamClaimScope> std::fmt::Debug for RamClaimJournalFailure<G> {

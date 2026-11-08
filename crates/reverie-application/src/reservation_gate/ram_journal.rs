@@ -6,7 +6,7 @@ use reverie_core::{
     revision::ProfileVersion,
 };
 use reverie_store::operations::{
-    RamClaimJournal, RamClaimJournalFailure, SuspendedRamClaimJournal,
+    AbortedRamClaimJournal, RamClaimJournal, RamClaimJournalFailure, SuspendedRamClaimJournal,
 };
 type Guard = super::guard::InstalledGuard;
 pub(super) type SharedJournal = Arc<Mutex<RamPreparationJournal>>;
@@ -14,9 +14,19 @@ pub(super) enum RamPreparationJournal {
     Transitioning,
     Active(RamClaimJournal<Guard>),
     Suspended(SuspendedRamClaimJournal<Guard>),
+    Aborted(AbortedRamClaimJournal<Guard>),
     Failed(Box<RamClaimJournalFailure<Guard>>),
 }
 impl RamPreparationJournal {
+    pub(super) fn quarantine(&mut self) -> Result<()> {
+        *self = match std::mem::replace(self, Self::Transitioning) {
+            Self::Active(owner) => Self::Aborted(owner.abort()),
+            Self::Suspended(owner) => Self::Aborted(owner.abort()),
+            Self::Transitioning => return Err(GateError::Refused("RAM_JOURNAL_PHASE_REQUIRED")),
+            other => other,
+        };
+        Ok(())
+    }
     fn failed(&mut self, owner: Box<RamClaimJournalFailure<Guard>>) -> GateError {
         let cause = GateError::SharedJournal(owner.cause().clone());
         *self = Self::Failed(owner);
@@ -53,6 +63,10 @@ impl RamPreparationJournal {
             }
             Self::Failed(owner) => Err(self.failed(owner)),
             Self::Transitioning => Err(GateError::Refused("RAM_JOURNAL_PHASE_REQUIRED")),
+            Self::Aborted(owner) => {
+                *self = Self::Aborted(owner);
+                Err(GateError::Refused("RAM_JOURNAL_ABORTED"))
+            }
         }
     }
     pub(super) fn resume(&mut self, guard: Arc<Guard>) -> Result<()> {
@@ -104,6 +118,7 @@ impl RamPreparationJournal {
             Self::Active(owner) => owner.close_component(),
             Self::Suspended(owner) => owner.close_component(),
             Self::Failed(owner) => owner.close_component(),
+            Self::Aborted(owner) => owner.close_component(),
             Self::Transitioning => return Err(GateError::Refused("RAM_JOURNAL_PHASE_REQUIRED")),
         }
         .map_err(GateError::SharedJournal)

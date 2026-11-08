@@ -26,6 +26,10 @@ pub(super) struct Admission {
     ram_journal: Option<super::ram_journal::SharedJournal>,
     _thread: std::marker::PhantomData<std::rc::Rc<()>>,
 }
+enum CleanupPurpose {
+    Abort,
+    BoundaryClosed,
+}
 pub(super) struct Entering {
     thread: ThreadId,
     process: u32,
@@ -249,28 +253,56 @@ impl Admission {
             Err(error) => finalized(Err(error), self.abort()),
         }
     }
-    pub(super) fn finish(mut self) -> Result<()> {
-        let guard = self.gate.guard(None).map(|_| ());
-        self.finished = true;
-        finalized(guard, self.cleanup())
+    fn suspend_ram_journal(&self) -> Result<()> {
+        self.ram_journal.as_ref().map_or(Ok(()), |journal| {
+            journal
+                .try_lock()
+                .map_err(|_| GateError::Refused("RAM_JOURNAL_UNAVAILABLE"))?
+                .suspend()
+        })
     }
-    pub(super) fn finish_claim(mut self, claim: &super::claim::TerminalClaim) -> Result<()> {
-        let terminal = self.gate.finish_claim(claim);
+    fn quarantine_ram_journal(&self) -> Result<()> {
+        self.ram_journal.as_ref().map_or(Ok(()), |journal| {
+            journal
+                .try_lock()
+                .map_err(|_| GateError::Refused("RAM_JOURNAL_UNAVAILABLE"))?
+                .quarantine()
+        })
+    }
+    fn finish_result<T>(mut self, result: Result<T>) -> Result<T> {
+        let purpose = if result.is_ok() {
+            CleanupPurpose::BoundaryClosed
+        } else {
+            CleanupPurpose::Abort
+        };
         self.finished = true;
-        finalized(terminal, self.cleanup())
+        finalized(result, self.cleanup(purpose))
+    }
+    pub(super) fn finish(self) -> Result<()> {
+        let guard = self
+            .suspend_ram_journal()
+            .and_then(|()| self.gate.guard(None).map(|_| ()));
+        self.finish_result(guard)
+    }
+    pub(super) fn finish_claim(self, claim: &super::claim::TerminalClaim) -> Result<()> {
+        let terminal = self
+            .suspend_ram_journal()
+            .and_then(|()| self.gate.finish_claim(claim));
+        self.finish_result(terminal)
     }
     pub(super) fn finish_preparation(
-        mut self,
+        self,
         claim: &super::preparation::RetainedPreparation,
         phase: super::preparation_phase::PublicationPhase,
     ) -> Result<()> {
-        let terminal = self.gate.finish_preparation(claim, phase);
-        self.finished = true;
-        finalized(terminal, self.cleanup())
+        let terminal = self
+            .suspend_ram_journal()
+            .and_then(|()| self.gate.finish_preparation(claim, phase));
+        self.finish_result(terminal)
     }
     pub(super) fn abort(mut self) -> Result<()> {
         self.finished = true;
-        self.cleanup()
+        self.cleanup(CleanupPurpose::Abort)
     }
     pub(super) fn finish_native_start(
         self,
@@ -287,26 +319,26 @@ impl Admission {
         self.native_start_boundary(claim, intent, false)
     }
     fn native_start_boundary(
-        mut self,
+        self,
         claim: &super::preparation::RetainedPreparation,
         intent: &super::preparation_start::ProtectedStartIntent,
         allow_running: bool,
     ) -> Result<super::preparation_start::StartQualificationFacts> {
         let result = if Arc::ptr_eq(&self.gate, &claim.gate) {
-            claim.qualify_intent(intent, allow_running)
+            self.suspend_ram_journal()
+                .and_then(|()| claim.qualify_intent(intent, allow_running))
         } else {
             Err(GateError::Refused("RESOURCE_NATIVE_PERMIT_REQUIRED"))
         };
-        self.finished = true;
-        finalized(result, self.cleanup())
+        self.finish_result(result)
     }
-    fn cleanup(&self) -> Result<()> {
-        let suspended = self.ram_journal.as_ref().map_or(Ok(()), |journal| {
-            journal
-                .try_lock()
-                .map_err(|_| GateError::Refused("RAM_JOURNAL_UNAVAILABLE"))?
-                .suspend()
-        });
+    fn cleanup(&self, purpose: CleanupPurpose) -> Result<()> {
+        // No journal validation/native observation follows a terminal stamp
+        // or a body error. Abort custody moves into a non-resumable facade.
+        let quarantined = match purpose {
+            CleanupPurpose::Abort => self.quarantine_ram_journal(),
+            CleanupPurpose::BoundaryClosed => Ok(()),
+        };
         // Revoke this exact journal purpose before any fallible native close.
         // Escaped store guards cannot borrow the next admission's authority.
         let revoked = self.revoke_ram_authority();
@@ -333,7 +365,12 @@ impl Admission {
             }
         };
         self.gate.changed.notify_all();
-        finalized(suspended, finalized(revoked, finalized(closed, released)))
+        let result = finalized(quarantined, finalized(revoked, finalized(closed, released)));
+        if result.is_err() {
+            finalized(result, self.quarantine_ram_journal())
+        } else {
+            result
+        }
     }
 }
 impl Entry {
@@ -429,7 +466,7 @@ impl Drop for Admission {
         // Abandonment releases only owned descriptors/local waiting state; it
         // produces no success acknowledgement, credit, or completed boundary.
         if !self.finished {
-            let _ = self.cleanup();
+            let _ = self.cleanup(CleanupPurpose::Abort);
         }
     }
 }

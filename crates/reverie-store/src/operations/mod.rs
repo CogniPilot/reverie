@@ -8,7 +8,8 @@ mod error;
 mod io;
 mod ram_claim;
 pub use ram_claim::{
-    RamClaimJournal, RamClaimJournalFailure, RamClaimScope, SuspendedRamClaimJournal,
+    AbortedRamClaimJournal, RamClaimJournal, RamClaimJournalFailure, RamClaimScope,
+    SuspendedRamClaimJournal,
 };
 mod terminal;
 mod transition;

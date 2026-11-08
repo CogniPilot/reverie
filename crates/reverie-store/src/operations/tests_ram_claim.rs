@@ -209,3 +209,27 @@ fn directory_consuming_close_is_sticky_and_a_second_fault_is_not_replayed() {
     );
     assert_eq!(tree.descriptor_count(), 0);
 }
+#[test]
+fn aborted_custody_performs_no_guard_read_or_lock_and_only_closes_its_component() {
+    let tree = Tree::new();
+    let guard = RamGuard::new(Arc::new(()));
+    let (store, view, handle) = claimed(&tree, &guard);
+    let phase = RamClaimJournal::retain(store, handle, guard.clone(), scope(), view).unwrap();
+    let bytes = tree.raw();
+    let calls = guard.calls.load(Ordering::SeqCst);
+    guard.live.store(false, Ordering::SeqCst);
+    faults::STATE.with(|state| state.borrow_mut().close = Some(CloseRole::Lock));
+    let mut aborted = phase.abort();
+    assert_eq!(guard.calls.load(Ordering::SeqCst), calls);
+    assert_eq!(tree.raw(), bytes);
+    assert_eq!(tree.descriptor_count(), 1);
+    aborted.close_component().unwrap();
+    assert_eq!(tree.descriptor_count(), 0);
+    let sentinel = tree.open();
+    assert!(
+        sentinel.snapshot(&scope()).is_err(),
+        "fresh actual lock still consumes untouched fault"
+    );
+    sentinel.close().unwrap();
+    assert_eq!(tree.descriptor_count(), 0);
+}
