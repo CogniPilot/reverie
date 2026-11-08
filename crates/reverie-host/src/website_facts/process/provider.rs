@@ -201,9 +201,12 @@ mod tests {
             fs,
             os::{fd::OwnedFd, unix::fs::PermissionsExt},
         };
-        let root = std::env::temp_dir().join(format!("provider-process-{}", std::process::id()));
-        fs::create_dir(&root).unwrap();
-        fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).unwrap();
+        let root =
+            nix::unistd::mkdtemp(&std::env::temp_dir().join("provider-process-XXXXXX")).unwrap();
+        assert_eq!(
+            fs::metadata(&root).unwrap().permissions().mode() & 0o777,
+            0o700
+        );
         let executable = root.join("storage-writer");
         fs::hard_link(crate::engine_metadata::tests::program(), &executable).unwrap();
         let engine = ReadonlyEngine::new(
