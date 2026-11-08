@@ -57,11 +57,23 @@ export interface ResourcePreviewContext extends ResourceContext {
 export interface RamResourceOwnerContext extends ResourceContext<typeof RAM_PURPOSE> {
   readonly stage: 'apply';
   readonly approval: Readonly<RamResourceApproval>;
+  readonly principal: Readonly<ResourceOwnerPrincipal>;
 }
 export interface RamResourcePreviewContext extends ResourceContext<typeof RAM_PURPOSE> {
   readonly stage: 'preview';
   readonly employeeId: string;
+  readonly principal: Readonly<ResourceOwnerPrincipal>;
 }
+/** Current canonical identity DATA, meaningful only with its actual retained
+ * context, cookie/session and attested native channel. */
+export interface ResourceOwnerPrincipal {
+  readonly accountId: string;
+  readonly personId: string;
+  readonly sessionEpoch: number;
+}
+type PrincipalFor<P extends ResourcePurpose> = P extends typeof RAM_PURPOSE
+  ? { readonly principal: Readonly<ResourceOwnerPrincipal> }
+  : object;
 export type AnyResourceContext =
   | ResourceOwnerContext
   | ResourcePreviewContext
@@ -148,7 +160,11 @@ export class ResourceOwnerAuthority {
     for (const socket of this.#channels.keys()) socket.destroy();
     this.#channels.clear();
   }
-  #identity(request: FastifyRequest, token: string): string {
+  #identity(
+    request: FastifyRequest,
+    token: string,
+    purpose: ResourcePurpose = PURPOSE
+  ): { key: string; principal?: Readonly<ResourceOwnerPrincipal> } {
     need(
       !this.#closed &&
         request.method === 'POST' &&
@@ -171,7 +187,30 @@ export class ResourceOwnerAuthority {
     );
     const owner = ownerFor(request);
     need(owner === undefined || owner === identity.username);
-    return JSON.stringify([owner, identity.id, identity.username, identity.role, identity.primary]);
+    const human = [owner, identity.id, identity.username, identity.role, identity.primary];
+    if (purpose === RAM_PURPOSE) {
+      // New RAM authority additionally pins the canonical account birth and
+      // current Office person. This read never enrolls a legacy account, and
+      // deliberately has no ordinary-identity/cache fallback.
+      const current = this.#auth.registrationIdentity(token);
+      need(
+        UUID.test(current.accountId) &&
+          (current.personId === 'owner' || UUID.test(current.personId)) &&
+          current.personId === identity.id &&
+          Number.isSafeInteger(current.sessionEpoch) &&
+          current.sessionEpoch >= 0
+      );
+      const principal = Object.freeze({
+        accountId: current.accountId,
+        personId: current.personId,
+        sessionEpoch: current.sessionEpoch,
+      });
+      return {
+        key: JSON.stringify([...human, principal.accountId, principal.personId, principal.sessionEpoch]),
+        principal,
+      };
+    }
+    return { key: JSON.stringify(human) };
   }
   capture(request: FastifyRequest, approved: ResourceApproval): ResourceOwnerContext {
     this.#approval(approved, false);
@@ -218,10 +257,10 @@ export class ResourceOwnerAuthority {
   #capture<
     P extends ResourcePurpose,
     T extends { stage: 'apply'; approval: Readonly<ResourceApproval> } | { stage: 'preview'; employeeId: string },
-  >(request: FastifyRequest, selected: T, purpose: P): Readonly<ResourceContext<P> & T> {
+  >(request: FastifyRequest, selected: T, purpose: P): Readonly<ResourceContext<P> & T> & PrincipalFor<P> {
     const token = request.cookies?.[OWNER_COOKIE];
     need(typeof token === 'string' && token.length > 0 && token.length <= 4096);
-    const identity = this.#identity(request, token),
+    const identity = this.#identity(request, token, purpose),
       owner = ownerFor(request);
     const issued = Date.now(),
       expires = issued + 300_000;
@@ -231,13 +270,14 @@ export class ResourceOwnerAuthority {
         this.#contexts.has(context) &&
           Date.now() >= issued &&
           Date.now() < expires &&
-          this.#identity(request, token) === identity
+          this.#identity(request, token, purpose).key === identity.key
       );
     };
     const context = Object.freeze({
       purpose,
       owner,
-      ownerScopeDigest: digest(this.#epoch + identity + randomBytes(32).toString('hex')),
+      ownerScopeDigest: digest(this.#epoch + identity.key + randomBytes(32).toString('hex')),
+      ...(identity.principal === undefined ? {} : { principal: identity.principal }),
       ...selected,
       expiresAtEpochMs: expires,
       assertCurrent,
@@ -245,7 +285,7 @@ export class ResourceOwnerAuthority {
         throw new Error('Resource owner context is server-private');
       },
       [inspect.custom]: () => '[Private resource owner context]',
-    }) as Readonly<ResourceContext<P> & T>;
+    }) as Readonly<ResourceContext<P> & T> & PrincipalFor<P>;
     this.#contexts.add(context);
     this.#sessions.set(context, { account: this.#auth.forSession(token), token });
     assertCurrent();
