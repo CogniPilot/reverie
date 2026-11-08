@@ -2,6 +2,40 @@
 use super::*;
 
 #[test]
+fn legacy_cold_does_not_consult_an_unrelated_busy_controller_slot() {
+    crate::test_process::owning_case!(
+        legacy_cold_does_not_consult_an_unrelated_busy_controller_slot
+    );
+    let tree = Tree::new();
+    let broker = broker(&tree);
+    let (_client, cold) = classified(&broker);
+    let slot = broker.controller.lock().unwrap();
+    let result = cold.prepare_cold();
+    match &result {
+        Ok(owner) => owner
+            .started
+            .office
+            .close_for_stopped_source(super::super::super::tests::end())
+            .unwrap(),
+        Err(owner) => owner
+            .owner
+            .office
+            .as_ref()
+            .unwrap()
+            .owner()
+            .close_for_stopped_source(super::super::super::tests::end())
+            .unwrap(),
+    }
+    drop(slot);
+    assert!(
+        result.is_ok(),
+        "unselected legacy creation must not consult the native controller slot"
+    );
+    assert!(tree.root.join("cold-pane-configured").is_file());
+    assert!(lease_held(&broker));
+}
+
+#[test]
 fn selected_native_provider_without_controller_refuses_before_any_create_or_start() {
     crate::test_process::owning_case!(
         selected_native_provider_without_controller_refuses_before_any_create_or_start
