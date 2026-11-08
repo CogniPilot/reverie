@@ -108,7 +108,7 @@ where
     let request = request.body(Full::new(Bytes::from(raw))).map_err(reason)?;
     let body = async {
         let response = sender.send_request(request).await.map_err(reason)?;
-        require(response.status().is_success(), "owned fixture HTTP refused")?;
+        let status = response.status();
         let cookie = response
             .headers()
             .get("set-cookie")
@@ -129,6 +129,13 @@ where
                 bytes.extend_from_slice(&data);
             }
         }
+        require(
+            status.is_success(),
+            &format!(
+                "owned fixture HTTP refused: {status}; body: {}",
+                String::from_utf8_lossy(&bytes[..bytes.len().min(4096)])
+            ),
+        )?;
         let value = if bytes.is_empty() {
             Value::Null
         } else {
