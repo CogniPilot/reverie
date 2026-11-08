@@ -15,8 +15,22 @@ fn reply(client: &mut UnixStream) -> Response {
         .map_err(|e| format!("{}: {e}", String::from_utf8_lossy(&raw)))
 }
 fn observe(request: &[u8], names: &str) -> Observation {
+    observe_company(request, names, None)
+}
+fn observe_company(
+    request: &[u8],
+    names: &str,
+    company: Option<serde_json::Value>,
+) -> Observation {
     let (root, broker) = recovered::tests::Tree::bootstrap_parts("", "admission", 512, 4096);
     std::fs::write(root.join("names.out"), names).unwrap();
+    if let Some(company) = company {
+        std::fs::write(
+            root.join("company.json"),
+            serde_json::to_vec(&company).unwrap(),
+        )
+        .unwrap();
+    }
     let broker = Arc::new(broker);
     let (mut client, connection) = incoming(&broker, request);
     let result = broker.handle_control(connection).map_err(|mut failure| {
@@ -28,6 +42,50 @@ fn observe(request: &[u8], names: &str) -> Observation {
     let closed = finish(root, broker, client);
     closed.unwrap();
     (result, response, calls)
+}
+
+#[test]
+fn actual_current_company_binding_stays_unknown_without_native_command_proof() {
+    crate::test_process::owning_case!(
+        actual_current_company_binding_stays_unknown_without_native_command_proof
+    );
+    let employee = serde_json::json!({"id":"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+        "sessionId":"bbbbbbbb-bbbb-4ccc-8ddd-eeeeeeeeeeee","sessionGeneration":3,
+        "owner":"fixture-owner","desiredRunning":true,"onVacation":false,
+        "runtimeRecipe":{"mode":"codex"},"permissions":{}});
+    let (body, response, calls) = observe_company(
+        br#"{"action":"provider-health"}"#,
+        "",
+        Some(serde_json::json!({"employees":[employee]})),
+    );
+    body.unwrap();
+    let (kind, value) = response.unwrap();
+    assert_eq!(kind, b'J');
+    let rows = value["providerHealth"]["providers"].as_array().unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0]["state"], "unknown");
+    assert_eq!(rows[0]["reason"], "UNCONFIRMED");
+    assert_eq!(
+        rows[0]["observedBinding"],
+        serde_json::json!([
+            employee["id"],
+            employee["owner"],
+            employee["sessionId"],
+            3,
+            true,
+            false,
+            null,
+            employee["runtimeRecipe"],
+            employee["permissions"]
+        ])
+    );
+    assert!(rows[0].get("containerId").is_none());
+    assert!(rows[0]["observedAtEpochMs"].as_u64().is_some());
+    assert!(
+        calls
+            .lines()
+            .all(|line| !line.starts_with("stop\0") && !line.starts_with("rm\0"))
+    );
 }
 
 #[test]
