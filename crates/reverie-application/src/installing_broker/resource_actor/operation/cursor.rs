@@ -1,7 +1,7 @@
 //! The actual original Q channel owns its bounded continuation cursor. IDs
 //! correlate this owner; no cursor constructs a claim or authorizes a launch.
 use super::*;
-use reverie_core::{ids::NativeOperationId, operations::JournalId};
+use reverie_core::operations::JournalId;
 #[cfg(test)]
 mod tests;
 
@@ -18,7 +18,7 @@ impl OperationCursor {
         &mut self,
         next: ResourceContinuationRequest,
         original: &ResourceOperationRequest,
-        reference: &JournalId,
+        reference: &NativeOperationId,
         expected: ResourceContinuationVerb,
     ) -> Result<()> {
         const ORDER: [ResourceContinuationVerb; 4] = [
@@ -27,12 +27,11 @@ impl OperationCursor {
             ResourceContinuationVerb::SourceStop,
             ResourceContinuationVerb::Start,
         ];
-        let actual = NativeOperationId::parse(reference.as_str())
-            .expect("actual canonical journal operation reference");
-        next.require_original(original, &actual)?;
+        next.require_original(original, reference)?;
         need(
             ORDER.get(self.seen.len()) == Some(&expected)
                 && next.verb() == expected
+                && next.request_id().as_str() != reference.as_str()
                 && !self.seen.contains(next.request_id()),
             "RESOURCE_RAM_CONTINUATION_ORDER",
         )?;
@@ -46,7 +45,6 @@ impl OperationCursor {
 impl AuthenticatedResourceOperation<'_> {
     pub(super) fn receive_continuation(
         &mut self,
-        reference: &JournalId,
         expected: ResourceContinuationVerb,
     ) -> Result<()> {
         let result = (|| {
@@ -54,6 +52,9 @@ impl AuthenticatedResourceOperation<'_> {
             let frame = &mut self.website.frame;
             let end = frame.deadline.min(Instant::now() + Duration::from_secs(5));
             let next = ResourceContinuationRequest::decode(&frame.receive(end)?)?;
+            let reference = self.reference.as_ref().ok_or(ResourceActorError::Refused(
+                "RESOURCE_RAM_REFERENCE_REQUIRED",
+            ))?;
             self.cursor
                 .accept(next, &self.request, reference, expected)?;
             self.assert_current()

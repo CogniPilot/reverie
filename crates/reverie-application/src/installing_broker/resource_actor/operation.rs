@@ -2,12 +2,14 @@
 //! canonical request. Neither decoded selections nor a callback mint this type.
 use super::*;
 use reverie_contracts::resource_config::ResourceIdentitySettings;
+use reverie_core::ids::NativeOperationId;
 use reverie_store::storage_identity::{self, StorageIdentityConfig};
 use std::time::{SystemTime, UNIX_EPOCH};
 mod claim;
 mod cursor;
 mod preview;
 mod receipt;
+mod reference;
 pub use claim::{ClaimedRamOperation, RamClaimFailure, RamPreparationFailure};
 pub use receipt::{
     CommittedRamFailure, CommittedRamOperation, PreparedResourceStart, ResourceStartFailure,
@@ -20,6 +22,7 @@ pub struct AuthenticatedResourceOperation<'a> {
     owner: Option<CurrentResourceOwner>,
     checks: usize,
     cursor: cursor::OperationCursor,
+    reference: Option<NativeOperationId>,
 }
 impl<'a> InstalledResourceWebsite<'a> {
     /// One pending action owns the SAME channel. A future L rendezvous must
@@ -57,6 +60,7 @@ impl<'a> InstalledResourceWebsite<'a> {
             owner: None,
             checks: 0,
             cursor: cursor::OperationCursor::default(),
+            reference: None,
         };
         match operation.assert_current() {
             Ok(()) => Ok(operation),

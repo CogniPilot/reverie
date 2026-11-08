@@ -1,11 +1,11 @@
 //! Pure cursor DATA controls. These never construct an authenticated Q owner.
 use super::*;
 use serde_json::json;
-const REF: &str = "11111111-2222-4333-8444-555555555555";
+const REF: &str = "99999999-2222-4333-8444-555555555555";
 const INITIAL: &str = "22222222-2222-4333-8444-555555555555";
 fn original() -> ResourceOperationRequest {
     let value = json!({"kind":"resource-operation","requestId":INITIAL,"verb":"claim","approval":{
-        "employeeId":REF,"draftId":REF,"operationId":REF,"reservationId":REF,"targetSid":REF,
+        "employeeId":"11111111-2222-4333-8444-555555555555","draftId":"44444444-2222-4333-8444-555555555555","operationId":"55555555-2222-4333-8444-555555555555","reservationId":"66666666-2222-4333-8444-555555555555","targetSid":"77777777-2222-4333-8444-555555555555",
         "profileVersion":"1","profileDigest":"a".repeat(64),"previewDigest":"b".repeat(64),"ramPolicyDigest":"c".repeat(64)}});
     ResourceOperationRequest::decode(
         &HumanFrame::decode(&serde_json::to_vec(&value).unwrap()).unwrap(),
@@ -23,7 +23,7 @@ fn next(verb: &str, n: u8, reference: &str) -> ResourceContinuationRequest {
 fn original_cursor_is_bounded_to_four_distinct_ordered_phases() {
     let mut cursor = OperationCursor::default();
     let original = original();
-    let reference = JournalId::parse(REF).unwrap();
+    let reference = NativeOperationId::parse(REF).unwrap();
     for (n, verb, phase) in [
         (3, "publication", ResourceContinuationVerb::Publication),
         (4, "prepare", ResourceContinuationVerb::Prepare),
@@ -55,7 +55,7 @@ fn original_cursor_is_bounded_to_four_distinct_ordered_phases() {
 fn out_of_order_and_foreign_reference_never_advance_original_cursor() {
     let mut cursor = OperationCursor::default();
     let original = original();
-    let reference = JournalId::parse(REF).unwrap();
+    let reference = NativeOperationId::parse(REF).unwrap();
     assert!(
         cursor
             .accept(
@@ -91,7 +91,24 @@ fn out_of_order_and_foreign_reference_never_advance_original_cursor() {
 fn request_id_reuse_cannot_advance_the_same_owned_phase() {
     let mut cursor = OperationCursor::default();
     let original = original();
-    let reference = JournalId::parse(REF).unwrap();
+    let reference = NativeOperationId::parse(REF).unwrap();
+    let collision =
+        json!({"kind":"resource-operation","requestId":REF,"verb":"publication","reference":REF});
+    let collision = ResourceContinuationRequest::decode(
+        &HumanFrame::decode(&serde_json::to_vec(&collision).unwrap()).unwrap(),
+    )
+    .unwrap();
+    assert!(
+        cursor
+            .accept(
+                collision,
+                &original,
+                &reference,
+                ResourceContinuationVerb::Publication
+            )
+            .is_err()
+    );
+    assert!(cursor.current().is_none());
     cursor
         .accept(
             next("publication", 3, REF),

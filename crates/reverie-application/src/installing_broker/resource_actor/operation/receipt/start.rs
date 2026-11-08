@@ -11,10 +11,9 @@ struct StartAttempt<'a> {
 impl StartAttempt<'_> {
     fn begin(&mut self) -> Result<()> {
         let owner = self.operation.owner_mut();
-        owner.auth.receive_continuation(
-            owner.claim.operation_id(),
-            ResourceContinuationVerb::SourceStop,
-        )?;
+        owner
+            .auth
+            .receive_continuation(ResourceContinuationVerb::SourceStop)?;
         self.operation.assert_current()?;
         let owner = self.operation.owner_mut();
         let result = owner.claim.begin_native_start().map_err(Into::into);
@@ -89,7 +88,7 @@ impl PreparedResourceStart<'_> {
         let owner = self.operation.owner_mut();
         owner
             .auth
-            .receive_continuation(owner.claim.operation_id(), ResourceContinuationVerb::Start)
+            .receive_continuation(ResourceContinuationVerb::Start)
     }
     /// The surrounding launch owner must retain the original Held L and its
     /// native pin before this one-shot same-Q command exchange. Selection here
@@ -114,7 +113,7 @@ impl PreparedResourceStart<'_> {
             )?;
             let owner = self.operation.owner_mut();
             need(
-                incoming.reference().as_str() == owner.claim.operation_id().as_str(),
+                incoming.reference() == owner.auth.reference()?,
                 "RESOURCE_RAM_LAUNCH_REFERENCE_CHANGED",
             )?;
             held.assert_current(&owner.auth.website.frame.broker.storage.runtime)?;
@@ -134,6 +133,10 @@ impl PreparedResourceStart<'_> {
     }
     pub fn request(&self) -> &ResourceOperationRequest {
         self.operation.request()
+    }
+    /// Original same-Q routing DATA, distinct from the durable operation ID.
+    pub fn reference(&self) -> Result<&NativeOperationId> {
+        self.operation.owner().auth.reference()
     }
     pub fn target_resources(&self) -> &reverie_core::resources::ResourcePolicy {
         self.operation.policy().target_resources()

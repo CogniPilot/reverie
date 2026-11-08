@@ -18,11 +18,10 @@ struct RamClaimOwner<'a> {
 }
 impl RamClaimOwner<'_> {
     fn continuation(&mut self, expected: ResourceContinuationVerb) -> Result<()> {
-        let ClaimPhase::Claimed { claim, .. } = &self.phase else {
+        let ClaimPhase::Claimed { .. } = &self.phase else {
             return Err(ResourceActorError::Refused("RESOURCE_RAM_CLAIM_REQUIRED"));
         };
-        self.auth
-            .receive_continuation(claim.operation_id(), expected)
+        self.auth.receive_continuation(expected)
     }
     fn commit(&mut self) -> Result<crate::reservation_gate::CommittedPolicy> {
         self.continuation(ResourceContinuationVerb::Prepare)?;
@@ -96,6 +95,10 @@ impl<'a> ClaimedRamOperation<'a> {
                 return Err(ResourceActorError::Refused(code));
             }
         }
+        let ClaimPhase::Claimed { claim, .. } = &owner.phase else {
+            unreachable!("actual claimed owner retained")
+        };
+        owner.auth.retain_reference(claim)?;
         owner.auth.assert_current()
     }
     pub fn request(&self) -> &ResourceOperationRequest {
@@ -104,6 +107,15 @@ impl<'a> ClaimedRamOperation<'a> {
             .expect("whole RAM claim owner retained")
             .auth
             .request()
+    }
+    /// Correlation DATA minted on this original Q after the actual claim. It
+    /// is distinct from every original approval/source ID and grants no work.
+    pub fn reference(&self) -> Result<&NativeOperationId> {
+        self.owner
+            .as_deref()
+            .expect("whole RAM claim retained")
+            .auth
+            .reference()
     }
     /// The original publication intent is created before the website's normal
     /// Session publication. No configuration or source stop is implied.
