@@ -85,7 +85,10 @@ fn fixture() -> (State, PathBuf, PathBuf) {
 fn fixture_mode(mode: &str) -> (State, PathBuf, PathBuf) {
     assert!(matches!(
         mode,
-        "native-worker-manager" | "native-worker-manager-legacy" | "native-worker-manager-slow"
+        "native-worker-manager"
+            | "native-worker-manager-legacy"
+            | "native-worker-manager-slow"
+            | "native-worker-manager-rollback"
     ));
     let root = std::env::temp_dir().join(format!(
         "native-worker-manager-{}-{}",
@@ -353,4 +356,140 @@ fn actual_slow_predecessor_stop_keeps_original_end_pending_and_single_attempt() 
     assert!(uncertain && pending_retained);
     assert_eq!(original_end, end);
     assert_eq!(trace.unwrap(), b"original-stop\n");
+}
+
+#[test]
+fn actual_happy_path_rollback_preserves_native_artifacts_and_restores_only_previous() {
+    let (mut state, root, _program) = rollback_fixture();
+    let native = state.unit.clone();
+    let previous = state.previous.clone().unwrap();
+    let source = state.source.clone();
+    let body = state.run(WorkerServiceAction::Rollback {
+        start_previous: false,
+    });
+    let closed = state.close();
+    let finish = if body.is_ok() && closed.is_ok() {
+        state.finish_attempt()
+    } else {
+        Ok(())
+    };
+    let current = fs::read_link(root.join(".config/systemd/user").join(UNIT));
+    let retained = fs::read_link(state.folder().join("rolled-back-native-unit"));
+    let env = fs::read_to_string(state.folder().join("rolled-back-native-environment"));
+    let pending = state.folder().join("pending").exists();
+    assert!(closed.is_ok(), "{closed:?}");
+    fs::remove_dir_all(root).unwrap();
+    assert!(body.is_ok(), "{body:?}");
+    assert!(finish.is_ok());
+    assert_eq!(current.unwrap(), previous);
+    assert_eq!(retained.unwrap(), native);
+    assert_eq!(env.unwrap(), environment(&source).unwrap());
+    assert!(!pending);
+}
+#[test]
+fn actual_rollback_rejects_unsettled_run_and_changed_source_before_unit_move() {
+    let (mut state, root, _program) = rollback_fixture();
+    let current = state.home.join(".config/systemd/user").join(UNIT);
+    let native = state.unit.clone();
+    write_owned_test(
+        &state.folder().join("native-running"),
+        b"original native custody",
+    );
+    let running = state.run(WorkerServiceAction::Rollback {
+        start_previous: false,
+    });
+    fs::remove_file(state.folder().join("native-running")).unwrap();
+    fs::write(&state.source, b"changed original selection").unwrap();
+    let changed = state.run(WorkerServiceAction::Rollback {
+        start_previous: false,
+    });
+    let closed = state.close();
+    let unchanged =
+        fs::read_link(current).unwrap() == native && !state.folder().join("pending").exists();
+    assert!(closed.is_ok());
+    fs::remove_dir_all(root).unwrap();
+    assert!(matches!(
+        running,
+        Err(WorkerServiceError::Refused(
+            "NATIVE_SERVICE_ROLLBACK_REQUIRES_QUIESCENCE"
+        ))
+    ));
+    assert!(matches!(
+        changed,
+        Err(WorkerServiceError::Refused(
+            "NATIVE_SERVICE_ROLLBACK_SOURCE_CHANGED"
+        ))
+    ));
+    assert!(unchanged);
+}
+#[test]
+fn actual_rollback_starts_previous_only_when_explicitly_selected() {
+    let (mut state, root, _program) = rollback_fixture();
+    let body = state.run(WorkerServiceAction::Rollback {
+        start_previous: true,
+    });
+    let closed = state.close();
+    let finish = if body.is_ok() && closed.is_ok() {
+        state.finish_attempt()
+    } else {
+        Ok(())
+    };
+    let started = root.join("manager-started").is_file();
+    assert!(closed.is_ok());
+    fs::remove_dir_all(root).unwrap();
+    assert!(body.is_ok(), "{body:?}");
+    assert!(finish.is_ok());
+    assert!(started);
+}
+fn rollback_fixture() -> (State, PathBuf, PathBuf) {
+    use sha2::Digest;
+    let (state, root, program) = fixture_mode("native-worker-manager-rollback");
+    prepare_predecessor(&state);
+    fs::remove_file(state.home.join(".config/systemd/user").join(UNIT)).unwrap();
+    std::os::unix::fs::symlink(
+        &state.unit,
+        state.home.join(".config/systemd/user").join(UNIT),
+    )
+    .unwrap();
+    fs::DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(state.folder())
+        .unwrap();
+    write_owned_test(&state.source, b"{\"owned\":\"bootstrap fixture\"}\n");
+    write_owned_test(
+        &state.folder().join("environment"),
+        environment(&state.source).unwrap().as_bytes(),
+    );
+    write_owned_test(
+        &state.folder().join("previous-generation"),
+        state
+            .previous
+            .as_ref()
+            .unwrap()
+            .as_os_str()
+            .as_encoded_bytes(),
+    );
+    std::os::unix::fs::symlink(
+        state.previous.as_ref().unwrap(),
+        state.folder().join("previous-unit"),
+    )
+    .unwrap();
+    let digest = format!(
+        "{:x}",
+        sha2::Sha256::digest(fs::read(&state.source).unwrap())
+    );
+    write_owned_test(&state.folder().join("source-sha256"), digest.as_bytes());
+    (state, root, program)
+}
+fn write_owned_test(path: &Path, bytes: &[u8]) {
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(path)
+        .unwrap();
+    file.write_all(bytes).unwrap();
+    file.sync_all().unwrap();
+    native::close(file).unwrap();
 }

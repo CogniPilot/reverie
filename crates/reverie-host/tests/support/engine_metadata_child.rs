@@ -26,6 +26,14 @@ fn main() {
     let executable = env::current_exe().unwrap();
     let mode = executable.file_name().unwrap().to_str().unwrap();
     match mode {
+        "native-worker-manager-rollback" => {
+            if args == ["--user", "daemon-reload"] { std::fs::write("manager-reloaded", b"known fixed reload").unwrap();return; }
+            if args == ["--user", "start", "reverie-worker-broker.service"] { std::fs::write("manager-started", b"known fixed start").unwrap();return; }
+            assert_eq!(args, ["--user", "show", "reverie-worker-broker.service", "--property=LoadState", "--property=ActiveState", "--property=SubState", "--property=FragmentPath"]);
+            let target=std::fs::read_link(".config/systemd/user/reverie-worker-broker.service").unwrap();
+            let (active,sub)=if std::path::Path::new("manager-started").exists(){("active","running")}else{("inactive","dead")};
+            print!("LoadState=loaded\nActiveState={active}\nSubState={sub}\nFragmentPath={}\n",target.display());
+        },
         "native-worker-manager-legacy" | "native-worker-manager-slow" => {
             if args == ["--user", "stop", "reverie-worker-broker.service"] {
                 let mut trace = std::fs::OpenOptions::new().append(true).create(true).open("manager-stops").unwrap();writeln!(trace,"original-stop").unwrap();
