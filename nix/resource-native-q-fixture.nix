@@ -18,9 +18,9 @@ in {
   console = fixtureConsole;
   image = pkgs.dockerTools.buildLayeredImage {
     name = "reverie-native-q-fixture";
-    tag = "source-fixture";
+    tag = "source-fixture-flock-v1";
     created = "1970-01-01T00:00:01Z";
-    contents = [ fixtureConsole pkgs.nodejs_22 client ];
+    contents = [ fixtureConsole pkgs.nodejs_22 client (pkgs.lib.getBin pkgs.util-linux) ];
     extraCommands = ''
       mkdir -p etc fixture run/reverie-native-q tmp
       printf 'root:x:0:0:root:/root:/bin/false\nfixture:x:1000:100:Fixture:/fixture/home:/bin/false\n' > etc/passwd
@@ -36,6 +36,7 @@ in {
         "REVERIE_DATA=/fixture/instance" "REVERIE_DATA_DIR=/fixture/data"
         "REVERIE_CASES_PATH=/fixture/cases" "REVERIE_SHARED_WORKSPACE_PATH=/fixture/workspace"
         "REVERIE_SHARED_ATTACHMENTS_PATH=/fixture/attachments" "REVERIE_NO_AUTOSTART=1"
+        "REVERIE_FLOCK_BIN=${pkgs.lib.getBin pkgs.util-linux}/bin/flock"
       ];
     };
   };
