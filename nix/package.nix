@@ -355,7 +355,7 @@ let
         test/session-select-ack-gate.test.ts test/session-settings-recovery.test.ts test/session-sidebar-ux.test.ts \
         test/session-state.test.ts test/session-submit-anchor.test.ts
       npm test -- test/session-switcher.test.ts test/session-trust-dialog.test.ts test/session-wait-registry.test.ts \
-        test/session-watching.test.ts test/session-worktree-label.test.ts test/session.test.ts test/settings-apply-button.test.ts \
+        test/session-watching.test.ts test/session-worktree-label.test.ts test/session.test.ts test/settings-apply-button.test.ts test/settle-children.test.ts \
         test/shell-scroll-history-pull.test.ts test/shell-session-launch.test.ts test/shift-enter-keypress-swallowed.test.ts \
         test/shortcut-registry-overlay.test.ts test/signal-target.test.ts test/skin-themes.test.ts test/span-displays.test.ts \
         test/spawned-tabs-follow-setting.test.ts \
