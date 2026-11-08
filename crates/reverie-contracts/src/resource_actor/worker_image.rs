@@ -116,6 +116,15 @@ impl WorkerImageProvenance {
     pub fn manifest(&self) -> &CodeFile {
         &self.manifest
     }
+    pub fn elf_machine(&self) -> u16 {
+        u16::try_from(
+            unsigned(field(&self.child, "elfMachine").expect("validated child"))
+                .expect("validated integer")
+                .to_u64()
+                .expect("validated machine"),
+        )
+        .expect("ELF machine")
+    }
     pub fn toolkit(&self) -> &[CodeFile] {
         &self.toolkit
     }
