@@ -99,7 +99,7 @@ enum Holder {
     Live(Entry),
     /// Proven gone, or its pid reused by another process.
     Stale,
-    /// Already removed by someone else.
+    /// Removed by someone else between listing and reading (proven by `symlink_metadata`).
     Removed,
     Unknown(String),
 }
@@ -107,7 +107,14 @@ enum Holder {
 fn classify(path: &Path, proc: &Path) -> Holder {
     let bytes = match fs::read(path) {
         Ok(bytes) => bytes,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Holder::Removed,
+        // Gone only if the entry itself is: a dangling symlink also reads as NotFound, but still exists.
+        Err(error)
+            if error.kind() == io::ErrorKind::NotFound
+                && fs::symlink_metadata(path)
+                    .is_err_and(|missing| missing.kind() == io::ErrorKind::NotFound) =>
+        {
+            return Holder::Removed;
+        }
         Err(error) => return Holder::Unknown(format!("unreadable ({error})")),
     };
     let entry: Entry = match serde_json::from_slice(&bytes) {

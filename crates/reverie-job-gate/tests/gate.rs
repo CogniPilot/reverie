@@ -254,6 +254,17 @@ fn a_reservation_filed_under_another_pid_is_kept_and_refuses() {
 }
 
 #[test]
+fn a_dangling_reservation_link_is_kept_and_refuses() {
+    let seat = Seat::new("dangling-holder", &format!("{}\n", 100 * MIB), &stat(1));
+    std::os::unix::fs::symlink(
+        seat.root.join("nowhere.json"),
+        seat.ledger().join("4242.json"),
+    )
+    .unwrap();
+    refuses_and_keeps(&seat, Path::new("/proc"), "4242.json");
+}
+
+#[test]
 fn a_holder_whose_process_state_is_unknown_is_kept_and_refuses() {
     let seat = Seat::new("unknown-stat", &format!("{}\n", 100 * MIB), &stat(1));
     let proc = seat.root.join("proc");
