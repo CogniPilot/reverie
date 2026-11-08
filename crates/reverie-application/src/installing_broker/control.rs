@@ -309,8 +309,10 @@ impl Frame<'_> {
         Ok(())
     }
     fn close_transport(&mut self) -> Result<(), Cause> {
-        self.connection.close_socket_for_worker()?;
-        self.close_health_readers()?;
+        let socket = self.connection.close_socket_for_worker();
+        let readers = self.close_health_readers();
+        socket?;
+        readers?;
         if let Some(cause) = &self.identity_unknown {
             return Err(Cause::Identity(Arc::clone(cause)));
         }
