@@ -1,6 +1,7 @@
 //! Synthetic compared metadata only selects our own process/owned child. These
 //! controls do not attest an engine, website, image, peer program or owner.
 use super::*;
+use crate::native::owned_process as process;
 use reverie_contracts::resource_actor::{
     CodeFile, EngineMetadata, ProgramSelection, WebsiteSelection,
 };
@@ -8,10 +9,14 @@ use reverie_core::{PythonText, ids::ContainerId};
 use serde_json::json;
 use sha2::{Digest, Sha256};
 use std::{
+    io::{self, Write},
+    os::fd::OwnedFd,
     os::unix::fs::MetadataExt,
     process::{Child, Command, Stdio},
     time::Duration,
 };
+const READY: &[u8] = b"WEBSITE_SNAPSHOT_CHILD_READY\n";
+type TestResult<T> = std::result::Result<T, String>;
 fn end() -> Instant {
     Instant::now() + Duration::from_secs(5)
 }
@@ -78,38 +83,114 @@ fn actual_self_snapshot_matches_kernel_executable_namespaces_and_raw_cmdline_has
         format!("{:x}", Sha256::digest(argv))
     );
 }
-fn finish(child: &mut Child) -> std::process::ExitStatus {
-    drop(child.stdin.take());
-    let deadline = end();
+fn finish(child: &mut Child) -> TestResult<std::process::ExitStatus> {
+    let input = child
+        .stdin
+        .take()
+        .map(|file| process::close(file.into()))
+        .transpose();
+    let status = reap(child);
+    match (status, input) {
+        (Ok(status), Ok(_)) => Ok(status),
+        (status, input) => Err(format!(
+            "owned child settlement: {status:?}; stdin: {input:?}"
+        )),
+    }
+}
+fn reap(child: &mut Child) -> TestResult<std::process::ExitStatus> {
+    let mut deadline = end();
+    let mut killed = false;
     loop {
-        if let Some(status) = child.try_wait().unwrap() {
-            return status;
+        if let Some(status) = child.try_wait().map_err(|error| error.to_string())? {
+            return Ok(status);
         }
         if Instant::now() >= deadline {
-            child.kill().unwrap();
-            return child.wait().unwrap();
+            if killed {
+                return Err("original child reap remains unknown after one kill".into());
+            }
+            killed = true;
+            child.kill().map_err(|error| error.to_string())?;
+            deadline = end();
+        }
+        std::thread::sleep(Duration::from_millis(2));
+    }
+}
+fn child(ready: bool) -> Child {
+    Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--ignored",
+            "--exact",
+            "website_facts::process::tests::snapshot_child",
+        ])
+        .env(
+            "REVERIE_WEBSITE_SNAPSHOT_CHILD",
+            if ready { "1" } else { "0" },
+        )
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap()
+}
+fn await_ready(output: &OwnedFd, deadline: Instant) -> TestResult<()> {
+    process::nonblocking(output).map_err(|error| error.to_string())?;
+    let mut raw = Vec::new();
+    loop {
+        let mut chunk = [0; 512];
+        match process::read(output, &mut chunk) {
+            Ok(0) => {
+                return Err(format!(
+                    "child EOF before Ready: {}",
+                    String::from_utf8_lossy(&raw)
+                ));
+            }
+            Ok(count) => {
+                raw.extend_from_slice(&chunk[..count]);
+                if raw.len() > 4096 {
+                    return Err("owned child Ready output exceeded bound".into());
+                }
+                if raw.windows(READY.len()).any(|window| window == READY) {
+                    return Ok(());
+                }
+            }
+            Err(error) if error.kind() == io::ErrorKind::WouldBlock => {}
+            Err(error) => return Err(error.to_string()),
+        }
+        if Instant::now() >= deadline {
+            return Err("owned child Ready deadline".into());
         }
         std::thread::sleep(Duration::from_millis(2));
     }
 }
 #[test]
 fn actual_owned_child_snapshot_keeps_parent_and_inherited_namespace_data() {
-    let mut child = Command::new(std::env::current_exe().unwrap())
-        .args([
-            "--ignored",
-            "--exact",
-            "website_facts::process::tests::snapshot_child",
-        ])
-        .env("REVERIE_WEBSITE_SNAPSHOT_CHILD", "1")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .unwrap();
+    let mut child = child(true);
+    let output: OwnedFd = child.stdout.take().expect("fixed piped stdout").into();
     let mut observer = WebsiteProcessObserver::default();
-    let result = observer.observe_init(&metadata(child.id()), end());
+    // Exec completion is not user-main readiness. Observe once only after the
+    // actual fixed child announces that it has reached its stdin wait.
+    let body = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        await_ready(&output, end())?;
+        observer
+            .observe_init(&metadata(child.id()), end())
+            .map_err(|error| error.to_string())
+    }));
     let status = finish(&mut child);
+    let closed = process::close(output);
+    if status.is_err() {
+        eprintln!("original child {} retained: {status:?}", child.id());
+        std::mem::forget(child);
+    }
+    if closed.is_err() {
+        eprintln!("original stdout consumed-close remains unconfirmed: {closed:?}");
+    }
+    let result = match body {
+        Ok(result) => result,
+        Err(primary) => std::panic::resume_unwind(primary),
+    };
     let snapshot = result.unwrap();
+    let status = status.unwrap();
+    closed.unwrap();
     assert!(status.success());
     assert_eq!(
         snapshot.parent().to_u64(),
@@ -119,6 +200,21 @@ fn actual_owned_child_snapshot_keeps_parent_and_inherited_namespace_data() {
         .observe_init(&metadata(std::process::id()), end())
         .unwrap();
     assert_eq!(snapshot.namespaces(), parent.namespaces());
+}
+#[test]
+fn actual_failed_snapshot_child_cannot_supply_ready_and_is_reaped_before_verdict() {
+    let mut child = child(false);
+    let output: OwnedFd = child.stdout.take().expect("fixed piped stdout").into();
+    let ready = await_ready(&output, end());
+    let status = finish(&mut child);
+    let closed = process::close(output);
+    if status.is_err() {
+        eprintln!("original child {} retained: {status:?}", child.id());
+        std::mem::forget(child);
+    }
+    assert!(ready.is_err(), "failed child must never announce Ready");
+    assert!(!status.unwrap().success());
+    closed.unwrap();
 }
 #[test]
 fn actual_consumed_descriptor_close_failure_latches_observer_without_retry() {
@@ -143,6 +239,8 @@ fn snapshot_child() {
         std::env::var("REVERIE_WEBSITE_SNAPSHOT_CHILD").unwrap(),
         "1"
     );
+    std::io::stdout().write_all(READY).unwrap();
+    std::io::stdout().flush().unwrap();
     use std::io::Read;
     let mut byte = [0];
     let _ = std::io::stdin().read(&mut byte);
