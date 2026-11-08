@@ -48,11 +48,13 @@ pub(crate) use control::{
     open_admission,
 };
 mod policy;
+mod private_stamp;
+pub(crate) use private_stamp::PrivateFileStamp;
 pub(crate) mod private_goal;
 pub(crate) use lease::observe_ops_private;
 pub(crate) use lease::observe_with_ancestors;
 pub(crate) use policy::{
-    EntryStat, PolicyEntryStamp, create_policy_temporary, entry_stat, named_policy_entry,
+    PolicyEntryStamp, create_policy_temporary, entry_stat, named_policy_entry,
     open_policy_child_directory, open_policy_original, policy_effective_uid, replace_policy,
 };
 pub(crate) use reservation::{
