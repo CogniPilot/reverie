@@ -10,6 +10,9 @@ mod reuse_finalization;
 /// data or permission. Keeping the Arc prevents address reuse while observed.
 #[derive(Clone)]
 pub(super) struct LaunchGeneration(Arc<Generation>);
+pub(super) struct DrainingOwner {
+    generation: LaunchGeneration,
+}
 struct Generation {
     serial: UnsignedInteger,
 }
@@ -95,6 +98,33 @@ impl InstalledWorker {
     }
 }
 impl<'a> LaptopLifecycle<'a> {
+    pub(super) fn begin_control_drain(&mut self) -> Result<DrainingOwner, GateError> {
+        if self.guard.draining || !self.guard.transients_empty() {
+            return Err(GateError::Refused("WORKER_STOP_ACTIVE_LAUNCH_OR_VIEWER"));
+        }
+        self.guard.generation = LaunchGeneration(Arc::new(Generation {
+            serial: self
+                .guard
+                .generation
+                .serial()
+                .plus(&UnsignedInteger::from_u64(1)),
+        }));
+        self.guard.draining = true;
+        Ok(DrainingOwner {
+            generation: self.guard.generation.clone(),
+        })
+    }
+    pub(super) fn finish_control_drain(&mut self, owner: &DrainingOwner) -> Result<(), GateError> {
+        if !self.guard.draining
+            || !Arc::ptr_eq(&self.guard.generation.0, &owner.generation.0)
+            || !self.guard.transients_empty()
+            || !self.guard.is_empty()
+        {
+            return Err(GateError::Refused("WORKER_STOP_DRAIN_RETAINED"));
+        }
+        self.guard.draining = false;
+        Ok(())
+    }
     pub(super) fn stopped_ram_generation(
         &self,
         sid: &ProfileSessionId,

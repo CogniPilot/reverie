@@ -18,6 +18,7 @@ use crate::{
 pub use error::SourceStopError;
 use error::{Result, need};
 use identity::StopIdentity;
+pub use legacy::{ControlLaptopStop, ControlStopCensus};
 pub use legacy::{OrdinaryLaptopReturned, OrdinaryLaptopStop, OrdinaryLaptopStopRetainFailure};
 pub use ordinary::{
     OrdinaryReplacementReturned, OrdinaryReplacementStop, OrdinaryStopRetainFailure,

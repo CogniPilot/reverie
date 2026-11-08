@@ -5,8 +5,10 @@ use crate::worker_launch::{ExistingLaptopInspection, ObservedCreatePlan};
 use reverie_core::ids::{ContainerId, ProfileSessionId};
 use std::{ffi::OsString, time::Duration};
 mod container;
+mod control;
 mod network;
 mod owner;
+pub use control::{ControlLaptopStop, ControlStopCensus};
 pub use owner::{OrdinaryLaptopReturned, OrdinaryLaptopStop, OrdinaryLaptopStopRetainFailure};
 
 #[derive(Clone, Copy, Eq, PartialEq)]

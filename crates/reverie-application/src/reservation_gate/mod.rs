@@ -75,6 +75,7 @@ use std::{
     thread::ThreadId,
     time::Instant,
 };
+pub(crate) use stop_admission::FleetStopAdmission;
 
 pub struct ReservationGate {
     inner: Arc<Inner>,

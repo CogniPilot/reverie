@@ -33,8 +33,9 @@ pub use started_finalization::StartedStorageFinalizer;
 mod storage;
 mod storage_cleanup;
 pub use started_transfer::{
-    StartedOrdinaryStopTransferFailure, StartedOrdinaryStopTransferred,
-    StartedReplacementStopTransferFailure, StartedReplacementStopTransferred,
+    StartedControlStopTransferred, StartedOrdinaryStopTransferFailure,
+    StartedOrdinaryStopTransferred, StartedReplacementStopTransferFailure,
+    StartedReplacementStopTransferred,
 };
 mod started_source;
 pub use started_source::{

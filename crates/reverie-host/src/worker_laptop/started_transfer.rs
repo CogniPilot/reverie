@@ -7,7 +7,9 @@ use crate::{
     worker_source_stop::{OrdinaryLaptopStop, OrdinaryReplacementStop},
 };
 use std::sync::MutexGuard;
+mod control;
 mod error;
+pub use control::StartedControlStopTransferred;
 pub use error::{StartedOrdinaryStopTransferFailure, StartedReplacementStopTransferFailure};
 
 #[must_use = "retain the actual stop and original Office through cleanup"]

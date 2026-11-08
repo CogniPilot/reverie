@@ -7,6 +7,7 @@ pub use bootstrap::{BootstrapSettlementError, BrokerBootstrapCause, BrokerBootst
 pub use chat_images::{ChatImageHandlerClosed, ChatImageHandlerFailure, ChatImagesError};
 #[cfg(test)]
 mod bootstrap_tests;
+mod control;
 mod creation;
 mod goal_custody;
 mod gpu_access;
