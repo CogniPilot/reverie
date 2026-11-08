@@ -10,9 +10,11 @@ mod existing_viewer;
 pub(in crate::installing_broker) use existing_viewer::{
     ExistingStorageError, ExistingStoragePreparation, ExistingStorageReturned,
 };
+mod control_stop;
 mod nix;
 mod observed;
 mod ordinary_stop;
+pub(in crate::installing_broker) use control_stop::ControlStorageStop;
 mod preparation;
 mod recovery_lifetime;
 mod replacement_stop;
@@ -63,6 +65,7 @@ enum EntryOwner {
     Laptop(reverie_host::worker_laptop::LaptopWorkflow),
     ReplacementStop(Arc<Mutex<reverie_host::worker_source_stop::OrdinaryReplacementStop>>),
     OrdinaryStop(Arc<Mutex<reverie_host::worker_source_stop::OrdinaryLaptopStop>>),
+    ControlStop(Arc<Mutex<reverie_host::worker_source_stop::ControlLaptopStop>>),
     Existing(Arc<reverie_host::worker_laptop::ExistingViewer>),
 }
 enum FinalizingStorage {
@@ -281,6 +284,7 @@ fn require_direct_release(owner: &EntryOwner) -> Result<(), StorageWorkflowError
         EntryOwner::StoppedRam(_) => "RAM_STOPPED_SOURCE_RETAINED",
         EntryOwner::ReplacementStop(_) => "WORKER_REPLACEMENT_STOP_RETAINED",
         EntryOwner::OrdinaryStop(_) => "WORKER_ORDINARY_STOP_RETAINED",
+        EntryOwner::ControlStop(_) => "WORKER_CONTROL_STOP_RETAINED",
     };
     Err(StorageWorkflowError::refused(code))
 }

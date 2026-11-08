@@ -38,6 +38,14 @@ impl std::error::Error for RecoveryDataError {}
 type Result<T> = std::result::Result<T, RecoveryDataError>;
 pub struct RecoveryNames(Vec<(ProfileSessionId, WorkerContainerName)>);
 impl RecoveryNames {
+    /// Complete stop inventory cannot silently skip an unmanaged label/name.
+    pub fn decode_complete_stop(base: &WorkerBase, stdout: &str) -> Result<Self> {
+        let names = Self::decode(base, stdout)?;
+        if names.entries().len() != crate::reservation_engine::splitlines(stdout).len() {
+            return Err(RecoveryDataError::InspectionUnavailable);
+        }
+        Ok(names)
+    }
     pub fn decode(base: &WorkerBase, stdout: &str) -> Result<Self> {
         let lines = crate::reservation_engine::splitlines(stdout);
         if lines.iter().collect::<BTreeSet<_>>().len() != lines.len() {

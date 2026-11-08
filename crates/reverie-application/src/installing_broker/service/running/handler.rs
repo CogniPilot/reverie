@@ -14,6 +14,7 @@ use reverie_host::worker_reports::{
 mod tests;
 
 enum Retained<'a> {
+    Control(Box<crate::installing_broker::control::ControlFailure<'a>>),
     Launch(HandlerReturned<'a>),
     Images(Box<ChatImageHandlerFailure>),
     Goal(Box<GoalCustodyHandlerFailure>),
@@ -28,6 +29,13 @@ struct Stack<'a> {
 impl Stack<'_> {
     fn reconcile(&mut self) -> WorkerHandlerDisposition {
         self.owner = match self.owner.take() {
+            Some(Retained::Control(mut owner)) => {
+                if owner.reconcile() {
+                    None
+                } else {
+                    Some(Retained::Control(owner))
+                }
+            }
             Some(Retained::Launch(mut owner)) => {
                 if owner.reconcile() == WorkerHandlerDisposition::Finalized {
                     None
@@ -70,6 +78,7 @@ impl Stack<'_> {
     }
     fn cause(&self) -> Option<String> {
         match &self.owner {
+            Some(Retained::Control(owner)) => Some(owner.to_string()),
             Some(Retained::Launch(owner)) => owner.diagnostics.last().cloned(),
             Some(Retained::Images(owner)) => Some(owner.to_string()),
             Some(Retained::Goal(owner)) => Some(owner.to_string()),
@@ -206,10 +215,14 @@ fn read(
         .receive_service_for_worker(broker.command_telemetry(), snapshot.configuration())?)
 }
 fn service<'a>(
-    broker: &'a InstallingBroker,
+    broker: &'a Arc<InstallingBroker>,
     connection: WorkerServiceConnection,
 ) -> Option<Retained<'a>> {
     match connection.purpose() {
+        WorkerServicePurpose::Control => match broker.handle_control(connection) {
+            Ok(()) => None,
+            Err(owner) => Some(Retained::Control(owner)),
+        },
         WorkerServicePurpose::ChatImages => match broker.handle_chat_images(connection) {
             Ok(closed) => {
                 if let Some(error) = closed.primary_error() {
