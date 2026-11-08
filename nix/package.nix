@@ -244,7 +244,7 @@ let
       npm test -- test/docker-exec-options.test.ts test/docker-export.test.ts test/docker-hosts.test.ts test/docker-memory-policy.test.ts test/docker-self-update.test.ts \
         test/doctor-cli-json.test.ts test/document-conversion-limiter.test.ts test/document-preview-cache-eviction.test.ts \
         test/document-preview-cache.test.ts test/document-thumbnailer.test.ts test/dropped-output-recovery.test.ts \
-        test/effort-injection.test.ts test/embassy-guest-client.test.ts test/embassy-guest-policy.test.ts test/embassy-guest-ui.test.ts \
+        test/effort-injection.test.ts test/embassy-guest-avatars.test.ts test/embassy-guest-client.test.ts test/embassy-guest-policy.test.ts test/embassy-guest-ui.test.ts \
         test/embassy-pairing-api-client.test.ts test/embassy-pairing-cancel-fence.test.ts test/embassy-pairing-cold-retirement.test.ts \
         test/embassy-pairing-protocol.test.ts test/embassy-pairing.test.ts test/embassy-qr.test.ts test/embassy-sidebar-errors.test.ts \
         test/employee-alert-mode-commit.test.ts test/employee-alert-mode.test.ts test/employee-journal-correction-chains.test.ts \

@@ -161,6 +161,12 @@ export interface EmbassyHostDeps {
   transport?: EmbassyChannelTransport;
   now?: () => number;
   localStatus?: () => Promise<{ builtin: boolean; needsAdvertisedOrigin: boolean }>;
+  /** The owner's pictures for this room's guests: listed in the status, deleted on revoke and close. */
+  guestAvatars?: {
+    urls(): Promise<Record<string, string>>;
+    remove(requestId: string): Promise<boolean>;
+    removeAll(): Promise<number>;
+  };
 }
 
 export class EmbassyHost {
@@ -278,6 +284,7 @@ export class EmbassyHost {
     bindingId?: string;
     builtin?: boolean;
     needsAdvertisedOrigin?: boolean;
+    guestAvatars?: Record<string, string>;
   }> {
     try {
       const res = await this.call('GET', '');
@@ -288,7 +295,16 @@ export class EmbassyHost {
         .update(`reverie-embassy-binding-v1\n${this.digest}\n${origin}\n${room.id}`)
         .digest('hex')
         .slice(0, 32);
-      return { status: 'ready', origin, room: { id: room.id, name: room.name }, bindingId, ...(await this.deps.localStatus?.()) };
+      // An unreadable picture map leaves the pictures out; it never makes the room look unreachable.
+      const guestAvatars = await this.deps.guestAvatars?.urls().catch(() => undefined);
+      return {
+        status: 'ready',
+        origin,
+        room: { id: room.id, name: room.name },
+        bindingId,
+        ...(await this.deps.localStatus?.()),
+        ...(guestAvatars ? { guestAvatars } : {}),
+      };
     } catch (error) {
       if (error instanceof EmbassyPairError && error.code === 'HOSTING_UNCONFIGURED') return { status: 'unconfigured' };
       return { status: 'unreachable' };
@@ -340,8 +356,7 @@ export class EmbassyHost {
   }
 
   async listInvites() {
-    const res = await this.call('GET', '/invites');
-    const { invites } = this.parsed(z.object({ invites: z.array(Invite).max(1000) }), res.body);
+    const invites = await this.invites();
     const now = this.now();
     return invites.map((invite) => ({
       inviteId: invite.id,
@@ -351,9 +366,35 @@ export class EmbassyHost {
     }));
   }
 
+  private async invites() {
+    const res = await this.call('GET', '/invites');
+    return this.parsed(z.object({ invites: z.array(Invite).max(1000) }), res.body).invites;
+  }
+
+  /** Refuses unless `requestId` is a current guest of the hosted room: its invite is not revoked and the pairing
+   * request is approved or claimed (connected). A pending, rejected, expired or unknown request is not a guest. */
+  async requireGuest(requestId: string): Promise<void> {
+    const guest =
+      UUID.test(requestId) &&
+      (await this.invites()).some(
+        (invite) =>
+          invite.requestId === requestId &&
+          !invite.revoked &&
+          (invite.requestState === 'approved' || invite.requestState === 'claimed')
+      );
+    if (!guest) throw new EmbassyPairError(404, 'NOT_FOUND', 'Not an approved guest of this room');
+  }
+
+  /** Revoking an invite revokes its guest too, so the guest's picture is deleted. */
   async revokeInvite(inviteId: string): Promise<{ revoked: true }> {
     if (!ID.test(inviteId)) throw new EmbassyPairError(404, 'NOT_FOUND', 'Invite not found');
+    const requestId = this.deps.guestAvatars
+      ? await this.invites()
+          .then((all) => all.find((invite) => invite.id === inviteId)?.requestId ?? null)
+          .catch(() => null)
+      : null;
     await this.call('DELETE', `/invites/${inviteId}`);
+    if (requestId) await this.deps.guestAvatars?.remove(requestId);
     return { revoked: true };
   }
 
@@ -406,9 +447,12 @@ export class EmbassyHost {
     return this.parsed(z.object({ room: z.object({ id: z.string(), name: label }) }), res.body);
   }
 
-  /** Close the hosted room: every invite and guest pairing is revoked and the room posts that it closed. */
+  /** Close the hosted room: every invite and guest pairing is revoked and the room posts that it closed. Every
+   * guest picture is deleted. */
   async close() {
     const res = await this.call('POST', '/close', {});
-    return this.parsed(z.object({ closed: z.literal(true), revoked: z.number().int().min(0) }), res.body);
+    const closed = this.parsed(z.object({ closed: z.literal(true), revoked: z.number().int().min(0) }), res.body);
+    await this.deps.guestAvatars?.removeAll();
+    return closed;
   }
 }

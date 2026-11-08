@@ -45,6 +45,7 @@ import { EmbassyGuestClient } from '../embassy-guest-client.js';
 import { registerEmbassyGuestRoutes } from './routes/embassy-guest-routes.js';
 import { registerEmbassyPairingRoutes } from './routes/embassy-pairing-routes.js';
 import { EmbassyHost } from '../embassy-host.js';
+import { EmbassyGuestAvatars } from '../embassy-guest-avatars.js';
 import { EmbassyPairing } from '../embassy-pairing.js';
 import { registerWorkspaceFileRoutes } from './routes/workspace-file-routes.js';
 import { registerBotsPageRoutes } from './routes/bots-page-routes.js';
@@ -1956,9 +1957,14 @@ export class WebServer extends EventEmitter {
           secretFile: dataPath('embassy-channel', 'secret'),
           origin: process.env.REVERIE_EMBASSY_ORIGIN,
         });
+    const embassyGuestAvatars = new EmbassyGuestAvatars(
+      new AvatarStore(dataPath('embassy-guest-avatars')),
+      dataPath('embassy-host', 'guest-avatars.json')
+    );
     this.embassyHost = new EmbassyHost({
       dir: dataPath('embassy-channel'),
       opsFile: dataPath('embassy-host', 'ops.json'),
+      guestAvatars: embassyGuestAvatars,
       transport: builtinEmbassy?.channelTransport,
       localStatus: builtinEmbassy
         ? async () => {
@@ -1976,8 +1982,13 @@ export class WebServer extends EventEmitter {
     }
     this.embassyPairing = new EmbassyPairing({ dir: dataPath('embassy-pairings'), guest: this.embassyGuestClient });
     await this.embassyPairing.init();
-    registerEmbassyPairingRoutes(this.app, this.embassyHost, this.embassyPairing, verifiedOwner, () =>
-      this.getHostPolicy()
+    registerEmbassyPairingRoutes(
+      this.app,
+      this.embassyHost,
+      this.embassyPairing,
+      verifiedOwner,
+      () => this.getHostPolicy(),
+      embassyGuestAvatars
     );
     registerOfficeRoutes(this.app, ownerAuth, this.chatroomService);
     registerChatroomRoutes(

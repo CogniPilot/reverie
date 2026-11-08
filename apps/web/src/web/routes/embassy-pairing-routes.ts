@@ -15,6 +15,9 @@ import {
 } from '../../embassy-host.js';
 import { EmbassyPairingCreateSchema, type EmbassyPairing } from '../../embassy-pairing.js';
 import { isAllowedRequestOrigin, type HostPolicy } from '../network-auth-policy.js';
+import { AvatarError, MAX_AVATAR_BYTES } from '../../agent-avatars.js';
+import type { EmbassyGuestAvatars } from '../../embassy-guest-avatars.js';
+import { isMultiUserMode } from '../../config/multiuser.js';
 
 /** Fixed, non-secret CSRF marker (integration pins r1 §1). A cross-origin page cannot send it: CORS never allows it. */
 export const EMBASSY_CSRF_HEADER = 'x-reverie-csrf';
@@ -29,7 +32,8 @@ export function registerEmbassyPairingRoutes(
   host: EmbassyHost,
   pairing: EmbassyPairing,
   verifiedOwner: OwnerVerifier,
-  getPolicy: () => HostPolicy
+  getPolicy: () => HostPolicy,
+  guestAvatars?: EmbassyGuestAvatars
 ): void {
   app.addHook('onRoute', (options) => {
     if (options.url.startsWith('/api/embassy-host') || options.url.startsWith('/api/embassy-pairing'))
@@ -56,6 +60,7 @@ export function registerEmbassyPairingRoutes(
         return { success: true, data: await fn(req) };
       } catch (error) {
         if (error instanceof EmbassyPairError) return refuse(reply, error.status, error.code, error.message);
+        if (error instanceof AvatarError) return refuse(reply, error.status, 'INVALID_IMAGE', error.message);
         if (error instanceof EmbassyGuestError) {
           const status = { INVALID_INPUT: 400, NOT_FOUND: 404, CONFLICT: 409, UPSTREAM: 502 }[error.code];
           return refuse(reply, status, error.code === 'UPSTREAM' ? 'EMBASSY_UNREACHABLE' : error.code, error.message);
@@ -127,6 +132,61 @@ export function registerEmbassyPairingRoutes(
       return host.close();
     })
   );
+
+  // ---------- guest pictures (host side) ----------
+  // The owner's picture for an approved or connected guest of the hosted room, shown in the host's own console. Set
+  // and remove go through the same owner/CSRF guard as every host route; single-owner mode only.
+  if (guestAvatars) {
+    const singleOwner = () => {
+      if (isMultiUserMode())
+        throw new EmbassyPairError(403, 'OWNER_ONLY', 'Guest pictures are not available in multi-user mode');
+    };
+    void app.register(async (scope) => {
+      scope.addContentTypeParser(
+        ['application/octet-stream', 'image/png', 'image/jpeg', 'image/gif', 'image/webp'],
+        { parseAs: 'buffer', bodyLimit: MAX_AVATAR_BYTES + 1024 },
+        (_req, body, done) => done(null, body)
+      );
+      scope.put(
+        '/api/embassy-host/guests/:requestId/avatar',
+        handle(async (req) => {
+          singleOwner();
+          const requestId = param(req, 'requestId');
+          await host.requireGuest(requestId);
+          return { url: await guestAvatars.set(requestId, req.body) };
+        })
+      );
+    });
+    app.delete(
+      '/api/embassy-host/guests/:requestId/avatar',
+      handle(async (req) => {
+        singleOwner();
+        return { removed: await guestAvatars.remove(param(req, 'requestId')) };
+      })
+    );
+    // An <img> cannot send the CSRF marker, so this read checks the rest of the guard itself: a signed-in owner, no
+    // agent session, an absent or allowed Origin. The picture is served like an agent's, and never to another site.
+    app.get('/api/embassy-host/guests/:requestId/avatar', async (req, reply) => {
+      const origin = req.headers.origin;
+      if (
+        req.headers['x-reverie-parent-session'] !== undefined ||
+        isMultiUserMode() ||
+        origin === 'null' ||
+        (origin !== undefined && !isAllowedRequestOrigin(origin, getPolicy())) ||
+        !verifiedOwner(req)
+      )
+        return refuse(reply, 403, 'OWNER_ONLY', 'Guest pictures are for the signed-in owner');
+      const stored = await guestAvatars.get(param(req, 'requestId'));
+      if (!stored) return refuse(reply, 404, 'NOT_FOUND', 'No picture for this guest');
+      return reply
+        .header('Content-Type', stored.type)
+        .header('X-Content-Type-Options', 'nosniff')
+        .header('Content-Security-Policy', "default-src 'none'; sandbox")
+        .header('Cross-Origin-Resource-Policy', 'same-origin')
+        .header('Cache-Control', 'private, max-age=86400')
+        .send(stored.data);
+    });
+  }
 
   // ---------- guest side ----------
   app.post(
