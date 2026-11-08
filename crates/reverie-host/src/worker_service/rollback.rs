@@ -7,11 +7,7 @@ impl State {
         observed.require_action_finished(&WorkerServiceAction::Stop)?;
         self.assert_rollback_quiescent()?;
         self.assert_legacy_selection()?;
-        let stored = self.read_private(&self.folder().join("source-sha256"))?;
-        need(
-            stored == self.source_digest()?,
-            "NATIVE_SERVICE_ROLLBACK_SOURCE_CHANGED",
-        )?;
+        self.assert_rollback_source()?;
         let previous = self.previous.clone().ok_or(WorkerServiceError::Refused(
             "NATIVE_SERVICE_PREDECESSOR_NOT_PACKAGED",
         ))?;
@@ -101,6 +97,38 @@ impl State {
             )?;
         }
         Ok(())
+    }
+    fn assert_rollback_source(&mut self) -> Result<()> {
+        use sha2::Digest;
+        let stored = self.read_private(&self.folder().join("source-sha256"))?;
+        let current = self.source_snapshot()?;
+        if stored == current.digest {
+            return Ok(());
+        }
+        let backup = self.folder().join("source-original.json");
+        if fs::symlink_metadata(&backup)
+            .is_err_and(|error| error.kind() == std::io::ErrorKind::NotFound)
+        {
+            return Err(WorkerServiceError::Refused(
+                "NATIVE_SERVICE_ROLLBACK_SOURCE_CHANGED",
+            ));
+        }
+        let original = self.read_private(&backup)?;
+        need(
+            format!("{:x}", sha2::Sha256::digest(original.as_bytes())) == stored,
+            "NATIVE_SERVICE_ROLLBACK_ORIGINAL_CHANGED",
+        )?;
+        let before = reverie_contracts::worker_config::decode(original.as_bytes())
+            .map_err(|_| WorkerServiceError::Refused("NATIVE_SERVICE_ROLLBACK_SOURCE_CHANGED"))?;
+        let after = reverie_contracts::worker_config::decode(current.raw.as_bytes())
+            .map_err(|_| WorkerServiceError::Refused("NATIVE_SERVICE_ROLLBACK_SOURCE_CHANGED"))?;
+        // The established image-only transition preserves worker policy and
+        // the native child's bare-record ABI also serves the predecessor.
+        // Retain that selected image; never rewrite the owner's configuration.
+        need(
+            reverie_contracts::worker_config::image_only_equivalent(&before, &after),
+            "NATIVE_SERVICE_ROLLBACK_SOURCE_CHANGED",
+        )
     }
 }
 fn absent(path: &Path, code: &'static str) -> Result<()> {

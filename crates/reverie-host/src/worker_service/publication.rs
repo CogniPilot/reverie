@@ -189,8 +189,12 @@ impl State {
             &folder.join("previous-generation"),
             observed.fragment.as_os_str().as_encoded_bytes(),
         )?;
-        let source_digest = self.source_digest()?;
-        self.exclusive(&folder.join("source-sha256"), source_digest.as_bytes())?;
+        let original = self.source_snapshot()?;
+        self.exclusive(
+            &folder.join("source-original.json"),
+            original.raw.as_bytes(),
+        )?;
+        self.exclusive(&folder.join("source-sha256"), original.digest.as_bytes())?;
         self.exclusive(
             &folder.join("environment"),
             environment(&self.source)?.as_bytes(),
@@ -239,12 +243,15 @@ fn owned_unit_directory(path: &Path) -> Result<()> {
 }
 
 impl State {
-    pub(super) fn source_digest(&mut self) -> Result<String> {
+    pub(super) fn source_snapshot(&mut self) -> Result<SourceSnapshot> {
         use sha2::Digest;
         let source = self.source.clone();
-        Ok(format!(
-            "{:x}",
-            sha2::Sha256::digest(self.read_private(&source)?.as_bytes())
-        ))
+        let raw = self.read_private(&source)?;
+        let digest = format!("{:x}", sha2::Sha256::digest(raw.as_bytes()));
+        Ok(SourceSnapshot { raw, digest })
     }
+}
+pub(super) struct SourceSnapshot {
+    pub(super) raw: String,
+    pub(super) digest: String,
 }
