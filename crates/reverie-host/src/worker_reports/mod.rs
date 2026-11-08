@@ -16,10 +16,12 @@ pub use protected_launch::{
     HeldProtectedWorkerLaunch, ProtectedLaunchDecodeFailure, ProtectedLaunchHoldFailure,
     WorkerProtectedLaunchConnection,
 };
-mod resume;
 mod peer_pin;
+mod resume;
 mod service_connection;
-pub use resume::{WorkerActorChannel, WorkerActorChannelFailure};
+pub use resume::{
+    ResourceJournalError, ResourceJournalPin, WorkerActorChannel, WorkerActorChannelFailure,
+};
 pub use service_connection::{
     AcceptedWorkerServiceConnection, WorkerPeer, WorkerServiceConnection, WorkerServicePurpose,
 };

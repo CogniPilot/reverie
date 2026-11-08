@@ -31,6 +31,9 @@ impl Frame<'_> {
     fn retain_stateless_error(&mut self, cause: ResourceActorError) -> ResourceActorError {
         match cause {
             ResourceActorError::Gate(error) => self.retain_gate_error(*error),
+            ResourceActorError::Channel(error) if error.has_unconfirmed_close() => {
+                self.retain_gate_error(GateError::Actor(Box::new(error.into())))
+            }
             ResourceActorError::Observer(ObserverError::Kernel(error))
                 if error.has_unconfirmed_close() =>
             {

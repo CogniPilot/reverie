@@ -48,6 +48,7 @@ impl ResourceActorError {
             Self::RetainedGateClose(error) => gate_close_unknown(error),
             Self::Gate(error) => gate_close_unknown(error),
             Self::Observer(error) => error.has_unconfirmed_close(),
+            Self::Channel(error) => error.has_unconfirmed_close(),
             Self::RetainedCompanyClose(error) => error.has_unconfirmed_close(),
             Self::RetainedKernelClose(error) => error.has_unconfirmed_close(),
             Self::RetainedControlClose(error) => error.has_unconfirmed_close(),
@@ -82,6 +83,7 @@ impl std::error::Error for ResourceActorError {
 }
 pub(super) fn gate_close_unknown(error: &GateError) -> bool {
     match error {
+        GateError::Actor(error) => error.has_unconfirmed_close(),
         GateError::Profile(error) => error.has_unconfirmed_close(),
         GateError::Journal(error) => journal_close_unknown(error),
         GateError::Observer(error) => error.has_unconfirmed_close(),

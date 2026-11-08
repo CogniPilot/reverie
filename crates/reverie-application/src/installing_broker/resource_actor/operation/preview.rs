@@ -1,5 +1,18 @@
 use super::*;
 impl AuthenticatedResourceOperation<'_> {
+    pub(crate) fn retain_ram_journal_pin(
+        &self,
+        gate: &crate::reservation_gate::ReservationGate,
+    ) -> Result<reverie_host::worker_reports::ResourceJournalPin> {
+        self.assert_reservation_gate(gate)?;
+        let frame = &self.website.frame;
+        let Transport::Retained(channel) = &frame.transport else {
+            return Err(ResourceActorError::Refused("RESOURCE_ACTOR_CHANNEL_STATE"));
+        };
+        channel
+            .retain_resource_journal_pin(&frame.broker.reports)
+            .map_err(|error| GateError::Actor(Box::new(error)).into())
+    }
     pub(crate) fn ram_admission_bounds(
         &self,
         gate: &crate::reservation_gate::ReservationGate,

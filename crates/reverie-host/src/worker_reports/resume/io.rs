@@ -134,20 +134,8 @@ impl WorkerActorChannel {
     }
     pub(super) fn ended(&self) -> Result<bool> {
         let peer = self.peer.as_ref().ok_or(WorkerReportError::Unconfirmed)?;
-        let mut fds = [nix::poll::PollFd::new(
-            peer.as_fd(),
-            nix::poll::PollFlags::POLLIN,
-        )];
-        let ready = nix::poll::poll(&mut fds, nix::poll::PollTimeout::ZERO)
-            .map_err(|error| WorkerReportError::Io(error.into()))?;
-        if ready != 0 {
-            let flags = fds[0].revents().ok_or(WorkerReportError::Unconfirmed)?;
-            if flags.intersects(nix::poll::PollFlags::POLLERR | nix::poll::PollFlags::POLLNVAL) {
-                return Err(WorkerReportError::Unconfirmed);
-            }
-            return Ok(
-                flags.intersects(nix::poll::PollFlags::POLLIN | nix::poll::PollFlags::POLLHUP)
-            );
+        if peer.ended()? {
+            return Ok(true);
         }
         let slot = self.connection.record.terminal_stream()?;
         let stream = slot.as_ref().ok_or(WorkerReportError::Unconfirmed)?;

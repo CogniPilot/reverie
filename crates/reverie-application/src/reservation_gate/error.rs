@@ -1,6 +1,7 @@
 use super::*;
 #[derive(Debug)]
 pub enum GateError {
+    Actor(Box<reverie_host::worker_reports::ResourceJournalError>),
     RamPolicy(reverie_contracts::ram_migration::RamMigrationError),
     OriginalSource(Box<crate::installing_broker::StorageWorkflowError>),
     SourceStopData(reverie_contracts::worker_source_stop::SourceStopDataError),
@@ -64,6 +65,7 @@ pub enum GateError {
 impl GateError {
     pub fn code(&self) -> &'static str {
         match self {
+            Self::Actor(error) => error.code(),
             Self::RamPolicy(error) => error.code(),
             Self::OriginalSource(error) => error.code(),
             Self::SourceStopData(error) => error.code(),
@@ -127,6 +129,7 @@ impl std::fmt::Display for GateError {
 impl std::error::Error for GateError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
+            Self::Actor(error) => Some(error.as_ref()),
             Self::RamPolicy(error) => Some(error),
             Self::OriginalSource(error) => Some(error.as_ref()),
             Self::SourceStopData(error) => Some(error),
