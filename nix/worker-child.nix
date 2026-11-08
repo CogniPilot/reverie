@@ -1,23 +1,15 @@
 { pkgs, src }:
+# reverie-worker-child from the shared build in host-tools.nix, which compiles reverie-host once for several tools.
 let
-  # Only this package's crate closure, so an unrelated change keeps its cached build.
-  workspace = import ./rust-workspace-source.nix {
-    inherit pkgs src;
-    members = [ "reverie-contracts" "reverie-core" "reverie-diagnostics" "reverie-host" "reverie-http" "reverie-python-regex" "reverie-store" "reverie-worker-child" ];
-    vendors = [ "rustpython-sre-engine" "rustpython-wtf8" ];
-  };
+  tools = import ./host-tools.nix { inherit pkgs src; };
 in
-pkgs.rustPlatform.buildRustPackage {
-  pname = "reverie-worker-child";
-  version = "0.1.0";
-  src = workspace.source;
-  cargoLock.lockFile = workspace.lockFile;
-  cargoBuildFlags = [ "-p" "reverie-worker-child" ];
-  cargoTestFlags = [ "-p" "reverie-worker-child" ];
-  doCheck = true;
+pkgs.runCommand "reverie-worker-child-0.1.0" {
   meta = {
     description = "Fixed-purpose native in-worker launch record and pane lifecycle";
     license = pkgs.lib.licenses.mit;
     platforms = pkgs.lib.platforms.linux;
   };
-}
+} ''
+  mkdir -p "$out/bin"
+  ln -s ${tools}/bin/reverie-worker-child "$out/bin/reverie-worker-child"
+''
