@@ -1,5 +1,7 @@
 //! The bootstrap selector must refuse a live/foreign predecessor before any
 //! selection write. The native capture fixture never invokes the user manager.
+#[path = "tests/fragment.rs"]
+mod fragment;
 use super::*;
 #[test]
 fn installed_generation_must_be_inactive_and_exact_before_replacement() {

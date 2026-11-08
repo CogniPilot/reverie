@@ -32,7 +32,8 @@ fn main() {
             assert_eq!(args, ["--user", "show", "reverie-worker-broker.service", "--property=LoadState", "--property=ActiveState", "--property=SubState", "--property=FragmentPath", "--property=DropInPaths"]);
             let target=std::fs::read_link(".config/systemd/user/reverie-worker-broker.service").unwrap();
             let (active,sub)=if std::path::Path::new("manager-started").exists(){("active","running")}else{("inactive","dead")};
-            print!("LoadState=loaded\nActiveState={active}\nSubState={sub}\nFragmentPath={}\nDropInPaths=\n",target.display());
+            let fragment=if std::path::Path::new("manager-fragment-link").is_file(){env::current_dir().unwrap().join(".config/systemd/user/reverie-worker-broker.service")}else{target};
+            print!("LoadState=loaded\nActiveState={active}\nSubState={sub}\nFragmentPath={}\nDropInPaths=\n",fragment.display());
         },
         "native-worker-manager-legacy" | "native-worker-manager-slow" => {
             if args == ["--user", "stop", "reverie-worker-broker.service"] {
