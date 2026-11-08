@@ -1391,6 +1391,7 @@ dependencies = [
  "nix",
  "reverie-application",
  "reverie-contracts",
+ "reverie-core",
  "reverie-host",
  "serde_json",
  "sha2",

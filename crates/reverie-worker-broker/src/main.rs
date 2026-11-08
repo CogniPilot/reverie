@@ -9,6 +9,7 @@ use reverie_host::{
     worker_runtime::WorkerRuntime,
 };
 use std::{path::PathBuf, process::ExitCode};
+mod image;
 mod manifest;
 mod service;
 
@@ -24,6 +25,12 @@ struct Arguments {
 }
 #[derive(Subcommand)]
 enum Role {
+    /// Qualify, preview and apply an offline worker-image pin through the native
+    /// application service. This never loads images or recreates laptops.
+    Image {
+        #[command(subcommand)]
+        action: image::Action,
+    },
     /// Validate an existing configuration and print its snapshot digest as JSON.
     /// Reads the file and its declared host paths without starting the broker.
     CheckConfig {
@@ -68,6 +75,7 @@ fn main() -> ExitCode {
 }
 fn run(arguments: Arguments) -> Result<(), Box<dyn std::error::Error>> {
     match arguments.command {
+        Role::Image { action } => image::run(action),
         Role::CheckConfig { config } => {
             let snapshot = load_owner_config(&config).inspect_err(|error| {
                 eprintln!("Configuration validation stage: {:?}", error.stage());
@@ -102,9 +110,7 @@ fn serve(config: PathBuf, offer: bool) -> Result<(), Box<dyn std::error::Error>>
         .ok_or("NATIVE_SERVICE_ORIGINAL_SOURCE_REQUIRED")?
         .to_owned();
     reverie_host::worker_service::assert_no_service_failure(&source)?;
-    let program = option_env!("REVERIE_FIXED_NATIVE_WORKER_ENGINE")
-        .ok_or("NATIVE_WORKER_BROKER_PACKAGED_ENGINE_REQUIRED")?;
-    let engine = InstalledWorkerEngine::new(EngineBootstrap::capture(program.as_ref())?);
+    let engine = captured_engine()?;
     let run_fence = reverie_host::worker_service::begin_service_run(&source)?;
     // A delayed start may span a completed image transition. Publish the run
     // fence first, then load the snapshot that the runtime will actually own.
@@ -139,18 +145,36 @@ fn serve(config: PathBuf, offer: bool) -> Result<(), Box<dyn std::error::Error>>
         .map_err(|primary| fenced_failure(&source, primary))?;
     Ok(())
 }
+fn captured_engine() -> Result<InstalledWorkerEngine, Box<dyn std::error::Error>> {
+    let program = option_env!("REVERIE_FIXED_NATIVE_WORKER_ENGINE")
+        .ok_or("NATIVE_WORKER_BROKER_PACKAGED_ENGINE_REQUIRED")?;
+    Ok(InstalledWorkerEngine::new(EngineBootstrap::capture(
+        program.as_ref(),
+    )?))
+}
 
 #[cfg(test)]
 mod tests {
     use super::*;
     #[test]
     fn image_preview_accepts_exact_pinned_profile_inputs_without_an_engine_override() {
-        let args = ["broker", "image", "preview", "--config", "/owner/reverie/broker.json",
-            "--provenance", "/nix/store/profile/worker-image.json", "--provenance-sha256",
+        let args = [
+            "broker",
+            "image",
+            "preview",
+            "--config",
+            "/owner/reverie/broker.json",
+            "--provenance",
+            "/nix/store/profile/worker-image.json",
+            "--provenance-sha256",
             "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-            "--child-annex", "/nix/store/profile/worker-child-image.json", "--child-annex-sha256",
+            "--child-annex",
+            "/nix/store/profile/worker-child-image.json",
+            "--child-annex-sha256",
             "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-            "--image", "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"];
+            "--image",
+            "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        ];
         assert!(Arguments::try_parse_from(args).is_ok());
         let mut foreign = args.to_vec();
         foreign.extend(["--engine", "/caller/program"]);
@@ -158,16 +182,31 @@ mod tests {
     }
     #[test]
     fn image_apply_requires_the_explicit_preview_and_original_operation() {
-        let args = ["broker", "image", "apply", "--config", "/owner/reverie/broker.json",
-            "--provenance", "/nix/store/profile/worker-image.json", "--provenance-sha256",
+        let args = [
+            "broker",
+            "image",
+            "apply",
+            "--config",
+            "/owner/reverie/broker.json",
+            "--provenance",
+            "/nix/store/profile/worker-image.json",
+            "--provenance-sha256",
             "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-            "--child-annex", "/nix/store/profile/worker-child-image.json", "--child-annex-sha256",
+            "--child-annex",
+            "/nix/store/profile/worker-child-image.json",
+            "--child-annex-sha256",
             "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-            "--image", "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"];
+            "--image",
+            "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        ];
         assert!(Arguments::try_parse_from(args).is_err());
         let mut selected = args.to_vec();
-        selected.extend(["--expected-preview", "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
-            "--operation-id", "10000000-0000-4000-8000-000000000001"]);
+        selected.extend([
+            "--expected-preview",
+            "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+            "--operation-id",
+            "10000000-0000-4000-8000-000000000001",
+        ]);
         assert!(Arguments::try_parse_from(selected).is_ok());
     }
     #[test]
