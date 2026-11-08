@@ -89,6 +89,19 @@ export function quoteChatBody(text: string, roomId?: string, messageId?: string,
 /** A fragment within `max` UTF-16 units, including quote closure; code points and JSON escapes stay whole. */
 export function cutQuoted(fragment: string, max: number): string {
   if (fragment.length <= max) return fragment;
+  const { end, quoted } = quotedCutPoint(fragment, max);
+  return `${fragment.slice(0, end)}${quoted ? QUOTE_CLOSE : ''}`;
+}
+
+/** The ellipsis and quote that close a quoted string cut at `quotedCutPoint`; the next part reopens it with QUOTE_REOPEN. */
+export const QUOTE_CLOSE = `${ELLIPSIS}"`;
+export const QUOTE_REOPEN = `"${ELLIPSIS}`;
+
+/**
+ * Where `fragment` can be cut within `max` UTF-16 units, leaving room for QUOTE_CLOSE when the cut falls inside a quoted
+ * string (`quoted`); code points and JSON escapes stay whole.
+ */
+export function quotedCutPoint(fragment: string, max: number): { end: number; quoted: boolean } {
   let end = 0;
   let quoted = false;
   while (end < fragment.length) {
@@ -104,5 +117,5 @@ export function cutQuoted(fragment: string, max: number): string {
     end += size;
     quoted = nextQuoted;
   }
-  return `${fragment.slice(0, end)}${quoted ? `${ELLIPSIS}"` : ''}`;
+  return { end, quoted };
 }

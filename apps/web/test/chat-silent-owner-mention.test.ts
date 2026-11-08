@@ -3,6 +3,7 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ChatroomService } from '../src/chatroom-service.js';
+import { wakePayload } from './helpers/wake-payload.js';
 
 // Owner 10-20/21: an employee on Silent answers the owner only when he @mentions it or @everyone (the one
 // room-wide word; @all and @here are plain text). Vibrate and Ring are unchanged.
@@ -12,11 +13,11 @@ async function setup(mode?: 'ring' | 'vibrate' | 'silent', twin = false) {
   const twinWrites: string[] = [];
   const session = {
     id: 'a', name: 'Alpha', mode: 'claude', status: 'idle', isWorking: true, pid: 42,
-    writeViaMux: async (text: string) => { writes.push(text); return true; },
+    writeViaMux: async (text: string) => { writes.push(wakePayload(service, 'a', text)); return true; },
   };
   const other = {
     id: 'c', name: 'ALPHA', mode: 'claude', status: 'idle', isWorking: true, pid: 43,
-    writeViaMux: async (text: string) => { twinWrites.push(text); return true; },
+    writeViaMux: async (text: string) => { twinWrites.push(wakePayload(service, 'c', text)); return true; },
   };
   const sessions: Record<string, typeof session> = twin ? { a: session, c: other } : { a: session };
   const service = new ChatroomService({

@@ -1,4 +1,5 @@
 import { agentCommandPaths } from '../../cli-command-list.js';
+import type { AgentCapabilities } from '../../agent-capabilities.js';
 import { NO_OWNER, type OwnerVerifier } from '../../owner-auth/marks.js';
 /**
  * @fileoverview The server's board (board-types.ts): GET /api/board and its audited writes.
@@ -325,10 +326,40 @@ export function registerBoardRoutes(app: FastifyInstance, ctx: SessionPort & Par
     if (issue.status !== 'done') delete issue.doneAt;
   };
 
+  // The caller's capabilities, as the full Board view and the capability-only route both report them.
+  const capabilitiesOf = async (c: Caller, at: number): Promise<AgentCapabilities> => {
+    const company = deps.company(c.owner);
+    const boardAccess = permissions(c);
+    return {
+      checkedAt: at,
+      // The agent commands of the CLI built from this server's source, so a seat CLI can name what it lacks.
+      cli: { commands: await agentCommandPaths().catch(() => [] as string[]) },
+      identity: identityOf(c),
+      board: { read: true, fileIssue: boardAccess.editBoardIssues, editBoardIssues: boardAccess.editBoardIssues,
+        createDecision: structuredDecisionWrites && boardAccess.manageDecisions,
+        clearDecision: boardAccess.manageDecisions, manageBoard: boardAccess.manageBoard,
+        manageDecisions: boardAccess.manageDecisions,
+        reason: !structuredDecisionWrites ? 'Structured decision writes are disabled; saved answers are preserved. Current Board grants still apply.' : 'Current owner-selected Board permissions; absent grants retain owner-made membership compatibility. Titles and plan/recovery grants confer no Board authority.' },
+      company: {
+        manageOffice: c.kind === 'owner' || company.employees.find(e => e.id === c.memberId)?.permissions?.manageOffice === true,
+        recoverEmployees: c.kind === 'owner' || company.employees.find(e => e.id === c.memberId)?.permissions?.recoverEmployees === true,
+        moveOwnPlan: c.kind === 'owner' || !!company.employees.find(e => e.id === c.memberId && (e.permissions?.moveOwnPlan === true || e.permissions?.managePlans === true)),
+        managePlans: c.kind === 'owner' || company.employees.find(e => e.id === c.memberId)?.permissions?.managePlans === true,
+        manageGoals: c.kind === 'owner' || company.employees.find(e => e.id === c.memberId)?.permissions?.manageGoals === true,
+        goalPreconditions: 'Canonical Goal permission only. Requires the separately authenticated Goal broker, current same-company bindings and exact CAS. It does not control provider-native goals or grant verification, terminal decisions, adoption, grants or unblocker attestations.',
+        planPreconditions: 'Grant admission only. Current owned live source/target bindings, non-vacation employees, supported single-company plan/account and handoff approval are checked again by the plan action. Self runtime refresh additionally requires the unchanged current account and runtime; it grants no installation or session-creation permission.',
+      },
+    };
+  };
+
   // ---- read ----
   // Identity-only consumers must not load Board contents or depend on their size.
   app.get('/api/board/identity', async (req, reply) =>
     run(reply, async () => ({ identity: identityOf(caller(req)) }))
+  );
+  // Capability-only consumers (`reverie agent capabilities`) likewise skip Board contents.
+  app.get('/api/board/capabilities', async (req, reply) =>
+    run(reply, async () => ({ capabilities: await capabilitiesOf(caller(req), now()) }))
   );
   // What waits on the owner: open decisions and open polls without an owner vote. Backs the Board badge and the push.
   app.get('/api/board/waiting', async (req, reply) =>
@@ -341,7 +372,6 @@ export function registerBoardRoutes(app: FastifyInstance, ctx: SessionPort & Par
     run(reply, async () => {
       const c = caller(req);
       const company = deps.company(c.owner);
-      const boardAccess = permissions(c);
       const state = deps.store.snapshot();
       const at = now();
       const rooms = visibleRooms(c);
@@ -404,26 +434,7 @@ export function registerBoardRoutes(app: FastifyInstance, ctx: SessionPort & Par
         timeZone: company.settings.timeZone,
         ownerName: company.settings.ownerName,
         roster,
-        capabilities: {
-          checkedAt: at,
-          // The agent commands of the CLI built from this server's source, so a seat CLI can name what it lacks.
-          cli: { commands: await agentCommandPaths().catch(() => [] as string[]) },
-          identity: identityOf(c),
-          board: { read: true, fileIssue: boardAccess.editBoardIssues, editBoardIssues: boardAccess.editBoardIssues,
-            createDecision: structuredDecisionWrites && boardAccess.manageDecisions,
-            clearDecision: boardAccess.manageDecisions, manageBoard: boardAccess.manageBoard,
-            manageDecisions: boardAccess.manageDecisions,
-            reason: !structuredDecisionWrites ? 'Structured decision writes are disabled; saved answers are preserved. Current Board grants still apply.' : 'Current owner-selected Board permissions; absent grants retain owner-made membership compatibility. Titles and plan/recovery grants confer no Board authority.' },
-          company: {
-            manageOffice: c.kind === 'owner' || company.employees.find(e => e.id === c.memberId)?.permissions?.manageOffice === true,
-            recoverEmployees: c.kind === 'owner' || company.employees.find(e => e.id === c.memberId)?.permissions?.recoverEmployees === true,
-            moveOwnPlan: c.kind === 'owner' || !!company.employees.find(e => e.id === c.memberId && (e.permissions?.moveOwnPlan === true || e.permissions?.managePlans === true)),
-            managePlans: c.kind === 'owner' || company.employees.find(e => e.id === c.memberId)?.permissions?.managePlans === true,
-            manageGoals: c.kind === 'owner' || company.employees.find(e => e.id === c.memberId)?.permissions?.manageGoals === true,
-            goalPreconditions: 'Canonical Goal permission only. Requires the separately authenticated Goal broker, current same-company bindings and exact CAS. It does not control provider-native goals or grant verification, terminal decisions, adoption, grants or unblocker attestations.',
-            planPreconditions: 'Grant admission only. Current owned live source/target bindings, non-vacation employees, supported single-company plan/account and handoff approval are checked again by the plan action. Self runtime refresh additionally requires the unchanged current account and runtime; it grants no installation or session-creation permission.',
-          },
-        },
+        capabilities: await capabilitiesOf(c, at),
         ownerIds,
         // Same gate as GET /api/plans.
         planBurn: isAdmin(req) ? await planBurn(state) : null,

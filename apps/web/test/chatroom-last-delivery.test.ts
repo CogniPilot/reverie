@@ -64,17 +64,15 @@ describe('rooms of the last delivery', () => {
     expect(delivery.lastDeliveryRooms('p')).toBeUndefined();
   });
 
-  it('counts only the rooms of the fragments that fitted in the line, not of those left for the next one', async () => {
+  it('one wake stands for the whole batch, so it counts every room in it and leaves nothing for a next one', async () => {
     let clock = 1_000_000;
     const s = pane();
     const delivery = new ChatroomDelivery({ getSession: () => s, now: () => clock });
     delivery.enqueue('p', R1, `"a" -> everyone: "${'x'.repeat(2000)}"`, { messageId: 'm' });
     delivery.enqueue('p', R2, `"b" -> everyone: "${'y'.repeat(2000)}"`, { messageId: 'm' });
     await delivery.flushAll();
-    expect(delivery.lastDeliveryRooms('p')?.roomIds).toEqual(['room-1']);
-    clock += 60_000;
-    await delivery.flushAll();
-    expect(delivery.lastDeliveryRooms('p')?.roomIds).toEqual(['room-2']);
+    expect(delivery.lastDeliveryRooms('p')?.roomIds).toEqual(['room-1', 'room-2']);
+    expect(delivery.pendingFor('p')).toBe(0);
   });
 
   it('a re-briefing or a system notice about another room never moves the default room', async () => {

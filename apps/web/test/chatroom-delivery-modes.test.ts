@@ -3,7 +3,7 @@
  * a shell would execute it. The guard sits in flush(), the one place that writes.
  */
 import { describe, expect, it } from 'vitest';
-import { ChatroomDelivery, modePollsChat, paneAcceptsChat, type DeliverySession } from '../src/chatroom-delivery.js';
+import { ChatroomDelivery, WAKE_LINE, modePollsChat, paneAcceptsChat, paneWakes, type DeliverySession } from '../src/chatroom-delivery.js';
 import { STOCK_CLIS } from '../src/config/cli-registry/stock.js';
 
 function pane(id: string, mode: string): DeliverySession & { writes: string[] } {
@@ -35,9 +35,10 @@ describe('chatroom delivery by session mode', () => {
     await delivery.flush('agent');
     expect(session.writes).toHaveLength(1);
   });
-  it('types into agent panes but never into shell or unknown panes, and drops their queue', async () => {
+  it('wakes only a verified-composer agent pane, never with the text; other agents, shells and unknown panes get nothing', async () => {
     const sessions = new Map([
-      ['agent', pane('agent', 'opencode')],
+      ['agent', pane('agent', 'claude')],
+      ['unverified', pane('unverified', 'opencode')],
       ['shell', pane('shell', 'shell')],
       ['odd', pane('odd', 'something-new')],
     ]);
@@ -45,11 +46,15 @@ describe('chatroom delivery by session mode', () => {
     const room = { id: 'r', name: 'Room' };
     for (const id of sessions.keys()) delivery.enqueue(id, room, 'USER: rm -rf ~');
     await delivery.flushAll();
-    expect(sessions.get('agent')!.writes).toHaveLength(1);
-    expect(sessions.get('shell')!.writes).toEqual([]);
-    expect(sessions.get('odd')!.writes).toEqual([]);
-    expect(delivery.pendingFor('shell')).toBe(0);
-    expect(delivery.pendingFor('odd')).toBe(0);
+    expect(sessions.get('agent')!.writes).toEqual([`${WAKE_LINE}\r`]);
+    for (const id of ['unverified', 'shell', 'odd']) {
+      expect(sessions.get(id)!.writes).toEqual([]);
+      expect(delivery.pendingFor(id)).toBe(0);
+    }
+    expect(paneWakes('claude')).toBe(true);
+    expect(paneWakes('codex')).toBe(true);
+    expect(paneWakes('opencode')).toBe(false);
+    expect(paneWakes('shell')).toBe(false);
   });
 
   it('uses the shipped kind for stock CLIs; shells and unknown modes never', () => {
@@ -74,18 +79,14 @@ describe('chatroom delivery by session mode', () => {
     expect(delivery.pendingFor(hands.id)).toBe(0);
   });
 
-  it('types no control character: a stray DEL in any builder\'s text is turned into a space on the final line, and what does not fit waits', async () => {
-    const agent = pane('agent', 'opencode');
+  it('types only the constant wake, whatever the queued text holds, and one wake covers the whole batch', async () => {
+    const agent = pane('agent', 'claude');
     const delivery = new ChatroomDelivery({ getSession: () => agent, now: () => 1_000_000 });
     const room = { id: 'r', name: 'Room' };
     delivery.enqueue('agent', room, `USER -> you: x${String.fromCharCode(0x7f).repeat(5)}y${String.fromCharCode(0x85)}z`);
     for (let i = 1; i <= 6; i++) delivery.enqueue('agent', room, `"alpha" -> you: "${String(i).repeat(600)}"`);
     await delivery.flushAll();
-    const first = agent.writes.join('');
-    expect(new RegExp('[\\u0000-\\u0008\\u000a-\\u001f\\u007f-\\u009f]').test(first.slice(0, -1))).toBe(false);
-    expect(first.endsWith('\r')).toBe(true);
-    expect(first).not.toContain('more message');
-    // the messages that did not fit are still queued for the next delivery
-    expect(delivery.pendingFor('agent')).toBeGreaterThan(0);
+    expect(agent.writes).toEqual([`${WAKE_LINE}\r`]);
+    expect(delivery.pendingFor('agent')).toBe(0);
   });
 });

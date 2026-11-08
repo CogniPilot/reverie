@@ -11,6 +11,7 @@ import { join } from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import { createRouteTestHarness } from './_route-test-utils.js';
 import { createMockSession, type MockRouteContext } from '../mocks/index.js';
+import { pendingBriefings, pendingNotices, recordCarried } from '../helpers/wake-payload.js';
 import { ChatroomService } from '../../src/chatroom-service.js';
 import { ChatFileStore } from '../../src/chatroom-files.js';
 import { registerChatroomRoutes } from '../../src/web/routes/chatroom-routes.js';
@@ -27,10 +28,20 @@ describe('chatroom message editing and pins', () => {
   let service: ChatroomService;
   let clock: number;
   let file: string;
+  // A pane only gets the wake line. What reached a member is what its hook carried: the messages each wake carried
+  // (recordCarried), then its pending Reverie notices and briefings.
+  const carried = new Map<string, string[]>();
   const panes = (id: string): string =>
-    (ctx.sessions.get(id) as unknown as { writeBuffer: string[] }).writeBuffer.join('');
+    [...(carried.get(id) ?? []), pendingNotices(service, id), pendingBriefings(service, id)].filter(Boolean).join('\n');
+  const typed = (id: string): string[] => (ctx.sessions.get(id) as unknown as { writeBuffer: string[] }).writeBuffer;
+  /** As if each member's hook had shown everything so far. */
   const clearPanes = () => {
-    for (const s of [A, B]) (ctx.sessions.get(s) as unknown as { writeBuffer: string[] }).writeBuffer.length = 0;
+    for (const s of [A, B]) {
+      typed(s).length = 0;
+      carried.get(s)?.splice(0);
+      service.delivery.noticesShown(s, service.delivery.pendingNotices(s).map((n) => n.id));
+      service.delivery.briefShown(s, service.delivery.pendingBriefs(s).map((b) => b.roomId));
+    }
   };
   const as = (id?: string) => (id ? { 'x-reverie-parent-session': id } : {});
 
@@ -55,6 +66,7 @@ describe('chatroom message editing and pins', () => {
     ] as const) {
       const s = createMockSession(id);
       s.name = name;
+      carried.set(id, recordCarried(s as never, () => service));
       ctx.sessions.set(id, s as never);
     }
   });
@@ -148,16 +160,19 @@ describe('chatroom message editing and pins', () => {
       clock += 10_000;
       await service.delivery.flushAll();
       clearPanes();
-      (ctx.sessions.get(D) as unknown as { writeBuffer: string[] }).writeBuffer.length = 0;
+      typed(D).length = 0;
+      service.delivery.briefShown(D, service.delivery.pendingBriefs(D).map((b) => b.roomId));
       await edit(id, m, 'actually, do not deploy "X"');
       clock += 10_000;
       await service.delivery.flushAll();
       for (const s of [A, B]) {
         expect(panes(s)).toContain('SYSTEM: edited: ');
         expect(panes(s)).toContain('actually, do not deploy \\"X\\"');
-        expect(panes(s).trim().split('\r').filter(Boolean)).toHaveLength(1);
+        expect(service.delivery.pendingNotices(s)).toHaveLength(1); // one note each
       }
-      expect((ctx.sessions.get(D) as unknown as { writeBuffer: string[] }).writeBuffer.join('')).toBe('');
+      // The outsider never received the original: nothing typed, nothing for its hook.
+      expect(typed(D).join('')).toBe('');
+      expect(panes(D)).toBe('');
       const read = await app.inject({ method: 'GET', url: `/api/chatrooms/${id}/messages`, headers: as(D) });
       expect(read.json().data.messages.find((x: { id: string }) => x.id === m).text).toBe(
         'actually, do not deploy "X"'
@@ -311,7 +326,7 @@ describe('chatroom message editing and pins', () => {
         expect(text).not.toContain('Pinned in this room'); // no briefing
         expect(text).not.toContain('Members:');
         expect(text.length).toBeLessThan(400); // the quoted text is cut near 120 characters
-        expect(text.trim().split('\r').filter(Boolean)).toHaveLength(1);
+        expect(service.delivery.pendingNotices(s)).toHaveLength(1); // one note, not a briefing
       }
       clearPanes();
       await pin(id, rule, undefined, false);

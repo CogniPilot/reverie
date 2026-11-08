@@ -13,7 +13,7 @@ import {
   type OpencodeTypingIo,
 } from '../src/opencode-input.js';
 import { Session } from '../src/session.js';
-import { ChatroomDelivery, type DeliverySession } from '../src/chatroom-delivery.js';
+import { ChatroomDelivery, WAKE_LINE, type DeliverySession } from '../src/chatroom-delivery.js';
 import { withWriteGate } from '../src/submit-settle.js';
 
 const SHELL_FOOTER = '  ~/work\n\n  ! ls -la\n\n  esc exit shell mode                      enter send';
@@ -225,7 +225,7 @@ describe('who gets the guard', () => {
     expect(sendInput).toHaveBeenLastCalledWith(s.id, 'hello! world\r', undefined);
   });
 
-  it('chat delivery asks for the guard on every write, and the line goes out with the mode-appropriate text', async () => {
+  it('chat delivery types nothing into an OpenCode pane (no verified composer glyph); its member reads through its hooks', async () => {
     const writes: Array<{ data: string; options: unknown }> = [];
     const pane: DeliverySession = {
       id: 'p',
@@ -241,8 +241,29 @@ describe('who gets the guard', () => {
     const delivery = new ChatroomDelivery({ getSession: () => pane, now: () => 1_000_000 });
     delivery.enqueue('p', { id: 'r', name: 'Room' }, '"alpha" -> you: "done!"');
     await delivery.flushAll();
+    expect(writes).toEqual([]);
+    expect(delivery.pendingFor('p')).toBe(0);
+  });
+
+  it('a verified pane gets only the wake line, with the guard and the idle and empty-composer gates on the write', async () => {
+    const writes: Array<{ data: string; options: unknown }> = [];
+    const pane: DeliverySession = {
+      id: 'p',
+      name: 'p',
+      mode: 'claude',
+      isWorking: false,
+      pid: 1,
+      writeViaMux: async (data, options) => {
+        writes.push({ data, options });
+        return true;
+      },
+    };
+    const delivery = new ChatroomDelivery({ getSession: () => pane, now: () => 1_000_000 });
+    delivery.enqueue('p', { id: 'r', name: 'Room' }, '"alpha" -> you: "done!"');
+    await delivery.flushAll();
     expect(writes).toHaveLength(1);
-    expect(writes[0].options).toEqual({ opencodeGuard: true, requireEmptyComposer: true, onOutcome: expect.any(Function) });
-    expect(writes[0].data.endsWith('\r')).toBe(true);
+    expect(writes[0].data).toBe(`${WAKE_LINE}\r`);
+    expect(writes[0].options).toEqual({ opencodeGuard: true, requireEmptyComposer: true, requireIdle: true,
+      onIdleRefused: expect.any(Function), onOutcome: expect.any(Function) });
   });
 });

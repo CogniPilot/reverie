@@ -74,12 +74,8 @@ function fixture() {
     io: { out: (text) => output.push(text), err: (text) => output.push(text) },
     request: async (_ctx, request) => {
       calls.push(request);
-      if (request.path === '/api/board')
-        return {
-          status: 200,
-          text: '',
-          json: { success: true, data: { capabilities: { identity: { kind: 'agent', ...actor } } } },
-        };
+      if (request.path === '/api/board/identity')
+        return { status: 200, text: '', json: { success: true, data: { identity: { kind: 'agent', ...actor } } } };
       return {
         status,
         text: 'SECRET /private/token',
@@ -101,11 +97,13 @@ it('CLI performs only bounded own GETs and no material/install/probe request', a
   const f = fixture();
   expect(await agentCredentialStatus(f.deps)).toBe(0);
   expect(JSON.parse(f.output[0]!)).toMatchObject({ success: true, visibility: 'current-employee-grants-only' });
+  // Identity comes from the identity-only route, never the whole Board, so Board size cannot break it.
   expect(f.calls.map((call) => [call.method, call.path])).toEqual([
-    ['GET', '/api/board'],
+    ['GET', '/api/board/identity'],
     ['GET', '/api/publication/credentials/status'],
   ]);
   expect(f.calls.every((call) => !!call.bounds && call.body === undefined)).toBe(true);
+  expect(f.calls[0]!.bounds!.maxBytes).toBeLessThanOrEqual(16 * 1024);
   expect(f.output.join(' ')).not.toMatch(/SECRET|\/private/);
 });
 it.each([
