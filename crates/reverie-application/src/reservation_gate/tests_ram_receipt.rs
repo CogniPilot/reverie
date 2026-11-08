@@ -140,9 +140,13 @@ fn ordinary_publication_and_live_admission_cannot_rebase_ram_authority() {
                 .code(),
             expected
         );
+        assert_eq!(fixture.events(), events);
         if let Some(admission) = admission {
             admission.finish().unwrap();
         }
+        // The real admission finalizer performs its own native guard. Only
+        // the receipt call and its refused replay are metadata-only.
+        let events = fixture.events();
         assert_eq!(
             receipt
                 .rebase_ram_snapshot(Ok(&gate), &claim, &policy, &before)
