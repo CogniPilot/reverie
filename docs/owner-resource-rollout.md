@@ -28,6 +28,13 @@ enrollment under the existing account writer lock; reads never migrate them.
 Enrollment preserves all other account fields. Shared-office registration
 identity retains the actual ROOT office person ID and current session epoch;
 an account-local child identity cannot promote a limited person.
+Registration checks fresh canonical office roles, including external demotion
+or removal, without changing legacy cached identity behavior. Sessions retain
+their original credential fingerprint and optional incarnation; a legacy
+session cannot adopt a replacement account merely because its epoch matches.
+Only that session's own checked enrollment publication can bind its new UUID.
+Account bytes are synced and the temporary descriptor closes before rename;
+the existing policy-marker writer retains the parent-directory sync.
 
 This identity is provenance DATA, not host-pool administration or enrollment
 consent. Native registration must still retain the exact installation offer,

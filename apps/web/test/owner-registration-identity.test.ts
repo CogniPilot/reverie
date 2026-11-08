@@ -6,6 +6,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { bootstrap } from '../src/owner-auth/admin.js';
 import { OfficeAuthService } from '../src/owner-auth/office.js';
 import { OwnerAuthStore } from '../src/owner-auth/store.js';
+import { writeCompanyStateFile } from '../src/company-store.js';
 
 const password = 'Synthetic-registration-fixture-42!';
 let directory: string, store: OwnerAuthStore, auth: OfficeAuthService, primary: string;
@@ -162,3 +163,77 @@ it('refuses malformed credential fields in valid current JSON without using a se
   await expect(auth.enrollRegistrationIdentity(primary)).rejects.toThrow();
   expect(await readFile(store.file, 'utf8')).toBe(raw);
 });
+
+it.each(['current', 'legacy'] as const)(
+  'never binds a legacy token to a real %s replacement setup at the same epoch',
+  async (format) => {
+    await store.update((account) => {
+      delete account.accountId;
+    });
+    auth.logout(primary);
+    primary = (await auth.login('fixture-primary', password, '127.0.0.1')).session!;
+    const originalEpoch = store.readCurrent()!.epoch;
+    await rm(store.file);
+    await rm(store.markerFile);
+    const replacement = new OfficeAuthService({
+      store: new OwnerAuthStore(store.file),
+      auditFile: join(directory, 'replacement-audit.jsonl'),
+      setupEnabled: true,
+    });
+    const next = await replacement.setup('fixture-primary', password, password, '127.0.0.1');
+    try {
+      const current = replacement.registrationIdentity(next);
+      expect(current.sessionEpoch).toBe(originalEpoch);
+      // The second case also covers an older replacement's no-UUID projection:
+      // optional-ID equality alone cannot distinguish those account births.
+      if (format === 'legacy')
+        await store.update((account) => {
+          delete account.accountId;
+        });
+      const replacementRaw = await readFile(store.file, 'utf8');
+      expect(auth.identity(primary)).toMatchObject({ id: 'owner', username: 'fixture-primary' });
+      expect(() => auth.registrationIdentity(primary)).toThrow();
+      await expect(auth.enrollRegistrationIdentity(primary)).rejects.toThrow();
+      expect(await readFile(store.file, 'utf8')).toBe(replacementRaw);
+      if (format === 'current') expect(replacement.registrationIdentity(next)).toEqual(current);
+    } finally {
+      replacement.logout(next);
+    }
+  }
+);
+
+it('refuses fresh mustChange at the same epoch despite the original unrestricted local session', async () => {
+  const member = await person('owner');
+  const local = auth.forSession(member.token);
+  const before = local.registrationIdentity(member.token);
+  await member.store.update((account) => {
+    account.mustChange = true;
+  });
+  expect(member.store.readCurrent()!.epoch).toBe(before.sessionEpoch);
+  expect(() => local.registrationIdentity(member.token)).toThrow();
+  await expect(local.enrollRegistrationIdentity(member.token)).rejects.toThrow();
+  expect(member.store.readCurrent()!.accountId).toBe(before.accountId);
+});
+
+it.each(['limited', 'disabled', 'removed', 'corrupt'] as const)(
+  'refuses externally published %s office authority while ordinary cached identity is unchanged',
+  async (change) => {
+    const member = await person('owner');
+    const original = auth.registrationIdentity(member.token);
+    const accountRaw = await readFile(member.store.file, 'utf8');
+    const peopleFile = join(directory, 'office-people.json');
+    const canonical = JSON.parse(await readFile(peopleFile, 'utf8'));
+    if (change === 'removed') canonical.people = canonical.people.filter((p: { id: string }) => p.id !== member.id);
+    else if (change === 'limited' || change === 'disabled') {
+      const person = canonical.people.find((p: { id: string }) => p.id === member.id);
+      if (change === 'limited') person.role = 'limited';
+      else person.disabled = true;
+    }
+    await writeCompanyStateFile(peopleFile, change === 'corrupt' ? '{broken' : JSON.stringify(canonical));
+    expect(auth.identity(member.token)).toMatchObject({ id: member.id, role: 'owner' });
+    expect(member.store.readCurrent()!.epoch).toBe(original.sessionEpoch);
+    expect(() => auth.registrationIdentity(member.token)).toThrow();
+    await expect(auth.enrollRegistrationIdentity(member.token)).rejects.toThrow();
+    expect(await readFile(member.store.file, 'utf8')).toBe(accountRaw);
+  }
+);

@@ -142,7 +142,7 @@ export class OfficeAuthService extends OwnerAuthService {
   override registrationIdentity(token: string | undefined): OwnerRegistrationIdentity {
     const person = this.identity(token),
       session = this.session(token);
-    if (!person || person.role !== 'owner' || !session || session.restricted)
+    if (!person || person.role !== 'owner' || !session || session.restricted || !this.isMessageOwner(person.id))
       throw new OwnerAuthError('Current unrestricted office owner is required', 403);
     const account = this.forSession(token);
     const identity = account === this ? super.registrationIdentity(token) : account.registrationIdentity(token);
@@ -152,7 +152,7 @@ export class OfficeAuthService extends OwnerAuthService {
   override async enrollRegistrationIdentity(token: string | undefined): Promise<OwnerRegistrationIdentity> {
     const person = this.identity(token),
       session = this.session(token);
-    if (!person || person.role !== 'owner' || !session || session.restricted)
+    if (!person || person.role !== 'owner' || !session || session.restricted || !this.isMessageOwner(person.id))
       throw new OwnerAuthError('Current unrestricted office owner is required', 403);
     const account = this.forSession(token);
     const enrolled =
