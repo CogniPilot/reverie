@@ -21,7 +21,12 @@
     ['memoryHighMiB', 'memoryMaxMiB', 'cpuWeight'].every((key) => value[key] === null || Number.isFinite(value[key])) &&
     (value.perfEnabled === null || typeof value.perfEnabled === 'boolean');
   const pool = (value) =>
-    policy({ ...value, perfEnabled: false }) &&
+    value &&
+    ['memoryMaxMiB', 'cpuWeight'].every((key) => Number.isSafeInteger(value[key]) && value[key] > 0) &&
+    (value.memoryHighMiB === null ||
+      (Number.isSafeInteger(value.memoryHighMiB) &&
+        value.memoryHighMiB > 0 &&
+        value.memoryHighMiB < value.memoryMaxMiB)) &&
     Array.isArray(value.allowedCpus) &&
     value.allowedCpus.every((cpu) => Number.isSafeInteger(cpu) && cpu >= 0);
   const operation = (value) =>
@@ -352,7 +357,13 @@
       );
       if (data.pool.desired) {
         const value = data.pool.desired;
-        const high = this.number(poolBox, 'Pool soft RAM (MiB)', value.memoryHighMiB);
+        let highValue = () => null;
+        if (value.memoryHighMiB === null) {
+          poolBox.append(s.el('p', 'ca-hint', 'Pool soft RAM is unbounded; the hard pool ceiling still applies.'));
+        } else {
+          const high = this.number(poolBox, 'Pool soft RAM (MiB)', value.memoryHighMiB);
+          highValue = () => Number(high.value);
+        }
         const max = this.number(poolBox, 'Pool hard RAM (MiB)', value.memoryMaxMiB);
         const cpu = this.number(poolBox, 'Pool CPU weight', value.cpuWeight);
         const label = s.el('label', 'ca-label');
@@ -363,7 +374,7 @@
         label.append(s.el('span', '', 'Allowed CPUs (comma-separated)'), this.cpus);
         poolBox.append(label);
         this.poolValues = () => ({
-          memoryHighMiB: Number(high.value),
+          memoryHighMiB: highValue(),
           memoryMaxMiB: Number(max.value),
           cpuWeight: Number(cpu.value),
           allowedCpus: this.cpus.value.split(',').map((value) => Number(value.trim())),

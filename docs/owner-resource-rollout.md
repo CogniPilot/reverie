@@ -45,6 +45,13 @@ Perf availability requires the image tool, selected task policy, host support
 and a real successful profiling check. Docker's memory reservation is not
 verification of `memory.high`.
 
+For the shared parent, a required `memoryHighMiB: null` means a known unbounded
+soft threshold (`memory.high=max`); the finite `memoryMaxMiB` still applies.
+An entire `pool.observed: null` means the pool has not been verified. Missing
+threshold fields do not mean unbounded. Employee requested soft thresholds
+remain finite and below their hard ceilings. Legacy finite parent thresholds
+retain their existing representation and editor.
+
 ## Host executor acceptance still required
 
 The rollout target is the repository-packaged Rust controller running in Docker,

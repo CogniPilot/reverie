@@ -5,6 +5,13 @@ const EmployeeId = z.string().uuid();
 const Reference = z.string().min(1).max(200);
 const MemoryMiB = z.number().int().min(512).max(1048576);
 const CpuWeight = z.number().int().min(1).max(10000);
+function handoffCharactersAllowed(value: string): boolean {
+  for (let index = 0; index < value.length; index++) {
+    const code = value.charCodeAt(index);
+    if ((code < 32 && code !== 9 && code !== 10 && code !== 13) || code === 127) return false;
+  }
+  return true;
+}
 export const FleetPolicySchema = z
   .object({
     memoryHighMiB: MemoryMiB,
@@ -18,16 +25,19 @@ export const FleetPolicySchema = z
   });
 export const FleetPoolSchema = z
   .object({
-    memoryHighMiB: MemoryMiB,
+    // Required null means a known unbounded parent soft threshold, not unknown.
+    memoryHighMiB: MemoryMiB.nullable(),
     memoryMaxMiB: MemoryMiB,
     cpuWeight: CpuWeight,
     allowedCpus: z.array(z.number().int().min(0).max(65535)).min(1).max(4096),
   })
   .strict()
   .refine(
-    (value) => value.memoryHighMiB < value.memoryMaxMiB && new Set(value.allowedCpus).size === value.allowedCpus.length,
+    (value) =>
+      (value.memoryHighMiB === null || value.memoryHighMiB < value.memoryMaxMiB) &&
+      new Set(value.allowedCpus).size === value.allowedCpus.length,
     {
-      message: 'Use a soft threshold below the pool ceiling and unique CPU identifiers',
+      message: 'Use an unbounded soft threshold or one below the pool ceiling, and unique CPU identifiers',
     }
   );
 export const FleetPreviewRequestSchema = z
@@ -40,12 +50,7 @@ export const FleetPreviewRequestSchema = z
       .max(256),
     pool: FleetPoolSchema,
     canaryEmployeeId: EmployeeId,
-    handoff: z
-      .string()
-      .trim()
-      .min(1)
-      .max(12000)
-      .refine((value) => !/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(value)),
+    handoff: z.string().trim().min(1).max(12000).refine(handoffCharactersAllowed),
   })
   .strict()
   .superRefine((value, context) => {
@@ -99,6 +104,7 @@ export interface FleetStatus {
   canPreview: boolean;
   blockers: FleetBlocker[];
   images: Array<{ id: string; label: string }>;
+  /** Outer null is unavailable/unknown; an object's high=null is known unbounded. */
   pool: { desired: FleetPool | null; observed: FleetPool | null };
   employees: FleetEmployee[];
   /** Null means host history could not be read; it is never proof of no pending rollout. */
