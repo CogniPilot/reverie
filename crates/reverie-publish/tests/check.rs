@@ -508,3 +508,33 @@ fn concurrent_checks_on_one_store_share_no_copy_and_leave_none() {
         .collect();
     assert_eq!(runs.len(), 2, "{runs:?}");
 }
+
+#[test]
+fn a_commit_already_in_the_store_but_not_in_the_bundle_refuses() {
+    let f = Fixture::new("preloaded");
+    f.commit("b.txt", "two\n", &format!("Add b\n\n{SIGNOFF}"));
+    let seal = f.seal("Add b", "Adds b.\n");
+    // A clean, signed-off commit put straight into the store, never into the bundle.
+    let work = f.work();
+    git(&work, &["checkout", "-q", "-b", "elsewhere", "main"]);
+    fs::write(work.join("c.txt"), "three\n").unwrap();
+    git(&work, &["add", "c.txt"]);
+    git(
+        &work,
+        &["commit", "-q", "-m", &format!("Add c\n\n{SIGNOFF}")],
+    );
+    let preloaded = git(&work, &["rev-parse", "HEAD"]);
+    git(
+        &f.root.join("store.git"),
+        &[
+            "fetch",
+            "-q",
+            work.to_str().unwrap(),
+            "elsewhere:refs/heads/elsewhere",
+        ],
+    );
+    refused(
+        &f.check(&seal, &preloaded, &[]),
+        "--head must be the tip of a ref in the sealed bundle",
+    );
+}

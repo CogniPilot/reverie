@@ -7,8 +7,8 @@ use nix::{
     dir::{Dir, Type},
     errno::Errno,
     fcntl::{AtFlags, OFlag, openat},
-    sys::stat::{FileStat, Mode, SFlag, fstat, fstatat},
-    unistd::{UnlinkatFlags, unlinkat},
+    sys::stat::{FileStat, Mode, SFlag, fstat, fstatat, mkdirat},
+    unistd::{UnlinkatFlags, fsync, unlinkat},
 };
 use std::{
     collections::BTreeSet,
@@ -34,6 +34,17 @@ impl Held {
     /// Opens `path` (relative paths start at the current directory) refusing a symlink in any
     /// component, and a `..`.
     pub fn open(path: &Path) -> Result<Self, String> {
+        Self::walk_from_root(path, false)
+    }
+
+    /// Like `open`, but a missing component is created (mode 0700) inside its already-held
+    /// parent with `mkdirat` and then opened no-follow, so nothing is ever created through a
+    /// symlink.
+    pub fn open_or_create(path: &Path) -> Result<Self, String> {
+        Self::walk_from_root(path, true)
+    }
+
+    fn walk_from_root(path: &Path, create: bool) -> Result<Self, String> {
         let shown = path.display();
         let absolute = std::path::absolute(path).map_err(|e| format!("{shown}: {e}"))?;
         let mut fd = nix::fcntl::open("/", DIRECTORY, Mode::empty())
@@ -42,13 +53,7 @@ impl Held {
             match component {
                 Component::RootDir | Component::CurDir => {}
                 Component::Normal(part) => {
-                    fd = openat(&fd, part, DIRECTORY, Mode::empty()).map_err(|e| match e {
-                        Errno::ELOOP | Errno::ENOTDIR if is_symlink(&fd, part) => format!(
-                            "{shown}: {} is a symlink; the path must not pass through one",
-                            part.to_string_lossy()
-                        ),
-                        e => format!("{shown}: {}: {e}", part.to_string_lossy()),
-                    })?;
+                    fd = step(&fd, part, create).map_err(|e| format!("{shown}: {e}"))?;
                 }
                 Component::ParentDir | Component::Prefix(_) => {
                     return Err(format!("{shown}: a path with .. is refused"));
@@ -156,12 +161,14 @@ impl Held {
         Ok(owned)
     }
 
-    /// `create`s `name` and writes `bytes` durably, as a record that stays.
+    /// `create`s `name` and writes `bytes` durably, as a record that stays: the file is synced,
+    /// then the held directory, so the new entry itself survives a crash too.
     pub fn write_new(&self, name: &str, bytes: &[u8]) -> Result<(), String> {
         let (mut file, _) = self.create(name)?;
         file.write_all(bytes)
             .and_then(|()| file.sync_all())
-            .map_err(|e| format!("{name}: {e}"))
+            .map_err(|e| format!("{name}: {e}"))?;
+        fsync(&self.fd).map_err(|e| format!("{}: {e}", self.path.display()))
     }
 
     /// `create_new` under a name no other process or call uses: `<stem>-<pid>-<time>-<n>.<ext>`,
@@ -213,6 +220,29 @@ impl Drop for Owned<'_> {
         if same {
             let _ = unlinkat(&self.dir.fd, self.name.as_str(), UnlinkatFlags::NoRemoveDir);
         }
+    }
+}
+
+/// Opens the directory `part` inside `dir` no-follow, first making it (mode 0700) when `create`
+/// and nothing is there yet.
+fn step(dir: &OwnedFd, part: &std::ffi::OsStr, create: bool) -> Result<OwnedFd, String> {
+    let name = part.to_string_lossy();
+    if create {
+        make_dir(dir, part).map_err(|e| format!("{name}: {e}"))?;
+    }
+    openat(dir, part, DIRECTORY, Mode::empty()).map_err(|e| match e {
+        Errno::ELOOP | Errno::ENOTDIR if is_symlink(dir, part) => {
+            format!("{name} is a symlink; the path must not pass through one")
+        }
+        e => format!("{name}: {e}"),
+    })
+}
+
+/// Makes `part` inside `dir` (mode 0700) unless something is already there.
+fn make_dir(dir: &OwnedFd, part: &std::ffi::OsStr) -> nix::Result<()> {
+    match mkdirat(dir, part, Mode::from_bits_truncate(0o700)) {
+        Ok(()) | Err(Errno::EEXIST) => Ok(()),
+        Err(e) => Err(e),
     }
 }
 
@@ -284,6 +314,21 @@ mod tests {
         }
         assert!(Held::open(&root.join("real/../real/packet")).is_err());
         assert!(Held::open(&root.join("real/packet")).is_ok());
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn missing_directories_are_created_only_inside_held_parents() {
+        let root = scratch("create-dirs");
+        fs::create_dir_all(root.join("outside")).unwrap();
+        symlink(root.join("outside"), root.join("alias")).unwrap();
+        let error = Held::open_or_create(&root.join("alias/records/new")).unwrap_err();
+        assert!(error.contains("is a symlink"), "{error}");
+        assert!(!root.join("outside/records").exists());
+        let held = Held::open_or_create(&root.join("real/records/new")).unwrap();
+        assert!(root.join("real/records/new").is_dir());
+        drop(held);
+        assert!(Held::open_or_create(&root.join("real/records/new")).is_ok());
         let _ = fs::remove_dir_all(&root);
     }
 
