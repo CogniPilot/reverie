@@ -209,8 +209,8 @@ pkgs.dockerTools.buildLayeredImage {
   config = {
     User = "${toString uid}:${toString gid}";
     WorkingDir = "/reverie_workspace";
-    Entrypoint = if worker then [ "/bin/sleep" ] else [ "/bin/tini" "-g" "-s" "--" "/usr/local/bin/reverie-start" ];
-    Cmd = if worker then [ "infinity" ] else if ownerTerminalWebsite != null then
+    Entrypoint = if worker then (if perfGuestCapsule == null then [ "/bin/sleep" ] else [ "/opt/reverie/perf/bin/reverie-worker-init" ]) else [ "/bin/tini" "-g" "-s" "--" "/usr/local/bin/reverie-start" ];
+    Cmd = if worker then (if perfGuestCapsule == null then [ "infinity" ] else []) else if ownerTerminalWebsite != null then
       ([ "${ownerTerminalWebsite}/libexec/reverie" ] ++ ownerTerminalWebsite.webArgs) else
       [ "reverie" "web" "--host" "0.0.0.0" "--port" "3000" ]
       ++ pkgs.lib.optionals resourceReplacement [ "--resource-replacement" ];

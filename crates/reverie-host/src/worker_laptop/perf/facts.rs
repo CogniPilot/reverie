@@ -32,10 +32,11 @@ impl Facts {
         )?;
         need(output.succeeded, "TASK_PERF_INSPECTION_FAILED")?;
         let resources = record.resources();
-        let identity = RetainedInspection::decode(
+        let identity = RetainedInspection::decode_started(
             &output.stdout,
             &cid,
             resources.plan.source(),
+            resources.plan.effective_configuration(),
             resources.plan.session(),
             resources
                 .storage()

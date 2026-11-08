@@ -1,6 +1,7 @@
 //! Compile-bound inventory and actual guest-root code observations. These
 //! readers grant no launch, pool membership, admission or resource release.
 mod files;
+mod init;
 use crate::{ObservationError, native, worker_runtime::WorkerRuntime};
 use reverie_contracts::task_perf_capsule::{
     MAX_INVENTORY_BYTES, PerfCapsuleDataError, PerfCapsuleInventory,
@@ -125,6 +126,16 @@ impl GuestFiles {
         )?;
         self.root.current(pid)?;
         self.root.observe(runtime, &self.inventory, end)?;
+        self.root.init_executable(
+            runtime,
+            pid,
+            self.inventory
+                .code_files()
+                .get("bin/reverie-worker-init")
+                .expect("v2 inventory requires the sealed init")
+                .as_str(),
+            end,
+        )?;
         self.root.current(pid)
     }
     pub(crate) fn close(&mut self) -> Result<()> {

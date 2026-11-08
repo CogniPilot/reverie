@@ -6,6 +6,7 @@ use std::{collections::BTreeMap, fmt, path::Component};
 pub const MAX_INVENTORY_BYTES: usize = 4 * 1024 * 1024;
 pub const PREFIX: &str = "/opt/reverie/perf";
 pub const ABSENT_PREFIX: &str = "/opt/rvprf";
+pub const WORKER_INIT: &str = "/opt/reverie/perf/bin/reverie-worker-init";
 
 #[derive(Debug)]
 pub struct PerfCapsuleDataError;
@@ -45,7 +46,7 @@ impl PerfCapsuleInventory {
             return Err(PerfCapsuleDataError);
         }
         let wire: Wire = serde_json::from_slice(raw).map_err(|_| PerfCapsuleDataError)?;
-        if wire.schema != "reverie-perf-guest-capsule-build-v1"
+        if wire.schema != "reverie-perf-guest-capsule-build-v2"
             || wire.purpose != "unselected-image-data-no-grant-or-attestation"
             || wire.prefix != PREFIX
             || wire.absent_fallback != "/opt/rvprf/"
@@ -71,7 +72,8 @@ impl PerfCapsuleInventory {
         }
         if !code.contains_key("bin/perf")
             || !code.contains_key("bin/reverie-perf-check")
-            || code.len() < 3
+            || !code.contains_key("bin/reverie-worker-init")
+            || code.len() < 4
             || code.len() > 256
         {
             return Err(PerfCapsuleDataError);
@@ -100,7 +102,7 @@ fn validate(artifact: &Artifact) -> Result<bool> {
     }
     let executable = matches!(
         artifact.output.as_str(),
-        "bin/perf" | "bin/reverie-perf-check"
+        "bin/perf" | "bin/reverie-perf-check" | "bin/reverie-worker-init"
     );
     let library = artifact.output.strip_prefix("lib/").is_some_and(|name| {
         !name.is_empty()

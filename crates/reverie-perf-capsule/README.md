@@ -13,5 +13,9 @@ This is an unselected image factory. Building it does not authorize a rollout or
 prove guest execution. The launcher must execute the checker against the actual
 created container and bind the result to its image, process incarnation, selected
 policy and nonce before opening a pane. The launcher must separately verify that
-the actual PID1 runs this sealed init rather than `/bin/sleep` from writable
-`/nix`. Native qualification remains required; no default image is selected here.
+the actual PID1 runs this sealed init. The task-v2 launch explicitly disables
+Docker's auxiliary init, uses the fixed capsule entrypoint with no arguments,
+and observes the actual pinned process's executable inode and hash against the
+sealed capsule before and after the perf check. Legacy launch arguments remain
+unchanged. Native qualification remains required; no default image is selected
+here.

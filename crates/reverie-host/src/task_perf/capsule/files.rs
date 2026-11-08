@@ -100,6 +100,21 @@ impl Root {
             .map(|_| ())
             .map_err(Into::into)
     }
+    pub(super) fn init_executable(
+        &self,
+        runtime: &WorkerRuntime,
+        pid: u32,
+        digest: &str,
+        end: Instant,
+    ) -> Result<()> {
+        super::init::verify(
+            self.directory.as_ref().expect("opened sealed prefix"),
+            runtime,
+            pid,
+            digest,
+            end,
+        )
+    }
 }
 fn absent(pid: u32) -> Result<()> {
     let path = format!(
