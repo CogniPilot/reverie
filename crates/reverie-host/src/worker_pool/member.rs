@@ -98,7 +98,7 @@ impl<'pool> OpenedPoolMember<'pool> {
             .get(employee)
             .ok_or(PoolError::Refused("WORKER_POOL_MEMBER_EMPLOYEE"))?;
         need(
-            *high > 0 && *high < self.pool.policy_data().memory_max_mi_b,
+            *high > 0 && *high <= self.pool.policy_data().memory_max_mi_b,
             "WORKER_POOL_MEMBER_SOFT_THRESHOLD",
         )?;
         self.high = u64::from(*high) * 1_048_576;

@@ -77,7 +77,7 @@ impl WorkerPoolPolicy {
             && self
                 .employee_memory_high_mi_b
                 .iter()
-                .all(|(employee, high)| uuid(employee) && (1..MEMORY_MAX_MIB).contains(high));
+                .all(|(employee, high)| uuid(employee) && (1..=MEMORY_MAX_MIB).contains(high));
         valid.then_some(()).ok_or(PoolPolicyError)
     }
 
@@ -243,8 +243,14 @@ mod tests {
     }
 
     #[test]
-    fn employee_soft_threshold_must_be_strictly_below_the_borrowing_ceiling() {
-        for (high, accepted) in [(0, false), (1, true), (49_151, true), (49_152, false)] {
+    fn version_one_preserves_finite_soft_threshold_at_the_hard_ceiling() {
+        for (high, accepted) in [
+            (0, false),
+            (1, true),
+            (49_151, true),
+            (49_152, true),
+            (49_153, false),
+        ] {
             let mut selected = policy();
             *selected
                 .employee_memory_high_mi_b

@@ -80,3 +80,8 @@ prove idle code or an approved image. This owner still needs the actual Created,
 Engine spec, start and memory-phase joins before pane execution. It performs no
 writes and supplies no admission or launch token. Refusal fences its original
 owner; checked metadata close never acknowledges worker or pool settlement.
+The lower reader preserves version-one policy compatibility: a finite employee
+high equal to its hard ceiling remains readable. New desired-policy validation
+in the owner API is a separate contract; this observer cannot rewrite existing
+policy semantics. Its borrowed parent lifetime also does not supply a movable
+shared controller owner or an authenticated controller-to-broker protocol.
