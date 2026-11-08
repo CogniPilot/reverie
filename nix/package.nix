@@ -382,7 +382,8 @@ let
         test/terminal-font.test.ts test/terminal-history-schema.test.ts test/terminal-history.test.ts \
         test/terminal-keycode229-recovery.test.ts test/terminal-layout-css.test.ts test/terminal-link-provider-target.test.ts \
         test/terminal-logical-line.test.ts test/terminal-osc52-clipboard.test.ts test/terminal-parsing.test.ts \
-        test/terminal-pty-geometry.test.ts test/terminal-resilience.test.ts test/terminal-resize-observer-survives-init.test.ts \
+        test/terminal-pty-geometry.test.ts test/terminal-replay-replies.test.ts test/terminal-resilience.test.ts \
+        test/terminal-resize-observer-survives-init.test.ts \
         test/terminal-scroll-intent.test.ts test/terminal-scroll-routing.test.ts test/terminal-shift-drag-selection.test.ts \
         test/terminal-tile-input.test.ts test/terminal-tile-scroll.test.ts test/terminal-tile-unit.test.ts test/terminal-touch-tap.test.ts \
         test/test-env-isolation.test.ts test/test-ports-guard.test.ts test/tile-grid-attach.test.ts \

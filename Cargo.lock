@@ -1123,6 +1123,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "reverie-job-gate"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "nix",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "reverie-laptop-tools"
 version = "0.1.0"
 dependencies = [
