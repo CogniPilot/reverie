@@ -8,12 +8,14 @@ use reverie_store::storage_identity::IdentityError;
 pub(super) enum RetainedClose {
     Company(Arc<IdentityError>),
     Kernel(Arc<ReservationKernelError>),
+    Control(Arc<reverie_host::reservation_control::ControlHostError>),
 }
 impl RetainedClose {
     pub(super) fn error(&self) -> ResourceActorError {
         match self {
             Self::Company(error) => ResourceActorError::RetainedCompanyClose(Arc::clone(error)),
             Self::Kernel(error) => ResourceActorError::RetainedKernelClose(Arc::clone(error)),
+            Self::Control(error) => ResourceActorError::RetainedControlClose(Arc::clone(error)),
         }
     }
 }
@@ -26,7 +28,7 @@ impl Frame<'_> {
     }
     fn retain_stateless_error(&mut self, cause: ResourceActorError) -> ResourceActorError {
         match cause {
-            ResourceActorError::Gate(error) => self.retain_company_error(*error),
+            ResourceActorError::Gate(error) => self.retain_gate_error(*error),
             ResourceActorError::Observer(ObserverError::Kernel(error))
                 if error.has_unconfirmed_close() =>
             {
@@ -38,6 +40,15 @@ impl Frame<'_> {
             ResourceActorError::RetainedKernelClose(error) => {
                 self.retain_close(RetainedClose::Kernel(error))
             }
+            ResourceActorError::RetainedControlClose(error) => {
+                self.retain_close(RetainedClose::Control(error))
+            }
+            ResourceActorError::GateFinalization { primary, secondary } => {
+                ResourceActorError::GateFinalization {
+                    primary: Box::new(self.retain_stateless_error(*primary)),
+                    secondary: Box::new(self.retain_stateless_error(*secondary)),
+                }
+            }
             ResourceActorError::Finalization { primary, secondary } => {
                 ResourceActorError::Finalization {
                     primary: Box::new(self.retain_stateless_error(*primary)),
@@ -47,10 +58,19 @@ impl Frame<'_> {
             other => other,
         }
     }
-    fn retain_company_error(&mut self, cause: GateError) -> ResourceActorError {
+    fn retain_gate_error(&mut self, cause: GateError) -> ResourceActorError {
         match cause {
             GateError::Identity(error) if error.has_unconfirmed_close() => {
                 self.retain_close(RetainedClose::Company(Arc::new(error)))
+            }
+            GateError::Control(error) if error.has_unconfirmed_close() => {
+                self.retain_close(RetainedClose::Control(Arc::new(error)))
+            }
+            GateError::Finalization { primary, secondary } => {
+                ResourceActorError::GateFinalization {
+                    primary: Box::new(self.retain_gate_error(*primary)),
+                    secondary: Box::new(self.retain_gate_error(*secondary)),
+                }
             }
             other => other.into(),
         }

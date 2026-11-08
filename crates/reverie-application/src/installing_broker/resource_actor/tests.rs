@@ -102,19 +102,26 @@ fn actual_q_record_retains_stateless_close_error_after_disconnect_and_repeated_c
     let kernel = reverie_host::reservation_kernel::ReservationKernelError::from(cause);
     let observed = crate::reservation_observer::ObserverError::from(kernel);
     fixture.retained = true;
-    for cause in [observed.into(), company_close_error()] {
+    for cause in [
+        observed.into(),
+        company_close_error(),
+        control_close_error(),
+    ] {
         let (mut client, connection) = fixture.accept(b'Q', b"{}");
         let mut failure = fixture
             .broker
             .prepare_resource_website(connection)
             .err()
             .unwrap();
+        let original_code = cause.code();
         let body = failure.frame.retain_stateless_result::<()>(Err(cause));
         let first = failure.close_channel_component(end());
         let eof = client.read(&mut [0]);
         let repeated = failure.close_channel_component(end());
         let retained = failure.frame.unconfirmed.clone();
-        assert!(body.unwrap_err().has_unconfirmed_close());
+        let body = body.unwrap_err();
+        assert!(body.has_unconfirmed_close());
+        assert_eq!(body.code(), original_code);
         assert!(first.unwrap_err().has_unconfirmed_close());
         assert_eq!(eof.unwrap(), 0, "same original socket must still close");
         assert!(repeated.unwrap_err().has_unconfirmed_close());
@@ -129,6 +136,7 @@ fn assert_same_close(first: &custody::RetainedClose, second: &custody::RetainedC
     match (first, second) {
         (RetainedClose::Company(a), RetainedClose::Company(b)) => assert!(Arc::ptr_eq(a, b)),
         (RetainedClose::Kernel(a), RetainedClose::Kernel(b)) => assert!(Arc::ptr_eq(a, b)),
+        (RetainedClose::Control(a), RetainedClose::Control(b)) => assert!(Arc::ptr_eq(a, b)),
         _ => panic!("original close origin changed"),
     }
 }
@@ -141,6 +149,47 @@ fn company_close_error() -> ResourceActorError {
         })),
     };
     GateError::from(error).into()
+}
+fn control_close_data() -> reverie_host::reservation_control::ControlHostError {
+    use reverie_host::{ObservationError, reservation_control::ControlHostError};
+    ControlHostError::Finalization {
+        primary: Box::new(ControlHostError::Native(ObservationError::Io(
+            std::io::Error::other("known control body"),
+        ))),
+        secondary: Box::new(ControlHostError::PoolTransitionClose(Arc::new(
+            ObservationError::CloseUnconfirmed {
+                cause: std::io::Error::other("typed consumed control close witness"),
+            },
+        ))),
+    }
+}
+fn control_close_error() -> ResourceActorError {
+    GateError::Finalization {
+        primary: Box::new(GateError::Refused("KNOWN_GATE_BODY")),
+        secondary: Box::new(GateError::Control(control_close_data())),
+    }
+    .into()
+}
+#[test]
+fn control_close_classifier_recurses_both_gate_branches_without_changing_primary_code() {
+    for secondary in [false, true] {
+        let close = Box::new(GateError::Control(control_close_data()));
+        let known = Box::new(GateError::Refused("KNOWN_GATE_BODY"));
+        let (primary, secondary) = if secondary {
+            (known, close)
+        } else {
+            (close, known)
+        };
+        let original = GateError::Finalization { primary, secondary };
+        let code = original.code();
+        let actual = ResourceActorError::from(original);
+        assert!(actual.has_unconfirmed_close());
+        assert_eq!(actual.code(), code);
+    }
+    let known = GateError::Control(reverie_host::reservation_control::ControlHostError::Native(
+        reverie_host::ObservationError::Io(std::io::Error::other("ordinary IO")),
+    ));
+    assert!(!ResourceActorError::from(known).has_unconfirmed_close());
 }
 #[test]
 fn actual_q_record_known_stateless_io_remains_closeable_without_native_or_owner_grant() {
