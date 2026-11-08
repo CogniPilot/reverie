@@ -34,9 +34,13 @@ fn main() {
             match property {
                 "MainPID" | "ControlPID" => println!("{{\"type\":\"u\",\"data\":{}}}", if active { 42 } else { 0 }),
                 "Job" => println!("{}", r#"{"type":"(uo)","data":[0,"/"]}"#),
+                "ExecStart" if std::path::Path::new("manager-native-mode").exists() => println!("{}", r#"{"type":"a(sasbttttuii)","data":[["/nix/store/new-broker/bin/reverie-worker-broker",["/nix/store/new-broker/bin/reverie-worker-broker","broker","--config","${REVERIE_WORKER_CONFIG}"],false,0,0,0,0,0,0,0]]}"#),
                 "ExecStart" => println!("{}", r#"{"type":"a(sasbttttuii)","data":[["/nix/store/old-broker/bin/reverie-worker-broker",["/nix/store/old-broker/bin/reverie-worker-broker","--config","${REVERIE_WORKER_CONFIG}"],false,0,0,0,0,0,0,0]]}"#),
                 "ExecStartPre" => println!("{}", r#"{"type":"a(sasbttttuii)","data":[]}"#),
-                "EnvironmentFiles" => println!("{{\"type\":\"a(sb)\",\"data\":[[{:?},false]]}}", std::env::current_dir().unwrap().join(".config/reverie/worker-broker.env").to_str().unwrap()),
+                "EnvironmentFiles" => {
+                    let path = if std::path::Path::new("manager-native-mode").exists() { "reverie/worker-pool/service/environment" } else { ".config/reverie/worker-broker.env" };
+                    println!("{{\"type\":\"a(sb)\",\"data\":[[{:?},false]]}}", std::env::current_dir().unwrap().join(path).to_str().unwrap());
+                },
                 _ => panic!("unexpected fixed manager property"),
             }
         },

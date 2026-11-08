@@ -26,7 +26,8 @@ pub use failure_fence::{assert_no_service_failure, record_service_failure};
 use manager::ObservedUnit;
 use publication::environment;
 pub use stopped::{
-    ClosedStoppedWorkerService, StoppedServiceFailure, StoppedServiceOrigin, StoppedWorkerService,
+    ClosedImageServiceMaintenance, ClosedStoppedWorkerService, ImageServiceMaintenance,
+    StoppedServiceFailure, StoppedServiceOrigin, StoppedWorkerService,
     capture_stopped_worker_service,
 };
 #[cfg(test)]

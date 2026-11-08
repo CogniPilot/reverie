@@ -1,6 +1,9 @@
 //! Original read-only manager custody for an offline image transition.
 use super::*;
 mod bus;
+mod image;
+pub use image::{ClosedImageServiceMaintenance, ImageServiceMaintenance};
+pub(super) const IMAGE_PENDING: &[u8] = b"NATIVE_SERVICE_IMAGE_TRANSITION_PENDING_V1\n";
 use bus::{BusReader, ExpectedCommands};
 
 #[derive(Clone, Debug)]
@@ -11,6 +14,7 @@ struct Owner {
     bus: Option<BusReader>,
     generation: Option<PathBuf>,
     origin: StoppedServiceOrigin,
+    image_stamp: Option<image::PendingStamp>,
     #[cfg(test)]
     expected: Option<ExpectedCommands>,
 }
@@ -97,6 +101,7 @@ impl StoppedWorkerService {
                 bus: None,
                 generation: None,
                 origin: StoppedServiceOrigin(Arc::new(())),
+                image_stamp: None,
                 #[cfg(test)]
                 expected: None,
             })),
