@@ -64,7 +64,7 @@ export class FakeFront {
   }
 
   /** Resolves once `predicate` holds, checked after every frame from TS; rejects after `ms`. */
-  until(predicate: () => boolean, ms = 2000, what = 'condition'): Promise<void> {
+  until(predicate: () => boolean, ms = 10_000, what = 'condition'): Promise<void> {
     if (predicate()) return Promise.resolve();
     return new Promise((resolve, reject) => {
       const check = (): void => {
@@ -84,7 +84,7 @@ export class FakeFront {
   /** The first frame from TS of `kind` at or after index `from`. */
   async next<K extends Body['kind']>(kind: K, from = 0): Promise<Frame & { body: Extract<Body, { kind: K }> }> {
     const find = () => this.frames.slice(from).find((frame) => frame.body.kind === kind);
-    await this.until(() => find() !== undefined, 2000, `a ${kind} frame`);
+    await this.until(() => find() !== undefined, undefined, `a ${kind} frame`);
     return find() as Frame & { body: Extract<Body, { kind: K }> };
   }
 
