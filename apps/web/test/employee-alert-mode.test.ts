@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { EmployeeAlertModes, MAX_ALERT_LEASE_MS } from '../src/employee-alert-mode.js';
 import { ChatroomService } from '../src/chatroom-service.js';
+import { wakePayload } from './helpers/wake-payload.js';
 
 describe('employee phone mode prototype', () => {
   it('persists by employee, expires on read, and Ring clears a lease', () => {
@@ -33,7 +34,7 @@ describe('employee phone mode prototype', () => {
       isWorking: true,
       pid: 42,
       writeViaMux: async (text: string) => {
-        writes.push(text);
+        writes.push(wakePayload(service, session.id, text));
         return true;
       },
     };
@@ -77,7 +78,7 @@ describe('employee phone mode prototype', () => {
       isWorking: true,
       pid: 42,
       writeViaMux: async (text: string) => {
-        writes.push(text);
+        writes.push(wakePayload(service, session.id, text));
         return true;
       },
     };
@@ -93,12 +94,15 @@ describe('employee phone mode prototype', () => {
       const room = service.createRoom('Room', undefined);
       service.addMember(room.id, 'a');
       await service.setAlertMode('a', 'vibrate', 1000);
-      service.post(room.id, { kind: 'agent', sessionId: 'b', name: 'Beta' }, 'held unrelated');
-      service.post(room.id, { kind: 'agent', sessionId: 'b', name: 'Beta' }, '@Alpha please respond');
+      const unrelated = service.post(room.id, { kind: 'agent', sessionId: 'b', name: 'Beta' }, 'held unrelated');
+      const mention = service.post(room.id, { kind: 'agent', sessionId: 'b', name: 'Beta' }, '@Alpha please respond');
       session.isWorking = false;
       await service.delivery.flushAll();
-      expect(writes.join('')).toContain('please respond');
-      expect(writes.join('')).not.toContain('held unrelated');
+      // An agent's room-wide mention is not an attention item, so the member reads it with chat read; what this checks is
+      // the wake policy: the direct mention woke the member and the unrelated text was not carried.
+      expect(writes).toHaveLength(1);
+      expect(service.delivery.receivedBy(room.id, mention.id)).toEqual(['a']);
+      expect(service.delivery.receivedBy(room.id, unrelated.id)).toEqual([]);
     } finally {
       await service.stop();
     }

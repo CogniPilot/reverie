@@ -41,6 +41,14 @@ pub(crate) fn decode_human_protocol_bytes(
     let raw = text::python_bytes(raw).map_err(HumanParseError::Json)?;
     decode::decode_human(&raw)
 }
+/// Already decoded scalar text uses the shared Python str reader.
+pub(crate) fn decode_text(text: &str) -> Result<Value, Error> {
+    decode_python_str(text.as_bytes())
+}
+/// Default bytes JSON retains encoding detection and last-wins semantics.
+pub(crate) fn decode_loads_bytes(raw: &[u8]) -> Result<Value, Error> {
+    decode::decode_last_wins(&text::python_bytes(raw)?)
+}
 /// Normal rootless seccomp JSON uses json.loads(bytes), without object_pairs_hook.
 /// Keep this mode purpose-private; strict profile/perf/registry readers differ.
 pub(crate) fn decode_rootless_profile(raw: &[u8]) -> Result<Value, Error> {

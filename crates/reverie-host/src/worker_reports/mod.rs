@@ -133,12 +133,13 @@ impl WorkerReportService {
             .stop_deadline()
             .map_or(deadline, |stop| stop.min(deadline));
         let records = self.lock_until(end)?.clone();
+        let budget = budget::CleanupBudget::bounded(self, end);
         let mut result = Ok(());
         for record in &records {
             result = finalized(result, record.interrupt());
         }
         for record in &records {
-            result = finalized(result, record.settle_handler(end));
+            result = finalized(result, record.settle_handler(&budget, end));
         }
         loop {
             if records.iter().all(|record| record.finished()) {
@@ -156,10 +157,19 @@ impl WorkerReportService {
             );
         }
         let mut retained = self.lock_until(end)?;
-        retained.retain(|record| !record.settled());
-        if !retained.is_empty() || self.opaque.load(Ordering::Acquire) {
+        // Admission is sealed. Validate under the same original cleanup budget;
+        // a busy bookkeeping mutex is not evidence of an unfinished resource.
+        for record in retained.iter() {
+            match record.settled_until(&budget) {
+                Ok(true) => {}
+                Ok(false) => return finalized(result, Err(WorkerReportError::Unconfirmed)),
+                Err(error) => return finalized(result, Err(error)),
+            }
+        }
+        if self.opaque.load(Ordering::Acquire) {
             return finalized(result, Err(WorkerReportError::Unconfirmed));
         }
+        retained.clear();
         result
     }
     fn lock_until(&self, end: Instant) -> Result<std::sync::MutexGuard<'_, Vec<Arc<Record>>>> {

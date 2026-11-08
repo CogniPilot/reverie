@@ -117,7 +117,7 @@ pub fn os_error(errno: i32, description: &str, filename: Option<&[u32]>) -> Stri
 /// Python `repr(str)`. Characters outside ASCII are kept as printable except
 /// C1 controls, U+00A0, U+00AD and surrogates (the undecodable path bytes);
 /// other non-printable code points beyond Latin-1 are not distinguished.
-fn repr(points: &[u32]) -> String {
+pub(crate) fn repr(points: &[u32]) -> String {
     let quote = if points.contains(&u32::from('\'')) && !points.contains(&u32::from('"')) {
         '"'
     } else {

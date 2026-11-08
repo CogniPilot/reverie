@@ -339,3 +339,21 @@ it('pauses managed Board timers, rejects stale responses/actions and resumes wit
     expect(result.state().B).toBeNull(); expect(result.state().readyForActions).toBe(false); expect(timers.size).toBe(0); expect(messages).toEqual([{type:'board-auth-lost'}]);
   } finally { dom.window.close(); }
 });
+
+it('shows all work until the viewer picks the latest plan, so a stale plan tag never hides current cards', () => {
+  const html = readFileSync(join(__dirname, '..', 'src', 'web', 'public', 'board.html'), 'utf8');
+  const view = html.slice(html.indexOf('/* Only the work view is filtered'), html.indexOf('function workScope()'));
+  const issues = [
+    { id: 'i-00000001', status: 'done', tags: ['company-plan-20261102'] },
+    { id: 'i-00000002', status: 'todo', tags: ['company-plan-20261102'] },
+    { id: 'i-00000003', status: 'doing', tags: [] },
+    { id: 'i-00000004', status: 'todo' },
+  ];
+  const run = (saved: string | null) => new vm.Script(`let B={issues};${view};({workChoice,tag:latestPlanTag(),shown:workIssues().map(i=>i.id)})`).runInNewContext({
+    issues, localStorage: { getItem: (key: string) => (key === 'board-work-view' ? saved : null) },
+  });
+  expect(run(null)).toEqual({ workChoice: null, tag: 'company-plan-20261102', shown: ['i-00000001', 'i-00000002', 'i-00000003', 'i-00000004'] });
+  expect(run('all').shown).toHaveLength(4);
+  expect(run('latest').shown).toEqual(['i-00000001', 'i-00000002']);
+  expect(run('bogus').shown).toHaveLength(4);
+});

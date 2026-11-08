@@ -1,7 +1,7 @@
 /**
  * @fileoverview The opt-in memory tools of `reverie mcp`: off unless the server's own environment names an
- * instance, the caller can never pick another store, requests go to the bridge on stdin with a minimal
- * environment, and every failure is an isError result.
+ * instance, the caller can never pick another store, recall reads only the caller's own instance, and every failure is
+ * an isError result.
  */
 import fs from 'node:fs';
 import os from 'node:os';
@@ -11,26 +11,29 @@ import { createMcpServer, type McpConfig } from '../src/mcp-server.js';
 import {
   createMemoryTools,
   resolveMemoryToolsConfig,
-  type BridgeRunner,
+  type LegacyRecall,
   type MemoryToolsConfig,
 } from '../src/mcp-memory-tools.js';
+import type { RecallRequest } from '../src/legacy-recall.js';
 
-const ON: MemoryToolsConfig = { instance: '/instances/x/config/experts/a.json', python: '/py/python3', source: '/src/python' };
+const ON: MemoryToolsConfig = { instance: '/instances/x/config/experts/a.json' };
 
+/** A recall that records what reached it and answers like the old store, or fails with python's error text. */
 function recorder(reply: { stdout?: string; stderr?: string; code?: number } = {}) {
-  const calls: Array<{ python: string; args: string[]; env: NodeJS.ProcessEnv; input: string }> = [];
-  const runner: BridgeRunner = async (python, args, options) => {
-    calls.push({ python, args, env: options.env, input: options.input });
-    return { stdout: reply.stdout ?? '[{"text":"a memory"}]', stderr: reply.stderr ?? '', code: reply.code ?? 0 };
+  const calls: Array<{ instance: string; request: RecallRequest }> = [];
+  const runner: LegacyRecall = async (instance, request) => {
+    calls.push({ instance, request });
+    if (reply.code) throw new Error((JSON.parse(reply.stderr ?? '{}') as { error?: string }).error ?? reply.stderr);
+    return reply.stdout ?? '[{"text":"a memory"}]';
   };
   return { calls, runner };
 }
 
 const mcpConfig: McpConfig = { allowAnySession: false, version: 'test' };
 
-function server(memory: MemoryToolsConfig, runner: BridgeRunner) {
+function server(memory: MemoryToolsConfig, runner: LegacyRecall) {
   const out: Array<Record<string, unknown>> = [];
-  const srv = createMcpServer({ config: mcpConfig, write: (m) => out.push(m), modes: ['shell'], memory, memoryRunner: runner });
+  const srv = createMcpServer({ config: mcpConfig, write: (m) => out.push(m), modes: ['shell'], memory, memoryRecall: runner });
   const send = async (message: unknown) => srv.handleLine(JSON.stringify(message));
   return { out, send };
 }
@@ -78,22 +81,14 @@ describe('opt-in', () => {
 });
 
 describe('requests', () => {
-  it('recalls privately by default and from a project when named, on stdin, with a minimal environment', async () => {
-    process.env.REVERIE_SESSION_ID = 'room-session-secret';
-    process.env.REVERIE_HOOK_SECRET_FILE = '/secret';
+  it("recalls privately by default and from a project when named, always from the caller's own instance", async () => {
     const { calls, runner } = recorder();
     const tools = createMemoryTools(ON, runner);
     const result = await tools.run('memory_recall', { query: '  baseline numbers ' });
     expect(result).toEqual({ text: '[{"text":"a memory"}]' });
-    expect(calls[0].python).toBe('/py/python3');
-    expect(calls[0].args).toEqual(['-m', 'reverie.memory_cli']);
-    expect(JSON.parse(calls[0].input)).toEqual({ action: 'recall', query: 'baseline numbers', private: true });
-    expect(calls[0].env.REVERIE_INSTANCE_CONFIG).toBe(ON.instance);
-    expect(calls[0].env.PYTHONPATH).toBe('/src/python');
-    expect(calls[0].env.REVERIE_SESSION_ID).toBeUndefined();
-    expect(calls[0].env.REVERIE_HOOK_SECRET_FILE).toBeUndefined();
+    expect(calls).toEqual([{ instance: ON.instance, request: { query: 'baseline numbers' } }]);
     await tools.run('memory_recall', { query: 'q', project: 'slam-web' });
-    expect(JSON.parse(calls[1].input)).toEqual({ action: 'recall', query: 'q', project: 'slam-web' });
+    expect(calls[1]).toEqual({ instance: ON.instance, request: { query: 'q', project: 'slam-web' } });
   });
 
   it('never lets an argument choose another store', async () => {
@@ -101,8 +96,7 @@ describe('requests', () => {
     await createMemoryTools(ON, runner).run('memory_recall', {
       query: 'q', instance: '/other.json', channel: 'work', private: false, data_dir: '/x',
     } as Record<string, unknown>);
-    expect(calls[0].env.REVERIE_INSTANCE_CONFIG).toBe(ON.instance);
-    expect(JSON.parse(calls[0].input)).toEqual({ action: 'recall', query: 'q', private: true });   // stray keys stripped
+    expect(calls).toEqual([{ instance: ON.instance, request: { query: 'q' } }]);   // stray keys stripped
   });
 
   it('refuses to remember outside a session, showing the journal command and calling nothing', async () => {
@@ -116,7 +110,7 @@ describe('requests', () => {
     expect(calls).toEqual([]);
   });
 
-  it('refuses bad arguments as isError results without calling the bridge', async () => {
+  it('refuses bad arguments as isError results without recalling anything', async () => {
     const { calls, runner } = recorder();
     const tools = createMemoryTools(ON, runner);
     for (const [name, args] of [
@@ -164,7 +158,7 @@ describe('inside a Reverie session: the office journal', () => {
     const { calls, runner } = recorder(bridge);
     const srv = createMcpServer({
       config: { ...mcpConfig, apiUrl: 'http://office.test', selfId },
-      write: (m) => out.push(m), modes: ['shell'], memory: ON, memoryRunner: runner,
+      write: (m) => out.push(m), modes: ['shell'], memory: ON, memoryRecall: runner,
       request: async (ctx, options) => {
         requests.push({ selfId: ctx.selfId, method: options.method, path: options.path, body: options.body, query: options.query });
         return { status: 200, json: { success: true, data: reply } as never, text: '' };
@@ -222,7 +216,7 @@ describe('inside a Reverie session: the office journal', () => {
   it('still answers from the old store, and says so, when the journal lookup fails', async () => {
     const out: Array<Record<string, unknown>> = [];
     const srv = createMcpServer({ config: { ...mcpConfig, apiUrl: 'http://office.test', selfId: MINE }, write: (m) => out.push(m), modes: ['shell'],
-      memory: ON, memoryRunner: recorder({ stdout: '[{"text":"an old reflection"}]' }).runner,
+      memory: ON, memoryRecall: recorder({ stdout: '[{"text":"an old reflection"}]' }).runner,
       request: async () => ({ status: 503, json: { success: false, error: 'journal unavailable' } as never, text: '' }) });
     await srv.handleLine(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'memory_recall', arguments: { query: 'q' } } }));
     const result = out[0].result as { content: Array<{ text: string }>; isError: boolean };

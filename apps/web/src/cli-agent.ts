@@ -31,6 +31,7 @@ import { isChatRaster, localImageFiles } from './chat-image-paths.js';
  */
 import http from 'node:http';
 import { displayTime, displayTimeZone } from './display-time.js';
+import { TURN_SUMMARY_MAX_CHARS } from './chatroom-turn-summary.js';
 import { agentCapabilities } from './cli-agent-capabilities.js';
 import { agentEmployeeOffice } from './cli-agent-office.js';
 import { agentViewerRecovery } from './cli-agent-viewer.js';
@@ -63,6 +64,7 @@ import { pronounsProblem, pronounsProposal } from './pronouns.js';
 import { agentPlanRequest, agentRequestPlanMove, agentPlanMoveAction, agentPendingPlanMoves, agentPlanRecovery } from './cli-plan-request.js';
 import { registerGoalCommands } from './cli-goal.js';
 import { registerJournalCommands } from './cli-agent-journal.js';
+import { registerMemoryCommand } from './cli-agent-memory.js';
 import { registerPublishCommands } from './cli-agent-publish.js';
 import { registerHireRequestCommands } from './cli-agent-hire-request.js';
 import { goalClientTarget } from './goal-client-target.js';
@@ -468,7 +470,7 @@ export async function agentChatSummary(deps: AgentDeps, hookEvent?: string): Pro
     return fail(deps, 'Unsupported summary hook event');
   const result = await deps.request(deps.ctx, { method: 'GET', path: '/api/chatrooms/turn-summary', timeoutMs: 2000 });
   const data = result.json?.data as { text?: unknown } | undefined;
-  if (!result.json?.success || typeof data?.text !== 'string' || data.text.length > 3000)
+  if (!result.json?.success || typeof data?.text !== 'string' || data.text.length > TURN_SUMMARY_MAX_CHARS)
     return fail(deps, 'Pending message summary unavailable');
   if (hookEvent) {
     deps.io.out(JSON.stringify({ hookSpecificOutput: { hookEventName: hookEvent, additionalContext: data.text } }));
@@ -2773,6 +2775,7 @@ export function registerAgentCommands(program: Command): Command {
   credentials.command('install <name-or-id>').description('Install one granted credential as a private local file; never print its value').option('--json', 'Machine-readable installation metadata; never token material')
     .action((reference: string, options: { json?: boolean }) => run(Boolean(options.json), (deps) => agentCredentialsInstall(deps, reference)));
   registerJournalCommands(agent, run);
+  registerMemoryCommand(agent);
   registerPublishCommands(agent, run);
   registerHireRequestCommands(agent, run);
   registerGoalCommands(agent, run);

@@ -3,10 +3,10 @@
  *
  * Opt-in per agent. They exist only when this MCP server's own environment names an instance configuration
  * (`REVERIE_MCP_MEMORY_INSTANCE`, set in that agent's MCP entry). The caller is that instance: no tool argument
- * can select another agent's store. The final installing runtime can supply a checked native bridge
- * binding; the existing portable Python adapter remains selected until that actual scope producer is
- * available. Requests go on stdin, never into a command line, and cannot select either executable.
- * The hard floors a save must pass run in-process (memory-floors.ts).
+ * can select another agent's store. Ordinary opt-in recalls in-process (legacy-recall.ts).
+ * Final-runtime bootstrap can supply a checked native bridge; an explicit legacy bridge remains
+ * compatibility-only. Tool arguments select neither an executable nor caller scope.
+ * Hard floors always run in-process (memory-floors.ts).
  *
  * Scope: with `project`, the shared project store; without it, the caller's private store.
  *
@@ -26,6 +26,7 @@ import { MemoryProjectSchema } from './memory-scope-identifiers.js';
 import type { InstalledMemoryScope } from './installed-memory-context.js';
 import type { InstalledMemoryAccess } from './installed-memory-access.js';
 import { runMemoryBridge } from './memory-bridge-process.js';
+import { legacyRecall, type RecallRequest } from './legacy-recall.js';
 import { screenMemoryText } from './memory-floors.js';
 
 export const MEMORY_TOOL_NAMES = ['memory_recall', 'memory_remember'] as const;
@@ -34,7 +35,7 @@ const QUERY_MAX = 500;
 const TEXT_MAX = 2000;
 const BRIDGE_TIMEOUT_MS = 60_000;
 
-export type MemoryToolsConfig = {
+type BridgeMemoryToolsConfig = {
   /** Absolute path of the calling agent's instance configuration; unset = the tools do not exist. */
   instance?: string;
 } & (
@@ -54,6 +55,18 @@ export type MemoryToolsConfig = {
       source: string;
     }
 );
+
+/** The ordinary path keeps main's in-process recall and floors. Only an explicit
+ * bridge configuration selects the checked native or legacy bridge path. */
+interface InProcessMemoryToolsConfig {
+  instance?: string;
+  native?: undefined;
+  installed?: never;
+  python?: never;
+  source?: never;
+}
+export type MemoryToolsConfig = InProcessMemoryToolsConfig | BridgeMemoryToolsConfig;
+export type LegacyRecall = (instance: string, request: RecallRequest, signal?: AbortSignal) => Promise<string>;
 
 /** Runs one journal verb as the session this MCP server runs in; undefined when it runs outside any session. */
 export type JournalPort = (
@@ -84,12 +97,10 @@ export type BridgeRunner = (
 ) => Promise<{ stdout: string; stderr: string; code: number }>;
 
 /** Read the opt-in from the environment. A relative or empty instance path leaves the tools off. */
-export function resolveMemoryToolsConfig(env: NodeJS.ProcessEnv = process.env): MemoryToolsConfig {
+export function resolveMemoryToolsConfig(env: NodeJS.ProcessEnv = process.env): InProcessMemoryToolsConfig {
   const instance = env.REVERIE_MCP_MEMORY_INSTANCE?.trim();
   return {
     instance: instance && isAbsolute(instance) ? instance : undefined,
-    python: env.REVERIE_MCP_MEMORY_PYTHON?.trim() || '/opt/reverie/python/bin/python3',
-    source: env.REVERIE_MCP_MEMORY_SOURCE?.trim() || '/workspace/python',
   };
 }
 
@@ -184,44 +195,97 @@ export function journalSaveCommand(args: Record<string, unknown>): string {
   return parts.map(quote).join(' ');
 }
 
+type MemoryScreen = (text: string, home: string) => string;
+type MemoryToolSet = {
+  enabled: boolean;
+  definitions(): ToolDefinition[];
+  has(name: string): boolean;
+  run(name: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<ToolResult>;
+};
+
+/** Preserve the native reader's absolute/per-fetch deadlines while composing
+ * the actual MCP cancellation signal; synchronous work remains bounded by its
+ * existing input/clock checks and shutdown still waits for real settlement. */
+const defaultRecall: LegacyRecall = async (instance, request, signal) => {
+  const clock = () => {
+    signal?.throwIfAborted();
+    return Date.now();
+  };
+  const requestEmbedding: typeof fetch = (input, init) =>
+    fetch(input, {
+      ...init,
+      signal: signal ? AbortSignal.any([signal, ...(init?.signal ? [init.signal] : [])]) : init?.signal,
+    });
+  clock();
+  const result = await legacyRecall(instance, request, {
+    home: process.env.HOME ?? '/tmp',
+    embedUrl: envValue(process.env, 'EMBED_URL') ?? '',
+    clock,
+    llama: { fetch: requestEmbedding },
+  });
+  clock();
+  return result;
+};
+
 export function createMemoryTools(
-  config: MemoryToolsConfig,
-  runner: BridgeRunner = runMemoryBridge,
+  config: BridgeMemoryToolsConfig,
+  runner?: BridgeRunner,
   journal?: JournalPort,
   access?: InstalledMemoryAccess,
-  screen: (text: string, home: string) => string = screenMemoryText
-) {
+  screen?: MemoryScreen
+): MemoryToolSet;
+export function createMemoryTools(
+  config: InProcessMemoryToolsConfig,
+  recall?: LegacyRecall,
+  journal?: JournalPort,
+  screen?: MemoryScreen
+): MemoryToolSet;
+export function createMemoryTools(
+  config: MemoryToolsConfig,
+  port?: BridgeRunner | LegacyRecall,
+  journal?: JournalPort,
+  policy?: InstalledMemoryAccess | MemoryScreen,
+  bridgeScreen?: MemoryScreen
+): MemoryToolSet {
+  const bridgeConfig: BridgeMemoryToolsConfig | undefined =
+    config.native || config.python !== undefined ? config : undefined;
+  const bridgeRunner = (bridgeConfig ? (port as BridgeRunner | undefined) : undefined) ?? runMemoryBridge;
+  const legacyRecaller = (!bridgeConfig ? (port as LegacyRecall | undefined) : undefined) ?? defaultRecall;
+  const access = bridgeConfig ? (policy as InstalledMemoryAccess | undefined) : undefined;
+  const screen = (bridgeConfig ? bridgeScreen : (policy as MemoryScreen | undefined)) ?? screenMemoryText;
   const enabled = Boolean(config.instance || config.installed);
 
   /** Only what the bridge needs: never forward this process's room or session credentials to it. */
   function bridgeEnv(): NodeJS.ProcessEnv {
-    if (config.native)
-      return config.installed
-        ? config.native.installedEnvironment()
-        : config.instance
-          ? config.native.environment(config.instance)
+    if (!bridgeConfig) throw new Error('Explicit memory bridge is not configured');
+    if (bridgeConfig.native)
+      return bridgeConfig.installed
+        ? bridgeConfig.native.installedEnvironment()
+        : bridgeConfig.instance
+          ? bridgeConfig.native.environment(bridgeConfig.instance)
           : {};
     const apiBase = envValue(process.env, 'API_BASE');
     const embedUrl = envValue(process.env, 'EMBED_URL');
     return {
       PATH: process.env.PATH ?? '/usr/bin:/bin',
       HOME: process.env.HOME ?? '/tmp',
-      PYTHONPATH: config.source,
-      ...(config.instance ? environmentEntry('INSTANCE_CONFIG', config.instance) : {}),
+      PYTHONPATH: bridgeConfig.source,
+      ...(bridgeConfig.instance ? environmentEntry('INSTANCE_CONFIG', bridgeConfig.instance) : {}),
       ...(apiBase ? environmentEntry('API_BASE', apiBase) : {}),
       ...(embedUrl ? environmentEntry('EMBED_URL', embedUrl) : {}),
     };
   }
 
   function bridge(input: string, signal?: AbortSignal) {
+    if (!bridgeConfig) throw new Error('Explicit memory bridge is not configured');
     const options = { env: bridgeEnv(), input, timeoutMs: BRIDGE_TIMEOUT_MS, signal };
-    if (config.native)
-      return runner(
-        config.native.executable,
-        config.installed ? ['--installed-context', '--expected-context', config.installed.fingerprint] : [],
+    if (bridgeConfig.native)
+      return bridgeRunner(
+        bridgeConfig.native.executable,
+        bridgeConfig.installed ? ['--installed-context', '--expected-context', bridgeConfig.installed.fingerprint] : [],
         options
       );
-    return runner(config.python, ['-m', 'reverie.memory_cli'], options);
+    return bridgeRunner(bridgeConfig.python, ['-m', 'reverie.memory_cli'], options);
   }
 
   async function journalVerb(verb: (deps: AgentDeps) => Promise<number>, signal?: AbortSignal): Promise<unknown> {
@@ -332,17 +396,36 @@ export function createMemoryTools(
   };
 
   async function recall(body: Record<string, unknown>, signal?: AbortSignal): Promise<ToolResult> {
-    const out = await bridge(JSON.stringify(body), signal);
-    if (out.code !== 0) {
-      let reason = out.stderr.trim();
-      try {
-        reason = String(JSON.parse(reason).error ?? reason);
-      } catch {
-        /* plain text */
+    let legacy: string;
+    if (bridgeConfig) {
+      const out = await bridge(JSON.stringify(body), signal);
+      if (out.code !== 0) {
+        let reason = out.stderr.trim();
+        try {
+          reason = String(JSON.parse(reason).error ?? reason);
+        } catch {
+          /* plain text */
+        }
+        return failure('Memory lookup failed: ' + (scrubPaths(reason).slice(0, 500) || 'no detail'));
       }
-      return failure(`Memory lookup failed: ${scrubPaths(reason).slice(0, 500) || 'no detail'}`);
+      legacy = out.stdout.trim() || '[]';
+    } else {
+      try {
+        signal?.throwIfAborted();
+        legacy = await legacyRecaller(
+          config.instance!,
+          {
+            query: body.query as string,
+            ...(body.project ? { project: body.project as string } : {}),
+          },
+          signal
+        );
+        signal?.throwIfAborted();
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        return failure('Memory lookup failed: ' + (scrubPaths(reason).slice(0, 500) || 'no detail'));
+      }
     }
-    const legacy = out.stdout.trim() || '[]';
     if (!journal) return { text: legacy };
     // Recall: the journal is the store of record; the old store answers as older, read-only history until imported.
     try {
