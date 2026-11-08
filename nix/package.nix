@@ -134,6 +134,7 @@ let
         test/company-resource-binding-cas.test.ts test/resource-session-publication.test.ts \
         test/resource-ram-session-publication.test.ts test/resource-ram-owner-incarnation.test.ts \
         test/pool-installation-consent.test.ts \
+        test/pool-installation-enrollment.test.ts \
         test/resource-replacement-controller.test.ts test/company-laptop-memory-ui.test.ts \
         test/company-resource-fleet-ui.test.ts test/resource-fleet-schema.test.ts test/resource-fleet-service.test.ts \
         test/agent-plan-server.test.ts test/agent-plan-request.test.ts test/agent-plan-recovery.test.ts test/agent-plan-journal-recovery.test.ts test/cli-agent-force.test.ts test/cli-agent-viewer.test.ts test/plan-request.test.ts test/plan-request-capability.test.ts test/plan-request-routes.test.ts test/plan-credential-boundary.test.ts test/plan-request-ui.test.ts test/plan-request-prompt.test.ts \

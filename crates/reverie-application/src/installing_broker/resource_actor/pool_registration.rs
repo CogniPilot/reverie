@@ -7,6 +7,8 @@
 use super::*;
 use crate::installing_broker::installation_offer::RegistrationOfferGuard;
 use reverie_host::worker_reports::{PoolRegistrationPin, WorkerActorPinError};
+mod consent;
+pub(in crate::installing_broker) use consent::ConsentedPoolInstallation;
 #[cfg(test)]
 mod tests;
 
@@ -18,6 +20,7 @@ enum Owner<'a> {
         website: Box<InstalledPoolRegistrationWebsite<'a>>,
         pin: Option<PoolRegistrationPin>,
     },
+    Consented(Box<consent::ConsentedPoolInstallation<'a>>),
 }
 impl Owner<'_> {
     fn into_entry_primary(self) -> Option<ResourceActorError> {
@@ -27,18 +30,22 @@ impl Owner<'_> {
         }
     }
 }
-enum Cause {
+pub(in crate::installing_broker) enum Cause {
+    ControllerInstalled,
     Offer(BrokerInstallationOfferCause),
     Website(ResourceActorError),
     Pin(WorkerActorPinError),
+    Controller(reverie_host::worker_pool::PoolError),
     Refused(&'static str),
 }
 impl std::fmt::Display for Cause {
     fn fmt(&self, out: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::ControllerInstalled => out.write_str("POOL_CONTROLLER_INSTALLED"),
             Self::Offer(cause) => cause.fmt(out),
             Self::Website(cause) => cause.fmt(out),
             Self::Pin(cause) => cause.fmt(out),
+            Self::Controller(cause) => cause.fmt(out),
             Self::Refused(code) => out.write_str(code),
         }
     }
@@ -58,6 +65,12 @@ pub(in crate::installing_broker) struct PoolRegistrationComponentClosed {
     primary: Cause,
     entry_primary: Option<ResourceActorError>,
     first_cleanup: Option<ResourceActorError>,
+    offer_identity: Option<Arc<()>>,
+}
+impl PoolRegistrationComponentClosed {
+    pub(in crate::installing_broker) fn matches_offer(&self, identity: &Arc<()>) -> bool {
+        self.offer_identity.as_ref().is_some_and(|actual| Arc::ptr_eq(actual, identity))
+    }
 }
 impl PoolRegistrationFailure<'_> {
     /// SAME original components only. No attestation, offer claim, consent or
@@ -70,6 +83,7 @@ impl PoolRegistrationFailure<'_> {
             Owner::Incoming(connection) => connection.close_socket_for_worker().map_err(Into::into),
             Owner::Entry(owner) => owner.close_channel_component(self.deadline),
             Owner::Joined { website, .. } => website.close_channel_component(self.deadline),
+            Owner::Consented(owner) => owner.close_for_worker(self.deadline),
         };
         let result = match result {
             Ok(WorkerLaunchClose::Complete | WorkerLaunchClose::SocketClosedHandlerRetained) => {
@@ -83,21 +97,31 @@ impl PoolRegistrationFailure<'_> {
         match result {
             Ok(()) => {
                 let Self {
-                    owner,
-                    offer,
+                    mut owner,
+                    mut offer,
                     primary,
                     first_cleanup,
                     ..
                 } = *self;
-                let entry_primary = owner.into_entry_primary();
                 // The Frame/channel owners close and drop before releasing
                 // the actual offer guard; no count or Arc observation grants it.
-                drop(offer);
-                Ok(PoolRegistrationComponentClosed {
+                let mut closed = PoolRegistrationComponentClosed {
                     primary,
-                    entry_primary,
+                    entry_primary: None,
                     first_cleanup,
-                })
+                    offer_identity: offer.as_ref().map(RegistrationOfferGuard::close_identity).or_else(|| {
+                        if let Owner::Consented(owner) = &owner { owner.close_identity() } else { None }
+                    }),
+                };
+                if let Some(offer) = offer.as_mut() {
+                    // Actual known Frame/socket/Hold close above, bound to the
+                    // same original guard. This is not a pool/domain release.
+                    offer.channel_closed(&closed).expect("same original close identity");
+                }
+                if let Owner::Consented(owner) = &mut owner { owner.channel_closed(&closed); }
+                closed.entry_primary = owner.into_entry_primary();
+                drop(offer);
+                Ok(closed)
             }
             Err(cause) => {
                 self.first_cleanup.get_or_insert(cause);
@@ -168,9 +192,7 @@ impl InstallingBroker {
             cleanup_failures: 0,
             deadline,
         });
-        if let Err(cause) = failure.prepare(self) {
-            failure.primary = cause;
-        }
+        failure.primary = match failure.prepare(self) { Ok(()) => Cause::ControllerInstalled, Err(cause) => cause };
         failure
     }
 }
@@ -217,6 +239,7 @@ impl<'a> PoolRegistrationFailure<'a> {
             .expect("actual B pin retained")
             .assert_current()
             .map_err(Cause::Pin)?;
-        offer.assert_current(broker).map_err(Cause::Offer)
+        offer.assert_current(broker).map_err(Cause::Offer)?;
+        self.run_consent(broker)
     }
 }

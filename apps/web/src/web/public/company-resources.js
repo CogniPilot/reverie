@@ -77,6 +77,8 @@
       this.error = shell.el('p', 'ca-company-error');
       this.error.setAttribute('role', 'alert');
       this.content = shell.el('div', 'ca-fleet-content');
+      this.setup = shell.el('section', 'ca-fleet-installation');
+      this.setupBusy = false;
       this.draft = shell.el('div', 'ca-fleet-preview');
       this.results = shell.el('div', 'ca-fleet-results');
       this.refresh = shell.button('ca-btn', 'Refresh laptop fleet status', () => this.load(), {
@@ -94,6 +96,7 @@
         ),
         this.status,
         this.error,
+        this.setup,
         this.content,
         this.draft,
         this.results,
@@ -171,6 +174,9 @@
       this.check.disabled = this.busy;
       this.check.hidden = this.pending.size === 0;
       if (this.apply) this.apply.disabled = locked || this.preview?.canApply !== true || this.applied;
+      this.setup.querySelectorAll('button').forEach((node) => {
+        node.disabled = this.busy || this.setupBusy || this.storageFailed || this.pending.size > 0;
+      });
     }
     invalidate() {
       this.preview = null;
@@ -293,6 +299,7 @@
       const s = this.shell,
         data = this.data;
       this.renderBlockers(this.content, data.blockers);
+      this.renderSetup();
       if (data.operations === null)
         this.content.append(
           s.el('p', 'ca-hint', 'Rollout history is unavailable. Existing operations have not been ruled out.')
@@ -342,6 +349,192 @@
         void this.prepare();
       });
       this.content.append(this.form);
+    }
+    setupKey() {
+      return `reverie:worker-pool-installation:${this.owner}`;
+    }
+    readSetupPending() {
+      try {
+        const raw = localStorage.getItem(this.setupKey());
+        if (!raw) return null;
+        const value = JSON.parse(raw);
+        if (!id(value.viewId) || !id(value.offerNonce) || !/^[a-f0-9]{64}$/.test(value.requestDigest))
+          throw new Error('Invalid installation record');
+        return value;
+      } catch {
+        this.storageFailed = true;
+        return { unavailable: true };
+      }
+    }
+    renderSetup() {
+      const s = this.shell;
+      this.setup.replaceChildren();
+      if (!this.data.blockers.some((row) => row.code === 'FLEET_HOST_SETUP_REQUIRED')) return;
+      this.setup.append(s.el('h4', '', 'Native worker pool setup'));
+      this.setup.append(
+        s.el(
+          'p',
+          'ca-hint',
+          'Review the OS-nominated installation before consenting. This installs the shared resource controller; laptop replacement is tracked separately.'
+        )
+      );
+      const pending = this.readSetupPending();
+      if (pending) {
+        this.setup.append(
+          s.el(
+            'p',
+            'ca-hint',
+            'An installation was attempted or is unconfirmed. Check its original result; consent will not be sent again.'
+          )
+        );
+        if (!pending.unavailable)
+          this.setup.append(s.button('ca-btn', 'Check original pool installation', () => this.checkSetup(pending)));
+      } else {
+        this.setup.append(s.button('ca-btn', 'Review native worker pool setup', () => this.openSetup()));
+      }
+    }
+    async openSetup() {
+      if (this.setupBusy || this.readSetupPending()) return;
+      this.setupBusy = true;
+      this.sync();
+      this.error.textContent = '';
+      try {
+        await this.identity();
+        const response = await this.shell.app._chatApi(`${ROOT}/installation/view`, { method: 'POST', body: {} });
+        await this.identity();
+        if (!response.ok) throw new Error(response.error || 'Native installation view unavailable');
+        const view = response.data,
+          policy = view?.policy;
+        if (
+          !view ||
+          view.kind !== 'pool-installation-viewed' ||
+          view.purpose !== 'host-pool-installation-consent-v1' ||
+          view.version !== 1 ||
+          !id(view.requestId) ||
+          !id(view.offerNonce) ||
+          !/^[a-f0-9]{64}$/.test(view.requestDigest) ||
+          !Number.isSafeInteger(view.expiresAtEpochMs) ||
+          view.expiresAtEpochMs <= Date.now() ||
+          !policy ||
+          policy.memoryMaxMiB !== 49152 ||
+          !Array.isArray(policy.allowedCpus) ||
+          !policy.allowedCpus.every((cpu) => Number.isSafeInteger(cpu) && cpu >= 0) ||
+          !Number.isSafeInteger(policy.cpuWeight) ||
+          !policy.employeeMemoryHighMiB ||
+          typeof policy.employeeMemoryHighMiB !== 'object'
+        )
+          throw new Error('Native setup selection could not be verified');
+        this.setup.replaceChildren(this.shell.el('h4', '', 'Review native worker pool setup'));
+        this.setup.append(
+          this.shell.el(
+            'p',
+            '',
+            `Shared hard ceiling: 48 GiB. CPU weight: ${policy.cpuWeight}; allowed CPUs: ${policy.allowedCpus.join(', ')}. Laptops share the pool; setup alone does not restart or wake an employee.`
+          )
+        );
+        for (const [employeeId, high] of Object.entries(policy.employeeMemoryHighMiB)) {
+          if (!Number.isSafeInteger(high) || high <= 0 || high > 49152)
+            throw new Error('Invalid native soft threshold');
+          const employee = this.data.employees.find((row) => row.employeeId === employeeId);
+          this.setup.append(
+            this.shell.el(
+              'p',
+              'ca-hint',
+              `${employee?.name || employeeId}: soft RAM ${high.toLocaleString()} MiB; hard maximum 48 GiB.`
+            )
+          );
+        }
+        this.setup.append(
+          this.shell.el(
+            'p',
+            'ca-hint',
+            `Installation expires ${new Date(view.expiresAtEpochMs).toLocaleString()}. Existing off and vacation intent remains separate from installation.`
+          )
+        );
+        this.setup.append(
+          this.shell.button('ca-btn is-danger', 'Consent to this native pool installation', () =>
+            this.consentSetup(view)
+          )
+        );
+      } catch (error) {
+        this.error.textContent = error.message || 'Native installation unavailable';
+      } finally {
+        this.setupBusy = false;
+        this.sync();
+      }
+    }
+    async consentSetup(view) {
+      if (this.setupBusy || this.readSetupPending()) return;
+      if (Date.now() >= view.expiresAtEpochMs) {
+        this.error.textContent = 'Installation view expired. No consent was sent.';
+        return;
+      }
+      const confirmed = await this.shell.confirmCompanyAction(
+        'Native worker pool',
+        'Install the reviewed shared worker resource controller?',
+        'Consent to installation'
+      );
+      if (!confirmed || this.setupBusy || this.readSetupPending() || !this.dialog.isConnected) return;
+      this.setupBusy = true;
+      this.sync();
+      try {
+        await this.identity();
+        if (Date.now() >= view.expiresAtEpochMs) throw new Error('Installation view expired. No consent was sent.');
+        const record = { viewId: view.requestId, offerNonce: view.offerNonce, requestDigest: view.requestDigest };
+        const raw = JSON.stringify(record);
+        localStorage.setItem(this.setupKey(), raw);
+        if (localStorage.getItem(this.setupKey()) !== raw)
+          throw new Error('Installation recovery record could not be saved; no consent sent');
+        const response = await this.shell.app._chatApi(
+          `${ROOT}/installation/${encodeURIComponent(view.requestId)}/consent`,
+          {
+            method: 'POST',
+            body: { consent: true, offerNonce: view.offerNonce, requestDigest: view.requestDigest },
+          }
+        );
+        await this.identity();
+        if (!response.ok) throw new Error(response.error || 'Original installation outcome is retained');
+        this.showSetupResult(response.data);
+      } catch (error) {
+        this.error.textContent = error.message || 'Installation is unconfirmed; do not resend consent';
+      } finally {
+        this.setupBusy = false;
+        this.renderSetup();
+        this.sync();
+      }
+    }
+    async checkSetup(record) {
+      if (this.setupBusy) return;
+      this.setupBusy = true;
+      this.sync();
+      try {
+        await this.identity();
+        const response = await this.shell.app._chatApi(
+          `${ROOT}/installation/${encodeURIComponent(record.viewId)}/result`,
+          { method: 'POST', body: {} }
+        );
+        await this.identity();
+        if (!response.ok) throw new Error(response.error || 'Installation history unavailable');
+        this.showSetupResult(response.data);
+      } catch (error) {
+        this.error.textContent = error.message || 'Original installation remains unconfirmed';
+      } finally {
+        this.setupBusy = false;
+        this.sync();
+      }
+    }
+    showSetupResult(result) {
+      if (
+        !result ||
+        !id(result.viewId) ||
+        typeof result.blocksFurtherChanges !== 'boolean' ||
+        !['viewed', 'pending', 'settled', 'unknown'].includes(result.state)
+      )
+        throw new Error('Installation result unavailable');
+      this.error.textContent =
+        result.state === 'settled'
+          ? 'Native pool setup returned a verified result. Refresh fleet status to inspect controller observations and laptop coverage; rollout completion has not been inferred.'
+          : 'Original native installation is pending or unconfirmed. No consent will be replayed.';
     }
     renderPool() {
       const s = this.shell,

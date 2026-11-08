@@ -4,6 +4,8 @@
 use super::*;
 
 pub const POOL_INSTALLATION_CONSENT_PURPOSE: &str = "host-pool-installation-consent-v1";
+mod view;
+pub use view::{CurrentPoolInstallationViewer, PoolInstallationOfferViewData, PoolInstallationViewRequest};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PoolInstallationConsentRequest {
@@ -31,6 +33,18 @@ impl CurrentPoolInstallationConsent {
     }
 }
 impl PoolInstallationConsentRequest {
+    /// Observation DATA after the native owner has actually configured and
+    /// transferred its controller. This frame itself grants no authority.
+    pub fn configured_reply(&self, observed: &[u8]) -> Result<HumanFrame> {
+        let observed = HumanFrame::decode(observed).map_err(frame_error)?;
+        need(matches!(observed.value().0, Node::Object(_)), "POOL_INSTALLATION_OBSERVATION_OBJECT_REQUIRED")?;
+        frame(Value(Node::Object(BTreeMap::from([
+            (key("kind"), string("pool-installation-result")), (key("purpose"), string(POOL_INSTALLATION_CONSENT_PURPOSE)),
+            (key("version"), Value(Node::Number(Number::Integer("1".into())))),
+            (key("requestId"), string(self.request.as_str())), (key("phase"), string("pool-configured")),
+            (key("observed"), observed.value().deep_clone()),
+        ]))))
+    }
     pub fn decode(frame: &HumanFrame) -> Result<Self> {
         let value = frame.value();
         closed(

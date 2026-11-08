@@ -11,11 +11,24 @@ enum BootstrapKind {
     Service,
     InstallationOffer,
 }
+pub(super) enum BrokerControllerActivationFailure {
+    Bootstrap(Box<BrokerControllerBootstrapFailure>),
+    Native(Box<reverie_host::worker_pool::ControllerActivationFailure>),
+}
+impl BrokerControllerActivationFailure {
+    pub(super) fn close_components(&mut self, end: Instant) -> Result<(), reverie_host::worker_pool::PoolError> {
+        match self {
+            Self::Bootstrap(owner) => owner.close_origin_metadata(),
+            Self::Native(owner) => owner.close_components(end),
+        }
+    }
+}
 #[must_use = "retain the original installing broker and bootstrap binding"]
 pub struct BrokerControllerBootstrap {
     broker: Arc<InstallingBroker>,
     source: std::path::PathBuf,
-    binding: BrokerBootstrapBinding,
+    binding: Option<BrokerBootstrapBinding>,
+    origin_transferred: bool,
     origin_closed: bool,
     birth_attempted: bool,
     publication: Option<ControllerBirthPublication>,
@@ -109,7 +122,8 @@ impl InstallingBroker {
         let mut owner = BrokerControllerBootstrap {
             broker: Arc::clone(self),
             source,
-            binding,
+            binding: Some(binding),
+            origin_transferred: false,
             origin_closed: false,
             birth_attempted: false,
             publication: None,
@@ -125,6 +139,28 @@ impl InstallingBroker {
     }
 }
 impl BrokerControllerBootstrap {
+    pub(super) fn activate_controller(
+        mut self,
+        host_reserve_mib: u32,
+        end: Instant,
+    ) -> Result<reverie_host::worker_pool::ActivatedController, Box<BrokerControllerActivationFailure>> {
+        let checked = self.assert_current(end).and_then(|()| {
+            if self.binding.is_some() && self.publication.is_some() { Ok(()) }
+            else { Err(BrokerControllerBootstrapCause::Refused("WORKER_POOL_ACTIVATION_SOURCE_REQUIRED")) }
+        });
+        if let Err(cause) = checked {
+            return Err(Box::new(BrokerControllerActivationFailure::Bootstrap(Box::new(BrokerControllerBootstrapFailure {
+                owner: Some(self), unopened_broker: None, cause,
+            }))));
+        }
+        let binding = self.binding.take().expect("original native binding checked");
+        let publication = self.publication.take().expect("original publication checked");
+        // Actual custody transfer of BOTH native owners. Publication metadata
+        // is not relabeled as closed, and no App Arc enters the installed slot.
+        self.origin_transferred = true;
+        binding.activate_controller(publication, &self.broker.storage.runtime, host_reserve_mib, end)
+            .map_err(|owner| Box::new(BrokerControllerActivationFailure::Native(owner)))
+    }
     pub(super) fn published_birth_reference(
         &self,
     ) -> Result<PublishedControllerBirthData, BrokerControllerBootstrapCause> {
@@ -151,7 +187,7 @@ impl BrokerControllerBootstrap {
                 "WORKER_POOL_BROKER_LOADER_SOURCE_CHANGED",
             ));
         }
-        self.binding
+        self.binding.as_mut().ok_or(BrokerControllerBootstrapCause::Refused("WORKER_POOL_BINDING_TRANSFERRED"))?
             .assert_registered_source(&self.broker.storage.runtime, &self.source, end)
             .map_err(BrokerControllerBootstrapCause::Observation)
     }
@@ -162,7 +198,7 @@ impl BrokerControllerBootstrap {
     ) -> Result<reverie_contracts::worker_pool::ControllerBirthV2, BrokerControllerBootstrapCause>
     {
         self.assert_current(end)?;
-        self.binding
+        self.binding.as_mut().ok_or(BrokerControllerBootstrapCause::Refused("WORKER_POOL_BINDING_TRANSFERRED"))?
             .birth_document_data(&self.broker.storage.runtime, policy, end)
             .map_err(BrokerControllerBootstrapCause::Observation)
     }
@@ -171,7 +207,7 @@ impl BrokerControllerBootstrap {
             .publication
             .as_mut()
             .map_or(Ok(()), ControllerBirthPublication::close);
-        let binding = self.binding.close();
+        let binding = self.binding.as_mut().map_or(Ok(()), BrokerBootstrapBinding::close);
         let result = match (publication, binding) {
             (Ok(()), Ok(())) => Ok(()),
             (Err(error), Ok(())) | (Ok(()), Err(error)) => Err(error),
@@ -199,7 +235,7 @@ impl BrokerControllerBootstrap {
         self.birth_attempted = true;
         self.assert_current(end)?;
         self.publication = Some(
-            self.binding
+            self.binding.as_mut().ok_or(BrokerControllerBootstrapCause::Refused("WORKER_POOL_BINDING_TRANSFERRED"))?
                 .prepare_birth_publication(&self.broker.storage.runtime, &self.source, policy, end)
                 .map_err(BrokerControllerBootstrapCause::Observation)?,
         );
@@ -218,7 +254,7 @@ impl BrokerControllerBootstrap {
 }
 impl Drop for BrokerControllerBootstrap {
     fn drop(&mut self) {
-        if !self.origin_closed {
+        if !self.origin_closed && !self.origin_transferred {
             // Default destruction never abandons the original service while
             // its native bootstrap descriptors lack checked finalization.
             std::mem::forget(Arc::clone(&self.broker));

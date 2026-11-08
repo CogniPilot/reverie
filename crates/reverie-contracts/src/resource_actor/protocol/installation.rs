@@ -6,7 +6,7 @@ use sha2::{Digest, Sha256};
 mod consent;
 pub use consent::{
     CurrentPoolInstallationConsent, POOL_INSTALLATION_CONSENT_PURPOSE,
-    PoolInstallationConsentRequest,
+    PoolInstallationConsentRequest, CurrentPoolInstallationViewer, PoolInstallationOfferViewData, PoolInstallationViewRequest,
 };
 
 pub const POOL_INSTALLATION_REQUEST_PURPOSE: &str = "host-pool-installation-request-v1";

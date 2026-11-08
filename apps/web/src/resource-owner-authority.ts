@@ -85,6 +85,11 @@ interface PoolInstallationSelection {
   readonly offerNonce: string;
   readonly requestDigest: string;
 }
+export interface PoolInstallationViewerContext extends ResourceContext<typeof POOL_INSTALLATION_CONSENT_PURPOSE> {
+  readonly stage: 'viewer';
+  readonly requestId: string;
+  readonly principal: Readonly<ResourceOwnerPrincipal>;
+}
 export interface PoolInstallationOfferContext
   extends ResourceContext<typeof POOL_INSTALLATION_CONSENT_PURPOSE>, PoolInstallationSelection {
   readonly stage: 'offer';
@@ -114,7 +119,11 @@ export type AnyResourceContext =
   | ResourcePreviewContext
   | RamResourceOwnerContext
   | RamResourcePreviewContext;
-type AuthorityContext = AnyResourceContext | PoolInstallationOfferContext | PoolInstallationConsentContext;
+type AuthorityContext =
+  | AnyResourceContext
+  | PoolInstallationViewerContext
+  | PoolInstallationOfferContext
+  | PoolInstallationConsentContext;
 
 /** Process-local authority join. A serialized scope digest never recreates it. */
 export class ResourceOwnerBinding {
@@ -345,9 +354,18 @@ export class ResourceOwnerAuthority {
     need(typeof employeeId === 'string' && UUID.test(employeeId));
     return this.#capture(request, { stage: 'preview' as const, employeeId }, RAM_PURPOSE);
   }
+  capturePoolInstallationViewer(request: FastifyRequest): PoolInstallationViewerContext {
+    return this.#capture(
+      request,
+      { stage: 'viewer' as const, requestId: randomUUID() },
+      POOL_INSTALLATION_CONSENT_PURPOSE
+    );
+  }
   capturePoolInstallationOffer(
     request: FastifyRequest,
-    nominated: PoolInstallationOfferData
+    nominated: PoolInstallationOfferData,
+    viewer?: PoolInstallationViewerContext,
+    offerExpiry?: number
   ): PoolInstallationOfferContext {
     need(Object.keys(nominated).sort().join(',') === 'offerNonce,principal,requestDigest');
     need(
@@ -359,16 +377,23 @@ export class ResourceOwnerAuthority {
         nominated.principal &&
         Object.keys(nominated.principal).sort().join(',') === 'accountId,personId,sessionEpoch'
     );
+    if (viewer) {
+      this.assertContext(viewer);
+      need(viewer.purpose === POOL_INSTALLATION_CONSENT_PURPOSE && viewer.stage === 'viewer');
+    }
+    if (offerExpiry !== undefined) need(Number.isSafeInteger(offerExpiry) && offerExpiry > Date.now());
     const context = this.#capture(
       request,
       {
         stage: 'offer' as const,
-        requestId: randomUUID(),
+        requestId: viewer?.requestId ?? randomUUID(),
         offerNonce: nominated.offerNonce,
         requestDigest: nominated.requestDigest,
       },
-      POOL_INSTALLATION_CONSENT_PURPOSE
+      POOL_INSTALLATION_CONSENT_PURPOSE,
+      Math.min(viewer?.expiresAtEpochMs ?? Number.MAX_SAFE_INTEGER, offerExpiry ?? Number.MAX_SAFE_INTEGER)
     );
+    if (viewer) this.assertSameSession(viewer, context);
     need(
       context.principal.accountId === nominated.principal.accountId &&
         context.principal.personId === nominated.principal.personId &&
@@ -417,6 +442,25 @@ export class ResourceOwnerAuthority {
     viewed.assertCurrent();
     return context;
   }
+  /** Read-only recovery lookup. Does not revive an expired action context or
+   * authorize a new connection/consent/effect. */
+  assertPoolInstallationSession(request: FastifyRequest, context: PoolInstallationViewerContext): void {
+    need(
+      this.#contexts.has(context) && context.purpose === POOL_INSTALLATION_CONSENT_PURPOSE && context.stage === 'viewer'
+    );
+    const source = this.#sessions.get(context),
+      token = request.cookies?.[OWNER_COOKIE];
+    need(
+      source && typeof token === 'string' && token === source.token && this.#auth.forSession(token) === source.account
+    );
+    const current = this.#identity(request, token, POOL_INSTALLATION_CONSENT_PURPOSE).principal;
+    need(
+      current &&
+        current.accountId === context.principal.accountId &&
+        current.personId === context.principal.personId &&
+        current.sessionEpoch === context.principal.sessionEpoch
+    );
+  }
   requestOwner(request: FastifyRequest): string | undefined {
     const token = request.cookies?.[OWNER_COOKIE];
     need(typeof token === 'string' && token.length > 0 && token.length <= 4096);
@@ -428,6 +472,7 @@ export class ResourceOwnerAuthority {
     T extends
       | { stage: 'apply'; approval: Readonly<ResourceApproval> }
       | { stage: 'preview'; employeeId: string }
+      | { stage: 'viewer'; requestId: string }
       | (PoolInstallationSelection & ({ stage: 'offer' } | { stage: 'consent'; consent: true })),
   >(
     request: FastifyRequest,
