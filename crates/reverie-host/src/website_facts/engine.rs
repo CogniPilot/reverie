@@ -25,6 +25,9 @@ fn identity(path: &std::path::Path) -> Result<[u64; 4]> {
     ])
 }
 impl WebsiteMetadataObserver {
+    pub fn assert_finalized(&self) -> Result<()> {
+        need(!self.close_uncertain, "ENGINE_METADATA_CLOSE_UNCONFIRMED")
+    }
     pub fn new(selected: &EngineSelection) -> Result<Self> {
         let socket = native::python_path(selected.socket.codepoints())?;
         let identity = selected

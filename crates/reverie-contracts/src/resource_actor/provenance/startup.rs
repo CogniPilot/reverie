@@ -25,10 +25,16 @@ impl InvocationSelection {
 }
 pub struct WebsiteProgramGraph {
     invocations: Vec<InvocationSelection>,
+    startup_code: Vec<CodeFile>,
 }
 impl WebsiteProgramGraph {
     pub fn invocations(&self) -> &[InvocationSelection] {
         &self.invocations
+    }
+    /// Legacy startup invocation targets must be in this exact subset, not
+    /// merely somewhere in the larger image manifest. Still DATA only.
+    pub fn startup_code_files(&self) -> &[CodeFile] {
+        &self.startup_code
     }
 }
 impl WebsiteImageProvenance {
@@ -74,6 +80,7 @@ impl WebsiteImageProvenance {
                 });
             }
         }
+        let mut startup_code = Vec::new();
         match (&self.startup, startup) {
             (None, None) => {}
             (Some(selected), Some(raw)) => {
@@ -85,7 +92,9 @@ impl WebsiteImageProvenance {
                             == selected.sha256,
                     "RESOURCE_INSTALL_STARTUP_GRAPH_CHANGED",
                 )?;
-                invocations.extend(startup_graph(self, raw)?);
+                let (selected, code) = startup_graph(self, raw)?;
+                invocations.extend(selected);
+                startup_code = code;
             }
             _ => {
                 return Err(ResourceActorDataError(
@@ -99,10 +108,16 @@ impl WebsiteImageProvenance {
                 require_path(executable)?;
             }
         }
-        Ok(WebsiteProgramGraph { invocations })
+        Ok(WebsiteProgramGraph {
+            invocations,
+            startup_code,
+        })
     }
 }
-fn startup_graph(image: &WebsiteImageProvenance, raw: &[u8]) -> Result<Vec<InvocationSelection>> {
+fn startup_graph(
+    image: &WebsiteImageProvenance,
+    raw: &[u8],
+) -> Result<(Vec<InvocationSelection>, Vec<CodeFile>)> {
     let value = legacy_json::decode_strict_bytes(raw)
         .map_err(|_| ResourceActorDataError("RESOURCE_INSTALL_STARTUP_GRAPH_CHANGED"))?;
     closed(
@@ -159,14 +174,17 @@ fn startup_graph(image: &WebsiteImageProvenance, raw: &[u8]) -> Result<Vec<Invoc
             "INCOMPLETE_STARTUP_CODE_GRAPH",
         )?;
     }
-    Ok(vec![
-        InvocationSelection {
-            invocation,
-            executable: Some(executable),
-            kind: InvocationKind::Executable,
-        },
-        python,
-    ])
+    Ok((
+        vec![
+            InvocationSelection {
+                invocation,
+                executable: Some(executable),
+                kind: InvocationKind::Executable,
+            },
+            python,
+        ],
+        code,
+    ))
 }
 fn python_graph(value: &Value, required: &mut Vec<PythonText>) -> Result<InvocationSelection> {
     // Read legacy startup metadata during transition; never execute Python.
