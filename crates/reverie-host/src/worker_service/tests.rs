@@ -3,6 +3,7 @@
 #[path = "tests/fragment.rs"]
 mod fragment;
 use super::*;
+mod stopped;
 #[test]
 fn installed_generation_must_be_inactive_and_exact_before_replacement() {
     let old = Path::new("/nix/store/old-worker/share/systemd/user/reverie-worker-broker.service");
