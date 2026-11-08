@@ -449,7 +449,7 @@ export class ResourceNativeClient {
         check.employeeId === (approval?.employeeId ?? (this.#context as ResourcePreviewContext).employeeId) &&
           isDeepStrictEqual(check.approval, approval)
       );
-      this.#write({
+      const ownerReply = {
         kind: 'resource-owner-current',
         requestId: pending.id,
         nonce: check.nonce,
@@ -459,7 +459,12 @@ export class ResourceNativeClient {
         ownerScopeDigest: this.#context.ownerScopeDigest,
         expiresAtEpochMs: this.#context.expiresAtEpochMs,
         approval,
-      });
+      };
+      if (this.#context.purpose === 'resource-ram-pool-v2') {
+        this.#write({ ...ownerReply, principal: this.#context.principal });
+      } else {
+        this.#write(ownerReply);
+      }
     } else if (Readiness.safeParse(value).success) {
       need(this.#context.purpose === 'resource-replacement-v1');
       const check = Readiness.parse(value);

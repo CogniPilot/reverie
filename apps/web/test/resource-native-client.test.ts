@@ -178,13 +178,18 @@ it('RAM-v2 sends the explicit purpose and bounded soft-memory draft with the act
     purpose: 'resource-ram-pool-v2',
     approval: null,
     ownerScopeDigest: ramPreview.ownerScopeDigest,
+    principal: ramPreview.principal,
   });
+  const { accountId, personId, sessionEpoch } = auth.registrationIdentity(token);
+  expect(received[1].principal).toEqual({ accountId, personId, sessionEpoch });
+  expect(Object.isFrozen(ramPreview.principal)).toBe(true);
   expect(JSON.stringify(received)).not.toContain(token);
 });
 it('RAM-v2 binds all nine Apply references and keeps legacy binding and contexts purpose-scoped', async () => {
   const client = await openRam(ramApply);
   await client.claim();
   expect(received[1].approval).toEqual(ramApproval);
+  expect(received[1].principal).toEqual(ramApply.principal);
   expect(() => authority.bind(ramApply as never)).toThrow();
   expect(() => authority.assertSameSession(ramApply, apply)).toThrow();
   await expect(ResourceNativeClient.open(path, authority, ramPreview as never)).rejects.toThrow();
@@ -277,6 +282,7 @@ it('uses the actual current owner context for a distinct preview proof without a
     client.request('draft', { employeeId: approval.employeeId, idempotencyKey: randomUUID() })
   ).resolves.toEqual({ state: 'CONTROLLED_SOURCE_RESPONSE', capacityHeld: false });
   expect(received.map((value) => value.kind)).toEqual(['resource-operation', 'resource-owner-current']);
+  expect(received[1]).not.toHaveProperty('principal');
   expect(received[1]).toMatchObject({
     purpose: 'resource-replacement-v1',
     stage: 'preview',
