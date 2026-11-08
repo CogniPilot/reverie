@@ -51,3 +51,12 @@ normalizations/parents and 1,300 seeded join/descendant/overlap pairs. Codepoint
 arrays preserve lone surrogates and NUL without a JSON string decoder deciding
 their meaning. The fixtures qualify lexical data only, never native path
 existence, canonical control domains or mount permission.
+
+`lease-records-python.json` was generated in one disposable Python oracle
+invocation from the frozen `python/reverie/cleanup/lease.py` (its SHA-256 is
+recorded in the file). No generator is added to the source tree. It holds
+`_reservation_value_state` over `json.loads(text)` (a `ValueError` reads as
+malformed), `_parse_duration`, and `json.dumps` bytes of the path, reservation
+and holder records for a synthetic path with non-ASCII and lone-surrogate
+codepoints. Each case records Python's outcome and the native one; the three
+intentional native refusals are listed in `intentionalDifferences`.

@@ -177,7 +177,7 @@ function loadRuntime(policyPath: string): Runtime {
  * Python's non-strict `Path.resolve()`: symlinks in the longest existing prefix are resolved and
  * the missing rest is appended, so a path to a file that does not exist still resolves.
  */
-function resolveLoose(path: string): string {
+export function resolveLoose(path: string): string {
   const missing: string[] = [];
   for (let at = resolve(path); ; at = dirname(at)) {
     try {

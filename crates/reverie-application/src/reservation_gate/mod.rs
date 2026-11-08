@@ -14,6 +14,8 @@ mod image_refresh;
 mod launch;
 mod observation;
 mod ordinary_stop;
+mod pool_transition;
+pub use pool_transition::{PoolTransitionFailure, PoolTransitionFence};
 mod stop_admission;
 pub(crate) use stop_admission::OrdinaryStopAdmission;
 mod preparation;
@@ -82,8 +84,11 @@ struct Inner {
     state: Mutex<State>,
     changed: Condvar,
     failed_gpu: Mutex<Vec<Arc<gpu_access::TransitionRecord>>>,
+    pool_transition: Mutex<Option<Arc<pool_transition::TransitionRecord>>>,
     #[cfg(test)]
     entry_capture_pause: Mutex<Option<crate::test_process::PausePoint<ObservationContext>>>,
+    #[cfg(test)]
+    entry_wait_notice: Mutex<Option<std::sync::mpsc::SyncSender<()>>>,
 }
 #[derive(Default)]
 struct State {
@@ -111,7 +116,10 @@ impl ReservationGate {
         // prevents acknowledgement; neither failure suppresses the other.
         finalized(
             self.inner.observer.settle_owned(end).map_err(Into::into),
-            self.inner.assert_no_failed_gpu(),
+            finalized(
+                self.inner.assert_no_failed_gpu(),
+                self.inner.assert_no_pool_transition(),
+            ),
         )
     }
     /// Installing-service input, never a request-selected Source/config path.
@@ -161,8 +169,11 @@ impl ReservationGate {
                 state: Mutex::new(State::default()),
                 changed: Condvar::new(),
                 failed_gpu: Mutex::new(Vec::new()),
+                pool_transition: Mutex::new(None),
                 #[cfg(test)]
                 entry_capture_pause: Mutex::new(None),
+                #[cfg(test)]
+                entry_wait_notice: Mutex::new(None),
             }),
         })
     }

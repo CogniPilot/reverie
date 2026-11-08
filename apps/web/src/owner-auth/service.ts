@@ -154,6 +154,10 @@ interface Session {
   createdAt: number;
   lastSeenAt: number;
   epoch: number;
+  /** Registration additionally binds the account incarnation when it exists. */
+  accountId?: string;
+  /** Fixed at actual authentication, including for an account without a UUID. */
+  registrationFingerprint: string;
   /** A one-time password is in use: only the password change (and logout/status) may be used. */
   restricted: boolean;
 }
@@ -186,6 +190,35 @@ export interface OwnerSession {
   role?: 'owner' | 'limited';
 }
 
+/** Stable account provenance only. This is not a host or employee grant. */
+export interface OwnerRegistrationIdentity {
+  readonly accountId: string;
+  readonly personId: string;
+  readonly sessionEpoch: number;
+}
+
+const RegistrationAccountSchema = MessageOwnerAccountSchema.extend({ accountId: z.string().uuid().optional() });
+
+function registrationFingerprint(
+  account: Pick<OwnerAccount, 'version' | 'username' | 'epoch' | 'passwordChangedAt' | 'password'>
+): string {
+  const password = account.password;
+  return sha256(
+    JSON.stringify([
+      account.version,
+      account.username,
+      account.epoch,
+      account.passwordChangedAt,
+      password.algo,
+      password.N,
+      password.r,
+      password.p,
+      password.salt,
+      password.hash,
+    ])
+  );
+}
+
 export class OwnerAuthService {
   private readonly sessions = new Map<string, Session>();
   private readonly challenges = new Map<string, { expiresAt: number; epoch: number; bucket: string }>();
@@ -211,6 +244,57 @@ export class OwnerAuthService {
     if (!this.session(token)) return undefined;
     const account = this.account();
     return account ? { id: 'owner', username: account.username, name: account.username, role: 'owner', primary: true } : undefined;
+  }
+
+  private registrationAccount(token: string | undefined, publication?: { session: Session; accountId: string }) {
+    const session = token ? this.sessions.get(sha256(token)) : undefined;
+    const account = RegistrationAccountSchema.safeParse(this.deps.store.readCurrent());
+    const now = this.now();
+    if (
+      !session ||
+      !account.success ||
+      session.restricted ||
+      session.epoch !== account.data.epoch ||
+      (publication !== undefined && publication.session !== session) ||
+      (publication ? publication.accountId : session.accountId) !== account.data.accountId ||
+      session.registrationFingerprint !== registrationFingerprint(account.data) ||
+      now - session.lastSeenAt > SESSION_IDLE_MS ||
+      now - session.createdAt > SESSION_MAX_MS
+    )
+      throw new OwnerAuthError('Current unrestricted account enrollment is unavailable', 403);
+    return { account: account.data, session };
+  }
+
+  /** Read-only: absence never creates an account id or repairs an account. */
+  registrationIdentity(token: string | undefined): OwnerRegistrationIdentity {
+    const { account } = this.registrationAccount(token);
+    if (!account.accountId) throw new OwnerAuthError('Explicit account enrollment is required', 409);
+    return Object.freeze({ accountId: account.accountId, personId: 'owner', sessionEpoch: account.epoch });
+  }
+
+  /** Explicit authenticated enrollment under the existing cross-process account lock.
+   * Adds one incarnation id to legacy accounts, preserving every other field. */
+  async enrollRegistrationIdentity(token: string | undefined): Promise<OwnerRegistrationIdentity> {
+    const before = this.registrationAccount(token);
+    const accountId = await this.deps.store.update((account) => {
+      const current = this.registrationAccount(token);
+      if (
+        current.session !== before.session ||
+        account.accountId !== before.account.accountId ||
+        registrationFingerprint(account) !== before.session.registrationFingerprint
+      )
+        throw new OwnerAuthError('Account changed during enrollment', 403);
+      account.accountId ??= randomUUID();
+      return account.accountId;
+    });
+    // Only this exact session's acknowledged publication permits the UUID
+    // transition. A fresh UUID in an arbitrary account is never an expectation.
+    const after = this.registrationAccount(token, { session: before.session, accountId });
+    after.session.accountId = accountId;
+    const current = this.registrationIdentity(token);
+    if (current.sessionEpoch !== before.account.epoch)
+      throw new OwnerAuthError('Account changed during enrollment', 403);
+    return current;
   }
 
   /** Current authority of the author of a server-marked message, without exposing credentials. */
@@ -255,6 +339,7 @@ export class OwnerAuthService {
     try {
       const account: OwnerAccount = {
         version: 1,
+        accountId: randomUUID(),
         username: name,
         password: await hashPassword(password, OWNER_SCRYPT_PARAMS),
         mustChange: false,
@@ -550,6 +635,8 @@ export class OwnerAuthService {
       createdAt: now,
       lastSeenAt: now,
       epoch: account.epoch,
+      accountId: account.accountId,
+      registrationFingerprint: registrationFingerprint(account),
       restricted: account.mustChange,
     });
     return token;

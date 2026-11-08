@@ -177,8 +177,8 @@ install -m 0600 /dev/null ~/reverie/runtime/config/routines.env
   anything the console allows, even though the code only uses the three calls above.
 - **Without a token** under owner-auth `enforce`, every read is refused. The tick then only
   reports `console_unknown`, so even a dry run needs a read-capable token.
-- **No proxies, no redirects:** the client follows no redirects (urllib would re-send the token)
-  and uses no proxies.
+- **No proxies, no redirects:** the client follows no redirects (a redirect would carry the token
+  elsewhere) and uses no proxies.
 
 ## Policy
 
@@ -216,8 +216,9 @@ journalctl --user -u reverie-routines.service      # dry run: "..._would_send" l
 ~/reverie/runtime/bin/reverie-routines status      # the dry ledger; add --live for the live one
 ```
 
-**Without Nix.** The module is standard-library only, so a host `python3` (3.11 or later) can
-run it from the verified clone: `nix develop --command python3 -m reverie.routines tick`.
+**Without Nix.** Build the native binary from the verified clone with `cargo build --release -p
+reverie-routines` and link `target/release/reverie-routines`. Without `TZDIR` it reads zones from the
+system zoneinfo, then from its own bundled database.
 
 **Going live.** Add `Environment=ROUTINES_FLAGS=--live` in a drop-in. Dry runs keep a separate
 ledger (`routines.dry.sqlite`), so going live starts clean.

@@ -13,6 +13,7 @@ serde_json.workspace = true
 sha2.workspace = true
 libyaml-safer.workspace = true
 regex-lite.workspace = true
+toml.workspace = true
 
 [lints]
 workspace = true

@@ -61,6 +61,8 @@ let
     nativeCheckInputs = [ pkgs.git pkgs.tmux pkgs.curl pkgs.which pkgs.procps (lib.getBin pkgs.util-linux) ];
     checkPhase = ''
       runHook preCheck
+      # Refuse missing or duplicate registrations before the longer test batches.
+      npm test -- test/test-suite-partition.test.ts
       npm test -- test/fixed-resume-message.test.ts test/recovery-authority.test.ts \
         test/recovery-transaction.test.ts test/recovery-operation-clock.test.ts test/recovery-ledger-client.test.ts \
         test/rest-canonical-metadata.test.ts \
@@ -124,9 +126,11 @@ let
         test/company-plans-navigation.test.ts test/company-plans-width.test.ts test/plan-five-hour-ui.test.ts \
         test/plan-move-runtime.test.ts test/plan-move-composer.test.ts test/plan-move-routes.test.ts test/plan-move-company.test.ts test/plan-move-launch.test.ts \
         test/plan-move-resources.test.ts test/plan-move-resource-runtime.test.ts \
-        test/resource-owner-authority.test.ts test/resource-native-client.test.ts \
+        test/resource-owner-authority.test.ts test/resource-owner-office-authority.test.ts test/resource-native-client.test.ts \
+        test/owner-registration-identity.test.ts test/owner-registration-durability.test.ts \
         test/company-resource-binding-cas.test.ts test/resource-session-publication.test.ts \
         test/resource-replacement-controller.test.ts test/company-laptop-memory-ui.test.ts \
+        test/company-resource-fleet-ui.test.ts test/resource-fleet-schema.test.ts test/resource-fleet-service.test.ts \
         test/agent-plan-server.test.ts test/agent-plan-request.test.ts test/agent-plan-recovery.test.ts test/agent-plan-journal-recovery.test.ts test/cli-agent-force.test.ts test/cli-agent-viewer.test.ts test/plan-request.test.ts test/plan-request-capability.test.ts test/plan-request-routes.test.ts test/plan-credential-boundary.test.ts test/plan-request-ui.test.ts test/plan-request-prompt.test.ts \
         test/embassy-builtin.test.ts test/embassy-protocol-server.test.ts test/embassy-pairing-ui.test.ts \
         test/disk-stats.test.ts test/disk-stats-ui.test.ts test/routes/system-routes.test.ts test/shared-attachments.test.ts test/routes/file-routes.test.ts \
@@ -218,7 +222,7 @@ let
         test/cli-agent-chat-channels.test.ts test/cli-agent-chat-if-latest.test.ts test/cli-agent-chat-images.test.ts \
         test/cli-agent-chat-new.test.ts test/cli-agent-chat-nudge.test.ts test/cli-agent-chat-reply-to.test.ts \
         test/cli-agent-chat-room-default.test.ts test/cli-agent-chat-roster.test.ts test/cli-agent-hire-request.test.ts \
-        test/cli-agent-journal-import.test.ts test/cli-agent-journal.test.ts test/cli-agent-poll-close.test.ts \
+        test/cli-agent-journal-import.test.ts test/cli-agent-journal.test.ts test/cli-agent-memory.test.ts test/cli-agent-poll-close.test.ts \
         test/cli-executable-resolver.test.ts test/cli-management-settings-ui.test.ts test/cli-newline-capability.test.ts \
         test/cli-registry-load.test.ts test/cli-registry-schema.test.ts test/cli-routine.test.ts test/cli-skill-target.test.ts \
         test/cli-style.test.ts test/cod54-hook-event-auth.test.ts test/codex-plan-usage.test.ts test/codex-reasoning-effort-schema.test.ts \
@@ -260,9 +264,9 @@ let
         test/http-range.test.ts test/i18n-branding.test.ts test/image-paste-trap.test.ts test/image-watcher.test.ts \
         test/independent-pairing-cold-retirement.test.ts test/input-cjk.test.ts test/input-socket-map.test.ts test/integration-flows.test.ts \
         test/intent-store.test.ts test/journal-map.test.ts test/keyboard-shortcuts.test.ts test/laptop-stop-agent-client.test.ts \
-        test/link-provider-regex.test.ts test/local-echo-codex-gating.test.ts
+        test/legacy-recall.test.ts test/link-provider-regex.test.ts test/local-echo-codex-gating.test.ts
       npm test -- test/location-overlay-commands.test.ts test/lru-map.test.ts test/markdown-anchors.test.ts test/markdown-sanitizer.test.ts \
-        test/mcp-memory-tools.test.ts test/mcp-server.test.ts test/mcp-sync-registry.test.ts test/mcp-sync-targets.test.ts \
+        test/mcp-memory-tools.test.ts test/mcp-server.test.ts test/memory-recall-cancellation.test.ts test/mcp-sync-registry.test.ts test/mcp-sync-targets.test.ts \
         test/mcp-sync.test.ts test/media-extension-parity.test.ts test/member-board-focus-server.test.ts test/member-board-focus.test.ts \
         test/member-picker.test.ts test/memory-brief.test.ts test/memory-floors.test.ts test/memory-leak-prevention.test.ts test/memory-restart-drill.test.ts \
         test/message-agent-bar.test.ts test/message-read-aloud.test.ts test/mobile-case-sheet-keyboard-lift.test.ts \
@@ -286,7 +290,7 @@ let
         test/plans-roles.test.ts test/plans-statusline-usage.test.ts
       npm test -- test/plans-usage-resets.test.ts test/preview-envelope.test.ts test/previews-ui.test.ts test/proc-walk-bounds.test.ts \
         test/process-exit-wait.test.ts test/prompt-cache-status.test.ts test/pty-interactive.test.ts test/push-endpoint-validation.test.ts \
-        test/push-forged-actions.test.ts test/push-payload-host-title.test.ts test/qr-auth.test.ts test/quick-start.test.ts \
+        test/push-forged-actions.test.ts test/push-payload-host-title.test.ts test/python-float.test.ts test/qr-auth.test.ts test/quick-start.test.ts \
         test/ralph-config.test.ts test/ralph-integration.test.ts test/ralph-loop-deep.test.ts test/ralph-loop.test.ts \
         test/ralph-prompt.test.ts test/ralph-tracker.test.ts test/read-aloud-per-room.test.ts test/read-aloud-settings.test.ts \
         test/readmymind-collectors.test.ts test/readmymind-context.test.ts test/readmymind-phone-key.test.ts \
@@ -294,7 +298,7 @@ let
         test/remote-auto-reconnect.test.ts test/remote-discover-attach.test.ts test/remote-files.test.ts test/remote-hosts.test.ts \
         test/remote-kill-command.test.ts test/remote-pane-history.test.ts test/remote-shared-sessions.test.ts \
         test/remote-ssh-limiter.test.ts test/remote-ssh-options.test.ts test/repo-status.test.ts test/respawn-adaptive-timing.test.ts \
-        test/respawn-controller.test.ts test/respawn-health.test.ts test/respawn-metrics.test.ts
+        test/respawn-controller.test.ts test/respawn-health.test.ts test/respawn-metrics.test.ts test/retired-retention.test.ts
       npm test -- test/respawn-patterns.test.ts test/respawn-pty-breaker.test.ts test/respawn-session-id-collision.test.ts \
         test/respawn-stop-race.test.ts test/respawn-team-awareness.test.ts test/response-viewer-external-links.test.ts \
         test/response-viewer-file-links.test.ts test/response-viewer-last-turn.test.ts test/response-viewer-transcript.test.ts \
@@ -378,10 +382,11 @@ let
         test/terminal-font.test.ts test/terminal-history-schema.test.ts test/terminal-history.test.ts \
         test/terminal-keycode229-recovery.test.ts test/terminal-layout-css.test.ts test/terminal-link-provider-target.test.ts \
         test/terminal-logical-line.test.ts test/terminal-osc52-clipboard.test.ts test/terminal-parsing.test.ts \
-        test/terminal-pty-geometry.test.ts test/terminal-resilience.test.ts test/terminal-resize-observer-survives-init.test.ts \
+        test/terminal-pty-geometry.test.ts test/terminal-replay-replies.test.ts test/terminal-resilience.test.ts \
+        test/terminal-resize-observer-survives-init.test.ts \
         test/terminal-scroll-intent.test.ts test/terminal-scroll-routing.test.ts test/terminal-shift-drag-selection.test.ts \
         test/terminal-tile-input.test.ts test/terminal-tile-scroll.test.ts test/terminal-tile-unit.test.ts test/terminal-touch-tap.test.ts \
-        test/test-env-isolation.test.ts test/test-ports-guard.test.ts test/test-suite-partition.test.ts test/tile-grid-attach.test.ts \
+        test/test-env-isolation.test.ts test/test-ports-guard.test.ts test/tile-grid-attach.test.ts \
         test/tile-grid-auto-join.test.ts test/tile-grid-cap.test.ts test/tile-grid-cells.test.ts test/tile-grid-chrome.test.ts \
         test/tile-grid-close-fallback.test.ts test/tile-grid-count-helpers.test.ts test/tile-grid-count-menu.test.ts \
         test/tile-grid-detach.test.ts test/tile-grid-dividers.test.ts test/tile-grid-entrance-styles.test.ts \
@@ -520,6 +525,7 @@ let
   # The OPS daemon and grants remain server-owned.
   opsNativeCli = import ./ops-cli.nix { inherit pkgs src; };
   mcpNativeCli = import ./mcp-cli.nix { inherit pkgs src console memoryNativeCli; };
+  routinesNative = import ./routines.nix { inherit pkgs src; };
   workerChild = pkgs.writeShellScriptBin "reverie-worker-child" ''
     exec ${memory}/bin/python3 -m reverie.worker child "$@"
   '';
@@ -574,7 +580,6 @@ let
   '') [ "claude" "codex" "opencode" ];
   launcher = pkgs.writeShellScript "reverie-launcher" ''
     export PATH=${installClis}/bin:${runtime}/bin:$PATH
-    export REVERIE_MCP_MEMORY_PYTHON=${memory}/bin/python3
     export REVERIE_MANAGED_INSTALL=nix
     export REVERIE_OWNER_SETUP=1
     export REVERIE_NIX_LAUNCHER="$0"
@@ -612,11 +617,29 @@ let
     ln -s ${adminMemory}/bin/reverie-admin-memory "$out/bin/reverie-admin-memory"
     # The structured OPS client is native; no Python console command remains.
     ln -s ${opsNativeCli}/bin/reverie-ops "$out/bin/reverie-ops"
+    # reverie-memory is the console's `reverie agent memory`; skills and agents keep calling it by this name.
+    makeWrapper ${console}/bin/reverie "$out/bin/reverie-memory" --add-flags "agent memory"
+    # Run the installed reverie-memory as packaged, with no environment: it must reach `reverie agent memory` and refuse.
+    smoke() {
+      input=$1 want=$2; shift 2
+      got_out=$(mktemp) got_err=$(mktemp)
+      got_rc=0
+      printf '%s' "$input" | ${pkgs.coreutils}/bin/env -i "$out/bin/reverie-memory" "$@" >"$got_out" 2>"$got_err" || got_rc=$?
+      # Byte for byte: no output at all, and exactly the one error line with its newline.
+      if [ "$got_rc" != 1 ] || [ -s "$got_out" ] || ! printf '%s\n' "$want" | ${pkgs.diffutils}/bin/cmp -s - "$got_err"; then
+        echo "reverie-memory smoke failed (args: $*): exit $got_rc, stdout [$(cat "$got_out")], stderr [$(cat "$got_err")]" >&2
+        exit 1
+      fi
+    }
+    smoke '{}' '{"error": "select an instance with --instance or REVERIE_INSTANCE_CONFIG"}'
+    smoke '{"action":"recall","private":true,"query":"q"}' "{\"error\": \"[Errno 2] No such file or directory: '/nonexistent'\"}" --instance /nonexistent/agent.json
+    echo "reverie-memory smoke passed: no instance and a missing instance both refuse with exit 1"
+    # The host routines tick (docs/routines.md) is native; the owner links it from this package.
+    ln -s ${routinesNative}/bin/reverie-routines "$out/bin/reverie-routines"
     for command in ${memory}/bin/reverie-*; do
       makeWrapper "$command" "$out/bin/$(basename "$command")" \
-        --prefix PATH : ${runtime}/bin \
-        --set REVERIE_MCP_MEMORY_PYTHON ${memory}/bin/python3
+        --prefix PATH : ${runtime}/bin
     done
   '';
 
-in { inherit reverie console memory memoryPackage runtime entrypoint kokoro hands handsTools workerExec workerResourceClientManifest workerNativeClient workerNativeClientManifest workerNativeChild workerNativeNixStorePrepare memoryNativeCli mcpNativeCli opsNativeCli laptopTools rustRouteHandler; }
+in { inherit reverie console memory memoryPackage runtime entrypoint kokoro hands handsTools workerExec workerResourceClientManifest workerNativeClient workerNativeClientManifest workerNativeChild workerNativeNixStorePrepare memoryNativeCli mcpNativeCli opsNativeCli routinesNative laptopTools rustRouteHandler; }

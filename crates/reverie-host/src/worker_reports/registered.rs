@@ -39,9 +39,10 @@ impl WorkerReportService {
             .stop_deadline()
             .map_or(deadline, |stop| stop.min(deadline));
         let records = self.lock_until(end)?.clone();
+        let budget = budget::CleanupBudget::bounded(self, end);
         let mut result = Ok(());
         for record in &records {
-            result = finalized(result, record.settle_handler(end));
+            result = finalized(result, record.settle_handler(&budget, end));
         }
         let mut retained = self.lock_until(end)?;
         retained.retain(|record| !record.settled());

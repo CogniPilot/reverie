@@ -25,6 +25,9 @@ members = [
     "crates/reverie-observations",
     "crates/reverie-voice-ci",
     "crates/reverie-commit-policy",
+    "crates/reverie-routines",
+    "crates/reverie-lease-cli",
+    "crates/reverie-job-gate",
     "crates/xtask",
 ]
 exclude = ["vendor/rustpython-sre-engine", "vendor/rustpython-wtf8"]

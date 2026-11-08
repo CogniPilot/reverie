@@ -124,6 +124,7 @@ impl Inner {
         }
     }
     pub(super) fn reserve_entry(self: &Arc<Self>, end: Option<Instant>) -> Result<Entry> {
+        self.assert_no_pool_transition()?;
         let mut state = self
             .state
             .lock()
@@ -139,6 +140,12 @@ impl Inner {
                 }),
                 "RESERVATION_REENTRANT_ADMISSION",
             )?;
+            #[cfg(test)]
+            if let Some(notice) = self.entry_wait_notice.lock().unwrap().take() {
+                // Observe the actual contended branch, without replacing a
+                // result, deadline, lock owner or wakeup.
+                let _ = notice.try_send(());
+            }
             state = if let Some(end) = end {
                 let left = end
                     .checked_duration_since(Instant::now())
@@ -158,6 +165,7 @@ impl Inner {
                     .map_err(|_| GateError::Refused("RESERVATION_ADMISSION_UNAVAILABLE"))?
             };
         }
+        self.assert_no_pool_transition()?;
         let token = Arc::new(());
         state.entering = Some(Entering {
             thread: std::thread::current().id(),

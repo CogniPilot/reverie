@@ -11,10 +11,11 @@ import { join } from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import { createRouteTestHarness } from './_route-test-utils.js';
 import { createMockSession, type MockRouteContext } from '../mocks/index.js';
+import { pendingNotices, recordCarried } from '../helpers/wake-payload.js';
 import { ChatroomService } from '../../src/chatroom-service.js';
 import { ChatFileStore } from '../../src/chatroom-files.js';
 import { registerChatroomRoutes } from '../../src/web/routes/chatroom-routes.js';
-import { ChatroomDelivery, MAX_PASSIVE_PER_SESSION, PASSIVE_MAX_AGE_MS, buildBriefing, wakeRecipients } from '../../src/chatroom-delivery.js';
+import { WAKE_LINE, ChatroomDelivery, MAX_PASSIVE_PER_SESSION, PASSIVE_MAX_AGE_MS, buildBriefing, wakeRecipients } from '../../src/chatroom-delivery.js';
 import type { ChatMessage, ChatRoom } from '../../src/chatroom-store.js';
 
 const A = '0000002d-0035-4000-8000-000000000047';
@@ -29,7 +30,11 @@ describe('mention-only delivery', () => {
   let clock: number;
 
   const panes = (id: string): string[] => (ctx.sessions.get(id) as unknown as { writeBuffer: string[] }).writeBuffer;
-  const text = (id: string) => panes(id).join('');
+  // A pane only ever gets the wake line: what each wake carried is the member's hook record (recordCarried), and a count of
+  // dropped messages reaches it as a Reverie notice.
+  const carried = new Map<string, string[]>();
+  const lines = (id: string): string[] => carried.get(id) ?? [];
+  const text = (id: string) => [...lines(id), pendingNotices(service, id)].join('\n');
   const names = new Map([[A, 'alpha'], [B, 'bravo'], [C, 'lead']]);
 
   beforeEach(async () => {
@@ -44,6 +49,7 @@ describe('mention-only delivery', () => {
     for (const [id, name] of names) {
       const s = createMockSession(id);
       s.name = name;
+      carried.set(id, recordCarried(s as never, () => service));
       ctx.sessions.set(id, s as never);
     }
   });
@@ -68,7 +74,13 @@ describe('mention-only delivery', () => {
   const settle = async () => {
     clock += 10_000;
     await service.delivery.flushAll();
-    for (const id of names.keys()) panes(id).length = 0;
+    for (const id of names.keys()) clear(id);
+  };
+  /** Forget what reached a member so far: its pane, its wake records, and the notices its hook already showed. */
+  const clear = (id: string) => {
+    panes(id).length = 0;
+    lines(id).length = 0;
+    service.delivery.noticesShown(id, service.delivery.pendingNotices(id).map((n) => n.id));
   };
   const post = (id: string, body: object, from?: string) =>
     app.inject({ method: 'POST', url: `/api/chatrooms/${id}/messages`, headers: from ? AS(from) : {}, payload: body });
@@ -81,7 +93,7 @@ describe('mention-only delivery', () => {
     const id = await room();
     await post(id, { text: 'status please' });
     await flush();
-    expect(text(C)).toContain('USER: "status please"');
+    expect(text(C)).toContain('user: status please');
     expect(panes(A)).toEqual([]);
     expect(panes(B)).toEqual([]);
     expect(service.delivery.pendingFor(A)).toBe(1);
@@ -100,12 +112,12 @@ describe('mention-only delivery', () => {
     await flush();
     await post(id, { text: '@alpha your turn' });
     await flush();
-    const lines = panes(A);
-    expect(lines).toHaveLength(1);
-    const line = lines[0];
-    expect(line.indexOf('"first"')).toBeGreaterThan(-1);
-    expect(line.indexOf('"first"')).toBeLessThan(line.indexOf('"second"'));
-    expect(line.indexOf('"second"')).toBeLessThan(line.indexOf('"@alpha your turn"'));
+    // One wake, and it carried the held messages with the one that woke it, in order.
+    expect(panes(A)).toHaveLength(1);
+    const line = lines(A)[0];
+    expect(line.indexOf('user: first')).toBeGreaterThan(-1);
+    expect(line.indexOf('user: first')).toBeLessThan(line.indexOf('bravo: second'));
+    expect(line.indexOf('bravo: second')).toBeLessThan(line.indexOf('user: @alpha your turn'));
     expect(service.delivery.pendingFor(A)).toBe(0);
     // bravo was not mentioned and wrote 'second': still asleep, still holding the others
     expect(panes(B)).toEqual([]);
@@ -116,7 +128,7 @@ describe('mention-only delivery', () => {
     await post(id, { text: '@everyone standup' });
     await flush();
     for (const who of [A, B, C]) expect(text(who)).toContain('@everyone standup');
-    for (const who of [A, B, C]) panes(who).length = 0;
+    for (const who of [A, B, C]) clear(who);
     clock += 10_000;
     await post(id, { text: 'mail a@alpha.io, ask @alphabet, @bravos too, email@bravo' });
     await flush();
@@ -129,13 +141,13 @@ describe('mention-only delivery', () => {
     const id = await room();
     const first = (await post(id, { text: 'parser done' }, A)).json().data.message.id as string;
     await flush();
-    for (const who of [A, B, C]) panes(who).length = 0;
+    for (const who of [A, B, C]) clear(who);
     clock += 10_000;
     await post(id, { text: 'thanks', replyTo: first }, B);
     await flush();
-    expect(text(A)).toContain('"thanks"');
+    expect(text(A)).toContain('bravo: thanks');
     clock += 10_000;
-    panes(A).length = 0;
+    clear(A);
     await post(id, { text: '@BRAVO please check' }, A);
     await flush();
     expect(text(B)).toContain('@BRAVO please check');
@@ -154,9 +166,9 @@ describe('mention-only delivery', () => {
     await flush();
     // bravo was not mentioned and the room wakes by mention: held, not woken; the coordinator is woken
     expect(panes(B)).toEqual([]);
-    expect(text(C)).toContain('USER: "just you"');
+    expect(text(C)).toContain('user: just you');
     expect(panes(A)).toEqual([]);
-    panes(C).length = 0;
+    clear(C);
     clock += 10_000;
     const dm = (await app.inject({ method: 'POST', url: '/api/chatrooms/dms', payload: { sessionId: A } })).json().data;
     await settle();
@@ -178,8 +190,8 @@ describe('mention-only delivery', () => {
     await flush();
     const line = text(A);
     expect(line).toContain('@alpha wake');
-    expect(line).toContain('"fresh"');
-    expect(line).not.toContain('"n44"');
+    expect(line).toContain('user: fresh');
+    expect(line).not.toContain('user: n44');
   });
 
   it('long held messages never push the message that wakes the member out of its line', async () => {
@@ -204,13 +216,13 @@ describe('mention-only delivery', () => {
     await post(id, { text: '@alpha wake' });
     await flush();
     expect(text(A)).not.toContain('not shown');
-    for (const who of [A, B, C]) panes(who).length = 0;
+    for (const who of [A, B, C]) clear(who);
     clock += 10_000;
     for (let i = 0; i < MAX_PASSIVE_PER_SESSION + 3; i++) await post(id, { text: `m${i}` });
     await post(id, { text: '@alpha again' });
     await flush();
     expect(text(A)).toContain('3 earlier messages not shown');
-    for (const who of [A, B, C]) panes(who).length = 0;
+    for (const who of [A, B, C]) clear(who);
     clock += 10_000;
     await post(id, { text: '@alpha once more' });
     await flush();
@@ -224,7 +236,7 @@ describe('mention-only delivery', () => {
     await flush();
     expect(text(A)).toContain('is anyone there?');
     expect(text(B)).toContain('is anyone there?');
-    for (const who of [A, B]) panes(who).length = 0;
+    for (const who of [A, B]) clear(who);
     // a coordinator that is a plain shell cannot take chat either
     const shell = createMockSession(C);
     shell.name = 'lead';
@@ -235,7 +247,7 @@ describe('mention-only delivery', () => {
     await flush();
     expect(text(A)).toContain('second try');
     // when the message names someone who is there, only that member is woken
-    for (const who of [A, B]) panes(who).length = 0;
+    for (const who of [A, B]) clear(who);
     clock += 10_000;
     await post(id, { text: '@bravo only you' });
     await flush();
@@ -368,6 +380,9 @@ describe('the wake setting of a room', () => {
   let file: string;
   let clock: number;
   const panes = (id: string): string[] => (ctx.sessions.get(id) as unknown as { writeBuffer: string[] }).writeBuffer;
+  // Panes only get the wake line; what each wake carried for a member is its hook record (recordCarried).
+  const carried = new Map<string, string[]>();
+  const heard = (id: string): string => (carried.get(id) ?? []).join('\n');
 
   beforeEach(async () => {
     clock = 1_000_000;
@@ -381,6 +396,7 @@ describe('the wake setting of a room', () => {
     for (const [id, name] of names) {
       const s = createMockSession(id);
       s.name = name;
+      carried.set(id, recordCarried(s as never, () => service));
       ctx.sessions.set(id, s as never);
     }
   });
@@ -396,7 +412,7 @@ describe('the wake setting of a room', () => {
   const settle = async () => {
     clock += 10_000;
     await service.delivery.flushAll();
-    for (const id of names.keys()) panes(id).length = 0;
+    for (const id of names.keys()) { panes(id).length = 0; carried.get(id)!.length = 0; }
   };
 
   it('is set by the owner only, shows in the room view, validates the mode, and is cleared by default', async () => {
@@ -422,21 +438,21 @@ describe('the wake setting of a room', () => {
     await service.delivery.flushAll();
     // the quiet room woke only its coordinator
     expect(panes(A)).toEqual([]);
-    expect(panes(C).join('')).toContain('to the quiet room');
+    expect(heard(C)).toContain('to the quiet room');
     // the control room still wakes everyone, and the held message of the quiet room comes along with it
     await app.inject({ method: 'POST', url: `/api/chatrooms/${control}/messages`, payload: { text: 'to the control room' } });
     clock += 10_000;
     await service.delivery.flushAll();
-    expect(panes(A).join('')).toContain('to the control room');
-    expect(panes(A).join('')).toContain('to the quiet room');
-    expect(panes(B).join('')).toContain('to the control room');
+    expect(heard(A)).toContain('to the control room');
+    expect(heard(A)).toContain('to the quiet room');
+    expect(heard(B)).toContain('to the control room');
     // going back to all wakes everyone at once
-    for (const id of names.keys()) panes(id).length = 0;
+    for (const id of names.keys()) { panes(id).length = 0; carried.get(id)!.length = 0; }
     await setWake(quiet, 'all');
     await app.inject({ method: 'POST', url: `/api/chatrooms/${quiet}/messages`, payload: { text: 'now everyone' } });
     clock += 10_000;
     await service.delivery.flushAll();
-    expect(panes(B).join('')).toContain('now everyone');
+    expect(heard(B)).toContain('now everyone');
   });
 
   it('is kept when the console restarts, and a direct message refuses it', async () => {
@@ -453,15 +469,18 @@ describe('the wake setting of a room', () => {
 });
 
 describe('what a full queue keeps', () => {
-  const pane = () => {
+  // The pane only gets the wake line; what a wake carried is what delivery holds for the member during that write.
+  const pane = (delivery: () => ChatroomDelivery) => {
     const writes: string[] = [];
-    return { id: 'p', name: 'p', mode: 'claude', isWorking: false, pid: 1, writes, writeViaMux: async (d: string) => (writes.push(d), true) };
+    const carried: string[][] = [];
+    return { id: 'p', name: 'p', mode: 'claude', isWorking: false, pid: 1, writes, carried,
+      writeViaMux: async (d: string) => (writes.push(d), carried.push(delivery().inspectionFor('p').map((m) => m.messageId)), true) };
   };
   const R = { id: 'room-1', name: 'One' };
 
   it('drops held context first: 70 waking messages and 40 held ones keep every waking one', async () => {
     let clock = 1_000_000;
-    const p = pane();
+    const p = pane(() => delivery);
     p.isWorking = true;
     const delivery = new ChatroomDelivery({ getSession: () => p, now: () => clock });
     for (let i = 0; i < 70; i++) delivery.enqueue('p', R, `"a": "w${i}"`, { messageId: `w${i}` });
@@ -470,15 +489,17 @@ describe('what a full queue keeps', () => {
     p.isWorking = false;
     clock += 60_000;
     await delivery.flushAll();
-    const line = p.writes.join('');
-    for (const i of [0, 1, 35, 69]) expect(line).toContain(`"w${i}"`);
-    expect(line).not.toContain('"h0"'); // the oldest held ones are the ones that went
-    expect(line).toContain('"h39"');
-    expect(line).toMatch(/SYSTEM: \d+ earlier messages? not shown/);
+    expect(p.writes).toEqual([`${WAKE_LINE}\r`]);
+    const [line] = p.carried;
+    for (const i of [0, 1, 35, 69]) expect(line).toContain(`w${i}`);
+    expect(line).not.toContain('h0'); // the oldest held ones are the ones that went
+    expect(line).toContain('h39');
+    // The member's hook says how many were left out.
+    expect(delivery.pendingNotices('p').map((n) => n.text).join('\n')).toMatch(/SYSTEM: \d+ earlier messages? not shown/);
   });
 
   it('only drops the oldest waking message when nothing held is left, as the bound always did', async () => {
-    const p = pane();
+    const p = pane(() => delivery);
     p.isWorking = true;
     const delivery = new ChatroomDelivery({ getSession: () => p, now: () => 1_000_000 });
     for (let i = 0; i < 105; i++) delivery.enqueue('p', R, `"a": "w${i}"`, { messageId: `w${i}` });
@@ -487,7 +508,7 @@ describe('what a full queue keeps', () => {
 
   it('long waking messages are never pushed out of the line by held context', async () => {
     let clock = 1_000_000;
-    const p = pane();
+    const p = pane(() => delivery);
     p.isWorking = true;
     const delivery = new ChatroomDelivery({ getSession: () => p, now: () => clock });
     const big = 'x'.repeat(900);
@@ -496,8 +517,8 @@ describe('what a full queue keeps', () => {
     p.isWorking = false;
     clock += 60_000;
     await delivery.flushAll();
-    expect(p.writes).toHaveLength(1);
-    for (let i = 0; i < 3; i++) expect(p.writes[0]).toContain(`wake${i} `);
+    expect(p.writes).toEqual([`${WAKE_LINE}\r`]);
+    for (let i = 0; i < 3; i++) expect(p.carried[0]).toContain(`w${i}`);
     expect(delivery.pendingFor('p')).toBe(0);
   });
 });

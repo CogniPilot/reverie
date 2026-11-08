@@ -77,6 +77,7 @@ import {
   createMemoryTools,
   resolveMemoryToolsConfig,
   type BridgeRunner,
+  type LegacyRecall,
   type JournalPort,
   type MemoryToolsConfig,
 } from './mcp-memory-tools.js';
@@ -1274,6 +1275,9 @@ export interface McpServerOptions {
   now?: () => number;
   /** The optional memory tools (opt-in through the environment by default). */
   memory?: MemoryToolsConfig;
+  /** Recall from the old memory store; the in-process reader by default. */
+  memoryRecall?: LegacyRecall;
+  /** Checked native/explicit legacy bridge execution; no ambient fallback. */
   memoryRunner?: BridgeRunner;
 }
 
@@ -1315,7 +1319,10 @@ export function createMcpServer(options: McpServerOptions) {
           journalRequest
         )
       : undefined;
-  const memory = createMemoryTools(memoryConfig, options.memoryRunner, journal, access);
+  const memory =
+    memoryConfig.native || memoryConfig.python !== undefined
+      ? createMemoryTools(memoryConfig, options.memoryRunner, journal, access)
+      : createMemoryTools(memoryConfig, options.memoryRecall, journal);
   const serverInstructions = config.chat
     ? BASE_SERVER_INSTRUCTIONS + CHAT_SERVER_INSTRUCTIONS
     : BASE_SERVER_INSTRUCTIONS;
@@ -1526,7 +1533,7 @@ export function createMcpServer(options: McpServerOptions) {
 export async function runMcpStdio(
   config: McpConfig,
   io: { stdin: NodeJS.ReadableStream; stdout: NodeJS.WritableStream; stderr: NodeJS.WritableStream } = process,
-  options: Pick<McpServerOptions, 'memory' | 'memoryRunner' | 'log'> & { signal?: AbortSignal } = {}
+  options: Pick<McpServerOptions, 'memory' | 'memoryRunner' | 'memoryRecall' | 'log'> & { signal?: AbortSignal } = {}
 ): Promise<void> {
   const log = options.log ?? ((line: string) => io.stderr.write(`${line}\n`));
   const server = createMcpServer({

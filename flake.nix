@@ -64,8 +64,15 @@
           # Optional tools: excluded from the runtime/image and never fetched by a chat toggle.
           chatPythonLsp = pkgs.pyright;
           capabilitiesAddon = import ./nix/capabilities-addon.nix { inherit pkgs; src = source; };
-          prune = import ./nix/prune.nix { inherit pkgs; src = source; };
-          pruneR12 = import ./nix/prune-r12.nix { inherit pkgs; src = source; };
+          leaseCli = import ./nix/lease-cli.nix { inherit pkgs; src = source; };
+          prune = import ./nix/prune.nix {
+            inherit pkgs; src = source;
+            leaseCli = self.packages.${system}.leaseCli;
+          };
+          pruneR12 = import ./nix/prune-r12.nix {
+            inherit pkgs; src = source;
+            leaseCli = self.packages.${system}.leaseCli;
+          };
           pruneHost = import ./nix/prune-host.nix { inherit pkgs; src = source; };
           pruneDeclared = import ./nix/prune-declared.nix {
             inherit pkgs; src = source;
