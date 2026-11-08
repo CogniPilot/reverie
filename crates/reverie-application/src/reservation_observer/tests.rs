@@ -316,6 +316,7 @@ impl Source for Arc<Fixture> {
                 EngineQuery::GpuInformation => "gpu-info",
                 EngineQuery::TelemetryInventory | EngineQuery::TelemetryInspect(_) => "telemetry",
                 EngineQuery::WorkerPoolInspect(_)
+                | EngineQuery::WorkerImageInspect(_)
                 | EngineQuery::ProviderPane(_)
                 | EngineQuery::ProviderTop(_) => {
                     return Err(ObserverError::Refused(

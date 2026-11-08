@@ -5,6 +5,7 @@ mod custody;
 mod dispatch;
 pub use dispatch::{ResourceOperationClosed, ResourceOperationFailure};
 mod error;
+pub(in crate::installing_broker) use error::gate_close_unknown;
 #[cfg(test)]
 mod native_fixture;
 mod operation;

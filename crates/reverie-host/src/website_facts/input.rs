@@ -56,6 +56,28 @@ pub struct ImmutableInputObserver {
     close_uncertain: bool,
 }
 impl ImmutableInputObserver {
+    /// Actual immutable ELF/hash/length observation for the closed worker child
+    /// profile. No execution, process identity or maintenance authority.
+    pub fn observe_worker_child_program(
+        &mut self,
+        selected: &reverie_contracts::resource_actor::WorkerImageProvenance,
+        end: Instant,
+    ) -> Result<()> {
+        self.current(end)?;
+        let code = selected.program();
+        let path = nix_path(&code.path)?;
+        let mut files = Descriptors::default();
+        let body = read_native(
+            &mut files,
+            &path,
+            &code.sha256,
+            Some(code.bytes),
+            Some(selected.elf_machine()),
+            end,
+        )
+        .map(|_| ());
+        files.finish(body, &mut self.close_uncertain)
+    }
     /// Program DATA from the trusted native bootstrap selection. This does
     /// not identify a process or grant controller/maintenance authority.
     pub fn observe_broker_program(
@@ -67,7 +89,7 @@ impl ImmutableInputObserver {
         let code = selected.code();
         let path = nix_path(&code.path)?;
         let mut files = Descriptors::default();
-        let body = read_native(&mut files, &path, &code.sha256, Some(code.bytes), end)
+        let body = read_native(&mut files, &path, &code.sha256, Some(code.bytes), None, end)
             .map(|identity| ObservedBrokerProgram { identity });
         files.finish(body, &mut self.close_uncertain)
     }
@@ -165,7 +187,7 @@ fn read_client(
     selected: &NativeResourceClientManifest,
     end: Instant,
 ) -> Result<ObservedNativeClient> {
-    read_native(files, path, selected.executable_digest(), None, end)
+    read_native(files, path, selected.executable_digest(), None, None, end)
         .map(|identity| ObservedNativeClient { identity })
 }
 fn read_native(
@@ -173,6 +195,7 @@ fn read_native(
     path: &Path,
     digest: &JournalDigest,
     expected_bytes: Option<u64>,
+    expected_machine: Option<u16>,
     end: Instant,
 ) -> Result<[u64; 2]> {
     let (index, info) = open(files, path, code::MAX_CODE_FILE, end)?;
@@ -184,6 +207,12 @@ fn read_native(
     files.get_mut(index).read_exact(&mut magic)?;
     need(magic == *b"\x7fELF", "NATIVE_CLIENT_ELF_REQUIRED")?;
     use std::io::{Seek, SeekFrom};
+    if let Some(machine) = expected_machine {
+        files.get_mut(index).seek(SeekFrom::Start(0))?;
+        let mut header = [0; 64];
+        files.get_mut(index).read_exact(&mut header)?;
+        require_worker_child_header(&header, machine)?;
+    }
     files.get_mut(index).seek(SeekFrom::Start(0))?;
     code::hash(
         files.get_mut(index),
@@ -197,4 +226,18 @@ fn read_native(
     )?;
     unchanged(files, index, &info, end)?;
     Ok([info.dev(), info.ino()])
+}
+/// Only the new child purpose requires these ELF64 architecture facts. The
+/// existing native-client/broker readers retain their original magic behavior.
+fn require_worker_child_header(header: &[u8], machine: u16) -> Result<()> {
+    need(
+        header.len() >= 64
+            && header[..7] == *b"\x7fELF\x02\x01\x01"
+            && [62, 183].contains(&machine)
+            && u16::from_le_bytes([header[18], header[19]]) == machine
+            && [2, 3].contains(&u16::from_le_bytes([header[16], header[17]]))
+            && header[20..24] == [1, 0, 0, 0]
+            && header[52..54] == [64, 0],
+        "WORKER_CHILD_ELF_MACHINE",
+    )
 }

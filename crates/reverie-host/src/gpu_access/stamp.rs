@@ -27,4 +27,7 @@ impl GpuFileStamp {
     pub(crate) fn private(&self, owner: u32) -> bool {
         self.0.private(owner)
     }
+    pub(crate) fn same_renamed_file(&self, before: &Self) -> bool {
+        self.0.same_renamed_file(&before.0)
+    }
 }

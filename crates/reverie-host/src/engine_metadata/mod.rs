@@ -49,12 +49,18 @@ pub enum EngineQuery<'a> {
     TelemetryInventory,
     TelemetryInspect(&'a reverie_core::command_telemetry::TelemetryContainerId),
     WorkerPoolInspect(&'a ContainerId),
+    WorkerImageInspect(&'a reverie_contracts::worker_image_switch::WorkerImageId),
     ProviderPane(&'a ContainerId),
     ProviderTop(&'a ContainerId),
 }
 impl EngineQuery<'_> {
     fn arguments(self) -> Result<Vec<OsString>> {
         let (format, ids) = match self {
+            Self::WorkerImageInspect(id) => {
+                return Ok(["image", "inspect", "--format", "{{json .}}", id.as_str()]
+                    .map(Into::into)
+                    .to_vec());
+            }
             Self::ProviderPane(id) => {
                 return Ok([
                     "exec",
