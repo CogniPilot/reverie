@@ -12,6 +12,7 @@ use std::{
     fmt,
     time::{Duration, Instant},
 };
+mod query;
 #[cfg(test)]
 mod tests;
 
@@ -21,6 +22,7 @@ enum Cause {
     Storage(StorageWorkflowError),
     Native(SourceStopError),
     Report(reverie_host::worker_reports::WorkerReportError),
+    Identity(Arc<reverie_store::storage_identity::IdentityError>),
     Refused(&'static str),
 }
 impl fmt::Display for Cause {
@@ -30,6 +32,7 @@ impl fmt::Display for Cause {
             Self::Storage(e) => e.fmt(out),
             Self::Native(e) => e.fmt(out),
             Self::Report(e) => e.fmt(out),
+            Self::Identity(e) => e.fmt(out),
             Self::Refused(e) => out.write_str(e),
         }
     }
@@ -75,6 +78,7 @@ struct Frame<'a> {
     orphan_offices: Vec<Arc<recovered::RecoveredOffice>>,
     completed: bool,
     finalization_failed: bool,
+    identity_unknown: Option<Arc<reverie_store::storage_identity::IdentityError>>,
 }
 pub(in crate::installing_broker) struct ControlFailure<'a> {
     owner: Option<Box<Frame<'a>>>,
@@ -108,6 +112,7 @@ impl InstallingBroker {
             orphan_offices: Vec::new(),
             completed: false,
             finalization_failed: false,
+            identity_unknown: None,
         });
         match owner.run() {
             Ok(()) => Ok(()),
@@ -133,8 +138,18 @@ impl Frame<'_> {
             return Err(Cause::Refused("WORKER_CONTROL_ORIGIN"));
         }
         self.connection.assert_service(&self.broker.reports)?;
-        WorkerControlRequest::decode(self.connection.request_bytes()).map_err(Cause::Refused)?;
+        let request = WorkerControlRequest::decode(self.connection.request_bytes())
+            .map_err(Cause::Refused)?;
         self.hold = Some(self.connection.retain_lifecycle()?);
+        match request {
+            WorkerControlRequest::Status => return self.status(),
+            WorkerControlRequest::ProviderHealth => return self.provider_health(),
+            WorkerControlRequest::UnsupportedStopAgent => return self.unsupported_stop(),
+            WorkerControlRequest::StopLaptops => {}
+        }
+        self.stop_laptops()
+    }
+    fn stop_laptops(&mut self) -> Result<(), Cause> {
         let snapshot = self.broker.configuration()?;
         self.admission = self
             .broker
@@ -312,6 +327,9 @@ impl Frame<'_> {
     }
     fn close_transport(&mut self) -> Result<(), Cause> {
         self.connection.close_socket_for_worker()?;
+        if let Some(cause) = &self.identity_unknown {
+            return Err(Cause::Identity(Arc::clone(cause)));
+        }
         if let Some(hold) = &mut self.hold {
             hold.release_for_worker()?;
         }
@@ -368,7 +386,9 @@ impl ControlFailure<'_> {
                 true
             }
             Err(cause) => {
-                self.causes.push(cause);
+                if !matches!(cause, Cause::Identity(_)) {
+                    self.causes.push(cause);
+                }
                 false
             }
         }

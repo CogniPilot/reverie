@@ -102,20 +102,28 @@ fn unsupported_agent_stop_never_dispatches_native_work_and_known_refusal_closes(
     );
     let (root, broker) = recovered::tests::Tree::bootstrap_parts("", "admission", 512, 4096);
     let broker = Arc::new(broker);
-    let (client, connection) = incoming(
+    let (mut client, connection) = incoming(
         &broker,
         br#"{"action":"stop-agent","sessionId":"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"}"#,
     );
-    let mut failure = broker
-        .handle_control(connection)
-        .expect_err("closed refusal");
-    let settled = failure.reconcile();
-    let cause = failure.to_string();
+    let result = broker.handle_control(connection).map_err(|mut failure| {
+        let _ = failure.reconcile();
+        failure.to_string()
+    });
+    let mut header = [0; 5];
+    let read = client.read_exact(&mut header);
+    let header = WorkerFrameHeader::decode(header);
+    let mut bytes = vec![0; header.payload_length() as usize];
+    let body = client.read_exact(&mut bytes);
     let dispatched = root.join("calls.txt").exists();
-    drop(failure);
     let cleanup = finish(root, broker, client);
     cleanup.unwrap();
-    assert!(settled);
+    result.unwrap();
+    read.unwrap();
+    body.unwrap();
+    assert_eq!(header.kind(), b'J');
+    let response: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(response["dispatched"], false);
+    assert_eq!(response["success"], false);
     assert!(!dispatched);
-    assert!(cause.contains("WORKER_CONTROL_UNSUPPORTED"));
 }

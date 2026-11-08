@@ -1,6 +1,9 @@
 //! Closed legacy C subset. Decoding is DATA, never a stop permit.
 pub enum WorkerControlRequest {
     StopLaptops,
+    Status,
+    ProviderHealth,
+    UnsupportedStopAgent,
 }
 
 impl WorkerControlRequest {
@@ -10,15 +13,38 @@ impl WorkerControlRequest {
         let canonical = frame.canonical().map_err(|_| "WORKER_CONTROL_REQUEST")?;
         let value: serde_json::Value =
             serde_json::from_slice(&canonical).map_err(|_| "WORKER_CONTROL_REQUEST")?;
-        if value.as_object().is_some_and(|fields| {
-            fields.len() == 1
-                && fields.get("action").and_then(serde_json::Value::as_str) == Some("stop-laptops")
-        }) {
-            Ok(Self::StopLaptops)
-        } else {
-            Err("WORKER_CONTROL_UNSUPPORTED")
+        let fields = value.as_object().ok_or("WORKER_CONTROL_UNSUPPORTED")?;
+        match fields.get("action").and_then(serde_json::Value::as_str) {
+            Some("stop-laptops") if fields.len() == 1 => Ok(Self::StopLaptops),
+            Some("status") if fields.len() == 1 => Ok(Self::Status),
+            Some("provider-health") if fields.len() == 1 => Ok(Self::ProviderHealth),
+            Some("stop-agent") if stop_agent(fields) => Ok(Self::UnsupportedStopAgent),
+            _ => Err("WORKER_CONTROL_UNSUPPORTED"),
         }
     }
+}
+fn stop_agent(fields: &serde_json::Map<String, serde_json::Value>) -> bool {
+    fields
+        .keys()
+        .all(|key| matches!(key.as_str(), "action" | "sessionId" | "notAfter" | "fence"))
+        && fields
+            .get("sessionId")
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|sid| reverie_core::ids::ProfileSessionId::parse(sid).is_ok())
+        && fields.get("notAfter").is_none_or(|value| {
+            value
+                .as_u64()
+                .is_some_and(|value| value > 0 && value <= reverie_core::revision::JS_SAFE_MAX)
+        })
+        && fields.get("fence").is_none_or(|value| {
+            fields.contains_key("notAfter")
+                && value.as_str().is_some_and(|value| {
+                    value.len() == 32
+                        && value
+                            .bytes()
+                            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+                })
+        })
 }
 
 #[cfg(test)]
