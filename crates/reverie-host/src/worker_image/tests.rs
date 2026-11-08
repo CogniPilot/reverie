@@ -282,3 +282,35 @@ fn terminal_from_another_actual_file_owner_cannot_release_same_named_pending() {
     assert!(foreign.release_pending(&mut pending, &terminal).is_err());
     assert!(tree.0.join("resource-reservation-control.pending").exists());
 }
+
+#[test]
+fn image_fence_preserves_actual_consumed_close_in_either_finalization_branch() {
+    use gpu_access::GpuHostError as Gpu;
+    let tree = Tree::new();
+    let mut files = tree.files();
+    native::test_faults::set(None, true);
+    let actual_close = files.read_configuration().err().unwrap();
+    native::test_faults::set(None, false);
+    let ordinary = ImageFileError::io(std::io::Error::other("ordinary metadata refusal"));
+    for (leaf, close) in [(actual_close, true), (ordinary, false)] {
+        let direct = Gpu::ImageFence(Box::new(leaf.clone()));
+        assert_eq!(direct.code(), leaf.code());
+        assert_eq!(direct.is_uncertain(), close);
+        for primary in [false, true] {
+            let fence = Box::new(Gpu::ImageFence(Box::new(leaf.clone())));
+            let refusal = Box::new(Gpu::Refused("ORDINARY_PRIMARY"));
+            let (primary, secondary) = if primary {
+                (fence, refusal)
+            } else {
+                (refusal, fence)
+            };
+            let composed =
+                ImageFileError::shared(Gpu::PublicationUnknown(Box::new(Gpu::Finalized {
+                    primary,
+                    secondary,
+                })));
+            assert_eq!(composed.has_unconfirmed_close(), close);
+            assert!(composed.is_uncertain());
+        }
+    }
+}
