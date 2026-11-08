@@ -551,10 +551,10 @@ impl ControllerState {
     }
 }
 impl ControllerActivationFailure {
-    fn primary_error(&self) -> &PoolError {
+    pub fn primary_error(&self) -> &PoolError {
         &self.primary
     }
-    fn close_components(&mut self, end: Instant) -> Result<()> {
+    pub fn close_components(&mut self, end: Instant) -> Result<()> {
         self.owner.close_components(end)
     }
 }
