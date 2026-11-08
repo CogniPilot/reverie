@@ -11,10 +11,24 @@ const PURPOSE: &str = "reverie-docker-worker-pool-provider-v1";
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct WorkerPoolProvider {
+struct UncheckedProvider {
     version: u32,
     purpose: String,
     policy: WorkerPoolPolicy,
+}
+/// Validated selection DATA. Only the checked configuration reader constructs
+/// this wrapper; serde cannot bypass its version, purpose or policy checks.
+pub struct WorkerPoolProvider {
+    policy: WorkerPoolPolicy,
+}
+impl UncheckedProvider {
+    fn checked(self) -> Result<WorkerPoolProvider, PoolPolicyError> {
+        if self.version != 1 || self.purpose != PURPOSE {
+            return Err(PoolPolicyError);
+        }
+        self.policy.validate()?;
+        Ok(WorkerPoolProvider { policy: self.policy })
+    }
 }
 impl WorkerPoolProvider {
     pub fn from_config(config: &EffectiveWorkerConfig) -> Result<Option<Self>, PoolPolicyError> {
@@ -25,13 +39,9 @@ impl WorkerPoolProvider {
         let Some(value) = root.get(&key) else {
             return Ok(None);
         };
-        let provider: Self = serde_json::from_slice(&crate::worker_config::compact_data(value))
+        let provider: UncheckedProvider = serde_json::from_slice(&crate::worker_config::compact_data(value))
             .map_err(|_| PoolPolicyError)?;
-        if provider.version != 1 || provider.purpose != PURPOSE {
-            return Err(PoolPolicyError);
-        }
-        provider.policy.validate()?;
-        Ok(Some(provider))
+        provider.checked().map(Some)
     }
     pub fn policy(&self) -> &WorkerPoolPolicy {
         &self.policy
