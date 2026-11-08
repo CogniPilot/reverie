@@ -50,11 +50,24 @@ impl WorkerActorChannelFailure {
     /// No domain resource was admitted by a refused transport constructor.
     /// Consumed descriptor uncertainty still fences the original Record.
     pub fn close_for_worker(&mut self) -> Result<()> {
+        match self.close_channel_component_for_worker()? {
+            WorkerLaunchClose::Complete | WorkerLaunchClose::SocketClosedHandlerRetained => Ok(()),
+            WorkerLaunchClose::SocketClosedLifecycleHeld => {
+                Err(WorkerReportError::LifecycleRetained)
+            }
+        }
+    }
+    /// Preserve the actual SAME Record status even if this refused constructor
+    /// issued no Hold. An independently held lifecycle cannot be released here.
+    pub fn close_channel_component_for_worker(&mut self) -> Result<WorkerLaunchClose> {
         self.connection.close_socket_for_worker()?;
         if let Some(hold) = self.hold.as_mut() {
             hold.release_for_worker()?;
         }
-        Ok(())
+        let budget = super::budget::CleanupBudget::worker(&self.connection.service);
+        self.connection
+            .service
+            .retire_launch(&self.connection.record, &budget)
     }
 }
 impl WorkerServiceConnection {

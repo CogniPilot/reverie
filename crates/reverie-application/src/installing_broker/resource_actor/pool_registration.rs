@@ -7,6 +7,8 @@
 use super::*;
 use crate::installing_broker::installation_offer::RegistrationOfferGuard;
 use reverie_host::worker_reports::{PoolRegistrationPin, WorkerActorPinError};
+#[cfg(test)]
+mod tests;
 
 enum Owner<'a> {
     Moving,
