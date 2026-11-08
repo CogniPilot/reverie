@@ -433,6 +433,15 @@ describe('company HTTP ownership and expert invites', () => {
     expect((await app.inject('/api/company')).json().data.employees.map((e: { id: string }) => e.id)).toEqual([id]);
   });
 
+  it('no longer serves the removed thread route, even to the owner, and changes nothing', async () => {
+    const employee = await service.hire(hireBody);
+    const before = service.store.snapshot();
+    const url = `/api/company/employees/${employee.id}/thread`;
+    const response = await app.inject({ method: 'PUT', url, payload: { threadId: 'ses_seed' } });
+    expect(response.statusCode).toBe(404);
+    expect(service.store.snapshot()).toEqual(before);
+  });
+
   it('lets only the owner edit an employee position, expertise and icon', async () => {
     const employee = await service.hire(hireBody);
     const url = `/api/company/employees/${employee.id}`;

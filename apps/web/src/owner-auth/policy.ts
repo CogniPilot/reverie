@@ -162,7 +162,7 @@ const AGENT_ROUTES = new Set([
 /**
  * What an owner-set admin agent may call besides the agent routes. A whitelist: anything that sets
  * who someone is or what they may do stays owner-only, i.e. company settings (the CTO), employee edits
- * (the position the CTO/COO recovery reads), hiring, retiring, another employee's memories or thread,
+ * (the position the CTO/COO recovery reads), hiring, retiring, another employee's memories,
  * ending a session, plans, settings, sign-in, the CLI registry and the mode switch.
  */
 export const ADMIN_ROUTES = new Set([

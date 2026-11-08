@@ -36,8 +36,8 @@
  * install shape: a git clone (where `scripts/` exists), an `npm i -g aireverie`
  * (where `files` ships only `dist` plus two named scripts), and any
  * `REVERIE_INSTANCE`. Writing it into the data dir at session-create time makes
- * one code path cover all of them, single-sources the content here in TS, and
- * follows the precedent of `self-update-runner.sh`. It is rewritten whenever the
+ * one code path cover all of them and single-sources the content here in TS. It
+ * is rewritten whenever the
  * embedded version marker changes, so an upgraded Reverie refreshes a stale shim
  * without the user knowing it exists.
  *
