@@ -4,7 +4,7 @@ mod common;
 
 use common::*;
 use reverie_publish::sha256_hex;
-use std::{fs, process::Command};
+use std::{fs, path::PathBuf, process::Command};
 
 #[test]
 fn a_clean_packet_passes_every_check() {
@@ -120,6 +120,105 @@ fn a_head_that_conflicts_with_the_base_refuses() {
         ],
     );
     refused(&f.check(&seal, &head, &[]), "does not merge cleanly");
+}
+
+/// An executable helper written at test time that leaves `marker` behind whenever git runs it.
+fn helper(f: &Fixture, name: &str, rest: &str) -> (PathBuf, PathBuf) {
+    let marker = f.root.join(format!("{name}-ran"));
+    let script = f.root.join(format!("{name}.sh"));
+    fs::write(
+        &script,
+        format!("#!/bin/sh\ntouch \"{}\"\n{rest}\n", marker.display()),
+    )
+    .unwrap();
+    fs::set_permissions(&script, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+    (script, marker)
+}
+
+#[test]
+fn a_store_url_rewrite_cannot_replace_the_sealed_bundle() {
+    let f = Fixture::new("store-rewrite");
+    let head = f.commit("b.txt", "two\n", &format!("Add b\n\n{SIGNOFF}"));
+    let seal = f.seal("Add b", "Adds b.\n");
+    // A clean, signed-off commit that was never put in the sealed bundle.
+    let work = f.work();
+    git(&work, &["checkout", "-q", "-b", "foreign", "main"]);
+    fs::write(work.join("c.txt"), "foreign\n").unwrap();
+    git(&work, &["add", "c.txt"]);
+    git(
+        &work,
+        &["commit", "-q", "-m", &format!("Add c\n\n{SIGNOFF}")],
+    );
+    let foreign = git(&work, &["rev-parse", "HEAD"]);
+    // The store's own config sends the bundle fetch to a helper serving that other repository.
+    let (transport, ran) = helper(
+        &f,
+        "transport",
+        &format!("exec git-upload-pack \"{}\"", work.display()),
+    );
+    let store = f.root.join("store.git");
+    git(&store, &["config", "protocol.ext.allow", "always"]);
+    git(
+        &store,
+        &[
+            "config",
+            &format!("url.ext::{} .insteadOf", transport.display()),
+            "./",
+        ],
+    );
+    // Only the sealed bundle is fetched, so the foreign commit is not even present to resolve.
+    refused(&f.check(&seal, &foreign, &[]), "");
+    assert!(!ran.exists(), "the store's transport rewrite ran");
+    // The sealed head still passes with that config in place.
+    let out = f.check(&seal, &head, &[]);
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    assert!(!ran.exists(), "the store's transport rewrite ran");
+}
+
+#[test]
+fn a_store_merge_driver_cannot_hide_a_conflict() {
+    let f = Fixture::new("store-driver");
+    let head = f.commit("a.txt", "topic\n", &format!("Change a\n\n{SIGNOFF}"));
+    let seal = f.seal("Change a", "Changes a.\n");
+    let work = f.work();
+    git(&work, &["checkout", "-q", "main"]);
+    fs::write(work.join("a.txt"), "main moved\n").unwrap();
+    git(
+        &work,
+        &["commit", "-q", "-am", &format!("Move main\n\n{SIGNOFF}")],
+    );
+    let store = f.root.join("store.git");
+    git(
+        &store,
+        &[
+            "fetch",
+            "-q",
+            work.to_str().unwrap(),
+            "+main:refs/heads/main",
+        ],
+    );
+    // The store's own config names a merge driver that declares every conflict resolved.
+    let (driver, ran) = helper(&f, "driver", "exit 0");
+    let attributes = f.root.join("attributes");
+    fs::write(&attributes, "a.txt merge=owned\n").unwrap();
+    git(
+        &store,
+        &[
+            "config",
+            "core.attributesFile",
+            attributes.to_str().unwrap(),
+        ],
+    );
+    git(
+        &store,
+        &[
+            "config",
+            "merge.owned.driver",
+            &format!("{} %O %A %B", driver.display()),
+        ],
+    );
+    refused(&f.check(&seal, &head, &[]), "does not merge cleanly");
+    assert!(!ran.exists(), "the store's merge driver ran");
 }
 
 #[test]
@@ -494,19 +593,12 @@ fn concurrent_checks_on_one_store_share_no_copy_and_leave_none() {
         assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
     }
     assert!(f.copies().is_empty(), "{:?}", f.copies());
-    let runs = git(
+    // Each run's import refs live in its own private git directory, never in the shared store.
+    let refs = git(
         &f.root.join("store.git"),
-        &[
-            "for-each-ref",
-            "--format=%(refname)",
-            "refs/publish/packet/",
-        ],
+        &["for-each-ref", "--format=%(refname)", "refs/publish/"],
     );
-    let runs: std::collections::BTreeSet<_> = runs
-        .lines()
-        .map(|r| r.split('/').nth(3).unwrap().to_owned())
-        .collect();
-    assert_eq!(runs.len(), 2, "{runs:?}");
+    assert_eq!(refs, "");
 }
 
 #[test]

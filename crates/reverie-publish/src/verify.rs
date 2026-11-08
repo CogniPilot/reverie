@@ -55,12 +55,7 @@ pub fn verify(input: &Inputs<'_>) -> Result<Verified, String> {
     if input.tree.len() < 8 || !tree.starts_with(input.tree) {
         return Err("the head's tree is not the reviewed tree".into());
     }
-    let base = git.run([
-        "rev-parse",
-        "--verify",
-        "--end-of-options",
-        &format!("{}^{{commit}}", input.base),
-    ])?;
+    let base = git.store_revision(input.base)?;
     let checked = commits::check_range(git, input.lists, name, &[&head, "--not", &base], &head)?;
     let text = packet.text()?;
     if let Some((title, body)) = &text {
