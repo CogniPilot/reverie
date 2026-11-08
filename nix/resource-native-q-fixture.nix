@@ -5,6 +5,11 @@ let
   fixtureConsole = pkgs.runCommand "reverie-native-q-fixture-console" { } ''
     mkdir -p "$out/lib/reverie"
     cp -rs ${console}/lib/reverie/. "$out/lib/reverie/"
+    # cp preserves the input's readonly modes. Change only this output's directory.
+    test -d "$out/lib/reverie/dist"
+    test ! -L "$out/lib/reverie/dist"
+    test -O "$out/lib/reverie/dist"
+    chmod u+w "$out/lib/reverie/dist"
     # Remove only this new output's link; the product console is immutable.
     unlink "$out/lib/reverie/dist/index.js"
     cp ${src}/apps/web/test/fixtures/resource-native-q-website.mjs "$out/lib/reverie/dist/index.js"
