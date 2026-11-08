@@ -62,7 +62,7 @@ pub(super) fn read_open(path: &Path) -> io::Result<File> {
         .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC | libc::O_NONBLOCK)
         .open(path)
 }
-fn observe(
+pub(super) fn observe(
     files: &mut Descriptors,
     init: &UnsignedInteger,
     path: &Path,
@@ -141,7 +141,11 @@ pub(super) fn hash(file: &mut File, code: &CodeFile, end: Instant) -> Result<()>
         "BACKEND_CODE_BYTES_CHANGED",
     )
 }
-fn mapped_root_uid(files: &mut Descriptors, init: &UnsignedInteger, end: Instant) -> Result<u32> {
+pub(super) fn mapped_root_uid(
+    files: &mut Descriptors,
+    init: &UnsignedInteger,
+    end: Instant,
+) -> Result<u32> {
     check_end(end)?;
     let index = files.retain(read_open(Path::new(&format!(
         "/proc/{}/uid_map",
