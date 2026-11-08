@@ -37,7 +37,7 @@ impl RestoredStoppedRamSource {
 impl StorageClaim {
     pub(crate) fn begin_stopped_ram_source(
         self,
-        context: ObservationContext,
+        mut context: ObservationContext,
     ) -> std::result::Result<StoppedRamSource, Box<StoppedRamRetainFailure>> {
         match transition::fence(&self, &context) {
             Err(cause) => Err(Box::new(StoppedRamRetainFailure {
@@ -46,6 +46,15 @@ impl StorageClaim {
                 cause,
             })),
             Ok((registry, identity)) => {
+                if let Err(cause) =
+                    context.inherit_worker_stop_budget(&registry.runtime.stop_budget())
+                {
+                    return Err(Box::new(StoppedRamRetainFailure {
+                        claim: self,
+                        context,
+                        cause: native(cause),
+                    }));
+                }
                 let configuration = context.configuration().clone();
                 let mut entries = match registry.lock(registry.runtime.stop_deadline()) {
                     Ok(entries) => entries,
