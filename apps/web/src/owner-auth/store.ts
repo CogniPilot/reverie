@@ -94,6 +94,9 @@ export interface OwnerService {
 
 export interface OwnerAccount {
   version: 1;
+  /** Account incarnation, distinct from names, display ids and session epochs.
+   * Legacy accounts acquire it only during explicit authenticated enrollment. */
+  accountId?: string;
   username: string;
   password: PasswordHash;
   /** Set by the host CLI's one-time password: the first login may only change the password. */
@@ -181,6 +184,12 @@ export class OwnerAuthStore {
     const account = JSON.parse(readFileSync(this.file, 'utf8')) as OwnerAccount;
     this.cache = { mtimeMs: stat.mtimeMs, size: stat.size, account };
     return account;
+  }
+
+  /** Current registration checks must not use an mtime-cached or last-good account. */
+  readCurrent(): OwnerAccount | undefined {
+    this.cache = undefined;
+    return this.read();
   }
 
   /** The lock file every writer holds (flock(2), exclusive) from its read to its rename. Never removed. */

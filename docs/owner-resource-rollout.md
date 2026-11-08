@@ -20,6 +20,29 @@ credentials are refused. Guest accounts and organizational titles do not grant
 permission. An appointed agent's scoped fleet authorization remains required
 implementation work; these routes do not borrow a human owner's identity.
 
+Host registration also needs a stable account incarnation: the legacy public
+human ID `owner`, a username and a primary-owner flag cannot distinguish a
+replacement account. New accounts receive an independent `accountId` UUID.
+Existing accounts acquire it only through explicit unrestricted authenticated
+enrollment under the existing account writer lock; reads never migrate them.
+Enrollment preserves all other account fields. Shared-office registration
+identity retains the actual ROOT office person ID and current session epoch;
+an account-local child identity cannot promote a limited person.
+
+This identity is provenance DATA, not host-pool administration or enrollment
+consent. Native registration must still retain the exact installation offer,
+join fresh owner consent and check canonical revocation. No fleet route is
+enabled by assigning an account UUID. The current native retained-offer and
+canonical registration-consent integration remain required work.
+
+The optional account field preserves the version-1 representation. The pinned
+older account store reads JSON without rejecting extra fields and retains them
+on read-modify-write; the message-owner schema also accepts extra fields.
+Older whole-account replacement intentionally creates a different account and
+may remove this field: registration then refuses until a fresh sign-in and
+explicit enrollment establish a new incarnation. Older versions do not enforce new registration
+grants; rolling back cannot be treated as an authorization-compatible executor.
+
 ## Shared API contract
 
 Every route returns the ordinary `success`/`data` envelope, or a failure with
