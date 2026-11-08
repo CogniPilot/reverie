@@ -44,6 +44,9 @@ fn expired_offer_keeps_actual_broker_before_nonce_origin_or_filesystem_effect() 
         .upgrade()
         .expect("metadata close is not broker shutdown");
     retained
+        .close_command_telemetry(Instant::now() + Duration::from_secs(5))
+        .unwrap();
+    retained
         .storage
         .runtime
         .close(Instant::now() + Duration::from_secs(5))
