@@ -11,6 +11,7 @@ pub mod commits;
 pub mod custody;
 pub mod git;
 pub mod github;
+pub mod merge;
 pub mod packet;
 pub mod record;
 
