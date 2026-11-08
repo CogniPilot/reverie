@@ -27,7 +27,9 @@ impl UncheckedProvider {
             return Err(PoolPolicyError);
         }
         self.policy.validate()?;
-        Ok(WorkerPoolProvider { policy: self.policy })
+        Ok(WorkerPoolProvider {
+            policy: self.policy,
+        })
     }
 }
 impl WorkerPoolProvider {
@@ -39,8 +41,9 @@ impl WorkerPoolProvider {
         let Some(value) = root.get(&key) else {
             return Ok(None);
         };
-        let provider: UncheckedProvider = serde_json::from_slice(&crate::worker_config::compact_data(value))
-            .map_err(|_| PoolPolicyError)?;
+        let provider: UncheckedProvider =
+            serde_json::from_slice(&crate::worker_config::compact_data(value))
+                .map_err(|_| PoolPolicyError)?;
         provider.checked().map(Some)
     }
     pub fn policy(&self) -> &WorkerPoolPolicy {
