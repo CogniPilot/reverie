@@ -1,7 +1,7 @@
 //! An unresolved native broker process outcome cannot become a clean new
 //! startup merely because the OS closed its descriptors. No automatic clear.
 use super::*;
-fn path(source: &Path) -> Result<PathBuf> {
+pub(super) fn path(source: &Path) -> Result<PathBuf> {
     let home = native::python_path(&native::home_directory(None)?)?;
     let root = home.join("reverie");
     need(
@@ -13,6 +13,11 @@ fn path(source: &Path) -> Result<PathBuf> {
 }
 pub fn assert_no_service_failure(source: &Path) -> Result<()> {
     let path = path(source)?;
+    if fs::symlink_metadata(path.with_file_name("native-running")).is_ok() {
+        return Err(WorkerServiceError::Refused(
+            "NATIVE_SERVICE_RUNNING_OR_UNSETTLED_REQUIRES_RECOVERY",
+        ));
+    }
     match fs::symlink_metadata(path) {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(error) => Err(error.into()),
@@ -34,7 +39,7 @@ pub fn record_service_failure(source: &Path) -> Result<()> {
         .create_new(true)
         .mode(0o600)
         .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
-        .open(target)?;
+        .open(&target)?;
     let written = state
         .write_all(b"NATIVE_BROKER_UNSETTLED_ORIGINAL_FAILURE_V1\n")
         .and_then(|()| state.sync_all());

@@ -16,6 +16,8 @@ use std::{
     time::{Duration, Instant},
 };
 mod failure_fence;
+mod run_fence;
+pub use run_fence::{NativeServiceRunAttempt, NativeServiceRunFailure, begin_service_run};
 mod manager;
 mod publication;
 pub use failure_fence::{assert_no_service_failure, record_service_failure};
@@ -164,7 +166,7 @@ impl State {
         let program = PathBuf::from(option_env!("REVERIE_FIXED_NATIVE_WORKER_SYSTEMCTL").ok_or(
             WorkerServiceError::Refused("NATIVE_SERVICE_PACKAGED_SYSTEMCTL_REQUIRED"),
         )?);
-        immutable(&program)?;
+        immutable_tool(&program)?;
         let command = InstalledCommand::from_snapshot(
             program.as_os_str(),
             manager_environment(&home),
@@ -178,7 +180,7 @@ impl State {
             PathBuf::from(option_env!("REVERIE_FIXED_NATIVE_WORKER_NIX_STORE").ok_or(
                 WorkerServiceError::Refused("NATIVE_SERVICE_PACKAGED_NIX_REQUIRED"),
             )?);
-        immutable(&pin_program)?;
+        immutable_tool(&pin_program)?;
         let pin = InstalledCommand::from_snapshot(
             pin_program.as_os_str(),
             std::env::vars_os().collect(),
@@ -332,4 +334,12 @@ fn manager_environment(home: &Path) -> Vec<(OsString, OsString)> {
             format!("unix:path=/run/user/{uid}/bus").into(),
         ),
     ]
+}
+
+fn immutable_tool(path: &Path) -> Result<()> {
+    need(
+        path.starts_with("/nix/store"),
+        "NATIVE_SERVICE_PACKAGED_TOOL_REQUIRED",
+    )?;
+    immutable(&path.canonicalize()?)
 }

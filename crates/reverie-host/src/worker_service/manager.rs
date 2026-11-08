@@ -51,7 +51,7 @@ impl State {
         )?;
         let mut words = vec![OsString::from("--user")];
         words.extend(args.iter().map(OsString::from));
-        match self.client.run(
+        match self.client.run_scoped(
             words,
             self.end,
             &CancellationToken::new(),
@@ -107,7 +107,7 @@ impl State {
 }
 
 impl State {
-    fn pin_package(&mut self) -> Result<()> {
+    pub(super) fn pin_package(&mut self) -> Result<()> {
         let package = self
             .unit
             .ancestors()
@@ -122,7 +122,7 @@ impl State {
         ];
         self.attempted = true;
         self.uncertain = true;
-        match self.pin.run(
+        match self.pin.run_scoped(
             args,
             self.end,
             &CancellationToken::new(),

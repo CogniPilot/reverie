@@ -73,11 +73,13 @@ fn serve(config: PathBuf, offer: bool) -> Result<(), Box<dyn std::error::Error>>
         .ok_or("NATIVE_SERVICE_ORIGINAL_SOURCE_REQUIRED")?
         .to_owned();
     reverie_host::worker_service::assert_no_service_failure(&source)?;
+    let run_fence = reverie_host::worker_service::begin_service_run(&source)?;
     let program = option_env!("REVERIE_FIXED_NATIVE_WORKER_ENGINE")
         .ok_or("NATIVE_WORKER_BROKER_PACKAGED_ENGINE_REQUIRED")?;
     let engine = InstalledWorkerEngine::new(EngineBootstrap::capture(program.as_ref())?);
     let runtime = WorkerRuntime::new(engine, snapshot.envelope().base());
-    let broker = InstallingBroker::new(snapshot, runtime)?;
+    let broker = InstallingBroker::new(snapshot, runtime)
+        .map_err(|primary| fenced_failure(&source, primary))?;
     let startup = if offer {
         broker
             .prepare_os_pool_installation_offer(
@@ -98,6 +100,9 @@ fn serve(config: PathBuf, offer: bool) -> Result<(), Box<dyn std::error::Error>>
     // stacks; a nonzero process result is never a cleanup ACK.
     service
         .run()
+        .map_err(|primary| fenced_failure(&source, primary))?;
+    run_fence
+        .finish_known()
         .map_err(|primary| fenced_failure(&source, primary))?;
     Ok(())
 }

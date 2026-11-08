@@ -13,6 +13,7 @@ rec {
   # unchanged until mandatory native service/maintenance consumers qualify.
   nativeWorkerBroker = import ./native-worker-broker.nix {
     inherit pkgs src;
+    previousUnit = workerService;
     perfGuestCapsule = nativePerfGuestCapsule;
     taskPerfPolicy = workerTaskPerfPolicy;
     taskPerfPolicyV2 = workerTaskPerfPolicyV2;

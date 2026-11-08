@@ -1,6 +1,6 @@
 # Unselected native broker integration package. Its fixed build-only role emits
 # provenance after stripping/fixup, hashing the actual final installed ELF.
-{ pkgs, src, perfGuestCapsule ? null, taskPerfPolicy ? null, taskPerfPolicyV2 ? null }:
+{ pkgs, src, perfGuestCapsule ? null, taskPerfPolicy ? null, taskPerfPolicyV2 ? null, previousUnit ? null }:
 pkgs.rustPlatform.buildRustPackage {
   pname = "reverie-native-worker-broker";
   version = "0.1.0";
@@ -16,6 +16,10 @@ pkgs.rustPlatform.buildRustPackage {
     REVERIE_FIXED_TASK_PERF_V2_MANIFEST = "${taskPerfPolicyV2}/share/reverie/worker-perf-profile.json";
   };
   preBuild = ''
+    export REVERIE_FIXED_NATIVE_WORKER_SYSTEMCTL=${pkgs.systemdMinimal}/bin/systemctl
+    export REVERIE_FIXED_NATIVE_WORKER_NIX_STORE=${pkgs.nix}/bin/nix-store
+    export REVERIE_FIXED_NATIVE_WORKER_SERVICE_UNIT="$out/share/systemd/user/reverie-worker-broker.service"
+    ${pkgs.lib.optionalString (previousUnit != null) "export REVERIE_FIXED_PREVIOUS_WORKER_SERVICE_UNIT=${previousUnit}/share/systemd/user/reverie-worker-broker.service"}
     export REVERIE_FIXED_NATIVE_WORKER_ENGINE=${pkgs.docker-client}/bin/docker
     export REVERIE_FIXED_NATIVE_WORKER_BROKER_EXECUTABLE="$out/bin/reverie-worker-broker"
     export REVERIE_FIXED_NATIVE_WORKER_BROKER_MANIFEST="$out/share/reverie/worker-broker-program.json"
@@ -23,6 +27,8 @@ pkgs.rustPlatform.buildRustPackage {
   postFixup = ''
     mkdir -p "$out/share/reverie"
     "$out/bin/reverie-worker-broker" origin-manifest
+    mkdir -p "$out/share/systemd/user"
+    "$out/bin/reverie-worker-broker" service-unit
   '';
   doCheck = true;
   meta = {
