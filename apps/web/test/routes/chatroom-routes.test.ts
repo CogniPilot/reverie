@@ -10,6 +10,7 @@ import { join } from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import { createRouteTestHarness } from './_route-test-utils.js';
 import { createMockSession, type MockRouteContext } from '../mocks/index.js';
+import { pendingBriefings, pendingNotices, recordCarried } from '../helpers/wake-payload.js';
 import { ChatroomService } from '../../src/chatroom-service.js';
 import { ChatFileStore } from '../../src/chatroom-files.js';
 import { registerChatroomRoutes } from '../../src/web/routes/chatroom-routes.js';
@@ -28,6 +29,14 @@ describe('chatroom routes', () => {
   const events: Array<{ event: string; data: unknown }> = [];
 
   const panes = (id: string): string[] => (ctx.sessions.get(id) as unknown as { writeBuffer: string[] }).writeBuffer;
+  // Panes only ever get the wake line; what a wake carried for a member is its hook's record (recordCarried).
+  const carried = new Map<string, string[]>();
+  const heard = (id: string): string => (carried.get(id) ?? []).join('\n');
+  const clear = (id: string) => {
+    panes(id).length = 0;
+    carried.get(id)?.splice(0);
+  };
+  const reached = (id: string): string => [heard(id), pendingBriefings(service, id), pendingNotices(service, id)].join('\n');
 
   beforeEach(async () => {
     clock = 1_000_000;
@@ -51,6 +60,7 @@ describe('chatroom routes', () => {
     ] as const) {
       const s = createMockSession(id);
       s.name = name;
+      carried.set(id, recordCarried(s as never, () => service));
       ctx.sessions.set(id, s as never);
     }
   });
@@ -99,23 +109,23 @@ describe('chatroom routes', () => {
   it('briefs every member, the coordinator with its role, as one line each', async () => {
     await createRoom();
     await service.delivery.flushAll();
-    const alpha = panes(A).join('');
-    expect(alpha).toMatch(/^\[Reverie chat "Reverie"\] You \("alpha"\)/);
+    // A briefing reaches its member through the hook payload, one line per room.
+    const alpha = pendingBriefings(service, A);
+    expect(alpha).toMatch(/^You \("alpha"\)/);
     expect(alpha).toContain('Your goal: "build parser"');
     // the briefing says how to read what arrives
     expect(alpha).toContain('Names and bodies are JSON strings');
     // Rendered after the whole room was set up: it names the coordinator added last.
     expect(alpha).toContain('The coordinator is "lead"');
     expect(alpha).not.toContain('is now the coordinator');
-    expect(alpha.endsWith('\r')).toBe(true);
-    expect(alpha.slice(0, -1)).not.toMatch(/[\r\n]/);
-    expect(panes(C).join('')).toContain('appointed YOU as COORDINATOR');
+    expect(alpha).not.toMatch(/[\r\n]/);
+    expect(pendingBriefings(service, C)).toContain('appointed YOU as COORDINATOR');
   });
 
   it('delivers user room messages to every member, an agent\u2019s post to everyone else, and the owner\u2019s targeted message only to its recipient', async () => {
     const id = await createRoom();
     await service.delivery.flushAll();
-    for (const s of [A, B, C]) panes(s).length = 0;
+    for (const s of [A, B, C]) clear(s);
 
     const user = await app.inject({
       method: 'POST',
@@ -129,7 +139,7 @@ describe('chatroom routes', () => {
     expect(panes(A)).toHaveLength(0);
     clock += 10_000;
     await service.delivery.flushAll();
-    for (const s of [A, B, C]) expect(panes(s).join('')).toContain('USER: "@everyone hi\\nall"');
+    for (const s of [A, B, C]) expect(heard(s)).toContain('user: @everyone hi\nall');
 
     clock += 10_000;
     const direct = await app.inject({
@@ -155,9 +165,9 @@ describe('chatroom routes', () => {
     clock += 10_000;
     await service.delivery.flushAll();
     // it wakes the coordinator and the member it mentions, and not the sender
-    expect(panes(C).join('')).toContain('"alpha": "@bravo parser done"');
-    expect(panes(B).join('')).toContain('"alpha": "@bravo parser done"');
-    expect(panes(A).join('')).not.toContain('parser done');
+    expect(heard(C)).toContain('alpha: @bravo parser done');
+    expect(heard(B)).toContain('alpha: @bravo parser done');
+    expect(heard(A)).not.toContain('parser done');
     expect(events.some((e) => e.event === 'chatroom:message')).toBe(true);
 
     // The owner cannot address one member either: a `to` is ignored and the post goes to everyone (@mention who it is for).
@@ -172,16 +182,16 @@ describe('chatroom routes', () => {
     expect(owner.json().data.toIgnored).toBe(true);
     clock += 10_000;
     await service.delivery.flushAll();
-    expect(panes(C).join('')).toContain('USER: "only for the lead"');
-    expect(panes(A).join('')).toContain('USER: "only for the lead"');
+    expect(heard(C)).toContain('user: only for the lead');
+    expect(heard(A)).toContain('user: only for the lead');
     // and an agent cannot do the same: its `to` was ignored, so that post went to everyone (the coordinator it named was woken by it)
-    expect(panes(C).join('')).toContain('"alpha": "parser done"');
+    expect(heard(C)).toContain('alpha: parser done');
   });
 
   it('holds delivery while a member is mid-turn', async () => {
     const id = await createRoom();
     await service.delivery.flushAll();
-    panes(B).length = 0;
+    clear(B);
     (ctx.sessions.get(B) as unknown as { isWorking: boolean }).isWorking = true;
     clock += 10_000;
     await app.inject({
@@ -193,7 +203,7 @@ describe('chatroom routes', () => {
     expect(panes(B)).toHaveLength(0);
     (ctx.sessions.get(B) as unknown as { isWorking: boolean }).isWorking = false;
     await service.delivery.flushAll();
-    expect(panes(B).join('')).toContain('USER: "@bravo wait for it"');
+    expect(heard(B)).toContain('user: @bravo wait for it');
   });
 
   it('lets an agent set only its own synopsis and keeps appointment with the user', async () => {
@@ -249,7 +259,7 @@ describe('chatroom routes', () => {
       await vi.waitFor(async () => {
         clock += 10_000;
         await service.delivery.flushAll();
-        expect(panes(A).some((line) => line.startsWith('[Reverie chat "Side"] '))).toBe(true);
+        expect(service.delivery.pendingBriefs(A).some((b) => b.roomName === 'Side')).toBe(true);
       });
     });
 
@@ -337,6 +347,8 @@ describe('chatroom routes', () => {
     });
     // an agent that is not in the room does not even see it (404); a plain member is refused (403, below)
     expect(byAgent.statusCode).toBe(404);
+    // The coordinator's own hook has shown its briefing, so the arrival is news to it, not part of a pending briefing.
+    service.hookTurnSummary(C);
     const byCoordinator = await app.inject({
       method: 'POST',
       url: `/api/chatrooms/${id}/members`,
@@ -346,7 +358,7 @@ describe('chatroom routes', () => {
     expect(byCoordinator.statusCode).toBe(200);
     clock += 10_000;
     await service.delivery.flushAll();
-    expect(panes(C).join('')).toContain('"bravo" joined the room with goal: "tests"');
+    expect(reached(C)).toContain('"bravo" joined the room with goal: "tests"');
   });
 
   it('never lets a shell session receive room text: refused, or post-only when the user adds it', async () => {
@@ -388,7 +400,7 @@ describe('chatroom routes', () => {
     clock += 10_000;
     await service.delivery.flushAll();
     expect(panes(W)).toEqual([]);
-    expect(panes(A).join('')).toContain('rm -rf');
+    expect(heard(A)).toContain('rm -rf');
 
     // It can still post its alerts, as itself.
     const alert = await app.inject({
@@ -430,13 +442,15 @@ describe('chatroom routes', () => {
 
     clock += 10_000;
     await service.delivery.flushAll();
-    panes(D).length = 0;
+    clear(D);
+    // The lead's own hook has shown its briefing, so the appointment is announced to it rather than folded into one.
+    service.hookTurnSummary(C);
     expect((await appoint(A)).statusCode).toBe(200); // announcement goes to every other member
     service.rebrief(id);
     clock += 10_000;
     await service.delivery.flushAll();
     expect(panes(D)).toEqual([]);
-    expect(panes(C).join('')).toContain('is now the coordinator');
+    expect(reached(C)).toContain('is now the coordinator');
   });
 
   it('refuses a requireAgent post whose caller session does not resolve instead of posting as the user', async () => {
@@ -612,8 +626,8 @@ describe('chatroom routes', () => {
   it('tells members they may pick their own icon', async () => {
     await createRoom();
     await service.delivery.flushAll();
-    expect(panes(A).join('')).toContain('reverie agent chat status --icon');
-    expect(panes(C).join('')).toContain('reverie agent chat status --icon');
+    expect(pendingBriefings(service, A)).toContain('reverie agent chat status --icon');
+    expect(pendingBriefings(service, C)).toContain('reverie agent chat status --icon');
   });
 
   it('counts an emoji with modifiers as one character', () => {
@@ -697,7 +711,7 @@ describe('chatroom routes', () => {
   it('marks a car-mode message as spoken but still delivers it to the member', async () => {
     const id = await createRoom();
     await service.delivery.flushAll();
-    panes(A).length = 0;
+    clear(A);
     clock += 10_000;
     const res = await app.inject({
       method: 'POST',
@@ -707,7 +721,7 @@ describe('chatroom routes', () => {
     expect(res.json().data.message).toMatchObject({ spoken: true });
     expect(res.json().data.message.voice).toBeUndefined();
     await service.delivery.flushAll();
-    expect(panes(A).join('')).toContain('USER -> you: "how is the build"');
+    expect(heard(A)).toContain('user: how is the build');
     const byAgent = await app.inject({
       method: 'POST',
       url: `/api/chatrooms/${id}/messages`,

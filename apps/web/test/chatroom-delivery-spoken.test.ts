@@ -3,7 +3,7 @@
  * context after the quoted text; nothing else does, a body's own `spoken` included.
  */
 import { describe, expect, it } from 'vitest';
-import { SPOKEN_TURN_HINT, answerLinkHint, renderForRecipient } from '../src/chatroom-delivery.js';
+import { SPOKEN_TURN_HINT, answerLinkHint, renderForRecipient, replyHintFor } from '../src/chatroom-delivery.js';
 import type { ChatMessage, ChatRoom } from '../src/chatroom-store.js';
 
 const A = '0000002d-0035-4000-8000-000000000047';
@@ -98,5 +98,28 @@ describe('spoken turns sent to agents', () => {
     } as unknown as ChatMessage;
     const line = renderForRecipient(room([m]), m, A, nameOf);
     expect(line.endsWith(`: ${JSON.stringify(SPOKEN_TURN_HINT)}`)).toBe(true);
+  });
+});
+
+// The hook payload carries a message's hint without its typed line: one decision serves both, per recipient.
+describe('the reply hint a recipient gets, in the line and in the hook', () => {
+  const B = '0000002d-0035-4000-8000-000000000048';
+  const checkin = '[assignment-checkin:01c12869-c12b-46d4-8df9-456f8ec2057c] alpha: status? Reply directly to this message with On track';
+  const message = (fields: Record<string, unknown>) =>
+    ({ id: 'm1', roomId: 'r', at: 1, to: 'all', text: 'hi', ...fields }) as unknown as ChatMessage;
+  it.each([
+    ['a verified spoken owner turn', message({ spoken: true, from: { kind: 'user', name: 'user', mark: 'owner_spoken' } }), A,
+      `${SPOKEN_TURN_HINT} ${answerLinkHint('m1')}`],
+    ['an unsigned spoken user post', message({ spoken: true, from: { kind: 'user', name: 'user' } }), A, answerLinkHint('m1')],
+    ['a check-in addressed to this recipient', message({ to: [A], text: checkin, from: { kind: 'bot', name: 'Assignment Status' } }), A,
+      answerLinkHint('m1')],
+    ['a check-in addressed to someone else', message({ to: [B], text: checkin, from: { kind: 'bot', name: 'Assignment Status' } }), A, ''],
+    ['a typed owner turn', message({ from: { kind: 'user', name: 'user', mark: 'owner_typed' } }), A, ''],
+    ['an agent post claiming spoken', message({ spoken: true, from: { kind: 'agent', sessionId: B, name: 'beta', mark: 'owner_spoken' } }), A, ''],
+  ])('%s', (_case, m, recipient, hint) => {
+    expect(replyHintFor(room([m]), m, recipient, nameOf)).toBe(hint);
+    const line = renderForRecipient(room([m]), m, recipient, nameOf);
+    if (hint) expect(line.endsWith(` ${hint}`)).toBe(true);
+    else expect(line).not.toContain('reverie agent chat say --reply-to');
   });
 });

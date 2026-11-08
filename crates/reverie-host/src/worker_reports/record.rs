@@ -131,7 +131,10 @@ impl Record {
                     self.opaque.store(true, Ordering::Release);
                     return Ok(error.into_inner());
                 }
-                Err(std::sync::TryLockError::WouldBlock) => {}
+                Err(std::sync::TryLockError::WouldBlock) => {
+                    #[cfg(test)]
+                    super::tests::record_lock_contended();
+                }
             }
             if budget.pause().is_err() {
                 self.opaque.store(true, Ordering::Release);
@@ -236,7 +239,11 @@ impl Record {
         }
         match self.lifecycle.try_lock() {
             Ok(state) => !matches!(*state, super::retention::LifecycleHoldState::Held(_)),
-            Err(std::sync::TryLockError::WouldBlock) => false,
+            Err(std::sync::TryLockError::WouldBlock) => {
+                #[cfg(test)]
+                super::tests::record_lock_contended();
+                false
+            }
             Err(std::sync::TryLockError::Poisoned(_)) => {
                 self.opaque.store(true, Ordering::Release);
                 false
@@ -246,10 +253,51 @@ impl Record {
     pub(super) fn mark_opaque(&self) {
         self.opaque.store(true, Ordering::Release);
     }
+    /// Cleanup observations may wait within the original live stop budget.
+    /// Unlike consuming finalizers, a timed-out observation has consumed no
+    /// resource and must not permanently poison an otherwise settled record.
+    fn observe_until<'a, T>(
+        &self,
+        lock: &'a Mutex<T>,
+        budget: &super::budget::CleanupBudget<'_>,
+    ) -> Result<MutexGuard<'a, T>> {
+        loop {
+            match lock.try_lock() {
+                Ok(guard) => return Ok(guard),
+                Err(std::sync::TryLockError::Poisoned(_)) => {
+                    self.mark_opaque();
+                    return Err(WorkerReportError::Unconfirmed);
+                }
+                Err(std::sync::TryLockError::WouldBlock) => {
+                    #[cfg(test)]
+                    super::tests::record_lock_contended();
+                    budget.pause()?;
+                }
+            }
+        }
+    }
+    pub(super) fn settled_until(&self, budget: &super::budget::CleanupBudget<'_>) -> Result<bool> {
+        if !self.socket_closed_known() {
+            return Ok(false);
+        }
+        let job = self.observe_until(&self.handler, budget)?.clone();
+        if job.is_some_and(|job| !job.known_settled()) {
+            return Ok(false);
+        }
+        let state = self.observe_until(&self.lifecycle, budget)?;
+        Ok(!matches!(
+            *state,
+            super::retention::LifecycleHoldState::Held(_)
+        ))
+    }
     fn handler_job(&self) -> Result<Option<std::sync::Arc<super::handler::HandlerJob>>> {
         match self.handler.try_lock() {
             Ok(job) => Ok(job.clone()),
-            Err(std::sync::TryLockError::WouldBlock) => Err(WorkerReportError::Unconfirmed),
+            Err(std::sync::TryLockError::WouldBlock) => {
+                #[cfg(test)]
+                super::tests::record_lock_contended();
+                Err(WorkerReportError::Unconfirmed)
+            }
             Err(std::sync::TryLockError::Poisoned(_)) => {
                 self.mark_opaque();
                 Err(WorkerReportError::Unconfirmed)
@@ -268,8 +316,13 @@ impl Record {
             job.unread_dropped();
         }
     }
-    pub(super) fn settle_handler(&self, end: Instant) -> Result<()> {
-        self.handler_job()?.map_or(Ok(()), |job| job.settle(end))
+    pub(super) fn settle_handler(
+        &self,
+        budget: &super::budget::CleanupBudget<'_>,
+        end: Instant,
+    ) -> Result<()> {
+        let job = self.observe_until(&self.handler, budget)?.clone();
+        job.map_or(Ok(()), |job| job.settle(end))
     }
     pub(super) fn collect_handler(&self) -> Result<bool> {
         self.handler_job()?.map_or(Ok(true), |job| job.join_once())
