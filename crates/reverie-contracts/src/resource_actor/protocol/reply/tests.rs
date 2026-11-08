@@ -39,7 +39,7 @@ fn policy(cpu: CpuQuota, version: u64) -> (ResourceProfile, RamMigrationPolicy) 
     )
     .unwrap();
     let resources =
-        ResourcePolicy::try_new(BudgetMode::Admission, 49_152, 8, cpu, 49_152, 8192).unwrap();
+        ResourcePolicy::try_new(BudgetMode::Admission, 49_152, 512, cpu, 49_152, 8192).unwrap();
     let profile = ResourceProfile::new(
         ProfileVersion::try_new(version).unwrap(),
         resources,
@@ -48,7 +48,7 @@ fn policy(cpu: CpuQuota, version: u64) -> (ResourceProfile, RamMigrationPolicy) 
     let cid = "a".repeat(64);
     let row = json!({"Id":cid,"Name":format!("/fixture-agent-{CURRENT}"),"Image":format!("sha256:{}","b".repeat(64)),
         "State":{"Running":true,"Pid":42},"Config":{"Labels":{}},"Mounts":[],
-        "HostConfig":{"Memory":536870912u64,"MemorySwap":536870912u64,"PidsLimit":8,"NanoCpus":0}});
+        "HostConfig":{"Memory":536870912u64,"MemorySwap":536870912u64,"PidsLimit":512,"NanoCpus":0}});
     let rows = InventoryRows::decode(
         &[ContainerId::parse(&cid).unwrap()],
         &[serde_json::to_string(&json!([row])).unwrap()],
@@ -66,7 +66,7 @@ fn policy(cpu: CpuQuota, version: u64) -> (ResourceProfile, RamMigrationPolicy) 
     .unwrap();
     let config = worker_config::decode(
         &serde_json::to_vec(&json!({"budgetMode":"admission","memoryMiB":512,
-        "pidsLimit":8,"cpus":0,"poolMemoryMiB":49152,"poolTasksMax":8192}))
+        "pidsLimit":512,"cpus":0,"poolMemoryMiB":49152,"poolTasksMax":8192}))
         .unwrap(),
     )
     .unwrap();
