@@ -6,6 +6,7 @@ pub struct CurrentResourceOwner {
     owner: Option<PythonText>,
     scope: JournalDigest,
     expires: u64,
+    principal: ResourceOwnerPrincipal,
 }
 impl CurrentResourceOwner {
     pub fn owner(&self) -> &Option<PythonText> {
@@ -16,6 +17,9 @@ impl CurrentResourceOwner {
     }
     pub fn expires_at_epoch_ms(&self) -> u64 {
         self.expires
+    }
+    pub fn principal(&self) -> &ResourceOwnerPrincipal {
+        &self.principal
     }
 }
 impl ResourceOperationRequest {
@@ -47,6 +51,7 @@ impl ResourceOperationRequest {
                 "ownerScopeDigest",
                 "expiresAtEpochMs",
                 "approval",
+                "principal",
             ],
         )?;
         for (name, expected) in [
@@ -77,6 +82,7 @@ impl ResourceOperationRequest {
             owner,
             scope: digest(field(value, "ownerScopeDigest")?)?,
             expires,
+            principal: ResourceOwnerPrincipal::capture(field(value, "principal")?)?,
         })
     }
 }
