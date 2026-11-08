@@ -95,7 +95,7 @@ impl Fixture {
             .map_err(reason)?,
         );
         let body = json!({"Image":image,"User":"1000:100","Env":observed["Config"]["Env"],"Entrypoint":observed["Config"]["Entrypoint"],"Cmd":[],"WorkingDir":"/fixture","Labels":{"reverie.native-q-fixture":self.name()},
-            "ExposedPorts":{"3000/tcp":{}},"HostConfig":{"AutoRemove":false,"Init":false,"Privileged":false,"ReadonlyRootfs":true,"CapDrop":["ALL"],"CapAdd":[],"SecurityOpt":["no-new-privileges"],"PidMode":"private","Memory":536870912u64,"MemorySwap":536870912u64,"PidsLimit":256,"NanoCpus":0,"CpusetCpus":"0-7",
+            "ExposedPorts":{"3000/tcp":{}},"HostConfig":{"AutoRemove":false,"Init":false,"Privileged":false,"ReadonlyRootfs":true,"CapDrop":["ALL"],"CapAdd":[],"SecurityOpt":["no-new-privileges"],"PidMode":"","Memory":536870912u64,"MemorySwap":536870912u64,"PidsLimit":256,"NanoCpus":0,"CpusetCpus":"0-7",
                 "PortBindings":{"3000/tcp":[{"HostIp":"127.0.0.1","HostPort":""}]},"Mounts":[
                     {"Type":"bind","Source":self.tree().root.join("run"),"Target":"/run/reverie-native-q","ReadOnly":true,"BindOptions":{"CreateMountpoint":false}},
                     {"Type":"bind","Source":self.tree().root.join("guest"),"Target":"/fixture","ReadOnly":false,"BindOptions":{"CreateMountpoint":false}}]}});
