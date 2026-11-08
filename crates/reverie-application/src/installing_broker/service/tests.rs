@@ -2,6 +2,7 @@
 //! custody, native socket paths and recovery. Admission mode legitimately skips
 //! pool kernel counters; no live cgroup/Engine/company is inspected here.
 use super::*;
+mod native_cold;
 use std::{
     fs,
     os::unix::fs::PermissionsExt,
