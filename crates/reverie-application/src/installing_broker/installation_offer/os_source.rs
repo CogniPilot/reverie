@@ -47,7 +47,7 @@ impl std::fmt::Display for OsPoolInstallationFailure {
     fn fmt(&self, out: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match &self.owner {
             FailedOwner::Source { cause, .. } => cause.fmt(out),
-            FailedOwner::Offer(owner) => owner.fmt(out),
+            FailedOwner::Offer(owner) => owner.cause().fmt(out),
         }
     }
 }
