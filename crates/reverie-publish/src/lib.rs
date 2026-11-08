@@ -13,6 +13,7 @@ pub mod git;
 pub mod github;
 pub mod packet;
 pub mod record;
+pub mod text;
 
 use sha2::{Digest, Sha256};
 
