@@ -10,6 +10,7 @@ mod provider;
 mod service;
 mod started;
 mod started_prefix;
+mod supervisor;
 fn broker(tree: &Tree) -> InstallingBroker {
     broker_with_provider(tree, None)
 }
