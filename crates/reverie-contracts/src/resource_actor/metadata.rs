@@ -3,7 +3,7 @@ use super::*;
 mod website;
 pub use website::QualifiedWebsiteMetadata;
 pub const MAX_ENGINE_BODY: usize = 2 * 1024 * 1024;
-pub struct EngineMetadata(Value);
+pub struct EngineMetadata(pub(super) Value);
 impl EngineMetadata {
     pub fn decode(raw: &[u8]) -> Result<Self> {
         need(raw.len() <= MAX_ENGINE_BODY, "ENGINE_METADATA_UNAVAILABLE")?;

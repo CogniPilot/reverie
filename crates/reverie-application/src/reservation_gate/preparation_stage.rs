@@ -5,6 +5,7 @@ use super::*;
 use reverie_contracts::{
     broker_resources::{self, ResourceConfigError},
     profiles_v1::{self, ProfileDigest},
+    ram_migration::RamMigrationPolicy,
     resource_reload::{FrozenOldPolicy, OldPolicyStart},
     worker_config::{self, EffectiveWorkerConfig},
 };
@@ -38,13 +39,39 @@ impl StagedPreparation {
 }
 impl RetainedPreparation {
     pub fn stage_configuration(&self) -> Result<StagedPreparation> {
+        self.stage_selected(None)
+    }
+    /// Selection DATA from this retained original baseline/profile. The actual
+    /// caller must approve its exact digest and retain fresh authority; this
+    /// observation is no write, native pool or launch permission.
+    pub fn ram_migration_policy(&self) -> Result<RamMigrationPolicy> {
+        let original = crate::resource_staging::effective_config(
+            self.source_configuration().clone(),
+            self.profile().binding().current_session(),
+        )?;
+        Ok(RamMigrationPolicy::from_observed(
+            self.profile(),
+            self.original_baseline().native(),
+            &original,
+        )?)
+    }
+    pub fn stage_ram_configuration(
+        &self,
+        policy: &RamMigrationPolicy,
+    ) -> Result<StagedPreparation> {
+        self.stage_selected(Some(policy))
+    }
+    pub(super) fn stage_selected(
+        &self,
+        policy: Option<&RamMigrationPolicy>,
+    ) -> Result<StagedPreparation> {
         need(
             self.store.is_some(),
             "RESOURCE_PREPARATION_ACTIVE_HANDLE_REQUIRED",
         )?;
         need(self.published, "RESOURCE_PREPARATION_PUBLICATION_REQUIRED")?;
         let admission = self.gate.admit(AdmissionBounds::default())?;
-        match self.stage_body() {
+        match self.stage_body(policy) {
             Ok(value) => finalized(
                 Ok(value),
                 admission.finish_preparation(self, PublicationPhase::After),
@@ -54,7 +81,13 @@ impl RetainedPreparation {
             Err(error) => admission.conclude(Err(error)),
         }
     }
-    fn stage_body(&self) -> Result<StagedPreparation> {
+    fn stage_body(&self, policy: Option<&RamMigrationPolicy>) -> Result<StagedPreparation> {
+        if let Some(policy) = policy {
+            need(
+                self.ram_migration_policy()?.digest() == policy.digest(),
+                "RAM_MIGRATION_APPROVED_SELECTION_CHANGED",
+            )?;
+        }
         let profiles = ProfileStore::open(reservation_control::profile_directory(
             self.gate.config()?.as_ref(),
         )?)?;
@@ -94,6 +127,10 @@ impl RetainedPreparation {
             )
         })();
         let staged = finalized(result, profiles.close().map_err(Into::into))?;
+        let staged = match policy {
+            Some(policy) => policy.apply_to_staged(staged)?,
+            None => staged,
+        };
         let config = self.compatibility_candidate(staged)?;
         Ok(StagedPreparation {
             config,

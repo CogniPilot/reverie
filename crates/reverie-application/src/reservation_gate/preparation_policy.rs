@@ -106,7 +106,10 @@ impl RetainedPreparation {
         )
     }
 }
-fn validate_bound_policy(binding: &PolicyBinding, expected: &EffectiveWorkerConfig) -> Result<()> {
+pub(super) fn validate_bound_policy(
+    binding: &PolicyBinding,
+    expected: &EffectiveWorkerConfig,
+) -> Result<()> {
     let metadata = binding.read_for_validation()?;
     let config = reservation_policy::configuration_for_validation(&metadata)?;
     let actual = crate::worker_validation::validate_captured(config)?;

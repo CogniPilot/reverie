@@ -1,7 +1,9 @@
 //! Actual counted sockets and credentials; no Node/program/action authority.
 use super::*;
 use reverie_contracts::human_protocol::HumanFrame;
+mod ancestry;
 mod budgets;
+mod process_snapshot;
 
 fn accepted(
     fixture: &Fixture,

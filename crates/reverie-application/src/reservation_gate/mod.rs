@@ -22,6 +22,8 @@ pub(crate) use preparation_draft::{DraftRetentionFailure, EnteredResourceDraft};
 mod preparation_commit;
 mod preparation_phase;
 mod preparation_policy;
+mod preparation_receipt;
+pub use preparation_receipt::CommittedPolicy;
 mod preparation_stage;
 mod preparation_start;
 mod preparation_stop;

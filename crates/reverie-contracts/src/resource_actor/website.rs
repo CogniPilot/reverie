@@ -1,6 +1,7 @@
 use super::*;
 use reverie_core::ids::ContainerId;
 
+#[derive(Clone, Eq, PartialEq)]
 pub struct ProgramSelection {
     pub executable: PythonText,
     pub argv: Vec<PythonText>,
@@ -25,6 +26,7 @@ impl ProgramSelection {
         Ok(Self { executable, argv })
     }
 }
+#[derive(Clone, Eq, PartialEq)]
 pub struct CodeFile {
     pub path: PythonText,
     pub sha256: JournalDigest,
@@ -62,7 +64,7 @@ fn initial(value: &Value) -> Result<Option<(UnsignedInteger, UnsignedInteger)>> 
     )?;
     Ok(Some((pid, start)))
 }
-fn files(value: &Value) -> Result<Vec<CodeFile>> {
+pub(super) fn files(value: &Value) -> Result<Vec<CodeFile>> {
     let values = object(value)?;
     need(
         (1..=4096).contains(&values.len()),

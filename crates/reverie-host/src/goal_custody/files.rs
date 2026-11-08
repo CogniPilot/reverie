@@ -9,12 +9,12 @@ use std::{
     path::{Component, PathBuf},
 };
 
-pub(super) type Fingerprint = native::PolicyEntryStamp;
+pub(crate) type Fingerprint = native::PolicyEntryStamp;
 struct Entry {
     path: PathBuf,
     identity: PathIdentity,
 }
-pub(super) struct PrivateBatch {
+pub(crate) struct PrivateBatch {
     files: Vec<File>,
     directories: BTreeMap<PathBuf, usize>,
     entries: Vec<Entry>,
@@ -23,7 +23,7 @@ pub(super) struct PrivateBatch {
     close_uncertain: bool,
 }
 impl PrivateBatch {
-    pub(super) fn new() -> Result<Self> {
+    pub(crate) fn new() -> Result<Self> {
         let root = native::open_at(
             libc::AT_FDCWD,
             std::ffi::OsStr::new("/"),
@@ -39,20 +39,36 @@ impl PrivateBatch {
         })
     }
     pub(super) fn read_json_file(&mut self, path: &Path) -> Result<(Fingerprint, Vec<u8>)> {
-        let (fingerprint, bytes) = self.observe(path, false, false, Some(65536))?;
+        self.read_json(path, false)
+    }
+    /// Resource installation requires exactly 0600, including owner read/write.
+    /// The common G reader's existing owner-private rule is unchanged.
+    pub(crate) fn read_exact_private_json(
+        &mut self,
+        path: &Path,
+    ) -> Result<(Fingerprint, Vec<u8>)> {
+        let root = self.files[0].metadata()?;
+        self.entries.push(Entry {
+            path: PathBuf::from("/"),
+            identity: identity(&root),
+        });
+        self.read_json(path, true)
+    }
+    fn read_json(&mut self, path: &Path, exact: bool) -> Result<(Fingerprint, Vec<u8>)> {
+        let (fingerprint, bytes) = self.observe(path, false, false, Some(65536), exact)?;
         Ok((
             fingerprint.expect("required file"),
             bytes.expect("bounded read"),
         ))
     }
-    pub(super) fn inspect(
+    pub(crate) fn inspect(
         &mut self,
         path: &Path,
         directory: bool,
         absent: bool,
     ) -> Result<Option<[String; 5]>> {
         Ok(self
-            .observe(path, directory, absent, None)?
+            .observe(path, directory, absent, None, false)?
             .0
             .map(|value| native::private_goal::projection(&value)))
     }
@@ -116,6 +132,7 @@ impl PrivateBatch {
         directory: bool,
         absent: bool,
         limit: Option<usize>,
+        exact: bool,
     ) -> Result<(Option<Fingerprint>, Option<Vec<u8>>)> {
         let parent = self.parent(path)?;
         let leaf = path
@@ -135,7 +152,8 @@ impl PrivateBatch {
         let index = self.retain(file);
         let info = self.files[index].metadata()?;
         need(
-            native::private_goal::entry_available(&info, directory),
+            native::private_goal::entry_available(&info, directory)
+                && (!exact || info.mode() & 0o7777 == 0o600),
             "Private Goal entry unavailable",
         )?;
         self.entries.push(Entry {
@@ -170,7 +188,7 @@ impl PrivateBatch {
             )),
         }
     }
-    pub(super) fn check(&self) -> Result<()> {
+    pub(crate) fn check(&self) -> Result<()> {
         for entry in &self.entries {
             let info = fs::symlink_metadata(&entry.path)?;
             need(
@@ -183,7 +201,23 @@ impl PrivateBatch {
         }
         Ok(())
     }
-    pub(super) fn close(&mut self) -> Result<()> {
+    pub(crate) fn identities(&self) -> Vec<(PathBuf, PathIdentity)> {
+        self.entries
+            .iter()
+            .map(|entry| (entry.path.clone(), entry.identity))
+            .collect()
+    }
+    /// Metadata only: no fresh descriptor after the caller's native bracket.
+    pub(crate) fn check_exact_private_json(path: &Path, stamp: &Fingerprint) -> Result<()> {
+        let info = fs::symlink_metadata(path)?;
+        need(
+            native::private_goal::entry_available(&info, false)
+                && info.mode() & 0o7777 == 0o600
+                && Fingerprint::of(&info) == *stamp,
+            "Private installation generation changed",
+        )
+    }
+    pub(crate) fn close(&mut self) -> Result<()> {
         if !self.close_attempted {
             self.close_attempted = true;
             for file in self.files.drain(..).rev() {

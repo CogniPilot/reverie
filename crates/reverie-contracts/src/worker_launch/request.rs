@@ -65,6 +65,12 @@ impl WorkerRequest {
         }
         let request =
             legacy_json::decode_worker_request_bytes(raw).map_err(|_| LaunchDataError::Json)?;
+        Self::from_ordered(request, configuration)
+    }
+    pub(super) fn from_ordered(
+        request: legacy_json::ordered::OrderedValue,
+        configuration: &EffectiveWorkerConfig,
+    ) -> Result<Self> {
         let fields = object(&request.value).map_err(|_| LaunchDataError::Request)?;
         if RequestField::REQUIRED
             .iter()

@@ -1,12 +1,13 @@
 use super::*;
 
 /// Installer-selected references, never request-selected executable authority.
+#[derive(Clone, Eq, PartialEq)]
 pub struct ArtifactReference {
     pub path: PythonText,
     pub sha256: JournalDigest,
 }
 impl ArtifactReference {
-    fn decode(value: &Value) -> Result<Self> {
+    pub(super) fn decode(value: &Value) -> Result<Self> {
         closed(value, &["path", "sha256"])?;
         Ok(Self {
             path: text(field(value, "path")?)?,

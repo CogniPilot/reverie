@@ -2,6 +2,8 @@ use super::*;
 use reverie_core::ids::ProfileSessionId;
 #[path = "tests_preparation_start.rs"]
 mod native_start_cases;
+#[path = "tests_ram_migration.rs"]
+mod ram_migration_cases;
 fn preparing() -> (
     Setup,
     Arc<Fixture>,
@@ -9,7 +11,18 @@ fn preparing() -> (
     RetainedPreparation,
     PathBuf,
 ) {
-    let setup = Setup::new();
+    preparing_using(Setup::new(), Fixture::new())
+}
+fn preparing_using(
+    setup: Setup,
+    fixture: Arc<Fixture>,
+) -> (
+    Setup,
+    Arc<Fixture>,
+    ReservationGate,
+    RetainedPreparation,
+    PathBuf,
+) {
     record_source_binding(&setup);
     let directory = setup.tree.root.join("actor-policy");
     fs::create_dir(&directory).unwrap();
@@ -18,7 +31,6 @@ fn preparing() -> (
         .tree
         .write("actor-policy/worker.json", &setup.tree.raw);
     let path = directory.join("worker.json");
-    let fixture = Fixture::new();
     fixture.storage_facts(setup.stats);
     fill(&fixture, &setup);
     retain_tail(&fixture, &setup);
@@ -59,6 +71,27 @@ fn actual_policy_cas_installs_same_broker_state_and_acks_prepared_without_start_
     let before = fs::read(&path).unwrap();
     let profiles = fs::read(setup.tree.root.join("control/profiles/profiles.json")).unwrap();
     let record = claim.commit_configuration().unwrap();
+    let operation = claim.operation_id().clone();
+    record.assert_gate_current(&gate, &operation).unwrap();
+    assert_eq!(
+        record
+            .assert_gate_current(
+                &gate,
+                &JournalId::parse("99999999-9999-4999-8999-999999999999").unwrap(),
+            )
+            .unwrap_err()
+            .code(),
+        "RESOURCE_PREPARATION_PUBLICATION_NOT_CURRENT"
+    );
+    let foreign =
+        ReservationGate::new(load_owner_config(&path).unwrap(), Fixture::new().observer()).unwrap();
+    assert_eq!(
+        record
+            .assert_gate_current(&foreign, &operation)
+            .unwrap_err()
+            .code(),
+        "RESOURCE_PREPARATION_PUBLICATION_NOT_CURRENT"
+    );
     assert_eq!(claim.operation().state(), OperationState::Prepared);
     assert_eq!(claim.operation().record().data().version.get(), 3);
     assert!(worker_config::equivalent(
@@ -113,9 +146,47 @@ fn actual_policy_cas_installs_same_broker_state_and_acks_prepared_without_start_
     );
     assert!(gate.inner.state.lock().unwrap().active.is_none());
     claim.close().unwrap();
+    assert_eq!(
+        record
+            .assert_gate_current(&gate, &operation)
+            .unwrap_err()
+            .code(),
+        "RESOURCE_PREPARATION_PUBLICATION_NOT_CURRENT"
+    );
     let cold = gate.inspect(&key()).unwrap().unwrap();
     assert!(cold.reservation_retained());
     assert!(!cold.retry_allowed());
+}
+#[test]
+fn committed_policy_receipt_refuses_same_bytes_file_rebinding_without_new_native_work_or_credit() {
+    crate::test_process::owning_case!(
+        committed_policy_receipt_refuses_same_bytes_file_rebinding_without_new_native_work_or_credit
+    );
+    let (setup, fixture, gate, mut claim, path) = preparing();
+    let record = claim.commit_configuration().unwrap();
+    record
+        .assert_gate_current(&gate, claim.operation_id())
+        .unwrap();
+    let journal_path = setup.tree.root.join("control/operations/operations.json");
+    let journal = fs::read(&journal_path).unwrap();
+    let bytes = fs::read(&path).unwrap();
+    let preserved = path.with_file_name("owned-published-config-evidence");
+    fs::rename(&path, &preserved).unwrap();
+    fs::write(&path, &bytes).unwrap();
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+    let native = fixture.events();
+    assert!(
+        record
+            .assert_gate_current(&gate, claim.operation_id())
+            .is_err()
+    );
+    assert_eq!(fixture.events(), native);
+    assert_eq!(fs::read(&journal_path).unwrap(), journal);
+    assert_eq!(fs::read(&path).unwrap(), bytes);
+    assert_eq!(fs::read(&preserved).unwrap(), bytes);
+    assert_eq!(claim.operation().state(), OperationState::Prepared);
+    assert!(!claim.operation().retry_allowed());
+    claim.close().unwrap();
 }
 #[test]
 fn same_bytes_original_rebind_retains_preparing_claim_temp_and_before_evidence_without_retry() {

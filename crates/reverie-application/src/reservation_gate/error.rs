@@ -1,6 +1,7 @@
 use super::*;
 #[derive(Debug)]
 pub enum GateError {
+    RamPolicy(reverie_contracts::ram_migration::RamMigrationError),
     OriginalSource(Box<crate::installing_broker::StorageWorkflowError>),
     SourceStopData(reverie_contracts::worker_source_stop::SourceStopDataError),
     NativeSourceStopUncertain {
@@ -63,6 +64,7 @@ pub enum GateError {
 impl GateError {
     pub fn code(&self) -> &'static str {
         match self {
+            Self::RamPolicy(error) => error.code(),
             Self::OriginalSource(error) => error.code(),
             Self::SourceStopData(error) => error.code(),
             Self::NativeSourceStopUncertain { .. } => {
@@ -125,6 +127,7 @@ impl std::fmt::Display for GateError {
 impl std::error::Error for GateError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
+            Self::RamPolicy(error) => Some(error),
             Self::OriginalSource(error) => Some(error.as_ref()),
             Self::SourceStopData(error) => Some(error),
             Self::NativeSourceStopUncertain { cause } => Some(cause.as_ref()),
@@ -179,6 +182,10 @@ macro_rules! from_error {
     };
 }
 from_error!(ControlHostError, Control);
+from_error!(
+    reverie_contracts::ram_migration::RamMigrationError,
+    RamPolicy
+);
 from_error!(
     reverie_contracts::reservation_baseline::StartDataError,
     StartData

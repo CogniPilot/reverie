@@ -1,6 +1,6 @@
 //! Fixed owner-only G projection over the actual accepted kernel record,
 //! selected worker snapshot, original engine capture and anchored private FDs.
-mod files;
+pub(crate) mod files;
 mod inventory;
 mod projection;
 #[cfg(test)]

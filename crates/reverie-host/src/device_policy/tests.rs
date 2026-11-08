@@ -402,6 +402,42 @@ fn effective_memory_checks_actual_resources_only_after_selecting_high() {
     );
     assert_eq!(tree.fd_count(), 0);
 }
+
+#[test]
+fn frozen_session_memory_precedes_employee_lookup_in_host_projections() {
+    let tree = Tree::new();
+    let identity = tree.identity();
+    fs::remove_file(tree.company_file()).unwrap();
+    for snapshot in [
+        "null",
+        r#"{"memoryHighMiB":1024,"swapMiB":0,"swapPoolMiB":0}"#,
+    ] {
+        let source = config(&format!(
+            r#"{{"sessionResources":{{"{S}":{{"version":2,"resources":{{"budgetMode":"admission","memoryMiB":4096,"pidsLimit":512,"cpus":1.0,"poolMemoryMiB":8192,"poolTasksMax":1024}},"memoryPolicy":{snapshot}}}}},"employeeMemoryPolicies":{{"{E}":{{"memoryHighMiB":2048,"swapMiB":0}}}}}}"#
+        ));
+        let projected = project_effective_memory_resources(
+            &source,
+            &identity,
+            &sid(S),
+            effective_resources("4096"),
+        )
+        .unwrap();
+        assert_eq!(projected.policy().is_some(), snapshot != "null");
+        let other = project_memory_resources(
+            &source,
+            &identity,
+            &sid(S),
+            effective_resources("4096"),
+            None,
+        )
+        .unwrap();
+        assert_eq!(
+            reverie_contracts::worker_config::encode_config(projected.configuration()),
+            reverie_contracts::worker_config::encode_config(other.configuration())
+        );
+    }
+    assert_eq!(tree.fd_count(), 0);
+}
 #[test]
 fn effective_memory_derivation_remains_inside_storage_binding_observations() {
     let tree = Tree::new();

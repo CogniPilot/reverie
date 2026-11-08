@@ -75,6 +75,14 @@ fn resource_config(
         task_perf::project_task_perf(&perf, &identity(captured)?, session)?
     }
     .into_configuration();
+    let resources = match memory::project_session(captured.source(), session, resources)
+        .map_err(DevicePolicyHostError::from)?
+    {
+        memory::SessionMemoryProjection::Legacy(resources) => resources,
+        memory::SessionMemoryProjection::Frozen(projection) => {
+            return Ok(projection.into_configuration());
+        }
+    };
     if !memory::resource_projection_required(captured.source()) {
         return Ok(resources);
     }

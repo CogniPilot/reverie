@@ -1,11 +1,12 @@
 //! Fixed Nix-store bytes in the host and selected init root. This returns file
 //! identity DATA only. The real Q owner must still bind the actual engine,
 //! incarnation, process, peer and current owner before authorizing any work.
-mod files;
+pub(super) mod files;
 #[cfg(test)]
 mod tests;
+use super::files::Descriptors;
 use super::*;
-use files::{Descriptors, Stamp, check_end, nix_path, open_image};
+use files::{Stamp, check_end, nix_path, open_image};
 use reverie_contracts::resource_actor::CodeFile;
 use reverie_core::decimal::UnsignedInteger;
 use sha2::{Digest, Sha256};
@@ -16,7 +17,7 @@ use std::{
     path::Path,
     time::Instant,
 };
-const MAX_CODE_FILE: u64 = 256 * 1024 * 1024;
+pub(super) const MAX_CODE_FILE: u64 = 256 * 1024 * 1024;
 
 #[derive(Default)]
 pub struct ImmutableCodeObserver {
@@ -52,29 +53,10 @@ impl ImmutableCodeObserver {
         let path = nix_path(&code.path)?;
         let mut files = Descriptors::default();
         let body = observe(&mut files, init, &path, code, end);
-        self.finish(body, &mut files)
-    }
-    fn finish(
-        &mut self,
-        body: Result<ObservedCodeFile>,
-        files: &mut Descriptors,
-    ) -> Result<ObservedCodeFile> {
-        let closed = files.close();
-        if closed.is_err() {
-            self.close_uncertain = true;
-        }
-        match (body, closed) {
-            (Ok(value), Ok(())) => Ok(value),
-            (Err(error), Ok(())) => Err(error),
-            (Ok(_), Err(error)) => Err(error),
-            (Err(primary), Err(secondary)) => Err(WebsiteFactsError::Finalization {
-                primary: Box::new(primary),
-                secondary: Box::new(secondary),
-            }),
-        }
+        files.finish(body, &mut self.close_uncertain)
     }
 }
-fn read_open(path: &Path) -> io::Result<File> {
+pub(super) fn read_open(path: &Path) -> io::Result<File> {
     OpenOptions::new()
         .read(true)
         .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC | libc::O_NONBLOCK)
@@ -136,7 +118,7 @@ fn observe(
         inode: actual.ino(),
     })
 }
-fn hash(file: &mut File, code: &CodeFile, end: Instant) -> Result<()> {
+pub(super) fn hash(file: &mut File, code: &CodeFile, end: Instant) -> Result<()> {
     let mut hasher = Sha256::new();
     let mut count = 0_u64;
     let mut buffer = vec![0; 1024 * 1024];
