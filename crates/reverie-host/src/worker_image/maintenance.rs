@@ -64,6 +64,15 @@ impl std::error::Error for ImageMaintenanceFailure {
     }
 }
 impl ImageMaintenanceLocks {
+    #[cfg(test)]
+    pub(crate) fn capture_fixture(
+        root: &Path,
+        source: &Path,
+        config: &EffectiveWorkerConfig,
+        end: Instant,
+    ) -> std::result::Result<Self, Box<ImageMaintenanceFailure>> {
+        Self::capture_at(root, source, config, end)
+    }
     pub fn capture(
         source: &Path,
         config: &EffectiveWorkerConfig,

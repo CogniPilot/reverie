@@ -5,6 +5,8 @@ mod consumers;
 mod current;
 mod files;
 #[cfg(test)]
+pub(crate) use files::image_path_swap_before_cas_fixture_fault;
+#[cfg(test)]
 pub(crate) use files::image_pending_swap_before_cas_fixture_fault;
 pub(crate) use files::open_parent as open_control_parent;
 pub(crate) use files::replace_image_configuration;

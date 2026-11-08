@@ -322,6 +322,17 @@ pub(crate) fn image_pending_swap_before_cas_fixture_fault() {
         Ok(())
     });
 }
+#[cfg(test)]
+pub(crate) fn image_path_swap_before_cas_fixture_fault(path: PathBuf) {
+    tests::hook(tests::Point::BeforeCas, move |_, _| {
+        use std::os::unix::fs::PermissionsExt;
+        let bytes = fs::read(&path)?;
+        fs::rename(&path, path.with_extension("original-fixture"))?;
+        fs::write(&path, bytes)?;
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o600))?;
+        Ok(())
+    });
+}
 struct Prepared {
     name: OsString,
     stamp: GpuFileStamp,
