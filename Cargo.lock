@@ -1253,6 +1253,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "reverie-perf-capsule"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "reverie-elf-bundle",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "reverie-perf-check"
 version = "0.1.0"
 dependencies = [

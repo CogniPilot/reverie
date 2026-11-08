@@ -1,4 +1,4 @@
-{ pkgs, src, reverie, console, memory, runtime, worker ? false, browserRuntime ? null, chatLanguageTools ? null, rootlessDocker ? null, resourceReplacement ? false, ownerTerminalWebsite ? null, memoryGuestCapsule ? null }:
+{ pkgs, src, reverie, console, memory, runtime, worker ? false, browserRuntime ? null, chatLanguageTools ? null, rootlessDocker ? null, resourceReplacement ? false, ownerTerminalWebsite ? null, memoryGuestCapsule ? null, perfGuestCapsule ? null }:
 let
   uid = if rootlessDocker == null then 2000 else rootlessDocker.uid;
   gid = if rootlessDocker == null then 2000 else rootlessDocker.gid;
@@ -46,6 +46,7 @@ let
       ((import ./service-auth-config.nix { inherit (pkgs) lib; }) (builtins.elemAt ownerWebArgs 6)) ];
 in assert builtins.isBool resourceReplacement && (!resourceReplacement || !worker);
 assert memoryGuestCapsule == null || worker;
+assert perfGuestCapsule == null || worker;
 assert ownerTerminalWebsite == null || (!worker && !resourceReplacement &&
   (builtins.elem ownerWebArgs [ webArgs (webArgs ++ [ "--resource-replacement" ]) ] || serviceAuthWebArgs));
 assert rootlessDocker == null || (worker && builtins.isInt uid && builtins.isInt gid && uid > 0 && gid > 0
@@ -70,6 +71,12 @@ pkgs.dockerTools.buildLayeredImage {
       # No context, service grant, default command or launcher is selected here.
       cp -r ${memoryGuestCapsule}/opt/reverie/memory opt/reverie/memory
       test ! -e opt/rvmem
+    ''}
+    ${pkgs.lib.optionalString (perfGuestCapsule != null) ''
+      # Fixed real files survive the employee's writable /nix overlay.
+      # This candidate slot does not select an installed launch policy.
+      cp -r ${perfGuestCapsule}/opt/reverie/perf opt/reverie/perf
+      test ! -e opt/rvprf
     ''}
     unlink bin/reverie
     ln -s ${reverie}/bin/reverie bin/reverie
