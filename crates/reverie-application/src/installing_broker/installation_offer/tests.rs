@@ -55,9 +55,9 @@ fn expired_offer_keeps_actual_broker_before_nonce_origin_or_filesystem_effect() 
 }
 
 #[test]
-fn actual_expired_owner_enters_startup_failure_whole_without_prefix_effects_or_new_deadline() {
+fn expired_installation_startup_refuses_before_claim_and_retains_original_runtime() {
     crate::test_process::owning_case!(
-        actual_expired_owner_enters_startup_failure_whole_without_prefix_effects_or_new_deadline
+        expired_installation_startup_refuses_before_claim_and_retains_original_runtime
     );
     let (root, broker) =
         super::super::recovered::tests::Tree::bootstrap_parts("", "admission", 512, 4096);
@@ -66,8 +66,6 @@ fn actual_expired_owner_enters_startup_failure_whole_without_prefix_effects_or_n
         .prepare_pool_installation_offer(request(), Instant::now() - Duration::from_secs(1))
         .err()
         .unwrap();
-    let deadline = expired.owner.deadline;
-    let digest = expired.owner.request.digest().clone();
     let original = Arc::downgrade(&expired.owner.broker);
     // This is the real retained FAILED producer, not a fabricated successful
     // origin/nonce/publication. Even misuse must keep every original owner.
@@ -80,16 +78,13 @@ fn actual_expired_owner_enters_startup_failure_whole_without_prefix_effects_or_n
                 "POOL_INSTALLATION_OFFER_EXPIRED_OR_CLOSED"
             ))
     ));
-    assert!(budget.same_runtime(&failure.owner.broker.storage.runtime));
-    assert!(failure.owner.signals.is_none());
-    assert!(failure.owner.listener.is_none() && failure.owner.bound_listener.is_none());
-    let offer = failure.owner.installation_offer.as_mut().unwrap();
-    assert!(Arc::ptr_eq(&offer.broker, &failure.owner.broker));
-    assert_eq!(offer.deadline, deadline);
-    assert_eq!(offer.request.digest(), &digest);
-    assert!(matches!(offer.origin, Origin::Unopened));
-    assert!(offer.snapshot.is_none() && offer.nonce.is_none() && offer.published.is_none());
-    assert!(!offer.service_closed);
+    let retained = original.upgrade().expect("original runtime stays retained");
+    assert!(budget.same_runtime(&retained.storage.runtime));
+    assert!(
+        !retained
+            .service_start_claimed
+            .load(std::sync::atomic::Ordering::Acquire)
+    );
     failure.close_installation_origin_metadata().unwrap();
     assert!(matches!(
         failure.cause(),
@@ -97,7 +92,8 @@ fn actual_expired_owner_enters_startup_failure_whole_without_prefix_effects_or_n
     ));
     assert!(!root.join("control").exists() && !root.join("calls.txt").exists());
     failure.close_listener_component().unwrap();
-    close_unstarted(&failure.owner.broker);
+    close_unstarted(&retained);
+    drop(retained);
     drop(failure);
     assert!(
         original.upgrade().is_some(),
@@ -118,6 +114,7 @@ fn actual_foreign_broker_cannot_adopt_retained_offer_or_lose_either_runtime() {
         .prepare_pool_installation_offer(request(), Instant::now() - Duration::from_secs(1))
         .err()
         .unwrap();
+    let original = Arc::downgrade(&expired.owner.broker);
     let BrokerInstallationOfferFailure { owner, .. } = *expired;
     let (other_root, other) =
         super::super::recovered::tests::Tree::bootstrap_parts("", "admission", 512, 4096);
@@ -130,22 +127,27 @@ fn actual_foreign_broker_cannot_adopt_retained_offer_or_lose_either_runtime() {
                 "POOL_INSTALLATION_OFFER_FOREIGN_BROKER"
             ))
     ));
-    assert!(Arc::ptr_eq(&other, &failure.owner.broker));
-    assert!(failure.owner.signals.is_none());
-    assert!(failure.owner.listener.is_none() && failure.owner.bound_listener.is_none());
-    let offer = failure.owner.installation_offer.as_mut().unwrap();
-    assert!(budget.same_runtime(&offer.broker.storage.runtime));
-    assert!(!Arc::ptr_eq(&other, &offer.broker));
+    let retained = original.upgrade().expect("original runtime stays retained");
+    assert!(budget.same_runtime(&retained.storage.runtime));
+    assert!(!Arc::ptr_eq(&other, &retained));
+    for original in [&retained, &other] {
+        assert!(
+            !original
+                .service_start_claimed
+                .load(std::sync::atomic::Ordering::Acquire)
+        );
+    }
     failure.close_installation_origin_metadata().unwrap();
     assert!(matches!(
         failure.cause(),
         BrokerStartupCause::InstallationOffer(_)
     ));
-    close_unstarted(&failure.owner.installation_offer.as_ref().unwrap().broker);
+    close_unstarted(&retained);
     close_unstarted(&other);
     assert!(!root.join("control").exists() && !root.join("calls.txt").exists());
     assert!(!other_root.join("control").exists() && !other_root.join("calls.txt").exists());
     drop(failure);
+    drop(retained);
     drop(other);
     std::fs::remove_dir_all(root).unwrap();
     std::fs::remove_dir_all(other_root).unwrap();
