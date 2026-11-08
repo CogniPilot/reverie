@@ -521,6 +521,7 @@ let
   opsNativeCli = import ./ops-cli.nix { inherit pkgs src; };
   mcpNativeCli = import ./mcp-cli.nix { inherit pkgs src console memoryNativeCli; };
   routinesNative = import ./routines.nix { inherit pkgs src; };
+  muxNative = import ./mux.nix { inherit pkgs src; };
   workerChild = pkgs.writeShellScriptBin "reverie-worker-child" ''
     exec ${memory}/bin/python3 -m reverie.worker child "$@"
   '';
@@ -631,10 +632,12 @@ let
     echo "reverie-memory smoke passed: no instance and a missing instance both refuse with exit 1"
     # The host routines tick (docs/routines.md) is native; the owner links it from this package.
     ln -s ${routinesNative}/bin/reverie-routines "$out/bin/reverie-routines"
+    # Terminal session tool (list, info, attach, kill); works with or without the console running.
+    ln -s ${muxNative}/bin/reverie-mux "$out/bin/reverie-mux"
     for command in ${memory}/bin/reverie-*; do
       makeWrapper "$command" "$out/bin/$(basename "$command")" \
         --prefix PATH : ${runtime}/bin
     done
   '';
 
-in { inherit reverie console memory memoryPackage runtime entrypoint kokoro hands handsTools workerExec workerResourceClientManifest workerNativeClient workerNativeClientManifest workerNativeChild workerNativeNixStorePrepare memoryNativeCli mcpNativeCli opsNativeCli routinesNative laptopTools rustRouteHandler; }
+in { inherit reverie console memory memoryPackage runtime entrypoint kokoro hands handsTools workerExec workerResourceClientManifest workerNativeClient workerNativeClientManifest workerNativeChild workerNativeNixStorePrepare memoryNativeCli mcpNativeCli opsNativeCli routinesNative muxNative laptopTools rustRouteHandler; }
