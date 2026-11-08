@@ -40,6 +40,7 @@ struct Qualification<'a> {
     context: ObservationContext,
     end: Instant,
     failed: bool,
+    recheck_close_failure: Option<Arc<WorkerImageQualificationError>>,
     preview_files: Option<reverie_host::worker_image::ImageControlFiles>,
     preview: Option<crate::reservation_gate::ImageSwitchPreview>,
     file_close_failure: Option<reverie_host::worker_image::ImageFileError>,

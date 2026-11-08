@@ -167,8 +167,15 @@ fn typed_stateless_recheck_close_failure_keeps_original_qualifier_after_known_co
     let tree = Tree::new();
     let broker = broker(&tree);
     let end = Instant::now() + Duration::from_secs(2);
-    let mut failure = broker.qualify_worker_image(reference(), reference(), WorkerImageId::parse(&format!("sha256:{}", "b".repeat(64))).unwrap(), end)
-        .err().expect("real original qualifier retained before invalid reference");
+    let mut failure = broker
+        .qualify_worker_image(
+            reference(),
+            reference(),
+            WorkerImageId::parse(&format!("sha256:{}", "b".repeat(64))).unwrap(),
+            end,
+        )
+        .err()
+        .expect("real original qualifier retained before invalid reference");
     // Typed notification control only. Actual native consumed-close mechanics
     // are separately owned by Host; this never fabricates a qualified image.
     let notification = WorkerImageQualificationError::Rootless(
@@ -178,7 +185,11 @@ fn typed_stateless_recheck_close_failure_keeps_original_qualifier_after_known_co
             },
         ),
     );
-    let returned = failure.owner.as_mut().unwrap().latch_recheck_failure(notification);
+    let returned = failure
+        .owner
+        .as_mut()
+        .unwrap()
+        .latch_recheck_failure(notification);
     assert!(returned.has_unconfirmed_close());
     assert!(failure.close_components(end).is_err());
     assert!(failure.owner.is_some());
