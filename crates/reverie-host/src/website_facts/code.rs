@@ -1,6 +1,7 @@
 //! Fixed Nix-store bytes in the host and selected init root. This returns file
 //! identity DATA only. The real Q owner must still bind the actual engine,
 //! incarnation, process, peer and current owner before authorizing any work.
+pub(super) mod cache;
 pub(super) mod files;
 #[cfg(test)]
 mod tests;
@@ -22,6 +23,7 @@ pub(super) const MAX_CODE_FILE: u64 = 256 * 1024 * 1024;
 #[derive(Default)]
 pub struct ImmutableCodeObserver {
     close_uncertain: bool,
+    cache: cache::HashCache,
 }
 /// An observed guest inode, never a process, path, execution or owner grant.
 pub struct ObservedCodeFile {
@@ -34,6 +36,11 @@ impl ObservedCodeFile {
     }
 }
 impl ImmutableCodeObserver {
+    /// Metadata-only finalization check for the original observer. This never
+    /// clears uncertainty, closes a descriptor or grants process authority.
+    pub fn assert_finalized(&self) -> Result<()> {
+        need(!self.close_uncertain, "BACKEND_CODE_CLOSE_UNCONFIRMED")
+    }
     /// Caller supplies installer-selected manifest DATA, not a wire-selected
     /// executable. Recheck the bound init before and after this whole operation.
     /// No namespace switch, exec, write, generic guest symlink or fallback open.
@@ -43,7 +50,7 @@ impl ImmutableCodeObserver {
         code: &CodeFile,
         end: Instant,
     ) -> Result<ObservedCodeFile> {
-        need(!self.close_uncertain, "BACKEND_CODE_CLOSE_UNCONFIRMED")?;
+        self.assert_finalized()?;
         need(
             init.to_u64()
                 .is_some_and(|pid| pid > 1 && u32::try_from(pid).is_ok()),
@@ -52,8 +59,10 @@ impl ImmutableCodeObserver {
         need(code.bytes <= MAX_CODE_FILE, "IMMUTABLE_CODE_BINDING")?;
         let path = nix_path(&code.path)?;
         let mut files = Descriptors::default();
-        let body = observe(&mut files, init, &path, code, end);
-        files.finish(body, &mut self.close_uncertain)
+        let body = observe(&mut files, init, &path, code, &self.cache, end);
+        let (observed, verified) = files.finish(body, &mut self.close_uncertain)?;
+        self.cache.publish(verified);
+        Ok(observed)
     }
 }
 pub(super) fn read_open(path: &Path) -> io::Result<File> {
@@ -67,8 +76,9 @@ pub(super) fn observe(
     init: &UnsignedInteger,
     path: &Path,
     code: &CodeFile,
+    cache: &cache::HashCache,
     end: Instant,
-) -> Result<ObservedCodeFile> {
+) -> Result<(ObservedCodeFile, cache::Verified)> {
     check_end(end)?;
     need(
         fs::canonicalize(path)? == path,
@@ -103,20 +113,25 @@ pub(super) fn observe(
             && flags.contains(nix::sys::statvfs::FsFlags::ST_RDONLY),
         "PROTECTED_IMAGE_CODE_REQUIRED",
     )?;
-    let before = [Stamp::of(&trusted), Stamp::of(&actual)];
-    for index in [host, guest] {
-        hash(files.get_mut(index), code, end)?;
+    let verified = cache::Verified::new(path, code, [Stamp::of(&trusted), Stamp::of(&actual)]);
+    if !cache.contains(&verified) {
+        for index in [host, guest] {
+            hash(files.get_mut(index), code, end)?;
+        }
     }
     need(
-        Stamp::of(&files.get(host).metadata()?) == before[0]
-            && Stamp::of(&files.get(guest).metadata()?) == before[1],
+        Stamp::of(&files.get(host).metadata()?) == verified.stamps()[0]
+            && Stamp::of(&files.get(guest).metadata()?) == verified.stamps()[1],
         "BACKEND_CODE_READ_CHANGED",
     )?;
     check_end(end)?;
-    Ok(ObservedCodeFile {
-        device: actual.dev(),
-        inode: actual.ino(),
-    })
+    Ok((
+        ObservedCodeFile {
+            device: actual.dev(),
+            inode: actual.ino(),
+        },
+        verified,
+    ))
 }
 pub(super) fn hash(file: &mut File, code: &CodeFile, end: Instant) -> Result<()> {
     let mut hasher = Sha256::new();
@@ -132,6 +147,8 @@ pub(super) fn hash(file: &mut File, code: &CodeFile, end: Instant) -> Result<()>
         }
         count += read as u64;
         need(count <= MAX_CODE_FILE, "BACKEND_CODE_BOUND")?;
+        #[cfg(test)]
+        cache::observe_hash_read();
         hasher.update(&buffer[..read]);
     }
     need(

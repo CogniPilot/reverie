@@ -155,6 +155,10 @@ fn actual_alias_consumed_close_failure_preserves_primary_and_never_reopens_after
     native::test_faults::set(None, true);
     let first = alias.observe_alias(&init(), &fixture.invocation, &[wrong], end());
     native::test_faults::set(None, false);
+    assert_eq!(
+        alias.assert_finalized().unwrap_err().code(),
+        "INVOCATION_ALIAS_CLOSE_UNCONFIRMED"
+    );
     assert!(
         matches!(first.err().unwrap(),WebsiteFactsError::Finalization {ref primary,ref secondary}
         if primary.code()=="BACKEND_CODE_BYTES_CHANGED" && secondary.code()=="BACKEND_CODE_CLOSE_UNCONFIRMED")
@@ -179,6 +183,84 @@ fn actual_alias_consumed_close_failure_preserves_primary_and_never_reopens_after
             .filter_map(|entry| fs::read_link(entry.path()).ok())
             .any(|path| path == fixture.canonical
                 || native::python_text(&path) == fixture.invocation.codepoints())
+    );
+}
+#[test]
+#[ignore = "requires explicit REVERIE_DEPLOYMENT_COPY and actual read-only UID0 Nix store"]
+fn actual_code_and_alias_cache_hits_skip_only_hash_reads_and_wrong_manifest_digest_misses() {
+    let fixture = Fixture::new();
+    let mut code = ImmutableCodeObserver::default();
+    let mut alias = ImmutableAliasObserver::default();
+    for use_alias in [false, true] {
+        let mut observe = |selected: &CodeFile| {
+            if use_alias {
+                alias
+                    .observe_alias(
+                        &init(),
+                        &fixture.invocation,
+                        std::slice::from_ref(selected),
+                        end(),
+                    )
+                    .map(|observed| observed.identity())
+            } else {
+                code.observe_file(&init(), selected, end())
+                    .map(|observed| observed.identity())
+            }
+        };
+        let before = code::cache::hash_reads();
+        let initial = observe(&fixture.code).unwrap();
+        let first = code::cache::hash_reads();
+        assert!(
+            first > before,
+            "first observation must read actual file bytes"
+        );
+        assert_eq!(observe(&fixture.code).unwrap(), initial);
+        assert_eq!(
+            code::cache::hash_reads(),
+            first,
+            "exact hit skips only content reads"
+        );
+        let mut wrong = fixture.code.clone();
+        wrong.sha256 = JournalDigest::parse(&"0".repeat(64)).unwrap();
+        let refused = observe(&wrong).err().unwrap();
+        assert_eq!(refused.code(), "BACKEND_CODE_BYTES_CHANGED");
+        let after_wrong = code::cache::hash_reads();
+        assert!(
+            after_wrong > first,
+            "different expected digest must miss despite same inode"
+        );
+        assert_eq!(observe(&fixture.code).unwrap(), initial);
+        assert_eq!(
+            code::cache::hash_reads(),
+            after_wrong,
+            "failed candidate cannot replace valid entry"
+        );
+    }
+    code.assert_finalized().unwrap();
+    alias.assert_finalized().unwrap();
+    let before_close = code::cache::hash_reads();
+    native::test_faults::set(None, true);
+    let failed_close = code.observe_file(&init(), &fixture.code, end());
+    native::test_faults::set(None, false);
+    assert_eq!(
+        failed_close.err().unwrap().code(),
+        "BACKEND_CODE_CLOSE_UNCONFIRMED"
+    );
+    assert_eq!(
+        code::cache::hash_reads(),
+        before_close,
+        "cached hit still checked-closes actual current descriptors"
+    );
+    assert_eq!(
+        code.assert_finalized().unwrap_err().code(),
+        "BACKEND_CODE_CLOSE_UNCONFIRMED"
+    );
+    assert_eq!(
+        code.observe_file(&init(), &fixture.code, end())
+            .err()
+            .unwrap()
+            .code(),
+        "BACKEND_CODE_CLOSE_UNCONFIRMED"
     );
 }
 #[test]

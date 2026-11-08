@@ -13,6 +13,7 @@ use std::{path::Path, time::Instant};
 #[must_use = "retain this observer and the original actor hold after uncertain close"]
 pub struct ImmutableAliasObserver {
     close_uncertain: bool,
+    cache: code::cache::HashCache,
 }
 pub struct ObservedCodeAlias {
     canonical: PythonText,
@@ -27,6 +28,11 @@ impl ObservedCodeAlias {
     }
 }
 impl ImmutableAliasObserver {
+    /// Only the original observer's sticky checked-close outcome. No I/O,
+    /// retry, uncertainty reset, or program/peer/owner authority is supplied.
+    pub fn assert_finalized(&self) -> Result<()> {
+        need(!self.close_uncertain, "INVOCATION_ALIAS_CLOSE_UNCONFIRMED")
+    }
     /// Only installer-selected invocation/manifest DATA. The authenticating
     /// factory must bracket its real init/engine, check the target against the
     /// selected program, and compare actual peer argv/executable separately.
@@ -37,7 +43,7 @@ impl ImmutableAliasObserver {
         manifest: &[CodeFile],
         end: Instant,
     ) -> Result<ObservedCodeAlias> {
-        need(!self.close_uncertain, "INVOCATION_ALIAS_CLOSE_UNCONFIRMED")?;
+        self.assert_finalized()?;
         need(
             init.to_u64()
                 .is_some_and(|pid| pid > 1 && u32::try_from(pid).is_ok()),
@@ -49,8 +55,10 @@ impl ImmutableAliasObserver {
         )?;
         let path = nix_path(invocation)?;
         let mut files = Descriptors::default();
-        let body = observe(&mut files, init, &path, manifest, end);
-        files.finish(body, &mut self.close_uncertain)
+        let body = observe(&mut files, init, &path, manifest, &self.cache, end);
+        let (observed, verified) = files.finish(body, &mut self.close_uncertain)?;
+        self.cache.publish(verified);
+        Ok(observed)
     }
 }
 fn observe(
@@ -58,8 +66,9 @@ fn observe(
     init: &UnsignedInteger,
     path: &Path,
     manifest: &[CodeFile],
+    cache: &code::cache::HashCache,
     end: Instant,
-) -> Result<ObservedCodeAlias> {
+) -> Result<(ObservedCodeAlias, code::cache::Verified)> {
     check_end(end)?;
     let expected = std::fs::canonicalize(path)?;
     let canonical = PythonText::try_new(native::python_text(&expected)).expect("OS codepoints");
@@ -74,6 +83,6 @@ fn observe(
         matches.next().is_none() && selected.bytes <= code::MAX_CODE_FILE,
         "IMMUTABLE_CODE_BINDING",
     )?;
-    let file = code::observe(files, init, &actual, selected, end)?;
-    Ok(ObservedCodeAlias { canonical, file })
+    let (file, verified) = code::observe(files, init, &actual, selected, cache, end)?;
+    Ok((ObservedCodeAlias { canonical, file }, verified))
 }
