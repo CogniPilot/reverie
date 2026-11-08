@@ -10,6 +10,8 @@ pub struct Inputs<'a> {
     pub packet: &'a Path,
     pub seal: &'a str,
     pub git: &'a Git,
+    /// The object store `git` works in; the verified bundle is copied here before import.
+    pub git_dir: &'a Path,
     /// `OWNER/NAME`.
     pub repo: &'a str,
     /// The base, as a revision in the object store.
@@ -35,10 +37,14 @@ pub fn verify(input: &Inputs<'_>) -> Result<Verified, String> {
     let name = short_name(input.repo)?;
     let packet = Packet::open(input.packet, input.seal)?;
     let git = input.git;
-    git.import_bundle(&packet.bundle()?, "packet")?;
+    // git reads a private copy of the verified bytes, never the packet's path.
+    let bundle = input.git_dir.join("publish-packet.bundle");
+    std::fs::write(&bundle, packet.bundle()?).map_err(|e| format!("{}: {e}", bundle.display()))?;
+    git.import_bundle(&bundle, "packet")?;
     let head = git.run([
         "rev-parse",
         "--verify",
+        "--end-of-options",
         &format!("{}^{{commit}}", input.head),
     ])?;
     if head != input.head {
@@ -51,6 +57,7 @@ pub fn verify(input: &Inputs<'_>) -> Result<Verified, String> {
     let base = git.run([
         "rev-parse",
         "--verify",
+        "--end-of-options",
         &format!("{}^{{commit}}", input.base),
     ])?;
     let checked = commits::check_range(git, input.lists, name, &[&head, "--not", &base], &head)?;
@@ -71,6 +78,8 @@ pub fn verify(input: &Inputs<'_>) -> Result<Verified, String> {
         Approval::load(path)?.verify(
             git,
             input.repo,
+            &head,
+            &base,
             text.as_ref().map(|(t, b)| (t.as_str(), b.as_str())),
         )?;
     }

@@ -1,25 +1,16 @@
-//! `git` with explicit argv against one object store, no shell, no credential helper, no user
-//! or system config, and none of the environment variables that redirect or trace git.
+//! `git` with explicit argv against one object store, no shell, no credential helper, no hooks,
+//! no replacement objects, no user or system config, and no `GIT_*` variable from the caller: any
+//! of them could redirect, reconfigure (`GIT_CONFIG_COUNT`, `GIT_CONFIG_PARAMETERS`), trace or run
+//! code inside git.
 use std::{
     ffi::OsStr,
     path::{Path, PathBuf},
     process::{Command, Output},
 };
 
-/// Variables removed from git's environment: they redirect the repository, leak traffic or carry
-/// a token that must only ever come from the token file.
-const SCRUBBED: &[&str] = &[
-    "GIT_DIR",
-    "GIT_WORK_TREE",
-    "GIT_INDEX_FILE",
-    "GIT_OBJECT_DIRECTORY",
-    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
-    "GIT_CURL_VERBOSE",
-    "GIT_ASKPASS",
-    "SSH_ASKPASS",
-    "GH_TOKEN",
-    "GITHUB_TOKEN",
-];
+/// Variables removed from git's environment besides every `GIT_*` one: they carry a token or a
+/// credential prompt that must only ever come from this binary.
+const SCRUBBED: &[&str] = &["SSH_ASKPASS", "GH_TOKEN", "GITHUB_TOKEN"];
 
 #[derive(Debug, Clone)]
 pub struct Git {
@@ -41,7 +32,7 @@ impl Git {
         let mut command = Command::new("git");
         for (key, _) in std::env::vars_os() {
             let name = key.to_string_lossy();
-            if SCRUBBED.contains(&name.as_ref()) || name.starts_with("GIT_TRACE") {
+            if SCRUBBED.contains(&name.as_ref()) || name.starts_with("GIT_") {
                 command.env_remove(&key);
             }
         }
@@ -49,8 +40,8 @@ impl Git {
             .env("GIT_CONFIG_GLOBAL", "/dev/null")
             .env("GIT_CONFIG_NOSYSTEM", "1")
             .env("GIT_TERMINAL_PROMPT", "0")
-            .arg("-c")
-            .arg("credential.helper=")
+            .env("GIT_NO_REPLACE_OBJECTS", "1")
+            .args(["-c", "credential.helper=", "-c", "core.hooksPath=/dev/null"])
             .arg("--git-dir")
             .arg(&self.git_dir)
             .args(args);

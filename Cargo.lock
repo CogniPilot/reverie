@@ -1210,6 +1210,7 @@ name = "reverie-publish"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "libc",
  "reverie-namegate",
  "serde",
  "serde_json",

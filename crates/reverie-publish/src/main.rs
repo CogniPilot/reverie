@@ -1,5 +1,6 @@
 //! `reverie-publish`: reviewed publication from sealed packets. `check` runs every shared check
-//! and writes nothing; `new-pr` pushes a reviewed head to a new branch and opens a draft PR.
+//! and writes only into the local object store it is given; `new-pr` pushes a reviewed head to a
+//! new branch and opens a draft PR.
 use clap::{Parser, Subcommand};
 use reverie_namegate::Lists;
 use reverie_publish::{
@@ -26,7 +27,8 @@ struct Arguments {
 enum Action {
     /// Check a packet against an object store: seal, bundle, head and tree, every commit beyond
     /// the base (identity, sign-off, rule 8), the title and body, a clean merge with the base,
-    /// and the approval record when given. Writes nothing.
+    /// and the approval record when given. Writes only into the local object store (the imported
+    /// bundle); nothing is pushed or sent.
     Check(Check),
     /// Push a reviewed head to a new branch and open a draft PR from it, after every check and
     /// the approval record pass. The branch must not exist yet.
@@ -160,6 +162,7 @@ fn run_verify(
         packet: &common.packet,
         seal: &common.seal,
         git,
+        git_dir: &common.git_dir,
         repo: &common.repo,
         base,
         head: &common.head,

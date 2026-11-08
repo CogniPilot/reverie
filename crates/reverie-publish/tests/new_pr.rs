@@ -116,7 +116,7 @@ fn prepared(name: &str) -> Publish {
             "main:refs/heads/main",
         ],
     );
-    let approval = fixture.approval(&head, TITLE, BODY);
+    let approval = fixture.approval(&head, "main", TITLE, BODY);
     fs::write(fixture.root.join("approval.json"), approval.to_string()).unwrap();
     fs::write(fixture.root.join("token"), "testtoken\n").unwrap();
     Publish {
@@ -295,7 +295,7 @@ fn a_write_needs_an_approval_and_refuses_a_stale_one() {
     );
     let mut stale = p
         .fixture
-        .approval(&p.head, TITLE, "Adds b, as first written.\n");
+        .approval(&p.head, "main", TITLE, "Adds b, as first written.\n");
     stale["reviews"] = json!(["source GO 0000aaaa"]);
     refused(
         &p.run(&api, &args(&p.with_approval(&stale))),
@@ -326,7 +326,9 @@ fn a_stacked_base_must_be_contained_in_the_head() {
         ],
     );
     let (api, _) = fake_api(echo(p.head.clone()));
-    let mut extra = approval_args(&p);
+    // An approval for exactly this head on `other`, so only the containment rule can refuse.
+    let approval = p.fixture.approval(&p.head, "other", TITLE, BODY);
+    let mut extra = p.with_approval(&approval);
     extra.extend(["--base-branch".into(), "other".into()]);
     refused(&p.run(&api, &args(&extra)), "must contain its current tip");
 }
@@ -339,4 +341,33 @@ fn an_api_base_other_than_github_or_loopback_is_refused_before_any_write() {
         "the API base must be",
     );
     assert_eq!(p.remote_branch(), None);
+}
+
+#[test]
+fn an_approval_for_an_older_base_refuses_once_the_target_branch_moved() {
+    let p = prepared("moved-base");
+    let work = p.fixture.work();
+    git(&work, &["checkout", "-q", "main"]);
+    fs::write(work.join("c.txt"), "three\n").unwrap();
+    git(&work, &["add", "c.txt"]);
+    git(
+        &work,
+        &["commit", "-q", "-m", &format!("Move main\n\n{SIGNOFF}")],
+    );
+    git(
+        &p.remote(),
+        &[
+            "fetch",
+            "-q",
+            work.to_str().unwrap(),
+            "+main:refs/heads/main",
+        ],
+    );
+    let (api, seen) = fake_api(echo(p.head.clone()));
+    refused(
+        &p.run(&api, &args(&approval_args(&p))),
+        "the approval is for another base",
+    );
+    assert_eq!(p.remote_branch(), None);
+    assert!(seen.lock().unwrap().is_empty());
 }

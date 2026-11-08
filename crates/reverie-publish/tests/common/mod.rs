@@ -140,6 +140,16 @@ impl Fixture {
     }
 
     pub(crate) fn check(&self, seal: &str, head: &str, extra: &[&str]) -> Output {
+        self.check_env(seal, head, extra, &[])
+    }
+
+    pub(crate) fn check_env(
+        &self,
+        seal: &str,
+        head: &str,
+        extra: &[&str],
+        envs: &[(&str, &str)],
+    ) -> Output {
         let tree = git(&self.work(), &["rev-parse", &format!("{head}^{{tree}}")]);
         let lists_sha = sha256_hex(LISTS.as_bytes());
         let root = &self.root;
@@ -163,6 +173,7 @@ impl Fixture {
             .arg("--lists")
             .arg(root.join("lists.json"))
             .args(extra)
+            .envs(envs.iter().copied())
             .output()
             .unwrap()
     }
@@ -187,8 +198,14 @@ pub(crate) fn refused(out: &Output, why: &str) {
 }
 
 impl Fixture {
-    /// An approval record for `head` against `main`, covering `title` and `body`.
-    pub(crate) fn approval(&self, head: &str, title: &str, body: &str) -> serde_json::Value {
+    /// An approval record for `head` against `base`, covering `title` and `body`.
+    pub(crate) fn approval(
+        &self,
+        head: &str,
+        base: &str,
+        title: &str,
+        body: &str,
+    ) -> serde_json::Value {
         let work = self.work();
         let bytes = |args: &[&str]| {
             Command::new("git")
@@ -204,11 +221,17 @@ impl Fixture {
             "head": head,
             "tree": git(&work, &["rev-parse", &format!("{head}^{{tree}}")]),
             "rawCommitSha256": sha256_hex(&bytes(&["cat-file", "commit", head])),
-            "base": git(&work, &["rev-parse", "main"]),
-            "patchSha256": sha256_hex(&bytes(&["diff", "--binary", "--full-index", "main", head])),
+            "base": git(&work, &["rev-parse", base]),
+            "patchSha256": sha256_hex(&bytes(&["diff", "--binary", "--full-index", base, head])),
             "titleSha256": sha256_hex(title.as_bytes()),
             "bodySha256": sha256_hex(body.as_bytes()),
             "reviews": ["source GO 0000aaaa"],
         })
+    }
+
+    pub(crate) fn with_approval(&self, approval: &serde_json::Value) -> String {
+        let path = self.root.join("approval.json");
+        fs::write(&path, approval.to_string()).unwrap();
+        path.to_string_lossy().into_owned()
     }
 }
