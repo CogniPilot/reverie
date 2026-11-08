@@ -391,6 +391,33 @@
           this.setup.append(s.button('ca-btn', 'Check original pool installation', () => this.checkSetup(pending)));
       } else {
         this.setup.append(s.button('ca-btn', 'Review native worker pool setup', () => this.openSetup()));
+        this.setup.append(s.button('ca-btn', 'Enroll this owner account for native setup', () => this.enrollSetup()));
+      }
+    }
+    async enrollSetup() {
+      if (this.setupBusy || this.readSetupPending()) return;
+      const confirmed = await this.shell.confirmCompanyAction(
+        'Owner account enrollment',
+        'Add a stable registration identity to this owner account? This does not install or authorize a worker pool.',
+        'Enroll account'
+      );
+      if (!confirmed || this.setupBusy || this.readSetupPending() || !this.dialog.isConnected) return;
+      this.setupBusy = true;
+      this.sync();
+      try {
+        await this.identity();
+        const response = await this.shell.app._chatApi(`${ROOT}/installation/enroll`, {
+          method: 'POST',
+          body: { enroll: true },
+        });
+        await this.identity();
+        if (!response.ok) throw new Error(response.error || 'Owner account enrollment unavailable');
+        this.error.textContent = 'Owner account enrolled. Review the OS-nominated setup separately.';
+      } catch (error) {
+        this.error.textContent = error.message || 'Owner account enrollment unavailable';
+      } finally {
+        this.setupBusy = false;
+        this.sync();
       }
     }
     async openSetup() {

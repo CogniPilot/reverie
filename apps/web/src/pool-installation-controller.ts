@@ -1,9 +1,10 @@
-/** Thin authenticated API over one original native B conversation. No account
- * enrollment, OS nomination, policy file write or native grant is created here.
+/** Thin authenticated API over one original native B conversation. Explicit
+ * account enrollment is separate from OS nomination and native consent.
  */
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { OwnerAuthService } from './owner-auth/service.js';
+import { OWNER_COOKIE } from './owner-auth/policy.js';
 import { ResourceOwnerAuthority, ResourceOwnerAuthorizationError } from './resource-owner-authority.js';
 import { PoolInstallationNativeClient, type PoolInstallationView } from './pool-installation-native-client.js';
 
@@ -26,10 +27,15 @@ export class PoolInstallationController {
   readonly #views = new Map<string, Entry>();
   #opening = false;
   constructor(
-    auth: OwnerAuthService,
+    private readonly auth: OwnerAuthService,
     private readonly socket: string | undefined
   ) {
     this.#authority = new ResourceOwnerAuthority(auth);
+  }
+  async enroll(request: FastifyRequest) {
+    this.#authority.requestOwner(request);
+    z.object({ enroll: z.literal(true) }).strict().parse(request.body);
+    return this.auth.enrollRegistrationIdentity(request.cookies?.[OWNER_COOKIE]);
   }
   async view(request: FastifyRequest): Promise<PoolInstallationView> {
     // Authentication precedes even checking configuration, and native client
@@ -127,6 +133,17 @@ export function registerPoolInstallationRoutes(app: FastifyInstance, controller:
       : error instanceof Error && 'status' in error && (error.status === 403 || error.status === 409)
         ? error.status
         : 503;
+  app.post(prefix + '/enroll', async (request, reply) => {
+    reply.header('Cache-Control', 'no-store');
+    try {
+      return { success: true, data: await controller.enroll(request) };
+    } catch (error) {
+      return reply.code(status(error)).send({
+        success: false,
+        error: error instanceof Error ? error.message : 'Account enrollment unavailable',
+      });
+    }
+  });
   app.post(prefix + '/view', async (request, reply) => {
     reply.header('Cache-Control', 'no-store');
     try {
