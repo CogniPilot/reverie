@@ -48,15 +48,13 @@ impl AuthenticatedResourceOperation<'_> {
         expected: ResourceContinuationVerb,
     ) -> Result<()> {
         let result = (|| {
+            let reference = self.reference()?.clone();
             self.assert_live()?;
             let frame = &mut self.website.frame;
             let end = frame.deadline.min(Instant::now() + Duration::from_secs(5));
             let next = ResourceContinuationRequest::decode(&frame.receive(end)?)?;
-            let reference = self.reference.as_ref().ok_or(ResourceActorError::Refused(
-                "RESOURCE_RAM_REFERENCE_REQUIRED",
-            ))?;
             self.cursor
-                .accept(next, &self.request, reference, expected)?;
+                .accept(next, &self.request, &reference, expected)?;
             self.assert_current()
         })();
         self.website.frame.failed |= result.is_err();
