@@ -15,12 +15,12 @@ async function setup(emptyLocal=false){
   calls.push({path,...options});let data:any;
   if(state.deny)return {ok:false,status:403,json:async()=>({success:false,error:{code:'OWNER_ONLY',message:'owner only'}})};
   if(path==='/api/embassy-guest')data={connections:rows};
-  else if(path.startsWith('/api/embassy-guest/'))data={posts:[],next:0};
+  else if(path.startsWith('/api/embassy-guest/'))data={posts:state.guestPosts||[],next:(state.guestPosts||[]).length};
   else if(path.startsWith('/api/embassy-host/posts')){
    if(options.method==='POST'){const post={ackId:'00000036-0041-4000-8000-00000000005d',sequence:state.hostPosts.length+1,at:Date.now(),text:options.body.text,author:{company:'Host company',identity:'Owner'}};state.hostPosts.push(post);data={post};}
    else data={posts:state.hostPosts,next:state.hostPosts.length};
   }
-  else if(path==='/api/embassy-host')data={status:state.host,origin:state.needsOrigin?'':origin,builtin:!!state.builtin,needsAdvertisedOrigin:!!state.needsOrigin,room:{id:roomId,name:'Shared room'}};
+  else if(path==='/api/embassy-host')data={status:state.host,origin:state.needsOrigin?'':origin,builtin:!!state.builtin,needsAdvertisedOrigin:!!state.needsOrigin,room:{id:roomId,name:'Shared room'},...(state.guestAvatars?{guestAvatars:state.guestAvatars}:{})};
   else if(path==='/api/embassy-host/settings'){state.needsOrigin=false;data={builtin:true,origin,needsAdvertisedOrigin:false};}
   else if(path==='/api/embassy-host/rename')data={room:{id:roomId,name:options.body.name}};
   else if(path==='/api/embassy-host/close')data={closed:true,revoked:2};
@@ -302,4 +302,26 @@ it('lets the owner rename the hosted embassy and close it only after a second, e
  h.button('Confirm: close and end guest access').click();await h.flush(10);
  expect(h.calls.find(c=>c.path==='/api/embassy-host/close')?.body).toEqual({confirm:'close'});
  expect(h.document.body.textContent).toContain('Guest access has ended');
+});
+it('the hosted room shows the picture the owner set for a guest, and nothing else stands in for one',async()=>{
+ const pictured='0000000a-0000-4000-8000-00000000000a',plain='0000000b-0000-4000-8000-00000000000b',crossed='0000000c-0000-4000-8000-00000000000c',forged='0000000d-0000-4000-8000-00000000000d';
+ const url=(id:string,v=1700000000000)=>`/api/embassy-host/guests/${id}/avatar?v=${v}`;
+ const h=await setup();
+ // A map entry is kept only when its URL is that guest's own picture route.
+ h.state.guestAvatars={[pictured]:url(pictured),[crossed]:url(pictured,1),[forged]:'https://robotronix.example/zorblat.png','not-a-request':url(pictured)};
+ await h.view.pairing.refresh();
+ expect(h.view.pairing.host.guestAvatars).toEqual({[pictured]:url(pictured)});
+ const guest=(n:number,id:string)=>({ackId:`0000000${n}-0041-4000-8000-00000000005d`,sequence:n,at:n,text:`from ${id}`,author:{kind:'guest',company:'Robotronix',identity:`Guest ${n}`,requestId:id}});
+ h.state.hostPosts.push(guest(1,pictured),guest(2,plain),guest(3,crossed),guest(4,forged),{ackId:'00000005-0041-4000-8000-00000000005d',sequence:5,at:5,text:'from host',author:{kind:'host',company:'Host company',identity:'Owner'}});
+ h.view.open('__host__');await h.flush(10);
+ const rows=[...h.document.querySelectorAll('.eg-post')] as HTMLElement[];expect(rows).toHaveLength(5);
+ const img=(row:HTMLElement)=>row.querySelector('img.chatroom-avatar-img')?.getAttribute('src')??null;
+ expect(img(rows[0])).toBe(url(pictured));
+ expect(rows.slice(1).map(img)).toEqual([null,null,null,null]);
+ // The same request id in another company's room (a guest connection here) never borrows the hosted map.
+ h.rows.push({id:'remote',origin:'https://remote.example.test',roomId:'remote-room',roomName:'Remote room',hostCompany:'Robotronix',guest:{company:'Host company',identity:'Owner'},expiresAt:Date.now()+3600000,enabled:true,status:'live',postCount:1});
+ h.state.guestPosts=[guest(1,pictured)];
+ await h.view.refresh();h.view.open('remote');await h.flush(10);
+ const remote=[...h.document.querySelectorAll('.eg-post')] as HTMLElement[];expect(remote).toHaveLength(1);
+ expect(img(remote[0])).toBeNull();
 });
