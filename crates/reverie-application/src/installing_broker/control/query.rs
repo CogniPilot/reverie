@@ -144,24 +144,14 @@ impl Frame<'_> {
         for binding in bindings {
             let result =
                 readers.observe_binding(snapshot, &identity, binding, &before, epoch, self.end);
-            match result {
-                Ok(value) => observations.push(value),
-                Err(Cause::Identity(error)) if error.has_unconfirmed_close() => {
-                    self.identity_unknown
-                        .get_or_insert_with(|| Arc::clone(&error));
-                    return Err(Cause::Identity(error));
-                }
-                Err(error) => {
-                    readers
-                        .process
-                        .assert_finalized()
-                        .map_err(|_| Cause::Refused("PROVIDER_PROCESS_CLOSE_UNCONFIRMED"))?;
-                    if readers.unknown.is_some() {
-                        return Err(error);
-                    }
-                    observations.push(binding.unknown_observation(epoch).map_err(identity_data)?);
-                }
+            if let Err(Cause::Identity(error)) = &result
+                && error.has_unconfirmed_close()
+            {
+                self.identity_unknown
+                    .get_or_insert_with(|| Arc::clone(error));
+                return Err(Cause::Identity(Arc::clone(error)));
             }
+            observations.push(readers.known_observation(binding, result, epoch)?);
         }
         let after = readers
             .context
@@ -193,6 +183,25 @@ impl Frame<'_> {
     }
 }
 impl HealthReaders {
+    fn known_observation(
+        &self,
+        binding: &reverie_contracts::storage_identity::ProviderHealthBinding,
+        result: Result<BrokerReply, Cause>,
+        epoch: u64,
+    ) -> Result<BrokerReply, Cause> {
+        match result {
+            Ok(value) => Ok(value),
+            Err(error) => {
+                self.process
+                    .assert_finalized()
+                    .map_err(|_| Cause::Refused("PROVIDER_PROCESS_CLOSE_UNCONFIRMED"))?;
+                if self.unknown.is_some() {
+                    return Err(error);
+                }
+                binding.unknown_observation(epoch).map_err(identity_data)
+            }
+        }
+    }
     fn observe_binding(
         &mut self,
         snapshot: &ValidatedWorkerSnapshot,
