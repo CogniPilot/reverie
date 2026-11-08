@@ -4,6 +4,12 @@
 use std::error::Error;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+// The run flow (the next part of the controller) drives the scope; until then only its tests do.
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "the controller run flow drives the scope driver")
+)]
+mod scope;
 mod validate;
 
 const USAGE: &str = "cargo task-cancel-scope --check-source --lease-root DIR --pins FILE --pins-sha256 HEX\n  Validate the task-cancel controller's private pins, tool and component closure, fixture sources\n  and CPU set against this checkout and this executable; starts nothing.";

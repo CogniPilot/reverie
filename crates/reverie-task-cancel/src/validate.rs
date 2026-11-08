@@ -37,7 +37,7 @@ pub(crate) const TOOLS: [&str; 6] = [
 
 pub(crate) type Result<T> = std::result::Result<T, String>;
 
-fn need(condition: bool, message: &str) -> Result<()> {
+pub(crate) fn need(condition: bool, message: &str) -> Result<()> {
     if condition {
         Ok(())
     } else {
@@ -59,7 +59,7 @@ pub(crate) fn sha256_hex(bytes: &[u8]) -> String {
         .collect()
 }
 
-fn hex(text: &str, length: usize) -> bool {
+pub(crate) fn hex(text: &str, length: usize) -> bool {
     text.len() == length
         && text
             .bytes()
