@@ -63,26 +63,6 @@ impl ContainerId {
     }
 }
 
-/// A complete engine inventory reference, never process/effect authority.
-/// The legacy observer accepts the all-zero lexical ID as well.
-#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
-pub struct ContainerId(String);
-impl ContainerId {
-    pub fn parse(value: &str) -> Result<Self, ValueError> {
-        if value.len() != 64
-            || !value
-                .bytes()
-                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
-        {
-            return Err(ValueError::ContainerId);
-        }
-        Ok(Self(value.to_owned()))
-    }
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub struct NativeOperationId(String);
 impl NativeOperationId {
