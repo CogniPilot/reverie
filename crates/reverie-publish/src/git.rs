@@ -104,6 +104,59 @@ impl Git {
         Ok(self.output(args)?.status.success())
     }
 
+    /// `git push <url> <refspec>` without force. With `token_file`, git asks this binary for the
+    /// credentials (`GIT_ASKPASS`, answered by `askpass::answer`), so the token never reaches argv,
+    /// the environment of anything but this binary, or a shell. Returns (success, stderr).
+    pub fn push(
+        &self,
+        url: &str,
+        refspec: &str,
+        token_file: Option<&Path>,
+    ) -> Result<(bool, String), String> {
+        if refspec.starts_with('+') || refspec.contains(":+") {
+            return Err("a forced refspec is never pushed".into());
+        }
+        let mut command = self.command(["push", "--porcelain", url, refspec]);
+        if let Some(token_file) = token_file {
+            let me =
+                std::env::current_exe().map_err(|e| format!("cannot find this binary: {e}"))?;
+            command
+                .env("GIT_ASKPASS", me)
+                .env(crate::askpass::MODE, "1")
+                .env(crate::askpass::TOKEN_FILE, token_file);
+        }
+        let output = command
+            .output()
+            .map_err(|e| format!("could not run git: {e}"))?;
+        Ok((
+            output.status.success(),
+            String::from_utf8_lossy(&output.stderr).into_owned(),
+        ))
+    }
+
+    /// The commit a remote ref points at, or None when the ref does not exist.
+    pub fn remote_ref(&self, url: &str, reference: &str) -> Result<Option<String>, String> {
+        let listed = self.run(["ls-remote", url, reference])?;
+        Ok(listed
+            .lines()
+            .find(|line| line.split_whitespace().nth(1) == Some(reference))
+            .and_then(|line| line.split_whitespace().next())
+            .map(str::to_owned))
+    }
+
+    /// Fetches one remote branch to `refs/publish/<label>` and returns its commit.
+    pub fn fetch_branch(&self, url: &str, branch: &str, label: &str) -> Result<String, String> {
+        let local = format!("refs/publish/{label}");
+        self.run([
+            "fetch",
+            "--quiet",
+            "--no-tags",
+            url,
+            &format!("+refs/heads/{branch}:{local}"),
+        ])?;
+        self.run(["rev-parse", "--verify", &format!("{local}^{{commit}}")])
+    }
+
     /// Verifies a bundle and fetches all its refs under `refs/publish/<label>/`.
     pub fn import_bundle(&self, bundle: &Path, label: &str) -> Result<(), String> {
         let bundle = bundle.to_string_lossy().into_owned();
@@ -111,5 +164,21 @@ impl Git {
         let refspec = format!("+refs/*:refs/publish/{label}/*");
         self.run(["fetch", "--quiet", "--no-tags", &bundle, &refspec])?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_forced_refspec_is_refused_before_git_runs() {
+        let git = Git::new(Path::new("/nonexistent/store.git"));
+        for refspec in ["+abc:refs/heads/x", "abc:+refs/heads/x"] {
+            let error = git
+                .push("/nonexistent/remote.git", refspec, None)
+                .unwrap_err();
+            assert!(error.contains("never pushed"), "{error}");
+        }
     }
 }
