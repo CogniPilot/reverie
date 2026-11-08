@@ -4,7 +4,7 @@ use super::*;
 fn service_tree() -> Tree {
     let mut tree = Tree::new();
     let mut raw: serde_json::Value = serde_json::from_slice(&tree.raw).unwrap();
-    raw["socket"] = serde_json::json!(tree.root.join("supervisor.sock"));
+    raw["socket"] = serde_json::json!(tree.root.join("control/supervisor.sock"));
     tree.raw = serde_json::to_vec(&raw).unwrap();
     tree
 }
