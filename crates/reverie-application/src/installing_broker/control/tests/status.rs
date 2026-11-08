@@ -1,8 +1,10 @@
 //! Genuine accepted C plus the existing fixed Rust metadata child. No live
 //! engine, callback, manufactured runtime or lifecycle mutation is selected.
 use super::*;
+type Response = Result<(u8, serde_json::Value), String>;
+type Observation = (Result<(), String>, Response, String);
 
-fn reply(client: &mut UnixStream) -> Result<(u8, serde_json::Value), String> {
+fn reply(client: &mut UnixStream) -> Response {
     let mut header = [0; 5];
     client.read_exact(&mut header).map_err(|e| e.to_string())?;
     let header = WorkerFrameHeader::decode(header);
@@ -12,14 +14,7 @@ fn reply(client: &mut UnixStream) -> Result<(u8, serde_json::Value), String> {
         .map(|value| (header.kind(), value))
         .map_err(|e| format!("{}: {e}", String::from_utf8_lossy(&raw)))
 }
-fn observe(
-    request: &[u8],
-    names: &str,
-) -> (
-    Result<(), String>,
-    Result<(u8, serde_json::Value), String>,
-    String,
-) {
+fn observe(request: &[u8], names: &str) -> Observation {
     let (root, broker) = recovered::tests::Tree::bootstrap_parts("", "admission", 512, 4096);
     std::fs::write(root.join("names.out"), names).unwrap();
     let broker = Arc::new(broker);
