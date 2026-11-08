@@ -1,6 +1,7 @@
 //! Read-only C operations share the original accepted record and native query
 //! owner. A running container is not proof that its CLI command is healthy.
 use super::*;
+use reverie_contracts::broker_reply::BrokerReply;
 use reverie_contracts::{resource_config::ResourceIdentitySettings, storage_identity::Metadata};
 use reverie_store::storage_identity::{self, StorageIdentityConfig};
 fn identity_data(error: reverie_contracts::storage_identity::IdentityDataError) -> Cause {
@@ -66,16 +67,34 @@ impl Frame<'_> {
     pub(super) fn provider_health(&mut self) -> Result<(), Cause> {
         let snapshot = self.broker.configuration()?;
         let company = self.company(&snapshot)?;
-        // No positive command proof is inferred from the container or viewer.
-        // The full binding/process reader replaces this conservative empty
-        // observation before nonempty-provider coverage can be claimed.
+        let epoch_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .ok()
+            .and_then(|value| u64::try_from(value.as_millis()).ok())
+            .ok_or(Cause::Refused("WORKER_CONTROL_OBSERVATION_CLOCK"))?;
+        let bindings = company.provider_health_bindings().map_err(identity_data)?;
+        // Unknown rows retain their exact current-company tuple. Neither a
+        // container nor its terminal viewer supplies positive command proof.
+        let observations = bindings
+            .iter()
+            .map(|binding| binding.unknown_observation(epoch_ms).map_err(identity_data))
+            .collect::<Result<Vec<_>, _>>()?;
         if !company.equivalent(&self.company(&snapshot)?)
             || !Arc::ptr_eq(&snapshot, &self.broker.configuration()?)
         {
             return Err(Cause::Refused("WORKER_CONTROL_HEALTH_CHANGED"));
         }
-        self.reply_query(serde_json::json!({"providerHealth":{
-            "version":1,"purpose":"worker-provider-health-v1","providers":[]}}))
+        self.reply_query_bytes(
+            &BrokerReply::object(vec![(
+                "providerHealth",
+                BrokerReply::object(vec![
+                    ("version", BrokerReply::integer(1)),
+                    ("purpose", BrokerReply::string("worker-provider-health-v1")),
+                    ("providers", BrokerReply::array(observations)),
+                ]),
+            )])
+            .encode(),
+        )
     }
     pub(super) fn unsupported_stop(&mut self) -> Result<(), Cause> {
         // This branch precedes every engine call/admission. It never represents
@@ -88,7 +107,10 @@ impl Frame<'_> {
     fn reply_query(&mut self, value: serde_json::Value) -> Result<(), Cause> {
         let bytes =
             serde_json::to_vec(&value).map_err(|_| Cause::Refused("WORKER_CONTROL_REPLY"))?;
-        self.connection.reply_json(&bytes)?;
+        self.reply_query_bytes(&bytes)
+    }
+    fn reply_query_bytes(&mut self, bytes: &[u8]) -> Result<(), Cause> {
+        self.connection.reply_json(bytes)?;
         self.close_transport()?;
         self.completed = true;
         Ok(())

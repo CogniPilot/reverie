@@ -1,6 +1,8 @@
 //! Named read-side laptop registry/lineage facts. No authorization or write API.
 pub(crate) mod lineage;
+mod provider;
 mod registry;
+pub use provider::ProviderHealthBinding;
 #[cfg(test)]
 mod provider_tests;
 

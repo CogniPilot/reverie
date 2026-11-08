@@ -15,17 +15,25 @@ fn provider_binding_keeps_the_exact_nine_field_tuple_and_unknown_is_not_running_
     assert_eq!(bindings.len(), 1);
     assert!(bindings[0].eligible());
     let observed = bindings[0].unknown_observation(1_800_000_000_000).unwrap();
-    let observed: Json = serde_json::from_slice(&crate::worker_config::compact_data(&observed)).unwrap();
-    assert_eq!(observed, json!({"observedBinding":[row["id"],row["owner"],row["sessionId"],row["sessionGeneration"],
+    let observed: Json = serde_json::from_slice(&observed.encode()).unwrap();
+    assert_eq!(
+        observed,
+        json!({"observedBinding":[row["id"],row["owner"],row["sessionId"],row["sessionGeneration"],
         true,false,null,row["runtimeRecipe"],row["permissions"]],"employeeId":row["id"],"sessionId":row["sessionId"],
-        "sessionGeneration":3,"state":"unknown","reason":"UNCONFIRMED","observedAtEpochMs":1_800_000_000_000_u64}));
+        "sessionGeneration":3,"state":"unknown","reason":"UNCONFIRMED","observedAtEpochMs":1_800_000_000_000_u64})
+    );
     assert!(observed.get("containerId").is_none());
     assert!(observed.get("initPID").is_none());
 }
 #[test]
 fn off_vacation_and_migration_bindings_remain_ineligible_observations() {
-    for (field, value) in [("desiredRunning",json!(false)),("onVacation",json!(true)),("bindingMigration",json!({"state":"moving"}))] {
-        let mut row = employee(); row[field] = value;
+    for (field, value) in [
+        ("desiredRunning", json!(false)),
+        ("onVacation", json!(true)),
+        ("bindingMigration", json!({"state":"moving"})),
+    ] {
+        let mut row = employee();
+        row[field] = value;
         let bindings = metadata(json!([row])).provider_health_bindings().unwrap();
         assert!(!bindings[0].eligible(), "{field}");
     }
@@ -33,9 +41,24 @@ fn off_vacation_and_migration_bindings_remain_ineligible_observations() {
 #[test]
 fn duplicate_or_noncanonical_provider_bindings_refuse_before_any_process_probe() {
     let row = employee();
-    assert!(metadata(json!([row.clone(),row.clone()])).provider_health_bindings().is_err());
-    for (field, value) in [("sessionGeneration",json!(true)),("sessionGeneration",json!(0)),("sessionGeneration",json!(9_007_199_254_740_992_u64)),("sessionId",json!("foreign"))] {
-        let mut changed = row.clone();changed[field] = value;
-        assert!(metadata(json!([changed])).provider_health_bindings().is_err(),"{field}");
+    assert!(
+        metadata(json!([row.clone(), row.clone()]))
+            .provider_health_bindings()
+            .is_err()
+    );
+    for (field, value) in [
+        ("sessionGeneration", json!(true)),
+        ("sessionGeneration", json!(0)),
+        ("sessionGeneration", json!(9_007_199_254_740_992_u64)),
+        ("sessionId", json!("foreign")),
+    ] {
+        let mut changed = row.clone();
+        changed[field] = value;
+        assert!(
+            metadata(json!([changed]))
+                .provider_health_bindings()
+                .is_err(),
+            "{field}"
+        );
     }
 }
