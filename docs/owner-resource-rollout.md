@@ -114,3 +114,20 @@ incarnation and kernel limits before normal pane startup. Keep stopped/absent
 preparation separate from running-source preparation. A configured policy,
 successful isolated test or closed socket cannot substitute for any of those
 ownership joins or the final pressure/recovery acceptance.
+
+## Perf qualification boundary
+
+The explicit native image test is
+`cargo xtask verify-worker-perf --rootless-image ... --task-perf-policy task-v2`.
+Its help lists the immutable image, provenance, policy and closure inputs. It
+checks physical outer-container limits, nonroot software `task-clock:u`
+counting and inherited recording with positive samples, and a native inner
+rootless Docker workload. The inner workload is not itself profiled and does
+not establish inner cgroup delegation. Task-v1 retains its original restrictions;
+its inherited-recording refusal is not a successful capability check.
+
+This developer fixture mounts its reviewed test executable. It is not yet the
+production check for each employee incarnation. The rollout must package a fixed
+Rust checker in the offered worker image and bind its actual result to the same
+Created/start/memory workflow before pane startup. A successful fixture, selected
+policy or installed perf executable cannot replace that per-incarnation result.
