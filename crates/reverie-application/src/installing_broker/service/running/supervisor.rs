@@ -1,20 +1,24 @@
 //! Original service-thread custody; no second registry or worker thread.
 use super::*;
 impl BrokerService {
-    pub(super) fn poll_supervisor(&self) -> Result<(), BrokerServiceError> {
-        let mut retained = self
-            .supervisor
-            .try_borrow_mut()
-            .map_err(|_| BrokerServiceError::Supervisor("WORKER_SUPERVISOR_OWNER_BUSY".into()))?;
-        if let Some(owner) = retained.as_ref() {
-            return Err(BrokerServiceError::Supervisor(owner.to_string()));
+    pub(super) fn poll_supervisor(&self) {
+        let Ok(mut retained) = self.supervisor.try_borrow_mut() else {
+            // Another same-thread component owns the cell. Skip this poll;
+            // never replay its body or infer closure from the failed borrow.
+            return;
+        };
+        if retained.is_some() {
+            return;
         }
         match self.startup.owner.broker.supervise_detached() {
-            Ok(()) => Ok(()),
+            Ok(()) => (),
             Err(owner) => {
-                let diagnostic = owner.to_string();
+                let diagnostic: String = owner.to_string().chars().take(2048).collect();
                 *retained = Some(owner);
-                Err(BrokerServiceError::Supervisor(diagnostic))
+                eprintln!("Detached worker supervision retained: {diagnostic}");
+                // Keep C/status and unrelated workers responsive. The actual
+                // pending/admission/stop remain retained; shutdown separately
+                // refuses its closed-service witness.
             }
         }
     }

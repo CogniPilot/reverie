@@ -130,7 +130,7 @@ impl BrokerService {
             .reports
             .collect_worker_handlers()
             .map_err(BrokerServiceError::Handler)?;
-        self.poll_supervisor()?;
+        self.poll_supervisor();
         let Some(mut registered) = self
             .listener
             .accept(&broker.reports)
