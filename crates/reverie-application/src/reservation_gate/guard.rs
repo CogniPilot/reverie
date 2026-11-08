@@ -5,22 +5,29 @@ struct InstalledGuard {
 }
 enum JournalPurpose {
     Ordinary,
-    Ram(Weak<super::ram_authority::RamJournalAuthority>),
+    Ram {
+        authority: Weak<super::ram_authority::RamJournalAuthority>,
+        active: Weak<Active>,
+    },
     Unavailable,
 }
 pub(super) fn installed(gate: &Arc<Inner>) -> Arc<dyn ScopeGuard> {
-    let purpose = match gate.state.lock() {
-        Ok(state) => match state.active.as_ref() {
-            Some(active) => match active.ram_authority.lock() {
-                Ok(selected) => selected.as_ref().map_or(JournalPurpose::Ordinary, |own| {
-                    JournalPurpose::Ram(own.clone())
-                }),
-                Err(_) => JournalPurpose::Unavailable,
+    let purpose =
+        match gate.state.lock() {
+            Ok(state) => match state.active.as_ref() {
+                Some(active) => match active.ram_authority.lock() {
+                    Ok(selected) => selected.as_ref().map_or(JournalPurpose::Ordinary, |own| {
+                        JournalPurpose::Ram {
+                            authority: own.clone(),
+                            active: Arc::downgrade(active),
+                        }
+                    }),
+                    Err(_) => JournalPurpose::Unavailable,
+                },
+                None => JournalPurpose::Ordinary,
             },
-            None => JournalPurpose::Ordinary,
-        },
-        Err(_) => JournalPurpose::Unavailable,
-    };
+            Err(_) => JournalPurpose::Unavailable,
+        };
     Arc::new(InstalledGuard {
         gate: Arc::downgrade(gate),
         purpose,
@@ -29,6 +36,17 @@ pub(super) fn installed(gate: &Arc<Inner>) -> Arc<dyn ScopeGuard> {
 impl InstalledGuard {
     fn assert_purpose(&self, gate: &Arc<Inner>, scope: &OperationScope) -> Result<()> {
         let active = gate.held(Some(scope))?;
+        if let JournalPurpose::Ram {
+            active: original, ..
+        } = &self.purpose
+        {
+            need(
+                original
+                    .upgrade()
+                    .is_some_and(|own| Arc::ptr_eq(&own, &active)),
+                "RESOURCE_RAM_JOURNAL_PURPOSE_CHANGED",
+            )?;
+        }
         let selected = active
             .ram_authority
             .try_lock()
@@ -36,12 +54,16 @@ impl InstalledGuard {
             .clone();
         match (&self.purpose, selected) {
             (JournalPurpose::Ordinary, None) => Ok(()),
-            (JournalPurpose::Ram(original), Some(current)) if Weak::ptr_eq(original, &current) => {
-                original
-                    .upgrade()
-                    .ok_or(GateError::Refused("RESOURCE_RAM_JOURNAL_PURPOSE_CHANGED"))?
-                    .assert_current(gate, &active)
-            }
+            (
+                JournalPurpose::Ram {
+                    authority: original,
+                    ..
+                },
+                Some(current),
+            ) if Weak::ptr_eq(original, &current) => original
+                .upgrade()
+                .ok_or(GateError::Refused("RESOURCE_RAM_JOURNAL_PURPOSE_CHANGED"))?
+                .assert_current(gate, &active),
             _ => Err(GateError::Refused("RESOURCE_RAM_JOURNAL_PURPOSE_CHANGED")),
         }
     }
