@@ -51,6 +51,8 @@ enum Role {
     Service {
         action: service::Action,
         #[arg(long)]
+        start_previous: bool,
+        #[arg(long)]
         config: PathBuf,
     },
 }
@@ -84,7 +86,11 @@ fn run(arguments: Arguments) -> Result<(), Box<dyn std::error::Error>> {
         }
         Role::OriginManifest => Ok(manifest::publish()?),
         Role::ServiceUnit => Ok(manifest::publish_service_unit()?),
-        Role::Service { action, config } => service::run(action, &config),
+        Role::Service {
+            action,
+            config,
+            start_previous,
+        } => service::run(action, &config, start_previous),
         Role::Broker { config } => serve(config, false),
         Role::OfferPoolV1 { config } => serve(config, true),
     }

@@ -33,7 +33,7 @@ impl State {
     pub(super) fn folder(&self) -> PathBuf {
         self.root.join("worker-pool/service")
     }
-    fn open_directory(&mut self, path: &Path) -> Result<usize> {
+    pub(super) fn open_directory(&mut self, path: &Path) -> Result<usize> {
         private(path, true)?;
         let f = native::open_at(
             libc::AT_FDCWD,
@@ -176,6 +176,8 @@ impl State {
             &folder.join("previous-generation"),
             observed.fragment.as_os_str().as_encoded_bytes(),
         )?;
+        let source_digest = self.source_digest()?;
+        self.exclusive(&folder.join("source-sha256"), source_digest.as_bytes())?;
         self.exclusive(
             &folder.join("environment"),
             environment(&self.source)?.as_bytes(),
@@ -221,4 +223,15 @@ fn owned_unit_directory(path: &Path) -> Result<()> {
         m.is_dir() && m.uid() == nix::unistd::geteuid().as_raw() && m.mode() & 0o022 == 0,
         "NATIVE_SERVICE_UNIT_DIRECTORY_CUSTODY",
     )
+}
+
+impl State {
+    pub(super) fn source_digest(&mut self) -> Result<String> {
+        use sha2::Digest;
+        let source = self.source.clone();
+        Ok(format!(
+            "{:x}",
+            sha2::Sha256::digest(self.read_private(&source)?.as_bytes())
+        ))
+    }
 }

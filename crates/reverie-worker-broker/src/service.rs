@@ -10,8 +10,16 @@ pub(super) enum Action {
     Start,
     Stop,
     Status,
+    Rollback,
 }
-pub(super) fn run(action: Action, config: &Path) -> Result<(), Box<dyn std::error::Error>> {
+pub(super) fn run(
+    action: Action,
+    config: &Path,
+    start_previous: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    if start_previous && !matches!(action, Action::Rollback) {
+        return Err("NATIVE_SERVICE_START_PREVIOUS_ONLY_DURING_ROLLBACK".into());
+    }
     let snapshot = reverie_application::worker_validation::load_owner_config(config)?;
     let source = snapshot
         .source_path()
@@ -21,6 +29,7 @@ pub(super) fn run(action: Action, config: &Path) -> Result<(), Box<dyn std::erro
         Action::Start => WorkerServiceAction::Start,
         Action::Stop => WorkerServiceAction::Stop,
         Action::Status => WorkerServiceAction::Status,
+        Action::Rollback => WorkerServiceAction::Rollback { start_previous },
     };
     let maximum = if matches!(action, WorkerServiceAction::Stop) {
         45

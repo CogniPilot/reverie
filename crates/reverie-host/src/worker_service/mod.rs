@@ -20,6 +20,7 @@ mod run_fence;
 pub use run_fence::{NativeServiceRunAttempt, NativeServiceRunFailure, begin_service_run};
 mod manager;
 mod publication;
+mod rollback;
 pub use failure_fence::{assert_no_service_failure, record_service_failure};
 use manager::ObservedUnit;
 use publication::environment;
@@ -31,6 +32,7 @@ pub enum WorkerServiceAction {
     Start,
     Stop,
     Status,
+    Rollback { start_previous: bool },
 }
 #[derive(Debug)]
 pub enum WorkerServiceError {
@@ -237,6 +239,9 @@ impl State {
         }
         match action {
             WorkerServiceAction::Install => self.install(observed)?,
+            WorkerServiceAction::Rollback { start_previous } => {
+                self.rollback(observed, start_previous)?
+            }
             WorkerServiceAction::Start | WorkerServiceAction::Stop => {
                 if matches!(action, WorkerServiceAction::Stop) {
                     self.assert_stoppable(&observed)?;
@@ -268,6 +273,16 @@ impl State {
             WorkerServiceAction::Status => unreachable!(),
         }
         Ok("NATIVE_SERVICE_COMMAND_KNOWN; worker/resource readiness is separate".into())
+    }
+    fn close_metadata(&mut self) -> Result<()> {
+        let mut result = Ok(());
+        while let Some(file) = self.files.pop() {
+            let closed =
+                native::close(file).map_err(|e| WorkerServiceError::Io(std::io::Error::other(e)));
+            self.uncertain |= closed.is_err();
+            result = finalized(result, closed);
+        }
+        result
     }
     fn close(&mut self) -> Result<()> {
         let mut result = self
@@ -306,12 +321,7 @@ impl State {
                 .close(self.end)
                 .map_err(|error| WorkerServiceError::Engine(error.into())),
         );
-        while let Some(file) = self.files.pop() {
-            let closed =
-                native::close(file).map_err(|e| WorkerServiceError::Io(std::io::Error::other(e)));
-            self.uncertain |= closed.is_err();
-            result = finalized(result, closed);
-        }
+        result = finalized(result, self.close_metadata());
         result = finalized(
             result,
             self.client
@@ -381,5 +391,6 @@ fn pending_bytes(action: &WorkerServiceAction) -> &'static [u8] {
         WorkerServiceAction::Start => b"NATIVE_SERVICE_START_PENDING_V1\n",
         WorkerServiceAction::Stop => b"NATIVE_SERVICE_STOP_PENDING_V1\n",
         WorkerServiceAction::Status => b"NATIVE_SERVICE_READONLY_V1\n",
+        WorkerServiceAction::Rollback { .. } => b"NATIVE_SERVICE_ROLLBACK_PENDING_V1\n",
     }
 }

@@ -275,4 +275,7 @@ pub(crate) mod test_faults {
 mod tests;
 
 mod worker_service;
-pub(crate) use worker_service::retain_predecessor;
+pub(crate) use worker_service::{
+    restore_previous_service_unit, retain_native_service_environment, retain_native_service_unit,
+    retain_predecessor,
+};

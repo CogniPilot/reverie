@@ -35,6 +35,7 @@ impl ObservedUnit {
                 self.active == "inactive" && self.sub == "dead"
             }
             WorkerServiceAction::Status => true,
+            WorkerServiceAction::Rollback { .. } => self.active == "inactive" && self.sub == "dead",
         };
         need(expected, "NATIVE_SERVICE_POST_COMMAND_STATE_UNCONFIRMED")
     }
