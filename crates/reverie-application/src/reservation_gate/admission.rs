@@ -132,6 +132,7 @@ impl Inner {
             deadline: Mutex::new(end),
             policy_ack: Mutex::new(None),
             gpu_transition: Mutex::new(None),
+            image_transition: Mutex::new(None),
             ram_authority: Mutex::new(None),
         });
         #[cfg(test)]
@@ -177,6 +178,7 @@ impl Inner {
     }
     pub(super) fn reserve_entry(self: &Arc<Self>, end: Option<Instant>) -> Result<Entry> {
         self.assert_no_pool_transition()?;
+        self.assert_no_failed_image()?;
         let mut state = self
             .state
             .lock()
@@ -218,6 +220,7 @@ impl Inner {
             };
         }
         self.assert_no_pool_transition()?;
+        self.assert_no_failed_image()?;
         let token = Arc::new(());
         state.entering = Some(Entering {
             thread: std::thread::current().id(),
@@ -233,6 +236,19 @@ impl Inner {
     }
 }
 impl Admission {
+    pub(super) fn finish_image(
+        self,
+        record: &Arc<super::image_switch::ImageTransitionRecord>,
+    ) -> Result<()> {
+        if !Arc::ptr_eq(&self.active, &record.active) {
+            return finalized(
+                Err(GateError::Refused("WORKER_IMAGE_ADMISSION_CHANGED")),
+                self.abort(),
+            );
+        }
+        self.finish()?;
+        record.admission_closed()
+    }
     pub(super) fn retain_ram_journal(
         &mut self,
         claim: &RetainedPreparation,

@@ -93,6 +93,7 @@ struct Inner {
     state: Mutex<State>,
     changed: Condvar,
     failed_gpu: Mutex<Vec<Arc<gpu_access::TransitionRecord>>>,
+    failed_image: Mutex<Option<Arc<image_switch::ImageTransitionRecord>>>,
     pool_transition: Mutex<Option<Arc<pool_transition::TransitionRecord>>>,
     #[cfg(test)]
     entry_capture_pause: Mutex<Option<crate::test_process::PausePoint<ObservationContext>>>,
@@ -112,6 +113,7 @@ struct Active {
     policy_ack: Mutex<Option<Arc<preparation_policy::PolicyAckFence>>>,
     deadline: Mutex<Option<Instant>>,
     gpu_transition: Mutex<Option<Arc<gpu_access::TransitionRecord>>>,
+    image_transition: Mutex<Option<Weak<image_switch::ImageTransitionRecord>>>,
     ram_authority: Mutex<Option<Weak<ram_authority::RamJournalAuthority>>>,
 }
 impl ReservationGate {
@@ -128,7 +130,10 @@ impl ReservationGate {
             self.inner.observer.settle_owned(end).map_err(Into::into),
             finalized(
                 self.inner.assert_no_failed_gpu(),
-                self.inner.assert_no_pool_transition(),
+                finalized(
+                    self.inner.assert_no_failed_image(),
+                    self.inner.assert_no_pool_transition(),
+                ),
             ),
         )
     }
@@ -179,6 +184,7 @@ impl ReservationGate {
                 state: Mutex::new(State::default()),
                 changed: Condvar::new(),
                 failed_gpu: Mutex::new(Vec::new()),
+                failed_image: Mutex::new(None),
                 pool_transition: Mutex::new(None),
                 #[cfg(test)]
                 entry_capture_pause: Mutex::new(None),

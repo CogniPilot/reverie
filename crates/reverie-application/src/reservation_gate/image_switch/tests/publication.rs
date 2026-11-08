@@ -70,7 +70,7 @@ fn actual_image_cas_updates_same_context_and_preserves_ready_profiles_and_journa
     gate.inner
         .publish_image_record(&record, &lifecycle)
         .unwrap();
-    admission.conclude(Ok(())).unwrap();
+    admission.finish_image(&record).unwrap();
     let terminal = record.terminal(&protected).unwrap();
     record.release(&terminal).unwrap();
     assert_eq!(

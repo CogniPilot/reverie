@@ -183,6 +183,7 @@ impl Inner {
     pub(super) fn guard(&self, scope: Option<&OperationScope>) -> Result<ObservedInventory> {
         self.assert_no_pool_transition()?;
         self.assert_no_failed_gpu()?;
+        self.assert_no_failed_image()?;
         let active = self.held(scope)?;
         let inherited = *active
             .deadline
@@ -195,7 +196,7 @@ impl Inner {
             "RESERVATION_DOMAIN_CHANGED",
         )?;
         if reservation_control::pending_present(&config)? {
-            self.gpu_pending_current(&active)?;
+            self.image_or_gpu_pending_current(&active)?;
         }
         let image = self
             .source_path
@@ -214,6 +215,7 @@ impl Inner {
         drop(lock);
         let rows = context.custody(Some(end))?;
         self.gpu_rows_current(&active, &rows)?;
+        self.image_rows_current(&active, &rows)?;
         need(Instant::now() < end, "RESERVATION_OBSERVATION_DEADLINE")?;
         if let Some(image) = image {
             image.assert_current()?;

@@ -10,6 +10,7 @@ pub enum GateError {
     },
     GpuData(reverie_contracts::gpu_access::GpuDataError),
     ImageFiles(reverie_host::worker_image::ImageFileError),
+    ImageTransition(Arc<GateError>),
     GpuHost(reverie_host::gpu_access::GpuHostError),
     GpuApplyUncertain {
         cause: Box<Self>,
@@ -76,6 +77,7 @@ impl GateError {
             }
             Self::GpuData(error) => error.code(),
             Self::ImageFiles(error) => error.code(),
+            Self::ImageTransition(error) => error.code(),
             Self::GpuHost(error) => error.code(),
             Self::GpuApplyUncertain { .. } => "GPU_APPLY_REQUIRES_RECONCILIATION",
             Self::StartData(error) => error.code(),
@@ -140,6 +142,7 @@ impl std::error::Error for GateError {
             Self::NativeSourceStopUncertain { cause } => Some(cause.as_ref()),
             Self::GpuData(error) => Some(error),
             Self::ImageFiles(error) => Some(error),
+            Self::ImageTransition(error) => Some(error.as_ref()),
             Self::GpuHost(error) => Some(error),
             Self::GpuApplyUncertain { cause } => Some(cause),
             Self::StartData(error) => Some(error),

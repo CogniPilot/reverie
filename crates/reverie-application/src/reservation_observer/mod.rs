@@ -131,6 +131,12 @@ impl ObservedRow<'_> {
     }
 }
 impl ObservationContext {
+    pub(crate) fn assert_inventory_origin(&self, rows: &ObservedInventory) -> Result<()> {
+        need(
+            Arc::ptr_eq(&self.origin, &rows.origin),
+            "RESERVATION_OBSERVATION_CONTEXT",
+        )
+    }
     pub(crate) fn provider_process(
         &self,
         observer: &mut reverie_host::website_facts::WebsiteProcessObserver,
