@@ -140,6 +140,11 @@ export type EmbassyHostInviteState =
   | 'revoked'
   | 'rejected';
 
+/** A current guest of the hosted room: the invite is not revoked and its pairing is approved or claimed (connected). */
+function currentGuest(invite: z.infer<typeof Invite>): boolean {
+  return !invite.revoked && (invite.requestState === 'approved' || invite.requestState === 'claimed');
+}
+
 /** The console's honest state for one pair invite: `connected` is the embassy's `claimed`; an invite with no
  * request is open, expired or revoked. */
 export function embassyHostInviteState(invite: z.infer<typeof Invite>, now: number): EmbassyHostInviteState {
@@ -161,6 +166,15 @@ export interface EmbassyHostDeps {
   transport?: EmbassyChannelTransport;
   now?: () => number;
   localStatus?: () => Promise<{ builtin: boolean; needsAdvertisedOrigin: boolean }>;
+  /** The owner's pictures for this room's guests: listed in the status, deleted on revoke and close. */
+  guestAvatars?: {
+    urls(): Promise<Record<string, string>>;
+    revoke(requestId: string): Promise<boolean>;
+    removeAll(): Promise<number>;
+    fence(): () => void;
+    settle(): Promise<void>;
+    guestIds(): Promise<string[]>;
+  };
 }
 
 export class EmbassyHost {
@@ -278,6 +292,7 @@ export class EmbassyHost {
     bindingId?: string;
     builtin?: boolean;
     needsAdvertisedOrigin?: boolean;
+    guestAvatars?: Record<string, string>;
   }> {
     try {
       const res = await this.call('GET', '');
@@ -288,7 +303,16 @@ export class EmbassyHost {
         .update(`reverie-embassy-binding-v1\n${this.digest}\n${origin}\n${room.id}`)
         .digest('hex')
         .slice(0, 32);
-      return { status: 'ready', origin, room: { id: room.id, name: room.name }, bindingId, ...(await this.deps.localStatus?.()) };
+      // An unreadable picture map leaves the pictures out; it never makes the room look unreachable.
+      const guestAvatars = await this.deps.guestAvatars?.urls().catch(() => undefined);
+      return {
+        status: 'ready',
+        origin,
+        room: { id: room.id, name: room.name },
+        bindingId,
+        ...(await this.deps.localStatus?.()),
+        ...(guestAvatars ? { guestAvatars } : {}),
+      };
     } catch (error) {
       if (error instanceof EmbassyPairError && error.code === 'HOSTING_UNCONFIGURED') return { status: 'unconfigured' };
       return { status: 'unreachable' };
@@ -340,8 +364,7 @@ export class EmbassyHost {
   }
 
   async listInvites() {
-    const res = await this.call('GET', '/invites');
-    const { invites } = this.parsed(z.object({ invites: z.array(Invite).max(1000) }), res.body);
+    const invites = await this.invites();
     const now = this.now();
     return invites.map((invite) => ({
       inviteId: invite.id,
@@ -351,10 +374,61 @@ export class EmbassyHost {
     }));
   }
 
+  private async invites() {
+    const res = await this.call('GET', '/invites');
+    return this.parsed(z.object({ invites: z.array(Invite).max(1000) }), res.body).invites;
+  }
+
+  /** Refuses unless `requestId` is a current guest of the hosted room: its invite is not revoked and the pairing
+   * request is approved or claimed (connected). A pending, rejected, expired or unknown request is not a guest. */
+  async requireGuest(requestId: string): Promise<void> {
+    const guest =
+      UUID.test(requestId) &&
+      (await this.invites()).some((invite) => invite.requestId === requestId && currentGuest(invite));
+    if (!guest) throw new EmbassyPairError(404, 'NOT_FOUND', 'Not an approved guest of this room');
+  }
+
+  /** Revoking an invite revokes its guest too: the guest's picture is deleted, and an upload for that guest that
+   * is still checking with the embassy cannot write one afterwards. */
   async revokeInvite(inviteId: string): Promise<{ revoked: true }> {
     if (!ID.test(inviteId)) throw new EmbassyPairError(404, 'NOT_FOUND', 'Invite not found');
-    await this.call('DELETE', `/invites/${inviteId}`);
+    const avatars = this.deps.guestAvatars;
+    const guestOf = () =>
+      this.invites()
+        .then((all) => all.find((invite) => invite.id === inviteId)?.requestId ?? null)
+        .catch(() => null);
+    let requestId = avatars ? await guestOf() : null;
+    // Guest unknown: no picture is written by any upload until this revoke is done, rather than miss this guest's.
+    const close = avatars && !requestId ? avatars.fence() : undefined;
+    try {
+      await this.call('DELETE', `/invites/${inviteId}`);
+      if (avatars && !requestId) requestId = await guestOf();
+      if (requestId) await avatars?.revoke(requestId);
+      else if (avatars) await this.reconcileGuestAvatars(avatars);
+    } finally {
+      close?.();
+    }
     return { revoked: true };
+  }
+
+  /** After a revoke whose guest could not be named: join any upload already writing, then delete the picture of
+   * every guest that is no longer current. If the embassy cannot be asked, the invite is revoked but the cleanup is
+   * reported as unresolved; revoking again finishes it. */
+  private async reconcileGuestAvatars(avatars: NonNullable<EmbassyHostDeps['guestAvatars']>): Promise<void> {
+    await avatars.settle();
+    let current: Set<string>;
+    try {
+      current = new Set(
+        (await this.invites()).flatMap((invite) => (invite.requestId && currentGuest(invite) ? [invite.requestId] : []))
+      );
+    } catch {
+      throw new EmbassyPairError(
+        503,
+        'GUEST_PICTURES_UNRESOLVED',
+        "The invite was revoked, but its guest's picture could not be checked; revoke it again to finish"
+      );
+    }
+    for (const id of await avatars.guestIds()) if (!current.has(id)) await avatars.revoke(id);
   }
 
   /** A scanned request QR must name this host's own origin; a typed code needs no origin. */
@@ -406,9 +480,12 @@ export class EmbassyHost {
     return this.parsed(z.object({ room: z.object({ id: z.string(), name: label }) }), res.body);
   }
 
-  /** Close the hosted room: every invite and guest pairing is revoked and the room posts that it closed. */
+  /** Close the hosted room: every invite and guest pairing is revoked and the room posts that it closed. Every
+   * guest picture is deleted. */
   async close() {
     const res = await this.call('POST', '/close', {});
-    return this.parsed(z.object({ closed: z.literal(true), revoked: z.number().int().min(0) }), res.body);
+    const closed = this.parsed(z.object({ closed: z.literal(true), revoked: z.number().int().min(0) }), res.body);
+    await this.deps.guestAvatars?.removeAll();
+    return closed;
   }
 }
