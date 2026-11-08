@@ -2,6 +2,8 @@ use super::*;
 use reverie_core::ids::ProfileSessionId;
 #[path = "tests_preparation_start.rs"]
 mod native_start_cases;
+#[path = "tests_ram_migration.rs"]
+mod ram_migration_cases;
 fn preparing() -> (
     Setup,
     Arc<Fixture>,
@@ -9,7 +11,18 @@ fn preparing() -> (
     RetainedPreparation,
     PathBuf,
 ) {
-    let setup = Setup::new();
+    preparing_using(Setup::new(), Fixture::new())
+}
+fn preparing_using(
+    setup: Setup,
+    fixture: Arc<Fixture>,
+) -> (
+    Setup,
+    Arc<Fixture>,
+    ReservationGate,
+    RetainedPreparation,
+    PathBuf,
+) {
     record_source_binding(&setup);
     let directory = setup.tree.root.join("actor-policy");
     fs::create_dir(&directory).unwrap();
@@ -18,7 +31,6 @@ fn preparing() -> (
         .tree
         .write("actor-policy/worker.json", &setup.tree.raw);
     let path = directory.join("worker.json");
-    let fixture = Fixture::new();
     fixture.storage_facts(setup.stats);
     fill(&fixture, &setup);
     retain_tail(&fixture, &setup);

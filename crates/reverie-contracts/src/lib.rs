@@ -31,6 +31,7 @@ pub mod operations_v1;
 pub mod ops_command;
 pub mod profiles_v1;
 mod python_number;
+pub mod ram_migration;
 pub mod reservation_baseline;
 pub mod reservation_control;
 pub mod reservation_draft;
