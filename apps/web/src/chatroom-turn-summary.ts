@@ -3,6 +3,9 @@ import { displayTime, displayTimeZone } from './display-time.js';
 import type { AlertMode } from './employee-alert-mode.js';
 import type { NoticeAttention } from './chatroom-notice-state.js';
 
+/** The whole hook payload a member's turn summary may use: the server, the CLI and the generated hook all enforce it. */
+export const TURN_SUMMARY_MAX_CHARS = 3000;
+
 export interface TurnSummaryMessage {
   roomId: string;
   room: string;
@@ -17,6 +20,16 @@ export interface TurnSummaryMessage {
   sourceDigest?: string;
   attention?: NoticeAttention;
   transport?: 'unread' | 'queued' | 'delivery-unconfirmed' | 'unknown';
+  /** Reverie's own reply instruction for this message (replyHintFor), outside the quoted excerpt. */
+  replyHint?: string;
+  /** The message this one answers, as its typed line said; the member reads it with chat read. */
+  replyTo?: string;
+  /** A poll's question, numbered options and vote command, whole (pollSummary), as its typed line carried them. */
+  poll?: string;
+  /** The message's attachments as paths the member can open (attachmentLabels), as its typed line carried them. */
+  attachments?: string[];
+  /** Set instead of poll and attachments when they do not fit the payload: the command that reads this exact stored message. */
+  detail?: string;
 }
 export interface TurnSummary {
   phoneMode: AlertMode;
@@ -27,6 +40,13 @@ export interface TurnSummary {
   messages: TurnSummaryMessage[];
   text: string;
   historyCoverage?: NoticeHistoryCoverage;
+  /** Pending room briefings carried by the member's own hook payload (hookTurnSummary), ahead of the messages. */
+  briefings?: Array<{ roomId: string; room: string; text: string; truncated: boolean }>;
+  /**
+   * Pending Reverie notices carried by the member's own hook payload (hookTurnSummary), after any briefing: whole, or the next part
+   * of the oldest long one (`more`: the rest follows in a later payload; `continued`: earlier parts came before).
+   */
+  notices?: Array<{ roomId: string; room: string; text: string; continued?: boolean; more?: boolean }>;
   /** Only the explicit history inspection endpoint; all eligible examined sources remain inspectable. */
   sourceReferences?: Array<{ roomId: string; messageId: string; at: number; sourceDigest: string }>;
 }
@@ -58,7 +78,8 @@ export function renderTurnSummary(
   candidates: TurnSummaryCandidate[],
   historyCoverage?: NoticeHistoryCoverage,
   timeZone?: string,
-  now = Date.now()
+  now = Date.now(),
+  maxChars = TURN_SUMMARY_MAX_CHARS
 ): TurnSummary {
   const zone = timeZone === undefined ? undefined : displayTimeZone(timeZone);
   const clock = zone ? `Display timezone: ${zone}. Use this timezone and include its abbreviation for human-facing chat/deadline/reset times; retain explicit offsets for machine timestamps.\n` : '';
@@ -97,11 +118,20 @@ export function renderTurnSummary(
         messages.map((m) => JSON.stringify(m)).join('\n') +
         (omitted ? `\n${omitted} more not shown (agent chat pending lists them).` : '');
       text = clock + warning + header(byKind) + body;
-      if (text.length <= 3000) break;
+      if (text.length <= maxChars) break;
       text = clock + warning + header('') + body;
-      if (text.length <= 3000) break;
+      if (text.length <= maxChars) break;
+      // Never a substring of an entry: the last one first gives up its poll and attachments for the exact stored-message read, then goes.
+      const last = messages[messages.length - 1];
+      if (last.poll !== undefined || last.attachments !== undefined) {
+        const { poll: _poll, attachments: _attachments, ...rest } = last;
+        messages[messages.length - 1] = { ...rest, detail: `reverie agent chat read -r ${last.roomId} --message ${last.messageId}` };
+        continue;
+      }
       messages.pop();
     }
+    // Every entry gave way: the count alone, never the last attempt's oversized text.
+    if (!messages.length) text = clock + warning + header('') + `${candidates.length} not shown (agent chat pending lists them).`;
   }
   return {
     phoneMode,

@@ -1,0 +1,333 @@
+{
+  "source": "python/reverie/cleanup/lease.py",
+  "sourceSha256": "606cacea83ebb70bb805423e67be44168fec411d3e5c62c5e563c416ab6891aa",
+  "scope": "One disposable oracle run of the frozen lease.py: _reservation_value_state over json.loads(text) (ValueError -> malformed), _parse_duration, and json.dumps record bytes. No generator is added to the tree.",
+  "now": 1794024826.576123,
+  "pathCodepoints": [
+    47,
+    115,
+    99,
+    114,
+    97,
+    116,
+    99,
+    104,
+    47,
+    116,
+    109,
+    112,
+    47,
+    233,
+    32,
+    252,
+    34,
+    92,
+    56575
+  ],
+  "reservationStates": [
+    {
+      "text": "{\"version\": 1, \"path\": \"/w\", \"created_utc\": 1794024826.576123, \"until_utc\": 1794028426.576123, \"owner\": \"a\"}",
+      "python": "inUse",
+      "native": "inUse"
+    },
+    {
+      "text": "{\"version\": 1, \"created_utc\": 1794017626.576123, \"until_utc\": 1794021226.576123}",
+      "python": "free",
+      "native": "free"
+    },
+    {
+      "text": "{\"version\": 1, \"created_utc\": 1794024826.576123, \"until_utc\": 1794111226.576123}",
+      "python": "inUse",
+      "native": "inUse"
+    },
+    {
+      "text": "{\"version\": 1, \"created_utc\": 1794024826.576123, \"until_utc\": 1794111226.577123}",
+      "python": "unknown",
+      "native": "unknown"
+    },
+    {
+      "text": "{\"version\": 1, \"created_utc\": 1794024826.576123, \"until_utc\": 1794024826.576123}",
+      "python": "unknown",
+      "native": "unknown"
+    },
+    {
+      "text": "{\"version\": 1, \"created_utc\": 1794024887.576123, \"until_utc\": 1794024926.576123}",
+      "python": "unknown",
+      "native": "unknown"
+    },
+    {
+      "text": "{\"version\": 1, \"created_utc\": 1794024885.576123, \"until_utc\": 1794024926.576123}",
+      "python": "inUse",
+      "native": "inUse"
+    },
+    {
+      "text": "{\"version\": 1, \"created_utc\": 1794024826, \"until_utc\": 1794028426}",
+      "python": "inUse",
+      "native": "inUse"
+    },
+    {
+      "text": "{\"version\": 1, \"created_utc\": 1794020000, \"until_utc\": 1794024826}",
+      "python": "free",
+      "native": "free"
+    },
+    {
+      "text": "{\"version\": 1, \"created_utc\": 1794020000, \"until_utc\": 1794024827}",
+      "python": "inUse",
+      "native": "inUse"
+    },
+    {
+      "text": "{\"version\": 1.0, \"created_utc\": 1794024826, \"until_utc\": 1794028426}",
+      "python": "inUse",
+      "native": "inUse"
+    },
+    {
+      "text": "{\"version\": true, \"created_utc\": 1794024826, \"until_utc\": 1794028426}",
+      "python": "inUse",
+      "native": "inUse"
+    },
+    {
+      "text": "{\"version\": 2, \"created_utc\": 1794024826, \"until_utc\": 1794028426}",
+      "python": "unknown",
+      "native": "unknown"
+    },
+    {
+      "text": "{\"version\": \"1\", \"created_utc\": 1794024826, \"until_utc\": 1794028426}",
+      "python": "unknown",
+      "native": "unknown"
+    },
+    {
+      "text": "{\"created_utc\": 1794024826, \"until_utc\": 1794028426}",
+      "python": "unknown",
+      "native": "unknown"
+    },
+    {
+      "text": "{\"version\": 1, \"created_utc\": true, \"until_utc\": 1794028426}",
+      "python": "unknown",
+      "native": "unknown"
+    },
+    {
+      "text": "{\"version\": 1, \"created_utc\": \"1794024826\", \"until_utc\": 1794028426}",
+      "python": "unknown",
+      "native": "unknown"
+    },
+    {
+      "text": "{\"version\": 1, \"until_utc\": 1794028426}",
+      "python": "unknown",
+      "native": "unknown"
+    },
+    {
+      "text": "{\"version\": 1, \"created_utc\": NaN, \"until_utc\": 1794028426}",
+      "python": "unknown",
+      "native": "unknown"
+    },
+    {
+      "text": "{\"version\": 1, \"created_utc\": -Infinity, \"until_utc\": Infinity}",
+      "python": "unknown",
+      "native": "unknown"
+    },
+    {
+      "text": "{\"version\": 1, \"created_utc\": 1794024826, \"until_utc\": 1794028426, \"malformed\": 0}",
+      "python": "inUse",
+      "native": "inUse"
+    },
+    {
+      "text": "{\"version\": 1, \"created_utc\": 1794024826, \"until_utc\": 1794028426, \"malformed\": \"x\"}",
+      "python": "unknown",
+      "native": "unknown"
+    },
+    {
+      "text": "{\"version\": 1, \"created_utc\": 1794024826, \"until_utc\": 1794028426, \"created_utc\": 1794024000}",
+      "python": "inUse",
+      "native": "inUse"
+    },
+    {
+      "text": "{\"version\": 1, \"created_utc\": 1794024826, \"until_utc\": 1e400}",
+      "python": "unknown",
+      "native": "unknown"
+    },
+    {
+      "text": "{\"version\": 1, \"created_utc\": -100000000000000000000000000000000000000000, \"until_utc\": -99999999999999999999999999999999999999999}",
+      "python": "free",
+      "native": "unknown"
+    },
+    {
+      "text": "[1794024826, 1794028426]",
+      "python": "unknown",
+      "native": "unknown"
+    },
+    {
+      "text": "\"x\"",
+      "python": "unknown",
+      "native": "unknown"
+    },
+    {
+      "text": "7",
+      "python": "unknown",
+      "native": "unknown"
+    },
+    {
+      "text": "null",
+      "python": "free",
+      "native": "unknown"
+    },
+    {
+      "text": "",
+      "python": "unknown",
+      "native": "unknown"
+    },
+    {
+      "text": "{",
+      "python": "unknown",
+      "native": "unknown"
+    },
+    {
+      "text": "{\"version\": 1, \"created_utc\": 1, \"until_utc\": 2",
+      "python": "unknown",
+      "native": "unknown"
+    },
+    {
+      "text": "\ufeff{\"version\": 1, \"created_utc\": 1794024826, \"until_utc\": 1794028426}",
+      "python": "unknown",
+      "native": "unknown"
+    }
+  ],
+  "durations": [
+    {
+      "text": "1s",
+      "seconds": 1,
+      "native": 1
+    },
+    {
+      "text": "90m",
+      "seconds": 5400,
+      "native": 5400
+    },
+    {
+      "text": "6h",
+      "seconds": 21600,
+      "native": 21600
+    },
+    {
+      "text": "1d",
+      "seconds": 86400,
+      "native": 86400
+    },
+    {
+      "text": "24h",
+      "seconds": 86400,
+      "native": 86400
+    },
+    {
+      "text": "86400s",
+      "seconds": 86400,
+      "native": 86400
+    },
+    {
+      "text": "86401s",
+      "seconds": null,
+      "native": null
+    },
+    {
+      "text": "1440m",
+      "seconds": 86400,
+      "native": 86400
+    },
+    {
+      "text": "1441m",
+      "seconds": null,
+      "native": null
+    },
+    {
+      "text": "0s",
+      "seconds": null,
+      "native": null
+    },
+    {
+      "text": "0h",
+      "seconds": null,
+      "native": null
+    },
+    {
+      "text": "00001h",
+      "seconds": 3600,
+      "native": 3600
+    },
+    {
+      "text": "2d",
+      "seconds": null,
+      "native": null
+    },
+    {
+      "text": "h",
+      "seconds": null,
+      "native": null
+    },
+    {
+      "text": "1",
+      "seconds": null,
+      "native": null
+    },
+    {
+      "text": "1H",
+      "seconds": null,
+      "native": null
+    },
+    {
+      "text": "1.5h",
+      "seconds": null,
+      "native": null
+    },
+    {
+      "text": " 1h",
+      "seconds": null,
+      "native": null
+    },
+    {
+      "text": "1h ",
+      "seconds": null,
+      "native": null
+    },
+    {
+      "text": "-1h",
+      "seconds": null,
+      "native": null
+    },
+    {
+      "text": "+1h",
+      "seconds": null,
+      "native": null
+    },
+    {
+      "text": "99999999999999999999999h",
+      "seconds": null,
+      "native": null
+    },
+    {
+      "text": "\u0663h",
+      "seconds": 10800,
+      "native": null
+    },
+    {
+      "text": "1w",
+      "seconds": null,
+      "native": null
+    },
+    {
+      "text": "",
+      "seconds": null,
+      "native": null
+    }
+  ],
+  "records": {
+    "pathRecord": "{\"version\": 1, \"path\": \"/scratch/tmp/\\u00e9 \\u00fc\\\"\\\\\\udcff\", \"first_seen_utc\": 1794024826.576123}\n",
+    "reservation": "{\"version\": 1, \"path\": \"/scratch/tmp/\\u00e9 \\u00fc\\\"\\\\\\udcff\", \"created_utc\": 1794024826.576123, \"until_utc\": 1794111226.576123, \"owner\": \"agent\"}\n",
+    "reservationCompute": "{\"version\": 1, \"path\": \"/scratch/tmp/\\u00e9 \\u00fc\\\"\\\\\\udcff\", \"created_utc\": 1794024826.576123, \"until_utc\": 1794030226.576123, \"owner\": \"\", \"compute_lease_id\": \"c-1\"}\n",
+    "holder": "{\"version\": 1, \"path\": \"/scratch/tmp/\\u00e9 \\u00fc\\\"\\\\\\udcff\", \"pid\": 4242, \"start\": 123456789, \"argv0\": \"fixed-public-gpu-job\", \"utc\": 1794024826.576123, \"session\": 4200}\n",
+    "holderNoStart": "{\"version\": 1, \"path\": \"/scratch/tmp/\\u00e9 \\u00fc\\\"\\\\\\udcff\", \"pid\": 1, \"start\": null, \"argv0\": \"\", \"utc\": 1.0, \"session\": 1}\n"
+  },
+  "intentionalDifferences": [
+    "A reservation file whose entire value is null: Python FREE, native UNKNOWN (fail closed).",
+    "Integers outside i128 in a reservation window: Python exact arithmetic (FREE for an absurd far-past window), native UNKNOWN.",
+    "Durations accept ASCII digits only: Python \\d also accepts other Unicode decimal digits."
+  ]
+}

@@ -1,10 +1,12 @@
 //! USER observation custody (`cleanup/collector_user.py`), the bounded
-//! history reader (`cleanup/collector_history.py`) over owned files, and the
-//! collector state initializer (`cleanup/collector_state.py`). Projections
-//! and output text are data in `reverie_contracts`.
+//! history reader (`cleanup/collector_history.py`) over owned files, the
+//! collector state initializer (`cleanup/collector_state.py`) and the prune
+//! receipts adapter (`cleanup/receipts.py`, in `receipts`). Projections and
+//! output text are data in `reverie_contracts`.
 pub mod collector;
 pub mod collector_state;
 mod custody;
+pub mod receipts;
 mod source;
 pub mod user;
 
