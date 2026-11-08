@@ -134,9 +134,7 @@ impl Held {
     /// existing entry of any kind (a file, a hardlink, a symlink, even a dangling one) refuses, so
     /// nothing already there is followed, truncated or overwritten.
     fn create(&self, name: &str) -> Result<(File, (u64, u64)), String> {
-        if name.is_empty() || name.contains('/') || name == "." || name == ".." {
-            return Err(format!("{name}: not a plain file name"));
-        }
+        plain(name)?;
         let flags =
             OFlag::O_WRONLY | OFlag::O_CREAT | OFlag::O_EXCL | OFlag::O_NOFOLLOW | OFlag::O_CLOEXEC;
         let fd = openat(&self.fd, name, flags, Mode::from_bits_truncate(0o600))
@@ -190,6 +188,65 @@ impl Held {
         }
         Err(last)
     }
+
+    /// Whether `name` (a plain name) is in this directory as an entry of any kind, a symlink
+    /// included; nothing is followed.
+    pub fn has(&self, name: &str) -> Result<bool, String> {
+        plain(name)?;
+        match fstatat(&self.fd, name, AtFlags::AT_SYMLINK_NOFOLLOW) {
+            Ok(_) => Ok(true),
+            Err(Errno::ENOENT) => Ok(false),
+            Err(e) => Err(format!("{}/{name}: {e}", self.path.display())),
+        }
+    }
+
+    /// Creates the directory `name` in this one with `mkdirat` (mode 0700), which never follows
+    /// or reuses an existing entry, and holds it: opened no-follow through this descriptor and
+    /// refused unless it is still an empty directory. The new entry is synced with this directory.
+    pub fn create_dir_new(&self, name: &str) -> Result<Held, String> {
+        plain(name)?;
+        let path = self.path.join(name);
+        let shown = path.display();
+        mkdirat(&self.fd, name, Mode::from_bits_truncate(0o700))
+            .map_err(|e| format!("{shown}: {e}"))?;
+        let fd = openat(&self.fd, name, DIRECTORY, Mode::empty())
+            .map_err(|e| format!("{shown}: {e}"))?;
+        if !is_empty(&fd).map_err(|e| format!("{shown}: {e}"))? {
+            return Err(format!("{shown}: not the empty directory just created"));
+        }
+        fsync(&self.fd).map_err(|e| format!("{}: {e}", self.path.display()))?;
+        Ok(Held { fd, path })
+    }
+
+    /// Whether this and `other` are the same directory (device and inode).
+    pub fn same_dir(&self, other: &Held) -> Result<bool, String> {
+        let identity = |held: &Held| {
+            fstat(&held.fd)
+                .map(|s| (s.st_dev, s.st_ino))
+                .map_err(|e| format!("{}: {e}", held.path.display()))
+        };
+        Ok(identity(self)? == identity(other)?)
+    }
+}
+
+/// Refuses anything but one plain directory entry name.
+fn plain(name: &str) -> Result<(), String> {
+    if name.is_empty() || name.contains('/') || name == "." || name == ".." {
+        return Err(format!("{name}: not a plain file name"));
+    }
+    Ok(())
+}
+
+/// Whether the directory `fd` has no entries, read through its own descriptor.
+fn is_empty(fd: &OwnedFd) -> nix::Result<bool> {
+    let mut dir = Dir::from_fd(openat(fd, ".", DIRECTORY, Mode::empty())?)?;
+    for entry in dir.iter() {
+        let name = entry?.file_name().to_bytes().to_vec();
+        if name != b"." && name != b".." {
+            return Ok(false);
+        }
+    }
+    Ok(true)
 }
 
 /// A file this process created in a held directory. Dropping it removes it, but only while the
@@ -314,6 +371,39 @@ mod tests {
         }
         assert!(Held::open(&root.join("real/../real/packet")).is_err());
         assert!(Held::open(&root.join("real/packet")).is_ok());
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_new_directory_is_made_and_held_only_where_nothing_is() {
+        let root = scratch("create-dir-new");
+        let parent = Held::open(&root).unwrap();
+        fs::create_dir(root.join("outside")).unwrap();
+        fs::create_dir(root.join("dir")).unwrap();
+        fs::write(root.join("file"), "kept\n").unwrap();
+        symlink(root.join("outside"), root.join("link")).unwrap();
+        symlink(root.join("missing"), root.join("dangling")).unwrap();
+        for name in ["dir", "file", "link", "dangling"] {
+            assert!(parent.has(name).unwrap(), "{name}");
+            let error = parent.create_dir_new(name).unwrap_err();
+            assert!(error.ends_with(Errno::EEXIST.desc()), "{name}: {error}");
+        }
+        assert_eq!(fs::read(root.join("file")).unwrap(), b"kept\n");
+        assert!(fs::read_dir(root.join("outside")).unwrap().next().is_none());
+        assert!(!root.join("missing").exists());
+        for name in ["", ".", "..", "a/b"] {
+            assert!(parent.create_dir_new(name).is_err(), "{name:?}");
+        }
+        assert!(!parent.has("new").unwrap());
+        let new = parent.create_dir_new("new").unwrap();
+        assert!(root.join("new").is_dir());
+        new.write_new("x", b"x\n").unwrap();
+        assert_eq!(fs::read(root.join("new/x")).unwrap(), b"x\n");
+        assert!(
+            new.same_dir(&Held::open(&root.join("new")).unwrap())
+                .unwrap()
+        );
+        assert!(!new.same_dir(&parent).unwrap());
         let _ = fs::remove_dir_all(&root);
     }
 

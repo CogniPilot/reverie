@@ -1,15 +1,19 @@
 //! `reverie-publish`: reviewed publication from sealed packets. `check` runs every shared check
-//! and writes only into the local object store it is given (the imported objects and refs,
-//! through a private bundle copy it removes); `new-pr` pushes a reviewed head to a new branch and
-//! opens a draft PR; `push-ff` fast-forwards an existing PR's head branch to a reviewed head.
-//! `pr-text`, `issue-create` and `issue-close` publish text only (a PR's title, body and labels,
-//! an issue, a closing comment), each from a sealed packet and a text approval record.
+//! against a packet and an object store, and writes only the imported objects into that local store
+//! (through a private bundle copy it removes; refs stay in a private git directory). `new-pr`
+//! pushes a reviewed head to a new branch and opens a draft PR; `push-ff` fast-forwards an existing
+//! PR's head branch to a reviewed head. `pr-text`, `issue-create` and `issue-close` publish text
+//! only (a PR's title, body and labels, an issue, a closing comment), each from a sealed packet and
+//! a text approval record. `mint-merge-main` makes and checks the merge of main into a PR head in a
+//! local store and writes a new sealed packet for review.
 use clap::{Parser, Subcommand};
 use reverie_namegate::Lists;
 use reverie_publish::{
     askpass,
+    custody::Held,
     git::Git,
     github::{API, Curl, Repo},
+    mint,
     packet::Packet,
     pull::Target,
     record::Records,
@@ -54,6 +58,39 @@ enum Action {
     /// approval record pass. The PR must be open with its head at --old, in the base repository
     /// or in a fork that allows maintainer pushes. A sealed title and body are set and read back.
     PushFf(PushFf),
+    /// Merge main into a PR head in the local object store: PR head first, main second, one
+    /// identity with its sign-off, the tree `git merge-tree` computes, and a delta over the head
+    /// that is exactly main's own change. Writes a new sealed packet (bundle, commit, deltas,
+    /// remerge diff, summary) for review. Nothing is pushed or sent.
+    MintMergeMain(MintMergeMain),
+}
+
+#[derive(clap::Args)]
+struct MintMergeMain {
+    /// The bare object store holding both commits; its path must not pass through a symlink.
+    #[arg(long)]
+    git_dir: PathBuf,
+    /// The target repository, OWNER/NAME.
+    #[arg(long)]
+    repo: String,
+    /// The PR's head (full id): the merge's first parent.
+    #[arg(long)]
+    head: String,
+    /// Current main (full id): the merge's second parent.
+    #[arg(long)]
+    main: String,
+    /// The PR's branch, named in the merge subject "Merge main into BRANCH".
+    #[arg(long)]
+    branch: String,
+    /// The private namegate list file and its pinned sha256.
+    #[arg(long)]
+    lists: PathBuf,
+    #[arg(long)]
+    lists_sha256: String,
+    /// The packet directory to create; it must not exist yet, and its parent must not be
+    /// reached through a symlink.
+    #[arg(long)]
+    out: PathBuf,
 }
 
 /// What every text write takes.
@@ -237,6 +274,7 @@ fn main() -> ExitCode {
         Action::IssueCreate(options) => issue_create(&options),
         Action::IssueClose(options) => issue_close(&options),
         Action::PushFf(options) => push_ff(&options),
+        Action::MintMergeMain(options) => mint_merge_main(&options),
     };
     match result {
         Ok(summary) => {
@@ -414,6 +452,102 @@ fn new_pr(o: &NewPr) -> Result<Value, String> {
     summary["pushed"] = json!(true);
     summary["pr"] = pr["number"].clone();
     summary["url"] = pr["html_url"].clone();
+    Ok(summary)
+}
+
+fn mint_merge_main(o: &MintMergeMain) -> Result<serde_json::Value, String> {
+    let name = short_name(&o.repo)?;
+    let lists =
+        Lists::load(&o.lists, &o.lists_sha256).map_err(|e| format!("namegate lists: {e:?}"))?;
+    let git = Git::open(&o.git_dir)?;
+    // Hold the parent before anything is minted, so a bad --out refuses first, and keep it: the
+    // packet directory is made and written through this descriptor, never by path again.
+    let parent_path = o
+        .out
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or(std::path::Path::new("."));
+    let leaf = o
+        .out
+        .file_name()
+        .and_then(|n| n.to_str())
+        .ok_or_else(|| format!("{}: --out must end in a plain name", o.out.display()))?;
+    let parent = Held::open(parent_path)?;
+    if parent.has(leaf)? {
+        return Err(format!(
+            "{} exists: a sealed packet is never rewritten",
+            o.out.display()
+        ));
+    }
+    let minted = mint::mint(
+        &git,
+        &lists,
+        name,
+        &o.head,
+        &o.main,
+        &format!("Merge main into {}", o.branch),
+    )?;
+    // If the parent's path now names another directory, refuse before making anything anywhere.
+    if !Held::open(parent_path).is_ok_and(|now| parent.same_dir(&now).unwrap_or(false)) {
+        return Err(format!(
+            "{} no longer names the directory held for --out; nothing was written",
+            parent_path.display()
+        ));
+    }
+    let out = parent.create_dir_new(leaf)?;
+    let bundle = git.bytes([
+        "bundle",
+        "create",
+        "-q",
+        "-",
+        &format!("refs/publish/mint/{}", minted.commit),
+        &format!("^{}", minted.main),
+    ])?;
+    let summary = serde_json::json!({
+        "minted": true,
+        "repo": o.repo,
+        "commit": minted.commit,
+        "tree": minted.tree,
+        "parents": [minted.head, minted.main],
+        "mergeBase": minted.base,
+        "deltaEqualsMain": true,
+        "changeLines": mint::change_lines(&minted.delta).len(),
+    });
+    let raw = git.bytes(["cat-file", "commit", &minted.commit])?;
+    let remerge = git.bytes([
+        "show",
+        "--no-ext-diff",
+        "--no-textconv",
+        "--remerge-diff",
+        "--format=fuller",
+        &minted.commit,
+    ])?;
+    let pretty = serde_json::to_string_pretty(&summary).map_err(|e| e.to_string())? + "\n";
+    let files: [(&str, &[u8]); 6] = [
+        ("source.bundle", &bundle),
+        ("MERGE-COMMIT.txt", &raw),
+        ("DELTA-U0.diff", minted.delta.as_bytes()),
+        ("MAIN-DELTA-U0.diff", minted.main_delta.as_bytes()),
+        ("REMERGE.diff", &remerge),
+        ("SUMMARY.json", pretty.as_bytes()),
+    ];
+    let mut sums = String::new();
+    for (file, bytes) in files {
+        out.write_new(file, bytes)?;
+        sums.push_str(&format!("{}  {file}\n", sha256_hex(bytes)));
+    }
+    out.write_new("SHA256SUMS", sums.as_bytes())?;
+    // A swap after the directory was made leaves the packet in the held parent, and whatever now
+    // sits at --out untouched; report that rather than a packet at a path that is not it.
+    if !Held::open(&o.out).is_ok_and(|now| out.same_dir(&now).unwrap_or(false)) {
+        return Err(format!(
+            "{} no longer names the packet just written in the held directory; inspect both",
+            o.out.display()
+        ));
+    }
+    let mut summary = summary;
+    summary["packet"] = serde_json::json!(o.out);
+    summary["seal"] = serde_json::json!(&sha256_hex(sums.as_bytes())[..8]);
     Ok(summary)
 }
 
