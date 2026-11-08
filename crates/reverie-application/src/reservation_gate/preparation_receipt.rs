@@ -105,6 +105,20 @@ impl CommittedPolicy {
         let gate = broker
             .resource_reservations()?
             .ok_or(GateError::Refused("RAM_PUBLICATION_OWNER_CHANGED"))?;
+        {
+            let state = gate
+                .inner
+                .state
+                .lock()
+                .map_err(|_| GateError::Refused("RESERVATION_ADMISSION_UNAVAILABLE"))?;
+            need(
+                state.active.as_ref().is_none_or(|active| {
+                    active.thread != std::thread::current().id()
+                        || active.process != std::process::id()
+                }),
+                "RAM_PUBLICATION_REBASE_REQUIRES_CLOSED_ADMISSION",
+            )?;
+        }
         need(
             Arc::ptr_eq(&gate.inner, &claim.gate)
                 && self.operation_id() == claim.operation_id()
