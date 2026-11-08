@@ -8,6 +8,8 @@ use reverie_contracts::{
 use reverie_host::reservation_control::PolicyBinding;
 use std::sync::atomic::{AtomicBool, Ordering};
 pub(super) struct PolicyPhase {
+    pub(super) before: Arc<ValidatedWorkerSnapshot>,
+    pub(super) installed_snapshot: Option<Arc<ValidatedWorkerSnapshot>>,
     pub(super) candidate: Arc<ValidatedWorkerSnapshot>,
     pub(super) binding: PolicyBinding,
     pub(super) published: bool,
