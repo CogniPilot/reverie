@@ -74,6 +74,7 @@ impl PoolError {
     pub(crate) fn close_unknown(&self) -> bool {
         match self {
             Self::MetadataClose(_) => true,
+            Self::Observation(error) => error.has_unconfirmed_close(),
             Self::Finalization(primary, secondary) => {
                 primary.close_unknown() || secondary.close_unknown()
             }
