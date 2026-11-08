@@ -454,7 +454,7 @@ curl -sk https://localhost:3000/api/subagents | jq # Background agents
 cat ~/.reverie/state.json | jq                     # Persisted state
 ```
 
-Legacy screenshots (deprecated): `GET/POST /api/screenshots` still read and write `~/.reverie/screenshots/`, but the upload page that fed them is gone, they log a one-time deprecation warning, and they are removed in a later MAJOR, after at least one MINOR release that carries the warning (`docs/versioning-policy.md`). To hand a file to an agent use `POST /api/sessions/:id/paste-image` (see Prompt uploads).
+Legacy screenshots (deprecated): the upload and list routes are gone; only `GET /api/screenshots/:name` still serves files already in `~/.reverie/screenshots/`, with a one-time deprecation warning. To hand a file to an agent use `POST /api/sessions/:id/paste-image` (see Prompt uploads).
 
 ## Performance & Limits
 
