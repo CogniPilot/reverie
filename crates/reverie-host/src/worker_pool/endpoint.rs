@@ -3,6 +3,7 @@
 use super::*;
 use crate::native::{self, socket_entry::SocketEntry};
 use std::{
+    cell::Cell,
     fs::{self, File},
     os::{
         fd::{AsRawFd, OwnedFd},
@@ -28,6 +29,12 @@ enum Stage {
     Closing,
     Closed,
 }
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum PeerSettlement {
+    Unissued,
+    Held,
+    Closed,
+}
 
 #[must_use = "retain the endpoint and its partial owners on uncertain finalization"]
 pub struct ControllerEndpoint<'policy> {
@@ -37,6 +44,7 @@ pub struct ControllerEndpoint<'policy> {
     entry: Option<SocketEntry>,
     stage: Stage,
     close_unknown: bool,
+    peer: Cell<PeerSettlement>,
 }
 impl<'policy> ControllerEndpoint<'policy> {
     pub fn bind_service_v2(
@@ -49,6 +57,7 @@ impl<'policy> ControllerEndpoint<'policy> {
             entry: None,
             stage: Stage::Opening,
             close_unknown: false,
+            peer: Cell::new(PeerSettlement::Unissued),
         };
         match owner.bind() {
             Ok(()) => {
@@ -113,16 +122,20 @@ impl<'policy> ControllerEndpoint<'policy> {
         &mut self,
         end: Instant,
     ) -> std::result::Result<ControllerPeer<'_>, Box<ControllerPeerFailure<'_>>> {
-        let allowed = self.stage == Stage::Listening;
+        let allowed = self.stage == Stage::Listening && self.peer.get() == PeerSettlement::Unissued;
         if allowed {
             self.stage = Stage::PeerIssued;
+            self.peer.set(PeerSettlement::Held);
         }
         let mut peer = ControllerPeer {
             endpoint: self,
-            stream: None,
-            pidfd: None,
-            closed: false,
-            close_unknown: false,
+            native: PeerNative {
+                stream: None,
+                pidfd: None,
+                closed: false,
+                close_unknown: false,
+                completion: allowed.then_some(&self.peer),
+            },
         };
         let body = need(allowed, "WORKER_POOL_CONTROL_ACCEPT_ALREADY_ATTEMPTED")
             .and_then(|()| peer.accept(end));
@@ -138,6 +151,10 @@ impl<'policy> ControllerEndpoint<'policy> {
     /// operation, and never acknowledges a broker handler or lease release.
     pub fn close(&mut self) -> Result<()> {
         self.stage = Stage::Closing;
+        // A dropped peer retains its descriptors and this SAME slot. Preserve
+        // the bound name/listener as well; local endpoint teardown cannot hide
+        // an abandoned original connection or authorize a new bind.
+        require_peer_settled(&self.peer)?;
         let listener = self
             .listener
             .take()
@@ -192,10 +209,14 @@ impl ControllerEndpointFailure<'_> {
 #[must_use = "retain this original socket and PIDFD after uncertain close"]
 pub struct ControllerPeer<'endpoint> {
     endpoint: &'endpoint ControllerEndpoint<'endpoint>,
+    native: PeerNative<'endpoint>,
+}
+struct PeerNative<'endpoint> {
     stream: Option<UnixStream>,
     pidfd: Option<OwnedFd>,
     closed: bool,
     close_unknown: bool,
+    completion: Option<&'endpoint Cell<PeerSettlement>>,
 }
 impl ControllerPeer<'_> {
     fn accept(&mut self, end: Instant) -> Result<()> {
@@ -210,7 +231,7 @@ impl ControllerPeer<'_> {
                 .accept()
             {
                 Ok((stream, _)) => {
-                    self.stream = Some(stream);
+                    self.native.stream = Some(stream);
                     break;
                 }
                 Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
@@ -220,13 +241,14 @@ impl ControllerPeer<'_> {
             }
         }
         let stream = self
+            .native
             .stream
             .as_ref()
             .expect("stored before native qualification");
         stream.set_nonblocking(true)?;
         nix::sys::socket::setsockopt(stream, nix::sys::socket::sockopt::PassCred, &true)
             .map_err(io::Error::from)?;
-        self.pidfd = Some(
+        self.native.pidfd = Some(
             nix::sys::socket::getsockopt(stream, nix::sys::socket::sockopt::PeerPidfd)
                 .map_err(io::Error::from)?,
         );
@@ -236,29 +258,44 @@ impl ControllerPeer<'_> {
     /// PIDFD. It deliberately does not inspect a foreign UID's exe/root/ns.
     pub fn require_original_broker(&mut self) -> Result<()> {
         need(
-            !self.closed && !self.close_unknown,
+            !self.native.closed && !self.native.close_unknown,
             "WORKER_POOL_CONTROL_CLOSED",
         )?;
         let expected = match self.endpoint.policy.broker_birth() {
             Ok(expected) => expected,
             Err(error) => {
-                self.close_unknown |= error.close_unknown();
+                self.native.close_unknown |= error.close_unknown();
                 return Err(error);
             }
         };
         let stream = self
+            .native
             .stream
             .as_ref()
             .ok_or(PoolError::Refused("WORKER_POOL_BROKER_PEER_UNKNOWN"))?;
         let pidfd = self
+            .native
             .pidfd
             .as_ref()
             .ok_or(PoolError::Refused("WORKER_POOL_BROKER_PIDFD_UNKNOWN"))?;
-        verify_peer(stream, pidfd, expected, &mut self.close_unknown)
+        verify_peer(stream, pidfd, expected, &mut self.native.close_unknown)
     }
     pub fn close(&mut self) -> Result<()> {
+        self.native.close()
+    }
+}
+impl PeerNative<'_> {
+    fn close(&mut self) -> Result<()> {
         self.closed = true;
-        close_peer(&mut self.stream, &mut self.pidfd, &mut self.close_unknown)
+        close_peer(&mut self.stream, &mut self.pidfd, &mut self.close_unknown)?;
+        if let Some(completion) = self.completion {
+            need(
+                completion.get() != PeerSettlement::Unissued,
+                "WORKER_POOL_CONTROL_PEER_UNISSUED",
+            )?;
+            completion.set(PeerSettlement::Closed);
+        }
+        Ok(())
     }
 }
 fn verify_peer(
@@ -319,11 +356,17 @@ fn close_peer(
     body?;
     need(!*close_unknown, "WORKER_POOL_CONTROL_CLOSE_UNKNOWN")
 }
-impl Drop for ControllerPeer<'_> {
+impl Drop for PeerNative<'_> {
     fn drop(&mut self) {
         std::mem::forget(self.stream.take());
         std::mem::forget(self.pidfd.take());
     }
+}
+fn require_peer_settled(peer: &Cell<PeerSettlement>) -> Result<()> {
+    need(
+        peer.get() != PeerSettlement::Held,
+        "WORKER_POOL_CONTROL_PEER_RETAINED",
+    )
 }
 pub struct ControllerPeerFailure<'endpoint> {
     owner: ControllerPeer<'endpoint>,

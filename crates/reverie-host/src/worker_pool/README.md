@@ -103,6 +103,10 @@ trusted bootstrap's original code qualification; CapDropALL root does not claim
 to inspect another UID's current executable. There is no generic stream, command
 or path getter. A borrowed peer or partial failure keeps its endpoint and policy
 serving scope alive; shutdown must settle them before closing the outer owner.
+The same endpoint also retains an issued peer slot after default peer Drop.
+Only checked closure of that original native owner settles the slot; a refused
+second handle cannot settle it. Endpoint close preserves its bound name and
+listener while this slot remains held, rather than hiding abandoned native FDs.
 
 `BrokerBootstrapBinding` retains the same Runtime origin, an actual SELF PIDFD,
 native immutable executable observation and original process snapshot. The App

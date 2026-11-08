@@ -3,6 +3,7 @@
 use super::*;
 use crate::website_facts::{ProcessSnapshot, WebsiteProcessObserver};
 use reverie_contracts::worker_pool::BrokerBirthData;
+use std::os::fd::AsRawFd;
 struct Fixture {
     stream: Option<UnixStream>,
     other: Option<UnixStream>,
@@ -136,4 +137,83 @@ fn consumed_peer_observation_close_stays_unknown_after_known_socket_cleanup() {
         )
         .is_err()
     );
+}
+
+fn original_native(slot: &Cell<PeerSettlement>) -> (PeerNative<'_>, UnixStream) {
+    let (stream, other) = UnixStream::pair().unwrap();
+    let mut owner = PeerNative {
+        stream: Some(stream),
+        pidfd: None,
+        closed: false,
+        close_unknown: false,
+        completion: Some(slot),
+    };
+    owner.pidfd = Some(
+        nix::sys::socket::getsockopt(
+            owner.stream.as_ref().unwrap(),
+            nix::sys::socket::sockopt::PeerPidfd,
+        )
+        .unwrap(),
+    );
+    (owner, other)
+}
+#[test]
+fn abandoned_original_peer_keeps_actual_fds_and_endpoint_slot_fenced() {
+    if isolated("abandoned_original_peer_keeps_actual_fds_and_endpoint_slot_fenced") {
+        return;
+    }
+    let slot = Cell::new(PeerSettlement::Held);
+    let (owner, other) = original_native(&slot);
+    let original = [
+        owner.stream.as_ref().unwrap().as_raw_fd(),
+        owner.pidfd.as_ref().unwrap().as_raw_fd(),
+    ];
+    let identities = original.map(|fd| {
+        let m = fs::metadata(format!("/proc/self/fd/{fd}")).unwrap();
+        (m.dev(), m.ino())
+    });
+    drop(owner);
+    assert_eq!(
+        require_peer_settled(&slot).unwrap_err().code(),
+        "WORKER_POOL_CONTROL_PEER_RETAINED"
+    );
+    for (fd, identity) in original.into_iter().zip(identities) {
+        let m = fs::metadata(format!("/proc/self/fd/{fd}")).unwrap();
+        assert_eq!((m.dev(), m.ino()), identity);
+    }
+    let mut stale = PeerNative {
+        stream: None,
+        pidfd: None,
+        closed: false,
+        close_unknown: false,
+        completion: None,
+    };
+    stale.close().unwrap();
+    assert_eq!(
+        require_peer_settled(&slot).unwrap_err().code(),
+        "WORKER_POOL_CONTROL_PEER_RETAINED"
+    );
+    native::close(File::from(OwnedFd::from(other))).unwrap();
+    // Only this isolated process's exit closes the deliberately retained FDs.
+}
+#[test]
+fn only_checked_original_native_close_settles_the_exact_endpoint_slot() {
+    if isolated("only_checked_original_native_close_settles_the_exact_endpoint_slot") {
+        return;
+    }
+    let slot = Cell::new(PeerSettlement::Held);
+    let (mut owner, other) = original_native(&slot);
+    let mut stale = PeerNative {
+        stream: None,
+        pidfd: None,
+        closed: false,
+        close_unknown: false,
+        completion: None,
+    };
+    stale.close().unwrap();
+    assert!(require_peer_settled(&slot).is_err());
+    owner.close().unwrap();
+    require_peer_settled(&slot).unwrap();
+    owner.close().unwrap();
+    native::close(File::from(OwnedFd::from(other))).unwrap();
 }
