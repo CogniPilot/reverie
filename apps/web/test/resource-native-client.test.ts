@@ -58,16 +58,16 @@ beforeEach(async () => {
   };
   server = createServer(socket => {
     peers.add(socket); socket.on('close', () => peers.delete(socket));
-    let buffer = Buffer.alloc(0), purpose = false;
+    let buffer = Buffer.alloc(0), handshaken = false;
     socket.on('data', bytes => {
       buffer = Buffer.concat([buffer, bytes]);
-      if (!purpose) {
+      if (!handshaken) {
         if (buffer.length < 5) return;
         const size = buffer.readUInt32BE(1); if (buffer.length < size + 5) return;
         expect(buffer[0]).toBe('Q'.charCodeAt(0));
         expect(JSON.parse(buffer.subarray(5, size + 5).toString())).toEqual({purpose,
           version: purpose === 'resource-ram-pool-v2' ? 2 : 1});
-        buffer = buffer.subarray(size + 5); purpose = true; socket.write('RESOURCE_READY\n');
+        buffer = buffer.subarray(size + 5); handshaken = true; socket.write('RESOURCE_READY\n');
       }
       while (buffer.length >= 4) {
         const size = buffer.readUInt32BE(0); if (buffer.length < size + 4) return;
