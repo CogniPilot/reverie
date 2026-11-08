@@ -80,7 +80,7 @@ describe('what an agent has seen of a room', () => {
     expect(service.lastSeen(C, room)).toBeUndefined();
   });
 
-  it('a line the pane was SEEN to submit marks every message in it as seen', async () => {
+  it('a submitted wake records delivery but marks nothing seen: the wake line shows the member no message', async () => {
     const pane = ctx.sessions.get(B) as unknown as { writeViaMux: (d: string, o?: { onOutcome?: (x: string) => void }) => Promise<boolean> };
     pane.writeViaMux = async (_data, options) => {
       options?.onOutcome?.('submitted');
@@ -93,7 +93,9 @@ describe('what an agent has seen of a room', () => {
     const id = r.json().data.id ?? r.json().data.message?.id;
     clock += 10_000;
     await service.delivery.flushAll();
-    expect(service.lastSeen(B, room)?.messageId).toBe(id);
-    expect(service.lastSeen(A, room)).toBeUndefined(); // A's mock pane reports nothing: typed is not seen
+    // Only reading the room (chat read) moves the seen cursor; the submitted wake is a receipt for its batch.
+    expect(service.lastSeen(B, room)).toBeUndefined();
+    expect(service.delivery.receivedBy(room, id)).toContain(B);
+    expect(service.lastSeen(A, room)).toBeUndefined();
   });
 });

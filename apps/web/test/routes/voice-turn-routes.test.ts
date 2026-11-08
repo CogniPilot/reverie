@@ -16,6 +16,7 @@ import type { FastifyInstance } from 'fastify';
 import { createRouteTestHarness } from './_route-test-utils.js';
 import { createMockSession, type MockRouteContext } from '../mocks/index.js';
 import { ChatroomService } from '../../src/chatroom-service.js';
+import { WAKE_LINE } from '../../src/chatroom-delivery.js';
 import type { ChatMessage } from '../../src/chatroom-store.js';
 import { registerVoiceTurnRoutes, voiceServiceUrl } from '../../src/web/routes/voice-turn-routes.js';
 import { STOCK_CLIS } from '../../src/config/cli-registry/stock.js';
@@ -209,8 +210,10 @@ describe('voice turn routes', () => {
   it('transcribes, delivers the transcript to the member, and reads its own answer aloud', async () => {
     let pane = '';
     let askedId = '';
+    let carried: ReturnType<ChatroomService['turnSummary']>['messages'] = [];
     onTranscript(async (asked) => {
-      pane = await typedInto(VOICE); // what reached the member before it answered
+      pane = await typedInto(VOICE); // what reached the member's pane before it answered
+      carried = service.turnSummary(VOICE).messages; // what its hook carries
       askedId = asked.id;
       answer(asked, VOICE, 'Time to ship, Pat.');
     });
@@ -238,10 +241,13 @@ describe('voice turn routes', () => {
     expect(messages[0].voice).toBeUndefined();
     expect(messages[1].voice).toBeUndefined();
     expect(messages[1].audioUrl).toBeUndefined();
-    // Delivered like any message: the typed member gets it in its pane; the other member is not addressed.
-    expect(pane).toContain('USER -> you: "what time is it"');
-    // ...with the id its answer must name, since a typed pane links it by hand.
-    expect(pane).toContain(`reverie agent chat say --reply-to ${askedId} "..."`);
+    // Delivered like any message: the pane only ever gets the constant wake, never the words.
+    expect(pane.split(`${WAKE_LINE}\r`).join('')).toBe('');
+    expect(pane).not.toContain('what time is it');
+    // The member's hook carries the transcript, with the id its answer must name.
+    const transcript = carried.find((m) => m.messageId === askedId);
+    expect(transcript?.excerpt).toBe('what time is it');
+    expect(transcript?.replyHint).toContain(`reverie agent chat say --reply-to ${askedId} "..."`);
     expect(messages[1].replyTo).toBe(askedId);
     expect(listeners()).toBe(0);
   });

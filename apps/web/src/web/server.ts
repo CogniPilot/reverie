@@ -1037,8 +1037,8 @@ export class WebServer extends EventEmitter {
   private async setupRoutes(): Promise<void> {
     // multipart/form-data: parser is provided by @fastify/multipart (registered
     // below). Its parser is a no-op marker that leaves the body on req.raw, so
-    // legacy routes that read the raw stream directly (e.g. /api/screenshots)
-    // continue to work alongside routes that use req.file() (e.g. paste-image).
+    // a route may read the raw stream directly as well as use req.file() (e.g.
+    // paste-image).
 
     // Enable gzip/brotli compression for all responses.
     // Massive win: 793KB uncompressed → ~120KB compressed for static assets.
@@ -1622,8 +1622,8 @@ export class WebServer extends EventEmitter {
         }
       },
       keepsRecord: (id) => this.store.getSession(id)?.pinned === true,
-      // Reads only `openCodeConfig.continueSession`: a hand-started session has none, so its employee gets no `threadId` until
-      // the owner sets one through `setThread`.
+      // Reads only `openCodeConfig.continueSession`: a hand-started session has none, so its employee gets no `threadId`
+      // from here.
       threadOf: (id) => {
         const thread = this.store.getSession(id)?.openCodeConfig?.continueSession;
         return typeof thread === 'string' ? thread : undefined;

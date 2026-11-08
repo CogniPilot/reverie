@@ -10,6 +10,7 @@ import { join } from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import { createRouteTestHarness } from './_route-test-utils.js';
 import { createMockSession, type MockRouteContext } from '../mocks/index.js';
+import { pendingBriefings, pendingNotices, recordCarried } from '../helpers/wake-payload.js';
 import { ChatroomService } from '../../src/chatroom-service.js';
 import { ChatFileStore } from '../../src/chatroom-files.js';
 import { registerChatroomRoutes } from '../../src/web/routes/chatroom-routes.js';
@@ -26,7 +27,17 @@ describe('an agent chooses what wakes it', () => {
   let clock: number;
 
   const panes = (id: string): string[] => (ctx.sessions.get(id) as unknown as { writeBuffer: string[] }).writeBuffer;
-  const text = (id: string) => panes(id).join('');
+  // A pane only gets the wake line: what reached a member is what each wake carried (recordCarried), plus the notices and
+  // briefings its hook payload carries.
+  const carried = new Map<string, string[]>();
+  const lines = (id: string): string[] => carried.get(id) ?? [];
+  const text = (id: string) => [...lines(id), pendingNotices(service, id), pendingBriefings(service, id)].join('\n');
+  const clear = (id: string) => {
+    panes(id).length = 0;
+    lines(id).length = 0;
+    service.delivery.noticesShown(id, service.delivery.pendingNotices(id).map((n) => n.id));
+    service.delivery.briefShown(id, service.delivery.pendingBriefs(id).map((b) => b.roomId));
+  };
   const names = new Map([[A, 'alpha'], [B, 'bravo'], [C, 'lead']]);
 
   beforeEach(async () => {
@@ -41,6 +52,7 @@ describe('an agent chooses what wakes it', () => {
     for (const [id, name] of names) {
       const s = createMockSession(id);
       s.name = name;
+      carried.set(id, recordCarried(s as never, () => service));
       ctx.sessions.set(id, s as never);
     }
   });
@@ -65,7 +77,7 @@ describe('an agent chooses what wakes it', () => {
   const settle = async () => {
     clock += 10_000;
     await service.delivery.flushAll();
-    for (const id of names.keys()) panes(id).length = 0;
+    for (const id of names.keys()) clear(id);
   };
   const post = (id: string, body: object, from?: string) =>
     app.inject({ method: 'POST', url: `/api/chatrooms/${id}/messages`, headers: from ? AS(from) : {}, payload: body });
@@ -81,14 +93,14 @@ describe('an agent chooses what wakes it', () => {
     expect((await notify(id, B, 'mentions', B)).statusCode).toBe(200);
     await post(id, { text: 'status update' }, A);
     await flush();
-    expect(text(C)).toContain('"alpha": "status update"'); // the coordinator and the others are woken as the room says
+    expect(text(C)).toContain('alpha: status update'); // the coordinator and the others are woken as the room says
     expect(panes(B)).toEqual([]);
     expect(service.delivery.pendingFor(B)).toBe(1);
     await post(id, { text: '@bravo your turn' }, A);
     await flush();
     expect(panes(B)).toHaveLength(1);
-    expect(panes(B)[0].indexOf('status update')).toBeGreaterThan(-1);
-    expect(panes(B)[0].indexOf('status update')).toBeLessThan(panes(B)[0].indexOf('@bravo your turn'));
+    expect(lines(B)[0].indexOf('status update')).toBeGreaterThan(-1);
+    expect(lines(B)[0].indexOf('status update')).toBeLessThan(lines(B)[0].indexOf('@bravo your turn'));
     expect(service.delivery.pendingFor(B)).toBe(0);
   });
 
@@ -97,15 +109,15 @@ describe('an agent chooses what wakes it', () => {
     await notify(id, B, 'mentions', B);
     await post(id, { text: 'owner speaking' });
     await flush();
-    expect(text(B)).toContain('USER: "owner speaking"');
-    panes(B).length = 0;
+    expect(text(B)).toContain('user: owner speaking');
+    clear(B);
     await post(id, { text: '@everyone heads up' }, A);
     await flush();
     expect(panes(B)).toEqual([]);
-    expect(panes(C).join('')).toContain('@everyone heads up');
+    expect(text(C)).toContain('@everyone heads up');
     const mine = (await post(id, { text: 'my question' }, B)).json().data.message.id as string;
     await flush();
-    panes(B).length = 0;
+    clear(B);
     await post(id, { text: 'plain answer', replyTo: mine }, A);
     await flush();
     expect(text(B)).toContain('plain answer');

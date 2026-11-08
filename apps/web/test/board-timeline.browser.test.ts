@@ -180,21 +180,23 @@ describe('Board timeline navigation in Chromium', () => {
     ]};
   }
 
-  it('defaults to the latest generic plan, keeps global overdue truthful, and restores All work on reload', async () => {
+  it('defaults to All work, keeps global overdue truthful, and restores a picked latest plan on reload', async () => {
     const data = plannedBoard();
     await open(1100, data);
-    expect(await page.getByLabel('Board work view').inputValue()).toBe('latest');
+    expect(await page.getByLabel('Board work view').inputValue()).toBe('all');
+    expect(await visibleIds()).toHaveLength(4);
+    expect(await page.locator('#work-scope-count').textContent()).toContain('4 of 4 cards');
+    expect(await page.locator('#kpis .kpi').filter({hasText:'issues overdue'}).locator('b').textContent()).toBe('2');
+    await page.getByLabel('Board work view').selectOption('latest');
     expect(await visibleIds()).toEqual(['current-task', 'current-forecast']);
     expect(await page.locator('#work-scope-count').textContent()).toContain('2 of 4 cards');
     expect(await page.locator('#kpis .kpi').filter({hasText:'issues overdue'}).locator('b').textContent()).toBe('2');
     await page.locator('[data-tab="kanban"]').click();
     expect(await page.locator('#kanban .card').count()).toBe(2);
-    await page.getByLabel('Board work view').selectOption('all');
-    expect(await page.locator('#kanban .card').count()).toBe(4);
     expect(await page.evaluate(() => (window as any).eval('B.issues.length'))).toBe(4);
     await page.reload();await page.waitForSelector('#tl svg');
-    expect(await page.getByLabel('Board work view').inputValue()).toBe('all');
-    expect(await visibleIds()).toHaveLength(4);
+    expect(await page.getByLabel('Board work view').inputValue()).toBe('latest');
+    expect(await visibleIds()).toEqual(['current-task', 'current-forecast']);
     expect(await page.locator('#work-scope-count').textContent()).toContain('Summary totals above cover all work');
   });
 
@@ -235,5 +237,25 @@ describe('Board timeline navigation in Chromium', () => {
     await page.evaluate(() => dispatchEvent(new Event('focus')));
     await page.waitForFunction(() => (window as any).eval('loading === false'));
     await expect.poll(() => boardReads).toBe(visibleReads + 1);
+  });
+
+  it('a fresh profile opens on all work and draws current cards when the newest plan tag is days old', async () => {
+    const old = now - 5 * 86400000;
+    const stalePlan = {
+      ...board,
+      issues: [
+        ...board.issues.slice(0, 3),
+        ...['done', 'todo'].map((status, i) => ({
+          ...board.issues[0], id: `plan-${i}`, title: `Old plan task ${i}`, status,
+          start: old, end: old + 3600000, tags: ['company-plan-20261102'],
+        })),
+      ],
+    };
+    await open(1100, stalePlan);
+    expect(await page.locator('#work-scope').inputValue()).toBe('all');
+    expect(await page.locator('#work-scope-count').textContent()).toContain('All work: 5 of 5 cards');
+    expect(await visibleIds()).toEqual(expect.arrayContaining(['issue-0', 'issue-1', 'issue-2']));
+    await page.selectOption('#work-scope', 'latest');
+    expect(await visibleIds()).toEqual(['plan-0', 'plan-1']);
   });
 });

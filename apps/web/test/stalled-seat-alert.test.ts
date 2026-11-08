@@ -9,6 +9,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ChatroomDelivery, DELIVERY_WAIT_TEXT, STALLED_ALERT_MS, STALLED_REPEAT_MS, type DeliverySession, type DeliveryStall } from '../src/chatroom-delivery.js';
 import { ChatroomService, type ChatSessionLike } from '../src/chatroom-service.js';
+import { wakePayload } from './helpers/wake-payload.js';
 
 type Options = Parameters<DeliverySession['writeViaMux']>[1];
 const MIN = 60_000;
@@ -91,7 +92,7 @@ describe('the stalled-seat notice', () => {
     const sessions = new Map<string, ChatSessionLike & { isWorking: boolean; canAcceptChatInput?: () => boolean }>();
     for (const id of ['stuck', 'lead']) sessions.set(id, {
       id, name: id === 'stuck' ? 'Robin' : 'Lead', status: 'idle', mode: 'claude', pid: 1, isWorking: false,
-      writeViaMux: async (text: string, options: Options) => { writes[id].push(text); options?.onOutcome?.('submitted'); return true; },
+      writeViaMux: async (text: string, options: Options) => { writes[id].push(wakePayload(services.at(-1), id, text)); options?.onOutcome?.('submitted'); return true; },
     });
     sessions.get('stuck')!.canAcceptChatInput = () => false;
     const service = new ChatroomService({ file: join(mkdtempSync(join(tmpdir(), 'stall-')), 'chatrooms.json'),

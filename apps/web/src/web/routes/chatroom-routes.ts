@@ -1347,6 +1347,17 @@ export function registerChatroomRoutes(
   });
 
   // A separate purpose avoids recursion: the broker reauthorizes through the ordinary exact GET and files API.
+  // Read-only: the caller's own how-to-talk briefing for a room it belongs to, as it reads now (the hook payload may cut it).
+  app.get('/api/chatrooms/:id/briefing', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    try {
+      roomOrFail(req, id);
+      const self = caller(req);
+      if (!self) return forbid(reply, 'An agent session is required');
+      return { success: true, data: { roomId: id, text: service.briefingFor(self, id) } };
+    } catch (error) { return sendError(reply, error); }
+  });
+
   app.post('/api/chatrooms/:id/messages/:messageId/image-paths', async (req, reply) => {
     const { id, messageId } = req.params as { id: string; messageId: string };
     try {

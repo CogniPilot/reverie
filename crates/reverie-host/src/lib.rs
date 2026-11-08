@@ -11,6 +11,7 @@ pub mod engine_metadata;
 pub mod gpu_access;
 pub mod host_jobs;
 pub mod installed_worker_engine;
+pub mod lease;
 pub mod lease_policy;
 mod memory_artifacts;
 pub mod memory_configuration;

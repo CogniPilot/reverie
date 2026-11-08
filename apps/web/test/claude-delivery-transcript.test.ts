@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { appendFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ChatroomDelivery, type DeliverySession } from '../src/chatroom-delivery.js';
+import { ChatroomDelivery, WAKE_LINE, type DeliverySession } from '../src/chatroom-delivery.js';
 
 type Options = Parameters<DeliverySession['writeViaMux']>[1];
 type Outcome = 'submitted' | 'stranded' | 'unverified';
@@ -51,13 +51,13 @@ function fixture(outcome: Outcome, options: { transcript?: boolean } = {}) {
 }
 
 describe('transcript evidence for an unconfirmed Claude delivery', () => {
-  it('confirms a long delivery found inside a new expanded turn, without typing it again', async () => {
+  it('confirms an unverified wake found in a new turn, without typing it again, however long the message is', async () => {
     const f = fixture('unverified');
     const long = `@Agent ${'review the attached plan carefully '.repeat(40)}`;
     await f.send(long, 'm-1');
     expect(f.uncertain).toEqual([['m-1']]);
     const line = f.writes[0].replace(/\r$/, '');
-    expect(line.length).toBeGreaterThan(800);
+    expect(line).toBe(WAKE_LINE);
     appendFileSync(f.file, turn(`[Pasted text #1]\n${line}\n`));
     await f.runChecks();
     expect(f.submitted).toEqual([['m-1']]);

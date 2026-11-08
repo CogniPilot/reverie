@@ -1,42 +1,27 @@
 /**
- * @fileoverview Server-side logic for the in-app self-updater.
+ * @fileoverview Server-side logic for App Settings → Updates.
  *
- * Powers App Settings → Updates. Reverie is installed as a git clone and run
- * under systemd (Linux) or launchd (macOS); updating means `git checkout <release
- * tag> && npm install && npm run build && restart-the-service`. The hard part is
- * that the update restarts the very process performing it, so the actual work
- * runs in a DETACHED `scripts/self-update.sh` that outlives the restart, writing
- * progress to `dataPath('update-status.json')` which the browser polls across the
- * connection drop.
+ * Reverie no longer updates itself in place: a Nix package upgrade or a rebuilt
+ * image replaces the install. `getInstallInfo` reports `selfUpdateEnabled: false`,
+ * `checkForUpdate` reports no release, and `startUpdate` refuses with
+ * `NIX_UPDATE_MESSAGE`.
  *
- * Channel: latest tagged RELEASE (tags look like `reverie@0.9.3`). Dirty trees
- * are auto-stashed (stash left for the user). Detection is manual (a button).
+ * What remains: the status file at `dataPath('update-status.json')` with its PURE
+ * reconcile and expiry helpers (a status left by an older updater still settles
+ * on boot and on read), install probing, and the Docker environment gate. See
+ * `docs/docker-self-update.md`.
  *
- * Split into PURE helpers (semver/tag parsing, reconcile decision) that are unit
- * tested, and IO wrappers (`getInstallInfo`, `checkForUpdate`, `startUpdate`,
- * `reconcileUpdateOnBoot`) that touch git/network/fs.
- *
- * DOCKER COMPOSE installs update in place too, through the same script and the
- * same status file. The repo is a host bind mount, so the pull/build land on the
- * host filesystem and survive container recreation; the "restart" is the server
- * EXITING so the container's restart policy relaunches it on the new `dist/`.
- * That applies CODE only — a restart reuses the existing container's image and
- * config — so `evaluateEnvironmentGate()` refuses a release that changes
- * `server.Dockerfile`, `docker-compose.yaml` or `.env.example`, pointing at the
- * host command instead. See `docs/docker-self-update.md`.
- *
- * Related: `src/types/update.ts`, `scripts/self-update.sh`, routes in
- * `src/web/routes/system-routes.ts`.
+ * Related: `src/types/update.ts`, routes in `src/web/routes/system-routes.ts`.
  *
  * @module web/self-update
  */
 
-import { spawn, execFileSync } from 'node:child_process';
-import { existsSync, readFileSync, writeFileSync, renameSync, copyFileSync, chmodSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { existsSync, readFileSync, writeFileSync, renameSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { homedir, hostname, tmpdir } from 'node:os';
-import { randomUUID, createHash } from 'node:crypto';
+import { homedir, hostname } from 'node:os';
+import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { dataPath } from '../config/instance.js';
 import { LAUNCHD_LABEL, SYSTEMD_UNIT } from '../config/service-names.js';
@@ -436,10 +421,6 @@ function tryExec(cmd: string, args: string[], cwd?: string, timeout = EXEC_TIMEO
   }
 }
 
-function commandExists(cmd: string): boolean {
-  return tryExec('sh', ['-c', `command -v ${cmd}`]) !== null;
-}
-
 /**
  * Resolve the repo root from this module's location. Compiled to
  * `dist/web/self-update.js` (or `src/web/self-update.ts` under tsx) → two levels
@@ -473,7 +454,7 @@ function detectInstallKind(dir: string): InstallKind {
   return 'unknown';
 }
 
-/** Install kinds whose update is applied in place by `scripts/self-update.sh`. */
+/** The refusal every update path returns: no install updates itself in place. */
 export const NIX_UPDATE_MESSAGE = 'Upgrade the Nix package or rebuild the image.';
 
 /** Immutable Nix installations are updated by their package manager, never by the console. */
@@ -682,167 +663,12 @@ export type StartUpdateResult =
     };
 
 /**
- * Copy the updater script OUT of the repo before running it. The script lives in
- * the very repo it's about to `git checkout`, and bash reads scripts lazily — so
- * running the in-repo copy risks executing torn/old-tag bytes after checkout.
- * Run a snapshot under ~/.reverie instead (git never touches it).
- */
-function stageRunner(installDir: string): string | null {
-  const src = join(installDir, 'scripts', 'self-update.sh');
-  if (!existsSync(src)) return null;
-  const runner = dataPath('self-update-runner.sh');
-  copyFileSync(src, runner);
-  chmodSync(runner, 0o755);
-  return runner;
-}
-
-/**
- * Launch the updater so it OUTLIVES the service restart it triggers.
- * - Linux + systemd: a transient `--scope` cgroup, independent of the
- *   reverie-web service lifecycle (survives `systemctl restart` regardless of
- *   the unit's KillMode). Inherits our env so node/npm/git stay on PATH.
- * - Everything else: `setsid` into a new session (escapes launchd's process-group
- *   kill); plain detached spawn as the last resort.
- */
-function launchDetached(runner: string, args: string[]): void {
-  const useScope = process.platform === 'linux' && !!process.env.XDG_RUNTIME_DIR && commandExists('systemd-run');
-  let cmd: string;
-  let cmdArgs: string[];
-  if (useScope) {
-    cmd = 'systemd-run';
-    cmdArgs = ['--user', '--scope', '--collect', '--quiet', 'bash', runner, ...args];
-  } else if (commandExists('setsid')) {
-    cmd = 'setsid';
-    cmdArgs = ['bash', runner, ...args];
-  } else {
-    cmd = 'bash';
-    cmdArgs = [runner, ...args];
-  }
-  const child = spawn(cmd, cmdArgs, { detached: true, stdio: 'ignore', env: process.env });
-  child.on('error', () => {
-    // Surface the failure in the status file so the UI doesn't hang on "queued".
-    const status = readUpdateStatus();
-    if (status && isInFlight(status)) {
-      writeUpdateStatusAtomic({
-        ...status,
-        phase: 'failed',
-        message: 'Could not launch the updater process',
-        error: `spawn ${cmd} failed`,
-        updatedAt: Date.now(),
-      });
-    }
-  });
-  child.unref();
-}
-
-/**
- * Validate, snapshot the current commit, write the initial status, and spawn the
- * detached updater. Returns immediately — progress is reported via the status file.
+ * Refuse the update. No install kind updates itself in place any more
+ * (`getInstallInfo` reports `selfUpdateEnabled: false` for all of them): a Nix
+ * package upgrade or a rebuilt image replaces the install instead.
  */
 export async function startUpdate(): Promise<StartUpdateResult> {
-  if (isNixManagedInstall()) return { ok: false, code: 'disabled', message: NIX_UPDATE_MESSAGE };
-  const info = getInstallInfo();
-  if (!info.selfUpdateEnabled) {
-    return {
-      ok: false,
-      code: 'disabled',
-      message: NIX_UPDATE_MESSAGE,
-    };
-  }
-  if (!canSelfUpdateInPlace(info.installKind)) {
-    return {
-      ok: false,
-      code: 'not-git',
-      message: isRunningInContainer()
-        ? 'This container has no repository mounted. Update from the host with reverie-request-update.'
-        : 'This is not a git install. Rebuild from this checkout (npm ci && npm run build), or from the Docker host with reverie-request-update.',
-    };
-  }
-  const existing = readCurrentUpdateStatus();
-  if (isInFlight(existing)) {
-    return { ok: false, code: 'in-flight', message: 'An update is already in progress.' };
-  }
-
-  const check = await checkForUpdate();
-  if (!check.latestTag || !check.updateAvailable) {
-    return { ok: false, code: 'up-to-date', message: 'Already up to date.' };
-  }
-  if (!isValidReleaseTag(check.latestTag)) {
-    return { ok: false, code: 'bad-tag', message: `Refusing to update to an unrecognized tag: ${check.latestTag}` };
-  }
-
-  // Re-evaluate rather than trusting the check the browser saw: the UI hides the
-  // button when the gate blocks, but the endpoint is reachable directly and the
-  // release could have moved between the check and the click.
-  if (info.installKind === 'docker-compose') {
-    const gate = evaluateEnvironmentGate(info.installDir, check.latestTag);
-    if (gate.blockers.length > 0) {
-      return {
-        ok: false,
-        code: 'env-blocked',
-        message: `${gate.blockers.map((b) => b.message).join(' ')} Run ${gate.hostCommand} on the Docker host to apply this release.`,
-      };
-    }
-  }
-
-  const prevSha = tryExec('git', ['rev-parse', 'HEAD'], info.installDir);
-  const runner = stageRunner(info.installDir);
-  if (!runner) {
-    return { ok: false, code: 'error', message: 'scripts/self-update.sh not found in the install.' };
-  }
-
-  const updateId = randomUUID();
-  const now = Date.now();
-  const status: UpdateStatus = {
-    updateId,
-    phase: 'queued',
-    message: `Preparing update to v${check.latestVersion}…`,
-    fromVersion: info.currentVersion,
-    toVersion: check.latestVersion ?? undefined,
-    toTag: check.latestTag,
-    prevSha: prevSha ?? undefined,
-    stashRef: null,
-    supervisor: info.supervisor,
-    startedAt: now,
-    updatedAt: now,
-  };
-  writeUpdateStatusAtomic(status);
-
-  const logFile = join(tmpdir(), `reverie-update-${updateId}.log`);
-  const args = [
-    '--repo',
-    info.installDir,
-    '--tag',
-    check.latestTag,
-    '--supervisor',
-    info.supervisor,
-    '--status-file',
-    STATUS_FILE,
-    '--update-id',
-    updateId,
-    '--from-version',
-    info.currentVersion,
-    '--node',
-    process.execPath,
-    '--log',
-    logFile,
-    // For the launchd-daemon and docker-compose restart paths: the updater kills
-    // this PID and the supervisor (KeepAlive daemon / Docker restart policy)
-    // respawns the server on the freshly built dist/.
-    '--server-pid',
-    String(process.pid),
-  ];
-  if (info.supervisor === 'docker-compose') {
-    // Decided HERE, where the Docker socket and the Compose env are reachable;
-    // the updater only reads the answer. Without a yes it never exits the server.
-    const byExit = shouldRestartByExit(restartByExitDeclared(), detectOwnRestartPolicy());
-    args.push('--restart-by-exit', byExit ? '1' : '0');
-  }
-  if (prevSha) args.push('--prev-sha', prevSha);
-  if (info.dirty) args.push('--stash');
-
-  launchDetached(runner, args);
-  return { ok: true, updateId, toTag: check.latestTag, toVersion: check.latestVersion };
+  return { ok: false, code: 'disabled', message: NIX_UPDATE_MESSAGE };
 }
 
 /** Current status for the polling endpoint; null collapses to an explicit idle. */

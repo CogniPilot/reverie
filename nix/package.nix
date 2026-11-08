@@ -294,7 +294,7 @@ let
         test/remote-auto-reconnect.test.ts test/remote-discover-attach.test.ts test/remote-files.test.ts test/remote-hosts.test.ts \
         test/remote-kill-command.test.ts test/remote-pane-history.test.ts test/remote-shared-sessions.test.ts \
         test/remote-ssh-limiter.test.ts test/remote-ssh-options.test.ts test/repo-status.test.ts test/respawn-adaptive-timing.test.ts \
-        test/respawn-controller.test.ts test/respawn-health.test.ts test/respawn-metrics.test.ts
+        test/respawn-controller.test.ts test/respawn-health.test.ts test/respawn-metrics.test.ts test/retired-retention.test.ts
       npm test -- test/respawn-patterns.test.ts test/respawn-pty-breaker.test.ts test/respawn-session-id-collision.test.ts \
         test/respawn-stop-race.test.ts test/respawn-team-awareness.test.ts test/response-viewer-external-links.test.ts \
         test/response-viewer-file-links.test.ts test/response-viewer-last-turn.test.ts test/response-viewer-transcript.test.ts \
@@ -378,7 +378,8 @@ let
         test/terminal-font.test.ts test/terminal-history-schema.test.ts test/terminal-history.test.ts \
         test/terminal-keycode229-recovery.test.ts test/terminal-layout-css.test.ts test/terminal-link-provider-target.test.ts \
         test/terminal-logical-line.test.ts test/terminal-osc52-clipboard.test.ts test/terminal-parsing.test.ts \
-        test/terminal-pty-geometry.test.ts test/terminal-resilience.test.ts test/terminal-resize-observer-survives-init.test.ts \
+        test/terminal-pty-geometry.test.ts test/terminal-replay-replies.test.ts test/terminal-resilience.test.ts \
+        test/terminal-resize-observer-survives-init.test.ts \
         test/terminal-scroll-intent.test.ts test/terminal-scroll-routing.test.ts test/terminal-shift-drag-selection.test.ts \
         test/terminal-tile-input.test.ts test/terminal-tile-scroll.test.ts test/terminal-tile-unit.test.ts test/terminal-touch-tap.test.ts \
         test/test-env-isolation.test.ts test/test-ports-guard.test.ts test/test-suite-partition.test.ts test/tile-grid-attach.test.ts \
