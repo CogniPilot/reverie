@@ -72,10 +72,13 @@ impl WebsiteProcessObserver {
         state
             .provider_running_header()
             .map_err(|_| WebsiteFactsError::Refused("PROVIDER_STATE"))?;
-        need(
-            state.pid().ok() == actual.pid().ok(),
-            "PROVIDER_STATE_CHANGED",
-        )?;
+        let state_pid = state
+            .pid()
+            .map_err(|_| WebsiteFactsError::Refused("PROVIDER_STATE_PID"))?;
+        let actual_pid = actual
+            .pid()
+            .map_err(|_| WebsiteFactsError::Refused("PROVIDER_PID"))?;
+        need(state_pid == actual_pid, "PROVIDER_STATE_CHANGED")?;
         let init = self.provider_record(
             &actual
                 .pid()
@@ -116,6 +119,13 @@ impl WebsiteProcessObserver {
         pane: &UnsignedInteger,
         end: Instant,
     ) -> Result<bool> {
+        need(
+            topology
+                .pairs()
+                .iter()
+                .any(|(pid, _)| pid == init.process.pid()),
+            "PROVIDER_TOP_INIT",
+        )?;
         let mut records = Vec::new();
         for (pid, parent) in topology.pairs() {
             let record = match self.provider_record(pid, end) {
