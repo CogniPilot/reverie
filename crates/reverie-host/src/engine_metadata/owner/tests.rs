@@ -102,21 +102,18 @@ fn scoped_consumed_close_uncertainty_keeps_original_ticket_and_refuses_native_re
         .open(tree.root.join("foreign-reused-descriptor"))
         .unwrap();
     let reused = actual_native.contains(&foreign.as_raw_fd());
-    foreign
-        .write_all(b"owned foreign bytes survive repeated settlement")
-        .unwrap();
+    let written = foreign.write_all(b"owned foreign bytes survive repeated settlement");
     let cleanup = owner.settle_owned(deadline());
-    let repeated = owner
-        .query(
-            EngineQuery::InventoryIds,
-            deadline(),
-            &CancellationToken::new(),
-        )
-        .unwrap_err();
+    let repeated = owner.query(
+        EngineQuery::InventoryIds,
+        deadline(),
+        &CancellationToken::new(),
+    );
     let global = engine.close(deadline());
-    foreign.rewind().unwrap();
     let mut bytes = Vec::new();
-    let read = foreign.read_to_end(&mut bytes);
+    let read = written
+        .and_then(|()| foreign.rewind())
+        .and_then(|()| foreign.read_to_end(&mut bytes));
     let closed = crate::native::close(foreign);
     assert!(
         entered && reused,
@@ -124,6 +121,7 @@ fn scoped_consumed_close_uncertainty_keeps_original_ticket_and_refuses_native_re
     );
     read.unwrap();
     closed.unwrap();
+    let repeated = repeated.unwrap_err();
     assert_eq!(bytes, b"owned foreign bytes survive repeated settlement");
     assert!(error.is_uncertain() && error.cleanup_faults().contains(&CleanupFault::StdoutClose));
     assert!(
