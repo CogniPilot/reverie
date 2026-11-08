@@ -117,6 +117,13 @@ impl EngineMetadata {
     /// Matches full expected image fields, aware creation instant and native
     /// descriptor/config identity. A returned ID remains daemon-declared DATA.
     pub fn qualify_image(&self, selected: &WebsiteImageProvenance) -> Result<String> {
+        self.qualify_image_fields(&selected.archive, &selected.image)
+    }
+    pub(super) fn qualify_image_fields(
+        &self,
+        archive: &JournalDigest,
+        image: &Value,
+    ) -> Result<String> {
         let id = scalar(field(&self.0, "Id")?)?;
         need(
             id.strip_prefix("sha256:")
@@ -125,18 +132,18 @@ impl EngineMetadata {
         )?;
         for name in ["Config", "RootFS", "Architecture", "Os"] {
             need(
-                field(&self.0, name)?.python_eq(field(&selected.image, name)?),
+                field(&self.0, name)?.python_eq(field(image, name)?),
                 "NATIVE_FULL_IMAGE_FIELDS_DIFFER",
             )?;
         }
         need(
-            creation(field(&self.0, "Created")?)? == creation(field(&selected.image, "Created")?)?,
+            creation(field(&self.0, "Created")?)? == creation(field(image, "Created")?)?,
             "NATIVE_IMAGE_CREATION_DIFFERS",
         )?;
         let descriptor = object(&self.0)?.get(&key("Descriptor"));
         if descriptor.is_none_or(|value| matches!(value.0, Node::Null)) {
             need(
-                id == format!("sha256:{}", selected.archive.as_str()),
+                id == format!("sha256:{}", archive.as_str()),
                 "LEGACY_IMAGE_CONFIG_IDENTITY_DIFFERS",
             )?;
         } else {
