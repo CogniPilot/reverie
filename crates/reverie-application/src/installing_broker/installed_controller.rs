@@ -1,11 +1,9 @@
 //! Custody transfer of the original activated Host owner. Installation here
 //! does not publish a fleet policy, clear a provider fence or admit a worker.
 use super::*;
-use reverie_host::worker_laptop::{
-    ControllerMemberConfigured, CreatedLaptop, StartedContainer,
-};
-use reverie_host::worker_reports::WorkerLaunchConnection;
+use reverie_host::worker_laptop::{ControllerMemberConfigured, CreatedLaptop, StartedContainer};
 use reverie_host::worker_pool::{ActivatedController, PoolError};
+use reverie_host::worker_reports::WorkerLaunchConnection;
 use std::time::Instant;
 
 #[must_use = "retain the same activated controller when transfer refuses"]

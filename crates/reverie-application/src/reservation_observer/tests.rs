@@ -315,6 +315,9 @@ impl Source for Arc<Fixture> {
                 EngineQuery::InspectStopped(_) => "stopped",
                 EngineQuery::GpuInformation => "gpu-info",
                 EngineQuery::TelemetryInventory | EngineQuery::TelemetryInspect(_) => "telemetry",
+                EngineQuery::WorkerPoolInspect(_) => {
+                    return Err(ObserverError::Refused("POOL_INSPECTION_FIXTURE_UNCONFIGURED"));
+                }
             }
             .to_owned(),
         );
