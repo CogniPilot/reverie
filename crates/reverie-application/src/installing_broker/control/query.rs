@@ -267,9 +267,6 @@ impl HealthReaders {
                 }
                 Cause::Provider(error)
             })?;
-        runtime
-            .assert_current(identity)
-            .map_err(|e| Cause::Identity(Arc::new(e)))?;
         let repeated = self
             .context
             .storage(row, &paths)
@@ -277,6 +274,9 @@ impl HealthReaders {
         if storage.canonical_bytes() != repeated.canonical_bytes() {
             return Err(Cause::Refused("PROVIDER_STORAGE_CHANGED"));
         }
+        runtime
+            .assert_current(identity)
+            .map_err(|e| Cause::Identity(Arc::new(e)))?;
         if runtime.completed()
             || runtime.starting()
             || (!observed.pane_dead() && !observed.live_child())
