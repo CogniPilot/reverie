@@ -34,7 +34,9 @@ export class PoolInstallationController {
   }
   async enroll(request: FastifyRequest) {
     this.#authority.requestOwner(request);
-    z.object({ enroll: z.literal(true) }).strict().parse(request.body);
+    z.object({ enroll: z.literal(true) })
+      .strict()
+      .parse(request.body);
     return this.auth.enrollRegistrationIdentity(request.cookies?.[OWNER_COOKIE]);
   }
   async view(request: FastifyRequest): Promise<PoolInstallationView> {
@@ -159,12 +161,10 @@ export function registerPoolInstallationRoutes(app: FastifyInstance, controller:
     try {
       return { success: true, data: await controller.consent(request, request.params.viewId) };
     } catch (error) {
-      return reply
-        .code(status(error))
-        .send({
-          success: false,
-          error: error instanceof Error ? error.message : 'Original installation outcome retained',
-        });
+      return reply.code(status(error)).send({
+        success: false,
+        error: error instanceof Error ? error.message : 'Original installation outcome retained',
+      });
     }
   });
   app.post<{ Params: { viewId: string } }>(prefix + '/:viewId/result', async (request, reply) => {
