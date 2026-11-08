@@ -10,6 +10,11 @@ struct StartAttempt<'a> {
 }
 impl StartAttempt<'_> {
     fn begin(&mut self) -> Result<()> {
+        let owner = self.operation.owner_mut();
+        owner.auth.receive_continuation(
+            owner.claim.operation_id(),
+            ResourceContinuationVerb::SourceStop,
+        )?;
         self.operation.assert_current()?;
         let owner = self.operation.owner_mut();
         let result = owner.claim.begin_native_start().map_err(Into::into);
@@ -38,6 +43,7 @@ pub struct PreparedResourceStart<'a> {
     operation: CommittedRamOperation<'a>,
     intent: ProtectedStartIntent,
     released: SourceStopFacts,
+    command_attempted: bool,
 }
 struct FailedStart<'a> {
     attempt: StartAttempt<'a>,
@@ -72,10 +78,53 @@ impl<'a> CommittedRamOperation<'a> {
             operation,
             intent: intent.expect("actual STARTING outcome"),
             released: released.expect("actual source-release outcome"),
+            command_attempted: false,
         })
     }
 }
 impl PreparedResourceStart<'_> {
+    /// Receive the actual start request on this original Q thread. This does
+    /// not qualify an L peer, enter allocation or grant pool membership.
+    pub fn receive_start_continuation(&mut self) -> Result<()> {
+        let owner = self.operation.owner_mut();
+        owner
+            .auth
+            .receive_continuation(owner.claim.operation_id(), ResourceContinuationVerb::Start)
+    }
+    /// The surrounding launch owner must retain the original Held L and its
+    /// native pin before this one-shot same-Q command exchange. Selection here
+    /// is derived only from that actual held request, not caller command DATA.
+    pub fn assert_launch_command(
+        &mut self,
+        held: &reverie_host::worker_reports::HeldProtectedWorkerLaunch,
+    ) -> Result<()> {
+        let result = (|| {
+            need(
+                !self.command_attempted,
+                "RESOURCE_RAM_COMMAND_ALREADY_ATTEMPTED",
+            )?;
+            self.command_attempted = true;
+            self.assert_release()?;
+            let incoming = held.incoming();
+            let selected = RamLaunchCommandData::from_observed_data(
+                self.request(),
+                incoming.reference(),
+                incoming.connection().request(),
+                incoming.request_digest(),
+            )?;
+            let owner = self.operation.owner_mut();
+            need(
+                incoming.reference().as_str() == owner.claim.operation_id().as_str(),
+                "RESOURCE_RAM_LAUNCH_REFERENCE_CHANGED",
+            )?;
+            held.assert_current(&owner.auth.website.frame.broker.storage.runtime)?;
+            owner.auth.assert_launch_command(&selected)?;
+            held.assert_current(&owner.auth.website.frame.broker.storage.runtime)?;
+            self.assert_live()
+        })();
+        self.operation.owner_mut().auth.website.frame.failed |= result.is_err();
+        result
+    }
     fn assert_release(&self) -> Result<()> {
         Ok(self
             .operation

@@ -17,8 +17,15 @@ struct RamClaimOwner<'a> {
     source_failure: Option<Box<crate::installing_broker::source::RamSourceDraftFailure>>,
 }
 impl RamClaimOwner<'_> {
+    fn continuation(&mut self, expected: ResourceContinuationVerb) -> Result<()> {
+        let ClaimPhase::Claimed { claim, .. } = &self.phase else {
+            return Err(ResourceActorError::Refused("RESOURCE_RAM_CLAIM_REQUIRED"));
+        };
+        self.auth
+            .receive_continuation(claim.operation_id(), expected)
+    }
     fn commit(&mut self) -> Result<crate::reservation_gate::CommittedPolicy> {
-        self.auth.assert_current()?;
+        self.continuation(ResourceContinuationVerb::Prepare)?;
         let ClaimPhase::Claimed { claim, policy } = &mut self.phase else {
             return Err(ResourceActorError::Refused("RESOURCE_RAM_CLAIM_REQUIRED"));
         };
@@ -117,7 +124,7 @@ impl<'a> ClaimedRamOperation<'a> {
     pub fn confirm_publication(&mut self) -> Result<()> {
         let owner = self.owner_mut();
         let result = (|| {
-            owner.auth.assert_current()?;
+            owner.continuation(ResourceContinuationVerb::Publication)?;
             let ClaimPhase::Claimed { claim, policy } = &mut owner.phase else {
                 return Err(ResourceActorError::Refused("RESOURCE_RAM_CLAIM_REQUIRED"));
             };

@@ -5,6 +5,7 @@ use reverie_contracts::resource_config::ResourceIdentitySettings;
 use reverie_store::storage_identity::{self, StorageIdentityConfig};
 use std::time::{SystemTime, UNIX_EPOCH};
 mod claim;
+mod cursor;
 mod preview;
 mod receipt;
 pub use claim::{ClaimedRamOperation, RamClaimFailure, RamPreparationFailure};
@@ -18,6 +19,7 @@ pub struct AuthenticatedResourceOperation<'a> {
     request: ResourceOperationRequest,
     owner: Option<CurrentResourceOwner>,
     checks: usize,
+    cursor: cursor::OperationCursor,
 }
 impl<'a> InstalledResourceWebsite<'a> {
     /// One pending action owns the SAME channel. A future L rendezvous must
@@ -54,6 +56,7 @@ impl<'a> InstalledResourceWebsite<'a> {
             request,
             owner: None,
             checks: 0,
+            cursor: cursor::OperationCursor::default(),
         };
         match operation.assert_current() {
             Ok(()) => Ok(operation),
@@ -111,10 +114,22 @@ impl AuthenticatedResourceOperation<'_> {
         self.checks += 1;
         need(self.checks <= 256, "RESOURCE_ACTOR_CHALLENGE_BOUND")?;
         let nonce = reverie_host::resource_facts::fresh_owner_nonce()?;
-        frame.send(&self.request.owner_challenge(&nonce)?, end)?;
-        let current = self
-            .request
-            .parse_owner_reply(&frame.receive(end)?, &nonce)?;
+        let challenge = match self.cursor.current() {
+            Some(next) => self.request.continuation_owner_challenge(next, &nonce)?,
+            None => self.request.owner_challenge(&nonce)?,
+        };
+        frame.send(&challenge, end)?;
+        let reply = frame.receive(end)?;
+        let current = match self.cursor.current() {
+            Some(next) => self
+                .request
+                .parse_continuation_owner_reply(&reply, next, &nonce)?,
+            None => self.request.parse_owner_reply(&reply, &nonce)?,
+        };
+        self.validate_owner(current)
+    }
+    fn validate_owner(&mut self, current: CurrentResourceOwner) -> Result<()> {
+        let frame = &mut self.website.frame;
         expiry(&current)?;
         let settings = ResourceIdentitySettings::capture_worker_config(
             frame
