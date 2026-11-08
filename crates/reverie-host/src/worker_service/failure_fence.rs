@@ -43,7 +43,7 @@ pub fn record_service_failure(source: &Path) -> Result<()> {
     let written = state
         .write_all(b"NATIVE_BROKER_UNSETTLED_ORIGINAL_FAILURE_V1\n")
         .and_then(|()| state.sync_all());
-    let closed = native::close(state).map_err(|e| std::io::Error::other(e));
+    let closed = native::close(state).map_err(std::io::Error::other);
     finalized(written.map_err(Into::into), closed.map_err(Into::into))?;
     let parent = native::open_at(
         libc::AT_FDCWD,
