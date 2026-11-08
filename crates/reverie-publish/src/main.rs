@@ -118,6 +118,19 @@ fn main() -> ExitCode {
 }
 
 fn check(o: &Check) -> Result<Value, String> {
+    let approval = o.approval.as_deref().map(Approval::load).transpose()?;
+    Ok(verify_packet(o, approval.as_ref())?.0)
+}
+
+/// A packet's title and body.
+type PacketText = (String, String);
+
+/// Every packet check, with `approval` (already loaded, never read again) verified against the
+/// exact head, base, title and body; returns the summary and the packet's title and body.
+fn verify_packet(
+    o: &Check,
+    approval: Option<&Approval>,
+) -> Result<(Value, Option<PacketText>), String> {
     let name = short_name(&o.repo)?;
     let lists =
         Lists::load(&o.lists, &o.lists_sha256).map_err(|e| format!("namegate lists: {e:?}"))?;
@@ -157,8 +170,7 @@ fn check(o: &Check) -> Result<Value, String> {
     if !git.succeeds(["merge-tree", "--write-tree", &base, &head])? {
         return Err("the head does not merge cleanly with the base".into());
     }
-    if let Some(path) = &o.approval {
-        let approval = Approval::load(path)?;
+    if let Some(approval) = approval {
         approval.verify(
             &git,
             &o.repo,
@@ -167,7 +179,7 @@ fn check(o: &Check) -> Result<Value, String> {
             text.as_ref().map(|(t, b)| (t.as_str(), b.as_str())),
         )?;
     }
-    Ok(json!({
+    let summary = json!({
         "verified": true,
         "repo": o.repo,
         "head": head,
@@ -178,8 +190,9 @@ fn check(o: &Check) -> Result<Value, String> {
         "addedLines": checked.iter().map(|c| c.added_lines).sum::<usize>(),
         "title": text.as_ref().map(|(t, _)| t.clone()),
         "bodySha256": text.as_ref().map(|(_, b)| sha256_hex(b.as_bytes())),
-        "approval": o.approval.is_some(),
-    }))
+        "approval": approval.is_some(),
+    });
+    Ok((summary, text))
 }
 
 fn merge(o: &Merge) -> Result<Value, String> {
@@ -188,17 +201,19 @@ fn merge(o: &Merge) -> Result<Value, String> {
         .approval
         .as_ref()
         .ok_or("merging needs --approval")?;
-    if Approval::load(path)?.merge_pr != Some(o.pr) {
+    // One read of the record: the merge permission and every object and text check below use this
+    // same value, so records swapped at the path between reads can never combine their permissions.
+    let approval = Approval::load(path)?;
+    if approval.merge_pr != Some(o.pr) {
         return Err(format!(
             "the approval record does not authorize merging PR {}",
             o.pr
         ));
     }
     // Every packet check, the approval against the exact head, base, title and body included.
-    let mut summary = check(&o.check)?;
-    let (title, body) = Packet::open(&o.check.packet, &o.check.seal)?
-        .text()?
-        .ok_or("merging needs the reviewed TITLE.txt and BODY.md in the packet")?;
+    let (mut summary, text) = verify_packet(&o.check, Some(&approval))?;
+    let (title, body) =
+        text.ok_or("merging needs the reviewed TITLE.txt and BODY.md in the packet")?;
     let name = short_name(&o.check.repo)?;
     let lists = Lists::load(&o.check.lists, &o.check.lists_sha256)
         .map_err(|e| format!("namegate lists: {e:?}"))?;

@@ -622,3 +622,57 @@ fn a_merge_that_does_not_read_back_as_a_merge_commit_of_the_head_is_reported() {
         has(&case.records(), &["INTENT.json", "MERGE-RESULT.json"]);
     }
 }
+
+#[test]
+fn records_swapped_at_the_approval_path_never_combine_into_a_merge() {
+    // A names PR 7 but approves another head; B approves the exact publication but no merge.
+    // Each alone refuses before any request. A FIFO hands A to a reader and, before that read
+    // ends, puts B at the same path: a second read of the path would combine the two.
+    let case = Case::new("approval-swap");
+    let approval = case.root.join("approval.json");
+    let (api, state) = serve(Hub::new(&case));
+    case.approve(None);
+    let publication_only = fs::read(&approval).unwrap();
+    let work = case.root.join("work");
+    let mut wrong_target: Value = serde_json::from_slice(&publication_only).unwrap();
+    wrong_target["mergePr"] = json!(7);
+    wrong_target["head"] = json!(case.base);
+    wrong_target["tree"] = json!(git(
+        &work,
+        &["rev-parse", &format!("{}^{{tree}}", case.base)]
+    ));
+    wrong_target["rawCommitSha256"] = json!(sha256_hex(&bytes(
+        &work,
+        &["cat-file", "commit", &case.base]
+    )));
+    wrong_target["patchSha256"] = json!(sha256_hex(&bytes(
+        &work,
+        &["diff", "--binary", "--full-index", &case.base, &case.base]
+    )));
+    let merge_wrong_target = wrong_target.to_string().into_bytes();
+    fs::write(&approval, &merge_wrong_target).unwrap();
+    refused(&case.run(&api, &[]), "another head");
+    fs::write(&approval, &publication_only).unwrap();
+    refused(&case.run(&api, &[]), "does not authorize merging PR 7");
+    assert!(requests(&state).is_empty());
+    fs::remove_file(&approval).unwrap();
+    nix::unistd::mkfifo(
+        &approval,
+        nix::sys::stat::Mode::S_IRUSR | nix::sys::stat::Mode::S_IWUSR,
+    )
+    .unwrap();
+    let swap_path = approval.clone();
+    let writer = thread::spawn(move || {
+        let mut fifo = fs::OpenOptions::new().write(true).open(&swap_path).unwrap();
+        fifo.write_all(&merge_wrong_target).unwrap();
+        fs::rename(&swap_path, swap_path.with_extension("held-fifo")).unwrap();
+        fs::write(&swap_path, &publication_only).unwrap();
+        drop(fifo);
+    });
+    let out = case.run(&api, &[]);
+    writer.join().unwrap();
+    // The one record read (A) refuses on its own head; nothing reaches GitHub.
+    refused(&out, "another head");
+    assert!(writes(&state).is_empty());
+    assert!(!case.records().exists());
+}

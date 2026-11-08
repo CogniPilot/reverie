@@ -124,6 +124,11 @@ pub fn public_texts(
     Ok(texts)
 }
 
+/// A full lowercase commit id.
+fn full_id(id: &str) -> bool {
+    id.len() == 40 && id.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+}
+
 /// The merge's own reply: GitHub must say it merged, with a full commit id. Returns that id.
 pub fn merge_reply(result: &Value) -> Result<String, String> {
     let sha = str_at(result, "/sha").unwrap_or("");
@@ -154,13 +159,19 @@ pub fn merged(
             "PR {number} does not read back merged at --head by {sha}; inspect PR-READBACK.json"
         ));
     }
-    let parents: Vec<&str> = commit["parents"]
+    // Exactly the two entries GitHub sent, each a full commit id: a malformed or extra entry is
+    // refused, never skipped.
+    let parents: Option<Vec<&str>> = commit["parents"]
         .as_array()
-        .into_iter()
-        .flatten()
-        .filter_map(|p| p["sha"].as_str())
-        .collect();
-    if str_at(commit, "/sha") != Some(sha) || parents.len() != 2 || parents[1] != head {
+        .filter(|entries| entries.len() == 2)
+        .and_then(|entries| {
+            entries
+                .iter()
+                .map(|entry| entry["sha"].as_str().filter(|id| full_id(id)))
+                .collect()
+        });
+    let second_is_head = parents.as_deref().is_some_and(|p| p[1] == head);
+    if str_at(commit, "/sha") != Some(sha) || !second_is_head {
         return Err(
             "the merge does not read back as a merge commit of --head; inspect MERGE-COMMIT-READBACK.json"
                 .into(),
@@ -285,6 +296,24 @@ mod tests {
         let base = "3333333333333333333333333333333333333333";
         let commit = |parents: &[&str]| json!({ "sha": SHA, "parents": parents.iter().map(|p| json!({ "sha": p })).collect::<Vec<_>>() });
         assert!(merged(&after, &commit(&[base, HEAD]), 7, HEAD, SHA).is_ok());
+        // Malformed, missing or extra parent entries are refused, never skipped.
+        let raw = |parents: Value| json!({ "sha": SHA, "parents": parents });
+        for parents in [
+            json!([{ "sha": base }, { "sha": HEAD }, {}]),
+            json!([{ "sha": base }, { "sha": HEAD }, { "sha": base }]),
+            json!([{ "sha": base }, {}]),
+            json!([{}, { "sha": HEAD }]),
+            json!([{ "sha": "not-a-commit" }, { "sha": HEAD }]),
+            json!([{ "sha": "ABCDEF0123456789ABCDEF0123456789ABCDEF01" }, { "sha": HEAD }]),
+            json!([{ "sha": 7 }, { "sha": HEAD }]),
+            json!({ "sha": HEAD }),
+            Value::Null,
+        ] {
+            assert!(
+                merged(&after, &raw(parents.clone()), 7, HEAD, SHA).is_err(),
+                "{parents}"
+            );
+        }
         // A squash (one parent) or a rebase (head is not a parent) is not a merge commit.
         assert!(merged(&after, &commit(&[base]), 7, HEAD, SHA).is_err());
         assert!(merged(&after, &commit(&[base, base]), 7, HEAD, SHA).is_err());
