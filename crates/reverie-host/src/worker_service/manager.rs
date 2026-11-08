@@ -15,12 +15,16 @@ impl ObservedUnit {
             need(
                 matches!(
                     key,
-                    "LoadState" | "ActiveState" | "SubState" | "FragmentPath"
+                    "LoadState" | "ActiveState" | "SubState" | "FragmentPath" | "DropInPaths"
                 ) && values.insert(key, value).is_none(),
                 "NATIVE_SERVICE_MANAGER_REPLY",
             )?;
         }
-        need(values.len() == 4, "NATIVE_SERVICE_MANAGER_REPLY")?;
+        need(values.len() == 5, "NATIVE_SERVICE_MANAGER_REPLY")?;
+        need(
+            values["DropInPaths"].is_empty(),
+            "NATIVE_SERVICE_DROPIN_OVERRIDE_REFUSED",
+        )?;
         Ok(Self {
             load: values["LoadState"].into(),
             active: values["ActiveState"].into(),
@@ -97,6 +101,7 @@ impl State {
             "--property=ActiveState",
             "--property=SubState",
             "--property=FragmentPath",
+            "--property=DropInPaths",
         ])?;
         ObservedUnit::decode(&raw)
     }

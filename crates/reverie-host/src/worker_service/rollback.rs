@@ -36,6 +36,7 @@ impl State {
             )?;
         }
         self.begin_attempt(&WorkerServiceAction::Rollback { start_previous })?;
+        self.assert_no_native_actor()?;
         self.restore_generation()?;
         // No start/reload occurs while an original filesystem close remains unknown.
         self.close_metadata()?;
@@ -86,7 +87,14 @@ impl State {
         finalized(unit_synced, folder_synced)
     }
     fn assert_rollback_quiescent(&self) -> Result<()> {
-        for name in ["native-running", "native-failure", "pending"] {
+        self.assert_no_native_actor()?;
+        absent(
+            &self.folder().join("pending"),
+            "NATIVE_SERVICE_ROLLBACK_REQUIRES_QUIESCENCE",
+        )
+    }
+    pub(super) fn assert_no_native_actor(&self) -> Result<()> {
+        for name in ["native-running", "native-failure"] {
             absent(
                 &self.folder().join(name),
                 "NATIVE_SERVICE_ROLLBACK_REQUIRES_QUIESCENCE",

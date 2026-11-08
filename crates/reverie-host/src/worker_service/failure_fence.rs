@@ -13,6 +13,7 @@ pub(super) fn path(source: &Path) -> Result<PathBuf> {
 }
 pub fn assert_no_service_failure(source: &Path) -> Result<()> {
     let path = path(source)?;
+    assert_generation_not_retired(&path.with_file_name("rolled-back-native-unit"))?;
     assert_pending_permits_startup(&path.with_file_name("pending"))?;
     if fs::symlink_metadata(path.with_file_name("native-running")).is_ok() {
         return Err(WorkerServiceError::Refused(
@@ -57,7 +58,7 @@ pub fn record_service_failure(source: &Path) -> Result<()> {
     )
 }
 
-fn assert_pending_permits_startup(path: &Path) -> Result<()> {
+pub(super) fn assert_pending_permits_startup(path: &Path) -> Result<()> {
     let metadata = match fs::symlink_metadata(path) {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
         Err(error) => return Err(error.into()),
@@ -121,5 +122,24 @@ mod tests {
             fs::remove_file(&path).unwrap();
         }
         fs::remove_dir(root).unwrap();
+    }
+}
+
+pub(super) fn assert_generation_not_retired(path: &Path) -> Result<()> {
+    match fs::symlink_metadata(path) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error.into()),
+        Ok(_) => Err(WorkerServiceError::Refused(
+            "NATIVE_SERVICE_GENERATION_ROLLED_BACK",
+        )),
+    }
+}
+pub(super) fn assert_failure_absent(path: &Path) -> Result<()> {
+    match fs::symlink_metadata(path) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error.into()),
+        Ok(_) => Err(WorkerServiceError::Refused(
+            "NATIVE_SERVICE_PREVIOUS_FAILURE_REQUIRES_RECOVERY",
+        )),
     }
 }

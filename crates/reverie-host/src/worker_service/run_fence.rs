@@ -44,6 +44,10 @@ impl NativeServiceRunAttempt {
         }
     }
     fn begin(&mut self) -> Result<()> {
+        self.publish()?;
+        self.assert_admission()
+    }
+    fn publish(&mut self) -> Result<()> {
         let folder = self.path.parent().expect("fixed run parent");
         fs::DirBuilder::new()
             .recursive(true)
@@ -70,6 +74,13 @@ impl NativeServiceRunAttempt {
         file.sync_all()?;
         self.parent.as_ref().expect("retained parent").sync_all()?;
         Ok(())
+    }
+    fn assert_admission(&self) -> Result<()> {
+        super::failure_fence::assert_pending_permits_startup(&self.path.with_file_name("pending"))?;
+        super::failure_fence::assert_failure_absent(&self.path.with_file_name("native-failure"))?;
+        super::failure_fence::assert_generation_not_retired(
+            &self.path.with_file_name("rolled-back-native-unit"),
+        )
     }
     pub fn finish_known(mut self) -> std::result::Result<(), Box<NativeServiceRunFailure>> {
         let result = self.finish();
@@ -155,5 +166,57 @@ mod tests {
         first.finish_known().unwrap();
         assert!(!path.exists());
         fs::remove_dir(root).unwrap();
+    }
+
+    #[test]
+    fn paired_publications_refuse_racing_rollback_and_retired_generation_after_aba() {
+        let (mut state, root, _) = super::super::tests::rollback_fixture();
+        state
+            .begin_attempt(&WorkerServiceAction::Rollback {
+                start_previous: false,
+            })
+            .unwrap();
+        state.assert_no_native_actor().unwrap();
+        let mut late = NativeServiceRunAttempt::unopened(state.folder().join("native-running"));
+        late.publish().unwrap();
+        assert!(late.assert_admission().is_err());
+        assert!(state.assert_no_native_actor().is_err());
+        let current = fs::read_link(state.home.join(".config/systemd/user").join(UNIT)).unwrap();
+        assert_eq!(current, state.unit);
+        assert!(state.close().is_ok());
+        // Denial-only snapshot: the old pending NAME is absent but retained
+        // retirement history remains. This does not mint a rollback receipt.
+        std::os::unix::fs::symlink(&state.unit, state.folder().join("rolled-back-native-unit"))
+            .unwrap();
+        fs::remove_file(state.folder().join("pending")).unwrap();
+        assert!(matches!(
+            late.assert_admission(),
+            Err(WorkerServiceError::Refused(
+                "NATIVE_SERVICE_GENERATION_ROLLED_BACK"
+            ))
+        ));
+        native::close(late.file.take().unwrap()).unwrap();
+        native::close(late.parent.take().unwrap()).unwrap();
+        fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn native_publication_winner_prevents_rollback_before_generation_move() {
+        let (mut state, root, _) = super::super::tests::rollback_fixture();
+        let mut run = NativeServiceRunAttempt::unopened(state.folder().join("native-running"));
+        run.begin().unwrap();
+        state
+            .begin_attempt(&WorkerServiceAction::Rollback {
+                start_previous: false,
+            })
+            .unwrap();
+        assert!(state.assert_no_native_actor().is_err());
+        assert_eq!(
+            fs::read_link(state.home.join(".config/systemd/user").join(UNIT)).unwrap(),
+            state.unit
+        );
+        assert!(state.close().is_ok());
+        native::close(run.file.take().unwrap()).unwrap();
+        native::close(run.parent.take().unwrap()).unwrap();
+        fs::remove_dir_all(root).unwrap();
     }
 }

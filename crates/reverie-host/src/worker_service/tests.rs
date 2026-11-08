@@ -4,10 +4,10 @@ use super::*;
 #[test]
 fn installed_generation_must_be_inactive_and_exact_before_replacement() {
     let old = Path::new("/nix/store/old-worker/share/systemd/user/reverie-worker-broker.service");
-    assert!(ObservedUnit::decode("LoadState=loaded\nActiveState=inactive\nSubState=dead\nFragmentPath=/nix/store/old-worker/share/systemd/user/reverie-worker-broker.service\n").unwrap().require_replaceable(Some(old)).is_ok());
+    assert!(ObservedUnit::decode("LoadState=loaded\nActiveState=inactive\nSubState=dead\nFragmentPath=/nix/store/old-worker/share/systemd/user/reverie-worker-broker.service\nDropInPaths=\n").unwrap().require_replaceable(Some(old)).is_ok());
     for raw in [
-        "LoadState=loaded\nActiveState=active\nSubState=running\nFragmentPath=/nix/store/old-worker/share/systemd/user/reverie-worker-broker.service\n",
-        "LoadState=loaded\nActiveState=inactive\nSubState=dead\nFragmentPath=/etc/systemd/user/foreign.service\n",
+        "LoadState=loaded\nActiveState=active\nSubState=running\nFragmentPath=/nix/store/old-worker/share/systemd/user/reverie-worker-broker.service\nDropInPaths=\n",
+        "LoadState=loaded\nActiveState=inactive\nSubState=dead\nFragmentPath=/etc/systemd/user/foreign.service\nDropInPaths=\n",
     ] {
         assert!(
             ObservedUnit::decode(raw)
@@ -18,7 +18,7 @@ fn installed_generation_must_be_inactive_and_exact_before_replacement() {
     }
     assert!(
         ObservedUnit::decode(
-            "LoadState=not-found\nActiveState=inactive\nSubState=dead\nFragmentPath=\n"
+            "LoadState=not-found\nActiveState=inactive\nSubState=dead\nFragmentPath=\nDropInPaths=\n"
         )
         .unwrap()
         .require_replaceable(None)
@@ -59,7 +59,7 @@ fn actual_captured_active_manager_refuses_before_any_selection_write() {
 
 #[test]
 fn completed_job_requires_actual_action_specific_state() {
-    let dead=ObservedUnit::decode("LoadState=loaded\nActiveState=inactive\nSubState=dead\nFragmentPath=/nix/store/known/unit\n").unwrap();
+    let dead=ObservedUnit::decode("LoadState=loaded\nActiveState=inactive\nSubState=dead\nFragmentPath=/nix/store/known/unit\nDropInPaths=\n").unwrap();
     assert!(
         dead.require_action_finished(&WorkerServiceAction::Stop)
             .is_ok()
@@ -68,7 +68,7 @@ fn completed_job_requires_actual_action_specific_state() {
         dead.require_action_finished(&WorkerServiceAction::Start)
             .is_err()
     );
-    let live=ObservedUnit::decode("LoadState=loaded\nActiveState=active\nSubState=running\nFragmentPath=/nix/store/known/unit\n").unwrap();
+    let live=ObservedUnit::decode("LoadState=loaded\nActiveState=active\nSubState=running\nFragmentPath=/nix/store/known/unit\nDropInPaths=\n").unwrap();
     assert!(
         live.require_action_finished(&WorkerServiceAction::Start)
             .is_ok()
@@ -441,7 +441,7 @@ fn actual_rollback_starts_previous_only_when_explicitly_selected() {
     assert!(finish.is_ok());
     assert!(started);
 }
-fn rollback_fixture() -> (State, PathBuf, PathBuf) {
+pub(super) fn rollback_fixture() -> (State, PathBuf, PathBuf) {
     use sha2::Digest;
     let (state, root, program) = fixture_mode("native-worker-manager-rollback");
     prepare_predecessor(&state);
