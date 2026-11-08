@@ -1,17 +1,62 @@
 use super::*;
-struct InstalledGuard(Weak<Inner>);
+struct InstalledGuard {
+    gate: Weak<Inner>,
+    purpose: JournalPurpose,
+}
+enum JournalPurpose {
+    Ordinary,
+    Ram(Weak<super::ram_authority::RamJournalAuthority>),
+    Unavailable,
+}
 pub(super) fn installed(gate: &Arc<Inner>) -> Arc<dyn ScopeGuard> {
-    Arc::new(InstalledGuard(Arc::downgrade(gate)))
+    let purpose = match gate.state.lock() {
+        Ok(state) => match state.active.as_ref() {
+            Some(active) => match active.ram_authority.lock() {
+                Ok(selected) => selected.as_ref().map_or(JournalPurpose::Ordinary, |own| {
+                    JournalPurpose::Ram(own.clone())
+                }),
+                Err(_) => JournalPurpose::Unavailable,
+            },
+            None => JournalPurpose::Ordinary,
+        },
+        Err(_) => JournalPurpose::Unavailable,
+    };
+    Arc::new(InstalledGuard {
+        gate: Arc::downgrade(gate),
+        purpose,
+    })
+}
+impl InstalledGuard {
+    fn assert_purpose(&self, gate: &Arc<Inner>, scope: &OperationScope) -> Result<()> {
+        let active = gate.held(Some(scope))?;
+        let selected = active
+            .ram_authority
+            .try_lock()
+            .map_err(|_| GateError::Refused("RESOURCE_RAM_JOURNAL_UNAVAILABLE"))?
+            .clone();
+        match (&self.purpose, selected) {
+            (JournalPurpose::Ordinary, None) => Ok(()),
+            (JournalPurpose::Ram(original), Some(current)) if Weak::ptr_eq(original, &current) => {
+                original
+                    .upgrade()
+                    .ok_or(GateError::Refused("RESOURCE_RAM_JOURNAL_PURPOSE_CHANGED"))?
+                    .assert_current(gate, &active)
+            }
+            _ => Err(GateError::Refused("RESOURCE_RAM_JOURNAL_PURPOSE_CHANGED")),
+        }
+    }
 }
 impl ScopeGuard for InstalledGuard {
     fn assert_scope(&self, scope: &OperationScope) -> std::result::Result<(), JournalError> {
         let gate = self
-            .0
+            .gate
             .upgrade()
             .ok_or_else(|| JournalError::refusal("RESERVATION_ADMISSION_LOCK_REQUIRED"))?;
         let checked = (|| {
+            self.assert_purpose(&gate, scope)?;
             gate.guard(Some(scope))?;
-            gate.assert_policy_ack()
+            gate.assert_policy_ack()?;
+            self.assert_purpose(&gate, scope)
         })();
         checked.map_err(|error| JournalError::guard_failure(error.code(), error))
     }
@@ -20,11 +65,10 @@ impl ScopeGuard for InstalledGuard {
         scope: &OperationScope,
     ) -> std::result::Result<(), JournalError> {
         let gate = self
-            .0
+            .gate
             .upgrade()
             .ok_or_else(|| JournalError::refusal("RESERVATION_ADMISSION_LOCK_REQUIRED"))?;
-        gate.held(Some(scope))
-            .map(|_| ())
+        self.assert_purpose(&gate, scope)
             .map_err(|error| JournalError::guard_failure(error.code(), error))
     }
 }

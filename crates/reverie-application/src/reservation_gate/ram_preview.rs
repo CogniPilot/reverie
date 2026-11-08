@@ -32,7 +32,7 @@ impl RamDraftPreview {
 pub(super) struct RamPreviewGuard<'a, 'q> {
     gate: &'a ReservationGate,
     operation: &'a AuthenticatedResourceOperation<'q>,
-    pin: reverie_host::worker_reports::ResourceJournalPin,
+    journal: Arc<super::ram_authority::RamJournalAuthority>,
 }
 impl RamPreviewGuard<'_, '_> {
     pub(super) fn check_profile(
@@ -59,9 +59,8 @@ impl RamPreviewGuard<'_, '_> {
             Arc::ptr_eq(&self.gate.inner, inner),
             "RESOURCE_ACTOR_GATE_CHANGED",
         )?;
-        self.pin
-            .assert_current()
-            .map_err(|error| GateError::Actor(Box::new(error)))?;
+        let active = inner.held(None)?;
+        self.journal.assert_current(inner, &active)?;
         self.operation
             .assert_reservation_gate(self.gate)
             .map_err(|error| GateError::Refused(error.code()))?;
@@ -129,16 +128,14 @@ impl ReservationGate {
         let authority = RamPreviewGuard {
             gate: self,
             operation,
-            pin: operation
-                .retain_ram_journal_pin(self)
-                .map_err(|error| GateError::Refused(error.code()))?,
+            journal: super::ram_authority::RamJournalAuthority::capture(self, operation)?,
         };
-        authority.check(&self.inner)?;
         let bounds = operation
             .ram_admission_bounds(self)
             .map_err(|error| GateError::Refused(error.code()))?;
         let admission = self.inner.admit(bounds)?;
         let body = (|| {
+            admission.bind_ram_authority(&authority.journal)?;
             authority.check(&self.inner)?;
             self.inner.select_profile_checked(
                 &employee,

@@ -32,6 +32,7 @@ mod preparation_stop;
 pub use preparation_start::{ProtectedStartIntent, StartQualificationFacts};
 pub use preparation_stop::SourceStopFacts;
 mod profile_selection;
+mod ram_authority;
 mod ram_preview;
 pub use ram_preview::RamDraftPreview;
 mod recovery;
@@ -105,6 +106,7 @@ struct Active {
     policy_ack: Mutex<Option<Arc<preparation_policy::PolicyAckFence>>>,
     deadline: Mutex<Option<Instant>>,
     gpu_transition: Mutex<Option<Arc<gpu_access::TransitionRecord>>>,
+    ram_authority: Mutex<Option<Weak<ram_authority::RamJournalAuthority>>>,
 }
 impl ReservationGate {
     /// Stop/settle the same persistent owned metadata-client context before an

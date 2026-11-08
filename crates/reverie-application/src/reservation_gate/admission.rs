@@ -81,6 +81,7 @@ impl Inner {
             deadline: Mutex::new(end),
             policy_ack: Mutex::new(None),
             gpu_transition: Mutex::new(None),
+            ram_authority: Mutex::new(None),
         });
         #[cfg(test)]
         {
@@ -181,6 +182,40 @@ impl Inner {
     }
 }
 impl Admission {
+    pub(super) fn bind_ram_authority(
+        &self,
+        authority: &Arc<super::ram_authority::RamJournalAuthority>,
+    ) -> Result<()> {
+        let active = self.gate.held(None)?;
+        need(
+            Arc::ptr_eq(&active, &self.active),
+            "RESERVATION_ADMISSION_LOCK_REQUIRED",
+        )?;
+        let mut selected = self
+            .active
+            .ram_authority
+            .lock()
+            .map_err(|_| GateError::Refused("RESOURCE_RAM_JOURNAL_UNAVAILABLE"))?;
+        need(selected.is_none(), "RESOURCE_RAM_JOURNAL_SCOPE_RETAINED")?;
+        authority.bind(&self.gate, &self.active)?;
+        *selected = Some(Arc::downgrade(authority));
+        Ok(())
+    }
+    fn revoke_ram_authority(&self) -> Result<()> {
+        let selected = self
+            .active
+            .ram_authority
+            .lock()
+            .map_err(|_| GateError::Refused("RESOURCE_RAM_JOURNAL_UNAVAILABLE"))?
+            .take();
+        match selected {
+            Some(weak) => weak
+                .upgrade()
+                .ok_or(GateError::Refused("RESOURCE_RAM_JOURNAL_PURPOSE_CHANGED"))?
+                .revoke(&self.active),
+            None => Ok(()),
+        }
+    }
     /// Python's context-manager body exception skips success/terminal native
     /// work and proceeds directly to mandatory owned cleanup.
     pub(super) fn conclude<T>(self, result: Result<T>) -> Result<T> {
@@ -241,6 +276,9 @@ impl Admission {
         finalized(result, self.cleanup())
     }
     fn cleanup(&self) -> Result<()> {
+        // Revoke this exact journal purpose before any fallible native close.
+        // Escaped store guards cannot borrow the next admission's authority.
+        let revoked = self.revoke_ram_authority();
         let closed = close_active(&self.active);
         let released = match self.gate.state.lock() {
             Ok(mut state) => need(
@@ -264,7 +302,7 @@ impl Admission {
             }
         };
         self.gate.changed.notify_all();
-        finalized(closed, released)
+        finalized(revoked, finalized(closed, released))
     }
 }
 impl Entry {
