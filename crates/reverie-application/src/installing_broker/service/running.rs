@@ -4,6 +4,7 @@ use super::*;
 use reverie_host::worker_reports::{WorkerBrokerListener, WorkerReportError};
 mod handler;
 mod shutdown;
+pub(in crate::installing_broker) use shutdown::ClosedBrokerResources;
 
 #[derive(Debug)]
 pub enum BrokerServiceError {
@@ -14,6 +15,7 @@ pub enum BrokerServiceError {
     Signal(reverie_host::worker_runtime::BrokerSignalError),
     Recovery(RecoveryError),
     Images(ChatImagesError),
+    InstallationOffer(reverie_host::worker_pool::PoolError),
     Shutdown(Vec<BrokerServiceError>),
 }
 impl fmt::Display for BrokerServiceError {
@@ -26,6 +28,7 @@ impl fmt::Display for BrokerServiceError {
             Self::Signal(error) => error.fmt(out),
             Self::Recovery(error) => error.fmt(out),
             Self::Images(error) => error.fmt(out),
+            Self::InstallationOffer(error) => error.fmt(out),
             Self::Shutdown(errors) => write!(
                 out,
                 "WORKER_SERVICE_SHUTDOWN_RETAINED: {}",
@@ -74,17 +77,39 @@ impl std::error::Error for BrokerServiceFailure {}
 impl BrokerServiceStartup {
     /// Recovery already preceded this consuming bind. No readiness is emitted.
     pub fn bind_listener(mut self) -> Result<BrokerService, Box<BrokerStartupFailure>> {
+        if let Err(cause) = self.owner.assert_installation_offer() {
+            return Err(Box::new(BrokerStartupFailure {
+                owner: self.owner,
+                cause,
+            }));
+        }
         let prepared = self.owner.listener.take().expect("same prepared listener");
         match prepared.bind() {
-            Ok(listener) => Ok(BrokerService {
-                startup: self,
-                listener,
-            }),
-            Err(cause) => Err(Box::new(BrokerStartupFailure {
-                owner: self.owner,
-                cause: BrokerStartupCause::Listener(cause),
-            })),
+            Ok(listener) => self.owner.bound_listener = Some(listener),
+            Err(cause) => {
+                return Err(Box::new(BrokerStartupFailure {
+                    owner: self.owner,
+                    cause: BrokerStartupCause::Listener(cause),
+                }));
+            }
         }
+        // The real bound descriptor/name is retained BEFORE this fallible
+        // original-deadline/origin check; failure returns the whole owner.
+        if let Err(cause) = self.owner.assert_installation_offer() {
+            return Err(Box::new(BrokerStartupFailure {
+                owner: self.owner,
+                cause,
+            }));
+        }
+        let listener = self
+            .owner
+            .bound_listener
+            .take()
+            .expect("same bound listener");
+        Ok(BrokerService {
+            startup: self,
+            listener,
+        })
     }
 }
 impl BrokerService {

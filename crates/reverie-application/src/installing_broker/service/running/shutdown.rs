@@ -1,6 +1,17 @@
 //! SIGTERM/service finally does not secretly issue C stop-laptops. Actual
 //! runtime resources must independently close; unresolved owners stay retained.
 use super::*;
+
+/// Created only at the checked core-service close point below. This borrows
+/// the actual Arc; it cannot be constructed from wire data or metadata closure.
+pub(in crate::installing_broker) struct ClosedBrokerResources<'a> {
+    broker: &'a Arc<InstallingBroker>,
+}
+impl ClosedBrokerResources<'_> {
+    pub(in crate::installing_broker) fn same_broker(&self, broker: &Arc<InstallingBroker>) -> bool {
+        Arc::ptr_eq(self.broker, broker)
+    }
+}
 impl BrokerService {
     pub(super) fn shutdown(
         &mut self,
@@ -51,6 +62,15 @@ impl BrokerService {
             errors.push(BrokerServiceError::Signal(error));
         }
         if errors.is_empty() {
+            // Every actual core owner above is known closed, including Runtime
+            // and signals. Metadata closure alone cannot create this witness.
+            let closed = ClosedBrokerResources { broker };
+            if let Some(offer) = &mut self.startup.owner.installation_offer
+                && let Err(error) = offer.close_after_service(&closed)
+            {
+                errors.push(BrokerServiceError::InstallationOffer(error));
+                return Err(());
+            }
             Ok(BrokerServiceClosed {
                 termination_signal: signal,
             })

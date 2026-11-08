@@ -3,11 +3,15 @@
 //! owner is not yet a runnable all-verb broker or a readiness acknowledgement.
 use super::*;
 use reverie_host::{
-    worker_reports::{BrokerListenerError, BrokerListenerFailure, PreparedBrokerListener},
+    worker_reports::{
+        BrokerListenerError, BrokerListenerFailure, PreparedBrokerListener, WorkerBrokerListener,
+    },
     worker_runtime::{BrokerSignalFailure, BrokerSignals},
 };
 use std::{fmt, sync::atomic::Ordering, time::Instant};
+mod installation_offer;
 mod running;
+pub(super) use running::ClosedBrokerResources;
 #[cfg(test)]
 mod tests;
 pub use running::{BrokerService, BrokerServiceClosed, BrokerServiceError, BrokerServiceFailure};
@@ -15,10 +19,13 @@ struct StartupOwner {
     broker: Arc<InstallingBroker>,
     signals: Option<BrokerSignals>,
     listener: Option<PreparedBrokerListener>,
+    bound_listener: Option<WorkerBrokerListener>,
+    installation_offer: Option<BrokerInstallationOffer>,
 }
 #[derive(Debug)]
 pub enum BrokerStartupCause {
     AlreadyAttempted,
+    InstallationOffer(Box<BrokerInstallationOfferCause>),
     Configuration(Box<GateError>),
     Signal(Box<BrokerSignalFailure>),
     Pool(Box<CreationBudgetError>),
@@ -29,6 +36,7 @@ impl fmt::Display for BrokerStartupCause {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::AlreadyAttempted => f.write_str("WORKER_BROKER_SERVICE_ALREADY_ATTEMPTED"),
+            Self::InstallationOffer(error) => error.fmt(f),
             Self::Configuration(error) => error.fmt(f),
             Self::Signal(error) => error.fmt(f),
             Self::Pool(error) => error.fmt(f),
@@ -41,6 +49,7 @@ impl std::error::Error for BrokerStartupCause {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::AlreadyAttempted => None,
+            Self::InstallationOffer(error) => Some(error.as_ref()),
             Self::Configuration(error) => Some(error.as_ref()),
             Self::Signal(error) => Some(error.as_ref()),
             Self::Pool(error) => Some(error.as_ref()),
@@ -90,11 +99,22 @@ impl InstallingBroker {
     pub fn prepare_shared_service(
         self: &Arc<Self>,
     ) -> Result<BrokerServiceStartup, Box<BrokerStartupFailure>> {
+        self.prepare_owned_service(None)
+    }
+    fn prepare_owned_service(
+        self: &Arc<Self>,
+        installation_offer: Option<BrokerInstallationOffer>,
+    ) -> Result<BrokerServiceStartup, Box<BrokerStartupFailure>> {
         let mut owner = StartupOwner {
             broker: Arc::clone(self),
             signals: None,
             listener: None,
+            bound_listener: None,
+            installation_offer,
         };
+        if let Err(cause) = owner.assert_installation_offer_broker() {
+            return Err(Box::new(BrokerStartupFailure { owner, cause }));
+        }
         if self
             .service_start_claimed
             .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
@@ -113,6 +133,7 @@ impl InstallingBroker {
 }
 impl StartupOwner {
     fn prepare(&mut self) -> Result<RecoverySummary, BrokerStartupCause> {
+        self.assert_installation_offer()?;
         let runtime = &self.broker.storage.runtime;
         self.signals = Some(
             runtime
@@ -131,14 +152,23 @@ impl StartupOwner {
                 .prepare_broker_listener(snapshot.envelope())
                 .map_err(BrokerStartupCause::Listener)?,
         );
-        self.broker
+        let recovered = self
+            .broker
             .recover_laptops()
-            .map_err(|error| BrokerStartupCause::Recovery(Box::new(error)))
+            .map_err(|error| BrokerStartupCause::Recovery(Box::new(error)))?;
+        self.assert_installation_offer()?;
+        Ok(recovered)
     }
     fn close_listener_component(&mut self) -> Result<(), BrokerListenerError> {
-        self.listener
+        let prepared = self
+            .listener
             .as_mut()
-            .map_or(Ok(()), PreparedBrokerListener::close)
+            .map_or(Ok(()), PreparedBrokerListener::close);
+        let bound = self
+            .bound_listener
+            .as_mut()
+            .map_or(Ok(()), WorkerBrokerListener::close);
+        combine_listener_close(prepared, bound)
     }
 }
 impl BrokerServiceStartup {
@@ -192,13 +222,20 @@ impl BrokerStartupFailure {
             BrokerStartupCause::Listener(error) => error.close(),
             _ => Ok(()),
         };
-        match (current, failed) {
-            (Ok(()), Ok(())) => Ok(()),
-            (Err(error), Ok(())) | (Ok(()), Err(error)) => Err(error),
-            (Err(primary), Err(secondary)) => Err(BrokerListenerError::Finalization {
-                primary: Box::new(primary),
-                secondary: Box::new(secondary),
-            }),
-        }
+        combine_listener_close(current, failed)
+    }
+}
+
+fn combine_listener_close(
+    first: Result<(), BrokerListenerError>,
+    second: Result<(), BrokerListenerError>,
+) -> Result<(), BrokerListenerError> {
+    match (first, second) {
+        (Ok(()), Ok(())) => Ok(()),
+        (Err(error), Ok(())) | (Ok(()), Err(error)) => Err(error),
+        (Err(primary), Err(secondary)) => Err(BrokerListenerError::Finalization {
+            primary: Box::new(primary),
+            secondary: Box::new(secondary),
+        }),
     }
 }
