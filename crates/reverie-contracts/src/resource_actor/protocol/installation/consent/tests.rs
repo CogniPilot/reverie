@@ -14,8 +14,20 @@ fn request() -> Json {
 fn human(value: &Json) -> HumanFrame {
     HumanFrame::decode(&serde_json::to_vec(value).unwrap()).unwrap()
 }
+// Negative wire cases may be refused by the outer safe-integer codec before
+// the inner consent schema. Preserve both real rejection boundaries.
+fn fallible_human(value: &Json) -> Result<HumanFrame> {
+    HumanFrame::decode(&serde_json::to_vec(value).unwrap()).map_err(frame_error)
+}
 fn decode(value: &Json) -> Result<PoolInstallationConsentRequest> {
-    PoolInstallationConsentRequest::decode(&human(value))
+    PoolInstallationConsentRequest::decode(&fallible_human(value)?)
+}
+fn decode_reply(
+    selected: &PoolInstallationConsentRequest,
+    value: &Json,
+    nonce: &JournalId,
+) -> Result<CurrentPoolInstallationConsent> {
+    selected.parse_owner_reply(&fallible_human(value)?, nonce)
 }
 fn reply() -> Json {
     let mut value = request();
@@ -133,12 +145,7 @@ fn current_reply_refuses_substitution_replay_expiry_coercion_and_extra_grants() 
     ] {
         let mut changed = reply();
         changed[name] = bad;
-        assert!(
-            selected
-                .parse_owner_reply(&human(&changed), &nonce)
-                .is_err(),
-            "{name}"
-        );
+        assert!(decode_reply(&selected, &changed, &nonce).is_err(), "{name}");
     }
     for (name, changed) in [
         ("accountId", json!(OTHER)),
@@ -148,17 +155,13 @@ fn current_reply_refuses_substitution_replay_expiry_coercion_and_extra_grants() 
         let mut value = reply();
         value["principal"][name] = changed;
         assert!(
-            selected.parse_owner_reply(&human(&value), &nonce).is_err(),
+            decode_reply(&selected, &value, &nonce).is_err(),
             "principal {name}"
         );
     }
     let mut missing = reply();
     missing.as_object_mut().unwrap().remove("version");
-    assert!(
-        selected
-            .parse_owner_reply(&human(&missing), &nonce)
-            .is_err()
-    );
+    assert!(decode_reply(&selected, &missing, &nonce).is_err());
 }
 #[test]
 fn employee_approval_and_duplicate_lossless_frames_cannot_substitute_for_global_consent() {
