@@ -139,6 +139,10 @@ impl Fixture {
     }
 
     fn check(&self, seal: &str, head: &str, extra: &[&str]) -> Output {
+        self.check_env(seal, head, extra, &[])
+    }
+
+    fn check_env(&self, seal: &str, head: &str, extra: &[&str], envs: &[(&str, &str)]) -> Output {
         let tree = git(&self.work(), &["rev-parse", &format!("{head}^{{tree}}")]);
         let lists_sha = sha256_hex(LISTS.as_bytes());
         let root = &self.root;
@@ -162,8 +166,40 @@ impl Fixture {
             .arg("--lists")
             .arg(root.join("lists.json"))
             .args(extra)
+            .envs(envs.iter().copied())
             .output()
             .unwrap()
+    }
+
+    /// An approval record for `head` against `base`, covering `title` and `body`.
+    fn approval(&self, head: &str, base: &str, title: &str, body: &str) -> serde_json::Value {
+        let work = self.work();
+        let bytes = |args: &[&str]| {
+            Command::new("git")
+                .args(args)
+                .current_dir(&work)
+                .output()
+                .unwrap()
+                .stdout
+        };
+        serde_json::json!({
+            "publicationAuthorized": true,
+            "repo": "owner/demo",
+            "head": head,
+            "tree": git(&work, &["rev-parse", &format!("{head}^{{tree}}")]),
+            "rawCommitSha256": sha256_hex(&bytes(&["cat-file", "commit", head])),
+            "base": git(&work, &["rev-parse", base]),
+            "patchSha256": sha256_hex(&bytes(&["diff", "--binary", "--full-index", base, head])),
+            "titleSha256": sha256_hex(title.as_bytes()),
+            "bodySha256": sha256_hex(body.as_bytes()),
+            "reviews": ["source GO 0000aaaa"],
+        })
+    }
+
+    fn with_approval(&self, approval: &serde_json::Value) -> String {
+        let path = self.root.join("approval.json");
+        fs::write(&path, approval.to_string()).unwrap();
+        path.to_string_lossy().into_owned()
     }
 }
 
@@ -424,4 +460,179 @@ fn a_merge_main_is_judged_by_what_the_merge_itself_adds() {
         &g.check(&seal, &head, &[]),
         "added lines has blocking names (team)",
     );
+}
+
+#[test]
+fn an_approval_for_another_head_or_base_does_not_cover_the_checked_one() {
+    let f = Fixture::new("approval-other");
+    let first = f.commit("b.txt", "two\n", &format!("Add b\n\n{SIGNOFF}"));
+    let approved = f.approval(&first, "main", "Add b", "Adds b.\n");
+    // An unreviewed second revision on top, with the same title and body.
+    let second = f.commit(
+        "b.txt",
+        "two, changed after review\n",
+        &format!("Change b\n\n{SIGNOFF}"),
+    );
+    let seal = f.seal("Add b", "Adds b.\n");
+    let path = f.with_approval(&approved);
+    refused(
+        &f.check(&seal, &second, &["--approval", &path]),
+        "the approval is for another head",
+    );
+
+    // A record consistent for `second` against `first` does not cover a check against main.
+    let other_base = f.approval(&second, &first, "Add b", "Adds b.\n");
+    let path = f.with_approval(&other_base);
+    refused(
+        &f.check(&seal, &second, &["--approval", &path]),
+        "the approval is for another base",
+    );
+}
+
+#[test]
+fn an_added_line_that_starts_with_plus_plus_is_still_scanned() {
+    let f = Fixture::new("plusplus");
+    let head = f.commit("b.txt", "++zorblat\n", &format!("Add b\n\n{SIGNOFF}"));
+    let seal = f.seal("Add b", "Adds b.\n");
+    refused(
+        &f.check(&seal, &head, &[]),
+        "added lines has blocking names (team)",
+    );
+}
+
+#[test]
+fn a_symlink_anywhere_in_the_packet_refuses() {
+    use std::os::unix::fs::symlink;
+    let f = Fixture::new("symlink-body");
+    let head = f.commit("b.txt", "two\n", &format!("Add b\n\n{SIGNOFF}"));
+    f.seal("Add b", "Adds b.\n");
+    let packet = f.root.join("packet");
+    fs::write(f.root.join("outside.md"), "Adds b.\n").unwrap();
+    fs::remove_file(packet.join("BODY.md")).unwrap();
+    symlink(f.root.join("outside.md"), packet.join("BODY.md")).unwrap();
+    let seal = f.reseal();
+    refused(
+        &f.check(&seal, &head, &[]),
+        "BODY.md: a symlink in the packet is refused",
+    );
+
+    let g = Fixture::new("symlink-sums");
+    let head = g.commit("b.txt", "two\n", &format!("Add b\n\n{SIGNOFF}"));
+    let seal = g.seal("Add b", "Adds b.\n");
+    let packet = g.root.join("packet");
+    fs::rename(packet.join("SHA256SUMS"), g.root.join("SUMS-outside")).unwrap();
+    symlink(g.root.join("SUMS-outside"), packet.join("SHA256SUMS")).unwrap();
+    refused(
+        &g.check(&seal, &head, &[]),
+        "SHA256SUMS: a symlink in the packet is refused",
+    );
+
+    let h = Fixture::new("symlink-dir");
+    let head = h.commit("b.txt", "two\n", &format!("Add b\n\n{SIGNOFF}"));
+    h.seal("Add b", "Adds b.\n");
+    let outside = h.root.join("outside-dir");
+    fs::create_dir_all(&outside).unwrap();
+    fs::write(outside.join("notes.txt"), "kept outside\n").unwrap();
+    symlink(&outside, h.root.join("packet/sub")).unwrap();
+    let packet = h.root.join("packet");
+    let mut sums = fs::read_to_string(packet.join("SHA256SUMS")).unwrap();
+    sums.push_str(&format!(
+        "{}  sub/notes.txt\n",
+        sha256_hex(b"kept outside\n")
+    ));
+    fs::write(packet.join("SHA256SUMS"), &sums).unwrap();
+    let seal = sha256_hex(sums.as_bytes())[..8].to_owned();
+    refused(
+        &h.check(&seal, &head, &[]),
+        "a symlink in the packet is refused",
+    );
+}
+
+#[test]
+fn git_configuration_from_the_environment_cannot_run_a_hook() {
+    use std::os::unix::fs::symlink;
+    let f = Fixture::new("env-hook");
+    let head = f.commit("b.txt", "two\n", &format!("Add b\n\n{SIGNOFF}"));
+    let seal = f.seal("Add b", "Adds b.\n");
+    // A hook that leaves a mark: git runs it with "prepared"/"committed" in the object store.
+    let hooks = f.root.join("hooks");
+    fs::create_dir_all(&hooks).unwrap();
+    let touch = std::env::var_os("PATH")
+        .and_then(|paths| {
+            std::env::split_paths(&paths)
+                .map(|p| p.join("touch"))
+                .find(|p| p.is_file())
+        })
+        .expect("touch on PATH");
+    symlink(touch, hooks.join("reference-transaction")).unwrap();
+    let hooks = hooks.to_string_lossy().into_owned();
+    let envs = [
+        ("GIT_CONFIG_COUNT", "1"),
+        ("GIT_CONFIG_KEY_0", "core.hooksPath"),
+        ("GIT_CONFIG_VALUE_0", hooks.as_str()),
+    ];
+    let out = f.check_env(&seal, &head, &[], &envs);
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    for mark in ["prepared", "committed"] {
+        assert!(
+            !f.root.join("store.git").join(mark).exists(),
+            "the injected hook ran ({mark})"
+        );
+    }
+}
+
+#[test]
+fn objects_from_outside_the_sealed_bundle_are_not_visible() {
+    let f = Fixture::new("alternates");
+    f.commit("b.txt", "two\n", &format!("Add b\n\n{SIGNOFF}"));
+    let seal = f.seal("Add b", "Adds b.\n");
+    // A commit that exists only in the work repository, never in the bundle.
+    let work = f.work();
+    git(&work, &["checkout", "-q", "-b", "elsewhere", "main"]);
+    fs::write(work.join("c.txt"), "three\n").unwrap();
+    git(&work, &["add", "c.txt"]);
+    git(
+        &work,
+        &["commit", "-q", "-m", &format!("Add c\n\n{SIGNOFF}")],
+    );
+    let outside = git(&work, &["rev-parse", "HEAD"]);
+    let objects = work.join(".git/objects").to_string_lossy().into_owned();
+    let out = f.check_env(
+        &seal,
+        &outside,
+        &[],
+        &[("GIT_ALTERNATE_OBJECT_DIRECTORIES", objects.as_str())],
+    );
+    assert_eq!(
+        out.status.code(),
+        Some(1),
+        "a commit outside the bundle was accepted: {}",
+        stderr(&out)
+    );
+}
+
+#[test]
+fn a_hook_inside_the_object_store_does_not_run() {
+    use std::os::unix::fs::symlink;
+    let f = Fixture::new("store-hook");
+    let head = f.commit("b.txt", "two\n", &format!("Add b\n\n{SIGNOFF}"));
+    let seal = f.seal("Add b", "Adds b.\n");
+    let touch = std::env::var_os("PATH")
+        .and_then(|paths| {
+            std::env::split_paths(&paths)
+                .map(|p| p.join("touch"))
+                .find(|p| p.is_file())
+        })
+        .expect("touch on PATH");
+    let hooks = f.root.join("store.git/hooks");
+    fs::create_dir_all(&hooks).unwrap();
+    symlink(touch, hooks.join("reference-transaction")).unwrap();
+    let out = f.check(&seal, &head, &[]);
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    for mark in ["prepared", "committed"] {
+        assert!(
+            !f.root.join("store.git").join(mark).exists(),
+            "the store's hook ran ({mark})"
+        );
+    }
 }

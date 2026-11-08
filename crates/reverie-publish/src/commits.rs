@@ -38,10 +38,15 @@ pub fn identity(raw: &str) -> Result<&'static str, String> {
     if committer != who {
         return Err(format!("committer differs from author: {committer}"));
     }
+    // Any spelling of the trailer counts, so a foreign sign-off cannot hide in another case.
+    const TRAILER: &str = "signed-off-by:";
     let signoffs: Vec<&str> = message
         .lines()
-        .filter_map(|line| line.strip_prefix("Signed-off-by:"))
-        .map(str::trim)
+        .filter(|line| {
+            line.get(..TRAILER.len())
+                .is_some_and(|key| key.eq_ignore_ascii_case(TRAILER))
+        })
+        .map(|line| line[TRAILER.len()..].trim())
         .collect();
     if signoffs.is_empty() {
         return Err("commit has no Signed-off-by".into());
@@ -96,16 +101,13 @@ pub fn check_range(
         )?;
         let parents = git.run(["rev-list", "--parents", "-n", "1", &commit])?;
         let merge = parents.split_whitespace().count() > 2;
-        let diff = if merge {
-            git.run(["show", "--remerge-diff", "--format=", &commit])?
-        } else {
-            git.run(["show", "--format=", &commit])?
-        };
-        let added: Vec<&str> = diff
-            .lines()
-            .filter(|line| line.starts_with('+') && !line.starts_with("+++"))
-            .map(|line| &line[1..])
-            .collect();
+        let mut show = vec!["show", "--no-ext-diff", "--no-textconv", "--format="];
+        if merge {
+            show.push("--remerge-diff");
+        }
+        show.push(&commit);
+        let diff = git.run(show)?;
+        let added = added_lines(&diff);
         clean(
             lists,
             &added.join("\n"),
@@ -113,7 +115,7 @@ pub fn check_range(
             repo,
             &format!("{commit} added lines"),
         )?;
-        let names = git.run(["show", "--name-only", "--format=", &commit])?;
+        let names = git.run(["show", "--no-ext-diff", "--name-only", "--format=", &commit])?;
         clean(
             lists,
             &names,
@@ -130,6 +132,23 @@ pub fn check_range(
     Ok(checked)
 }
 
+/// The lines a diff adds: `+` lines inside `@@` hunks only. The `+++ b/path` file header comes
+/// before a file's first hunk, so an added line that itself begins with `++` is still caught.
+pub fn added_lines(diff: &str) -> Vec<&str> {
+    let mut in_hunk = false;
+    let mut added = Vec::new();
+    for line in diff.lines() {
+        if line.starts_with("diff ") {
+            in_hunk = false;
+        } else if line.starts_with("@@") {
+            in_hunk = true;
+        } else if in_hunk && let Some(rest) = line.strip_prefix('+') {
+            added.push(rest);
+        }
+    }
+    added
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -138,6 +157,19 @@ mod tests {
 
     fn raw(author: &str, committer: &str, message: &str) -> String {
         format!("tree 0\nauthor {author} 1 +0000\ncommitter {committer} 1 +0000\n\n{message}")
+    }
+
+    #[test]
+    fn added_lines_come_only_from_hunks_and_keep_lines_starting_with_plus_plus() {
+        let diff = "diff --git a/x b/x\n--- a/x\n+++ b/x\n@@ -0,0 +1,2 @@\n+plain\n+++hidden\ndiff --git a/y b/y\n+++ b/y\n@@ -1 +1 @@\n-old\n+new\n";
+        assert_eq!(added_lines(diff), vec!["plain", "++hidden", "new"]);
+    }
+
+    #[test]
+    fn a_foreign_signoff_in_another_case_is_still_a_signoff() {
+        let other = "Someone Else <else@example.invalid>";
+        let message = format!("Subject\n\nSigned-off-by: {JAMES}\nsigned-off-by: {other}\n");
+        assert!(identity(&raw(JAMES, JAMES, &message)).is_err());
     }
 
     #[test]

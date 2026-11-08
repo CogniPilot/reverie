@@ -10,6 +10,10 @@ use std::{
 
 const API: &str = "https://api.github.com";
 
+/// curl's whole argv: `-q` must come first so no `~/.curlrc` (trace, extra headers, redirects)
+/// is read, and everything else, the token included, comes from stdin.
+pub const CURL_ARGS: [&str; 3] = ["-q", "--config", "-"];
+
 /// How a request reaches GitHub; the curl transport in use, a fake in tests.
 pub trait Transport {
     /// Sends `method path` with an optional JSON body and returns the HTTP status and body.
@@ -117,7 +121,7 @@ impl Transport for Curl {
 
 fn run_curl(config: &str) -> Result<String, String> {
     let mut child = Command::new("curl")
-        .args(["--config", "-"])
+        .args(CURL_ARGS)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -180,6 +184,11 @@ impl Repo<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn curl_ignores_any_curlrc_and_takes_everything_else_from_stdin() {
+        assert_eq!(CURL_ARGS, ["-q", "--config", "-"]);
+    }
 
     #[test]
     fn the_token_goes_only_into_the_stdin_config() {

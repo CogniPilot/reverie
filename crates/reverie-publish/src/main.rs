@@ -80,8 +80,16 @@ fn check(o: &Check) -> Result<serde_json::Value, String> {
         Lists::load(&o.lists, &o.lists_sha256).map_err(|e| format!("namegate lists: {e:?}"))?;
     let packet = Packet::open(&o.packet, &o.seal)?;
     let git = Git::new(&o.git_dir);
-    git.import_bundle(&packet.bundle()?, "check")?;
-    let head = git.run(["rev-parse", "--verify", &format!("{}^{{commit}}", o.head)])?;
+    // git reads a private copy of the verified bytes, never the packet's path.
+    let bundle = o.git_dir.join("publish-packet.bundle");
+    std::fs::write(&bundle, packet.bundle()?).map_err(|e| format!("{}: {e}", bundle.display()))?;
+    git.import_bundle(&bundle, "check")?;
+    let head = git.run([
+        "rev-parse",
+        "--verify",
+        "--end-of-options",
+        &format!("{}^{{commit}}", o.head),
+    ])?;
     if head != o.head {
         return Err("--head must be the full id of a commit in the bundle".into());
     }
@@ -89,7 +97,12 @@ fn check(o: &Check) -> Result<serde_json::Value, String> {
     if o.tree.len() < 8 || !tree.starts_with(&o.tree) {
         return Err("the head's tree is not the reviewed tree".into());
     }
-    let base = git.run(["rev-parse", "--verify", &format!("{}^{{commit}}", o.base)])?;
+    let base = git.run([
+        "rev-parse",
+        "--verify",
+        "--end-of-options",
+        &format!("{}^{{commit}}", o.base),
+    ])?;
     let checked = commits::check_range(&git, &lists, name, &[&head, "--not", &base], &head)?;
     let text = packet.text()?;
     if let Some((title, body)) = &text {
@@ -109,6 +122,8 @@ fn check(o: &Check) -> Result<serde_json::Value, String> {
         approval.verify(
             &git,
             &o.repo,
+            &head,
+            &base,
             text.as_ref().map(|(t, b)| (t.as_str(), b.as_str())),
         )?;
     }

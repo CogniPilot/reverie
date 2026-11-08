@@ -21,7 +21,8 @@ pub struct Approval {
     /// `git diff --binary --full-index <base> <head>`.
     pub base: String,
     pub patch_sha256: String,
-    /// sha256 of the reviewed title line and of the reviewed body, when the write sets them.
+    /// sha256 of the reviewed title line (its first line, trimmed, with no newline) and of the
+    /// reviewed body file's exact bytes, when the write sets them.
     #[serde(default)]
     pub title_sha256: Option<String>,
     #[serde(default)]
@@ -36,8 +37,17 @@ impl Approval {
         serde_json::from_str(&text).map_err(|e| format!("approval record: {e}"))
     }
 
-    /// Checks the record against the objects in `git` and the text about to be written.
-    pub fn verify(&self, git: &Git, repo: &str, text: Option<(&str, &str)>) -> Result<(), String> {
+    /// Checks the record against what is about to be written: `head` and `base` are the full ids
+    /// the caller checked (and will write), `text` the title and body it will set. The record must
+    /// name exactly that head and base, so an approval for one revision never covers another.
+    pub fn verify(
+        &self,
+        git: &Git,
+        repo: &str,
+        head: &str,
+        base: &str,
+        text: Option<(&str, &str)>,
+    ) -> Result<(), String> {
         if !self.publication_authorized {
             return Err("the approval record does not authorize publication".into());
         }
@@ -47,22 +57,37 @@ impl Approval {
         if self.reviews.is_empty() {
             return Err("the approval names no review".into());
         }
-        let head = git.run([
-            "rev-parse",
-            "--verify",
-            &format!("{}^{{commit}}", self.head),
-        ])?;
-        if head != self.head {
-            return Err("the approved head is not a full commit id".into());
+        let resolve = |rev: &str| {
+            git.run([
+                "rev-parse",
+                "--verify",
+                "--end-of-options",
+                &format!("{rev}^{{commit}}"),
+            ])
+        };
+        if resolve(&self.head)? != self.head || self.head != head {
+            return Err("the approval is for another head".into());
+        }
+        if resolve(&self.base)? != self.base || self.base != base {
+            return Err("the approval is for another base".into());
         }
         if git.run(["rev-parse", &format!("{head}^{{tree}}")])? != self.tree {
             return Err("the head's tree is not the approved tree".into());
         }
-        let raw = git.bytes(["cat-file", "commit", &head])?;
+        let raw = git.bytes(["cat-file", "commit", head])?;
         if sha256_hex(&raw) != self.raw_commit_sha256 {
             return Err("the head commit object is not the approved one".into());
         }
-        let patch = git.bytes(["diff", "--binary", "--full-index", &self.base, &head])?;
+        let patch = git.bytes([
+            "diff",
+            "--no-ext-diff",
+            "--no-textconv",
+            "--binary",
+            "--full-index",
+            "--end-of-options",
+            base,
+            head,
+        ])?;
         if sha256_hex(&patch) != self.patch_sha256 {
             return Err("the patch against the approved base is not the approved patch".into());
         }
