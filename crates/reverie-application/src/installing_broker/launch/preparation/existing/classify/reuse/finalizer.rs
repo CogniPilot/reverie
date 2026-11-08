@@ -445,6 +445,6 @@ impl Error {
 }
 impl std::fmt::Display for Error {
     fn fmt(&self, out: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.as_error().fmt(out)
+        std::fmt::Display::fmt(self.as_error(), out)
     }
 }
