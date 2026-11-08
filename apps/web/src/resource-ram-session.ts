@@ -6,7 +6,8 @@ import { RamResourceSessionReadiness } from './resource-readiness.js';
 import { PublishedRamResourceSession } from './resource-session-publication.js';
 import {
   assertRamResourceOperation,
-  type RamResourceOwnerBinding,
+  RamResourceOwnerBinding,
+  type RamResourceOwnerContext,
   type RamResourceSessionIntent,
 } from './resource-owner-authority.js';
 
@@ -83,6 +84,15 @@ export class RamResourceSessionLaunchTask {
   async wait(): Promise<void> {
     need(this.#started);
     await this.#started;
+  }
+  /** The transport must retain this exact actual owner capture and native
+   * routing name; a task for another approved operation is not interchangeable. */
+  assertContext(context: RamResourceOwnerContext, reference: string): void {
+    need(reference === this.#reference);
+    RamResourceOwnerBinding.prototype.assertContext.call(this.#binding, context);
+    // The constructor/begin perform the unstarted publication check. This
+    // pairing also runs while the actual Session start is in flight.
+    assertRamResourceOperation(this.#binding, this.#intent.owner, this.#intent);
   }
   assertCommand(digest: string, sessionId: string, cwd: string): void {
     need(this.#attempted);

@@ -17,6 +17,7 @@ import {
   ResourceOwnerAuthority,
   type RamResourceApproval,
   type RamResourceOwnerBinding,
+  type RamResourceOwnerContext,
   type RamResourcePreviewContext,
   type ResourceOwnerBinding,
   type RamResourceSessionIntent,
@@ -39,6 +40,7 @@ const mux = new Proxy(
 let directory: string, app: FastifyInstance, auth: OwnerAuthService, authority: ResourceOwnerAuthority;
 let company: CompanyService, store: CompanyStore, source: Session, token: string;
 let preview: RamResourcePreviewContext, binding: RamResourceOwnerBinding, legacy: ResourceOwnerBinding;
+let applyContext: RamResourceOwnerContext;
 let approval: RamResourceApproval, sessions: Map<string, Session>, port: SessionPort;
 const claimed = () => ({
   reference: randomUUID(),
@@ -109,7 +111,8 @@ beforeEach(async () => {
     return {};
   });
   app.post('/apply', async (req) => {
-    binding = authority.bindRam(authority.captureRam(req, approval));
+    applyContext = authority.captureRam(req, approval);
+    binding = authority.bindRam(applyContext);
     return {};
   });
   app.post('/legacy', async (req) => {
@@ -332,5 +335,33 @@ it('returns the original actual Session launch rejection and never substitutes a
   await expect(task.wait()).rejects.toBe(primary);
   expect(() => task.begin(reply.reference)).toThrow();
   expect(start).toHaveBeenCalledTimes(1);
+  expect(() => published.readiness().assertCurrent()).toThrow();
+});
+it('pairs a RAM task only with its exact retained actual owner capture and original native reference', async () => {
+  const reply = claimed();
+  const published = await publication().publish(binding, approval, reply);
+  const task = published.prepareLaunch(),
+    original = applyContext;
+  task.assertContext(original, reply.reference);
+  expect(() => task.assertContext({ ...original }, reply.reference)).toThrow();
+  expect(() => task.assertContext(original, randomUUID())).toThrow();
+  expect((await app.inject({ method: 'POST', url: '/apply', headers: headers() })).statusCode).toBe(200);
+  expect(applyContext).not.toBe(original);
+  expect(applyContext.approval).toEqual(original.approval);
+  expect(applyContext.principal).toEqual(original.principal);
+  expect(() => task.assertContext(applyContext, reply.reference)).toThrow();
+  task.assertContext(original, reply.reference);
+});
+it('current task/context pairing is not a command or readiness grant after an actual start rejection', async () => {
+  const reply = claimed();
+  const published = await publication().publish(binding, approval, reply);
+  const candidate = sessions.get(approval.targetSid)!;
+  const primary = new Error('OWNED_RAM_START_REFUSED');
+  vi.spyOn(candidate, 'startInteractive').mockRejectedValue(primary);
+  const task = published.prepareLaunch();
+  task.begin(reply.reference);
+  await expect(task.wait()).rejects.toBe(primary);
+  task.assertContext(applyContext, reply.reference);
+  expect(() => task.assertCommand('a'.repeat(64), approval.targetSid, directory)).toThrow();
   expect(() => published.readiness().assertCurrent()).toThrow();
 });

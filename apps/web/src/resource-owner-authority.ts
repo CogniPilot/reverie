@@ -171,6 +171,12 @@ export class RamResourceOwnerBinding {
     need(bindings.get(this) === this.#context && owner === this.#context.owner);
     this.#context.assertCurrent();
   }
+  /** Pair only the exact retained RAM context; matching serialized approvals
+   * or owner names cannot substitute another session/capture. */
+  assertContext(context: RamResourceOwnerContext): void {
+    need(bindings.get(this) === this.#context && context === this.#context);
+    this.assertCurrent(context.owner);
+  }
   assertPreview(authority: ResourceOwnerAuthority, preview: RamResourcePreviewContext): void {
     this.assertCurrent(preview.owner);
     need(authority instanceof ResourceOwnerAuthority && preview.purpose === RAM_PURPOSE);
