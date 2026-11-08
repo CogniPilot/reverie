@@ -10,6 +10,7 @@ enum Cause {
     Shared(gpu_access::GpuHostError),
     Configuration(EngineDataError),
     Data(IdentityDataError),
+    Transition(reverie_contracts::worker_image_switch::ImageDataError),
     Pending(PendingError),
     Identity(reverie_store::storage_identity::IdentityError),
     Finalized(ImageFileError, ImageFileError),
@@ -36,6 +37,9 @@ impl ImageFileError {
     pub(super) fn data(e: IdentityDataError) -> Self {
         Self(Arc::new(Cause::Data(e)))
     }
+    pub(super) fn transition(e: reverie_contracts::worker_image_switch::ImageDataError) -> Self {
+        Self(Arc::new(Cause::Transition(e)))
+    }
     pub(super) fn pending(e: PendingError) -> Self {
         Self(Arc::new(Cause::Pending(e)))
     }
@@ -50,6 +54,7 @@ impl ImageFileError {
             Cause::Shared(_) => "WORKER_IMAGE_FILE_PUBLICATION",
             Cause::Configuration(e) => e.code(),
             Cause::Data(_) => "WORKER_IMAGE_FILE_DATA",
+            Cause::Transition(e) => e.code(),
             Cause::Pending(_) => "WORKER_IMAGE_PENDING_UNCONFIRMED",
             Cause::Identity(e) => e.code(),
             Cause::Finalized(primary, _) => primary.code(),
@@ -123,6 +128,7 @@ impl std::error::Error for ImageFileError {
             Cause::Shared(e) => Some(e),
             Cause::Configuration(e) => Some(e),
             Cause::Data(e) => Some(e),
+            Cause::Transition(e) => Some(e),
             Cause::Identity(e) => Some(e),
             Cause::Finalized(a, _) => Some(a),
             Cause::PublicationUnknown(error) => Some(error),

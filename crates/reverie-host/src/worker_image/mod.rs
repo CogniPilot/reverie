@@ -1,11 +1,13 @@
 //! Image-only file publication components. These owners grant no admission,
 //! maintenance, service, image-load or worker permission.
 mod error;
+mod maintenance;
 mod terminal;
 #[cfg(test)]
 mod tests;
 use crate::{gpu_access, native, private_pending::PendingFile};
 pub use error::ImageFileError;
+pub use maintenance::{ClosedImageMaintenance, ImageMaintenanceFailure, ImageMaintenanceLocks};
 use reverie_contracts::{
     reservation_engine::ReservationConfiguration,
     storage_identity::{OrderedMetadata, decode_ordered_metadata},
