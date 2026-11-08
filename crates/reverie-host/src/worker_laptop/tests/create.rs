@@ -1,5 +1,6 @@
 use super::*;
 use crate::command_telemetry::CommandTelemetry;
+mod provider;
 fn creates(fixture: &Fixture) -> usize {
     fs::read_to_string(fixture.root.join("trace"))
         .unwrap_or_default()
