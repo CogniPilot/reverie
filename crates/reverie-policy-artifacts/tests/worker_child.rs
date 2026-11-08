@@ -101,12 +101,18 @@ fn actual_v1_base_derives_its_only_child_annex_without_rewriting_the_base() {
     let repeated = produce();
     assert!(!repeated.status.success());
     assert_eq!(fs::read(&base).unwrap(), original);
-    assert_eq!(annex["baseProvenance"]["sha256"], format!("{:x}", Sha256::digest(&original)));
+    assert_eq!(
+        annex["baseProvenance"]["sha256"],
+        format!("{:x}", Sha256::digest(&original))
+    );
     assert_eq!(annex["imageSpec"], value["imageSpec"]);
     assert_eq!(annex["archive"], value["archive"]);
     assert_eq!(annex["factory"], value["factory"]);
     assert_eq!(annex["archiveConfigSHA256"], value["archiveConfigSHA256"]);
-    assert_eq!(annex["workerChild"]["manifest"]["path"], value["imageSpec"]["Config"]["Labels"]["org.reverie.worker.child-manifest"]);
+    assert_eq!(
+        annex["workerChild"]["manifest"]["path"],
+        value["imageSpec"]["Config"]["Labels"]["org.reverie.worker.child-manifest"]
+    );
     fs::remove_file(output).unwrap();
     fs::remove_dir(root).unwrap();
 }

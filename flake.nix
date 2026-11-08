@@ -330,6 +330,10 @@
           workerChild = self.packages.${system}.workerChild;
           factory = { name = "lib.workerDockerImage"; } // arguments;
         };
+      lib.workerChildImageAnnex = { system, baseProvenance }:
+        import ./nix/worker-child-image-annex.nix {
+          pkgs = pkgsFor system; src = source; inherit baseProvenance;
+        };
       apps = forAllSystems (system: {
         prune = { type = "app"; program = "${self.packages.${system}.prune}/bin/reverie-prune"; meta.description = "Report eligible rebuildable output without deleting it"; };
         prune-host = { type = "app"; program = "${self.packages.${system}.pruneHost}/bin/reverie-prune-host"; meta.description = "Prepare an explicit dry-run cleanup host installation"; };
@@ -366,6 +370,8 @@
           packages = self.packages.${system};
         in {
           inherit (packages) reverie memoryPackage start update gpuPublisher previewProxy previewService prune pruneR12 cleanupObservations ownerTerminalCore;
+          workerChildImageAnnexContexts = assert import ./tests/worker_child_image_annex_eval.nix;
+            pkgs.runCommand "reverie-worker-child-annex-context-check" { } "touch $out";
           workerPythonRuntime = import ./nix/worker-python-check.nix { inherit pkgs; python = packages.workerPython; };
           workerPerfTools = let perf = import ./nix/worker-perf.nix { inherit pkgs; };
             in assert builtins.elem perf (import ./nix/worker-base-tools.nix { inherit pkgs; });
