@@ -403,3 +403,9 @@ fn actual_python_r12_defaults_and_admission_oracle() {
         );
     }
 }
+
+#[test]
+fn config_errors_have_a_stable_human_diagnostic() {
+    let err = Config::parse_toml("unknown = true", false).unwrap_err();
+    assert_eq!(err.to_string(), "prune config: Toml");
+}
