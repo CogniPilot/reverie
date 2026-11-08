@@ -14,6 +14,10 @@ pub use goal_custody::{GoalCustodyHandlerClosed, GoalCustodyHandlerFailure};
 mod image_refresh;
 mod launch;
 mod lifecycle;
+mod pool_controller;
+pub use pool_controller::{
+    BrokerControllerBootstrap, BrokerControllerBootstrapCause, BrokerControllerBootstrapFailure,
+};
 mod recovered;
 pub mod resource_actor;
 mod service;

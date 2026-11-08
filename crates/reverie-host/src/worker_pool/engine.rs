@@ -58,6 +58,7 @@ impl EngineObserver {
         policy: &WorkerPoolPolicy,
         process: &super::namespace::ControllerProcessObservation,
         birth_digest: [u8; 32],
+        service_v2: bool,
     ) -> Result<()> {
         need(
             !self.opaque.load(Ordering::Acquire),
@@ -71,14 +72,13 @@ impl EngineObserver {
             .iter()
             .map(|byte| format!("{byte:02x}"))
             .collect();
-        reverie_contracts::worker_pool::validate_controller_inspection(
-            &spec,
-            policy,
-            &process.container,
-            process.pid,
-            &digest,
-        )
-        .map_err(|_| PoolError::Refused("WORKER_POOL_CONTROLLER_SPEC"))?;
+        let validate = if service_v2 {
+            reverie_contracts::worker_pool::validate_controller_service_v2_inspection
+        } else {
+            reverie_contracts::worker_pool::validate_controller_inspection
+        };
+        validate(&spec, policy, &process.container, process.pid, &digest)
+            .map_err(|_| PoolError::Refused("WORKER_POOL_CONTROLLER_SPEC"))?;
         let target = format!("/containers/{}/json", policy.website_container);
         let website = self.read(&target)?;
         let pid = reverie_contracts::worker_pool::website_process_data(

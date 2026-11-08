@@ -62,6 +62,17 @@ pub struct WebsiteProcessObserver {
     close_uncertain: bool,
 }
 impl WebsiteProcessObserver {
+    pub(crate) fn assert_finalized(&self) -> Result<()> {
+        need(!self.close_uncertain, "WEBSITE_PROCESS_CLOSE_UNCONFIRMED")
+    }
+    /// Purpose-private bootstrap SELF observation, never a caller-selected PID.
+    pub(crate) fn observe_current_broker(&mut self, end: Instant) -> Result<ProcessSnapshot> {
+        self.current(end)?;
+        let pid = UnsignedInteger::from_u64(u64::from(std::process::id()));
+        let mut files = Descriptors::default();
+        let body = read::process(&mut files, &pid, end);
+        files.finish(body, &mut self.close_uncertain)
+    }
     pub fn assert_finalized(&self) -> Result<()> {
         need(!self.close_uncertain, "WEBSITE_PROCESS_CLOSE_UNCONFIRMED")
     }

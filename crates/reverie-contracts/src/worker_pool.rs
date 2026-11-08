@@ -2,10 +2,14 @@
 //! installed-controller, maintenance, admission or kernel-readback capability.
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+mod controller_v2;
 mod engine;
+pub use controller_v2::SERVICE_PURPOSE as CONTROLLER_SERVICE_V2_PURPOSE;
+pub use controller_v2::{BrokerBirthData, BrokerProgramData, ControllerBirthV2};
 pub use engine::validate_anchor_inspection;
 pub use engine::{
-    validate_controller_inspection, validate_engine_information, website_process_data,
+    validate_controller_inspection, validate_controller_service_v2_inspection,
+    validate_engine_information, website_process_data,
 };
 
 pub const PURPOSE: &str = "reverie-docker-worker-pool-v1";
@@ -170,7 +174,7 @@ impl std::error::Error for PoolPolicyError {}
 mod tests {
     use super::*;
 
-    fn policy() -> WorkerPoolPolicy {
+    pub(super) fn policy() -> WorkerPoolPolicy {
         WorkerPoolPolicy {
             version: 1,
             purpose: PURPOSE.into(),

@@ -14,6 +14,7 @@ mod tests;
 
 pub struct ControllerPoolPolicy {
     data: WorkerPoolPolicy,
+    birth: Option<reverie_contracts::worker_pool::ControllerBirthV2>,
     digest: [u8; 32],
     file: Option<File>,
     directory: Option<File>,
@@ -31,9 +32,23 @@ impl ControllerPoolPolicy {
     pub fn open(
         expected_sha256: [u8; 32],
     ) -> std::result::Result<Self, Box<ControllerPoolPolicyFailure>> {
+        Self::open_with(expected_sha256, false)
+    }
+    /// Explicit v2 birth record selected by the trusted registered bootstrap.
+    /// It still grants no maintenance, policy activation or member write.
+    pub fn open_service_v2(
+        expected_sha256: [u8; 32],
+    ) -> std::result::Result<Self, Box<ControllerPoolPolicyFailure>> {
+        Self::open_with(expected_sha256, true)
+    }
+    fn open_with(
+        expected_sha256: [u8; 32],
+        service_v2: bool,
+    ) -> std::result::Result<Self, Box<ControllerPoolPolicyFailure>> {
         // Allocate the actual partial owner before the first native check or
         // open. Every returned descriptor is stored before the next operation.
         let mut opening = OpeningPolicy::new(expected_sha256);
+        opening.service_v2 = service_v2;
         let result = (|| {
             need(
                 nix::unistd::geteuid().is_root(),
@@ -67,6 +82,19 @@ impl ControllerPoolPolicy {
     pub fn data(&self) -> &WorkerPoolPolicy {
         &self.data
     }
+    pub(super) fn broker_birth(&self) -> Result<&reverie_contracts::worker_pool::BrokerBirthData> {
+        self.assert_current()?;
+        self.birth
+            .as_ref()
+            .map(|birth| birth.broker())
+            .ok_or(PoolError::Refused("WORKER_POOL_SERVICE_V2_REQUIRED"))
+    }
+    pub(super) fn require_component_initialization(&self) -> Result<()> {
+        need(
+            self.birth.is_none(),
+            "WORKER_POOL_SERVICE_MAINTENANCE_REQUIRED",
+        )
+    }
     pub fn version_directory_identity(&self) -> (u64, u64) {
         self.directory_identity
     }
@@ -97,8 +125,12 @@ impl ControllerPoolPolicy {
             "WORKER_POOL_CONTROLLER_CHANGED",
         )?;
         super::controller_limits::observe(&self.controller, &self.data)?;
-        self.engine
-            .verify(&self.data, &self.controller, self.digest)?;
+        self.engine.verify(
+            &self.data,
+            &self.controller,
+            self.digest,
+            self.birth.is_some(),
+        )?;
         let file = self
             .file
             .as_ref()
@@ -134,7 +166,8 @@ impl ControllerPoolPolicy {
             "WORKER_POOL_POLICY_READONLY_REQUIRED",
         )?;
         need(
-            read_policy(file, self.digest)? == self.data,
+            read_policy(file, self.digest, self.birth.is_some())?
+                == (self.data.clone(), self.birth.clone()),
             "WORKER_POOL_POLICY_CHANGED",
         )?;
         let named = native::open_at(
@@ -179,9 +212,11 @@ struct OpeningPolicy {
     engine: Option<super::engine::EngineObserver>,
     captured: Option<CapturedPolicy>,
     close_unknown: bool,
+    service_v2: bool,
 }
 struct CapturedPolicy {
     data: WorkerPoolPolicy,
+    birth: Option<reverie_contracts::worker_pool::ControllerBirthV2>,
     identity: (u64, u64),
     directory_identity: (u64, u64),
 }
@@ -196,6 +231,7 @@ impl OpeningPolicy {
             engine: None,
             captured: None,
             close_unknown: false,
+            service_v2: false,
         }
     }
     fn open_directory(&mut self, path: &std::path::Path) -> Result<()> {
@@ -216,11 +252,12 @@ impl OpeningPolicy {
     }
     fn capture_policy(&mut self) -> Result<()> {
         let file = self.file.as_ref().expect("opening order");
-        let data = read_policy(file, self.digest)?;
+        let (data, birth) = read_policy(file, self.digest, self.service_v2)?;
         let identity = file_identity(file)?;
         let directory = self.directory.as_ref().expect("opening order").metadata()?;
         self.captured = Some(CapturedPolicy {
             data,
+            birth,
             identity,
             directory_identity: (directory.dev(), directory.ino()),
         });
@@ -229,11 +266,13 @@ impl OpeningPolicy {
     fn into_policy(mut self) -> ControllerPoolPolicy {
         let CapturedPolicy {
             data,
+            birth,
             identity,
             directory_identity,
         } = self.captured.take().expect("successful capture");
         ControllerPoolPolicy {
             data,
+            birth,
             identity,
             directory_identity,
             digest: self.digest,
@@ -327,13 +366,29 @@ fn file_identity(file: &File) -> Result<(u64, u64)> {
     )?;
     Ok((metadata.dev(), metadata.ino()))
 }
-fn read_policy(file: &File, digest: [u8; 32]) -> Result<WorkerPoolPolicy> {
+fn read_policy(
+    file: &File,
+    digest: [u8; 32],
+    service_v2: bool,
+) -> Result<(
+    WorkerPoolPolicy,
+    Option<reverie_contracts::worker_pool::ControllerBirthV2>,
+)> {
     use std::os::unix::fs::FileExt;
     let mut raw = [0u8; 65_537];
     let count = file.read_at(&mut raw, 0)?;
     need(count > 0 && count <= 65_536, "WORKER_POOL_POLICY_BOUND")?;
     let actual: [u8; 32] = Sha256::digest(&raw[..count]).into();
     need(actual == digest, "WORKER_POOL_POLICY_DIGEST")?;
-    WorkerPoolPolicy::decode(&raw[..count])
-        .map_err(|_| PoolError::Refused("WORKER_POOL_POLICY_INVALID"))
+    let invalid = |_| PoolError::Refused("WORKER_POOL_POLICY_INVALID");
+    if service_v2 {
+        let birth = reverie_contracts::worker_pool::ControllerBirthV2::decode(&raw[..count])
+            .map_err(invalid)?;
+        Ok((birth.policy().clone(), Some(birth)))
+    } else {
+        Ok((
+            WorkerPoolPolicy::decode(&raw[..count]).map_err(invalid)?,
+            None,
+        ))
+    }
 }

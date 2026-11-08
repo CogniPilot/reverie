@@ -30,6 +30,28 @@ pub fn validate_controller_inspection(
     pid: u32,
     birth_digest: &str,
 ) -> Result<(), PoolPolicyError> {
+    controller(raw, policy, cid, pid, birth_digest, false)
+}
+
+/// Explicit service-v2 confinement. The original four-bind v1 decoder remains
+/// unchanged; neither this readback nor the birth document grants an effect.
+pub fn validate_controller_service_v2_inspection(
+    raw: &[u8],
+    policy: &WorkerPoolPolicy,
+    cid: &str,
+    pid: u32,
+    birth_digest: &str,
+) -> Result<(), PoolPolicyError> {
+    controller(raw, policy, cid, pid, birth_digest, true)
+}
+fn controller(
+    raw: &[u8],
+    policy: &WorkerPoolPolicy,
+    cid: &str,
+    pid: u32,
+    birth_digest: &str,
+    service_v2: bool,
+) -> Result<(), PoolPolicyError> {
     let value = decode(raw)?;
     let host = &value["HostConfig"];
     let config = &value["Config"];
@@ -46,10 +68,26 @@ pub fn validate_controller_inspection(
         && value["State"]["Restarting"] == false
         && config["User"] == format!("0:{}", policy.broker_gid)
         && config["Entrypoint"] == json!(["/bin/reverie-worker-resource-controller"])
-        && config["Cmd"] == json!(["serve", "--policy-sha256", birth_digest])
+        && config["Cmd"]
+            == if service_v2 {
+                json!([
+                    "serve",
+                    "--confinement-version",
+                    "2",
+                    "--birth-sha256",
+                    birth_digest
+                ])
+            } else {
+                json!(["serve", "--policy-sha256", birth_digest])
+            }
         && config["Env"] == json!(["PATH=/bin", "LANG=C.UTF-8"])
         && labels["reverie.resource-controller"] == policy.deployment
-        && labels["reverie.pool.purpose"] == PURPOSE
+        && labels["reverie.pool.purpose"]
+            == if service_v2 {
+                super::controller_v2::SERVICE_PURPOSE
+            } else {
+                PURPOSE
+            }
         && labels["reverie.pool.birth-policy"] == birth_digest
         && labels.get("reverie.worker").is_none()
         && host["Privileged"] == false
@@ -73,7 +111,7 @@ pub fn validate_controller_inspection(
     if !valid {
         return Err(PoolPolicyError);
     }
-    mounts(&value["Mounts"], policy)
+    mounts(&value["Mounts"], policy, service_v2)
 }
 pub fn website_process_data(raw: &[u8], expected: &str) -> Result<Option<u32>, PoolPolicyError> {
     let value = decode(raw)?;
@@ -95,9 +133,13 @@ pub fn website_process_data(raw: &[u8], expected: &str) -> Result<Option<u32>, P
     }
 }
 
-fn mounts(value: &Value, policy: &WorkerPoolPolicy) -> Result<(), PoolPolicyError> {
+fn mounts(
+    value: &Value,
+    policy: &WorkerPoolPolicy,
+    service_v2: bool,
+) -> Result<(), PoolPolicyError> {
     let values = value.as_array().ok_or(PoolPolicyError)?;
-    let expected = [
+    let mut expected = vec![
         (
             format!("{}/worker-pool/policies", policy.instance_root),
             "/run/reverie-worker-pool/policies",
@@ -111,6 +153,13 @@ fn mounts(value: &Value, policy: &WorkerPoolPolicy) -> Result<(), PoolPolicyErro
             false,
         ),
     ];
+    if service_v2 {
+        expected.push((
+            format!("{}/worker-pool/control", policy.instance_root),
+            "/run/reverie-worker-pool/control",
+            true,
+        ));
+    }
     if values.len() != expected.len() {
         return Err(PoolPolicyError);
     }
