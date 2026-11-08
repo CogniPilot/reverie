@@ -106,6 +106,10 @@ fn serve(config: PathBuf, offer: bool) -> Result<(), Box<dyn std::error::Error>>
         .ok_or("NATIVE_WORKER_BROKER_PACKAGED_ENGINE_REQUIRED")?;
     let engine = InstalledWorkerEngine::new(EngineBootstrap::capture(program.as_ref())?);
     let run_fence = reverie_host::worker_service::begin_service_run(&source)?;
+    // A delayed start may span a completed image transition. Publish the run
+    // fence first, then load the snapshot that the runtime will actually own.
+    let snapshot =
+        load_owner_config(&source).map_err(|primary| fenced_failure(&source, primary))?;
     let runtime = WorkerRuntime::new(engine, snapshot.envelope().base());
     let broker = InstallingBroker::new(snapshot, runtime)
         .map_err(|primary| fenced_failure(&source, primary))?;

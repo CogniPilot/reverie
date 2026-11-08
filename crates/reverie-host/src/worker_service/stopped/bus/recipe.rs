@@ -100,6 +100,18 @@ impl ExpectedCommands {
     }
     #[cfg(test)]
     pub(in crate::worker_service) fn controlled(home: &Path) -> Self {
+        if home.join("manager-native-mode").exists() {
+            return Self {
+                start: vec![vec![
+                    "/nix/store/new-broker/bin/reverie-worker-broker".into(),
+                    "broker".into(),
+                    "--config".into(),
+                    "${REVERIE_WORKER_CONFIG}".into(),
+                ]],
+                pre: Vec::new(),
+                environment: home.join("reverie/worker-pool/service/environment"),
+            };
+        }
         Self {
             start: vec![vec![
                 "/nix/store/old-broker/bin/reverie-worker-broker".into(),

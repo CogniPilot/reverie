@@ -124,7 +124,7 @@ impl State {
         }
         Ok(observed)
     }
-    fn selected_unit_link(&self) -> Result<PathBuf> {
+    pub(super) fn selected_unit_link(&self) -> Result<PathBuf> {
         let link = self.home.join(".config/systemd/user").join(UNIT);
         let m = fs::symlink_metadata(&link)?;
         need(

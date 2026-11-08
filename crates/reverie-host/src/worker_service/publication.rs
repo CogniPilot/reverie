@@ -64,13 +64,19 @@ impl State {
         Ok(())
     }
     pub(super) fn begin_attempt(&mut self, action: &WorkerServiceAction) -> Result<()> {
+        self.begin_record(pending_bytes(action))
+    }
+    pub(super) fn begin_image_attempt(&mut self) -> Result<()> {
+        self.begin_record(super::stopped::IMAGE_PENDING)
+    }
+    fn begin_record(&mut self, bytes: &[u8]) -> Result<()> {
         let folder = self.folder();
         fs::DirBuilder::new()
             .recursive(true)
             .mode(0o700)
             .create(&folder)?;
         private(&folder, true)?;
-        self.exclusive(&folder.join("pending"), pending_bytes(action))?;
+        self.exclusive(&folder.join("pending"), bytes)?;
         let m = self.files.last().expect("original pending").metadata()?;
         self.pending_identity = Some((m.dev(), m.ino()));
         let n = self.open_directory(&folder)?;
