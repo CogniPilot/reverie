@@ -7,15 +7,30 @@ mod parent;
 mod rootfs;
 
 const CASE: &str = "task_perf::tests::image::actual_rootless_task_v1_perf";
+const CASE_V2: &str = "task_perf::tests::image::actual_rootless_task_v2_perf";
 const WORKLOAD: &str = "task_perf::tests::image::fixed_native_perf_workload";
 
 #[test]
 #[ignore = "requires reviewed rootless image/provenance/profile/native closure fixture; no host setup"]
 fn actual_rootless_task_v1_perf() {
+    run(reverie_core::task_perf::TaskPerfPolicy::TaskV1);
+}
+#[test]
+#[ignore = "requires separately reviewed task-v2 artifact; actual owned Docker/perf only"]
+fn actual_rootless_task_v2_perf() {
+    run(reverie_core::task_perf::TaskPerfPolicy::TaskV2);
+}
+fn run(policy: reverie_core::task_perf::TaskPerfPolicy) {
     if std::env::var_os("REVERIE_TASK_PERF_GUEST").as_deref() == Some(std::ffi::OsStr::new("1")) {
-        guest::run();
+        guest::run(policy);
     } else {
-        parent::run();
+        parent::run(policy);
+    }
+}
+fn case(policy: reverie_core::task_perf::TaskPerfPolicy) -> &'static str {
+    match policy {
+        reverie_core::task_perf::TaskPerfPolicy::TaskV1 => CASE,
+        reverie_core::task_perf::TaskPerfPolicy::TaskV2 => CASE_V2,
     }
 }
 

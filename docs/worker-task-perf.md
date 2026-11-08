@@ -108,6 +108,38 @@ source qualification.
 
 ## Installation and activation boundaries
 
+### Versioned native task-v2 policy
+
+The native codec/producer has a separate `task-v2` selection for ordinary
+inherited recording of multithreaded commands. Task-v1 and its default producer
+remain unchanged: `--per-thread` disables inheritance, and ordinary per-CPU
+recording is refused by task-v1's CPU=-1 filter.
+
+Task-v2 appends one ANDed rule: argument 1 (`pid_t`) masked by `0x80000000`
+equals zero, and argument 4 (`flags`) masked by `0xfffffffffffffff4` equals zero.
+This admits only nonnegative signed-32-bit task targets, including self PID0,
+with the known FD_NO_GROUP, FD_OUTPUT and FD_CLOEXEC flags. Negative/system-wide
+PID targets, PID_CGROUP and unknown/future flags refuse. Unused upper PID bits
+follow the kernel's pid_t cast; noncanonical upper compat flag bits conservatively
+refuse. CPU placement is unrestricted for this task target, not a CPU-wide grant.
+Kernel task credentials, namespaces, dumpability, LSM, event and host perf policy
+checks remain independent. The syscall filter cannot inspect perf_event_attr;
+the user-space-only limitation described above still applies.
+
+`workerTaskPerfPolicyV2` produces a distinct version2 manifest and profile. Native
+selection requires exact policy, purpose/version, marker, fixed compile-bound
+artifact and derivative agreement; it never substitutes a v1 artifact for v2.
+The existing Python broker/owner CLI remains v1-only. This source addition neither
+changes an installed map/domain nor makes that broker support v2. A genuine
+registered native policy transition, preserving every current domain and store,
+and separately reviewed runtime acceptance remain required before activation.
+
+The explicit Rust-owned rootless fixture accepts trailing
+`--task-perf-policy task-v2` to select the separate v2 ignored test. It retains
+the same finite Rust workload, positive stat/sample checks, rootless recipe,
+kernel limits and native inner-container witness. Source/build checks alone
+are not a runtime perf, rootless Docker or rollout pass.
+
 For a new installation the explicit owner map must be present before the
 canonical reservation domain is provisioned, and the matching broker artifact
 and normal rootless base profile must be selected. Ordinary creation then uses

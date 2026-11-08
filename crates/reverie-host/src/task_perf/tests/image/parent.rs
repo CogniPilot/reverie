@@ -13,8 +13,8 @@ use std::{
     time::{Duration, Instant},
 };
 
-pub(super) fn run() {
-    let inputs = inputs::Inputs::capture();
+pub(super) fn run(policy: reverie_core::task_perf::TaskPerfPolicy) {
+    let inputs = inputs::Inputs::capture(policy);
     inputs.verify_image();
     let mut fixture = Fixture::new(inputs);
     let body = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -170,7 +170,7 @@ impl Fixture {
             self.inputs.image.clone(),
             "--ignored".into(),
             "--exact".into(),
-            CASE.into(),
+            case(self.inputs.policy).into(),
             "--test-threads=1".into(),
             "--nocapture".into(),
         ]);
@@ -266,11 +266,12 @@ impl Fixture {
         assert_eq!(caps, ["SETGID", "SETUID"]);
         let options = host["SecurityOpt"].as_array().unwrap();
         println!(
-            "OUTER_SECURITY_READBACK optionCount={} devices={}",
+            "OUTER_SECURITY_READBACK optionCount={} devices={} policy={}",
             options.len(),
-            host["Devices"]
+            host["Devices"],
+            self.inputs.policy.name()
         );
-        assert_eq!(options.len(), 1, "only selected task-v1 seccomp option");
+        assert_eq!(options.len(), 1, "only selected task perf seccomp option");
         let actual = options[0]
             .as_str()
             .unwrap()
@@ -330,6 +331,7 @@ impl Fixture {
                 )
                 .unwrap();
                 assert_eq!(manifest["status"], "passed");
+                assert_eq!(manifest["policy"], self.inputs.policy.name());
                 assert_eq!(manifest["innerRootlessNativeWorkload"], true);
                 assert_eq!(manifest["innerWorkloadPerfProfiled"], false);
                 self.attach = None;

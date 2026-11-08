@@ -1,9 +1,7 @@
 //! Build-time bytes only. Paths are manifest data, never installed-file custody.
-use super::{
-    MANIFEST_PURPOSE, MAX_ARTIFACT_BYTES, PerfSystem, Result, TaskPerfError, TaskPerfProfile, key,
-    scalar,
-};
+use super::{MAX_ARTIFACT_BYTES, PerfSystem, Result, TaskPerfError, TaskPerfProfile, key, scalar};
 use crate::legacy_json::{Node, Number, Value};
+use reverie_core::task_perf::TaskPerfPolicy;
 use std::collections::BTreeMap;
 
 pub struct TaskPerfProducedBytes {
@@ -27,7 +25,24 @@ pub fn produce_task_perf(
     system: PerfSystem,
     base: &[u8],
 ) -> Result<TaskPerfProducedBytes> {
-    let mut profile = TaskPerfProfile::decode(base)?.derivative()?.encode();
+    produce_task_perf_for_policy(
+        TaskPerfPolicy::TaskV1,
+        base_profile,
+        selected_profile,
+        system,
+        base,
+    )
+}
+pub fn produce_task_perf_for_policy(
+    policy: TaskPerfPolicy,
+    base_profile: &str,
+    selected_profile: &str,
+    system: PerfSystem,
+    base: &[u8],
+) -> Result<TaskPerfProducedBytes> {
+    let mut profile = TaskPerfProfile::decode(base)?
+        .derivative_for_policy(policy)?
+        .encode();
     profile.push(b'\n');
     if profile.len() > MAX_ARTIFACT_BYTES {
         return Err(TaskPerfError::ArtifactBound);
@@ -35,9 +50,11 @@ pub fn produce_task_perf(
     let fields = BTreeMap::from([
         (
             key("version"),
-            Value(Node::Number(Number::Integer("1".into()))),
+            Value(Node::Number(Number::Integer(
+                super::manifest_version(policy).into(),
+            ))),
         ),
-        (key("purpose"), scalar(MANIFEST_PURPOSE)),
+        (key("purpose"), scalar(super::manifest_purpose(policy))),
         (key("system"), scalar(system.name())),
         (key("baseProfile"), scalar(base_profile)),
         (

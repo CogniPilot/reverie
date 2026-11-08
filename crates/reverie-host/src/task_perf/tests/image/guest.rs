@@ -12,7 +12,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-pub(super) fn run() {
+pub(super) fn run(policy: reverie_core::task_perf::TaskPerfPolicy) {
     assert_eq!(nix::unistd::geteuid().as_raw(), 1000);
     assert_eq!(nix::unistd::getegid().as_raw(), 100);
     let status = fs::read_to_string("/proc/self/status").unwrap();
@@ -39,16 +39,37 @@ pub(super) fn run() {
     let mut start = [0];
     std::io::stdin().read_exact(&mut start).unwrap();
     assert_eq!(start, [b'R']);
+    let paranoid = perf_kernel_facts();
     fs::create_dir("/tmp/perf-owned").unwrap();
     perf();
+    assert_eq!(
+        perf_kernel_facts(),
+        paranoid,
+        "host perf eligibility changed"
+    );
     let mut daemon = Daemon::spawn();
     daemon.ready();
     inner_native_workload(&daemon);
     daemon.close();
     println!(
         "PERF_ACCEPTANCE {}",
-        serde_json::json!({"status":"passed","uid":1000,"policy":"task-v1","event":"task-clock:u","stat":true,"record":true,"report":true,"innerRootlessNativeWorkload":true,"innerWorkloadPerfProfiled":false})
+        serde_json::json!({"status":"passed","uid":1000,"policy":policy.name(),"event":"task-clock:u","stat":true,"record":true,"report":true,"innerRootlessNativeWorkload":true,"innerWorkloadPerfProfiled":false})
     );
+}
+fn perf_kernel_facts() -> i32 {
+    let raw = fs::read_to_string("/proc/sys/kernel/perf_event_paranoid").unwrap();
+    let paranoid = raw.trim().parse::<i32>().unwrap();
+    let status = fs::read_to_string("/proc/self/status").unwrap();
+    for (name, expected) in [("CapEff:", 0), ("CapPrm:", 0), ("CapBnd:", 192)] {
+        let cap = status
+            .lines()
+            .find_map(|line| line.strip_prefix(name))
+            .unwrap()
+            .trim();
+        assert_eq!(u64::from_str_radix(cap, 16).unwrap(), expected);
+    }
+    println!("ACTUAL_PERF_KERNEL paranoid={paranoid} effective=0 permitted=0");
+    paranoid
 }
 fn perf() {
     let exe = std::env::current_exe().unwrap();

@@ -10,6 +10,7 @@ use reverie_contracts::rootless::{
 use reverie_contracts::storage_identity::MetadataText;
 use reverie_contracts::task_perf_v1::TaskPerfArtifactData;
 use reverie_core::rootless::SubordinateRange;
+use reverie_core::task_perf::TaskPerfPolicy;
 use std::os::unix::fs::MetadataExt;
 use std::{fmt, fs, path::Path};
 
@@ -70,7 +71,7 @@ impl RootlessObservation {
 }
 trait Source {
     fn profile(&self, config: &RootlessConfig) -> Result<Vec<u8>>;
-    fn perf(&self) -> Result<TaskPerfArtifactData>;
+    fn perf(&self, policy: TaskPerfPolicy) -> Result<TaskPerfArtifactData>;
     fn uid(&self) -> u32;
     fn grants(&self, kind: GrantKind, uid: u32) -> Result<Vec<SubordinateRange>>;
 }
@@ -99,8 +100,8 @@ impl Source for Installed {
             crate::task_perf::allowed_metadata,
         )?)
     }
-    fn perf(&self) -> Result<TaskPerfArtifactData> {
-        crate::task_perf::observe_installed_task_perf()
+    fn perf(&self, policy: TaskPerfPolicy) -> Result<TaskPerfArtifactData> {
+        crate::task_perf::observe_installed_task_perf_for_policy(policy)
             .map(|artifact| artifact.into_data())
             .map_err(RootlessHostError::Perf)
     }
@@ -131,7 +132,13 @@ fn observe(config: &RootlessConfig, source: &impl Source) -> Result<RootlessObse
             .ok_or(RootlessError::Option)?;
         let fixed = config
             .needs_perf_recognition()
-            .then(|| source.perf())
+            .then(|| {
+                let policy = reverie_contracts::task_perf_v1::selection_marker_policy(
+                    config.configuration(),
+                )
+                .map_err(|_| RootlessError::Perf)?;
+                source.perf(policy)
+            })
             .transpose()?;
         config.check_prepared_profile(&prepared, fixed.as_ref())?;
     }

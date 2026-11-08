@@ -9,6 +9,7 @@ use std::{
 };
 
 pub(super) struct Inputs {
+    pub(super) policy: reverie_core::task_perf::TaskPerfPolicy,
     pub(super) image: String,
     pub(super) provenance: Value,
     pub(super) security: Vec<String>,
@@ -19,7 +20,7 @@ pub(super) struct Inputs {
     pub(super) core_closure: Vec<PathBuf>,
 }
 impl Inputs {
-    pub(super) fn capture() -> Self {
+    pub(super) fn capture(policy: reverie_core::task_perf::TaskPerfPolicy) -> Self {
         let image =
             std::env::var("REVERIE_PERF_FIXTURE_IMAGE").expect("explicit actual immutable imageID");
         assert!(
@@ -42,7 +43,7 @@ impl Inputs {
             assert_eq!(provenance["factory"][key], value);
         }
         assert_eq!(provenance["factory"]["name"], "lib.workerDockerImage");
-        let (security, runtime) = selected_policy();
+        let (security, runtime) = selected_policy(policy);
         let tools = package("REVERIE_PERF_FIXTURE_DOCKER_TOOLS");
         let coreutils = package("REVERIE_PERF_FIXTURE_COREUTILS");
         assert!(tools.join("bin/dockerd-rootless").is_file());
@@ -53,6 +54,7 @@ impl Inputs {
         assert!(closure.contains(&tools) && closure.contains(&coreutils));
         assert!(core_closure.contains(&coreutils));
         Self {
+            policy,
             image,
             provenance,
             security,
@@ -94,12 +96,17 @@ impl Inputs {
         );
     }
 }
-fn selected_policy() -> (Vec<String>, Vec<String>) {
+fn selected_policy(policy: reverie_core::task_perf::TaskPerfPolicy) -> (Vec<String>, Vec<String>) {
     let manifest = TaskPerfManifest::decode(
         &immutable_file("REVERIE_PERF_FIXTURE_POLICY", 65_536),
         PerfSystem::from_linux_uname("Linux", std::env::consts::ARCH).unwrap(),
     )
     .unwrap();
+    assert_eq!(
+        manifest.policy(),
+        policy,
+        "explicit test policy must match actual artifact"
+    );
     let artifact = TaskPerfArtifactData::verify(
         manifest.clone(),
         &store_file(Path::new(manifest.base_profile()), 65_536),
@@ -107,7 +114,7 @@ fn selected_policy() -> (Vec<String>, Vec<String>) {
     )
     .unwrap();
     let employee = ProfileEmployeeId::parse("22222222-2222-4222-8222-222222222222").unwrap();
-    let config = TaskPerfConfiguration::decode(&serde_json::to_vec(&json!({"uid":1000,"gid":100,"mounts":[],"employeePerfPolicies":{employee.as_str():"task-v1"},"rootlessDocker":{"enabled":true,"seccompProfile":manifest.base_profile(),"seccompSha256":manifest.base_sha256()}})).unwrap()).unwrap();
+    let config = TaskPerfConfiguration::decode(&serde_json::to_vec(&json!({"uid":1000,"gid":100,"mounts":[],"employeePerfPolicies":{employee.as_str():policy.name()},"rootlessDocker":{"enabled":true,"seccompProfile":manifest.base_profile(),"seccompSha256":manifest.base_sha256()}})).unwrap()).unwrap();
     let projection = config.project(Some(&employee), Some(&artifact)).unwrap();
     assert!(projection.selected());
     let rootless = RootlessConfig::capture(projection.into_configuration()).unwrap();

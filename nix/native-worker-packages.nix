@@ -9,6 +9,11 @@ rec {
     inherit pkgs src;
     baseProfile = workerDockerSeccomp;
   };
+  workerTaskPerfPolicyV2 = import ./worker-perf-profile.nix {
+    inherit pkgs src;
+    baseProfile = workerDockerSeccomp;
+    policy = "task-v2";
+  };
   workerResumeProgram = import ./worker-resume-program.nix {
     inherit pkgs src console ownerTerminalProgram;
   };

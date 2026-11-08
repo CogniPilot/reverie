@@ -3,6 +3,20 @@
 use super::*;
 
 pub(crate) fn image(root: &Path, args: &[String]) -> Result<()> {
+    let (args, selector) = match args {
+        [rest @ .., flag, policy] if flag == "--task-perf-policy" => {
+            let selected = match policy.as_str() {
+                "task-v1" => "task_perf::tests::image::actual_rootless_task_v1_perf",
+                "task-v2" => "task_perf::tests::image::actual_rootless_task_v2_perf",
+                _ => return Err("unknown task perf policy".into()),
+            };
+            (rest, selected)
+        }
+        _ => (
+            args,
+            "task_perf::tests::image::actual_rootless_task_v1_perf",
+        ),
+    };
     let [
         image,
         policy,
@@ -50,7 +64,7 @@ pub(crate) fn image(root: &Path, args: &[String]) -> Result<()> {
             "--",
             "--ignored",
             "--exact",
-            "task_perf::tests::image::actual_rootless_task_v1_perf",
+            selector,
             "--test-threads=1",
             "--nocapture",
         ])
@@ -61,6 +75,7 @@ pub(crate) fn image(root: &Path, args: &[String]) -> Result<()> {
         .env("REVERIE_PERF_FIXTURE_COREUTILS", core)
         .env("REVERIE_PERF_FIXTURE_CLOSURE", closure_path)
         .env("REVERIE_PERF_FIXTURE_CORE_CLOSURE", core_path)
+        .env_remove("REVERIE_TASK_PERF_GUEST")
         .status()?;
     if status.success() {
         Ok(())
