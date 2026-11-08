@@ -56,6 +56,20 @@ pub struct ImmutableInputObserver {
     close_uncertain: bool,
 }
 impl ImmutableInputObserver {
+    /// Actual immutable ELF/hash/length observation for the closed worker child
+    /// profile. No execution, process identity or maintenance authority.
+    pub fn observe_worker_child_program(
+        &mut self,
+        selected: &reverie_contracts::resource_actor::WorkerImageProvenance,
+        end: Instant,
+    ) -> Result<()> {
+        self.current(end)?;
+        let code = selected.program();
+        let path = nix_path(&code.path)?;
+        let mut files = Descriptors::default();
+        let body = read_native(&mut files, &path, &code.sha256, Some(code.bytes), end).map(|_| ());
+        files.finish(body, &mut self.close_uncertain)
+    }
     /// Program DATA from the trusted native bootstrap selection. This does
     /// not identify a process or grant controller/maintenance authority.
     pub fn observe_broker_program(

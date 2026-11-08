@@ -301,9 +301,12 @@ fn expected_argv(value: &serde_json::Value, name: &str) -> Vec<String> {
 #[test]
 fn worker_image_inspection_uses_closed_exact_pin_without_container_fallback() {
     use reverie_contracts::worker_image_switch::WorkerImageId;
-    let image=WorkerImageId::parse(&format!("sha256:{}","a".repeat(64))).unwrap();
-    let arguments=EngineQuery::WorkerImageInspect(&image).arguments().unwrap();
-    assert_eq!(arguments,["image","inspect","--format","{{json .}}",image.as_str()].map(OsString::from));
+    let image = WorkerImageId::parse(&format!("sha256:{}", "a".repeat(64))).unwrap();
+    let arguments = EngineQuery::WorkerImageInspect(&image).arguments().unwrap();
+    assert_eq!(
+        arguments,
+        ["image", "inspect", "--format", "{{json .}}", image.as_str()].map(OsString::from)
+    );
     assert!(WorkerImageId::parse("--privileged").is_err());
 }
 #[test]

@@ -278,6 +278,18 @@ impl ObservationContext {
         self.check(end)?;
         Ok(result)
     }
+    /// Full image metadata through THIS context's same native engine/query
+    /// ticket. Exact image IDs are DATA, never a load/create command.
+    pub(crate) fn worker_image_metadata(
+        &self,
+        image: &reverie_contracts::worker_image_switch::WorkerImageId,
+        end: Instant,
+    ) -> Result<String> {
+        self.engine(
+            EngineQuery::WorkerImageInspect(image),
+            self.deadline(Some(end))?,
+        )
+    }
     pub fn inventory(&self, supplied: Option<Instant>) -> Result<ObservedInventory> {
         self.inventory_at(self.deadline(supplied)?)
     }

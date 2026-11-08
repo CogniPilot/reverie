@@ -118,6 +118,13 @@ impl WorkerImageProvenance {
     pub fn toolkit(&self) -> &[CodeFile] {
         &self.toolkit
     }
+    pub fn require_identity(&self, ids: reverie_core::worker_schema::WorkerIds) -> Result<()> {
+        need(
+            scalar(field(field(&self.image, "Config")?, "User")?)?
+                == format!("{}:{}", ids.uid(), ids.gid()),
+            "WORKER_IMAGE_CONFIG_IDENTITY",
+        )
+    }
     pub fn require_program_manifest(&self, raw: &[u8]) -> Result<()> {
         let value = decode(raw)?;
         closed(
