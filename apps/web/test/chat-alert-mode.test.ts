@@ -1,8 +1,8 @@
 /**
- * Phone-style alert mode in the member list (a prototype): the server sends
- * `alertMode: {mode, until}` on a room member; the list shows 🔔 ring, 📳 vibrate or 🔕 silent
- * after the name, with the end time in ET. Absent, unknown, endless or expired modes read as
- * ring, so a stale page never shows a member muted. Display only: nothing here sets a mode.
+ * Phone-style alert mode in the member list: the server sends `alertMode: {mode, source, until?,
+ * then?}` on a room member; the list shows 🔔 ring, 📳 vibrate or 🔕 silent after the name, with
+ * a timed mode's end in ET. An ended lease shows the server's `then`; absent or unknown reads as
+ * ring, so a stale page never shows a member muted on a guess. Display only: nothing here sets a mode.
  */
 import { describe, expect, it } from 'vitest';
 import { createHarness, member, room } from './helpers/chat-app-harness.mjs';
@@ -45,6 +45,33 @@ describe('member alert mode', () => {
     expect(badge('carol').title).toMatch(/^Silent until .* ET \(only an owner @mention or @everyone wakes it\)$/);
     expect(badge('delta').dataset.alertMode).toBe('ring');
     expect(label('delta')).not.toContain('Silent');
+  });
+  it("shows the server's default and owner-set modes, and an ended lease's fallback", async () => {
+    const rooms = [
+      room(
+        'r1',
+        'General',
+        [
+          member(A, 'alpha', { alertMode: { mode: 'vibrate', source: 'default' } }),
+          member(B, 'bravo', { alertMode: { mode: 'silent', source: 'preference' } }),
+          member(C, 'carol', { alertMode: { mode: 'ring', source: 'preference' } }),
+          member(D, 'delta', {
+            alertMode: { mode: 'ring', source: 'lease', until: Date.now() - 1000, then: 'vibrate' },
+          }),
+        ],
+        {}
+      ),
+    ];
+    const h = await createHarness({ sessions, rooms });
+    const badge = (name: string) =>
+      h.document.querySelector(`.ca-member[aria-label^="${name},"] .ca-member-alert`) as HTMLElement;
+    expect(badge('alpha').dataset.alertMode).toBe('vibrate');
+    expect(badge('alpha').title).toBe('Vibrate by default (wakes on a direct @mention or the owner)');
+    expect(badge('bravo').dataset.alertMode).toBe('silent');
+    expect(badge('bravo').title).toBe('Silent, set by the owner (only an owner @mention or @everyone wakes it)');
+    expect(badge('carol').dataset.alertMode).toBe('ring');
+    expect(badge('carol').title).toBe('Ring, set by the owner');
+    expect(badge('delta').dataset.alertMode).toBe('vibrate');
   });
   it('reads an inherited key such as constructor or __proto__ as ring and never throws', async () => {
     const until = Date.now() + 3600e3;

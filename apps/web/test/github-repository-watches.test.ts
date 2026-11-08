@@ -12,6 +12,8 @@ import type { ChatBot } from '../src/chat-bots.js';
 import type { ChatRoom, ChatMessage } from '../src/chatroom-store.js';
 import type { Reply, WatchConfig } from '../src/github-repository-watch-source.js';
 const dirs: string[] = [];
+// Multi-megabyte archive assertions can exceed the normal 30 s bound on contended CI runners.
+const LARGE_SPOOL_TEST_TIMEOUT_MS = 120_000;
 afterEach(async () => {
   vi.restoreAllMocks();
   for (const d of dirs.splice(0)) await rm(d, { recursive: true, force: true });
@@ -1226,7 +1228,7 @@ it('archives an oversized prepared spool losslessly before owner disable', async
   expect(() =>
     reconstructCancellation(frames.map((p, i) => (i ? p : { ...p, payload: Buffer.from('wrong').toString('base64') })))
   ).toThrow('bytes differ');
-});
+}, LARGE_SPOOL_TEST_TIMEOUT_MS);
 
 it('archives several unchanged small cancellation records separately when their sum exceeds2MiB', async () => {
   const f = await queuedArchiveFixture(1500);
@@ -1298,7 +1300,8 @@ it.each([false, true])(
       expect(() => reconstructCancellation(frames)).toThrow('Incomplete');
     }
     expect(f.messages).toHaveLength(0);
-  }
+  },
+  LARGE_SPOOL_TEST_TIMEOUT_MS
 );
 
 function expectExactBytes(actual: Buffer, expected: Buffer) {

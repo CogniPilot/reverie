@@ -1165,6 +1165,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "reverie-local-model"
+version = "0.1.0"
+dependencies = [
+ "getrandom",
+ "libc",
+ "nix",
+ "serde_json",
+ "socket2",
+]
+
+[[package]]
 name = "reverie-mcp-cli"
 version = "0.1.0"
 dependencies = [
@@ -1196,6 +1207,14 @@ dependencies = [
  "reverie-diagnostics",
  "reverie-host",
  "rusqlite",
+ "serde_json",
+]
+
+[[package]]
+name = "reverie-mux"
+version = "0.1.0"
+dependencies = [
+ "nix",
  "serde_json",
 ]
 
@@ -1282,6 +1301,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "reverie-publish"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "nix",
+ "reverie-namegate",
+ "serde",
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
 name = "reverie-python-regex"
 version = "0.1.0"
 dependencies = [
@@ -1327,6 +1358,15 @@ dependencies = [
  "reverie-core",
  "rusqlite",
  "serde_json",
+]
+
+[[package]]
+name = "reverie-task-cancel"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "serde_json",
+ "sha2",
 ]
 
 [[package]]

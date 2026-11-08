@@ -43,16 +43,17 @@
             runtimeInputs = [ pkgs.nodejs_22 ];
             text = ''exec node --experimental-strip-types ${source}/apps/host/gpu-publisher.ts "$@"'';
           };
+          localModelProgram = import ./nix/local-model.nix { inherit pkgs; src = source; };
           localModel = pkgs.writeShellApplication {
             name = "reverie-local-model";
-            runtimeInputs = [ pkgs.python3 pkgs.nix pkgs.coreutils pkgs.docker-client pkgs.systemd ];
+            runtimeInputs = [ pkgs.nix pkgs.coreutils pkgs.docker-client pkgs.systemd ];
             text = ''
               export REVERIE_MODEL_NIXPKGS=${llama-nixpkgs}
               export REVERIE_MODEL_BUILD_EXPR=${source}/nix/local-model-runtime.nix
               export REVERIE_MODEL_SYSTEM=${system}
               REVERIE_MODEL_LAUNCHER="$(readlink -f "$0")"
               export REVERIE_MODEL_LAUNCHER
-              exec python3 ${source}/apps/host/local-model.py "$@"
+              exec ${localModelProgram}/bin/reverie-local-model "$@"
             '';
           };
         in packages // nativeWorkerPackages // {

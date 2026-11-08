@@ -18,7 +18,7 @@ Create the named senders with the existing owner-only `PUT /api/chat-bots/:id` r
 }
 ```
 
-Only assigned `doing`/`blocked` tasks are checked. Completed, unassigned, stopped, vacationed, migrating or non-running assignees are skipped. A task with a source room stays in that room. Missing source rooms, absent membership and blocked phones appear as explicit coverage gaps. The initial policy conservatively requires a ringing phone; muted/vibrate/silent seats are not pressured or escalated as non-responders.
+Only assigned `doing`/`blocked` tasks are checked. Completed, unassigned, stopped, vacationed, migrating or non-running assignees are skipped. A task with a source room stays in that room. Missing source rooms, absent membership and blocked phones appear as explicit coverage gaps. A check-in is addressed to one employee, so it counts as direct contact: it is delivered on Ring or Vibrate (the employee default) and held on Silent, and a Silent seat is not pressured or escalated as a non-responder.
 
 The fair per-task queue prioritizes never-asked/oldest tasks, permits one un-escalated open check-in per employee, and obeys the sender's hourly budget. The configured interval is a minimum repeat cooldown, **not a delivery SLA**. Pending ages, deadlines and coverage are reported; a capped or privacy-blocked queue never claims every assignment was checked on time. A response deadline starts only after an acknowledged durable post with actual phone eligibility, not while waiting in the queue. Its reply clock pauses durably while the assignee is off, vacationed, phone-blocked, inaccessible, or the watch is owner-disabled; resuming never rewrites the actual task commitment.
 

@@ -511,17 +511,9 @@ Object.assign(ReverieApp.prototype, {
       windowData._lazySessionId = termData.sessionId;
     }
 
-    // Dispose the resize observer
-    if (termData.resizeObserver) {
-      termData.resizeObserver.disconnect();
-    }
-
-    // Dispose the xterm.js Terminal instance (frees DOM nodes and internal buffers)
-    if (termData.terminal) {
-      try {
-        termData.terminal.dispose();
-      } catch {}
-    }
+    // Cancel whatever its initialization still has pending, stop re-reading the pane, and dispose the resize
+    // observer and the xterm.js Terminal instance (frees DOM nodes and internal buffers)
+    this._disposeTeammateEntry(termData);
 
     // Remove from teammateTerminals map so renderSubagentWindowContent won't skip this window
     // (the activity HTML can serve as a lightweight placeholder while minimized)
@@ -957,14 +949,7 @@ Object.assign(ReverieApp.prototype, {
     this.subagentWindows.clear();
 
     // Clean up all teammate terminals
-    for (const [, termData] of this.teammateTerminals) {
-      if (termData.resizeObserver) termData.resizeObserver.disconnect();
-      if (termData.terminal) {
-        try {
-          termData.terminal.dispose();
-        } catch {}
-      }
-    }
+    for (const [, termData] of this.teammateTerminals) this._disposeTeammateEntry(termData);
     this.teammateTerminals.clear();
     this.teammatePanesByName.clear();
 

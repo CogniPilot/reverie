@@ -1,0 +1,865 @@
+{
+  "defaults": {
+    "live_enabled": false,
+    "b_mount": "/mnt/scratch",
+    "laptops_root": "laptops/employees",
+    "high_water_pct": 70,
+    "low_water_pct": 50,
+    "idle_days": 3,
+    "recent_write_hours": 6,
+    "max_delete_bytes": 214748364800,
+    "max_delete_seconds": 1800,
+    "registry_dir": "/etc/reverie/prune-registry",
+    "checkout_roots": [],
+    "checkout_max_depth": 6,
+    "log_dir": "/var/log/reverie-prune",
+    "lock_path": "/run/reverie-prune.lock",
+    "laptop_home_root": "",
+    "lease_dir_template": "{home}/.local/state/reverie/leases",
+    "host_lease_dirs": [
+      "/var/lib/reverie/leases"
+    ],
+    "lease_report_days": 3,
+    "lease_lib": "/usr/lib/reverie/lease.py",
+    "laptops_cmd": [],
+    "root_identities": {},
+    "registry_manifest": "approvals.json",
+    "test_mountinfo": "",
+    "test_trusted_uid": null,
+    "test_unbound_ok": false
+  },
+  "reasons": [
+    "anchor_changed",
+    "repo_unbound",
+    "registry_changed",
+    "registry_untrusted",
+    "proc_unreadable",
+    "lease_unknown",
+    "lease_held",
+    "reserved",
+    "barrier_busy",
+    "open_file",
+    "cwd",
+    "recent_write",
+    "tool_lock",
+    "keep",
+    "mount",
+    "symlink_path",
+    "walk_error",
+    "git_unsafe",
+    "registry_invalid",
+    "not_idle"
+  ],
+  "exit_codes": [
+    0,
+    2,
+    3,
+    4,
+    5
+  ],
+  "admission": [
+    {
+      "name": "valid",
+      "roots": [
+        {
+          "path": "/mnt/scratch",
+          "canonical_path": "/mnt/scratch",
+          "is_directory": true,
+          "is_symlink": false,
+          "device": [
+            8,
+            1
+          ],
+          "inode": 42
+        }
+      ],
+      "mounts": [
+        {
+          "point": "/mnt/scratch",
+          "root": "/",
+          "source": "/dev/fixture",
+          "fstype": "ext4",
+          "device": [
+            8,
+            1
+          ]
+        }
+      ],
+      "identities": {
+        "/mnt/scratch": {
+          "source": "/dev/fixture",
+          "fstype": "ext4"
+        }
+      },
+      "b_mount": "/mnt/scratch",
+      "checkouts": [],
+      "check": false,
+      "test_unbound": false,
+      "accepted": true,
+      "reference_error": null
+    },
+    {
+      "name": "identity-required",
+      "roots": [
+        {
+          "path": "/mnt/scratch",
+          "canonical_path": "/mnt/scratch",
+          "is_directory": true,
+          "is_symlink": false,
+          "device": [
+            8,
+            1
+          ],
+          "inode": 42
+        }
+      ],
+      "mounts": [
+        {
+          "point": "/mnt/scratch",
+          "root": "/",
+          "source": "/dev/fixture",
+          "fstype": "ext4",
+          "device": [
+            8,
+            1
+          ]
+        }
+      ],
+      "identities": {},
+      "b_mount": "/mnt/scratch",
+      "checkouts": [],
+      "check": false,
+      "test_unbound": false,
+      "accepted": false,
+      "reference_error": "root /mnt/scratch: no operator-approved identity in root_identities"
+    },
+    {
+      "name": "no-containing-mount",
+      "roots": [
+        {
+          "path": "/mnt/scratch",
+          "canonical_path": "/mnt/scratch",
+          "is_directory": true,
+          "is_symlink": false,
+          "device": [
+            8,
+            1
+          ],
+          "inode": 42
+        }
+      ],
+      "mounts": [],
+      "identities": {
+        "/mnt/scratch": {
+          "source": "/dev/fixture",
+          "fstype": "ext4"
+        }
+      },
+      "b_mount": "/mnt/scratch",
+      "checkouts": [],
+      "check": false,
+      "test_unbound": false,
+      "accepted": false,
+      "reference_error": "root /mnt/scratch: no containing mount"
+    },
+    {
+      "name": "mount-source",
+      "roots": [
+        {
+          "path": "/mnt/scratch",
+          "canonical_path": "/mnt/scratch",
+          "is_directory": true,
+          "is_symlink": false,
+          "device": [
+            8,
+            1
+          ],
+          "inode": 42
+        }
+      ],
+      "mounts": [
+        {
+          "point": "/mnt/scratch",
+          "root": "/",
+          "source": "/dev/wrong",
+          "fstype": "ext4",
+          "device": [
+            8,
+            1
+          ]
+        }
+      ],
+      "identities": {
+        "/mnt/scratch": {
+          "source": "/dev/fixture",
+          "fstype": "ext4"
+        }
+      },
+      "b_mount": "/mnt/scratch",
+      "checkouts": [],
+      "check": false,
+      "test_unbound": false,
+      "accepted": false,
+      "reference_error": "root /mnt/scratch: mount is /dev/wrong ext4 root /, approved /dev/fixture ext4 root /"
+    },
+    {
+      "name": "mount-fstype",
+      "roots": [
+        {
+          "path": "/mnt/scratch",
+          "canonical_path": "/mnt/scratch",
+          "is_directory": true,
+          "is_symlink": false,
+          "device": [
+            8,
+            1
+          ],
+          "inode": 42
+        }
+      ],
+      "mounts": [
+        {
+          "point": "/mnt/scratch",
+          "root": "/",
+          "source": "/dev/fixture",
+          "fstype": "xfs",
+          "device": [
+            8,
+            1
+          ]
+        }
+      ],
+      "identities": {
+        "/mnt/scratch": {
+          "source": "/dev/fixture",
+          "fstype": "ext4"
+        }
+      },
+      "b_mount": "/mnt/scratch",
+      "checkouts": [],
+      "check": false,
+      "test_unbound": false,
+      "accepted": false,
+      "reference_error": "root /mnt/scratch: mount is /dev/fixture xfs root /, approved /dev/fixture ext4 root /"
+    },
+    {
+      "name": "mount-root",
+      "roots": [
+        {
+          "path": "/mnt/scratch",
+          "canonical_path": "/mnt/scratch",
+          "is_directory": true,
+          "is_symlink": false,
+          "device": [
+            8,
+            1
+          ],
+          "inode": 42
+        }
+      ],
+      "mounts": [
+        {
+          "point": "/mnt/scratch",
+          "root": "/sub",
+          "source": "/dev/fixture",
+          "fstype": "ext4",
+          "device": [
+            8,
+            1
+          ]
+        }
+      ],
+      "identities": {
+        "/mnt/scratch": {
+          "source": "/dev/fixture",
+          "fstype": "ext4"
+        }
+      },
+      "b_mount": "/mnt/scratch",
+      "checkouts": [],
+      "check": false,
+      "test_unbound": false,
+      "accepted": false,
+      "reference_error": "root /mnt/scratch: b_mount must map the FULL filesystem root (approved /, observed /sub)"
+    },
+    {
+      "name": "mount-point",
+      "roots": [
+        {
+          "path": "/mnt/scratch",
+          "canonical_path": "/mnt/scratch",
+          "is_directory": true,
+          "is_symlink": false,
+          "device": [
+            8,
+            1
+          ],
+          "inode": 42
+        }
+      ],
+      "mounts": [
+        {
+          "point": "/mnt",
+          "root": "/",
+          "source": "/dev/fixture",
+          "fstype": "ext4",
+          "device": [
+            8,
+            1
+          ]
+        }
+      ],
+      "identities": {
+        "/mnt/scratch": {
+          "source": "/dev/fixture",
+          "fstype": "ext4"
+        }
+      },
+      "b_mount": "/mnt/scratch",
+      "checkouts": [],
+      "check": false,
+      "test_unbound": false,
+      "accepted": false,
+      "reference_error": "root /mnt/scratch: not a mount point (would fall back to /mnt)"
+    },
+    {
+      "name": "mount-device",
+      "roots": [
+        {
+          "path": "/mnt/scratch",
+          "canonical_path": "/mnt/scratch",
+          "is_directory": true,
+          "is_symlink": false,
+          "device": [
+            8,
+            1
+          ],
+          "inode": 42
+        }
+      ],
+      "mounts": [
+        {
+          "point": "/mnt/scratch",
+          "root": "/",
+          "source": "/dev/fixture",
+          "fstype": "ext4",
+          "device": [
+            8,
+            2
+          ]
+        }
+      ],
+      "identities": {
+        "/mnt/scratch": {
+          "source": "/dev/fixture",
+          "fstype": "ext4"
+        }
+      },
+      "b_mount": "/mnt/scratch",
+      "checkouts": [],
+      "check": false,
+      "test_unbound": false,
+      "accepted": false,
+      "reference_error": "root /mnt/scratch: st_dev 8:1 is not the mount's (8, 2)"
+    },
+    {
+      "name": "root-canonical_path",
+      "roots": [
+        {
+          "path": "/mnt/scratch",
+          "canonical_path": "/other",
+          "is_directory": true,
+          "is_symlink": false,
+          "device": [
+            8,
+            1
+          ],
+          "inode": 42
+        }
+      ],
+      "mounts": [
+        {
+          "point": "/mnt/scratch",
+          "root": "/",
+          "source": "/dev/fixture",
+          "fstype": "ext4",
+          "device": [
+            8,
+            1
+          ]
+        }
+      ],
+      "identities": {
+        "/mnt/scratch": {
+          "source": "/dev/fixture",
+          "fstype": "ext4"
+        }
+      },
+      "b_mount": "/mnt/scratch",
+      "checkouts": [],
+      "check": false,
+      "test_unbound": false,
+      "accepted": false,
+      "reference_error": "root /mnt/scratch: must be an absolute canonical path with no symlinks"
+    },
+    {
+      "name": "root-is_symlink",
+      "roots": [
+        {
+          "path": "/mnt/scratch",
+          "canonical_path": "/mnt/scratch",
+          "is_directory": true,
+          "is_symlink": true,
+          "device": [
+            8,
+            1
+          ],
+          "inode": 42
+        }
+      ],
+      "mounts": [
+        {
+          "point": "/mnt/scratch",
+          "root": "/",
+          "source": "/dev/fixture",
+          "fstype": "ext4",
+          "device": [
+            8,
+            1
+          ]
+        }
+      ],
+      "identities": {
+        "/mnt/scratch": {
+          "source": "/dev/fixture",
+          "fstype": "ext4"
+        }
+      },
+      "b_mount": "/mnt/scratch",
+      "checkouts": [],
+      "check": false,
+      "test_unbound": false,
+      "accepted": false,
+      "reference_error": "root /mnt/scratch: must be an absolute canonical path with no symlinks"
+    },
+    {
+      "name": "root-is_directory",
+      "roots": [
+        {
+          "path": "/mnt/scratch",
+          "canonical_path": "/mnt/scratch",
+          "is_directory": false,
+          "is_symlink": false,
+          "device": [
+            8,
+            1
+          ],
+          "inode": 42
+        }
+      ],
+      "mounts": [
+        {
+          "point": "/mnt/scratch",
+          "root": "/",
+          "source": "/dev/fixture",
+          "fstype": "ext4",
+          "device": [
+            8,
+            1
+          ]
+        }
+      ],
+      "identities": {
+        "/mnt/scratch": {
+          "source": "/dev/fixture",
+          "fstype": "ext4"
+        }
+      },
+      "b_mount": "/mnt/scratch",
+      "checkouts": [],
+      "check": false,
+      "test_unbound": false,
+      "accepted": false,
+      "reference_error": "root /mnt/scratch: not a directory"
+    },
+    {
+      "name": "root-device",
+      "roots": [
+        {
+          "path": "/mnt/scratch",
+          "canonical_path": "/mnt/scratch",
+          "is_directory": true,
+          "is_symlink": false,
+          "device": [
+            8,
+            2
+          ],
+          "inode": 42
+        }
+      ],
+      "mounts": [
+        {
+          "point": "/mnt/scratch",
+          "root": "/",
+          "source": "/dev/fixture",
+          "fstype": "ext4",
+          "device": [
+            8,
+            1
+          ]
+        }
+      ],
+      "identities": {
+        "/mnt/scratch": {
+          "source": "/dev/fixture",
+          "fstype": "ext4"
+        }
+      },
+      "b_mount": "/mnt/scratch",
+      "checkouts": [],
+      "check": false,
+      "test_unbound": false,
+      "accepted": false,
+      "reference_error": "root /mnt/scratch: st_dev 8:2 is not the mount's (8, 1)"
+    },
+    {
+      "name": "approved-subtree-still-refused",
+      "roots": [
+        {
+          "path": "/mnt/scratch",
+          "canonical_path": "/mnt/scratch",
+          "is_directory": true,
+          "is_symlink": false,
+          "device": [
+            8,
+            1
+          ],
+          "inode": 42
+        }
+      ],
+      "mounts": [
+        {
+          "point": "/mnt/scratch",
+          "root": "/sub",
+          "source": "/dev/fixture",
+          "fstype": "ext4",
+          "device": [
+            8,
+            1
+          ]
+        }
+      ],
+      "identities": {
+        "/mnt/scratch": {
+          "source": "/dev/fixture",
+          "fstype": "ext4",
+          "mount_root": "/sub"
+        }
+      },
+      "b_mount": "/mnt/scratch",
+      "checkouts": [],
+      "check": false,
+      "test_unbound": false,
+      "accepted": false,
+      "reference_error": "root /mnt/scratch: b_mount must map the FULL filesystem root (approved /sub, observed /sub)"
+    },
+    {
+      "name": "equal-point-last-wrong",
+      "roots": [
+        {
+          "path": "/mnt/scratch",
+          "canonical_path": "/mnt/scratch",
+          "is_directory": true,
+          "is_symlink": false,
+          "device": [
+            8,
+            1
+          ],
+          "inode": 42
+        }
+      ],
+      "mounts": [
+        {
+          "point": "/mnt/scratch",
+          "root": "/",
+          "source": "/dev/fixture",
+          "fstype": "ext4",
+          "device": [
+            8,
+            1
+          ]
+        },
+        {
+          "point": "/mnt/scratch",
+          "root": "/",
+          "source": "wrong",
+          "fstype": "ext4",
+          "device": [
+            8,
+            1
+          ]
+        }
+      ],
+      "identities": {
+        "/mnt/scratch": {
+          "source": "/dev/fixture",
+          "fstype": "ext4"
+        }
+      },
+      "b_mount": "/mnt/scratch",
+      "checkouts": [],
+      "check": false,
+      "test_unbound": false,
+      "accepted": false,
+      "reference_error": "root /mnt/scratch: mount is wrong ext4 root /, approved /dev/fixture ext4 root /"
+    },
+    {
+      "name": "equal-point-last-good",
+      "roots": [
+        {
+          "path": "/mnt/scratch",
+          "canonical_path": "/mnt/scratch",
+          "is_directory": true,
+          "is_symlink": false,
+          "device": [
+            8,
+            1
+          ],
+          "inode": 42
+        }
+      ],
+      "mounts": [
+        {
+          "point": "/mnt/scratch",
+          "root": "/",
+          "source": "wrong",
+          "fstype": "ext4",
+          "device": [
+            8,
+            1
+          ]
+        },
+        {
+          "point": "/mnt/scratch",
+          "root": "/",
+          "source": "/dev/fixture",
+          "fstype": "ext4",
+          "device": [
+            8,
+            1
+          ]
+        }
+      ],
+      "identities": {
+        "/mnt/scratch": {
+          "source": "/dev/fixture",
+          "fstype": "ext4"
+        }
+      },
+      "b_mount": "/mnt/scratch",
+      "checkouts": [],
+      "check": false,
+      "test_unbound": false,
+      "accepted": true,
+      "reference_error": null
+    },
+    {
+      "name": "innermost-wins",
+      "roots": [
+        {
+          "path": "/mnt/scratch",
+          "canonical_path": "/mnt/scratch",
+          "is_directory": true,
+          "is_symlink": false,
+          "device": [
+            8,
+            1
+          ],
+          "inode": 42
+        }
+      ],
+      "mounts": [
+        {
+          "point": "/mnt/scratch",
+          "root": "/",
+          "source": "/dev/fixture",
+          "fstype": "ext4",
+          "device": [
+            8,
+            1
+          ]
+        },
+        {
+          "point": "/",
+          "root": "/",
+          "source": "wrong",
+          "fstype": "ext4",
+          "device": [
+            8,
+            1
+          ]
+        }
+      ],
+      "identities": {
+        "/mnt/scratch": {
+          "source": "/dev/fixture",
+          "fstype": "ext4"
+        }
+      },
+      "b_mount": "/mnt/scratch",
+      "checkouts": [],
+      "check": false,
+      "test_unbound": false,
+      "accepted": true,
+      "reference_error": null
+    },
+    {
+      "name": "prefix-is-not-parent",
+      "roots": [
+        {
+          "path": "/mnt/scratch",
+          "canonical_path": "/mnt/scratch",
+          "is_directory": true,
+          "is_symlink": false,
+          "device": [
+            8,
+            1
+          ],
+          "inode": 42
+        }
+      ],
+      "mounts": [
+        {
+          "point": "/mnt/scratch2",
+          "root": "/",
+          "source": "/dev/fixture",
+          "fstype": "ext4",
+          "device": [
+            8,
+            1
+          ]
+        }
+      ],
+      "identities": {
+        "/mnt/scratch": {
+          "source": "/dev/fixture",
+          "fstype": "ext4"
+        }
+      },
+      "b_mount": "/mnt/scratch",
+      "checkouts": [],
+      "check": false,
+      "test_unbound": false,
+      "accepted": false,
+      "reference_error": "root /mnt/scratch: no containing mount"
+    },
+    {
+      "name": "inactive-checkout-ignored",
+      "roots": [
+        {
+          "path": "/mnt/scratch",
+          "canonical_path": "/mnt/scratch",
+          "is_directory": true,
+          "is_symlink": false,
+          "device": [
+            8,
+            1
+          ],
+          "inode": 42
+        }
+      ],
+      "mounts": [
+        {
+          "point": "/mnt/scratch",
+          "root": "/",
+          "source": "/dev/fixture",
+          "fstype": "ext4",
+          "device": [
+            8,
+            1
+          ]
+        }
+      ],
+      "identities": {
+        "/mnt/scratch": {
+          "source": "/dev/fixture",
+          "fstype": "ext4"
+        }
+      },
+      "b_mount": "/mnt/scratch",
+      "checkouts": [
+        "/work"
+      ],
+      "check": false,
+      "test_unbound": false,
+      "accepted": true,
+      "reference_error": null
+    },
+    {
+      "name": "active-checkout-missing",
+      "roots": [
+        {
+          "path": "/mnt/scratch",
+          "canonical_path": "/mnt/scratch",
+          "is_directory": true,
+          "is_symlink": false,
+          "device": [
+            8,
+            1
+          ],
+          "inode": 42
+        }
+      ],
+      "mounts": [
+        {
+          "point": "/mnt/scratch",
+          "root": "/",
+          "source": "/dev/fixture",
+          "fstype": "ext4",
+          "device": [
+            8,
+            1
+          ]
+        }
+      ],
+      "identities": {
+        "/mnt/scratch": {
+          "source": "/dev/fixture",
+          "fstype": "ext4"
+        }
+      },
+      "b_mount": "/mnt/scratch",
+      "checkouts": [
+        "/work"
+      ],
+      "check": true,
+      "test_unbound": false,
+      "accepted": false,
+      "reference_error": "root /work: no operator-approved identity in root_identities"
+    },
+    {
+      "name": "test-unbound-legacy",
+      "roots": [
+        {
+          "path": "/mnt/scratch",
+          "canonical_path": "/mnt/scratch",
+          "is_directory": true,
+          "is_symlink": false,
+          "device": [
+            8,
+            1
+          ],
+          "inode": 42
+        }
+      ],
+      "mounts": [],
+      "identities": {},
+      "b_mount": "/mnt/scratch",
+      "checkouts": [],
+      "check": false,
+      "test_unbound": true,
+      "accepted": true,
+      "reference_error": null
+    }
+  ]
+}

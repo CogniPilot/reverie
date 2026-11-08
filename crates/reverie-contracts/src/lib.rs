@@ -1,7 +1,9 @@
 //! Named legacy wire codecs. Decoded values and digests confer no authority.
 pub mod autoenv;
 pub mod autoenv_environment;
+pub mod broker_control;
 pub mod broker_laptop;
+pub mod broker_reply;
 pub mod broker_resources;
 pub mod chat_images;
 pub mod collector;
@@ -32,6 +34,7 @@ pub mod office_plan;
 pub mod operations_v1;
 pub mod ops_command;
 pub mod profiles_v1;
+pub mod prune;
 pub mod prune_receipts;
 mod python_number;
 pub mod ram_migration;

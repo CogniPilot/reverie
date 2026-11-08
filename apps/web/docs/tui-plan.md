@@ -189,7 +189,7 @@ A shared style inspector, `src/cli-style.ts`: one palette (mirroring the web's s
 | 1 | `reverie tui` core: list + states via SSE, cursor + 1-9, attach/return loop, kill w/ confirm, new session, narrow mode, degraded mode, `sc` alias flip + `--list`/`<n>` parity | M/L |
 | 2 | Preview pane (SGR clip), approvals answering, prompt composer, search, digest, resume, plan-usage header | M |
 | 3 | Mouse support, `--pick` popup switcher + tmux binding, opt-in attach status line, BEL/OSC 9 notifications | M |
-| 4 | Retire `tmux-chooser.sh`/fold `tmux-manager.sh` (keep as thin wrappers for one release), docs/README/wiki, screenshots for promo | S |
+| 4 | Retire `tmux-chooser.sh`/fold `tmux-manager.sh` (keep as thin wrappers for one release), docs/README/wiki, screenshots for promo (both scripts are now removed; `reverie tui` and the native `reverie-mux` replace them) | S |
 
 Phases 0-1 are the useful minimum; 2 is where it beats herdr's sidebar (answering approvals from the dashboard); 3 is delight.
 

@@ -131,25 +131,45 @@ Object.assign(ReverieApp.prototype, {
   },
 
   /**
+   * The phone mode in effect from the server's `alertMode: {mode, source, until?, then?}`. A timed
+   * choice (anything with `until`) shows its mode while it lasts and, once a stale page sees it
+   * ended, the `then` the server said applies after it. `default` and `preference` show their mode.
+   * Absent or unknown reads as ring, so a stale page never shows a member muted on a guess.
+   */
+  _chatEffectiveAlert(a) {
+    const known = (mode) => typeof mode === 'string' && ['ring', 'vibrate', 'silent'].includes(mode);
+    const until = Number(a?.until);
+    if (a && Number.isFinite(until)) {
+      if (known(a.mode) && until > Date.now()) return { mode: a.mode, live: true, until };
+      return { mode: known(a.then) ? a.then : 'ring', live: false };
+    }
+    return { mode: known(a?.mode) ? a.mode : 'ring', live: false, source: a?.source };
+  },
+
+  /**
    * The member's phone-style alert mode as a monochrome phone outline: ring,
    * vibrate (only a direct mention or the owner wakes it), silent (only the owner's @mention or @everyone).
-   * The server sends `alertMode: {mode, until}` with unexpired modes only; an absent, unknown
-   * or already-expired mode reads as ring, so a stale page never shows a member muted.
+   * An employee with no choice made is on Vibrate; the title says whether a mode is timed, the
+   * owner's lasting choice, or that default.
    */
   _chatAlertBadge(m, className) {
     const labels = { ring: 'Ring', vibrate: 'Vibrate', silent: 'Silent' };
-    const a = m?.alertMode;
-    const until = Number(a?.until);
-    const live = a && Object.hasOwn(labels, a.mode) && a.mode !== 'ring' && Number.isFinite(until) && until > Date.now();
-    const mode = live ? a.mode : 'ring';
+    const { mode, live, until, source } = this._chatEffectiveAlert(m?.alertMode);
     const label = labels[mode];
+    const effect = {
+      ring: '',
+      vibrate: ' (wakes on a direct @mention or the owner)',
+      silent: ' (only an owner @mention or @everyone wakes it)',
+    }[mode];
     let title = label;
+    if (source === 'preference') title = `${label}, set by the owner${effect}`;
+    else if (source === 'default' && mode !== 'ring') title = `${label} by default${effect}`;
     if (live) {
       const et = (opts) => new Intl.DateTimeFormat('en-US', { timeZone: globalThis.ReverieTime?.timeZone || 'UTC', ...opts });
       const day = (t) => et({ year: 'numeric', month: '2-digit', day: '2-digit' }).format(t);
       const time = et({ hour: 'numeric', minute: '2-digit', timeZoneName: 'short' }).format(until);
       const when = day(until) === day(Date.now()) ? time : `${et({ weekday: 'short' }).format(until)} ${time}`;
-      title = `${label} until ${when}${a.mode === 'vibrate' ? ' (wakes on a direct @mention or the owner)' : ' (only an owner @mention or @everyone wakes it)'}`;
+      title = `${label} until ${when}${effect}`;
     }
     const badge = this._chatEl('span', className);
     badge.style.cssText = 'display:inline-flex;vertical-align:middle;margin-left:4px;color:var(--text-muted,#919aa6);width:16px;height:16px;flex-shrink:0';
@@ -164,7 +184,7 @@ Object.assign(ReverieApp.prototype, {
     badge.append(svg);
     badge.title = title;
     badge.setAttribute('aria-label', title);
-    badge.dataset.alertMode = live ? a.mode : 'ring';
+    badge.dataset.alertMode = mode;
     return badge;
   },
 

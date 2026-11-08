@@ -6,7 +6,8 @@ import { ChatroomService } from '../src/chatroom-service.js';
 import { wakePayload } from './helpers/wake-payload.js';
 
 // Owner 10-20/21: an employee on Silent answers the owner only when he @mentions it or @everyone (the one
-// room-wide word; @all and @here are plain text). Vibrate and Ring are unchanged.
+// room-wide word; @all and @here are plain text). Vibrate and Ring are unchanged. With no choice made, an employee
+// is on Vibrate (James's A on d-phone-vibrate-default).
 // With `twin`, a second member 'c' goes by the same name in another case ('ALPHA'), on the same mode.
 async function setup(mode?: 'ring' | 'vibrate' | 'silent', twin = false) {
   const writes: string[] = [];
@@ -112,8 +113,35 @@ describe('Silent: only an owner @mention or @everyone gets through', () => {
     } finally { await t.service.stop(); }
   });
 
-  it.each([undefined, 'ring'] as const)('Ring (%s) is unchanged: owner force-wakes, others deliver without a force-wake', async (mode) => {
-    const t = await setup(mode);
+  it('an employee with no choice made is on Vibrate: the owner gets through, ordinary agent text is held', async () => {
+    const t = await setup();
+    try {
+      expect(t.service.alertMode('a')).toEqual({ mode: 'vibrate', source: 'default' });
+      const plain = t.owner('owner plain');
+      const peer = t.agent('agent plain held');
+      expect([plain, peer].map(t.wakes)).toEqual([true, false]);
+      const out = await t.flush();
+      expect(out).toContain('owner plain');
+      expect(out).not.toContain('held');
+    } finally { await t.service.stop(); }
+  });
+
+  it.each([[undefined, true], ['vibrate', true], ['silent', false]] as const)(
+    'a bot post addressed to the member alone (a check-in) is direct contact on %s: %s', async (mode, reaches) => {
+      const t = await setup(mode);
+      try {
+        const bot = { kind: 'bot', botId: 'status', name: 'Status' } as const;
+        const addressed = t.service.post(t.room.id, bot, 'Alpha: status for your task?', ['a']);
+        const roomWide = t.service.post(t.room.id, bot, 'room-wide bot note held', 'all');
+        expect([addressed, roomWide].map(t.wakes)).toEqual([reaches, false]);
+        const out = await t.flush();
+        expect(out.includes('status for your task')).toBe(reaches);
+        expect(out).not.toContain('held');
+      } finally { await t.service.stop(); }
+    });
+
+  it('an explicit Ring is unchanged: owner force-wakes, others deliver without a force-wake', async () => {
+    const t = await setup('ring');
     try {
       const plain = t.owner('owner plain');
       const peer = t.agent('agent plain');

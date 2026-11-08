@@ -109,8 +109,11 @@ impl Harness {
             task,
         }
     }
+    /// Close the channel as the TS does at teardown: half-close it. The front reads EOF and ends
+    /// with ChannelClosed, while a frame it still owes (a credit released by the last client write,
+    /// or data the TS never read) still has an open reader instead of failing with EPIPE.
     async fn finish(self) -> io::Result<SessionEnd> {
-        self.peer.0.shutdown(Shutdown::Both).unwrap();
+        self.peer.0.shutdown(Shutdown::Write).unwrap();
         tokio::time::timeout(Duration::from_secs(5), self.task)
             .await
             .unwrap()
@@ -156,6 +159,29 @@ async fn qualify_half_close() {
     assert_eq!(receipt.id, id);
     assert_eq!(receipt.body, Body::Written(response.len() as u64));
     assert_eq!(h.finish().await.unwrap(), SessionEnd::ChannelClosed);
+}
+
+#[test]
+fn teardown_ends_channel_closed_while_the_front_still_owes_frames() {
+    runtime().block_on(qualify_owed_teardown());
+}
+async fn qualify_owed_teardown() {
+    let h = Harness::start(1, 128 << 10);
+    let port = h.peer.bind(Listener::Main).await;
+    h.peer.send(0, Body::ServiceReady).await;
+    let (id, mut client) = h.peer.open(port, Listener::Main).await;
+    assert!(matches!(h.peer.receive().await.body, Body::Credit(_)));
+    // The client streams far more than the channel buffers while the TS stops reading, so the
+    // front's channel writer is mid-write when the TS closes the channel.
+    h.peer.send(id, Body::Credit(16 << 20)).await;
+    let writer = tokio::spawn(async move {
+        let _ = client.write_all(&vec![7; 8 << 20]).await;
+        client
+    });
+    assert!(matches!(h.peer.non_credit().await.body, Body::Data(_)));
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert_eq!(h.finish().await.unwrap(), SessionEnd::ChannelClosed);
+    writer.abort();
 }
 
 #[test]

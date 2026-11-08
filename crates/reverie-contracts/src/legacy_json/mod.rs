@@ -49,6 +49,10 @@ pub(crate) fn decode_text(text: &str) -> Result<Value, Error> {
 pub(crate) fn decode_loads_bytes(raw: &[u8]) -> Result<Value, Error> {
     decode::decode_last_wins(&text::python_bytes(raw)?)
 }
+/// Legacy C controls use Python's bytes decoder and last-duplicate-key rule.
+pub(crate) fn decode_broker_control(raw: &[u8]) -> Result<Value, Error> {
+    decode_loads_bytes(raw)
+}
 /// Normal rootless seccomp JSON uses json.loads(bytes), without object_pairs_hook.
 /// Keep this mode purpose-private; strict profile/perf/registry readers differ.
 pub(crate) fn decode_rootless_profile(raw: &[u8]) -> Result<Value, Error> {

@@ -1,0 +1,564 @@
+/**
+ * @fileoverview The hosting owner's pictures for embassy guests: the store, and the host routes that set, serve and
+ * remove them. Only an approved or connected guest of the hosted room gets one, only the signed-in owner sets or
+ * sees it, the image is checked by its own bytes and size, and revoking the guest or closing the room deletes it.
+ *
+ * Port: N/A (app.inject and a fake embassy channel)
+ */
+import { afterEach, describe, expect, it } from 'vitest';
+import Fastify, { type InjectOptions } from 'fastify';
+import { chmodSync, mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { AvatarError, AvatarStore, MAX_AVATAR_BYTES } from '../src/agent-avatars.js';
+import { EMBASSY_GUEST_AVATAR_URL, EmbassyGuestAvatars, GuestLifecycleError } from '../src/embassy-guest-avatars.js';
+import { writePrivate } from '../src/embassy-guest-client.js';
+import { EmbassyHost, type EmbassyChannelCall } from '../src/embassy-host.js';
+import type { EmbassyPairing } from '../src/embassy-pairing.js';
+import { registerEmbassyPairingRoutes } from '../src/web/routes/embassy-pairing-routes.js';
+import { buildHostPolicy } from '../src/web/network-auth-policy.js';
+
+const ROOM = '00000015-001b-4000-8000-000000000025';
+const ORIGIN = 'https://embassy.example.ts.net:8443';
+const APPROVED = '0000000a-0000-4000-8000-00000000000a';
+const CLAIMED = '0000000b-0000-4000-8000-00000000000b';
+const PENDING = '0000000c-0000-4000-8000-00000000000c';
+const REVOKED = '0000000d-0000-4000-8000-00000000000d';
+const REJECTED = '0000000e-0000-4000-8000-00000000000e';
+const UNKNOWN = '0000000f-0000-4000-8000-00000000000f';
+const PNG = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.from('zorblat')]);
+const JPEG = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.from('zorblat')]);
+const SVG = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>');
+
+/** An AvatarStore whose next put, once started, waits until released: a write already past its checks. */
+class HeldStore extends AvatarStore {
+  private hold?: { asked: () => void; released: Promise<void> };
+  holdNextPut() {
+    let release!: () => void;
+    let asked!: () => void;
+    const askedP = new Promise<void>((done) => (asked = done));
+    this.hold = { asked, released: new Promise<void>((done) => (release = done)) };
+    return { asked: askedP, release };
+  }
+  override async put(sessionId: string, data: Buffer): Promise<void> {
+    const hold = this.hold;
+    this.hold = undefined;
+    if (hold) {
+      hold.asked();
+      await hold.released;
+    }
+    return super.put(sessionId, data);
+  }
+}
+
+const dirs: string[] = [];
+const temp = () => {
+  const dir = mkdtempSync(join(tmpdir(), 'embassy-guest-avatars-'));
+  dirs.push(dir);
+  return dir;
+};
+afterEach(async () => {
+  delete process.env.REVERIE_MULTIUSER;
+  await Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
+});
+
+/** A hosted room with one invite per guest state; DELETE revokes an invite and POST /close revokes them all. */
+function fakeChannel() {
+  const invites = [
+    { id: 'inv-approved', requestId: APPROVED, requestState: 'approved', revoked: false },
+    { id: 'inv-claimed', requestId: CLAIMED, requestState: 'claimed', revoked: false },
+    { id: 'inv-pending', requestId: PENDING, requestState: 'pending', revoked: false },
+    { id: 'inv-revoked', requestId: REVOKED, requestState: 'approved', revoked: true },
+    { id: 'inv-rejected', requestId: REJECTED, requestState: 'rejected', revoked: false },
+  ];
+  const base = `/embassy/channel/rooms/${ROOM}`;
+  // A held call answers with the state at the moment it was asked, but only once released: an embassy reply that
+  // arrives late, after a revoke or close has completed meanwhile. A failed invites read answers 503.
+  type Hold = { asked: () => void; released: Promise<void> };
+  const hold = () => {
+    let release!: () => void;
+    let asked!: () => void;
+    const askedP = new Promise<void>((done) => (asked = done));
+    return { hold: { asked, released: new Promise<void>((done) => (release = done)) }, asked: askedP, release };
+  };
+  const invitesPlan: (Hold | 'fail')[] = [];
+  let heldDelete: Hold | undefined;
+  const holdNextInvites = () => {
+    const { hold: next, ...control } = hold();
+    invitesPlan.push(next);
+    return control;
+  };
+  const failNextInvites = () => invitesPlan.push('fail');
+  const holdNextDelete = () => {
+    const { hold: next, ...control } = hold();
+    heldDelete = next;
+    return control;
+  };
+  const transport = async (call: EmbassyChannelCall) => {
+    if (call.method === 'GET' && call.path === base)
+      return { status: 200, body: { room: { id: ROOM, name: 'Pilot' }, origin: ORIGIN } };
+    if (call.method === 'GET' && call.path === `${base}/invites`) {
+      const body = {
+        invites: invites.map((i) => ({
+          ...i,
+          roomId: ROOM,
+          expiresAt: Date.now() + 900_000,
+          guest: { company: 'Robotronix', identity: 'Zorblat' },
+        })),
+      };
+      const next = invitesPlan.shift();
+      if (next === 'fail') return { status: 503, body: { error: { code: 'UNAVAILABLE', message: 'x' } } };
+      if (next) {
+        next.asked();
+        await next.released;
+      }
+      return { status: 200, body };
+    }
+    const revoke = call.path.match(new RegExp(`^${base}/invites/(.+)$`));
+    if (call.method === 'DELETE' && revoke) {
+      const next = heldDelete;
+      heldDelete = undefined;
+      if (next) {
+        next.asked();
+        await next.released;
+      }
+      const invite = invites.find((i) => i.id === revoke[1]);
+      if (!invite) return { status: 404, body: { error: { code: 'NOT_FOUND', message: 'x' } } };
+      invite.revoked = true;
+      return { status: 200, body: { revoked: true } };
+    }
+    if (call.method === 'POST' && call.path === `${base}/close`) {
+      invites.forEach((i) => (i.revoked = true));
+      return { status: 200, body: { closed: true, revoked: invites.length } };
+    }
+    return { status: 404, body: { error: { code: 'NOT_FOUND', message: 'x' } } };
+  };
+  return { transport, invites, holdNextInvites, failNextInvites, holdNextDelete };
+}
+
+async function setup() {
+  const dir = temp();
+  const channel = fakeChannel();
+  const store = new HeldStore(join(dir, 'embassy-guest-avatars'));
+  // The next inventory write can be held once it has started: a write admitted but not yet listed.
+  let heldSave: { asked: () => void; released: Promise<void> } | undefined;
+  const holdNextSave = () => {
+    let release!: () => void;
+    let asked!: () => void;
+    const askedP = new Promise<void>((done) => (asked = done));
+    heldSave = { asked, released: new Promise<void>((done) => (release = done)) };
+    return { asked: askedP, release };
+  };
+  const avatars = new EmbassyGuestAvatars(
+    store,
+    join(dir, 'embassy-host', 'guest-avatars.json'),
+    Date.now,
+    async (file, value) => {
+      const hold = heldSave;
+      heldSave = undefined;
+      if (hold) {
+        hold.asked();
+        await hold.released;
+      }
+      await writePrivate(file, value);
+    }
+  );
+  const host = new EmbassyHost({
+    dir: join(dir, 'embassy-channel'),
+    opsFile: join(dir, 'embassy-host', 'ops.json'),
+    transport: channel.transport,
+    guestAvatars: avatars,
+  });
+  await host.init();
+  writeFileSync(join(dir, 'embassy-channel', 'channel.json'), JSON.stringify({ v: 1, roomId: ROOM }));
+  const state = { owner: true };
+  const app = Fastify();
+  registerEmbassyPairingRoutes(
+    app,
+    host,
+    {} as EmbassyPairing,
+    () => state.owner,
+    () => buildHostPolicy('127.0.0.1'),
+    avatars
+  );
+  const call = (opts: InjectOptions) =>
+    app.inject({ ...opts, headers: { 'x-reverie-csrf': '1', ...(opts.headers as Record<string, string>) } });
+  const put = (requestId: string, body: Buffer, type = 'image/png') =>
+    call({
+      method: 'PUT',
+      url: `/api/embassy-host/guests/${requestId}/avatar`,
+      payload: body,
+      headers: { 'content-type': type },
+    });
+  const image = (requestId: string, headers: Record<string, string> = {}) =>
+    app.inject({ method: 'GET', url: `/api/embassy-host/guests/${requestId}/avatar`, headers });
+  const stored = () => {
+    try {
+      // Versioned files, `guest-<requestId>-<version>.<ext>`, reduced to `guest-<requestId>.<ext>`.
+      return readdirSync(join(dir, 'embassy-guest-avatars'))
+        .map((name) => name.replace(/-\d+\./, '.'))
+        .sort();
+    } catch {
+      return [];
+    }
+  };
+  return { dir, app, host, avatars, store, holdNextSave, state, call, put, image, stored, channel };
+}
+
+describe('EmbassyGuestAvatars', () => {
+  it('stores a checked picture under the request id with a versioned URL, and removes it', async () => {
+    const dir = temp();
+    let now = 1000;
+    const avatars = new EmbassyGuestAvatars(new AvatarStore(join(dir, 'pics')), join(dir, 'map.json'), () => now);
+    const url = await avatars.set(avatars.token(APPROVED), PNG);
+    expect(url).toBe(`/api/embassy-host/guests/${APPROVED}/avatar?v=1000`);
+    expect(url).toMatch(EMBASSY_GUEST_AVATAR_URL);
+    expect(statSync(join(dir, 'pics', `guest-${APPROVED}-1000.png`)).mode & 0o777).toBe(0o600);
+    expect(statSync(join(dir, 'map.json')).mode & 0o777).toBe(0o600);
+    // A new picture in another format replaces the old one, under a newer version even if the clock did not move.
+    expect(await avatars.set(avatars.token(APPROVED), JPEG)).toBe(`/api/embassy-host/guests/${APPROVED}/avatar?v=1001`);
+    expect(readdirSync(join(dir, 'pics'))).toEqual([`guest-${APPROVED}-1001.jpg`]);
+    expect((await avatars.get(APPROVED))?.type).toBe('image/jpeg');
+    now = 5000;
+    await avatars.set(avatars.token(CLAIMED), PNG);
+    expect(await avatars.urls()).toEqual({
+      [APPROVED]: `/api/embassy-host/guests/${APPROVED}/avatar?v=1001`,
+      [CLAIMED]: `/api/embassy-host/guests/${CLAIMED}/avatar?v=5000`,
+    });
+    expect(await avatars.remove(APPROVED)).toBe(true);
+    expect(await avatars.remove(APPROVED)).toBe(false);
+    expect(await avatars.get(APPROVED)).toBeUndefined();
+    expect(await avatars.removeAll()).toBe(1);
+    expect(readdirSync(join(dir, 'pics'))).toEqual([]);
+    expect(await avatars.urls()).toEqual({});
+  });
+
+  it('refuses a non-image, an oversized image, a bad id and a corrupt map', async () => {
+    const dir = temp();
+    const avatars = new EmbassyGuestAvatars(new AvatarStore(join(dir, 'pics')), join(dir, 'map.json'));
+    await expect(avatars.set(avatars.token(APPROVED), SVG)).rejects.toMatchObject({ status: 415 });
+    const big = Buffer.concat([PNG, Buffer.alloc(MAX_AVATAR_BYTES)]);
+    await expect(avatars.set(avatars.token(APPROVED), big)).rejects.toBeInstanceOf(AvatarError);
+    await expect(avatars.set(avatars.token(APPROVED), big)).rejects.toMatchObject({ status: 413 });
+    await expect(avatars.set(avatars.token('../owner'), PNG)).rejects.toThrow('Invalid guest request id');
+    await expect(avatars.set(avatars.token(APPROVED.toUpperCase()), PNG)).rejects.toThrow('Invalid guest request id');
+    expect(await avatars.urls()).toEqual({});
+    writeFileSync(join(dir, 'map.json'), '{"v":3,"versions":{}}');
+    await expect(avatars.urls()).rejects.toThrow('refusing to reset');
+  });
+
+  it('writes no picture while a fence is open, and a token taken before it closes stays stale', async () => {
+    const dir = temp();
+    const avatars = new EmbassyGuestAvatars(new AvatarStore(join(dir, 'pics')), join(dir, 'map.json'));
+    const before = avatars.token(APPROVED);
+    const close = avatars.fence();
+    const during = avatars.token(APPROVED);
+    await expect(avatars.set(avatars.token(APPROVED), PNG)).rejects.toBeInstanceOf(GuestLifecycleError);
+    close();
+    close(); // closing twice changes nothing more
+    await expect(avatars.set(before, PNG)).rejects.toBeInstanceOf(GuestLifecycleError);
+    await expect(avatars.set(during, PNG)).rejects.toBeInstanceOf(GuestLifecycleError);
+    expect(await avatars.set(avatars.token(APPROVED), PNG)).toMatch(EMBASSY_GUEST_AVATAR_URL);
+  });
+
+  it('settle resolves only once a write already past its checks has finished', async () => {
+    const dir = temp();
+    const store = new HeldStore(join(dir, 'pics'));
+    const avatars = new EmbassyGuestAvatars(store, join(dir, 'map.json'));
+    const held = store.holdNextPut();
+    const write = avatars.set(avatars.token(APPROVED), PNG);
+    await held.asked;
+    let settled = false;
+    const settle = avatars.settle().then(() => (settled = true));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(settled).toBe(false);
+    held.release();
+    await write;
+    await settle;
+    expect(await avatars.guestIds()).toEqual([APPROVED]);
+  });
+
+  it('an older version whose file could not be deleted stays owned, and the next removal deletes it', async () => {
+    const dir = temp();
+    let now = 1000;
+    const avatars = new EmbassyGuestAvatars(new AvatarStore(join(dir, 'pics')), join(dir, 'map.json'), () => now);
+    await avatars.set(avatars.token(APPROVED), PNG);
+    // The first version's file cannot be deleted while it is replaced: a directory stands in its place.
+    const first = join(dir, 'pics', `guest-${APPROVED}-1000.png`);
+    rmSync(first);
+    mkdirSync(first);
+    now = 2000;
+    expect(await avatars.set(avatars.token(APPROVED), JPEG)).toBe(`/api/embassy-host/guests/${APPROVED}/avatar?v=2000`);
+    rmSync(first, { recursive: true });
+    writeFileSync(first, PNG);
+    expect(await avatars.removeAll()).toBe(1);
+    expect(readdirSync(join(dir, 'pics'))).toEqual([]);
+    expect(await avatars.removeAll()).toBe(0);
+  });
+
+  it('a new version whose switch failed stays owned while the old one serves, and the next removal deletes both', async () => {
+    const dir = temp();
+    let now = 1000;
+    let failSwitch = false;
+    let writes = 0;
+    const avatars = new EmbassyGuestAvatars(
+      new AvatarStore(join(dir, 'pics')),
+      join(dir, 'map.json'),
+      () => now,
+      async (file, value) => {
+        // The second inventory write of an upload makes its version current.
+        if (failSwitch && ++writes === 2) throw new Error('disk full');
+        await writePrivate(file, value);
+      }
+    );
+    const first = await avatars.set(avatars.token(APPROVED), PNG);
+    now = 2000;
+    failSwitch = true;
+    await expect(avatars.set(avatars.token(APPROVED), JPEG)).rejects.toThrow('disk full');
+    expect(await avatars.urls()).toEqual({ [APPROVED]: first });
+    expect((await avatars.get(APPROVED))?.type).toBe('image/png');
+    expect(readdirSync(join(dir, 'pics')).sort()).toEqual([`guest-${APPROVED}-1000.png`, `guest-${APPROVED}-2000.jpg`]);
+    failSwitch = false;
+    expect(await avatars.remove(APPROVED)).toBe(true);
+    expect(readdirSync(join(dir, 'pics'))).toEqual([]);
+    expect(await avatars.urls()).toEqual({});
+  });
+});
+
+describe('embassy guest picture routes', () => {
+  it('sets a picture only for an approved or connected guest of the hosted room', async () => {
+    const t = await setup();
+    const set = await t.put(APPROVED, PNG);
+    expect(set.statusCode).toBe(200);
+    expect(set.json().data.url).toMatch(EMBASSY_GUEST_AVATAR_URL);
+    expect((await t.put(CLAIMED, JPEG, 'image/jpeg')).statusCode).toBe(200);
+    for (const requestId of [PENDING, REVOKED, REJECTED, UNKNOWN, 'not-a-request']) {
+      const refused = await t.put(requestId, PNG);
+      expect(refused.statusCode, requestId).toBe(404);
+      expect(refused.json().errorCode, requestId).toBe('NOT_FOUND');
+    }
+    expect(t.stored()).toEqual([`guest-${APPROVED}.png`, `guest-${CLAIMED}.jpg`]);
+    const status = await t.call({ method: 'GET', url: '/api/embassy-host' });
+    expect(Object.keys(status.json().data.guestAvatars).sort()).toEqual([APPROVED, CLAIMED]);
+    expect(status.json().data.guestAvatars[APPROVED]).toBe(set.json().data.url);
+  });
+
+  it('checks the image by its bytes and size, whatever type it declares', async () => {
+    const t = await setup();
+    const svg = await t.put(APPROVED, SVG, 'image/png');
+    expect(svg.statusCode).toBe(415);
+    expect(svg.json().errorCode).toBe('INVALID_IMAGE');
+    const big = await t.put(APPROVED, Buffer.concat([PNG, Buffer.alloc(MAX_AVATAR_BYTES)]));
+    expect(big.statusCode).toBe(413);
+    expect((await t.put(APPROVED, Buffer.alloc(0))).statusCode).toBe(400);
+    expect(t.stored()).toEqual([]);
+  });
+
+  it('only the signed-in owner, from this console, sets or removes a picture', async () => {
+    const t = await setup();
+    t.state.owner = false;
+    expect((await t.put(APPROVED, PNG)).json().errorCode).toBe('OWNER_ONLY');
+    t.state.owner = true;
+    const agent = await t.call({
+      method: 'PUT',
+      url: `/api/embassy-host/guests/${APPROVED}/avatar`,
+      payload: PNG,
+      headers: { 'content-type': 'image/png', 'x-reverie-parent-session': 'zorblat-session' },
+    });
+    expect(agent.json().errorCode).toBe('OWNER_ONLY');
+    const csrf = await t.app.inject({
+      method: 'DELETE',
+      url: `/api/embassy-host/guests/${APPROVED}/avatar`,
+    });
+    expect(csrf.json().errorCode).toBe('CSRF_REFUSED');
+    process.env.REVERIE_MULTIUSER = '1';
+    expect((await t.put(APPROVED, PNG)).json().errorCode).toBe('OWNER_ONLY');
+    expect(t.stored()).toEqual([]);
+  });
+
+  it('serves the picture only to the signed-in owner, never to an agent or another site', async () => {
+    const t = await setup();
+    await t.put(APPROVED, PNG);
+    const ok = await t.image(APPROVED);
+    expect(ok.statusCode).toBe(200);
+    expect(ok.rawPayload.equals(PNG)).toBe(true);
+    expect(ok.headers['content-type']).toBe('image/png');
+    expect(ok.headers['x-content-type-options']).toBe('nosniff');
+    expect(ok.headers['content-security-policy']).toBe("default-src 'none'; sandbox");
+    expect(ok.headers['cross-origin-resource-policy']).toBe('same-origin');
+    expect((await t.image(APPROVED, { 'x-reverie-parent-session': 'zorblat-session' })).statusCode).toBe(403);
+    expect((await t.image(APPROVED, { origin: 'https://robotronix.example' })).statusCode).toBe(403);
+    expect((await t.image(APPROVED, { origin: 'null' })).statusCode).toBe(403);
+    t.state.owner = false;
+    expect((await t.image(APPROVED)).statusCode).toBe(403);
+    t.state.owner = true;
+    expect((await t.image(CLAIMED)).statusCode).toBe(404);
+    expect((await t.image('../agent-avatars/x')).statusCode).toBe(404);
+  });
+
+  it('removing, revoking the guest or closing the room deletes the picture', async () => {
+    const t = await setup();
+    await t.put(APPROVED, PNG);
+    await t.put(CLAIMED, PNG);
+    const removed = await t.call({ method: 'DELETE', url: `/api/embassy-host/guests/${APPROVED}/avatar` });
+    expect(removed.json().data).toEqual({ removed: true });
+    expect((await t.image(APPROVED)).statusCode).toBe(404);
+    await t.put(APPROVED, PNG);
+    expect((await t.call({ method: 'DELETE', url: '/api/embassy-host/invites/inv-claimed' })).statusCode).toBe(200);
+    expect(t.stored()).toEqual([`guest-${APPROVED}.png`]);
+    expect((await t.image(CLAIMED)).statusCode).toBe(404);
+    // The revoked guest is no longer a guest: a new picture is refused.
+    expect((await t.put(CLAIMED, PNG)).statusCode).toBe(404);
+    const closed = await t.call({ method: 'POST', url: '/api/embassy-host/close', payload: { confirm: 'close' } });
+    expect(closed.statusCode).toBe(200);
+    expect(t.stored()).toEqual([]);
+    expect(await t.avatars.urls()).toEqual({});
+  });
+});
+
+describe('embassy guest pictures across a revoke, a close or a failed write', () => {
+  const root = process.getuid?.() === 0;
+
+  for (const lifecycle of ['revoke', 'close'] as const) {
+    it(`an upload whose guest check answers after a ${lifecycle} never brings the picture back`, async () => {
+      const t = await setup();
+      const { asked, release } = t.channel.holdNextInvites();
+      const upload = t.put(APPROVED, PNG);
+      await asked; // the upload's guest check is with the embassy, still answering "approved"
+      const done =
+        lifecycle === 'revoke'
+          ? await t.call({ method: 'DELETE', url: '/api/embassy-host/invites/inv-approved' })
+          : await t.call({ method: 'POST', url: '/api/embassy-host/close', payload: { confirm: 'close' } });
+      expect(done.statusCode).toBe(200);
+      release();
+      const refused = await upload;
+      expect(refused.statusCode).toBe(409);
+      expect(refused.json().errorCode).toBe('GUEST_CHANGED');
+      expect(t.stored()).toEqual([]);
+      expect((await t.image(APPROVED)).statusCode).toBe(404);
+      expect(await t.avatars.urls()).toEqual({});
+    });
+  }
+
+  it('an upload checked during a revoke whose guest is unknown never brings the picture back', async () => {
+    const t = await setup();
+    t.channel.failNextInvites(); // the revoke cannot tell whose invite it is, before the delete
+    const deleting = t.channel.holdNextDelete();
+    const revoke = t.call({ method: 'DELETE', url: '/api/embassy-host/invites/inv-approved' });
+    await deleting.asked;
+    const check = t.channel.holdNextInvites();
+    const upload = t.put(APPROVED, PNG);
+    await check.asked; // the upload's guest check answers "approved": the delete has not landed
+    t.channel.failNextInvites(); // nor after it
+    deleting.release();
+    expect((await revoke).statusCode).toBe(200);
+    check.release();
+    const refused = await upload;
+    expect(refused.statusCode).toBe(409);
+    expect(refused.json().errorCode).toBe('GUEST_CHANGED');
+    expect(t.stored()).toEqual([]);
+    expect(await t.avatars.urls()).toEqual({});
+    // The fence closed with the revoke: another guest's picture is set again.
+    expect((await t.put(CLAIMED, PNG)).statusCode).toBe(200);
+  });
+
+  it('an upload already writing when a revoke cannot name its guest finishes first and is then deleted', async () => {
+    const t = await setup();
+    const held = t.store.holdNextPut();
+    const upload = t.put(APPROVED, PNG);
+    await held.asked; // past the guest check and the fence check, writing its file
+    t.channel.failNextInvites(); // the revoke cannot tell whose invite it is, before the delete
+    t.channel.failNextInvites(); // nor after it
+    let returned = false;
+    const revoke = t.call({ method: 'DELETE', url: '/api/embassy-host/invites/inv-approved' }).then((res) => {
+      returned = true;
+      return res;
+    });
+    const invite = t.channel.invites.find((i) => i.id === 'inv-approved')!;
+    while (!invite.revoked) await new Promise((resolve) => setTimeout(resolve, 5));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(returned).toBe(false); // the revoke waits for the write it cannot rule out
+    held.release();
+    expect((await upload).statusCode).toBe(200);
+    expect((await revoke).statusCode).toBe(200);
+    expect(t.stored()).toEqual([]);
+    expect((await t.image(APPROVED)).statusCode).toBe(404);
+    expect(await t.avatars.urls()).toEqual({});
+  });
+
+  it('an upload admitted but not yet listed when a revoke cannot name its guest is joined and then deleted', async () => {
+    const t = await setup();
+    const held = t.holdNextSave();
+    const upload = t.put(APPROVED, PNG);
+    await held.asked; // past its checks, about to list its new version: nothing on disk names it yet
+    t.channel.failNextInvites();
+    t.channel.failNextInvites();
+    let returned = false;
+    const revoke = t.call({ method: 'DELETE', url: '/api/embassy-host/invites/inv-approved' }).then((res) => {
+      returned = true;
+      return res;
+    });
+    const invite = t.channel.invites.find((i) => i.id === 'inv-approved')!;
+    while (!invite.revoked) await new Promise((resolve) => setTimeout(resolve, 5));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(returned).toBe(false);
+    held.release();
+    expect((await upload).statusCode).toBe(200);
+    expect((await revoke).statusCode).toBe(200);
+    expect(t.stored()).toEqual([]);
+    expect(await t.avatars.urls()).toEqual({});
+  });
+
+  it('when the embassy cannot be asked after an unknown-guest revoke, the cleanup is reported and a second revoke finishes it', async () => {
+    const t = await setup();
+    await t.put(APPROVED, PNG);
+    t.channel.failNextInvites(); // before the delete
+    t.channel.failNextInvites(); // after it
+    t.channel.failNextInvites(); // and when checking which pictures still have a guest
+    const unresolved = await t.call({ method: 'DELETE', url: '/api/embassy-host/invites/inv-approved' });
+    expect(unresolved.statusCode).toBe(503);
+    expect(unresolved.json().errorCode).toBe('GUEST_PICTURES_UNRESOLVED');
+    expect(t.stored()).toEqual([`guest-${APPROVED}.png`]);
+    const again = await t.call({ method: 'DELETE', url: '/api/embassy-host/invites/inv-approved' });
+    expect(again.statusCode).toBe(200);
+    expect(t.stored()).toEqual([]);
+    expect(await t.avatars.urls()).toEqual({});
+  });
+
+  it.skipIf(root)('a failed map write while replacing a picture leaves the old URL serving the old bytes', async () => {
+    const t = await setup();
+    const first = (await t.put(APPROVED, PNG)).json().data.url;
+    const hostDir = join(t.dir, 'embassy-host');
+    chmodSync(hostDir, 0o500); // the map cannot be rewritten
+    try {
+      expect((await t.put(APPROVED, JPEG, 'image/jpeg')).statusCode).toBeGreaterThanOrEqual(400);
+    } finally {
+      chmodSync(hostDir, 0o700);
+    }
+    expect((await t.avatars.urls())[APPROVED]).toBe(first);
+    const served = await t.image(APPROVED);
+    expect(served.headers['content-type']).toBe('image/png');
+    expect(served.rawPayload.equals(PNG)).toBe(true);
+    expect(t.stored()).toEqual([`guest-${APPROVED}.png`]);
+  });
+
+  it('a picture that could not be deleted on close stays listed while the others go, and a retry deletes it', async () => {
+    const t = await setup();
+    await t.put(APPROVED, PNG);
+    await t.put(CLAIMED, PNG);
+    const pictures = join(t.dir, 'embassy-guest-avatars');
+    // One picture's file cannot be deleted: a directory stands in its place.
+    const stuck = readdirSync(pictures).find((name) => name.startsWith(`guest-${APPROVED}-`))!;
+    rmSync(join(pictures, stuck));
+    mkdirSync(join(pictures, stuck));
+    await expect(t.avatars.removeAll()).rejects.toThrow();
+    expect(Object.keys(await t.avatars.urls())).toEqual([APPROVED]);
+    expect(t.stored()).toEqual([`guest-${APPROVED}.png`]);
+    rmSync(join(pictures, stuck), { recursive: true });
+    writeFileSync(join(pictures, stuck), PNG);
+    expect(await t.avatars.removeAll()).toBe(1);
+    expect(t.stored()).toEqual([]);
+    expect(await t.avatars.urls()).toEqual({});
+  });
+});

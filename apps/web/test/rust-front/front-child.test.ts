@@ -2,16 +2,72 @@
  * The front-child fixture the Rust front's integration tests run, checked here without Rust: it is spawned with a real
  * socket pair on fd 3, and the test plays the front on the other end through the shared codec.
  */
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { resolve } from 'node:path';
 import type { Duplex } from 'node:stream';
 import { FakeFront, type FakeConnection } from './fake-front.js';
 import { responseBody, sseBody } from './http-body.js';
+import { encode } from '../../src/rust-front/frames.js';
 
 const web = resolve(import.meta.dirname, '../..');
 const sleep = (ms: number) => new Promise((done) => setTimeout(done, ms));
 const children: ChildProcess[] = [];
+
+it('allows a child bind_request after two seconds within the ten-second frame deadline', async () => {
+  vi.useFakeTimers();
+  const fake = new FakeFront();
+  try {
+    let settled = false;
+    const pending = fake.next('bind_request').then(
+      (frame) => {
+        settled = true;
+        return { frame };
+      },
+      (error: Error) => {
+        settled = true;
+        return { error };
+      }
+    );
+    await vi.advanceTimersByTimeAsync(9000);
+    expect(settled).toBe(false);
+    const body = { kind: 'bind_request', listener: 'main', tls: false, port: 0, host: '127.0.0.1' } as const;
+    fake.peer.emit('data', encode({ generation: 1n, id: 0n, body }, 'to_front'));
+    expect(await pending).toMatchObject({ frame: { body } });
+    expect(vi.getTimerCount()).toBe(0);
+  } finally {
+    fake.peer.destroy();
+    fake.channel.destroy();
+    vi.useRealTimers();
+  }
+});
+
+it('refuses a missing child bind_request at the ten-second frame deadline', async () => {
+  vi.useFakeTimers();
+  const fake = new FakeFront();
+  try {
+    let settled = false;
+    const pending = fake.next('bind_request').then(
+      () => {
+        settled = true;
+        return undefined;
+      },
+      (error: Error) => {
+        settled = true;
+        return error;
+      }
+    );
+    await vi.advanceTimersByTimeAsync(9999);
+    expect(settled).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(await pending).toEqual(new Error('timed out waiting for a bind_request frame'));
+    expect(vi.getTimerCount()).toBe(0);
+  } finally {
+    fake.peer.destroy();
+    fake.channel.destroy();
+    vi.useRealTimers();
+  }
+});
 
 afterEach(() => {
   for (const child of children.splice(0)) if (child.exitCode === null) child.kill('SIGKILL');

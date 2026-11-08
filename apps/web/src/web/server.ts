@@ -45,6 +45,7 @@ import { EmbassyGuestClient } from '../embassy-guest-client.js';
 import { registerEmbassyGuestRoutes } from './routes/embassy-guest-routes.js';
 import { registerEmbassyPairingRoutes } from './routes/embassy-pairing-routes.js';
 import { EmbassyHost } from '../embassy-host.js';
+import { EmbassyGuestAvatars } from '../embassy-guest-avatars.js';
 import { EmbassyPairing } from '../embassy-pairing.js';
 import { registerWorkspaceFileRoutes } from './routes/workspace-file-routes.js';
 import { registerBotsPageRoutes } from './routes/bots-page-routes.js';
@@ -274,6 +275,7 @@ import { isExplicitlyEnabled, isLoopbackBindHost, buildHostPolicy, type HostPoli
 import {
   registerPushRoutes,
   registerTeamRoutes,
+  registerTeammatePaneRoutes,
   registerMuxRoutes,
   registerFileRoutes,
   registerHtmlViewRoutes,
@@ -1038,8 +1040,8 @@ export class WebServer extends EventEmitter {
   private async setupRoutes(): Promise<void> {
     // multipart/form-data: parser is provided by @fastify/multipart (registered
     // below). Its parser is a no-op marker that leaves the body on req.raw, so
-    // legacy routes that read the raw stream directly (e.g. /api/screenshots)
-    // continue to work alongside routes that use req.file() (e.g. paste-image).
+    // a route may read the raw stream directly as well as use req.file() (e.g.
+    // paste-image).
 
     // Enable gzip/brotli compression for all responses.
     // Massive win: 793KB uncompressed → ~120KB compressed for static assets.
@@ -1386,6 +1388,7 @@ export class WebServer extends EventEmitter {
     const ctx = this.createRouteContext();
     registerPushRoutes(this.app, ctx, verifiedOwner);
     registerTeamRoutes(this.app, ctx);
+    registerTeammatePaneRoutes(this.app, ctx);
     registerMuxRoutes(this.app, ctx);
     registerFileRoutes(this.app, ctx);
     registerHtmlViewRoutes(this.app, ctx);
@@ -1623,8 +1626,8 @@ export class WebServer extends EventEmitter {
         }
       },
       keepsRecord: (id) => this.store.getSession(id)?.pinned === true,
-      // Reads only `openCodeConfig.continueSession`: a hand-started session has none, so its employee gets no `threadId` until
-      // the owner sets one through `setThread`.
+      // Reads only `openCodeConfig.continueSession`: a hand-started session has none, so its employee gets no `threadId`
+      // from here.
       threadOf: (id) => {
         const thread = this.store.getSession(id)?.openCodeConfig?.continueSession;
         return typeof thread === 'string' ? thread : undefined;
@@ -1957,9 +1960,14 @@ export class WebServer extends EventEmitter {
           secretFile: dataPath('embassy-channel', 'secret'),
           origin: process.env.REVERIE_EMBASSY_ORIGIN,
         });
+    const embassyGuestAvatars = new EmbassyGuestAvatars(
+      new AvatarStore(dataPath('embassy-guest-avatars')),
+      dataPath('embassy-host', 'guest-avatars.json')
+    );
     this.embassyHost = new EmbassyHost({
       dir: dataPath('embassy-channel'),
       opsFile: dataPath('embassy-host', 'ops.json'),
+      guestAvatars: embassyGuestAvatars,
       transport: builtinEmbassy?.channelTransport,
       localStatus: builtinEmbassy
         ? async () => {
@@ -1977,8 +1985,13 @@ export class WebServer extends EventEmitter {
     }
     this.embassyPairing = new EmbassyPairing({ dir: dataPath('embassy-pairings'), guest: this.embassyGuestClient });
     await this.embassyPairing.init();
-    registerEmbassyPairingRoutes(this.app, this.embassyHost, this.embassyPairing, verifiedOwner, () =>
-      this.getHostPolicy()
+    registerEmbassyPairingRoutes(
+      this.app,
+      this.embassyHost,
+      this.embassyPairing,
+      verifiedOwner,
+      () => this.getHostPolicy(),
+      embassyGuestAvatars
     );
     registerOfficeRoutes(this.app, ownerAuth, this.chatroomService);
     registerChatroomRoutes(

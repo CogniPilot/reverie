@@ -1,6 +1,7 @@
 //! Linux host observations and owned resources. Neither grants owner or
 //! admission authority; installing services own their actual effect boundaries.
 pub mod broker_engine;
+pub mod broker_listener;
 mod captured_client;
 pub mod chat_images;
 pub mod command_telemetry;
@@ -34,6 +35,7 @@ pub mod reservation_kernel;
 pub mod resource_facts;
 pub mod rootless;
 pub mod task_perf;
+pub mod task_workspace;
 #[cfg(target_os = "linux")]
 pub mod terminal_pty;
 #[cfg(test)]

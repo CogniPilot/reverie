@@ -9,8 +9,7 @@ import { registerSettingsGet } from './settings-get-route.js';
 
 import { FastifyInstance } from 'fastify';
 import { join, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { existsSync, mkdirSync, readdirSync } from 'node:fs';
+import { existsSync, mkdirSync } from 'node:fs';
 import fs from 'node:fs/promises';
 import { totalmem, freemem, loadavg, cpus } from 'node:os';
 import { execSync, spawn } from 'node:child_process';
@@ -56,6 +55,7 @@ import { SseEvent } from '../sse-events.js';
 import { getInstallInfo, checkForUpdate, startUpdate, getUpdateStatusForApi } from '../self-update.js';
 
 import { getRepositoryStatus } from '../repo-status.js';
+import { spanDisplays, systemSpanHost } from '../../span-displays.js';
 import type { SessionPort, EventPort, ConfigPort, InfraPort, AuthPort, TabLayoutPort } from '../ports/index.js';
 import { AUTH_COOKIE_NAME } from '../middleware/auth.js';
 import { QR_AUTH_FAILURE_MAX } from '../../config/tunnel-config.js';
@@ -77,8 +77,6 @@ const DEEPSEEK_DEFAULT_PROFILE = 'dsh-tui';
 /** A plugin install compiles and links a dependency tree; npm-scale, not curl-scale. */
 const DEEPSEEK_INSTALL_TIMEOUT_MS = 300_000;
 
-// Maximum screenshot upload size (10MB)
-const MAX_SCREENSHOT_SIZE = 10 * 1024 * 1024;
 // Screenshots directory
 const SCREENSHOTS_DIR = dataPath('screenshots');
 
@@ -329,14 +327,14 @@ export function registerSystemRoutes(
   // Multi-monitor: span Reverie across all displays
   // ═══════════════════════════════════════════════════════════════
 
-  // Spawn scripts/span-reverie.sh, which opens a fresh, maximized browser --app
-  // window sized to the union of all displays — so in-page floating session
-  // panels can be dragged across the physical monitor seam. macOS only; needs
-  // the one-time "Displays have separate Spaces" OFF prerequisite (see script).
+  // Open a fresh, maximized browser --app window sized to the union of all
+  // displays (src/span-displays.ts), so in-page floating session panels can be
+  // dragged across the physical monitor seam. macOS only; needs the one-time
+  // "Displays have separate Spaces" OFF prerequisite (see that module).
   app.post('/api/system/span-displays', async (req, reply) => {
     // macOS only: the launcher uses osascript + Finder desktop bounds and Chrome
-    // --app geometry flags. Fail clearly elsewhere instead of spawning a bash
-    // that errors out invisibly (the toast would otherwise lie "Opening…").
+    // --app geometry flags. Fail clearly elsewhere instead of a launch that
+    // errors out invisibly (the toast would otherwise lie "Opening…").
     if (process.platform !== 'darwin') {
       return reply
         .code(400)
@@ -344,23 +342,17 @@ export function registerSystemRoutes(
           createErrorResponse(
             ApiErrorCode.INVALID_INPUT,
             'Multi-monitor spanning runs on the Reverie server, which is not macOS. ' +
-              'If your monitors are on a remote Mac, run scripts/span-reverie.sh locally on that Mac with this server URL — see the script header for details.'
+              'If your monitors are on a remote Mac, run `reverie span <this server URL>` on that Mac.'
           )
         );
-    }
-    // Resolve the bundled launcher relative to this module (works from src/ and dist/).
-    const scriptPath = join(dirname(fileURLToPath(import.meta.url)), '../../../scripts/span-reverie.sh');
-    if (!existsSync(scriptPath)) {
-      return reply.code(500).send(createErrorResponse(ApiErrorCode.INTERNAL_ERROR, 'span-reverie.sh not found'));
     }
     // Point the spanning window at THIS server (localhost + sanitized port).
     const url = resolveSpanUrl(req.headers.host);
     try {
-      const child = spawn('bash', [scriptPath, url], { detached: true, stdio: 'ignore' });
-      child.on('error', (err) => app.log.error({ err }, 'span-displays launch failed'));
-      child.unref();
+      await spanDisplays(url, systemSpanHost());
       return { url };
     } catch (err) {
+      app.log.error({ err }, 'span-displays launch failed');
       return reply.code(500).send(createErrorResponse(ApiErrorCode.INTERNAL_ERROR, getErrorMessage(err)));
     }
   });
@@ -1308,12 +1300,12 @@ export function registerSystemRoutes(
   });
 
   // ═══════════════════════════════════════════════════════════════
-  // Screenshots (upload, list, serve)
+  // Screenshots (serve only)
   // ═══════════════════════════════════════════════════════════════
 
   // ========== Screenshots ==========
-  // Deprecated (the upload page is gone): removed in a later MAJOR per
-  // docs/versioning-policy.md. Warns once per process on first use.
+  // Deprecated: the upload page and its upload/list routes are gone; this only
+  // serves files already in the screenshots folder. Warns once per process.
   let screenshotsDeprecationWarned = false;
   const warnScreenshotsDeprecated = (): void => {
     if (screenshotsDeprecationWarned) return;
@@ -1323,107 +1315,6 @@ export function registerSystemRoutes(
         'Use POST /api/sessions/:id/paste-image to hand a file to a session.'
     );
   };
-
-  app.post('/api/screenshots', async (req, reply) => {
-    warnScreenshotsDeprecated();
-    const contentType = req.headers['content-type'] ?? '';
-    if (!contentType.includes('multipart/form-data')) {
-      return createErrorResponse(ApiErrorCode.INVALID_INPUT, 'Expected multipart/form-data');
-    }
-
-    // Parse multipart boundary
-    const boundaryMatch = contentType.match(/boundary=(.+?)(?:;|$)/);
-    if (!boundaryMatch) {
-      return createErrorResponse(ApiErrorCode.INVALID_INPUT, 'Missing boundary');
-    }
-
-    // Collect raw body
-    const chunks: Buffer[] = [];
-    let totalSize = 0;
-    for await (const chunk of req.raw) {
-      totalSize += chunk.length;
-      if (totalSize > MAX_SCREENSHOT_SIZE) {
-        reply.code(413);
-        return createErrorResponse(ApiErrorCode.INVALID_INPUT, 'File too large (max 10MB)');
-      }
-      chunks.push(chunk as Buffer);
-    }
-    const body = Buffer.concat(chunks);
-
-    // Extract file from multipart body
-    const boundary = '--' + boundaryMatch[1];
-    const boundaryBuf = Buffer.from(boundary);
-    const parts: { headers: string; data: Buffer }[] = [];
-    let pos = 0;
-
-    // Find each part between boundaries
-    while (pos < body.length) {
-      const start = body.indexOf(boundaryBuf, pos);
-      if (start === -1) break;
-      const afterBoundary = start + boundaryBuf.length;
-      // Check for closing boundary (--)
-      if (body[afterBoundary] === 0x2d && body[afterBoundary + 1] === 0x2d) break;
-      // Skip \r\n after boundary
-      const headerStart = afterBoundary + 2;
-      const headerEnd = body.indexOf(Buffer.from('\r\n\r\n'), headerStart);
-      if (headerEnd === -1) break;
-      const headers = body.subarray(headerStart, headerEnd).toString();
-      const dataStart = headerEnd + 4;
-      const nextBoundary = body.indexOf(boundaryBuf, dataStart);
-      // Data ends 2 bytes before next boundary (\r\n)
-      const dataEnd = nextBoundary === -1 ? body.length : nextBoundary - 2;
-      parts.push({ headers, data: body.subarray(dataStart, dataEnd) });
-      pos = nextBoundary === -1 ? body.length : nextBoundary;
-    }
-
-    const filePart = parts.find((p) => p.headers.includes('name="file"'));
-    if (!filePart || filePart.data.length === 0) {
-      return createErrorResponse(ApiErrorCode.INVALID_INPUT, 'No file uploaded');
-    }
-
-    // Determine extension from Content-Type or filename
-    let ext = '.png';
-    const filenameMatch = filePart.headers.match(/filename="(.+?)"/);
-    if (filenameMatch) {
-      const origExt = filenameMatch[1].match(/\.(png|jpg|jpeg|webp|gif)$/i);
-      if (origExt) ext = origExt[0].toLowerCase();
-    }
-    const ctMatch = filePart.headers.match(/Content-Type:\s*image\/(png|jpeg|webp|gif)/i);
-    if (ctMatch) {
-      const map: Record<string, string> = {
-        png: '.png',
-        jpeg: '.jpg',
-        webp: '.webp',
-        gif: '.gif',
-      };
-      ext = map[ctMatch[1].toLowerCase()] ?? ext;
-    }
-
-    // Save to ~/.reverie/screenshots/
-    if (!existsSync(SCREENSHOTS_DIR)) {
-      mkdirSync(SCREENSHOTS_DIR, { recursive: true });
-    }
-    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').replace('T', '_').slice(0, 19);
-    const filename = `screenshot_${timestamp}${ext}`;
-    const filepath = join(SCREENSHOTS_DIR, filename);
-    await fs.writeFile(filepath, filePart.data);
-
-    return { path: filepath, filename };
-  });
-
-  app.get('/api/screenshots', async () => {
-    warnScreenshotsDeprecated();
-    if (!existsSync(SCREENSHOTS_DIR)) {
-      return { files: [] };
-    }
-    const files = readdirSync(SCREENSHOTS_DIR)
-      .filter((f) => /\.(png|jpg|jpeg|webp|gif)$/i.test(f))
-      .sort()
-      .reverse()
-      .slice(0, 50)
-      .map((name) => ({ name, path: join(SCREENSHOTS_DIR, name) }));
-    return { files };
-  });
 
   app.get('/api/screenshots/:name', async (req, reply) => {
     warnScreenshotsDeprecated();

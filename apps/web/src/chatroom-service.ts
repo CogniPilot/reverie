@@ -24,7 +24,7 @@ export const STALE_MIN_AGE_MS = 72 * 60 * 60 * 1000;
 /** Messages the mention feed reads per room per request; the cursor carries it past the rest. */
 const MENTION_SCAN_PER_ROOM = 2000;
 import { ChatroomNoticeState, noticeDigest, type NoticeAttention, type NoticeRecipient, type NoticeSource } from './chatroom-notice-state.js';
-import { EmployeeAlertModes, type AlertLease, type AlertMode } from './employee-alert-mode.js';
+import { DEFAULT_EMPLOYEE_ALERT_MODE, EmployeeAlertModes, type AlertMode, type AlertState } from './employee-alert-mode.js';
 import { isOwnerMark } from './owner-auth/marks.js';
 import { chmodSync, constants as fsConstants, copyFileSync, existsSync, promises as fs, renameSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -97,7 +97,13 @@ function attentionRecipients(room: ChatRoom, message: ChatMessage): string[] {
   return message.to.filter((id) => id !== USER_RECIPIENT && room.members.some((m) => m.sessionId === id));
 }
 
-function phoneAlertAllows(mode: AlertMode, message: ChatMessage | undefined, name: string, unique: boolean): boolean {
+function phoneAlertAllows(
+  mode: AlertMode,
+  message: ChatMessage | undefined,
+  name: string,
+  unique: boolean,
+  sessionId?: string
+): boolean {
   if (mode === 'ring') return true;
   if (!message) return false;
   const owner = message.from.kind === 'user' && isOwnerMark(message.from.mark);
@@ -105,7 +111,14 @@ function phoneAlertAllows(mode: AlertMode, message: ChatMessage | undefined, nam
   const direct = unique && textMentions(message.text, name);
   // Silent: only the owner's direct @mention or his @everyone. Vibrate: a direct @mention from anyone.
   if (owner) return direct || textMentions(message.text, 'everyone');
-  return mode === 'vibrate' && direct;
+  // A bot post addressed to this one member (an assignment check-in) is direct contact, like a mention.
+  const addressed =
+    !!sessionId &&
+    message.from.kind === 'bot' &&
+    Array.isArray(message.to) &&
+    message.to.length === 1 &&
+    message.to[0] === sessionId;
+  return mode === 'vibrate' && (direct || addressed);
 }
 
 export interface ChatroomServiceDeps {
@@ -168,7 +181,7 @@ const BOARD_CURSOR = '\0board';
 
 export interface ChatMemberView extends ChatMember {
   name: string;
-  alertMode?: AlertLease;
+  alertMode?: AlertState;
   mode?: string;
   alive: boolean;
   providerHealth?: ProviderHealth;
@@ -337,7 +350,11 @@ export class ChatroomService {
   private writesClosed: string | undefined;
 
   constructor(private readonly deps: ChatroomServiceDeps) {
-    this.alertModes = new EmployeeAlertModes(deps.file ? join(dirname(deps.file), 'employee-alert-modes.json') : undefined, () => this.now());
+    this.alertModes = new EmployeeAlertModes(
+      deps.file ? join(dirname(deps.file), 'employee-alert-modes.json') : undefined,
+      () => this.now(),
+      deps.file ? join(dirname(deps.file), 'employee-alert-preferences.json') : undefined
+    );
     this.notices = new ChatroomNoticeState(deps.file ? join(dirname(deps.file), 'chat-notice-state.json') : undefined);
     this.deliveryReady = !deps.deferDeliveryRecovery;
     this.archive = new ChatArchive(deps.archiveDir ?? join(dirname(deps.file), 'chat-archive'));
@@ -554,7 +571,7 @@ export class ChatroomService {
     if (select?.humans && select.before > this.now() - STALE_MIN_AGE_MS)
       throw new ChatroomError('Human notices can be set aside only when older than 72 hours', 'INVALID_INPUT');
     const session = this.deps.getSession(sessionId);
-    const mode = this.alertMode(sessionId)?.mode ?? 'ring';
+    const mode = this.effectiveAlertMode(sessionId);
     if (!session || session.pid === null) {
       if (historyPage || select) throw new ChatroomError('A live own session is required for notice history', 'NOT_FOUND');
       return renderTurnSummary(mode, []);
@@ -644,7 +661,7 @@ export class ChatroomService {
           (message.from.kind === 'agent' &&
             (message.from.sessionId === sessionId || (employeeId && message.from.employeeId === employeeId))) ||
           !attentionRecipients(room, message).includes(sessionId) ||
-          !phoneAlertAllows(mode, message, name, uniquelyNamed)
+          !phoneAlertAllows(mode, message, name, uniquelyNamed, sessionId)
         )
           continue;
         const key = `${room.id}\0${message.id}`;
@@ -735,12 +752,12 @@ export class ChatroomService {
   private noticeSource(sessionId: string, roomId: string, messageId: string): ChatMessage {
     const message = this.exactVisibleMessage(sessionId, roomId, messageId);
     const room = this.store.require(roomId);
-    const mode = this.alertMode(sessionId)?.mode ?? 'ring';
+    const mode = this.effectiveAlertMode(sessionId);
     const name = this.nameOf(sessionId);
     const unique = room.members.filter(m => this.nameOf(m.sessionId).toLowerCase() === name.toLowerCase()).length === 1;
     if (room.archivedAt || (isDm(room) && !room.dm.includes(sessionId)) ||
         !attentionRecipients(room, message).includes(sessionId) ||
-        !phoneAlertAllows(mode, message, name, unique)) {
+        !phoneAlertAllows(mode, message, name, unique, sessionId)) {
       throw new ChatroomError('No eligible notice for this recipient', 'NOT_FOUND');
     }
     return message;
@@ -1386,12 +1403,23 @@ export class ChatroomService {
     return this.store.roomsFor(sessionId);
   }
 
-  alertMode(sessionId: string): AlertLease | undefined {
+  /**
+   * The phone mode in effect for a member and where it comes from. An employee defaults to Vibrate:
+   * only a direct @mention or the owner wakes it. A session with no employee binding is not on the
+   * employee phone at all and stays Ring.
+   */
+  alertMode(sessionId: string): AlertState {
     const employee = this.deps.employeeOf?.(sessionId);
-    return employee ? this.alertModes.get(employee) : undefined;
+    return employee
+      ? this.alertModes.effective(employee, DEFAULT_EMPLOYEE_ALERT_MODE)
+      : { mode: 'ring', source: 'default' };
   }
 
-  async setAlertMode(sessionId: string, mode: AlertMode, durationMs: number): Promise<AlertLease | undefined> {
+  private effectiveAlertMode(sessionId: string): AlertMode {
+    return this.alertMode(sessionId).mode;
+  }
+
+  async setAlertMode(sessionId: string, mode: AlertMode, durationMs: number): Promise<AlertState> {
     const employeeId = this.deps.employeeOf?.(sessionId);
     if (!employeeId) throw new ChatroomError('No employee binding for this session', 'CONFLICT');
     if (!['ring', 'vibrate', 'silent'].includes(mode) || !Number.isFinite(durationMs) || durationMs <= 0 || durationMs > 28800000) throw new ChatroomError('Duration must be greater than zero and at most eight hours', 'INVALID_INPUT');
@@ -1401,30 +1429,56 @@ export class ChatroomService {
     this.delivery.applyAlertPolicy(sessionId);
     await this.audit({ action: 'alert-mode-changed', sessionId, employeeId, mode, until: lease?.until ?? null });
     for (const room of this.store.list()) if (room.members.some((m) => m.sessionId === sessionId)) this.deps.broadcast(ChatroomChanged, { owner: room.owner ?? '@single', roomId: room.id });
-    return lease;
+    return this.alertMode(sessionId);
   }
 
   private phoneWrites: Promise<unknown> = Promise.resolve();
 
-  ownerPhoneStatus(owner?: string): AlertLease | undefined {
-    return this.alertModes.get(`@owner:${owner ?? '@single'}`);
+  /** The owner's own phone: a timed choice over a Ring default, unchanged by the employee default. */
+  ownerPhoneStatus(owner?: string): AlertState {
+    return this.alertModes.effective(`@owner:${owner ?? '@single'}`, 'ring');
   }
 
-  /** Authorization and audit must succeed before the synchronous durable commit. */
-  setPhoneStatus(owner: string | undefined, target: string | undefined, mode: AlertMode, by: string,
-    authorize: () => void): Promise<AlertLease | undefined> {
+  /**
+   * Authorization and audit must succeed before the synchronous durable commit. The owner's choice for
+   * an employee lasts until changed; anyone else's (a coordinator's, the employee's own) is an
+   * eight-hour lease, and so is the owner's own phone status.
+   */
+  setPhoneStatus(
+    owner: string | undefined,
+    target: string | undefined,
+    mode: AlertMode,
+    by: string,
+    authorize: () => void
+  ): Promise<AlertState> {
     const run = async () => {
       authorize();
       const employee = target ? this.deps.employeeOf?.(target) : undefined;
       if (target && !employee) throw new ChatroomError('No employee binding', 'CONFLICT');
       const key = employee ?? `@owner:${owner ?? '@single'}`;
-      await this.audit({ action: 'phone-status-request', by, owner: owner ?? '@single', target: target ?? 'owner',
-        employeeId: employee, before: this.alertModes.get(key) ?? null, mode });
+      await this.audit({
+        action: 'phone-status-request',
+        by,
+        owner: owner ?? '@single',
+        target: target ?? 'owner',
+        employeeId: employee,
+        before: this.alertModes.effective(key, employee ? DEFAULT_EMPLOYEE_ALERT_MODE : 'ring'),
+        mode,
+      });
       authorize();
       if (target && this.deps.employeeOf?.(target) !== employee) throw new ChatroomError('Employee binding changed', 'CONFLICT');
-      const lease = this.alertModes.set(key, mode, 28800000);
-      void this.audit({ action: 'phone-status-changed', by, owner: owner ?? '@single',
-        target: target ?? 'owner', employeeId: employee, mode, after: lease ?? null }).catch(() => undefined);
+      if (employee && by === 'owner') this.alertModes.prefer(employee, mode);
+      else this.alertModes.set(key, mode, 28800000);
+      const after = this.alertModes.effective(key, employee ? DEFAULT_EMPLOYEE_ALERT_MODE : 'ring');
+      void this.audit({
+        action: 'phone-status-changed',
+        by,
+        owner: owner ?? '@single',
+        target: target ?? 'owner',
+        employeeId: employee,
+        mode,
+        after,
+      }).catch(() => undefined);
       // A delivery/broadcast failure after commit must not report a refused write.
       if (target) {
         try { this.delivery.applyAlertPolicy(target); } catch { /* durable mode is authoritative */ }
@@ -1432,7 +1486,7 @@ export class ChatroomService {
           try { this.deps.broadcast(ChatroomChanged, { owner: room.owner ?? '@single', roomId: room.id }); } catch { /* refreshed on next read */ }
         }
       }
-      return lease;
+      return after;
     };
     const result = this.phoneWrites.then(run);
     this.phoneWrites = result.catch(() => undefined);
@@ -1441,7 +1495,7 @@ export class ChatroomService {
 
   private phoneForcesWake(sessionId: string, roomId: string, messageId?: string): boolean {
     const message = this.store.get(roomId)?.messages.find((m) => m.id === messageId);
-    const mode = this.alertMode(sessionId)?.mode;
+    const mode = this.effectiveAlertMode(sessionId);
     if (message?.from.kind === 'user' && isOwnerMark(message.from.mark) && mode !== 'silent') return true;
     return (mode === 'vibrate' || mode === 'silent') && this.alertAllows(sessionId, roomId, messageId);
   }
@@ -1475,13 +1529,13 @@ export class ChatroomService {
   }
 
   private alertAllows(sessionId: string, roomId: string, messageId?: string): boolean {
-    const mode = this.alertMode(sessionId)?.mode ?? 'ring';
+    const mode = this.effectiveAlertMode(sessionId);
     if (mode === 'ring') return phoneAlertAllows(mode, undefined, '', false);
     const room = this.store.get(roomId);
     const message = room?.messages.find((m) => m.id === messageId);
     const name = this.nameOf(sessionId);
     const unique = room?.members.filter((m) => this.nameOf(m.sessionId).toLowerCase() === name.toLowerCase()).length === 1;
-    return phoneAlertAllows(mode, message, name, unique);
+    return phoneAlertAllows(mode, message, name, unique, sessionId);
   }
 
   view(room: ChatRoom, options: { since?: number; limit?: number } = {}): ChatRoomView {
