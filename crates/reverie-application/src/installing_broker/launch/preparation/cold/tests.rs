@@ -21,7 +21,8 @@ fn broker_with_provider(tree: &Tree, provider: Option<serde_json::Value>) -> Ins
     if let Some(provider) = provider {
         let policy = reverie_contracts::worker_pool::WorkerPoolPolicy::decode(
             &serde_json::to_vec(&provider["policy"]).unwrap(),
-        ).unwrap();
+        )
+        .unwrap();
         raw["cgroupParent"] = serde_json::json!(policy.parent_slice());
         raw["workerPoolProvider"] = provider;
     }
