@@ -3,6 +3,7 @@
 use super::super::*;
 use crate::{reservation_gate::tests::Tree, reservation_observer::tests::Fixture};
 use std::{fs, os::unix::fs::MetadataExt};
+mod entered;
 mod publication;
 fn fixture(rows: &[serde_json::Value]) -> Arc<Fixture> {
     let fixture = Fixture::new();
