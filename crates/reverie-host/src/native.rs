@@ -226,7 +226,9 @@ pub(crate) fn close(file: File) -> Result<()> {
     let result = if unsafe { libc::close(fd) } == 0 {
         Ok(())
     } else {
-        Err(std::io::Error::last_os_error().into())
+        Err(ObservationError::CloseUnconfirmed {
+            cause: std::io::Error::last_os_error(),
+        })
     };
     #[cfg(test)]
     let result = finalized(result, test_faults::closed());
@@ -253,7 +255,9 @@ pub(crate) mod test_faults {
     }
     pub(super) fn closed() -> Result<()> {
         if STATE.with(|state| std::mem::take(&mut state.borrow_mut().close)) {
-            Err(std::io::Error::other("owned injected close failure").into())
+            Err(ObservationError::CloseUnconfirmed {
+                cause: std::io::Error::other("owned injected close failure"),
+            })
         } else {
             Ok(())
         }

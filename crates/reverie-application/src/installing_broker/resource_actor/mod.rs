@@ -1,6 +1,7 @@
 //! Native protected website channel for the actual installing broker. Its
 //! constructor has no wire-selected engine/program, callbacks or owner flag.
 //! Qualifying a website does not authorize an employee resource operation.
+mod custody;
 mod error;
 mod operation;
 mod qualification;
@@ -52,6 +53,7 @@ struct Frame<'a> {
     deadline: Instant,
     failed: bool,
     frames: usize,
+    unconfirmed: Option<custody::RetainedClose>,
 }
 #[must_use = "retain this exact protected channel through actual operation and checked close"]
 pub struct InstalledResourceWebsite<'a> {
@@ -79,6 +81,7 @@ impl InstallingBroker {
             deadline: Instant::now() + Duration::from_secs(300),
             failed: false,
             frames: 0,
+            unconfirmed: None,
         };
         match frame.prepare() {
             Ok(()) => Ok(InstalledResourceWebsite { frame }),
@@ -137,7 +140,10 @@ impl Frame<'_> {
         // Attempt every original producer settlement even if another reader's
         // close was uncertain. Never release the SAME channel hold unless all
         // results establish known finalization; preserve every failing cause.
-        let readers: [Result<()>; 7] = [
+        let readers: [Result<()>; 8] = [
+            self.unconfirmed
+                .as_ref()
+                .map_or(Ok(()), |cause| Err(cause.error())),
             self.private.assert_finalized().map_err(Into::into),
             self.input.assert_finalized().map_err(Into::into),
             self.code.assert_finalized().map_err(Into::into),

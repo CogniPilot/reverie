@@ -106,8 +106,11 @@ impl AuthenticatedResourceOperation<'_> {
         )
         .map_err(GateError::from)?;
         let identity = StorageIdentityConfig::capture_worker_settings(&settings);
-        storage_identity::read_company_metadata(&identity)
-            .map_err(GateError::from)?
+        let metadata = storage_identity::read_company_metadata(&identity)
+            .map_err(GateError::from)
+            .map_err(Into::into);
+        frame
+            .retain_stateless_result(metadata)?
             .require_resource_owner(self.request.employee_id(), current.owner())?;
         need(
             self.owner
