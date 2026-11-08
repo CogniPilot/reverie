@@ -127,7 +127,10 @@ impl ReservationGate {
             operation,
         };
         authority.check(&self.inner)?;
-        let admission = self.inner.admit(AdmissionBounds::default())?;
+        let bounds = operation
+            .ram_admission_bounds(self)
+            .map_err(|error| GateError::Refused(error.code()))?;
+        let admission = self.inner.admit(bounds)?;
         let body = (|| {
             authority.check(&self.inner)?;
             self.inner.select_profile_checked(

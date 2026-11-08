@@ -143,6 +143,48 @@ fn assert_same_close(first: &custody::RetainedClose, second: &custody::RetainedC
 }
 
 #[test]
+fn actual_q_dispatch_reconciliation_keeps_original_hold_and_bounded_diagnostics() {
+    crate::test_process::owning_case!(
+        actual_q_dispatch_reconciliation_keeps_original_hold_and_bounded_diagnostics
+    );
+    let mut fixture = Fixture::new();
+    fixture.retained = true;
+    let (mut client, connection) = fixture.accept(b'Q', b"{}");
+    let mut entry = fixture
+        .broker
+        .prepare_resource_website(connection)
+        .err()
+        .unwrap();
+    let primary = entry.cause().code();
+    // Actual accepted Record/peer/hold; this is typed negative composition,
+    // not another native close producer or a successful Auth fixture.
+    let cleanup = company_close_error();
+    let cleanup_code = cleanup.code();
+    assert!(
+        entry
+            .frame
+            .retain_stateless_result::<()>(Err(cleanup))
+            .unwrap_err()
+            .has_unconfirmed_close()
+    );
+    let mut retained = ResourceOperationFailure::from_entry(entry);
+    let mut first_length = None;
+    for attempt in 1..=256 {
+        retained = match retained.settle_for_worker() {
+            Err(owner) => owner,
+            Ok(_) => panic!("uncertain original owner must remain counted"),
+        };
+        let diagnostic = retained.to_string();
+        assert!(diagnostic.contains(primary));
+        assert!(diagnostic.contains(cleanup_code));
+        assert!(diagnostic.ends_with(&format!("failed closes: {attempt}")));
+        let first_length = *first_length.get_or_insert(diagnostic.len());
+        assert!(diagnostic.len() <= first_length + 3);
+    }
+    assert_eq!(client.read(&mut [0]).unwrap(), 0);
+}
+
+#[test]
 fn actual_q_preview_gate_close_errors_keep_original_frame_hold_and_cause() {
     crate::test_process::owning_case!(
         actual_q_preview_gate_close_errors_keep_original_frame_hold_and_cause

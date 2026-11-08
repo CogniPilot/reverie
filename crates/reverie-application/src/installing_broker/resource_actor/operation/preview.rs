@@ -1,5 +1,23 @@
 use super::*;
 impl AuthenticatedResourceOperation<'_> {
+    pub(crate) fn ram_admission_bounds(
+        &self,
+        gate: &crate::reservation_gate::ReservationGate,
+    ) -> Result<crate::reservation_gate::AdmissionBounds> {
+        self.assert_reservation_gate(gate)?;
+        let frame = &self.website.frame;
+        let end = frame
+            .broker
+            .storage
+            .runtime
+            .stop_budget()
+            .deadline()
+            .map_or(frame.deadline, |stop| frame.deadline.min(stop));
+        Ok(crate::reservation_gate::AdmissionBounds {
+            entry: Some(end),
+            operation: Some(end),
+        })
+    }
     pub(in crate::installing_broker::resource_actor) fn close_for_worker(
         &mut self,
     ) -> Result<WorkerLaunchClose> {

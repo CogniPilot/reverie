@@ -43,20 +43,28 @@ impl ResourceOperationClosed {
 pub struct ResourceOperationFailure<'a> {
     owner: Owner<'a>,
     primary: Option<ResourceActorError>,
-    cleanup: Vec<ResourceActorError>,
+    first_cleanup: Option<ResourceActorError>,
+    cleanup_failures: u64,
 }
 impl<'a> ResourceOperationFailure<'a> {
+    pub(super) fn from_entry(owner: Box<ResourceActorFailure<'a>>) -> Box<Self> {
+        retained(Owner::Entry(owner), None)
+    }
     /// Selective same-owner component settlement only: no request, reply,
     /// profile write, native effect or operation dispatch is replayed.
     pub fn settle_for_worker(
         mut self: Box<Self>,
     ) -> std::result::Result<ResourceOperationClosed, Box<Self>> {
         if let Err(cause) = self.owner.close() {
-            self.cleanup.push(cause);
+            // Every actual producer remains inside owner. Keep the original
+            // typed close tree, rather than allocating another copy of the
+            // same sticky causes on every reconciliation request.
+            self.cleanup_failures = self.cleanup_failures.saturating_add(1);
+            self.first_cleanup.get_or_insert(cause);
             return Err(self);
         }
         let mut primary = self.owner.into_primary().or(self.primary);
-        for cause in self.cleanup {
+        if let Some(cause) = self.first_cleanup {
             primary = Some(match primary {
                 None => cause,
                 Some(body) => ResourceActorError::Finalization {
@@ -81,8 +89,12 @@ impl std::fmt::Display for ResourceOperationFailure<'_> {
         if let Some(primary) = &self.primary {
             write!(out, ": {primary}")?;
         }
-        for cause in &self.cleanup {
-            write!(out, "; cleanup: {cause}")?;
+        if let Some(cause) = &self.first_cleanup {
+            write!(
+                out,
+                "; cleanup: {cause}; failed closes: {}",
+                self.cleanup_failures
+            )?;
         }
         Ok(())
     }
@@ -101,11 +113,11 @@ impl InstallingBroker {
     ) -> std::result::Result<ResourceOperationClosed, Box<ResourceOperationFailure<'_>>> {
         let website = match self.prepare_resource_website(connection) {
             Ok(website) => website,
-            Err(owner) => return retained(Owner::Entry(owner), None).settle_for_worker(),
+            Err(owner) => return ResourceOperationFailure::from_entry(owner).settle_for_worker(),
         };
         let mut operation = match website.receive_operation() {
             Ok(owner) => Box::new(owner),
-            Err(owner) => return retained(Owner::Entry(owner), None).settle_for_worker(),
+            Err(owner) => return ResourceOperationFailure::from_entry(owner).settle_for_worker(),
         };
         let body = dispatch(&mut operation);
         retained(Owner::Operation(operation), body.err()).settle_for_worker()
@@ -118,7 +130,8 @@ fn retained<'a>(
     Box::new(ResourceOperationFailure {
         owner,
         primary,
-        cleanup: Vec::new(),
+        first_cleanup: None,
+        cleanup_failures: 0,
     })
 }
 fn dispatch(operation: &mut AuthenticatedResourceOperation<'_>) -> Result<()> {
