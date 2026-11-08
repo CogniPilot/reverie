@@ -132,8 +132,7 @@ fn offline_inspection_closes_the_real_fresh_broker_once_without_changing_ready_o
         .expect("actual runtime closed");
     let failure = broker
         .close_offline_image_inspection(Instant::now() + Duration::from_secs(2))
-        .err()
-        .expect("original close attempt is one-shot");
+        .expect_err("original close attempt is one-shot");
     assert_eq!(
         failure.cause().code(),
         "WORKER_IMAGE_REQUIRES_UNSTARTED_BROKER"
@@ -154,8 +153,7 @@ fn inspection_controller_slot_contention_refuses_before_runtime_stop_or_native_q
     let original_slot = broker.controller.lock().unwrap();
     let failure = broker
         .close_offline_image_inspection(Instant::now() + Duration::from_secs(2))
-        .err()
-        .expect("same original slot must be exclusively held");
+        .expect_err("same original slot must be exclusively held");
     assert_eq!(failure.cause().code(), "WORKER_CONTROLLER_SLOT_UNAVAILABLE");
     assert!(broker.storage.runtime.stop_deadline().is_none());
     drop(original_slot);
