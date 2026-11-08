@@ -16,7 +16,7 @@ import {
 import { EmbassyPairingCreateSchema, type EmbassyPairing } from '../../embassy-pairing.js';
 import { isAllowedRequestOrigin, type HostPolicy } from '../network-auth-policy.js';
 import { AvatarError, MAX_AVATAR_BYTES } from '../../agent-avatars.js';
-import type { EmbassyGuestAvatars } from '../../embassy-guest-avatars.js';
+import { GuestLifecycleError, type EmbassyGuestAvatars } from '../../embassy-guest-avatars.js';
 import { isMultiUserMode } from '../../config/multiuser.js';
 
 /** Fixed, non-secret CSRF marker (integration pins r1 §1). A cross-origin page cannot send it: CORS never allows it. */
@@ -61,6 +61,7 @@ export function registerEmbassyPairingRoutes(
       } catch (error) {
         if (error instanceof EmbassyPairError) return refuse(reply, error.status, error.code, error.message);
         if (error instanceof AvatarError) return refuse(reply, error.status, 'INVALID_IMAGE', error.message);
+        if (error instanceof GuestLifecycleError) return refuse(reply, 409, 'GUEST_CHANGED', error.message);
         if (error instanceof EmbassyGuestError) {
           const status = { INVALID_INPUT: 400, NOT_FOUND: 404, CONFLICT: 409, UPSTREAM: 502 }[error.code];
           return refuse(reply, status, error.code === 'UPSTREAM' ? 'EMBASSY_UNREACHABLE' : error.code, error.message);
@@ -152,8 +153,10 @@ export function registerEmbassyPairingRoutes(
         handle(async (req) => {
           singleOwner();
           const requestId = param(req, 'requestId');
+          // Taken before the embassy check: a revoke or close that lands while it is pending makes the write refuse.
+          const token = guestAvatars.token(requestId);
           await host.requireGuest(requestId);
-          return { url: await guestAvatars.set(requestId, req.body) };
+          return { url: await guestAvatars.set(token, req.body) };
         })
       );
     });

@@ -7,7 +7,7 @@
  */
 import { afterEach, describe, expect, it } from 'vitest';
 import Fastify, { type InjectOptions } from 'fastify';
-import { mkdtempSync, readdirSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -51,21 +51,36 @@ function fakeChannel() {
     { id: 'inv-rejected', requestId: REJECTED, requestState: 'rejected', revoked: false },
   ];
   const base = `/embassy/channel/rooms/${ROOM}`;
+  // A held invites read answers with the state at the moment it was asked, but only once released: an embassy
+  // reply that arrives late, after a revoke or close has completed meanwhile.
+  let held: { asked: () => void; released: Promise<void> } | undefined;
+  const holdNextInvites = () => {
+    let release!: () => void;
+    let asked!: () => void;
+    const askedP = new Promise<void>((done) => (asked = done));
+    held = { asked, released: new Promise<void>((done) => (release = done)) };
+    return { asked: askedP, release };
+  };
   const transport = async (call: EmbassyChannelCall) => {
     if (call.method === 'GET' && call.path === base)
       return { status: 200, body: { room: { id: ROOM, name: 'Pilot' }, origin: ORIGIN } };
-    if (call.method === 'GET' && call.path === `${base}/invites`)
-      return {
-        status: 200,
-        body: {
-          invites: invites.map((i) => ({
-            ...i,
-            roomId: ROOM,
-            expiresAt: Date.now() + 900_000,
-            guest: { company: 'Robotronix', identity: 'Zorblat' },
-          })),
-        },
+    if (call.method === 'GET' && call.path === `${base}/invites`) {
+      const body = {
+        invites: invites.map((i) => ({
+          ...i,
+          roomId: ROOM,
+          expiresAt: Date.now() + 900_000,
+          guest: { company: 'Robotronix', identity: 'Zorblat' },
+        })),
       };
+      const hold = held;
+      held = undefined;
+      if (hold) {
+        hold.asked();
+        await hold.released;
+      }
+      return { status: 200, body };
+    }
     const revoke = call.path.match(new RegExp(`^${base}/invites/(.+)$`));
     if (call.method === 'DELETE' && revoke) {
       const invite = invites.find((i) => i.id === revoke[1]);
@@ -79,11 +94,12 @@ function fakeChannel() {
     }
     return { status: 404, body: { error: { code: 'NOT_FOUND', message: 'x' } } };
   };
-  return { transport, invites };
+  return { transport, invites, holdNextInvites };
 }
 
 async function setup() {
   const dir = temp();
+  const channel = fakeChannel();
   const avatars = new EmbassyGuestAvatars(
     new AvatarStore(join(dir, 'embassy-guest-avatars')),
     join(dir, 'embassy-host', 'guest-avatars.json')
@@ -91,7 +107,7 @@ async function setup() {
   const host = new EmbassyHost({
     dir: join(dir, 'embassy-channel'),
     opsFile: join(dir, 'embassy-host', 'ops.json'),
-    transport: fakeChannel().transport,
+    transport: channel.transport,
     guestAvatars: avatars,
   });
   await host.init();
@@ -119,12 +135,15 @@ async function setup() {
     app.inject({ method: 'GET', url: `/api/embassy-host/guests/${requestId}/avatar`, headers });
   const stored = () => {
     try {
-      return readdirSync(join(dir, 'embassy-guest-avatars')).sort();
+      // Versioned files, `guest-<requestId>-<version>.<ext>`, reduced to `guest-<requestId>.<ext>`.
+      return readdirSync(join(dir, 'embassy-guest-avatars'))
+        .map((name) => name.replace(/-\d+\./, '.'))
+        .sort();
     } catch {
       return [];
     }
   };
-  return { dir, app, host, avatars, state, call, put, image, stored };
+  return { dir, app, host, avatars, state, call, put, image, stored, channel };
 }
 
 describe('EmbassyGuestAvatars', () => {
@@ -132,17 +151,17 @@ describe('EmbassyGuestAvatars', () => {
     const dir = temp();
     let now = 1000;
     const avatars = new EmbassyGuestAvatars(new AvatarStore(join(dir, 'pics')), join(dir, 'map.json'), () => now);
-    const url = await avatars.set(APPROVED, PNG);
+    const url = await avatars.set(avatars.token(APPROVED), PNG);
     expect(url).toBe(`/api/embassy-host/guests/${APPROVED}/avatar?v=1000`);
     expect(url).toMatch(EMBASSY_GUEST_AVATAR_URL);
-    expect(statSync(join(dir, 'pics', `guest-${APPROVED}.png`)).mode & 0o777).toBe(0o600);
+    expect(statSync(join(dir, 'pics', `guest-${APPROVED}-1000.png`)).mode & 0o777).toBe(0o600);
     expect(statSync(join(dir, 'map.json')).mode & 0o777).toBe(0o600);
     // A new picture in another format replaces the old one, under a newer version even if the clock did not move.
-    expect(await avatars.set(APPROVED, JPEG)).toBe(`/api/embassy-host/guests/${APPROVED}/avatar?v=1001`);
-    expect(readdirSync(join(dir, 'pics'))).toEqual([`guest-${APPROVED}.jpg`]);
+    expect(await avatars.set(avatars.token(APPROVED), JPEG)).toBe(`/api/embassy-host/guests/${APPROVED}/avatar?v=1001`);
+    expect(readdirSync(join(dir, 'pics'))).toEqual([`guest-${APPROVED}-1001.jpg`]);
     expect((await avatars.get(APPROVED))?.type).toBe('image/jpeg');
     now = 5000;
-    await avatars.set(CLAIMED, PNG);
+    await avatars.set(avatars.token(CLAIMED), PNG);
     expect(await avatars.urls()).toEqual({
       [APPROVED]: `/api/embassy-host/guests/${APPROVED}/avatar?v=1001`,
       [CLAIMED]: `/api/embassy-host/guests/${CLAIMED}/avatar?v=5000`,
@@ -158,14 +177,14 @@ describe('EmbassyGuestAvatars', () => {
   it('refuses a non-image, an oversized image, a bad id and a corrupt map', async () => {
     const dir = temp();
     const avatars = new EmbassyGuestAvatars(new AvatarStore(join(dir, 'pics')), join(dir, 'map.json'));
-    await expect(avatars.set(APPROVED, SVG)).rejects.toMatchObject({ status: 415 });
+    await expect(avatars.set(avatars.token(APPROVED), SVG)).rejects.toMatchObject({ status: 415 });
     const big = Buffer.concat([PNG, Buffer.alloc(MAX_AVATAR_BYTES)]);
-    await expect(avatars.set(APPROVED, big)).rejects.toBeInstanceOf(AvatarError);
-    await expect(avatars.set(APPROVED, big)).rejects.toMatchObject({ status: 413 });
-    await expect(avatars.set('../owner', PNG)).rejects.toThrow('Invalid guest request id');
-    await expect(avatars.set(APPROVED.toUpperCase(), PNG)).rejects.toThrow('Invalid guest request id');
+    await expect(avatars.set(avatars.token(APPROVED), big)).rejects.toBeInstanceOf(AvatarError);
+    await expect(avatars.set(avatars.token(APPROVED), big)).rejects.toMatchObject({ status: 413 });
+    await expect(avatars.set(avatars.token('../owner'), PNG)).rejects.toThrow('Invalid guest request id');
+    await expect(avatars.set(avatars.token(APPROVED.toUpperCase()), PNG)).rejects.toThrow('Invalid guest request id');
     expect(await avatars.urls()).toEqual({});
-    writeFileSync(join(dir, 'map.json'), '{"v":2}');
+    writeFileSync(join(dir, 'map.json'), '{"v":3,"versions":{}}');
     await expect(avatars.urls()).rejects.toThrow('refusing to reset');
   });
 });
@@ -256,6 +275,67 @@ describe('embassy guest picture routes', () => {
     expect((await t.put(CLAIMED, PNG)).statusCode).toBe(404);
     const closed = await t.call({ method: 'POST', url: '/api/embassy-host/close', payload: { confirm: 'close' } });
     expect(closed.statusCode).toBe(200);
+    expect(t.stored()).toEqual([]);
+    expect(await t.avatars.urls()).toEqual({});
+  });
+});
+
+describe('embassy guest pictures across a revoke, a close or a failed write', () => {
+  const root = process.getuid?.() === 0;
+
+  for (const lifecycle of ['revoke', 'close'] as const) {
+    it(`an upload whose guest check answers after a ${lifecycle} never brings the picture back`, async () => {
+      const t = await setup();
+      const { asked, release } = t.channel.holdNextInvites();
+      const upload = t.put(APPROVED, PNG);
+      await asked; // the upload's guest check is with the embassy, still answering "approved"
+      const done =
+        lifecycle === 'revoke'
+          ? await t.call({ method: 'DELETE', url: '/api/embassy-host/invites/inv-approved' })
+          : await t.call({ method: 'POST', url: '/api/embassy-host/close', payload: { confirm: 'close' } });
+      expect(done.statusCode).toBe(200);
+      release();
+      const refused = await upload;
+      expect(refused.statusCode).toBe(409);
+      expect(refused.json().errorCode).toBe('GUEST_CHANGED');
+      expect(t.stored()).toEqual([]);
+      expect((await t.image(APPROVED)).statusCode).toBe(404);
+      expect(await t.avatars.urls()).toEqual({});
+    });
+  }
+
+  it.skipIf(root)('a failed map write while replacing a picture leaves the old URL serving the old bytes', async () => {
+    const t = await setup();
+    const first = (await t.put(APPROVED, PNG)).json().data.url;
+    const hostDir = join(t.dir, 'embassy-host');
+    chmodSync(hostDir, 0o500); // the map cannot be rewritten
+    try {
+      expect((await t.put(APPROVED, JPEG, 'image/jpeg')).statusCode).toBeGreaterThanOrEqual(400);
+    } finally {
+      chmodSync(hostDir, 0o700);
+    }
+    expect((await t.avatars.urls())[APPROVED]).toBe(first);
+    const served = await t.image(APPROVED);
+    expect(served.headers['content-type']).toBe('image/png');
+    expect(served.rawPayload.equals(PNG)).toBe(true);
+    expect(t.stored()).toEqual([`guest-${APPROVED}.png`]);
+  });
+
+  it('a picture that could not be deleted on close stays listed while the others go, and a retry deletes it', async () => {
+    const t = await setup();
+    await t.put(APPROVED, PNG);
+    await t.put(CLAIMED, PNG);
+    const pictures = join(t.dir, 'embassy-guest-avatars');
+    // One picture's file cannot be deleted: a directory stands in its place.
+    const stuck = readdirSync(pictures).find((name) => name.startsWith(`guest-${APPROVED}-`))!;
+    rmSync(join(pictures, stuck));
+    mkdirSync(join(pictures, stuck));
+    await expect(t.avatars.removeAll()).rejects.toThrow();
+    expect(Object.keys(await t.avatars.urls())).toEqual([APPROVED]);
+    expect(t.stored()).toEqual([`guest-${APPROVED}.png`]);
+    rmSync(join(pictures, stuck), { recursive: true });
+    writeFileSync(join(pictures, stuck), PNG);
+    expect(await t.avatars.removeAll()).toBe(1);
     expect(t.stored()).toEqual([]);
     expect(await t.avatars.urls()).toEqual({});
   });

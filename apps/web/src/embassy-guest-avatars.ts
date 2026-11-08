@@ -2,10 +2,19 @@
  * @fileoverview Pictures the hosting owner sets for embassy guests, shown in the host's own console only.
  *
  * A picture is keyed by the guest's approved pairing `requestId`, never by the company or identity labels the guest
- * chose (they are neither unique nor the owner's). The image goes through AvatarStore as `guest-<requestId>`: PNG,
- * JPEG, GIF or WebP by its own magic bytes, at most 256 KB, written atomically with mode 0600. A small private map
- * file holds each picture's version, so its URL changes whenever the picture does. Revoking the guest or closing the
- * room deletes the picture (see EmbassyHost).
+ * chose (they are neither unique nor the owner's). The image goes through AvatarStore: PNG, JPEG, GIF or WebP by its
+ * own magic bytes, at most 256 KB, written atomically with mode 0600. Each version is its own file,
+ * `guest-<requestId>-<version>`, and a small private map file names the version each guest's URL serves.
+ *
+ * Every change keeps the map and the files consistent across a failure:
+ * - a new picture is written first, then the map, then the old version is deleted, so a failed map write leaves the
+ *   old URL serving the old bytes;
+ * - removal deletes files first and drops a guest from the map only once its file is gone, so a failed removal is
+ *   still listed and a retry finishes it.
+ *
+ * Revoking the guest or closing the room deletes the picture (see EmbassyHost). An upload checks the guest with the
+ * embassy before it writes, so it carries a lifecycle token taken before that check: revoking that guest or closing
+ * the room meanwhile makes the token stale, and the write refuses rather than bring a picture back.
  */
 import fs from 'node:fs/promises';
 import { z } from 'zod';
@@ -14,7 +23,7 @@ import { writePrivate } from './embassy-guest-client.js';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const Versions = z
-  .object({ v: z.literal(1), versions: z.record(z.string().regex(UUID), z.number().int().min(0)) })
+  .object({ v: z.literal(2), versions: z.record(z.string().regex(UUID), z.number().int().min(0)) })
   .strict();
 
 /** A rendered guest picture reference: only ever a URL of the host route, with its version. */
@@ -24,8 +33,22 @@ export function embassyGuestAvatarUrl(requestId: string, version: number): strin
   return `/api/embassy-host/guests/${requestId}/avatar?v=${version}`;
 }
 
+/** Thrown when a guest was revoked, or the room closed, between an upload's guest check and its write. */
+export class GuestLifecycleError extends Error {}
+
+/** Taken before an upload checks its guest; a revoke of that guest or a close since then makes it stale. */
+export interface GuestAvatarToken {
+  readonly requestId: string;
+  readonly epoch: number;
+  readonly generation: number;
+}
+
 export class EmbassyGuestAvatars {
   private chain: Promise<unknown> = Promise.resolve();
+  /** Advanced by every close. */
+  private epoch = 0;
+  /** Advanced by every revoke, per guest. */
+  private readonly generations = new Map<string, number>();
 
   constructor(
     private readonly store: AvatarStore,
@@ -49,9 +72,12 @@ export class EmbassyGuestAvatars {
     }
   }
 
-  private key(requestId: string): string {
+  private check(requestId: string): void {
     if (!UUID.test(requestId)) throw new Error('Invalid guest request id');
-    return `guest-${requestId}`;
+  }
+
+  private key(requestId: string, version: number): string {
+    return `guest-${requestId}-${version}`;
   }
 
   /** Every guest's picture URL, by request id. */
@@ -60,51 +86,89 @@ export class EmbassyGuestAvatars {
     return Object.fromEntries(Object.entries(versions).map(([id, v]) => [id, embassyGuestAvatarUrl(id, v)]));
   }
 
-  /** Store a checked picture for a guest (the caller has checked the guest) and return its new URL. */
-  async set(requestId: string, data: unknown): Promise<string> {
-    const key = this.key(requestId);
+  /** Take before checking the guest with the embassy; pass to `set` (which checks the id). */
+  token(requestId: string): GuestAvatarToken {
+    return { requestId, epoch: this.epoch, generation: this.generations.get(requestId) ?? 0 };
+  }
+
+  /** Make every upload token taken so far stale, without deleting anything: for a revoke whose guest is unknown. */
+  fenceAll(): void {
+    this.epoch += 1;
+  }
+
+  /** Store a checked picture for a guest checked under `token`, and return its new URL. Refuses when that guest was
+   * revoked, or the room closed, since the token was taken. */
+  async set(token: GuestAvatarToken, data: unknown): Promise<string> {
+    const { requestId } = token;
+    this.check(requestId);
     checkAvatar(data);
     return this.locked(async () => {
+      if (token.epoch !== this.epoch || token.generation !== (this.generations.get(requestId) ?? 0))
+        throw new GuestLifecycleError('The guest was revoked or the room closed while the picture was uploading');
       const versions = await this.versions();
       const previous = versions[requestId];
-      await this.store.put(key, data as Buffer);
-      versions[requestId] = Math.max(this.now(), (previous ?? 0) + 1);
+      const version = Math.max(this.now(), (previous ?? 0) + 1);
+      await this.store.put(this.key(requestId, version), data as Buffer);
       try {
-        await writePrivate(this.mapFile, { v: 1, versions });
+        await writePrivate(this.mapFile, { v: 2, versions: { ...versions, [requestId]: version } });
       } catch (error) {
-        if (previous === undefined) await this.store.remove(key);
+        // The map still names the previous version, whose file is untouched: the old URL keeps its old bytes.
+        await this.store.remove(this.key(requestId, version));
         throw error;
       }
-      return embassyGuestAvatarUrl(requestId, versions[requestId]);
+      if (previous !== undefined) await this.store.remove(this.key(requestId, previous)).catch(() => {});
+      return embassyGuestAvatarUrl(requestId, version);
     });
   }
 
-  /** Delete a guest's picture; true when there was one. */
+  /** Revoke a guest: later writes under an earlier token refuse, and its picture is deleted. True when it had one. */
+  async revoke(requestId: string): Promise<boolean> {
+    this.check(requestId);
+    this.generations.set(requestId, (this.generations.get(requestId) ?? 0) + 1);
+    return this.remove(requestId);
+  }
+
+  /** Delete a guest's picture; true when there was one. The file goes first, then the map entry. */
   async remove(requestId: string): Promise<boolean> {
-    const key = this.key(requestId);
+    this.check(requestId);
     return this.locked(async () => {
       const versions = await this.versions();
-      const had = requestId in versions;
-      delete versions[requestId];
-      if (had) await writePrivate(this.mapFile, { v: 1, versions });
-      await this.store.remove(key);
-      return had;
+      if (!(requestId in versions)) return false;
+      await this.store.remove(this.key(requestId, versions[requestId]));
+      const { [requestId]: _removed, ...rest } = versions;
+      await writePrivate(this.mapFile, { v: 2, versions: rest });
+      return true;
     });
   }
 
-  /** Delete every guest's picture (the room closed); returns how many there were. */
+  /** Close the room: later writes under any earlier token refuse, and every picture is deleted. Returns how many were
+   * deleted. A picture whose file could not be deleted stays listed, so a retry finishes it, and the call fails. */
   async removeAll(): Promise<number> {
+    this.epoch += 1;
     return this.locked(async () => {
-      const ids = Object.keys(await this.versions());
-      await writePrivate(this.mapFile, { v: 1, versions: {} });
-      for (const id of ids) await this.store.remove(this.key(id));
-      return ids.length;
+      const versions = await this.versions();
+      const kept: Record<string, number> = {};
+      let removed = 0;
+      let failure: unknown;
+      for (const [id, version] of Object.entries(versions)) {
+        try {
+          await this.store.remove(this.key(id, version));
+          removed += 1;
+        } catch (error) {
+          kept[id] = version;
+          failure ??= error;
+        }
+      }
+      if (removed > 0) await writePrivate(this.mapFile, { v: 2, versions: kept });
+      if (failure !== undefined) throw failure;
+      return removed;
     });
   }
 
-  /** A guest's stored picture, only while the map lists it. */
+  /** A guest's stored picture: only the version the map names. */
   async get(requestId: string): Promise<{ data: Buffer; type: string } | undefined> {
-    if (!UUID.test(requestId) || !(requestId in (await this.versions()))) return undefined;
-    return this.store.get(this.key(requestId));
+    if (!UUID.test(requestId)) return undefined;
+    const version = (await this.versions())[requestId];
+    return version === undefined ? undefined : this.store.get(this.key(requestId, version));
   }
 }

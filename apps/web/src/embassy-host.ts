@@ -164,8 +164,9 @@ export interface EmbassyHostDeps {
   /** The owner's pictures for this room's guests: listed in the status, deleted on revoke and close. */
   guestAvatars?: {
     urls(): Promise<Record<string, string>>;
-    remove(requestId: string): Promise<boolean>;
+    revoke(requestId: string): Promise<boolean>;
     removeAll(): Promise<number>;
+    fenceAll(): void;
   };
 }
 
@@ -385,16 +386,21 @@ export class EmbassyHost {
     if (!guest) throw new EmbassyPairError(404, 'NOT_FOUND', 'Not an approved guest of this room');
   }
 
-  /** Revoking an invite revokes its guest too, so the guest's picture is deleted. */
+  /** Revoking an invite revokes its guest too: the guest's picture is deleted, and an upload for that guest that
+   * is still checking with the embassy cannot write one afterwards. */
   async revokeInvite(inviteId: string): Promise<{ revoked: true }> {
     if (!ID.test(inviteId)) throw new EmbassyPairError(404, 'NOT_FOUND', 'Invite not found');
-    const requestId = this.deps.guestAvatars
-      ? await this.invites()
-          .then((all) => all.find((invite) => invite.id === inviteId)?.requestId ?? null)
-          .catch(() => null)
-      : null;
+    const avatars = this.deps.guestAvatars;
+    const guestOf = () =>
+      this.invites()
+        .then((all) => all.find((invite) => invite.id === inviteId)?.requestId ?? null)
+        .catch(() => null);
+    let requestId = avatars ? await guestOf() : null;
+    // Guest unknown: fence every upload in flight rather than miss this one.
+    if (avatars && !requestId) avatars.fenceAll();
     await this.call('DELETE', `/invites/${inviteId}`);
-    if (requestId) await this.deps.guestAvatars?.remove(requestId);
+    if (avatars && !requestId) requestId = await guestOf();
+    if (requestId) await avatars?.revoke(requestId);
     return { revoked: true };
   }
 
