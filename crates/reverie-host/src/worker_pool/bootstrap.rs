@@ -170,6 +170,8 @@ impl BrokerBootstrapBinding {
             !self.closed && !self.close_unknown,
             "WORKER_POOL_BROKER_BINDING_CLOSED",
         )?;
+        self.code.assert_finalized().map_err(facts_error)?;
+        self.processes.assert_finalized().map_err(facts_error)?;
         let end = self.stop.deadline().map_or(end, |stop| end.min(stop));
         need(Instant::now() < end, "WORKER_POOL_BROKER_BINDING_DEADLINE")?;
         Ok(end)
@@ -255,7 +257,7 @@ impl BrokerBootstrapBinding {
         use std::os::unix::ffi::OsStrExt;
         self.assert_current(runtime, end)?;
         let program = self.program.as_ref().expect("qualified actual origin");
-        let executable = native::python_path(&program.code().path.codepoints())?;
+        let executable = native::python_path(program.code().path.codepoints())?;
         let mut hash = Sha256::new();
         for argument in [
             executable.as_os_str(),

@@ -17,6 +17,8 @@ use std::{
 
 const DIRECTORY: &str = "/run/reverie-worker-pool/control";
 const LEAF: &str = "controller.sock";
+#[cfg(test)]
+mod tests;
 #[derive(Clone, Copy, Eq, PartialEq)]
 enum Stage {
     Opening,
@@ -232,64 +234,90 @@ impl ControllerPeer<'_> {
     }
     /// Uses delegated ORIGINAL code qualification, exact kernel peer and live
     /// PIDFD. It deliberately does not inspect a foreign UID's exe/root/ns.
-    pub fn require_original_broker(&self) -> Result<()> {
+    pub fn require_original_broker(&mut self) -> Result<()> {
         need(
             !self.closed && !self.close_unknown,
             "WORKER_POOL_CONTROL_CLOSED",
         )?;
-        let expected = self.endpoint.policy.broker_birth()?;
+        let expected = match self.endpoint.policy.broker_birth() {
+            Ok(expected) => expected,
+            Err(error) => {
+                self.close_unknown |= error.close_unknown();
+                return Err(error);
+            }
+        };
         let stream = self
             .stream
             .as_ref()
             .ok_or(PoolError::Refused("WORKER_POOL_BROKER_PEER_UNKNOWN"))?;
-        let peer = nix::sys::socket::getsockopt(stream, nix::sys::socket::sockopt::PeerCredentials)
-            .map_err(io::Error::from)?;
-        need(
-            peer.pid() as u32 == expected.pid() && [peer.uid(), peer.gid()] == expected.ids(),
-            "WORKER_POOL_BROKER_PEER_CHANGED",
-        )?;
-        let start = super::directory::process_start(expected.pid())?;
-        need(
-            start == expected.start(),
-            "WORKER_POOL_BROKER_INCARNATION_CHANGED",
-        )?;
         let pidfd = self
             .pidfd
             .as_ref()
             .ok_or(PoolError::Refused("WORKER_POOL_BROKER_PIDFD_UNKNOWN"))?;
-        use std::os::fd::AsFd;
-        let mut ready = [nix::poll::PollFd::new(
-            pidfd.as_fd(),
-            nix::poll::PollFlags::POLLIN,
-        )];
-        need(
-            nix::poll::poll(&mut ready, nix::poll::PollTimeout::ZERO).map_err(io::Error::from)?
-                == 0,
-            "WORKER_POOL_BROKER_ENDED",
-        )?;
-        Ok(())
+        verify_peer(stream, pidfd, expected, &mut self.close_unknown)
     }
     pub fn close(&mut self) -> Result<()> {
         self.closed = true;
-        let stream = self
-            .stream
-            .take()
-            .map(|stream| native::close(File::from(OwnedFd::from(stream))))
-            .transpose()
-            .map(|_| ())
-            .map_err(Into::into);
-        let pidfd = self
-            .pidfd
-            .take()
-            .map(|fd| native::close(File::from(fd)))
-            .transpose()
-            .map(|_| ())
-            .map_err(Into::into);
-        let body = finalized(stream, pidfd);
-        self.close_unknown |= body.is_err();
-        body?;
-        need(!self.close_unknown, "WORKER_POOL_CONTROL_CLOSE_UNKNOWN")
+        close_peer(&mut self.stream, &mut self.pidfd, &mut self.close_unknown)
     }
+}
+fn verify_peer(
+    stream: &UnixStream,
+    pidfd: &OwnedFd,
+    expected: &reverie_contracts::worker_pool::BrokerBirthData,
+    close_unknown: &mut bool,
+) -> Result<()> {
+    need(!*close_unknown, "WORKER_POOL_CONTROL_CLOSE_UNKNOWN")?;
+    let body = inspect_peer(stream, pidfd, expected);
+    *close_unknown |= body.as_ref().is_err_and(PoolError::close_unknown);
+    body
+}
+fn inspect_peer(
+    stream: &UnixStream,
+    pidfd: &OwnedFd,
+    expected: &reverie_contracts::worker_pool::BrokerBirthData,
+) -> Result<()> {
+    let peer = nix::sys::socket::getsockopt(stream, nix::sys::socket::sockopt::PeerCredentials)
+        .map_err(io::Error::from)?;
+    need(
+        peer.pid() as u32 == expected.pid() && [peer.uid(), peer.gid()] == expected.ids(),
+        "WORKER_POOL_BROKER_PEER_CHANGED",
+    )?;
+    need(
+        super::directory::process_start(expected.pid())? == expected.start(),
+        "WORKER_POOL_BROKER_INCARNATION_CHANGED",
+    )?;
+    use std::os::fd::AsFd;
+    let mut ready = [nix::poll::PollFd::new(
+        pidfd.as_fd(),
+        nix::poll::PollFlags::POLLIN,
+    )];
+    need(
+        nix::poll::poll(&mut ready, nix::poll::PollTimeout::ZERO).map_err(io::Error::from)? == 0,
+        "WORKER_POOL_BROKER_ENDED",
+    )
+}
+fn close_peer(
+    stream: &mut Option<UnixStream>,
+    pidfd: &mut Option<OwnedFd>,
+    close_unknown: &mut bool,
+) -> Result<()> {
+    let stream = stream
+        .take()
+        .map(|stream| native::close(File::from(OwnedFd::from(stream))))
+        .transpose()
+        .map(|_| ())
+        .map_err(Into::into);
+    let pidfd = pidfd
+        .take()
+        .map(|fd| native::close(File::from(fd)))
+        .transpose()
+        .map(|_| ())
+        .map_err(Into::into);
+    let body = finalized(stream, pidfd);
+    *close_unknown |= body.is_err();
+    body?;
+    need(!*close_unknown, "WORKER_POOL_CONTROL_CLOSE_UNKNOWN")
 }
 impl Drop for ControllerPeer<'_> {
     fn drop(&mut self) {
