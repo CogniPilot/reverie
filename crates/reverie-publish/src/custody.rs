@@ -125,10 +125,10 @@ impl Held {
         Ok(out)
     }
 
-    /// Creates `name` in this directory with `O_CREAT | O_EXCL | O_NOFOLLOW`, mode 0600, and
-    /// writes `bytes`: an existing entry of any kind (a file, a hardlink, a symlink, even a
-    /// dangling one) refuses, so nothing already there is followed, truncated or overwritten.
-    pub fn create_new(&self, name: &str, bytes: &[u8]) -> Result<Owned<'_>, String> {
+    /// Creates `name` in this directory with `O_CREAT | O_EXCL | O_NOFOLLOW`, mode 0600: an
+    /// existing entry of any kind (a file, a hardlink, a symlink, even a dangling one) refuses, so
+    /// nothing already there is followed, truncated or overwritten.
+    fn create(&self, name: &str) -> Result<(File, (u64, u64)), String> {
         if name.is_empty() || name.contains('/') || name == "." || name == ".." {
             return Err(format!("{name}: not a plain file name"));
         }
@@ -137,17 +137,31 @@ impl Held {
         let fd = openat(&self.fd, name, flags, Mode::from_bits_truncate(0o600))
             .map_err(|e| format!("{}/{name}: {e}", self.path.display()))?;
         let stat = fstat(&fd).map_err(|e| format!("{name}: {e}"))?;
+        Ok((File::from(fd), (stat.st_dev, stat.st_ino)))
+    }
+
+    /// `create`s `name` and writes `bytes` as a temporary file, removed when the result drops.
+    pub fn create_new(&self, name: &str, bytes: &[u8]) -> Result<Owned<'_>, String> {
+        let (file, identity) = self.create(name)?;
         let mut owned = Owned {
             dir: self,
             name: name.to_owned(),
-            identity: (stat.st_dev, stat.st_ino),
-            file: File::from(fd),
+            identity,
+            file,
         };
         owned
             .file
             .write_all(bytes)
             .map_err(|e| format!("{name}: {e}"))?;
         Ok(owned)
+    }
+
+    /// `create`s `name` and writes `bytes` durably, as a record that stays.
+    pub fn write_new(&self, name: &str, bytes: &[u8]) -> Result<(), String> {
+        let (mut file, _) = self.create(name)?;
+        file.write_all(bytes)
+            .and_then(|()| file.sync_all())
+            .map_err(|e| format!("{name}: {e}"))
     }
 
     /// `create_new` under a name no other process or call uses: `<stem>-<pid>-<time>-<n>.<ext>`,
