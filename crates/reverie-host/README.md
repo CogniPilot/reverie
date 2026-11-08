@@ -146,6 +146,26 @@ separate required work. The native source-package integration test is explicitly
 ignored by default and requires a separately built immutable artifact plus an
 independent legacy hash/inode receipt; running it qualifies readonly source
 observation only, not execution or mounted proof.
+## Lease directories
+
+`lease` is the native owner of the `python/reverie/cleanup/lease.py` lease
+directory contract: `hold`, `reserve`/`unreserve`, the destructive `janitor`
+and `check`, and the non-destructive `retirement` inventory, with `key_of` and
+the bounded `_retirement_record` and lock-probe rules. Record bytes and
+reservation liveness are `reverie_contracts::lease_records` data, checked
+against vectors from one disposable oracle run of the frozen Python source
+(`tests/fixtures/lease-records-python.json`). Locks use `nix` `Flock`; there is no
+new unsafe syscall code.
+
+It deliberately differs from Python in three refusal cases: a reservation file
+whose whole value is `null`, a reservation window integer outside i128, and a
+non-ASCII duration digit are refused, rather than freeing or accepting.
+`janitor` needs at least one explicit lease directory, `hold` takes no `extra`
+fields (no consumer passes them), and operating-system error text is Rust's.
+The holder CLI (`run`, `hold`, `gc`, `ls`) and all callers remain Python:
+`worker_retained_tmp`, `worker_cold_tmp`, `worker_mount_relocation`,
+`workspaces`, `browser_job_scope` and the prune packages. The Python source can
+be removed only after those consumers select this owner.
 ## Worker mount source observations
 
 `worker_mounts::observe_mount_sources` borrows the captured `WorkerEnvelope` and

@@ -17,6 +17,7 @@ pub mod js_json;
 pub mod kernel_accounting;
 pub mod kernel_mounts;
 pub mod lease_policy;
+pub mod lease_records;
 mod legacy_json;
 pub mod mcp_bootstrap;
 pub mod memory;

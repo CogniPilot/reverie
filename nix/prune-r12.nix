@@ -1,6 +1,6 @@
 # Source-reviewed candidate, isolated from the installed r8 observation package.
 # Host lease, phase-3 and clean dry-run acceptance remain operator gates.
-{ pkgs, src }:
+{ pkgs, src, leaseCli ? import ./lease-cli.nix { inherit pkgs src; } }:
 let
   hashes = {
     prune = "55f26deec48c2c5d25b7d2509aa2ec28a22b1ebb0a6747c8be021a79129d4bed";
@@ -29,8 +29,7 @@ in pkgs.runCommand "reverie-prune-r12-candidate" {
   makeWrapper ${pkgs.python3}/bin/python3 "$out/bin/reverie-prune-live" \
     --add-flags "-I -B $out/libexec/reverie/reverie_prune.py" \
     --prefix PATH : ${pkgs.lib.makeBinPath [ pkgs.git ]}
-  makeWrapper ${pkgs.python3}/bin/python3 "$out/bin/lease" \
-    --add-flags "-I -B $out/libexec/reverie/lease.py"
+  ln -s ${leaseCli}/bin/reverie-lease "$out/bin/lease"
   cat > "$out/share/reverie-prune/README" <<'DOC'
   Candidate r12 with lease r7. The public wrapper forces --dry-run and rejects
   --live. Building this package does not install or upgrade any service, grant
@@ -40,6 +39,8 @@ in pkgs.runCommand "reverie-prune-r12-candidate" {
   phase-3 synthetic fixture. Never run raw live mode against real data before
   all host acceptance and owner authorization gates pass. The r8 host installer
   refuses this candidate because its source pins intentionally remain unchanged.
+  bin/lease is the native reverie-lease command; libexec/reverie/lease.py stays
+  only as the janitor's lease_lib source.
   DOC
   "$out/bin/reverie-prune" --help > help.txt
   "$out/bin/reverie-prune-live" --help > live-help.txt
