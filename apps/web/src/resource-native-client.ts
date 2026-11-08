@@ -229,6 +229,7 @@ export class ResourceSessionLaunchTask {
         !session.muxName
     );
     assertResourceOperation(binding, record.owner, record);
+    launch.assertLegacyOperation(binding, record);
     UUID.parse(reference);
     this.#session = session;
     this.#launch = launch;

@@ -17,7 +17,7 @@ const NIL_UUID = '00000000-0000-0000-0000-000000000000';
 const HEX = /^[a-f0-9]{64}$/;
 const digest = (value: string) => createHash('sha256').update(value).digest('hex');
 const MINT = Symbol('resource-owner-binding');
-const bindings = new WeakMap<object, ResourceOwnerContext>();
+const bindings = new WeakMap<object, ResourceOwnerContext | RamResourceOwnerContext>();
 export class ResourceOwnerAuthorizationError extends Error {}
 function need(value: unknown): asserts value {
   if (!value)
@@ -75,6 +75,16 @@ export interface ResourceOwnerPrincipal {
 type PrincipalFor<P extends ResourcePurpose> = P extends typeof RAM_PURPOSE
   ? { readonly principal: Readonly<ResourceOwnerPrincipal> }
   : object;
+/** Website metadata/command correlation DATA. Only the retained owner binding
+ * authorizes its use; this is not a native journal, claim or launch permit. */
+export interface RamResourceSessionIntent {
+  readonly purpose: typeof RAM_PURPOSE;
+  readonly owner: string | undefined;
+  readonly ownerScopeDigest: string;
+  readonly sourceSid: string;
+  readonly sourceGeneration: number;
+  readonly approval: Readonly<RamResourceApproval>;
+}
 export type AnyResourceContext =
   | ResourceOwnerContext
   | ResourcePreviewContext
@@ -142,6 +152,58 @@ export function assertResourceOperation(
 ): string {
   assertResourceOwnerBinding(binding, owner);
   ResourceOwnerBinding.prototype.assertOperation.call(binding, owner, operation);
+  return binding.digest;
+}
+
+/** Distinct RAM purpose: never accepted by the legacy eight-field binding. */
+export class RamResourceOwnerBinding {
+  readonly #context: RamResourceOwnerContext;
+  constructor(token: symbol, context: RamResourceOwnerContext) {
+    need(token === MINT && context.purpose === RAM_PURPOSE);
+    this.#context = context;
+    bindings.set(this, context);
+    Object.freeze(this);
+  }
+  get digest(): string {
+    return this.#context.ownerScopeDigest;
+  }
+  assertCurrent(owner: string | undefined): void {
+    need(bindings.get(this) === this.#context && owner === this.#context.owner);
+    this.#context.assertCurrent();
+  }
+  assertPreview(authority: ResourceOwnerAuthority, preview: RamResourcePreviewContext): void {
+    this.assertCurrent(preview.owner);
+    need(authority instanceof ResourceOwnerAuthority && preview.purpose === RAM_PURPOSE);
+    authority.assertSameSession(preview, this.#context);
+  }
+  assertOperation(owner: string | undefined, operation: RamResourceSessionIntent): void {
+    this.assertCurrent(owner);
+    need(
+      operation.purpose === RAM_PURPOSE &&
+        operation.owner === owner &&
+        operation.ownerScopeDigest === this.digest &&
+        UUID.test(operation.sourceSid) &&
+        Number.isSafeInteger(operation.sourceGeneration) &&
+        operation.sourceGeneration >= 0
+    );
+    const approved = this.#context.approval,
+      actual = operation.approval;
+    need(Object.keys(actual).sort().join(',') === Object.keys(approved).sort().join(','));
+    for (const field of Object.keys(approved) as (keyof RamResourceApproval)[]) need(actual[field] === approved[field]);
+    need(operation.sourceSid !== approved.targetSid);
+  }
+  toJSON(): never {
+    throw new Error('RAM resource owner binding is server-private');
+  }
+}
+
+export function assertRamResourceOperation(
+  binding: RamResourceOwnerBinding,
+  owner: string | undefined,
+  operation: RamResourceSessionIntent
+): string {
+  need(binding instanceof RamResourceOwnerBinding && bindings.has(binding));
+  RamResourceOwnerBinding.prototype.assertOperation.call(binding, owner, operation);
   return binding.digest;
 }
 
@@ -315,6 +377,11 @@ export class ResourceOwnerAuthority {
     this.assertContext(context);
     need(context.stage === 'apply' && context.purpose === PURPOSE);
     return new ResourceOwnerBinding(MINT, context);
+  }
+  bindRam(context: RamResourceOwnerContext): RamResourceOwnerBinding {
+    this.assertContext(context);
+    need(context.stage === 'apply' && context.purpose === RAM_PURPOSE);
+    return new RamResourceOwnerBinding(MINT, context);
   }
   track(context: AnyResourceContext, socket: Socket): () => void {
     this.assertContext(context);
