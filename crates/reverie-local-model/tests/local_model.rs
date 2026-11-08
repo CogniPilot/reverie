@@ -331,6 +331,34 @@ fn command_line_matches_the_documented_options() {
         args::parse(&words(&["--help"])),
         Err(Usage::Help(_))
     ));
+    // A following option is a missing value, never the value: argparse refuses these too.
+    for missing in [
+        &["--model", "--install-service", "--gpu", "cpu"][..],
+        &["--config", "--help"],
+        &["--alias", "-x"],
+        &["--model", "/m.gguf", "--gpu", "--port", "9000"],
+    ] {
+        let parsed = args::parse(&words(missing));
+        let refused = matches!(&parsed, Err(Usage::Invalid(message)) if message.contains("expected one argument"));
+        assert!(refused, "{missing:?}: {parsed:?}");
+    }
+    // Negative numbers, a lone dash and the explicit form stay values.
+    let values = args::parse(&words(&[
+        "--gpu",
+        "-1",
+        "--context",
+        "-5",
+        "--alias",
+        "-",
+        "--model=--odd",
+    ]))
+    .unwrap();
+    assert_eq!(
+        (values.gpu.as_str(), values.context, values.alias.as_str()),
+        ("-1", -5, "-")
+    );
+    assert_eq!(values.model.as_deref(), Some("--odd"));
+    assert_eq!(args::parse(&words(&["--gpu", "-.5"])).unwrap().gpu, "-.5");
     let scratch = Scratch::new("args");
     let host = host(&scratch.0, None);
     let missing = main_with(&mut Recorder::default(), &host, &[]);

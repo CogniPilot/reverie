@@ -136,8 +136,23 @@ fn option_value(
     }
     let value = rest
         .next()
+        .filter(|value| !looks_like_option(value))
         .ok_or_else(|| Usage::Invalid(format!("argument {word}: expected one argument")))?;
     Ok((word.to_owned(), value))
+}
+
+/// Whether a following word is an option rather than a value, as argparse decides it: anything
+/// starting with `-` except a lone `-` and negative numbers such as `-1` or `-.5`.
+fn looks_like_option(word: &str) -> bool {
+    let Some(rest) = word.strip_prefix('-') else {
+        return false;
+    };
+    let digits = |text: &str| !text.is_empty() && text.bytes().all(|byte| byte.is_ascii_digit());
+    let negative_number = digits(rest)
+        || rest.split_once('.').is_some_and(|(whole, fraction)| {
+            (whole.is_empty() || digits(whole)) && digits(fraction)
+        });
+    !rest.is_empty() && !negative_number
 }
 
 /// Parses `argv` without the program name. Each option takes `--name value` or `--name=value`;
