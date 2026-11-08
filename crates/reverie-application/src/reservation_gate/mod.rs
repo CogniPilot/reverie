@@ -11,6 +11,7 @@ pub(crate) use gpu_access::PublishedGpu;
 mod history;
 mod host_jobs;
 mod image_refresh;
+mod image_switch;
 mod launch;
 mod observation;
 mod ordinary_stop;
