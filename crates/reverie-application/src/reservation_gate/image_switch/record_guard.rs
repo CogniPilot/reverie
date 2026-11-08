@@ -1,13 +1,13 @@
 use super::*;
 impl Inner {
-    pub(super) fn assert_no_failed_image(&self) -> Result<()> {
+    pub(in crate::reservation_gate) fn assert_no_failed_image(&self) -> Result<()> {
         let failed = self
             .failed_image
             .lock()
             .map_err(|_| GateError::Refused("WORKER_IMAGE_REQUIRES_RECONCILIATION"))?;
         need(failed.is_none(), "WORKER_IMAGE_REQUIRES_RECONCILIATION")
     }
-    pub(super) fn image_or_gpu_pending_current(&self, active: &Arc<Active>) -> Result<()> {
+    pub(in crate::reservation_gate) fn image_or_gpu_pending_current(&self, active: &Arc<Active>) -> Result<()> {
         let image = active
             .image_transition
             .lock()
@@ -21,7 +21,7 @@ impl Inner {
             None => self.gpu_pending_current(active),
         }
     }
-    pub(super) fn image_rows_current(
+    pub(in crate::reservation_gate) fn image_rows_current(
         &self,
         active: &Arc<Active>,
         rows: &ObservedInventory,
