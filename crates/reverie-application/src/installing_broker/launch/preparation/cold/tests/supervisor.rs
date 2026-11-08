@@ -1,6 +1,13 @@
 //! Real startup, accepted J, detached LIVE owner and fresh canonical intent.
 use super::*;
 
+fn service_tree() -> Tree {
+    let mut tree = Tree::new();
+    let mut raw: serde_json::Value = serde_json::from_slice(&tree.raw).unwrap();
+    raw["socket"] = serde_json::json!(tree.root.join("supervisor.sock"));
+    tree.raw = serde_json::to_vec(&raw).unwrap();
+    tree
+}
 fn company(tree: &Tree, running: bool) {
     tree.write(
         "company.json",
@@ -36,7 +43,7 @@ fn service_poll_stops_detached_off_session_after_original_j_is_finalized() {
     crate::test_process::owning_case!(
         service_poll_stops_detached_off_session_after_original_j_is_finalized
     );
-    let tree = Tree::new();
+    let tree = service_tree();
     let broker = Arc::new(broker(&tree));
     tree.write("recovery-names.out", b"");
     let service = broker
@@ -67,7 +74,7 @@ fn service_poll_keeps_normal_detached_running_session_and_original_resource() {
     crate::test_process::owning_case!(
         service_poll_keeps_normal_detached_running_session_and_original_resource
     );
-    let tree = Tree::new();
+    let tree = service_tree();
     let broker = Arc::new(broker(&tree));
     tree.write("recovery-names.out", b"");
     let service = broker
