@@ -58,7 +58,14 @@ jobs:
           echo "tag $TAG is $actual; release notes name ${reviewed:-nothing}"
           test -n "$reviewed" && test "$reviewed" = "$actual"
 
+      # The action's max-jobs = auto runs four derivations at once on this four-core runner, each free to use every
+      # core, so the timing-sensitive console tests could share the CPU with the Rust and Python checks. Two
+      # derivations at a time, two cores each, keeps the build within the runner's cores.
       - uses: cachix/install-nix-action@448cde739abec1eaf0646249e3d25bb8d9bc7702 # v31
+        with:
+          extra_nix_config: |
+            max-jobs = 2
+            cores = 2
 
       - name: Restore and save the Nix store
         id: nix-cache
