@@ -1,4 +1,4 @@
-//! Actual consuming service startup prefix. Native signals/check_pool precede
+//! Actual one-shot service startup prefix. Native signals/check_pool precede
 //! raw socket preparation, and real recovery precedes listener binding. This
 //! owner is not yet a runnable all-verb broker or a readiness acknowledgement.
 use super::*;
@@ -6,7 +6,7 @@ use reverie_host::{
     worker_reports::{BrokerListenerError, BrokerListenerFailure, PreparedBrokerListener},
     worker_runtime::{BrokerSignalFailure, BrokerSignals},
 };
-use std::{fmt, time::Instant};
+use std::{fmt, sync::atomic::Ordering, time::Instant};
 mod running;
 #[cfg(test)]
 mod tests;
@@ -18,6 +18,7 @@ struct StartupOwner {
 }
 #[derive(Debug)]
 pub enum BrokerStartupCause {
+    AlreadyAttempted,
     Configuration(Box<GateError>),
     Signal(Box<BrokerSignalFailure>),
     Pool(Box<CreationBudgetError>),
@@ -27,6 +28,7 @@ pub enum BrokerStartupCause {
 impl fmt::Display for BrokerStartupCause {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::AlreadyAttempted => f.write_str("WORKER_BROKER_SERVICE_ALREADY_ATTEMPTED"),
             Self::Configuration(error) => error.fmt(f),
             Self::Signal(error) => error.fmt(f),
             Self::Pool(error) => error.fmt(f),
@@ -37,13 +39,14 @@ impl fmt::Display for BrokerStartupCause {
 }
 impl std::error::Error for BrokerStartupCause {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        Some(match self {
-            Self::Configuration(error) => error.as_ref(),
-            Self::Signal(error) => error.as_ref(),
-            Self::Pool(error) => error.as_ref(),
-            Self::Listener(error) => error.as_ref(),
-            Self::Recovery(error) => error.as_ref(),
-        })
+        match self {
+            Self::AlreadyAttempted => None,
+            Self::Configuration(error) => Some(error.as_ref()),
+            Self::Signal(error) => Some(error.as_ref()),
+            Self::Pool(error) => Some(error.as_ref()),
+            Self::Listener(error) => Some(error.as_ref()),
+            Self::Recovery(error) => Some(error.as_ref()),
+        }
     }
 }
 #[must_use = "retain complete startup ownership until actual service cleanup"]
@@ -78,11 +81,30 @@ impl InstallingBroker {
     /// a decoded readiness/authority value. The same actual broker is retained
     /// even when recovery has already published some real phones and leases.
     pub fn prepare_service(self) -> Result<BrokerServiceStartup, Box<BrokerStartupFailure>> {
+        Arc::new(self).prepare_shared_service()
+    }
+    /// Preserve the SAME broker Arc retained by the supported outer bootstrap
+    /// before recovery/listener effects. This is not a fresh service factory:
+    /// a private irreversible latch permits one attempt across all Arc aliases.
+    /// A refusal retains the same broker and no new signal/listener owner.
+    pub fn prepare_shared_service(
+        self: &Arc<Self>,
+    ) -> Result<BrokerServiceStartup, Box<BrokerStartupFailure>> {
         let mut owner = StartupOwner {
-            broker: Arc::new(self),
+            broker: Arc::clone(self),
             signals: None,
             listener: None,
         };
+        if self
+            .service_start_claimed
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .is_err()
+        {
+            return Err(Box::new(BrokerStartupFailure {
+                owner,
+                cause: BrokerStartupCause::AlreadyAttempted,
+            }));
+        }
         match owner.prepare() {
             Ok(recovered) => Ok(BrokerServiceStartup { owner, recovered }),
             Err(cause) => Err(Box::new(BrokerStartupFailure { owner, cause })),

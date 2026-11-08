@@ -220,6 +220,7 @@ impl InstallingBroker {
             reverie_host::worker_reports::WorkerReportService::from_runtime(&owner.runtime),
         );
         Ok(Self {
+            service_start_claimed: std::sync::atomic::AtomicBool::new(false),
             installed: owner.installed,
             gate,
             storage: Arc::new(storage::StorageRegistry::new(owner.runtime)),
