@@ -1,9 +1,11 @@
-# Explicit rootless task-v1 image acceptance
+# Explicit versioned rootless task perf image acceptance
 
 `cargo xtask verify-worker-perf --rootless-image ...` only invokes the exact
 ignored Host test with its declared image, provenance, policy, Docker-tools,
 Coreutils and closure inputs. Xtask contains no engine/policy/resource logic.
 No test is part of the ordinary suite unless explicitly selected.
+The default selector remains task-v1. A trailing `--task-perf-policy task-v2`
+chooses the separate v2 test, which refuses a v1 manifest rather than falling back.
 
 The Rust fixture checks the loaded actual Engine image ID against the declared
 immutable worker-image provenance's selected configuration and every RootFS
@@ -21,10 +23,13 @@ checks the original CID, actual running state and physical cgroup readbacks:
 1536MiB hard RAM, swap0, pids512, no CPU quota and effective CPUs0-7. Only then
 does it profile the fixed finite native Rust workload using real per-task
 user-space perf stat, record and report, requiring positive counts and samples.
-Recording explicitly inherits into the Rust harness's workload thread. It uses
+The ordinary recording command explicitly inherits into the Rust workload thread. It uses
 the ordinary per-CPU buffers with 64 pages each; `--per-thread` would disable
 inheritance and miss that thread. Each completed stat/report is logged before
 the next phase so a later refusal preserves the earlier actual measurements.
+Task-v1 correctly denies ordinary per-CPU/inherited recording; its negative
+result is not a kernel-unsupported pass. Task-v2 tests the separately versioned
+nonnegative-task/closed-flags policy without widening v1 or enabling CPU-wide perf.
 
 It also starts the separately prepared immutable rootless Docker package,
 checks its real rootless info/VFS driver and kernel socket peer/sub-ID maps,

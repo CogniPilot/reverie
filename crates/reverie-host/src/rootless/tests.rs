@@ -77,7 +77,7 @@ impl Source for Fixture {
             crate::task_perf::allowed_metadata,
         )?)
     }
-    fn perf(&self) -> Result<TaskPerfArtifactData> {
+    fn perf(&self, _policy: TaskPerfPolicy) -> Result<TaskPerfArtifactData> {
         self.perf_reads.set(self.perf_reads.get() + 1);
         let selected = TaskPerfProfile::decode(RAW)
             .unwrap()

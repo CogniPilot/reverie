@@ -66,6 +66,9 @@ impl TaskPerfConfiguration {
     pub fn has_task_perf_marker(&self) -> bool {
         marker_matches(&self.value)
     }
+    pub fn marker_policy(&self) -> Option<TaskPerfPolicy> {
+        selection_marker(config_marker(&self.value))
+    }
     /// Apply only a selected current employee's fixed artifact data. The host
     /// brackets observation with real current-employee reads independently.
     pub fn project(
@@ -83,6 +86,9 @@ impl TaskPerfConfiguration {
             let fixed = artifact
                 .ok_or(TaskPerfError::FixedArtifactRequired)?
                 .manifest();
+            if fixed.policy() != policy {
+                return Err(TaskPerfError::PolicyArtifact);
+            }
             let Some(Value(Node::Object(docker))) = fields.get_mut(&key("rootlessDocker")) else {
                 return Err(TaskPerfError::FixedBaseRequired);
             };
@@ -142,6 +148,9 @@ fn recognize_value(
         .and_then(object)
         .ok_or(TaskPerfError::Marker)?;
     let fixed = artifact.manifest();
+    if selection_marker(config_marker(value)) != Some(fixed.policy()) {
+        return Err(TaskPerfError::PolicyArtifact);
+    }
     if docker
         .get(&key("seccompProfile"))
         .and_then(string)
@@ -160,18 +169,21 @@ fn recognize_value(
 }
 /// Check captured selection marker data before observing a fixed artifact.
 pub fn validate_selection_marker(config: &EffectiveWorkerConfig) -> Result<()> {
-    if marker_matches(config.as_value()) {
-        Ok(())
-    } else {
-        Err(TaskPerfError::Marker)
-    }
+    selection_marker_policy(config).map(|_| ())
+}
+pub fn selection_marker_policy(config: &EffectiveWorkerConfig) -> Result<TaskPerfPolicy> {
+    selection_marker(config_marker(config.as_value())).ok_or(TaskPerfError::Marker)
 }
 fn marker_matches(value: &Value) -> bool {
+    selection_marker(config_marker(value)).is_some()
+}
+fn config_marker(value: &Value) -> Option<String> {
     object(value)
         .and_then(|fields| fields.get(&key(MARKER)))
         .and_then(string)
-        .as_deref()
-        == Some(TaskPerfPolicy::TaskV1.name())
+}
+fn selection_marker(value: Option<String>) -> Option<TaskPerfPolicy> {
+    value.as_deref().and_then(TaskPerfPolicy::from_name)
 }
 fn policy_entries(value: Option<&Value>) -> Result<BTreeMap<ProfileEmployeeId, TaskPerfPolicy>> {
     let Some(value) = value else {
@@ -190,10 +202,11 @@ fn policy_entries(value: Option<&Value>) -> Result<BTreeMap<ProfileEmployeeId, T
             .collect::<Option<_>>()
             .ok_or(TaskPerfError::PolicyMap)?;
         let employee = ProfileEmployeeId::parse(&employee).map_err(|_| TaskPerfError::PolicyMap)?;
-        if string(policy).as_deref() != Some(TaskPerfPolicy::TaskV1.name()) {
-            return Err(TaskPerfError::PolicyMap);
-        }
-        policies.insert(employee, TaskPerfPolicy::TaskV1);
+        let policy = string(policy)
+            .as_deref()
+            .and_then(TaskPerfPolicy::from_name)
+            .ok_or(TaskPerfError::PolicyMap)?;
+        policies.insert(employee, policy);
     }
     Ok(policies)
 }

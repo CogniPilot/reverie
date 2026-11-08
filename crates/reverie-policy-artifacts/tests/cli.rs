@@ -54,6 +54,52 @@ fn actual_cli_writes_exact_existing_schema_and_never_overwrites_a_leaf() {
     );
 }
 #[test]
+fn v2_is_explicit_and_unknown_or_cross_mode_policy_refuses_before_outputs() {
+    let tree = Tree::new();
+    assert!(
+        tree.command()
+            .args(["--task-perf-policy", "task-v2"])
+            .status()
+            .unwrap()
+            .success()
+    );
+    // Build outputs deliberately use this private temporary directory; they
+    // are not an installed Nix manifest. Compare the complete declared bytes.
+    let expected = reverie_contracts::task_perf_v1::produce_task_perf_for_policy(
+        reverie_contracts::task_perf_v1::TaskPerfPolicy::TaskV2,
+        tree.0.join("base.json").to_str().unwrap(),
+        tree.0.join("task-perf-seccomp.json").to_str().unwrap(),
+        reverie_contracts::task_perf_v1::PerfSystem::X86_64Linux,
+        &fs::read(tree.0.join("base.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        fs::read(tree.0.join("worker-perf-profile.json")).unwrap(),
+        expected.manifest()
+    );
+    assert_eq!(
+        fs::read(tree.0.join("task-perf-seccomp.json")).unwrap(),
+        expected.profile()
+    );
+    let refused = Tree::new();
+    assert_eq!(
+        refused
+            .command()
+            .args(["--task-perf-policy", "task-v3"])
+            .status()
+            .unwrap()
+            .code(),
+        Some(2)
+    );
+    assert!(!refused.0.join("task-perf-seccomp.json").exists());
+    let result = Command::new(env!("CARGO_BIN_EXE_reverie-policy-artifacts"))
+        .args(["--task-perf-policy", "task-v2", "--verify-manifest"])
+        .arg(tree.0.join("worker-perf-profile.json"))
+        .output()
+        .unwrap();
+    assert_eq!(result.status.code(), Some(2));
+}
+#[test]
 fn help_invalid_arguments_and_invalid_profile_do_not_create_outputs() {
     let tree = Tree::new();
     for flag in ["--help", "--version"] {

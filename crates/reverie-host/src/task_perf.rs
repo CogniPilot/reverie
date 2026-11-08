@@ -6,6 +6,7 @@ use reverie_contracts::task_perf_v1::{
     TaskPerfManifest, TaskPerfProfile, TaskPerfProjection,
 };
 use reverie_core::ids::ProfileSessionId;
+use reverie_core::task_perf::TaskPerfPolicy;
 use reverie_store::storage_identity::{self, IdentityError, StorageIdentityConfig};
 use std::os::unix::fs::MetadataExt;
 use std::{
@@ -14,6 +15,7 @@ use std::{
 };
 
 const FIXED_MANIFEST: Option<&str> = option_env!("REVERIE_FIXED_TASK_PERF_MANIFEST");
+const FIXED_V2_MANIFEST: Option<&str> = option_env!("REVERIE_FIXED_TASK_PERF_V2_MANIFEST");
 
 #[derive(Debug)]
 pub enum TaskPerfHostError {
@@ -71,15 +73,18 @@ impl InstalledTaskPerfArtifact {
 }
 
 trait ArtifactSource {
-    fn manifest(&self) -> Result<PathBuf>;
+    fn manifest(&self, policy: TaskPerfPolicy) -> Result<PathBuf>;
     fn read(&self, path: &Path) -> Result<Vec<u8>>;
 }
 struct Installed;
 impl ArtifactSource for Installed {
-    fn manifest(&self) -> Result<PathBuf> {
-        FIXED_MANIFEST
-            .map(PathBuf::from)
-            .ok_or(TaskPerfHostError::Unconfigured)
+    fn manifest(&self, policy: TaskPerfPolicy) -> Result<PathBuf> {
+        match policy {
+            TaskPerfPolicy::TaskV1 => FIXED_MANIFEST,
+            TaskPerfPolicy::TaskV2 => FIXED_V2_MANIFEST,
+        }
+        .map(PathBuf::from)
+        .ok_or(TaskPerfHostError::Unconfigured)
     }
     fn read(&self, path: &Path) -> Result<Vec<u8>> {
         let path = native::canonical_in(path, Path::new("/nix/store"))?;
@@ -93,10 +98,16 @@ impl ArtifactSource for Installed {
 pub(crate) fn allowed_metadata(metadata: &std::fs::Metadata) -> bool {
     (metadata.uid() == 0 || metadata.uid() == native::uid()) && metadata.mode() & 0o022 == 0
 }
-fn artifact(source: &impl ArtifactSource) -> Result<InstalledTaskPerfArtifact> {
+fn artifact(
+    source: &impl ArtifactSource,
+    policy: TaskPerfPolicy,
+) -> Result<InstalledTaskPerfArtifact> {
     let (system, machine) = native::system()?;
     let system = PerfSystem::from_linux_uname(&system, &machine)?;
-    let manifest = TaskPerfManifest::decode(&source.read(&source.manifest()?)?, system)?;
+    let manifest = TaskPerfManifest::decode(&source.read(&source.manifest(policy)?)?, system)?;
+    if manifest.policy() != policy {
+        return Err(TaskPerfError::PolicyArtifact.into());
+    }
     let base = source.read(Path::new(manifest.base_profile()))?;
     let selected = source.read(Path::new(manifest.profile()))?;
     Ok(InstalledTaskPerfArtifact {
@@ -107,7 +118,14 @@ fn artifact(source: &impl ArtifactSource) -> Result<InstalledTaskPerfArtifact> {
 /// Observe only the compile/package-bound sibling successor. There is no
 /// configuration, environment, wire or public caller-selected artifact pathname.
 pub fn observe_installed_task_perf() -> Result<InstalledTaskPerfArtifact> {
-    artifact(&Installed)
+    observe_installed_task_perf_for_policy(TaskPerfPolicy::TaskV1)
+}
+/// The closed policy selects only its separate compile-bound immutable input.
+/// No runtime path or fallback to another policy is accepted.
+pub fn observe_installed_task_perf_for_policy(
+    policy: TaskPerfPolicy,
+) -> Result<InstalledTaskPerfArtifact> {
+    artifact(&Installed, policy)
 }
 
 /// The identity configuration must come from the same captured worker domain.
@@ -133,10 +151,10 @@ fn project(
     }
     let before = current()?;
     let employee = before.as_ref().map(CurrentEmployee::identity);
-    if config.policies().selected(employee).is_none() {
+    let Some(policy) = config.policies().selected(employee) else {
         return Ok(config.project(employee, None)?);
-    }
-    let fixed = artifact(source)?;
+    };
+    let fixed = artifact(source, policy)?;
     let candidate = config.project(employee, Some(fixed.data()))?;
     if current()? != before {
         return Err(TaskPerfHostError::CurrentEmployeeChanged);
@@ -154,7 +172,11 @@ pub fn recognized_task_perf(
     if !config.has_task_perf_marker() {
         return Err(TaskPerfError::Marker.into());
     }
-    Ok(config.recognized(observe_installed_task_perf()?.data(), profile)?)
+    let policy = config.marker_policy().ok_or(TaskPerfError::Marker)?;
+    Ok(config.recognized(
+        observe_installed_task_perf_for_policy(policy)?.data(),
+        profile,
+    )?)
 }
 
 #[cfg(test)]
