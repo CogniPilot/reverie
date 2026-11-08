@@ -29,9 +29,10 @@ impl StartupOwner {
     pub(super) fn close_installation_origin_metadata(
         &mut self,
     ) -> Result<(), reverie_host::worker_pool::PoolError> {
-        self.installation_offer
-            .as_mut()
-            .map_or(Ok(()), BrokerInstallationOffer::close_origin_metadata)
+        self.installation_offer.as_ref().map_or(
+            Ok(()),
+            super::super::installation_offer::SharedInstallationOffer::close_origin_metadata,
+        )
     }
 }
 impl BrokerStartupFailure {

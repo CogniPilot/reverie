@@ -55,7 +55,13 @@ impl<'a> ResourceOperationFailure<'a> {
     pub fn settle_for_worker(
         mut self: Box<Self>,
     ) -> std::result::Result<ResourceOperationClosed, Box<Self>> {
-        if let Err(cause) = self.owner.close() {
+        let closed = match self.owner.close() {
+            Ok(WorkerLaunchClose::SocketClosedLifecycleHeld) => Err(ResourceActorError::Channel(
+                reverie_host::worker_reports::WorkerReportError::LifecycleRetained,
+            )),
+            result => result,
+        };
+        if let Err(cause) = closed {
             // Every actual producer remains inside owner. Keep the original
             // typed close tree, rather than allocating another copy of the
             // same sticky causes on every reconciliation request.

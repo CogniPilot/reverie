@@ -20,7 +20,7 @@ struct StartupOwner {
     signals: Option<BrokerSignals>,
     listener: Option<PreparedBrokerListener>,
     bound_listener: Option<WorkerBrokerListener>,
-    installation_offer: Option<BrokerInstallationOffer>,
+    installation_offer: Option<super::installation_offer::SharedInstallationOffer>,
 }
 #[derive(Debug)]
 pub enum BrokerStartupCause {
@@ -110,7 +110,8 @@ impl InstallingBroker {
             signals: None,
             listener: None,
             bound_listener: None,
-            installation_offer,
+            installation_offer: installation_offer
+                .map(super::installation_offer::SharedInstallationOffer::retain),
         };
         if let Err(cause) = owner.assert_installation_offer_broker() {
             return Err(Box::new(BrokerStartupFailure { owner, cause }));

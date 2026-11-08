@@ -66,3 +66,51 @@ fn ram_and_registration_channels_refuse_cross_purpose_before_issuing_hold() {
     }
     service.close(end()).unwrap();
 }
+
+#[test]
+fn failed_registration_constructor_reports_external_hold_until_actual_release() {
+    let fixture = Fixture::new();
+    let service = Arc::new(fixture.service());
+    let original_end = end();
+    let (mut client, server) = fixture.sockets();
+    send(
+        &mut client,
+        b'B',
+        br#"{"purpose":"host-pool-registration-v1","version":1}"#,
+    );
+    let connection = accepted(&fixture, &service, server);
+    let mut hold = connection.retain_lifecycle().unwrap();
+    let original = service.records.lock().unwrap()[0].clone();
+    // The actual second Hold mint refuses. This failure owns the connection,
+    // but never acquired the external logical Hold retained above.
+    let mut failure = connection
+        .retain_pool_registration_website_channel(&fixture.runtime)
+        .err()
+        .unwrap();
+    let typed = failure.close_channel_component_for_worker();
+    let unit = failure.close_for_worker();
+    let still_held = original.require_terminal_hold();
+    let same_record = {
+        let records = service.records.lock().unwrap();
+        records.len() == 1 && Arc::ptr_eq(&records[0], &original)
+    };
+    let eof = client.read(&mut [0; 1]);
+    let released = hold.release(original_end);
+    let settled = failure.close_channel_component_for_worker();
+    let unit_settled = failure.close_for_worker();
+    drop(failure);
+    let closed = service.close(original_end);
+    let client_closed = super::super::super::record::close(client);
+    // All original finalizers run before any regression verdict.
+    assert!(
+        released.is_ok() && closed.is_ok() && client_closed.is_ok(),
+        "cleanup: {released:?} {closed:?} {client_closed:?}"
+    );
+    assert_eq!(typed.unwrap(), WorkerLaunchClose::SocketClosedLifecycleHeld);
+    assert!(matches!(unit, Err(WorkerReportError::LifecycleRetained)));
+    still_held.unwrap();
+    assert!(same_record);
+    assert_eq!(eof.unwrap(), 0);
+    assert_eq!(settled.unwrap(), WorkerLaunchClose::Complete);
+    unit_settled.unwrap();
+}

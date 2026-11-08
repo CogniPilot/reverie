@@ -81,7 +81,9 @@ impl WorkerReportService {
                 }),
         )
     }
-    fn retire_launch(
+    // Shared typed post-close classification. This performs no descriptor
+    // close; callers must retain the original checked socket-close result.
+    pub(super) fn retire_launch(
         &self,
         record: &Arc<Record>,
         budget: &super::budget::CleanupBudget<'_>,

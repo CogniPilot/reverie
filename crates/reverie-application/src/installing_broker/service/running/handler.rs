@@ -2,15 +2,23 @@
 //! selects a body, and neither a status answer nor join releases a resource.
 use super::*;
 use crate::installing_broker::launch::service::{HandlerReturned, run_service_launch};
+use crate::installing_broker::{
+    installation_offer::SharedInstallationOffer,
+    resource_actor::{PoolRegistrationFailure, ResourceOperationFailure},
+};
 use reverie_host::worker_reports::{
     AcceptedWorkerServiceConnection, RegisteredWorkerConnection, WorkerHandlerCommand,
     WorkerHandlerDisposition, WorkerHandlerInbox, WorkerServiceConnection, WorkerServicePurpose,
 };
+#[cfg(test)]
+mod tests;
 
 enum Retained<'a> {
     Launch(HandlerReturned<'a>),
     Images(Box<ChatImageHandlerFailure>),
     Goal(Box<GoalCustodyHandlerFailure>),
+    Registration(Box<PoolRegistrationFailure<'a>>),
+    ResourceOperation(Box<ResourceOperationFailure<'a>>),
     Socket(WorkerServiceConnection),
 }
 struct Stack<'a> {
@@ -34,6 +42,22 @@ impl Stack<'_> {
                     Some(Retained::Socket(connection))
                 }
             }
+            Some(Retained::Registration(owner)) => match owner.settle_for_worker() {
+                Ok(closed) => {
+                    eprintln!("{closed}");
+                    None
+                }
+                Err(owner) => Some(Retained::Registration(owner)),
+            },
+            Some(Retained::ResourceOperation(owner)) => match owner.settle_for_worker() {
+                Ok(closed) => {
+                    if let Some(error) = closed.primary_error() {
+                        eprintln!("{error}");
+                    }
+                    None
+                }
+                Err(owner) => Some(Retained::ResourceOperation(owner)),
+            },
             // These concrete domain failures retain their own original native
             // producers. No replay of observe/fetch/install is permitted here.
             other => other,
@@ -49,6 +73,8 @@ impl Stack<'_> {
             Some(Retained::Launch(owner)) => owner.diagnostics.last().cloned(),
             Some(Retained::Images(owner)) => Some(owner.to_string()),
             Some(Retained::Goal(owner)) => Some(owner.to_string()),
+            Some(Retained::Registration(owner)) => Some(owner.to_string()),
+            Some(Retained::ResourceOperation(owner)) => Some(owner.to_string()),
             Some(Retained::Socket(connection)) => {
                 Some(format!("{:?}: socket close retained", connection.purpose()))
             }
@@ -70,6 +96,7 @@ pub(super) fn run(
     broker: Arc<InstallingBroker>,
     mut registered: RegisteredWorkerConnection,
     inbox: WorkerHandlerInbox,
+    installation_offer: Option<SharedInstallationOffer>,
 ) {
     if let Err(error) = registered.await_handler_publication() {
         eprintln!("{error}");
@@ -90,6 +117,11 @@ pub(super) fn run(
                 .retained
                 .is_some()
                 .then_some(Retained::Launch(returned))
+        }
+        Ok(AcceptedWorkerServiceConnection::Service(connection))
+            if connection.purpose() == WorkerServicePurpose::PoolRegistration =>
+        {
+            registration(&broker, connection, installation_offer.as_ref())
         }
         Ok(AcceptedWorkerServiceConnection::Service(connection)) => service(&broker, connection),
         Err(error) => {
@@ -121,6 +153,35 @@ pub(super) fn run(
                 return;
             }
         }
+    }
+}
+fn registration<'a>(
+    broker: &'a Arc<InstallingBroker>,
+    connection: WorkerServiceConnection,
+    offer: Option<&'a SharedInstallationOffer>,
+) -> Option<Retained<'a>> {
+    let original_end = std::time::Instant::now() + std::time::Duration::from_secs(300);
+    // The original accepted connection remains owned throughout lock/origin
+    // refusal; no stream is cloned or second reader installed.
+    let entered = offer.map_or_else(
+        || {
+            Err(BrokerInstallationOfferCause::Refused(
+                "POOL_INSTALLATION_OFFER_REQUIRED",
+            ))
+        },
+        |offer| offer.enter_registration(broker),
+    );
+    let failure = match entered {
+        Ok(guard) => broker.handle_pool_registration(connection, guard, original_end),
+        Err(cause) => broker.refuse_pool_registration(connection, cause, original_end),
+    };
+    eprintln!("{failure}");
+    match failure.settle_for_worker() {
+        Ok(closed) => {
+            eprintln!("{closed}");
+            None
+        }
+        Err(owner) => Some(Retained::Registration(owner)),
     }
 }
 fn read(
@@ -167,7 +228,16 @@ fn service<'a>(
             }
             Err(owner) => Some(Retained::Goal(owner)),
         },
-        // Actual Q/L/C/Y consumers are separate mandatory joins, not a public
+        WorkerServicePurpose::ResourceActor => match broker.handle_resource_operation(connection) {
+            Ok(closed) => {
+                if let Some(error) = closed.primary_error() {
+                    eprintln!("{error}");
+                }
+                None
+            }
+            Err(owner) => Some(Retained::ResourceOperation(owner)),
+        },
+        // Actual L/C/Y consumers are separate mandatory joins, not a public
         // request/UID substitute. This unselected running cut advertises NO
         // all-verb readiness. Preserve failure and checked socket uncertainty.
         _ => {

@@ -9,6 +9,8 @@ use reverie_core::operations::JournalId;
 use reverie_host::worker_pool::PublishedControllerBirthData;
 use std::time::{Duration, Instant};
 mod error;
+mod shared;
+pub(in crate::installing_broker) use shared::{RegistrationOfferGuard, SharedInstallationOffer};
 #[cfg(test)]
 mod tests;
 
@@ -29,6 +31,7 @@ pub struct BrokerInstallationOffer {
     failed: bool,
     metadata_closed: bool,
     service_closed: bool,
+    registration_attempted: bool,
 }
 #[must_use = "failed installation keeps the whole original attempt"]
 pub struct BrokerInstallationOfferFailure {
@@ -62,6 +65,7 @@ impl InstallingBroker {
             failed: false,
             metadata_closed: false,
             service_closed: false,
+            registration_attempted: false,
         };
         match owner.prepare() {
             Ok(()) => Ok(owner),

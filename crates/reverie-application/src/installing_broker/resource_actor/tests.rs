@@ -14,13 +14,13 @@ use std::{
     io::{Read, Write},
     os::unix::net::UnixStream,
 };
-struct Fixture {
-    broker: InstallingBroker,
+pub(super) struct Fixture {
+    pub(super) broker: InstallingBroker,
     tree: Tree,
-    retained: bool,
+    pub(super) retained: bool,
 }
 impl Fixture {
-    fn new() -> Self {
+    pub(super) fn new() -> Self {
         let tree = Tree::new();
         let mut raw: serde_json::Value = serde_json::from_slice(&tree.raw).unwrap();
         raw.as_object_mut().unwrap().remove("resourceReservations");
@@ -45,7 +45,7 @@ impl Fixture {
             retained: false,
         }
     }
-    fn accept(&self, purpose: u8, raw: &[u8]) -> (UnixStream, WorkerServiceConnection) {
+    pub(super) fn accept(&self, purpose: u8, raw: &[u8]) -> (UnixStream, WorkerServiceConnection) {
         let (mut client, server) = UnixStream::pair().unwrap();
         client
             .set_read_timeout(Some(Duration::from_secs(3)))
@@ -183,6 +183,50 @@ fn actual_q_dispatch_reconciliation_keeps_original_hold_and_bounded_diagnostics(
         assert!(diagnostic.len() <= first_length + 3);
     }
     assert_eq!(client.read(&mut [0]).unwrap(), 0);
+}
+
+#[test]
+fn actual_q_failed_entry_component_keeps_external_hold_until_real_release() {
+    crate::test_process::owning_case!(
+        actual_q_failed_entry_component_keeps_external_hold_until_real_release
+    );
+    let mut fixture = Fixture::new();
+    let original_end = end();
+    let (mut client, connection) =
+        fixture.accept(b'Q', br#"{"purpose":"resource-ram-pool-v2","version":2}"#);
+    let mut hold = connection.retain_lifecycle().unwrap();
+    let entry = fixture
+        .broker
+        .prepare_resource_website(connection)
+        .err()
+        .unwrap();
+    let failure = ResourceOperationFailure::from_entry(entry);
+    let (retained, premature) = match failure.settle_for_worker() {
+        Err(owner) => (Some(owner), false),
+        Ok(_) => (None, true),
+    };
+    let diagnostic = retained.as_ref().map(ToString::to_string);
+    let eof = client.read(&mut [0; 1]);
+    let blocked = fixture.broker.reports.close(original_end);
+    let released = hold.release(original_end);
+    let settled = retained.map(|owner| owner.settle_for_worker());
+    let settled_known = matches!(&settled, Some(Ok(_)));
+    drop(settled);
+    drop(hold);
+    let reports = fixture.broker.reports.close(original_end);
+    let client_close = nix::unistd::close(client);
+    fixture.retained = reports.is_err();
+    drop(fixture);
+    assert!(
+        released.is_ok() && reports.is_ok() && client_close.is_ok(),
+        "cleanup: {released:?} {reports:?} {client_close:?}"
+    );
+    assert!(!premature && settled_known);
+    assert_eq!(eof.unwrap(), 0);
+    assert!(blocked.is_err());
+    let diagnostic = diagnostic.unwrap();
+    assert!(diagnostic.contains("RESOURCE_ACTOR_CHANNEL_ORIGIN"));
+    assert!(diagnostic.contains("WORKER_LAUNCH_LIFECYCLE_RETAINED"));
 }
 
 #[test]

@@ -8,6 +8,8 @@ mod error;
 #[cfg(test)]
 mod native_fixture;
 mod operation;
+mod pool_registration;
+pub(in crate::installing_broker) use pool_registration::PoolRegistrationFailure;
 mod qualification;
 #[cfg(test)]
 mod tests;
@@ -106,9 +108,35 @@ impl InstallingBroker {
         connection: WorkerServiceConnection,
         purpose: WebsitePurpose,
     ) -> std::result::Result<Frame<'_>, Box<ResourceActorFailure<'_>>> {
-        let mut frame = Frame {
+        self.prepare_website_frame_until(
+            connection,
             purpose,
-            broker: self,
+            Instant::now() + Duration::from_secs(300),
+        )
+    }
+    fn prepare_website_frame_until(
+        &self,
+        connection: WorkerServiceConnection,
+        purpose: WebsitePurpose,
+        deadline: Instant,
+    ) -> std::result::Result<Frame<'_>, Box<ResourceActorFailure<'_>>> {
+        let mut frame = Frame::incoming(self, connection, purpose, deadline);
+        match frame.prepare() {
+            Ok(()) => Ok(frame),
+            Err(cause) => Err(Box::new(ResourceActorFailure { frame, cause })),
+        }
+    }
+}
+impl<'a> Frame<'a> {
+    fn incoming(
+        broker: &'a InstallingBroker,
+        connection: WorkerServiceConnection,
+        purpose: WebsitePurpose,
+        deadline: Instant,
+    ) -> Self {
+        Self {
+            purpose,
+            broker,
             snapshot: None,
             transport: Transport::Incoming(connection),
             private: InstalledFactsObserver::default(),
@@ -119,14 +147,10 @@ impl InstallingBroker {
             engine: None,
             context: None,
             bindings: None,
-            deadline: Instant::now() + Duration::from_secs(300),
+            deadline,
             failed: false,
             frames: 0,
             unconfirmed: None,
-        };
-        match frame.prepare() {
-            Ok(()) => Ok(frame),
-            Err(cause) => Err(Box::new(ResourceActorFailure { frame, cause })),
         }
     }
 }
@@ -220,18 +244,17 @@ impl Frame<'_> {
         error::finalized(readers, disconnected)?;
         let closed = match &mut self.transport {
             Transport::Retained(channel) => channel.close_for_worker()?,
-            Transport::Failed(failure) => {
-                failure.close_for_worker()?;
-                WorkerLaunchClose::SocketClosedHandlerRetained
-            }
-            Transport::Incoming(connection) => {
-                connection.close_socket_for_worker()?;
-                WorkerLaunchClose::SocketClosedHandlerRetained
-            }
+            Transport::Failed(failure) => failure.close_channel_component_for_worker()?,
+            Transport::Incoming(connection) => connection.close_socket_for_worker()?,
             Transport::Closed => {
                 return Err(ResourceActorError::Refused("RESOURCE_ACTOR_CHANNEL_CLOSED"));
             }
         };
+        if closed == WorkerLaunchClose::SocketClosedLifecycleHeld {
+            // Keep the SAME transport/observers for actual late Hold release.
+            // A physically closed socket cannot turn this Frame into Closed.
+            return Ok(closed);
+        }
         self.transport = Transport::Closed;
         self.context = None;
         Ok(closed)

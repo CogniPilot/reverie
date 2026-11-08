@@ -137,9 +137,10 @@ impl BrokerService {
             .retain_reconciliation()
             .map_err(BrokerServiceError::Handler)?;
         let broker = broker.clone();
+        let installation_offer = self.startup.owner.installation_offer.clone();
         let spawned = std::thread::Builder::new()
             .name("reverie-worker-handler".into())
-            .spawn(move || handler::run(broker, registered, inbox));
+            .spawn(move || handler::run(broker, registered, inbox, installation_offer));
         match spawned {
             Ok(thread) => construction.publish(thread),
             Err(error) => construction.spawn_failed(error),
