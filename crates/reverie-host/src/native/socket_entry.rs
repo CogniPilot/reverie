@@ -11,6 +11,8 @@ use std::{
     },
     path::PathBuf,
 };
+#[cfg(test)]
+mod controller_tests;
 #[derive(Debug)]
 pub(crate) enum SocketError {
     Io(io::Error),
@@ -87,6 +89,23 @@ impl SocketEntry {
         let held_path = format!("/proc/self/fd/{}", anchor.as_raw_fd());
         fs::set_permissions(held_path, fs::Permissions::from_mode(0o600))?;
         Ok(())
+    }
+    /// Fixed controller-v2 endpoint only. CapDropALL root and the ordinary
+    /// broker share the explicitly installed GID; v1 endpoints remain0600.
+    pub(crate) fn finish_controller_pin(&mut self, gid: u32) -> Result<()> {
+        self.pin_identity()?;
+        let anchor = self.anchor.as_ref().ok_or(SocketError::Unconfirmed)?;
+        let before = anchor.metadata()?;
+        if before.uid() != 0 || before.gid() != gid {
+            return Err(SocketError::Unconfirmed);
+        }
+        let held_path = format!("/proc/self/fd/{}", anchor.as_raw_fd());
+        fs::set_permissions(held_path, fs::Permissions::from_mode(0o660))?;
+        let after = anchor.metadata()?;
+        if after.uid() != 0 || after.gid() != gid || after.mode() & 0o7777 != 0o660 {
+            return Err(SocketError::Unconfirmed);
+        }
+        self.check_anchor()
     }
     pub(crate) fn pin_identity(&mut self) -> Result<()> {
         let anchor = self.anchor.as_ref().ok_or(SocketError::Unconfirmed)?;

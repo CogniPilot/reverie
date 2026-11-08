@@ -37,6 +37,14 @@ impl ObservedImmutableInput {
 pub struct ObservedNativeClient {
     identity: [u64; 2],
 }
+pub struct ObservedBrokerProgram {
+    identity: [u64; 2],
+}
+impl ObservedBrokerProgram {
+    pub fn identity(&self) -> [u64; 2] {
+        self.identity
+    }
+}
 impl ObservedNativeClient {
     pub fn identity(&self) -> [u64; 2] {
         self.identity
@@ -48,6 +56,21 @@ pub struct ImmutableInputObserver {
     close_uncertain: bool,
 }
 impl ImmutableInputObserver {
+    /// Program DATA from the trusted native bootstrap selection. This does
+    /// not identify a process or grant controller/maintenance authority.
+    pub fn observe_broker_program(
+        &mut self,
+        selected: &reverie_contracts::worker_pool::BrokerProgramData,
+        end: Instant,
+    ) -> Result<ObservedBrokerProgram> {
+        self.current(end)?;
+        let code = selected.code();
+        let path = nix_path(&code.path)?;
+        let mut files = Descriptors::default();
+        let body = read_native(&mut files, &path, &code.sha256, Some(code.bytes), end)
+            .map(|identity| ObservedBrokerProgram { identity });
+        files.finish(body, &mut self.close_uncertain)
+    }
     pub fn assert_finalized(&self) -> Result<()> {
         need(!self.close_uncertain, "IMMUTABLE_INPUT_CLOSE_UNCONFIRMED")
     }
@@ -142,9 +165,19 @@ fn read_client(
     selected: &NativeResourceClientManifest,
     end: Instant,
 ) -> Result<ObservedNativeClient> {
+    read_native(files, path, selected.executable_digest(), None, end)
+        .map(|identity| ObservedNativeClient { identity })
+}
+fn read_native(
+    files: &mut Descriptors,
+    path: &Path,
+    digest: &JournalDigest,
+    expected_bytes: Option<u64>,
+    end: Instant,
+) -> Result<[u64; 2]> {
     let (index, info) = open(files, path, code::MAX_CODE_FILE, end)?;
     need(
-        info.mode() & 0o111 != 0,
+        info.mode() & 0o111 != 0 && expected_bytes.is_none_or(|bytes| bytes == info.len()),
         "NATIVE_CLIENT_EXECUTABLE_REQUIRED",
     )?;
     let mut magic = [0; 4];
@@ -155,14 +188,13 @@ fn read_client(
     code::hash(
         files.get_mut(index),
         &CodeFile {
-            path: selected.executable().clone(),
-            sha256: selected.executable_digest().clone(),
+            path: reverie_core::PythonText::try_new(crate::native::python_text(path))
+                .expect("scalar selected path"),
+            sha256: digest.clone(),
             bytes: info.len(),
         },
         end,
     )?;
     unchanged(files, index, &info, end)?;
-    Ok(ObservedNativeClient {
-        identity: [info.dev(), info.ino()],
-    })
+    Ok([info.dev(), info.ino()])
 }

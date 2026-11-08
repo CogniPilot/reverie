@@ -1,15 +1,21 @@
 //! Docker-controller cgroup ownership. Public policy/anchor values are data;
 //! the installed witness retains the actual opened kernel directory. This is
 //! not a Gate, storage lease, stop receipt or global shutdown acknowledgement.
+mod bootstrap;
 mod controller_limits;
 mod directory;
+mod endpoint;
 mod engine;
 mod member;
 mod namespace;
 mod policy;
 #[cfg(test)]
 mod tests;
+pub use bootstrap::{BrokerBootstrapBinding, BrokerBootstrapFailure};
 use directory::PoolDirectory;
+pub use endpoint::{
+    ControllerEndpoint, ControllerEndpointFailure, ControllerPeer, ControllerPeerFailure,
+};
 pub use member::{OpenedPoolMember, PoolMemberFailure, PoolMemberLimits};
 pub use policy::{ControllerPoolPolicy, ControllerPoolPolicyFailure};
 use reverie_contracts::worker_pool::WorkerPoolPolicy;
@@ -22,6 +28,7 @@ pub enum PoolError {
     Observation(crate::ObservationError),
     Finalization(Box<PoolError>, Box<PoolError>),
     MetadataClose(Box<PoolError>),
+    BootstrapFacts(Box<crate::website_facts::WebsiteFactsError>),
 }
 impl fmt::Display for PoolError {
     fn fmt(&self, output: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -35,6 +42,7 @@ impl std::error::Error for PoolError {
             Self::Observation(error) => Some(error),
             Self::Finalization(primary, _) => Some(primary),
             Self::MetadataClose(error) => Some(error),
+            Self::BootstrapFacts(error) => Some(error),
             Self::Refused(_) => None,
         }
     }
@@ -47,6 +55,7 @@ impl PoolError {
             Self::Observation(_) => "WORKER_POOL_CLOSE_UNKNOWN",
             Self::Finalization(_, _) => "WORKER_POOL_FINALIZATION_UNKNOWN",
             Self::MetadataClose(_) => "WORKER_POOL_CLOSE_UNKNOWN",
+            Self::BootstrapFacts(error) => error.code(),
         }
     }
     fn close_unknown(&self) -> bool {
@@ -149,6 +158,9 @@ impl OpenedWorkerPool {
     /// One-shot controller effect, with all opened owners already retained.
     /// The application must still retain its real provider-maintenance fence.
     pub fn initialize(&mut self) -> Result<()> {
+        // The new serving purpose cannot reuse this lower v1 component
+        // effect as a substitute for genuine Q/provider maintenance.
+        self.policy.require_component_initialization()?;
         need(
             self.stage == InstallationStage::Ready,
             "WORKER_POOL_ATTEMPT_ALREADY_EXISTS",

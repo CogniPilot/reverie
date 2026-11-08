@@ -13,7 +13,8 @@ use crate::native;
 pub use alias::{ImmutableAliasObserver, ObservedCodeAlias};
 pub use code::{ImmutableCodeObserver, ObservedCodeFile};
 pub use input::{
-    ImmutableInputKind, ImmutableInputObserver, ObservedImmutableInput, ObservedNativeClient,
+    ImmutableInputKind, ImmutableInputObserver, ObservedBrokerProgram, ObservedImmutableInput,
+    ObservedNativeClient,
 };
 #[cfg(test)]
 pub(crate) use process::tests::metadata as process_test_metadata;

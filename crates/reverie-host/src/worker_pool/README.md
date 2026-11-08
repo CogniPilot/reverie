@@ -85,3 +85,42 @@ high equal to its hard ceiling remains readable. New desired-policy validation
 in the owner API is a separate contract; this observer cannot rewrite existing
 policy semantics. Its borrowed parent lifetime also does not supply a movable
 shared controller owner or an authenticated controller-to-broker protocol.
+
+The separate service-v2 birth schema adds original broker observations and a
+native-program manifest to the unchanged version-one pool policy. Both schemas
+remain DATA. V1 still requires its original serve argv and exactly four binds.
+V2 requires explicit versioned serve argv and exactly one additional writable
+`<instance>/worker-pool/control` bind. This dedicated directory is
+brokerUID:brokerGID0770; only the controller's actual socket is0660, root-owned
+with that GID. The policy directory remains0750 and read-only. No capabilities,
+network, host configuration or private broker configuration bind is added.
+
+`ControllerEndpoint` retains the actual opened directory before binding through
+its FD, owns listener/socket inode custody before validation and refuses any
+existing endpoint. The original accepted broker is pinned with SO_PEERPIDFD and
+checked against the birth PID/start and UID/GID. This explicitly delegates the
+trusted bootstrap's original code qualification; CapDropALL root does not claim
+to inspect another UID's current executable. There is no generic stream, command
+or path getter. A borrowed peer or partial failure keeps its endpoint and policy
+serving scope alive; shutdown must settle them before closing the outer owner.
+The same endpoint also retains an issued peer slot after default peer Drop.
+Only checked closure of that original native owner settles the slot; a refused
+second handle cannot settle it. Endpoint close preserves its bound name and
+listener while this slot remains held, rather than hiding abandoned native FDs.
+
+`BrokerBootstrapBinding` retains the same Runtime origin, an actual SELF PIDFD,
+native immutable executable observation and original process snapshot. The App
+`BrokerControllerBootstrap` also retains the actual InstallingBroker and checks
+its loader-selected source against fixed native `broker --config` raw argv.
+Only the compile-bound `REVERIE_FIXED_NATIVE_WORKER_BROKER_MANIFEST` may select
+the native program; missing packaging refuses before sockets. No current package
+provides that selector yet. Its native executable and no-self-exec invariant
+must qualify before production delegation. Broker replacement needs registered
+bootstrap; ordinary GUI policy activation must not replace this birth identity.
+
+This cut provides neither immutable policy publication nor active-version
+activation. A future checked publication receipt is separate from broker config
+CAS. It also supplies no host-administration consent or provider-maintenance
+owner. Service-v2 births are explicitly refused by the existing v1 component
+initializer, before any limit write. There is no privileged Activate/Configure
+consumer, native controller executable, broker member join or selected service.

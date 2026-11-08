@@ -94,3 +94,64 @@ fn controller_reserve_rejects_cpu_quota_or_different_placement() {
         assert!(!valid(&changed, &policy), "{field}");
     }
 }
+
+fn service_v2(policy: &WorkerPoolPolicy) -> Value {
+    let mut value = controller(policy);
+    value["Config"]["Cmd"] = json!([
+        "serve",
+        "--confinement-version",
+        "2",
+        "--birth-sha256",
+        "d".repeat(64)
+    ]);
+    value["Config"]["Labels"]["reverie.pool.purpose"] =
+        json!(super::super::controller_v2::SERVICE_PURPOSE);
+    value["Mounts"].as_array_mut().unwrap().push(json!({
+        "Type":"bind","Source":format!("{}/worker-pool/control",policy.instance_root),
+        "Destination":"/run/reverie-worker-pool/control","RW":true,"Propagation":"rprivate"}));
+    value
+}
+fn valid_v2(value: &Value, policy: &WorkerPoolPolicy) -> bool {
+    validate_controller_service_v2_inspection(
+        &serde_json::to_vec(value).unwrap(),
+        policy,
+        &"e".repeat(64),
+        123,
+        &"d".repeat(64),
+    )
+    .is_ok()
+}
+#[test]
+fn service_v2_is_exact_fifth_control_bind_without_silently_relaxing_v1() {
+    let policy = policy();
+    let old = controller(&policy);
+    let new = service_v2(&policy);
+    assert!(valid(&old, &policy));
+    assert!(!valid_v2(&old, &policy));
+    assert!(valid_v2(&new, &policy));
+    assert!(!valid(&new, &policy));
+    for (index, field, bad) in [
+        (0, "RW", json!(true)),
+        (4, "RW", json!(false)),
+        (4, "Source", json!("/arbitrary")),
+        (4, "Destination", json!("/run/other")),
+        (4, "Propagation", json!("rshared")),
+    ] {
+        let mut changed = new.clone();
+        changed["Mounts"][index][field] = bad;
+        assert!(!valid_v2(&changed, &policy));
+    }
+    let mut extra = new.clone();
+    extra["Mounts"].as_array_mut().unwrap().push(json!({}));
+    assert!(!valid_v2(&extra, &policy));
+    for (field, bad) in [
+        ("CapAdd", json!(["SYS_PTRACE"])),
+        ("PidMode", json!("private")),
+        ("ReadonlyRootfs", json!(false)),
+        ("Privileged", json!(true)),
+    ] {
+        let mut changed = new.clone();
+        changed["HostConfig"][field] = bad;
+        assert!(!valid_v2(&changed, &policy));
+    }
+}

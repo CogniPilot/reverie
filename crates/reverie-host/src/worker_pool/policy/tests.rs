@@ -185,3 +185,60 @@ fn pool_close_fences_confirmed_stage_before_fallible_metadata_close() {
     );
     assert!(pool.close().is_err());
 }
+
+#[test]
+fn service_v2_birth_cannot_reuse_component_initialization_without_maintenance() {
+    if isolated("service_v2_birth_cannot_reuse_component_initialization_without_maintenance") {
+        return;
+    }
+    use reverie_contracts::worker_pool::{BrokerBirthData, BrokerProgramData, ControllerBirthV2};
+    let tree = Tree::new();
+    let policy = WorkerPoolPolicy::decode(&policy_bytes()).unwrap();
+    let broker = BrokerBirthData::from_observations(
+        std::process::id(),
+        "123".into(),
+        [policy.broker_uid, policy.broker_gid],
+        [1, 2],
+        [3, 4, 5],
+        "a".repeat(64),
+    )
+    .unwrap();
+    let program = BrokerProgramData::decode(
+        &serde_json::to_vec(&serde_json::json!({
+        "version":1,"purpose":"reverie-native-worker-broker-v1",
+        "executable":"/nix/store/controlled-program/bin/reverie-worker-broker",
+        "executableSHA256":"b".repeat(64),"bytes":4096}))
+        .unwrap(),
+    )
+    .unwrap();
+    let raw = ControllerBirthV2::from_observations(policy, broker, program)
+        .unwrap()
+        .encode()
+        .unwrap();
+    let mut opening = tree.opening(&raw);
+    opening.service_v2 = true;
+    opening.capture_policy().unwrap();
+    // Explicit controlled prelude DATA, never a native-positive controller.
+    opening.controller = Some(super::super::namespace::ControllerProcessObservation {
+        container: "d".repeat(64),
+        pid: std::process::id(),
+        start: "controlled".into(),
+    });
+    opening.engine = Some(super::super::engine::EngineObserver::unconnected_test_owner());
+    let policy = opening.into_policy();
+    let directory = super::super::directory::PoolDirectory::unopened(policy.data());
+    let mut pool = super::super::OpenedWorkerPool {
+        policy,
+        directory,
+        anchor_id: "e".repeat(64),
+        anchor_pid: std::process::id(),
+        stage: super::super::InstallationStage::Ready,
+    };
+    assert_eq!(
+        pool.initialize().unwrap_err().code(),
+        "WORKER_POOL_SERVICE_MAINTENANCE_REQUIRED"
+    );
+    assert_eq!(pool.stage, super::super::InstallationStage::Ready);
+    assert!(pool.directory.parent().is_err());
+    pool.close().unwrap();
+}
