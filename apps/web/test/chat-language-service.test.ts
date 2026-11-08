@@ -24,7 +24,20 @@ afterEach(async () => {
   await rm(directory, { recursive: true, force: true });
 });
 
-async function fixture(mode = 'normal', timeoutMs = 2000) {
+/** Resolves once `file` exists: the fixture server writes its receipt as soon as it has started. */
+async function started(file: string, timeoutMs = 10000) {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    try {
+      return await readFile(file, 'utf8');
+    } catch (error) {
+      if (Date.now() > deadline) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+  }
+}
+
+async function fixture(mode = 'normal', timeoutMs = 2000, startDelayMs = 0) {
   const binary = join(directory, `server-${services.length}.cjs`);
   const receipt = join(directory, `receipt-${services.length}.json`);
   await writeFile(
@@ -32,6 +45,8 @@ async function fixture(mode = 'normal', timeoutMs = 2000) {
     `#!${process.execPath}
 const fs = require('node:fs');
 const receipt = ${JSON.stringify(receipt)}, mode = ${JSON.stringify(mode)};
+// A slow start, as on a loaded runner: nothing is written until it has passed.
+if (${startDelayMs} > 0) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ${startDelayMs});
 const descendant = mode === 'descendant' ? require('node:child_process').spawn(process.execPath, ['-e','setInterval(()=>{},1000)'], {stdio:'ignore'}) : null;
 fs.writeFileSync(receipt, JSON.stringify({pid: process.pid, child: descendant?.pid, env: process.env, cwd: process.cwd()}));
 let input = Buffer.alloc(0), uri;
@@ -156,12 +171,13 @@ describe('explicit snippet assistance', () => {
     }
   });
   it('bounds concurrency and kills hung servers on cancellation, shutdown and deadline', async () => {
-    const { service, receipt } = await fixture('hang', 500);
+    // A server that starts slowly, as on a loaded runner: cancelling before it has started would leave no receipt.
+    const { service, receipt } = await fixture('hang', 2000, 300);
     const controller = new AbortController();
     const first = service.assist(request, controller.signal).catch((error) => error);
     const second = service.assist(request).catch((error) => error);
     await expect(service.assist(request)).rejects.toThrow('busy');
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    await started(receipt);
     controller.abort();
     expect((await first).message).toContain('cancelled');
     service.stop();

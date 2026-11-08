@@ -16,6 +16,7 @@ import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, afterEach, vi } from 'vitest';
+import { childrenSettled } from './helpers/settle-children.js';
 
 const originalHome = process.env.HOME;
 const originalUserProfile = process.env.USERPROFILE;
@@ -159,6 +160,10 @@ afterAll(async () => {
     else process.env[key] = value;
   }
 
+  // A child a test spawned can still be writing into the temp directories; removing them under it fails with
+  // ENOTEMPTY after every test passed. Wait for the children to exit first (bounded), and name any that do not.
+  const left = await childrenSettled(5000);
+  if (left.length > 0) console.warn(`[test setup] child processes still running at teardown: ${left.join(', ')}`);
   rmSync(testHome, { recursive: true, force: true });
   rmSync(testTmp, { recursive: true, force: true });
 });
