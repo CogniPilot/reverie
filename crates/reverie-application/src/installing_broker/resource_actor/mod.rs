@@ -8,6 +8,8 @@ mod error;
 #[cfg(test)]
 mod native_fixture;
 mod operation;
+mod pool_registration;
+pub(in crate::installing_broker) use pool_registration::PoolRegistrationFailure;
 mod qualification;
 #[cfg(test)]
 mod tests;
@@ -106,6 +108,18 @@ impl InstallingBroker {
         connection: WorkerServiceConnection,
         purpose: WebsitePurpose,
     ) -> std::result::Result<Frame<'_>, Box<ResourceActorFailure<'_>>> {
+        self.prepare_website_frame_until(
+            connection,
+            purpose,
+            Instant::now() + Duration::from_secs(300),
+        )
+    }
+    fn prepare_website_frame_until(
+        &self,
+        connection: WorkerServiceConnection,
+        purpose: WebsitePurpose,
+        deadline: Instant,
+    ) -> std::result::Result<Frame<'_>, Box<ResourceActorFailure<'_>>> {
         let mut frame = Frame {
             purpose,
             broker: self,
@@ -119,7 +133,7 @@ impl InstallingBroker {
             engine: None,
             context: None,
             bindings: None,
-            deadline: Instant::now() + Duration::from_secs(300),
+            deadline,
             failed: false,
             frames: 0,
             unconfirmed: None,
