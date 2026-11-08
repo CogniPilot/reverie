@@ -13,6 +13,7 @@ pub mod custody;
 pub mod git;
 pub mod github;
 pub mod packet;
+pub mod pull;
 pub mod record;
 pub mod verify;
 
