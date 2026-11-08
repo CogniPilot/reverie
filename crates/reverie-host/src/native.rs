@@ -36,6 +36,8 @@ pub(crate) use lease::open_at;
 pub(crate) use lease::open_at_mode;
 pub(crate) use memory_namespace::memory_credentials;
 pub(crate) use memory_namespace::{memory_lock, memory_lock_entry, memory_lock_file};
+mod session;
+pub(crate) use session::spawn_new_session;
 mod passwd;
 pub(crate) use memory_profile::publish as publish_memory_profile;
 pub(crate) use memory_profile::{

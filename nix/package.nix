@@ -218,7 +218,7 @@ let
         test/cli-agent-chat-channels.test.ts test/cli-agent-chat-if-latest.test.ts test/cli-agent-chat-images.test.ts \
         test/cli-agent-chat-new.test.ts test/cli-agent-chat-nudge.test.ts test/cli-agent-chat-reply-to.test.ts \
         test/cli-agent-chat-room-default.test.ts test/cli-agent-chat-roster.test.ts test/cli-agent-hire-request.test.ts \
-        test/cli-agent-journal-import.test.ts test/cli-agent-journal.test.ts test/cli-agent-poll-close.test.ts \
+        test/cli-agent-journal-import.test.ts test/cli-agent-journal.test.ts test/cli-agent-memory.test.ts test/cli-agent-poll-close.test.ts \
         test/cli-executable-resolver.test.ts test/cli-management-settings-ui.test.ts test/cli-newline-capability.test.ts \
         test/cli-registry-load.test.ts test/cli-registry-schema.test.ts test/cli-routine.test.ts test/cli-skill-target.test.ts \
         test/cli-style.test.ts test/cod54-hook-event-auth.test.ts test/codex-plan-usage.test.ts test/codex-reasoning-effort-schema.test.ts \
@@ -294,7 +294,7 @@ let
         test/remote-auto-reconnect.test.ts test/remote-discover-attach.test.ts test/remote-files.test.ts test/remote-hosts.test.ts \
         test/remote-kill-command.test.ts test/remote-pane-history.test.ts test/remote-shared-sessions.test.ts \
         test/remote-ssh-limiter.test.ts test/remote-ssh-options.test.ts test/repo-status.test.ts test/respawn-adaptive-timing.test.ts \
-        test/respawn-controller.test.ts test/respawn-health.test.ts test/respawn-metrics.test.ts
+        test/respawn-controller.test.ts test/respawn-health.test.ts test/respawn-metrics.test.ts test/retired-retention.test.ts
       npm test -- test/respawn-patterns.test.ts test/respawn-pty-breaker.test.ts test/respawn-session-id-collision.test.ts \
         test/respawn-stop-race.test.ts test/respawn-team-awareness.test.ts test/response-viewer-external-links.test.ts \
         test/response-viewer-file-links.test.ts test/response-viewer-last-turn.test.ts test/response-viewer-transcript.test.ts \
@@ -613,6 +613,23 @@ let
     ln -s ${adminMemory}/bin/reverie-admin-memory "$out/bin/reverie-admin-memory"
     # The structured OPS client is native; no Python console command remains.
     ln -s ${opsNativeCli}/bin/reverie-ops "$out/bin/reverie-ops"
+    # reverie-memory is the console's `reverie agent memory`; skills and agents keep calling it by this name.
+    makeWrapper ${console}/bin/reverie "$out/bin/reverie-memory" --add-flags "agent memory"
+    # Run the installed reverie-memory as packaged, with no environment: it must reach `reverie agent memory` and refuse.
+    smoke() {
+      input=$1 want=$2; shift 2
+      got_out=$(mktemp) got_err=$(mktemp)
+      got_rc=0
+      printf '%s' "$input" | ${pkgs.coreutils}/bin/env -i "$out/bin/reverie-memory" "$@" >"$got_out" 2>"$got_err" || got_rc=$?
+      # Byte for byte: no output at all, and exactly the one error line with its newline.
+      if [ "$got_rc" != 1 ] || [ -s "$got_out" ] || ! printf '%s\n' "$want" | ${pkgs.diffutils}/bin/cmp -s - "$got_err"; then
+        echo "reverie-memory smoke failed (args: $*): exit $got_rc, stdout [$(cat "$got_out")], stderr [$(cat "$got_err")]" >&2
+        exit 1
+      fi
+    }
+    smoke '{}' '{"error": "select an instance with --instance or REVERIE_INSTANCE_CONFIG"}'
+    smoke '{"action":"recall","private":true,"query":"q"}' "{\"error\": \"[Errno 2] No such file or directory: '/nonexistent'\"}" --instance /nonexistent/agent.json
+    echo "reverie-memory smoke passed: no instance and a missing instance both refuse with exit 1"
     # The host routines tick (docs/routines.md) is native; the owner links it from this package.
     ln -s ${routinesNative}/bin/reverie-routines "$out/bin/reverie-routines"
     for command in ${memory}/bin/reverie-*; do

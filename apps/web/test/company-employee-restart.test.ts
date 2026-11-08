@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CompanyService } from '../src/company-service.js';
 import { CompanyStore } from '../src/company-store.js';
 import { ChatroomService, type ChatSessionLike } from '../src/chatroom-service.js';
+import { wakePayload } from './helpers/wake-payload.js';
 
 interface Pane extends ChatSessionLike {
   isWorking: boolean;
@@ -28,13 +29,14 @@ describe('permanent employee across three runtime replacements', () => {
       id,
       name: 'Worker',
       owner,
-      mode: 'opencode',
+      // A verified-composer harness, so delivery can wake it; each record is that wake's hook payload (wakePayload).
+      mode: 'claude',
       status: 'running',
       pid: 1,
       isWorking: true,
       writes,
       writeViaMux: async (text, options) => {
-        writes.push(text);
+        writes.push(wakePayload(chat, id, text));
         options?.onOutcome?.('submitted');
         return true;
       },

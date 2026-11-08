@@ -38,6 +38,7 @@ import { join, dirname } from 'node:path';
 import type { HookEventType } from './types.js';
 import type { AgentSkillDir, CliCapabilities } from './config/cli-registry/types.js';
 import { HOOK_TIMEOUT_SECONDS } from './config/auth-config.js';
+import { TURN_SUMMARY_MAX_CHARS } from './chatroom-turn-summary.js';
 import { dataPath } from './config/instance.js';
 import { readJsonConfig, SETTINGS_PATH } from './web/route-helpers.js';
 import { isNearStalledPath, probePath } from './utils/index.js';
@@ -560,7 +561,7 @@ export function generateTurnSummaryScript(event: TurnSummaryHookEvent): string {
     '    const output = JSON.parse(stdout).hookSpecificOutput;',
     `    if (output?.hookEventName !== '${event}' || typeof output.additionalContext !== 'string') return;`,
     '    let text = output.additionalContext.trim();',
-    '    if (text.length > 3000) return;',
+    `    if (text.length > ${TURN_SUMMARY_MAX_CHARS}) return;`,
     '    let previous = null;',
     '    let unchanged = false;',
     '    try {',

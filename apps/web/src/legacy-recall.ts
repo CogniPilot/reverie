@@ -146,7 +146,7 @@ export function instanceDataDir(instanceConfig: string, home: string): string {
 
 // ---- python's json: numbers keep their int/float kind, output matches json.dumps(ensure_ascii=False) -------------------
 
-type PyJson = null | boolean | string | { int: bigint } | { float: number } | PyJson[] | Map<string, PyJson>;
+export type PyJson = null | boolean | string | { int: bigint } | { float: number } | PyJson[] | Map<string, PyJson>;
 
 /** `json.loads` keeping python's int/float distinction (and its NaN and Infinity literals). */
 export function parsePyJson(text: string): PyJson {
@@ -429,7 +429,7 @@ const PY_ERRNO: Record<string, [number, string]> = {
 };
 
 /** A file-system error worded the way python's OSError prints. */
-function pyOsError(error: unknown): unknown {
+export function pyOsError(error: unknown): unknown {
   const e = error as NodeJS.ErrnoException;
   const known = e && typeof e.code === 'string' ? PY_ERRNO[e.code] : undefined;
   return known ? new Error(`[Errno ${known[0]}] ${known[1]}${e.path ? `: '${e.path}'` : ''}`) : error;
