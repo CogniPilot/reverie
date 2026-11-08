@@ -120,6 +120,12 @@ pub trait BrokerCore: Send + Sync {
     ) -> Result<BrokerReply, Refusal>;
     /// The single first-stop budget; repeated calls never extend it.
     fn request_stop(&self) -> Instant;
+    /// Whether the process was asked to stop, for example by a termination
+    /// signal observed on the installed engine. `serve` polls it with its
+    /// accept loop, as the legacy serve() loop checked `stopping`, and closes.
+    fn stop_requested(&self) -> bool {
+        false
+    }
     fn close_lease_peer(&self) -> bool;
     fn request_office_close(&self) -> bool;
     fn close_offices(&self, deadline: Instant) -> bool;
@@ -189,6 +195,11 @@ impl BrokerService {
     pub fn closing_flag(&self) -> Arc<AtomicBool> {
         self.closing.clone()
     }
+    /// Closing was asked for, by `request_close` or by a stop the core reports.
+    /// `close` then sets the closing flag itself.
+    fn stopping(&self) -> bool {
+        self.core.stop_requested() || self.closing.load(Ordering::Acquire)
+    }
     /// No effect at all: every injected owner must be present.
     pub fn preflight(&self) -> Result<(), ServiceError> {
         let missing: Vec<_> = InjectedKind::ALL
@@ -220,7 +231,7 @@ impl BrokerService {
             .recover()
             .map_err(|error| early(refusal_text(&error)))?;
         // From here the legacy try/finally owns cleanup on every exit.
-        if self.closing.load(Ordering::Acquire) {
+        if self.stopping() {
             return self.close(None);
         }
         self.core.start_lease_peer();
@@ -260,7 +271,7 @@ impl BrokerService {
             return;
         }
         let limit = self.core.connection_limit();
-        while !self.closing.load(Ordering::Acquire) {
+        while !self.stopping() {
             let stream = match listener.accept() {
                 Ok((stream, _)) => stream,
                 Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
