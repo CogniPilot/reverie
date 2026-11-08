@@ -5,3 +5,5 @@ xtask = "run --locked --package xtask --bin xtask --"
 namegate = "run --locked --package reverie-namegate --bin reverie-namegate --"
 # Standing-policy checks (formerly the reverie-governance Python command).
 commit-policy = "run --locked --package reverie-commit-policy --bin reverie-commit-policy --"
+# The task-cancel acceptance controller, the native successor of scripts/acceptance/task-cancel-scope.py.
+task-cancel-scope = "run --locked --package reverie-task-cancel --bin reverie-task-cancel --"
