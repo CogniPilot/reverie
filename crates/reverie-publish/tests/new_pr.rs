@@ -394,6 +394,75 @@ fn the_askpass_gives_the_token_only_to_a_github_prompt() {
 }
 
 #[test]
+fn the_store_config_cannot_redirect_the_fetch_or_push() {
+    for case in ["insteadOf", "pushInsteadOf", "include"] {
+        let p = prepared(&format!("rewrite-{case}"));
+        // A private remote with the same main, so a redirected run would succeed there.
+        let private = p.fixture.root.join("private.git");
+        git(&p.fixture.root, &["init", "-q", "--bare", "private.git"]);
+        let work = p.fixture.work();
+        git(
+            &private,
+            &[
+                "fetch",
+                "-q",
+                work.to_str().unwrap(),
+                "main:refs/heads/main",
+            ],
+        );
+        let key = format!("url.{}.{case}", private.display());
+        let store = p.fixture.root.join("store.git");
+        let remote = p.remote().display().to_string();
+        if case == "include" {
+            let included = p.fixture.root.join("included.cfg");
+            fs::write(
+                &included,
+                format!("[url \"{}\"]\n\tinsteadOf = {remote}\n", private.display()),
+            )
+            .unwrap();
+            git(
+                &store,
+                &["config", "include.path", included.to_str().unwrap()],
+            );
+        } else {
+            git(&store, &["config", &key, &remote]);
+        }
+        let (api, _) = fake_api(echo(p.head.clone()));
+        let out = p.run(&api, &args(&approval_args(&p)));
+        assert_eq!(out.status.code(), Some(0), "{case}: {}", stderr(&out));
+        assert_eq!(
+            p.remote_branch().as_deref(),
+            Some(p.head.as_str()),
+            "{case}"
+        );
+        let leaked = Command::new("git")
+            .args(["--git-dir", private.to_str().unwrap()])
+            .args(["rev-parse", "--verify", "-q", "refs/heads/add-b"])
+            .output()
+            .unwrap();
+        assert!(
+            !leaked.status.success(),
+            "{case}: pushed to the rewritten remote"
+        );
+    }
+}
+
+#[test]
+fn the_private_transport_directories_are_removed() {
+    let p = prepared("transport-cleanup");
+    let tmp = p.fixture.root.join("tmp");
+    fs::create_dir(&tmp).unwrap();
+    let (api, _) = fake_api(echo(p.head.clone()));
+    let out = p
+        .command(&api, &args(&approval_args(&p)))
+        .env("TMPDIR", &tmp)
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    assert_eq!(fs::read_dir(&tmp).unwrap().count(), 0);
+}
+
+#[test]
 fn a_branch_created_by_someone_else_just_before_the_push_is_not_taken_over() {
     let p = prepared("race");
     // A git on PATH that creates the branch at the base, a fast-forward of the head, after the
