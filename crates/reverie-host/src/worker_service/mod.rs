@@ -82,6 +82,7 @@ struct State {
     attempted: bool,
     uncertain: bool,
     marker: bool,
+    pending_identity: Option<(u64, u64)>,
 }
 /// Contains the original partial installation or command attempt on refusal.
 pub struct WorkerServiceFailure {
@@ -134,7 +135,13 @@ pub fn run_native_worker_service(
     };
     let body = state.run(action);
     let closed = state.close();
-    match finalized(body, closed) {
+    let finished = finalized(body, closed).and_then(|value| {
+        if state.marker {
+            state.finish_attempt()?;
+        }
+        Ok(value)
+    });
+    match finished {
         Ok(value) => Ok(value),
         Err(primary) => Err(Box::new(WorkerServiceFailure {
             owner: Some(state),
@@ -204,6 +211,7 @@ impl State {
             attempted: false,
             uncertain: false,
             marker: false,
+            pending_identity: None,
         })
     }
     fn run(&mut self, action: WorkerServiceAction) -> Result<String> {
@@ -232,7 +240,7 @@ impl State {
                 ])?;
                 let current = self.observe()?;
                 self.assert_installed(&current)?;
-                self.finish_attempt()?;
+                current.require_action_finished(&action)?;
             }
             WorkerServiceAction::Status => unreachable!(),
         }

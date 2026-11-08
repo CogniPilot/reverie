@@ -2,6 +2,7 @@ use super::*;
 pub(super) struct ObservedUnit {
     pub(super) load: String,
     pub(super) active: String,
+    sub: String,
     pub(super) fragment: PathBuf,
 }
 impl ObservedUnit {
@@ -23,8 +24,19 @@ impl ObservedUnit {
         Ok(Self {
             load: values["LoadState"].into(),
             active: values["ActiveState"].into(),
+            sub: values["SubState"].into(),
             fragment: values["FragmentPath"].into(),
         })
+    }
+    pub(super) fn require_action_finished(&self, action: &WorkerServiceAction) -> Result<()> {
+        let expected = match action {
+            WorkerServiceAction::Start => self.active == "active" && self.sub == "running",
+            WorkerServiceAction::Stop | WorkerServiceAction::Install => {
+                self.active == "inactive" && self.sub == "dead"
+            }
+            WorkerServiceAction::Status => true,
+        };
+        need(expected, "NATIVE_SERVICE_POST_COMMAND_STATE_UNCONFIRMED")
     }
     pub(super) fn require_replaceable(&self, previous: Option<&Path>) -> Result<()> {
         need(
