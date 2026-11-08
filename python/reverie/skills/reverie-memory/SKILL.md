@@ -9,10 +9,10 @@ Choose the authorized instance and scope before looking up memory. Project work 
 
 Use the native memory tool when the adapter exposes it. In the current OpenCode adapter this is `reverie_memory` (the identifier is retained for compatibility): action `recall`, text as the search query, and project as the project identifier. Use action `remember` with concise findings and a source. Empty project selects private scope only in a private channel.
 
-For another CLI, use the portable bridge from the installed package or repository. Set `REVERIE_INSTANCE_CONFIG` to the owner-selected external configuration and send JSON over stdin:
+For another CLI, use `reverie-memory` (the same command as `reverie agent memory`). Set `REVERIE_INSTANCE_CONFIG` to the owner-selected external configuration, or pass `--instance`, and send JSON over stdin:
 
 ```bash
-python3 -m reverie.memory_cli <<'JSON'
+reverie-memory <<'JSON'
 {"action":"recall","project":"example-project","query":"last verified compiler baseline"}
 JSON
 ```
