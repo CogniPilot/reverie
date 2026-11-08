@@ -57,7 +57,7 @@ impl RetainedPreparation {
         path: &Path,
     ) -> Result<PreparedPolicyRecord> {
         let gate = self.gate.clone();
-        let admission = gate.admit(AdmissionBounds::default())?;
+        let admission = self.admit_preparation()?;
         let result = (|| {
             gate.finish_preparation(self, PublicationPhase::After)?;
             let installed = gate.installed.snapshot()?;

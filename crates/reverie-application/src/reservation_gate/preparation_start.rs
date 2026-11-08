@@ -84,7 +84,7 @@ impl RetainedPreparation {
     }
     fn begin_start_attempt(&mut self) -> Result<ProtectedStartIntent> {
         let gate = self.gate.clone();
-        let admission = gate.admit(AdmissionBounds::default())?;
+        let admission = self.admit_preparation()?;
         let body = (|| {
             gate.require_host_job_idle()?;
             self.assert_start_phase(OperationState::Prepared, 3)?;
@@ -140,7 +140,7 @@ impl RetainedPreparation {
         &self,
         intent: &ProtectedStartIntent,
     ) -> Result<StartQualificationFacts> {
-        let admission = self.gate.admit(AdmissionBounds::default())?;
+        let admission = self.admit_preparation()?;
         admission.inspect_native_start(self, intent)
     }
     pub(super) fn qualify_intent(

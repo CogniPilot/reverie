@@ -111,6 +111,19 @@ impl RamPreviewGuard<'_, '_> {
         Ok(policy)
     }
 }
+impl<'a, 'q> RamPreviewGuard<'a, 'q> {
+    pub(super) fn admitted(
+        gate: &'a ReservationGate,
+        operation: &'a AuthenticatedResourceOperation<'q>,
+        journal: Arc<super::ram_authority::RamJournalAuthority>,
+    ) -> Self {
+        Self {
+            gate,
+            operation,
+            journal,
+        }
+    }
+}
 impl ReservationGate {
     pub(crate) fn draft_ram_operation(
         &self,

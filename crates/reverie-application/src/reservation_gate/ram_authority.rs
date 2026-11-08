@@ -12,8 +12,18 @@ pub(super) struct RamJournalAuthority {
     pin: reverie_host::worker_reports::ResourceJournalPin,
     employee: ProfileEmployeeId,
     owner: CurrentResourceOwner,
+    bounds: AdmissionBounds,
     active: Mutex<Option<Weak<Active>>>,
     failed: AtomicBool,
+}
+impl std::fmt::Debug for RamJournalAuthority {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RamJournalAuthority")
+            .field("employee", &self.employee)
+            .field("owner_scope", self.owner.scope_digest())
+            .field("failed", &self.failed.load(Ordering::Acquire))
+            .finish_non_exhaustive()
+    }
 }
 impl RamJournalAuthority {
     pub(super) fn capture(
@@ -33,9 +43,15 @@ impl RamJournalAuthority {
                 .current_owner()
                 .map_err(|error| GateError::Refused(error.code()))?
                 .clone(),
+            bounds: operation
+                .ram_admission_bounds(gate)
+                .map_err(|error| GateError::Refused(error.code()))?,
             active: Mutex::new(None),
             failed: AtomicBool::new(false),
         }))
+    }
+    pub(super) fn bounds(&self) -> AdmissionBounds {
+        self.bounds
     }
     pub(super) fn bind(&self, gate: &Arc<Inner>, active: &Arc<Active>) -> Result<()> {
         need(

@@ -38,8 +38,22 @@ pub struct RetainedPreparation {
     pub(super) published: bool,
     pub(super) policy: Option<super::preparation_policy::PolicyPhase>,
     pub(super) live: Arc<std::sync::atomic::AtomicBool>,
+    pub(super) ram_authority: Option<Arc<super::ram_authority::RamJournalAuthority>>,
 }
 impl RetainedPreparation {
+    pub(super) fn admit_preparation(&self) -> Result<admission::Admission> {
+        let bounds = self
+            .ram_authority
+            .as_ref()
+            .map_or_else(AdmissionBounds::default, |authority| authority.bounds());
+        let admission = self.gate.admit(bounds)?;
+        if let Some(authority) = &self.ram_authority
+            && let Err(error) = admission.bind_ram_authority(authority)
+        {
+            return admission.conclude(Err(error));
+        }
+        Ok(admission)
+    }
     pub(crate) fn attach_original_source(
         &mut self,
         source: crate::installing_broker::source::RegisteredSource,
@@ -98,7 +112,33 @@ impl ReservationGate {
         context: ClaimedContext,
         draft: reverie_contracts::reservation_draft::DraftRecord,
     ) -> Result<RetainedPreparation> {
-        let body = (|| {
+        let body = self.capture_preparation_context(&context);
+        match body {
+            Err(error) => admission.conclude(finalized(
+                Err(error),
+                context.store.close().map_err(Into::into),
+            )),
+            Ok(captured) => {
+                if let Err(error) = admission.finish_claim(&context.terminal) {
+                    return finalized(Err(error), context.store.close().map_err(Into::into));
+                }
+                Ok(self.retained_preparation(context, draft, captured))
+            }
+        }
+    }
+}
+
+pub(super) struct CapturedPreparation {
+    before: EffectiveWorkerConfig,
+    paths: StoragePaths,
+    baseline: OriginalSourceBaseline,
+}
+impl ReservationGate {
+    pub(super) fn capture_preparation_context(
+        &self,
+        context: &ClaimedContext,
+    ) -> Result<CapturedPreparation> {
+        (|| {
             need(
                 context.handle.is_some(),
                 "RESERVATION_REPLAY_HAS_NO_ACTIVE_HANDLE",
@@ -113,41 +153,48 @@ impl ReservationGate {
                 "RESOURCE_PREPARATION_STORAGE_CHANGED",
             )?;
             let baseline = self.inner.capture_original(&context.terminal, &paths)?;
-            Ok((before, paths, baseline))
-        })();
-        match body {
-            Err(error) => admission.conclude(finalized(
-                Err(error),
-                context.store.close().map_err(Into::into),
-            )),
-            Ok((before, paths, baseline)) => {
-                if let Err(error) = admission.finish_claim(&context.terminal) {
-                    return finalized(Err(error), context.store.close().map_err(Into::into));
-                }
-                Ok(RetainedPreparation {
-                    draft,
-                    gate: self.inner.clone(),
-                    store: Some(context.store),
-                    handle: context.handle.expect("checked handle"),
-                    view: context.view,
-                    terminal: context.terminal,
-                    before,
-                    paths,
-                    baseline,
-                    original_source: None,
-                    source_stop_phase: super::preparation_stop::SourceStopPhase::Idle,
-                    preparing_attempted: false,
-                    start_attempted: false,
-                    start_owner: None,
-                    publication: None,
-                    published: false,
-                    policy: None,
-                    live: Arc::new(std::sync::atomic::AtomicBool::new(true)),
-                })
-            }
+            Ok(CapturedPreparation {
+                before,
+                paths,
+                baseline,
+            })
+        })()
+    }
+    pub(super) fn retained_preparation(
+        &self,
+        context: ClaimedContext,
+        draft: reverie_contracts::reservation_draft::DraftRecord,
+        captured: CapturedPreparation,
+    ) -> RetainedPreparation {
+        let CapturedPreparation {
+            before,
+            paths,
+            baseline,
+        } = captured;
+        RetainedPreparation {
+            draft,
+            gate: self.inner.clone(),
+            store: Some(context.store),
+            handle: context.handle.expect("checked handle"),
+            view: context.view,
+            terminal: context.terminal,
+            before,
+            paths,
+            baseline,
+            original_source: None,
+            source_stop_phase: super::preparation_stop::SourceStopPhase::Idle,
+            preparing_attempted: false,
+            start_attempted: false,
+            start_owner: None,
+            publication: None,
+            published: false,
+            policy: None,
+            live: Arc::new(std::sync::atomic::AtomicBool::new(true)),
+            ram_authority: None,
         }
     }
 }
+
 impl Drop for RetainedPreparation {
     fn drop(&mut self) {
         self.live.store(false, std::sync::atomic::Ordering::Release);

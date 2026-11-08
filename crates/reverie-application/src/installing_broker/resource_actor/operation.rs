@@ -4,8 +4,10 @@ use super::*;
 use reverie_contracts::resource_config::ResourceIdentitySettings;
 use reverie_store::storage_identity::{self, StorageIdentityConfig};
 use std::time::{SystemTime, UNIX_EPOCH};
+mod claim;
 mod preview;
 mod receipt;
+pub use claim::{ClaimedRamOperation, RamClaimFailure};
 pub use receipt::{CommittedRamFailure, CommittedRamOperation};
 
 #[must_use = "move the whole actual Q owner with the operation; do not reconstruct from IDs"]

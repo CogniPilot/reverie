@@ -183,6 +183,7 @@ impl RetainedPreparation {
         request: &reverie_contracts::resource_actor::ResourceOperationRequest,
         policy: &reverie_contracts::ram_migration::RamMigrationPolicy,
     ) -> Result<()> {
+        assert_ram_draft_approval(request, &self.draft, self.profile(), policy)?;
         use reverie_contracts::resource_actor::ResourceRequestSelection;
         let ResourceRequestSelection::Apply {
             employee_id,
@@ -223,4 +224,46 @@ impl RetainedPreparation {
             .require_profile_version(self.profile().version())
             .map_err(|_| GateError::Refused("RAM_APPROVAL_CHANGED"))
     }
+}
+pub(super) fn assert_ram_draft_approval(
+    request: &reverie_contracts::resource_actor::ResourceOperationRequest,
+    draft: &reverie_contracts::reservation_draft::DraftRecord,
+    profile: &reverie_core::profiles::ResourceProfile,
+    policy: &reverie_contracts::ram_migration::RamMigrationPolicy,
+) -> Result<()> {
+    use reverie_contracts::resource_actor::ResourceRequestSelection;
+    let ResourceRequestSelection::Apply {
+        employee_id,
+        draft_id,
+        operation_id,
+        reservation_id,
+        target_sid,
+        profile_version,
+        profile_digest,
+        preview_digest,
+        ram_policy_digest,
+    } = request.selection()
+    else {
+        return Err(GateError::Refused("RAM_APPROVAL_REQUIRED"));
+    };
+    let digest = reverie_contracts::profiles_v1::profile_digest(profile)
+        .map_err(crate::resource_staging::ResourceServiceError::from)?
+        .to_hex();
+    need(
+        employee_id == profile.binding().employee()
+            && *draft_id == draft.id()
+            && *operation_id == draft.operation()
+            && *reservation_id == draft.reservation()
+            && target_sid == profile.binding().target_session()
+            && target_sid.as_str() == draft.target().as_str()
+            && *profile_version == profile.version()
+            && profile_digest.as_str() == digest
+            && *preview_digest == draft.digest()?
+            && ram_policy_digest == policy.digest()
+            && reverie_contracts::profiles_v1::equivalent(policy.profile(), profile),
+        "RAM_APPROVAL_CHANGED",
+    )?;
+    request
+        .require_profile_version(profile.version())
+        .map_err(|_| GateError::Refused("RAM_APPROVAL_CHANGED"))
 }

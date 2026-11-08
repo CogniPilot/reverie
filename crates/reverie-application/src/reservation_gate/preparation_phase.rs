@@ -52,8 +52,7 @@ impl RetainedPreparation {
         }
     }
     fn prepare_attempt(&mut self) -> Result<PreparationIntentFacts> {
-        let gate = self.gate.clone();
-        let admission = gate.admit(AdmissionBounds::default())?;
+        let admission = self.admit_preparation()?;
         match self.prepare_body() {
             Ok(()) => admission.finish_preparation(self, PublicationPhase::Before)?,
             Err(error) => return admission.conclude(Err(error)),
@@ -105,7 +104,7 @@ impl RetainedPreparation {
             "RESOURCE_PREPARATION_INTENT_REQUIRED",
         )?;
         let result = (|| {
-            let admission = self.gate.admit(AdmissionBounds::default())?;
+            let admission = self.admit_preparation()?;
             admission.finish_preparation(self, PublicationPhase::After)
         })();
         match result {

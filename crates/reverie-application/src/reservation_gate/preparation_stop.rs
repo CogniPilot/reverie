@@ -80,7 +80,7 @@ impl RetainedPreparation {
         intent: &ProtectedStartIntent,
     ) -> Result<()> {
         let gate = self.gate.clone();
-        let admission = gate.admit(AdmissionBounds::default())?;
+        let admission = self.admit_preparation()?;
         let body = (|| {
             let state = self.qualify_intent(intent, true)?;
             self.source_stop_phase = SourceStopPhase::Attempted;

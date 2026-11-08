@@ -66,7 +66,7 @@ impl RetainedPreparation {
             "RESOURCE_PREPARATION_ACTIVE_HANDLE_REQUIRED",
         )?;
         need(self.published, "RESOURCE_PREPARATION_PUBLICATION_REQUIRED")?;
-        let admission = self.gate.admit(AdmissionBounds::default())?;
+        let admission = self.admit_preparation()?;
         match self.stage_body(policy) {
             Ok(value) => finalized(
                 Ok(value),

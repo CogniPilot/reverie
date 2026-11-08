@@ -16,7 +16,10 @@ use super::*;
 use crate::reservation_observer::ObservationContext;
 pub use error::{ResourceActorError, ResourceActorFailure};
 use error::{Result, need};
-pub use operation::{AuthenticatedResourceOperation, CommittedRamFailure, CommittedRamOperation};
+pub use operation::{
+    AuthenticatedResourceOperation, ClaimedRamOperation, CommittedRamFailure,
+    CommittedRamOperation, RamClaimFailure,
+};
 use reverie_contracts::{human_protocol::HumanFrame, resource_actor::*};
 use reverie_host::{
     resource_facts::InstalledFactsObserver,
