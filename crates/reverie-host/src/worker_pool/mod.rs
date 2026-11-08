@@ -6,6 +6,8 @@ mod controller_limits;
 mod directory;
 mod endpoint;
 mod engine;
+mod installation_request;
+pub use installation_request::load_os_pool_installation_request;
 mod member;
 mod namespace;
 mod policy;

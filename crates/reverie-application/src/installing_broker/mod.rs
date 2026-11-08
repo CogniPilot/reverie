@@ -15,6 +15,7 @@ mod image_refresh;
 mod installation_offer;
 pub use installation_offer::{
     BrokerInstallationOffer, BrokerInstallationOfferCause, BrokerInstallationOfferFailure,
+    OsPoolInstallationFailure,
 };
 mod launch;
 mod lifecycle;
