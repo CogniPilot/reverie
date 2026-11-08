@@ -8,7 +8,9 @@ mod claim;
 mod preview;
 mod receipt;
 pub use claim::{ClaimedRamOperation, RamClaimFailure, RamPreparationFailure};
-pub use receipt::{CommittedRamFailure, CommittedRamOperation};
+pub use receipt::{
+    CommittedRamFailure, CommittedRamOperation, PreparedResourceStart, ResourceStartFailure,
+};
 
 #[must_use = "move the whole actual Q owner with the operation; do not reconstruct from IDs"]
 pub struct AuthenticatedResourceOperation<'a> {

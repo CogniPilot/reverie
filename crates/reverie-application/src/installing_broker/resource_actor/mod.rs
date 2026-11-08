@@ -18,7 +18,8 @@ pub use error::{ResourceActorError, ResourceActorFailure};
 use error::{Result, need};
 pub use operation::{
     AuthenticatedResourceOperation, ClaimedRamOperation, CommittedRamFailure,
-    CommittedRamOperation, RamClaimFailure, RamPreparationFailure,
+    CommittedRamOperation, PreparedResourceStart, RamClaimFailure, RamPreparationFailure,
+    ResourceStartFailure,
 };
 use reverie_contracts::{human_protocol::HumanFrame, resource_actor::*};
 use reverie_host::{
