@@ -274,6 +274,7 @@ import { isExplicitlyEnabled, isLoopbackBindHost, buildHostPolicy, type HostPoli
 import {
   registerPushRoutes,
   registerTeamRoutes,
+  registerTeammatePaneRoutes,
   registerMuxRoutes,
   registerFileRoutes,
   registerHtmlViewRoutes,
@@ -1385,6 +1386,7 @@ export class WebServer extends EventEmitter {
     const ctx = this.createRouteContext();
     registerPushRoutes(this.app, ctx, verifiedOwner);
     registerTeamRoutes(this.app, ctx);
+    registerTeammatePaneRoutes(this.app, ctx);
     registerMuxRoutes(this.app, ctx);
     registerFileRoutes(this.app, ctx);
     registerHtmlViewRoutes(this.app, ctx);

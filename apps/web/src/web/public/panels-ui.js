@@ -2373,19 +2373,31 @@ Object.assign(ReverieApp.prototype, {
 
     // Buffer incoming terminal data until xterm is ready
     const pendingData = [];
-    this.teammateTerminals.set(agentId, {
+    // This initialization's own entry. Every deferred step below acts only while this exact entry is live (not
+    // disposed, and still the one the map holds for this agent), so a minimize and re-open in between can never
+    // feed an old callback's timer or output into the new terminal. _disposeTeammateEntry cancels what is pending.
+    const entry = {
       terminal: null,
       fitAddon: null,
       paneTarget: paneInfo.paneTarget,
       sessionId,
       resizeObserver: null,
       pendingData,
-    });
+      disposed: false,
+      initFrame: null,
+      initTimer: null,
+      refreshTimer: null,
+    };
+    const live = () => !entry.disposed && this.teammateTerminals.get(agentId) === entry;
+    this.teammateTerminals.set(agentId, entry);
 
     // Defer terminal creation to next frame so the body element has computed dimensions
-    requestAnimationFrame(() => {
+    entry.initFrame = requestAnimationFrame(() => {
+      entry.initFrame = null;
+      if (!live()) return;
       // Safety: if window was closed before we got here, bail out
       if (!document.contains(body)) {
+        this._disposeTeammateEntry(entry);
         this.teammateTerminals.delete(agentId);
         return;
       }
@@ -2422,9 +2434,13 @@ Object.assign(ReverieApp.prototype, {
         terminal.open(body);
       } catch (err) {
         console.warn('[TeammateTerminal] Failed to open terminal:', err);
+        this._disposeTeammateEntry(entry);
         this.teammateTerminals.delete(agentId);
         return;
       }
+      // Held from here on, so a disposal while the rest is pending also disposes this terminal.
+      entry.terminal = terminal;
+      entry.fitAddon = fitAddon;
 
       // Ctrl+Z (SIGTSTP/job-control suspend): a teammate/subagent pane is always
       // running an agent CLI (Task-tool dispatched, never a plain shell), so
@@ -2449,18 +2465,34 @@ Object.assign(ReverieApp.prototype, {
 
       // Wait for terminal renderer to fully initialize before any writes.
       // xterm.js needs a few frames after open() before write() is safe.
-      setTimeout(() => {
+      entry.initTimer = setTimeout(() => {
+        entry.initTimer = null;
+        if (!live()) return;
         try { fitAddon.fit(); } catch {}
 
-        // Fetch initial pane buffer
-        fetch(`/api/sessions/${sessionId}/teammate-pane-buffer/${encodeURIComponent(paneInfo.paneTarget)}`)
-          .then(r => r.json())
-          .then(resp => {
-            if (resp.success && resp.data?.buffer) {
-              try { terminal.write(resp.data.buffer); } catch {}
-            }
-          })
-          .catch(err => console.error('[TeammateTerminal] Failed to fetch buffer:', err));
+        // The teammate writes to its own pane, not through this window: read the pane now, then again
+        // every 2 s while the window is in the page, redrawing only when it changed. A reply that arrives
+        // after this entry was disposed or replaced is dropped.
+        let shown = null;
+        const refresh = () => {
+          if (!live() || !document.contains(body)) {
+            clearInterval(entry.refreshTimer);
+            entry.refreshTimer = null;
+            return;
+          }
+          fetch(`/api/sessions/${sessionId}/teammate-pane-buffer/${encodeURIComponent(paneInfo.paneTarget)}`)
+            .then(r => r.json())
+            .then(resp => {
+              if (!live()) return;
+              const buffer = resp?.success ? resp.data?.buffer : null;
+              if (typeof buffer !== 'string' || buffer === shown) return;
+              shown = buffer;
+              try { terminal.reset(); terminal.write(buffer); } catch {}
+            })
+            .catch(err => console.error('[TeammateTerminal] Failed to fetch buffer:', err));
+        };
+        refresh();
+        entry.refreshTimer = setInterval(refresh, 2000);
 
         // Flush any data that arrived while terminal was initializing
         for (const chunk of pendingData) {
@@ -2471,6 +2503,7 @@ Object.assign(ReverieApp.prototype, {
 
       // Forward keyboard input to the teammate's pane
       terminal.onData((data) => {
+        if (!live()) return;
         fetch(`/api/sessions/${sessionId}/teammate-pane-input`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -2480,18 +2513,28 @@ Object.assign(ReverieApp.prototype, {
 
       // Resize observer to refit terminal when window is resized
       const resizeObserver = new ResizeObserver(() => {
-        requestAnimationFrame(() => { try { fitAddon.fit(); } catch {} });
+        requestAnimationFrame(() => { if (live()) try { fitAddon.fit(); } catch {} });
       });
       resizeObserver.observe(body);
-
-      // Update the stored entry with the real terminal
-      const entry = this.teammateTerminals.get(agentId);
-      if (entry) {
-        entry.terminal = terminal;
-        entry.fitAddon = fitAddon;
-        entry.resizeObserver = resizeObserver;
-      }
+      entry.resizeObserver = resizeObserver;
     });
+  },
+
+  /** Stop everything one teammate terminal initialization started or still has pending: its first frame, its
+   * delayed start, its pane refresh, its resize observer and its terminal. Later callbacks of that entry find it
+   * disposed and do nothing. */
+  _disposeTeammateEntry(entry) {
+    entry.disposed = true;
+    if (entry.initFrame !== null && entry.initFrame !== undefined) cancelAnimationFrame(entry.initFrame);
+    if (entry.initTimer !== null && entry.initTimer !== undefined) clearTimeout(entry.initTimer);
+    if (entry.refreshTimer !== null && entry.refreshTimer !== undefined) clearInterval(entry.refreshTimer);
+    entry.initFrame = entry.initTimer = entry.refreshTimer = null;
+    if (entry.resizeObserver) entry.resizeObserver.disconnect();
+    if (entry.terminal) {
+      try {
+        entry.terminal.dispose();
+      } catch {}
+    }
   },
 
   /** Open a standalone terminal window for a tmux-pane teammate (no subagent entry needed) */
@@ -2625,9 +2668,25 @@ Object.assign(ReverieApp.prototype, {
     });
   },
 
-  /** Rebuild the teammate lookup map from all team configs */
+  /** Load the agent teams the server watches (GET /api/teams), then rebuild the teammate maps. */
+  async loadTeams() {
+    try {
+      const resp = await (await fetch('/api/teams')).json();
+      if (!resp?.success || !Array.isArray(resp.data)) return;
+      this.teams.clear();
+      for (const team of resp.data) {
+        if (team?.name && Array.isArray(team.members)) this.teams.set(team.name, team);
+      }
+      this.rebuildTeammateMap();
+    } catch {
+      /* teams stay as they were; the next team event rebuilds them */
+    }
+  },
+
+  /** Rebuild the teammate lookup maps from all team configs */
   rebuildTeammateMap() {
     this.teammateMap.clear();
+    this.teammatePanesByName.clear();
     for (const [teamName, team] of this.teams) {
       for (const member of team.members) {
         if (member.agentType !== 'team-lead') {
@@ -2638,6 +2697,14 @@ Object.assign(ReverieApp.prototype, {
             teamName,
             agentId: member.agentId,
           });
+          // A teammate in its own tmux pane of the lead's session opens as a terminal window.
+          if (team.leadSessionId && /^%\d+$/.test(member.tmuxPaneId || '')) {
+            this.teammatePanesByName.set(member.name, {
+              paneTarget: member.tmuxPaneId,
+              sessionId: team.leadSessionId,
+              color: member.color || 'blue',
+            });
+          }
         }
       }
     }

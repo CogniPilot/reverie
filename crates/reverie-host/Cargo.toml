@@ -9,7 +9,10 @@ publish.workspace = true
 sha2.workspace = true
 libc.workspace = true
 getrandom.workspace = true
-nix = { workspace = true, features = ["term", "fs", "socket", "poll", "user"] }
+# "signal" is for the lease CLI, which shares one Nix build with the other host tools: with it here every
+# host tool resolves the same nix features alone as together. The other host tools now also compile nix's
+# signal and process modules.
+nix = { workspace = true, features = ["term", "fs", "socket", "poll", "user", "signal"] }
 reverie-core.workspace = true
 reverie-diagnostics.workspace = true
 reverie-python-regex.workspace = true

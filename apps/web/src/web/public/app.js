@@ -276,6 +276,11 @@ const _SSE_HANDLER_MAP = [
   [SSE_EVENTS.SUBAGENT_TOOL_RESULT, '_onSubagentToolResult'],
   [SSE_EVENTS.SUBAGENT_COMPLETED, '_onSubagentCompleted'],
 
+  // Agent teams (teammates, and the panes the teammate terminal window opens)
+  [SSE_EVENTS.TEAM_CREATED, '_onTeamChanged'],
+  [SSE_EVENTS.TEAM_UPDATED, '_onTeamChanged'],
+  [SSE_EVENTS.TEAM_REMOVED, '_onTeamRemoved'],
+
   // Workflow runs (ultracode)
   [SSE_EVENTS.WORKFLOW_RUN_DISCOVERED, '_onWorkflowRunDiscovered'],
   [SSE_EVENTS.WORKFLOW_RUN_UPDATED, '_onWorkflowRunUpdated'],
@@ -2434,9 +2439,23 @@ class ReverieApp {
   _onInit(data) {
     _crashDiag.log(`INIT: ${data.sessions?.length || 0} sessions`);
     this.handleInit(data);
+    // Teams are not in the init payload; later changes arrive as team events.
+    void this.loadTeams?.();
     // Start the remote-host reachability poller even if no session switch follows
     // (a page loaded with the remote tab already active) — see host-wake-ui.js.
     this._ensureHostWakePoller?.();
+  }
+
+  _onTeamChanged(team) {
+    if (!team?.name || !Array.isArray(team.members)) return;
+    this.teams.set(team.name, team);
+    this.rebuildTeammateMap();
+  }
+
+  _onTeamRemoved(team) {
+    if (!team?.name) return;
+    this.teams.delete(team.name);
+    this.rebuildTeammateMap();
   }
 
   _onSessionCreated(data) {

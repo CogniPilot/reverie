@@ -12,15 +12,21 @@
  * between tests.
  */
 
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, afterEach, vi } from 'vitest';
+import { tempTeardown } from './helpers/settle-children.js';
 
 const originalHome = process.env.HOME;
 const originalUserProfile = process.env.USERPROFILE;
 const originalVitest = process.env.VITEST;
-const originalTemp = { TMPDIR: process.env.TMPDIR, TMP: process.env.TMP, TEMP: process.env.TEMP };
+const originalTemp = {
+  TMPDIR: process.env.TMPDIR,
+  TMP: process.env.TMP,
+  TEMP: process.env.TEMP,
+  TMUX_TMPDIR: process.env.TMUX_TMPDIR,
+};
 const originalPlaywrightBrowsersPath = process.env.PLAYWRIGHT_BROWSERS_PATH;
 // Refuse to run against a live instance. A data dir holding `state.json` belongs
 // to a running Reverie, so this run shares that instance's memory limit and can
@@ -58,6 +64,10 @@ const testTmp = mkdtempSync(join(tmpdir(), 'rvt-'));
 process.env.TMPDIR = testTmp;
 process.env.TMP = testTmp;
 process.env.TEMP = testTmp;
+// tmux ignores TMPDIR and puts its default socket under TMUX_TMPDIR (else /tmp), so without this every test file that
+// starts a real tmux shares one server. Under the same per-file directory, files running side by side never meet.
+process.env.TMUX_TMPDIR = testTmp;
+const tempDirs = tempTeardown([testHome, testTmp]);
 process.env.VITEST = 'true';
 
 for (const key of Object.keys(process.env)) {
@@ -151,14 +161,14 @@ afterAll(async () => {
     else process.env[key] = value;
   }
 
-  rmSync(testHome, { recursive: true, force: true });
-  rmSync(testTmp, { recursive: true, force: true });
+  // A child a test spawned can still be writing into the temp directories; removing them under it fails with
+  // ENOTEMPTY after every test passed. Wait for the children to exit first (bounded), stop any that do not, and keep
+  // the directories (failing by name) rather than delete under one that cannot be stopped.
+  await tempDirs.finish();
 });
 
 // afterAll never fires for a fully-skipped test file (no tests execute), which
-// would leak the temp home created above. The exit hook is the backstop; rmSync
-// with force is a no-op when afterAll already removed it.
-process.on('exit', () => {
-  rmSync(testHome, { recursive: true, force: true });
-  rmSync(testTmp, { recursive: true, force: true });
-});
+// would leak the temp home created above. The exit hook is the backstop: a no-op
+// when afterAll already removed or kept the directories, and it never removes
+// them under a live child.
+process.on('exit', () => tempDirs.backstop());

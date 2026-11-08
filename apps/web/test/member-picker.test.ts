@@ -18,6 +18,16 @@ afterEach(() => { for (const h of opened.splice(0)) h.dom.window.close(); vi.res
 const button = (h: Harness) => h.document.querySelector('.ca-add-button') as HTMLButtonElement;
 const open = (h: Harness) => { button(h).click(); return h.document.querySelector('.ca-member-picker') as HTMLElement; };
 const key = (h: Harness, key: string) => h.document.activeElement!.dispatchEvent(new h.window.KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
+/** Waits until `ready()` holds, bounded: a fixed sleep is outlasted by the page on a loaded runner. */
+const until = async (ready: () => unknown, timeoutMs = 5000) => {
+  const deadline = Date.now() + timeoutMs;
+  while (!ready()) {
+    if (Date.now() > deadline) throw new Error('the page did not settle in time');
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+};
+/** An add has finished: the reloaded list shows the member and focus is on the new plus button. */
+const added = (h: Harness, id: string) => () => h.document.querySelector(`[data-key="member:${id}"]`) && h.document.activeElement === button(h);
 
 describe('the member-list add button', () => {
   it('replaces the native select with a labelled plus button', async () => {
@@ -43,8 +53,18 @@ describe('the member-list add button', () => {
 
   it('sends the existing add POST once, refreshes the list and focuses the new plus button', async () => {
     const h = await setup();
+    // The room reload after the add answers slowly, as on a loaded runner. Focus moves to the new plus button only
+    // once it lands; before that, the re-render has removed the old button and focus is on the body.
+    const handle = h.server.handle;
+    let posted = false;
+    h.server.handle = async (path: string, opts: { method?: string } = {}) => {
+      if (posted && (opts.method || 'GET') === 'GET') await new Promise((resolve) => setTimeout(resolve, 300));
+      const res = await handle(path, opts);
+      if (opts.method === 'POST' && path.endsWith('/members')) posted = true;
+      return res;
+    };
     open(h).querySelector('button')!.click();
-    await h.flush(100);
+    await until(added(h, B));
     const calls = h.server.calls.filter((c: { method: string; path: string }) => c.method === 'POST' && c.path === '/api/chatrooms/r1/members');
     expect(calls).toHaveLength(1);
     expect(calls[0].body).toEqual({ sessionId: B });
@@ -77,7 +97,7 @@ describe('the member-list add button', () => {
     expect(h.document.activeElement).toBe(button(h));
     open(h);
     key(h, 'Enter');
-    await h.flush(100);
+    await until(added(h, B));
     expect(h.server.invited).toEqual([{ id: 'r1', sessionId: B }]);
   });
 
@@ -92,7 +112,7 @@ describe('the member-list add button', () => {
     key(h, 'ArrowUp');
     expect(h.document.activeElement!.textContent).toContain('Candidate 7');
     key(h, 'Enter');
-    await h.flush(100);
+    await until(added(h, 's7'));
     expect(h.server.invited).toEqual([{ id: 'r1', sessionId: 's7' }]);
   });
 
@@ -138,7 +158,7 @@ describe('polling delivery in the normal member picker',()=>{
  it('includes a positively declared polling agent already post-only elsewhere; posts only sessionId',async()=>{
   const h=await createHarness({sessions:[{id:A,name:'Maple',mode:'claude'},{id:B,name:'Poller',mode:'poll-agent',postOnly:true}],rooms:[room('r1','Office',[member(A,'Maple')]),room('r2','Break',[member(B,'Poller',{postOnly:true})])],features:{pollingModes:['poll-agent']}});
   opened.push(h);
-  const picker=open(h);expect(picker.textContent).toContain('Poller');picker.querySelector('button')!.click();await h.flush(100);
+  const picker=open(h);expect(picker.textContent).toContain('Poller');picker.querySelector('button')!.click();await until(added(h,B));
   const calls=h.server.calls.filter((c:any)=>c.method==='POST'&&c.path==='/api/chatrooms/r1/members');expect(calls).toHaveLength(1);expect(calls[0].body).toEqual({sessionId:B});
  });
  it('does not infer polling support from acceptsChat=false or a post-only flag',async()=>{

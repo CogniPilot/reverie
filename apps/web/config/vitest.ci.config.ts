@@ -3,6 +3,8 @@ import { defineConfig, configDefaults } from 'vitest/config';
 import { NON_CI_TEST_GLOBS } from './test-suites';
 
 const root = resolve(import.meta.dirname, '..');
+// The Nix check sets this to run test files side by side; unset, files run one at a time as before.
+const fileWorkers = Number.parseInt(process.env.NIX_TEST_FILE_WORKERS ?? '', 10) || 1;
 
 /**
  * The default gate — what `npm test` and CI both run.
@@ -23,7 +25,8 @@ export default defineConfig({
     include: ['test/**/*.test.ts'],
     exclude: [...configDefaults.exclude, ...NON_CI_TEST_GLOBS],
     setupFiles: ['./test/setup.ts'],
-    fileParallelism: false,
+    fileParallelism: fileWorkers > 1,
+    maxWorkers: fileWorkers,
     testTimeout: 30000,
     teardownTimeout: 60000,
   },
