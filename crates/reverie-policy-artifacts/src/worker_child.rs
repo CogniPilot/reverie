@@ -63,6 +63,7 @@ struct Program {
 struct Base {
     version: u32,
     purpose: String,
+    #[serde(rename = "archiveConfigSHA256")]
     archive_config_sha256: String,
     archive: Pin,
     image_spec: Value,
