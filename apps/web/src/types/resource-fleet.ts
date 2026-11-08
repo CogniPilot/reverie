@@ -5,6 +5,13 @@ const EmployeeId = z.string().uuid();
 const Reference = z.string().min(1).max(200);
 const MemoryMiB = z.number().int().min(512).max(1048576);
 const CpuWeight = z.number().int().min(1).max(10000);
+function handoffCharactersAllowed(value: string): boolean {
+  for (let index = 0; index < value.length; index++) {
+    const code = value.charCodeAt(index);
+    if ((code < 32 && code !== 9 && code !== 10 && code !== 13) || code === 127) return false;
+  }
+  return true;
+}
 export const FleetPolicySchema = z
   .object({
     memoryHighMiB: MemoryMiB,
@@ -43,12 +50,7 @@ export const FleetPreviewRequestSchema = z
       .max(256),
     pool: FleetPoolSchema,
     canaryEmployeeId: EmployeeId,
-    handoff: z
-      .string()
-      .trim()
-      .min(1)
-      .max(12000)
-      .refine((value) => !/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(value)),
+    handoff: z.string().trim().min(1).max(12000).refine(handoffCharactersAllowed),
   })
   .strict()
   .superRefine((value, context) => {
