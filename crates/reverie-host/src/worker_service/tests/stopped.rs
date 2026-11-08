@@ -1,6 +1,18 @@
 use super::*;
 
 #[test]
+fn image_maintenance_refuses_predecessor_without_creating_a_service_fence() {
+    let (state, root, program) = fixture_mode("native-worker-manager-rollback");
+    prepare_predecessor(&state);
+    let proof = super::super::stopped::StoppedWorkerService::from_state_for_test(state).unwrap();
+    let mut failure = proof.begin_image_transition().err().expect("native installed generation required");
+    failure.close_components().unwrap();
+    assert!(!root.join("worker-pool/service/pending").exists());
+    fs::remove_file(root.join("native-worker-service-bus")).unwrap();
+    cleanup_predecessor(root, program);
+}
+
+#[test]
 fn stopped_service_receipt_requires_the_same_original_inactive_generation() {
     let (state, root, program) = fixture_mode("native-worker-manager-rollback");
     prepare_predecessor(&state);
