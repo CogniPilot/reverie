@@ -5,8 +5,10 @@
 //! (the signal path); the office-power C actions never reach it.
 mod close;
 mod dispatch;
+pub mod power;
 #[cfg(test)]
 mod tests;
+pub mod watchdog;
 use reverie_contracts::{broker_control::ControlRoute, broker_reply::BrokerReply};
 use reverie_host::broker_listener::{self, BoundSocket};
 use std::{
