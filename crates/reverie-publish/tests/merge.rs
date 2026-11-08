@@ -554,6 +554,35 @@ fn a_base_that_moves_after_the_checks_is_reported_never_as_the_reviewed_merge() 
 }
 
 #[test]
+fn a_pr_retargeted_while_merging_is_reported_never_as_the_reviewed_merge() {
+    // The PR read before the merge targets main; the merge lands, but the PR reads back merged onto
+    // release at the same first parent. That is not the reviewed operation: it is reported with one
+    // write and every record kept, and nothing is retried.
+    let case = Case::new("retargeted-after");
+    let mut hub = Hub::new(&case);
+    hub.rewrite = Some(|s, r| {
+        if s.method == "GET" && s.path.ends_with("/pulls/7") && r["merged"] == true {
+            r["base"]["ref"] = json!("release");
+        }
+    });
+    let (api, state) = serve(hub);
+    refused(
+        &case.run(&api, &[]),
+        "reads back onto release in owner/demo, not the approved main",
+    );
+    assert_eq!(writes(&state), ["PUT /repos/owner/demo/pulls/7/merge"]);
+    has(
+        &case.records(),
+        &[
+            "INTENT.json",
+            "MERGE-RESULT.json",
+            "PR-READBACK.json",
+            "MERGE-COMMIT-READBACK.json",
+        ],
+    );
+}
+
+#[test]
 fn a_failing_packet_check_or_a_foreign_api_base_refuses_before_any_request() {
     let case = Case::new("packet");
     let (api, state) = serve(Hub::new(&case));

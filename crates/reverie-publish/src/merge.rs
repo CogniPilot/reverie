@@ -45,9 +45,20 @@ pub fn ready(pr: &Value, number: u64, head: &str, title: &str, body: &str) -> Re
     }
 }
 
-/// Checks that `pr` targets the approved operation: a PR in `repo` onto `branch`, whose base is at
-/// `base`. A retargeted PR, a base that moved since the review, or a missing field refuses.
-pub fn targets(pr: &Value, repo: &str, branch: &str, base: &str) -> Result<(), String> {
+/// The reviewed operation's target: the repository, the branch the PR goes onto, and the base commit
+/// the approved patch was taken against.
+#[derive(Debug, Clone, Copy)]
+pub struct Target<'a> {
+    pub repo: &'a str,
+    pub branch: &'a str,
+    pub base: &'a str,
+}
+
+/// Checks that `pr` targets the approved operation: a PR in the target repository onto its branch,
+/// whose base is at the approved base. A retargeted PR, a base that moved since the review, or a
+/// missing field refuses.
+pub fn targets(pr: &Value, target: Target) -> Result<(), String> {
+    let Target { repo, branch, base } = target;
     if str_at(pr, "/base/repo/full_name") != Some(repo) {
         return Err(format!("the PR's base is not in {repo}"));
     }
@@ -166,16 +177,19 @@ pub fn merge_reply(result: &Value) -> Result<String, String> {
 
 /// The readback: PR `number` is merged at `head` with `sha` as its merge commit, and that commit
 /// is a merge commit, two parents, the second being `head` (not a squash or a rebase) and the first
-/// being the approved `base`. GitHub's merge is conditioned on the head only, so a base that moved
-/// between the checks and the merge shows here, after the fact.
+/// being the approved base. The merged PR must still read back in the target repository on the
+/// approved branch. GitHub's merge is conditioned on the head only, so a base that moved or a PR
+/// retargeted between the checks and the merge shows here, after the fact. The merged PR's own
+/// `base.sha` is not trusted for the base: the merge commit's first parent is.
 pub fn merged(
     pr: &Value,
     commit: &Value,
     number: u64,
     head: &str,
     sha: &str,
-    base: &str,
+    target: Target,
 ) -> Result<(), String> {
+    let Target { repo, branch, base } = target;
     if pr["number"].as_u64() != Some(number)
         || pr["merged"] != Value::Bool(true)
         || str_at(pr, "/merge_commit_sha") != Some(sha)
@@ -209,6 +223,16 @@ pub fn merged(
              it is not the reviewed operation; inspect MERGE-COMMIT-READBACK.json and do not retry"
                 .into(),
         );
+    }
+    let read_repo = str_at(pr, "/base/repo/full_name");
+    let read_branch = str_at(pr, "/base/ref");
+    if read_repo != Some(repo) || read_branch != Some(branch) {
+        return Err(format!(
+            "a merge was made, but the PR reads back onto {} in {}, not the approved {branch} in {repo}: \
+             it is not the reviewed operation; inspect PR-READBACK.json and do not retry",
+            read_branch.unwrap_or("no branch"),
+            read_repo.unwrap_or("no repository")
+        ));
     }
     Ok(())
 }
@@ -325,10 +349,18 @@ mod tests {
         );
         assert!(merge_reply(&json!({ "merged": false, "sha": SHA })).is_err());
         assert!(merge_reply(&json!({ "merged": true, "sha": "abc" })).is_err());
-        let after = json!({ "number": 7, "merged": true, "merge_commit_sha": SHA, "head": { "sha": HEAD } });
+        let after = json!({
+            "number": 7, "merged": true, "merge_commit_sha": SHA, "head": { "sha": HEAD },
+            "base": { "ref": "main", "repo": { "full_name": "owner/demo" } },
+        });
         let base = "3333333333333333333333333333333333333333";
+        let target = Target {
+            repo: "owner/demo",
+            branch: "main",
+            base,
+        };
         let commit = |parents: &[&str]| json!({ "sha": SHA, "parents": parents.iter().map(|p| json!({ "sha": p })).collect::<Vec<_>>() });
-        assert!(merged(&after, &commit(&[base, HEAD]), 7, HEAD, SHA, base).is_ok());
+        assert!(merged(&after, &commit(&[base, HEAD]), 7, HEAD, SHA, target).is_ok());
         // Malformed, missing or extra parent entries are refused, never skipped.
         let raw = |parents: Value| json!({ "sha": SHA, "parents": parents });
         for parents in [
@@ -343,36 +375,56 @@ mod tests {
             Value::Null,
         ] {
             assert!(
-                merged(&after, &raw(parents.clone()), 7, HEAD, SHA, base).is_err(),
+                merged(&after, &raw(parents.clone()), 7, HEAD, SHA, target).is_err(),
                 "{parents}"
             );
         }
         // A squash (one parent) or a rebase (head is not a parent) is not a merge commit.
-        assert!(merged(&after, &commit(&[base]), 7, HEAD, SHA, base).is_err());
-        assert!(merged(&after, &commit(&[base, base]), 7, HEAD, SHA, base).is_err());
+        assert!(merged(&after, &commit(&[base]), 7, HEAD, SHA, target).is_err());
+        assert!(merged(&after, &commit(&[base, base]), 7, HEAD, SHA, target).is_err());
         let mut other = after.clone();
         other["merge_commit_sha"] = json!(base);
-        assert!(merged(&other, &commit(&[base, HEAD]), 7, HEAD, SHA, base).is_err());
+        assert!(merged(&other, &commit(&[base, HEAD]), 7, HEAD, SHA, target).is_err());
         // A merge onto any first parent but the approved base is reported as not the reviewed one.
         let moved = "4444444444444444444444444444444444444444";
-        let wrong = merged(&after, &commit(&[moved, HEAD]), 7, HEAD, SHA, base).unwrap_err();
+        let wrong = merged(&after, &commit(&[moved, HEAD]), 7, HEAD, SHA, target).unwrap_err();
         assert!(wrong.contains("other than the approved one"), "{wrong}");
         assert!(wrong.contains("do not retry"), "{wrong}");
+        // A PR that reads back merged onto another branch or repository, even at the same first
+        // parent, is not the reviewed operation either.
+        let ok = commit(&[base, HEAD]);
+        for (rewrite, why) in [
+            (
+                json!({ "ref": "release", "repo": { "full_name": "owner/demo" } }),
+                "onto release in owner/demo",
+            ),
+            (
+                json!({ "ref": "main", "repo": { "full_name": "other/demo" } }),
+                "onto main in other/demo",
+            ),
+            (json!({ "ref": "main" }), "onto main in no repository"),
+            (Value::Null, "onto no branch in no repository"),
+        ] {
+            let mut moved_pr = after.clone();
+            moved_pr["base"] = rewrite;
+            let refusal = merged(&moved_pr, &ok, 7, HEAD, SHA, target).unwrap_err();
+            assert!(
+                refusal.contains(why) && refusal.contains("do not retry"),
+                "{refusal}"
+            );
+        }
     }
 
     #[test]
     fn only_a_pr_onto_the_approved_branch_at_the_approved_base_is_the_target() {
         const BASE: &str = "3333333333333333333333333333333333333333";
         let target = |repo: &str, branch: &str, sha: &str| json!({ "base": { "ref": branch, "sha": sha, "repo": { "full_name": repo } } });
-        assert!(
-            targets(
-                &target("owner/demo", "main", BASE),
-                "owner/demo",
-                "main",
-                BASE
-            )
-            .is_ok()
-        );
+        let approved = Target {
+            repo: "owner/demo",
+            branch: "main",
+            base: BASE,
+        };
+        assert!(targets(&target("owner/demo", "main", BASE), approved).is_ok());
         let moved = "4444444444444444444444444444444444444444";
         for (pr, why) in [
             (target("owner/demo", "release", moved), "targets release"),
@@ -392,7 +444,7 @@ mod tests {
             ),
             (json!({}), "not in owner/demo"),
         ] {
-            let refusal = targets(&pr, "owner/demo", "main", BASE).unwrap_err();
+            let refusal = targets(&pr, approved).unwrap_err();
             assert!(refusal.contains(why), "{pr}: {refusal}");
         }
     }

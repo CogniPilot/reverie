@@ -230,7 +230,12 @@ fn merge(o: &Merge) -> Result<Value, String> {
     let pr = api.call("GET", &format!("/pulls/{number}"), None)?;
     merge::ready(&pr, number, head, &title, &body)?;
     // verify_packet has already bound approval.base to the full id of --base in the store.
-    merge::targets(&pr, &o.check.repo, branch, &approval.base)?;
+    let target = merge::Target {
+        repo: &o.check.repo,
+        branch,
+        base: &approval.base,
+    };
+    merge::targets(&pr, target)?;
     let runs = api.call(
         "GET",
         &format!("/commits/{head}/check-runs?per_page=100"),
@@ -285,7 +290,7 @@ fn merge(o: &Merge) -> Result<Value, String> {
     records.result("PR-READBACK.json", &after)?;
     let commit = api.call("GET", &format!("/commits/{sha}"), None)?;
     records.result("MERGE-COMMIT-READBACK.json", &commit)?;
-    merge::merged(&after, &commit, number, head, &sha, &approval.base)?;
+    merge::merged(&after, &commit, number, head, &sha, target)?;
     summary["merged"] = json!(true);
     summary["mergeCommit"] = json!(sha);
     Ok(summary)
