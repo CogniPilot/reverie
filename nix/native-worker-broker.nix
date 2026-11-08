@@ -27,6 +27,7 @@ in pkgs.rustPlatform.buildRustPackage {
   };
   preBuild = ''
     export REVERIE_FIXED_NATIVE_WORKER_SYSTEMCTL=${pkgs.systemdMinimal}/bin/systemctl
+    export REVERIE_FIXED_NATIVE_WORKER_BUSCTL=${pkgs.systemdMinimal}/bin/busctl
     export REVERIE_FIXED_NATIVE_WORKER_NIX_STORE=${pkgs.nix}/bin/nix-store
     export REVERIE_FIXED_NATIVE_WORKER_SERVICE_UNIT="$out/share/systemd/user/reverie-worker-broker.service"
     ${pkgs.lib.optionalString (previousUnit != null) "export REVERIE_FIXED_PREVIOUS_WORKER_SERVICE_UNIT=${previousUnit}/share/systemd/user/reverie-worker-broker.service"}

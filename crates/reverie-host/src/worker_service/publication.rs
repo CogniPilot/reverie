@@ -14,8 +14,15 @@ pub(super) fn environment(source: &Path) -> Result<String> {
 }
 impl State {
     pub(super) fn read_private(&mut self, path: &Path) -> Result<String> {
-        use std::io::Read;
         private(path, false)?;
+        self.read_retained(path)
+    }
+    pub(super) fn read_immutable(&mut self, path: &Path) -> Result<String> {
+        immutable(path)?;
+        self.read_retained(path)
+    }
+    fn read_retained(&mut self, path: &Path) -> Result<String> {
+        use std::io::Read;
         let file = OpenOptions::new()
             .read(true)
             .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
