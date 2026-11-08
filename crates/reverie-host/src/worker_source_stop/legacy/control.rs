@@ -128,6 +128,10 @@ pub struct ControlLaptopStop {
     source: EffectiveWorkerConfig,
 }
 impl ControlLaptopStop {
+    /// Binding DATA for the actual retained phone's close check.
+    pub fn session(&self) -> &ProfileSessionId {
+        &self.attempt.session
+    }
     pub(crate) fn bind_created_identity(&mut self, id: reverie_core::ids::ContainerId) {
         self.attempt.container = Some(id);
     }

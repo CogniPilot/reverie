@@ -201,11 +201,11 @@ impl ControlStorageStop {
             }
             ClaimDestination::Legacy { .. } => None,
         };
-        let owner = self
-            .native
-            .try_lock()
-            .map_err(|_| refused())?
-            .take_stopped_storage(&registry.runtime, end)?;
+        let mut native = self.native.try_lock().map_err(|_| refused())?;
+        if let Some(phone) = &self._phone {
+            phone.require_closed_for_resource(&registry.runtime, native.session())?;
+        }
+        let owner = native.take_stopped_storage(&registry.runtime, end)?;
         if let Some(index) = index {
             entries[index].owner = EntryOwner::Direct(owner);
             Ok(registry.handle(&entries[index], false))
