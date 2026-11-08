@@ -4,6 +4,11 @@
 # measurements in workerResumeProgram's normal build.
 { pkgs, src, console, ownerTerminalProgram ? null }:
 rec {
+  nativeWorkerResourceController = import ./worker-resource-controller.nix { inherit pkgs src; };
+  nativeWorkerResourceControllerImage = import ./worker-resource-controller-image.nix {
+    inherit pkgs;
+    controller = nativeWorkerResourceController;
+  };
   # Explicit integration output only; the shipped hybrid workerBroker below is
   # unchanged until mandatory native service/maintenance consumers qualify.
   nativeWorkerBroker = import ./native-worker-broker.nix {

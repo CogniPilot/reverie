@@ -1423,6 +1423,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "reverie-worker-resource-controller"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "reverie-host",
+]
+
+[[package]]
 name = "ring"
 version = "0.17.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
