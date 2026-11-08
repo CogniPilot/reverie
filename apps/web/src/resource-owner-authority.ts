@@ -159,10 +159,10 @@ export class ResourceOwnerAuthority {
         request.headers['x-reverie-parent-session'] === undefined &&
         !Object.keys(request.headers).some((name) => name.startsWith('x-reverie-goal-'))
     );
-    const account = this.#auth.forSession(token);
-    need(account instanceof OwnerAuthService);
-    const session = account.session(token),
-      identity = account.identity(token);
+    // The root service retains shared-office role/id/primary distinctions;
+    // a child account's local identity describes only its own credentials.
+    const session = this.#auth.session(token),
+      identity = this.#auth.identity(token);
     need(
       session &&
         !session.restricted &&
