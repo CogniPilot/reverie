@@ -255,6 +255,6 @@ pixels and the viewport now spans both monitors.
 |-------|------|--------|--------|
 | Gesture consumer | `gesture-proto/src/reverie/entry.ts` | `detach()` → `floatSession()`; `floats` map; panel re-grab; (later) re-dock branch + `getScreenDetails` snapping | ✅ float+re-grab done (`581fcf9`/`3e0447a`); re-dock/snap pending |
 | Gesture core | `gesture-proto/src/gesture/*` | **none** — stays transport-agnostic | ✅ unchanged |
-| Reverie — launch | `src/web/routes/system-routes.ts`, `src/web/public/{index.html,panels-ui.js}`, `scripts/span-reverie.sh` | header button → `POST /api/system/span-displays` → spawn span script (bundled into repo) | ✅ PR #103 `95b0035` |
+| Reverie — launch | `src/web/routes/system-routes.ts`, `src/web/public/{index.html,panels-ui.js}`, `src/span-displays.ts` | header button → `POST /api/system/span-displays` → native span launch (was a bundled shell script) | ✅ PR #103 `95b0035` |
 | Reverie — caching | `src/web/server.ts` | `cacheBustAssets()` — `?v=<mtime>` on all same-origin `.js`/`.css` so frontend edits show on normal reload | ✅ PR #103 `b5ea711` |
-| Ops | macOS display settings + `scripts/span-reverie.sh` | "separate Spaces" off + re-login; Brave-first maximized spanning window | ✅ validated at desk |
+| Ops | macOS display settings + `reverie span [url]` | "separate Spaces" off + re-login; Brave-first maximized spanning window | ✅ validated at desk |

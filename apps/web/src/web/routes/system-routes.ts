@@ -9,7 +9,6 @@ import { registerSettingsGet } from './settings-get-route.js';
 
 import { FastifyInstance } from 'fastify';
 import { join, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { existsSync, mkdirSync, readdirSync } from 'node:fs';
 import fs from 'node:fs/promises';
 import { totalmem, freemem, loadavg, cpus } from 'node:os';
@@ -56,6 +55,7 @@ import { SseEvent } from '../sse-events.js';
 import { getInstallInfo, checkForUpdate, startUpdate, getUpdateStatusForApi } from '../self-update.js';
 
 import { getRepositoryStatus } from '../repo-status.js';
+import { spanDisplays, systemSpanHost } from '../../span-displays.js';
 import type { SessionPort, EventPort, ConfigPort, InfraPort, AuthPort, TabLayoutPort } from '../ports/index.js';
 import { AUTH_COOKIE_NAME } from '../middleware/auth.js';
 import { QR_AUTH_FAILURE_MAX } from '../../config/tunnel-config.js';
@@ -329,14 +329,14 @@ export function registerSystemRoutes(
   // Multi-monitor: span Reverie across all displays
   // ═══════════════════════════════════════════════════════════════
 
-  // Spawn scripts/span-reverie.sh, which opens a fresh, maximized browser --app
-  // window sized to the union of all displays — so in-page floating session
-  // panels can be dragged across the physical monitor seam. macOS only; needs
-  // the one-time "Displays have separate Spaces" OFF prerequisite (see script).
+  // Open a fresh, maximized browser --app window sized to the union of all
+  // displays (src/span-displays.ts), so in-page floating session panels can be
+  // dragged across the physical monitor seam. macOS only; needs the one-time
+  // "Displays have separate Spaces" OFF prerequisite (see that module).
   app.post('/api/system/span-displays', async (req, reply) => {
     // macOS only: the launcher uses osascript + Finder desktop bounds and Chrome
-    // --app geometry flags. Fail clearly elsewhere instead of spawning a bash
-    // that errors out invisibly (the toast would otherwise lie "Opening…").
+    // --app geometry flags. Fail clearly elsewhere instead of a launch that
+    // errors out invisibly (the toast would otherwise lie "Opening…").
     if (process.platform !== 'darwin') {
       return reply
         .code(400)
@@ -344,23 +344,17 @@ export function registerSystemRoutes(
           createErrorResponse(
             ApiErrorCode.INVALID_INPUT,
             'Multi-monitor spanning runs on the Reverie server, which is not macOS. ' +
-              'If your monitors are on a remote Mac, run scripts/span-reverie.sh locally on that Mac with this server URL — see the script header for details.'
+              'If your monitors are on a remote Mac, run `reverie span <this server URL>` on that Mac.'
           )
         );
-    }
-    // Resolve the bundled launcher relative to this module (works from src/ and dist/).
-    const scriptPath = join(dirname(fileURLToPath(import.meta.url)), '../../../scripts/span-reverie.sh');
-    if (!existsSync(scriptPath)) {
-      return reply.code(500).send(createErrorResponse(ApiErrorCode.INTERNAL_ERROR, 'span-reverie.sh not found'));
     }
     // Point the spanning window at THIS server (localhost + sanitized port).
     const url = resolveSpanUrl(req.headers.host);
     try {
-      const child = spawn('bash', [scriptPath, url], { detached: true, stdio: 'ignore' });
-      child.on('error', (err) => app.log.error({ err }, 'span-displays launch failed'));
-      child.unref();
+      await spanDisplays(url, systemSpanHost());
       return { url };
     } catch (err) {
+      app.log.error({ err }, 'span-displays launch failed');
       return reply.code(500).send(createErrorResponse(ApiErrorCode.INTERNAL_ERROR, getErrorMessage(err)));
     }
   });
