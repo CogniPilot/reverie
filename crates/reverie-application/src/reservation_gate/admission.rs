@@ -68,6 +68,52 @@ impl Inner {
     ) -> Result<Admission> {
         let end = bounds.validate()?;
         let entry = self.reserve_entry(end)?;
+        self.enter_reserved(bounds, end, ordinary_session, native_budget, entry)
+    }
+    pub(super) fn admit_ready_stop(
+        self: &Arc<Self>,
+        end: Instant,
+        budget: &reverie_host::worker_runtime::WorkerStopBudget,
+    ) -> Result<Option<Admission>> {
+        let bounds = AdmissionBounds {
+            operation: Some(end),
+            entry: Some(end),
+        };
+        let end = bounds.validate()?;
+        self.assert_no_pool_transition()?;
+        let mut state = match self.state.try_lock() {
+            Ok(state) => state,
+            Err(std::sync::TryLockError::WouldBlock) => return Ok(None),
+            Err(_) => return Err(GateError::Refused("RESERVATION_ADMISSION_UNAVAILABLE")),
+        };
+        if state.active.is_some() || state.entering.is_some() {
+            return Ok(None);
+        }
+        self.assert_no_pool_transition()?;
+        let token = Arc::new(());
+        state.entering = Some(Entering {
+            thread: std::thread::current().id(),
+            process: std::process::id(),
+            token: token.clone(),
+        });
+        drop(state);
+        let entry = Entry {
+            gate: self.clone(),
+            token,
+            finished: false,
+            _thread: std::marker::PhantomData,
+        };
+        self.enter_reserved(bounds, end, None, Some(budget), entry)
+            .map(Some)
+    }
+    fn enter_reserved(
+        self: &Arc<Self>,
+        bounds: AdmissionBounds,
+        end: Option<Instant>,
+        ordinary_session: Option<&reverie_core::ids::ProfileSessionId>,
+        native_budget: Option<&reverie_host::worker_runtime::WorkerStopBudget>,
+        entry: Entry,
+    ) -> Result<Admission> {
         // Never hold the waiting-state mutex across filesystem I/O. Another
         // thread's bounded wait must remain bounded while this open stalls.
         let config = match self.config() {

@@ -153,13 +153,19 @@ impl BrokerService {
                 .map_err(BrokerServiceError::Recovery),
             errors,
         );
+        let supervisor = self.supervisor_closed();
+        if !supervisor {
+            errors.push(BrokerServiceError::Supervisor(
+                "WORKER_SUPERVISOR_STOP_RETAINED".into(),
+            ));
+        }
         let controller = record_close(
             broker
-                .close_installed_controller(reports && recovery, end)
+                .close_installed_controller(reports && recovery && supervisor, end)
                 .map_err(BrokerServiceError::Controller),
             errors,
         );
-        listener && reports && telemetry && images && recovery && controller
+        listener && reports && telemetry && images && recovery && supervisor && controller
     }
 }
 fn record_close(

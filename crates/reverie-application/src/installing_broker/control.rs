@@ -1,4 +1,5 @@
 //! Actual legacy C stop-laptops consumer. It grants no pool administration.
+use super::seat_stop::SeatStop as Seat;
 use super::*;
 use crate::reservation_gate::FleetStopAdmission;
 use reverie_contracts::worker_control::WorkerControlRequest;
@@ -58,11 +59,6 @@ impl From<reverie_host::worker_reports::WorkerReportError> for Cause {
     }
 }
 
-struct Seat {
-    stop: Option<storage::ControlStorageStop>,
-    claim: Option<StorageClaim>,
-    office: Option<Arc<recovered::RecoveredOffice>>,
-}
 struct Frame<'a> {
     broker: &'a Arc<InstallingBroker>,
     connection: WorkerServiceConnection,
@@ -302,26 +298,7 @@ impl Frame<'_> {
     }
     fn finish_seats(&mut self) -> Result<(), Cause> {
         for seat in &mut self.seats {
-            if let Some(office) = &seat.office {
-                office
-                    .close_for_stopped_source(self.end)
-                    .map_err(StorageWorkflowError::from)?;
-            }
-            let stop = seat.stop.take().expect("actual stopped owner");
-            match stop.reclaim(self.end) {
-                Ok(claim) => seat.claim = Some(claim),
-                Err(failure) => {
-                    let (stop, cause) = *failure;
-                    seat.stop = Some(stop);
-                    return Err(cause.into());
-                }
-            }
-            let claim = seat.claim.take().expect("same reclaimed Box");
-            if let Err(failure) = claim.release(self.end) {
-                let (claim, cause) = failure.into_parts();
-                seat.claim = Some(claim);
-                return Err(cause.into());
-            }
+            seat.finish(self.end)?;
         }
         Ok(())
     }

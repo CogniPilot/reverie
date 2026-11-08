@@ -4,6 +4,7 @@ use super::*;
 use reverie_host::worker_reports::{WorkerBrokerListener, WorkerReportError};
 mod handler;
 mod shutdown;
+mod supervisor;
 pub(in crate::installing_broker) use shutdown::ClosedBrokerResources;
 
 #[derive(Debug)]
@@ -17,6 +18,7 @@ pub enum BrokerServiceError {
     Images(ChatImagesError),
     InstallationOffer(reverie_host::worker_pool::PoolError),
     Controller(reverie_host::worker_pool::PoolError),
+    Supervisor(String),
     Shutdown(Vec<BrokerServiceError>),
 }
 impl fmt::Display for BrokerServiceError {
@@ -31,6 +33,7 @@ impl fmt::Display for BrokerServiceError {
             Self::Images(error) => error.fmt(out),
             Self::InstallationOffer(error) => error.fmt(out),
             Self::Controller(error) => error.fmt(out),
+            Self::Supervisor(error) => out.write_str(error),
             Self::Shutdown(errors) => write!(
                 out,
                 "WORKER_SERVICE_SHUTDOWN_RETAINED: {}",
@@ -49,6 +52,7 @@ pub struct BrokerService {
     startup: BrokerServiceStartup,
     listener: WorkerBrokerListener,
     shutdown_attempted: bool,
+    supervisor: std::cell::RefCell<Option<super::super::supervisor::DetachedStopFailure>>,
 }
 #[must_use = "failed shutdown is not a resource/global acknowledgement"]
 pub struct BrokerServiceFailure {
@@ -113,6 +117,7 @@ impl BrokerServiceStartup {
             startup: self,
             listener,
             shutdown_attempted: false,
+            supervisor: std::cell::RefCell::new(None),
         })
     }
 }
@@ -125,6 +130,7 @@ impl BrokerService {
             .reports
             .collect_worker_handlers()
             .map_err(BrokerServiceError::Handler)?;
+        self.poll_supervisor()?;
         let Some(mut registered) = self
             .listener
             .accept(&broker.reports)

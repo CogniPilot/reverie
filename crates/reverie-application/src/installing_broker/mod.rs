@@ -33,9 +33,11 @@ pub use service::{
     BrokerService, BrokerServiceClosed, BrokerServiceError, BrokerServiceFailure,
     BrokerServiceStartup, BrokerStartupCause, BrokerStartupFailure,
 };
+mod seat_stop;
 pub(crate) mod source;
 mod stop_admission;
 mod stopped_ram;
+mod supervisor;
 pub use stopped_ram::{
     EnteredStoppedRamSource, StoppedRamAborted, StoppedRamPreparationFailure, StoppedRamReport,
 };

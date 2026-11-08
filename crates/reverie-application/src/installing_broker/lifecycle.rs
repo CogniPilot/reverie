@@ -13,6 +13,11 @@ pub(super) struct LaunchGeneration(Arc<Generation>);
 pub(super) struct DrainingOwner {
     generation: LaunchGeneration,
 }
+/// Negative same-registry fence for one genuine detached stop attempt.
+pub(super) struct DetachedStopToken {
+    session: ProfileSessionId,
+    identity: Arc<()>,
+}
 struct Generation {
     serial: UnsignedInteger,
 }
@@ -93,11 +98,87 @@ pub(super) struct ActiveLaunchToken<'a> {
     hold: WorkerLaunchHold,
 }
 impl InstalledWorker {
+    pub(super) fn try_supervisor_lifecycle(
+        &self,
+    ) -> Result<Option<LaptopLifecycle<'_>>, GateError> {
+        match self.laptops.try_lock() {
+            Ok(guard) => Ok(Some(LaptopLifecycle { owner: self, guard })),
+            Err(std::sync::TryLockError::WouldBlock) => Ok(None),
+            Err(_) => Err(GateError::Refused("WORKER_BROKER_LIFECYCLE_UNAVAILABLE")),
+        }
+    }
     pub(super) fn capture_generation(&self) -> Result<LaunchGeneration, GateError> {
         Ok(self.lifecycle()?.guard.generation.clone())
     }
 }
 impl<'a> LaptopLifecycle<'a> {
+    pub(super) fn supervisor_detached(&self, sid: &ProfileSessionId) -> bool {
+        !self.guard.draining
+            && !self.guard.active.iter().any(|entry| &entry.session == sid)
+            && !self.guard.pending.iter().any(|entry| &entry.session == sid)
+    }
+    pub(super) fn take_supervisor_stop(
+        &mut self,
+        sid: &ProfileSessionId,
+    ) -> Result<(LaptopRegistration, DetachedStopToken), GateError> {
+        if !self.supervisor_detached(sid) {
+            return Err(GateError::Refused("WORKER_SUPERVISOR_ATTACHED"));
+        }
+        let at = self
+            .guard
+            .iter()
+            .position(|entry| &entry.session == sid)
+            .ok_or(GateError::Refused("WORKER_SUPERVISOR_REGISTRATION_CHANGED"))?;
+        self.guard
+            .pending
+            .try_reserve(1)
+            .map_err(|_| GateError::Refused("WORKER_BROKER_ACTIVE_UNAVAILABLE"))?;
+        let identity = Arc::new(());
+        let entry = self.guard.remove(at);
+        self.guard.pending.push(PendingName {
+            session: sid.clone(),
+            name: entry.name.clone(),
+            identity: identity.clone(),
+        });
+        Ok((
+            entry,
+            DetachedStopToken {
+                session: sid.clone(),
+                identity,
+            },
+        ))
+    }
+    pub(super) fn finish_supervisor_stop(
+        &mut self,
+        token: &DetachedStopToken,
+    ) -> Result<(), GateError> {
+        if self
+            .guard
+            .active
+            .iter()
+            .any(|entry| entry.session == token.session)
+            || self
+                .guard
+                .iter()
+                .any(|entry| entry.session == token.session)
+            || self
+                .guard
+                .pending
+                .iter()
+                .filter(|entry| entry.session == token.session)
+                .count()
+                != 1
+            || !self.guard.pending.iter().any(|entry| {
+                entry.session == token.session && Arc::ptr_eq(&entry.identity, &token.identity)
+            })
+        {
+            return Err(GateError::Refused("WORKER_SUPERVISOR_STOP_RETAINED"));
+        }
+        self.guard
+            .pending
+            .retain(|entry| !Arc::ptr_eq(&entry.identity, &token.identity));
+        Ok(())
+    }
     pub(super) fn begin_control_drain(&mut self) -> Result<DrainingOwner, GateError> {
         if self.guard.draining || !self.guard.transients_empty() {
             return Err(GateError::Refused("WORKER_STOP_ACTIVE_LAUNCH_OR_VIEWER"));
