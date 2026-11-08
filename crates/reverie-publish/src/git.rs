@@ -182,9 +182,15 @@ impl Git {
         command
             .env("GIT_CONFIG_GLOBAL", "/dev/null")
             .env("GIT_CONFIG_NOSYSTEM", "1")
+            // No system gitattributes, and no user attributes from $XDG_CONFIG_HOME or $HOME: an
+            // ambient `merge=union` would otherwise make a real conflict merge cleanly.
+            .env("GIT_ATTR_NOSYSTEM", "1")
+            .env_remove("XDG_CONFIG_HOME")
+            .env("HOME", &self.private.0)
             .env("GIT_TERMINAL_PROMPT", "0")
             .env("GIT_NO_REPLACE_OBJECTS", "1")
             .args(["-c", "credential.helper=", "-c", "core.hooksPath=/dev/null"])
+            .args(["-c", "core.attributesFile=/dev/null"])
             .current_dir(self.store.proc_path());
         command
     }
@@ -327,6 +333,32 @@ mod tests {
         let substituted = init(&root.join("store.git"), "substituted");
         assert_eq!(git.run(["cat-file", "blob", &held]).unwrap(), "held");
         assert!(git.run(["cat-file", "-e", &substituted]).is_err());
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn git_reads_no_system_or_user_attributes() {
+        let root = std::env::temp_dir().join(format!("publish-git-attrs-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        init(&root.join("store.git"), "held");
+        let git = Git::open(&root.join("store.git")).unwrap();
+        let command = git.command(["status"]);
+        let envs: Vec<_> = command.get_envs().collect();
+        let set = |key: &str| {
+            envs.iter()
+                .find(|(k, _)| *k == OsStr::new(key))
+                .map(|(_, v)| *v)
+        };
+        assert_eq!(set("GIT_ATTR_NOSYSTEM"), Some(Some(OsStr::new("1"))));
+        assert_eq!(set("XDG_CONFIG_HOME"), Some(None));
+        assert_eq!(set("HOME"), Some(Some(git.private.0.as_os_str())));
+        assert!(
+            command
+                .get_args()
+                .any(|a| a == "core.attributesFile=/dev/null")
+        );
+        drop(git);
         let _ = fs::remove_dir_all(&root);
     }
 
