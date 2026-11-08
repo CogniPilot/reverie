@@ -264,4 +264,20 @@ impl InstallingBroker {
     pub fn request_stop(&self) -> std::time::Instant {
         self.storage.runtime.request_stop()
     }
+    /// Install the broker's native termination-signal custody on this broker's
+    /// engine, once, before the service starts. A signal then cancels the
+    /// engine, which `stop_requested` reports.
+    pub fn install_broker_signals(
+        &self,
+    ) -> Result<
+        reverie_host::worker_runtime::BrokerSignals,
+        reverie_host::worker_runtime::BrokerSignalFailure,
+    > {
+        self.storage.runtime.install_broker_signals()
+    }
+    /// Whether a stop was requested on this broker's engine: a termination
+    /// signal observed through `install_broker_signals`, or `request_stop`.
+    pub fn stop_requested(&self) -> bool {
+        self.storage.runtime.cancellation().is_cancelled()
+    }
 }

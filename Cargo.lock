@@ -1365,6 +1365,7 @@ name = "reverie-task-cancel"
 version = "0.1.0"
 dependencies = [
  "libc",
+ "nix",
  "serde_json",
  "sha2",
 ]
