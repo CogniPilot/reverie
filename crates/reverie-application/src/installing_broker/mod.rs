@@ -12,6 +12,10 @@ mod goal_custody;
 mod gpu_access;
 pub use goal_custody::{GoalCustodyHandlerClosed, GoalCustodyHandlerFailure};
 mod image_refresh;
+mod installation_offer;
+pub use installation_offer::{
+    BrokerInstallationOffer, BrokerInstallationOfferCause, BrokerInstallationOfferFailure,
+};
 mod launch;
 mod lifecycle;
 mod pool_controller;

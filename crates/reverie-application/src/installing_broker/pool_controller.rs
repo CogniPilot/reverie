@@ -125,6 +125,17 @@ impl InstallingBroker {
     }
 }
 impl BrokerControllerBootstrap {
+    pub(super) fn published_birth_reference(
+        &self,
+    ) -> Result<PublishedControllerBirthData, BrokerControllerBootstrapCause> {
+        self.publication
+            .as_ref()
+            .ok_or(BrokerControllerBootstrapCause::Refused(
+                "WORKER_POOL_BIRTH_NOT_PUBLISHED",
+            ))?
+            .reference_data()
+            .map_err(BrokerControllerBootstrapCause::Observation)
+    }
     pub fn assert_current(&mut self, end: Instant) -> Result<(), BrokerControllerBootstrapCause> {
         if self.origin_closed {
             return Err(BrokerControllerBootstrapCause::Refused(
