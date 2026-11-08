@@ -7,9 +7,11 @@
  * - `loadTeams` reads `GET /api/teams` into `teams` and rebuilds both maps; a failed read keeps them.
  * - `initTeammateTerminal` reads the pane now and every 2 s while the window is in the page, redraws
  *   only when the pane changed, and stops once the window is gone.
+ * - A rapid minimize, re-open and close (subagent-windows.js's real minimize path) leaves no timer
+ *   behind, and a reply that arrives for a disposed or replaced terminal is never written.
  *
- * Real code under test: panels-ui.js in a `vm` context against a stub app and a minimal fake DOM
- * (no jsdom), as in folder-grid-ui.test.ts.
+ * Real code under test: panels-ui.js and subagent-windows.js in a `vm` context against a stub app
+ * and a minimal fake DOM (no jsdom), as in folder-grid-ui.test.ts.
  */
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -33,6 +35,7 @@ class FakeTerminal {
   static last: FakeTerminal;
   written: string[] = [];
   resets = 0;
+  disposed = false;
   unicode = { activeVersion: '' };
   constructor() {
     FakeTerminal.last = this;
@@ -43,6 +46,9 @@ class FakeTerminal {
   onData() {}
   write(s: string) {
     this.written.push(s);
+  }
+  dispose() {
+    this.disposed = true;
   }
   reset() {
     this.resets++;
@@ -77,19 +83,22 @@ function loadApp(fetchImpl: (url: string) => unknown) {
     DEFAULT_SCROLLBACK: 1000,
     // Late-bound so vi.useFakeTimers() reaches code running in the context.
     requestAnimationFrame: (fn: () => void) => setTimeout(fn, 0),
+    cancelAnimationFrame: (id: ReturnType<typeof setTimeout>) => clearTimeout(id),
     setTimeout: (fn: () => void, ms?: number) => setTimeout(fn, ms),
     clearTimeout: (id: ReturnType<typeof setTimeout>) => clearTimeout(id),
     setInterval: (fn: () => void, ms?: number) => setInterval(fn, ms),
     clearInterval: (id: ReturnType<typeof setInterval>) => clearInterval(id),
     fetch: vi.fn(async (url: string) => fetchImpl(url)),
   });
-  vm.runInContext(readFileSync(resolve(PUBLIC, 'panels-ui.js'), 'utf8'), context, { filename: 'panels-ui.js' });
+  for (const file of ['panels-ui.js', 'subagent-windows.js'])
+    vm.runInContext(readFileSync(resolve(PUBLIC, file), 'utf8'), context, { filename: file });
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const app = new ReverieApp() as Record<string, any>;
   app.teams = new Map();
   app.teammateMap = new Map();
   app.teammatePanesByName = new Map();
   app.teammateTerminals = new Map();
+  app.subagentWindows = new Map();
   return { app, inPage, fetch: context.fetch as ReturnType<typeof vi.fn> };
 }
 
@@ -168,6 +177,64 @@ describe('initTeammateTerminal', () => {
     inPage.delete(body);
     await vi.advanceTimersByTimeAsync(6000);
     expect(reads()).toBe(3);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+});
+
+describe('teammate terminal lifecycle', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  const AGENT = 'tester@zorblat-team';
+  const PANE = { paneTarget: '%7', sessionId: 's1' };
+  const windowFor = (body: unknown) => ({ querySelector: () => body, classList: { add() {} } });
+
+  it('a rapid minimize, re-open and close leaves no timer and writes nothing to a disposed terminal', async () => {
+    vi.useFakeTimers();
+    const replies: Array<(value: unknown) => void> = [];
+    const { app, inPage } = loadApp(() => new Promise((done) => replies.push(done)));
+    const body = { innerHTML: '', classList: { add() {} } };
+    inPage.add(body);
+    app.initTeammateTerminal(AGENT, PANE, windowFor(body));
+    await vi.advanceTimersByTimeAsync(50); // the terminal is open; its delayed start is still pending
+    const first = FakeTerminal.last;
+    app._disposeTeammateTerminalForMinimize(AGENT);
+    app.initTeammateTerminal(AGENT, PANE, windowFor(body));
+    await vi.advanceTimersByTimeAsync(150); // the re-opened terminal has started and asked for the pane
+    const second = FakeTerminal.last;
+    expect(second).not.toBe(first);
+    expect(replies).toHaveLength(1); // the first terminal's cancelled start never asked
+    app._disposeTeammateTerminalForMinimize(AGENT);
+    replies.forEach((done) => done(json({ success: true, data: { buffer: 'late' } })));
+    await vi.advanceTimersByTimeAsync(6300);
+    expect(vi.getTimerCount()).toBe(0);
+    expect(replies).toHaveLength(1);
+    expect([first.disposed, second.disposed]).toEqual([true, true]);
+    expect([first.written, second.written]).toEqual([[], []]);
+  });
+
+  it('a reply for a replaced terminal is dropped, and the new one draws its own', async () => {
+    vi.useFakeTimers();
+    const replies: Array<(value: unknown) => void> = [];
+    const { app, inPage } = loadApp(() => new Promise((done) => replies.push(done)));
+    const body = { innerHTML: '', classList: { add() {} } };
+    inPage.add(body);
+    app.initTeammateTerminal(AGENT, PANE, windowFor(body));
+    await vi.advanceTimersByTimeAsync(100);
+    const first = FakeTerminal.last;
+    app._disposeTeammateTerminalForMinimize(AGENT);
+    app.initTeammateTerminal(AGENT, PANE, windowFor(body));
+    await vi.advanceTimersByTimeAsync(100);
+    const second = FakeTerminal.last;
+    expect(replies).toHaveLength(2);
+    replies[0](json({ success: true, data: { buffer: 'old frame' } }));
+    await vi.advanceTimersByTimeAsync(0);
+    expect([first.written, second.written]).toEqual([[], []]);
+    replies[1](json({ success: true, data: { buffer: 'new frame' } }));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(second.written).toEqual(['new frame']);
+    app._disposeTeammateTerminalForMinimize(AGENT);
     expect(vi.getTimerCount()).toBe(0);
   });
 });

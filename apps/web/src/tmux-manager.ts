@@ -131,6 +131,7 @@ import {
 // ============================================================================
 
 import { EXEC_TIMEOUT_MS } from './config/exec-timeout.js';
+import { MAX_TEAMMATE_INPUT_ENTERS } from './config/terminal-limits.js';
 import { ensureDeepSeekStatusShim } from './deepseek-status-shim.js';
 
 /** How long a cached process snapshot stays usable. */
@@ -447,9 +448,12 @@ export function resolveTmuxPaneTarget(muxName: string, paneTarget?: string): str
 /**
  * The `send-keys` arguments that type `input` into a pane. Keystrokes arrive a chunk at a time from
  * a terminal: each piece of text goes in literally, spaces included, and each carriage return is its
- * own Enter, in order. Line feeds are dropped.
+ * own Enter, in order. Line feeds are dropped. Undefined when the input has more than
+ * MAX_TEAMMATE_INPUT_ENTERS carriage returns: each command is a synchronous tmux call, so such an input
+ * is refused whole, before anything is sent.
  */
-export function paneSendKeysArgs(input: string): string[] {
+export function paneSendKeysArgs(input: string): string[] | undefined {
+  if ((input.match(/\r/g)?.length ?? 0) > MAX_TEAMMATE_INPUT_ENTERS) return undefined;
   const args: string[] = [];
   input
     .replace(/\n/g, '')
@@ -4055,8 +4059,13 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
     const target = paneTarget.startsWith('%') ? `${muxName}.${paneTarget}` : `${muxName}.%${paneTarget}`;
     const tmux = this.tmux();
 
+    const plan = paneSendKeysArgs(input);
+    if (!plan) {
+      console.error('[TmuxManager] Too many line breaks in one pane input; nothing sent');
+      return false;
+    }
     try {
-      for (const args of paneSendKeysArgs(input)) {
+      for (const args of plan) {
         execSync(`${tmux} send-keys -t ${shellescape(target)} ${args}`, {
           encoding: 'utf-8',
           timeout: EXEC_TIMEOUT_MS,

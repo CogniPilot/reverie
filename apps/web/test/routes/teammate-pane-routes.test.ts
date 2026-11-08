@@ -8,6 +8,7 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { createRouteTestHarness, type RouteTestHarness } from './_route-test-utils.js';
 import { registerTeammatePaneRoutes } from '../../src/web/routes/teammate-pane-routes.js';
+import { MAX_INPUT_LENGTH, MAX_TEAMMATE_INPUT_ENTERS } from '../../src/config/terminal-limits.js';
 
 const SESSION = 'test-session-1';
 
@@ -142,6 +143,21 @@ describe('teammate-pane-routes', () => {
       const res = await sendInput(harness, { paneTarget: '%7', input: 'x' });
       expect(res.statusCode).toBe(404);
       expect(s.mux.sendInputToPane).not.toHaveBeenCalled();
+    });
+
+    it('refuses too many line breaks before anything is sent', async () => {
+      const s = await setup();
+      harness = s.harness;
+      // The route's largest input, all carriage returns: refused whole, the pane is never called.
+      const flood = await sendInput(harness, { paneTarget: '%7', input: '\r'.repeat(MAX_INPUT_LENGTH) });
+      expect(flood.statusCode).toBe(400);
+      expect(JSON.parse(flood.body).success).toBe(false);
+      const over = await sendInput(harness, { paneTarget: '%7', input: 'y\r'.repeat(MAX_TEAMMATE_INPUT_ENTERS + 1) });
+      expect(over.statusCode).toBe(400);
+      expect(s.mux.sendInputToPane).not.toHaveBeenCalled();
+      const most = await sendInput(harness, { paneTarget: '%7', input: 'y\r'.repeat(MAX_TEAMMATE_INPUT_ENTERS) });
+      expect(JSON.parse(most.body)).toEqual({ success: true });
+      expect(s.mux.sendInputToPane).toHaveBeenCalledTimes(1);
     });
 
     it('reports input that did not reach the pane', async () => {

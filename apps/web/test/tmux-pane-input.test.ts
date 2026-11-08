@@ -9,6 +9,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { paneSendKeysArgs } from '../src/tmux-manager.js';
+import { MAX_INPUT_LENGTH, MAX_TEAMMATE_INPUT_ENTERS } from '../src/config/terminal-limits.js';
 
 describe('paneSendKeysArgs', () => {
   it('sends a single typed character, including a space, literally', () => {
@@ -29,6 +30,16 @@ describe('paneSendKeysArgs', () => {
   it('drops line feeds, so a CRLF paste is one Enter per line', () => {
     expect(paneSendKeysArgs('one\r\ntwo\r\n')).toEqual(["-l 'one'", 'Enter', "-l 'two'", 'Enter']);
     expect(paneSendKeysArgs('\n')).toEqual([]);
+  });
+
+  it('refuses an input with too many line breaks whole, so nothing of it is sent', () => {
+    // The largest input the route accepts, all carriage returns: 65536 tmux calls if it were planned.
+    expect(paneSendKeysArgs('\r'.repeat(MAX_INPUT_LENGTH))).toBeUndefined();
+    expect(paneSendKeysArgs('a\r'.repeat(MAX_TEAMMATE_INPUT_ENTERS + 1))).toBeUndefined();
+    const most = paneSendKeysArgs('a\r'.repeat(MAX_TEAMMATE_INPUT_ENTERS));
+    expect(most).toHaveLength(2 * MAX_TEAMMATE_INPUT_ENTERS);
+    // Length alone is not the bound: a long line with no Enter is one call.
+    expect(paneSendKeysArgs('x'.repeat(MAX_INPUT_LENGTH))).toHaveLength(1);
   });
 
   it('quotes text so the shell running tmux sees it as one literal argument', () => {

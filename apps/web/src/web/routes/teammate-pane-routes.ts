@@ -9,7 +9,7 @@ import { z } from 'zod';
 import type { InfraPort, SessionPort } from '../ports/index.js';
 import { findSessionOrFail, parseBody } from '../route-helpers.js';
 import { ApiErrorCode, createErrorResponse } from '../../types/api.js';
-import { MAX_INPUT_LENGTH } from '../../config/terminal-limits.js';
+import { MAX_INPUT_LENGTH, MAX_TEAMMATE_INPUT_ENTERS } from '../../config/terminal-limits.js';
 
 /** A tmux pane id as agent teams record it (`%12`). */
 const PANE_TARGET = /^%\d{1,9}$/;
@@ -17,7 +17,14 @@ const PANE_TARGET = /^%\d{1,9}$/;
 const TeammatePaneInputSchema = z
   .object({
     paneTarget: z.string().regex(PANE_TARGET),
-    input: z.string().min(1).max(MAX_INPUT_LENGTH),
+    // Each Enter is its own synchronous tmux call, so their number is bounded before anything is sent.
+    input: z
+      .string()
+      .min(1)
+      .max(MAX_INPUT_LENGTH)
+      .refine((input) => (input.match(/\r/g)?.length ?? 0) <= MAX_TEAMMATE_INPUT_ENTERS, {
+        message: `At most ${MAX_TEAMMATE_INPUT_ENTERS} line breaks at once`,
+      }),
   })
   .strict();
 
