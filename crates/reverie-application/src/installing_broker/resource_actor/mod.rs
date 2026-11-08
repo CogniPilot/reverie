@@ -3,6 +3,8 @@
 //! Qualifying a website does not authorize an employee resource operation.
 mod custody;
 mod error;
+#[cfg(test)]
+mod native_fixture;
 mod operation;
 mod qualification;
 #[cfg(test)]
