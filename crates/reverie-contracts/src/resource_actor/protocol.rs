@@ -21,9 +21,10 @@ pub use reply::RamPreviewFields;
 #[cfg(test)]
 mod tests;
 pub use installation::{
-    CurrentPoolInstallationConsent, POOL_INSTALLATION_CONSENT_PURPOSE,
-    POOL_INSTALLATION_REQUEST_PURPOSE, PoolInstallationConsentRequest, PoolInstallationRequestData,
-    CurrentPoolInstallationViewer, PoolInstallationOfferViewData, PoolInstallationViewRequest,
+    CurrentPoolInstallationConsent, CurrentPoolInstallationViewer,
+    POOL_INSTALLATION_CONSENT_PURPOSE, POOL_INSTALLATION_REQUEST_PURPOSE,
+    PoolInstallationConsentRequest, PoolInstallationOfferViewData, PoolInstallationRequestData,
+    PoolInstallationViewRequest,
 };
 pub use owner::CurrentResourceOwner;
 pub use principal::ResourceOwnerPrincipal;

@@ -220,7 +220,9 @@ impl BrokerInstallationOffer {
     /// Terminal metadata close only. No broker/resource stop, offer replay,
     /// provider release or global shutdown acknowledgment is implied.
     pub fn close_origin_metadata(&mut self) -> Result<(), reverie_host::worker_pool::PoolError> {
-        if matches!(self.origin, Origin::Transferred) { return Ok(()); }
+        if matches!(self.origin, Origin::Transferred) {
+            return Ok(());
+        }
         self.metadata_closed = true;
         match &mut self.origin {
             Origin::Transferred => return Ok(()),

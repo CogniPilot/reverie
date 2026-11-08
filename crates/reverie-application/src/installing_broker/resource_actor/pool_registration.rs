@@ -79,7 +79,9 @@ pub(in crate::installing_broker) struct PoolRegistrationComponentClosed {
 }
 impl PoolRegistrationComponentClosed {
     pub(in crate::installing_broker) fn matches_offer(&self, identity: &Arc<()>) -> bool {
-        self.offer_identity.as_ref().is_some_and(|actual| Arc::ptr_eq(actual, identity))
+        self.offer_identity
+            .as_ref()
+            .is_some_and(|actual| Arc::ptr_eq(actual, identity))
     }
 }
 impl PoolRegistrationFailure<'_> {
@@ -119,12 +121,17 @@ impl PoolRegistrationFailure<'_> {
                     primary,
                     entry_primary: None,
                     first_cleanup,
-                    offer_identity: offer.as_ref().map(RegistrationOfferGuard::close_identity).or_else(|| owner.close_identity()),
+                    offer_identity: offer
+                        .as_ref()
+                        .map(RegistrationOfferGuard::close_identity)
+                        .or_else(|| owner.close_identity()),
                 };
                 if let Some(offer) = offer.as_mut() {
                     // Actual known Frame/socket/Hold close above, bound to the
                     // same original guard. This is not a pool/domain release.
-                    offer.channel_closed(&closed).expect("same original close identity");
+                    offer
+                        .channel_closed(&closed)
+                        .expect("same original close identity");
                 }
                 owner.channel_closed(&closed);
                 closed.entry_primary = owner.into_entry_primary();
@@ -200,7 +207,10 @@ impl InstallingBroker {
             cleanup_failures: 0,
             deadline,
         });
-        failure.primary = match failure.prepare(self) { Ok(()) => Cause::ControllerInstalled, Err(cause) => cause };
+        failure.primary = match failure.prepare(self) {
+            Ok(()) => Cause::ControllerInstalled,
+            Err(cause) => cause,
+        };
         failure
     }
 }

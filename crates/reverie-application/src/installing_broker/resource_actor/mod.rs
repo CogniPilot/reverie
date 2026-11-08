@@ -9,7 +9,9 @@ mod error;
 mod native_fixture;
 mod operation;
 mod pool_registration;
-pub(in crate::installing_broker) use pool_registration::{PoolRegistrationFailure, PoolRegistrationComponentClosed};
+pub(in crate::installing_broker) use pool_registration::{
+    PoolRegistrationComponentClosed, PoolRegistrationFailure,
+};
 mod qualification;
 #[cfg(test)]
 mod tests;
