@@ -1,6 +1,8 @@
 //! Named read-side laptop registry/lineage facts. No authorization or write API.
 pub(crate) mod lineage;
 mod registry;
+#[cfg(test)]
+mod provider_tests;
 
 use crate::legacy_json::{self, Node, Number, Text, Value, truthy};
 pub use lineage::StoredBinding;
