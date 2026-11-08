@@ -11,7 +11,7 @@ pub(super) struct HealthReaders {
     context: crate::reservation_observer::ObservationContext,
     process: reverie_host::website_facts::WebsiteProcessObserver,
     unknown: Option<Arc<crate::reservation_observer::ObserverError>>,
-    process_unknown: Option<Arc<reverie_host::website_facts::WebsiteFactsError>>,
+    process_unknown: Option<Rc<reverie_host::website_facts::WebsiteFactsError>>,
 }
 
 impl Frame<'_> {
@@ -22,7 +22,7 @@ impl Frame<'_> {
         let settled = readers.context.settle_metadata_owned(self.end);
         let finalized = readers.process.assert_finalized();
         if let Some(error) = &readers.process_unknown {
-            return Err(Cause::Provider(Arc::clone(error)));
+            return Err(Cause::Provider(Rc::clone(error)));
         }
         if let Some(error) = &readers.unknown {
             return Err(Cause::Observation(Arc::clone(error)));
@@ -269,10 +269,10 @@ impl HealthReaders {
             .context
             .provider_process(&mut self.process, row, end)
             .map_err(|error| {
-                let error = Arc::new(error);
+                let error = Rc::new(error);
                 if self.process.assert_finalized().is_err() {
                     self.process_unknown
-                        .get_or_insert_with(|| Arc::clone(&error));
+                        .get_or_insert_with(|| Rc::clone(&error));
                 }
                 Cause::Provider(error)
             })?;

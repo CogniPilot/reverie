@@ -11,6 +11,7 @@ use reverie_host::{
 };
 use std::{
     fmt,
+    rc::Rc,
     time::{Duration, Instant},
 };
 mod query;
@@ -25,7 +26,7 @@ enum Cause {
     Report(reverie_host::worker_reports::WorkerReportError),
     Identity(Arc<reverie_store::storage_identity::IdentityError>),
     Observation(Arc<crate::reservation_observer::ObserverError>),
-    Provider(Arc<reverie_host::website_facts::WebsiteFactsError>),
+    Provider(Rc<reverie_host::website_facts::WebsiteFactsError>),
     Refused(&'static str),
 }
 impl fmt::Display for Cause {
