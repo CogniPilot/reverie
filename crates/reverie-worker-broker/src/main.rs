@@ -67,9 +67,8 @@ fn main() -> ExitCode {
 fn run(arguments: Arguments) -> Result<(), Box<dyn std::error::Error>> {
     match arguments.command {
         Role::CheckConfig { config } => {
-            let snapshot = load_owner_config(&config).map_err(|error| {
+            let snapshot = load_owner_config(&config).inspect_err(|error| {
                 eprintln!("Configuration validation stage: {:?}", error.stage());
-                error
             })?;
             println!(
                 "{}",
