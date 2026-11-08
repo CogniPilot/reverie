@@ -3,7 +3,7 @@
 use super::*;
 use crate::installing_broker::launch::service::{HandlerReturned, run_service_launch};
 use crate::installing_broker::{
-    installation_offer::{RegistrationOfferGuard, SharedInstallationOffer},
+    installation_offer::SharedInstallationOffer,
     resource_actor::{PoolRegistrationFailure, ResourceOperationFailure},
 };
 use reverie_host::worker_reports::{
@@ -42,13 +42,13 @@ impl Stack<'_> {
                     Some(Retained::Socket(connection))
                 }
             }
-            Some(Retained::Registration(mut owner)) => {
-                if owner.settle_for_worker() {
+            Some(Retained::Registration(owner)) => match owner.settle_for_worker() {
+                Ok(closed) => {
+                    eprintln!("{closed}");
                     None
-                } else {
-                    Some(Retained::Registration(owner))
                 }
-            }
+                Err(owner) => Some(Retained::Registration(owner)),
+            },
             Some(Retained::ResourceOperation(owner)) => match owner.settle_for_worker() {
                 Ok(closed) => {
                     if let Some(error) = closed.primary_error() {
@@ -105,9 +105,6 @@ pub(super) fn run(
         }
         return;
     }
-    // Kept separately from Stack/Frame: no self-reference. This is a guard of
-    // the ONE outer offer, retained until the original B stack settles.
-    let mut registration_guard = None;
     let accepted = read(&broker, registered);
     let owner = match accepted {
         Ok(AcceptedWorkerServiceConnection::ReportCompleted) => None,
@@ -124,12 +121,7 @@ pub(super) fn run(
         Ok(AcceptedWorkerServiceConnection::Service(connection))
             if connection.purpose() == WorkerServicePurpose::PoolRegistration =>
         {
-            registration(
-                &broker,
-                connection,
-                installation_offer.as_ref(),
-                &mut registration_guard,
-            )
+            registration(&broker, connection, installation_offer.as_ref())
         }
         Ok(AcceptedWorkerServiceConnection::Service(connection)) => service(&broker, connection),
         Err(error) => {
@@ -163,11 +155,10 @@ pub(super) fn run(
         }
     }
 }
-fn registration<'a, 'offer>(
+fn registration<'a>(
     broker: &'a Arc<InstallingBroker>,
     connection: WorkerServiceConnection,
-    offer: Option<&'offer SharedInstallationOffer>,
-    held: &mut Option<RegistrationOfferGuard<'offer>>,
+    offer: Option<&'a SharedInstallationOffer>,
 ) -> Option<Retained<'a>> {
     let original_end = std::time::Instant::now() + std::time::Duration::from_secs(300);
     // The original accepted connection remains owned throughout lock/origin
@@ -180,18 +171,17 @@ fn registration<'a, 'offer>(
         },
         |offer| offer.enter_registration(broker),
     );
-    let mut failure = match entered {
-        Ok(guard) => {
-            let guard = held.insert(guard);
-            broker.handle_pool_registration(connection, guard, original_end)
-        }
+    let failure = match entered {
+        Ok(guard) => broker.handle_pool_registration(connection, guard, original_end),
         Err(cause) => broker.refuse_pool_registration(connection, cause, original_end),
     };
     eprintln!("{failure}");
-    if failure.settle_for_worker() {
-        None
-    } else {
-        Some(Retained::Registration(failure))
+    match failure.settle_for_worker() {
+        Ok(closed) => {
+            eprintln!("{closed}");
+            None
+        }
+        Err(owner) => Some(Retained::Registration(owner)),
     }
 }
 fn read(

@@ -17,6 +17,14 @@ enum Owner<'a> {
         pin: Option<PoolRegistrationPin>,
     },
 }
+impl Owner<'_> {
+    fn into_entry_primary(self) -> Option<ResourceActorError> {
+        match self {
+            Self::Entry(owner) => Some(owner.cause),
+            _ => None,
+        }
+    }
+}
 enum Cause {
     Offer(BrokerInstallationOfferCause),
     Website(ResourceActorError),
@@ -36,29 +44,77 @@ impl std::fmt::Display for Cause {
 #[must_use = "retain this original B frame, pin and counted handler through checked cleanup"]
 pub(in crate::installing_broker) struct PoolRegistrationFailure<'a> {
     owner: Owner<'a>,
+    offer: Option<RegistrationOfferGuard<'a>>,
     primary: Cause,
     first_cleanup: Option<ResourceActorError>,
     cleanup_failures: u64,
     deadline: Instant,
 }
+/// Original channel component only, never consent, an offer release, joined
+/// handler, native resource closure or administration/capacity authority.
+pub(in crate::installing_broker) struct PoolRegistrationComponentClosed {
+    primary: Cause,
+    entry_primary: Option<ResourceActorError>,
+    first_cleanup: Option<ResourceActorError>,
+}
 impl PoolRegistrationFailure<'_> {
     /// SAME original components only. No attestation, offer claim, consent or
     /// reply is replayed by a handler reconciliation command.
-    pub(in crate::installing_broker) fn settle_for_worker(&mut self) -> bool {
+    pub(in crate::installing_broker) fn settle_for_worker(
+        mut self: Box<Self>,
+    ) -> std::result::Result<PoolRegistrationComponentClosed, Box<Self>> {
         let result = match &mut self.owner {
             Owner::Moving => Err(ResourceActorError::Refused("POOL_REGISTRATION_ENTRY_STATE")),
             Owner::Incoming(connection) => connection.close_socket_for_worker().map_err(Into::into),
             Owner::Entry(owner) => owner.close_channel_component(self.deadline),
             Owner::Joined { website, .. } => website.close_channel_component(self.deadline),
         };
+        let result = match result {
+            Ok(WorkerLaunchClose::Complete | WorkerLaunchClose::SocketClosedHandlerRetained) => {
+                Ok(())
+            }
+            Ok(WorkerLaunchClose::SocketClosedLifecycleHeld) => Err(ResourceActorError::Refused(
+                "POOL_REGISTRATION_LIFECYCLE_HELD",
+            )),
+            Err(cause) => Err(cause),
+        };
         match result {
-            Ok(_) => true,
+            Ok(()) => {
+                let Self {
+                    owner,
+                    offer,
+                    primary,
+                    first_cleanup,
+                    ..
+                } = *self;
+                let entry_primary = owner.into_entry_primary();
+                // The Frame/channel owners close and drop before releasing
+                // the actual offer guard; no count or Arc observation grants it.
+                drop(offer);
+                Ok(PoolRegistrationComponentClosed {
+                    primary,
+                    entry_primary,
+                    first_cleanup,
+                })
+            }
             Err(cause) => {
                 self.first_cleanup.get_or_insert(cause);
                 self.cleanup_failures = self.cleanup_failures.saturating_add(1);
-                false
+                Err(self)
             }
         }
+    }
+}
+impl std::fmt::Display for PoolRegistrationComponentClosed {
+    fn fmt(&self, out: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.primary.fmt(out)?;
+        if let Some(cause) = &self.entry_primary {
+            write!(out, "; original entry: {cause}")?;
+        }
+        if let Some(cause) = &self.first_cleanup {
+            write!(out, "; prior cleanup: {cause}")?;
+        }
+        Ok(())
     }
 }
 impl std::fmt::Display for PoolRegistrationFailure<'_> {
@@ -86,40 +142,42 @@ impl InstallingBroker {
     ) -> Box<PoolRegistrationFailure<'_>> {
         Box::new(PoolRegistrationFailure {
             owner: Owner::Incoming(connection),
+            offer: None,
             primary: Cause::Offer(cause),
             first_cleanup: None,
             cleanup_failures: 0,
             deadline,
         })
     }
-    pub(in crate::installing_broker) fn handle_pool_registration(
-        self: &Arc<Self>,
+    pub(in crate::installing_broker) fn handle_pool_registration<'a>(
+        self: &'a Arc<Self>,
         connection: WorkerServiceConnection,
-        offer: &mut RegistrationOfferGuard<'_>,
+        offer: RegistrationOfferGuard<'a>,
         original_end: Instant,
-    ) -> Box<PoolRegistrationFailure<'_>> {
+    ) -> Box<PoolRegistrationFailure<'a>> {
         // Capture the original B deadline before any fallible observation and
         // retain the accepted connection in this owner before checking origin.
         let deadline = original_end.min(offer.deadline());
         let mut failure = Box::new(PoolRegistrationFailure {
             owner: Owner::Incoming(connection),
+            offer: Some(offer),
             primary: Cause::Refused("POOL_REGISTRATION_CONSENT_CONTINUATION_REQUIRED"),
             first_cleanup: None,
             cleanup_failures: 0,
             deadline,
         });
-        if let Err(cause) = failure.prepare(self, offer) {
+        if let Err(cause) = failure.prepare(self) {
             failure.primary = cause;
         }
         failure
     }
 }
 impl<'a> PoolRegistrationFailure<'a> {
-    fn prepare(
-        &mut self,
-        broker: &'a Arc<InstallingBroker>,
-        offer: &mut RegistrationOfferGuard<'_>,
-    ) -> std::result::Result<(), Cause> {
+    fn prepare(&mut self, broker: &'a Arc<InstallingBroker>) -> std::result::Result<(), Cause> {
+        let offer = self
+            .offer
+            .as_mut()
+            .ok_or(Cause::Refused("POOL_INSTALLATION_OFFER_REQUIRED"))?;
         offer.assert_current(broker).map_err(Cause::Offer)?;
         let Owner::Incoming(connection) = std::mem::replace(&mut self.owner, Owner::Moving) else {
             return Err(Cause::Refused("POOL_REGISTRATION_ENTRY_STATE"));
