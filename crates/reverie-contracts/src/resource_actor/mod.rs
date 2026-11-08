@@ -5,6 +5,11 @@ mod image_time;
 mod metadata;
 mod native_client;
 mod process;
+mod protocol;
+pub use protocol::{
+    CurrentResourceOwner, RAM_POOL_PURPOSE, ResourceOperationRequest, ResourceRequestSelection,
+    decode_ram_pool_hello,
+};
 mod provenance;
 mod settings;
 #[cfg(test)]
