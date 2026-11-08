@@ -1,4 +1,6 @@
 use super::*;
+#[path = "tests_ram_receipt.rs"]
+mod receipt_cases;
 fn ram_preparing(
     hard: u32,
     high: Option<u32>,
