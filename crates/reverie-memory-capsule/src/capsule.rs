@@ -1,9 +1,5 @@
-use crate::{
-    Arguments, Result, execution, files,
-    libraries::Libraries,
-    refused,
-    tools::{Tools, immutable_input},
-};
+use crate::{Arguments, Result, execution, files, refused};
+use reverie_elf_bundle::{Libraries, Tools, immutable_input};
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs,
@@ -161,7 +157,7 @@ fn write_origin_inventory(
             "output": destination.strip_prefix(target)?, "sha256": files::digest(destination)?,
         }));
     }
-    for (name, source) in &libraries.selected {
+    for (name, source) in libraries.selected() {
         artifacts.push(serde_json::json!({
             "input": source, "inputSha256": files::digest(source)?,
             "output": format!("lib/{name}"), "sha256": files::digest(&target.join("lib").join(name))?,
@@ -199,7 +195,7 @@ fn install_libraries(
     loader: &str,
     tools: &Tools,
 ) -> Result<()> {
-    for (name, source) in &libraries.selected {
+    for (name, source) in libraries.selected() {
         let destination = target.join("lib").join(name);
         files::copy(source, &destination)?;
         if name == loader {

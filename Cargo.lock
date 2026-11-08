@@ -1062,6 +1062,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "reverie-elf-bundle"
+version = "0.1.0"
+dependencies = [
+ "sha2",
+]
+
+[[package]]
 name = "reverie-front"
 version = "0.1.0"
 dependencies = [
@@ -1172,6 +1179,7 @@ name = "reverie-memory-capsule"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "reverie-elf-bundle",
  "serde",
  "serde_json",
  "sha2",

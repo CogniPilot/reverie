@@ -5,12 +5,12 @@ use std::{
     path::{Path, PathBuf},
 };
 
-pub(crate) struct Libraries {
+pub struct Libraries {
     index: BTreeMap<String, BTreeSet<PathBuf>>,
-    pub(crate) selected: BTreeMap<String, PathBuf>,
+    selected: BTreeMap<String, PathBuf>,
 }
 impl Libraries {
-    pub(crate) fn new(closure: &Path) -> Result<Self> {
+    pub fn new(closure: &Path) -> Result<Self> {
         let mut index: BTreeMap<String, BTreeSet<PathBuf>> = BTreeMap::new();
         for line in fs::read_to_string(closure)?.lines() {
             let root = Path::new(line);
@@ -58,7 +58,7 @@ impl Libraries {
         }
         Ok(first.clone())
     }
-    pub(crate) fn include(&mut self, root: &Path, tools: &Tools) -> Result<()> {
+    pub fn include(&mut self, root: &Path, tools: &Tools) -> Result<()> {
         let mut pending = vec![root.to_owned()];
         let mut visited = BTreeSet::new();
         while let Some(source) = pending.pop() {
@@ -81,6 +81,9 @@ impl Libraries {
             self.interpreter(&source, tools)?;
         }
         Ok(())
+    }
+    pub fn selected(&self) -> &BTreeMap<String, PathBuf> {
+        &self.selected
     }
     fn select(&mut self, name: String, resolved: &Path) -> Result<()> {
         if let Some(previous) = self.selected.get(&name) {
