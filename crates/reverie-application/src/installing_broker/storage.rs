@@ -19,9 +19,14 @@ mod replacement_stop;
 pub(in crate::installing_broker) use ordinary_stop::OrdinaryStopPreparation;
 mod source;
 mod started;
+mod stopped_ram;
 pub use observed::OwnedCreatePreparationError;
 pub(crate) use source::RegisteredSource;
 pub(super) use source::SourceAttachment;
+pub(crate) use stopped_ram::{
+    RestoredStoppedRamSource, RetainedStoppedRamSource, StoppedRamAdvanceFailure, StoppedRamError,
+    StoppedRamRestoreFailure, StoppedRamRetainFailure, StoppedRamSource,
+};
 #[cfg(test)]
 pub(in crate::installing_broker) mod tests;
 use super::*;
@@ -56,6 +61,7 @@ enum EntryOwner {
     Direct(Box<LaunchStorage>),
     Finalizing(FinalizingStorage),
     Source(Arc<source::SourceRecord>),
+    StoppedRam(Arc<Mutex<stopped_ram::Record>>),
     Nix(reverie_host::worker_nix::NixWorkflow),
     Laptop(reverie_host::worker_laptop::LaptopWorkflow),
     ReplacementStop(Arc<Mutex<reverie_host::worker_source_stop::OrdinaryReplacementStop>>),
@@ -275,6 +281,7 @@ fn require_direct_release(owner: &EntryOwner) -> Result<(), StorageWorkflowError
         EntryOwner::Laptop(_) => "WORKER_LAPTOP_STORAGE_RETAINED",
         EntryOwner::Existing(_) => "WORKER_EXISTING_VIEWER_RETAINED",
         EntryOwner::Source(_) => "WORKER_ORIGINAL_SOURCE_RETAINED",
+        EntryOwner::StoppedRam(_) => "RAM_STOPPED_SOURCE_RETAINED",
         EntryOwner::ReplacementStop(_) => "WORKER_REPLACEMENT_STOP_RETAINED",
         EntryOwner::OrdinaryStop(_) => "WORKER_ORDINARY_STOP_RETAINED",
     };

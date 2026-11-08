@@ -5,6 +5,8 @@ mod custody;
 mod error;
 mod source;
 mod stop_budget;
+mod stopped_ram;
+pub(crate) use stopped_ram::{StoppedRamObservation, StoppedRamPresence, StoppedRamPresent};
 #[cfg(test)]
 pub(crate) mod tests;
 pub use capacity::{CapacityFacts, WebsiteBinding};
