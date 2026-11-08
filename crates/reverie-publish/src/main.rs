@@ -1,5 +1,6 @@
 //! `reverie-publish`: reviewed publication from sealed packets. This release has `check`, which
-//! runs every shared check against a packet and an object store without writing anywhere.
+//! runs every shared check against a packet and an object store. It writes only into that local
+//! store (a private copy of the bundle and its imported refs) and nothing anywhere else.
 use clap::{Parser, Subcommand};
 use reverie_namegate::{Kind, Lists};
 use reverie_publish::{
@@ -21,7 +22,8 @@ struct Arguments {
 enum Action {
     /// Check a packet against an object store: seal, bundle, head and tree, every commit beyond
     /// the base (identity, sign-off, rule 8), the title and body, a clean merge with the base,
-    /// and the approval record when given. Writes nothing.
+    /// and the approval record when given. Writes only into the local object store (the imported
+    /// bundle); nothing is pushed or sent.
     Check(Check),
 }
 
