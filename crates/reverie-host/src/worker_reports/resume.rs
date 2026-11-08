@@ -137,16 +137,7 @@ impl WorkerActorChannel {
         let stream = slot.as_ref().ok_or(WorkerReportError::Unconfirmed)?;
         nix::sys::socket::setsockopt(stream, nix::sys::socket::sockopt::PassCred, &true)
             .map_err(|error| WorkerReportError::Io(error.into()))?;
-        self.peer = Some(
-            nix::sys::socket::getsockopt(stream, nix::sys::socket::sockopt::PeerPidfd).map_err(
-                |error| match error {
-                    nix::errno::Errno::ENOPROTOOPT | nix::errno::Errno::EINVAL => {
-                        WorkerReportError::ChannelCapability
-                    }
-                    _ => WorkerReportError::Io(error.into()),
-                },
-            )?,
-        );
+        self.peer = Some(super::peer_pin::acquire(stream)?);
         self.require_live()
     }
     fn require_live(&self) -> Result<()> {
@@ -155,18 +146,7 @@ impl WorkerActorChannel {
         }
         self.connection.record.require_terminal_hold()?;
         let peer = self.peer.as_ref().ok_or(WorkerReportError::Unconfirmed)?;
-        use std::os::fd::AsFd;
-        let mut fds = [nix::poll::PollFd::new(
-            peer.as_fd(),
-            nix::poll::PollFlags::POLLIN,
-        )];
-        let ready = nix::poll::poll(&mut fds, nix::poll::PollTimeout::ZERO)
-            .map_err(|error| WorkerReportError::Io(error.into()))?;
-        if ready == 0 {
-            Ok(())
-        } else {
-            Err(WorkerReportError::Peer)
-        }
+        super::peer_pin::require_alive(peer)
     }
     /// Adjacent cancellation observation for the actual action owner. This
     /// cannot replace that owner's fresh code, process, scope and target checks.

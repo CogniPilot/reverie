@@ -17,6 +17,7 @@ pub use protected_launch::{
     WorkerProtectedLaunchConnection,
 };
 mod resume;
+mod peer_pin;
 mod service_connection;
 pub use resume::{WorkerActorChannel, WorkerActorChannelFailure};
 pub use service_connection::{

@@ -151,11 +151,6 @@ impl WorkerActorChannel {
         }
         let slot = self.connection.record.terminal_stream()?;
         let stream = slot.as_ref().ok_or(WorkerReportError::Unconfirmed)?;
-        let flags = nix::sys::socket::MsgFlags::MSG_DONTWAIT | nix::sys::socket::MsgFlags::MSG_PEEK;
-        match nix::sys::socket::recv(stream.as_raw_fd(), &mut [0; 1], flags) {
-            Ok(0) => Ok(true),
-            Ok(_) | Err(nix::errno::Errno::EAGAIN) => Ok(false),
-            Err(error) => Err(std::io::Error::from(error).into()),
-        }
+        super::super::peer_pin::socket_ended(stream)
     }
 }
