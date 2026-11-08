@@ -5,15 +5,17 @@
 //! PR's head branch to a reviewed head. `pr-text`, `issue-create` and `issue-close` publish text
 //! only (a PR's title, body and labels, an issue, a closing comment), each from a sealed packet and
 //! a text approval record. `mint-merge-main` makes and checks the merge of main into a PR head in a
-//! local store and writes a new sealed packet for review.
+//! local store and writes a new sealed packet for review. `merge` runs the same checks, then
+//! GitHub's, and merges the PR with a merge commit.
 use clap::{Parser, Subcommand};
-use reverie_namegate::Lists;
+use reverie_namegate::{Kind, Lists};
 use reverie_publish::{
-    askpass,
+    approval::Approval,
+    askpass, commits,
     custody::Held,
     git::Git,
     github::{API, Curl, Repo},
-    mint,
+    merge, mint,
     packet::Packet,
     pull::Target,
     record::Records,
@@ -63,6 +65,12 @@ enum Action {
     /// that is exactly main's own change. Writes a new sealed packet (bundle, commit, deltas,
     /// remerge diff, summary) for review. Nothing is pushed or sent.
     MintMergeMain(MintMergeMain),
+    /// Merge a PR with a merge commit after every check passes: the packet checks above with an
+    /// approval record that names this PR, then GitHub's: the PR is open at --head with the
+    /// reviewed title and body and reported clean, every check run on that head passed, and its
+    /// title, body, comments and reviews pass rule 8. Records the intent first and reads the
+    /// merge back.
+    Merge(Merge),
 }
 
 #[derive(clap::Args)]
@@ -263,6 +271,30 @@ struct PushFf {
     dry: bool,
 }
 
+#[derive(clap::Args)]
+struct Merge {
+    #[command(flatten)]
+    check: Check,
+    /// The PR number.
+    #[arg(long)]
+    pr: u64,
+    /// Directory for the intent, result and readback records.
+    #[arg(long)]
+    records: PathBuf,
+    /// The file holding only the token.
+    #[arg(long)]
+    token_file: PathBuf,
+    /// A private directory for the request body.
+    #[arg(long)]
+    scratch: PathBuf,
+    /// The GitHub API base (a loopback test server is the only alternative).
+    #[arg(long, default_value = API)]
+    api_base: String,
+    /// Run every check and read, then stop before the merge.
+    #[arg(long)]
+    dry: bool,
+}
+
 fn main() -> ExitCode {
     if std::env::var_os(askpass::MODE).is_some_and(|mode| mode == "1") {
         return ask();
@@ -275,6 +307,7 @@ fn main() -> ExitCode {
         Action::IssueClose(options) => issue_close(&options),
         Action::PushFf(options) => push_ff(&options),
         Action::MintMergeMain(options) => mint_merge_main(&options),
+        Action::Merge(options) => merge(&options),
     };
     match result {
         Ok(summary) => {
@@ -1070,6 +1103,124 @@ fn read_back(api: &Repo<'_>, path: &str, head: &str) -> Result<Value, String> {
         pr = api.call("GET", path, None)?;
     }
     Ok(pr)
+}
+
+/// A packet's title and body.
+type PacketText = (String, String);
+
+/// Every packet check, then `approval` (already loaded, never read again) against the exact head,
+/// base, title and body those checks verified; returns the summary and the packet's title and body.
+fn verify_approved(o: &Check, approval: &Approval) -> Result<(Value, Option<PacketText>), String> {
+    let git = Git::open(&o.common.git_dir)?;
+    let verified = run_verify(&o.common, &git, &lists(&o.common)?, &o.base, None)?;
+    let text = verified
+        .text
+        .as_ref()
+        .map(|(t, b)| (t.as_str(), b.as_str()));
+    approval.verify(&git, &o.common.repo, &verified.head, &verified.base, text)?;
+    let mut summary = verified.summary;
+    summary["approval"] = json!(true);
+    Ok((summary, verified.text))
+}
+
+fn merge(o: &Merge) -> Result<Value, String> {
+    let path = o
+        .check
+        .approval
+        .as_ref()
+        .ok_or("merging needs --approval")?;
+    // One read of the record: the merge permission and every object and text check below use this
+    // same value, so records swapped at the path between reads can never combine their permissions.
+    let approval = Approval::load(path)?;
+    if approval.merge_pr != Some(o.pr) {
+        return Err(format!(
+            "the approval record does not authorize merging PR {}",
+            o.pr
+        ));
+    }
+    let branch = approval
+        .merge_base_branch
+        .as_deref()
+        .ok_or("the approval record does not name the branch the merge targets")?;
+    // Every packet check, the approval against the exact head, base, title and body included.
+    let (mut summary, text) = verify_approved(&o.check, &approval)?;
+    let (title, body) =
+        text.ok_or("merging needs the reviewed TITLE.txt and BODY.md in the packet")?;
+    let name = short_name(&o.check.common.repo)?;
+    let lists = lists(&o.check.common)?;
+    let curl = Curl::new(&o.token_file, &o.scratch, &o.api_base)?;
+    let api = Repo {
+        transport: &curl,
+        name: o.check.common.repo.clone(),
+    };
+    let (number, head) = (o.pr, o.check.common.head.as_str());
+    let pr = api.call("GET", &format!("/pulls/{number}"), None)?;
+    merge::ready(&pr, number, head, &title, &body)?;
+    // approval.verify above has bound approval.base to the full id of --base in the store.
+    let target = merge::Target {
+        repo: &o.check.common.repo,
+        branch,
+        base: &approval.base,
+    };
+    merge::targets(&pr, target)?;
+    let runs = api.call(
+        "GET",
+        &format!("/commits/{head}/check-runs?per_page=100"),
+        None,
+    )?;
+    let status = api.call("GET", &format!("/commits/{head}/status"), None)?;
+    let check_runs = merge::checks_green(&runs, &status, head)?;
+    let comments = api.call(
+        "GET",
+        &format!("/issues/{number}/comments?per_page=100"),
+        None,
+    )?;
+    let reviews = api.call(
+        "GET",
+        &format!("/pulls/{number}/reviews?per_page=100"),
+        None,
+    )?;
+    let review_comments = api.call(
+        "GET",
+        &format!("/pulls/{number}/comments?per_page=100"),
+        None,
+    )?;
+    for (what, text) in merge::public_texts(&pr, &comments, &reviews, &review_comments)? {
+        commits::clean(&lists, &text, Kind::Text, name, &what)?;
+    }
+    summary["pr"] = json!(number);
+    summary["checkRuns"] = json!(check_runs);
+    if o.dry {
+        return Ok(summary);
+    }
+    let records = Records::new(&o.records)?;
+    records.intent(&json!({
+        "action": "merge",
+        "repo": o.check.common.repo,
+        "pr": number,
+        "head": head,
+        "baseBranch": branch,
+        "base": approval.base,
+        "mergeMethod": "merge",
+        "packetSeal": o.check.common.seal,
+        "approval": path,
+    }))?;
+    // `sha` makes GitHub refuse if the head moved after these checks.
+    let result = api.call(
+        "PUT",
+        &format!("/pulls/{number}/merge"),
+        Some(&json!({ "merge_method": "merge", "sha": head })),
+    )?;
+    records.result("MERGE-RESULT.json", &result)?;
+    let sha = merge::merge_reply(&result)?;
+    let after = api.call("GET", &format!("/pulls/{number}"), None)?;
+    records.result("PR-READBACK.json", &after)?;
+    let commit = api.call("GET", &format!("/commits/{sha}"), None)?;
+    records.result("MERGE-COMMIT-READBACK.json", &commit)?;
+    merge::merged(&after, &commit, number, head, &sha, target)?;
+    summary["merged"] = json!(true);
+    summary["mergeCommit"] = json!(sha);
+    Ok(summary)
 }
 
 #[cfg(test)]
