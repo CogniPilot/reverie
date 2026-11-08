@@ -24,3 +24,23 @@ impl StartupOwner {
         })
     }
 }
+
+impl StartupOwner {
+    pub(super) fn close_installation_origin_metadata(
+        &mut self,
+    ) -> Result<(), reverie_host::worker_pool::PoolError> {
+        self.installation_offer
+            .as_mut()
+            .map_or(Ok(()), BrokerInstallationOffer::close_origin_metadata)
+    }
+}
+impl BrokerStartupFailure {
+    /// Close only this SAME retained offer's actual origin/publication owners.
+    /// The primary startup cause and whole broker/offer remain retained;
+    /// returned secondary causes do not become a service/global close receipt.
+    pub fn close_installation_origin_metadata(
+        &mut self,
+    ) -> Result<(), reverie_host::worker_pool::PoolError> {
+        self.owner.close_installation_origin_metadata()
+    }
+}

@@ -90,7 +90,11 @@ fn actual_expired_owner_enters_startup_failure_whole_without_prefix_effects_or_n
     assert!(matches!(offer.origin, Origin::Unopened));
     assert!(offer.snapshot.is_none() && offer.nonce.is_none() && offer.published.is_none());
     assert!(!offer.service_closed);
-    offer.close_origin_metadata().unwrap();
+    failure.close_installation_origin_metadata().unwrap();
+    assert!(matches!(
+        failure.cause(),
+        BrokerStartupCause::InstallationOffer(_)
+    ));
     assert!(!root.join("control").exists() && !root.join("calls.txt").exists());
     failure.close_listener_component().unwrap();
     close_unstarted(&failure.owner.broker);
@@ -132,8 +136,12 @@ fn actual_foreign_broker_cannot_adopt_retained_offer_or_lose_either_runtime() {
     let offer = failure.owner.installation_offer.as_mut().unwrap();
     assert!(budget.same_runtime(&offer.broker.storage.runtime));
     assert!(!Arc::ptr_eq(&other, &offer.broker));
-    offer.close_origin_metadata().unwrap();
-    close_unstarted(&offer.broker);
+    failure.close_installation_origin_metadata().unwrap();
+    assert!(matches!(
+        failure.cause(),
+        BrokerStartupCause::InstallationOffer(_)
+    ));
+    close_unstarted(&failure.owner.installation_offer.as_ref().unwrap().broker);
     close_unstarted(&other);
     assert!(!root.join("control").exists() && !root.join("calls.txt").exists());
     assert!(!other_root.join("control").exists() && !other_root.join("calls.txt").exists());

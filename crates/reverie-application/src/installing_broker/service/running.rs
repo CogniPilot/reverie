@@ -170,6 +170,16 @@ impl BrokerService {
     }
 }
 impl BrokerServiceFailure {
+    /// Original metadata component only; no native/app/handler/global closure
+    /// or healthy broker release is implied. The historical cause stays intact.
+    pub fn close_installation_origin_metadata(
+        &mut self,
+    ) -> Result<(), reverie_host::worker_pool::PoolError> {
+        self.service
+            .startup
+            .owner
+            .close_installation_origin_metadata()
+    }
     pub fn cause(&self) -> &BrokerServiceError {
         &self.cause
     }
