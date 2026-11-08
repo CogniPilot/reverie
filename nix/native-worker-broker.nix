@@ -1,11 +1,21 @@
 # Unselected native broker integration package. Its fixed build-only role emits
 # provenance after stripping/fixup, hashing the actual final installed ELF.
 { pkgs, src, perfGuestCapsule ? null, taskPerfPolicy ? null, taskPerfPolicyV2 ? null, previousUnit ? null }:
-pkgs.rustPlatform.buildRustPackage {
+let
+  workspace = import ./rust-workspace-source.nix {
+    inherit pkgs src;
+    members = [
+      "reverie-worker-broker" "reverie-application" "reverie-host"
+      "reverie-core" "reverie-contracts" "reverie-store" "reverie-http"
+      "reverie-diagnostics" "reverie-python-regex"
+    ];
+    vendors = [ "rustpython-sre-engine" "rustpython-wtf8" ];
+  };
+in pkgs.rustPlatform.buildRustPackage {
   pname = "reverie-native-worker-broker";
   version = "0.1.0";
-  inherit src;
-  cargoLock.lockFile = src + "/Cargo.lock";
+  src = workspace.source;
+  cargoLock.lockFile = workspace.lockFile;
   cargoBuildFlags = [ "-p" "reverie-worker-broker" ];
   cargoTestFlags = [ "-p" "reverie-worker-broker" ];
   env = pkgs.lib.optionalAttrs (perfGuestCapsule != null) {
