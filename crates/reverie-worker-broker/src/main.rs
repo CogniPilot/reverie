@@ -16,8 +16,8 @@ mod service;
 #[derive(Parser)]
 #[command(
     version,
-    about = "Native worker broker (unselected integration package)",
-    long_about = "Fixed broker --config role over the installing Runtime and registered handler owners. This integration package does not advertise fleet/pool/all-verb readiness and is not selected by the shipped hybrid service. No arbitrary command or runtime engine path is accepted."
+    about = "Native worker broker and owner bootstrap",
+    long_about = "Run the worker service, validate configuration, or manage a registered native installation. Use 'image preview' before 'image apply'. Applying an image requires an already-loaded factory image, an inactive native service, and physically stopped workers. Image apply changes the selected image; it does not start the service or recreate laptops. See each subcommand's --help for its required inputs."
 )]
 struct Arguments {
     #[command(subcommand)]
