@@ -224,3 +224,23 @@ fn a_job_admitted_moments_earlier_keeps_a_back_to_back_one_out_until_it_exits() 
     let third = seat.job(&["run", "--estimate", "60m", "--wait-secs", "0", "--", "true"]);
     assert_eq!(third.status.code(), Some(0), "{}", stderr(&third));
 }
+
+#[test]
+fn a_failed_release_after_the_command_ran_still_reports_the_command_status() {
+    let seat = Seat::new("release", &format!("{}\n", 1024 * MIB), &stat(10));
+    let ledger = seat.ledger();
+    let lock_down = format!("chmod 500 '{}'; exit 3", ledger.display());
+    let out = seat.job(&["run", "--estimate", "1m", "--", "sh", "-c", &lock_down]);
+    use std::os::unix::fs::PermissionsExt;
+    fs::set_permissions(&ledger, fs::Permissions::from_mode(0o700)).unwrap();
+    assert_eq!(out.status.code(), Some(3), "{}", stderr(&out));
+    assert!(stderr(&out).contains("not released"), "{}", stderr(&out));
+}
+
+#[test]
+fn a_command_killed_by_a_signal_exits_128_plus_the_signal() {
+    let seat = Seat::new("signal", &format!("{}\n", 1024 * MIB), &stat(10));
+    let out = seat.job(&["run", "--estimate", "1m", "--", "sh", "-c", "kill -9 $$"]);
+    assert_eq!(out.status.code(), Some(137), "{}", stderr(&out));
+    assert!(seat.holders().is_empty());
+}

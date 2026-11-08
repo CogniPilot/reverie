@@ -115,17 +115,41 @@ pub fn parse_size(text: &str) -> Option<u64> {
         .filter(|bytes| *bytes > 0)
 }
 
-/// Default ledger directory: per user, under the runtime directory when there is one.
-pub fn default_ledger(runtime_dir: Option<&Path>, uid: u32) -> std::path::PathBuf {
-    match runtime_dir {
-        Some(dir) => dir.join("reverie-job"),
-        None => std::env::temp_dir().join(format!("reverie-job-{uid}")),
+/// Default ledger directory, per user: the runtime directory, else the state directory under the
+/// home directory (outside any /tmp cleanup), else a per-user directory under /tmp.
+pub fn default_ledger(
+    runtime_dir: Option<&Path>,
+    home: Option<&Path>,
+    uid: u32,
+) -> std::path::PathBuf {
+    match (runtime_dir, home) {
+        (Some(dir), _) => dir.join("reverie-job"),
+        (None, Some(home)) => home.join(".local/state/reverie-job"),
+        (None, None) => std::env::temp_dir().join(format!("reverie-job-{uid}")),
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_default_ledger_prefers_runtime_then_home_state_then_tmp() {
+        let runtime = Path::new("/run/user/7");
+        let home = Path::new("/home/casey");
+        assert_eq!(
+            default_ledger(Some(runtime), Some(home), 7),
+            runtime.join("reverie-job")
+        );
+        assert_eq!(
+            default_ledger(None, Some(home), 7),
+            home.join(".local/state/reverie-job")
+        );
+        assert_eq!(
+            default_ledger(None, None, 7),
+            std::env::temp_dir().join("reverie-job-7")
+        );
+    }
 
     #[test]
     fn parses_sizes_and_refuses_zero_or_junk() {

@@ -19,7 +19,7 @@ const NOT_RUN: u8 = 75;
 #[command(
     about = "Run a heavy command (build, test suite) only when this seat has memory room for it.",
     long_about = "Reserve the command's estimated memory in this seat's ledger, wait until every reservation and the seat's non-reclaimable usage fit under a fraction of its memory cap, run the command, and release the reservation when it exits. The gate never kills or limits anything; a command started without it is seen only through measured usage.",
-    after_long_help = "EXAMPLES:\n  reverie-job run --estimate 800m -- cargo test -p reverie-namegate\n  reverie-job status\n\nEXIT STATUS:\n  run: the command's own status, or 75 when the gate did not run it\n  (refused, timed out waiting, or memory facts unreadable)."
+    after_long_help = "EXAMPLES:\n  reverie-job run --estimate 800m -- cargo test -p reverie-namegate\n  reverie-job status\n\nEXIT STATUS:\n  run: the command's own status, or 75 when the gate did not run it\n  (refused, timed out waiting, or memory facts unreadable). A command that itself\n  exits 75 looks the same. A command killed by a signal exits 128 + the signal\n  (137 for an OOM kill). A reservation the gate fails to release after the\n  command ran only warns: it lapses when the gate process exits.\n\nLEDGER:\n  REVERIE_JOB_LEDGER, else $XDG_RUNTIME_DIR/reverie-job, else\n  ~/.local/state/reverie-job, else a per-user directory under /tmp."
 )]
 struct Arguments {
     #[command(subcommand)]
@@ -70,10 +70,10 @@ fn ledger_dir() -> PathBuf {
         return PathBuf::from(dir);
     }
     let uid = nix::unistd::getuid().as_raw();
+    let dir = |name: &str| std::env::var_os(name).map(PathBuf::from);
     default_ledger(
-        std::env::var_os("XDG_RUNTIME_DIR")
-            .as_deref()
-            .map(std::path::Path::new),
+        dir("XDG_RUNTIME_DIR").as_deref(),
+        dir("HOME").as_deref(),
         uid,
     )
 }
@@ -149,14 +149,26 @@ fn run(
         }
     }
     let status = Command::new(&command[0]).args(&command[1..]).status();
-    let released = release(&ledger, pid);
+    if let Err(error) = release(&ledger, pid) {
+        // The command's outcome stands either way: the entry is stale, and pruned, once this
+        // process is gone.
+        eprintln!(
+            "reverie-job: warning: reservation not released ({error}); it lapses when this process exits"
+        );
+    }
     let status =
         status.map_err(|e| format!("could not start {}: {e}", command[0].to_string_lossy()))?;
-    released.map_err(|e| format!("command finished but its reservation was not released: {e}"))?;
-    Ok(match status.code() {
-        Some(code) => ExitCode::from(u8::try_from(code).unwrap_or(1)),
-        None => ExitCode::from(1),
-    })
+    Ok(exit_code(status))
+}
+
+/// The command's own status, or 128 + the signal that killed it (137 for an OOM kill).
+fn exit_code(status: std::process::ExitStatus) -> ExitCode {
+    use std::os::unix::process::ExitStatusExt;
+    let code = status
+        .code()
+        .or_else(|| status.signal().map(|signal| 128 + signal))
+        .unwrap_or(1);
+    ExitCode::from(u8::try_from(code & 0xff).unwrap_or(1))
 }
 
 fn status(permille: u32) -> Result<ExitCode, String> {
