@@ -14,12 +14,14 @@ pub use command::RamLaunchCommandData;
 pub use continuation::{ResourceContinuationRequest, ResourceContinuationVerb};
 mod owner;
 mod principal;
+mod registration;
 mod reply;
 pub use reply::RamPreviewFields;
 #[cfg(test)]
 mod tests;
 pub use owner::CurrentResourceOwner;
 pub use principal::ResourceOwnerPrincipal;
+pub use registration::{POOL_REGISTRATION_PURPOSE, decode_pool_registration_hello};
 pub const RAM_POOL_PURPOSE: &str = "resource-ram-pool-v2";
 
 #[derive(Clone, Debug, Eq, PartialEq)]

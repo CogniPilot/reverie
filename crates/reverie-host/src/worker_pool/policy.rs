@@ -352,7 +352,7 @@ fn close_files(file: &mut Option<File>, directory: &mut Option<File>) -> Result<
         .map_err(Into::into);
     finalized(file, directory)
 }
-fn digest_text(digest: [u8; 32]) -> String {
+pub(super) fn digest_text(digest: [u8; 32]) -> String {
     digest.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 fn file_identity(file: &File) -> Result<(u64, u64)> {

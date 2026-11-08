@@ -174,6 +174,15 @@ pub fn validate_selection_marker(config: &EffectiveWorkerConfig) -> Result<()> {
 pub fn selection_marker_policy(config: &EffectiveWorkerConfig) -> Result<TaskPerfPolicy> {
     selection_marker(config_marker(config.as_value())).ok_or(TaskPerfError::Marker)
 }
+/// Projected selection DATA only. An absent marker is distinct from a malformed
+/// marker, so native callers preserve the unselected path without a fallback.
+pub fn projected_selection(config: &EffectiveWorkerConfig) -> Result<Option<TaskPerfPolicy>> {
+    let fields = object(config.as_value()).ok_or(TaskPerfError::Marker)?;
+    if !fields.contains_key(&key(MARKER)) {
+        return Ok(None);
+    }
+    selection_marker_policy(config).map(Some)
+}
 fn marker_matches(value: &Value) -> bool {
     selection_marker(config_marker(value)).is_some()
 }

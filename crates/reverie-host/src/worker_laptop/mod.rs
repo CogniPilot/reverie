@@ -15,9 +15,11 @@ mod error;
 mod existing_viewer;
 pub(crate) mod final_storage;
 mod guard;
+mod handler_settlement;
 mod memory;
 mod network;
 mod pane;
+mod perf;
 mod protected;
 mod publication;
 pub use protected::{
@@ -455,13 +457,19 @@ impl Workflows {
         let mut record = record
             .try_lock()
             .map_err(|_| LaptopError::Refused("WORKER_LAPTOP_RETAINED"))?;
+        need(
+            record.phase != Phase::FinalizingStarted,
+            "WORKER_STARTED_FINAL_STORAGE_RETAINED",
+        )?;
         if record.phase == Phase::Held && runtime.cancellation().is_cancelled() {
             record.outcome = Some(Err(Arc::new(LaptopError::Refused("WORKER_LAPTOP_STOPPED"))));
             record.phase = Phase::Known;
         }
         let viewer = record.viewer.clone();
         let memory_result = if runtime.cancellation().is_cancelled() || record.cleanup.is_some() {
-            memory::close_abandoned(&mut record)
+            let memory = memory::close_abandoned(&mut record);
+            let perf = perf::close_abandoned(&mut record);
+            finalized(memory, perf)
         } else {
             Ok(())
         };

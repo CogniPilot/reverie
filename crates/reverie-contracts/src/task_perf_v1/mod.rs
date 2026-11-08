@@ -5,8 +5,8 @@ mod producer;
 mod profile;
 
 pub use config::{
-    TaskPerfConfiguration, TaskPerfProjection, recognize_configuration, selection_marker_policy,
-    validate_selection_marker,
+    TaskPerfConfiguration, TaskPerfProjection, projected_selection, recognize_configuration,
+    selection_marker_policy, validate_selection_marker,
 };
 pub use manifest::{PerfSystem, TaskPerfManifest};
 pub use producer::{TaskPerfProducedBytes, produce_task_perf, produce_task_perf_for_policy};

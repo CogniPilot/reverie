@@ -11,6 +11,7 @@ members = [
     "crates/reverie-routes",
     "crates/reverie-worker-client",
     "crates/reverie-worker-child",
+    "crates/reverie-worker-broker",
     "crates/reverie-nix-store-prepare",
     "crates/reverie-memory-cli",
     "crates/reverie-front",
@@ -19,6 +20,10 @@ members = [
     "crates/reverie-mcp-cli",
     "crates/reverie-python-regex",
     "crates/reverie-memory-capsule",
+    "crates/reverie-elf-bundle",
+    "crates/reverie-perf-check",
+    "crates/reverie-worker-init",
+    "crates/reverie-perf-capsule",
     "crates/reverie-diagnostics",
     "crates/reverie-deployment",
     "crates/reverie-namegate",
@@ -79,6 +84,7 @@ reverie-store = { path = "crates/reverie-store" }
 reverie-host = { path = "crates/reverie-host" }
 reverie-application = { path = "crates/reverie-application" }
 reverie-diagnostics = { path = "crates/reverie-diagnostics" }
+reverie-elf-bundle = { path = "crates/reverie-elf-bundle" }
 
 # Derived from CogniPilot/rumoca 0bab7e08c42dced38488abd298a4b9bb77d2b0cc.
 # Every member must opt in with [lints] workspace = true.

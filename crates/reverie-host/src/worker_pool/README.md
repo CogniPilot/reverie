@@ -2,7 +2,7 @@
 
 This is an unfinished lower controller owner, not an executable fleet rollout.
 It does not provide Q authorization, the retained provider-maintenance fence,
-controller policy publication/activation, a controller listener, leaf policy
+active-policy publication/activation, a selected controller listener, leaf policy
 application, or an installed-pool proof to the broker over a socket.
 
 The Docker-only purpose preserves the registered `<deployment>-workers.slice`
@@ -112,15 +112,33 @@ listener while this slot remains held, rather than hiding abandoned native FDs.
 native immutable executable observation and original process snapshot. The App
 `BrokerControllerBootstrap` also retains the actual InstallingBroker and checks
 its loader-selected source against fixed native `broker --config` raw argv.
+The distinct installation-offer constructor requires original
+`offer-pool-v1 --config SOURCE` argv instead. Its private closed role is retained
+with the process observation and cannot be changed or selected by decoded data.
+Calling it from the ordinary service refuses on the original argv digest; no
+new command is exposed until the actual retained offer and consent path exist.
+Neither origin type establishes an owner's identity or administration consent.
 Only the compile-bound `REVERIE_FIXED_NATIVE_WORKER_BROKER_MANIFEST` may select
 the native program; missing packaging refuses before sockets. No current package
 provides that selector yet. Its native executable and no-self-exec invariant
 must qualify before production delegation. Broker replacement needs registered
 bootstrap; ordinary GUI policy activation must not replace this birth identity.
 
-This cut provides neither immutable policy publication nor active-version
-activation. A future checked publication receipt is separate from broker config
-CAS. It also supplies no host-administration consent or provider-maintenance
-owner. Service-v2 births are explicitly refused by the existing v1 component
-initializer, before any limit write. There is no privileged Activate/Configure
-consumer, native controller executable, broker member join or selected service.
+The original `BrokerControllerBootstrap` can now retain a one-shot birth-input
+publication owner before any directory/file effect. It derives the fixed
+`~/reverie/worker-pool/policies` path from the actual account home, checks exact
+directory ownership/modes, creates a new hash-named version exclusively, syncs
+and rereads it, then checked-closes its writable descriptor before returning
+metadata identity DATA. Existing files are never overwritten or adopted as a
+cached success. Partial writes, close uncertainty and abandoned descriptors stay
+with the original owner; metadata cleanup neither deletes versions nor releases
+any pool/provider responsibility. A read refusal terminally fences that receipt.
+
+This birth-input producer is separate from broker-config CAS and from a future
+active-policy publication. It supplies no host-administration consent or
+provider-maintenance owner. Actual installed bootstrap/GUI/API consumers and
+their original grant/fence must still bracket its use. Service-v2 births remain
+refused by the existing v1 initializer before any limit write. Privileged
+Activate/Configure, a selected native controller, broker member joins and the
+complete supported installation workflow remain required work. Component
+filesystem tests do not establish genuine native-broker origin or activation.

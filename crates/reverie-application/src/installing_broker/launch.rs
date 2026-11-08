@@ -9,6 +9,7 @@ use reverie_host::worker_reports::{
 use std::{os::unix::net::UnixStream, time::Instant};
 mod error;
 mod preparation;
+pub(in crate::installing_broker) mod service;
 pub(in crate::installing_broker) use preparation::StartedLaptop;
 mod viewer;
 pub use error::{LaunchAdmissionFailure, WorkerDispatchError};

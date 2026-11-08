@@ -19,6 +19,7 @@ pub struct CreateArguments {
     digest: WorkerConfigDigest,
     policy: WorkerPolicyDigest,
     args: Vec<MetadataText>,
+    tail_offset: usize,
 }
 /// Bind name and both hashes to the same effective captured configuration,
 /// before any rootless/GPU/hostname observation. This is immutable DATA.
@@ -28,6 +29,7 @@ pub struct CreatePreparation<'a> {
     name: WorkerName,
     digest: WorkerConfigDigest,
     policy: WorkerPolicyDigest,
+    init: WorkerInitData,
 }
 impl<'a> CreatePreparation<'a> {
     pub fn capture(
@@ -41,6 +43,7 @@ impl<'a> CreatePreparation<'a> {
             name: WorkerName::for_session(&scalar(field(fields, "deployment"))?, session)?,
             digest: worker_config::config_digest(config),
             policy: worker_config::policy_digest(config),
+            init: WorkerInitData::for_effective(config)?,
         })
     }
     pub fn arguments(
@@ -68,7 +71,7 @@ impl CreateArguments {
     pub fn args(&self) -> &[MetadataText] {
         &self.args
     }
-    /// Source's two late insertions before the fixed four-word image tail.
+    /// Late mounts precede the captured closed layout's entrypoint/image tail.
     /// Inputs are mount DATA; the real Host owner derives them from its retained
     /// Nix result and fresh account observations before the telemetry boundary.
     pub fn with_late_mounts(
@@ -77,14 +80,13 @@ impl CreateArguments {
         accounts: &[MetadataText],
     ) -> Vec<MetadataText> {
         let mut args = self.args.clone();
-        let offset = args.len() - 4;
         let mut extra = Vec::new();
         if let Some(nix) = nix {
             extra.push(MetadataText::from_scalar_text("--mount"));
             extra.push(bind(nix, &MetadataText::from_scalar_text("/nix"), false));
         }
         extra.extend_from_slice(accounts);
-        args.splice(offset..offset, extra);
+        args.splice(self.tail_offset..self.tail_offset, extra);
         args
     }
 }
@@ -111,6 +113,7 @@ fn render(
         name,
         digest,
         policy,
+        init,
     } = prepared;
     let fields = object(config.as_value())?;
     let deployment = scalar(field(fields, "deployment"))?;
@@ -118,7 +121,7 @@ fn render(
         "create",
         "--name",
         name.as_str(),
-        "--init",
+        init.engine_init_argument(),
         "--restart",
         "no",
         "--read-only",
@@ -187,17 +190,19 @@ fn render(
             hostname,
         ]));
     }
+    let tail_offset = args.len();
     args.extend(words(&[
         "--entrypoint",
-        "/bin/sleep",
+        init.entrypoint(),
         &scalar(field(fields, "image"))?,
-        "infinity",
     ]));
+    args.extend(words(init.command()));
     Ok(CreateArguments {
         name,
         digest,
         policy,
         args,
+        tail_offset,
     })
 }
 fn scratch_path(

@@ -50,6 +50,16 @@ may remove this field: registration then refuses until a fresh sign-in and
 explicit enrollment establish a new incarnation. Older versions do not enforce new registration
 grants; rolling back cannot be treated as an authorization-compatible executor.
 
+Native installation website attestation has a separate `B` transport purpose
+and `host-pool-registration-v1` hello. It shares the installed program, image,
+kernel peer and process checks with RAM operations, but its distinct Rust owner
+exposes only current-attestation checks and component closure. It cannot issue
+an employee approval or journal authority. RAM's `Q` purpose still requires its
+employee Gate. Neither channel can substitute for the other. This internal
+attestation component does not enable a registration route: the actual retained
+OS-owner offer, nominated account incarnation, fresh authenticated consent and
+canonical revocation/publication checks remain required before administration.
+
 ## Shared API contract
 
 Every route returns the ordinary `success`/`data` envelope, or a failure with

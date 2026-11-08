@@ -43,8 +43,10 @@ pub fn storage_path_text(points: &[u32]) -> Result<MetadataText> {
     Ok(MetadataText::from_text(Text(points.to_vec())))
 }
 use crate::legacy_json::{Node, Number, Text, Value};
+mod init;
 use crate::storage_identity::MetadataText;
 use crate::worker_config::EffectiveWorkerConfig;
+pub use init::WorkerInitData;
 pub(crate) use request::RequestField;
 pub use request::{MAX_REQUEST_FRAME, WorkerRequest};
 use reverie_core::worker_launch::LaunchRuleError;

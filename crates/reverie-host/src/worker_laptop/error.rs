@@ -69,6 +69,10 @@ pub enum LaptopError {
     Observation(crate::ObservationError),
     MemoryKernel(crate::reservation_kernel::ReservationKernelError),
     MemoryData(reverie_contracts::reservation_engine::EngineDataError),
+    PerfCapsule(crate::task_perf::PerfCapsuleFailure),
+    PerfPolicy(crate::task_perf::TaskPerfHostError),
+    PerfData(reverie_contracts::task_perf_v1::TaskPerfError),
+    PerfResult(reverie_contracts::task_perf_check::PerfCheckDataError),
     MemoryIdentity(reverie_contracts::worker_recovery::RecoveryDataError),
     MemoryHelperSelection(reverie_contracts::worker_validation::WorkerValidationError),
     ColdPolicy(reverie_contracts::worker_validation::WorkerValidationError),
@@ -94,6 +98,12 @@ impl LaptopError {
             Self::ColdStorage(error) => error.unconfirmed_native(),
             Self::StorageOwner(error) => error.unconfirmed_native(),
             Self::Observation(_) => true,
+            Self::MemoryKernel(error) => error.has_unconfirmed_close(),
+            Self::PerfPolicy(crate::task_perf::TaskPerfHostError::Observation(_)) => true,
+            Self::PerfPolicy(crate::task_perf::TaskPerfHostError::Identity(error)) => {
+                error.has_unconfirmed_close()
+            }
+            Self::PerfCapsule(error) => error.unconfirmed_native(),
             Self::Publication(error) => !error.cleanup_faults().is_empty(),
             Self::Finalization { primary, secondary } => {
                 primary.unconfirmed_native() || secondary.unconfirmed_native()
@@ -123,6 +133,10 @@ impl LaptopError {
             Self::Observation(_) => "WORKER_LAPTOP_NATIVE_FINALIZATION",
             Self::MemoryKernel(error) => error.code(),
             Self::MemoryData(error) => error.code(),
+            Self::PerfCapsule(_) => "TASK_PERF_CAPSULE_UNCONFIRMED",
+            Self::PerfPolicy(error) => error.code(),
+            Self::PerfData(error) => error.code(),
+            Self::PerfResult(_) => "TASK_PERF_CHECK_RESULT_INVALID",
             Self::MemoryIdentity(error) => error.code(),
             Self::MemoryHelperSelection(_) => "LAPTOP_SOFT_LIMIT_HELPER_SELECTION",
             Self::ColdPolicy(_) => "WORKER_COLD_POLICY",
@@ -158,6 +172,10 @@ impl std::error::Error for LaptopError {
             Self::Observation(error) => Some(error),
             Self::MemoryKernel(error) => Some(error),
             Self::MemoryData(error) => Some(error),
+            Self::PerfCapsule(error) => Some(error),
+            Self::PerfPolicy(error) => Some(error),
+            Self::PerfData(error) => Some(error),
+            Self::PerfResult(error) => Some(error),
             Self::MemoryIdentity(error) => Some(error),
             Self::MemoryHelperSelection(error) => Some(error),
             Self::ColdPolicy(error) => Some(error),

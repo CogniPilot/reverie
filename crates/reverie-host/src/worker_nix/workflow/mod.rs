@@ -3,6 +3,7 @@
 mod cleanup;
 mod cold;
 mod drive;
+mod handler_settlement;
 mod image;
 mod log;
 mod post_copy;

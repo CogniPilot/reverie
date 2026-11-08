@@ -111,9 +111,13 @@ fn commit(runtime: &WorkerRuntime, record: &mut Record, deadline: CallBudget) ->
     resources
         .held_nix()?
         .require_cold_prepared(resources.plan.source())?;
+    // The selected task-v2 path must finish its actual same-Created perf check
+    // before any cold commit can produce a token accepted by pane startup.
+    super::perf::check(runtime, record, deadline)?;
     if retained {
         return commit_retained(runtime, record, deadline);
     }
+    let resources = record.resources();
     resources
         .held_nix()?
         .assert_cold_resources_current()

@@ -3,6 +3,7 @@ use super::*;
 use reverie_contracts::human_protocol::HumanFrame;
 mod ancestry;
 mod budgets;
+mod pool_registration;
 mod process_snapshot;
 mod resource_journal;
 

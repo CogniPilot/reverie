@@ -1,21 +1,17 @@
-use crate::{
-    Arguments, Result, execution, files,
-    libraries::Libraries,
-    refused,
-    tools::{Tools, immutable_input},
-};
+use crate::{Arguments, Result, execution, files, refused};
+use reverie_elf_bundle::{ImageLayout, Libraries, Tools, immutable_input};
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs,
     path::{Path, PathBuf},
 };
 
-const PREFIX: &str = "/opt/reverie/memory";
+const LAYOUT: ImageLayout = ImageLayout::Memory;
+const PREFIX: &str = LAYOUT.prefix();
 // Equal-length compiled optional-loader paths become an immutable absent slot.
 // Actual interpreter/DT_NEEDED/RPATH entries are changed by maintained patchelf.
-const ABSENT: &[u8] = b"/opt/rvmem/";
-const SYSTEM_PRELOAD: &[u8] = b"/etc/ld-nix.so.preload";
-const ABSENT_PRELOAD: &[u8] = b"/opt/rvmem/preload.off";
+const ABSENT: &[u8] = LAYOUT.absent_fallback().as_bytes();
+const ABSENT_PRELOAD: &[u8] = LAYOUT.absent_preload().as_bytes();
 
 pub(crate) fn build(args: Arguments) -> Result<()> {
     let tools = Tools::new(&args.patchelf, &args.readelf)?;
@@ -48,10 +44,10 @@ pub(crate) fn build(args: Arguments) -> Result<()> {
         .file_name()
         .and_then(|v| v.to_str())
         .ok_or_else(|| refused("loader basename required"))?;
-    install_libraries(&libraries, &target, loader_name, &tools)?;
+    LAYOUT.install_libraries(&libraries, &target, loader_name, &tools)?;
     for (source, destination) in &roots {
         files::copy(source, destination)?;
-        relocate(destination, loader_name, &tools)?;
+        LAYOUT.relocate(destination, loader_name, &tools)?;
     }
     for (source, name) in [(&args.memory, "reverie-memory"), (&args.mcp, "reverie-mcp")] {
         let source = immutable_input(source)?;
@@ -161,7 +157,7 @@ fn write_origin_inventory(
             "output": destination.strip_prefix(target)?, "sha256": files::digest(destination)?,
         }));
     }
-    for (name, source) in &libraries.selected {
+    for (name, source) in libraries.selected() {
         artifacts.push(serde_json::json!({
             "input": source, "inputSha256": files::digest(source)?,
             "output": format!("lib/{name}"), "sha256": files::digest(&target.join("lib").join(name))?,
@@ -190,82 +186,6 @@ fn write_origin_inventory(
         target.join("build-inputs.json"),
         serde_json::to_vec_pretty(&value)?,
     )?;
-    Ok(())
-}
-
-fn install_libraries(
-    libraries: &Libraries,
-    target: &Path,
-    loader: &str,
-    tools: &Tools,
-) -> Result<()> {
-    for (name, source) in &libraries.selected {
-        let destination = target.join("lib").join(name);
-        files::copy(source, &destination)?;
-        if name == loader {
-            if !tools.patch(&["--print-needed"], &destination)?.is_empty() {
-                return Err(refused("dependency-free loader required"));
-            }
-            absent_fallback(&destination)?;
-        } else {
-            relocate(&destination, loader, tools)?;
-        }
-    }
-    Ok(())
-}
-
-fn relocate(path: &Path, loader: &str, tools: &Tools) -> Result<()> {
-    if tools.dynamic(path)? {
-        let origin = tools
-            .patch(&["--print-rpath"], path)?
-            .split(':')
-            .filter(|value| value.starts_with("$ORIGIN") || value.starts_with("${ORIGIN}"))
-            .map(str::to_owned)
-            .collect::<Vec<_>>();
-        let rpath = std::iter::once(format!("{PREFIX}/lib"))
-            .chain(origin)
-            .collect::<Vec<_>>()
-            .join(":");
-        tools.patch(&["--set-rpath", &rpath, "--no-default-lib"], path)?;
-        for needed in tools.patch(&["--print-needed"], path)?.lines() {
-            if needed.contains('/') {
-                let basename = Path::new(needed)
-                    .file_name()
-                    .and_then(|value| value.to_str())
-                    .ok_or_else(|| refused("dependency basename required"))?;
-                tools.patch(&["--replace-needed", needed, basename], path)?;
-            }
-        }
-        if tools.interpreter(path)?.is_some() {
-            tools.patch(
-                &["--set-interpreter", &format!("{PREFIX}/lib/{loader}")],
-                path,
-            )?;
-        }
-    }
-    absent_fallback(path)
-}
-
-fn absent_fallback(path: &Path) -> Result<()> {
-    let mut bytes = fs::read(path)?;
-    for (original, absent) in [
-        (b"/nix/store/".as_slice(), ABSENT),
-        (SYSTEM_PRELOAD, ABSENT_PRELOAD),
-    ] {
-        if original.len() != absent.len() {
-            return Err(refused("optional-loader replacement must keep byte length"));
-        }
-        let mut cursor = 0;
-        while cursor + original.len() <= bytes.len() {
-            if bytes[cursor..].starts_with(original) {
-                bytes[cursor..cursor + original.len()].copy_from_slice(absent);
-                cursor += original.len();
-            } else {
-                cursor += 1;
-            }
-        }
-    }
-    fs::write(path, bytes)?;
     Ok(())
 }
 
