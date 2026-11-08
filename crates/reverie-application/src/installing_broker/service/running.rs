@@ -16,6 +16,7 @@ pub enum BrokerServiceError {
     Recovery(RecoveryError),
     Images(ChatImagesError),
     InstallationOffer(reverie_host::worker_pool::PoolError),
+    Controller(reverie_host::worker_pool::PoolError),
     Shutdown(Vec<BrokerServiceError>),
 }
 impl fmt::Display for BrokerServiceError {
@@ -29,6 +30,7 @@ impl fmt::Display for BrokerServiceError {
             Self::Recovery(error) => error.fmt(out),
             Self::Images(error) => error.fmt(out),
             Self::InstallationOffer(error) => error.fmt(out),
+            Self::Controller(error) => error.fmt(out),
             Self::Shutdown(errors) => write!(
                 out,
                 "WORKER_SERVICE_SHUTDOWN_RETAINED: {}",

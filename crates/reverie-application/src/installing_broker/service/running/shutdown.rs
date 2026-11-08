@@ -153,7 +153,13 @@ impl BrokerService {
                 .map_err(BrokerServiceError::Recovery),
             errors,
         );
-        listener && reports && telemetry && images && recovery
+        let controller = record_close(
+            broker
+                .close_installed_controller(reports && recovery, end)
+                .map_err(BrokerServiceError::Controller),
+            errors,
+        );
+        listener && reports && telemetry && images && recovery && controller
     }
 }
 fn record_close(

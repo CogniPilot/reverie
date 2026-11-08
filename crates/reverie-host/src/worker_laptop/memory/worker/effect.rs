@@ -10,54 +10,74 @@ impl Workflows {
         wanted: &WorkerPolicyDigest,
         facts: &impl Observations,
     ) -> Result<WorkerMemoryEffect> {
-        self.assert_worker_connection(runtime, &observed.workflow, connection)?;
-        let mut record = state::pending(&observed.workflow)?;
-        need(
-            matches!(
-                record
-                    .creation
-                    .as_ref()
-                    .expect("actual memory")
-                    .worker_memory,
-                Some(Pending::Policy { .. })
-            ),
-            "LAPTOP_MEMORY_POLICY_PHASE",
-        )?;
-        let Some(Pending::Policy {
-            row,
-            policy,
-            budget,
-        }) = record
-            .creation
-            .as_mut()
-            .expect("actual memory")
-            .worker_memory
-            .take()
-        else {
-            unreachable!("checked same policy phase")
-        };
-        record.phase = Phase::Running;
+        let (mut record, row, policy, budget) = begin_effect(self, runtime, observed, connection)?;
         let result = effect(runtime, &mut record, row, policy, wanted, budget, facts);
-        match result {
-            Ok(pending) => {
-                record
-                    .creation
-                    .as_mut()
-                    .expect("actual memory")
-                    .worker_memory = Some(pending);
-                record.phase = Phase::Known;
-                record.outcome = Some(Ok(()));
-                Ok(WorkerMemoryEffect::Readback(StartedMemoryReadback {
-                    workflow: observed.workflow.clone(),
-                }))
-            }
-            Err(error) => Ok(
-                match state::complete(&mut record, &observed.workflow, Err(error)) {
-                    MemoryConfiguration::Rejected => WorkerMemoryEffect::Rejected,
-                    _ => WorkerMemoryEffect::Retained,
-                },
-            ),
+        finish_effect(&mut record, &observed.workflow, result)
+    }
+}
+type EffectInput<'a> = (
+    std::sync::MutexGuard<'a, Record>,
+    RecoveryInspection,
+    ObservedMemoryPolicy,
+    CallBudget,
+);
+pub(super) fn begin_effect<'a>(
+    workflows: &Workflows,
+    runtime: &WorkerRuntime,
+    observed: &'a StartedMemoryPolicy,
+    connection: &WorkerLaunchConnection,
+) -> Result<EffectInput<'a>> {
+    workflows.assert_worker_connection(runtime, &observed.workflow, connection)?;
+    let mut record = state::pending(&observed.workflow)?;
+    need(
+        matches!(
+            record
+                .creation
+                .as_ref()
+                .expect("actual memory")
+                .worker_memory,
+            Some(Pending::Policy { .. })
+        ),
+        "LAPTOP_MEMORY_POLICY_PHASE",
+    )?;
+    let Some(Pending::Policy {
+        row,
+        policy,
+        budget,
+    }) = record
+        .creation
+        .as_mut()
+        .expect("actual memory")
+        .worker_memory
+        .take()
+    else {
+        unreachable!("checked same policy phase");
+    };
+    record.phase = Phase::Running;
+    Ok((record, row, policy, budget))
+}
+pub(super) fn finish_effect(
+    record: &mut Record,
+    workflow: &LaptopWorkflow,
+    result: Result<Pending>,
+) -> Result<WorkerMemoryEffect> {
+    match result {
+        Ok(pending) => {
+            record
+                .creation
+                .as_mut()
+                .expect("actual memory")
+                .worker_memory = Some(pending);
+            record.phase = Phase::Known;
+            record.outcome = Some(Ok(()));
+            Ok(WorkerMemoryEffect::Readback(StartedMemoryReadback {
+                workflow: workflow.clone(),
+            }))
         }
+        Err(error) => Ok(match state::complete(record, workflow, Err(error)) {
+            MemoryConfiguration::Rejected => WorkerMemoryEffect::Rejected,
+            _ => WorkerMemoryEffect::Retained,
+        }),
     }
 }
 fn effect(
