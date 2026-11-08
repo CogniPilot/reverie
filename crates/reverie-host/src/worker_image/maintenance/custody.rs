@@ -20,6 +20,7 @@ pub(super) struct HeldLock {
 }
 pub(super) struct Terminal {
     end: Instant,
+    owner_terminal: PathBuf,
     deployment: (PathBuf, ImageFileStamp),
     directories: Vec<(PathBuf, Identity)>,
     locks: Vec<(PathBuf, ImageFileStamp)>,
@@ -30,6 +31,7 @@ impl Terminal {
             Instant::now() < self.end,
             "WORKER_IMAGE_MAINTENANCE_DEADLINE",
         )?;
+        owner_terminal_absent(&self.owner_terminal)?;
         require(
             ImageFileStamp::observe(&self.deployment.0)? == self.deployment.1,
             "WORKER_IMAGE_DEPLOYMENT_CHANGED",
@@ -99,10 +101,18 @@ impl HeldLock {
     }
 }
 impl Owner {
+    fn owner_terminal(&self) -> Result<PathBuf> {
+        Ok(self
+            .root
+            .parent()
+            .ok_or_else(|| ImageFileError::refused("WORKER_IMAGE_REGISTERED_HOME"))?
+            .join(".config/systemd/user/reverie-owner-terminal.service"))
+    }
     pub(super) fn terminal(&self) -> Result<Terminal> {
         self.current()?;
         Ok(Terminal {
             end: self.end,
+            owner_terminal: self.owner_terminal()?,
             deployment: self.deployment.clone().expect("same actual deployment"),
             directories: self
                 .directories
@@ -134,6 +144,7 @@ impl Owner {
     }
     pub(super) fn acquire(&mut self, config: &EffectiveWorkerConfig) -> Result<()> {
         self.time()?;
+        owner_terminal_absent(&self.owner_terminal()?)?;
         let captured = ReservationConfiguration::capture(config.clone());
         require(
             captured.uid().map_err(ImageFileError::configuration)? == self.uid
@@ -253,6 +264,7 @@ impl Owner {
     }
     fn binding_current(&self) -> Result<()> {
         self.time()?;
+        owner_terminal_absent(&self.owner_terminal()?)?;
         for directory in &self.directories {
             directory.current()?;
         }
@@ -328,5 +340,14 @@ impl Owner {
             lock.current()?;
         }
         self.binding_current()
+    }
+}
+fn owner_terminal_absent(path: &Path) -> Result<()> {
+    match fs::symlink_metadata(path) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(ImageFileError::io(error)),
+        Ok(_) => Err(ImageFileError::refused(
+            "WORKER_IMAGE_OWNER_TERMINAL_UNSUPPORTED",
+        )),
     }
 }

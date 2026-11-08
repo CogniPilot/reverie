@@ -5,14 +5,17 @@ use std::{
 };
 
 struct Fixture {
+    home: PathBuf,
     root: PathBuf,
     source: PathBuf,
     config: EffectiveWorkerConfig,
 }
 impl Fixture {
     fn new() -> Self {
-        let root =
+        let home =
             nix::unistd::mkdtemp(&std::env::temp_dir().join("image-maintenance-XXXXXX")).unwrap();
+        let root = home.join("reverie");
+        fs::DirBuilder::new().mode(0o700).create(&root).unwrap();
         for name in [
             "data/console",
             "runtime/update-state",
@@ -35,6 +38,7 @@ impl Fixture {
         );
         let config = reverie_contracts::worker_config::decode(raw.as_bytes()).unwrap();
         let result = Self {
+            home,
             root,
             source,
             config,
@@ -66,7 +70,7 @@ impl Fixture {
 impl Drop for Fixture {
     fn drop(&mut self) {
         native::test_faults::set(None, false);
-        fs::remove_dir_all(&self.root).unwrap();
+        fs::remove_dir_all(&self.home).unwrap();
     }
 }
 
@@ -202,4 +206,41 @@ fn post_close_equal_bytes_deployment_or_lock_replacement_is_not_current() {
             "post-close replacement of {relative} must refuse"
         );
     }
+}
+
+#[test]
+fn fixed_owner_terminal_unit_absence_is_required_before_and_after_close() {
+    let mut refused = Vec::new();
+    for before in [true, false] {
+        let fixture = Fixture::new();
+        let folder = fixture.home.join(".config/systemd/user");
+        fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(&folder)
+            .unwrap();
+        let unit = folder.join("reverie-owner-terminal.service");
+        if before {
+            fixture.write(&unit, b"actual separate raw-config consumer");
+            refused.push(match fixture.capture() {
+                Err(mut failure) => {
+                    failure.close_components().unwrap();
+                    true
+                }
+                Ok(locks) => {
+                    locks.close().unwrap();
+                    false
+                }
+            });
+        } else {
+            let closed = fixture.capture().unwrap().close().unwrap();
+            fixture.write(&unit, b"separate consumer appeared after checked close");
+            refused.push(closed.assert_current().is_err());
+        }
+    }
+    assert_eq!(
+        refused,
+        [true, true],
+        "H absence must remain a fixed native scope condition"
+    );
 }
