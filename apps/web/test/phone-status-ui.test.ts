@@ -28,3 +28,21 @@ it('owner can click agent mode; member self permission only; no profile click pr
  h.shell.phoneStatus={canSetAgents:false,self:A};h.shell.renderMembers();
  expect(h.document.querySelector('.ca-member-alert')?.getAttribute('role')).toBe('button');
 });
+it('cycles from the effective mode the server reports, so an employee on the Vibrate default goes to Silent next', async () => {
+  const h = await createHarness({
+    sessions: [{ id: A, name: 'alpha', mode: 'codex' }],
+    rooms: [room('r1', 'General', [member(A, 'alpha', { alertMode: { mode: 'vibrate', source: 'default' } })])],
+  });
+  h.shell.phoneStatus = { canSetAgents: true, self: 'owner' };
+  h.shell.renderMembers();
+  let called: any;
+  h.app._chatApi = async (path: string, opts: any) => {
+    called = { path, ...opts };
+    return { ok: true, data: { alertMode: { mode: 'silent', source: 'preference' } } };
+  };
+  (h.document.querySelector('.ca-member-alert') as HTMLElement).click();
+  await h.flush();
+  expect(called).toMatchObject({ path: `/api/chatrooms/phone-status/${A}`, method: 'PUT', body: { mode: 'silent' } });
+  expect(h.document.querySelector('.ca-member-alert')?.getAttribute('data-alert-mode')).toBe('silent');
+  expect(h.document.querySelector('.ca-member-alert')?.getAttribute('title')).toContain('set by the owner');
+});

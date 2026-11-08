@@ -46,6 +46,9 @@ async function fixture(owner?: string, database = false) {
     owner ? { authUser: { username: owner, role: 'user' } } : undefined
   );
   await service.init();
+  // These summaries are about ordinary pending traffic, which an employee receives on Ring; the
+  // owner sets that for the reviewer, since an employee with no choice made is on Vibrate.
+  await service.setPhoneStatus(owner, A, 'ring', 'owner', () => {});
   const room = service.createRoom('Office', owner);
   service.addMember(room.id, A);
   service.addMember(room.id, B);

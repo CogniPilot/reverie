@@ -1,5 +1,5 @@
 import { it, expect } from 'vitest';
-import { mkdtempSync, readFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createRouteTestHarness } from './_route-test-utils.js';
@@ -19,14 +19,16 @@ it('phone permissions: verified owner any, coordinator agents, member self; stri
   registerChatroomRoutes(f,ctx,service,new ChatFileStore(dir),req=>req.headers.cookie==='verified-owner',undefined,employeeOf);
  });
  await service.init();
+ // The owner's choice for an employee is a lasting preference; every other choice is a lease.
+ const files=()=>['employee-alert-modes.json','employee-alert-preferences.json'].map(f=>existsSync(join(dir,f))?readFileSync(join(dir,f),'utf8'):'');
  const write=(target:string,who:string|undefined,mode='silent',extra={})=>app.inject({method:'PUT',url:`/api/chatrooms/phone-status/${target}`,headers:who==='owner'?{cookie:'verified-owner'}:who?{'x-reverie-parent-session':who}:{},payload:{mode,...extra}});
  try {
   expect((await write(b,undefined)).statusCode).toBe(403);
   expect((await write(b,'owner')).statusCode).toBe(200);
-  expect(service.alertMode(b)?.mode).toBe('silent');
-  const before=readFileSync(join(dir,'employee-alert-modes.json'),'utf8');
+  expect(service.alertMode(b)).toEqual({mode:'silent',source:'preference'});
+  const before=files();
   expect((await write(b,a,'ring')).statusCode).toBe(403);
-  expect(readFileSync(join(dir,'employee-alert-modes.json'),'utf8')).toBe(before);
+  expect(files()).toEqual(before);
   expect((await write(b,b,'vibrate')).statusCode).toBe(200);
   expect((await write('owner',b)).statusCode).toBe(403);
   expect((await write('owner','owner')).statusCode).toBe(200);
@@ -37,7 +39,8 @@ it('phone permissions: verified owner any, coordinator agents, member self; stri
   const room=await app.inject({method:'POST',url:'/api/chatrooms',headers:{cookie:'verified-owner'},payload:{name:'Reverie',members:[{sessionId:b}],coordinatorSessionId:a}});
   expect(room.statusCode).toBe(200);
   expect((await write(b,a,'ring')).statusCode).toBe(200);
-  expect(service.alertMode(b)).toBeUndefined();
+  // A coordinator's choice is a lease over the owner's lasting Silent.
+  expect(service.alertMode(b)).toMatchObject({mode:'ring',source:'lease',then:'silent'});
   expect((await app.inject({method:'PUT',url:`/api/chatrooms/${room.json().data.id}/archive`,headers:{cookie:'verified-owner'},payload:{archived:true}})).statusCode).toBe(200);
   expect((await write(b,a)).statusCode).toBe(403);
   const audit=readFileSync(join(dir,'rooms.json.audit.jsonl'),'utf8');
@@ -53,16 +56,17 @@ it('audit failure and permission revocation during audit refuse without changing
  await service.init();
  try {
   await service.setPhoneStatus(undefined,a,'vibrate','owner',()=>{});
-  const before=readFileSync(join(dir,'employee-alert-modes.json'),'utf8');
+  const preferences=join(dir,'employee-alert-preferences.json');
+  const before=readFileSync(preferences,'utf8');
   const audit=(service as any).audit.bind(service);
   (service as any).audit=async()=>{throw Error('audit unavailable');};
   await expect(service.setPhoneStatus(undefined,a,'silent','owner',()=>{})).rejects.toThrow('audit unavailable');
-  expect(readFileSync(join(dir,'employee-alert-modes.json'),'utf8')).toBe(before);
+  expect(readFileSync(preferences,'utf8')).toBe(before);
   expect(service.alertMode(a)?.mode).toBe('vibrate');
   let allowed=true;
   (service as any).audit=async(entry:unknown)=>{await audit(entry);allowed=false;};
   await expect(service.setPhoneStatus(undefined,a,'silent','owner',()=>{if(!allowed)throw Error('permission revoked');})).rejects.toThrow('permission revoked');
-  expect(readFileSync(join(dir,'employee-alert-modes.json'),'utf8')).toBe(before);
+  expect(readFileSync(preferences,'utf8')).toBe(before);
   expect(service.alertMode(a)?.mode).toBe('vibrate');
  }finally{await service.stop();}
 });

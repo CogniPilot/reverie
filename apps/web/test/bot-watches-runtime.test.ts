@@ -3,7 +3,7 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { registerBotWatches } from '../src/bot-watches-runtime.js';
+import { checkInReaches, registerBotWatches } from '../src/bot-watches-runtime.js';
 import { BoardStore } from '../src/board-store.js';
 import { ChatBotRegistry } from '../src/chat-bots.js';
 import type { ChatroomService } from '../src/chatroom-service.js';
@@ -46,7 +46,7 @@ describe('typed bot watch owner-only runtime integration', () => {
         room: () => room,
         rooms: () => [room],
         auditEntry: async () => {},
-        alertMode: () => undefined,
+        alertMode: () => ({ mode: 'ring', source: 'default' }),
         adminPhoneWakeEnabled: true,
       } as unknown as ChatroomService,
       ...extra,
@@ -116,7 +116,7 @@ describe('typed bot watch owner-only runtime integration', () => {
         room: () => room,
         rooms: () => [room],
         auditEntry: async () => {},
-        alertMode: () => undefined,
+        alertMode: () => ({ mode: 'ring', source: 'default' }),
         adminPhoneWakeEnabled: true,
         checkBotPost: () => {},
         postDurableBotMessage: (_b: unknown, _r: unknown, text: string, _n: unknown, to: unknown, deliver: unknown) => {
@@ -163,5 +163,12 @@ describe('typed bot watch owner-only runtime integration', () => {
         })
       ).statusCode
     ).toBe(403);
+  });
+  it('delivers assignment check-ins under Ring and Vibrate (the employee default), never under Silent', () => {
+    expect(['ring', 'vibrate', 'silent'].map((mode) => checkInReaches(mode as 'ring' | 'vibrate' | 'silent'))).toEqual([
+      true,
+      true,
+      false,
+    ]);
   });
 });

@@ -3115,7 +3115,9 @@ export function registerAgentCommands(program: Command): Command {
 
   chat
     .command('mode [mode]')
-    .description('Read or set your employee phone mode: ring, vibrate, silent; quiet leases expire within 8h')
+    .description(
+      "Read or set your employee phone mode: ring, vibrate, silent; your choice is a lease of at most 8h, then the owner's choice or the Vibrate default applies"
+    )
     .option('--for <duration>', 'Lease duration, e.g. 30m or 1h (maximum 8h)', '1h')
     .option('--json', 'Machine-readable output')
     .action((mode: string | undefined, options: { for: string; json?: boolean }) => run(Boolean(options.json), async (deps) => {

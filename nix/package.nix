@@ -244,7 +244,8 @@ let
         test/effort-injection.test.ts test/embassy-guest-client.test.ts test/embassy-guest-policy.test.ts test/embassy-guest-ui.test.ts \
         test/embassy-pairing-api-client.test.ts test/embassy-pairing-cancel-fence.test.ts test/embassy-pairing-cold-retirement.test.ts \
         test/embassy-pairing-protocol.test.ts test/embassy-pairing.test.ts test/embassy-qr.test.ts test/embassy-sidebar-errors.test.ts \
-        test/employee-alert-mode.test.ts test/employee-journal-correction-chains.test.ts test/employee-journal-routes.test.ts \
+        test/employee-alert-mode-commit.test.ts test/employee-alert-mode.test.ts test/employee-journal-correction-chains.test.ts \
+        test/employee-journal-routes.test.ts \
         test/employee-journal.test.ts test/entrance-animations.test.ts test/env-overrides-schema.test.ts test/file-browser-hidden.test.ts \
         test/file-browser-search.test.ts test/file-editing-policy.test.ts test/file-link-click.test.ts test/file-path-link-forms.test.ts \
         test/file-picker-root-home.test.ts test/file-preview-detach.test.ts test/file-preview-html-page.test.ts \
