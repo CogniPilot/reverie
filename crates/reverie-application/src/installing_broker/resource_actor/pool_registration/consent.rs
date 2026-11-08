@@ -177,6 +177,18 @@ impl<'a> PoolRegistrationFailure<'a> {
         offer
             .latch_consent(&request, &current)
             .map_err(Cause::Offer)?;
+        self.retain_consented(broker, request, current);
+        let Owner::Consented(owner) = &mut self.owner else {
+            unreachable!()
+        };
+        owner.activate_and_publish()
+    }
+    fn retain_consented(
+        &mut self,
+        broker: &'a Arc<InstallingBroker>,
+        request: PoolInstallationConsentRequest,
+        current: CurrentPoolInstallationConsent,
+    ) {
         // Move ALL original native/channel/offer owners before any activation.
         let Owner::Joined {
             website,
@@ -199,10 +211,6 @@ impl<'a> PoolRegistrationFailure<'a> {
             activation_cleanup: None,
             channel_cleanup: None,
         }));
-        let Owner::Consented(owner) = &mut self.owner else {
-            unreachable!()
-        };
-        owner.activate_and_publish()
     }
 }
 impl ConsentedPoolInstallation<'_> {
@@ -379,10 +387,10 @@ impl ConsentedPoolInstallation<'_> {
         self.website.close_channel_component(end)
     }
     fn disconnect_retaining(&mut self) {
-        if let Transport::Retained(channel) = &mut self.website.frame.transport {
-            if let Err(error) = channel.disconnect_for_worker() {
-                self.channel_cleanup.get_or_insert(error.into());
-            }
+        if let Transport::Retained(channel) = &mut self.website.frame.transport
+            && let Err(error) = channel.disconnect_for_worker()
+        {
+            self.channel_cleanup.get_or_insert(error.into());
         }
     }
 }

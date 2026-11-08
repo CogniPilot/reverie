@@ -225,7 +225,7 @@ impl BrokerInstallationOffer {
         }
         self.metadata_closed = true;
         match &mut self.origin {
-            Origin::Transferred => return Ok(()),
+            Origin::Transferred => Ok(()),
             Origin::Unopened => Ok(()),
             Origin::Retained(origin) => origin.close_origin_metadata(),
             Origin::Failed(failure) => failure.close_origin_metadata(),
