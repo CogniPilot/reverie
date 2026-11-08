@@ -1,35 +1,7 @@
 [workspace]
-members = [
-    "crates/reverie-soft-limit-helper",
-    "crates/reverie-laptop-tools",
-    "crates/reverie-core",
-    "crates/reverie-contracts",
-    "crates/reverie-store",
-    "crates/reverie-host",
-    "crates/reverie-policy-artifacts",
-    "crates/reverie-application",
-    "crates/reverie-routes",
-    "crates/reverie-worker-client",
-    "crates/reverie-worker-child",
-    "crates/reverie-nix-store-prepare",
-    "crates/reverie-memory-cli",
-    "crates/reverie-front",
-    "crates/reverie-http",
-    "crates/reverie-ops-cli",
-    "crates/reverie-mcp-cli",
-    "crates/reverie-python-regex",
-    "crates/reverie-memory-capsule",
-    "crates/reverie-diagnostics",
-    "crates/reverie-deployment",
-    "crates/reverie-namegate",
-    "crates/reverie-observations",
-    "crates/reverie-voice-ci",
-    "crates/reverie-commit-policy",
-    "crates/reverie-routines",
-    "crates/reverie-lease-cli",
-    "crates/reverie-mux",
-    "crates/xtask",
-]
+# Every directory under crates/ is a member, so adding or removing a crate never edits this
+# list and parallel PRs never conflict on it. xtask's workspace_members policy test holds it.
+members = ["crates/*"]
 exclude = ["vendor/rustpython-sre-engine", "vendor/rustpython-wtf8"]
 resolver = "3"
 
