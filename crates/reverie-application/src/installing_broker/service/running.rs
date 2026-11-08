@@ -46,6 +46,7 @@ impl std::error::Error for BrokerServiceError {}
 pub struct BrokerService {
     startup: BrokerServiceStartup,
     listener: WorkerBrokerListener,
+    shutdown_attempted: bool,
 }
 #[must_use = "failed shutdown is not a resource/global acknowledgement"]
 pub struct BrokerServiceFailure {
@@ -109,6 +110,7 @@ impl BrokerServiceStartup {
         Ok(BrokerService {
             startup: self,
             listener,
+            shutdown_attempted: false,
         })
     }
 }
@@ -170,6 +172,18 @@ impl BrokerService {
     }
 }
 impl BrokerServiceFailure {
+    /// Settle only native work already retained by this SAME failed service.
+    /// Uses its original first stop, never seals/reopens the client, repeats a
+    /// service body or claims App/report/global closure. The primary stays put.
+    pub fn settle_original_native_work(
+        &mut self,
+    ) -> Result<(), reverie_host::worker_runtime::RuntimeError> {
+        let runtime = &self.service.startup.owner.broker.storage.runtime;
+        let end = runtime
+            .stop_deadline()
+            .unwrap_or_else(|| runtime.request_stop());
+        runtime.settle_owned(end)
+    }
     /// Original metadata component only; no native/app/handler/global closure
     /// or healthy broker release is implied. The historical cause stays intact.
     pub fn close_installation_origin_metadata(
