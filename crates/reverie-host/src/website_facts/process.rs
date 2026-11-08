@@ -62,6 +62,29 @@ pub struct WebsiteProcessObserver {
     close_uncertain: bool,
 }
 impl WebsiteProcessObserver {
+    /// The original held L Record and its actual pinned kernel peer select
+    /// every process read. No wire PID or caller-created snapshot is accepted.
+    pub fn observe_protected_peer(
+        &mut self,
+        pin: &crate::worker_reports::ProtectedLaunchPeerPin,
+        runtime: &crate::worker_runtime::WorkerRuntime,
+        connection: &crate::worker_reports::WorkerLaunchConnection,
+        end: Instant,
+    ) -> Result<PeerProcessSnapshot> {
+        self.current(end)?;
+        pin.assert_current(runtime, connection)?;
+        let peer = *pin.peer();
+        need(peer.pid() > 1, "PEER_IDENTITY")?;
+        let pid = UnsignedInteger::from_u64(peer.pid() as u64);
+        let mut files = Descriptors::default();
+        let body = self.peer_body(&mut files, &pid, peer, end);
+        let body = files.finish(body, &mut self.close_uncertain);
+        finalized(
+            body,
+            pin.assert_current(runtime, connection)
+                .map_err(WebsiteFactsError::from),
+        )
+    }
     /// Purpose-private bootstrap SELF observation, never a caller-selected PID.
     pub(crate) fn observe_current_broker(&mut self, end: Instant) -> Result<ProcessSnapshot> {
         self.current(end)?;

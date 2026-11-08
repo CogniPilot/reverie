@@ -2,6 +2,8 @@
 //! origin remains L through the common native transport; ordinary admission
 //! must refuse it. No parsed reference, request or digest is a start grant.
 use super::*;
+mod peer;
+pub use peer::{ProtectedLaunchPeerFailure, ProtectedLaunchPeerPin};
 use reverie_contracts::{
     worker_config::EffectiveWorkerConfig, worker_launch::ProtectedWorkerRequest,
 };
@@ -22,6 +24,7 @@ pub struct ProtectedLaunchDecodeFailure {
 pub struct HeldProtectedWorkerLaunch {
     incoming: WorkerProtectedLaunchConnection,
     hold: WorkerLaunchHold,
+    peer_pin_attempted: bool,
 }
 pub struct ProtectedLaunchHoldFailure {
     incoming: WorkerProtectedLaunchConnection,
@@ -80,6 +83,7 @@ impl WorkerProtectedLaunchConnection {
             Ok(hold) => Ok(HeldProtectedWorkerLaunch {
                 incoming: self,
                 hold,
+                peer_pin_attempted: false,
             }),
             Err(cause) => Err(Box::new(ProtectedLaunchHoldFailure {
                 incoming: self,

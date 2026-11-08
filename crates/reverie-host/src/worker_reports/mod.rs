@@ -14,7 +14,7 @@ mod record;
 mod registered;
 pub use protected_launch::{
     HeldProtectedWorkerLaunch, ProtectedLaunchDecodeFailure, ProtectedLaunchHoldFailure,
-    WorkerProtectedLaunchConnection,
+    ProtectedLaunchPeerFailure, ProtectedLaunchPeerPin, WorkerProtectedLaunchConnection,
 };
 mod peer_pin;
 mod resume;

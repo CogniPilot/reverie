@@ -18,6 +18,34 @@ impl PeerInitSnapshot {
     }
 }
 impl WebsiteProcessObserver {
+    pub fn observe_protected_peer_ancestry(
+        &mut self,
+        pin: &crate::worker_reports::ProtectedLaunchPeerPin,
+        runtime: &crate::worker_runtime::WorkerRuntime,
+        connection: &crate::worker_reports::WorkerLaunchConnection,
+        metadata: &QualifiedWebsiteMetadata,
+        end: Instant,
+    ) -> Result<PeerInitSnapshot> {
+        self.current(end)?;
+        pin.assert_current(runtime, connection)?;
+        let identity = *pin.peer();
+        need(identity.pid() > 1, "PEER_IDENTITY")?;
+        need(
+            metadata
+                .pid()
+                .to_u64()
+                .is_some_and(|pid| pid > 1 && u32::try_from(pid).is_ok()),
+            "WEBSITE_INIT_SELECTION",
+        )?;
+        let mut files = Descriptors::default();
+        let body = ancestry(&mut files, identity, metadata.pid(), end);
+        let body = files.finish(body, &mut self.close_uncertain);
+        finalized(
+            body,
+            pin.assert_current(runtime, connection)
+                .map_err(WebsiteFactsError::from),
+        )
+    }
     /// The metadata PID remains DATA. The authenticating factory must join the
     /// same actual engine/init/program and independently protected peer status.
     pub fn observe_peer_ancestry(
