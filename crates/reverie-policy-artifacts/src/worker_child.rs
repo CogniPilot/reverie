@@ -261,6 +261,24 @@ mod tests {
         (program, pin(), base, pin())
     }
     #[test]
+    fn preserved_v1_archive_config_key_is_exact() {
+        // Literal wire spelling from the existing v1 producer, independent of
+        // Rust's field-name conversion. Do not change the base document.
+        let actual_v1 = serde_json::json!({
+            "version":1, "purpose":"worker-image-provenance-v1",
+            "archiveConfigSHA256":"b".repeat(64),
+            "archive":{"path":"/nix/store/fixed/archive", "sha256":"a".repeat(64), "bytes":12},
+            "imageSpec":{}, "factory":{}, "source":{}, "toolkit":{}
+        });
+        let decoded: Base = serde_json::from_value(actual_v1.clone()).unwrap();
+        assert_eq!(decoded.archive_config_sha256, "b".repeat(64));
+        let mut foreign_spelling = actual_v1;
+        let fields = foreign_spelling.as_object_mut().unwrap();
+        let digest = fields.remove("archiveConfigSHA256").unwrap();
+        fields.insert("archiveConfigSha256".into(), digest);
+        assert!(serde_json::from_value::<Base>(foreign_spelling).is_err());
+    }
+    #[test]
     fn annex_refuses_old_foreign_or_wrong_arch_image_and_preserves_exact_spec() {
         for (label, arch) in [
             (None, "amd64"),
