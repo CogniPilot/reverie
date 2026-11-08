@@ -1,20 +1,6 @@
 //! Shared cleanup timing and actual handler owners, plus negative prefix
 //! finalization. Metadata or transport cleanup never authorizes resource release.
 use super::*;
-/// Retrying a read/settlement observation must not accumulate the SAME retained
-/// diagnostic indefinitely. This changes no phase, owner or success predicate.
-pub(in crate::installing_broker::launch) fn retain_late_error<T: std::fmt::Display>(
-    errors: &mut Vec<T>,
-    error: T,
-) {
-    let message = error.to_string();
-    if !errors
-        .iter()
-        .any(|original| original.to_string() == message)
-    {
-        errors.push(error);
-    }
-}
 #[cfg(test)]
 #[path = "finalization_tests.rs"]
 mod tests;

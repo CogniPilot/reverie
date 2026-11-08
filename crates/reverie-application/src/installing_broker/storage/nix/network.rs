@@ -86,7 +86,7 @@ pub struct NetworkStoragePreparation {
 impl NetworkStoragePreparation {
     pub(in crate::installing_broker) fn settle_handler_native(
         &self,
-    ) -> Result<(), NetworkStorageError> {
+    ) -> Result<reverie_host::worker_runtime::NativeSettlementProgress, NetworkStorageError> {
         self.check()?;
         self.destination
             .registry()

@@ -39,7 +39,7 @@ pub(in crate::installing_broker) struct ExistingStoragePreparation {
 impl ExistingStoragePreparation {
     pub(in crate::installing_broker) fn settle_handler_native(
         &self,
-    ) -> Result<(), ExistingStorageError> {
+    ) -> Result<reverie_host::worker_runtime::NativeSettlementProgress, ExistingStorageError> {
         self.check()?;
         Ok(self
             .destination

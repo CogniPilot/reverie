@@ -65,6 +65,11 @@ fn actual_finalized_reply_cannot_release_the_original_j_hold() {
         service.reconcile_worker_handlers(end()).unwrap(),
         WorkerHandlersProgress::Pending
     );
+    service.settle_worker_handlers(end()).unwrap();
+    assert_eq!(
+        service.reconcile_worker_handlers(end()).unwrap(),
+        WorkerHandlersProgress::Pending
+    );
     assert!(record.socket_closed_known());
     assert!(!record.settled());
     assert_eq!(service.records.lock().unwrap().len(), 1);

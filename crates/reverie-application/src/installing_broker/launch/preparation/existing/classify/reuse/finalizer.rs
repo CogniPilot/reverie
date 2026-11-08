@@ -39,6 +39,7 @@ pub struct ReuseHandlerClosed {
     storage_retained: bool,
     primary: Option<Error>,
     history: Vec<Error>,
+    classified: Option<ColdHandlerClosed>,
 }
 impl ReuseHandlerClosed {
     pub fn primary_error(&self) -> Option<&(dyn std::error::Error + 'static)> {
@@ -46,6 +47,11 @@ impl ReuseHandlerClosed {
             .as_ref()
             .or_else(|| self.history.first())
             .map(Error::as_error)
+            .or_else(|| {
+                self.classified
+                    .as_ref()
+                    .and_then(ColdHandlerClosed::primary_error)
+            })
     }
     pub fn completed(&self) -> bool {
         self.completed
@@ -174,6 +180,7 @@ impl<'a> ReuseViewerFailure<'a> {
                         storage_retained: closed.storage_retained(),
                         primary,
                         history: Vec::new(),
+                        classified: Some(closed),
                     }),
                     Err(owner) => Err(Box::new(ReuseFinalizationFailure {
                         owner: Owner::Classified(owner),
@@ -273,6 +280,7 @@ fn finish<'a>(
             storage_retained,
             primary: cleanup.primary,
             history: Vec::new(),
+            classified: None,
         })
     } else {
         Err(Box::new(ReuseFinalizationFailure {
@@ -441,10 +449,5 @@ impl Error {
             Self::Gate(error) => error,
             Self::Transport(error) => error,
         }
-    }
-}
-impl std::fmt::Display for Error {
-    fn fmt(&self, out: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        std::fmt::Display::fmt(self.as_error(), out)
     }
 }

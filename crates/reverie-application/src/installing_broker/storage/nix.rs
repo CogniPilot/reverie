@@ -27,6 +27,21 @@ pub struct NixStoragePreparation {
     workflow: NixWorkflow,
 }
 impl NixStoragePreparation {
+    pub(in crate::installing_broker) fn settle_handler_native(
+        &self,
+    ) -> Result<reverie_host::worker_runtime::NativeSettlementProgress, NixStorageError> {
+        if let ReturnTo::Registered {
+            registry, identity, ..
+        } = &self.destination
+        {
+            registry.check_nix(identity, &self.workflow)?;
+        }
+        Ok(self
+            .destination
+            .registry()
+            .runtime
+            .settle_nix_native_for_handler(&self.workflow)?)
+    }
     pub fn paths(&self) -> &StoragePaths {
         &self.paths
     }
