@@ -134,10 +134,110 @@ fn actual_q_record_retains_stateless_close_error_after_disconnect_and_repeated_c
 fn assert_same_close(first: &custody::RetainedClose, second: &custody::RetainedClose) {
     use custody::RetainedClose;
     match (first, second) {
+        (RetainedClose::Gate(a), RetainedClose::Gate(b)) => assert!(Arc::ptr_eq(a, b)),
         (RetainedClose::Company(a), RetainedClose::Company(b)) => assert!(Arc::ptr_eq(a, b)),
         (RetainedClose::Kernel(a), RetainedClose::Kernel(b)) => assert!(Arc::ptr_eq(a, b)),
         (RetainedClose::Control(a), RetainedClose::Control(b)) => assert!(Arc::ptr_eq(a, b)),
         _ => panic!("original close origin changed"),
+    }
+}
+
+#[test]
+fn actual_q_preview_gate_close_errors_keep_original_frame_hold_and_cause() {
+    crate::test_process::owning_case!(
+        actual_q_preview_gate_close_errors_keep_original_frame_hold_and_cause
+    );
+    let mut fixture = Fixture::new();
+    fixture.retained = true;
+    // Classification composition only. The intrinsic consumed-close producers
+    // are separately exercised by actual Store/Host native controls.
+    let profile = GateError::Profile(profile_close_data());
+    let journal = GateError::Journal(reverie_store::operations::JournalError::Filesystem(
+        profile_close_data(),
+    ));
+    let kernel = gate_kernel_close_error();
+    let guard = gate_kernel_close_error();
+    let guarded = GateError::Journal(reverie_store::operations::JournalError::guard_failure(
+        guard.code(),
+        guard,
+    ));
+    for cause in [profile, journal, kernel, guarded] {
+        let (mut client, connection) = fixture.accept(b'Q', b"{}");
+        let mut failure = fixture
+            .broker
+            .prepare_resource_website(connection)
+            .err()
+            .unwrap();
+        let original = cause.code();
+        let body = failure
+            .frame
+            .retain_stateless_result::<()>(Err(cause.into()))
+            .unwrap_err();
+        assert_eq!(body.code(), original);
+        assert!(body.has_unconfirmed_close());
+        let retained = failure.frame.unconfirmed.clone().unwrap();
+        assert!(
+            failure
+                .close_channel_component(end())
+                .unwrap_err()
+                .has_unconfirmed_close()
+        );
+        assert_eq!(client.read(&mut [0]).unwrap(), 0);
+        assert!(
+            failure
+                .close_channel_component(end())
+                .unwrap_err()
+                .has_unconfirmed_close()
+        );
+        assert_same_close(&retained, failure.frame.unconfirmed.as_ref().unwrap());
+    }
+}
+fn profile_close_data() -> reverie_store::StoreError {
+    reverie_store::StoreError::CloseUnconfirmed {
+        cause: Box::new(reverie_store::StoreError::Refused(
+            reverie_store::StoreFault::PrivateFile,
+        )),
+    }
+}
+fn gate_kernel_close_error() -> GateError {
+    let cause = reverie_host::ObservationError::CloseUnconfirmed {
+        cause: std::io::Error::other("typed Gate kernel consumed-close witness"),
+    };
+    let kernel = reverie_host::reservation_kernel::ReservationKernelError::from(cause);
+    GateError::Observer(crate::reservation_observer::ObserverError::from(kernel))
+}
+#[test]
+fn actual_q_preview_known_profile_journal_and_kernel_errors_do_not_invent_unknown() {
+    crate::test_process::owning_case!(
+        actual_q_preview_known_profile_journal_and_kernel_errors_do_not_invent_unknown
+    );
+    let fixture = Fixture::new();
+    let profile = GateError::Profile(reverie_store::StoreError::Refused(
+        reverie_store::StoreFault::PrivateFile,
+    ));
+    let journal = GateError::Journal(reverie_store::operations::JournalError::Filesystem(
+        reverie_store::StoreError::Refused(reverie_store::StoreFault::LockBusy),
+    ));
+    let native =
+        reverie_host::ObservationError::Io(std::io::Error::other("known native body refusal"));
+    let kernel = GateError::Observer(crate::reservation_observer::ObserverError::from(
+        reverie_host::reservation_kernel::ReservationKernelError::from(native),
+    ));
+    for cause in [profile, journal, kernel] {
+        let (mut client, connection) = fixture.accept(b'Q', b"{}");
+        let mut failure = fixture
+            .broker
+            .prepare_resource_website(connection)
+            .err()
+            .unwrap();
+        let body = failure
+            .frame
+            .retain_stateless_result::<()>(Err(cause.into()))
+            .unwrap_err();
+        assert!(!body.has_unconfirmed_close());
+        assert!(failure.frame.unconfirmed.is_none());
+        failure.close_channel_component(end()).unwrap();
+        assert_eq!(client.read(&mut [0]).unwrap(), 0);
     }
 }
 fn company_close_error() -> ResourceActorError {

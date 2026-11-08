@@ -65,6 +65,9 @@ impl Frame<'_> {
     }
     fn retain_gate_error(&mut self, cause: GateError) -> ResourceActorError {
         match cause {
+            GateError::Observer(ObserverError::Kernel(error)) if error.has_unconfirmed_close() => {
+                self.retain_close(RetainedClose::Kernel(Arc::new(error)))
+            }
             GateError::Identity(error) if error.has_unconfirmed_close() => {
                 self.retain_close(RetainedClose::Company(Arc::new(error)))
             }

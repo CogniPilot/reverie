@@ -3,6 +3,8 @@
 use super::*;
 use crate::{profiles_v1, ram_migration::RamMigrationPolicy};
 use reverie_core::{profiles::ResourceProfile, resources::ResourceTemplate};
+#[cfg(test)]
+mod tests;
 
 pub struct RamPreviewFields<'a> {
     pub draft_id: &'a JournalId,
