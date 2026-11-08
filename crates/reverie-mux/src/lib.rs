@@ -44,8 +44,9 @@ pub enum Target {
 pub trait Host {
     /// Whether tmux itself can run (`tmux -V`), independent of any server.
     fn tmux_available(&mut self) -> Result<(), Error>;
-    /// Runs tmux on `socket` with `args`; stdout on success, `None` when it ran and failed.
-    fn tmux(&mut self, socket: &str, args: &[&str]) -> Option<String>;
+    /// Runs tmux on `socket` with `args`: its stdout when it succeeds, `None` when it ran and
+    /// failed (no server, no such session), and an error when it could not be run at all.
+    fn tmux(&mut self, socket: &str, args: &[&str]) -> Result<Option<String>, Error>;
     /// Sends `signal` to `target`, ignoring a process that is already gone.
     fn signal(&mut self, target: Target, signal: Signal);
     /// The direct children of `pid`.
@@ -237,28 +238,36 @@ pub fn format_duration(seconds: i64) -> String {
 /// The tmux session this tool runs inside, on the instance socket, if any.
 /// Asked by pane: without a target, tmux answers with some session even when the caller is not
 /// inside one, which the old script mistook for its own.
-fn own_session(host: &mut dyn Host, instance: &Instance) -> Option<String> {
-    let pane = instance.own_pane.as_deref()?;
-    host.tmux(
+fn own_session(host: &mut dyn Host, instance: &Instance) -> Result<Option<String>, Error> {
+    let Some(pane) = instance.own_pane.as_deref() else {
+        return Ok(None);
+    };
+    let name = host.tmux(
         &instance.socket,
         &["display-message", "-p", "-t", pane, "#{session_name}"],
-    )
-    .map(|name| name.trim().to_owned())
-    .filter(|name| !name.is_empty())
+    )?;
+    Ok(name
+        .map(|name| name.trim().to_owned())
+        .filter(|name| !name.is_empty()))
 }
 
-fn alive(host: &mut dyn Host, socket: &str, mux_name: &str) -> bool {
-    host.tmux(socket, &["has-session", "-t", mux_name])
-        .is_some()
+fn alive(host: &mut dyn Host, socket: &str, mux_name: &str) -> Result<bool, Error> {
+    Ok(host
+        .tmux(socket, &["has-session", "-t", mux_name])?
+        .is_some())
 }
 
 /// The table `list` prints.
-pub fn list(host: &mut dyn Host, instance: &Instance, sessions: &Sessions) -> String {
+pub fn list(
+    host: &mut dyn Host,
+    instance: &Instance,
+    sessions: &Sessions,
+) -> Result<String, Error> {
     if sessions.is_empty() {
-        return format!(
+        return Ok(format!(
             "No reverie sessions found in {}.\n",
             instance.sessions_file.display()
-        );
+        ));
     }
     let now = host.now();
     let mut out = format!(
@@ -276,7 +285,7 @@ pub fn list(host: &mut dyn Host, instance: &Instance, sessions: &Sessions) -> St
         let running = session
             .created_at_ms
             .map_or_else(|| "unknown".into(), |ms| format_duration(now - ms / 1000));
-        let status = if alive(host, &instance.socket, &session.mux_name) {
+        let status = if alive(host, &instance.socket, &session.mux_name)? {
             "alive"
         } else {
             "dead"
@@ -292,11 +301,11 @@ pub fn list(host: &mut dyn Host, instance: &Instance, sessions: &Sessions) -> St
             session.mode
         ));
     }
-    out
+    Ok(out)
 }
 
 /// The details `info N` prints.
-pub fn info(host: &mut dyn Host, instance: &Instance, session: &Session) -> String {
+pub fn info(host: &mut dyn Host, instance: &Instance, session: &Session) -> Result<String, Error> {
     let now = host.now();
     let running = session
         .created_at_ms
@@ -312,7 +321,7 @@ pub fn info(host: &mut dyn Host, instance: &Instance, session: &Session) -> Stri
     out.push_str(&format!("  Mode:        {}\n", session.mode));
     out.push_str(&format!("  Directory:   {}\n", session.working_dir));
     out.push_str(&format!("  Running:     {running}\n"));
-    if alive(host, &instance.socket, &session.mux_name) {
+    if alive(host, &instance.socket, &session.mux_name)? {
         out.push_str("  Status:      alive\n");
         if let Some(kib) = session.pid.and_then(|pid| host.rss_kib(pid)) {
             out.push_str(&format!("  Memory:      {:.1} MB\n", kib as f64 / 1024.0));
@@ -320,13 +329,14 @@ pub fn info(host: &mut dyn Host, instance: &Instance, session: &Session) -> Stri
     } else {
         out.push_str("  Status:      dead\n");
     }
-    out
+    Ok(out)
 }
 
 /// Stops one session the way the old script did: TERM its children and its process group,
 /// kill the tmux session, then KILL the process. A pid that is missing or not above 1 is never
-/// signalled, so a bad record cannot reach this tool's own group or init.
-fn stop(host: &mut dyn Host, socket: &str, session: &Session) {
+/// signalled, so a bad record cannot reach this tool's own group or init. An error means tmux
+/// could not be run, so the session may still exist.
+fn stop(host: &mut dyn Host, socket: &str, session: &Session) -> Result<(), Error> {
     let pid = session.pid.filter(|pid| *pid > 1);
     if let Some(pid) = pid {
         for child in host.children(pid) {
@@ -334,14 +344,17 @@ fn stop(host: &mut dyn Host, socket: &str, session: &Session) {
         }
         host.signal(Target::Group(pid), Signal::Term);
     }
-    host.tmux(socket, &["kill-session", "-t", &session.mux_name]);
+    host.tmux(socket, &["kill-session", "-t", &session.mux_name])?;
     if let Some(pid) = pid {
         host.signal(Target::Process(pid), Signal::Kill);
     }
+    Ok(())
 }
 
 /// Kills the selected sessions (0-based), never the one this tool runs inside, and removes
-/// their records. Returns one line per session.
+/// their records. Returns one line per session. If tmux cannot be run partway, the last line
+/// starts with `FAILED:`, that session and every later one keep their records, and nothing
+/// after it is attempted.
 pub fn kill(
     host: &mut dyn Host,
     instance: &Instance,
@@ -351,7 +364,7 @@ pub fn kill(
     // Without a working tmux every session would look already gone and its record would be
     // dropped; refuse before touching anything.
     host.tmux_available()?;
-    let own = own_session(host, instance);
+    let own = own_session(host, instance)?;
     let mut report = Vec::new();
     let mut removed = Vec::new();
     for &index in selected {
@@ -360,7 +373,15 @@ pub fn kill(
             report.push(format!("SKIPPED: own tmux session {}", session.mux_name));
             continue;
         }
-        stop(host, &instance.socket, &session);
+        if let Err(error) = stop(host, &instance.socket, &session) {
+            report.push(format!(
+                "FAILED: [{}] {} ({}): {error}; its record is kept",
+                index + 1,
+                session.name,
+                session.mux_name
+            ));
+            break;
+        }
         report.push(format!(
             "Killed [{}] {} ({})",
             index + 1,

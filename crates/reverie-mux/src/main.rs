@@ -32,7 +32,7 @@ impl Host for System {
         Ok(())
     }
 
-    fn tmux(&mut self, socket: &str, args: &[&str]) -> Option<String> {
+    fn tmux(&mut self, socket: &str, args: &[&str]) -> Result<Option<String>, Error> {
         let output = Command::new("tmux")
             .arg("-L")
             .arg(socket)
@@ -40,11 +40,11 @@ impl Host for System {
             .stdin(Stdio::null())
             .stderr(Stdio::null())
             .output()
-            .ok()?;
-        output
+            .map_err(|error| Error(format!("tmux could not be run: {error}")))?;
+        Ok(output
             .status
             .success()
-            .then(|| String::from_utf8_lossy(&output.stdout).into_owned())
+            .then(|| String::from_utf8_lossy(&output.stdout).into_owned()))
     }
 
     fn signal(&mut self, target: Target, signal: Signal) {
@@ -95,6 +95,18 @@ fn index_argument(
     Ok(parse_selection(spec, sessions.len())?[0])
 }
 
+/// Prints a kill report; a `FAILED:` line makes the command fail after the report is shown.
+fn print_report(report: &[String]) -> Result<(), Error> {
+    let mut failed = None;
+    for line in report {
+        match line.strip_prefix("FAILED: ") {
+            Some(reason) => failed = Some(reason.to_owned()),
+            None => println!("{line}"),
+        }
+    }
+    failed.map_or(Ok(()), |reason| Err(Error(reason)))
+}
+
 fn run(args: &[String]) -> Result<(), Error> {
     let home = std::env::var_os("HOME")
         .map(PathBuf::from)
@@ -111,16 +123,16 @@ fn run(args: &[String]) -> Result<(), Error> {
     host.tmux_available()?;
     let mut sessions = Sessions::load(&instance.sessions_file)?;
     match command {
-        "list" | "ls" => print!("{}", list(&mut host, &instance, &sessions)),
+        "list" | "ls" => print!("{}", list(&mut host, &instance, &sessions)?),
         "info" => {
             let index = index_argument(argument, "info", &sessions)?;
-            print!("{}", info(&mut host, &instance, &sessions.session(index)));
+            print!("{}", info(&mut host, &instance, &sessions.session(index))?);
         }
         "attach" => {
             let index = index_argument(argument, "attach", &sessions)?;
             let name = sessions.session(index).mux_name;
             if host
-                .tmux(&instance.socket, &["has-session", "-t", &name])
+                .tmux(&instance.socket, &["has-session", "-t", &name])?
                 .is_none()
             {
                 return Err(Error("Session dead or not found".into()));
@@ -134,9 +146,8 @@ fn run(args: &[String]) -> Result<(), Error> {
             let spec =
                 argument.ok_or_else(|| Error("Usage: reverie-mux kill <N|N,M|N-M>".into()))?;
             let selected = parse_selection(spec, sessions.len())?;
-            for line in reverie_mux::kill(&mut host, &instance, &mut sessions, &selected)? {
-                println!("{line}");
-            }
+            let report = reverie_mux::kill(&mut host, &instance, &mut sessions, &selected)?;
+            print_report(&report)?;
         }
         "kill-all" => {
             let selected: Vec<usize> = (0..sessions.len()).collect();
@@ -145,10 +156,9 @@ fn run(args: &[String]) -> Result<(), Error> {
                 .iter()
                 .filter(|line| line.starts_with("Killed"))
                 .count();
-            for line in report {
-                println!("{line}");
-            }
+            let printed = print_report(&report);
             println!("{killed} sessions killed");
+            printed?;
         }
         other => return Err(Error(format!("Unknown command: {other}\n\n{USAGE}"))),
     }

@@ -32,6 +32,8 @@ struct Fake {
     children: Vec<i32>,
     calls: Vec<String>,
     tmux_missing: bool,
+    /// tmux passes `-V` but cannot be run for anything else, as when it breaks after the check.
+    tmux_breaks: bool,
 }
 
 impl Host for Fake {
@@ -45,17 +47,20 @@ impl Host for Fake {
             Ok(())
         }
     }
-    fn tmux(&mut self, socket: &str, args: &[&str]) -> Option<String> {
+    fn tmux(&mut self, socket: &str, args: &[&str]) -> Result<Option<String>, Error> {
         self.calls
             .push(format!("tmux -L {socket} {}", args.join(" ")));
-        match args {
+        if self.tmux_breaks {
+            return Err(Error("tmux could not be run: Permission denied".into()));
+        }
+        Ok(match args {
             ["display-message", "-p", "-t", "%7", _] => self.own.clone(),
             // Untargeted, tmux names some session even for a caller outside tmux.
             ["display-message", ..] => Some("reverie-1".into()),
             ["has-session", "-t", name] => self.alive.contains(*name).then(String::new),
             ["kill-session", "-t", name] => self.alive.remove(*name).then(String::new),
             _ => None,
-        }
+        })
     }
     fn signal(&mut self, target: Target, signal: Signal) {
         self.calls.push(format!("signal {target:?} {signal:?}"));
@@ -162,7 +167,7 @@ fn list_and_info_show_each_session_and_whether_it_is_alive() {
         alive: ["reverie-1".to_owned()].into(),
         ..Fake::default()
     };
-    let table = list(&mut host, &instance, &sessions);
+    let table = list(&mut host, &instance, &sessions).unwrap();
     assert!(table.contains(&instance.sessions_file.display().to_string()));
     let rows: Vec<&str> = table.lines().filter(|line| line.starts_with('[')).collect();
     assert_eq!(rows.len(), 2);
@@ -171,7 +176,7 @@ fn list_and_info_show_each_session_and_whether_it_is_alive() {
     );
     assert!(rows[0].contains("alive") && rows[1].contains("dead"));
     assert!(host.calls.iter().all(|call| !call.starts_with("signal")));
-    let details = info(&mut host, &instance, &sessions.session(0));
+    let details = info(&mut host, &instance, &sessions.session(0)).unwrap();
     for expected in [
         "Session ID:  id-1",
         "Tmux:        reverie-1",
@@ -181,7 +186,11 @@ fn list_and_info_show_each_session_and_whether_it_is_alive() {
         assert!(details.contains(expected), "{expected} in {details}");
     }
     assert!(details.contains("Status:      alive") && details.contains("Memory:      2.0 MB"));
-    assert!(info(&mut host, &instance, &sessions.session(1)).contains("Status:      dead"));
+    assert!(
+        info(&mut host, &instance, &sessions.session(1))
+            .unwrap()
+            .contains("Status:      dead")
+    );
     let empty = Scratch::new("empty");
     let none = Instance {
         sessions_file: empty.0.join("mux-sessions.json"),
@@ -189,7 +198,11 @@ fn list_and_info_show_each_session_and_whether_it_is_alive() {
         own_pane: None,
     };
     let loaded = Sessions::load(&none.sessions_file).unwrap();
-    assert!(list(&mut host, &none, &loaded).starts_with("No reverie sessions found"));
+    assert!(
+        list(&mut host, &none, &loaded)
+            .unwrap()
+            .starts_with("No reverie sessions found")
+    );
 }
 
 #[test]
@@ -320,6 +333,48 @@ fn a_missing_tmux_refuses_before_any_record_or_process_is_touched() {
     assert!(refused.0.contains("tmux is not available"), "{refused}");
     assert_eq!(fs::read_to_string(&instance.sessions_file).unwrap(), before);
     assert_eq!(host.calls, ["tmux -V"]);
+}
+
+#[test]
+fn a_tmux_that_breaks_after_the_check_keeps_the_record_and_fails() {
+    // tmux passes -V, then cannot be run: the session may still exist, so nothing is dropped.
+    let scratch = Scratch::new("breaks");
+    let records = [record(1, 4001), record(2, 4002)];
+    let instance = instance(&scratch.0, &records);
+    let before = fs::read_to_string(&instance.sessions_file).unwrap();
+    let mut sessions = Sessions::load(&instance.sessions_file).unwrap();
+    let mut host = Fake {
+        tmux_breaks: true,
+        ..Fake::default()
+    };
+    let report = kill(&mut host, &instance, &mut sessions, &[0, 1]).unwrap();
+    assert_eq!(report.len(), 1, "{report:?}");
+    assert!(
+        report[0].starts_with("FAILED: [1] session 1 (reverie-1): tmux could not be run"),
+        "{report:?}"
+    );
+    assert_eq!(fs::read_to_string(&instance.sessions_file).unwrap(), before);
+    assert!(
+        !host
+            .calls
+            .iter()
+            .any(|call| call.contains("reverie-2") || call.contains("4002")),
+        "{:?}",
+        host.calls
+    );
+    // Inside a session, the own-session lookup itself fails first, before any signal.
+    let mut inside = instance.clone();
+    inside.own_pane = Some("%7".into());
+    let mut host = Fake {
+        tmux_breaks: true,
+        ..Fake::default()
+    };
+    assert!(kill(&mut host, &inside, &mut sessions, &[0, 1]).is_err());
+    assert!(!host.calls.iter().any(|call| call.starts_with("signal")));
+    assert_eq!(fs::read_to_string(&instance.sessions_file).unwrap(), before);
+    // list and info refuse instead of calling every session dead.
+    assert!(list(&mut host, &instance, &sessions).is_err());
+    assert!(info(&mut host, &instance, &sessions.session(0)).is_err());
 }
 
 #[test]
