@@ -48,7 +48,7 @@ cache-bust), ported onto the PR in commit `eea84db` (CI green). See
 **A+C** (see [`../docs/MULTIMONITOR_DESIGN.md`](../docs/MULTIMONITOR_DESIGN.md)):
 (A) gesture "detach" now pops a session into a re-grabbable **in-page floating
 panel** (an `<iframe src="/session/:id">`, not an OS window — so the hand keeps
-control); (C) `scripts/span-reverie.sh` runs Reverie in a **single window spanned
+control); (C) `reverie span` runs Reverie in a **single window spanned
 across both monitors** (Brave-first; needs macOS "Displays have separate Spaces"
 OFF + re-login), launchable one-click from a new **multi-monitor button** in
 Reverie's header. Confirmed: a panel drags across the monitor seam. Still pending:
@@ -150,8 +150,8 @@ its CSP for WebAssembly). Deploy = copy the bundle into Reverie's
 otherwise block the CDN and startup fails with `failed: {"isTrusted":true}`.
 
 **Multi-monitor button.** Reverie's header has a **multi-monitor button** (it
-replaced the notification bell) → `POST /api/system/span-displays` → spawns
-`scripts/span-reverie.sh`, opening a fresh browser `--app` window spanned across
+replaced the notification bell) → `POST /api/system/span-displays` → runs
+`src/span-displays.ts`, opening a fresh browser `--app` window spanned across
 all displays so floating panels can cross the monitor seam (PR #103 `95b0035`).
 
 **Caveats:** Reverie serves static with a 1-year **`immutable`** cache, so

@@ -20,7 +20,12 @@ import { afterAll, afterEach, vi } from 'vitest';
 const originalHome = process.env.HOME;
 const originalUserProfile = process.env.USERPROFILE;
 const originalVitest = process.env.VITEST;
-const originalTemp = { TMPDIR: process.env.TMPDIR, TMP: process.env.TMP, TEMP: process.env.TEMP };
+const originalTemp = {
+  TMPDIR: process.env.TMPDIR,
+  TMP: process.env.TMP,
+  TEMP: process.env.TEMP,
+  TMUX_TMPDIR: process.env.TMUX_TMPDIR,
+};
 const originalPlaywrightBrowsersPath = process.env.PLAYWRIGHT_BROWSERS_PATH;
 // Refuse to run against a live instance. A data dir holding `state.json` belongs
 // to a running Reverie, so this run shares that instance's memory limit and can
@@ -58,6 +63,9 @@ const testTmp = mkdtempSync(join(tmpdir(), 'rvt-'));
 process.env.TMPDIR = testTmp;
 process.env.TMP = testTmp;
 process.env.TEMP = testTmp;
+// tmux ignores TMPDIR and puts its default socket under TMUX_TMPDIR (else /tmp), so without this every test file that
+// starts a real tmux shares one server. Under the same per-file directory, files running side by side never meet.
+process.env.TMUX_TMPDIR = testTmp;
 process.env.VITEST = 'true';
 
 for (const key of Object.keys(process.env)) {

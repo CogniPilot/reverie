@@ -1,4 +1,4 @@
-{ pkgs, src }:
+{ pkgs, src, leaseCli ? import ./lease-cli.nix { inherit pkgs src; } }:
 let
   lib = pkgs.lib;
   sourceHashes = {
@@ -27,8 +27,7 @@ pkgs.runCommand "reverie-prune-tools" {
   makeWrapper ${pkgs.python3}/bin/python3 "$out/bin/reverie-prune" \
     --add-flags "-I -B $out/libexec/reverie/reverie_prune.py --dry-run" \
     --prefix PATH : ${lib.makeBinPath [ pkgs.git ]}
-  makeWrapper ${pkgs.python3}/bin/python3 "$out/bin/lease" \
-    --add-flags "-I -B $out/libexec/reverie/lease.py"
+  ln -s ${leaseCli}/bin/reverie-lease "$out/bin/lease"
 
   cat > "$out/share/reverie-prune/prune.example.toml" <<'TOML'
   # Review and copy to private host configuration before running anything.
@@ -70,6 +69,9 @@ pkgs.runCommand "reverie-prune-tools" {
   configurable root-controlled directory, verify the copied hash and full parent
   chain, then put that canonical copy in lease_lib. The immutable package source
   alone does not establish that the live import path is acceptable.
+
+  bin/lease is the native reverie-lease command; libexec/reverie/lease.py stays
+  only as the janitor's lease_lib source.
 
   lease uses REVERIE_LEASE_DIR, defaulting to the user's persistent
   .local/state/reverie/leases directory. Provision every applicable lease directory

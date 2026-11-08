@@ -147,6 +147,9 @@ async function fixture() {
     });
   let service = create();
   await service.init();
+  // Notices here are ordinary agent and bot traffic, which the reviewer receives on Ring (the owner's lasting choice);
+  // an employee with no choice made is on Vibrate.
+  await service.setPhoneStatus(undefined, A, 'ring', 'owner', () => {});
   const room = service.createRoom('Office');
   service.addMember(room.id, A);
   service.addMember(room.id, B);

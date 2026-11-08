@@ -41,6 +41,7 @@ const TOP_LEVEL: Record<string, string[]> = {
   reset: [],
   start: [],
   list: ['ls'],
+  span: [],
   tui: [],
   web: [],
   service: [],

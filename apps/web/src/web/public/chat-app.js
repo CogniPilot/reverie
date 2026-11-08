@@ -6979,7 +6979,7 @@ class ReverieChatApp {
     this._phonePending ||= new Set();
     if (this._phonePending.has(target)) return;
     const previous = member ? member.alertMode : this.phoneStatus?.alertMode;
-    const mode = previous?.until > Date.now() ? previous.mode : 'ring';
+    const mode = this.app._chatEffectiveAlert?.(previous)?.mode || 'ring';
     const next = ({ ring: 'vibrate', vibrate: 'silent', silent: 'ring' })[mode] || 'ring';
     const update = lease => {
       if (member) member.alertMode = lease;
@@ -6991,7 +6991,8 @@ class ReverieChatApp {
       this.renderMembers();
     };
     this._phonePending.add(target);
-    update(next === 'ring' ? null : { mode: next, until: Date.now() + 28800000 });
+    // Shown at once; the server's answer replaces it (a lasting choice when the owner sets an employee).
+    update({ mode: next, source: 'lease', until: Date.now() + 28800000 });
     try {
       const res = await this.app._chatApi(`/api/chatrooms/phone-status/${encodeURIComponent(target)}`, { method: 'PUT', body: { mode: next } });
       if (!res.ok) throw new Error('Phone status refused');

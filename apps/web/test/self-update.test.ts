@@ -225,3 +225,15 @@ describe('Nix managed updates', () => {
     }
   });
 });
+
+describe('in-place updates', () => {
+  it('are refused for every install, Nix-managed or not', async () => {
+    vi.stubEnv('REVERIE_MANAGED_INSTALL', '');
+    try {
+      expect(isNixManagedInstall()).toBe(false);
+      expect(await startUpdate()).toEqual({ ok: false, code: 'disabled', message: NIX_UPDATE_MESSAGE });
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+});

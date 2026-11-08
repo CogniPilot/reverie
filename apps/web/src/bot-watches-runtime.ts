@@ -12,6 +12,7 @@ import { PublicIssueWatch } from './cron/public-issue-watch.js';
 import { GithubRepositoryWatches } from './github-repository-watches.js';
 import { DiskSpaceWatch, type DiskSpaceWatchDeps } from './disk-space-watch.js';
 import type { PublicationCredentialVault } from './publication-credentials.js';
+import type { AlertMode } from './employee-alert-mode.js';
 
 export interface BotWatchesRuntimeDeps {
   dataPath(name: string): string;
@@ -32,6 +33,14 @@ export interface BotWatchesRuntimeDeps {
   /** Disk readers; the defaults read the website's own filesystems. */
   disk?: Pick<DiskSpaceWatchDeps, 'volumes' | 'hostVolumes' | 'consumers'>;
 }
+/**
+ * A check-in is addressed to one employee, so it is direct contact: Ring and Vibrate (the employee
+ * default) receive it, Silent does not.
+ */
+export function checkInReaches(mode: AlertMode): boolean {
+  return mode !== 'silent';
+}
+
 export async function registerBotWatches(app: FastifyInstance, d: BotWatchesRuntimeDeps) {
   const post = (
     bot: ReturnType<ChatBotRegistry['list']>[number],
@@ -73,7 +82,7 @@ export async function registerBotWatches(app: FastifyInstance, d: BotWatchesRunt
         r.kind !== 'dm' &&
         r.owner === undefined &&
         r.members.some((m) => m.sessionId === sid) &&
-        (!d.chat.alertMode(sid) || d.chat.alertMode(sid)?.mode === 'ring')
+        checkInReaches(d.chat.alertMode(sid).mode)
       );
     },
     coordinatorId: d.coordinatorId,

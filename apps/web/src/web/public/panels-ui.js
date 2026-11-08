@@ -6828,7 +6828,7 @@ Object.assign(ReverieApp.prototype, {
   },
 
   // Open a Reverie window stretched across all displays (multi-monitor mode).
-  // The server spawns scripts/span-reverie.sh, which launches a fresh, spanning
+  // The server (src/span-displays.ts) launches a fresh, spanning
   // browser --app window so in-page floating panels can cross the monitor seam.
   async launchMultiMonitor() {
     try {

@@ -1,10 +1,11 @@
 /**
- * A session with unconfirmed (held) deliveries still gets new lines once its pane is idle with a provably empty composer:
- * a pointer line says how many are held, held messages are never typed again, and the hold stays until they are read.
- * Without that proof, or when the write refuses before any key, nothing is typed and nothing new becomes uncertain.
+ * A session with unconfirmed (held) deliveries still gets woken once its pane is idle with a provably empty composer: only the
+ * constant wake line is typed, held messages are never typed again, and the hold stays until they are read (the member reads
+ * them through its hooks and chat read). Without that proof, or when the write refuses before any key, nothing is typed and
+ * nothing new becomes uncertain.
  */
 import { describe, expect, it } from 'vitest';
-import { ChatroomDelivery, type DeliverySession } from '../src/chatroom-delivery.js';
+import { ChatroomDelivery, WAKE_LINE, type DeliverySession } from '../src/chatroom-delivery.js';
 
 type Options = Parameters<DeliverySession['writeViaMux']>[1];
 
@@ -45,13 +46,13 @@ describe('delivery to a session with unconfirmed earlier lines', () => {
     expect(f.writes).toEqual([]);
   });
 
-  it('delivers a new line with a pointer to the held ones, never retypes them, and keeps the hold until read', async () => {
+  it('wakes with only the constant line, never retypes the held ones, and keeps the hold until read', async () => {
     const f = fixture();
     expect(await f.delivery.flush('s')).toBe(true);
     expect(f.writes).toHaveLength(1);
     const line = f.writes[0]!.text;
-    expect(line).toContain('SYSTEM: 2 earlier messages may not have reached you and were not pasted again (read them with reverie agent chat read)');
-    expect(line).toContain('@Alex check in please');
+    expect(line).toBe(`${WAKE_LINE}\r`);
+    expect(line).not.toContain('@Alex');
     expect(line).not.toContain('old-1');
     expect(f.writes[0]!.options?.requireIdle).toBe(true);
     expect(f.delivery.inspectionFor('s').map((m) => m.messageId).sort()).toEqual(['old-1', 'old-2']);
@@ -70,14 +71,15 @@ describe('delivery to a session with unconfirmed earlier lines', () => {
     // The spacing guard measures from the refused attempt; a later clock is the next poll.
     (f.delivery as unknown as { lastDelivered: Map<string, number> }).lastDelivered.clear();
     expect(await f.delivery.flush('s')).toBe(true);
-    expect(f.writes[0]!.text.match(/SYSTEM: 2 earlier/g)).toHaveLength(1);
+    expect(f.writes.map((w) => w.text)).toEqual([`${WAKE_LINE}\r`]);
   });
 
-  it('adds no pointer and no idle requirement when nothing is held', async () => {
+  it('with nothing held, still types only the wake line, behind the idle and empty-composer gates', async () => {
     const f = fixture();
     f.delivery.acknowledgeRead('s', 'office', ['old-1', 'old-2']);
     expect(await f.delivery.flush('s')).toBe(true);
-    expect(f.writes[0]!.text).not.toContain('may not have reached you');
-    expect(f.writes[0]!.options?.requireIdle).toBeUndefined();
+    expect(f.writes[0]!.text).toBe(`${WAKE_LINE}\r`);
+    expect(f.writes[0]!.options?.requireIdle).toBe(true);
+    expect(f.writes[0]!.options?.requireEmptyComposer).toBe(true);
   });
 });
