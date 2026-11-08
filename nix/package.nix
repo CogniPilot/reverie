@@ -353,7 +353,8 @@ let
       npm test -- test/session-switcher.test.ts test/session-trust-dialog.test.ts test/session-wait-registry.test.ts \
         test/session-watching.test.ts test/session-worktree-label.test.ts test/session.test.ts test/settings-apply-button.test.ts \
         test/shell-scroll-history-pull.test.ts test/shell-session-launch.test.ts test/shift-enter-keypress-swallowed.test.ts \
-        test/shortcut-registry-overlay.test.ts test/signal-target.test.ts test/skin-themes.test.ts test/spawned-tabs-follow-setting.test.ts \
+        test/shortcut-registry-overlay.test.ts test/signal-target.test.ts test/skin-themes.test.ts test/span-displays.test.ts \
+        test/spawned-tabs-follow-setting.test.ts \
         test/split-pane-auto-collapse-unit.test.ts test/split-pane-headers.test.ts test/split-pane-helpers.test.ts \
         test/split-pane-hidden-button-css.test.ts test/split-pane-per-device-setting.test.ts \
         test/split-pane-picker-listener-leak-unit.test.ts test/spreadsheet-preview.test.ts \
