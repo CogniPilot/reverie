@@ -79,17 +79,39 @@ fn nonstore_image_reference_refuses_without_query_or_reservation_mutation() {
     );
 }
 #[test]
-fn composed_file_error_walks_both_branches_without_classifying_known_io_as_close_unknown(){
-    let tree=Tree::new();let broker=broker(&tree);let snapshot=broker.configuration().unwrap();
-    let mut files=reverie_host::worker_image::ImageControlFiles::capture(&tree.root.join("missing-worker.json"),snapshot.configuration());
-    let original=files.read_configuration().err().expect("actual named file absent");
+fn composed_file_error_walks_both_branches_without_classifying_known_io_as_close_unknown() {
+    let tree = Tree::new();
+    let broker = broker(&tree);
+    let snapshot = broker.configuration().unwrap();
+    let mut files = reverie_host::worker_image::ImageControlFiles::capture(
+        &tree.root.join("missing-worker.json"),
+        snapshot.configuration(),
+    );
+    let original = files
+        .read_configuration()
+        .err()
+        .expect("actual named file absent");
     assert!(!original.has_unconfirmed_close());
-    for primary in [true,false]{
-        let leaf=GateError::ImageFiles(original.clone());let other=GateError::Refused("OWNED_CLEANUP_NEGATIVE");
-        let (a,b)=if primary{(leaf,other)}else{(other,leaf)};
-        let wrapped=GateError::Finalization{primary:Box::new(a),secondary:Box::new(b)};
-        let found=super::prepare::image_file_error(&wrapped).expect("typed original leaf in either branch");
-        assert_eq!(found.code(),original.code());assert!(!found.has_unconfirmed_close());
+    for primary in [true, false] {
+        let leaf = GateError::ImageFiles(original.clone());
+        let other = GateError::Refused("OWNED_CLEANUP_NEGATIVE");
+        let (a, b) = if primary {
+            (leaf, other)
+        } else {
+            (other, leaf)
+        };
+        let wrapped = GateError::Finalization {
+            primary: Box::new(a),
+            secondary: Box::new(b),
+        };
+        let found = super::prepare::image_file_error(&wrapped)
+            .expect("typed original leaf in either branch");
+        assert_eq!(found.code(), original.code());
+        assert!(!found.has_unconfirmed_close());
     }
-    broker.storage.runtime.close(Instant::now()+Duration::from_secs(2)).unwrap();
+    broker
+        .storage
+        .runtime
+        .close(Instant::now() + Duration::from_secs(2))
+        .unwrap();
 }

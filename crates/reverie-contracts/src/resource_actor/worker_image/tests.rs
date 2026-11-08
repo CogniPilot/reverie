@@ -99,15 +99,36 @@ fn worker_annex_closed_integer_version_abi_and_machine_refusals() {
     }
 }
 #[test]
-fn copied_archive_and_program_doc_keep_integer_types_even_under_numeric_equality(){
-    let(base,raw,annex)=inputs();
-    let mut bad=annex.clone();bad["archive"]["bytes"]=json!(7.0);
-    assert!(decode(&base,&raw,&bad).is_err(),"archive copied equality cannot erase token type");
-    for machine in [true,false]{
-        let mut changed=annex.clone();let mut program=changed["workerChild"].clone();program.as_object_mut().unwrap().remove("manifest");
-        if machine{program["elfMachine"]=json!(62.0);}else{program["program"]["bytes"]=json!(3.0);}
-        let bytes=serde_json::to_vec(&program).unwrap();
-        changed["workerChild"]["manifest"]["sha256"]=json!(sha(&bytes));changed["workerChild"]["manifest"]["bytes"]=json!(bytes.len());
-        assert!(decode(&base,&raw,&changed).unwrap().require_program_manifest(&bytes).is_err(),"program manifest numeric token type remains closed");
+fn copied_archive_size_keeps_integer_type_even_under_numeric_equality() {
+    let (base, raw, annex) = inputs();
+    let mut bad = annex.clone();
+    bad["archive"]["bytes"] = json!(7.0);
+    assert!(
+        decode(&base, &raw, &bad).is_err(),
+        "archive copied equality cannot erase token type"
+    );
+}
+#[test]
+fn program_doc_keeps_integer_types_even_under_numeric_equality() {
+    let (base, raw, annex) = inputs();
+    for machine in [true, false] {
+        let mut changed = annex.clone();
+        let mut program = changed["workerChild"].clone();
+        program.as_object_mut().unwrap().remove("manifest");
+        if machine {
+            program["elfMachine"] = json!(62.0);
+        } else {
+            program["program"]["bytes"] = json!(3.0);
+        }
+        let bytes = serde_json::to_vec(&program).unwrap();
+        changed["workerChild"]["manifest"]["sha256"] = json!(sha(&bytes));
+        changed["workerChild"]["manifest"]["bytes"] = json!(bytes.len());
+        assert!(
+            decode(&base, &raw, &changed)
+                .unwrap()
+                .require_program_manifest(&bytes)
+                .is_err(),
+            "program manifest numeric token type remains closed"
+        );
     }
 }
