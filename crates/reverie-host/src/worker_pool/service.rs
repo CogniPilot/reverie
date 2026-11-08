@@ -186,8 +186,14 @@ impl<'a> ControllerServing<'a> {
             self.peer
                 .reply(&reply, Instant::now() + Duration::from_secs(2))?;
             if close {
-                self.peer.close()?;
-                return Ok(());
+                let peer = self.peer.close();
+                if self.state.primary.is_some() {
+                    return finalized(
+                        Err(PoolError::Refused("WORKER_POOL_ORIGINAL_ATTEMPT_RETAINED")),
+                        peer,
+                    );
+                }
+                return peer;
             }
         }
     }

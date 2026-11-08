@@ -20,7 +20,7 @@ impl ControllerPeer<'_> {
         verify_peer(stream, pidfd, expected, &mut self.native.close_unknown)?;
         let mut ready = [nix::poll::PollFd::new(
             stream.as_fd(),
-            nix::poll::PollFlags::POLLIN | nix::poll::PollFlags::POLLRDHUP,
+            nix::poll::PollFlags::POLLIN | nix::poll::PollFlags::from_bits_retain(libc::POLLRDHUP),
         )];
         Ok(nix::poll::poll(&mut ready, nix::poll::PollTimeout::ZERO).map_err(io::Error::from)? > 0)
     }
