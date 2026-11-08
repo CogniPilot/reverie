@@ -302,7 +302,7 @@ reverie service install           # systemd/launchd 服务：重启后自动回�
 - **自更新** —— git-clone 安装可在 **App Settings → System → Updates** 中原地更新。
 - **部署你自己的改动** —— 见[开发](#开发)。
 
-> ⚠️ **安全提示：** 如果你正在 Reverie 受管会话*内部*工作（`echo $REVERIE_MUX` → `1`），绝不要直接运行 `tmux kill-session` / `pkill claude` —— 请使用 Web UI 或 `./scripts/tmux-manager.sh`。
+> ⚠️ **安全提示：** 如果你正在 Reverie 受管会话*内部*工作（`echo $REVERIE_MUX` → `1`），绝不要直接运行 `tmux kill-session` / `pkill claude` —— 请使用 Web UI、`reverie tui` 或 `reverie-mux`。
 
 ---
 

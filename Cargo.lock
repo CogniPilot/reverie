@@ -1178,6 +1178,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "reverie-mux"
+version = "0.1.0"
+dependencies = [
+ "nix",
+ "serde_json",
+]
+
+[[package]]
 name = "reverie-namegate"
 version = "0.1.0"
 dependencies = [
