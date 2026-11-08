@@ -56,6 +56,52 @@ fn journal_pin_busy_original_socket_is_nonblocking_and_never_closes_it() {
     service.close(end()).unwrap();
 }
 #[test]
+fn journal_pin_rejects_buffered_peer_fin_without_consuming_open_or_closed_input() {
+    let fixture = Fixture::new();
+    for half_close in [true, false] {
+        let service = Arc::new(fixture.service());
+        let (client, mut channel) = resource_channel(&fixture, &service);
+        let mut client = Some(client);
+        let pin = channel.retain_resource_journal_pin(&service).unwrap();
+        let first_written = client.as_mut().unwrap().write_all(b"x");
+        let open = pin.assert_current();
+        let first = channel.receive_chunk(1, end());
+        let second_written = client.as_mut().unwrap().write_all(b"y");
+        let shutdown = if half_close {
+            client
+                .as_ref()
+                .unwrap()
+                .shutdown(std::net::Shutdown::Write)
+                .map_err(WorkerReportError::Io)
+        } else {
+            super::super::super::record::close(client.take().unwrap())
+        };
+        // The peer PROCESS is this still-running test process; only actual
+        // socket FIN can establish cancellation behind the buffered byte.
+        // Legacy input still drains data, whereas the new work guard refuses.
+        let legacy = channel.peer_ended();
+        let closed = pin.assert_current();
+        let second = channel.receive_chunk(1, end());
+        let client_closed = client.map_or(Ok(()), super::super::super::record::close);
+        let channel_closed = channel.close_for_worker();
+        let service_closed = service.close(end());
+        // Attempt every actual cleanup before checking the regression, so a
+        // failed buffered-FIN assertion cannot abandon an owned live socket.
+        first_written.unwrap();
+        open.unwrap();
+        assert_eq!(first.unwrap(), b"x");
+        second_written.unwrap();
+        shutdown.unwrap();
+        assert!(!legacy.unwrap());
+        assert!(closed.is_err());
+        assert_eq!(second.unwrap(), b"y");
+        client_closed.unwrap();
+        channel_closed.unwrap();
+        service_closed.unwrap();
+        assert!(service.records.lock().unwrap().is_empty());
+    }
+}
+#[test]
 fn consumed_peer_close_is_sticky_and_never_retries_a_descriptor_close() {
     let fixture = Fixture::new();
     let service = Arc::new(fixture.service());

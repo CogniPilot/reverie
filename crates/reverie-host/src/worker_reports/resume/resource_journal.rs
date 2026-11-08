@@ -102,7 +102,7 @@ impl ResourceJournalPin {
         peer.require_alive()?;
         let stream = record.terminal_stream()?;
         let socket = stream.as_ref().ok_or(WorkerReportError::Unconfirmed)?;
-        if super::super::peer_pin::socket_ended(socket)? {
+        if super::super::peer_pin::socket_disconnected(socket)? {
             return Err(WorkerReportError::Peer);
         }
         drop(stream);
