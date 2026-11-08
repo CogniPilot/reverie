@@ -23,7 +23,7 @@ fn expired_offer_keeps_actual_broker_before_nonce_origin_or_filesystem_effect() 
     );
     let (root, broker) =
         super::super::recovered::tests::Tree::bootstrap_parts("", "admission", 512, 4096);
-    let actual_engine = broker.storage.runtime.installed_engine().clone();
+    let original_budget = broker.storage.runtime.stop_budget();
     let mut failure = broker
         .prepare_pool_installation_offer(request(), Instant::now() - Duration::from_secs(1))
         .err()
@@ -35,10 +35,7 @@ fn expired_offer_keeps_actual_broker_before_nonce_origin_or_filesystem_effect() 
     assert!(failure.owner.snapshot.is_none());
     assert!(failure.owner.nonce.is_none() && failure.owner.published.is_none());
     assert!(matches!(failure.owner.origin, Origin::Unopened));
-    assert!(Arc::ptr_eq(
-        &actual_engine,
-        failure.owner.broker.storage.runtime.installed_engine()
-    ));
+    assert!(original_budget.same_runtime(&failure.owner.broker.storage.runtime));
     let original = Arc::downgrade(&failure.owner.broker);
     failure.close_origin_metadata().unwrap();
     assert!(failure.owner.assert_current().is_err());
