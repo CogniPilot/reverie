@@ -1,5 +1,6 @@
 use super::*;
 use serde_json::{Value as Json, json};
+mod continuation;
 mod principal;
 const EID: &str = "11111111-2222-4333-8444-555555555555";
 const RID: &str = "22222222-2222-4333-8444-555555555555";

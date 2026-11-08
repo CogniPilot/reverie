@@ -1,4 +1,16 @@
 use super::*;
+pub(super) const OWNER_REPLY_FIELDS: &[&str] = &[
+    "kind",
+    "requestId",
+    "nonce",
+    "purpose",
+    "stage",
+    "owner",
+    "ownerScopeDigest",
+    "expiresAtEpochMs",
+    "approval",
+    "principal",
+];
 /// One reply's immutable DATA. Equality is useful for the actual owner's
 /// repeated challenge signature; it is not current-cookie/channel authority.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -24,9 +36,16 @@ impl CurrentResourceOwner {
 }
 impl ResourceOperationRequest {
     pub fn owner_challenge(&self, nonce: &JournalId) -> Result<HumanFrame> {
+        self.owner_challenge_at(self.request_id(), nonce)
+    }
+    pub(super) fn owner_challenge_at(
+        &self,
+        request_id: &JournalId,
+        nonce: &JournalId,
+    ) -> Result<HumanFrame> {
         frame(Value(Node::Object(BTreeMap::from([
             (key("kind"), string("resource-owner-check")),
-            (key("requestId"), string(self.request_id().as_str())),
+            (key("requestId"), string(request_id.as_str())),
             (key("nonce"), string(nonce.as_str())),
             (key("stage"), string(self.stage())),
             (key("employeeId"), string(self.employee_id().as_str())),
@@ -38,25 +57,26 @@ impl ResourceOperationRequest {
         frame: &HumanFrame,
         nonce: &JournalId,
     ) -> Result<CurrentResourceOwner> {
-        let value = frame.value();
-        closed(
-            value,
-            &[
-                "kind",
-                "requestId",
-                "nonce",
-                "purpose",
-                "stage",
-                "owner",
-                "ownerScopeDigest",
-                "expiresAtEpochMs",
-                "approval",
-                "principal",
-            ],
-        )?;
+        self.owner_reply_at(
+            frame.value(),
+            self.request_id(),
+            nonce,
+            "resource-owner-current",
+            OWNER_REPLY_FIELDS,
+        )
+    }
+    pub(super) fn owner_reply_at(
+        &self,
+        value: &Value,
+        request_id: &JournalId,
+        nonce: &JournalId,
+        expected_kind: &'static str,
+        fields: &[&str],
+    ) -> Result<CurrentResourceOwner> {
+        closed(value, fields)?;
         for (name, expected) in [
-            ("kind", "resource-owner-current"),
-            ("requestId", self.request_id().as_str()),
+            ("kind", expected_kind),
+            ("requestId", request_id.as_str()),
             ("nonce", nonce.as_str()),
             ("purpose", RAM_POOL_PURPOSE),
             ("stage", self.stage()),

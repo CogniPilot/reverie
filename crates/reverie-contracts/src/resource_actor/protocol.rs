@@ -8,6 +8,10 @@ use reverie_core::{
     revision::ProfileVersion,
 };
 mod approval;
+mod command;
+mod continuation;
+pub use command::RamLaunchCommandData;
+pub use continuation::{ResourceContinuationRequest, ResourceContinuationVerb};
 mod owner;
 mod principal;
 mod reply;

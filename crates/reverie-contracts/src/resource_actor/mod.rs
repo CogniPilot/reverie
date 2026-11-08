@@ -7,7 +7,8 @@ mod native_client;
 mod process;
 mod protocol;
 pub use protocol::{
-    CurrentResourceOwner, RAM_POOL_PURPOSE, RamPreviewFields, ResourceOperationRequest,
+    CurrentResourceOwner, RAM_POOL_PURPOSE, RamLaunchCommandData, RamPreviewFields,
+    ResourceContinuationRequest, ResourceContinuationVerb, ResourceOperationRequest,
     ResourceOwnerPrincipal, ResourceRequestSelection, decode_ram_pool_hello,
 };
 mod provenance;
