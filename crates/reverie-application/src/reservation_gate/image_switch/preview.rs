@@ -21,6 +21,36 @@ impl ImageSwitchPreview {
     }
 }
 impl ReservationGate {
+    pub(crate) fn assert_image_preview(
+        &self,
+        preview: &ImageSwitchPreview,
+        files: &mut ImageControlFiles,
+        end: Instant,
+    ) -> Result<()> {
+        let admission = self.inner.admit(AdmissionBounds {
+            operation: Some(end),
+            entry: Some(end),
+        })?;
+        let result = (|| {
+            let current = self.inner.installed.snapshot()?;
+            need(
+                Arc::ptr_eq(&current, &preview.before)
+                    && current.envelope().base().image() != preview.image.as_str(),
+                "WORKER_IMAGE_PREVIEW_CHANGED",
+            )?;
+            let rows = self.inner.image_idle()?;
+            need(
+                rows.equivalent(&preview.rows),
+                "WORKER_IMAGE_NATIVE_CHANGED",
+            )?;
+            let source = files.read_configuration()?;
+            need(
+                source.stamp() == &preview.stamp && source.bytes() == preview.raw,
+                "WORKER_IMAGE_PREVIEW_CHANGED",
+            )
+        })();
+        admission.conclude(result)
+    }
     pub(crate) fn preview_offline_image(
         &self,
         files: &mut ImageControlFiles,
@@ -38,6 +68,10 @@ impl ReservationGate {
             need(
                 Arc::ptr_eq(before, &self.inner.installed.snapshot()?),
                 "WORKER_IMAGE_CONFIGURATION_CHANGED",
+            )?;
+            need(
+                before.envelope().base().image() != image.as_str(),
+                "WORKER_IMAGE_ALREADY_SELECTED",
             )?;
             let rows = Arc::new(self.inner.image_idle()?);
             let source = files.read_configuration()?;

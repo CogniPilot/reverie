@@ -88,6 +88,33 @@ pub(super) fn image_file_error(
     }
 }
 impl<'a> PreparedOfflineImageSwitch<'a> {
+    /// Full original native input/engine and admitted preview reobservation.
+    /// Invoke before the short stopped-service fence; this renews no deadline.
+    pub fn assert_current(&mut self, end: Instant) -> Result<()> {
+        let owner = self.owner.as_mut().expect("same prepared owner");
+        let result = (|| {
+            owner.observe(end)?;
+            let gate = owner.broker.resource_reservations()?.ok_or(
+                WorkerImageQualificationError::Refused("WORKER_IMAGE_EXISTING_R_REQUIRED"),
+            )?;
+            let result = gate.assert_image_preview(
+                owner.preview.as_ref().expect("actual frozen preview"),
+                owner.preview_files.as_mut().expect("retained actual files"),
+                end.min(owner.end),
+            );
+            if let Err(cause) = &result
+                && let Some(error) = image_file_error(cause)
+                && error.has_unconfirmed_close()
+            {
+                owner.file_close_failure = Some(error.clone());
+            }
+            Ok(result?)
+        })();
+        if result.is_err() {
+            owner.failed = true;
+        }
+        result
+    }
     pub fn preview_digest(&self) -> &JournalDigest {
         self.owner
             .as_ref()
