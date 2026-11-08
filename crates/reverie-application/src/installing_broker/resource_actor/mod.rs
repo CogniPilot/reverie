@@ -53,7 +53,7 @@ struct Frame<'a> {
     deadline: Instant,
     failed: bool,
     frames: usize,
-    unconfirmed: Option<Arc<ResourceActorError>>,
+    unconfirmed: Option<custody::RetainedClose>,
 }
 #[must_use = "retain this exact protected channel through actual operation and checked close"]
 pub struct InstalledResourceWebsite<'a> {
@@ -141,9 +141,9 @@ impl Frame<'_> {
         // close was uncertain. Never release the SAME channel hold unless all
         // results establish known finalization; preserve every failing cause.
         let readers: [Result<()>; 8] = [
-            self.unconfirmed.as_ref().map_or(Ok(()), |cause| {
-                Err(ResourceActorError::RetainedClose(Arc::clone(cause)))
-            }),
+            self.unconfirmed
+                .as_ref()
+                .map_or(Ok(()), |cause| Err(cause.error())),
             self.private.assert_finalized().map_err(Into::into),
             self.input.assert_finalized().map_err(Into::into),
             self.code.assert_finalized().map_err(Into::into),

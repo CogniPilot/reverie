@@ -120,7 +120,10 @@ impl Frame<'_> {
             .expect("bound native context")
             .custody(Some(end))
             .map_err(Into::into);
-        let rows = self.retain_stateless_result(custody)?;
+        let rows = match custody {
+            Ok(rows) => rows,
+            Err(cause) => return self.retain_stateless_result(Err(cause)),
+        };
         let name = format!(
             "/{}",
             ReservationConfiguration::capture(

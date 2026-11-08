@@ -113,15 +113,23 @@ fn actual_q_record_retains_stateless_close_error_after_disconnect_and_repeated_c
         let first = failure.close_channel_component(end());
         let eof = client.read(&mut [0]);
         let repeated = failure.close_channel_component(end());
-        let retained = failure.frame.unconfirmed.as_ref().map(Arc::clone);
+        let retained = failure.frame.unconfirmed.clone();
         assert!(body.unwrap_err().has_unconfirmed_close());
         assert!(first.unwrap_err().has_unconfirmed_close());
         assert_eq!(eof.unwrap(), 0, "same original socket must still close");
         assert!(repeated.unwrap_err().has_unconfirmed_close());
-        assert!(Arc::ptr_eq(
+        assert_same_close(
             retained.as_ref().unwrap(),
-            failure.frame.unconfirmed.as_ref().unwrap()
-        ));
+            failure.frame.unconfirmed.as_ref().unwrap(),
+        );
+    }
+}
+fn assert_same_close(first: &custody::RetainedClose, second: &custody::RetainedClose) {
+    use custody::RetainedClose;
+    match (first, second) {
+        (RetainedClose::Company(a), RetainedClose::Company(b)) => assert!(Arc::ptr_eq(a, b)),
+        (RetainedClose::Kernel(a), RetainedClose::Kernel(b)) => assert!(Arc::ptr_eq(a, b)),
+        _ => panic!("original close origin changed"),
     }
 }
 fn company_close_error() -> ResourceActorError {
