@@ -1,6 +1,7 @@
 //! `reverie-publish`: reviewed publication from sealed packets. `check` runs every shared check
-//! and writes only into the local object store it is given; `new-pr` pushes a reviewed head to a
-//! new branch and opens a draft PR.
+//! and writes only into the local object store it is given (the imported objects and refs,
+//! through a private bundle copy it removes); `new-pr` pushes a reviewed head to a new branch and
+//! opens a draft PR.
 use clap::{Parser, Subcommand};
 use reverie_namegate::Lists;
 use reverie_publish::{
@@ -38,13 +39,14 @@ enum Action {
 /// What every subcommand checks.
 #[derive(clap::Args)]
 struct Common {
-    /// The sealed packet directory.
+    /// The sealed packet directory; its path must not pass through a symlink.
     #[arg(long)]
     packet: PathBuf,
     /// The packet's seal: leading hex digits of sha256(SHA256SUMS), at least 8.
     #[arg(long)]
     seal: String,
-    /// The bare object store the bundle is imported into.
+    /// The bare object store the bundle is imported into; its path must not pass through a
+    /// symlink.
     #[arg(long)]
     git_dir: PathBuf,
     /// The target repository, OWNER/NAME.
@@ -162,7 +164,6 @@ fn run_verify(
         packet: &common.packet,
         seal: &common.seal,
         git,
-        git_dir: &common.git_dir,
         repo: &common.repo,
         base,
         head: &common.head,
@@ -173,7 +174,7 @@ fn run_verify(
 }
 
 fn check(o: &Check) -> Result<Value, String> {
-    let git = Git::new(&o.common.git_dir);
+    let git = Git::open(&o.common.git_dir)?;
     Ok(run_verify(
         &o.common,
         &git,
@@ -186,7 +187,7 @@ fn check(o: &Check) -> Result<Value, String> {
 
 fn new_pr(o: &NewPr) -> Result<Value, String> {
     let c = &o.common;
-    let git = Git::new(&c.git_dir);
+    let git = Git::open(&c.git_dir)?;
     let lists = lists(c)?;
     let url = o
         .remote_url

@@ -9,6 +9,7 @@
 pub mod approval;
 pub mod askpass;
 pub mod commits;
+pub mod custody;
 pub mod git;
 pub mod github;
 pub mod packet;

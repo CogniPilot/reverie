@@ -150,10 +150,32 @@ impl Fixture {
         extra: &[&str],
         envs: &[(&str, &str)],
     ) -> Output {
+        self.command(seal, head, extra)
+            .envs(envs.iter().copied())
+            .output()
+            .unwrap()
+    }
+
+    /// The check command against this fixture's packet, store and lists.
+    pub(crate) fn command(&self, seal: &str, head: &str, extra: &[&str]) -> Command {
+        let (packet, store) = (self.root.join("packet"), self.root.join("store.git"));
+        let mut command = self.command_at(seal, head, &packet, &store);
+        command.args(extra);
+        command
+    }
+
+    pub(crate) fn command_at(
+        &self,
+        seal: &str,
+        head: &str,
+        packet: &Path,
+        store: &Path,
+    ) -> Command {
         let tree = git(&self.work(), &["rev-parse", &format!("{head}^{{tree}}")]);
         let lists_sha = sha256_hex(LISTS.as_bytes());
         let root = &self.root;
-        Command::new(env!("CARGO_BIN_EXE_reverie-publish"))
+        let mut command = Command::new(env!("CARGO_BIN_EXE_reverie-publish"));
+        command
             .args([
                 "check",
                 "--repo",
@@ -167,15 +189,21 @@ impl Fixture {
             ])
             .args(["--tree", &tree[..12], "--lists-sha256", &lists_sha])
             .arg("--packet")
-            .arg(root.join("packet"))
+            .arg(packet)
             .arg("--git-dir")
-            .arg(root.join("store.git"))
+            .arg(store)
             .arg("--lists")
-            .arg(root.join("lists.json"))
-            .args(extra)
-            .envs(envs.iter().copied())
-            .output()
+            .arg(root.join("lists.json"));
+        command
+    }
+
+    /// Bundle copies left in the store.
+    pub(crate) fn copies(&self) -> Vec<String> {
+        fs::read_dir(self.root.join("store.git"))
             .unwrap()
+            .map(|e| e.unwrap().file_name().into_string().unwrap())
+            .filter(|n| n.starts_with("publish-packet-"))
+            .collect()
     }
 }
 

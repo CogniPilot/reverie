@@ -1,21 +1,18 @@
 //! A sealed packet: a directory whose `SHA256SUMS` lists every file in it, sealed by the leading
 //! hex digits of the hash of `SHA256SUMS` itself. A packet is only read through a seal the caller
-//! states, so a file changed, added or removed after review is refused. Every file read must be a
-//! regular file reached without a symlink in any component, so nothing outside the sealed
-//! directory can stand in for a payload, or change after the check.
-use crate::sha256_hex;
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    fs,
-    path::{Path, PathBuf},
-};
+//! states, so a file changed, added or removed after review is refused. The packet directory is
+//! held (see `custody`): no symlink on its path or inside it is followed, and every read goes
+//! through the held descriptor, so nothing outside the sealed directory can stand in for a payload,
+//! even if a parent directory is swapped after the packet is opened.
+use crate::{custody::Held, sha256_hex};
+use std::{collections::BTreeMap, path::Path};
 
 /// Shortest seal accepted: 8 hex digits, the length reviewers quote.
 pub const MIN_SEAL: usize = 8;
 
 #[derive(Debug)]
 pub struct Packet {
-    dir: PathBuf,
+    dir: Held,
     /// Each listed file and its sealed hash.
     listed: BTreeMap<String, String>,
 }
@@ -26,7 +23,8 @@ impl Packet {
         if seal.len() < MIN_SEAL || !seal.bytes().all(|b| b.is_ascii_hexdigit()) {
             return Err(format!("a seal is at least {MIN_SEAL} hex digits"));
         }
-        let sums = read_regular(dir, "SHA256SUMS")?;
+        let dir = Held::open(dir)?;
+        let sums = read_regular(&dir, "SHA256SUMS")?;
         if !sha256_hex(&sums).starts_with(&seal.to_ascii_lowercase()) {
             return Err("packet seal does not match SHA256SUMS".into());
         }
@@ -41,14 +39,13 @@ impl Packet {
             if name.is_empty() || name.split('/').any(|part| part == ".." || part.is_empty()) {
                 return Err(format!("unsafe path in SHA256SUMS: {name}"));
             }
-            let bytes = read_regular(dir, name)?;
+            let bytes = read_regular(&dir, name)?;
             if sha256_hex(&bytes) != hash.to_ascii_lowercase() {
                 return Err(format!("{name}: hash does not match SHA256SUMS"));
             }
             listed.insert(name.to_owned(), hash.to_ascii_lowercase());
         }
-        let mut present = BTreeSet::new();
-        files(dir, dir, &mut present).map_err(|e| format!("{}: {e}", dir.display()))?;
+        let mut present = dir.files()?;
         present.remove("SHA256SUMS");
         let unlisted: Vec<_> = present
             .iter()
@@ -58,10 +55,7 @@ impl Packet {
         if !unlisted.is_empty() {
             return Err(format!("files not in SHA256SUMS: {}", unlisted.join(", ")));
         }
-        Ok(Self {
-            dir: dir.to_path_buf(),
-            listed,
-        })
+        Ok(Self { dir, listed })
     }
 
     /// Reads a listed file again, refusing it unless it still matches its sealed hash.
@@ -126,52 +120,14 @@ impl Packet {
     }
 }
 
-/// Reads `name` under `dir` only if no component of it is a symlink and it is a regular file; the
-/// open itself refuses a symlink (`O_NOFOLLOW`), so a swap after the check fails too.
-pub fn read_regular(dir: &Path, name: &str) -> Result<Vec<u8>, String> {
-    use std::{io::Read, os::unix::fs::OpenOptionsExt};
-    let mut path = dir.to_path_buf();
-    for part in name.split('/') {
-        path.push(part);
-        let meta = fs::symlink_metadata(&path).map_err(|e| format!("{name}: {e}"))?;
-        if meta.file_type().is_symlink() {
-            return Err(format!("{name}: a symlink in the packet is refused"));
-        }
-    }
-    if !fs::symlink_metadata(&path)
-        .map_err(|e| format!("{name}: {e}"))?
-        .is_file()
-    {
-        return Err(format!("{name}: only regular files are read from a packet"));
-    }
-    let mut file = fs::OpenOptions::new()
-        .read(true)
-        .custom_flags(libc::O_NOFOLLOW)
-        .open(&path)
-        .map_err(|e| format!("{name}: {e}"))?;
-    let mut bytes = Vec::new();
-    file.read_to_end(&mut bytes)
-        .map_err(|e| format!("{name}: {e}"))?;
-    Ok(bytes)
-}
-
-fn files(root: &Path, dir: &Path, out: &mut BTreeSet<String>) -> std::io::Result<()> {
-    for entry in fs::read_dir(dir)? {
-        let entry = entry?;
-        let path = entry.path();
-        if entry.file_type()?.is_dir() {
-            files(root, &path, out)?;
-        } else {
-            let relative = path.strip_prefix(root).unwrap_or(&path);
-            out.insert(relative.to_string_lossy().replace('\\', "/"));
-        }
-    }
-    Ok(())
+fn read_regular(dir: &Held, name: &str) -> Result<Vec<u8>, String> {
+    dir.read_regular(name, "the packet")
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
 
     #[test]
     fn a_file_changed_after_opening_is_refused_on_a_later_read() {

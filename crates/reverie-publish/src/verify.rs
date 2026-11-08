@@ -9,9 +9,8 @@ use std::path::Path;
 pub struct Inputs<'a> {
     pub packet: &'a Path,
     pub seal: &'a str,
+    /// The held object store; the verified bundle is imported through a private copy in it.
     pub git: &'a Git,
-    /// The object store `git` works in; the verified bundle is copied here before import.
-    pub git_dir: &'a Path,
     /// `OWNER/NAME`.
     pub repo: &'a str,
     /// The base, as a revision in the object store.
@@ -38,9 +37,7 @@ pub fn verify(input: &Inputs<'_>) -> Result<Verified, String> {
     let packet = Packet::open(input.packet, input.seal)?;
     let git = input.git;
     // git reads a private copy of the verified bytes, never the packet's path.
-    let bundle = input.git_dir.join("publish-packet.bundle");
-    std::fs::write(&bundle, packet.bundle()?).map_err(|e| format!("{}: {e}", bundle.display()))?;
-    git.import_bundle(&bundle, "packet")?;
+    git.import_bundle(&packet.bundle()?, "packet")?;
     let head = git.run([
         "rev-parse",
         "--verify",

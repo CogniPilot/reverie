@@ -1,10 +1,13 @@
 //! `git` with explicit argv against one object store, no shell, no credential helper, no hooks,
 //! no replacement objects, no user or system config, and no `GIT_*` variable from the caller: any
 //! of them could redirect, reconfigure (`GIT_CONFIG_COUNT`, `GIT_CONFIG_PARAMETERS`), trace or run
-//! code inside git.
+//! code inside git. The object store is held (see `custody`): git starts inside the held directory
+//! with `--git-dir .`, so a symlink on the store's path is refused and a swap of the path later
+//! cannot point git at another store.
+use crate::custody::Held;
 use std::{
     ffi::OsStr,
-    path::{Path, PathBuf},
+    path::Path,
     process::{Command, Output},
 };
 
@@ -12,16 +15,22 @@ use std::{
 /// credential prompt that must only ever come from this binary.
 const SCRUBBED: &[&str] = &["SSH_ASKPASS", "GH_TOKEN", "GITHUB_TOKEN"];
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Git {
-    git_dir: PathBuf,
+    store: Held,
 }
 
 impl Git {
-    pub fn new(git_dir: &Path) -> Self {
-        Self {
-            git_dir: git_dir.to_path_buf(),
-        }
+    /// Holds the object store at `git_dir`, refusing a path through a symlink.
+    pub fn open(git_dir: &Path) -> Result<Self, String> {
+        Ok(Self {
+            store: Held::open(git_dir)?,
+        })
+    }
+
+    /// The held store, for files this process writes into it.
+    pub fn store(&self) -> &Held {
+        &self.store
     }
 
     fn command<I, S>(&self, args: I) -> Command
@@ -42,8 +51,8 @@ impl Git {
             .env("GIT_TERMINAL_PROMPT", "0")
             .env("GIT_NO_REPLACE_OBJECTS", "1")
             .args(["-c", "credential.helper=", "-c", "core.hooksPath=/dev/null"])
-            .arg("--git-dir")
-            .arg(&self.git_dir)
+            .args(["--git-dir", "."])
+            .current_dir(self.store.proc_path())
             .args(args);
         command
     }
@@ -114,7 +123,13 @@ impl Git {
             command
                 .env("GIT_ASKPASS", me)
                 .env(crate::askpass::MODE, "1")
-                .env(crate::askpass::TOKEN_FILE, token_file);
+                // git and its askpass child start in the held store, so a relative path would
+                // name a file there.
+                .env(
+                    crate::askpass::TOKEN_FILE,
+                    std::path::absolute(token_file)
+                        .map_err(|e| format!("token file: {}", e.kind()))?,
+                );
         }
         let output = command
             .output()
@@ -148,23 +163,69 @@ impl Git {
         self.run(["rev-parse", "--verify", &format!("{local}^{{commit}}")])
     }
 
-    /// Verifies a bundle and fetches all its refs under `refs/publish/<label>/`.
-    pub fn import_bundle(&self, bundle: &Path, label: &str) -> Result<(), String> {
-        let bundle = bundle.to_string_lossy().into_owned();
+    /// Writes `bytes` to a new private bundle file in the store, verifies it and fetches all its
+    /// refs under `refs/publish/<label>/<run>/`, where `<run>` is the copy's own unique name, so
+    /// concurrent imports share no file and no ref. The copy is removed afterwards. Returns the
+    /// ref prefix.
+    pub fn import_bundle(&self, bytes: &[u8], label: &str) -> Result<String, String> {
+        let copy = self
+            .store
+            .create_unique("publish-packet", "bundle", bytes)?;
+        let run = copy.name().trim_end_matches(".bundle");
+        let bundle = format!("./{}", copy.name());
         self.run(["bundle", "verify", "--quiet", &bundle])?;
-        let refspec = format!("+refs/*:refs/publish/{label}/*");
-        self.run(["fetch", "--quiet", "--no-tags", &bundle, &refspec])?;
-        Ok(())
+        let prefix = format!("refs/publish/{label}/{run}/");
+        let refspec = format!("+refs/*:{prefix}*");
+        self.run([
+            "fetch",
+            "--quiet",
+            "--no-tags",
+            "--no-write-fetch-head",
+            &bundle,
+            &refspec,
+        ])?;
+        Ok(prefix)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
+
+    fn init(path: &Path, marker: &str) {
+        for args in [
+            vec!["init", "-q", "--bare"],
+            vec!["config", "publish.marker", marker],
+        ] {
+            let status = Command::new("git")
+                .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                .env("GIT_CONFIG_NOSYSTEM", "1")
+                .arg("--git-dir")
+                .arg(path)
+                .args(args)
+                .status()
+                .unwrap();
+            assert!(status.success());
+        }
+    }
+
+    #[test]
+    fn git_keeps_working_in_the_held_store_after_its_path_is_swapped() {
+        let root = std::env::temp_dir().join(format!("publish-git-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        init(&root.join("store.git"), "held");
+        let git = Git::open(&root.join("store.git")).unwrap();
+        fs::rename(root.join("store.git"), root.join("store-moved.git")).unwrap();
+        init(&root.join("store.git"), "substituted");
+        assert_eq!(git.run(["config", "publish.marker"]).unwrap(), "held");
+        let _ = fs::remove_dir_all(&root);
+    }
 
     #[test]
     fn a_forced_refspec_is_refused_before_git_runs() {
-        let git = Git::new(Path::new("/nonexistent/store.git"));
+        let git = Git::open(&std::env::temp_dir()).unwrap();
         for refspec in ["+abc:refs/heads/x", "abc:+refs/heads/x"] {
             let error = git
                 .push("/nonexistent/remote.git", refspec, None)
