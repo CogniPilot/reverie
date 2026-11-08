@@ -681,71 +681,38 @@ describe('system-routes', () => {
     });
   });
 
-  // ========== GET /api/screenshots ==========
+  // ========== Removed screenshot upload and list ==========
 
-  describe('GET /api/screenshots', () => {
-    it('returns empty list when directory does not exist', async () => {
-      mockedExistsSync.mockReturnValue(false);
-
-      const res = await harness.app.inject({ method: 'GET', url: '/api/screenshots' });
-      expect(res.statusCode).toBe(200);
-      expect(JSON.parse(res.body)).toEqual({ files: [] });
-    });
-
-    it('returns image files sorted in reverse order', async () => {
+  describe('removed /api/screenshots upload and list', () => {
+    it.each([
+      { label: 'GET /api/screenshots', method: 'GET' as const },
+      { label: 'POST /api/screenshots', method: 'POST' as const },
+    ])('$label is no longer served and writes nothing', async ({ method }) => {
       mockedExistsSync.mockReturnValue(true);
-      mockedReaddirSync.mockReturnValue([
-        'screenshot_2026-01-01_00-00-00.png',
-        'screenshot_2026-01-02_00-00-00.png',
-        'not-an-image.txt',
-        'screenshot_2026-01-03_00-00-00.jpg',
-      ] as never);
-
-      const res = await harness.app.inject({ method: 'GET', url: '/api/screenshots' });
-      expect(res.statusCode).toBe(200);
-      const body = JSON.parse(res.body);
-      expect(body.files).toHaveLength(3); // excludes .txt
-      // Sorted reverse: 03, 02, 01
-      expect(body.files[0].name).toBe('screenshot_2026-01-03_00-00-00.jpg');
-      expect(body.files[1].name).toBe('screenshot_2026-01-02_00-00-00.png');
-      expect(body.files[2].name).toBe('screenshot_2026-01-01_00-00-00.png');
+      mockedReaddirSync.mockReturnValue(['screenshot_2026-01-01_00-00-00.png'] as never);
+      const res = await harness.app.inject({
+        method,
+        url: '/api/screenshots',
+        payload:
+          method === 'POST'
+            ? '--b\r\nContent-Disposition: form-data; name="file"; filename="a.png"\r\n\r\nx\r\n--b--'
+            : undefined,
+        headers: method === 'POST' ? { 'content-type': 'multipart/form-data; boundary=b' } : undefined,
+      });
+      expect(res.statusCode).toBe(404);
+      expect(mockedWriteFile).not.toHaveBeenCalled();
     });
   });
 
-  describe('/api/screenshots deprecation', () => {
+  describe('/api/screenshots/:name deprecation', () => {
     it('warns once across requests and leaves the response unchanged', async () => {
       const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
       try {
         mockedExistsSync.mockReturnValue(false);
-        const first = await harness.app.inject({ method: 'GET', url: '/api/screenshots' });
-        const second = await harness.app.inject({ method: 'GET', url: '/api/screenshots' });
-        expect(JSON.parse(first.body)).toEqual({ files: [] });
-        expect(JSON.parse(second.body)).toEqual({ files: [] });
-        const deprecations = warn.mock.calls.filter((c) => String(c[0]).includes('/api/screenshots'));
-        expect(deprecations).toHaveLength(1);
-        expect(String(deprecations[0][0])).toContain('POST /api/sessions/:id/paste-image');
-      } finally {
-        warn.mockRestore();
-      }
-    });
-
-    // One request per route on the fresh per-test harness, so each warn call is pinned on its own
-    // (the once-flag would let the first route's warning mask a missing call on the others).
-    it.each([
-      { label: 'GET /api/screenshots', method: 'GET' as const, url: '/api/screenshots' },
-      {
-        label: 'POST /api/screenshots',
-        method: 'POST' as const,
-        url: '/api/screenshots',
-        payload: { file: 'data' },
-        headers: { 'content-type': 'application/json' },
-      },
-      { label: 'GET /api/screenshots/:name', method: 'GET' as const, url: '/api/screenshots/nonexistent.png' },
-    ])('$label warns that it is deprecated', async ({ method, url, payload, headers }) => {
-      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-      try {
-        mockedExistsSync.mockReturnValue(false);
-        await harness.app.inject({ method, url, payload, headers });
+        const first = await harness.app.inject({ method: 'GET', url: '/api/screenshots/nonexistent.png' });
+        const second = await harness.app.inject({ method: 'GET', url: '/api/screenshots/nonexistent.png' });
+        expect(first.statusCode).toBe(404);
+        expect(second.statusCode).toBe(404);
         const deprecations = warn.mock.calls.filter((c) => String(c[0]).includes('/api/screenshots'));
         expect(deprecations).toHaveLength(1);
         expect(String(deprecations[0][0])).toContain('POST /api/sessions/:id/paste-image');
@@ -798,23 +765,6 @@ describe('system-routes', () => {
       });
       expect(res.statusCode).toBe(200);
       expect(res.headers['content-type']).toBe('image/jpeg');
-    });
-  });
-
-  // ========== POST /api/screenshots ==========
-
-  describe('POST /api/screenshots', () => {
-    it('rejects non-multipart content type', async () => {
-      const res = await harness.app.inject({
-        method: 'POST',
-        url: '/api/screenshots',
-        payload: { file: 'data' },
-        headers: { 'content-type': 'application/json' },
-      });
-      expect(res.statusCode).toBe(200);
-      const body = JSON.parse(res.body);
-      expect(body.success).toBe(false);
-      expect(body.error).toContain('multipart');
     });
   });
 

@@ -31,7 +31,15 @@ export async function githubCredentialReferences(home = process.env.REVERIE_AGEN
 }
 
 export async function agentCapabilities(deps: AgentDeps, references = githubCredentialReferences): Promise<number> {
-  const response = await deps.request(deps.ctx, { method: 'GET', path: '/api/board', timeoutMs: 10000 });
+  // The capability report alone, not the whole Board, which grows with every card. A server that
+  // predates the route answers 404 and is asked for the Board as before.
+  let response = await deps.request(deps.ctx, {
+    method: 'GET',
+    path: '/api/board/capabilities',
+    bounds: { maxBytes: 64 * 1024, deadlineMs: 10000 },
+  });
+  if (response.status === 404)
+    response = await deps.request(deps.ctx, { method: 'GET', path: '/api/board', timeoutMs: 10000 });
   if (!response.json?.success) {
     // Error bodies can contain secret-adjacent paths; report only the transport status.
     const status = Number.isInteger(response.status) ? response.status : 'unknown';
