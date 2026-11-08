@@ -29,6 +29,18 @@ impl RestoredStoppedRamSource {
     }
 }
 impl StorageClaim {
+    /// Pure same-slot/original Direct-custody fence. It does not observe the
+    /// physical lease or grant release; the returned claim retains that duty.
+    pub(crate) fn assert_stopped_ram_untransferred_custody(
+        &self,
+        context: &ObservationContext,
+    ) -> StopResult<()> {
+        let (registry, identity) = transition::fence(self, context)?;
+        let entries = registry
+            .lock(registry.runtime.stop_deadline())
+            .map_err(storage)?;
+        transition::check_direct(&entries, &identity, self, context, &registry.runtime).map(|_| ())
+    }
     pub(crate) fn begin_stopped_ram_source(
         self,
         mut context: ObservationContext,

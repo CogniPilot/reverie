@@ -33,6 +33,41 @@ pub struct StoppedRamPreparationFailure<'a> {
     cause: Cause,
     owner: Option<Box<Frame<'a>>>,
 }
+/// Known unclaimed restoration preserves the original error and actual claim.
+/// No resource is physically released and no failed body becomes a success.
+pub struct StoppedRamAborted<'a> {
+    claim: Option<StorageClaim>,
+    primary: Box<StoppedRamPreparationFailure<'a>>,
+}
+impl<'a> StoppedRamAborted<'a> {
+    pub fn into_parts(self) -> (Option<StorageClaim>, Box<StoppedRamPreparationFailure<'a>>) {
+        (self.claim, self.primary)
+    }
+}
+impl<'a> StoppedRamPreparationFailure<'a> {
+    pub fn abort_unclaimed(
+        mut self: Box<Self>,
+        end: Instant,
+    ) -> std::result::Result<StoppedRamAborted<'a>, Box<Self>> {
+        let Some(mut frame) = self.owner.take() else {
+            return Ok(StoppedRamAborted {
+                claim: None,
+                primary: self,
+            });
+        };
+        match frame.restore(end) {
+            Ok(claim) => Ok(StoppedRamAborted {
+                claim,
+                primary: self,
+            }),
+            Err(cleanup) => {
+                self.cause = Cause::Finalization(Box::new(self.cause), Box::new(cleanup));
+                self.owner = Some(frame);
+                Err(self)
+            }
+        }
+    }
+}
 impl StoppedRamPreparationFailure<'_> {
     pub fn code(&self) -> &'static str {
         self.cause.code()

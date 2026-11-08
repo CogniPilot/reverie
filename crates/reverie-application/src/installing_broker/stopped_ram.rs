@@ -12,8 +12,10 @@ use storage::{StoppedRamError, StoppedRamSource};
 mod error;
 mod report;
 mod selection;
-pub use error::StoppedRamPreparationFailure;
+#[cfg(test)]
+mod tests;
 use error::{Cause, Result};
+pub use error::{StoppedRamAborted, StoppedRamPreparationFailure};
 pub use report::StoppedRamReport;
 use selection::Selection;
 
@@ -71,6 +73,31 @@ impl InstallingBroker {
     }
 }
 impl Frame<'_> {
+    fn restore(&mut self, end: Instant) -> Result<Option<StorageClaim>> {
+        if let Some(source) = self.source.take() {
+            match source.restore_unclaimed(end) {
+                Ok(restored) => {
+                    let (claim, _) = restored.into_parts();
+                    self.claim = Some(claim);
+                }
+                Err(failure) => {
+                    let (source, cause) = failure.into_parts();
+                    self.source = Some(source);
+                    return Err(Cause::Native(cause));
+                }
+            }
+        }
+        if let Some(context) = &self.context {
+            context.settle_stopped_ram(end).map_err(GateError::from)?;
+            self.claim
+                .as_ref()
+                .expect("original pretransfer claim")
+                .assert_stopped_ram_untransferred_custody(context)
+                .map_err(Cause::Native)?;
+        }
+        self.context = None;
+        Ok(self.claim.take())
+    }
     fn prepare(&mut self) -> Result<()> {
         let life = self.broker.installed.lifecycle()?;
         self.selection.assert_metadata()?;
