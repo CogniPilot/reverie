@@ -366,6 +366,10 @@
         in {
           inherit (packages) reverie memoryPackage start update gpuPublisher previewProxy previewService prune pruneR12 cleanupObservations ownerTerminalCore;
           workerPythonRuntime = import ./nix/worker-python-check.nix { inherit pkgs; python = packages.workerPython; };
+          nativeWorkerBrokerStoreInputs = pkgs.writeText "reverie-native-broker-store-inputs.json"
+            (builtins.toJSON (import ./tests/native_worker_broker_store_inputs_eval.nix {
+              inherit pkgs; src = source;
+            }));
           workerPerfTools = let perf = import ./nix/worker-perf.nix { inherit pkgs; };
             in assert builtins.elem perf (import ./nix/worker-base-tools.nix { inherit pkgs; });
               pkgs.runCommand "reverie-worker-perf-tool-check" { } ''

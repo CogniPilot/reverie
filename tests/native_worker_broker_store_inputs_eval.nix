@@ -21,6 +21,15 @@ let
       == "${fixture}/share/reverie/worker-perf-profile.json";
     perfPolicyV2Identity = broker.REVERIE_FIXED_TASK_PERF_V2_MANIFEST
       == "${fixture}/share/reverie/worker-perf-profile.json";
+    closureReferencesPreserved = builtins.all (value: let
+      references = builtins.getContext value;
+      names = builtins.filter (name: name == fixture) (builtins.attrNames references);
+    in names != [] && ((builtins.getAttr (builtins.head names) references).path or false)) [
+      broker.preBuild
+      broker.REVERIE_FIXED_PERF_GUEST_CAPSULE_MANIFEST
+      broker.REVERIE_FIXED_TASK_PERF_MANIFEST
+      broker.REVERIE_FIXED_TASK_PERF_V2_MANIFEST
+    ];
   };
 in
 assert pkgs.lib.assertMsg (builtins.all (value: value) (builtins.attrValues checks))
