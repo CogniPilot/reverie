@@ -1,6 +1,9 @@
 //! Custody transfer of the original activated Host owner. Installation here
 //! does not publish a fleet policy, clear a provider fence or admit a worker.
 use super::*;
+use reverie_host::worker_laptop::{
+    ControllerMemberConfigured, CreatedLaptop, StartedContainer, WorkerLaunchConnection,
+};
 use reverie_host::worker_pool::{ActivatedController, PoolError};
 use std::time::Instant;
 
@@ -31,6 +34,29 @@ impl std::fmt::Debug for ControllerInstallFailure {
 impl std::error::Error for ControllerInstallFailure {}
 
 impl InstallingBroker {
+    pub(in crate::installing_broker) fn configure_controller_member(
+        &self,
+        created: &CreatedLaptop,
+        started: &StartedContainer,
+        connection: &WorkerLaunchConnection,
+        end: Instant,
+    ) -> Result<Option<ControllerMemberConfigured>, PoolError> {
+        let mut slot = self
+            .controller
+            .try_lock()
+            .map_err(|_| PoolError::Refused("WORKER_CONTROLLER_SLOT_UNAVAILABLE"))?;
+        slot.as_mut()
+            .map(|owner| {
+                owner.configure_created_member(
+                    &self.storage.runtime,
+                    created,
+                    started,
+                    connection,
+                    end,
+                )
+            })
+            .transpose()
+    }
     pub(in crate::installing_broker) fn assert_installed_controller_current(
         &self,
         end: Instant,

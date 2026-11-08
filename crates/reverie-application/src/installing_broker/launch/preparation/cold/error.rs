@@ -8,6 +8,7 @@ pub(super) enum ColdError {
     Office(reverie_host::office::OfficeError),
     Recovery(crate::installing_broker::recovered::RecoveryError),
     Transport(reverie_host::worker_reports::WorkerReportError),
+    Controller(reverie_host::worker_pool::PoolError),
     Recorded(Arc<reverie_host::worker_laptop::LaptopError>),
     Refused(&'static str),
     Finalized {
@@ -27,6 +28,7 @@ impl std::fmt::Display for ColdError {
             Self::Recorded(error) => error.fmt(out),
             Self::Recovery(error) => error.fmt(out),
             Self::Transport(error) => error.fmt(out),
+            Self::Controller(error) => error.fmt(out),
             Self::Finalized { primary, secondary } => {
                 write!(out, "{primary}; cleanup: {secondary}")
             }
@@ -46,6 +48,7 @@ impl std::error::Error for ColdError {
             Self::Recorded(error) => Some(error.as_ref()),
             Self::Recovery(error) => Some(error),
             Self::Transport(error) => Some(error),
+            Self::Controller(error) => Some(error),
         }
     }
 }
@@ -65,6 +68,7 @@ from!(storage::NetworkStorageError, Network);
 from!(reverie_host::office::OfficeError, Office);
 from!(crate::installing_broker::recovered::RecoveryError, Recovery);
 from!(reverie_host::worker_reports::WorkerReportError, Transport);
+from!(reverie_host::worker_pool::PoolError, Controller);
 impl From<GateError> for ColdError {
     fn from(error: GateError) -> Self {
         Self::Preparation(error.into())
