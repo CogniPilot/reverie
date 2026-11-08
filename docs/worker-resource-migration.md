@@ -1,5 +1,12 @@
 # Staged laptop resource policies
 
+This document records the legacy admission migration contract for compatibility
+work. Routine owner operations follow the [fleet GUI/API workflow](owner-resource-rollout.md).
+The private staging/reload sequence below belongs inside its application service;
+it is not a supported instruction to edit instance files by hand. The new Docker
+borrowing pool requires its own parent-once accounting and persistent provider
+fence, as described there; this older finite-high pool proof does not replace it.
+
 A resource-policy change must preserve access to existing laptop programs and
 scoped office APIs. Changing a global policy and restarting the broker can leave
 running programs intact while making every terminal reattachment fail its grant

@@ -83,3 +83,27 @@ swap settings. A publication receipt proves the actual configuration commit;
 it is not permission to launch or evidence of applied kernel limits. Created,
 started, ready and settled are separate native outcomes. Lost replies or
 unconfirmed effects retain the original operation and forbid automatic replay.
+
+## Native integration work
+
+The [native integration map](rust-overhaul.md#native-integration-map) names the
+existing Rust owners and the RAM-v2 client. Reuse those components. The client
+does not activate these fleet routes, and its per-employee approval cannot
+implicitly authorize a fleet-wide stop. The fleet preview must bind the complete
+selected cohort and preserve every employee's desired-running disposition.
+
+The new Docker parent needs separate admission accounting. Existing reservation
+operations charge hard memory and require a finite parent soft threshold; they
+cannot establish parent-once accounting for this borrowing pool. Preserve their
+records and contracts. The new transition must own a durable provider fence on
+the existing pending-control boundary, including across storage waits, Nix work
+and broker restarts. Reconciliation must reobserve the original native owners
+before acknowledging settlement; an empty census or dropped local handle is
+insufficient.
+
+Only after old outside workers have physically settled may the executor admit a
+borrowing leaf. Its actual created record must retain verified parent membership,
+incarnation and kernel limits before normal pane startup. Keep stopped/absent
+preparation separate from running-source preparation. A configured policy,
+successful isolated test or closed socket cannot substitute for any of those
+ownership joins or the final pressure/recovery acceptance.
