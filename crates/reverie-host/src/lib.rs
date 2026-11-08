@@ -61,3 +61,5 @@ pub mod worker_storage;
 pub mod worker_validation;
 
 pub use observation::{ObservationError, ObservationFault};
+
+pub mod worker_service;

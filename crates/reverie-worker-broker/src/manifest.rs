@@ -139,3 +139,22 @@ mod tests {
         assert!((1..=MAXIMUM).contains(&(bytes.len() as u64)));
     }
 }
+
+pub(super) fn publish_service_unit() -> io::Result<()> {
+    let executable = option_env!("REVERIE_FIXED_NATIVE_WORKER_BROKER_EXECUTABLE")
+        .ok_or_else(|| io::Error::other("NATIVE_SERVICE_BUILD_SLOT_REQUIRED"))?;
+    let target = option_env!("REVERIE_FIXED_NATIVE_WORKER_SERVICE_UNIT")
+        .ok_or_else(|| io::Error::other("NATIVE_SERVICE_BUILD_SLOT_REQUIRED"))?;
+    let expected = Path::new(executable)
+        .parent()
+        .and_then(Path::parent)
+        .ok_or(io::ErrorKind::InvalidInput)?
+        .join("share/systemd/user/reverie-worker-broker.service");
+    if Path::new(target) != expected || std::env::current_exe()? != Path::new(executable) {
+        return Err(io::Error::other("NATIVE_SERVICE_BUILD_SLOT_CHANGED"));
+    }
+    let body = format!(
+        "[Unit]\nDescription=Reverie native worker broker\n[Service]\nEnvironmentFile=%h/reverie/worker-pool/service/environment\nExecStart={executable} offer-pool-v1 --config ${{REVERIE_WORKER_CONFIG}}\nRestart=no\nTimeoutStopSec=35\nKillMode=mixed\nUMask=0077\nNoNewPrivileges=true\nMemoryMax=512M\nTasksMax=512\n[Install]\nWantedBy=default.target\n"
+    );
+    write(Path::new(target), body.as_bytes())
+}

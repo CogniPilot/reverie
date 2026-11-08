@@ -26,6 +26,10 @@ fn main() {
     let executable = env::current_exe().unwrap();
     let mode = executable.file_name().unwrap().to_str().unwrap();
     match mode {
+        "native-worker-manager" => {
+            assert_eq!(args, ["--user", "show", "reverie-worker-broker.service", "--property=LoadState", "--property=ActiveState", "--property=SubState", "--property=FragmentPath"]);
+            print!("LoadState=loaded\nActiveState=active\nSubState=running\nFragmentPath=/nix/store/old-worker/share/systemd/user/reverie-worker-broker.service\n");
+        },
         "telemetry-bootstrap-pending" => {
             assert_eq!(args.first().map(String::as_str), Some("ps"));
             let mut trace = std::fs::OpenOptions::new().create(true).append(true).open("calls.txt").unwrap();
