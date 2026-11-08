@@ -233,7 +233,10 @@ impl Fixture {
             .as_array()
             .unwrap()
             .iter()
-            .map(|v| v.as_str().unwrap())
+            .map(|v| {
+                let name = v.as_str().unwrap();
+                name.strip_prefix("CAP_").unwrap_or(name)
+            })
             .collect::<Vec<_>>();
         caps.sort_unstable();
         assert_eq!(caps, ["SETGID", "SETUID"]);
