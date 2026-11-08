@@ -65,6 +65,7 @@ pub mod worker_child;
 pub mod worker_cold_tmp;
 pub mod worker_config;
 pub mod worker_control;
+pub mod worker_image_switch;
 pub mod worker_intent;
 pub mod worker_launch;
 pub mod worker_memory;
