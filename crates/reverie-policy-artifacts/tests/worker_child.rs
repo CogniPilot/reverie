@@ -1,5 +1,5 @@
 //! Fixed build-only native child artifact producer acceptance.
-use std::{fs, path::PathBuf, process::Command};
+use std::{fs, os::unix::fs::PermissionsExt, path::PathBuf, process::Command};
 
 #[test]
 #[ignore = "requires the declared immutable native worker child package"]
@@ -28,6 +28,7 @@ fn actual_native_program_manifest_is_exclusive_and_paired_root_is_verified() {
     }
     let original = fs::read(&manifest).unwrap();
     let repeated = produce();
+    fs::set_permissions(&manifest, fs::Permissions::from_mode(0o444)).unwrap();
     let verify = Command::new(env!("CARGO_BIN_EXE_reverie-policy-artifacts"))
         .arg("verify-worker-child-root")
         .arg("--program")

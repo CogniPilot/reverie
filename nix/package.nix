@@ -570,7 +570,7 @@ let
       cacert lockTools ] ++ providerLaunchers;
     pathsToLink = [ "/bin" "/share" ];
     # The images' /etc/ssl/certs comes from this same bundle (nix/image.nix).
-    passthru = { inherit cacert; };
+    passthru = { inherit cacert workerChild; };
   };
   entrypoint = pkgs.writeShellScript "reverie-start" (builtins.readFile (src + "/docker/entrypoint.sh"));
   requestUpdate = pkgs.writeShellApplication {

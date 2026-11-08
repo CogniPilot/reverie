@@ -327,6 +327,7 @@
           inherit pkgs; src = source;
           image = self.lib.workerDockerImage arguments;
           toolkit = self.packages.${system}.humanTerminalToolkit;
+          workerChild = self.packages.${system}.workerChild;
           factory = { name = "lib.workerDockerImage"; } // arguments;
         };
       apps = forAllSystems (system: {
