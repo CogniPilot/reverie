@@ -35,7 +35,9 @@ impl BrokerServiceFailure {
         self.service
             .supervisor
             .try_borrow_mut()
-            .map_err(|_| StorageWorkflowError::refused("WORKER_SUPERVISOR_OWNER_BUSY"))?
+            .map_err(|_| {
+                StorageWorkflowError::from(GateError::Refused("WORKER_SUPERVISOR_OWNER_BUSY"))
+            })?
             .as_mut()
             .map_or(Ok(()), |owner| owner.settle_native())
     }

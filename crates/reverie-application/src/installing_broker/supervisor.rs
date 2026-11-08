@@ -110,21 +110,7 @@ impl Attempt {
     fn run(&mut self) -> Result<(), Cause> {
         let broker = self.broker.clone();
         let snapshot = broker.configuration()?;
-        let candidate = {
-            let Some(lifecycle) = broker.installed.try_supervisor_lifecycle()? else {
-                return Ok(());
-            };
-            let mut selected = None;
-            for entry in lifecycle.guard.iter() {
-                if lifecycle.supervisor_detached(&entry.session)
-                    && should_stop(&broker, entry, snapshot.configuration())?
-                {
-                    selected = Some((entry.session.clone(), entry.name.clone()));
-                    break;
-                }
-            }
-            selected
-        };
+        let candidate = self.select_candidate(snapshot.configuration())?;
         let Some((session, target)) = candidate else {
             return Ok(());
         };
@@ -182,6 +168,22 @@ impl Attempt {
         self.token = None;
         self.original = None;
         Ok(())
+    }
+    fn select_candidate(
+        &self,
+        source: &EffectiveWorkerConfig,
+    ) -> Result<Option<(ProfileSessionId, WorkerContainerName)>, Cause> {
+        let Some(lifecycle) = self.broker.installed.try_supervisor_lifecycle()? else {
+            return Ok(None);
+        };
+        for entry in lifecycle.guard.iter() {
+            if lifecycle.supervisor_detached(&entry.session)
+                && should_stop(&self.broker, entry, source)?
+            {
+                return Ok(Some((entry.session.clone(), entry.name.clone())));
+            }
+        }
+        Ok(None)
     }
     fn close_admission(&mut self) -> Result<(), Cause> {
         if let Some(admission) = self.admission.take() {
