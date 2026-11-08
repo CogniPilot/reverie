@@ -1,6 +1,7 @@
 //! Fixed original confirm_retained_temporary inspection DATA. This validates
 //! neither process/mount custody nor the actual Host creation record.
 use super::*;
+mod perf;
 use reverie_core::{decimal::UnsignedInteger, ids::ProfileSessionId};
 pub struct RetainedInspection {
     inventory: ColdInventory,

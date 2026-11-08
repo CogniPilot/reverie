@@ -1,4 +1,5 @@
 //! Fixed installed perf artifact observations and current-employee bracketing.
+pub(crate) mod capsule;
 pub mod guest;
 use crate::{ObservationError, native};
 use reverie_contracts::storage_identity::CurrentEmployee;
@@ -17,6 +18,28 @@ use std::{
 
 const FIXED_MANIFEST: Option<&str> = option_env!("REVERIE_FIXED_TASK_PERF_MANIFEST");
 const FIXED_V2_MANIFEST: Option<&str> = option_env!("REVERIE_FIXED_TASK_PERF_V2_MANIFEST");
+
+/// Complete typed capsule observation cause, exposed through diagnostics only.
+#[derive(Debug)]
+pub struct PerfCapsuleFailure(capsule::CapsuleError);
+impl PerfCapsuleFailure {
+    pub(crate) fn new(error: capsule::CapsuleError) -> Self {
+        Self(error)
+    }
+    pub(crate) fn unconfirmed_native(&self) -> bool {
+        self.0.unconfirmed_native()
+    }
+}
+impl std::fmt::Display for PerfCapsuleFailure {
+    fn fmt(&self, out: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(out)
+    }
+}
+impl std::error::Error for PerfCapsuleFailure {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&self.0)
+    }
+}
 
 #[derive(Debug)]
 pub enum TaskPerfHostError {

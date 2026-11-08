@@ -32,6 +32,7 @@ pub(super) struct Creation {
     pub(super) stage: CreateStage,
     pub(super) publication: Option<super::publication::Publication>,
     pub(super) worker_memory: Option<super::memory::Pending>,
+    pub(super) worker_perf: Option<super::perf::Attempt>,
 }
 impl Creation {
     pub(super) fn owns_created(&self) -> bool {
@@ -88,6 +89,7 @@ impl Workflows {
             stage: CreateStage::Preparing,
             publication: None,
             worker_memory: None,
+            worker_perf: None,
         });
         record.phase = Phase::Running;
         let result = run(runtime, &mut record, telemetry, deadline);

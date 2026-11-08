@@ -55,6 +55,7 @@ pub mod settings_v1;
 pub mod storage_identity;
 pub mod storage_writers;
 pub mod subscription_profiles_v1;
+pub mod task_perf_capsule;
 pub mod task_perf_check;
 pub mod task_perf_v1;
 pub mod worker_child;

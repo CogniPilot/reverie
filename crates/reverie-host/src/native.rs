@@ -17,6 +17,8 @@ mod control;
 #[cfg(test)]
 pub(crate) mod interrupted_test;
 mod lease;
+mod perf_init;
+pub(crate) use perf_init::perf_init_pidfd;
 mod memory_namespace;
 mod memory_profile;
 pub(crate) mod metadata_socket;

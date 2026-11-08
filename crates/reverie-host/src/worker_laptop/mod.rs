@@ -19,6 +19,7 @@ mod handler_settlement;
 mod memory;
 mod network;
 mod pane;
+mod perf;
 mod protected;
 mod publication;
 pub use protected::{
@@ -466,7 +467,9 @@ impl Workflows {
         }
         let viewer = record.viewer.clone();
         let memory_result = if runtime.cancellation().is_cancelled() || record.cleanup.is_some() {
-            memory::close_abandoned(&mut record)
+            let memory = memory::close_abandoned(&mut record);
+            let perf = perf::close_abandoned(&mut record);
+            finalized(memory, perf)
         } else {
             Ok(())
         };
