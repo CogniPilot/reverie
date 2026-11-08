@@ -6,6 +6,44 @@ over the already ported private stores, full worker validator and NativeObserver
 No request callback, serialized approval or public row/path can construct a Source,
 held admission, native completion proof or start permit.
 
+## Establish-only pool-transition fence
+
+`establish_pool_transition` is a trusted lower denial-only component. No service,
+route, configuration or wire action activates it. The typed selection contains
+only operation/preview and cohort/pool/coverage/current-revision references; it
+does not authenticate a fleet or authorize a container/controller effect.
+
+The producer holds the existing Gate admission and physical flock through the
+full current guard, canonical active-history and host-job idle checks. It stores
+one actual attempt in the same Gate before exclusively writing the existing
+`stateRoot/resource-reservation-control.pending` leaf. File and parent fsync and
+checked finalizers precede the returned owner. It closes admission through the
+failure/cleanup path: a success guard must refuse this new pending purpose.
+
+Every later native entry and guard refuses the stored attempt, including a
+partial write. The file independently fences restart: Gate construction refuses
+pending, and removed-option selection still checks prior control. No JSON reader
+can reconstruct the owner, no Drop clears it, and this cohort exposes no release
+or reconciliation API. A consuming current check returns the whole owner on
+failure; attempted failure Drop quarantines its original evidence and cause.
+The actual Host pending owner also latches the first typed consumed-close cause;
+later checks refuse before another native read. Gate finalization preserves both
+causes and the original primary code, and the existing Q failure reader retains
+typed control-close opacity without manufacturing an authenticated operation.
+
+The unchanged legacy Gate also refuses this distinct pending purpose. Ordinary
+J takes `resource_admission`; storage waits close then reacquire it; Nix copying
+retains it while releasing the lifecycle mutex. Ordinary creation and replacement
+budget checks, startup recovery and resume all use that same guard. Its five
+existing purpose-specific pending exceptions cannot own this Rust pool record.
+Existing GPU/host-job constructors and ownership are unchanged.
+
+This fence denies new work; it does not stop an old process, settle storage or
+prove outside allocations empty. A future actual cohort/current-owner producer
+must hold it before effects, and native controller/resource settlement must
+provide any eventual reconciliation. OFF/vacation remain separately config-only;
+this component wakes nothing and grants no capacity, launch or global ACK.
+
 | Original method | Current Rust owner | Boundary |
 | --- | --- | --- |
 | constructor | `ReservationGate::new` | Consumes the real immutable validated snapshot; captures checked option/scope, pending absence and exact ordered marker data |

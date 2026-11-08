@@ -12,6 +12,11 @@ pub enum ResourceActorError {
     Frame(reverie_contracts::human_protocol::HumanFrameError),
     RetainedCompanyClose(Arc<reverie_store::storage_identity::IdentityError>),
     RetainedKernelClose(Arc<reverie_host::reservation_kernel::ReservationKernelError>),
+    RetainedControlClose(Arc<reverie_host::reservation_control::ControlHostError>),
+    GateFinalization {
+        primary: Box<Self>,
+        secondary: Box<Self>,
+    },
     Finalization {
         primary: Box<Self>,
         secondary: Box<Self>,
@@ -31,18 +36,20 @@ impl ResourceActorError {
             Self::Frame(e) => e.code(),
             Self::RetainedCompanyClose(e) => e.code(),
             Self::RetainedKernelClose(e) => e.code(),
+            Self::RetainedControlClose(e) => e.code(),
+            Self::GateFinalization { primary, .. } => primary.code(),
             Self::Finalization { .. } => "RESOURCE_ACTOR_FINALIZATION",
         }
     }
     pub(super) fn has_unconfirmed_close(&self) -> bool {
         match self {
-            Self::Gate(error) => {
-                matches!(&**error, GateError::Identity(error) if error.has_unconfirmed_close())
-            }
+            Self::Gate(error) => gate_close_unknown(error),
             Self::Observer(error) => error.has_unconfirmed_close(),
             Self::RetainedCompanyClose(error) => error.has_unconfirmed_close(),
             Self::RetainedKernelClose(error) => error.has_unconfirmed_close(),
-            Self::Finalization { primary, secondary } => {
+            Self::RetainedControlClose(error) => error.has_unconfirmed_close(),
+            Self::Finalization { primary, secondary }
+            | Self::GateFinalization { primary, secondary } => {
                 primary.has_unconfirmed_close() || secondary.has_unconfirmed_close()
             }
             _ => false,
@@ -61,9 +68,22 @@ impl std::error::Error for ResourceActorError {
             Self::Observer(error) => Some(error),
             Self::RetainedCompanyClose(error) => Some(&**error),
             Self::RetainedKernelClose(error) => Some(&**error),
-            Self::Finalization { primary, .. } => Some(&**primary),
+            Self::RetainedControlClose(error) => Some(&**error),
+            Self::Finalization { primary, .. } | Self::GateFinalization { primary, .. } => {
+                Some(&**primary)
+            }
             _ => None,
         }
+    }
+}
+fn gate_close_unknown(error: &GateError) -> bool {
+    match error {
+        GateError::Identity(error) => error.has_unconfirmed_close(),
+        GateError::Control(error) => error.has_unconfirmed_close(),
+        GateError::Finalization { primary, secondary } => {
+            gate_close_unknown(primary) || gate_close_unknown(secondary)
+        }
+        _ => false,
     }
 }
 impl From<GateError> for ResourceActorError {

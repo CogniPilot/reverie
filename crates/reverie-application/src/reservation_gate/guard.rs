@@ -49,6 +49,7 @@ impl Inner {
         Ok(active.clone())
     }
     pub(super) fn guard(&self, scope: Option<&OperationScope>) -> Result<ObservedInventory> {
+        self.assert_no_pool_transition()?;
         self.assert_no_failed_gpu()?;
         let active = self.held(scope)?;
         let inherited = *active

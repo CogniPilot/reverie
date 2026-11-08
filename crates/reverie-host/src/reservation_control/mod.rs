@@ -5,6 +5,7 @@ mod draft;
 mod history;
 mod image;
 mod policy;
+mod pool_transition;
 mod private_record;
 mod publication;
 #[cfg(test)]
@@ -17,6 +18,7 @@ pub use history::{
 };
 pub use image::{CurrentImageBinding, ImageHostError, capture_current_image};
 pub use policy::{PolicyBinding, PolicyFileStamp, PolicyTransaction, publish_prepared_policy};
+pub use pool_transition::PoolTransitionPending;
 pub use publication::{
     PublicationStamp, assert_native_publication, observe_publication, publish_publication,
 };
@@ -52,6 +54,7 @@ pub enum ControlHostError {
         secondary: Box<Self>,
     },
     Native(ObservationError),
+    PoolTransitionClose(std::sync::Arc<ObservationError>),
     /// Preserve ledger/finalizer variants for typed inspection; no erased
     /// io::Error wrapper is needed to reach a secondary checked-close error.
     Journal(reverie_store::operations::JournalError),
@@ -66,10 +69,24 @@ impl ControlHostError {
             Self::Draft(e) => e.code(),
             Self::Finalization { primary, .. } => primary.code(),
             Self::Native(e) => e.code(),
+            Self::PoolTransitionClose(e) => e.code(),
             Self::Journal(e) => e.code(),
             Self::Metadata(e) => e.code(),
             Self::Configuration(e) => e.code(),
             Self::Refused(code) => code,
+        }
+    }
+    /// Intrinsic stateless-reader descriptor opacity. Journal/effect outcome
+    /// uncertainty remains separate from this exact native-close predicate.
+    pub fn has_unconfirmed_close(&self) -> bool {
+        match self {
+            Self::Native(error) => error.has_unconfirmed_close(),
+            Self::PoolTransitionClose(error) => error.has_unconfirmed_close(),
+            Self::Metadata(error) => error.has_unconfirmed_close(),
+            Self::Finalization { primary, secondary } => {
+                primary.has_unconfirmed_close() || secondary.has_unconfirmed_close()
+            }
+            _ => false,
         }
     }
 }
@@ -92,6 +109,7 @@ impl std::error::Error for ControlHostError {
             Self::Draft(error) => Some(error),
             Self::Finalization { primary, .. } => Some(primary),
             Self::Native(error) => Some(error),
+            Self::PoolTransitionClose(error) => Some(error.as_ref()),
             Self::Journal(error) => Some(error),
             Self::Metadata(error) => Some(error),
             Self::Configuration(error) => Some(error),
