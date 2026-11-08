@@ -8,7 +8,6 @@ use super::*;
 use crate::installing_broker::installation_offer::RegistrationOfferGuard;
 use reverie_host::worker_reports::{PoolRegistrationPin, WorkerActorPinError};
 mod consent;
-pub(in crate::installing_broker) use consent::ConsentedPoolInstallation;
 #[cfg(test)]
 mod tests;
 
@@ -23,6 +22,17 @@ enum Owner<'a> {
     Consented(Box<consent::ConsentedPoolInstallation<'a>>),
 }
 impl Owner<'_> {
+    fn close_identity(&self) -> Option<Arc<()>> {
+        match self {
+            Self::Consented(owner) => owner.close_identity(),
+            _ => None,
+        }
+    }
+    fn channel_closed(&mut self, closed: &PoolRegistrationComponentClosed) {
+        if let Self::Consented(owner) = self {
+            owner.channel_closed(closed);
+        }
+    }
     fn into_entry_primary(self) -> Option<ResourceActorError> {
         match self {
             Self::Entry(owner) => Some(owner.cause),
@@ -109,16 +119,14 @@ impl PoolRegistrationFailure<'_> {
                     primary,
                     entry_primary: None,
                     first_cleanup,
-                    offer_identity: offer.as_ref().map(RegistrationOfferGuard::close_identity).or_else(|| {
-                        if let Owner::Consented(owner) = &owner { owner.close_identity() } else { None }
-                    }),
+                    offer_identity: offer.as_ref().map(RegistrationOfferGuard::close_identity).or_else(|| owner.close_identity()),
                 };
                 if let Some(offer) = offer.as_mut() {
                     // Actual known Frame/socket/Hold close above, bound to the
                     // same original guard. This is not a pool/domain release.
                     offer.channel_closed(&closed).expect("same original close identity");
                 }
-                if let Owner::Consented(owner) = &mut owner { owner.channel_closed(&closed); }
+                owner.channel_closed(&closed);
                 closed.entry_primary = owner.into_entry_primary();
                 drop(offer);
                 Ok(closed)

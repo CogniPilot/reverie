@@ -10,7 +10,6 @@ mod native_fixture;
 mod operation;
 mod pool_registration;
 pub(in crate::installing_broker) use pool_registration::{PoolRegistrationFailure, PoolRegistrationComponentClosed};
-pub(in crate::installing_broker) use pool_registration::{ConsentedPoolInstallation, Cause as PoolInstallationConsentError};
 mod qualification;
 #[cfg(test)]
 mod tests;

@@ -99,7 +99,7 @@ impl<'a> PoolRegistrationFailure<'a> {
 }
 impl ConsentedPoolInstallation<'_> {
     fn activate_and_publish(&mut self) -> std::result::Result<(), Cause> {
-        self.assert_current()?;
+        self.assert_for_broker(self.broker)?;
         let offer = self.offer.as_mut().ok_or(Cause::Refused("POOL_INSTALLATION_OFFER_REQUIRED"))?;
         let reserve = offer.configured_host_reserve().map_err(Cause::Offer)?;
         let origin = offer.take_activation_source().map_err(Cause::Offer)?;
@@ -125,6 +125,7 @@ impl ConsentedPoolInstallation<'_> {
         // Actual Host custody was moved, not reconstructed from response DATA.
         // No worker configuration/member/capacity permission follows this move.
         self.assert_current()?;
+        self.assert_live(self.broker)?;
         let reply = self.request.configured_reply(&observed).map_err(ResourceActorError::from).map_err(Cause::Website)?;
         self.website.frame.send(&reply, self.deadline).map_err(Cause::Website)
     }
@@ -132,7 +133,7 @@ impl ConsentedPoolInstallation<'_> {
         need(std::ptr::eq(self.website.frame.broker, broker), "POOL_INSTALLATION_FOREIGN_BROKER").map_err(Cause::Website)?;
         self.assert_current()
     }
-    pub(in crate::installing_broker) fn assert_live(&self, broker: &InstallingBroker) -> std::result::Result<(), Cause> {
+    pub(in crate::installing_broker) fn assert_live(&mut self, broker: &InstallingBroker) -> std::result::Result<(), Cause> {
         need(!self.failed && std::ptr::eq(self.website.frame.broker, broker), "POOL_INSTALLATION_FOREIGN_BROKER").map_err(Cause::Website)?;
         expiry(self.current.expires_at_epoch_ms()).map_err(Cause::Website)?;
         self.website.frame.guard_peer(self.deadline).map_err(Cause::Website)?;
