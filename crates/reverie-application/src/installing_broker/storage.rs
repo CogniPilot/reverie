@@ -23,10 +23,7 @@ mod stopped_ram;
 pub use observed::OwnedCreatePreparationError;
 pub(crate) use source::RegisteredSource;
 pub(super) use source::SourceAttachment;
-pub(crate) use stopped_ram::{
-    RestoredStoppedRamSource, StoppedRamError, StoppedRamRestoreFailure, StoppedRamRetainFailure,
-    StoppedRamSource,
-};
+pub(crate) use stopped_ram::{StoppedRamError, StoppedRamSource};
 #[cfg(test)]
 pub(in crate::installing_broker) mod tests;
 use super::*;

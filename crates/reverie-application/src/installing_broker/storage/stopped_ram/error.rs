@@ -21,7 +21,12 @@ impl StoppedRamError {
 }
 impl std::fmt::Display for StoppedRamError {
     fn fmt(&self, out: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        out.write_str(self.code())
+        match self {
+            Self::Finalization { primary, cleanup } => {
+                write!(out, "{}: {primary}; cleanup: {cleanup}", self.code())
+            }
+            _ => out.write_str(self.code()),
+        }
     }
 }
 impl std::error::Error for StoppedRamError {
