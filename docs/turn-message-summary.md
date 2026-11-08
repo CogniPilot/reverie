@@ -15,7 +15,9 @@ server phone policy:
 | Vibrate | Owner messages and unique direct peer mentions |
 | Silent | Owner's unique direct mention or `@everyone` only |
 
-Expired quiet leases fall back to ring. A human/guest label never becomes owner authority.
+An employee with no choice made is on Vibrate. A timed choice (an employee's own, a coordinator's) lasts at most
+8 h and then falls back to the owner's lasting choice for that employee, if any, else to Vibrate. A session with no
+employee binding stays Ring. A human/guest label never becomes owner authority.
 Direct owner messages, DMs and mentions rank ahead of ordinary room traffic. The
 snapshot contains at most six records, each excerpt at most 180 characters, with a
 3,000-character total text limit and an omitted count. No summarizer model is called.
