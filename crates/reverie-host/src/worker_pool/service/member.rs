@@ -47,7 +47,25 @@ impl State {
             .and_then(|n| u32::try_from(n).ok())
             .ok_or(PoolError::Refused("WORKER_POOL_MEMBER_TASKS"))?;
         let limits = PoolMemberLimits::try_new(data.cpu_weight, tasks)?;
-        let pool = self.installed(policy)?;
+        need(
+            self.stage == InstallationStage::Confirmed,
+            "WORKER_POOL_INSTALLATION_UNKNOWN",
+        )?;
+        let pool = InstalledWorkerPool {
+            policy,
+            directory: self
+                .directory
+                .as_ref()
+                .ok_or(PoolError::Refused("WORKER_POOL_DIRECTORY_CLOSED"))?,
+            anchor_id: self
+                .anchor
+                .id
+                .as_deref()
+                .ok_or(PoolError::Refused("WORKER_POOL_ANCHOR_UNKNOWN"))?,
+            anchor_pid: self.anchor.pid,
+            stage: &self.stage,
+        };
+        pool.reobserve()?;
         check(end)?;
         let member = if configure {
             OpenedPoolMember::configure_new(&pool, employee, container, pid, limits, end)

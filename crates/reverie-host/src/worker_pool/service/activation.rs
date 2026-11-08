@@ -87,26 +87,4 @@ impl State {
             "WORKER_POOL_WEBSITE_CHANGED",
         )
     }
-    pub(super) fn installed<'a>(
-        &'a self,
-        policy: &'a ControllerPoolPolicy,
-    ) -> Result<InstalledWorkerPool<'a>> {
-        need(
-            self.stage == InstallationStage::Confirmed,
-            "WORKER_POOL_INSTALLATION_UNKNOWN",
-        )?;
-        let pool = InstalledWorkerPool {
-            policy,
-            directory: self.directory()?,
-            anchor_id: self
-                .anchor
-                .id
-                .as_deref()
-                .ok_or(PoolError::Refused("WORKER_POOL_ANCHOR_UNKNOWN"))?,
-            anchor_pid: self.anchor.pid,
-            stage: &self.stage,
-        };
-        pool.reobserve()?;
-        Ok(pool)
-    }
 }

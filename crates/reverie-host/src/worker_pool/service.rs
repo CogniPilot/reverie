@@ -17,6 +17,13 @@ struct State {
     primary: Option<PoolError>,
 }
 impl State {
+    fn phase(&self) -> &'static str {
+        if self.stage == InstallationStage::Confirmed {
+            "active"
+        } else {
+            "opening"
+        }
+    }
     fn directory(&self) -> Result<&PoolDirectory> {
         self.directory
             .as_ref()
@@ -95,11 +102,7 @@ impl<'a> ControllerServing<'a> {
             let mut phase = "retained";
             let result = match &request {
                 protocol::Request::Status { .. } => {
-                    phase = if self.state.stage == InstallationStage::Confirmed {
-                        "active"
-                    } else {
-                        "opening"
-                    };
+                    phase = self.state.phase();
                     Ok(())
                 }
                 protocol::Request::ContinueOriginal { .. } => {
@@ -186,16 +189,19 @@ impl<'a> ControllerServing<'a> {
             self.peer
                 .reply(&reply, Instant::now() + Duration::from_secs(2))?;
             if close {
-                let peer = self.peer.close();
-                if self.state.primary.is_some() {
-                    return finalized(
-                        Err(PoolError::Refused("WORKER_POOL_ORIGINAL_ATTEMPT_RETAINED")),
-                        peer,
-                    );
-                }
-                return peer;
+                return self.close_reply();
             }
         }
+    }
+    fn close_reply(&mut self) -> Result<()> {
+        let peer = self.peer.close();
+        if self.state.primary.is_some() {
+            return finalized(
+                Err(PoolError::Refused("WORKER_POOL_ORIGINAL_ATTEMPT_RETAINED")),
+                peer,
+            );
+        }
+        peer
     }
     fn close_components(&mut self) -> Result<()> {
         let state = self.state.close();

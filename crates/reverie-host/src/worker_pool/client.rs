@@ -285,38 +285,10 @@ impl ControllerState {
             match nix::sys::socket::connect(socket.as_raw_fd(), &address) {
                 Ok(()) => break,
                 Err(nix::errno::Errno::EINPROGRESS) => {
-                    use std::os::fd::AsFd;
-                    loop {
-                        need(
-                            Instant::now() < end,
-                            "WORKER_POOL_CONTROLLER_CONNECT_DEADLINE",
-                        )?;
-                        let mut ready = [nix::poll::PollFd::new(
-                            socket.as_fd(),
-                            nix::poll::PollFlags::POLLOUT,
-                        )];
-                        if nix::poll::poll(&mut ready, 10u16).map_err(std::io::Error::from)? > 0 {
-                            let error = nix::sys::socket::getsockopt(
-                                socket,
-                                nix::sys::socket::sockopt::SocketError,
-                            )
-                            .map_err(std::io::Error::from)?;
-                            if error != 0 {
-                                return Err(std::io::Error::from_raw_os_error(error).into());
-                            }
-                            break;
-                        }
-                    }
+                    self.wait_connected(end)?;
                     break;
                 }
-                Err(nix::errno::Errno::ENOENT) => {
-                    let socket = self.client.take().expect("original failed connect");
-                    if let Err(error) = native::close(File::from(OwnedFd::from(socket))) {
-                        self.close_unknown = true;
-                        return Err(PoolError::MetadataClose(Box::new(error.into())));
-                    }
-                    std::thread::sleep(Duration::from_millis(10));
-                }
+                Err(nix::errno::Errno::ENOENT) => self.close_failed_connect()?,
                 Err(error) => return Err(std::io::Error::from(error).into()),
             }
         }
@@ -339,6 +311,39 @@ impl ControllerState {
         );
         self.verify_peer(inspected)?;
         self.binding.assert_current(runtime, end)
+    }
+    fn wait_connected(&self, end: Instant) -> Result<()> {
+        use std::os::fd::AsFd;
+        let socket = self.client.as_ref().expect("retained connecting socket");
+        loop {
+            need(
+                Instant::now() < end,
+                "WORKER_POOL_CONTROLLER_CONNECT_DEADLINE",
+            )?;
+            let mut ready = [nix::poll::PollFd::new(
+                socket.as_fd(),
+                nix::poll::PollFlags::POLLOUT,
+            )];
+            if nix::poll::poll(&mut ready, 10u16).map_err(std::io::Error::from)? == 0 {
+                continue;
+            }
+            let error =
+                nix::sys::socket::getsockopt(socket, nix::sys::socket::sockopt::SocketError)
+                    .map_err(std::io::Error::from)?;
+            return if error == 0 {
+                Ok(())
+            } else {
+                Err(std::io::Error::from_raw_os_error(error).into())
+            };
+        }
+    }
+    fn close_failed_connect(&mut self) -> Result<()> {
+        let socket = self.client.take().expect("original failed connect");
+        let result = native::close(File::from(OwnedFd::from(socket)));
+        self.close_unknown |= result.is_err();
+        result.map_err(|error| PoolError::MetadataClose(Box::new(error.into())))?;
+        std::thread::sleep(Duration::from_millis(10));
+        Ok(())
     }
     fn verify_peer(&self, inspected: &serde_json::Value) -> Result<()> {
         use std::os::fd::AsFd;
