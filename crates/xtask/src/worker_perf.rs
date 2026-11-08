@@ -4,7 +4,9 @@ use std::{error::Error, path::Path, process::Command};
 mod ci;
 #[cfg(target_os = "linux")]
 mod ci_image;
+mod rootless;
 mod temporary;
+pub(super) use rootless::image as rootless_image;
 pub(super) use temporary::temporary_image;
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
 pub(super) fn prepare_ci() -> Result<()> {
