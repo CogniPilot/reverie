@@ -8,22 +8,40 @@ use std::{
     fs,
     path::PathBuf,
     process::{Command, Output},
+    sync::Mutex,
 };
 
-/// A PR as GitHub would return it for `request`, at `head`.
-fn echo(head: String) -> impl Fn(&Seen) -> Value {
-    move |seen| {
-        let request = &seen.body;
-        json!({
-            "number": 7,
-            "html_url": "https://example.invalid/pull/7",
-            "head": { "sha": head, "ref": request["head"] },
-            "base": { "ref": request["base"] },
-            "title": request["title"],
-            "body": request["body"],
-            "draft": request["draft"],
-        })
+/// GitHub's API for one repository holding at most one PR: a POST creates it at `head` from the
+/// request, and a GET of it returns what was stored, passed through `stored`.
+fn github(
+    head: String,
+    stored: impl Fn(Value) -> Value + Send + 'static,
+) -> impl Fn(&Seen) -> Value {
+    let pr = Mutex::new(Value::Null);
+    move |request| match (request.method.as_str(), request.path.as_str()) {
+        ("POST", "/repos/owner/demo/pulls") => {
+            let body = &request.body;
+            let created = json!({
+                "number": 7,
+                "state": "open",
+                "html_url": "https://example.invalid/pull/7",
+                "head": { "sha": head, "ref": body["head"] },
+                "base": { "ref": body["base"], "repo": { "full_name": "owner/demo" } },
+                "title": body["title"],
+                "body": body["body"],
+                "draft": body["draft"],
+            });
+            *pr.lock().unwrap() = stored(created.clone());
+            created
+        }
+        ("GET", "/repos/owner/demo/pulls/7") => pr.lock().unwrap().clone(),
+        _ => json!({ "message": "Not Found" }),
     }
+}
+
+/// GitHub's API storing each PR exactly as created.
+fn echo(head: String) -> impl Fn(&Seen) -> Value {
+    github(head, |pr| pr)
 }
 
 struct Publish {
@@ -70,12 +88,17 @@ impl Publish {
     }
 
     fn run(&self, api: &str, extra: &[&str]) -> Output {
+        self.command(api, extra).output().unwrap()
+    }
+
+    fn command(&self, api: &str, extra: &[&str]) -> Command {
         let root = &self.fixture.root;
         let tree = git(
             &self.fixture.work(),
             &["rev-parse", &format!("{}^{{tree}}", self.head)],
         );
-        Command::new(env!("CARGO_BIN_EXE_reverie-publish"))
+        let mut command = Command::new(env!("CARGO_BIN_EXE_reverie-publish"));
+        command
             .args([
                 "new-pr",
                 "--repo",
@@ -96,15 +119,16 @@ impl Publish {
             .arg(root.join("store.git"))
             .arg("--lists")
             .arg(root.join("lists.json"))
-            .arg("--remote-url")
-            .arg(self.remote())
             .arg("--records")
             .arg(self.records())
             .arg("--token-file")
             .arg(root.join("token"))
-            .args(extra)
-            .output()
-            .unwrap()
+            .args(extra);
+        // The local bare remote, unless the test names its own.
+        if !extra.contains(&"--remote-url") {
+            command.arg("--remote-url").arg(self.remote());
+        }
+        command
     }
 
     fn remote_branch(&self) -> Option<String> {
@@ -169,14 +193,23 @@ fn publishes_the_head_to_a_new_branch_and_opens_a_draft_pr_read_back() {
     assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
     assert_eq!(p.remote_branch().as_deref(), Some(p.head.as_str()));
     let requests = seen.lock().unwrap().clone();
-    assert_eq!(requests.len(), 1);
+    assert_eq!(requests.len(), 2);
     assert_eq!(requests[0].method, "POST");
     assert_eq!(requests[0].path, "/repos/owner/demo/pulls");
     assert_eq!(requests[0].authorization, "Bearer testtoken");
     assert_eq!(requests[0].body["draft"], true);
     assert_eq!(requests[0].body["title"], TITLE);
     assert_eq!(requests[0].body["body"], BODY);
-    for record in ["INTENT.json", "PUSH-RESULT.json", "PR-READBACK.json"] {
+    // The PR is then read afresh, not judged by the creation response.
+    assert_eq!(requests[1].method, "GET");
+    assert_eq!(requests[1].path, "/repos/owner/demo/pulls/7");
+    assert_eq!(requests[1].authorization, "Bearer testtoken");
+    for record in [
+        "INTENT.json",
+        "PUSH-RESULT.json",
+        "PR-CREATED.json",
+        "PR-READBACK.json",
+    ] {
         assert!(p.records().join(record).exists(), "{record}");
     }
     let summary: Value = serde_json::from_slice(&out.stdout).unwrap();
@@ -185,7 +218,7 @@ fn publishes_the_head_to_a_new_branch_and_opens_a_draft_pr_read_back() {
     // The branch now exists, so a second run refuses before writing anything.
     let again = p.run(&api, &args(&approval_args(&p)));
     refused(&again, "branch add-b already exists");
-    assert_eq!(seen.lock().unwrap().len(), 1);
+    assert_eq!(seen.lock().unwrap().len(), 2);
 }
 
 #[test]
@@ -205,17 +238,200 @@ fn an_earlier_unresolved_attempt_blocks_a_retry() {
 #[test]
 fn a_pr_that_does_not_read_back_as_published_is_reported() {
     let p = prepared("readback");
-    let head = p.head.clone();
-    let (api, _) = fake_api(move |request| {
-        let mut pr = echo(head.clone())(request);
+    // The creation response matches; only the fresh read shows what GitHub kept.
+    let (api, seen) = fake_api(github(p.head.clone(), |mut pr| {
         pr["body"] = json!("Something else.");
+        pr["draft"] = json!(false);
         pr
-    });
+    }));
     refused(
         &p.run(&api, &args(&approval_args(&p))),
         "does not read back as published",
     );
-    assert!(p.records().join("PR-READBACK.json").exists());
+    let methods: Vec<String> = seen
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|s| s.method.clone())
+        .collect();
+    assert_eq!(methods, ["POST", "GET"]);
+    let kept: Value =
+        serde_json::from_slice(&fs::read(p.records().join("PR-READBACK.json")).unwrap()).unwrap();
+    assert_eq!(kept["body"], "Something else.");
+}
+
+#[test]
+fn a_pr_read_back_from_another_repository_or_not_open_is_reported() {
+    for (name, change) in [
+        (
+            "other-repo",
+            ("/base/repo/full_name", json!("someone/demo")),
+        ),
+        ("closed", ("/state", json!("closed"))),
+        ("other-number", ("/number", json!(8))),
+        ("other-branch", ("/head/ref", json!("add-c"))),
+    ] {
+        let p = prepared(&format!("readback-{name}"));
+        let (pointer, value) = change;
+        let (api, _) = fake_api(github(p.head.clone(), move |mut pr| {
+            *pr.pointer_mut(pointer).unwrap() = value.clone();
+            pr
+        }));
+        refused(
+            &p.run(&api, &args(&approval_args(&p))),
+            "does not read back as published",
+        );
+    }
+}
+
+#[test]
+fn a_remote_url_other_than_the_repository_or_a_local_path_is_refused_before_any_write() {
+    for url in [
+        "https://foreign.example.invalid/not-approved/repo.git",
+        "https://github.com/someone/demo.git",
+        "https://github.com/owner/demo",
+        "ssh://git@github.com/owner/demo.git",
+        "git@github.com:owner/demo.git",
+        "relative/remote.git",
+    ] {
+        let p = prepared("foreign-url");
+        let (api, seen) = fake_api(echo(p.head.clone()));
+        let mut extra = approval_args(&p);
+        extra.extend(["--remote-url".into(), url.into()]);
+        refused(
+            &p.run(&api, &args(&extra)),
+            "the token is never sent elsewhere",
+        );
+        assert_eq!(p.remote_branch(), None, "{url}");
+        assert!(!p.records().exists(), "{url}");
+        assert!(seen.lock().unwrap().is_empty(), "{url}");
+    }
+}
+
+#[test]
+fn the_askpass_gives_the_token_only_to_a_github_prompt() {
+    let p = prepared("askpass");
+    let ask = |prompt: &str| {
+        Command::new(env!("CARGO_BIN_EXE_reverie-publish"))
+            .arg(prompt)
+            .env("REVERIE_PUBLISH_ASKPASS", "1")
+            .env("REVERIE_PUBLISH_TOKEN_FILE", p.fixture.root.join("token"))
+            .output()
+            .unwrap()
+    };
+    let foreign = ask("Password for 'https://x-access-token@foreign.example.invalid': ");
+    assert_ne!(foreign.status.code(), Some(0));
+    assert!(foreign.stdout.is_empty());
+    let github = ask("Password for 'https://x-access-token@github.com': ");
+    assert_eq!(github.status.code(), Some(0), "{}", stderr(&github));
+    assert_eq!(github.stdout, b"testtoken\n");
+}
+
+#[test]
+fn the_store_config_cannot_redirect_the_fetch_or_push() {
+    for case in ["insteadOf", "pushInsteadOf", "include"] {
+        let p = prepared(&format!("rewrite-{case}"));
+        // A private remote with the same main, so a redirected run would succeed there.
+        let private = p.fixture.root.join("private.git");
+        git(&p.fixture.root, &["init", "-q", "--bare", "private.git"]);
+        let work = p.fixture.work();
+        git(
+            &private,
+            &[
+                "fetch",
+                "-q",
+                work.to_str().unwrap(),
+                "main:refs/heads/main",
+            ],
+        );
+        let key = format!("url.{}.{case}", private.display());
+        let store = p.fixture.root.join("store.git");
+        let remote = p.remote().display().to_string();
+        if case == "include" {
+            let included = p.fixture.root.join("included.cfg");
+            fs::write(
+                &included,
+                format!("[url \"{}\"]\n\tinsteadOf = {remote}\n", private.display()),
+            )
+            .unwrap();
+            git(
+                &store,
+                &["config", "include.path", included.to_str().unwrap()],
+            );
+        } else {
+            git(&store, &["config", &key, &remote]);
+        }
+        let (api, _) = fake_api(echo(p.head.clone()));
+        let out = p.run(&api, &args(&approval_args(&p)));
+        assert_eq!(out.status.code(), Some(0), "{case}: {}", stderr(&out));
+        assert_eq!(
+            p.remote_branch().as_deref(),
+            Some(p.head.as_str()),
+            "{case}"
+        );
+        let leaked = Command::new("git")
+            .args(["--git-dir", private.to_str().unwrap()])
+            .args(["rev-parse", "--verify", "-q", "refs/heads/add-b"])
+            .output()
+            .unwrap();
+        assert!(
+            !leaked.status.success(),
+            "{case}: pushed to the rewritten remote"
+        );
+    }
+}
+
+#[test]
+fn the_private_transport_directories_are_removed() {
+    let p = prepared("transport-cleanup");
+    let tmp = p.fixture.root.join("tmp");
+    fs::create_dir(&tmp).unwrap();
+    let (api, _) = fake_api(echo(p.head.clone()));
+    let out = p
+        .command(&api, &args(&approval_args(&p)))
+        .env("TMPDIR", &tmp)
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    assert_eq!(fs::read_dir(&tmp).unwrap().count(), 0);
+}
+
+#[test]
+fn a_branch_created_by_someone_else_just_before_the_push_is_not_taken_over() {
+    let p = prepared("race");
+    // A git on PATH that creates the branch at the base, a fast-forward of the head, after the
+    // absence check and immediately before the real push.
+    let real = std::env::split_paths(&std::env::var_os("PATH").unwrap())
+        .map(|dir| dir.join("git"))
+        .find(|git| git.is_file())
+        .unwrap();
+    let base = git(&p.fixture.work(), &["rev-parse", "main"]);
+    let shim = p.fixture.root.join("shim");
+    fs::create_dir(&shim).unwrap();
+    let racer = format!(
+        "#!/bin/sh\ncase \" $* \" in *\" push \"*) \"{real}\" --git-dir \"{remote}\" update-ref refs/heads/add-b {base} ;; esac\nexec \"{real}\" \"$@\"\n",
+        real = real.display(),
+        remote = p.remote().display(),
+    );
+    fs::write(shim.join("git"), racer).unwrap();
+    fs::set_permissions(
+        shim.join("git"),
+        std::os::unix::fs::PermissionsExt::from_mode(0o755),
+    )
+    .unwrap();
+    let path = std::env::join_paths(
+        std::iter::once(shim).chain(std::env::split_paths(&std::env::var_os("PATH").unwrap())),
+    )
+    .unwrap();
+    let (api, seen) = fake_api(echo(p.head.clone()));
+    let out = p
+        .command(&api, &args(&approval_args(&p)))
+        .env("PATH", path)
+        .output()
+        .unwrap();
+    assert_ne!(out.status.code(), Some(0), "the push took over the branch");
+    assert_eq!(p.remote_branch().as_deref(), Some(base.as_str()));
+    assert!(seen.lock().unwrap().is_empty());
 }
 
 #[test]
