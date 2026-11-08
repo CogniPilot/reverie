@@ -12,6 +12,7 @@ import {
   spanArgs,
   spanDisplays,
   spanProfile,
+  systemSpanHost,
   type SpanHost,
 } from '../src/span-displays.js';
 
@@ -75,7 +76,7 @@ describe('spanDisplays', () => {
     const value: SpanHost = {
       desktopBounds: async () => '0, 25, 2560, 1465',
       executable: (path) => path === browserBinary('Google Chrome'),
-      launch: (bin, args) => {
+      launch: async (bin, args) => {
         launches.push({ bin, args });
         return 4242;
       },
@@ -111,5 +112,28 @@ describe('spanDisplays', () => {
       'No Chrome-family browser found'
     );
     expect(noBrowser.launches).toEqual([]);
+  });
+
+  it('reports a launch that could not start instead of claiming the window opened', async () => {
+    const { value } = host({
+      launch: async () => {
+        throw Object.assign(new Error('spawn /Applications/Google Chrome.app/Contents/MacOS/Google Chrome ENOENT'), {
+          code: 'ENOENT',
+        });
+      },
+    });
+    await expect(spanDisplays('http://localhost:5000', value)).rejects.toThrow('ENOENT');
+  });
+});
+
+describe('systemSpanHost().launch', () => {
+  // The real launcher, on whatever host runs the tests: only the start/fail contract is checked here.
+  it('resolves with the pid of a program that starts', async () => {
+    const pid = await systemSpanHost().launch(process.execPath, ['-e', '0']);
+    expect(pid).toBeGreaterThan(0);
+  });
+
+  it('rejects when the program cannot be started', async () => {
+    await expect(systemSpanHost().launch('/nonexistent/zorblat-browser', [])).rejects.toThrow('ENOENT');
   });
 });

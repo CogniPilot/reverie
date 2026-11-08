@@ -41,8 +41,11 @@ export interface SpanHost {
   /** Finder's desktop window bounds: `left, top, right, bottom`. */
   desktopBounds(): Promise<string>;
   executable(path: string): boolean;
-  /** Starts `bin` detached, so the caller is not blocked for the window's life; returns its pid. */
-  launch(bin: string, args: string[]): number | undefined;
+  /**
+   * Starts `bin` detached, so the caller is not blocked for the window's life. Resolves with its
+   * pid once it has started, and rejects when it could not be started at all.
+   */
+  launch(bin: string, args: string[]): Promise<number | undefined>;
   home: string;
   /** A browser application name to force, e.g. "Google Chrome" (the BROWSER variable). */
   browser?: string;
@@ -108,7 +111,7 @@ export interface SpanLaunch {
 export async function spanDisplays(url: string, host: SpanHost): Promise<SpanLaunch> {
   const union = parseDesktopBounds(await host.desktopBounds());
   const { app, bin } = chooseBrowser(host.browser, (path) => host.executable(path));
-  const pid = host.launch(bin, spanArgs(url, spanProfile(host.home, app), union));
+  const pid = await host.launch(bin, spanArgs(url, spanProfile(host.home, app), union));
   return { url, union, bin, pid };
 }
 
@@ -131,12 +134,18 @@ export function systemSpanHost(env: NodeJS.ProcessEnv = process.env): SpanHost {
         return false;
       }
     },
-    launch: (bin, args) => {
-      const child = spawn(bin, args, { detached: true, stdio: 'ignore' });
-      child.on('error', () => {});
-      child.unref();
-      return child.pid;
-    },
+    launch: (bin, args) =>
+      new Promise((resolve, reject) => {
+        const child = spawn(bin, args, { detached: true, stdio: 'ignore' });
+        child.once('error', reject);
+        child.once('spawn', () => {
+          // Started: a later error (e.g. signalling it) is not a failed launch.
+          child.removeListener('error', reject);
+          child.on('error', () => {});
+          child.unref();
+          resolve(child.pid);
+        });
+      }),
     home: env.HOME || homedir(),
     browser: env.BROWSER || undefined,
   };
