@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 mod controller_v2;
 mod engine;
+mod provider;
 pub use controller_v2::SERVICE_PURPOSE as CONTROLLER_SERVICE_V2_PURPOSE;
 pub use controller_v2::{BrokerBirthData, BrokerProgramData, ControllerBirthV2};
 pub use engine::validate_anchor_inspection;
@@ -11,6 +12,7 @@ pub use engine::{
     validate_controller_inspection, validate_controller_service_v2_inspection,
     validate_engine_information, website_process_data,
 };
+pub use provider::WorkerPoolProvider;
 
 pub const PURPOSE: &str = "reverie-docker-worker-pool-v1";
 pub const MEMORY_MAX_MIB: u32 = 49_152;

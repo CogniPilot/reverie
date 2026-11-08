@@ -35,8 +35,14 @@ fn malformed_or_authority_claiming_provider_never_falls_back_to_legacy() {
     wrong_purpose["purpose"] = serde_json::json!(PURPOSE);
     let mut invalid_policy = selected();
     invalid_policy["policy"]["memoryMaxMiB"] = serde_json::json!(0);
-    for value in [serde_json::Value::Null, serde_json::json!({}), extra,
-        wrong_version, wrong_purpose, invalid_policy] {
+    for value in [
+        serde_json::Value::Null,
+        serde_json::json!({}),
+        extra,
+        wrong_version,
+        wrong_purpose,
+        invalid_policy,
+    ] {
         let config = configuration(serde_json::json!({"workerPoolProvider":value}));
         assert!(WorkerPoolProvider::from_config(&config).is_err());
     }
