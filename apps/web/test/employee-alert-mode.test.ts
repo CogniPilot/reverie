@@ -60,8 +60,11 @@ describe('employee phone mode prototype', () => {
     });
     // The lease file keeps its old flat shape, so an older console still reads it.
     expect(Object.keys(JSON.parse(readFileSync(leases, 'utf8')))).toEqual(['employee-a']);
-    expect(JSON.parse(readFileSync(preferences, 'utf8'))).toEqual({ 'employee-a': 'ring' });
-    writeFileSync(preferences, JSON.stringify({ 'employee-b': 'loud' }));
+    expect(JSON.parse(readFileSync(preferences, 'utf8'))).toEqual({
+      schema: 1,
+      employees: { 'employee-a': { mode: 'ring', at: 1000001 } },
+    });
+    writeFileSync(preferences, JSON.stringify({ schema: 1, employees: { 'employee-b': { mode: 'loud', at: 1 } } }));
     expect(() => new EmployeeAlertModes(leases, () => now, preferences)).toThrow('Invalid alert preference');
     expect(() => modes.prefer('employee-a', 'loud' as never)).toThrow();
   });

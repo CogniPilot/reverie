@@ -12,11 +12,12 @@ server phone policy:
 | Mode | Eligible pending traffic |
 | --- | --- |
 | Ring | Addressed room traffic and DMs visible to this expert |
-| Vibrate | Owner messages and unique direct peer mentions |
+| Vibrate | Owner messages, unique direct peer mentions, and bot posts addressed to this member alone (check-ins) |
 | Silent | Owner's unique direct mention or `@everyone` only |
 
 An employee with no choice made is on Vibrate. A timed choice (an employee's own, a coordinator's) lasts at most
-8 h and then falls back to the owner's lasting choice for that employee, if any, else to Vibrate. A session with no
+8 h and then falls back to the owner's lasting choice for that employee, if any, else to Vibrate. The owner's choice
+applies at once and ends any earlier timed choice; one set after it applies over it until it ends. A session with no
 employee binding stays Ring. A human/guest label never becomes owner authority.
 Direct owner messages, DMs and mentions rank ahead of ordinary room traffic. The
 snapshot contains at most six records, each excerpt at most 180 characters, with a
