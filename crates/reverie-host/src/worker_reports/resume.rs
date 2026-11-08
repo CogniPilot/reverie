@@ -13,6 +13,7 @@ enum Purpose {
     ResumeWebsite,
     ResumeOwner,
     ResourceWebsite,
+    PoolRegistrationWebsite,
 }
 #[derive(Clone, Copy, Eq, PartialEq)]
 enum ClosePhase {
@@ -69,6 +70,14 @@ impl WorkerServiceConnection {
     ) -> std::result::Result<WorkerActorChannel, Box<WorkerActorChannelFailure>> {
         WorkerActorChannel::retain(self, runtime, Purpose::ResourceWebsite)
     }
+    /// Separate counted installation channel. It cannot acquire the RAM
+    /// purpose by presenting another hello or an employee approval payload.
+    pub fn retain_pool_registration_website_channel(
+        self,
+        runtime: &WorkerRuntime,
+    ) -> std::result::Result<WorkerActorChannel, Box<WorkerActorChannelFailure>> {
+        WorkerActorChannel::retain(self, runtime, Purpose::PoolRegistrationWebsite)
+    }
 }
 impl WorkerActorChannel {
     fn retain(
@@ -80,6 +89,7 @@ impl WorkerActorChannel {
             Purpose::ResumeWebsite => WorkerServicePurpose::ResumeRegistration,
             Purpose::ResumeOwner => WorkerServicePurpose::Control,
             Purpose::ResourceWebsite => WorkerServicePurpose::ResourceActor,
+            Purpose::PoolRegistrationWebsite => WorkerServicePurpose::PoolRegistration,
         };
         if !connection.same_runtime(runtime) || connection.purpose() != expected {
             return Err(Box::new(WorkerActorChannelFailure {

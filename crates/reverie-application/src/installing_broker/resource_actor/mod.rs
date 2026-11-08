@@ -40,7 +40,13 @@ struct Bindings {
     init: ProcessSnapshot,
     peer: ProcessSnapshot,
 }
+#[derive(Clone, Copy)]
+enum WebsitePurpose {
+    RamOperation,
+    PoolRegistration,
+}
 struct Frame<'a> {
+    purpose: WebsitePurpose,
     broker: &'a InstallingBroker,
     snapshot: Option<Arc<ValidatedWorkerSnapshot>>,
     transport: Transport,
@@ -61,6 +67,12 @@ struct Frame<'a> {
 pub struct InstalledResourceWebsite<'a> {
     frame: Frame<'a>,
 }
+/// Native website attestation only. This distinct owner exposes no RAM
+/// operation, journal authority, owner approval or global administration grant.
+#[must_use = "retain the exact installation channel through checked close"]
+pub struct InstalledPoolRegistrationWebsite<'a> {
+    frame: Frame<'a>,
+}
 impl InstallingBroker {
     /// Actual accepted Q connection only. The early same counted hold and
     /// kernel peer precede all immutable/private/native qualification.
@@ -68,7 +80,28 @@ impl InstallingBroker {
         &self,
         connection: WorkerServiceConnection,
     ) -> std::result::Result<InstalledResourceWebsite<'_>, Box<ResourceActorFailure<'_>>> {
+        self.prepare_website_frame(connection, WebsitePurpose::RamOperation)
+            .map(|frame| InstalledResourceWebsite { frame })
+    }
+    /// Separate actual accepted B connection. This reuses installed native
+    /// website proof, never an employee Gate or per-employee approval as a
+    /// global registration capability. The original offer/consent must join
+    /// this actual owner in a later installation workflow.
+    pub fn prepare_pool_registration_website(
+        &self,
+        connection: WorkerServiceConnection,
+    ) -> std::result::Result<InstalledPoolRegistrationWebsite<'_>, Box<ResourceActorFailure<'_>>>
+    {
+        self.prepare_website_frame(connection, WebsitePurpose::PoolRegistration)
+            .map(|frame| InstalledPoolRegistrationWebsite { frame })
+    }
+    fn prepare_website_frame(
+        &self,
+        connection: WorkerServiceConnection,
+        purpose: WebsitePurpose,
+    ) -> std::result::Result<Frame<'_>, Box<ResourceActorFailure<'_>>> {
         let mut frame = Frame {
+            purpose,
             broker: self,
             snapshot: None,
             transport: Transport::Incoming(connection),
@@ -86,7 +119,7 @@ impl InstallingBroker {
             unconfirmed: None,
         };
         match frame.prepare() {
-            Ok(()) => Ok(InstalledResourceWebsite { frame }),
+            Ok(()) => Ok(frame),
             Err(cause) => Err(Box::new(ResourceActorFailure { frame, cause })),
         }
     }
@@ -98,7 +131,14 @@ impl Frame<'_> {
         else {
             return Err(ResourceActorError::Refused("RESOURCE_ACTOR_CHANNEL_STATE"));
         };
-        match connection.retain_resource_website_channel(&self.broker.storage.runtime) {
+        let runtime = &self.broker.storage.runtime;
+        let retained = match self.purpose {
+            WebsitePurpose::RamOperation => connection.retain_resource_website_channel(runtime),
+            WebsitePurpose::PoolRegistration => {
+                connection.retain_pool_registration_website_channel(runtime)
+            }
+        };
+        match retained {
             Ok(channel) => self.transport = Transport::Retained(channel),
             Err(failure) => {
                 self.transport = Transport::Failed(failure);
@@ -106,12 +146,17 @@ impl Frame<'_> {
             }
         }
         let reports = self.broker.reports.clone();
+        let purpose = self.purpose;
         let channel = self.channel()?;
         channel.assert_service(&reports)?;
         channel.pin_peer()?;
         // Version-two wire activation is explicit. Original v1 purpose and
         // persisted installation selectors keep their separate contracts.
-        decode_ram_pool_hello(channel.request_bytes())?;
+        let raw = channel.request_bytes();
+        match purpose {
+            WebsitePurpose::RamOperation => decode_ram_pool_hello(raw)?,
+            WebsitePurpose::PoolRegistration => decode_pool_registration_hello(raw)?,
+        }
         Ok(())
     }
     fn channel(&mut self) -> Result<&mut WorkerActorChannel> {
@@ -189,16 +234,27 @@ impl Frame<'_> {
 impl InstalledResourceWebsite<'_> {
     /// Full native bootstrap recheck, without constructing an owner grant.
     pub fn assert_current(&mut self) -> Result<()> {
-        let end = self
-            .frame
-            .deadline
-            .min(Instant::now() + Duration::from_secs(5));
-        let result = self.frame.guard_bootstrap(end);
-        self.frame.failed |= result.is_err();
-        result
+        self.frame.assert_current()
     }
     pub fn close_channel_component(&mut self, end: Instant) -> Result<WorkerLaunchClose> {
         self.frame.close(end)
+    }
+}
+impl InstalledPoolRegistrationWebsite<'_> {
+    pub fn assert_current(&mut self) -> Result<()> {
+        self.frame.assert_current()
+    }
+    /// Metadata/channel component only; not registration or pool settlement.
+    pub fn close_channel_component(&mut self, end: Instant) -> Result<WorkerLaunchClose> {
+        self.frame.close(end)
+    }
+}
+impl Frame<'_> {
+    fn assert_current(&mut self) -> Result<()> {
+        let end = self.deadline.min(Instant::now() + Duration::from_secs(5));
+        let result = self.guard_bootstrap(end);
+        self.failed |= result.is_err();
+        result
     }
 }
 impl Drop for Frame<'_> {

@@ -9,9 +9,11 @@ use reverie_core::{
 };
 mod approval;
 mod owner;
+mod registration;
 #[cfg(test)]
 mod tests;
 pub use owner::CurrentResourceOwner;
+pub use registration::{POOL_REGISTRATION_PURPOSE, decode_pool_registration_hello};
 pub const RAM_POOL_PURPOSE: &str = "resource-ram-pool-v2";
 
 #[derive(Clone, Debug, Eq, PartialEq)]

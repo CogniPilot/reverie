@@ -5,10 +5,12 @@ use reverie_host::website_facts::{ImmutableInputKind, WebsiteMetadataRoute};
 impl Frame<'_> {
     pub(super) fn prepare(&mut self) -> Result<()> {
         self.retain()?;
-        need(
-            self.broker.resource_reservations()?.is_some(),
-            "RESOURCE_ACTOR_GATE_REQUIRED",
-        )?;
+        if matches!(self.purpose, WebsitePurpose::RamOperation) {
+            need(
+                self.broker.resource_reservations()?.is_some(),
+                "RESOURCE_ACTOR_GATE_REQUIRED",
+            )?;
+        }
         let snapshot = self.broker.configuration()?;
         let end = self.deadline.min(Instant::now() + Duration::from_secs(10));
         let installed = self.private.observe(snapshot.configuration(), end)?;

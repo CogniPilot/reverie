@@ -1,6 +1,7 @@
 //! Actual accepted records and kernel peer handles. These are negative entry
 //! controls, never synthetic successful website or current-owner capabilities.
 use super::*;
+mod pool_registration;
 use crate::{reservation_gate::tests::Tree, worker_validation::load_owner_config};
 use reverie_core::worker_wire::WorkerFrameHeader;
 use reverie_host::{
