@@ -12,7 +12,7 @@ let
     dontConfigure = true;
     installPhase = ''
       mkdir -p "$out"
-      find . -type f \( -iname 'copying*' -o -iname '*license*' -o -iname 'notice*' -o -iname 'copyright*' \) \
+      find . -type f \( -iname 'copying*' -o -iname '*license*' -o -iname 'notice*' -o -iname 'copyright*' -o -ipath '*/licenses/*' \) \
         -exec cp --parents -- '{}' "$out/" \;
       test -n "$(find "$out" -type f -print -quit)"
     '';
