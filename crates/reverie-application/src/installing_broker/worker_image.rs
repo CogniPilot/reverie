@@ -8,8 +8,11 @@ use reverie_contracts::{
 };
 use reverie_host::website_facts::{ImmutableInputKind, ImmutableInputObserver};
 use std::time::{Duration, Instant};
+mod apply;
 mod error;
+mod preflight;
 mod prepare;
+pub use apply::{OfflineImageSwitchClosed, OfflineImageSwitchError, OfflineImageSwitchFailure};
 mod qualification;
 #[cfg(test)]
 mod tests;
@@ -38,6 +41,8 @@ struct Qualification<'a> {
     preview_files: Option<reverie_host::worker_image::ImageControlFiles>,
     preview: Option<crate::reservation_gate::ImageSwitchPreview>,
     file_close_failure: Option<reverie_host::worker_image::ImageFileError>,
+    preflight_locks: Option<reverie_host::worker_image::ImageMaintenanceLocks>,
+    preflight_failure: Option<Box<reverie_host::worker_image::ImageMaintenanceFailure>>,
 }
 impl Drop for PreparedOfflineImageSwitch<'_> {
     fn drop(&mut self) {

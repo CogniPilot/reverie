@@ -31,26 +31,39 @@ impl ReservationGate {
             operation: Some(end),
             entry: Some(end),
         })?;
-        let result = (|| {
-            let current = self.inner.installed.snapshot()?;
-            need(
-                Arc::ptr_eq(&current, &preview.before)
-                    && current.envelope().base().image() != preview.image.as_str(),
-                "WORKER_IMAGE_PREVIEW_CHANGED",
-            )?;
-            let rows = self.inner.image_idle()?;
-            need(
-                rows.equivalent(&preview.rows),
-                "WORKER_IMAGE_NATIVE_CHANGED",
-            )?;
-            let source = files.read_configuration()?;
-            need(
-                source.stamp() == &preview.stamp && source.bytes() == preview.raw,
-                "WORKER_IMAGE_PREVIEW_CHANGED",
-            )
-        })();
+        let result = self
+            .inner
+            .assert_image_preview_held(preview, files)
+            .map(|_| ());
         admission.conclude(result)
     }
+}
+impl Inner {
+    pub(super) fn assert_image_preview_held(
+        self: &Arc<Self>,
+        preview: &ImageSwitchPreview,
+        files: &mut ImageControlFiles,
+    ) -> Result<Arc<ObservedInventory>> {
+        let current = self.installed.snapshot()?;
+        need(
+            Arc::ptr_eq(&current, &preview.before)
+                && current.envelope().base().image() != preview.image.as_str(),
+            "WORKER_IMAGE_PREVIEW_CHANGED",
+        )?;
+        let rows = Arc::new(self.image_idle()?);
+        need(
+            rows.equivalent(&preview.rows),
+            "WORKER_IMAGE_NATIVE_CHANGED",
+        )?;
+        let source = files.read_configuration()?;
+        need(
+            source.stamp() == &preview.stamp && source.bytes() == preview.raw,
+            "WORKER_IMAGE_PREVIEW_CHANGED",
+        )?;
+        Ok(rows)
+    }
+}
+impl ReservationGate {
     pub(crate) fn preview_offline_image(
         &self,
         files: &mut ImageControlFiles,

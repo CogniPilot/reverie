@@ -37,6 +37,8 @@ impl InstallingBroker {
             preview_files: None,
             preview: None,
             file_close_failure: None,
+            preflight_locks: None,
+            preflight_failure: None,
         });
         if let Err(cause) = owner.observe(end) {
             owner.failed = true;
@@ -128,13 +130,22 @@ impl Qualification<'_> {
             .map_err(WorkerImageQualificationError::Rootless)?;
         Ok(())
     }
-    pub(super) fn close(&self, end: Instant) -> Result<()> {
+    pub(super) fn close(&mut self, end: Instant) -> Result<()> {
         let input = self.file_close_failure.as_ref().map_or_else(
             || self.input.assert_finalized().map_err(Into::into),
             |error| Err(WorkerImageQualificationError::ImageFiles(error.clone())),
         );
         let query = self.context.settle_metadata_owned(end).map_err(Into::into);
-        match (input, query) {
+        let original = match (input, query) {
+            (Ok(()), Ok(())) => Ok(()),
+            (Err(e), Ok(())) | (Ok(()), Err(e)) => Err(e),
+            (Err(a), Err(b)) => Err(WorkerImageQualificationError::Finalization(
+                Box::new(a),
+                Box::new(b),
+            )),
+        };
+        let maintenance = self.close_preflight();
+        match (original, maintenance) {
             (Ok(()), Ok(())) => Ok(()),
             (Err(e), Ok(())) | (Ok(()), Err(e)) => Err(e),
             (Err(a), Err(b)) => Err(WorkerImageQualificationError::Finalization(
@@ -160,7 +171,7 @@ impl<'a> QualifiedWorkerImage<'a> {
         mut self,
         end: Instant,
     ) -> std::result::Result<(), Box<WorkerImageQualificationFailure<'a>>> {
-        let owner = self.owner.take().expect("qualified owner");
+        let mut owner = self.owner.take().expect("qualified owner");
         match owner.close(end) {
             Ok(()) => Ok(()),
             Err(cause) => Err(Box::new(WorkerImageQualificationFailure {

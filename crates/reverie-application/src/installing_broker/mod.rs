@@ -15,6 +15,7 @@ pub use goal_custody::{GoalCustodyHandlerClosed, GoalCustodyHandlerFailure};
 mod image_refresh;
 mod worker_image;
 pub use worker_image::{
+    OfflineImageSwitchClosed, OfflineImageSwitchError, OfflineImageSwitchFailure,
     PreparedOfflineImageSwitch, QualifiedWorkerImage, WorkerImageQualificationError,
     WorkerImageQualificationFailure,
 };

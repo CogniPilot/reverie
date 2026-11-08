@@ -4,8 +4,10 @@ use super::*;
 use reverie_contracts::reservation_engine::StoppedFlag;
 mod preview;
 pub(crate) use preview::ImageSwitchPreview;
+mod entered;
 mod record;
 mod record_guard;
+pub(crate) use entered::{ImageGateClosed, ImageGateFailure, ImageGateTransition};
 pub(super) use record::ImageTransitionRecord;
 impl Inner {
     /// Read under the original actual R admission. The public offline owner

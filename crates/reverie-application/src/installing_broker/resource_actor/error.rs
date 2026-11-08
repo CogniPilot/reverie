@@ -81,9 +81,13 @@ impl std::error::Error for ResourceActorError {
         }
     }
 }
-pub(super) fn gate_close_unknown(error: &GateError) -> bool {
+pub(in crate::installing_broker) fn gate_close_unknown(error: &GateError) -> bool {
     match error {
         GateError::Actor(error) => error.has_unconfirmed_close(),
+        GateError::ImageFiles(error) => error.has_unconfirmed_close(),
+        GateError::ImageTransition(error) => gate_close_unknown(error),
+        GateError::FullPolicy(error) => error.has_unconfirmed_close(),
+        GateError::Image(error) => image_close_unknown(error),
         GateError::Profile(error) => error.has_unconfirmed_close(),
         GateError::Journal(error) => journal_close_unknown(error),
         GateError::SharedJournal(error) => journal_close_unknown(error),
@@ -100,6 +104,16 @@ pub(super) fn gate_close_unknown(error: &GateError) -> bool {
         | GateError::NativeStartIntentUncertain { cause }
         | GateError::NativeSourceStopUncertain { cause }
         | GateError::GpuApplyUncertain { cause } => gate_close_unknown(cause),
+        _ => false,
+    }
+}
+fn image_close_unknown(error: &reverie_host::reservation_control::ImageHostError) -> bool {
+    use reverie_host::reservation_control::ImageHostError as E;
+    match error {
+        E::Native(e) => e.has_unconfirmed_close(),
+        E::Finalization { primary, secondary } => {
+            image_close_unknown(primary) || image_close_unknown(secondary)
+        }
         _ => false,
     }
 }

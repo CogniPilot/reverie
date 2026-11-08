@@ -11,6 +11,17 @@ pub enum WorkerImageQualificationError {
     Finalization(Box<Self>, Box<Self>),
 }
 impl WorkerImageQualificationError {
+    pub(super) fn has_unconfirmed_close(&self) -> bool {
+        match self {
+            Self::Gate(e) => crate::installing_broker::resource_actor::gate_close_unknown(e),
+            Self::Native(e) => facts_unknown(e),
+            Self::Observer(e) => e.has_unconfirmed_close(),
+            Self::ImageFiles(e) => e.has_unconfirmed_close(),
+            Self::Rootless(e) => crate::worker_validation::rootless_close_unknown(e),
+            Self::Finalization(a, b) => a.has_unconfirmed_close() || b.has_unconfirmed_close(),
+            _ => false,
+        }
+    }
     pub fn code(&self) -> &'static str {
         match self {
             Self::Gate(e) => e.code(),
@@ -22,6 +33,17 @@ impl WorkerImageQualificationError {
             Self::Refused(code) => code,
             Self::Finalization(..) => "WORKER_IMAGE_QUALIFICATION_FINALIZATION",
         }
+    }
+}
+fn facts_unknown(error: &reverie_host::website_facts::WebsiteFactsError) -> bool {
+    use reverie_host::website_facts::WebsiteFactsError as E;
+    match error {
+        E::Cleanup => true,
+        E::Channel(e) => e.has_unconfirmed_close(),
+        E::Finalization { primary, secondary } => {
+            facts_unknown(primary) || facts_unknown(secondary)
+        }
+        _ => false,
     }
 }
 impl std::fmt::Display for WorkerImageQualificationError {
@@ -63,10 +85,15 @@ impl WorkerImageQualificationFailure<'_> {
     /// Cleanup only. Unknown native input/query finalization never becomes a
     /// successful qualification or a right to publish/remove a pending file.
     pub fn close_components(&mut self, end: Instant) -> Result<()> {
-        let Some(owner) = &self.owner else {
+        let Some(owner) = &mut self.owner else {
             return Ok(());
         };
         owner.close(end)?;
+        if self.cause.has_unconfirmed_close() {
+            return Err(WorkerImageQualificationError::Refused(
+                "WORKER_IMAGE_NATIVE_CLOSE_UNCONFIRMED",
+            ));
+        }
         self.owner = None;
         Ok(())
     }

@@ -14,6 +14,59 @@ impl ClosedBrokerResources<'_> {
 }
 #[cfg(test)]
 mod tests;
+/// Results of the same original broker-owned component finalizers. Fields are
+/// private; callers cannot construct closure from metadata or a boolean.
+pub(in crate::installing_broker) struct BrokerIoClosure {
+    reports: bool,
+    telemetry: bool,
+    images: bool,
+    recovery: bool,
+}
+impl BrokerIoClosure {
+    pub(in crate::installing_broker) fn reports_closed(&self) -> bool {
+        self.reports
+    }
+    pub(in crate::installing_broker) fn recovery_closed(&self) -> bool {
+        self.recovery
+    }
+    pub(in crate::installing_broker) fn all_closed(&self) -> bool {
+        self.reports && self.telemetry && self.images && self.recovery
+    }
+}
+impl InstallingBroker {
+    pub(in crate::installing_broker) fn close_application_io(
+        &self,
+        end: std::time::Instant,
+        errors: &mut Vec<BrokerServiceError>,
+    ) -> BrokerIoClosure {
+        let reports = record_close(
+            self.reports.close(end).map_err(BrokerServiceError::Handler),
+            errors,
+        );
+        let telemetry = record_close(
+            self.close_command_telemetry(end)
+                .map_err(BrokerServiceError::Telemetry),
+            errors,
+        );
+        let images = record_close(
+            self.close_chat_images(end)
+                .map_err(BrokerServiceError::Images),
+            errors,
+        );
+        let recovery = record_close(
+            self.recovery
+                .close_service_owners(self, end)
+                .map_err(BrokerServiceError::Recovery),
+            errors,
+        );
+        BrokerIoClosure {
+            reports,
+            telemetry,
+            images,
+            recovery,
+        }
+    }
+}
 
 impl BrokerService {
     pub(super) fn shutdown(
@@ -127,32 +180,7 @@ impl BrokerService {
                 .map_err(BrokerServiceError::Handler),
             errors,
         );
-        let reports = record_close(
-            broker
-                .reports
-                .close(end)
-                .map_err(BrokerServiceError::Handler),
-            errors,
-        );
-        let telemetry = record_close(
-            broker
-                .close_command_telemetry(end)
-                .map_err(BrokerServiceError::Telemetry),
-            errors,
-        );
-        let images = record_close(
-            broker
-                .close_chat_images(end)
-                .map_err(BrokerServiceError::Images),
-            errors,
-        );
-        let recovery = record_close(
-            broker
-                .recovery
-                .close_service_owners(broker, end)
-                .map_err(BrokerServiceError::Recovery),
-            errors,
-        );
+        let io = broker.close_application_io(end, errors);
         let supervisor = self.supervisor_closed();
         if !supervisor {
             errors.push(BrokerServiceError::Supervisor(
@@ -161,11 +189,14 @@ impl BrokerService {
         }
         let controller = record_close(
             broker
-                .close_installed_controller(reports && recovery && supervisor, end)
+                .close_installed_controller(
+                    io.reports_closed() && io.recovery_closed() && supervisor,
+                    end,
+                )
                 .map_err(BrokerServiceError::Controller),
             errors,
         );
-        listener && reports && telemetry && images && recovery && supervisor && controller
+        listener && io.all_closed() && supervisor && controller
     }
 }
 fn record_close(

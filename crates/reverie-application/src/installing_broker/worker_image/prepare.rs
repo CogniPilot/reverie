@@ -19,6 +19,7 @@ impl<'a> QualifiedWorkerImage<'a> {
 impl Qualification<'_> {
     fn prepare(&mut self) -> Result<()> {
         self.observe(self.end)?;
+        self.begin_preflight()?;
         let source = self
             .before
             .source_path()
@@ -43,7 +44,7 @@ impl Qualification<'_> {
             &self.annex,
             self.end,
         );
-        match result {
+        let body = match result {
             Ok(preview) => {
                 self.preview = Some(preview);
                 Ok(())
@@ -56,6 +57,15 @@ impl Qualification<'_> {
                 }
                 Err(cause.into())
             }
+        };
+        let closed = self.close_preflight();
+        match (body, closed) {
+            (Ok(()), Ok(())) => Ok(()),
+            (Err(e), Ok(())) | (Ok(()), Err(e)) => Err(e),
+            (Err(a), Err(b)) => Err(WorkerImageQualificationError::Finalization(
+                Box::new(a),
+                Box::new(b),
+            )),
         }
     }
 }
@@ -94,6 +104,7 @@ impl<'a> PreparedOfflineImageSwitch<'a> {
         let owner = self.owner.as_mut().expect("same prepared owner");
         let result = (|| {
             owner.observe(end)?;
+            owner.begin_preflight()?;
             let gate = owner.broker.resource_reservations()?.ok_or(
                 WorkerImageQualificationError::Refused("WORKER_IMAGE_EXISTING_R_REQUIRED"),
             )?;
@@ -110,6 +121,15 @@ impl<'a> PreparedOfflineImageSwitch<'a> {
             }
             Ok(result?)
         })();
+        let closed = owner.close_preflight();
+        let result = match (result, closed) {
+            (Ok(()), Ok(())) => Ok(()),
+            (Err(e), Ok(())) | (Ok(()), Err(e)) => Err(e),
+            (Err(a), Err(b)) => Err(WorkerImageQualificationError::Finalization(
+                Box::new(a),
+                Box::new(b),
+            )),
+        };
         if result.is_err() {
             owner.failed = true;
         }
@@ -131,7 +151,7 @@ impl<'a> PreparedOfflineImageSwitch<'a> {
         mut self,
         end: Instant,
     ) -> std::result::Result<(), Box<WorkerImageQualificationFailure<'a>>> {
-        let owner = self.owner.take().expect("same preview owner");
+        let mut owner = self.owner.take().expect("same preview owner");
         match owner.close(end) {
             Ok(()) => Ok(()),
             Err(cause) => Err(Box::new(WorkerImageQualificationFailure {
