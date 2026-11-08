@@ -51,7 +51,7 @@ fn policy(cpu: CpuQuota, version: u64) -> (ResourceProfile, RamMigrationPolicy) 
         "HostConfig":{"Memory":536870912u64,"MemorySwap":536870912u64,"PidsLimit":512,"NanoCpus":0}});
     let rows = InventoryRows::decode(
         &[ContainerId::parse(&cid).unwrap()],
-        &[serde_json::to_string(&json!([row])).unwrap()],
+        &[serde_json::to_string(&row).unwrap()],
     )
     .unwrap();
     let row = &rows.rows()[0];
@@ -130,15 +130,17 @@ fn preview_reply_rejects_foreign_employee_memory_and_profile_substitution() {
     assert!(preview(&request(EMPLOYEE, 49_152), &changed, &policy).is_err());
 }
 #[test]
-fn preview_reply_preserves_full_version_and_normalizes_negative_zero_only_on_wire() {
+fn preview_reply_preserves_highest_valid_version_and_normalizes_negative_zero_only_on_wire() {
     let request = request(EMPLOYEE, 49_152);
-    let (profile, policy) = policy(CpuQuota::from_float(-0.0).unwrap(), u64::MAX);
+    let version = reverie_core::revision::JS_SAFE_MAX;
+    assert!(ProfileVersion::try_new(u64::MAX).is_err());
+    let (profile, policy) = policy(CpuQuota::from_float(-0.0).unwrap(), version);
     let raw = preview(&request, &profile, &policy)
         .unwrap()
         .canonical()
         .unwrap();
     let value: Json = serde_json::from_slice(&raw).unwrap();
-    assert_eq!(value["value"]["profileVersion"], u64::MAX.to_string());
+    assert_eq!(value["value"]["profileVersion"], version.to_string());
     assert_eq!(value["value"]["resources"]["cpus"], 0);
     assert!(!String::from_utf8(raw).unwrap().contains("\"cpus\":-0"));
     assert!(
