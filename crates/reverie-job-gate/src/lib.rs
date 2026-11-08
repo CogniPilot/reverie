@@ -5,6 +5,9 @@
 //! until the job exits and admits a new job only while every reservation and the seat's
 //! non-reclaimable usage still fit under a fraction of the memory cap (see `rule`). It never kills
 //! or limits anything; a job it does not run is not counted, except through the measured usage.
+//! This cooperative ledger is not a cgroup limit, a host administration grant,
+//! or proof that a command's descendants have physically settled. If a wrapper
+//! dies or a command leaves descendants, its estimate is not an ownership fence.
 pub mod facts;
 pub mod ledger;
 pub mod rule;
@@ -31,11 +34,27 @@ pub enum GateError {
     /// A ledger entry that could not be read, parsed or checked against `/proc`; it is kept.
     UnknownHolder(String),
     Io(io::Error),
+    Finalization {
+        primary: Box<GateError>,
+        cleanup: io::Error,
+    },
 }
 
 impl From<io::Error> for GateError {
     fn from(error: io::Error) -> Self {
         Self::Io(error)
+    }
+}
+
+fn finalized<T>(body: Result<T, GateError>, close: io::Result<()>) -> Result<T, GateError> {
+    match (body, close) {
+        (Ok(value), Ok(())) => Ok(value),
+        (Err(error), Ok(())) => Err(error),
+        (Ok(_), Err(error)) => Err(GateError::Io(error)),
+        (Err(primary), Err(cleanup)) => Err(GateError::Finalization {
+            primary: Box::new(primary),
+            cleanup,
+        }),
     }
 }
 
@@ -49,56 +68,62 @@ pub fn try_admit(
     permille: u32,
 ) -> Result<Attempt, GateError> {
     let locked = ledger.lock()?;
-    let entries = ledger.live(&locked, &roots.proc)?;
-    let held: Holders = entries
-        .into_iter()
-        .map(|entry| (entry, tree_pss_anon(&roots.proc, entry.pid)))
-        .collect();
-    let facts = read_facts(roots).map_err(GateError::Unreadable)?;
-    let rule_held: Vec<Held> = held
-        .iter()
-        .map(|(entry, pss_anon)| Held {
-            reservation: entry.reservation,
-            pss_anon: *pss_anon,
+    let result = (|| {
+        let entries = ledger.live(&locked, &roots.proc)?;
+        let held: Holders = entries
+            .into_iter()
+            .map(|entry| (entry, tree_pss_anon(&roots.proc, entry.pid)))
+            .collect();
+        let facts = read_facts(roots).map_err(GateError::Unreadable)?;
+        let rule_held: Vec<Held> = held
+            .iter()
+            .map(|(entry, pss_anon)| Held {
+                reservation: entry.reservation,
+                pss_anon: *pss_anon,
+            })
+            .collect();
+        let decision = rule::decide(&facts, &rule_held, estimate, permille);
+        if decision == Decision::Admit {
+            let start = start_time(&roots.proc, pid).ok_or_else(|| {
+                GateError::Unreadable(Unreadable(format!("no start time for pid {pid}")))
+            })?;
+            ledger.add(
+                &locked,
+                Entry {
+                    pid,
+                    start,
+                    reservation: estimate,
+                },
+            )?;
+        }
+        Ok(Attempt {
+            decision,
+            facts,
+            held,
         })
-        .collect();
-    let decision = rule::decide(&facts, &rule_held, estimate, permille);
-    if decision == Decision::Admit {
-        let start = start_time(&roots.proc, pid).ok_or_else(|| {
-            GateError::Unreadable(Unreadable(format!("no start time for pid {pid}")))
-        })?;
-        ledger.add(
-            &locked,
-            Entry {
-                pid,
-                start,
-                reservation: estimate,
-            },
-        )?;
-    }
-    Ok(Attempt {
-        decision,
-        facts,
-        held,
-    })
+    })();
+    finalized(result, locked.close())
 }
 
 /// Release `pid`'s reservation.
 pub fn release(ledger: &Ledger, pid: u32) -> io::Result<()> {
     let locked = ledger.lock()?;
-    ledger.remove(&locked, pid)
+    ledger::finalized(ledger.remove(&locked, pid), locked.close())
 }
 
 /// Current facts and live holders, for `status`; prunes stale holders like an admission does.
 pub fn snapshot(ledger: &Ledger, roots: &Roots) -> Result<(Facts, Holders), GateError> {
     let locked = ledger.lock()?;
-    let held = ledger
-        .live(&locked, &roots.proc)?
-        .into_iter()
-        .map(|entry| (entry, tree_pss_anon(&roots.proc, entry.pid)))
-        .collect();
-    let facts = read_facts(roots).map_err(GateError::Unreadable)?;
-    Ok((facts, held))
+    let result = (|| {
+        let held = ledger
+            .live(&locked, &roots.proc)?
+            .into_iter()
+            .map(|entry| (entry, tree_pss_anon(&roots.proc, entry.pid)))
+            .collect();
+        let facts = read_facts(roots).map_err(GateError::Unreadable)?;
+        Ok((facts, held))
+    })();
+    finalized(result, locked.close())
 }
 
 /// Parse a size: plain bytes, or a number with k, m or g (binary units).

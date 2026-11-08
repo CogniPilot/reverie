@@ -101,6 +101,9 @@ fn describe(error: GateError) -> String {
             format!("reservation could not be checked, refusing: {why}")
         }
         GateError::Io(error) => format!("ledger unavailable: {error}"),
+        GateError::Finalization { primary, cleanup } => {
+            format!("{}; ledger finalization: {cleanup}", describe(*primary))
+        }
     }
 }
 
@@ -115,12 +118,32 @@ fn run(
     command: &[OsString],
 ) -> Result<ExitCode, String> {
     let ledger = Ledger::open(&ledger_dir()).map_err(|e| format!("ledger unavailable: {e}"))?;
+    let result = run_held(&ledger, estimate, permille, wait_secs, command);
+    let closed = ledger.close();
+    match (result, closed) {
+        (Ok(status), Ok(())) => Ok(status),
+        (Ok(status), Err(error)) => {
+            eprintln!("reverie-job: warning: ledger close unconfirmed ({error})");
+            Ok(status)
+        }
+        (Err(error), Ok(())) => Err(error),
+        (Err(error), Err(cleanup)) => Err(format!("{error}; ledger close: {cleanup}")),
+    }
+}
+
+fn run_held(
+    ledger: &Ledger,
+    estimate: u64,
+    permille: u32,
+    wait_secs: u64,
+    command: &[OsString],
+) -> Result<ExitCode, String> {
     let roots = roots();
     let pid = std::process::id();
     let deadline = Instant::now() + Duration::from_secs(wait_secs);
     let mut said_waiting = false;
     loop {
-        let attempt = try_admit(&ledger, &roots, pid, estimate, permille).map_err(describe)?;
+        let attempt = try_admit(ledger, &roots, pid, estimate, permille).map_err(describe)?;
         match attempt.decision {
             rule::Decision::Admit => break,
             rule::Decision::Refuse { estimate, limit } => {
@@ -152,7 +175,7 @@ fn run(
         }
     }
     let status = Command::new(&command[0]).args(&command[1..]).status();
-    if let Err(error) = release(&ledger, pid) {
+    if let Err(error) = release(ledger, pid) {
         // The command's outcome stands either way: the entry is stale, and pruned, once this
         // process is gone.
         eprintln!(
@@ -176,7 +199,20 @@ fn exit_code(status: std::process::ExitStatus) -> ExitCode {
 
 fn status(permille: u32) -> Result<ExitCode, String> {
     let ledger = Ledger::open(&ledger_dir()).map_err(|e| format!("ledger unavailable: {e}"))?;
-    let (facts, held) = snapshot(&ledger, &roots()).map_err(describe)?;
+    let result = status_held(&ledger, permille);
+    let closed = ledger.close();
+    let report = match (result, closed) {
+        (Ok(report), Ok(())) => report,
+        (Err(error), Ok(())) => return Err(error),
+        (Ok(_), Err(error)) => return Err(format!("ledger close: {error}")),
+        (Err(error), Err(cleanup)) => return Err(format!("{error}; ledger close: {cleanup}")),
+    };
+    println!("{report}");
+    Ok(ExitCode::SUCCESS)
+}
+
+fn status_held(ledger: &Ledger, permille: u32) -> Result<serde_json::Value, String> {
+    let (facts, held) = snapshot(ledger, &roots()).map_err(describe)?;
     let rule_held: Vec<rule::Held> = held
         .iter()
         .map(|(entry, pss_anon)| rule::Held {
@@ -193,6 +229,5 @@ fn status(permille: u32) -> Result<ExitCode, String> {
             "pid": entry.pid, "reservation": entry.reservation, "pssAnon": pss_anon,
         })).collect::<Vec<_>>(),
     });
-    println!("{report}");
-    Ok(ExitCode::SUCCESS)
+    Ok(report)
 }
