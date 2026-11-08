@@ -1,5 +1,7 @@
 //! Anchored cgroupfs operations. All names/values are fixed by the closed pool
 //! purpose. Uses the existing checked-open/close syscall owner; no new unsafe.
+#[cfg(test)]
+pub(super) mod fixture;
 use super::*;
 use crate::native;
 use std::{

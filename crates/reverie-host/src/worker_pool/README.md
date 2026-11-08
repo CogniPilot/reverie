@@ -42,3 +42,15 @@ host namespace visibility and group-readable0440/version-hash custody. It uses
 only controlled fixture data and the bound test ELF. It writes no pool limits,
 mints no InstalledPool/Q grant and changes no company seats. Ambiguous effects
 retain fixture names/CIDs; local metadata close is never a global acknowledgement.
+
+A separate ignored test is being prepared for independently reviewed limit
+writes. Its private test owner retains the actual unique fixture parent and
+anchor FDs before one-shot configuration, then starts two native sleep-only
+leaves with 48GiB hard limits under the one 48GiB parent. It checks raw high/max,
+swap, tasks, CPU weight/no quota and configured/effective CPU+memory-node sets,
+including a parent readback immediately after each Docker start before any leaf
+high write. It never repairs parent drift silently. The real website is observed
+read-only outside that hierarchy; no company data is mounted. This fixture does
+not mint InstalledWorkerPool, Q authority or a production provider fence. Known
+CID cleanup may leave empty implicit runtime slice objects; those are recorded
+as residual metadata, not manually removed or described as complete removal.

@@ -2,7 +2,7 @@ use super::*;
 use crate::native::{self, owned_process as process};
 use sha2::{Digest, Sha256};
 use std::{
-    fs,
+    fs::{self, File},
     io::{Read, Write},
     os::{
         fd::{IntoRawFd, OwnedFd},
@@ -13,10 +13,24 @@ use std::{
     time::{Duration, Instant},
 };
 const CASE: &str = "worker_pool::tests::actual_implicit_parent_and_confined_controller_namespace";
+pub(super) mod limits;
 
 pub(super) fn probe_child() {
     assert!(nix::unistd::geteuid().is_root());
     let actual = namespace::assert_controller_namespaces().unwrap();
+    let (file, _) = opened_policy();
+    println!(
+        "POOL_CONTEXT {} {} {}",
+        actual.container, actual.pid, actual.start
+    );
+    std::io::stdout().flush().unwrap();
+    let mut command = [0];
+    std::io::stdin().read_exact(&mut command).unwrap();
+    assert_eq!(command, [b'X']);
+    native::close(file).unwrap();
+}
+
+fn opened_policy() -> (File, WorkerPoolPolicy) {
     let digest = std::env::var("REVERIE_POOL_CONTEXT_VERSION").unwrap();
     assert!(reverie_contracts::worker_pool::hex_id(&digest));
     let path = format!("/run/reverie-worker-pool/policies/{digest}.json");
@@ -32,22 +46,14 @@ pub(super) fn probe_child() {
     let mut raw = Vec::new();
     (&file).take(65_537).read_to_end(&mut raw).unwrap();
     assert_eq!(format!("{:x}", Sha256::digest(&raw)), digest);
-    WorkerPoolPolicy::decode(&raw).unwrap();
+    let policy = WorkerPoolPolicy::decode(&raw).unwrap();
     assert!(
         nix::sys::statvfs::fstatvfs(&file)
             .unwrap()
             .flags()
             .contains(nix::sys::statvfs::FsFlags::ST_RDONLY)
     );
-    println!(
-        "POOL_CONTEXT {} {} {}",
-        actual.container, actual.pid, actual.start
-    );
-    std::io::stdout().flush().unwrap();
-    let mut command = [0];
-    std::io::stdin().read_exact(&mut command).unwrap();
-    assert_eq!(command, [b'X']);
-    native::close(file).unwrap();
+    (file, policy)
 }
 
 pub(super) fn run_parent() {
@@ -78,9 +84,15 @@ struct Fixture {
     probe_seen: bool,
     exit_requested: bool,
     complete: bool,
+    case: &'static str,
+    leaves: Vec<String>,
+    pending_leaf_name: Option<String>,
 }
 impl Fixture {
     fn new() -> Self {
+        Self::new_case(CASE, None)
+    }
+    fn new_case(case: &'static str, website: Option<String>) -> Self {
         let image = std::env::var("REVERIE_POOL_DOCKER_FIXTURE_IMAGE")
             .expect("explicit immutable owned-fixture image");
         assert!(
@@ -115,7 +127,7 @@ impl Fixture {
             engine_id: info["ID"].as_str().unwrap().into(),
             anchor_image: image.clone(),
             controller_image: image,
-            website_container: "b".repeat(64),
+            website_container: website.unwrap_or_else(|| "b".repeat(64)),
             broker_uid: nix::unistd::geteuid().as_raw(),
             broker_gid: nix::unistd::getegid().as_raw(),
             memory_max_mi_b: 49_152,
@@ -158,6 +170,9 @@ impl Fixture {
             probe_seen: false,
             exit_requested: false,
             complete: false,
+            case,
+            leaves: Vec::new(),
+            pending_leaf_name: None,
         }
     }
     fn create_anchor(&mut self) {
@@ -257,6 +272,8 @@ impl Fixture {
             "--env",
             "REVERIE_POOL_CONTEXT_CHILD=1",
             "--env",
+            "REVERIE_POOL_LIMITS_CHILD=1",
+            "--env",
             &format!("REVERIE_POOL_CONTEXT_VERSION={}", self.version),
             "--env",
             "RUST_BACKTRACE=0",
@@ -265,7 +282,7 @@ impl Fixture {
             &self.policy.controller_image,
             "--ignored",
             "--exact",
-            CASE,
+            self.case,
             "--test-threads=1",
             "--nocapture",
         ])
@@ -370,6 +387,12 @@ impl Fixture {
         process::close(self.output.take().unwrap()).unwrap();
     }
     fn cleanup_known(&mut self) {
+        assert!(self.pending_leaf_name.is_none());
+        for leaf in &self.leaves {
+            docker::run(&["stop", "--time", "2", leaf]).unwrap();
+            docker::run(&["rm", leaf]).unwrap();
+        }
+        self.leaves.clear();
         let controller = self.controller.as_ref().unwrap();
         docker::run(&["rm", controller]).unwrap();
         self.controller = None;
@@ -386,10 +409,12 @@ impl Drop for Fixture {
         if !self.complete {
             self.settle_probe_unwind();
             eprintln!(
-                "OWNED_FIXTURE_RETAINED root={} anchor={:?} controller={:?}; no cleanup acknowledgement",
+                "OWNED_FIXTURE_RETAINED root={} anchor={:?} controller={:?} leaves={:?} pending_leaf={:?}; no cleanup acknowledgement",
                 self.root.display(),
                 self.anchor,
-                self.controller
+                self.controller,
+                self.leaves,
+                self.pending_leaf_name
             );
             std::mem::forget((self.attach.take(), self.input.take(), self.output.take()));
         }

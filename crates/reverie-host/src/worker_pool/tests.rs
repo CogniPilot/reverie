@@ -13,3 +13,13 @@ fn actual_implicit_parent_and_confined_controller_namespace() {
         fixture::run_parent();
     }
 }
+
+#[test]
+#[ignore = "requires independently reviewed owned Docker limit writes; no company effects"]
+fn actual_two_hard_leaves_share_confined_pool() {
+    if std::env::var_os("REVERIE_POOL_LIMITS_CHILD").as_deref() == Some(std::ffi::OsStr::new("1")) {
+        fixture::limits::probe_child();
+    } else {
+        fixture::limits::run_parent();
+    }
+}
