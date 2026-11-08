@@ -127,6 +127,54 @@ describe('retired-session retention policy', () => {
     expect(decisions.filter((d) => d.action === 'prune').map((d) => d.sessionId)).toEqual(['m']);
   });
 
+  it('keeps a record with no retirement time, and it cannot displace the well-formed rollback', () => {
+    // a -> b with `at` missing (as a hand-edited or older file can hold), b -> c long ago, everything running.
+    const stored = [
+      { sessionId: 'a', successorId: 'b' },
+      { sessionId: 'b', successorId: 'c', at: 2 },
+    ] as unknown as RetiredRecord[];
+    expect(byId(decideRetention(input({ retired: stored })))).toEqual({
+      a: 'keep:invalid-record',
+      b: 'keep:newest-for-seat',
+    });
+  });
+
+  it('keeps every record whose ids or time are malformed, even when its session is gone', () => {
+    const bad = [
+      { sessionId: 'a', successorId: 'c', at: Number.NaN },
+      { sessionId: 'b', successorId: 'c', at: Number.POSITIVE_INFINITY },
+      { sessionId: 'd', successorId: 'c', at: '5' },
+      { sessionId: 'e', successorId: 'c', at: null },
+      { sessionId: 'f', successorId: '', at: 1 },
+      { sessionId: 'g', at: 1 },
+      { sessionId: '', successorId: 'c', at: 1 },
+      { successorId: 'c', at: 1 },
+    ] as unknown as RetiredRecord[];
+    for (const exists of [() => true, () => false]) {
+      const decisions = decideRetention(input({ retired: bad, exists, isRunning: () => true }));
+      expect(decisions.map((d) => `${d.action}:${d.reason}`)).toEqual(Array(bad.length).fill('keep:invalid-record'));
+    }
+  });
+
+  it('keeps a well-formed record whose chain passes through a malformed one', () => {
+    // x -> m, where m has no successor; u -> v -> c, where v has no time. Both chains run through a malformed hop.
+    const stored = [
+      { sessionId: 'x', successorId: 'm', at: 1 },
+      { sessionId: 'm', at: 2 },
+      { sessionId: 'u', successorId: 'v', at: 1 },
+      { sessionId: 'v', successorId: 'c', at: Number.NaN },
+    ] as unknown as RetiredRecord[];
+    const all = () => true;
+    expect(byId(decideRetention(input({ retired: stored, exists: all, isRunning: all })))).toEqual({
+      x: 'keep:invalid-chain',
+      m: 'keep:invalid-record',
+      u: 'keep:invalid-chain',
+      v: 'keep:invalid-record',
+    });
+    const map = new Map(stored.map((r) => [r.sessionId, r]));
+    expect(seatOf(stored[0], map)).toBe('m');
+  });
+
   it('returns one decision per record in input order and changes nothing it is given', () => {
     const given = records();
     const frozen = JSON.stringify(given);
