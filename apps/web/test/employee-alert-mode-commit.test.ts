@@ -79,6 +79,40 @@ describe("an owner's phone choice commits in one write", () => {
     expect(mode(p.reopen())).toEqual({ mode: 'silent', source: 'preference' });
   });
 
+  it('a second owner choice after a failed cleanup still orders after the old lease, at the same clock', () => {
+    const p = prepared();
+    failing.target = p.leases;
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    p.modes.prefer('employee-a', 'vibrate');
+    failing.target = '';
+    p.modes.prefer('employee-a', 'silent');
+    expect(mode(p.modes)).toEqual({ mode: 'silent', source: 'preference' });
+    expect(mode(p.reopen())).toEqual({ mode: 'silent', source: 'preference' });
+    p.advance(60 * 60 * 1000);
+    expect(mode(p.reopen())).toEqual({ mode: 'silent', source: 'preference' });
+  });
+
+  it('keeps the newest choice first when the clock goes back', () => {
+    const p = prepared();
+    failing.target = p.leases;
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    p.modes.prefer('employee-a', 'silent');
+    failing.target = '';
+    const stamp = () => JSON.parse(readFileSync(p.preferences, 'utf8')).employees['employee-a'].at as number;
+    const first = stamp();
+    p.advance(-10000);
+    // The old Ring lease is still on disk; the later owner choice must still order after it.
+    p.modes.prefer('employee-a', 'vibrate');
+    expect(stamp()).toBeGreaterThan(first);
+    expect(mode(p.modes)).toEqual({ mode: 'vibrate', source: 'preference' });
+    expect(mode(p.reopen())).toEqual({ mode: 'vibrate', source: 'preference' });
+    // A lease set later, with the clock still behind, applies over it, then the preference returns.
+    p.modes.set('employee-a', 'ring', 1000);
+    expect(mode(p.reopen())).toMatchObject({ mode: 'ring', source: 'lease', then: 'vibrate' });
+    p.advance(1000);
+    expect(mode(p.reopen())).toEqual({ mode: 'vibrate', source: 'preference' });
+  });
+
   it("applies at once, removes only that employee's lease, and survives a restart", () => {
     const p = prepared();
     p.modes.prefer('employee-a', 'silent');

@@ -152,20 +152,24 @@ export class EmployeeAlertModes {
   prefer(id: string, mode: AlertMode): void {
     if (!MODES.includes(mode)) throw new Error('Unknown phone mode');
     const lease = Object.hasOwn(this.leases, id) ? this.leases[id] : undefined;
-    // Strictly after the lease it ends, even within the same millisecond.
-    const at = lease ? Math.max(this.now(), leaseStart(lease) + 1) : this.now();
+    const previous = Object.hasOwn(this.preferences, id) ? this.preferences[id] : undefined;
+    // Strictly after the preference it replaces and the lease it ends, even within the same
+    // millisecond or if the clock went back, so a later choice always orders last.
+    const after = Math.max(previous?.at ?? -Infinity, lease ? leaseStart(lease) : -Infinity);
+    const at = Math.max(this.now(), after + 1);
     const preferences = { ...this.preferences, [id]: { mode, at } };
     if (this.preferencesFile) writeRecord(this.preferencesFile, { schema: PREFERENCES_SCHEMA, employees: preferences });
     this.preferences = preferences;
     if (!lease) return;
     const leases = { ...this.leases };
     delete leases[id];
-    this.leases = leases;
     try {
       if (this.file) writeRecord(this.file, leases);
+      this.leases = leases;
     } catch (error) {
-      // The choice is already committed and the old lease no longer applies; only an older
-      // console reading `file` would still see it until it ends.
+      // The choice is already committed and the old lease no longer applies. It stays in memory as
+      // on disk, ordered behind the preference; only an older console reading `file` would still
+      // see it until it ends.
       console.warn('Phone preference committed; removing its old lease failed', error);
     }
   }
