@@ -372,7 +372,12 @@ impl ControlFailure<'_> {
                 true
             }
             Err(cause) => {
-                if !matches!(cause, Cause::Identity(_)) {
+                // These exact read owners already retain their first typed
+                // failure. Reconcile cannot replay a read or grow diagnostics.
+                if !matches!(
+                    cause,
+                    Cause::Identity(_) | Cause::Observation(_) | Cause::Provider(_)
+                ) {
                     self.causes.push(cause);
                 }
                 false
