@@ -102,14 +102,25 @@ describe('current agent capability command', () => {
     expect(await agentCapabilities(f.deps, refs)).toBe(0);
     expect(JSON.parse(f.output[1]).board.createDecision).toBe(false);
     expect(f.calls).toEqual([
-      expect.objectContaining({ method: 'GET', path: '/api/board' }),
+      expect.objectContaining({ method: 'GET', path: '/api/board/capabilities' }),
       expect.objectContaining({ method: 'GET', path: '/api/publication/credentials' }),
-      expect.objectContaining({ method: 'GET', path: '/api/board' }),
+      expect.objectContaining({ method: 'GET', path: '/api/board/capabilities' }),
       expect.objectContaining({ method: 'GET', path: '/api/publication/credentials' }),
     ]);
+    // The capability report alone, bounded, never the whole Board.
+    expect(f.calls[0].bounds?.maxBytes).toBeLessThanOrEqual(64 * 1024);
     expect(f.calls.every((call) => call.body === undefined)).toBe(true);
     expect(JSON.parse(f.output[0]).website.redeploy.status).toBe('unavailable');
     expect(JSON.parse(f.output[0]).website.restart.status).toBe('unknown');
+  });
+  it('asks an older server without the capability route for the Board, as before', async () => {
+    const f = fixture();
+    const request = f.deps.request;
+    f.deps.request = async (context, options) =>
+      options.path === '/api/board/capabilities' ? { status: 404, text: '', json: { success: false } } : request(context, options);
+    expect(await agentCapabilities(f.deps, refs)).toBe(0);
+    expect(JSON.parse(f.output[0]).board.createDecision).toBe(true);
+    expect(f.calls.map(call => call.path)).toEqual(['/api/board', '/api/publication/credentials']);
   });
   it('refuses to infer grants from roster, title or forged local session identity', async () => {
     const f = fixture();
@@ -148,7 +159,7 @@ describe('current agent capability command', () => {
     const f = fixture();
     f.deps.request = async (_context, request) => {
       f.calls.push(request);
-      return { status: 200, text: '', json: { success: true, data: request.path === '/api/board'
+      return { status: 200, text: '', json: { success: true, data: request.path === '/api/board/capabilities'
         ? { capabilities: snapshot() }
         : { employeeId: 'employee-one', sessionId: 'self-session', credentials: [{
           id: '44444444-4444-4444-8444-444444444444', name: 'project-publish',

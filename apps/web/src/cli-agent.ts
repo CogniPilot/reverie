@@ -31,6 +31,7 @@ import { isChatRaster, localImageFiles } from './chat-image-paths.js';
  */
 import http from 'node:http';
 import { displayTime, displayTimeZone } from './display-time.js';
+import { TURN_SUMMARY_MAX_CHARS } from './chatroom-turn-summary.js';
 import { agentCapabilities } from './cli-agent-capabilities.js';
 import { agentEmployeeOffice } from './cli-agent-office.js';
 import { agentViewerRecovery } from './cli-agent-viewer.js';
@@ -469,7 +470,7 @@ export async function agentChatSummary(deps: AgentDeps, hookEvent?: string): Pro
     return fail(deps, 'Unsupported summary hook event');
   const result = await deps.request(deps.ctx, { method: 'GET', path: '/api/chatrooms/turn-summary', timeoutMs: 2000 });
   const data = result.json?.data as { text?: unknown } | undefined;
-  if (!result.json?.success || typeof data?.text !== 'string' || data.text.length > 3000)
+  if (!result.json?.success || typeof data?.text !== 'string' || data.text.length > TURN_SUMMARY_MAX_CHARS)
     return fail(deps, 'Pending message summary unavailable');
   if (hookEvent) {
     deps.io.out(JSON.stringify({ hookSpecificOutput: { hookEventName: hookEvent, additionalContext: data.text } }));

@@ -1,5 +1,9 @@
 use super::*;
+mod close_contention;
 mod handler;
+pub(super) fn record_lock_contended() {
+    close_contention::lock_contended();
+}
 mod launch;
 mod listener;
 mod reference;

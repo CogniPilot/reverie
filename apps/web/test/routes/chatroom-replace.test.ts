@@ -95,8 +95,10 @@ describe('a plan switch: the old session\'s place moves to its successor', () =>
     expect(service.room(r1)?.members.find((m) => m.role === 'coordinator')?.sessionId).toBe(B);
     clock += 10_000;
     await service.delivery.flushAll();
-    expect(panes(B).join('')).toContain('Reverie chatroom "Ops"');
-    expect(panes(B).join('')).toContain('COORDINATOR');
+    // The successor's briefings reach it through its hook payload; its pane only gets the wake line.
+    const briefed = service.delivery.pendingBriefs(B).map((b) => b.text).join('\n');
+    expect(briefed).toContain('Reverie chatroom "Ops"');
+    expect(briefed).toContain('COORDINATOR');
     const msgs = (await app.inject({ method: 'GET', url: `/api/chatrooms/${r1}/messages` })).json().data.messages as Array<{ text: string; from: { kind: string } }>;
     expect(msgs.some((m) => m.from.kind === 'system' && m.text === 'alpha moved to a new session')).toBe(true);
     expect(audit().find((a) => a.action === 'replace-session')).toMatchObject({ from: A, to: B });

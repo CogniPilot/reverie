@@ -40,6 +40,11 @@ pub(crate) fn decode_ordered_metadata_bytes(raw: &[u8]) -> Result<ordered::Order
 pub(crate) fn decode_text(text: &str) -> Result<Value, Error> {
     decode::decode_last_wins(text.as_bytes())
 }
+/// `json.loads(bytes)` with its defaults: byte-encoding detection, duplicate
+/// keys last-wins, literal constants and the decimal conversion cap.
+pub(crate) fn decode_loads_bytes(raw: &[u8]) -> Result<Value, Error> {
+    decode::decode_last_wins(&text::python_bytes(raw)?)
+}
 /// Normal rootless seccomp JSON uses json.loads(bytes), without object_pairs_hook.
 /// Keep this mode purpose-private; strict profile/perf/registry readers differ.
 pub(crate) fn decode_rootless_profile(raw: &[u8]) -> Result<Value, Error> {

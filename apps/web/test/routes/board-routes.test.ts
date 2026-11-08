@@ -96,6 +96,33 @@ describe('board routes', () => {
     } finally { snapshot.mockRestore(); }
   });
 
+  it.each([undefined, BUILDER, STRANGER])('reports the same capabilities without loading Board state or growing with it (%s)', async (session) => {
+    for (let n = 0; n < 40; n++) await post('/api/board/issues', { title: 'Filler card ' + n, reason: 'x'.repeat(400) }, COORD);
+    const board = await app.inject({ method: 'GET', url: '/api/board', headers: as(session) });
+    const { checkedAt: _at, ...full } = board.json().data.capabilities;
+    const snapshot = vi.spyOn(store, 'snapshot').mockImplementation(() => { throw new Error('Board must not be read'); });
+    for (const r of rooms) Object.defineProperty(r, 'messages', { get: () => { throw new Error('Messages must not be read'); } });
+    try {
+      const result = await app.inject({ method: 'GET', url: '/api/board/capabilities', headers: as(session) });
+      expect(result.statusCode).toBe(200);
+      const { checkedAt, ...rest } = result.json().data.capabilities;
+      expect(rest).toEqual(full);
+      expect(checkedAt).toBe(NOW);
+      expect(Object.keys(result.json().data)).toEqual(['capabilities']);
+      expect(result.body.length).toBeLessThan(board.body.length / 4);
+      expect(snapshot).not.toHaveBeenCalled();
+    } finally { snapshot.mockRestore(); }
+  });
+
+  it('refuses unknown, partial and service callers on the capability-only route', async () => {
+    for (const headers of [as(BUILDER.slice(0, 8)), as('00000043-0053-4000-8000-00000000007b'),
+      { ...as(BUILDER), 'x-reverie-service-token': 'fixture-service-token' }]) {
+      const result = await app.inject({ method: 'GET', url: '/api/board/capabilities', headers });
+      expect(result.statusCode).toBe(403);
+      expect(result.json().data).toBeUndefined();
+    }
+  });
+
   it('refuses unknown, partial and service callers on the identity-only route', async () => {
     for (const headers of [as(BUILDER.slice(0, 8)), as('00000043-0053-4000-8000-00000000007b'),
       { ...as(BUILDER), 'x-reverie-service-token': 'fixture-service-token' }]) {

@@ -1,21 +1,15 @@
 import { describe, expect, it, vi } from 'vitest';
-import { ChatroomDelivery, type DeliverySession } from '../src/chatroom-delivery.js';
+import { ChatroomDelivery, WAKE_LINE, type DeliverySession } from '../src/chatroom-delivery.js';
 
-function deferred<T>() {
-  let resolve!: (value: T) => void;
-  const promise = new Promise<T>((r) => {
-    resolve = r;
-  });
-  return { resolve, promise };
-}
-function fixture() {
-  const fetching = deferred<string>();
+// Image paths are no longer prepared for, or typed into, a pane: an agent fetches them itself through the image-paths route
+// (chatroom-image-paths.test.ts). Delivery only wakes the member.
+function fixture(mode = 'codex') {
   const writes: string[] = [];
   const gates: boolean[] = [];
   const session: DeliverySession = {
     id: 's',
     name: 'Agent',
-    mode: 'codex',
+    mode,
     pid: 42,
     isWorking: false,
     writeViaMux: async (text, opts) => {
@@ -26,58 +20,34 @@ function fixture() {
     },
   };
   const submitted = vi.fn();
-  const prepare = vi.fn(() => fetching.promise);
-  const delivery = new ChatroomDelivery({ getSession: () => session, prepareMessage: prepare, onSubmitted: submitted });
-  delivery.enqueue('s', { id: 'r', name: 'room' }, 'USER: image unavailable', { messageId: 'm', localImages: true });
-  return { fetching, writes, session, submitted, prepare, delivery, gates };
+  const delivery = new ChatroomDelivery({ getSession: () => session, onSubmitted: submitted });
+  delivery.enqueue('s', { id: 'r', name: 'room' }, 'USER: [attached image: "photo.png"]', { messageId: 'm', localImages: true });
+  return { writes, session, submitted, delivery, gates };
 }
 
-describe('fresh image paths at queue flush', () => {
-  it('does not fetch at enqueue and submits only the freshly prepared view', async () => {
+describe('image messages under hook-only delivery', () => {
+  it('types only the constant wake, behind the idle gate, and never an image path', async () => {
     const f = fixture();
-    expect(f.prepare).not.toHaveBeenCalled();
-    const flushing = f.delivery.flush('s');
-    expect(f.prepare).toHaveBeenCalledWith('s', 'r', 'm');
-    expect(f.writes).toEqual([]);
-    f.fetching.resolve('USER: [attached: "/tmp/.reverie-chat-images/fresh.png"]');
-    expect(await flushing).toBe(true);
-    expect(f.writes[0]).toContain('fresh.png');
-    expect(f.gates).toEqual([true]);
-    expect(f.submitted).toHaveBeenCalledOnce();
-    f.delivery.stop();
-  });
-  it('keeps unsupported automatic composer proofs out of image I/O; ordinary CLI reads remain available', async () => {
-    const f = fixture();
-    Object.assign(f.session, { mode: 'opencode' });
     expect(await f.delivery.flush('s')).toBe(true);
-    expect(f.prepare).not.toHaveBeenCalled();
-    expect(f.writes[0]).toContain('image unavailable');
+    expect(f.writes).toEqual([`${WAKE_LINE}\r`]);
+    expect(f.writes[0]).not.toContain('photo.png');
+    expect(f.gates).toEqual([true]);
+    expect(f.submitted).toHaveBeenCalledWith('s', [{ roomId: 'r', messageId: 'm' }]);
     f.delivery.stop();
   });
-  it.each(['read', 'delete', 'leave', 'forget'] as const)(
-    'a %s during image I/O withdraws the pending identity without a pane attempt',
-    async (kind) => {
-      const f = fixture();
-      const flushing = f.delivery.flush('s');
-      if (kind === 'read') f.delivery.acknowledgeRead('s', 'r', ['m']);
-      if (kind === 'delete') f.delivery.dropMessage('r', 'm');
-      if (kind === 'leave') f.delivery.dropRoom('r', 's');
-      if (kind === 'forget') f.delivery.forget('s');
-      f.fetching.resolve('fresh');
-      expect(await flushing).toBe(false);
-      expect(f.writes).toEqual([]);
-      expect(f.delivery.inspectionFor('s')).toEqual([]);
-      f.delivery.stop();
-    }
-  );
-  it('a turn beginning during image I/O keeps the original queued view for a fresh later attempt', async () => {
-    const f = fixture();
-    const flushing = f.delivery.flush('s');
-    Object.assign(f.session, { isWorking: true });
-    f.fetching.resolve('a path that must not be saved');
-    expect(await flushing).toBe(false);
+  it('a CLI without a verified composer glyph gets nothing typed, and its queue is dropped', async () => {
+    const f = fixture('opencode');
+    expect(await f.delivery.flush('s')).toBe(false);
     expect(f.writes).toEqual([]);
-    expect(f.delivery.pendingFor('s')).toBe(1);
+    expect(f.delivery.pendingFor('s')).toBe(0);
+    f.delivery.stop();
+  });
+  it.each(['read', 'delete'] as const)('a %s before the flush withdraws the identity without a pane attempt', async (kind) => {
+    const f = fixture();
+    if (kind === 'read') f.delivery.acknowledgeRead('s', 'r', ['m']);
+    if (kind === 'delete') f.delivery.dropMessage('r', 'm');
+    expect(await f.delivery.flush('s')).toBe(false);
+    expect(f.writes).toEqual([]);
     expect(f.delivery.inspectionFor('s')).toEqual([]);
     f.delivery.stop();
   });

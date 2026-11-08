@@ -10,6 +10,7 @@ import { join } from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import { createRouteTestHarness } from './_route-test-utils.js';
 import { createMockSession, type MockRouteContext } from '../mocks/index.js';
+import { WAKE_LINE } from '../../src/chatroom-delivery.js';
 import { ChatroomService } from '../../src/chatroom-service.js';
 import { ChatFileStore, safeFileName } from '../../src/chatroom-files.js';
 import { registerChatroomRoutes } from '../../src/web/routes/chatroom-routes.js';
@@ -132,7 +133,7 @@ describe('chatroom media', () => {
     expect(empty.statusCode).toBe(400);
   });
 
-  it("hands an agent the attachment's absolute path on its one delivered line", async () => {
+  it("hands an agent the attachment's absolute path through its hook, never typed into its pane", async () => {
     await service.delivery.flushAll();
     const pane = (ctx.sessions.get(A) as unknown as { writeBuffer: string[] }).writeBuffer;
     pane.length = 0;
@@ -145,9 +146,9 @@ describe('chatroom media', () => {
     });
     const path = post.json().data.message.attachments[0].path;
     await service.delivery.flushAll();
-    const line = pane.join('');
-    expect(line).toContain(`USER: "@alpha look at this" [attached: ${JSON.stringify(path)}]`);
-    expect(line.slice(0, -1)).not.toMatch(/[\r\n]/);
+    expect(pane.every((typed) => typed === `${WAKE_LINE}\r`)).toBe(true);
+    const entry = service.turnSummary(A).messages.find((m) => m.excerpt === '@alpha look at this');
+    expect(entry?.attachments).toEqual([`[attached: ${JSON.stringify(path)}]`]);
   });
 
   it('toggles reactions per person, counts them, and broadcasts each change', async () => {

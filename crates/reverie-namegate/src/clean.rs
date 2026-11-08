@@ -1,6 +1,7 @@
 //! Normalisation and removal of exempt spans, in the reference order: NFKC, drop Cf, exempt
-//! genuine PEM/DER bodies, blank allowlisted strings, drop long hex runs, then strip
-//! base64-like blobs (which are returned so the caller re-scans them).
+//! genuine PEM/DER bodies, blank allowlisted strings, drop long hex runs, blank the hex digits of
+//! code escapes and short hex words, then strip base64-like blobs (which are returned so the
+//! caller re-scans them).
 
 use crate::classes::{is_format, is_space, is_word};
 use unicode_normalization::UnicodeNormalization;
@@ -23,6 +24,7 @@ pub(crate) fn clean(text: &str, allow: &[String]) -> (String, Vec<(usize, String
         cleaned = cleaned.replace(entry.as_str(), " ");
     }
     let cleaned = drop_hex(&cleaned);
+    let cleaned = blank_code_hex(&cleaned);
     strip_blobs(&cleaned)
 }
 
@@ -149,6 +151,76 @@ fn drop_hex(text: &str) -> String {
         }
     }
     out
+}
+
+/// Not part of the reference gate: hex digits that only look like letters. The digits of a `\u`
+/// escape with exactly 4 hex digits, `\U` with 8 and `\x` with 2 become spaces, as does a letter
+/// run with a decimal digit on both sides inside a hex word of 8 to 15 characters (bounded like
+/// `drop_hex`) that holds a decimal digit. Hex digits are `0-9`, `a-f` and `A-F` in both rules.
+/// Each is replaced one for one, so nothing else moves, and such digits never join a neighbouring
+/// letter or form a token of their own. The only names this can hide are names spelled entirely
+/// with the letters a to f, and only in those positions.
+fn blank_code_hex(text: &str) -> String {
+    let mut chars: Vec<char> = text.chars().collect();
+    blank_escape_digits(&mut chars);
+    blank_short_hex_words(&mut chars);
+    chars.into_iter().collect()
+}
+
+fn blank_escape_digits(chars: &mut [char]) {
+    let mut i = 0;
+    while i + 1 < chars.len() {
+        let width = match (chars[i], chars[i + 1]) {
+            ('\\', 'u') => 4,
+            ('\\', 'U') => 8,
+            ('\\', 'x') => 2,
+            _ => 0,
+        };
+        let digits = i + 2..i + 2 + width;
+        if width > 0
+            && digits.end <= chars.len()
+            && chars[digits.clone()].iter().all(char::is_ascii_hexdigit)
+        {
+            chars[digits.clone()].fill(' ');
+            i = digits.end;
+        } else {
+            i += 1;
+        }
+    }
+}
+
+fn blank_short_hex_words(chars: &mut [char]) {
+    let mut i = 0;
+    while i < chars.len() {
+        let end = run_end(chars, i, |ch| ch.is_ascii_hexdigit());
+        if end == i {
+            i += 1;
+            continue;
+        }
+        let bounded =
+            (i == 0 || !is_word(chars[i - 1])) && chars.get(end).is_none_or(|&ch| !is_word(ch));
+        if bounded && (8..16).contains(&(end - i)) && chars[i..end].iter().any(char::is_ascii_digit)
+        {
+            blank_interior_letters(&mut chars[i..end]);
+        }
+        i = end;
+    }
+}
+
+/// Blanks every letter run of a hex word that has a decimal digit on both sides.
+fn blank_interior_letters(word: &mut [char]) {
+    let mut j = 0;
+    while j < word.len() {
+        let run = run_end(word, j, |ch| ch.is_ascii_alphabetic());
+        if run == j {
+            j += 1;
+            continue;
+        }
+        if j > 0 && run < word.len() {
+            word[j..run].fill(' ');
+        }
+        j = run;
+    }
 }
 
 /// Python `[A-Za-z0-9+/]{32,}={0,2}`: runs of 32 or more with up to two `=`. Runs containing a

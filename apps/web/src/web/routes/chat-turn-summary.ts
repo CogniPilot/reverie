@@ -64,7 +64,7 @@ export function registerChatTurnSummary(app: FastifyInstance, ctx: SessionPort, 
     if (Object.keys(req.query as object).length)
       return reply.code(400).send({ success: false, error: 'Summary takes no target or query parameters' });
     reply.header('Cache-Control', 'no-store');
-    return { success: true, data: service.turnSummary(self) };
+    return { success: true, data: service.hookTurnSummary(self) };
   });
 
   app.get('/api/chatrooms/digest', async (req, reply) => {
