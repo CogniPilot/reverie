@@ -12,9 +12,12 @@ mod goal_custody;
 mod gpu_access;
 pub use goal_custody::{GoalCustodyHandlerClosed, GoalCustodyHandlerFailure};
 mod image_refresh;
+mod installed_controller;
+pub use installed_controller::ControllerInstallFailure;
 mod installation_offer;
 pub use installation_offer::{
     BrokerInstallationOffer, BrokerInstallationOfferCause, BrokerInstallationOfferFailure,
+    OsPoolInstallationFailure,
 };
 mod launch;
 mod lifecycle;
@@ -192,6 +195,7 @@ pub struct InstallingBroker {
     recovery: Arc<RecoveryOwners>,
     goals: Arc<reverie_host::goal_custody::GoalCustodyState>,
     images: Arc<chat_images::ChatImages>,
+    controller: Mutex<Option<reverie_host::worker_pool::ActivatedController>>,
 }
 impl InstallingBroker {
     /// Trusted installing bootstrap; no wire-selected native engine or path.

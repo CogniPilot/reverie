@@ -214,6 +214,17 @@ impl NetworkStoragePreparation {
             .apply_started_laptop_memory_for_connection(observed, connection, digest)
             .map_err(NetworkStorageError::Host)
     }
+    pub(in crate::installing_broker) fn accept_controller_memory(
+        &self,
+        observed: &StartedMemoryPolicy,
+        configured: reverie_host::worker_laptop::ControllerMemberConfigured,
+        connection: &WorkerLaunchConnection,
+        digest: &WorkerPolicyDigest,
+    ) -> Result<WorkerMemoryEffect> {
+        self.cold_runtime()?
+            .accept_controller_memory_for_connection(observed, configured, connection, digest)
+            .map_err(NetworkStorageError::Host)
+    }
     pub(in crate::installing_broker) fn finish_memory(
         &self,
         observed: &StartedMemoryReadback,

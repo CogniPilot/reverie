@@ -231,6 +231,7 @@ impl InstallingBroker {
             recovery: Arc::new(RecoveryOwners::new()),
             goals: Arc::new(reverie_host::goal_custody::GoalCustodyState::new()),
             images: owner.images.expect("actual pre-telemetry image manager"),
+            controller: Mutex::new(None),
         })
     }
 }

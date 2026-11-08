@@ -9,6 +9,8 @@ use reverie_core::operations::JournalId;
 use reverie_host::worker_pool::PublishedControllerBirthData;
 use std::time::{Duration, Instant};
 mod error;
+mod os_source;
+pub use os_source::OsPoolInstallationFailure;
 mod shared;
 pub(in crate::installing_broker) use shared::{RegistrationOfferGuard, SharedInstallationOffer};
 #[cfg(test)]

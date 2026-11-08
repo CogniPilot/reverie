@@ -56,19 +56,17 @@ impl WorkerReportService {
         )
     }
     pub fn collect_worker_handlers(&self) -> Result<WorkerHandlersProgress> {
-        let records = self
-            .records
-            .try_lock()
-            .map_err(|_| WorkerReportError::Unconfirmed)?
-            .clone();
+        let records = match self.try_collect_records()? {
+            Some(records) => records.clone(),
+            None => return Ok(WorkerHandlersProgress::Pending),
+        };
         let mut pending = false;
         for record in &records {
             pending |= !record.collect_handler()?;
         }
-        let mut retained = self
-            .records
-            .try_lock()
-            .map_err(|_| WorkerReportError::Unconfirmed)?;
+        let Some(mut retained) = self.try_collect_records()? else {
+            return Ok(WorkerHandlersProgress::Pending);
+        };
         retained.retain(|record| !record.settled());
         if self.opaque.load(Ordering::Acquire) {
             return Err(WorkerReportError::Unconfirmed);
@@ -78,6 +76,16 @@ impl WorkerReportService {
         } else {
             WorkerHandlersProgress::Settled
         })
+    }
+    fn try_collect_records(&self) -> Result<Option<std::sync::MutexGuard<'_, Vec<Arc<Record>>>>> {
+        match self.records.try_lock() {
+            Ok(records) => Ok(Some(records)),
+            Err(std::sync::TryLockError::WouldBlock) => Ok(None),
+            Err(std::sync::TryLockError::Poisoned(_)) => {
+                self.opaque.store(true, Ordering::Release);
+                Err(WorkerReportError::Unconfirmed)
+            }
+        }
     }
     pub(super) fn finish_registered(&self, record: &Arc<Record>) -> Result<()> {
         self.finish_accepted(record)
