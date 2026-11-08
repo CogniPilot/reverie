@@ -1,0 +1,188 @@
+//! Fixed native handler and closed same-stack recovery consumer. No callback
+//! selects a body, and neither a status answer nor join releases a resource.
+use super::*;
+use crate::installing_broker::launch::service::{HandlerReturned, run_service_launch};
+use reverie_host::worker_reports::{
+    AcceptedWorkerServiceConnection, RegisteredWorkerConnection, WorkerHandlerCommand,
+    WorkerHandlerDisposition, WorkerHandlerInbox, WorkerServiceConnection, WorkerServicePurpose,
+};
+
+enum Retained<'a> {
+    Launch(HandlerReturned<'a>),
+    Images(Box<ChatImageHandlerFailure>),
+    Goal(Box<GoalCustodyHandlerFailure>),
+    Socket(WorkerServiceConnection),
+}
+struct Stack<'a> {
+    broker: &'a Arc<InstallingBroker>,
+    owner: Option<Retained<'a>>,
+}
+impl Stack<'_> {
+    fn reconcile(&mut self) -> WorkerHandlerDisposition {
+        self.owner = match self.owner.take() {
+            Some(Retained::Launch(mut owner)) => {
+                if owner.reconcile() == WorkerHandlerDisposition::Finalized {
+                    None
+                } else {
+                    Some(Retained::Launch(owner))
+                }
+            }
+            Some(Retained::Socket(connection)) => {
+                if connection.close_socket_for_worker().is_ok() {
+                    None
+                } else {
+                    Some(Retained::Socket(connection))
+                }
+            }
+            // These concrete domain failures retain their own original native
+            // producers. No replay of observe/fetch/install is permitted here.
+            other => other,
+        };
+        if self.owner.is_some() {
+            WorkerHandlerDisposition::Retained
+        } else {
+            WorkerHandlerDisposition::Finalized
+        }
+    }
+    fn cause(&self) -> Option<String> {
+        match &self.owner {
+            Some(Retained::Launch(owner)) => owner.diagnostics.last().cloned(),
+            Some(Retained::Images(owner)) => Some(owner.to_string()),
+            Some(Retained::Goal(owner)) => Some(owner.to_string()),
+            Some(Retained::Socket(connection)) => {
+                Some(format!("{:?}: socket close retained", connection.purpose()))
+            }
+            None => None,
+        }
+    }
+}
+impl Drop for Stack<'_> {
+    fn drop(&mut self) {
+        if let Some(owner) = self.owner.take() {
+            // Unexpected unwind is negative quarantine, not a cleanup result.
+            // Retain the actual broker backing every borrowed resource owner.
+            // The normal path remains responsive to exact same-Job commands.
+            std::mem::forget((Arc::clone(self.broker), owner));
+        }
+    }
+}
+pub(super) fn run(
+    broker: Arc<InstallingBroker>,
+    mut registered: RegisteredWorkerConnection,
+    inbox: WorkerHandlerInbox,
+) {
+    if let Err(error) = registered.await_handler_publication() {
+        eprintln!("{error}");
+        if let Err(cleanup) = registered.close_for_worker() {
+            eprintln!("{cleanup}");
+        }
+        return;
+    }
+    let accepted = read(&broker, registered);
+    let owner = match accepted {
+        Ok(AcceptedWorkerServiceConnection::ReportCompleted) => None,
+        Ok(AcceptedWorkerServiceConnection::Launch(connection)) => {
+            let returned = run_service_launch(&broker, connection);
+            for diagnostic in &returned.diagnostics {
+                eprintln!("{diagnostic}");
+            }
+            returned
+                .retained
+                .is_some()
+                .then_some(Retained::Launch(returned))
+        }
+        Ok(AcceptedWorkerServiceConnection::Service(connection)) => service(&broker, connection),
+        Err(error) => {
+            eprintln!("{error}");
+            None
+        }
+    };
+    let mut stack = Stack {
+        broker: &broker,
+        owner,
+    };
+    if let Some(cause) = stack.cause() {
+        eprintln!("Worker handler retained: {cause}");
+    }
+    while stack.owner.is_some() {
+        match inbox.receive() {
+            Ok(request) => {
+                let disposition = match request.command() {
+                    WorkerHandlerCommand::Status => WorkerHandlerDisposition::Retained,
+                    WorkerHandlerCommand::Reconcile => stack.reconcile(),
+                };
+                request.answer(disposition);
+            }
+            Err(error) => {
+                // Broken publication/ownership cannot abandon the stack or
+                // turn into successful thread completion.
+                eprintln!("{error}");
+                broker.request_stop();
+                return;
+            }
+        }
+    }
+}
+fn read(
+    broker: &InstallingBroker,
+    registered: RegisteredWorkerConnection,
+) -> Result<AcceptedWorkerServiceConnection, WorkerDispatchError> {
+    if !registered.same_runtime(&broker.storage.runtime) {
+        let cleanup = registered.close_for_worker().err();
+        return Err(WorkerDispatchError::Configuration {
+            primary: GateError::Refused("WORKER_HANDLER_RUNTIME_CHANGED"),
+            cleanup,
+        });
+    }
+    let snapshot = match broker.configuration() {
+        Ok(snapshot) => snapshot,
+        Err(primary) => {
+            let cleanup = registered.close_for_worker().err();
+            return Err(WorkerDispatchError::Configuration { primary, cleanup });
+        }
+    };
+    Ok(registered
+        .receive_service_for_worker(broker.command_telemetry(), snapshot.configuration())?)
+}
+fn service<'a>(
+    broker: &'a InstallingBroker,
+    connection: WorkerServiceConnection,
+) -> Option<Retained<'a>> {
+    match connection.purpose() {
+        WorkerServicePurpose::ChatImages => match broker.handle_chat_images(connection) {
+            Ok(closed) => {
+                if let Some(error) = closed.primary_error() {
+                    eprintln!("{error}");
+                }
+                None
+            }
+            Err(owner) => Some(Retained::Images(owner)),
+        },
+        WorkerServicePurpose::GoalCustody => match broker.handle_goal_custody(connection) {
+            Ok(closed) => {
+                if let Some(error) = closed.primary_error_code() {
+                    eprintln!("{error}");
+                }
+                None
+            }
+            Err(owner) => Some(Retained::Goal(owner)),
+        },
+        // Actual Q/L/C/Y consumers are separate mandatory joins, not a public
+        // request/UID substitute. This unselected running cut advertises NO
+        // all-verb readiness. Preserve failure and checked socket uncertainty.
+        _ => {
+            if let Err(error) =
+                connection.report_failure("WORKER_NATIVE_MANDATORY_CONSUMER_REQUIRED")
+            {
+                eprintln!("{error}");
+            }
+            match connection.close_socket_for_worker() {
+                Ok(_) => None,
+                Err(error) => {
+                    eprintln!("{error}");
+                    Some(Retained::Socket(connection))
+                }
+            }
+        }
+    }
+}

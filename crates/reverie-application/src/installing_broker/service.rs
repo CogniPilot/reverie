@@ -7,8 +7,10 @@ use reverie_host::{
     worker_runtime::{BrokerSignalFailure, BrokerSignals},
 };
 use std::{fmt, time::Instant};
+mod running;
 #[cfg(test)]
 mod tests;
+pub use running::{BrokerService, BrokerServiceClosed, BrokerServiceError, BrokerServiceFailure};
 struct StartupOwner {
     broker: Arc<InstallingBroker>,
     signals: Option<BrokerSignals>,

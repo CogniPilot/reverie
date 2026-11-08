@@ -1315,6 +1315,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "reverie-worker-broker"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "nix",
+ "reverie-application",
+ "reverie-contracts",
+ "reverie-host",
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
 name = "reverie-worker-child"
 version = "0.1.0"
 dependencies = [

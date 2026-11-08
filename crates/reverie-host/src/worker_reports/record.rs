@@ -368,7 +368,7 @@ impl Record {
             super::retention::LifecycleHoldState::Held(_)
         ))
     }
-    fn handler_job(&self) -> Result<Option<std::sync::Arc<super::handler::HandlerJob>>> {
+    pub(super) fn handler_job(&self) -> Result<Option<std::sync::Arc<super::handler::HandlerJob>>> {
         match self.handler.try_lock() {
             Ok(job) => Ok(job.clone()),
             Err(std::sync::TryLockError::WouldBlock) => {

@@ -16,6 +16,7 @@ mod attempt;
 use attempt::Attempt;
 mod error;
 mod lifetime;
+mod service;
 #[cfg(test)]
 pub(in crate::installing_broker) mod tests;
 pub use error::RecoveryError;

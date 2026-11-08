@@ -4,6 +4,9 @@
 # measurements in workerResumeProgram's normal build.
 { pkgs, src, console, ownerTerminalProgram ? null }:
 rec {
+  # Explicit integration output only; the shipped hybrid workerBroker below is
+  # unchanged until mandatory native service/maintenance consumers qualify.
+  nativeWorkerBroker = import ./native-worker-broker.nix { inherit pkgs src; };
   workerDockerSeccomp = import ./worker-docker-profile.nix { inherit pkgs src; };
   workerTaskPerfPolicy = import ./worker-perf-profile.nix {
     inherit pkgs src;
