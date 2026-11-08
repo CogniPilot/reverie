@@ -7,6 +7,23 @@ pub struct ProgramSelection {
     pub argv: Vec<PythonText>,
 }
 impl ProgramSelection {
+    /// Expected raw process argv hash DATA. Native executable/incarnation,
+    /// installed program custody and actual peer remain separate checks.
+    pub fn argv_digest(&self) -> Result<JournalDigest> {
+        use sha2::{Digest, Sha256};
+        arguments(&self.argv)?;
+        let mut hash = Sha256::new();
+        let mut buffer = [0; 4];
+        for argument in &self.argv {
+            for &point in argument.codepoints() {
+                let scalar =
+                    char::from_u32(point).ok_or(ResourceActorDataError("PROGRAM_ARGV_ENCODING"))?;
+                hash.update(scalar.encode_utf8(&mut buffer).as_bytes());
+            }
+            hash.update([0]);
+        }
+        Ok(JournalDigest::parse(&format!("{:x}", hash.finalize())).expect("SHA256"))
+    }
     fn decode(value: &Value) -> Result<Self> {
         closed(value, &["executable", "argv"])?;
         let executable = text(field(value, "executable")?)?;
@@ -14,16 +31,48 @@ impl ProgramSelection {
             .iter()
             .map(text)
             .collect::<Result<Vec<_>>>()?;
-        need(
-            (1..=32).contains(&argv.len())
-                && argv.iter().all(|value| {
-                    !value.codepoints().is_empty()
-                        && value.codepoints().len() <= 4096
-                        && !value.codepoints().contains(&0)
-                }),
-            "FIXED_WEBSITE_PROGRAM",
-        )?;
+        arguments(&argv)?;
         Ok(Self { executable, argv })
+    }
+}
+fn arguments(argv: &[PythonText]) -> Result<()> {
+    need(
+        (1..=32).contains(&argv.len())
+            && argv.iter().all(|value| {
+                !value.codepoints().is_empty()
+                    && value.codepoints().len() <= 4096
+                    && !value.codepoints().contains(&0)
+            }),
+        "FIXED_WEBSITE_PROGRAM",
+    )
+}
+#[cfg(test)]
+mod argv_tests {
+    use super::*;
+    #[test]
+    fn selected_raw_argv_hash_matches_python_boundaries_utf8_and_encoding_refusals() {
+        let corpus = legacy_json::decode_strict_bytes(include_bytes!(
+            "../../tests/fixtures/resource_actor/program-argv-python.json"
+        ))
+        .unwrap();
+        let cases = array(field(&corpus, "cases").unwrap()).unwrap();
+        assert_eq!(cases.len(), 8);
+        for case in cases {
+            let argv = array(field(case, "argv").unwrap())
+                .unwrap()
+                .iter()
+                .map(|value| text(value).unwrap())
+                .collect();
+            let program = ProgramSelection {
+                executable: PythonText::from_scalar_text("/nix/store/data/bin/program"),
+                argv,
+            };
+            let expected = field(case, "sha256").unwrap();
+            match &expected.0 {
+                Node::Null => assert!(program.argv_digest().is_err()),
+                _ => assert_eq!(program.argv_digest().unwrap(), digest(expected).unwrap()),
+            }
+        }
     }
 }
 #[derive(Clone, Eq, PartialEq)]
