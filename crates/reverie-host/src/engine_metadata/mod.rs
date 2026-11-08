@@ -5,10 +5,12 @@ mod bootstrap;
 mod control;
 #[cfg(test)]
 mod installed_context_tests;
+mod owner;
 #[cfg(test)]
 pub(crate) mod tests;
 pub use bootstrap::EngineBootstrap;
 pub use control::{CancellationToken, ReadonlyEngine};
+pub use owner::MetadataQueryOwner;
 use reverie_core::ids::ContainerId;
 use std::{ffi::OsString, fmt};
 

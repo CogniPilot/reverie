@@ -115,7 +115,21 @@ source and component tests do not establish an installed native broker.
 | Nix guard finalization | `release_laptop_nix_guard` consumes the real original guard after acknowledged pane startup, retains the same storage before fallible close, and preserves created-CID cleanup after confirmed or uncertain close | Installing protected CLI receipt before close, actual admission/canonical release afterward, and a viewer consumer that rechecks the current retained record |
 | Native viewer session | Created and existing origins share one bounded inventory and captured-client constructor slot; classified reuse retains its original J/Hold, receipt and same storage box through relay and actual finalization. Fresh receipt/stop-before-reap, exact recovered Office ownership, fresh stop admission and branded final storage transfer retain uncertainty | Cold/Started reuse, direct-prefix cleanup, complete service adoption, confirmed guest resize and live OCI acceptance |
 | Employee resource policy | Existing effective-config, GPU/perf/memory projection, reservation gate and native observer owners; `configure_started_laptop_memory` applies and reads back memory policy on the same actual started record | Installing caller sequence and owner GUI/API selection for remaining settings |
+| Protected RAM owner channel | `InstallingBroker::prepare_resource_website` and `InstalledResourceWebsite::receive_operation`; native website/process/code/private-facts qualification and repeated nonce-bound current-owner checks. Exact-context query settlement and intrinsic checked-close errors preserve the original accepted channel hold | Real positive website/current-owner canary, service dispatch and closed operation continuations/results; the source constructor alone enables no endpoint |
+| RAM configuration publication | `RetainedPreparation::commit_ram_configuration` returns the same-claim, one-shot `CommittedPolicy`; consuming `AuthenticatedResourceOperation::adopt_committed_ram_policy` retains the complete Q/claim/policy/receipt owner on success or failure | Actual positive adoption, genuine terminal ownership, distinct stopped/configuration-only preparation and parent-once admission |
+| Docker worker parent | `ControllerPoolPolicy` and `OpenedWorkerPool` retain the actual policy/controller/engine/kernel owners. Isolated tests exercise two idle 48 GiB leaves beneath one 48 GiB parent, physical limits and website exclusion | Controller service/activation, persistent provider fence, outside-worker settlement, host headroom, verified new members and pressure/recovery canary |
+| RAM owner client | `ResourceOwnerAuthority::captureRam`/`captureRamPreview` and `RamResourceNativeClient` reuse current owner sessions and private transport with a distinct RAM-v2 purpose, nine-field approval and bounded draft/claim messages | Product routes, scoped agent grants, typed results/progress and GUI controls after native service integration; importing the client activates no rollout |
 | Memory tools | Native memory/MCP entry points, persistence, journal transport, staged startup/read owners and an unselected fixed-purpose guest capsule; existing-data and reverse-language compatibility controls | Actual prior-writer shutdown, real launch/image/context/grant join and coordinated package selection |
+
+The Docker parent and the existing reservation pool have different contracts.
+The former uses `memory.high=max` with an enforced aggregate hard ceiling; the
+existing reservation proof requires a finite parent high and charges requested
+hard memory. Preserve that older contract. A distinct pool operation must count
+the verified parent once and retain a persistent provider fence before allowing
+borrowing leaves. An empty new parent does not prove that old outside workers
+have settled. Retain their real process, cgroup, Office and storage owners through
+physical settlement. OFF/vacation outcomes remain configuration-only and require
+genuine stopped/absent preparation rather than an invented running baseline.
 
 Recovery entries contain actual Office and storage resources. Recovered names
 are membership data; they do not establish a canonical container/process identity

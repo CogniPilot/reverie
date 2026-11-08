@@ -180,6 +180,18 @@
             console = packages.console;
             clientManifest = packages.workerResourceClientManifest;
           };
+          resourceNativeQFixtureConsole = (import ./nix/resource-native-q-fixture.nix {
+            inherit pkgs; src = source; console = packages.console; client = packages.workerNativeClient;
+          }).console;
+          resourceNativeQFixtureImage = (import ./nix/resource-native-q-fixture.nix {
+            inherit pkgs; src = source; console = packages.console; client = packages.workerNativeClient;
+          }).image;
+          resourceNativeQFixtureProvenance = import ./nix/website-image-provenance.nix {
+            inherit pkgs; src = source;
+            image = self.packages.${system}.resourceNativeQFixtureImage;
+            console = self.packages.${system}.resourceNativeQFixtureConsole;
+            clientManifest = packages.workerResourceClientManifest;
+          };
           resourceTerminalHost = import ./nix/owner-terminal-host.nix {
             inherit pkgs; src = source;
             inherit (packages) console memory memoryPackage entrypoint;

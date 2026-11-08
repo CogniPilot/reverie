@@ -15,10 +15,15 @@ mod image_refresh;
 mod launch;
 mod lifecycle;
 mod recovered;
+pub mod resource_actor;
 mod service;
 pub use service::{BrokerServiceStartup, BrokerStartupCause, BrokerStartupFailure};
 pub(crate) mod source;
 mod stop_admission;
+mod stopped_ram;
+pub use stopped_ram::{
+    EnteredStoppedRamSource, StoppedRamAborted, StoppedRamPreparationFailure, StoppedRamReport,
+};
 mod storage;
 pub(crate) use stop_admission::WorkerStopAdmission;
 mod telemetry;

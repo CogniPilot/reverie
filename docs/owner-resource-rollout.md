@@ -45,6 +45,13 @@ Perf availability requires the image tool, selected task policy, host support
 and a real successful profiling check. Docker's memory reservation is not
 verification of `memory.high`.
 
+For the shared parent, a required `memoryHighMiB: null` means a known unbounded
+soft threshold (`memory.high=max`); the finite `memoryMaxMiB` still applies.
+An entire `pool.observed: null` means the pool has not been verified. Missing
+threshold fields do not mean unbounded. Employee requested soft thresholds
+remain finite and below their hard ceilings. Legacy finite parent thresholds
+retain their existing representation and editor.
+
 ## Host executor acceptance still required
 
 The rollout target is the repository-packaged Rust controller running in Docker,
@@ -83,3 +90,27 @@ swap settings. A publication receipt proves the actual configuration commit;
 it is not permission to launch or evidence of applied kernel limits. Created,
 started, ready and settled are separate native outcomes. Lost replies or
 unconfirmed effects retain the original operation and forbid automatic replay.
+
+## Native integration work
+
+The [native integration map](rust-overhaul.md#native-integration-map) names the
+existing Rust owners and the RAM-v2 client. Reuse those components. The client
+does not activate these fleet routes, and its per-employee approval cannot
+implicitly authorize a fleet-wide stop. The fleet preview must bind the complete
+selected cohort and preserve every employee's desired-running disposition.
+
+The new Docker parent needs separate admission accounting. Existing reservation
+operations charge hard memory and require a finite parent soft threshold; they
+cannot establish parent-once accounting for this borrowing pool. Preserve their
+records and contracts. The new transition must own a durable provider fence on
+the existing pending-control boundary, including across storage waits, Nix work
+and broker restarts. Reconciliation must reobserve the original native owners
+before acknowledging settlement; an empty census or dropped local handle is
+insufficient.
+
+Only after old outside workers have physically settled may the executor admit a
+borrowing leaf. Its actual created record must retain verified parent membership,
+incarnation and kernel limits before normal pane startup. Keep stopped/absent
+preparation separate from running-source preparation. A configured policy,
+successful isolated test or closed socket cannot substitute for any of those
+ownership joins or the final pressure/recovery acceptance.

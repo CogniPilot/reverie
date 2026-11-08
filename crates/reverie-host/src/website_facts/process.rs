@@ -62,6 +62,9 @@ pub struct WebsiteProcessObserver {
     close_uncertain: bool,
 }
 impl WebsiteProcessObserver {
+    pub fn assert_finalized(&self) -> Result<()> {
+        need(!self.close_uncertain, "WEBSITE_PROCESS_CLOSE_UNCONFIRMED")
+    }
     /// Only a PID declared by previously compared metadata DATA. The factory
     /// must independently bracket its actual engine/init incarnation.
     pub fn observe_init(

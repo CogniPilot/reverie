@@ -1,13 +1,16 @@
 //! Docker-controller cgroup ownership. Public policy/anchor values are data;
 //! the installed witness retains the actual opened kernel directory. This is
 //! not a Gate, storage lease, stop receipt or global shutdown acknowledgement.
+mod controller_limits;
 mod directory;
 mod engine;
+mod member;
 mod namespace;
 mod policy;
 #[cfg(test)]
 mod tests;
 use directory::PoolDirectory;
+pub use member::{OpenedPoolMember, PoolMemberFailure, PoolMemberLimits};
 pub use policy::{ControllerPoolPolicy, ControllerPoolPolicyFailure};
 use reverie_contracts::worker_pool::WorkerPoolPolicy;
 use std::{fmt, io};

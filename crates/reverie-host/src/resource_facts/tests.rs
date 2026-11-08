@@ -94,6 +94,43 @@ fn actual_private_facts_are_existing_only_and_policy_changes_preserve_the_instal
     );
 }
 #[test]
+fn actual_metadata_only_final_bracket_refuses_pending_replacement_and_process_gid_mismatch() {
+    let tree = Tree::new();
+    let mut observer = InstalledFactsObserver::default();
+    assert!(observer.assert_metadata(&tree.config, end()).is_err());
+    observer.observe(&tree.config, end()).unwrap();
+    observer.assert_metadata(&tree.config, end()).unwrap();
+    let pending = tree.path.join("resource-actor.installing.json");
+    fs::write(&pending, b"{}").unwrap();
+    assert_eq!(
+        observer
+            .assert_metadata(&tree.config, end())
+            .unwrap_err()
+            .code(),
+        "RESOURCE_INSTALL_PENDING_REQUIRES_INSPECTION"
+    );
+    fs::remove_file(pending).unwrap();
+    let old = tree.path.join("old-facts.json");
+    fs::rename(tree.file(), old).unwrap();
+    tree.write();
+    assert!(observer.assert_metadata(&tree.config, end()).is_err());
+    let mut changed: Value = serde_json::from_slice(
+        &reverie_contracts::worker_config::encode_config(&tree.config),
+    )
+    .unwrap();
+    changed["gid"] = json!(u64::from(nix::unistd::getgid().as_raw()) + 1);
+    let changed =
+        reverie_contracts::worker_config::decode(&serde_json::to_vec(&changed).unwrap()).unwrap();
+    assert_eq!(
+        InstalledFactsObserver::default()
+            .observe(&changed, end())
+            .err()
+            .unwrap()
+            .code(),
+        "ORDINARY_OWNER_WEBSITE_REQUIRED"
+    );
+}
+#[test]
 fn actual_installing_marker_symlink_hardlink_and_nonexact_mode_refuse() {
     let tree = Tree::new();
     let pending = tree.path.join("resource-actor.installing.json");

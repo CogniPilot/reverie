@@ -78,6 +78,31 @@ fn channel_keeps_actual_record_and_kernel_peer_across_fragmented_frames() {
     service.close(end()).unwrap();
 }
 #[test]
+fn checked_disconnect_closes_only_socket_and_keeps_original_lifecycle_hold_counted() {
+    let fixture = Fixture::new();
+    let service = Arc::new(fixture.service());
+    let (mut client, mut channel) = channel(&fixture, &service);
+    let original = service.records.lock().unwrap()[0].clone();
+    assert!(matches!(
+        channel.disconnect_for_worker().unwrap(),
+        WorkerLaunchClose::SocketClosedLifecycleHeld
+    ));
+    assert_eq!(client.read(&mut [0]).unwrap(), 0);
+    original.require_terminal_hold().unwrap();
+    let records = service.records.lock().unwrap();
+    assert_eq!(records.len(), 1);
+    assert!(Arc::ptr_eq(&records[0], &original));
+    drop(records);
+    assert!(
+        channel
+            .send_frame(&HumanFrame::decode_canonical(b"{}").unwrap(), end())
+            .is_err()
+    );
+    channel.close_for_worker().unwrap();
+    assert!(service.records.lock().unwrap().is_empty());
+    service.close(end()).unwrap();
+}
+#[test]
 fn wrong_runtime_is_refused_before_hold_and_returns_original_connection() {
     let fixture = Fixture::new();
     let foreign = Fixture::new();

@@ -20,6 +20,7 @@ use reverie_store::{
 /// claim and native capture. Data accessors convey no permission to effects.
 /// Dropping/closing retains the durable reservation and target-session fence.
 pub struct RetainedPreparation {
+    pub(super) draft: reverie_contracts::reservation_draft::DraftRecord,
     pub(super) gate: Arc<Inner>,
     pub(super) store: Option<OperationStore>,
     pub(super) handle: OperationHandle,
@@ -95,6 +96,7 @@ impl ReservationGate {
         &self,
         admission: super::admission::Admission,
         context: ClaimedContext,
+        draft: reverie_contracts::reservation_draft::DraftRecord,
     ) -> Result<RetainedPreparation> {
         let body = (|| {
             need(
@@ -123,6 +125,7 @@ impl ReservationGate {
                     return finalized(Err(error), context.store.close().map_err(Into::into));
                 }
                 Ok(RetainedPreparation {
+                    draft,
                     gate: self.inner.clone(),
                     store: Some(context.store),
                     handle: context.handle.expect("checked handle"),

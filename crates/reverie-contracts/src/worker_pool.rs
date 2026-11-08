@@ -11,6 +11,9 @@ pub use engine::{
 pub const PURPOSE: &str = "reverie-docker-worker-pool-v1";
 pub const MEMORY_MAX_MIB: u32 = 49_152;
 pub const TASKS_MAX: u32 = 8192;
+/// Fixed controller contribution OUTSIDE the employee worker parent.
+pub const CONTROLLER_MEMORY_BYTES: u64 = 256 * 1_048_576;
+pub const CONTROLLER_TASKS_MAX: u32 = 128;
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
@@ -236,6 +239,25 @@ mod tests {
             let mut changed = policy();
             changed.allowed_cpus = cpus;
             assert!(changed.validate().is_err());
+        }
+    }
+
+    #[test]
+    fn version_one_preserves_finite_soft_threshold_at_the_hard_ceiling() {
+        for (high, accepted) in [
+            (0, false),
+            (1, true),
+            (49_151, true),
+            (49_152, true),
+            (49_153, false),
+        ] {
+            let mut selected = policy();
+            *selected
+                .employee_memory_high_mi_b
+                .values_mut()
+                .next()
+                .unwrap() = high;
+            assert_eq!(selected.validate().is_ok(), accepted);
         }
     }
 }

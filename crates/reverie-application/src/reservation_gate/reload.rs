@@ -33,6 +33,15 @@ impl Inner {
             .ok_or(GateError::Refused("WORKER_RESOURCE_RELOAD_FILE_REQUIRED"))?;
         let _lifecycle = self.installed.lifecycle()?;
         let before = self.installed.snapshot()?;
+        if let Some(claim) = preparation.as_ref() {
+            let phase = claim.policy.as_ref().ok_or(GateError::Refused(
+                "RESOURCE_PREPARATION_RELOAD_CONTEXT_REQUIRED",
+            ))?;
+            need(
+                Arc::ptr_eq(&phase.before, &before) && phase.installed_snapshot.is_none(),
+                "RESOURCE_PREPARATION_RELOAD_CONTEXT_REQUIRED",
+            )?;
+        }
         let updated = Arc::new(crate::worker_validation::load_owner_config(path)?);
         resource_reload::validate_reload(before.configuration(), updated.configuration())?;
         let document = self.document()?;
@@ -67,14 +76,13 @@ impl Inner {
             .context
             .lock()
             .map_err(|_| GateError::Refused("RESERVATION_ADMISSION_UNAVAILABLE"))?;
+        let installed_snapshot = updated.clone();
         self.installed
             .install_reloaded(InspectedReload { before, updated }, &mut context)?;
         if let Some(claim) = preparation.as_mut() {
-            claim
-                .policy
-                .as_mut()
-                .expect("protected reload phase")
-                .installed = true;
+            let phase = claim.policy.as_mut().expect("protected reload phase");
+            phase.installed = true;
+            phase.installed_snapshot = Some(installed_snapshot);
         }
         Ok(())
     }

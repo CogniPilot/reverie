@@ -18,6 +18,13 @@ identity rather than requiring access to another UID's root/exe/ns symlinks.
 The root-peer Engine must independently attest the same controller CID/PID,
 image, namespace configuration, confinement and exact binds.
 
+Its own fixed outside contribution is bounded separately: 256MiB hard RAM,
+zero swap, 128 tasks, no CPU quota and the policy CPU set. Current policy checks
+join Engine declarations to the same controller PID/start and actual cgroup2
+scope limits before and after policy observation. Kernel CPU ranges are compared
+as sets. This does not account for website/recovery reserves or establish
+aggregate host headroom or parent-once admission.
+
 Only a nonsecret immutable policy-version directory is mounted read-only.
 `~/reverie` remains private0700; `worker-pool/policies` is brokerUID:GID0750,
 with immutable `<sha256>.json` files0440. Neither broker credentials nor its
@@ -62,3 +69,19 @@ constructor refusal. Checked metadata cleanup remains distinct from pool/outer
 operation completion. Consumed-close uncertainty is sticky even after other
 descriptors close, and default failure destruction retains its actual owner.
 Pool close terminally fences its installed stage before any fallible close.
+
+`OpenedPoolMember` is a separate read-only pre-pane metadata owner. It borrows
+the actual installed parent, retains the original leaf directory, and checks
+the process PID/start, parent membership, scope inode and exact physical
+high/max/swap/task/CPU limits before and after parent observation. The selected
+employee's high threshold comes from the retained policy; CPU weight and task
+expectations are checked data, never permission. A single init PID does not
+prove idle code or an approved image. This owner still needs the actual Created,
+Engine spec, start and memory-phase joins before pane execution. It performs no
+writes and supplies no admission or launch token. Refusal fences its original
+owner; checked metadata close never acknowledges worker or pool settlement.
+The lower reader preserves version-one policy compatibility: a finite employee
+high equal to its hard ceiling remains readable. New desired-policy validation
+in the owner API is a separate contract; this observer cannot rewrite existing
+policy semantics. Its borrowed parent lifetime also does not supply a movable
+shared controller owner or an authenticated controller-to-broker protocol.

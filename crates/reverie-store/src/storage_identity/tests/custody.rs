@@ -131,3 +131,47 @@ fn checked_walk_and_data_closes_refuse_and_retain_primary_parse_failure() {
     ));
     assert_eq!(tree.fd_count(), 0);
 }
+
+#[test]
+fn typed_identity_close_uncertainty_tracks_actual_walk_data_and_secondary_close() {
+    let tree = Tree::new();
+    for role in [private_fs::CloseRole::Walk, private_fs::CloseRole::Data] {
+        faults::STATE.with(|value| value.borrow_mut().close = Some(role));
+        let error = read_metadata(&tree.company_file(), uid(), DEFAULT_METADATA_LIMIT)
+            .err()
+            .unwrap();
+        assert!(error.has_unconfirmed_close());
+        assert_eq!(
+            tree.fd_count(),
+            0,
+            "injected close consumed the original FD"
+        );
+    }
+    tree.write(&tree.company_file(), "not json");
+    faults::STATE.with(|value| value.borrow_mut().close = Some(private_fs::CloseRole::Data));
+    let error = read_metadata(&tree.company_file(), uid(), DEFAULT_METADATA_LIMIT)
+        .err()
+        .unwrap();
+    assert!(matches!(&error, IdentityError::Finalization { .. }));
+    assert!(error.has_unconfirmed_close());
+    assert_eq!(tree.fd_count(), 0);
+}
+
+#[test]
+fn typed_identity_close_uncertainty_does_not_promote_generic_io_or_custody_refusal() {
+    let tree = Tree::new();
+    tree.write(&tree.company_file(), "not json");
+    let malformed = read_metadata(&tree.company_file(), uid(), DEFAULT_METADATA_LIMIT)
+        .err()
+        .unwrap();
+    assert!(!malformed.has_unconfirmed_close());
+    let error = IdentityError::Finalization {
+        primary: Box::new(IdentityError::Io(std::io::Error::other(
+            "owned fixture I/O",
+        ))),
+        secondary: Box::new(IdentityError::Custody(StoreError::Refused(
+            crate::StoreFault::PrivateFile,
+        ))),
+    };
+    assert!(!error.has_unconfirmed_close());
+}

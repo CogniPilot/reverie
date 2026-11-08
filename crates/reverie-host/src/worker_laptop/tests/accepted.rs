@@ -8,6 +8,36 @@ use crate::{
 };
 use std::{io::Write, os::unix::net::UnixStream};
 impl Fixture {
+    pub(in crate::worker_laptop) fn accepted_protected(
+        &self,
+        service: &Arc<WorkerReportService>,
+        command: &str,
+    ) -> (UnixStream, crate::worker_reports::HeldProtectedWorkerLaunch) {
+        let collector = CommandTelemetry::capture(self.runtime(), &self.source).unwrap();
+        let (mut client, server) = UnixStream::pair().unwrap();
+        let raw = serde_json::to_vec(&json!({
+            "reference":"11111111-2222-4333-8444-555555555555",
+            "request":{"sessionId":SID,"cwd":"/workspace","command":command,
+                "env":{},"cols":80,"rows":24}
+        }))
+        .unwrap();
+        let header =
+            reverie_core::worker_wire::WorkerFrameHeader::for_payload(b'L', raw.len()).unwrap();
+        client.write_all(&header.encode()).unwrap();
+        client.write_all(&raw).unwrap();
+        let crate::worker_reports::AcceptedWorkerServiceConnection::Service(incoming) = service
+            .register_worker_connection(server)
+            .unwrap()
+            .receive_service_for_worker(&collector, &self.source)
+            .unwrap()
+        else {
+            panic!("actual L")
+        };
+        let incoming = incoming.decode_protected_launch(&self.source).ok().unwrap();
+        let held = incoming.retain_for_qualification().ok().unwrap();
+        held.assert_current(self.runtime()).unwrap();
+        (client, held)
+    }
     pub(in crate::worker_laptop) fn released_for_connection(
         &self,
         connection: &WorkerLaunchConnection,

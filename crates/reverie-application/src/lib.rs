@@ -2,6 +2,7 @@
 //! Callers retain owner authorization, whole worker-domain validation and native
 //! admission/effect custody. Returned candidates do not establish those powers.
 pub mod installing_broker;
+pub use installing_broker::resource_actor;
 pub mod memory_import;
 pub mod memory_lifecycle;
 pub mod memory_recall;

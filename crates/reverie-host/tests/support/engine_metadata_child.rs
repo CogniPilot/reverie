@@ -43,6 +43,10 @@ fn main() {
             use std::fs::{self,OpenOptions};
             let mut trace=OpenOptions::new().create(true).append(true).open("calls.txt").unwrap();
             writeln!(trace,"{}",args.join("\0")).unwrap();drop(trace);
+            if mode == "storage-writer" && std::path::Path::new("stopped-ram-control").is_file() {
+                stopped_ram(&args);
+                return;
+            }
             if mode == "storage-writer" && std::path::Path::new("goal-inventory-control").is_file() && goal_inventory(&args) {
                 return;
             }
@@ -163,6 +167,52 @@ fn main() {
     }
 }
 
+fn stopped_ram(args: &[String]) {
+    use std::{fs, path::Path};
+    if args == ["ps", "--quiet", "--no-trunc"] {
+        io::stdout().write_all(&fs::read("ps.out").unwrap()).unwrap();
+        return;
+    }
+    let format = concat!(
+        "{\"Id\":{{json .Id}},\"Name\":{{json .Name}},\"Image\":{{json .Image}},",
+        "\"Config\":{\"Labels\":{{json .Config.Labels}}},",
+        "\"State\":{\"Running\":{{json .State.Running}},\"Pid\":{{json .State.Pid}}},",
+        "\"Mounts\":{{json .Mounts}},\"HostConfig\":{",
+        "\"Memory\":{{json .HostConfig.Memory}},\"MemorySwap\":{{json .HostConfig.MemorySwap}},",
+        "\"PidsLimit\":{{json .HostConfig.PidsLimit}},\"NanoCpus\":{{json .HostConfig.NanoCpus}}}}"
+    );
+    let stopped = format.replace(
+        "\"Pid\":{{json .State.Pid}}}",
+        concat!(
+            "\"Pid\":{{json .State.Pid}},\"Status\":{{json .State.Status}},",
+            "\"StartedAt\":{{json .State.StartedAt}},\"Paused\":{{json .State.Paused}},",
+            "\"Restarting\":{{json .State.Restarting}},\"Dead\":{{json .State.Dead}}}"
+        ),
+    );
+    let output = if args == ["ps", "-aq", "--no-trunc"] {
+        if fs::remove_file("ram-hold.next").is_ok() {
+            fs::write("ram-query-started", b"actual fixed census child entered").unwrap();
+            wait_file("ram-query-release");
+        }
+        let before = fs::read("ram-ids.out").unwrap();
+        if Path::new("ram-ids.next").is_file() {
+            fs::rename("ram-ids.next", "ram-ids.out").unwrap();
+        }
+        before
+    } else {
+        assert_eq!(args.len(), 4);
+        assert_eq!(&args[..2], ["inspect", "--format"]);
+        assert_eq!(args[3], "c".repeat(64));
+        let file = if args[2] == format {
+            "ram-row.out"
+        } else {
+            assert_eq!(args[2], stopped);
+            "ram-stopped.out"
+        };
+        fs::read(file).unwrap()
+    };
+    io::stdout().write_all(&output).unwrap();
+}
 fn goal_inventory(args: &[String]) -> bool {
     let name = if args == ["ps","--all","--no-trunc","--quiet"] { "goal-ids.out" }
         else if args.first().map(String::as_str) == Some("inspect") {

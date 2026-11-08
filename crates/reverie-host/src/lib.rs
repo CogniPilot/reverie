@@ -27,6 +27,7 @@ pub mod memory_screen;
 mod native;
 mod observation;
 pub mod office;
+mod private_pending;
 pub mod reservation_control;
 pub mod reservation_kernel;
 pub mod resource_facts;

@@ -5,6 +5,8 @@ mod custody;
 mod error;
 mod source;
 mod stop_budget;
+mod stopped_ram;
+pub(crate) use stopped_ram::{StoppedRamObservation, StoppedRamPresence};
 #[cfg(test)]
 pub(crate) mod tests;
 pub use capacity::{CapacityFacts, WebsiteBinding};
@@ -68,6 +70,7 @@ impl NativeObserver {
         inherited: Option<Instant>,
     ) -> ObservationContext {
         ObservationContext {
+            metadata: self.source.capture_metadata_owner().map(Arc::new),
             observer: self.clone(),
             config: ReservationConfiguration::capture(config),
             inherited,
@@ -77,6 +80,7 @@ impl NativeObserver {
     }
 }
 pub struct ObservationContext {
+    metadata: Option<Arc<reverie_host::engine_metadata::MetadataQueryOwner>>,
     observer: NativeObserver,
     config: ReservationConfiguration,
     inherited: Option<Instant>,
@@ -127,6 +131,14 @@ impl ObservedRow<'_> {
     }
 }
 impl ObservationContext {
+    /// Exact calls owned by THIS observation context only. Whole Runtime
+    /// shutdown retains its separate global settlement operation.
+    pub(crate) fn settle_metadata_owned(&self, end: Instant) -> Result<()> {
+        let end = self.live_stop_deadline().map_or(end, |stop| stop.min(end));
+        self.observer
+            .source
+            .settle_metadata_owner(self.metadata.as_deref(), end)
+    }
     pub(crate) fn original_target_storage(
         &self,
         paths: &StoragePaths,
@@ -173,6 +185,7 @@ impl ObservationContext {
     pub(crate) fn with_applied_configuration(&self, config: EffectiveWorkerConfig) -> Self {
         Self {
             observer: self.observer.clone(),
+            metadata: self.metadata.clone(),
             config: ReservationConfiguration::capture(config),
             inherited: self.inherited,
             origin: self.origin.clone(),
@@ -185,10 +198,12 @@ impl ObservationContext {
         supplied: Option<Instant>,
     ) -> Result<reverie_host::broker_engine::LaptopInspectOutput> {
         let end = self.deadline(supplied)?;
-        let output = self
-            .observer
-            .source
-            .inspect_laptop(name, end, &self.observer.cancellation)?;
+        let output = self.observer.source.inspect_laptop(
+            self.metadata.as_deref(),
+            name,
+            end,
+            &self.observer.cancellation,
+        )?;
         self.check(end)?;
         Ok(output)
     }
@@ -197,6 +212,7 @@ impl ObservationContext {
     pub(crate) fn with_inherited(&self, inherited: Option<Instant>) -> Self {
         Self {
             observer: self.observer.clone(),
+            metadata: self.metadata.clone(),
             config: ReservationConfiguration::capture(self.config.configuration().clone()),
             inherited,
             origin: self.origin.clone(),
@@ -231,10 +247,12 @@ impl ObservationContext {
     }
     fn engine(&self, query: EngineQuery<'_>, end: Instant) -> Result<String> {
         self.check(end)?;
-        let result = self
-            .observer
-            .source
-            .query(query, end, &self.observer.cancellation)?;
+        let result = self.observer.source.query(
+            self.metadata.as_deref(),
+            query,
+            end,
+            &self.observer.cancellation,
+        )?;
         self.check(end)?;
         Ok(result)
     }

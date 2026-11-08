@@ -97,7 +97,7 @@ fn owner_read_and_close_failures_preserve_both_and_never_acknowledge_success() {
     let error = read_worker_config(&tree.path()).unwrap_err();
     assert!(
         matches!(error,ObservationError::Finalization{primary,secondary}
-        if matches!(*primary,ObservationError::Io(_)) && matches!(*secondary,ObservationError::Io(_)))
+        if matches!(*primary,ObservationError::Io(_)) && matches!(*secondary,ObservationError::CloseUnconfirmed{..}))
     );
     super::super::test_faults::set(None, true);
     assert!(read_worker_config(&tree.path()).is_err());

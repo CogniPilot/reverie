@@ -38,6 +38,9 @@ pub enum ReservationKernelError {
     Refused(&'static str),
 }
 impl ReservationKernelError {
+    pub fn has_unconfirmed_close(&self) -> bool {
+        matches!(self, Self::Observation(error) if error.has_unconfirmed_close())
+    }
     pub fn code(&self) -> &'static str {
         match self {
             Self::Observation(value) => value.code(),

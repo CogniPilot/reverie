@@ -207,6 +207,39 @@ describe('Company Settings laptop fleet', () => {
     expect(section().textContent).toContain('River: unknown; not verified');
     expect(section().textContent).not.toContain('Fleet complete');
   });
+  it('renders a known unbounded parent and preserves exact null in the preview without a numeric fallback', async () => {
+    const data = initial();
+    const pool = { ...data.pool.desired!, memoryHighMiB: null, memoryMaxMiB: 49152 };
+    data.pool = { desired: pool, observed: { ...pool } };
+    const { section, submit, calls } = await setup({ data, replies: { '/preview': (body) => preview(body) } });
+    const parent = Array.from(section().querySelectorAll('fieldset')).find(
+      (row) => row.querySelector('legend')?.textContent === 'Shared employee pool'
+    )!;
+    expect(parent.textContent).toContain('Running: Soft RAM unbounded; hard RAM 49,152 MiB');
+    expect(parent.textContent).toContain('Pool soft RAM is unbounded; the hard pool ceiling still applies.');
+    expect(parent.querySelector('[aria-label="Pool soft RAM (MiB)"]')).toBeNull();
+    expect(section().querySelector<HTMLInputElement>('[aria-label="River soft RAM (MiB)"]')!.value).toBe('4096');
+    await submit();
+    expect(calls.at(-1)?.body.pool).toEqual(pool);
+    expect(calls.at(-1)?.body.pool.memoryHighMiB).toBeNull();
+    expect(section().textContent).toContain('Preview only. No laptop has been changed.');
+  });
+  it('keeps an unknown whole pool distinct from known unbounded high and rejects an omitted threshold', async () => {
+    const data = initial();
+    data.pool.desired!.memoryHighMiB = null;
+    const unknown = await setup({ data });
+    const parent = Array.from(unknown.section().querySelectorAll('fieldset')).find(
+      (row) => row.querySelector('legend')?.textContent === 'Shared employee pool'
+    )!;
+    expect(parent.textContent).toContain('Running: Not verified');
+    expect(parent.textContent).not.toContain('Running: Soft RAM unbounded');
+    const malformed: any = initial();
+    delete malformed.pool.desired.memoryHighMiB;
+    const refused = await setup({ data: malformed });
+    expect(refused.section().textContent).toContain('Laptop fleet status could not be verified');
+    expect(refused.section().querySelector('form')).toBeNull();
+    expect(refused.calls.filter((row) => row.path.endsWith('/preview'))).toHaveLength(0);
+  });
   it('invalidates approval when a field changes, and obeys server canApply=false', async () => {
     let allowed = true;
     const { h, section, button, calls, submit } = await setup({

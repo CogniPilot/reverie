@@ -2,6 +2,8 @@
 //! actual root-peer call and native process/filesystem observations confer use.
 use super::*;
 use serde_json::{Value, json};
+#[cfg(test)]
+mod tests;
 
 pub fn validate_engine_information(
     raw: &[u8],
@@ -57,6 +59,13 @@ pub fn validate_controller_inspection(
         && host["UsernsMode"] == "host"
         && host["NetworkMode"] == "none"
         && host["CgroupParent"] == "system.slice"
+        && host["Memory"] == CONTROLLER_MEMORY_BYTES
+        && host["MemorySwap"] == CONTROLLER_MEMORY_BYTES
+        && host["PidsLimit"] == CONTROLLER_TASKS_MAX
+        && host["CpuQuota"] == 0
+        && host["CpuPeriod"] == 0
+        && host["NanoCpus"] == 0
+        && host["CpusetCpus"] == policy.cpu_list()
         && host["CapDrop"] == json!(["ALL"])
         && (host["CapAdd"].is_null() || host["CapAdd"] == json!([]))
         && (host["GroupAdd"].is_null() || host["GroupAdd"] == json!([]))

@@ -15,6 +15,12 @@ reverie-host.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
+tokio.workspace = true
+hyper.workspace = true
+hyper-util.workspace = true
+http-body-util.workspace = true
+bytes.workspace = true
+nix = { workspace = true, features = ["user", "socket"] }
 
 [lints]
 workspace = true

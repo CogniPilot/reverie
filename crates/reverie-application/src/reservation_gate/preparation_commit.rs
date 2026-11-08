@@ -41,7 +41,11 @@ impl RetainedPreparation {
             "RESOURCE_PREPARATION_CONFIG_FILE_REQUIRED",
         ))?;
         match self.commit_attempt(candidate, &path) {
-            Ok(receipt) => Ok(CommittedPolicy::after_commit(self, receipt)),
+            Ok(receipt) => Ok(CommittedPolicy::after_commit(
+                self,
+                receipt,
+                policy.map(|policy| policy.digest().clone()),
+            )),
             Err(error) => Err(GateError::PreparationConfigUncertain {
                 cause: Box::new(finalized::<()>(Err(error), self.close_owned()).unwrap_err()),
             }),
@@ -61,7 +65,7 @@ impl RetainedPreparation {
                 .custody_loaded_policy(&installed, None)?;
             let transaction = PolicyTransaction::capture(path, gate.config()?.uid()?)?;
             let mut transaction = Some(transaction);
-            let body = self.publish_policy(candidate, path, &mut transaction);
+            let body = self.publish_policy(candidate, path, &mut transaction, installed);
             let closed = transaction.take().map_or(Ok(()), |transaction| {
                 transaction.close().map_err(Into::into)
             });
@@ -80,6 +84,7 @@ impl RetainedPreparation {
         candidate: Arc<ValidatedWorkerSnapshot>,
         path: &Path,
         transaction: &mut Option<PolicyTransaction>,
+        before: Arc<ValidatedWorkerSnapshot>,
     ) -> Result<PreparedPolicyRecord> {
         let original = crate::worker_validation::load_owner_config(path)?;
         need(
@@ -87,6 +92,8 @@ impl RetainedPreparation {
             "RESOURCE_PREPARATION_CONFIG_CHANGED",
         )?;
         self.policy = Some(PolicyPhase {
+            before,
+            installed_snapshot: None,
             candidate: candidate.clone(),
             binding: transaction.as_ref().expect("actual transaction").binding(),
             published: false,
