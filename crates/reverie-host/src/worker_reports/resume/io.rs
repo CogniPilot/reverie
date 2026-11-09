@@ -5,7 +5,21 @@ impl WorkerActorChannel {
     /// B-only idle readiness. Human view/consent may pause on the same socket;
     /// no receive, descriptor clone, new hold or ordinary-Q timeout changes.
     pub fn pool_registration_frame_ready(&self, deadline: Instant) -> Result<bool> {
-        if self.purpose != Purpose::PoolRegistrationWebsite || !self.greeted {
+        if self.purpose != Purpose::PoolRegistrationWebsite {
+            return Err(WorkerReportError::Unconfirmed);
+        }
+        self.frame_ready(deadline)
+    }
+    /// Fleet-only idle consent readiness on the SAME counted socket. This
+    /// neither consumes bytes nor grants website, owner or resource authority.
+    pub fn fleet_maintenance_frame_ready(&self, deadline: Instant) -> Result<bool> {
+        if self.purpose != Purpose::FleetMaintenanceWebsite {
+            return Err(WorkerReportError::Unconfirmed);
+        }
+        self.frame_ready(deadline)
+    }
+    fn frame_ready(&self, deadline: Instant) -> Result<bool> {
+        if !self.greeted {
             return Err(WorkerReportError::Unconfirmed);
         }
         let remaining = self.remaining(deadline)?;

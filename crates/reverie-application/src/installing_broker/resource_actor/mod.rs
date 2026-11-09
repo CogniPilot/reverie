@@ -8,7 +8,10 @@ pub use dispatch::{ResourceOperationClosed, ResourceOperationFailure};
 mod error;
 mod fleet_preview;
 pub(in crate::installing_broker) use error::gate_close_unknown;
-pub(in crate::installing_broker) use fleet_preview::FleetPreviewFailure;
+pub use fleet_preview::{
+    AuthenticatedFleetMaintenance, FleetMaintenanceCheckError, FleetPreviewClosed,
+    FleetPreviewFailure, QualifiedFleetPreview,
+};
 #[cfg(test)]
 mod native_fixture;
 mod operation;

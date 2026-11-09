@@ -1,6 +1,7 @@
 //! Actual refused OS prefix and counted Q. No successful native OS origin,
 //! target image qualification or installed website is invented here.
 use super::*;
+mod qualification;
 
 #[test]
 fn equal_native_census_data_from_a_foreign_context_is_not_the_frames_origin() {

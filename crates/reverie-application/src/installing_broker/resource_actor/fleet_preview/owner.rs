@@ -42,7 +42,7 @@ impl<'a> NativeFleetPreview<'a> {
         );
         Ok(())
     }
-    fn assert_binding(&mut self) -> Result<UnpreparedOfferBinding> {
+    pub(super) fn assert_binding(&mut self) -> Result<UnpreparedOfferBinding> {
         let frame = self.frame.as_ref().expect("same Q");
         let target = self.target.as_mut().expect("same target");
         target.binding(
@@ -72,9 +72,11 @@ impl<'a> NativeFleetPreview<'a> {
         }
         Ok(binding)
     }
-    fn check_viewer(&mut self) -> Result<()> {
+    pub(super) fn check_viewer(&mut self) -> Result<()> {
         let frame = self.frame.as_mut().expect("same Q");
-        let end = frame.deadline.min(Instant::now() + Duration::from_secs(10));
+        let end = frame
+            .deadline
+            .min(Instant::now() + Duration::from_millis(OWNER_FRESHNESS_MILLIS));
         frame.guard_bootstrap(end)?;
         let nonce =
             reverie_host::resource_facts::fresh_owner_nonce().map_err(ResourceActorError::from)?;
@@ -83,7 +85,7 @@ impl<'a> NativeFleetPreview<'a> {
         let current = request.parse_owner_reply(&frame.receive(end)?, &nonce)?;
         let now = epoch()?;
         if current.expires_at_epoch_ms() <= now
-            || current.expires_at_epoch_ms() > now.saturating_add(10_000)
+            || current.expires_at_epoch_ms() > now.saturating_add(OWNER_FRESHNESS_MILLIS)
             || self.viewer.as_ref().is_some_and(|old| {
                 old.principal() != current.principal()
                     || old.scope_digest() != current.scope_digest()
@@ -136,7 +138,7 @@ impl<'a> NativeFleetPreview<'a> {
         Ok(())
     }
 }
-fn epoch() -> Result<u64> {
+pub(super) fn epoch() -> Result<u64> {
     u64::try_from(
         SystemTime::now()
             .duration_since(UNIX_EPOCH)

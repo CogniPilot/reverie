@@ -76,14 +76,37 @@ impl OfferPreparationView {
         principal: &reverie_contracts::resource_actor::ResourceOwnerPrincipal,
     ) -> Result<(), BrokerInstallationOfferCause> {
         let owner = self.offer.try_owner()?;
+        self.assert_preview_context(&owner, broker, snapshot)?;
+        if owner.request.principal() != principal {
+            return Err(BrokerInstallationOfferCause::Refused(
+                "FLEET_PREVIEW_ORIGINAL_BINDING_CHANGED",
+            ));
+        }
+        Ok(())
+    }
+    pub(in crate::installing_broker) fn assert_preview_broker(
+        &self,
+        broker: &InstallingBroker,
+    ) -> Result<(), BrokerInstallationOfferCause> {
+        let owner = self.offer.try_owner()?;
+        let snapshot = broker
+            .configuration()
+            .map_err(BrokerInstallationOfferCause::Configuration)?;
+        self.assert_preview_context(&owner, broker, &snapshot)
+    }
+    fn assert_preview_context(
+        &self,
+        owner: &BrokerInstallationOffer,
+        broker: &InstallingBroker,
+        snapshot: &Arc<ValidatedWorkerSnapshot>,
+    ) -> Result<(), BrokerInstallationOfferCause> {
         owner.check_time()?;
-        self.assert_binding(&owner)?;
+        self.assert_binding(owner)?;
         if !std::ptr::eq(Arc::as_ptr(&self.broker), broker)
             || !self
                 .snapshot
                 .as_ref()
                 .is_some_and(|actual| Arc::ptr_eq(actual, snapshot))
-            || owner.request.principal() != principal
         {
             return Err(BrokerInstallationOfferCause::Refused(
                 "FLEET_PREVIEW_ORIGINAL_BINDING_CHANGED",
