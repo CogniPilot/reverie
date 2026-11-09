@@ -156,16 +156,7 @@ impl PoolInstallationConsentRequest {
         })
     }
     fn principal_value(&self) -> Value {
-        Value(Node::Object(BTreeMap::from([
-            (key("accountId"), string(self.principal.account_id())),
-            (key("personId"), string(self.principal.person_id())),
-            (
-                key("sessionEpoch"),
-                Value(Node::Number(Number::Integer(
-                    self.principal.session_epoch().to_string(),
-                ))),
-            ),
-        ])))
+        self.principal.value()
     }
 }
 fn purpose_version(value: &Value) -> Result<()> {

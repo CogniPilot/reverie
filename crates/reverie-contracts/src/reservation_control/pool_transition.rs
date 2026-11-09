@@ -4,6 +4,7 @@ use reverie_core::operations::{JournalDigest, JournalId, OperationScope};
 
 /// Closed references to a future real cohort approval. These references alone
 /// authorize nothing; the lower fence only prevents subsequent admissions.
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PoolTransitionSelection {
     operation: JournalId,
     preview: JournalId,
@@ -30,6 +31,22 @@ impl PoolTransitionSelection {
             revision,
         }
     }
+    pub fn operation_id(&self) -> &JournalId {
+        &self.operation
+    }
+    /// Canonical binding DATA, shared by the native pending writer and the
+    /// distinct fleet consent protocol. This never grants drain authority.
+    pub(crate) fn approval_value(&self) -> Value {
+        let text = |value: &str| Value(Node::String(key(value)));
+        Value(Node::Object(BTreeMap::from([
+            (key("operationId"), text(self.operation.as_str())),
+            (key("previewId"), text(self.preview.as_str())),
+            (key("cohortDigest"), text(self.cohort.as_str())),
+            (key("poolPolicyDigest"), text(self.pool_policy.as_str())),
+            (key("coverageDigest"), text(self.coverage.as_str())),
+            (key("revisionDigest"), text(self.revision.as_str())),
+        ])))
+    }
 }
 pub struct PoolTransitionIntent {
     operation: JournalId,
@@ -49,22 +66,20 @@ impl PoolTransitionIntent {
             return Err(ControlDataError::DomainChanged);
         }
         let text = |value: &str| Value(Node::String(key(value)));
-        let document = Value(Node::Object(BTreeMap::from([
+        let mut document = selected.approval_value();
+        let Node::Object(fields) = &mut document.0 else {
+            unreachable!("closed transition selection");
+        };
+        fields.extend([
             (key("schema"), text("reverie-pool-transition-pending-v1")),
             (key("state"), text("RECONCILIATION_REQUIRED")),
-            (key("operationId"), text(selected.operation.as_str())),
-            (key("previewId"), text(selected.preview.as_str())),
-            (key("cohortDigest"), text(selected.cohort.as_str())),
-            (key("poolPolicyDigest"), text(selected.pool_policy.as_str())),
-            (key("coverageDigest"), text(selected.coverage.as_str())),
-            (key("revisionDigest"), text(selected.revision.as_str())),
             (key("companyId"), text(scope.company_id.as_str())),
             (
                 key("ownerScopeDigest"),
                 text(scope.owner_scope_digest.as_str()),
             ),
             (key("configurationDigest"), text(&binding.domain().to_hex())),
-        ])));
+        ]);
         Ok(Self {
             operation: selected.operation.clone(),
             revision: selected.revision.clone(),

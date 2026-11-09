@@ -10,8 +10,13 @@ use reverie_core::{
 mod approval;
 mod command;
 mod continuation;
+mod fleet;
 pub use command::RamLaunchCommandData;
 pub use continuation::{ResourceContinuationRequest, ResourceContinuationVerb};
+pub use fleet::{
+    CurrentFleetMaintenanceOwner, FLEET_MAINTENANCE_PURPOSE, FleetMaintenanceRequest,
+    decode_fleet_maintenance_hello,
+};
 mod installation;
 mod owner;
 mod principal;

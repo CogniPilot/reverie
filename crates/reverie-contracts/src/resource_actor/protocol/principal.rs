@@ -27,6 +27,18 @@ pub struct ResourceOwnerPrincipal {
     epoch: u64,
 }
 impl ResourceOwnerPrincipal {
+    pub(super) fn value(&self) -> Value {
+        Value(Node::Object(BTreeMap::from([
+            (key("accountId"), string(self.account_id())),
+            (key("personId"), string(self.person_id())),
+            (
+                key("sessionEpoch"),
+                Value(Node::Number(Number::Integer(
+                    self.session_epoch().to_string(),
+                ))),
+            ),
+        ])))
+    }
     pub(super) fn capture(value: &Value) -> Result<Self> {
         closed(value, &["accountId", "personId", "sessionEpoch"])?;
         let account = PrincipalUuid::capture(field(value, "accountId")?)?;
