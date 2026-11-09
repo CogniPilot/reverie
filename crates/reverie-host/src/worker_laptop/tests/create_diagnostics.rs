@@ -55,8 +55,12 @@ fn original_runtime_lists_same_nonzero_create_without_queries_replay_or_foreign_
     };
     // Preserve the actual failed resource/Office/lease owner before verdict;
     // this does not invent a successful Runtime or employee cleanup receipt.
-    fixture.retain_after_expired_stop();
+    let office_closed = fixture.office.close(end());
+    let runtime_retained = fixture.runtime().close(end()).is_err();
+    std::mem::forget(fixture);
     drop(other);
+    office_closed.unwrap();
+    assert!(runtime_retained);
     assert_eq!(listed.len(), 1);
     assert_eq!(repeated.len(), 1);
     assert!(Arc::ptr_eq(&listed[0], &original));
