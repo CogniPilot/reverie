@@ -2745,7 +2745,7 @@ export class Session extends EventEmitter {
     return undefined;
   }
 
-  async reconnectWorkerViewer(stillCurrent: () => boolean): Promise<boolean> {
+  async reconnectWorkerViewer(stillCurrent: () => boolean, revalidateMove?: () => Promise<boolean>): Promise<boolean> {
     if (!this.workerViewerReconnect || !stillCurrent() || this._closing || this.paneLifecycleInFlight || this._muxWritesInFlight > 0) return false;
     if (!this._viewerInputHeld && !this._viewerClientLost && !this.hasDeadPane()) return false;
     return this._withPaneLifecycle(async () => {
@@ -2778,6 +2778,8 @@ export class Session extends EventEmitter {
         const working = !!text && !!getCli(this.mode)?.capabilities.workDetect?.workingLine &&
           this._workingLinePattern().test(text);
         if (working || (mark ? text?.includes(mark) : !!text?.trim())) {
+          // A held move's actual account/source check must finish before input is released.
+          if (revalidateMove && !await revalidateMove()) return false;
           const final = await mux.readPaneLiveness!(name);
           if (!stillCurrent() || final.state !== 'live' || final.pid !== pid || this.ptyProcess !== client || this._pid === null) return false;
           if (working) this._markWorking();

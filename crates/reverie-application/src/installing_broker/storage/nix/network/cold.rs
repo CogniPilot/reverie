@@ -20,6 +20,9 @@ impl NetworkStoragePreparation {
         created: &CreatedLaptop,
     ) -> Result<bool> {
         self.check()?;
+        self.observe_original_created_receipt(created)
+    }
+    pub(super) fn observe_original_created_receipt(&self, created: &CreatedLaptop) -> Result<bool> {
         let observed = self
             .destination
             .registry()

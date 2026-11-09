@@ -331,10 +331,16 @@ impl WorkerBrokerListener {
         }
         self.resources.running()?;
         match listener.accept() {
-            Ok((stream, _)) => service
-                .register_worker_connection(stream)
-                .map(Some)
-                .map_err(BrokerListenerError::Report),
+            Ok((stream, _)) => match service.register_worker_connection(stream) {
+                Ok(connection) => Ok(Some(connection)),
+                // The original rejected socket is already known closed.
+                // A close failure is Finalization, never this bare known refusal.
+                Err(WorkerReportError::Capacity) => {
+                    eprintln!("{}", WorkerReportError::Capacity);
+                    Ok(None)
+                }
+                Err(error) => Err(BrokerListenerError::Report(error)),
+            },
             Err(error) if error.kind() == io::ErrorKind::WouldBlock => Ok(None),
             Err(error) => Err(error.into()),
         }

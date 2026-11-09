@@ -158,11 +158,12 @@ pub(crate) fn immutable_bytes(
     )
 }
 
+const MAX_CPUS: usize = 8;
 /// The private CPU list: one to eight distinct non-negative integers.
 pub(crate) fn cpu_set(value: &Value) -> Result<Vec<usize>> {
     let message = "private finite unique CPU list required";
     let list = value.as_array().ok_or_else(|| message.to_owned())?;
-    need((1..=8).contains(&list.len()), message)?;
+    need((1..=MAX_CPUS).contains(&list.len()), message)?;
     let mut cpus = Vec::new();
     for item in list {
         let cpu = item

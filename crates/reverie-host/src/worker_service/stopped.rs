@@ -1,6 +1,6 @@
 //! Original read-only manager custody for an offline image transition.
 use super::*;
-mod bus;
+pub(super) mod bus;
 mod image;
 pub use image::{ClosedImageServiceMaintenance, ImageServiceMaintenance};
 pub(super) const IMAGE_PENDING: &[u8] = b"NATIVE_SERVICE_IMAGE_TRANSITION_PENDING_V1\n";

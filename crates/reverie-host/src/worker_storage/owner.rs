@@ -466,3 +466,21 @@ impl WorkerRuntime {
         })
     }
 }
+
+impl LaunchStorage {
+    /// No FD/currentness read: this is only the held ownership variant. Cold
+    /// lifecycle/native work is not inferred clear from a held lease.
+    pub fn storage_owner_status(
+        &self,
+    ) -> reverie_contracts::worker_storage_status::OwnerObservation {
+        use reverie_contracts::worker_storage_status::{
+            OwnerObservation as View, OwnerPhase, RecordedOutcome,
+        };
+        let phase = match self.ownership_kind() {
+            StorageOwnershipKind::HeldLease => OwnerPhase::Held,
+            StorageOwnershipKind::UnleasedLegacy => OwnerPhase::UnleasedLegacy,
+            StorageOwnershipKind::ConsumedUnconfirmed => OwnerPhase::ConsumedUnconfirmed,
+        };
+        View::observed(phase, RecordedOutcome::NotRecorded, None, None)
+    }
+}

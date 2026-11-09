@@ -2,16 +2,34 @@
 //! inventory slot. Old Created/pane aliases cannot forward after this move.
 use super::*;
 use crate::worker_reports::WorkerLaunchConnection;
+mod handoff;
+pub use handoff::StartedStorageHandoff;
 
 #[must_use = "retain both the actual relay and its original Office owner"]
 pub struct StartedRelayTransferred {
     existing: ExistingViewer,
     office: OfficePhone,
     original_request: WorkerRequest,
+    handoff: StartedStorageHandoff,
 }
 impl StartedRelayTransferred {
     pub fn into_parts(self) -> (ExistingViewer, OfficePhone, WorkerRequest) {
         (self.existing, self.office, self.original_request)
+    }
+    pub fn into_handoff_parts(
+        self,
+    ) -> (
+        ExistingViewer,
+        OfficePhone,
+        WorkerRequest,
+        StartedStorageHandoff,
+    ) {
+        (
+            self.existing,
+            self.office,
+            self.original_request,
+            self.handoff,
+        )
     }
 }
 struct TransferInputs {
@@ -111,6 +129,7 @@ impl WorkerRuntime {
             .iter_mut()
             .find(|entry| entry.is_created(&created.workflow.record))
             .ok_or(LaptopError::Refused("WORKER_LAPTOP_REPLAYED"))?;
+        let handoff = StartedStorageHandoff::new(created, record.resources().storage());
         // Every fallible check precedes the move. Both inventories are one
         // slot, so no capacity permit is released or reacquired in between.
         let TransferInputs {
@@ -155,6 +174,7 @@ impl WorkerRuntime {
             },
             office,
             original_request: request,
+            handoff,
         })
     }
 }

@@ -149,6 +149,7 @@ fn service_code(error: &crate::worker_service::WorkerServiceError) -> &'static s
         E::Refused(code) => code,
         E::Io(_) => "WORKER_IMAGE_SERVICE_METADATA_IO",
         E::Engine(e) => e.code(),
+        E::Program(code) => code,
         E::Finalization(primary, _) => service_code(primary),
     }
 }

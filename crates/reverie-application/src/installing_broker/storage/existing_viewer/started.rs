@@ -81,10 +81,11 @@ fn transfer(
             return Err(cause.into());
         }
     };
-    let (viewer, office, _original_request_data) = transferred.into_parts();
+    let (viewer, office, _original_request_data, handoff) = transferred.into_handoff_parts();
     let viewer = Arc::new(viewer);
     if let (Some(entries), Some(index)) = (&mut entries, index) {
         entries[index].owner = EntryOwner::Existing(viewer.clone());
+        entries[index].started_handoff = Some(handoff);
     }
     Ok((viewer, office))
 }

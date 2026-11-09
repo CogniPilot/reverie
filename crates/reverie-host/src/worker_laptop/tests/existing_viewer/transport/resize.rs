@@ -210,16 +210,12 @@ fn unknown_exact_resize_constructor_remains_retained_and_blocks_later_confirmati
     });
     assert!(matches!(event, ViewerRelayEvent::CheckCurrentIntent));
     assert_eq!(starts.load(Ordering::Acquire), before + 1);
-    let error = fixture
-        .runtime()
-        .readonly()
-        .query(
-            crate::engine_metadata::EngineQuery::InventoryIds,
-            end(),
-            &crate::captured_client::CancellationToken::new(),
-        )
-        .unwrap_err();
-    assert_eq!(error.fault(), crate::engine_metadata::EngineFault::Busy);
+    let error = fixture.runtime().readonly().query(
+        crate::engine_metadata::EngineQuery::InventoryIds,
+        Instant::now() + Duration::from_millis(60),
+        &crate::captured_client::CancellationToken::new(),
+    );
+    let calls_after_waiter = starts.load(Ordering::Acquire);
     relay.check_current_intent(&fixture.source).unwrap();
     send(&mut client, b'R', b"[101,36]");
     relay.step().unwrap();
@@ -248,4 +244,8 @@ fn unknown_exact_resize_constructor_remains_retained_and_blocks_later_confirmati
     });
     cleanup_component(&fixture, &existing, connection, hold, &service);
     drop(release);
+    let error = error.unwrap_err();
+    assert_eq!(error.fault(), crate::engine_metadata::EngineFault::Deadline);
+    assert!(!error.is_uncertain(), "metadata waiter owns no native call");
+    assert_eq!(calls_after_waiter, before + 1, "no metadata query replay");
 }

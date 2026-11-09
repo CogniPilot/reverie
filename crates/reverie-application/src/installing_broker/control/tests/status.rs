@@ -4,6 +4,85 @@ use super::*;
 type Response = Result<(u8, serde_json::Value), String>;
 type Observation = (Result<(), String>, Response, String);
 
+#[test]
+fn storage_status_reads_original_registry_without_native_commands() {
+    crate::test_process::owning_case!(
+        storage_status_reads_original_registry_without_native_commands
+    );
+    let (body, response, calls) = observe(br#"{"action":"storage-status"}"#, "");
+    body.unwrap();
+    assert_eq!(
+        response.unwrap(),
+        (
+            b'J',
+            serde_json::json!({"storageStatus":{
+                "version":1,"purpose":"worker-storage-owner-status-v1",
+                "readOnly":true,"completeSnapshot":false,"entries":[]
+            }})
+        )
+    );
+    assert!(
+        calls.is_empty(),
+        "read-only registry projection issued a native command"
+    );
+}
+
+#[test]
+fn storage_status_wire_projects_held_owner_without_paths_principal_or_release() {
+    crate::test_process::owning_case!(
+        storage_status_wire_projects_held_owner_without_paths_principal_or_release
+    );
+    let (root, broker) = recovered::tests::Tree::bootstrap_parts("", "admission", 512, 4096);
+    let sid = ProfileSessionId::parse("bbbbbbbb-bbbb-4ccc-8ddd-eeeeeeeeeeee").unwrap();
+    let company = serde_json::json!({"employees":[{
+        "id":"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee","sessionId":sid.as_str(),
+        "sessionGeneration":3,"owner":"fixture-private-principal",
+        "desiredRunning":true,"onVacation":false
+    }]});
+    std::fs::write(
+        root.join("company.json"),
+        serde_json::to_vec(&company).unwrap(),
+    )
+    .unwrap();
+    let broker = Arc::new(broker);
+    let snapshot = broker.configuration().unwrap();
+    let claim = broker
+        .storage
+        .claim(snapshot.configuration(), &sid)
+        .unwrap();
+    let calls_before = std::fs::read(root.join("calls.txt")).unwrap_or_default();
+    let (mut client, connection) = incoming(&broker, br#"{"action":"storage-status"}"#);
+    let result = broker.handle_control(connection).map_err(|mut failure| {
+        let _ = failure.reconcile();
+        failure.to_string()
+    });
+    let response = reply(&mut client);
+    let calls_after = std::fs::read(root.join("calls.txt")).unwrap_or_default();
+    let metadata = reverie_contracts::storage_identity::decode_metadata(
+        &std::fs::read(root.join("company.json")).unwrap(),
+    )
+    .unwrap();
+    let retained = broker.storage.storage_status(&metadata).unwrap().len();
+    claim
+        .release(Instant::now() + Duration::from_secs(3))
+        .unwrap();
+    finish(root.clone(), broker, client).unwrap();
+    result.unwrap();
+    let (kind, value) = response.unwrap();
+    assert_eq!(kind, b'J');
+    let row = &value["storageStatus"]["entries"][0];
+    assert_eq!(row["sessionId"], sid.as_str());
+    assert_eq!(row["currentSessionGeneration"], "3");
+    assert_eq!(row["ownerKind"], "direct");
+    assert_eq!(row["writerChecked"], true);
+    assert!(row.get("ownerSessionGeneration").is_none());
+    let raw = serde_json::to_string(&value).unwrap();
+    assert!(!raw.contains(root.to_str().unwrap()));
+    assert!(!raw.contains("fixture-private-principal"));
+    assert_eq!(calls_before, calls_after);
+    assert_eq!(retained, 1);
+}
+
 fn reply(client: &mut UnixStream) -> Response {
     let mut header = [0; 5];
     client.read_exact(&mut header).map_err(|e| e.to_string())?;

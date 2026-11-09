@@ -67,6 +67,7 @@ impl From<reverie_host::worker_reports::WorkerReportError> for Cause {
 struct Frame<'a> {
     broker: &'a Arc<InstallingBroker>,
     connection: WorkerServiceConnection,
+    action: Option<WorkerControlRequest>,
     hold: Option<WorkerLaunchHold>,
     admission: Option<FleetStopAdmission>,
     drain: Option<lifecycle::DrainingOwner>,
@@ -102,6 +103,7 @@ impl InstallingBroker {
         let mut owner = Box::new(Frame {
             broker: self,
             connection,
+            action: None,
             hold: None,
             admission: None,
             drain: None,
@@ -144,9 +146,10 @@ impl Frame<'_> {
         let request = WorkerControlRequest::decode(self.connection.request_bytes())
             .map_err(Cause::Refused)?;
         self.hold = Some(self.connection.retain_lifecycle()?);
-        match request {
+        match self.action.insert(request) {
             WorkerControlRequest::Status => return self.status(),
             WorkerControlRequest::ProviderHealth => return self.provider_health(),
+            WorkerControlRequest::StorageStatus => return self.storage_status(),
             WorkerControlRequest::UnsupportedStopAgent => return self.unsupported_stop(),
             WorkerControlRequest::StopLaptops => {}
         }
@@ -329,6 +332,21 @@ impl Frame<'_> {
     }
 }
 impl ControlFailure<'_> {
+    pub(in crate::installing_broker) fn reconcile_known_refusal(&mut self) -> bool {
+        let readonly = self
+            .owner
+            .as_ref()
+            .and_then(|owner| owner.action.as_ref())
+            .is_some_and(|action| {
+                matches!(
+                    action,
+                    WorkerControlRequest::Status
+                        | WorkerControlRequest::ProviderHealth
+                        | WorkerControlRequest::StorageStatus
+                )
+            });
+        (readonly || matches!(self.causes.first(), Some(Cause::Refused(_)))) && self.reconcile()
+    }
     pub(in crate::installing_broker) fn reconcile(&mut self) -> bool {
         let Some(owner) = self.owner.as_mut() else {
             return true;

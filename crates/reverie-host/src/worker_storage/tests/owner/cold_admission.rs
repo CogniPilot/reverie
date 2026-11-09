@@ -29,12 +29,141 @@ fn source(tree: &Tree) -> EffectiveWorkerConfig {
     config(raw)
 }
 fn runtime(tree: &Tree) -> WorkerRuntime {
+    runtime_with_hooks(tree, crate::captured_client::test_hooks::Hooks::default())
+}
+fn runtime_with_hooks(
+    tree: &Tree,
+    hooks: crate::captured_client::test_hooks::Hooks,
+) -> WorkerRuntime {
     let selected = tree.0.join("cold-admission");
     stdfs::hard_link(crate::engine_metadata::tests::program(), &selected).unwrap();
-    let bootstrap =
+    let mut bootstrap =
         EngineBootstrap::from_service(selected.as_os_str(), BTreeMap::new(), tree.0.clone())
             .unwrap();
+    bootstrap.hooks = hooks;
     WorkerRuntime::new(InstalledWorkerEngine::new(bootstrap), &base())
+}
+
+#[test]
+fn cold_read_waits_for_original_sibling_then_completes_fixed_census() {
+    use crate::captured_client::test_hooks::{Gate, Hooks, RunningSibling};
+    let tree = Tree::new();
+    let hooks = Hooks {
+        gate: Some(Arc::new(Gate::default())),
+        ..Hooks::default()
+    };
+    let runtime = runtime_with_hooks(&tree, hooks.clone());
+    let (owner, plan, keys) = start(&tree, &runtime);
+    tree.write(&tree.0.join("ps.out"), b"");
+    let sibling = RunningSibling::start(runtime.readonly().client, hooks.gate.clone().unwrap());
+    let mut admission = Admission::default();
+    let (sibling, result, before) = std::thread::scope(|scope| {
+        let query = scope.spawn(|| admission.observe(&runtime, &owner, &plan, &keys, end()));
+        crate::worker_recovery::tests::wait_for_waiter_or_return(&hooks, &query);
+        let before = hooks.starts.load(Ordering::Acquire);
+        (sibling.release(), query.join().unwrap(), before)
+    });
+    let starts = hooks.starts.load(Ordering::Acquire);
+    owner.close(end()).unwrap();
+    runtime.close(end()).unwrap();
+    sibling.unwrap();
+    result.unwrap();
+    assert_eq!(before, 1);
+    assert_eq!(
+        starts, 3,
+        "sibling plus the original double empty inventory"
+    );
+}
+
+#[test]
+fn cold_read_original_end_expires_without_dispatching_or_settling_sibling() {
+    use crate::captured_client::test_hooks::{Gate, Hooks, RunningSibling};
+    let tree = Tree::new();
+    let hooks = Hooks {
+        gate: Some(Arc::new(Gate::default())),
+        ..Hooks::default()
+    };
+    let runtime = runtime_with_hooks(&tree, hooks.clone());
+    let (owner, plan, keys) = start(&tree, &runtime);
+    tree.write(&tree.0.join("ps.out"), b"");
+    let sibling = RunningSibling::start(runtime.readonly().client, hooks.gate.clone().unwrap());
+    let result = Admission::default().observe(
+        &runtime,
+        &owner,
+        &plan,
+        &keys,
+        Instant::now() + Duration::from_millis(60),
+    );
+    let starts = hooks.starts.load(Ordering::Acquire);
+    let sibling = sibling.release();
+    owner.close(end()).unwrap();
+    runtime.close(end()).unwrap();
+    sibling.unwrap();
+    assert!(
+        matches!(result, Err(StorageOwnerError::Engine(error)) if error.fault() == crate::engine_metadata::EngineFault::Deadline)
+    );
+    assert_eq!(starts, 1);
+}
+
+#[test]
+fn cold_read_midwait_service_stop_cancels_without_dispatch_or_sibling_settlement() {
+    use crate::captured_client::test_hooks::{Gate, Hooks, RunningSibling};
+    let tree = Tree::new();
+    let hooks = Hooks {
+        gate: Some(Arc::new(Gate::default())),
+        ..Hooks::default()
+    };
+    let runtime = runtime_with_hooks(&tree, hooks.clone());
+    let (owner, plan, keys) = start(&tree, &runtime);
+    tree.write(&tree.0.join("ps.out"), b"");
+    let sibling = RunningSibling::start(runtime.readonly().client, hooks.gate.clone().unwrap());
+    let mut admission = Admission::default();
+    let result = std::thread::scope(|scope| {
+        let query = scope.spawn(|| admission.observe(&runtime, &owner, &plan, &keys, end()));
+        crate::worker_recovery::tests::wait_for_waiter_or_return(&hooks, &query);
+        runtime.request_stop();
+        query.join().unwrap()
+    });
+    let starts = hooks.starts.load(Ordering::Acquire);
+    let sibling = sibling.release();
+    owner.close(end()).unwrap();
+    runtime.close(end()).unwrap();
+    sibling.unwrap();
+    assert!(
+        matches!(result, Err(StorageOwnerError::Engine(error)) if error.fault() == crate::engine_metadata::EngineFault::Cancelled)
+    );
+    assert_eq!(starts, 1);
+}
+
+#[test]
+fn cold_read_started_unknown_keeps_original_admission_and_cannot_requery() {
+    const CASE: &str = "worker_storage::tests::owner::cold_admission::cold_read_started_unknown_keeps_original_admission_and_cannot_requery";
+    if crate::test_process::isolate_case(CASE) {
+        return;
+    }
+    let tree = Tree::new();
+    let hooks = crate::captured_client::test_hooks::Hooks::default();
+    let runtime = runtime_with_hooks(&tree, hooks.clone());
+    let (owner, plan, keys) = start(&tree, &runtime);
+    tree.write(&tree.0.join("ps.out"), b"");
+    hooks.close_failed.store(true, Ordering::Release);
+    let mut admission = Admission::default();
+    let result = admission.observe(&runtime, &owner, &plan, &keys, end());
+    let second = admission.observe(&runtime, &owner, &plan, &keys, end());
+    let starts = hooks.starts.load(Ordering::Acquire);
+    let closed_owner = owner.close(end());
+    let closed_runtime = runtime.close(end());
+    assert!(matches!(result, Err(StorageOwnerError::Engine(error)) if error.is_uncertain()));
+    assert_eq!(second.unwrap_err().code(), "WORKER_COLD_CLIENT_RETAINED");
+    assert_eq!(starts, 1);
+    assert!(
+        closed_owner.is_err(),
+        "actual shared-client uncertainty retains the storage lease too"
+    );
+    assert!(
+        closed_runtime.is_err(),
+        "consumed native close cannot become settled"
+    );
 }
 fn start(
     tree: &Tree,

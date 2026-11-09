@@ -33,3 +33,17 @@ pub(crate) fn restore_previous_service_unit(source: &File, destination: &File) -
         c"reverie-worker-broker.service",
     )
 }
+pub(crate) fn retain_upgrade_package(source: &File, destination: &File) -> io::Result<()> {
+    super::rename::noreplace(
+        source,
+        c"native-package",
+        destination,
+        c"previous-native-package",
+    )
+}
+pub(crate) fn retain_upgrade_running(source: &File, destination: &File) -> io::Result<()> {
+    super::rename::noreplace(source, c"native-running", destination, c"native-running")
+}
+pub(crate) fn retain_upgrade_failure(source: &File, destination: &File) -> io::Result<()> {
+    super::rename::noreplace(source, c"native-failure", destination, c"native-failure")
+}

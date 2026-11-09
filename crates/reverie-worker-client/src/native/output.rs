@@ -22,7 +22,7 @@ impl Output {
             if (before.dev(), before.ino(), before.mode())
                 != (after.dev(), after.ino(), after.mode())
             {
-                return Err(Error("Output descriptor changed"));
+                return Err(Error::new("Output descriptor changed"));
             }
             Some(file)
         } else {
@@ -39,13 +39,13 @@ impl Output {
     pub(crate) fn write(&self, mut bytes: &[u8]) -> Result<()> {
         while !bytes.is_empty() {
             if stopped().is_some() {
-                return Err(Error("Worker client interrupted"));
+                return Err(Error::new("Worker client interrupted"));
             }
             if !self.writable()? {
                 continue;
             }
             if stopped().is_some() {
-                return Err(Error("Worker client interrupted"));
+                return Err(Error::new("Worker client interrupted"));
             }
             let count = self.write_chunk(&bytes[..bytes.len().min(65_536)])?;
             bytes = &bytes[count..];
@@ -66,7 +66,7 @@ impl Output {
         if std::io::Error::last_os_error().kind() == std::io::ErrorKind::Interrupted {
             return Ok(false);
         }
-        Err(Error("OSError"))
+        Err(Error::new("OSError"))
     }
     fn write_chunk(&self, bytes: &[u8]) -> Result<usize> {
         // SAFETY: bytes remain readable for their exact length; output is live.
@@ -94,7 +94,7 @@ impl Output {
         {
             return Ok(0);
         }
-        Err(Error("Output unavailable"))
+        Err(Error::new("Output unavailable"))
     }
     pub(crate) fn finish<T>(self, result: Result<T>) -> Result<T> {
         if let Some(file) = self.file {

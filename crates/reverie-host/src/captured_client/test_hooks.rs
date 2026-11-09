@@ -31,6 +31,7 @@ pub(crate) struct Hooks {
     pub registration_close_failed: Arc<AtomicBool>,
     pub result_gate: Option<Arc<Gate>>,
     pub handoff_contended: Arc<AtomicBool>,
+    pub admission_waited: Arc<AtomicBool>,
 }
 #[derive(Default)]
 pub(crate) struct Gate {
@@ -82,6 +83,51 @@ impl Hooks {
             Err(std::io::Error::from_raw_os_error(libc::EIO))
         } else {
             value
+        }
+    }
+}
+
+/// An actual admitted sibling on the same private capture. Test verdicts run
+/// only after releasing and joining it; no fake Busy/error is supplied.
+pub(crate) struct RunningSibling {
+    gate: Arc<Gate>,
+    thread: Option<std::thread::JoinHandle<super::Result<super::CapturedOutput>>>,
+}
+impl RunningSibling {
+    pub(crate) fn start(client: Arc<super::CapturedClient>, gate: Arc<Gate>) -> Self {
+        let thread = std::thread::spawn(move || {
+            client.run(
+                Vec::new(),
+                std::time::Instant::now() + Duration::from_secs(5),
+                &super::CancellationToken::new(),
+                super::Policy {
+                    maximum: Duration::from_secs(5),
+                    maximum_output: 4 * 1024 * 1024,
+                    successful_exit: false,
+                },
+            )
+        });
+        let owned = Self {
+            gate,
+            thread: Some(thread),
+        };
+        let end = std::time::Instant::now() + Duration::from_secs(3);
+        while !owned.gate.entered.load(Ordering::Acquire) {
+            assert!(std::time::Instant::now() < end, "actual sibling admitted");
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        owned
+    }
+    pub(crate) fn release(mut self) -> super::Result<super::CapturedOutput> {
+        self.gate.released.store(true, Ordering::Release);
+        self.thread.take().unwrap().join().unwrap()
+    }
+}
+impl Drop for RunningSibling {
+    fn drop(&mut self) {
+        self.gate.released.store(true, Ordering::Release);
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
         }
     }
 }

@@ -75,6 +75,8 @@ pub mod worker_provider_health;
 pub mod worker_recovery;
 pub mod worker_resume;
 pub mod worker_schema;
+pub mod worker_service;
 pub mod worker_source_stop;
 pub mod worker_storage;
+pub mod worker_storage_status;
 pub mod worker_validation;

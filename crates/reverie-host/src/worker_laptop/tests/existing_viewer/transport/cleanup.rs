@@ -26,13 +26,12 @@ fn actual_pending_resize_query_cannot_hide_the_owned_native_viewer_during_cleanu
     let gate = Arc::new(Gate::default());
     gate.released.store(true, Ordering::Release);
     let _release = Release(gate.clone());
-    let fixture = Fixture::employee_with_hooks(
-        "created-viewer-group",
-        Hooks {
-            gate: Some(gate.clone()),
-            ..Hooks::default()
-        },
-    );
+    let hooks = Hooks {
+        gate: Some(gate.clone()),
+        ..Hooks::default()
+    };
+    let starts = hooks.starts.clone();
+    let fixture = Fixture::employee_with_hooks("created-viewer-group", hooks);
     let service = Arc::new(WorkerReportService::from_runtime(fixture.runtime()));
     eprintln!(
         "owned fixed fixture executable: {}; root: {}",
@@ -81,7 +80,9 @@ fn actual_pending_resize_query_cannot_hide_the_owned_native_viewer_during_cleanu
     assert!(matches!(event, ViewerRelayEvent::CheckCurrentIntent));
     drop(relay);
     assert!(job.has_pending_native_work());
-    assert_metadata_busy(&fixture);
+    let calls_before_waiter = starts.load(Ordering::Acquire);
+    let waiter = metadata_waiter(&fixture);
+    let calls_after_waiter = starts.load(Ordering::Acquire);
     let result = fixture
         .runtime()
         .close_laptop_viewer(&viewer, Instant::now() + Duration::from_millis(5100));
@@ -107,6 +108,7 @@ fn actual_pending_resize_query_cannot_hide_the_owned_native_viewer_during_cleanu
         native_counts,
     );
     // Decisive RED/GREEN assertions follow actual native/query finalization.
+    assert_metadata_waiter(waiter, calls_before_waiter, calls_after_waiter);
     assert!(
         !native_still_running,
         "pending resize settlement hid the real viewer from native cleanup"
@@ -116,17 +118,30 @@ fn actual_pending_resize_query_cannot_hide_the_owned_native_viewer_during_cleanu
         "one pinned native group decision despite retained query uncertainty"
     );
 }
-fn assert_metadata_busy(fixture: &Fixture) {
-    let busy = fixture
-        .runtime()
-        .readonly()
-        .query(
-            crate::engine_metadata::EngineQuery::InventoryIds,
-            end(),
-            &crate::captured_client::CancellationToken::new(),
-        )
-        .unwrap_err();
-    assert_eq!(busy.fault(), crate::engine_metadata::EngineFault::Busy);
+fn assert_metadata_waiter(
+    waiter: std::result::Result<String, crate::engine_metadata::EngineError>,
+    calls_before: usize,
+    calls_after: usize,
+) {
+    let waiter = waiter.unwrap_err();
+    assert_eq!(
+        waiter.fault(),
+        crate::engine_metadata::EngineFault::Deadline
+    );
+    assert!(
+        !waiter.is_uncertain(),
+        "metadata waiter owns no native call"
+    );
+    assert_eq!(calls_before, calls_after, "no query replay");
+}
+fn metadata_waiter(
+    fixture: &Fixture,
+) -> std::result::Result<String, crate::engine_metadata::EngineError> {
+    fixture.runtime().readonly().query(
+        crate::engine_metadata::EngineQuery::InventoryIds,
+        Instant::now() + Duration::from_millis(60),
+        &crate::captured_client::CancellationToken::new(),
+    )
 }
 fn finish_fixture(
     fixture: Fixture,

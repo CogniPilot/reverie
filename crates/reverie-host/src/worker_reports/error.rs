@@ -1,6 +1,7 @@
 #[derive(Debug)]
 pub enum WorkerReportError {
     Stopping,
+    Capacity,
     Peer,
     ChannelCapability,
     ChannelClosePending,
@@ -34,6 +35,7 @@ impl WorkerReportError {
     pub fn code(&self) -> &'static str {
         match self {
             Self::Stopping => "Worker broker is stopping",
+            Self::Capacity => "WORKER_BROKER_CAPACITY",
             Self::Peer => "Worker peer identity is not authorized",
             Self::ChannelCapability => "WORKER_NATIVE_CHANNEL_REQUIRES_SO_PEERPIDFD",
             Self::ChannelClosePending => "WORKER_NATIVE_CHANNEL_CLOSE_PENDING",

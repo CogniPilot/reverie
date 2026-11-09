@@ -476,3 +476,44 @@ fn actual_existing_io_holds_same_record_against_close_and_resource_return() {
         .unwrap();
     restore(&fixture, &existing).close(end()).unwrap();
 }
+
+#[test]
+fn storage_status_observes_same_existing_record_and_contention_without_native_calls() {
+    if isolated("storage_status_observes_same_existing_record_and_contention_without_native_calls")
+    {
+        return;
+    }
+    use reverie_contracts::worker_storage_status::{
+        CheckPhase, OwnerObservation as View, OwnerPhase, RecordedOutcome,
+    };
+    let fixture = Fixture::employee("created-viewer-echo");
+    let existing = retain(&fixture, originals(&fixture));
+    let trace = fs::read(fixture.root.join("trace")).unwrap();
+    let first = existing.storage_owner_status();
+    let held = existing.reference.record.try_lock().unwrap();
+    let busy = existing.storage_owner_status();
+    drop(held);
+    let second = existing.storage_owner_status();
+    let unchanged = fs::read(fixture.root.join("trace")).unwrap() == trace;
+    fixture
+        .runtime()
+        .close_existing_viewer(&existing, end())
+        .unwrap();
+    let closed = existing.storage_owner_status();
+    restore(&fixture, &existing).close(end()).unwrap();
+    assert_eq!(
+        first,
+        View::observed(OwnerPhase::Held, RecordedOutcome::NotRecorded, None, None)
+            .with_final_check(CheckPhase::Unattempted)
+    );
+    assert_eq!(first, second);
+    assert_eq!(busy, View::Busy);
+    assert!(unchanged);
+    assert!(matches!(
+        closed,
+        View::Observed {
+            phase: OwnerPhase::Closed,
+            ..
+        }
+    ));
+}

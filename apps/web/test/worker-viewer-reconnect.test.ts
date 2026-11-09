@@ -12,6 +12,8 @@ import type { CompanyEmployee } from '../src/company-types.js';
 import { WorkerViewerReconnect, registerWorkerViewerReconnect } from '../src/worker-viewer-reconnect.js';
 import { WebServer } from '../src/web/server.js';
 import { SseEvent } from '../src/web/sse-events.js';
+import { PlanMoves, type PlanMovePort, type PlanMoveRecord } from '../src/plan-move.js';
+import { planMoveExecutor, type PlanMoveRuntime } from '../src/plan-move-runtime.js';
 import { createHarness, member, room } from './helpers/chat-app-harness.mjs';
 
 const cleanups: Array<() => Promise<unknown>> = [];
@@ -68,6 +70,41 @@ it('repairs only the saved viewer with an atomic attach-only respawn and fresh l
   expect(hooks).not.toHaveBeenCalled(); expect(f.mux.sendInput).not.toHaveBeenCalled();
   expect(f.deps.publish).toHaveBeenCalledOnce(); expect(f.release).toHaveBeenCalledOnce();
 });
+
+it.each(['success', 'account-drift', 'proof-expiry', 'readiness-failure'] as const)(
+  'retained ordinary destination repair: %s never unlocks or completes its journal', async failure => {
+    const f = await fixture();
+    const record: PlanMoveRecord = { id: 'existing-destination', employeeId: f.employee.id, name: 'Synthetic expert',
+      oldSession: 'original-source', newSession: f.session.id, fromAccount: 'before', toAccount: 'current',
+      phase: 'recovery-required', at: 1, sourceStopRequested: true, sourceCleanupVerified: true };
+    const save = vi.fn(), request = vi.fn(), cleanup = vi.fn(); let account = 'current';
+    const runtime = { company: f.company, sessions: new Map([[f.session.id, f.session]]), mux: f.mux,
+      plans: { account: vi.fn(async () => ({ id: 'current', provider: 'openai', profileId: 'current' })),
+        allocations: vi.fn(async () => ({ accounts: [{ id: account, sessionIds: [f.session.id] }] })) },
+      chat: { rooms: () => [] }, request, cleanup, authorized: () => true } as unknown as PlanMoveRuntime;
+    const moves = new PlanMoves({ load: async () => [{ ...record }], save } as unknown as PlanMovePort);
+    const originalRecord = await moves.get(record.id);
+    const executor = planMoveExecutor(runtime);
+    f.deps.moveGuard = vi.fn(async () => moves.viewerReconnectGuard(f.employee.id, { sessionId: f.session.id, executor }));
+    const original = f.mux.respawnPane.getMockImplementation()!;
+    f.mux.respawnPane.mockImplementation(async (...args) => {
+      expect((await moves.get(record.id))?.phase).toBe('checking');
+      await expect(moves.resolve(record.id, { oldSession: record.oldSession, newSession: f.session.id, toAccount: 'current' }))
+        .rejects.toThrow('still active');
+      if (failure === 'account-drift') account = 'foreign';
+      if (failure === 'proof-expiry') f.health(false);
+      return failure === 'readiness-failure' ? null as never : original(...args);
+    });
+    expect(await f.controller.reconnect(f.employee.id, f.expected, undefined)).toBe(failure === 'success' ? 'connected' :
+      ['account-drift', 'proof-expiry'].includes(failure) ? 'changed' : 'unavailable');
+    expect(f.mux.respawnPane).toHaveBeenCalledOnce();
+    expect(f.mux.respawnPane.mock.calls[0][0]).toMatchObject({ workerAttachOnly: true, onlyIfDead: true });
+    expect(await moves.get(record.id)).toEqual(originalRecord);
+    if (failure !== 'success') expect(f.session.canAcceptChatInput()).toBe(false);
+    await expect(moves.assertAvailable(f.employee.id)).rejects.toThrow('already has a move');
+    expect(save).not.toHaveBeenCalled(); expect(request).not.toHaveBeenCalled(); expect(cleanup).not.toHaveBeenCalled();
+    expect(f.mux.sendInput).not.toHaveBeenCalled();
+  });
 
 it('reattaches a missing website PTY through the canonical client factory without launching a provider', async () => {
   const f = await fixture();Object.assign(f.session,{ptyProcess:null,_pid:null,_viewerClientLost:true});

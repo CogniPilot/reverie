@@ -30,6 +30,12 @@ fn legacy(args: &[String], cid: &str, name: &str) {
             fs::write("metadata-entered", b"actual unrelated fixed native query").unwrap();
             wait("release-metadata");
         }
+        ["ps", "--filter", "label=reverie.worker=test", "--format", "{{.Names}}"] => {
+            if Path::new("census-known-refusal").exists() {
+                std::process::exit(7);
+            }
+            output("running-names");
+        }
         ["image", "inspect", target] if *target == format!("sha256:{}", "a".repeat(64)) => {
             print!("[{{\"Config\":{{\"Labels\":{{\"reverie.worker.nix-store\":\"0\"}}}}}}]");
         }

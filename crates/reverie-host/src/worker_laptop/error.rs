@@ -80,6 +80,8 @@ impl std::error::Error for CreateTelemetryFailure {}
 #[derive(Debug)]
 pub enum LaptopError {
     Refused(&'static str),
+    /// Only a nonblocking completion read encountered an actually held mutex.
+    CreatedReceiptPending,
     Plan(CreateObservationError),
     ExistingObservation(crate::worker_launch::ExistingObservationError),
     OrdinaryStop(crate::worker_source_stop::SourceStopError),
@@ -148,6 +150,7 @@ impl LaptopError {
     pub fn code(&self) -> &'static str {
         match self {
             Self::Refused(code) => code,
+            Self::CreatedReceiptPending => "WORKER_CREATED_RECEIPT_PENDING",
             Self::ControllerPool(error) => error.code,
             Self::Plan(_) => "WORKER_LAPTOP_PLAN",
             Self::ExistingObservation(_) => "WORKER_EXISTING_VIEWER_OBSERVATION",
@@ -187,7 +190,7 @@ impl LaptopError {
 impl std::error::Error for LaptopError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            Self::Refused(_) => None,
+            Self::Refused(_) | Self::CreatedReceiptPending => None,
             Self::ControllerPool(error) => Some(error),
             Self::Plan(error) => Some(error),
             Self::ExistingObservation(error) => Some(error),

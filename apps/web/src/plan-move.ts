@@ -107,6 +107,8 @@ export interface PlanMovePort {
   audit(record: PlanMoveRecord): Promise<void>;
   /** Read-only native inspection; returned fence rechecks live owner/bindings immediately before journal commit. */
   verifyRecovery?(record: Readonly<PlanMoveRecord>): Promise<() => void>;
+  /** Same current destination/account/source checks, without requiring its disposable viewer alive. */
+  verifyViewerRepair?(record: Readonly<PlanMoveRecord>): Promise<() => void>;
   recoveryPending?(record: Readonly<PlanMoveRecord>): Promise<void>;
   recoveryConfirmed?(record: Readonly<PlanMoveRecord>): Promise<void>;
   /** Fixed server actor only. Called after the new SID and intent are durable.
@@ -126,6 +128,12 @@ export interface PlanMovePort {
 }
 
 export type PlanMoveExecutor = Omit<PlanMovePort, 'load' | 'save' | 'recoveryPending' | 'recoveryConfirmed'>;
+
+export interface PlanViewerReconnectLease {
+  (): boolean;
+  revalidate(): Promise<boolean>;
+  close(): void;
+}
 
 /** Names the hold a refusal hit. An id is given only to its own owner; other holds are typed without one. */
 export type PlanMoveBlocker =
@@ -196,10 +204,47 @@ export class PlanMoves {
     return { ...record };
   }
 
-  /** Read-only flight guard shared with non-destructive viewer reconnection. */
-  async viewerReconnectGuard(employeeId: string): Promise<() => boolean> {
+  /** A viewer flight never completes/unlocks a move or permits provider creation. */
+  async viewerReconnectGuard(employeeId: string, destination?: { owner?: string; sessionId: string;
+    executor: Pick<PlanMoveExecutor, 'verifyViewerRepair'> }): Promise<PlanViewerReconnectLease> {
     await this.init();
-    return () => !this.locked.has(employeeId);
+    let closed = false;
+    const simple = (check: () => boolean) => Object.assign(() => !closed && check(), {
+      revalidate: async () => !closed && check(), close: () => { closed = true; },
+    });
+    if (!this.locked.has(employeeId)) return simple(() => !this.locked.has(employeeId));
+    const unresolved = [...this.records.values()].filter(record => record.employeeId === employeeId &&
+      !['completed', 'failed'].includes(record.phase));
+    const record = unresolved[0];
+    if (!destination?.executor.verifyViewerRepair || unresolved.length !== 1 || !record ||
+        record.owner !== destination.owner || record.phase !== 'recovery-required' || record.resourceIntent ||
+        !record.newSession || record.newSession === record.oldSession || record.newSession !== destination.sessionId ||
+        record.sourceStopRequested !== true || record.sourceCleanupVerified !== true ||
+        this.intents.has(record.id) || this.aborts.has(record.id)) return simple(() => false);
+    const fingerprint = JSON.stringify(record), id = record.id;
+    const journalCurrent = () => !closed && this.intents.has(id) && !this.aborts.has(id) &&
+      this.records.get(id) === record && JSON.stringify(record) === fingerprint && this.locked.has(employeeId) &&
+      [...this.records.values()].filter(row => row.employeeId === employeeId && !['completed', 'failed'].includes(row.phase)).length === 1;
+    // Existing transaction single-flight excludes adoption while the original journal remains held.
+    this.intents.add(id);
+    let runtimeCurrent: () => void, invalid = false;
+    const close = () => { if (!closed) { closed = true; this.intents.delete(id); } };
+    const current = () => {
+      if (invalid || !journalCurrent()) return false;
+      try { runtimeCurrent(); return true; } catch { return false; }
+    };
+    try {
+      runtimeCurrent = await destination.executor.verifyViewerRepair({ ...record });
+      if (!current()) { close(); return simple(() => false); }
+    } catch { close(); return simple(() => false); }
+    return Object.assign(current, { close, revalidate: async () => {
+      if (!current()) return false;
+      try {
+        const fresh = await destination.executor.verifyViewerRepair!({ ...record });
+        if (!current()) return false;
+        fresh(); runtimeCurrent = fresh; return current();
+      } catch { invalid = true; return false; }
+    } });
   }
 
   async get(id: string, owner?: string): Promise<PlanMoveRecord | undefined> {

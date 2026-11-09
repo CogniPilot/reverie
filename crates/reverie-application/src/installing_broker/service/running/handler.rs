@@ -221,7 +221,14 @@ fn service<'a>(
     match connection.purpose() {
         WorkerServicePurpose::Control => match broker.handle_control(connection) {
             Ok(()) => None,
-            Err(owner) => Some(Retained::Control(owner)),
+            Err(mut owner) => {
+                if owner.reconcile_known_refusal() {
+                    eprintln!("{owner}");
+                    None
+                } else {
+                    Some(Retained::Control(owner))
+                }
+            }
         },
         WorkerServicePurpose::ChatImages => match broker.handle_chat_images(connection) {
             Ok(closed) => {

@@ -34,6 +34,9 @@ pub(crate) struct Error {
     pub(crate) may_have_started: bool,
 }
 impl Error {
+    pub(crate) fn is_admission_busy(&self) -> bool {
+        self.fault == Fault::Busy && self.uncertain && !self.may_have_started
+    }
     pub(super) fn new(fault: Fault) -> Self {
         Self {
             fault,

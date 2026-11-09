@@ -50,7 +50,7 @@ impl State {
         self.files.push(f);
         Ok(self.files.len() - 1)
     }
-    fn exclusive(&mut self, path: &Path, bytes: &[u8]) -> Result<()> {
+    pub(super) fn exclusive(&mut self, path: &Path, bytes: &[u8]) -> Result<()> {
         let file = OpenOptions::new()
             .write(true)
             .create_new(true)

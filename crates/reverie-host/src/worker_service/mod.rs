@@ -22,6 +22,7 @@ mod manager;
 mod publication;
 mod rollback;
 mod stopped;
+mod upgrade;
 pub use failure_fence::{assert_no_service_failure, record_service_failure};
 use manager::ObservedUnit;
 use publication::environment;
@@ -39,12 +40,14 @@ pub enum WorkerServiceAction {
     Stop,
     Status,
     Rollback { start_previous: bool },
+    Upgrade { force_stopped: bool },
 }
 #[derive(Debug)]
 pub enum WorkerServiceError {
     Refused(&'static str),
     Io(std::io::Error),
     Engine(EngineError),
+    Program(&'static str),
     Finalization(Box<Self>, Box<Self>),
 }
 impl std::fmt::Display for WorkerServiceError {
@@ -53,6 +56,7 @@ impl std::fmt::Display for WorkerServiceError {
             Self::Refused(code) => f.write_str(code),
             Self::Io(e) => write!(f, "NATIVE_SERVICE_IO: {e}"),
             Self::Engine(e) => write!(f, "NATIVE_SERVICE_COMMAND: {e}"),
+            Self::Program(code) => write!(f, "NATIVE_SERVICE_PROGRAM: {code}"),
             Self::Finalization(a, b) => write!(f, "{a}; {b}"),
         }
     }
@@ -91,6 +95,11 @@ struct State {
     uncertain: bool,
     marker: bool,
     pending_identity: Option<(u64, u64)>,
+    upgrade_bus: Option<stopped::bus::BusReader>,
+    upgrade_inputs: crate::website_facts::ImmutableInputObserver,
+    upgrade_failure: Option<Box<crate::website_facts::WebsiteFactsError>>,
+    upgrade_close_failure: Option<Box<crate::website_facts::WebsiteFactsError>>,
+    checked_generation: Option<upgrade::CheckedNativeGeneration>,
 }
 /// Contains the original partial installation or command attempt on refusal.
 pub struct WorkerServiceFailure {
@@ -109,10 +118,27 @@ impl std::fmt::Display for WorkerServiceFailure {
         self.primary.fmt(f)
     }
 }
-impl std::error::Error for WorkerServiceFailure {}
+impl std::error::Error for WorkerServiceFailure {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        self.program_error()
+            .or_else(|| self.program_close_error())
+            .map(|e| e as &(dyn std::error::Error + 'static))
+            .or(Some(&self.primary))
+    }
+}
 impl WorkerServiceFailure {
     pub fn primary_error(&self) -> &WorkerServiceError {
         &self.primary
+    }
+    pub fn program_error(&self) -> Option<&crate::website_facts::WebsiteFactsError> {
+        self.owner
+            .as_ref()
+            .and_then(|o| o.upgrade_failure.as_deref())
+    }
+    pub fn program_close_error(&self) -> Option<&crate::website_facts::WebsiteFactsError> {
+        self.owner
+            .as_ref()
+            .and_then(|o| o.upgrade_close_failure.as_deref())
     }
     /// Settle only original admitted native work and opened files. A durable
     /// unknown installation marker is never cleared by local component close.
@@ -221,19 +247,35 @@ impl State {
             last: None,
             end: end.min(
                 Instant::now()
-                    + Duration::from_secs(if matches!(action, WorkerServiceAction::Stop) {
-                        45
-                    } else {
-                        20
+                    + Duration::from_secs(match action {
+                        WorkerServiceAction::Upgrade { .. } => 90,
+                        WorkerServiceAction::Stop => 45,
+                        _ => 20,
                     }),
             ),
             attempted: false,
             uncertain: false,
             marker: false,
             pending_identity: None,
+            upgrade_bus: None,
+            upgrade_inputs: Default::default(),
+            upgrade_failure: None,
+            upgrade_close_failure: None,
+            checked_generation: None,
         })
     }
     fn run(&mut self, action: WorkerServiceAction) -> Result<String> {
+        match action {
+            WorkerServiceAction::Upgrade { .. } => self.prepare_recorded_generation()?,
+            WorkerServiceAction::Status => {
+                match fs::symlink_metadata(self.folder().join("native-package")) {
+                    Ok(_) => self.prepare_recorded_generation()?,
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(error) => return Err(error.into()),
+                }
+            }
+            _ => {}
+        }
         let observed = self.observe()?;
         if matches!(action, WorkerServiceAction::Status) {
             return Ok(format!(
@@ -245,6 +287,9 @@ impl State {
         }
         match action {
             WorkerServiceAction::Install => self.install(observed)?,
+            WorkerServiceAction::Upgrade { force_stopped } => {
+                self.upgrade(observed, force_stopped)?
+            }
             WorkerServiceAction::Rollback { start_previous } => {
                 self.rollback(observed, start_previous)?
             }
@@ -295,6 +340,19 @@ impl State {
             .client
             .settle_owned(self.end)
             .map_err(|error| WorkerServiceError::Engine(error.into()));
+        if let Some(bus) = &mut self.upgrade_bus {
+            result = finalized(result, bus.close());
+        }
+        let input_close = if let Some(error) = &self.upgrade_close_failure {
+            Err(WorkerServiceError::Program(error.code()))
+        } else {
+            self.upgrade_inputs.assert_finalized().map_err(|error| {
+                let code = error.code();
+                self.upgrade_close_failure = Some(Box::new(error));
+                WorkerServiceError::Program(code)
+            })
+        };
+        result = finalized(result, input_close);
         if let Some(call) = self.call.as_ref() {
             let closed = self
                 .client
@@ -398,5 +456,6 @@ fn pending_bytes(action: &WorkerServiceAction) -> &'static [u8] {
         WorkerServiceAction::Stop => b"NATIVE_SERVICE_STOP_PENDING_V1\n",
         WorkerServiceAction::Status => b"NATIVE_SERVICE_READONLY_V1\n",
         WorkerServiceAction::Rollback { .. } => b"NATIVE_SERVICE_ROLLBACK_PENDING_V1\n",
+        WorkerServiceAction::Upgrade { .. } => b"NATIVE_SERVICE_UPGRADE_PENDING_V1\n",
     }
 }

@@ -240,6 +240,7 @@ pkgs.dockerTools.buildLayeredImage {
       "NIX_SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt" ]
       # Laptops: Reverie's own hooks run the image's CLI, so an older `reverie` earlier on PATH (a home
       # install from before a release) cannot answer for them.
+      ++ pkgs.lib.optionals (!worker && ownerTerminalWebsite == null) [ "REVERIE_NATIVE_FRONT=1" ]
       ++ pkgs.lib.optionals worker [ "REVERIE_CLI=${reverie}/bin/reverie" ]
       ++ pkgs.lib.optionals worker [ "NIX_REMOTE=local" "NIX_PATH=nixpkgs=flake:nixpkgs"
         "TZDIR=${pkgs.tzdata}/share/zoneinfo" ]

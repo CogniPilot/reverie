@@ -158,3 +158,52 @@ impl Drop for DirectStorageFinalizer {
         }
     }
 }
+
+impl StartedStorageHandoff {
+    pub fn pending_direct_finalizer(
+        &self,
+        runtime: &WorkerRuntime,
+        finalizer: &DirectStorageFinalizer,
+    ) -> Result<()> {
+        let State::Held(held) = &finalizer.state else {
+            return Err(LaptopError::Refused("WORKER_DIRECT_STORAGE_CONSUMED"));
+        };
+        self.assert_storage(runtime, &held.storage)?;
+        if let Observation::Failed(error) = &held.observation {
+            return Err(LaptopError::Recorded(error.clone()));
+        }
+        Ok(())
+    }
+}
+
+impl DirectStorageFinalizer {
+    /// Pure local state, not a fresh storage or process observation.
+    pub fn storage_owner_status(
+        &self,
+    ) -> reverie_contracts::worker_storage_status::OwnerObservation {
+        use reverie_contracts::worker_storage_status::{
+            CheckPhase, OwnerObservation as View, OwnerPhase, RecordedOutcome,
+        };
+        let State::Held(held) = &self.state else {
+            return View::observed(
+                OwnerPhase::Consumed,
+                RecordedOutcome::NotRecorded,
+                None,
+                None,
+            );
+        };
+        let (check, outcome) = match &held.observation {
+            Observation::Unattempted => (CheckPhase::Unattempted, RecordedOutcome::NotRecorded),
+            Observation::Reading => (CheckPhase::Reading, RecordedOutcome::NotRecorded),
+            Observation::Known { .. } => (CheckPhase::Known, RecordedOutcome::SuccessRecorded),
+            Observation::Failed(_) => (CheckPhase::Failed, RecordedOutcome::FailureRecorded),
+        };
+        View::observed(
+            OwnerPhase::Held,
+            outcome,
+            held.pending.is_some().then_some(true),
+            None,
+        )
+        .with_final_check(check)
+    }
+}

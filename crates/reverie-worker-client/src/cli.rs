@@ -56,6 +56,8 @@ pub(crate) struct Args {
 enum Control {
     Status,
     ProviderHealth,
+    /// Observe original live storage-owner kinds/phases; never reconcile or retry.
+    StorageStatus,
     StopLaptops,
     Shutdown,
     RestartWebsite,
@@ -66,9 +68,10 @@ enum Control {
 impl Control {
     fn name(self) -> &'static str {
         match self {
-            Self::Status => "status",
-            Self::ProviderHealth => "provider-health",
-            Self::StopLaptops => "stop-laptops",
+            Self::Status => crate::control::Action::Status.name(),
+            Self::ProviderHealth => crate::control::Action::ProviderHealth.name(),
+            Self::StorageStatus => crate::control::Action::StorageStatus.name(),
+            Self::StopLaptops => crate::control::Action::StopLaptops.name(),
             Self::Shutdown => "shutdown",
             Self::RestartWebsite => "restart-website",
             Self::ReloadResources => "reload-resources",
@@ -118,7 +121,7 @@ impl Args {
                 || self.not_after.is_some()
                 || self.fence.is_some()
             {
-                return Err(Error(
+                return Err(Error::new(
                     "Goal custody client accepts no operation or identity inputs",
                 ));
             }
@@ -133,41 +136,49 @@ impl Args {
                 || self.not_after.is_some()
                 || self.fence.is_some()
             {
-                return Err(Error("TELEMETRY_REPORT_REFUSED"));
+                return Err(Error::new("TELEMETRY_REPORT_REFUSED"));
             }
             crate::report::selected(&self.employee_id)?;
             return Ok(Operation::Report(self.employee_id));
         }
         if !self.employee_id.is_empty() {
-            return Err(Error("TELEMETRY_REPORT_REFUSED"));
+            return Err(Error::new("TELEMETRY_REPORT_REFUSED"));
         }
         if let Some(control) = self.control {
             return self.control(control);
         }
         if self.not_after.is_some() || self.fence.is_some() {
-            return Err(Error("--not-after and --fence are only for stop-agent"));
+            return Err(Error::new(
+                "--not-after and --fence are only for stop-agent",
+            ));
         }
         self.launch()
     }
     fn control(self, control: Control) -> Result<Operation> {
+        if control == Control::StorageStatus && (self.has_launch() || self.caller_session.is_some())
+        {
+            return Err(Error::new(
+                "Storage status accepts no identity, launch or reconciliation inputs",
+            ));
+        }
         if self.attach_only || self.resource_ref.is_some() {
-            return Err(Error("Closed resource launch reference required"));
+            return Err(Error::new("Closed resource launch reference required"));
         }
         let mut request = json!({"action":control.name()});
         if matches!(control, Control::StopAgent | Control::SettleStop) {
             let session = self
                 .session_id
                 .filter(|sid| uuid(sid))
-                .ok_or(Error("Invalid session identifier"))?;
+                .ok_or(Error::new("Invalid session identifier"))?;
             if self.caller_session.is_some() || self.cwd.is_some() || self.command.is_some() {
-                return Err(Error(
+                return Err(Error::new(
                     "Stop control accepts only session, deadline and fence",
                 ));
             }
             if control == Control::SettleStop && (self.not_after.is_some() || self.fence.is_none())
                 || self.fence.is_some() && control == Control::StopAgent && self.not_after.is_none()
             {
-                return Err(Error("Invalid stop fence/deadline combination"));
+                return Err(Error::new("Invalid stop fence/deadline combination"));
             }
             if self.fence.as_ref().is_some_and(|f| {
                 f.len() != 32
@@ -175,7 +186,7 @@ impl Args {
                         .bytes()
                         .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
             }) {
-                return Err(Error("Invalid stop fence"));
+                return Err(Error::new("Invalid stop fence"));
             }
             request["sessionId"] = session.into();
             if let Some(deadline) = self.not_after {
@@ -186,7 +197,9 @@ impl Args {
             }
         } else {
             if self.not_after.is_some() || self.fence.is_some() {
-                return Err(Error("--not-after and --fence are only for stop-agent"));
+                return Err(Error::new(
+                    "--not-after and --fence are only for stop-agent",
+                ));
             }
             if let Some(caller) = self.caller_session {
                 request["caller"] = caller.into();
@@ -198,18 +211,18 @@ impl Args {
         if self.resource_ref.as_ref().is_some_and(|reference| {
             !uuid(reference) || self.attach_only || self.caller_session.is_some()
         }) {
-            return Err(Error("Closed resource launch reference required"));
+            return Err(Error::new("Closed resource launch reference required"));
         }
-        let session = self.session_id.filter(|sid| uuid(sid)).ok_or(Error(
+        let session = self.session_id.filter(|sid| uuid(sid)).ok_or(Error::new(
             "A laptop launch requires session, directory and command",
         ))?;
-        let cwd = self.cwd.filter(|cwd| !cwd.is_empty()).ok_or(Error(
+        let cwd = self.cwd.filter(|cwd| !cwd.is_empty()).ok_or(Error::new(
             "A laptop launch requires session, directory and command",
         ))?;
         let command = self
             .command
             .filter(|command| !command.is_empty())
-            .ok_or(Error(
+            .ok_or(Error::new(
                 "A laptop launch requires session, directory and command",
             ))?;
         let mut request = json!({"sessionId":session,"cwd":cwd,"command":command});

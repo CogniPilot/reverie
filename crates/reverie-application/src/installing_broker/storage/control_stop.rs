@@ -86,6 +86,15 @@ impl StorageRegistry {
         {
             return Err(refused());
         }
+        self.retain_direct_control_stop(&mut entries, index, source, end)
+    }
+    fn retain_direct_control_stop(
+        &self,
+        entries: &mut Vec<Entry>,
+        index: usize,
+        source: &EffectiveWorkerConfig,
+        end: Instant,
+    ) -> Result<Arc<Mutex<ControlLaptopStop>>, StorageWorkflowError> {
         let mut entry = entries.remove(index);
         let EntryOwner::Direct(owner) = entry.owner else {
             unreachable!()
@@ -114,12 +123,29 @@ impl StorageRegistry {
         let paths = started.network.paths();
         let mut entries = self.lock(self.runtime.stop_deadline())?;
         let index = if paths.kind() == StorageKind::Employee {
-            let index = entries
-                .iter()
-                .position(|entry| &entry.paths == paths)
-                .ok_or_else(refused)?;
-            if !entries[index].writer_checked
-                || !matches!(&entries[index].owner, EntryOwner::Laptop(workflow) if started.created.same_workflow(workflow))
+            let index =
+                started
+                    .network
+                    .started_registered_index(self, &entries, &started.created)?;
+            if let EntryOwner::Direct(owner) = &entries[index].owner {
+                let handoff = entries[index]
+                    .started_handoff
+                    .as_ref()
+                    .ok_or_else(refused)?;
+                handoff.assert_created(&self.runtime, &started.created)?;
+                handoff.assert_storage(&self.runtime, owner)?;
+                let native = self.retain_direct_control_stop(&mut entries, index, source, end)?;
+                return Ok(ControlStorageStop {
+                    destination: ClaimDestination::Registered {
+                        registry: self.clone(),
+                        identity: entries[index].identity.clone(),
+                        newly_claimed: false,
+                    },
+                    native,
+                    _phone: None,
+                });
+            }
+            if !matches!(&entries[index].owner, EntryOwner::Laptop(workflow) if started.created.same_workflow(workflow))
             {
                 return Err(refused());
             }

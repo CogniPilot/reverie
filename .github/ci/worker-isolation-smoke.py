@@ -78,7 +78,8 @@ def main():
                         return output
                 elif kind == b'X':
                     if marker:
-                        raise AssertionError('Worker exited before the expected terminal output')
+                        raise AssertionError('Worker exited before the expected terminal output: '
+                                             f'exit={json.loads(data)!r}, output_tail={output[-8192:]!r}')
                     return json.loads(data), output
                 elif kind == b'E':
                     raise AssertionError(data.decode())

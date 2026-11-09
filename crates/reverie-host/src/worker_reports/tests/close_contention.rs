@@ -10,6 +10,9 @@ pub(super) fn lock_contended() {
         let _ = waiting.send(());
     }
 }
+pub(super) fn observe_lock(waiting: Sender<()>) {
+    LOCK_WAIT.with(|slot| *slot.borrow_mut() = Some(waiting));
+}
 
 fn closes_after_observed_contention(handler: bool) {
     let fixture = Fixture::new();
@@ -36,7 +39,7 @@ fn closes_after_observed_contention(handler: bool) {
         let (waiting, observed) = mpsc::channel();
         let held = &service;
         let task = scope.spawn(move || {
-            LOCK_WAIT.with(|slot| *slot.borrow_mut() = Some(waiting));
+            observe_lock(waiting);
             held.close(end())
         });
         // The observer fires only after an actual try_lock reports contention.

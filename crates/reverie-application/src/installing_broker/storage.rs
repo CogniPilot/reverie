@@ -1,5 +1,6 @@
 //! The installing service's actual storage registry. A claim retains real
 //! resources; labels, returned paths and this handle do not authorize launch.
+mod diagnostic;
 mod direct_finalization;
 mod error;
 mod finalization;
@@ -55,6 +56,7 @@ struct Entry {
     paths: StoragePaths,
     owner: EntryOwner,
     writer_checked: bool,
+    started_handoff: Option<reverie_host::worker_laptop::StartedStorageHandoff>,
 }
 enum EntryOwner {
     Direct(Box<LaunchStorage>),
@@ -211,6 +213,7 @@ impl StorageRegistry {
                         paths: owner.paths().clone(),
                         owner: EntryOwner::Direct(Box::new(owner)),
                         writer_checked: false,
+                        started_handoff: None,
                     });
                     Err(StorageWorkflowError::with_cleanup(primary, cleanup))
                 }
@@ -221,6 +224,7 @@ impl StorageRegistry {
             paths: owner.paths().clone(),
             owner: EntryOwner::Direct(Box::new(owner)),
             writer_checked: true,
+            started_handoff: None,
         };
         let result = self.handle(&entry, true);
         entries.push(entry);
@@ -264,6 +268,7 @@ impl StorageRegistry {
                         paths: entry.paths,
                         writer_checked: false,
                         identity: entry.identity,
+                        started_handoff: entry.started_handoff,
                     },
                 );
                 Err(cause.into())

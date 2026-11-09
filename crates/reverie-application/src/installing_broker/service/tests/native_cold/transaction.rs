@@ -6,6 +6,7 @@ use reverie_host::{
 use std::collections::BTreeMap;
 mod diagnostics;
 mod exchange;
+mod reconnect;
 use exchange::Frames;
 
 pub(super) struct Attempt {
@@ -19,6 +20,7 @@ pub(super) struct Attempt {
     bootstrap_failure: Option<Box<crate::installing_broker::BrokerBootstrapFailure>>,
     service_failure: Option<Box<BrokerServiceFailure>>,
     client: Option<UnixStream>,
+    provider_reader: Option<reconnect::ProviderReader>,
     create_attempted: bool,
     server: Option<String>,
     worker: Option<String>,
@@ -42,6 +44,7 @@ impl Attempt {
             bootstrap_failure: None,
             service_failure: None,
             client: None,
+            provider_reader: None,
             create_attempted: false,
             server: None,
             worker: None,
@@ -220,7 +223,14 @@ impl Attempt {
         }
     }
     fn cold_launch(&mut self) -> Result<()> {
-        let raw=self.request("printf 'native-cold-canary-started\\n'; for ((i=0;i<600;i++)); do if test -f /workspace/release; then printf 'native-cold-canary-ok\\n'; exit 0; fi; sleep .1; done; exit 79");
+        let frames = self.begin_cold()?;
+        self.complete_workload(frames)
+    }
+    fn held_request(&self) -> Vec<u8> {
+        self.request("printf 'native-cold-canary-started\\n'; for ((i=0;i<600;i++)); do if test -f /workspace/release; then printf 'native-cold-canary-ok\\n'; exit 0; fi; sleep .1; done; exit 79")
+    }
+    fn begin_cold(&mut self) -> Result<Frames> {
+        let raw = self.held_request();
         self.client = Some(exchange::connect(
             &self.tenant.root.join("broker/service.sock"),
             b'J',
@@ -230,6 +240,9 @@ impl Attempt {
         self.until(&mut frames, true)?;
         self.capture_started()?;
         self.bare_record()?;
+        Ok(frames)
+    }
+    fn complete_workload(&mut self, mut frames: Frames) -> Result<()> {
         tenant::write(
             &self.tenant.root.join("work/release"),
             b"release only this fixed finite workload",
@@ -289,6 +302,9 @@ impl Attempt {
             "actual product-created worker identity",
         )?;
         self.r_available()?;
+        self.require_storage_held()
+    }
+    fn require_storage_held(&self) -> Result<()> {
         match reverie_host::worker_storage::StorageLease::acquire_launch(
             &self.tenant.config,
             &self.tenant.sid,
@@ -329,7 +345,7 @@ impl Attempt {
         )?;
         self.anchor_current(true)
     }
-    fn require_exit(&self) -> Result<()> {
+    fn exit_receipt_path(&self) -> Result<PathBuf> {
         let runtime = fs::read(
             self.tenant
                 .root
@@ -351,14 +367,15 @@ impl Attempt {
             !Path::new(&name).is_absolute() && !name.contains('/'),
             "actual paired exit leaf only",
         )?;
-        let raw = fs::read(
-            self.home
-                .as_ref()
-                .ok_or("same actual storage home")?
-                .join(".reverie-launch")
-                .join(name),
-        )
-        .map_err(|e| e.to_string())?;
+        Ok(self
+            .home
+            .as_ref()
+            .ok_or("same actual storage home")?
+            .join(".reverie-launch")
+            .join(name))
+    }
+    fn require_exit(&self) -> Result<()> {
+        let raw = fs::read(self.exit_receipt_path()?).map_err(|e| e.to_string())?;
         require(raw == b"0" || raw == b"0\n", "actual native .exit0 receipt")
     }
     fn stop_via_service(&mut self) -> Result<()> {
@@ -467,6 +484,7 @@ impl Attempt {
                 "actual same-owner stop not proven; retain service/worker/server/root".into(),
             );
         }
+        self.close_provider_reader()?;
         self.broker().request_stop();
         if let Some(service) = self.service.take() {
             match service.run() {
@@ -550,6 +568,7 @@ impl Drop for Attempt {
                 self.bootstrap_failure.take(),
                 self.service_failure.take(),
                 self.client.take(),
+                self.provider_reader.take(),
             ));
         }
     }

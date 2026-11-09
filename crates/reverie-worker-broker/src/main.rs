@@ -10,6 +10,7 @@ use reverie_host::{
 };
 use std::{path::PathBuf, process::ExitCode};
 mod image;
+mod inventory;
 mod manifest;
 mod service;
 
@@ -25,6 +26,12 @@ struct Arguments {
 }
 #[derive(Subcommand)]
 enum Role {
+    /// Read the registered OS-owner employee/declared-plan inventory without
+    /// starting a broker or exposing private model, thread or account fields.
+    Inventory {
+        #[arg(long, value_name = "FILE")]
+        config: PathBuf,
+    },
     /// Qualify, preview and apply an offline worker-image pin through the native
     /// application service. This never loads images or recreates laptops.
     Image {
@@ -59,6 +66,14 @@ enum Role {
         action: service::Action,
         #[arg(long)]
         start_previous: bool,
+        /// Start the new broker only after a known completed native upgrade.
+        #[arg(long)]
+        restart: bool,
+        /// After proving the exact stopped service has no processes or populated
+        /// cgroup, archive its old unresolved markers instead of losing history.
+        /// This does not acknowledge previous runtime or resource outcomes.
+        #[arg(long)]
+        force_stopped: bool,
         #[arg(long)]
         config: PathBuf,
     },
@@ -75,6 +90,7 @@ fn main() -> ExitCode {
 }
 fn run(arguments: Arguments) -> Result<(), Box<dyn std::error::Error>> {
     match arguments.command {
+        Role::Inventory { config } => inventory::run(&config),
         Role::Image { action } => image::run(action),
         Role::CheckConfig { config } => {
             let snapshot = load_owner_config(&config).inspect_err(|error| {
@@ -98,7 +114,9 @@ fn run(arguments: Arguments) -> Result<(), Box<dyn std::error::Error>> {
             action,
             config,
             start_previous,
-        } => service::run(action, &config, start_previous),
+            restart,
+            force_stopped,
+        } => service::run(action, &config, start_previous, restart, force_stopped),
         Role::Broker { config } => serve(config, false),
         Role::OfferPoolV1 { config } => serve(config, true),
     }
@@ -156,6 +174,56 @@ fn captured_engine() -> Result<InstalledWorkerEngine, Box<dyn std::error::Error>
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn native_upgrade_exposes_explicit_restart_and_force_stopped() {
+        let arguments = Arguments::try_parse_from([
+            "broker",
+            "service",
+            "upgrade",
+            "--config",
+            "/owner/reverie/broker.json",
+            "--restart",
+            "--force-stopped",
+        ])
+        .unwrap();
+        assert!(matches!(
+            arguments.command,
+            Role::Service {
+                action: service::Action::Upgrade,
+                restart: true,
+                force_stopped: true,
+                start_previous: false,
+                ..
+            }
+        ));
+    }
+    #[test]
+    fn owner_inventory_has_one_config_selector_and_no_private_path_overrides() {
+        assert!(matches!(
+            Arguments::try_parse_from([
+                "broker",
+                "inventory",
+                "--config",
+                "/owner/reverie/broker.json"
+            ])
+            .unwrap()
+            .command,
+            Role::Inventory { .. }
+        ));
+        for flag in ["--company", "--state", "--plan-file", "--engine", "--home"] {
+            assert!(
+                Arguments::try_parse_from([
+                    "broker",
+                    "inventory",
+                    "--config",
+                    "/owner/reverie/broker.json",
+                    flag,
+                    "/foreign"
+                ])
+                .is_err()
+            );
+        }
+    }
     #[test]
     fn image_preview_accepts_exact_pinned_profile_inputs_without_an_engine_override() {
         let args = [

@@ -9,7 +9,7 @@ use std::{
 };
 
 #[derive(Debug)]
-enum Cause {
+pub(super) enum Cause {
     Gate(GateError),
     Storage(StorageWorkflowError),
     Network(storage::NetworkStorageError),
@@ -110,7 +110,7 @@ impl Attempt {
     fn run(&mut self) -> Result<(), Cause> {
         let broker = self.broker.clone();
         let snapshot = broker.configuration()?;
-        let candidate = self.select_candidate(snapshot.configuration())?;
+        let candidate = select_candidate(&broker, snapshot.configuration())?;
         let Some((session, target)) = candidate else {
             return Ok(());
         };
@@ -146,11 +146,11 @@ impl Attempt {
             .find(|entry| entry.session == session);
         if !lifecycle.supervisor_detached(&session)
             || entry.is_none_or(|entry| entry.name != target)
-            || !should_stop(
+            || should_stop(
                 &broker,
                 entry.expect("current registration"),
                 source.configuration(),
-            )?
+            )? != Some(true)
         {
             return self.close_admission();
         }
@@ -168,22 +168,6 @@ impl Attempt {
         self.token = None;
         self.original = None;
         Ok(())
-    }
-    fn select_candidate(
-        &self,
-        source: &EffectiveWorkerConfig,
-    ) -> Result<Option<(ProfileSessionId, WorkerContainerName)>, Cause> {
-        let Some(lifecycle) = self.broker.installed.try_supervisor_lifecycle()? else {
-            return Ok(None);
-        };
-        for entry in lifecycle.guard.iter() {
-            if lifecycle.supervisor_detached(&entry.session)
-                && should_stop(&self.broker, entry, source)?
-            {
-                return Ok(Some((entry.session.clone(), entry.name.clone())));
-            }
-        }
-        Ok(None)
     }
     fn close_admission(&mut self) -> Result<(), Cause> {
         if let Some(admission) = self.admission.take() {
@@ -237,6 +221,24 @@ impl Attempt {
         Ok(())
     }
 }
+/// Candidate DATA only. The stop attempt must reacquire the same lifecycle,
+/// admission, current intent and exact owner before issuing any native work.
+pub(super) fn select_candidate(
+    broker: &InstallingBroker,
+    source: &EffectiveWorkerConfig,
+) -> Result<Option<(ProfileSessionId, WorkerContainerName)>, Cause> {
+    let Some(lifecycle) = broker.installed.try_supervisor_lifecycle()? else {
+        return Ok(None);
+    };
+    for entry in lifecycle.guard.iter() {
+        if lifecycle.supervisor_detached(&entry.session)
+            && should_stop(broker, entry, source)? == Some(true)
+        {
+            return Ok(Some((entry.session.clone(), entry.name.clone())));
+        }
+    }
+    Ok(None)
+}
 impl Drop for Attempt {
     fn drop(&mut self) {
         if !self.finished {
@@ -253,27 +255,34 @@ impl Drop for Attempt {
         }
     }
 }
-fn should_stop(
+pub(super) fn should_stop(
     broker: &InstallingBroker,
     entry: &LaptopRegistration,
     source: &EffectiveWorkerConfig,
-) -> Result<bool, Cause> {
+) -> Result<Option<bool>, Cause> {
     let (paths, completed) = match &entry.owner {
-        LaptopOwner::Started(owner) => (
-            owner.network.paths(),
-            owner
-                .network
-                .created_completed(&owner.created)
-                .map_err(Cause::Network)?,
-        ),
-        LaptopOwner::Recovered(owner) => (
-            owner.storage.paths(),
-            owner
-                .storage
-                .observe_launch_receipt()?
-                .recheck_is_file(&broker.storage.runtime)
-                .map_err(StorageWorkflowError::from)?,
-        ),
+        LaptopOwner::Started(owner) => {
+            let completed = match owner.network.supervisor_completion(&owner.created) {
+                Ok(Some(completed)) => completed,
+                Ok(None) => return Ok(None),
+                Err(storage::NetworkStorageError::Host(
+                    reverie_host::worker_laptop::LaptopError::CreatedReceiptPending,
+                )) => return Ok(None),
+                Err(cause) => return Err(Cause::Network(cause)),
+            };
+            (owner.network.paths(), completed)
+        }
+        LaptopOwner::Recovered(owner) => {
+            let Some(receipt) = owner.storage.observe_supervision_receipt()? else {
+                return Ok(None);
+            };
+            (
+                owner.storage.paths(),
+                receipt
+                    .recheck_is_file(&broker.storage.runtime)
+                    .map_err(StorageWorkflowError::from)?,
+            )
+        }
         #[cfg(test)]
         LaptopOwner::Modeled => return Err(Cause::Refused("WORKER_MODELED_STOP_REFUSED")),
     };
@@ -286,5 +295,7 @@ fn should_stop(
     let current = reverie_store::storage_identity::storage_start_allowed(&identity, paths)
         .map_err(reverie_host::worker_storage::StorageOwnerError::Identity)
         .map_err(StorageWorkflowError::from)?;
-    Ok(completed || !current || !broker.allowed(&entry.session)?)
+    Ok(Some(
+        completed || !current || !broker.allowed(&entry.session)?,
+    ))
 }

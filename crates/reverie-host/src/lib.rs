@@ -49,6 +49,7 @@ pub mod worker_image;
 #[cfg(all(test, target_os = "linux"))]
 mod worker_init_tests;
 pub mod worker_intent;
+pub mod worker_inventory;
 pub mod worker_laptop;
 pub mod worker_launch;
 pub mod worker_mounts;

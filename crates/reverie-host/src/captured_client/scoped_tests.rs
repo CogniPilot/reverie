@@ -76,6 +76,9 @@ impl Drop for Tree {
 fn end() -> Instant {
     Instant::now() + Duration::from_secs(3)
 }
+fn admission_end() -> Instant {
+    Instant::now() + Duration::from_millis(60)
+}
 fn policy() -> Policy {
     Policy {
         maximum: Duration::from_secs(20),
@@ -94,7 +97,7 @@ fn run_with_cancellation(
     deadline: Instant,
     cancellation: &CancellationToken,
 ) -> std::result::Result<CapturedOutput, CallFailure> {
-    client.run_scoped(
+    client.run_scoped_waiting(
         vec!["fixed-owned-call".into()],
         deadline,
         cancellation,
@@ -161,7 +164,7 @@ impl Drop for Running {
 }
 
 #[test]
-fn busy_before_admission_has_no_call_and_never_cancels_the_admitted_job() {
+fn expired_waiter_has_no_call_and_never_cancels_the_admitted_job() {
     let tree = Tree::new();
     let gate = Arc::new(Gate::default());
     let hooks = Hooks {
@@ -170,10 +173,14 @@ fn busy_before_admission_has_no_call_and_never_cancels_the_admitted_job() {
     };
     let starts = hooks.starts.clone();
     let client = tree.client(hooks);
-    let mut running = Running::new(client.clone(), gate, end());
+    let mut running = Running::new(
+        client.clone(),
+        gate,
+        Instant::now() + Duration::from_secs(20),
+    );
     running.entered();
-    let failure = run(&client, end()).err().unwrap();
-    assert_eq!(failure.error.fault, Fault::Busy);
+    let failure = run(&client, admission_end()).err().unwrap();
+    assert_eq!(failure.error.fault, Fault::Deadline);
     assert!(failure.call.is_none());
     assert_eq!(starts.load(Ordering::Acquire), 1);
     let finished = running.finish().err().unwrap();
@@ -201,9 +208,9 @@ fn completed_old_call_cannot_cancel_or_release_a_later_admitted_constructor() {
     let mut running = Running::new(client.clone(), gate, end());
     running.entered();
     client.settle_call(&old, end()).unwrap();
-    let busy = run(&client, end()).err().unwrap();
-    assert_eq!(busy.error.fault, Fault::Busy);
-    assert!(busy.call.is_none());
+    let expired = run(&client, admission_end()).err().unwrap();
+    assert_eq!(expired.error.fault, Fault::Deadline);
+    assert!(expired.call.is_none());
     assert_eq!(starts.load(Ordering::Acquire), 2);
     let other = tree.client(Hooks::default());
     assert_eq!(
@@ -245,7 +252,10 @@ fn exact_uncertain_constructor_handle_retains_and_settles_the_late_child_without
     assert!(failure.error.is_uncertain());
     let owned = failure.call.unwrap();
     assert!(client.settle_call(&owned, Instant::now()).is_err());
-    assert_eq!(run(&client, end()).err().unwrap().error.fault, Fault::Busy);
+    let waiter = run(&client, admission_end()).err().unwrap();
+    assert_eq!(waiter.error.fault, Fault::Deadline);
+    assert!(waiter.call.is_none());
+    assert!(client.settle_call(&owned, Instant::now()).is_err());
     gate.released.store(true, Ordering::Release);
     client.settle_call(&owned, end()).unwrap();
     assert_eq!(starts.load(Ordering::Acquire), 1);
@@ -309,7 +319,10 @@ fn original_deadline_expires_while_actual_constructor_is_held_and_retains_the_ex
     assert!(!running.cancellation.is_cancelled());
     let owned = failure.call.unwrap();
     assert!(client.settle_call(&owned, Instant::now()).is_err());
-    assert_eq!(run(&client, end()).err().unwrap().error.fault, Fault::Busy);
+    let waiter = run(&client, admission_end()).err().unwrap();
+    assert_eq!(waiter.error.fault, Fault::Deadline);
+    assert!(waiter.call.is_none());
+    assert!(client.settle_call(&owned, Instant::now()).is_err());
     gate.released.store(true, Ordering::Release);
     client.settle_call(&owned, end()).unwrap();
     assert_eq!(starts.load(Ordering::Acquire), 1);

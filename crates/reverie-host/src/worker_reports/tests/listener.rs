@@ -58,21 +58,80 @@ fn actual_listener_registers_unread_connections_in_the_same_report_and_launch_ca
         held.push((client, listener.accept(&service).unwrap().unwrap()));
     }
     let mut refused = UnixStream::connect(&path).unwrap();
-    assert!(matches!(
-        listener.accept(&service),
-        Err(BrokerListenerError::Report(WorkerReportError::Stopping))
-    ));
+    let capacity = listener.accept(&service);
+    let known_refusal = matches!(capacity, Ok(None));
+    let diagnostic = capacity.as_ref().err().map(ToString::to_string);
     refused
         .set_read_timeout(Some(Duration::from_secs(2)))
         .unwrap();
     assert_eq!(refused.read(&mut [0]).unwrap(), 0);
     assert_eq!(service.records.lock().unwrap().len(), service.limit);
+    let (_client, original) = held.pop().unwrap();
+    original.close().unwrap();
+    let returned_slot = UnixStream::connect(&path).unwrap();
+    let accepted_again = listener.accept(&service).unwrap().unwrap();
+    accepted_again.close().unwrap();
+    drop(returned_slot);
+    let running =
+        !fixture.runtime.cancellation().is_cancelled() && fixture.runtime.stop_deadline().is_none();
     for (_client, record) in held {
         record.close().unwrap();
     }
     listener.close().unwrap();
     assert!(!path.exists());
     service.close(end()).unwrap();
+    assert!(running, "ordinary full admission must not stop the runtime");
+    assert!(
+        known_refusal,
+        "known rejected socket close must keep serving, not report a fatal poll error: {diagnostic:?}"
+    );
+}
+#[test]
+fn rejected_capacity_socket_close_uncertainty_stays_retained_after_original_slots_close() {
+    if isolated(
+        "rejected_capacity_socket_close_uncertainty_stays_retained_after_original_slots_close",
+    ) {
+        return;
+    }
+    let fixture = Fixture::new();
+    let service = Arc::new(fixture.service());
+    let path = fixture.root.join("broker.sock");
+    let mut listener = prepared(&fixture, &path)
+        .bind()
+        .unwrap_or_else(|error| panic!("{error}"));
+    let mut held = Vec::new();
+    for _ in 0..service.limit {
+        let client = UnixStream::connect(&path).unwrap();
+        held.push((client, listener.accept(&service).unwrap().unwrap()));
+    }
+    let mut refused = UnixStream::connect(&path).unwrap();
+    refused
+        .set_read_timeout(Some(Duration::from_secs(2)))
+        .unwrap();
+    CLOSE_REFUSAL.with(|flag| flag.set(true));
+    let refusal = listener.accept(&service);
+    let retained = matches!(
+        refusal,
+        Err(BrokerListenerError::Report(
+            WorkerReportError::Finalization { .. }
+        ))
+    );
+    assert_eq!(refused.read(&mut [0]).unwrap(), 0, "actual fd was consumed");
+    for (_client, record) in held {
+        record.close().unwrap();
+    }
+    let next = UnixStream::connect(&path).unwrap();
+    let still_refuses = listener.accept(&service).is_err();
+    drop(next);
+    listener.close().unwrap();
+    let first_close = service.close(end());
+    let repeated_close = service.close(end());
+    assert!(retained, "capacity cannot hide an uncertain checked close");
+    assert!(
+        still_refuses,
+        "the same service retains consumed-close uncertainty"
+    );
+    assert!(first_close.is_err() && repeated_close.is_err());
 }
 #[test]
 fn live_and_non_socket_names_are_preserved_and_only_stale_same_inode_is_removed() {

@@ -95,3 +95,29 @@ impl Drop for Record {
         }
     }
 }
+
+impl Record {
+    pub(in crate::installing_broker::storage) fn storage_owner_status(
+        &self,
+    ) -> reverie_contracts::worker_storage_status::OwnerObservation {
+        use reverie_contracts::worker_storage_status::{
+            OwnerObservation as View, OwnerPhase, RecordedOutcome,
+        };
+        let Some(held) = &self.held else {
+            return View::observed(
+                OwnerPhase::Consumed,
+                RecordedOutcome::NotRecorded,
+                None,
+                None,
+            );
+        };
+        let outcome = match &held.outcome {
+            Outcome::Fresh => RecordedOutcome::NotRecorded,
+            Outcome::Observed(_) => RecordedOutcome::SuccessRecorded,
+            Outcome::Failed(_) => RecordedOutcome::FailureRecorded,
+        };
+        // The metadata context has its own native owner; do not invent an
+        // aggregate pending/known-clear classification from this result slot.
+        View::observed(OwnerPhase::Held, outcome, None, None)
+    }
+}

@@ -6,6 +6,7 @@ use super::*;
 #[path = "tests/image_rollback.rs"]
 mod image_rollback;
 mod stopped;
+mod upgrade;
 #[test]
 fn installed_generation_must_be_inactive_and_exact_before_replacement() {
     let old = Path::new("/nix/store/old-worker/share/systemd/user/reverie-worker-broker.service");
@@ -130,6 +131,11 @@ fn fixture_mode(mode: &str) -> (State, PathBuf, PathBuf) {
         uncertain: false,
         marker: false,
         pending_identity: None,
+        upgrade_bus: None,
+        upgrade_inputs: Default::default(),
+        upgrade_failure: None,
+        upgrade_close_failure: None,
+        checked_generation: None,
     };
 
     (state, root, program)

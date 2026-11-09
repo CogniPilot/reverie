@@ -59,7 +59,15 @@ impl DeploymentService {
         let operation = self.operation(id)?;
         let pins = self.pins(&operation)?;
         let result = self.apply_pinned(&operation, &pins);
-        DeploymentError::finalized(result, pins.close())
+        DeploymentError::finalized(result, pins.close()).map_err(|error| {
+            if !error.has_snapshot() {
+                return error;
+            }
+            match self.installation.current() {
+                Ok(()) => operation.record_snapshot_refusal(error),
+                Err(close) => error.with_finalizer(close),
+            }
+        })
     }
     fn apply_pinned(
         &self,
@@ -87,6 +95,7 @@ impl DeploymentService {
         let source_root = self.data_source(operation)?;
         let tools = snapshot_tools()?;
         pins.running_mounts(&source)?;
+        self.refuse_shared_writers(&source)?;
         operation.attempt("stop-attempt")?;
         self.engine.stop(model::string(&source, "Id")?)?;
         self.source_current(operation, false)?;
@@ -94,24 +103,24 @@ impl DeploymentService {
         let end = Instant::now() + Duration::from_secs(1800);
         let mut snapshot = tools
             .capture_console(&source_root, &operation.directory.join("snapshot"), end)
-            .map_err(|_| DeploymentError::new("DEPLOYMENT_SNAPSHOT_REFUSED"))?;
+            .map_err(|error| DeploymentError::snapshot("DEPLOYMENT_SNAPSHOT_REFUSED", error))?;
         let verified = (|| {
             self.source_current(operation, false)?;
             snapshot
                 .verify_source(end)
-                .map_err(|_| DeploymentError::new("DEPLOYMENT_SNAPSHOT_CHANGED"))?;
+                .map_err(|error| DeploymentError::snapshot("DEPLOYMENT_SNAPSHOT_CHANGED", error))?;
             self.source_current(operation, false)?;
-            snapshot
-                .rehearse(end)
-                .map_err(|_| DeploymentError::new("DEPLOYMENT_RESTORE_REHEARSAL_REFUSED"))?;
+            snapshot.rehearse(end).map_err(|error| {
+                DeploymentError::snapshot("DEPLOYMENT_RESTORE_REHEARSAL_REFUSED", error)
+            })?;
             self.source_current(operation, false)?;
             operation.record("snapshot", &json!({"archive":snapshot.archive_path(),"sha256":snapshot.archive_sha256(),
             "entries":snapshot.entry_count(),"regularBytes":snapshot.regular_bytes(),"scope":snapshot.scope_note(),"manifestSHA256":snapshot.manifest_sha256()}))?;
             Ok(())
         })();
-        let closed = snapshot
-            .close()
-            .map_err(|_| DeploymentError::new("DEPLOYMENT_SNAPSHOT_CLOSE_UNCONFIRMED"));
+        let closed = snapshot.close().map_err(|error| {
+            DeploymentError::snapshot("DEPLOYMENT_SNAPSHOT_CLOSE_UNCONFIRMED", error)
+        });
         DeploymentError::finalized(verified, closed)?;
         self.source_current(operation, false)?;
         self.swap(operation, &candidate, pins)?;
@@ -199,7 +208,7 @@ fn snapshot_tools() -> Result<SnapshotTools> {
     let acl = option_env!("REVERIE_DEPLOYMENT_GETFACL")
         .ok_or_else(|| DeploymentError::new("DEPLOYMENT_SNAPSHOT_TOOLS_UNINSTALLED"))?;
     SnapshotTools::capture_installed(Path::new(tar), Path::new(attr), Path::new(acl))
-        .map_err(|_| DeploymentError::new("DEPLOYMENT_SNAPSHOT_TOOLS_INVALID"))
+        .map_err(|error| DeploymentError::snapshot("DEPLOYMENT_SNAPSHOT_TOOLS_INVALID", error))
 }
 pub(super) fn status_responds(port: u16) -> bool {
     let timeout = Duration::from_secs(2);

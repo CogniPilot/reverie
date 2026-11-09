@@ -310,3 +310,20 @@ impl HealthReaders {
         Cause::Observation(error)
     }
 }
+
+impl Frame<'_> {
+    pub(super) fn storage_status(&mut self) -> Result<(), Cause> {
+        let snapshot = self.broker.configuration()?;
+        let company = self.company(&snapshot)?;
+        let entries = self.broker.storage.storage_status(&company)?;
+        if !company.equivalent(&self.company(&snapshot)?)
+            || !Arc::ptr_eq(&snapshot, &self.broker.configuration()?)
+        {
+            return Err(Cause::Refused("WORKER_CONTROL_STORAGE_STATUS_CHANGED"));
+        }
+        self.reply_query(serde_json::json!({"storageStatus":{
+            "version":1,"purpose":"worker-storage-owner-status-v1",
+            "readOnly":true,"completeSnapshot":false,"entries":entries
+        }}))
+    }
+}

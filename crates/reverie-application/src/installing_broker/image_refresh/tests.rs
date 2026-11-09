@@ -216,24 +216,27 @@ fn image_publication_during_unlocked_preparation_keeps_pending_client_and_origin
     wait_file(&tree, "query-started");
     changed(&tree, 'b');
     let published = service.refresh_launch_configuration().unwrap();
-    let duplicate = service
-        .storage
-        .runtime
-        .readonly()
-        .query(
-            EngineQuery::InventoryIds,
-            end(),
-            &service.storage.runtime.cancellation(),
-        )
-        .unwrap_err();
+    // This waiter must expire BEFORE the original held query's deadline;
+    // waiting for another full query budget would expire the original owner.
+    let calls_before_waiter = fs::read(tree.root.join("calls.txt")).unwrap();
+    let duplicate = service.storage.runtime.readonly().query(
+        EngineQuery::InventoryIds,
+        Instant::now() + Duration::from_millis(60),
+        &service.storage.runtime.cancellation(),
+    );
+    let calls_after_waiter = fs::read(tree.root.join("calls.txt")).unwrap();
     tree.write("query-release", b"release actual owned child");
-    query.join().unwrap().unwrap();
+    let original_query = query.join().unwrap();
     let current_context = gate.owned_context_for_test().unwrap();
     scope.close().unwrap();
     close(&service);
+    original_query.unwrap();
+    let duplicate = duplicate.unwrap_err();
+    assert!(!duplicate.is_uncertain(), "waiter started no native call");
+    assert_eq!(calls_before_waiter, calls_after_waiter, "no query replay");
     assert_eq!(
         duplicate.fault(),
-        reverie_host::engine_metadata::EngineFault::Busy
+        reverie_host::engine_metadata::EngineFault::Deadline
     );
     assert!(original_context.same_source_for_test(&current_context));
     assert_eq!(

@@ -74,9 +74,12 @@ impl ControlStopCensus {
             Arc::ptr_eq(&self.origin, runtime.installed_engine()) && self.pending.is_none(),
             "WORKER_CONTROL_STOP_ORIGIN",
         )?;
-        let output = call::captured(
+        let query_end = self
+            .end
+            .min(Instant::now() + Duration::from_secs(crate::engine_metadata::MAX_QUERY_SECONDS));
+        let output = call::captured_for_worker(
             &self.origin,
-            self.end,
+            query_end,
             &mut self.pending,
             vec![
                 "ps".into(),
@@ -171,5 +174,14 @@ impl Drop for ControlLaptopStop {
                 self.attempt.failure.take(),
             );
         }
+    }
+}
+
+impl ControlLaptopStop {
+    /// Closed local DATA; never settles or advances this owner.
+    pub fn storage_owner_status(
+        &self,
+    ) -> reverie_contracts::worker_storage_status::OwnerObservation {
+        self.attempt.diagnostic()
     }
 }

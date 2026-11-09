@@ -74,7 +74,7 @@ impl MetadataQueryOwner {
         if let Some(primary) = &state.primary {
             return Err(primary.clone());
         }
-        match self.engine.client.run_scoped(
+        match self.engine.client.run_scoped_waiting(
             arguments,
             end,
             cancellation,

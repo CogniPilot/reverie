@@ -13,6 +13,7 @@ pub use cold_prepare::{ColdPreparation, PreparedColdTemporary};
 pub use controller::ControllerMemberConfigured;
 pub(crate) use controller::CreatedPoolTarget;
 mod create;
+mod diagnostic;
 mod direct_finalization;
 mod error;
 pub use error::{ControllerPoolCause, ControllerPoolFailure};
@@ -73,6 +74,7 @@ pub use existing_viewer::{
     ExistingRelayRetainFailure, ExistingRelayReturned, ExistingStorageObservation, ExistingViewer,
     ExistingViewerReceiptObservation, ExistingViewerRetainFailure, ExistingViewerReturned,
     ExistingViewerStart, StartedRelayTransferFailure, StartedRelayTransferred,
+    StartedStorageHandoff,
 };
 pub use guard::{NixGuardRelease, NixReleasedPane};
 pub use memory::{
@@ -83,9 +85,22 @@ pub use pane::{PaneStart, StartedPane};
 use reverie_contracts::worker_launch::WorkerRequest;
 pub use start::{ContainerStart, StartedContainer};
 use std::{
-    sync::{Arc, Mutex, OnceLock},
+    sync::{Arc, Mutex, OnceLock, TryLockError},
     time::Instant,
 };
+#[derive(Clone, Copy)]
+enum ReadContention {
+    Retained,
+    CreatedReceipt,
+}
+impl ReadContention {
+    fn error<T>(self, error: TryLockError<T>) -> LaptopError {
+        match (self, error) {
+            (Self::CreatedReceipt, TryLockError::WouldBlock) => LaptopError::CreatedReceiptPending,
+            _ => LaptopError::Refused("WORKER_LAPTOP_RETAINED"),
+        }
+    }
+}
 pub(crate) use viewer::ViewerJob;
 pub use viewer::{ViewerSession, ViewerStart};
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -350,6 +365,14 @@ impl Workflows {
         })
     }
     fn bound(&self, runtime: &WorkerRuntime, workflow: &LaptopWorkflow) -> Result<()> {
+        self.bound_with_contention(runtime, workflow, ReadContention::Retained)
+    }
+    fn bound_with_contention(
+        &self,
+        runtime: &WorkerRuntime,
+        workflow: &LaptopWorkflow,
+        contention: ReadContention,
+    ) -> Result<()> {
         need(
             Arc::ptr_eq(runtime.installed_engine(), &workflow.origin),
             "WORKER_LAPTOP_RUNTIME_CHANGED",
@@ -357,7 +380,7 @@ impl Workflows {
         let records = self
             .records
             .try_lock()
-            .map_err(|_| LaptopError::Refused("WORKER_LAPTOP_RETAINED"))?;
+            .map_err(|error| contention.error(error))?;
         need(
             records.iter().any(|r| r.is_created(&workflow.record)),
             "WORKER_LAPTOP_REPLAYED",

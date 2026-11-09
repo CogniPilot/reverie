@@ -3,6 +3,7 @@
 //! There is no separate Runtime source registry or caller-selected command.
 mod call;
 pub(crate) use call::captured_for_worker as captured_worker_cleanup;
+mod diagnostic;
 mod error;
 mod identity;
 pub(crate) mod legacy;

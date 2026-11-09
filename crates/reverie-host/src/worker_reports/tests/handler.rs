@@ -46,6 +46,97 @@ fn collector_preserves_actual_poison_as_unknown_after_contention_fix() {
     assert!(service.opaque.load(Ordering::Acquire));
     assert!(service.close(end()).is_err());
 }
+#[test]
+fn collector_keeps_actual_published_handler_pending_while_record_lookup_is_contended() {
+    if isolated("collector_keeps_actual_published_handler_pending_while_record_lookup_is_contended")
+    {
+        return;
+    }
+    let fixture = Arc::new(Fixture::new());
+    let service = Arc::new(fixture.service());
+    let (mut client, server) = fixture.sockets();
+    send(&mut client, b'T', REQUEST);
+    let mut registered = service.register_worker_connection(server).unwrap();
+    let constructor = registered.reserve_handler().unwrap();
+    let record = service.records.lock().unwrap()[0].clone();
+    let gate = Arc::new(Gate::default());
+    let release = Release(gate.clone());
+    let paused = gate.clone();
+    let source = fixture.clone();
+    let thread = std::thread::spawn(move || {
+        assert!(matches!(
+            registered
+                .receive(&source.collector, &super::launch::configuration())
+                .unwrap(),
+            AcceptedWorkerConnection::ReportCompleted
+        ));
+        tail(&paused);
+    });
+    constructor.publish(thread).unwrap();
+    assert_eq!(reply(&mut client).0, b'J');
+    wait(|| gate.entered.load(Ordering::Acquire));
+    let held = record.handler.lock().unwrap();
+    let progress = service.collect_worker_handlers();
+    let counted = service.records.lock().unwrap().len();
+    let known = record.socket_closed_known() && !service.opaque.load(Ordering::Acquire);
+    drop(held);
+    gate.released.store(true, Ordering::Release);
+    service.settle_worker_handlers(end()).unwrap();
+    service.close(end()).unwrap();
+    drop(release);
+    assert_eq!(progress.unwrap(), WorkerHandlersProgress::Pending);
+    assert_eq!(
+        counted, 1,
+        "the actual published handler must remain counted"
+    );
+    assert!(
+        known,
+        "lookup contention consumes no close and poisons no owner"
+    );
+}
+#[test]
+fn actual_published_handler_entry_waits_for_original_record_lookup_before_reading() {
+    if isolated("actual_published_handler_entry_waits_for_original_record_lookup_before_reading") {
+        return;
+    }
+    let fixture = Arc::new(Fixture::new());
+    let service = Arc::new(fixture.service());
+    let (mut client, server) = fixture.sockets();
+    send(&mut client, b'T', REQUEST);
+    let mut registered = service.register_worker_connection(server).unwrap();
+    let constructor = registered.reserve_handler().unwrap();
+    let record = service.records.lock().unwrap()[0].clone();
+    let held = record.handler.lock().unwrap();
+    let source = fixture.clone();
+    let (waiting, contended) = mpsc::channel();
+    let (proceed, released) = mpsc::channel();
+    let (sent, result) = mpsc::channel();
+    let thread = std::thread::spawn(move || {
+        super::close_contention::observe_lock(waiting);
+        let first = registered.await_handler_publication();
+        released.recv_timeout(Duration::from_secs(2)).unwrap();
+        // Baseline-only cleanup retries the pure entry check on the SAME
+        // original thread/token. No request body was read by the first check.
+        let report = registered
+            .receive(&source.collector, &super::launch::configuration())
+            .unwrap();
+        assert!(matches!(report, AcceptedWorkerConnection::ReportCompleted));
+        sent.send(first).unwrap();
+    });
+    constructor.publish(thread).unwrap();
+    let observed = contended.recv_timeout(Duration::from_secs(2));
+    let unread = !record.finished();
+    drop(held);
+    proceed.send(()).unwrap();
+    let first = result.recv_timeout(Duration::from_secs(2)).unwrap();
+    let response = reply(&mut client).0;
+    service.settle_worker_handlers(end()).unwrap();
+    service.close(end()).unwrap();
+    observed.unwrap();
+    first.unwrap();
+    assert!(unread, "publication wait must not read the actual request");
+    assert_eq!(response, b'J');
+}
 fn wait(mut condition: impl FnMut() -> bool) {
     let end = end();
     while !condition() {

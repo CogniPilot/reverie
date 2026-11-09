@@ -21,7 +21,7 @@ returning 128 + signal. Stdin EOF retains the existing exit 1 behavior.
 | Terminal launch | J launch, I input, R resize; O output, X exit or E refusal |
 | Attach-only | Same launch with attachOnly:true |
 | Resource launch | L with the exact reference/request envelope |
-| Office control | C with one of the eight existing actions; J result |
+| Office control | C with an existing action; J result |
 | Goal custody | G fixed action; closed J projection, at most 32768 bytes |
 | Custody stream | Bare G stdin byte per fresh call; framed J stdout reply |
 | Failure metadata | T fixed command-failures request; strictly validated J report |
@@ -30,6 +30,34 @@ Stop-agent preserves the exact session, optional epoch-ms deadline and optional
 32-hex fence; a fence requires a deadline. Settle-stop requires session and fence
 and accepts no deadline. These requests are sent once. A lost reply never causes
 reconnect, replay, a fabricated stop settlement or automatic rollback.
+
+## One-shot Rust control API
+
+The same package exposes `reverie_worker_client::control::call(endpoint,
+action, deadline)` with the fixed `Action::{Status, ProviderHealth,
+StorageStatus, StopLaptops}` vocabulary. The CLI uses the same private C
+exchange, endpoint checks, framing and checked finalization. The library does
+not read `REVERIE_WORKER_SOCKET`: its explicit path selects an existing endpoint,
+and the broker remains responsible for authorization.
+
+Each call opens one connection, sends one request, and returns the original
+bounded UTF-8 J payload only after endpoint revalidation and checked socket and
+anchor closure. A reply remains DATA; callers must interpret the existing
+broker response rather than equate transport success with a successful stop or
+healthy provider. The caller's original monotonic deadline is capped by the
+existing 120-second control budget and is never renewed by partial I/O.
+
+`ControlError::message()` preserves the existing safe CLI message and
+`causes()` retains safe original and cleanup errors. A connection-close refusal
+keeps its existing CLI precedence without erasing the earlier request error.
+Failed setup also checks closure of each original acquired owner. No descriptor
+or retry handle is exposed, and no error establishes that an effect was absent.
+Private socket ownership and peer UID checks do not attest the executable,
+provide an employee grant, or release maintenance/resource ownership.
+
+The executable is a thin `run_cli()` caller; terminal, Goal and failure-report
+behavior stays in the same private implementation. Library control calls do not
+normalize argv, install signal handlers or change terminal settings.
 
 The launch environment uses the existing exact allowlist, including its uppercase
 provider prefixes; host endpoints, PATH, HOME and owner tokens are excluded.

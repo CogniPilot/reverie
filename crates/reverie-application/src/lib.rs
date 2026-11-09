@@ -14,6 +14,7 @@ pub mod reservation_observer;
 pub mod resource_staging;
 #[cfg(test)]
 mod test_process;
+pub mod worker_inventory;
 pub mod worker_launch;
 pub mod worker_recovery;
 pub mod worker_validation;

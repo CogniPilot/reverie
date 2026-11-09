@@ -6,6 +6,7 @@ use reverie_core::ids::{ContainerId, ProfileSessionId};
 use std::{ffi::OsString, time::Duration};
 mod container;
 mod control;
+mod diagnostic;
 mod network;
 mod owner;
 pub use control::{ControlLaptopStop, ControlStopCensus};

@@ -60,6 +60,65 @@ fn finish(
     }
 }
 #[test]
+fn known_control_refusal_cannot_release_an_external_original_lifecycle_hold() {
+    crate::test_process::owning_case!(
+        known_control_refusal_cannot_release_an_external_original_lifecycle_hold
+    );
+    let (root, broker) = recovered::tests::Tree::bootstrap_parts("", "admission", 512, 4096);
+    let broker = Arc::new(broker);
+    let (client, connection) = incoming(&broker, br#"{"action":"unsupported-known"}"#);
+    let mut hold = connection.retain_lifecycle().unwrap();
+    let mut failure = broker.handle_control(connection).unwrap_err();
+    let retained = !failure.reconcile();
+    let pending = failure.owner.is_some();
+    hold.release_for_worker().unwrap();
+    let finalized = failure.reconcile();
+    let cause = failure.to_string();
+    drop(failure);
+    let cleanup = finish(root, broker, client);
+    cleanup.unwrap();
+    assert!(
+        retained && pending,
+        "body refusal must retain the actual held record"
+    );
+    assert!(
+        finalized,
+        "only same-owner release permits later component close"
+    );
+    assert!(cause.contains("WORKER_CONTROL_UNSUPPORTED"));
+}
+
+#[test]
+fn readonly_native_failure_keeps_the_same_frame_until_its_original_hold_is_released() {
+    crate::test_process::owning_case!(
+        readonly_native_failure_keeps_the_same_frame_until_its_original_hold_is_released
+    );
+    let (root, broker) = recovered::tests::Tree::bootstrap_parts("", "admission", 512, 4096);
+    std::fs::write(root.join("names.out"), b"foreign-container\n").unwrap();
+    let broker = Arc::new(broker);
+    let (client, connection) = incoming(&broker, br#"{"action":"status"}"#);
+    let mut failure = broker.handle_control(connection).unwrap_err();
+    // Transfer the actual already-minted Hold, rather than manufacture a
+    // second hold or a native-close uncertainty marker.
+    let mut hold = failure.owner.as_mut().unwrap().hold.take().unwrap();
+    let retained = !failure.reconcile_known_refusal() && failure.owner.is_some();
+    hold.release_for_worker().unwrap();
+    let finalized = failure.reconcile_known_refusal();
+    let cause = failure.to_string();
+    drop(failure);
+    let cleanup = finish(root, broker, client);
+    cleanup.unwrap();
+    assert!(
+        retained,
+        "readonly Native failure cannot erase its original held record"
+    );
+    assert!(
+        finalized,
+        "only actual same-Hold release permits finalization"
+    );
+    assert!(cause.contains("WORKER_CONTROL_STOP_CENSUS"));
+}
+#[test]
 fn actual_empty_fleet_census_and_checked_close_precede_success_reply() {
     crate::test_process::owning_case!(
         actual_empty_fleet_census_and_checked_close_precede_success_reply

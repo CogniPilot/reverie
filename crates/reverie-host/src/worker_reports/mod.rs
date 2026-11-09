@@ -107,8 +107,11 @@ impl WorkerReportService {
         // A checked lifecycle release may have left only known-complete
         // bookkeeping while contending with this same admission mutex.
         records.retain(|record| !record.settled());
-        if self.closed.load(Ordering::Acquire) || records.len() >= self.limit {
+        if self.closed.load(Ordering::Acquire) {
             return self.refuse(stream, WorkerReportError::Stopping);
+        }
+        if records.len() >= self.limit {
+            return self.refuse(stream, WorkerReportError::Capacity);
         }
         let record = Arc::new(Record::new(stream));
         records.push(record.clone());

@@ -37,7 +37,7 @@ fn validate(raw: &[u8]) -> Result<Value> {
         }
         let parts = identity
             .as_array()
-            .ok_or(Error("Invalid closed metadata"))?;
+            .ok_or(Error::new("Invalid closed metadata"))?;
         json::need(
             parts.len() == 5
                 && parts.iter().all(|part| {
@@ -55,7 +55,7 @@ fn project() -> Result<Vec<u8>> {
         connection.send(b'G', br#"{"action":"goal-custody"}"#)?;
         let frame = connection.receive(LIMIT)?;
         if frame.kind != b'J' {
-            return Err(Error("Private Goal custody unavailable"));
+            return Err(Error::new("Private Goal custody unavailable"));
         }
         let value = validate(&frame.payload)?;
         let encoded = serde_json::to_vec(&value)?;
@@ -67,7 +67,7 @@ fn project() -> Result<Vec<u8>> {
 }
 pub(crate) fn run(operation: Operation) -> Result<u8> {
     let Operation::Custody { stream } = operation else {
-        return Err(Error("Invalid custody operation"));
+        return Err(Error::new("Invalid custody operation"));
     };
     if !stream {
         let raw = project()?;
@@ -88,7 +88,7 @@ pub(crate) fn run(operation: Operation) -> Result<u8> {
             Err(error) => return Err(error.into()),
         }
         if operation[0] != b'G' {
-            return Err(Error("Closed Goal helper operation refused"));
+            return Err(Error::new("Closed Goal helper operation refused"));
         }
         let raw = project()?;
         output.write_all(b"J")?;

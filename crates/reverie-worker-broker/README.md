@@ -6,13 +6,24 @@ report registry, and published actual handler JoinHandles. It never executes
 itself or replaces its process image. Replacing this program invalidates its
 original-process delegation and requires supported registered bootstrap.
 
-The additive `nativeWorkerBroker` Nix output is unselected. The shipped hybrid
-`workerBroker` remains unchanged. This cut connects ordinary J preparation,
-Cold/Reuse viewer relay and original all-outcome finalization. Existing M/G
-consumers use the same service. Mandatory Q operation execution, protected L,
-C maintenance, lease-peer/supervision and their complete shutdown disposition
-remain required before native production selection or readiness. Temporary
-fail-closed missing-consumer handling is not completed protocol support.
+The additive `nativeWorkerBroker` Nix output is explicitly selectable; the
+default `workerBroker` output still selects the legacy implementation. Supported
+native service install/upgrade can select a native package independently of that
+default. Check actual executable provenance separately from source availability.
+
+The service connects ordinary J preparation, Cold/Reuse viewer relay and
+all-outcome finalization, M/G consumers, Q previews/refusals and pool B
+registration. Q apply still refuses with
+`RESOURCE_RAM_NATIVE_CONTINUATION_REQUIRED`; dispatch alone does not implement
+resource replacement. C supports the fixed `status`, `provider-health`, `storage-status`
+and `stop-laptops` actions. The first three observe; the last stops and settles
+the fleet once. It does not retain writer exclusion for a later snapshot and
+does not change employees' desired-running choices. Unknown C actions refuse.
+
+Protected L and resume Y dispatch, coordinated website maintenance and full
+installed resource-policy acceptance remain separate migration requirements.
+Fail-closed missing-consumer handling is not completed protocol support. Passing
+an ordinary launch or reconnect test does not establish all-verb readiness.
 
 Retained J cleanup stays on the original counted handler thread. Its closed
 Status/Reconcile inbox belongs to the same HandlerJob. Late reconciliation

@@ -4,15 +4,16 @@
  * `bind_failed`, binds the docker bridge through the front, and unbinds on stop(). The suite's setup gives
  * it a temporary HOME.
  */
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { existsSync } from 'node:fs';
 import { Server as HttpsServer } from 'node:https';
 import { join } from 'node:path';
 import type { FastifyInstance } from 'fastify';
-import { WebServer } from '../../src/web/server.js';
+import { WebServer, frontFromEnvironment } from '../../src/web/server.js';
 import { FrontChannel } from '../../src/rust-front/front.js';
 import { dataPath } from '../../src/config/instance.js';
 import { FakeFront } from './fake-front.js';
+import { execFront, frontLaunch } from '../../src/rust-front/launch.js';
 
 type Internal = { app: FastifyInstance; _startDockerBridgeHooksListener(): Promise<void> };
 const running: WebServer[] = [];
@@ -128,5 +129,75 @@ describe('WebServer behind the Rust front', () => {
       { kind: 'unbind', listener: 'bridge' },
       { kind: 'unbind', listener: 'main' },
     ]);
+  });
+});
+
+describe('production start under the native front', () => {
+  it('opens the inherited channel only when started as the front child', () => {
+    const opened: string[] = [];
+    const open = () => {
+      opened.push('fd3');
+      return new FrontChannel(new FakeFront().channel);
+    };
+    expect(frontFromEnvironment({}, open)).toBeUndefined();
+    expect(frontFromEnvironment({ REVERIE_FRONT_CHILD: '0', REVERIE_NATIVE_FRONT: '1' }, open)).toBeUndefined();
+    expect(opened).toEqual([]);
+    expect(frontFromEnvironment({ REVERIE_FRONT_CHILD: '1' }, open)).toBeInstanceOf(FrontChannel);
+    expect(opened).toEqual(['fd3']);
+  });
+
+  it('stop() finishes the channel, and fails when it cannot flush', async () => {
+    const { server, fake, front } = fronted();
+    await start(fake, server);
+    const finish = vi.spyOn(front, 'finish').mockRejectedValueOnce(new Error('front channel did not flush'));
+    await expect(server.stop()).rejects.toThrow('did not flush');
+    expect(finish).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('reverie web selected behind the native front', () => {
+  const argv = ['/store/node', '/store/reverie/dist/index.js', 'web', '--host', '127.0.0.1', '--port', '3100'];
+
+  it('runs the front with the same Node, entry and web arguments, only when selected and not already its child', () => {
+    expect(frontLaunch({}, argv, '/store/node')).toBeUndefined();
+    const env = { REVERIE_NATIVE_FRONT: '1', REVERIE_NATIVE_FRONT_BIN: '/store/front/bin/reverie-front' };
+    expect(frontLaunch(env, argv, '/store/node')).toEqual({
+      command: '/store/front/bin/reverie-front',
+      args: [
+        '--node',
+        '/store/node',
+        '--entrypoint',
+        '/store/reverie/dist/index.js',
+        '--',
+        'web',
+        '--host',
+        '127.0.0.1',
+        '--port',
+        '3100',
+      ],
+    });
+    // The front's own child runs the server itself: no recursion.
+    expect(frontLaunch({ ...env, REVERIE_FRONT_CHILD: '1' }, argv, '/store/node')).toBeUndefined();
+    // Selected without a front is an error, never a TS-only start.
+    expect(() => frontLaunch({ REVERIE_NATIVE_FRONT: '1' }, argv, '/store/node')).toThrow(/REVERIE_NATIVE_FRONT_BIN/);
+  });
+
+  it('replaces the process with the front, marking its child, or refuses when it cannot', () => {
+    const launch = { command: '/store/front/bin/reverie-front', args: ['--node', '/store/node', '--', 'web'] };
+    const calls: Array<{ file: string; args: readonly string[]; env: NodeJS.ProcessEnv }> = [];
+    const execve = ((file: string, args: readonly string[] = [], env: NodeJS.ProcessEnv = {}) => {
+      calls.push({ file, args, env });
+      throw new Error('replaced');
+    }) as (file: string, args?: readonly string[], env?: NodeJS.ProcessEnv) => never;
+    expect(() => execFront(launch, { KEEP: 'yes' }, execve)).toThrow('replaced');
+    expect(calls).toEqual([
+      {
+        file: '/store/front/bin/reverie-front',
+        args: ['/store/front/bin/reverie-front', '--node', '/store/node', '--', 'web'],
+        env: { KEEP: 'yes', REVERIE_FRONT_CHILD: '1' },
+      },
+    ]);
+    // A Node without process.execve refuses rather than starting a supervisor or the TS listener alone.
+    expect(() => execFront(launch, {}, null)).toThrow(/cannot replace its process/);
   });
 });

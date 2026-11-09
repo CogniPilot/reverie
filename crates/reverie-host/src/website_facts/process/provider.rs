@@ -16,7 +16,8 @@ struct Record {
 pub struct ProviderProcessObservation {
     init: ProcessSnapshot,
     pane_dead: bool,
-    live_child: bool,
+    pane: Option<ProcessSnapshot>,
+    pane_children: Vec<ProcessSnapshot>,
 }
 impl ProviderProcessObservation {
     pub fn init(&self) -> &ProcessSnapshot {
@@ -26,7 +27,16 @@ impl ProviderProcessObservation {
         self.pane_dead
     }
     pub fn live_child(&self) -> bool {
-        self.live_child
+        !self.pane_children.is_empty()
+    }
+    /// Same already-validated pane process DATA, never a PID selector or grant.
+    pub fn pane_process(&self) -> Option<&ProcessSnapshot> {
+        self.pane.as_ref()
+    }
+    /// Direct children observed under that same pane/root/namespaces and
+    /// rechecked before return. Intent and dispatch authority are not inferred.
+    pub fn pane_children(&self) -> &[ProcessSnapshot] {
+        &self.pane_children
     }
 }
 impl WebsiteProcessObserver {
@@ -87,12 +97,14 @@ impl WebsiteProcessObserver {
         )?;
         let pane = ProviderPane::decode(&query(EngineQuery::ProviderPane(actual.id()))?)
             .map_err(WebsiteFactsError::Refused)?;
-        let live_child = if pane.dead() {
-            false
+        let (pane_process, pane_children) = if pane.dead() {
+            (None, Vec::new())
         } else {
             let topology = ProviderTopology::decode(&query(EngineQuery::ProviderTop(actual.id()))?)
                 .map_err(WebsiteFactsError::Refused)?;
-            self.provider_children(&topology, &init, pane.guest_pid(), end)?
+            let (pane, children) =
+                self.provider_children(&topology, &init, pane.guest_pid(), end)?;
+            (Some(pane), children)
         };
         need(
             self.provider_record(init.process.pid(), end)? == init,
@@ -109,7 +121,8 @@ impl WebsiteProcessObserver {
         Ok(ProviderProcessObservation {
             init: init.process,
             pane_dead: pane.dead(),
-            live_child,
+            pane: pane_process,
+            pane_children,
         })
     }
     fn provider_children(
@@ -118,7 +131,7 @@ impl WebsiteProcessObserver {
         init: &Record,
         pane: &UnsignedInteger,
         end: Instant,
-    ) -> Result<bool> {
+    ) -> Result<(ProcessSnapshot, Vec<ProcessSnapshot>)> {
         need(
             topology
                 .pairs()
@@ -147,16 +160,18 @@ impl WebsiteProcessObserver {
             .filter(|record| &record.guest == pane)
             .collect::<Vec<_>>();
         need(panes.len() == 1, "PROVIDER_PANE_PROCESS")?;
-        let child = records
+        let children = records
             .iter()
-            .any(|record| record.process.parent() == panes[0].process.pid());
+            .filter(|record| record.process.parent() == panes[0].process.pid())
+            .map(|record| record.process.clone())
+            .collect();
         for record in &records {
             need(
                 self.provider_record(record.process.pid(), end)? == *record,
                 "PROVIDER_PROCESS_CHANGED",
             )?;
         }
-        Ok(child)
+        Ok((panes[0].process.clone(), children))
     }
     fn provider_record(&mut self, pid: &UnsignedInteger, end: Instant) -> Result<Record> {
         self.current(end)?;
@@ -220,6 +235,7 @@ mod tests {
         let owner = engine.capture_query_owner();
         let mut observer = WebsiteProcessObserver::default();
         let mut child = super::super::tests::child(true);
+        let child_pid = child.id();
         let output: OwnedFd = child.stdout.take().unwrap().into();
         let end = Instant::now() + std::time::Duration::from_secs(10);
         let body = (|| -> std::result::Result<ProviderProcessObservation, String> {
@@ -271,6 +287,19 @@ mod tests {
         let observed = body.unwrap();
         assert!(!observed.pane_dead());
         assert!(observed.live_child());
+        assert_eq!(
+            observed.pane_process().unwrap().pid().to_u64(),
+            Some(u64::from(std::process::id()))
+        );
+        assert_eq!(observed.pane_children().len(), 1);
+        assert_eq!(
+            observed.pane_children()[0].pid().to_u64(),
+            Some(u64::from(child_pid))
+        );
+        assert_eq!(
+            observed.pane_children()[0].parent(),
+            observed.pane_process().unwrap().pid()
+        );
         assert_eq!(
             observed.init().pid().to_u64(),
             Some(u64::from(std::process::id()))

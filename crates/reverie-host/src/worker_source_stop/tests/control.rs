@@ -1,6 +1,7 @@
 //! Real owned target/process and held storage; no Docker or fabricated lease.
 use super::*;
 use std::fs;
+mod census;
 fn prepare(fixture: &Fixture) -> (ControlLaptopStop, *const LaunchStorage) {
     fs::write(fixture.root.join("legacy-stop"), b"closed C fixture").unwrap();
     fs::write(fixture.root.join("container-census"), b"").unwrap();

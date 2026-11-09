@@ -54,3 +54,37 @@ provider or production website. The isolated anchor has no production network;
 the real Office socket and relay lifecycle are exercised, not bridge-address
 lookup or backend API health. It grants no perf, soft-RAM, pool activation,
 systemd-installation or global native-service singleton acceptance.
+
+The separately ignored
+`actual_native_viewer_eof_reconnect_preserves_same_live_provider_and_command`
+case uses the same exact inputs and original 150-second attempt budget. It calls
+the same held-workload helper; the existing finite terminal command is unchanged,
+not duplicated or a claim that shell runtime has been retired. It closes only
+the first website-side Unix socket while the command is live, collects the real
+published handler thread, checks original socket/Hold settlement and lifecycle
+transients, then attaches with `attachOnly: true` to the same SID. It repeats EOF
+on that reuse viewer and attaches once more before releasing the original command.
+No protocol exit, terminal input, explicit reconciliation or provider-stop request
+is used to simulate either website disappearance.
+
+Each live boundary requires the exact original Created CID, original Started
+registration, actual running/unpaused/nondead init PID, kernel start tick, Docker
+StartedAt and original runtime publication bytes/exit nonce to match. The original command receipt and workload-release marker must remain absent,
+the original storage lease held and R admission available. Checkpoints retain
+private fixed-workload frame bytes and the actual registry's read-only typed
+storage diagnostic. The existing typed provider observer additionally supplies
+the actual pane controller and its single direct command child, already checked
+against the Engine topology, kernel root/namespaces and repeated process reads.
+Their PID, birth, parent, argv digest, executable identity and namespaces must
+remain identical at every boundary. No new process lookup, shell inspection or
+caller-selected PID is added. The same Runtime metadata owner and process reader
+are retained across checks, known-closed before global service shutdown, and kept
+whole with original typed failures on uncertainty. Missing/incomplete native knowledge is not a cleanup grant.
+After the final attach, normal command output, `.exit0`, owned stop, physical
+handler/service/Office/storage closure and original-CID cleanup remain mandatory.
+
+Compilation and test listing do not authorize this Docker case. The exact selector
+needs a separate one-attempt execution approval outside the host rollout quiet
+window; pinning the test process alone does not pin its created containers. Unknown
+or failed results retain the original whole attempt and tenant, without replay,
+guessed-CID cleanup, manual release or resetting any marker.

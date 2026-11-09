@@ -51,11 +51,18 @@ fn main() -> ExitCode {
         Err(error) => {
             println!(
                 "{}",
-                serde_json::json!({"success":false,"code":error.code(),"finalizationCode":error.finalization_code(),
-                "recovery":"Inspect the durable operation and actual containers before another effect."})
+                serde_json::json!({"success":false,"code":error.code(),"finalizationCode":error.finalization_code(),"diagnostic":error.diagnostic(),
+                "recovery":recovery_message(error.code())})
             );
             ExitCode::FAILURE
         }
+    }
+}
+fn recovery_message(code: &str) -> &'static str {
+    if code == "DEPLOYMENT_SHARED_WRITABLE_MOUNT" {
+        "Another running container has a writable bind overlapping console data. Keep the current website running, coordinate authorized maintenance to quiesce that shared writer, then create a fresh verified deployment. Do not exclude account data or bypass backup verification."
+    } else {
+        "Inspect the durable operation and actual containers before another effect."
     }
 }
 fn run(args: Arguments) -> Result<serde_json::Value, reverie_deployment::DeploymentError> {
@@ -75,10 +82,27 @@ fn run(args: Arguments) -> Result<serde_json::Value, reverie_deployment::Deploym
         };
         Ok(value)
     })();
-    let closed = service.close();
-    let value = match (result, closed) {
-        (Ok(value), Ok(())) => value,
-        (Err(error), _) | (_, Err(error)) => return Err(error),
-    };
+    finish(result, service.close())
+}
+fn finish(
+    result: Result<serde_json::Value, reverie_deployment::DeploymentError>,
+    closed: Result<(), reverie_deployment::DeploymentError>,
+) -> Result<serde_json::Value, reverie_deployment::DeploymentError> {
+    let value = reverie_deployment::DeploymentError::finalized(result, closed)?;
     Ok(serde_json::json!({"success":true,"data":value}))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn body_and_close_errors_both_survive_cli_finalization() {
+        let body = serde_json::from_slice::<serde_json::Value>(b"invalid")
+            .unwrap_err()
+            .into();
+        let closed = std::io::Error::other("owned fixture close failure").into();
+        let error = finish(Err(body), Err(closed)).unwrap_err();
+        assert_eq!(error.code(), "DEPLOYMENT_JSON_INVALID");
+        assert_eq!(error.finalization_code(), Some("DEPLOYMENT_IO_UNAVAILABLE"));
+    }
 }

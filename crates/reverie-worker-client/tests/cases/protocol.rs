@@ -6,6 +6,16 @@ use std::os::unix::fs::{PermissionsExt, symlink};
 use std::time::{Duration, Instant};
 
 #[test]
+fn storage_status_is_discoverable_without_connecting_or_selecting_a_session() {
+    let tree = Tree::new();
+    let output = Process::spawn(&mut tree.command(&["--help"])).wait();
+    assert!(output.status.success());
+    let help = String::from_utf8(output.stdout).unwrap();
+    assert!(help.contains("storage-status"));
+    tree.no_connection();
+}
+
+#[test]
 fn launch_attach_and_resource_frames_preserve_stdio_and_environment() {
     for mode in ["normal", "attach", "resource"] {
         let tree = Tree::new();
@@ -73,6 +83,7 @@ fn all_control_verbs_and_stop_fences_are_sent_once_with_existing_shape() {
     for action in [
         "status",
         "provider-health",
+        "storage-status",
         "stop-laptops",
         "shutdown",
         "restart-website",
@@ -114,6 +125,9 @@ fn all_control_verbs_and_stop_fences_are_sent_once_with_existing_shape() {
 fn malformed_modes_and_invalid_utf8_arguments_refuse_before_connect() {
     let tree = Tree::new();
     for args in [
+        vec!["--control", "storage-status", "--session-id", SID],
+        vec!["--control", "storage-status", "--caller-session", SID],
+        vec!["--control", "storage-status", "--command", "secret-command"],
         vec!["--resource-ref", "bad"],
         vec!["--resource-ref", SID, "--control", "status"],
         vec!["--resource-ref", SID, "--attach-only"],

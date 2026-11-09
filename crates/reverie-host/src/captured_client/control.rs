@@ -116,6 +116,7 @@ pub(crate) struct CallFailure {
 #[derive(Clone, Copy)]
 enum ExecutionMode {
     Combined,
+    CombinedWaiting,
     NixTail,
     GoalStdout,
 }
@@ -194,9 +195,7 @@ impl CapturedClient {
         if !job.same_capture(&self.bootstrap) {
             return Err(EngineError::new(EngineFault::Identity));
         }
-        let mut active = self.active.try_lock().map_err(|_| {
-            EngineError::before_start_pending(EngineFault::Busy, CleanupFault::Supervisor)
-        })?;
+        let mut active = self.admission_slot()?;
         if self.closing.load(Ordering::Acquire) {
             return Err(EngineError::new(EngineFault::Cancelled));
         }
@@ -363,7 +362,7 @@ impl CapturedClient {
         cancellation: &CancellationToken,
         policy: Policy,
     ) -> Result<CapturedOutput> {
-        self.run_scoped(args, deadline, cancellation, policy)
+        self.run_scoped_waiting(args, deadline, cancellation, policy)
             .map_err(|failure| failure.error)
     }
     pub(crate) fn run_scoped(
@@ -380,6 +379,24 @@ impl CapturedClient {
             policy,
             &mut None,
             ExecutionMode::Combined,
+        )
+    }
+    /// Fixed metadata readers own this whole bounded query window. Effect
+    /// owners with their own live stop/admission loop use immediate run_scoped.
+    pub(crate) fn run_scoped_waiting(
+        &self,
+        args: Vec<OsString>,
+        deadline: Instant,
+        cancellation: &CancellationToken,
+        policy: Policy,
+    ) -> std::result::Result<CapturedOutput, CallFailure> {
+        self.run_owned(
+            args,
+            deadline,
+            cancellation,
+            policy,
+            &mut None,
+            ExecutionMode::CombinedWaiting,
         )
     }
     /// Goal's existing fixed inventory discards stderr in the child. Keep the
@@ -449,9 +466,33 @@ impl CapturedClient {
                 EngineFault::Deadline,
             )));
         }
-        let call = self
-            .admit(cancellation, policy, registration, mode)
-            .map_err(CallFailure::before_admission)?;
+        // The existing viewer admission strategy also waits only BEFORE any
+        // native constructor starts. Keep this call's original clipped end;
+        // never settle/cancel a sibling or retry an admitted command.
+        let call = loop {
+            if cancellation.is_cancelled() || Instant::now() >= deadline {
+                return Err(CallFailure::before_admission(EngineError::new(
+                    cancellation_fault(cancellation.is_cancelled()),
+                )));
+            }
+            match self.admit(cancellation, policy, registration, mode) {
+                Ok(call) => break call,
+                Err(error)
+                    if matches!(
+                        mode,
+                        ExecutionMode::CombinedWaiting | ExecutionMode::GoalStdout
+                    ) && error.is_admission_busy() =>
+                {
+                    #[cfg(test)]
+                    self.bootstrap
+                        .hooks
+                        .admission_waited
+                        .store(true, Ordering::Release);
+                    tick(deadline);
+                }
+                Err(error) => return Err(CallFailure::before_admission(error)),
+            }
+        };
         self.run_admitted(args, deadline, &call.job)
             .map_err(|error| CallFailure {
                 error,
@@ -503,17 +544,19 @@ impl CapturedClient {
         registration: &mut Option<std::fs::File>,
         mode: ExecutionMode,
     ) -> Result<CapturedCall> {
-        let mut active = self.active.try_lock().map_err(|_| {
-            EngineError::before_start_pending(EngineFault::Busy, CleanupFault::Supervisor)
-        })?;
+        let mut active = self.admission_slot()?;
+        if self.closing.load(Ordering::Acquire) {
+            return Err(if active.is_some() {
+                EngineError::pending(EngineFault::Busy, CleanupFault::Unreaped)
+            } else {
+                EngineError::new(EngineFault::Busy)
+            });
+        }
         if active.is_some() {
             return Err(EngineError::before_start_pending(
                 EngineFault::Busy,
                 CleanupFault::Unreaped,
             ));
-        }
-        if self.closing.load(Ordering::Acquire) {
-            return Err(EngineError::new(EngineFault::Busy));
         }
         let job = Arc::new(Job {
             external: external.clone(),
@@ -534,6 +577,19 @@ impl CapturedClient {
             origin: Arc::clone(&self.bootstrap),
             job,
         })
+    }
+    fn admission_slot(&self) -> Result<std::sync::MutexGuard<'_, Option<Active>>> {
+        match self.active.try_lock() {
+            Ok(active) => Ok(active),
+            Err(TryLockError::WouldBlock) => Err(EngineError::before_start_pending(
+                EngineFault::Busy,
+                CleanupFault::Supervisor,
+            )),
+            Err(TryLockError::Poisoned(_)) => Err(EngineError::pending(
+                EngineFault::Supervisor,
+                CleanupFault::Supervisor,
+            )),
+        }
     }
     fn release(&self, job: &Arc<Job>, deadline: Instant) -> Result<()> {
         // Only the exact completed job is handed off. Waiting for this RAM

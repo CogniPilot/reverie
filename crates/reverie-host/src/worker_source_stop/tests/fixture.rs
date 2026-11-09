@@ -82,6 +82,15 @@ impl Fixture {
         }
     }
     pub(super) fn new(exit_on: &str) -> Self {
+        Self::with_hooks(
+            exit_on,
+            crate::captured_client::test_hooks::Hooks::default(),
+        )
+    }
+    pub(super) fn with_hooks(
+        exit_on: &str,
+        hooks: crate::captured_client::test_hooks::Hooks,
+    ) -> Self {
         let program = program();
         let root = fs::canonicalize(std::env::temp_dir())
             .unwrap()
@@ -98,12 +107,13 @@ impl Fixture {
         let info = fs::metadata(&root).unwrap();
         let config = worker_config::decode(&serde_json::to_vec(&json!({"version":1,"deployment":"test","serverContainer":"test-server","image":format!("sha256:{}","a".repeat(64)),"socket":"/run/source-stop.sock","uid":info.uid(),"gid":info.gid(),"stateRoot":root.join("state"),"scratchRoot":root.join("scratch"),"companyFile":root.join("company.json"),"companyRoot":root.join("company"),"apiSocketRoot":root.join("office"),"budgetMode":"pool","memoryMiB":0,"poolMemoryMiB":4096,"poolTasksMax":1024,"cgroupParent":"reverie-workers.slice","pidsLimit":128,"cpus":0,"maxWorkers":4,"mounts":[{"source":root.join("workspace"),"destination":"/workspace","readOnly":false}],"maintenanceSessions":[]})).unwrap()).unwrap();
         let base = WorkerEnvelope::capture(config.clone()).unwrap();
-        let bootstrap = EngineBootstrap::from_service(
+        let mut bootstrap = EngineBootstrap::from_service(
             program.as_os_str(),
             BTreeMap::from([("SOURCE_EXIT_ON".into(), exit_on.into())]),
             root.clone(),
         )
         .unwrap();
+        bootstrap.hooks = hooks;
         let runtime = Arc::new(WorkerRuntime::new(
             InstalledWorkerEngine::new(bootstrap),
             base.base(),

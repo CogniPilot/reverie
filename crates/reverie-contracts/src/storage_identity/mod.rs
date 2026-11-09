@@ -1,4 +1,7 @@
 //! Named read-side laptop registry/lineage facts. No authorization or write API.
+mod inventory;
+#[cfg(test)]
+mod inventory_tests;
 pub(crate) mod lineage;
 mod provider;
 mod registry;

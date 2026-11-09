@@ -168,10 +168,31 @@ impl BrokerService {
             .is_cancelled()
         {
             if let Err(error) = self.poll_handler() {
+                eprintln!("WORKER_SERVICE_POLL_FAILED: {error}");
                 errors.push(error);
                 self.startup.request_stop();
             }
         }
+        let signal = self
+            .startup
+            .owner
+            .signals
+            .as_ref()
+            .and_then(BrokerSignals::termination_signal);
+        let remaining = self
+            .startup
+            .owner
+            .broker
+            .storage
+            .runtime
+            .stop_deadline()
+            .map(|end| {
+                end.saturating_duration_since(std::time::Instant::now())
+                    .as_millis()
+            });
+        eprintln!(
+            "WORKER_SERVICE_STOP_OBSERVED: signal={signal:?}; stop_deadline_remaining_ms={remaining:?}"
+        );
         match self.shutdown(&mut errors) {
             Ok(closed) => Ok(closed),
             Err(()) => Err(Box::new(BrokerServiceFailure {

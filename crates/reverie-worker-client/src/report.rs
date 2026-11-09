@@ -8,7 +8,7 @@ pub(crate) fn selected(employees: &[String]) -> Result<()> {
         || employees.iter().any(|employee| !uuid(employee))
         || employees.iter().collect::<BTreeSet<_>>().len() != employees.len()
     {
-        return Err(Error("TELEMETRY_REPORT_REFUSED"));
+        return Err(Error::new("TELEMETRY_REPORT_REFUSED"));
     }
     Ok(())
 }
@@ -16,17 +16,17 @@ fn integer(value: &Value, maximum: u64) -> Result<u64> {
     value
         .as_u64()
         .filter(|number| *number <= maximum)
-        .ok_or(Error("TELEMETRY_REPORT_REFUSED"))
+        .ok_or(Error::new("TELEMETRY_REPORT_REFUSED"))
 }
 fn group(value: &Value, maximum: u64) -> Result<(String, String, i64, u64)> {
     let tool = value["tool"]
         .as_str()
         .filter(|tool| TOOLS.contains(tool))
-        .ok_or(Error("TELEMETRY_REPORT_REFUSED"))?;
+        .ok_or(Error::new("TELEMETRY_REPORT_REFUSED"))?;
     let code = value["exit"]
         .as_i64()
         .filter(|code| (-255..=255).contains(code) && *code != 0)
-        .ok_or(Error("TELEMETRY_REPORT_REFUSED"))?;
+        .ok_or(Error::new("TELEMETRY_REPORT_REFUSED"))?;
     let category = if code == 127 {
         "COMMAND_NOT_FOUND"
     } else if code < 0 {
@@ -43,7 +43,7 @@ fn counts(value: &Value) -> Result<()> {
     let counts = value["counts"]
         .as_array()
         .filter(|rows| rows.len() <= 20)
-        .ok_or(Error("TELEMETRY_REPORT_REFUSED"))?;
+        .ok_or(Error::new("TELEMETRY_REPORT_REFUSED"))?;
     let mut seen = BTreeSet::new();
     let mut total = 0;
     for row in counts {
@@ -79,7 +79,7 @@ fn employee(value: &Value, expected: &str, enabled: bool) -> Result<()> {
     )?;
     let status = value["status"]
         .as_str()
-        .ok_or(Error("TELEMETRY_REPORT_REFUSED"))?;
+        .ok_or(Error::new("TELEMETRY_REPORT_REFUSED"))?;
     json::need(if enabled {
         ["ready", "no_data", "unavailable"].contains(&status)
     } else {
@@ -99,7 +99,7 @@ fn employee(value: &Value, expected: &str, enabled: bool) -> Result<()> {
 }
 fn validate(raw: &[u8], expected: &[String]) -> Result<Value> {
     if raw.len() > 262_144 {
-        return Err(Error("TELEMETRY_REPORT_REFUSED"));
+        return Err(Error::new("TELEMETRY_REPORT_REFUSED"));
     }
     selected(expected)?;
     let value = json::decode(raw)?;
@@ -128,7 +128,7 @@ fn validate(raw: &[u8], expected: &[String]) -> Result<Value> {
     let enabled = value["enabled"].as_bool().expect("checked boolean");
     let employees = value["employees"]
         .as_array()
-        .ok_or(Error("TELEMETRY_REPORT_REFUSED"))?;
+        .ok_or(Error::new("TELEMETRY_REPORT_REFUSED"))?;
     json::need(employees.len() == expected.len())?;
     for (row, expected) in employees.iter().zip(expected) {
         employee(row, expected, enabled)?;
@@ -136,7 +136,7 @@ fn validate(raw: &[u8], expected: &[String]) -> Result<Value> {
     let top = value["top_repeats"]
         .as_array()
         .filter(|rows| rows.len() <= 20)
-        .ok_or(Error("TELEMETRY_REPORT_REFUSED"))?;
+        .ok_or(Error::new("TELEMETRY_REPORT_REFUSED"))?;
     let mut seen = BTreeSet::new();
     for row in top {
         json::closed(
@@ -161,10 +161,10 @@ pub(crate) fn run(connection: &mut Connection, employees: &[String]) -> Result<V
     )?;
     let frame = connection.receive(262_144)?;
     if frame.kind != b'J' {
-        return Err(Error("TELEMETRY_REPORT_UNAVAILABLE"));
+        return Err(Error::new("TELEMETRY_REPORT_UNAVAILABLE"));
     }
     let value =
-        validate(&frame.payload, employees).map_err(|_| Error("TELEMETRY_REPORT_REFUSED"))?;
+        validate(&frame.payload, employees).map_err(|_| Error::new("TELEMETRY_REPORT_REFUSED"))?;
     connection.validate()?;
     Ok(serde_json::to_vec(&value)?)
 }

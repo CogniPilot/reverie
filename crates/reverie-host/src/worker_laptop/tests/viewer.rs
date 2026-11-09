@@ -61,6 +61,11 @@ fn actual_session_pty_stdio_marker_resize_and_python_negative_signal_status() {
     let fixture = Fixture::employee("created-viewer-echo");
     let (workflow, created, released) = released(&fixture);
     let viewer = start(&fixture, &released);
+    let original_viewer_flag = {
+        let record = workflow.record.try_lock().unwrap();
+        record.viewer.is_some() && !record.unknown
+    };
+    let original_diagnostic = workflow.storage_owner_status();
     assert!(viewer.same_workflow(&workflow));
     assert!(
         fixture
@@ -128,6 +133,18 @@ fn actual_session_pty_stdio_marker_resize_and_python_negative_signal_status() {
     assert!(
         fixture.runtime().close(end()).is_err(),
         "viewer close never releases created/storage owners"
+    );
+    assert!(original_viewer_flag);
+    assert!(
+        matches!(
+            original_diagnostic,
+            reverie_contracts::worker_storage_status::OwnerObservation::Observed {
+                native_uncertain: None,
+                native_pending: None,
+                ..
+            }
+        ),
+        "nested viewer native knowledge must not be reconstructed from Record.unknown=false"
     );
 }
 #[test]

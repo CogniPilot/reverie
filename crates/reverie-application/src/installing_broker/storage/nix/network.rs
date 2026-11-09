@@ -3,6 +3,7 @@
 use super::*;
 mod abort_held;
 mod cold;
+mod completion;
 mod created_return;
 pub(in crate::installing_broker) use created_return::{
     CreatedStorageFinishFailure, CreatedStorageReturned,
@@ -248,6 +249,7 @@ fn transfer(
     };
     let workflow = retain_native(registry, &preparation.workflow, inputs, connection)?;
     entries[index].owner = EntryOwner::Laptop(workflow.clone());
+    entries[index].started_handoff = None;
     Ok(workflow)
 }
 fn retain_native(

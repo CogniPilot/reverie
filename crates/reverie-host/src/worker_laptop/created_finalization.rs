@@ -257,3 +257,18 @@ pub(super) fn require_native_closed(runtime: &WorkerRuntime, record: &Record) ->
     }
     Ok(())
 }
+
+impl StorageCheck {
+    pub(super) fn diagnostic_phase(&self) -> reverie_contracts::worker_storage_status::CheckPhase {
+        use reverie_contracts::worker_storage_status::CheckPhase;
+        if !self.attempted {
+            CheckPhase::Unattempted
+        } else if self.failure.is_some() {
+            CheckPhase::Failed
+        } else if self.current.is_some() {
+            CheckPhase::Known
+        } else {
+            CheckPhase::Reading
+        }
+    }
+}

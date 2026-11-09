@@ -33,6 +33,7 @@ describe('owner middleware: exact board decision add and clear', () => {
   let rooms: ChatRoom[];
   let serviceToken: string;
   let ownerToken: string;
+  let sessions: Map<string, { id: string; owner: undefined }>;
   let ownPlanPermissions: { moveOwnPlan: boolean; managePlans: boolean };
   let audit: Record<string, unknown>[];
   let boardPermissions: Record<string, BoardPermissionFlags>;
@@ -72,7 +73,7 @@ describe('owner middleware: exact board decision add and clear', () => {
     await setPolicy(store, 'enforce', { forceLockoutRisk: true });
     serviceToken = await issueServiceToken(store, 'synthetic-board-service');
     const service = new OwnerAuthService({ store, auditFile: join(dir, 'owner-auth-audit.jsonl') });
-    const sessions = new Map([COORD, ORDINARY, FORGED].map((id) => [id, { id, owner: undefined }]));
+    sessions = new Map([COORD, ORDINARY, FORGED].map((id) => [id, { id, owner: undefined }]));
     rooms = [
       {
         id: 'synthetic-room',
@@ -147,6 +148,36 @@ describe('owner middleware: exact board decision add and clear', () => {
   const asAgent = (session: string) => ({ 'x-reverie-parent-session': session });
   const post = (url: string, headers: Record<string, string>, payload: object = {}) =>
     app.inject({ method: 'POST', url, headers, payload });
+
+  it('lets current employees and coordinators read one card through the same enforced Board boundary', async () => {
+    const created = await post('/api/board/issues', asAgent(ORDINARY), {
+      title: 'Ordinary employee card', owner: 'e-ordinary', reason: 'Complete card reason',
+    });
+    expect(created.statusCode).toBe(200);
+    const item = created.json().data.item;
+    for (const session of [ORDINARY, COORD]) {
+      const headers = asAgent(session);
+      expect((await app.inject({ url: '/api/board', headers })).statusCode).toBe(200);
+      const single = await app.inject({ url: `/api/board/issues/${item.id}`, headers });
+      expect(single.statusCode).toBe(200);
+      expect(single.json().data).toEqual({ rev: board.rev, item });
+      expect((await app.inject({ url: '/api/board/issues/missing-card', headers })).statusCode).toBe(404);
+    }
+  });
+
+  it('keeps single-card reads private and refuses unknown, retired and service-token callers', async () => {
+    const created = await post('/api/board/issues', asAgent(ORDINARY), { title: 'Private card', owner: 'e-ordinary' });
+    expect(created.statusCode).toBe(200);
+    const url = `/api/board/issues/${created.json().data.item.id}`;
+    const before = board.snapshot();
+    expect((await app.inject({ url })).statusCode).toBe(401);
+    expect((await app.inject({ url, headers: asAgent('00000000-0000-4000-8000-000000000099') })).statusCode).toBe(403);
+    expect((await app.inject({ url, headers: { [SERVICE_HEADER]: serviceToken, ...asAgent(ORDINARY) } })).statusCode).toBe(403);
+    sessions.delete(ORDINARY);
+    expect((await app.inject({ url, headers: asAgent(ORDINARY) })).statusCode).toBe(403);
+    expect((await app.inject({ method: 'PUT', url: '/api/settings', headers: asAgent(COORD), payload: {} })).statusCode).toBe(403);
+    expect(board.snapshot()).toEqual(before);
+  });
 
   it('opens decision creation, annotation and dismissal while keeping choice and execution owner-only', () => {
     for (const route of ['/api/board/decisions', '/api/board/decisions/:id/clear'])

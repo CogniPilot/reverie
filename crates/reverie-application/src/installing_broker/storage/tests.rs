@@ -301,3 +301,6 @@ fn actual_installing_bootstrap_consumes_runtime_and_uses_real_wait_binding_reade
     claim.release(end()).unwrap();
     broker.storage.runtime.close(end()).unwrap();
 }
+
+#[path = "diagnostic/tests.rs"]
+mod diagnostic_cases;

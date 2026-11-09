@@ -107,7 +107,7 @@ fn service_purposes_use_original_cap_and_return_slot_only_after_checked_close() 
     let (_client, server) = fixture.sockets();
     assert!(matches!(
         service.register_worker_connection(server),
-        Err(WorkerReportError::Stopping)
+        Err(WorkerReportError::Capacity)
     ));
     connections.pop().unwrap().close_for_worker().unwrap();
     let (mut client, server) = fixture.sockets();

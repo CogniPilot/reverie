@@ -74,8 +74,8 @@ facts or bypass the existing supported activation workflow.
 The application resource-staging service now composes profile-store custody,
 resource selection and native GPU/perf/memory/lease observations before deriving
 the separate profile/config/policy digests. It returns a candidate only. The
-current Python broker remains selected until its full worker validation,
-admission, reservation, effect and reconciliation consumers migrate. See
+default broker package remains legacy; the explicit native service has a separate
+selection and acceptance boundary. See
 [`reverie-application`](../crates/reverie-application/README.md) for the exact
 service boundary and compatibility evidence.
 
@@ -97,7 +97,30 @@ claims a complete Rust backend or an installed rollout.
 Use the existing owners below before adding another adapter or executor. Their
 source and component tests do not establish an installed native broker.
 
-| Operation | Existing Rust owner | Integration still required |
+For the current executable and service entry points, start with the
+[native broker](../crates/reverie-worker-broker/README.md),
+[worker client](../crates/reverie-worker-client/README.md) and
+[console deployment service](../crates/reverie-deployment/README.md).
+The native broker has a recovery-before-listen service, counted handler joins,
+ordinary Cold/Reuse launch handlers, detached supervision, and fixed C controls.
+`status`, `provider-health` and `storage-status` are read-only observations;
+`stop-laptops` is a one-shot fleet stop, not a maintained deployment lease.
+The Rust client library uses the same checked exchange as the CLI. Its reply is
+data, not proof that a requested effect succeeded or its resources were released.
+
+Package selection is a separate migration boundary: `nativeWorkerBroker` is
+currently an explicit integration output, while `workerBroker` still selects
+the legacy implementation in `nix/native-worker-packages.nix`. Protected resume,
+launch and maintenance consumers must be paired with their correct program
+provenance before changing that default. An explicitly installed native service
+does not change what a fresh default installation selects. The rows below track
+the ownership boundaries to preserve, rather than a percentage-complete estimate.
+Their final column is the original integration contract, not a list of absent
+implementations: service startup, ordinary Cold/Reuse handlers and counted
+shutdown now connect several of those boundaries. Current missing dispatch and
+deployment capabilities are identified above and in the native broker README.
+
+| Operation | Existing Rust owner | Integration contract |
 | --- | --- | --- |
 | Broker bootstrap | `InstallingBroker::new` in `reverie-application`; consumes the actual validated snapshot and `WorkerRuntime`, captures mandatory telemetry before optional reservations, and retains failed construction resources | Service entry point, accepted connections and whole-service shutdown |
 | Running-laptop recovery | `InstallingBroker::recover_laptops`; ordered census/memory/budget checks, all storage claims before phones, atomic registry publication and retained cleanup owners; actual configured-Gate transaction controls | Actual listener/service invocation and real running-container canary |
@@ -175,15 +198,18 @@ contracts. Full native completion also requires the remaining runtime/model,
 terminal, service and maintenance entry points in the cohort inventory above;
 passing a front-only trial does not retire those Python consumers.
 
-## Hybrid production selection
+## Hybrid selection and acceptance
 
 The November 7, 2026 hybrid cutover selected the qualified Rust network front
 with the existing TypeScript application. Rust owns public listeners, transport
 buffers, backpressure and child supervision; HTTP application routes,
 authentication and company stores remain in TypeScript/Node. Rust worker command
-clients are also running. The existing Python worker broker, Kokoro speech
-service and other legacy helpers remain active. Other Rust backend crates are not thereby selected as
-production services, and this is not the full native-backend migration.
+clients were also selected. That initial cutover retained the Python worker
+broker, Kokoro speech service and other legacy helpers; subsequent broker
+selection is an independent service operation. Inspect the installed service's
+actual executable and package provenance when reporting what runs. Neither the
+front selection nor a later broker selection establishes that all other backend
+crates are selected or that the runtime is Python-free.
 
 The owner-directed fix-forward cutover retained the original stopped container,
 all existing data mounts and an ordinary full console copy. Strict snapshot

@@ -2,6 +2,7 @@ mod abort_held;
 mod accepted;
 mod cleanup;
 mod cold_prepare;
+mod completion;
 mod create;
 mod create_diagnostics;
 mod direct_finalization;

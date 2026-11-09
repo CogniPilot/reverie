@@ -49,6 +49,10 @@ impl ObservedUnit {
             }
             WorkerServiceAction::Status => true,
             WorkerServiceAction::Rollback { .. } => self.active == "inactive" && self.sub == "dead",
+            WorkerServiceAction::Upgrade { force_stopped } => {
+                (self.active == "inactive" && self.sub == "dead")
+                    || (*force_stopped && self.active == "failed" && self.sub == "failed")
+            }
         };
         need(expected, "NATIVE_SERVICE_POST_COMMAND_STATE_UNCONFIRMED")
     }
@@ -117,7 +121,12 @@ impl State {
         if observed.fragment == self.home.join(".config/systemd/user").join(UNIT) {
             let target = self.selected_unit_link()?;
             need(
-                target == self.unit || self.previous.as_ref() == Some(&target),
+                target == self.unit
+                    || self.previous.as_ref() == Some(&target)
+                    || self
+                        .checked_generation
+                        .as_ref()
+                        .is_some_and(|checked| checked.unit == target),
                 "NATIVE_SERVICE_UNKNOWN_GENERATION",
             )?;
             observed.fragment = target;
@@ -179,6 +188,9 @@ impl State {
 
 impl State {
     pub(super) fn pin_package(&mut self) -> Result<()> {
+        self.pin_package_at(&self.folder().join("gcroot"))
+    }
+    pub(super) fn pin_package_at(&mut self, root: &Path) -> Result<()> {
         let package = self
             .unit
             .ancestors()
@@ -188,7 +200,7 @@ impl State {
             OsString::from("--store"),
             OsString::from("daemon"),
             OsString::from("--add-root"),
-            self.folder().join("gcroot").into_os_string(),
+            root.as_os_str().to_owned(),
             OsString::from("--indirect"),
             OsString::from("--realise"),
             package.as_os_str().to_owned(),

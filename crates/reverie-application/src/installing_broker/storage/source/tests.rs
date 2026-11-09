@@ -17,6 +17,47 @@ fn operation() -> JournalId {
     JournalId::parse("33333333-2222-4333-8444-555555555555").unwrap()
 }
 #[test]
+fn supervision_keeps_the_actual_source_pending_without_borrowing_or_releasing_it() {
+    crate::test_process::owning_case!(
+        supervision_keeps_the_actual_source_pending_without_borrowing_or_releasing_it
+    );
+    let tree = employee_tree();
+    let config = tree.broker.configuration().unwrap();
+    let ordinary = tree.broker.claim_storage(&session()).unwrap();
+    let (reference, office) = reference(&tree);
+    let attached = reference
+        .attach(config.configuration(), operation(), office)
+        .unwrap();
+    let source = attached.retained_source();
+    drop(attached);
+    let calls = fs::read(tree.root.join("calls.txt")).unwrap();
+    let result = {
+        let lifecycle = tree.broker.installed.lifecycle().unwrap();
+        super::super::super::supervisor::should_stop(
+            &tree.broker,
+            &lifecycle.guard[0],
+            config.configuration(),
+        )
+    };
+    let ordinary_refused = ordinary.observe_launch_receipt().is_err();
+    let unchanged = fs::read(tree.root.join("calls.txt")).unwrap() == calls;
+    let held = StorageLease::acquire_launch(config.configuration(), &session()).is_err();
+    let same = {
+        let entries = tree.broker.storage.lock(None).unwrap();
+        entries.iter().any(|entry| matches!(&entry.owner, EntryOwner::Source(actual) if Arc::ptr_eq(actual, &source.record)))
+    };
+    let registry = source.registry.upgrade().unwrap();
+    source
+        .restore_unclaimed(&mut registry.lock(None).unwrap())
+        .unwrap();
+    ordinary.release(end()).unwrap();
+    assert!(
+        result.is_ok_and(|observed| observed.is_none()),
+        "actual supervision must return typed pending, not latch an unrelated source as a failed stop"
+    );
+    assert!(ordinary_refused && unchanged && held && same);
+}
+#[test]
 fn actual_pending_phone_refuses_original_resource_close_before_consuming_employee_lease() {
     crate::test_process::owning_case!(
         actual_pending_phone_refuses_original_resource_close_before_consuming_employee_lease
@@ -83,6 +124,88 @@ fn session() -> ProfileSessionId {
 }
 fn end() -> Instant {
     Instant::now() + Duration::from_secs(5)
+}
+#[test]
+fn supervision_skips_retained_source_but_selects_the_freshly_recovered_old_direct_sibling() {
+    crate::test_process::owning_case!(
+        supervision_skips_retained_source_but_selects_the_freshly_recovered_old_direct_sibling
+    );
+    const SECOND: &str = "44444444-2222-4333-8444-555555555555";
+    const SECOND_EID: &str = "bbbbbbbb-cccc-4ddd-8eee-ffffffffffff";
+    let tree = Tree::new(&format!("test-agent-{SID}\ntest-agent-{SECOND}\n"));
+    let second = ProfileSessionId::parse(SECOND).unwrap();
+    let config = tree.broker.configuration().unwrap();
+    let company = |second_sid: &str| {
+        serde_json::to_vec(&serde_json::json!({"employees":[
+            {"id":EID,"owner":null,"sessionId":SID,"desiredRunning":true},
+            {"id":SECOND_EID,"owner":null,"sessionId":second_sid,"desiredRunning":true}
+        ]}))
+        .unwrap()
+    };
+    fs::write(tree.root.join("company.json"), company(SECOND)).unwrap();
+    for sid in [session(), second.clone()] {
+        let mut prior = StorageLease::acquire_launch(config.configuration(), &sid).unwrap();
+        prior.prepare_storage().unwrap();
+        prior.record_storage_binding().unwrap();
+        prior.close().unwrap();
+    }
+    // Restart reconstruction sees the advanced canonical binding. The old
+    // sibling is resolved through its original storage-owner lineage.
+    fs::write(tree.root.join("company.json"), company(NEXT_SID)).unwrap();
+    tree.broker.recover_laptops().unwrap();
+    fs::create_dir_all(tree.root.join("state").join(SECOND)).unwrap();
+    fs::write(
+        tree.root.join("state").join(SECOND).join("runtime.json"),
+        br#"{"exit":"not-completed"}"#,
+    )
+    .unwrap();
+    let ordinary = tree.broker.claim_storage(&session()).unwrap();
+    let (reference, office) = reference(&tree);
+    let attached = reference
+        .attach(config.configuration(), operation(), office)
+        .unwrap();
+    let source = attached.retained_source();
+    drop(attached);
+    let before = fs::read(tree.root.join("calls.txt")).unwrap();
+    let identities = {
+        let entries = tree.broker.storage.lock(None).unwrap();
+        entries
+            .iter()
+            .map(|entry| Arc::as_ptr(&entry.identity))
+            .collect::<Vec<_>>()
+    };
+    let selected =
+        super::super::super::supervisor::select_candidate(&tree.broker, config.configuration());
+    let after = fs::read(tree.root.join("calls.txt")).unwrap();
+    let conserved = {
+        let entries = tree.broker.storage.lock(None).unwrap();
+        entries
+            .iter()
+            .map(|entry| Arc::as_ptr(&entry.identity))
+            .collect::<Vec<_>>()
+            == identities
+            && matches!(&entries[0].owner, EntryOwner::Source(actual) if Arc::ptr_eq(actual, &source.record))
+            && matches!(&entries[1].owner, EntryOwner::Direct(_))
+    };
+    let lifecycle_conserved = tree.broker.installed.lifecycle().unwrap().guard.len() == 2;
+    source
+        .restore_unclaimed(&mut tree.broker.storage.lock(None).unwrap())
+        .unwrap();
+    ordinary.release(end()).unwrap();
+    let recovered = tree.broker.installed.lifecycle().unwrap().guard.remove(1);
+    let LaptopOwner::Recovered(old) = recovered.owner else {
+        panic!("actual recovered old sibling")
+    };
+    old.office.close_for_stopped_source(end()).unwrap();
+    old.storage.release(end()).unwrap();
+    assert!(
+        selected.is_ok_and(|candidate| candidate.is_some_and(|(sid, _)| sid == second)),
+        "retained neighbor must not hide the eligible original old Direct owner"
+    );
+    assert!(
+        before == after && conserved && lifecycle_conserved,
+        "selection must not stop or release either genuine seat"
+    );
 }
 fn employee_tree() -> Tree {
     let tree = Tree::new(&format!("test-agent-{SID}\n"));

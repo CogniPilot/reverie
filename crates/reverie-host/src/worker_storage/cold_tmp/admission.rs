@@ -3,7 +3,7 @@
 mod mounts;
 use super::*;
 use crate::{
-    captured_client::{CancellationToken, CapturedCall, Policy},
+    captured_client::{CapturedCall, Policy},
     engine_metadata::EngineError,
     reservation_kernel::ReservationKernel,
     worker_launch::ObservedCreatePlan,
@@ -141,16 +141,20 @@ impl Admission {
     ) -> OwnerResult<Vec<u8>> {
         require(self.pending.is_none(), "WORKER_COLD_CLIENT_RETAINED")?;
         let end = runtime.stop_deadline().map_or(end, |stop| stop.min(end));
-        match runtime.installed_engine().readonly().client.run_scoped(
-            args,
-            end,
-            &CancellationToken::new(),
-            Policy {
-                maximum: Duration::from_secs(20),
-                maximum_output: 4 * 1024 * 1024,
-                successful_exit: true,
-            },
-        ) {
+        match runtime
+            .installed_engine()
+            .readonly()
+            .client
+            .run_scoped_waiting(
+                args,
+                end,
+                &runtime.cancellation(),
+                Policy {
+                    maximum: Duration::from_secs(20),
+                    maximum_output: 4 * 1024 * 1024,
+                    successful_exit: true,
+                },
+            ) {
             Ok(output) => Ok(output.stdout),
             Err(failure) => {
                 if failure.error.is_uncertain() {

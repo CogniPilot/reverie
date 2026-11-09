@@ -4,8 +4,11 @@
 use super::call_budget::CallBudget;
 use super::*;
 mod created_transfer;
+mod diagnostic;
 mod finalization;
-pub use created_transfer::{StartedRelayTransferFailure, StartedRelayTransferred};
+pub use created_transfer::{
+    StartedRelayTransferFailure, StartedRelayTransferred, StartedStorageHandoff,
+};
 mod relay;
 mod stop;
 use crate::{

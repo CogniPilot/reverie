@@ -14,6 +14,7 @@ impl DeploymentService {
         pins: &crate::pins::Pins,
     ) -> Result<DeploymentStatus> {
         self.claimed(operation)?;
+        let source_front = model::uses_front(&operation.plan.source["Config"])?;
         require(
             !operation.exists("rollback-attempt"),
             "DEPLOYMENT_ROLLBACK_ALREADY_ATTEMPTED",
@@ -78,7 +79,7 @@ impl DeploymentService {
         if source["State"]["Running"] == false {
             self.engine.start(source_id)?;
         }
-        self.await_ready(source_id, false)?;
+        self.await_ready(source_id, source_front)?;
         let restored = self.engine.container(source_id)?;
         require(
             model::projection(&restored) == model::projection(&operation.plan.source)

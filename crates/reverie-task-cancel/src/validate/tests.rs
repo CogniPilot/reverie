@@ -2,6 +2,7 @@ use super::*;
 use serde_json::json;
 use std::os::unix::fs::PermissionsExt;
 use std::sync::atomic::{AtomicU64, Ordering};
+mod affinity;
 
 static NEXT: AtomicU64 = AtomicU64::new(0);
 
@@ -64,7 +65,7 @@ impl World {
         let controller = write(&dir.join("controller"), b"robotronix controller", 0o755);
         fs::create_dir(dir.join("task")).unwrap();
         fs::set_permissions(dir.join("task"), fs::Permissions::from_mode(0o700)).unwrap();
-        let cpus: Vec<usize> = current_affinity().unwrap().into_iter().take(8).collect();
+        let cpus = affinity::selection(&current_affinity().unwrap());
         let pins = json!({
             "operationId": "a".repeat(32),
             "tools": tools, "toolSHA256": tool_shas,
@@ -100,6 +101,9 @@ impl World {
 
 #[test]
 fn a_complete_closure_validates() {
+    if affinity::isolate_case("validate::tests::a_complete_closure_validates") {
+        return;
+    }
     let world = World::new();
     let validated = validate(&world.inputs(false)).unwrap();
     assert!(!validated.cpus.is_empty());
@@ -108,6 +112,11 @@ fn a_complete_closure_validates() {
 
 #[test]
 fn a_pending_operation_refuses_a_run_but_not_a_source_check() {
+    if affinity::isolate_case(
+        "validate::tests::a_pending_operation_refuses_a_run_but_not_a_source_check",
+    ) {
+        return;
+    }
     let mut world = World::new();
     world.pins["operationId"] = Value::Null;
     assert!(world.refused(false).contains("operation ID"));

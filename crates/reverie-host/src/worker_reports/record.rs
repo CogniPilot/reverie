@@ -387,7 +387,13 @@ impl Record {
             .is_ok_and(|job| job.is_none_or(|job| job.known_settled()))
     }
     pub(super) fn enter_handler(&self, service: &WorkerReportService) -> Result<()> {
-        self.handler_job()?.map_or(Ok(()), |job| job.enter(service))
+        let job = self
+            .observe_until(
+                &self.handler,
+                &super::budget::CleanupBudget::worker(service),
+            )?
+            .clone();
+        job.map_or(Ok(()), |job| job.enter(service))
     }
     pub(super) fn note_unread_drop(&self) {
         if let Ok(Some(job)) = self.handler_job() {
@@ -403,7 +409,15 @@ impl Record {
         job.map_or(Ok(()), |job| job.settle(end))
     }
     pub(super) fn collect_handler(&self) -> Result<bool> {
-        self.handler_job()?.map_or(Ok(true), |job| job.join_once())
+        let job = match self.handler.try_lock() {
+            Ok(job) => job.clone(),
+            Err(std::sync::TryLockError::WouldBlock) => return Ok(false),
+            Err(std::sync::TryLockError::Poisoned(_)) => {
+                self.mark_opaque();
+                return Err(WorkerReportError::Unconfirmed);
+            }
+        };
+        job.map_or(Ok(true), |job| job.join_once())
     }
     pub(super) fn finished(&self) -> bool {
         self.finished.load(Ordering::Acquire)

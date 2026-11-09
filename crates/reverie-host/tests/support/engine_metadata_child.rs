@@ -34,6 +34,10 @@ fn main() {
             match property {
                 "MainPID" | "ControlPID" => println!("{{\"type\":\"u\",\"data\":{}}}", if active { 42 } else { 0 }),
                 "Job" => println!("{}", r#"{"type":"(uo)","data":[0,"/"]}"#),
+                "Slice" => println!("{}", r#"{"type":"s","data":"app.slice"}"#),
+                "ControlGroup" => println!("{}",r#"{"type":"s","data":"/user.slice/user-1000.slice/user@1000.service/app.slice"}"#),
+                "ExecMainPID" => println!("{{\"type\":\"u\",\"data\":{}}}",if std::path::Path::new("manager-lastpid-changed").exists() { 43 } else { 42 }),
+                "InvocationID" => println!("{{\"type\":\"ay\",\"data\":{}}}",serde_json_free_invocation()),
                 "ExecStart" if std::path::Path::new("manager-native-mode").exists() => println!("{}", r#"{"type":"a(sasbttttuii)","data":[["/nix/store/new-broker/bin/reverie-worker-broker",["/nix/store/new-broker/bin/reverie-worker-broker","broker","--config","${REVERIE_WORKER_CONFIG}"],false,0,0,0,0,0,0,0]]}"#),
                 "ExecStart" => println!("{}", r#"{"type":"a(sasbttttuii)","data":[["/nix/store/old-broker/bin/reverie-worker-broker",["/nix/store/old-broker/bin/reverie-worker-broker","--config","${REVERIE_WORKER_CONFIG}"],false,0,0,0,0,0,0,0]]}"#),
                 "ExecStartPre" => println!("{}", r#"{"type":"a(sasbttttuii)","data":[]}"#),
@@ -206,6 +210,10 @@ fn main() {
             print!("{}", args.join("\0"));
         }
     }
+}
+fn serde_json_free_invocation() -> String {
+    let value=if std::path::Path::new("manager-invocation-changed").exists() { "2" } else { "1" };
+    format!("[{}]",vec![value;16].join(","))
 }
 
 fn stopped_ram(args: &[String]) {

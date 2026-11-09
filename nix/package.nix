@@ -10,6 +10,7 @@ let
   # evaluation never has to materialize the intermediate filtered root first.
   consoleFixture = relative: builtins.path { path = (src.origSrc or src) + "/${relative}"; };
   rustRouteHandler = import ./rust-route-handler.nix { inherit pkgs src; };
+  rustFront = import ./rust-front.nix { inherit pkgs src; };
   console = pkgs.buildNpmPackage {
     pname = "reverie-console";
     version = manifest.version;
@@ -442,6 +443,7 @@ let
       find "$out/lib/reverie/node_modules" \( -path '*/node-pty/build/Makefile' -o -path '*/node-pty/*.mk' \) -delete
       makeWrapper ${pkgs.nodejs_22}/bin/node "$out/bin/reverie" \
         --prefix PATH : ${lib.getBin pkgs.util-linux}/bin \
+        --set REVERIE_NATIVE_FRONT_BIN ${rustFront}/bin/reverie-front \
         --set-default REVERIE_RUST_ROUTE_HANDLER ${rustRouteHandler}/bin/reverie-route-handler \
         --add-flags "$out/lib/reverie/dist/index.js"
       runHook postInstall

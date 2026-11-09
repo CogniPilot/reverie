@@ -3,6 +3,7 @@ pub enum WorkerControlRequest {
     StopLaptops,
     Status,
     ProviderHealth,
+    StorageStatus,
     UnsupportedStopAgent,
 }
 
@@ -18,6 +19,7 @@ impl WorkerControlRequest {
             Some("stop-laptops") if fields.len() == 1 => Ok(Self::StopLaptops),
             Some("status") if fields.len() == 1 => Ok(Self::Status),
             Some("provider-health") if fields.len() == 1 => Ok(Self::ProviderHealth),
+            Some("storage-status") if fields.len() == 1 => Ok(Self::StorageStatus),
             Some("stop-agent") if stop_agent(fields) => Ok(Self::UnsupportedStopAgent),
             _ => Err("WORKER_CONTROL_UNSUPPORTED"),
         }
@@ -50,6 +52,18 @@ fn stop_agent(fields: &serde_json::Map<String, serde_json::Value>) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn storage_status_accepts_only_the_fixed_read_only_action() {
+        assert!(WorkerControlRequest::decode(br#"{"action":"storage-status"}"#).is_ok());
+        for raw in [
+            br#"{"action":"storage-status","sessionId":"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"}"#
+                .as_slice(),
+            br#"{"action":"storage-status","reconcile":true}"#,
+            br#"{"action":"storage-status","caller":"owner"}"#,
+        ] {
+            assert!(WorkerControlRequest::decode(raw).is_err());
+        }
+    }
     #[test]
     fn closed_stop_subset_preserves_unimplemented_and_extra_field_refusals() {
         assert!(matches!(
