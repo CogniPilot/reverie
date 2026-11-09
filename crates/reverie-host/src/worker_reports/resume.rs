@@ -149,6 +149,64 @@ impl WorkerActorChannel {
     pub fn assert_service(&self, expected: &Arc<WorkerReportService>) -> Result<()> {
         self.connection.assert_service(expected)
     }
+    /// Observe the same service's original records, excluding only this Q.
+    /// Started handlers require their actual parent join; an original unread
+    /// parent Drop may instead prove no handler started. Neither outcome
+    /// substitutes for socket/Hold closure or grants resource release.
+    pub fn other_original_handlers_settled(
+        &self,
+        expected: &Arc<WorkerReportService>,
+    ) -> Result<bool> {
+        self.assert_service(expected)?;
+        if self.purpose != Purpose::ResourceWebsite
+            || self.failed
+            || self.close != ClosePhase::Open
+            || expected.closed.load(Ordering::Acquire)
+            || expected.opaque.load(Ordering::Acquire)
+            || self.connection.record.opaque()
+        {
+            return Err(WorkerReportError::Unconfirmed);
+        }
+        let records = match expected.records.try_lock() {
+            Ok(records) => records,
+            Err(TryLockError::WouldBlock) => return Ok(false),
+            Err(TryLockError::Poisoned(_)) => {
+                expected.opaque.store(true, Ordering::Release);
+                return Err(WorkerReportError::Unconfirmed);
+            }
+        };
+        if !records
+            .iter()
+            .any(|record| Arc::ptr_eq(record, &self.connection.record))
+        {
+            return Err(WorkerReportError::Unconfirmed);
+        }
+        for record in records.iter() {
+            if Arc::ptr_eq(record, &self.connection.record) {
+                continue;
+            }
+            if record.opaque() {
+                return Err(WorkerReportError::Unconfirmed);
+            }
+            let job = match record.handler_job() {
+                Ok(Some(job)) => job,
+                Ok(None) => return Ok(false),
+                Err(cause) if record.opaque() => return Err(cause),
+                Err(_) => return Ok(false),
+            };
+            let settled = job.known_settled() && record.settled();
+            if record.opaque() {
+                return Err(WorkerReportError::Unconfirmed);
+            }
+            if !settled {
+                return Ok(false);
+            }
+        }
+        if expected.opaque.load(Ordering::Acquire) || self.connection.record.opaque() {
+            return Err(WorkerReportError::Unconfirmed);
+        }
+        Ok(true)
+    }
     /// Qualifying the actual installed process remains the domain's task. The
     /// exact kernel socket-peer handle cannot be selected from wire PID data.
     pub fn pin_peer(&mut self) -> Result<()> {
