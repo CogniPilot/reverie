@@ -84,6 +84,7 @@ fn main() {
             assert!(owned.wait().unwrap().success());
         }
         "gpu-info"=>gpu_info(&args),
+        "worker-pool-info" => worker_pool_info(&args),
         "storage-writer" | "image-refresh" | "command-telemetry" | "cold-admission" => {
             use std::fs::{self,OpenOptions};
             let mut trace=OpenOptions::new().create(true).append(true).open("calls.txt").unwrap();
@@ -360,6 +361,24 @@ fn cold_launch(args: &[String]) -> bool {
         _ => return false,
     }
     true
+}
+fn worker_pool_info(args: &[String]) {
+    let format = concat!(
+        "{\"ID\":{{json .ID}},\"OSType\":{{json .OSType}},",
+        "\"CgroupDriver\":{{json .CgroupDriver}},\"CgroupVersion\":{{json .CgroupVersion}},",
+        "\"SecurityOptions\":{{json .SecurityOptions}}}"
+    );
+    assert_eq!(args, ["info", "--format", format]);
+    let mut trace = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open("calls.txt")
+        .unwrap();
+    writeln!(trace, "{}", args.join("\0")).unwrap();
+    drop(trace);
+    io::stdout()
+        .write_all(&std::fs::read("info.json").unwrap())
+        .unwrap();
 }
 fn gpu_info(args:&[String]){
     use std::fs;
