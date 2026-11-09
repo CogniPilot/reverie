@@ -1,5 +1,6 @@
 //! Original counted Q/J records and native sockets; no fleet or resource grant.
 use super::*;
+use std::rc::Rc;
 use std::sync::mpsc;
 
 fn isolated(name: &str) -> bool {
@@ -15,6 +16,27 @@ fn socket_live(client: &mut UnixStream) -> bool {
     let result = client.read(&mut [0]);
     client.set_nonblocking(false).unwrap();
     matches!(result, Err(error) if error.kind() == std::io::ErrorKind::WouldBlock)
+}
+fn fleet_channel(
+    fixture: &Fixture,
+    service: &Arc<WorkerReportService>,
+) -> (UnixStream, WorkerActorChannel) {
+    let (mut client, server) = fixture.sockets();
+    send(
+        &mut client,
+        b'Q',
+        br#"{"purpose":"resource-fleet-maintenance-v1","version":1}"#,
+    );
+    let mut channel = accepted(fixture, service, server)
+        .retain_fleet_maintenance_website_channel(&fixture.runtime)
+        .ok()
+        .unwrap();
+    channel.pin_peer().unwrap();
+    channel.greet(end()).unwrap();
+    let mut greeting = [0; b"FLEET_MAINTENANCE_CHANNEL_V1\n".len()];
+    client.read_exact(&mut greeting).unwrap();
+    assert_eq!(&greeting, b"FLEET_MAINTENANCE_CHANNEL_V1\n");
+    (client, channel)
 }
 
 struct Published {
@@ -67,8 +89,9 @@ fn same_originals_interrupt_once_join_and_hold_after_q_closes() {
     }
     let fixture = Arc::new(Fixture::new());
     let service = Arc::new(fixture.service());
-    let (mut q_client, mut q) = channel(&fixture, &service);
+    let (mut q_client, mut q) = fleet_channel(&fixture, &service);
     let mut original = published(&fixture, &service);
+    let record = service.records.lock().unwrap()[1].clone();
     let mut owner = q
         .retain_other_original_handlers(&service, &fixture.runtime, end())
         .unwrap();
@@ -86,9 +109,15 @@ fn same_originals_interrupt_once_join_and_hold_after_q_closes() {
         .unwrap();
     original.connection.close_socket(end()).unwrap();
     q.close_for_worker().unwrap();
+    let join_bound = owner.deadline(&fixture.runtime).unwrap();
     original.release.send(()).unwrap();
-    service.settle_worker_handlers(end()).unwrap();
+    while !record.handler_job().unwrap().unwrap().known_settled() && Instant::now() < join_bound {
+        let _ = owner.settle(&fixture.runtime);
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    let joined_by_owner = record.handler_job().unwrap().unwrap().known_settled();
     let held = owner.settle(&fixture.runtime);
+    service.settle_worker_handlers(end()).unwrap();
     original.hold.release(end()).unwrap();
     let settled = owner.settle(&fixture.runtime);
     let final_observation = owner.into_closed().ok().unwrap();
@@ -98,6 +127,7 @@ fn same_originals_interrupt_once_join_and_hold_after_q_closes() {
     assert_eq!(after_duplicate, after_interrupt);
     assert_eq!(original_eof.unwrap(), 0);
     assert!(q_alive);
+    assert!(joined_by_owner);
     assert_eq!(pending.unwrap(), WorkerHandlersProgress::Pending);
     assert_eq!(held.unwrap(), WorkerHandlersProgress::Pending);
     assert_eq!(settled.unwrap(), WorkerHandlersProgress::Settled);
@@ -114,7 +144,7 @@ fn foreign_or_expired_admission_issues_zero_shutdowns_and_preserves_originals() 
     let other = Fixture::new();
     let service = Arc::new(fixture.service());
     let foreign = Arc::new(fixture.service());
-    let (_q_client, mut q) = channel(&fixture, &service);
+    let (_q_client, mut q) = fleet_channel(&fixture, &service);
     let (mut client, connection) = super::super::launch::launch(&service, &fixture);
     let before = shutdowns();
     let wrong_service = q.retain_other_original_handlers(&foreign, &fixture.runtime, end());
@@ -147,10 +177,11 @@ fn fresh_undecided_record_is_not_recaptured_or_interrupted() {
     }
     let fixture = Fixture::new();
     let service = Arc::new(fixture.service());
-    let (_q_client, mut q) = channel(&fixture, &service);
+    let (_q_client, mut q) = fleet_channel(&fixture, &service);
     let mut owner = q
         .retain_other_original_handlers(&service, &fixture.runtime, end())
         .unwrap();
+    let fleet_alone = q.fleet_other_original_handlers_settled(&service);
     let interrupted = owner.interrupt(&q, &service, &fixture.runtime);
     let (mut client, server) = fixture.sockets();
     let registered = service.register_worker_connection(server).unwrap();
@@ -165,6 +196,7 @@ fn fresh_undecided_record_is_not_recaptured_or_interrupted() {
     q.close_for_worker().unwrap();
     service.close(end()).unwrap();
     assert!(interrupted.is_ok() && duplicate.is_ok());
+    assert!(fleet_alone.unwrap());
     assert_eq!(fresh_pending.unwrap(), WorkerHandlersProgress::Pending);
     assert_eq!(settled.unwrap(), WorkerHandlersProgress::Settled);
     assert_eq!(before, after);
@@ -178,7 +210,7 @@ fn consumed_original_close_retains_same_cleanup_cause_without_replay() {
     }
     let fixture = Arc::new(Fixture::new());
     let service = Arc::new(fixture.service());
-    let (_q_client, mut q) = channel(&fixture, &service);
+    let (_q_client, mut q) = fleet_channel(&fixture, &service);
     let mut original = published(&fixture, &service);
     let mut owner = q
         .retain_other_original_handlers(&service, &fixture.runtime, end())
@@ -201,12 +233,12 @@ fn consumed_original_close_retains_same_cleanup_cause_without_replay() {
     let after = shutdowns();
     let preserved = owner
         .cleanup_error()
-        .is_some_and(|cause| Arc::ptr_eq(cause, &first));
+        .is_some_and(|cause| Rc::ptr_eq(cause, &first));
     let retained = owner.into_closed().is_err();
     q.close_for_worker().unwrap();
     let whole = service.close(end());
     assert!(closed.is_err() && hold_retained.is_err() && whole.is_err());
-    assert!(Arc::ptr_eq(&first, &second) && preserved && retained);
+    assert!(Rc::ptr_eq(&first, &second) && preserved && retained);
     assert!(replay.is_err());
     assert_eq!(before, after);
 }
@@ -218,7 +250,7 @@ fn poisoned_registry_is_unknown_and_never_dispatches_shutdown() {
     }
     let fixture = Fixture::new();
     let service = Arc::new(fixture.service());
-    let (_q_client, q) = channel(&fixture, &service);
+    let (_q_client, q) = fleet_channel(&fixture, &service);
     let mut owner = q
         .retain_other_original_handlers(&service, &fixture.runtime, end())
         .unwrap();
@@ -246,7 +278,7 @@ fn original_control_contention_is_pending_then_issued_once_after_release() {
     }
     let fixture = Arc::new(Fixture::new());
     let service = Arc::new(fixture.service());
-    let (_q_client, mut q) = channel(&fixture, &service);
+    let (_q_client, mut q) = fleet_channel(&fixture, &service);
     let mut original = published(&fixture, &service);
     let record = service.records.lock().unwrap()[1].clone();
     let mut owner = q
@@ -291,7 +323,7 @@ fn actual_first_stop_after_capture_clips_original_deadline_and_denies_new_shutdo
     }
     let fixture = Fixture::new();
     let service = Arc::new(fixture.service());
-    let (_q_client, mut q) = channel(&fixture, &service);
+    let (_q_client, mut q) = fleet_channel(&fixture, &service);
     let (mut client, connection) = super::super::launch::launch(&service, &fixture);
     let original_end = Instant::now() + Duration::from_secs(120);
     let mut owner = q
@@ -313,4 +345,45 @@ fn actual_first_stop_after_capture_clips_original_deadline_and_denies_new_shutdo
     assert_eq!(observed.unwrap(), first_stop);
     assert!(interrupted.is_err() && live);
     assert_eq!(before, after);
+}
+
+#[test]
+fn fleet_channel_rejects_ram_and_nonclosed_hellos_before_hold_or_effects() {
+    if isolated("fleet_channel_rejects_ram_and_nonclosed_hellos_before_hold_or_effects") {
+        return;
+    }
+    let fixture = Fixture::new();
+    let service = Arc::new(fixture.service());
+    let mut outcomes = Vec::new();
+    for raw in [
+        br#"{"purpose":"resource-ram-pool-v2","version":2}"#.as_slice(),
+        br#"{"purpose":"resource-fleet-maintenance-v1","version":1,"extra":true}"#,
+        br#"{"purpose":"resource-fleet-maintenance-v1","version":1,"version":1}"#,
+        br#"{"purpose":"resource-fleet-maintenance-v1","version":1.0}"#,
+    ] {
+        let (mut client, server) = fixture.sockets();
+        send(&mut client, b'Q', raw);
+        let before = shutdowns();
+        let mut failure = accepted(&fixture, &service, server)
+            .retain_fleet_maintenance_website_channel(&fixture.runtime)
+            .err()
+            .unwrap();
+        let original_typed_cause = matches!(failure.cause(), WorkerReportError::FleetHello(_));
+        let no_effect = shutdowns() == before && socket_live(&mut client);
+        let closed = failure.close_for_worker();
+        outcomes.push((original_typed_cause, no_effect, closed));
+    }
+    let (_ram_client, mut ram) = channel(&fixture, &service);
+    let before = shutdowns();
+    let refused = ram.retain_other_original_handlers(&service, &fixture.runtime, end());
+    let wrong_observer = ram.fleet_other_original_handlers_settled(&service);
+    let no_ram_effect = shutdowns() == before;
+    ram.close_for_worker().unwrap();
+    service.close(end()).unwrap();
+    assert!(refused.is_err() && wrong_observer.is_err() && no_ram_effect);
+    assert!(
+        outcomes
+            .into_iter()
+            .all(|(typed, no_effect, closed)| typed && no_effect && closed.is_ok())
+    );
 }

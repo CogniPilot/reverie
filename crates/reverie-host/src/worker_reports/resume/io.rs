@@ -37,6 +37,7 @@ impl WorkerActorChannel {
             Purpose::ResumeWebsite => b"HOST_RESUME_READY\n".as_slice(),
             Purpose::ResumeOwner => b"HOST_RESUME_OWNER_READY\n".as_slice(),
             Purpose::ResourceWebsite => b"RESOURCE_READY\n".as_slice(),
+            Purpose::FleetMaintenanceWebsite => b"FLEET_MAINTENANCE_CHANNEL_V1\n".as_slice(),
             Purpose::PoolRegistrationWebsite => b"POOL_REGISTRATION_CHANNEL_V1\n".as_slice(),
         };
         // Original worker initial greetings inherit its ten-second sendall

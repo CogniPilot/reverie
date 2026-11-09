@@ -4,7 +4,9 @@
 //! before and after every receive chunk; no verifier callback is accepted here.
 mod current_pin;
 mod io;
+mod original_handlers;
 pub use current_pin::WorkerActorPinError;
+pub use original_handlers::{WorkerOriginalHandlersClosed, WorkerOriginalHandlersDrain};
 mod pool_registration;
 pub use pool_registration::PoolRegistrationPin;
 mod resource_journal;
@@ -19,6 +21,7 @@ enum Purpose {
     ResumeWebsite,
     ResumeOwner,
     ResourceWebsite,
+    FleetMaintenanceWebsite,
     PoolRegistrationWebsite,
 }
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -89,6 +92,14 @@ impl WorkerServiceConnection {
     ) -> std::result::Result<WorkerActorChannel, Box<WorkerActorChannelFailure>> {
         WorkerActorChannel::retain(self, runtime, Purpose::ResourceWebsite)
     }
+    /// Distinct transport purpose, not fleet consent or resource authority.
+    /// The original Q bytes must be the closed fleet-maintenance hello.
+    pub fn retain_fleet_maintenance_website_channel(
+        self,
+        runtime: &WorkerRuntime,
+    ) -> std::result::Result<WorkerActorChannel, Box<WorkerActorChannelFailure>> {
+        WorkerActorChannel::retain(self, runtime, Purpose::FleetMaintenanceWebsite)
+    }
     /// Separate counted installation channel. It cannot acquire the RAM
     /// purpose by presenting another hello or an employee approval payload.
     pub fn retain_pool_registration_website_channel(
@@ -107,7 +118,9 @@ impl WorkerActorChannel {
         let expected = match purpose {
             Purpose::ResumeWebsite => WorkerServicePurpose::ResumeRegistration,
             Purpose::ResumeOwner => WorkerServicePurpose::Control,
-            Purpose::ResourceWebsite => WorkerServicePurpose::ResourceActor,
+            Purpose::ResourceWebsite | Purpose::FleetMaintenanceWebsite => {
+                WorkerServicePurpose::ResourceActor
+            }
             Purpose::PoolRegistrationWebsite => WorkerServicePurpose::PoolRegistration,
         };
         if !connection.same_runtime(runtime) || connection.purpose() != expected {
@@ -115,6 +128,17 @@ impl WorkerActorChannel {
                 connection,
                 hold: None,
                 cause: WorkerReportError::Peer,
+            }));
+        }
+        if purpose == Purpose::FleetMaintenanceWebsite
+            && let Err(cause) = reverie_contracts::resource_actor::decode_fleet_maintenance_hello(
+                connection.request_bytes(),
+            )
+        {
+            return Err(Box::new(WorkerActorChannelFailure {
+                connection,
+                hold: None,
+                cause: WorkerReportError::FleetHello(cause),
             }));
         }
         let hold = match connection.retain_lifecycle() {
@@ -157,9 +181,25 @@ impl WorkerActorChannel {
         &self,
         expected: &Arc<WorkerReportService>,
     ) -> Result<bool> {
+        if self.purpose != Purpose::ResourceWebsite {
+            return Err(WorkerReportError::Unconfirmed);
+        }
+        self.original_handlers_settled(expected)
+    }
+    /// SAME-record observation for the distinct closed fleet channel. The RAM
+    /// observer remains separate; both reuse identical closure semantics.
+    pub fn fleet_other_original_handlers_settled(
+        &self,
+        expected: &Arc<WorkerReportService>,
+    ) -> Result<bool> {
+        if self.purpose != Purpose::FleetMaintenanceWebsite {
+            return Err(WorkerReportError::Unconfirmed);
+        }
+        self.original_handlers_settled(expected)
+    }
+    fn original_handlers_settled(&self, expected: &Arc<WorkerReportService>) -> Result<bool> {
         self.assert_service(expected)?;
-        if self.purpose != Purpose::ResourceWebsite
-            || self.failed
+        if self.failed
             || self.close != ClosePhase::Open
             || expected.closed.load(Ordering::Acquire)
             || expected.opaque.load(Ordering::Acquire)

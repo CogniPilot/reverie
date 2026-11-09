@@ -305,6 +305,36 @@ impl Record {
                 error.into_inner()
             }
         };
+        self.interrupt_control(&slot)
+    }
+    /// Original-handler drain distinguishes no-issued contention from an
+    /// actual shutdown outcome; a poisoned control owner never grants a call.
+    pub(super) fn try_interrupt_original(
+        &self,
+        service: &WorkerReportService,
+        original_end: Instant,
+    ) -> Result<bool> {
+        let slot = match self.control.try_lock() {
+            Ok(slot) => slot,
+            Err(std::sync::TryLockError::WouldBlock) => return Ok(false),
+            Err(std::sync::TryLockError::Poisoned(_)) => {
+                self.mark_opaque();
+                return Err(WorkerReportError::Unconfirmed);
+            }
+        };
+        if self.opaque() {
+            return Err(WorkerReportError::Unconfirmed);
+        }
+        let end = service
+            .engine
+            .stop_deadline()
+            .map_or(original_end, |stop| stop.min(original_end));
+        if service.stopping() || Instant::now() >= end {
+            return Err(WorkerReportError::Stopping);
+        }
+        self.interrupt_control(&slot).map(|()| true)
+    }
+    fn interrupt_control(&self, slot: &Option<UnixStream>) -> Result<()> {
         let result = slot.as_ref().map_or(Ok(()), wire::shutdown);
         if result.is_err() {
             self.opaque.store(true, Ordering::Release);
