@@ -44,7 +44,7 @@ use std::{collections::BTreeMap, fmt};
 pub use website::{CodeFile, ProgramSelection, WebsiteSelection};
 
 pub const PURPOSE: &str = "resource-replacement-v1";
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct ResourceActorDataError(&'static str);
 impl ResourceActorDataError {
     pub fn code(&self) -> &'static str {

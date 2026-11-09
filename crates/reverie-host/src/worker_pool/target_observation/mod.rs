@@ -85,6 +85,13 @@ impl PoolTargetObservation {
     /// Each successful round has three actual known-closed queries. A later
     /// round uses the SAME owner/end; it cannot clear any earlier failure.
     pub fn observe(&mut self, runtime: &WorkerRuntime, policy: &WorkerPoolPolicy) -> Result<()> {
+        self.require_open()?;
+        let result = self
+            .assert_binding(runtime, policy)
+            .and_then(|()| self.observe_round(runtime));
+        self.record_round(result)
+    }
+    fn require_open(&self) -> Result<()> {
         if let Some(error) = &self.primary {
             return Err(error.clone());
         }
@@ -94,9 +101,9 @@ impl PoolTargetObservation {
         if self.phase == PoolTargetPhase::Closed {
             return Err(refused("WORKER_POOL_TARGET_CLOSED"));
         }
-        let result = self
-            .assert_binding(runtime, policy)
-            .and_then(|()| self.observe_round(runtime));
+        Ok(())
+    }
+    fn record_round(&mut self, result: Result<()>) -> Result<()> {
         match result {
             Ok(()) => {
                 self.phase = PoolTargetPhase::Observed;
@@ -108,6 +115,38 @@ impl PoolTargetObservation {
                 Err(error)
             }
         }
+    }
+    /// Compare the original round's actual retained image bytes. Inputs are
+    /// DATA: the owning App must independently observe the fixed package input
+    /// through its original immutable reader. No source/effect grant is minted.
+    pub fn qualify_observed_images(
+        &mut self,
+        inputs: &reverie_contracts::resource_actor::PoolImageInputsData,
+    ) -> Result<[String; 2]> {
+        use reverie_contracts::resource_actor::{EngineMetadata, PoolImageRole};
+        self.require_open()?;
+        let result = (|| {
+            if self.phase != PoolTargetPhase::Observed {
+                return Err(refused("WORKER_POOL_TARGET_IMAGES_NOT_OBSERVED"));
+            }
+            let qualify = |raw: &Option<String>, role| {
+                let raw = raw
+                    .as_ref()
+                    .ok_or_else(|| refused("WORKER_POOL_TARGET_IMAGE_REQUIRED"))?;
+                EngineMetadata::decode(raw.as_bytes())
+                    .and_then(|image| image.qualify_pool_image(inputs, role))
+                    .map_err(PoolTargetObservationError::Data)
+            };
+            Ok([
+                qualify(&self.raw[1], PoolImageRole::Anchor)?,
+                qualify(&self.raw[2], PoolImageRole::Controller)?,
+            ])
+        })();
+        if let Err(cause) = &result {
+            self.phase = PoolTargetPhase::Failed;
+            self.primary = Some(cause.clone());
+        }
+        result
     }
     /// Freshly repeat the same fixed observation; a cached phase is DATA only.
     pub fn assert_current(

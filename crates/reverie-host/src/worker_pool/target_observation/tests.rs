@@ -8,6 +8,7 @@ use std::{
 };
 mod fixture;
 use fixture::*;
+mod repository;
 
 #[test]
 fn same_runtime_reads_fixed_daemon_and_each_exact_image_before_reobservation() {

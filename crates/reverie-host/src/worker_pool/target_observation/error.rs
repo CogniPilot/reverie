@@ -5,12 +5,14 @@ use crate::engine_metadata::EngineError;
 pub enum PoolTargetObservationError {
     Refused(&'static str),
     Engine(EngineError),
+    Data(reverie_contracts::resource_actor::ResourceActorDataError),
 }
 impl PoolTargetObservationError {
     pub fn code(&self) -> &'static str {
         match self {
             Self::Refused(code) => code,
             Self::Engine(error) => error.code(),
+            Self::Data(error) => error.code(),
         }
     }
 }
@@ -23,6 +25,7 @@ impl std::error::Error for PoolTargetObservationError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::Engine(error) => Some(error),
+            Self::Data(error) => Some(error),
             Self::Refused(_) => None,
         }
     }
