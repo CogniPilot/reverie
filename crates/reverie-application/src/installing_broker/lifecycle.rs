@@ -4,6 +4,8 @@ use super::*;
 use reverie_core::decimal::UnsignedInteger;
 use reverie_host::worker_reports::{WorkerLaunchConnection, WorkerLaunchHold};
 use std::ops::{Deref, DerefMut};
+mod fleet_preview;
+pub(in crate::installing_broker) use fleet_preview::FleetRegistrationSnapshot;
 mod reuse_finalization;
 
 /// Only equality with the same installed state has meaning. This is not wire

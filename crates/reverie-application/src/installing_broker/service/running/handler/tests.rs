@@ -1,6 +1,7 @@
 //! The actual listener, registered std handler, fixed purpose read and original
 //! Job join. No successful native offer or consent is substituted.
 use super::*;
+mod fleet_preview;
 use std::{
     io::{Read, Write},
     os::unix::net::UnixStream,

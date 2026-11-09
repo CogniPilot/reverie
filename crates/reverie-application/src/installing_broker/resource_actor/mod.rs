@@ -1,11 +1,14 @@
 //! Native protected website channel for the actual installing broker. Its
 //! constructor has no wire-selected engine/program, callbacks or owner flag.
 //! Qualifying a website does not authorize an employee resource operation.
+mod close;
 mod custody;
 mod dispatch;
 pub use dispatch::{ResourceOperationClosed, ResourceOperationFailure};
 mod error;
+mod fleet_preview;
 pub(in crate::installing_broker) use error::gate_close_unknown;
+pub(in crate::installing_broker) use fleet_preview::FleetPreviewFailure;
 #[cfg(test)]
 mod native_fixture;
 mod operation;
@@ -55,6 +58,7 @@ struct Bindings {
 enum WebsitePurpose {
     RamOperation,
     PoolRegistration,
+    FleetPreview,
 }
 struct Frame<'a> {
     purpose: WebsitePurpose,
@@ -170,6 +174,9 @@ impl Frame<'_> {
             WebsitePurpose::PoolRegistration => {
                 connection.retain_pool_registration_website_channel(runtime)
             }
+            WebsitePurpose::FleetPreview => {
+                connection.retain_fleet_maintenance_website_channel(runtime)
+            }
         };
         match retained {
             Ok(channel) => self.transport = Transport::Retained(channel),
@@ -189,6 +196,7 @@ impl Frame<'_> {
         match purpose {
             WebsitePurpose::RamOperation => decode_ram_pool_hello(raw)?,
             WebsitePurpose::PoolRegistration => decode_pool_registration_hello(raw)?,
+            WebsitePurpose::FleetPreview => decode_fleet_maintenance_hello(raw)?,
         }
         Ok(())
     }
@@ -214,53 +222,6 @@ impl Frame<'_> {
         self.private
             .assert_metadata(snapshot.configuration(), end)?;
         Ok(())
-    }
-    fn close(&mut self, end: Instant) -> Result<WorkerLaunchClose> {
-        self.failed = true;
-        // Attempt every original producer settlement even if another reader's
-        // close was uncertain. Never release the SAME channel hold unless all
-        // results establish known finalization; preserve every failing cause.
-        let readers: [Result<()>; 8] = [
-            self.unconfirmed
-                .as_ref()
-                .map_or(Ok(()), |cause| Err(cause.error())),
-            self.private.assert_finalized().map_err(Into::into),
-            self.input.assert_finalized().map_err(Into::into),
-            self.code.assert_finalized().map_err(Into::into),
-            self.aliases.assert_finalized().map_err(Into::into),
-            self.processes.assert_finalized().map_err(Into::into),
-            self.engine.as_ref().map_or(Ok(()), |engine| {
-                engine.assert_finalized().map_err(Into::into)
-            }),
-            self.context.as_ref().map_or(Ok(()), |context| {
-                context.settle_metadata_owned(end).map_err(Into::into)
-            }),
-        ];
-        let readers = readers.into_iter().fold(Ok(()), error::finalized);
-        let disconnected = match &mut self.transport {
-            Transport::Retained(channel) => channel
-                .disconnect_for_worker()
-                .map(|_| ())
-                .map_err(Into::into),
-            _ => Ok(()),
-        };
-        error::finalized(readers, disconnected)?;
-        let closed = match &mut self.transport {
-            Transport::Retained(channel) => channel.close_for_worker()?,
-            Transport::Failed(failure) => failure.close_channel_component_for_worker()?,
-            Transport::Incoming(connection) => connection.close_socket_for_worker()?,
-            Transport::Closed => {
-                return Err(ResourceActorError::Refused("RESOURCE_ACTOR_CHANNEL_CLOSED"));
-            }
-        };
-        if closed == WorkerLaunchClose::SocketClosedLifecycleHeld {
-            // Keep the SAME transport/observers for actual late Hold release.
-            // A physically closed socket cannot turn this Frame into Closed.
-            return Ok(closed);
-        }
-        self.transport = Transport::Closed;
-        self.context = None;
-        Ok(closed)
     }
 }
 impl InstalledResourceWebsite<'_> {

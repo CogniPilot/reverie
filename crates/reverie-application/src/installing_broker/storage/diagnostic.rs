@@ -6,7 +6,7 @@ use reverie_contracts::{
     worker_storage_status::{OwnerKind, OwnerObservation, StorageOwnerRow},
 };
 use std::sync::TryLockError;
-const MAX_DIAGNOSTIC_ENTRIES: usize = 256;
+pub(super) const MAX_DIAGNOSTIC_ENTRIES: usize = 256;
 impl StorageRegistry {
     pub(in crate::installing_broker) fn storage_status(
         &self,
@@ -24,26 +24,29 @@ impl StorageRegistry {
         // no waiting, producer or inverse-lock acquisition is invoked here.
         Ok(entries
             .iter()
-            .map(|entry| {
-                let (owner_kind, observation) = entry.owner.diagnostic();
-                let current_session_generation = entry.paths.employee().and_then(|employee| {
-                    // Missing/invalid generation is explicitly unknown DATA here;
-                    // it must never be replaced with a default or owner's epoch.
-                    company
-                        .current_employee(employee, entry.paths.session(), entry.paths.owner())
-                        .ok()
-                        .flatten()
-                        .map(|row| row.generation().decimal().to_owned())
-                });
-                StorageOwnerRow {
-                    session_id: entry.paths.session().as_str().to_owned(),
-                    current_session_generation,
-                    writer_checked: entry.writer_checked,
-                    owner_kind,
-                    observation,
-                }
-            })
+            .map(|entry| entry.diagnostic_row(company))
             .collect())
+    }
+}
+impl Entry {
+    pub(super) fn diagnostic_row(&self, company: &Metadata) -> StorageOwnerRow {
+        let (owner_kind, observation) = self.owner.diagnostic();
+        let current_session_generation = self.paths.employee().and_then(|employee| {
+            // Missing/invalid generation is explicitly unknown DATA here;
+            // it must never be replaced with a default or owner's epoch.
+            company
+                .current_employee(employee, self.paths.session(), self.paths.owner())
+                .ok()
+                .flatten()
+                .map(|row| row.generation().decimal().to_owned())
+        });
+        StorageOwnerRow {
+            session_id: self.paths.session().as_str().to_owned(),
+            current_session_generation,
+            writer_checked: self.writer_checked,
+            owner_kind,
+            observation,
+        }
     }
 }
 fn locked<T>(owner: &Mutex<T>, inspect: impl FnOnce(&T) -> OwnerObservation) -> OwnerObservation {

@@ -1,6 +1,7 @@
 //! Real recovery registration/Office/employee lease. These isolate resource
 //! fencing only; they mint no draft, native stop or API permission.
 use super::*;
+mod fleet_preview;
 use crate::installing_broker::recovered::tests::Tree;
 use reverie_host::worker_storage::StorageLease;
 use std::{

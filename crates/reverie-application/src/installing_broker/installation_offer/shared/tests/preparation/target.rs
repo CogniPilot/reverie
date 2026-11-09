@@ -1,6 +1,36 @@
 //! Real refused origin prefixes only; successful joined OS/daemon/image
 //! qualification is not synthesized by these ownership controls.
 use super::*;
+#[test]
+fn equal_revalidated_snapshot_and_foreign_nominee_cannot_replace_original_binding() {
+    crate::test_process::owning_case!(
+        equal_revalidated_snapshot_and_foreign_nominee_cannot_replace_original_binding
+    );
+    let (root, broker, shared) = unopened();
+    let snapshot = broker.configuration().unwrap();
+    shared.try_owner().unwrap().snapshot = Some(Arc::clone(&snapshot));
+    let principal = shared.try_owner().unwrap().request.principal().clone();
+    let view = shared.preparation_view(&broker).unwrap();
+    let equal = Arc::new(
+        crate::worker_validation::validate_captured(snapshot.configuration().clone()).unwrap(),
+    );
+    let equal_data = reverie_contracts::worker_config::config_digest(snapshot.configuration())
+        == reverie_contracts::worker_config::config_digest(equal.configuration());
+    let original = view.assert_fleet_preview_binding(&broker, &snapshot, &principal);
+    let copied = view.assert_fleet_preview_binding(&broker, &equal, &principal);
+    let raw=serde_json::to_vec(&serde_json::json!({"kind":"fleet-preview","purpose":"resource-fleet-maintenance-v1","version":1,
+        "requestId":"11111111-2222-4333-8444-555555555555","principal":{"accountId":"bbbbbbbb-cccc-4ddd-8eee-ffffffffffff","personId":"owner","sessionEpoch":3}})).unwrap();
+    let request = reverie_contracts::resource_actor::FleetPreviewRequest::decode(
+        &reverie_contracts::human_protocol::HumanFrame::decode(&raw).unwrap(),
+    )
+    .unwrap();
+    let foreign = view.assert_fleet_preview_binding(&broker, &snapshot, request.principal());
+    drop(view);
+    let b_unchanged = shared.preparation_view(&broker).is_ok();
+    cleanup(root, broker, shared);
+    original.unwrap();
+    assert!(equal_data && copied.is_err() && foreign.is_err() && b_unchanged);
+}
 
 #[test]
 fn dropped_unclosed_failure_keeps_the_original_view_without_b_latch_changes() {

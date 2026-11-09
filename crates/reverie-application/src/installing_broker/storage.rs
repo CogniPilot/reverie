@@ -4,9 +4,11 @@ mod diagnostic;
 mod direct_finalization;
 mod error;
 mod finalization;
+mod fleet_preview;
 pub(in crate::installing_broker) use direct_finalization::{
     DirectStorageFinishFailure, DirectStoragePreparation,
 };
+pub(in crate::installing_broker) use fleet_preview::StorageFleetSnapshot;
 mod existing_viewer;
 pub(in crate::installing_broker) use existing_viewer::{
     ExistingStorageError, ExistingStoragePreparation, ExistingStorageReturned,

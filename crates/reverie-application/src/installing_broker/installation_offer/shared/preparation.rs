@@ -66,6 +66,31 @@ impl SharedInstallationOffer {
 }
 
 impl OfferPreparationView {
+    pub(in crate::installing_broker) fn original_deadline(&self) -> Instant {
+        self.deadline
+    }
+    pub(in crate::installing_broker) fn assert_fleet_preview_binding(
+        &self,
+        broker: &InstallingBroker,
+        snapshot: &Arc<ValidatedWorkerSnapshot>,
+        principal: &reverie_contracts::resource_actor::ResourceOwnerPrincipal,
+    ) -> Result<(), BrokerInstallationOfferCause> {
+        let owner = self.offer.try_owner()?;
+        owner.check_time()?;
+        self.assert_binding(&owner)?;
+        if !std::ptr::eq(Arc::as_ptr(&self.broker), broker)
+            || !self
+                .snapshot
+                .as_ref()
+                .is_some_and(|actual| Arc::ptr_eq(actual, snapshot))
+            || owner.request.principal() != principal
+        {
+            return Err(BrokerInstallationOfferCause::Refused(
+                "FLEET_PREVIEW_ORIGINAL_BINDING_CHANGED",
+            ));
+        }
+        Ok(())
+    }
     /// Revalidate the captured tuple and the original native origin. Refusal
     /// never latches B consent/registration or the offer's failed flag; any
     /// native uncertainty remains inside the SAME original bootstrap owner.

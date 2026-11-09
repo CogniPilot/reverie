@@ -21,6 +21,9 @@ pub struct OfferTargetObservationFailure {
     owner: ObservedOfferTarget,
     cause: Rc<OfferTargetObservationError>,
 }
+pub(in crate::installing_broker) struct OfferTargetQueriesClosed<'a> {
+    _owner: &'a mut ObservedOfferTarget,
+}
 
 impl OfferPreparationView {
     /// Consume the actual view before its first fallible read. Policy DATA is
@@ -44,6 +47,27 @@ impl OfferPreparationView {
 }
 
 impl ObservedOfferTarget {
+    pub(in crate::installing_broker) fn assert_fleet_preview_binding(
+        &self,
+        broker: &InstallingBroker,
+        snapshot: &Arc<ValidatedWorkerSnapshot>,
+        principal: &reverie_contracts::resource_actor::ResourceOwnerPrincipal,
+    ) -> Result<()> {
+        if let Some(cause) = &self.primary {
+            return Err(Rc::clone(cause));
+        }
+        self.view
+            .as_ref()
+            .expect("original view retained")
+            .assert_fleet_preview_binding(broker, snapshot, principal)
+            .map_err(|cause| Rc::new(OfferTargetObservationError::offer(cause)))
+    }
+    pub(in crate::installing_broker) fn close_queries(
+        &mut self,
+    ) -> Result<OfferTargetQueriesClosed<'_>> {
+        self.close_components()?;
+        Ok(OfferTargetQueriesClosed { _owner: self })
+    }
     /// Each read brackets the SAME original Host observation with fresh reads
     /// of the SAME offer tuple. Returned values remain unprepared DATA only.
     pub fn read_current(&mut self) -> Result<UnpreparedOfferBinding> {
@@ -120,6 +144,14 @@ impl ObservedOfferTarget {
 }
 
 impl OfferTargetObservationFailure {
+    pub(in crate::installing_broker) fn retained_cause(&self) -> Rc<OfferTargetObservationError> {
+        Rc::clone(&self.cause)
+    }
+    pub(in crate::installing_broker) fn close_queries(
+        &mut self,
+    ) -> Result<OfferTargetQueriesClosed<'_>> {
+        self.owner.close_queries()
+    }
     pub fn cause(&self) -> &OfferTargetObservationError {
         &self.cause
     }

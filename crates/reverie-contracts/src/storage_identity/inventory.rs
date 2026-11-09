@@ -89,6 +89,12 @@ fn employee(value: &Value, retired: bool, sessions: Option<&Object>) -> Result<B
     Ok(BrokerReply::object(output))
 }
 impl Metadata {
+    /// Complete company DATA fingerprint using the existing inventory codec.
+    /// It is not file custody, an atomic snapshot or permission to change it.
+    pub fn company_snapshot_digest(&self) -> Result<String> {
+        self.company_records()?;
+        digest(&self.0)
+    }
     /// Exact existing documents are observed, never normalized or rewritten.
     /// Digests use the finite lossless metadata encoding, not a backup format.
     /// Saved-session digests cover whole records, including volatile fields.

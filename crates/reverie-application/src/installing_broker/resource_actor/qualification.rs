@@ -6,7 +6,13 @@ mod protected_launch;
 impl Frame<'_> {
     pub(super) fn prepare(&mut self) -> Result<()> {
         self.retain()?;
-        if matches!(self.purpose, WebsitePurpose::RamOperation) {
+        self.prepare_after_retain()
+    }
+    pub(super) fn prepare_after_retain(&mut self) -> Result<()> {
+        if matches!(
+            self.purpose,
+            WebsitePurpose::RamOperation | WebsitePurpose::FleetPreview
+        ) {
             need(
                 self.broker.resource_reservations()?.is_some(),
                 "RESOURCE_ACTOR_GATE_REQUIRED",

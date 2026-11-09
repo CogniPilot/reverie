@@ -44,6 +44,7 @@ use crate::test_process::isolate_case as isolate;
 mod cold_cases;
 #[path = "direct_finalization/tests.rs"]
 mod direct_finalization_cases;
+mod fleet_preview;
 #[path = "stopped_ram/metadata_tests.rs"]
 mod metadata_owner_cases;
 #[path = "nix/network/tests.rs"]
