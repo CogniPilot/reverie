@@ -1,6 +1,7 @@
 //! Actual failed producer and native runtime. These controls grant no valid
 //! origin, registration, consent or service-close witness.
 use super::*;
+mod preparation;
 
 fn setup() -> (
     std::path::PathBuf,

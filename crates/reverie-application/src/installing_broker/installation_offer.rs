@@ -12,6 +12,7 @@ mod error;
 mod os_source;
 pub use os_source::OsPoolInstallationFailure;
 mod shared;
+pub use shared::{OfferPreparationView, UnpreparedOfferBinding};
 pub(in crate::installing_broker) use shared::{RegistrationOfferGuard, SharedInstallationOffer};
 #[cfg(test)]
 pub(in crate::installing_broker) mod tests;
@@ -57,19 +58,7 @@ impl InstallingBroker {
         request: PoolInstallationRequestData,
         end: Instant,
     ) -> Result<BrokerInstallationOffer, Box<BrokerInstallationOfferFailure>> {
-        let mut owner = BrokerInstallationOffer {
-            broker: Arc::new(self),
-            snapshot: None,
-            request,
-            origin: Origin::Unopened,
-            nonce: None,
-            published: None,
-            deadline: end.min(Instant::now() + Duration::from_secs(300)),
-            failed: false,
-            metadata_closed: false,
-            service_closed: false,
-            registration_attempted: false,
-        };
+        let mut owner = BrokerInstallationOffer::unopened(self, request, end);
         match owner.prepare() {
             Ok(()) => Ok(owner),
             Err(cause) => {
@@ -80,6 +69,25 @@ impl InstallingBroker {
     }
 }
 impl BrokerInstallationOffer {
+    fn unopened(
+        broker: InstallingBroker,
+        request: PoolInstallationRequestData,
+        end: Instant,
+    ) -> Self {
+        Self {
+            broker: Arc::new(broker),
+            snapshot: None,
+            request,
+            origin: Origin::Unopened,
+            nonce: None,
+            published: None,
+            deadline: end.min(Instant::now() + Duration::from_secs(300)),
+            failed: false,
+            metadata_closed: false,
+            service_closed: false,
+            registration_attempted: false,
+        }
+    }
     /// Consuming entry from the actual OS-installation attempt. The only Arc
     /// used by service startup is this offer's original private broker Arc.
     /// No broker getter, fresh constructor or installation grant is exposed.

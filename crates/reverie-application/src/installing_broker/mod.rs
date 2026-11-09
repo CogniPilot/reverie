@@ -25,7 +25,7 @@ pub use installed_controller::ControllerInstallFailure;
 mod installation_offer;
 pub use installation_offer::{
     BrokerInstallationOffer, BrokerInstallationOfferCause, BrokerInstallationOfferFailure,
-    OsPoolInstallationFailure,
+    OfferPreparationView, OsPoolInstallationFailure, UnpreparedOfferBinding,
 };
 mod launch;
 mod lifecycle;

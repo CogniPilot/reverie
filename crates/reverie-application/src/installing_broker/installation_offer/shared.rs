@@ -2,6 +2,8 @@
 //! an offer registry nor an administration/capacity capability.
 use super::*;
 use std::sync::{Mutex, MutexGuard};
+mod preparation;
+pub use preparation::{OfferPreparationView, UnpreparedOfferBinding};
 #[cfg(test)]
 mod tests;
 
