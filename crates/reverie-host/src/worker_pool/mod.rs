@@ -17,6 +17,9 @@ mod namespace;
 mod policy;
 mod publication;
 mod service;
+#[cfg(test)]
+#[path = "target_observation/tests.rs"]
+mod target_observation_tests;
 pub use service::{ControllerServing, ControllerServingFailure};
 #[cfg(test)]
 mod tests;

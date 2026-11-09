@@ -85,6 +85,7 @@ fn main() {
         }
         "gpu-info"=>gpu_info(&args),
         "worker-pool-info" => worker_pool_info(&args),
+        "pool-target" => pool_target(&args),
         "storage-writer" | "image-refresh" | "command-telemetry" | "cold-admission" => {
             use std::fs::{self,OpenOptions};
             let mut trace=OpenOptions::new().create(true).append(true).open("calls.txt").unwrap();
@@ -426,4 +427,48 @@ fn reuse_finalizer(args: &[String]) {
         ["network","ls","--no-trunc","--format","{{.ID}} {{.Name}}"] => {},
         _ => std::process::exit(83),
     }
+}
+
+fn pool_target(args: &[String]) {
+    use std::fs::{self, OpenOptions};
+    let mut trace = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open("target-calls.txt")
+        .unwrap();
+    writeln!(trace, "{}", args.join("\0")).unwrap();
+    drop(trace);
+    if std::path::Path::new("query-refused").is_file() {
+        std::process::exit(7);
+    }
+    let file = match args
+        .iter()
+        .map(String::as_str)
+        .collect::<Vec<_>>()
+        .as_slice()
+    {
+        ["info", "--format", format] => {
+            assert_eq!(
+                *format,
+                concat!(
+                    "{\"ID\":{{json .ID}},\"OSType\":{{json .OSType}},",
+                    "\"CgroupDriver\":{{json .CgroupDriver}},\"CgroupVersion\":{{json .CgroupVersion}},",
+                    "\"SecurityOptions\":{{json .SecurityOptions}}}"
+                )
+            );
+            "info.json"
+        }
+        ["image", "inspect", "--format", "{{json .}}", id]
+            if *id == format!("sha256:{}", "a".repeat(64)) =>
+        {
+            "anchor.json"
+        }
+        ["image", "inspect", "--format", "{{json .}}", id]
+            if *id == format!("sha256:{}", "b".repeat(64)) =>
+        {
+            "controller.json"
+        }
+        _ => panic!("only the fixed pool target observation reads are allowed"),
+    };
+    io::stdout().write_all(&fs::read(file).unwrap()).unwrap();
 }
