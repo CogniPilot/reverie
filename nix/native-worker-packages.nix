@@ -4,6 +4,7 @@
 # measurements in workerResumeProgram's normal build.
 { pkgs, src, console, ownerTerminalProgram ? null }:
 rec {
+  nativeWorkerPoolAnchorImage = import ./worker-pool-anchor-image.nix { inherit pkgs; };
   nativeWorkerResourceController = import ./worker-resource-controller.nix { inherit pkgs src; };
   nativeWorkerResourceControllerImage = import ./worker-resource-controller-image.nix {
     inherit pkgs;
