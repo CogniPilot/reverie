@@ -71,10 +71,10 @@ impl ControlDirectory {
     }
 }
 impl ControlBinding {
-    /// Purpose-private GPU projection of marker DATA. The actual application
+    /// Purpose-private configuration projection of marker DATA. The actual application
     /// must publish the two files under its real pending/admission producer;
     /// this method grants no reload or transition permission.
-    pub(crate) fn gpu_rebound(&self, config: &EffectiveWorkerConfig) -> Result<Self> {
+    pub(crate) fn configuration_rebound(&self, config: &EffectiveWorkerConfig) -> Result<Self> {
         let mut next = self.clone();
         next.domain = domain_digest(config)?;
         let Node::Object(fields) = &mut next.original.0 else {
@@ -86,7 +86,7 @@ impl ControlBinding {
         );
         Ok(next)
     }
-    pub(crate) fn gpu_data(&self) -> Value {
+    pub(crate) fn configuration_data(&self) -> Value {
         self.original.deep_clone()
     }
     /// Preserve the constructor's original check order. The config's option

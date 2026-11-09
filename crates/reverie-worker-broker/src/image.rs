@@ -67,17 +67,6 @@ fn artifact(path: &Path, digest: &str) -> Result<ArtifactReference, Box<dyn std:
         sha256: JournalDigest::parse(digest)?,
     })
 }
-fn installing_owner(
-    config: &Path,
-) -> Result<&'static InstallingBroker, Box<dyn std::error::Error>> {
-    let snapshot = load_owner_config(config)?;
-    let runtime = WorkerRuntime::new(super::captured_engine()?, snapshot.envelope().base());
-    let broker = InstallingBroker::new(snapshot, runtime)?;
-    // One-shot CLI scope: borrowed failure owners must keep their original
-    // installing instance at a stable address until process termination.
-    // Successful component closure is explicit in close/apply, not Drop.
-    Ok(Box::leak(Box::new(broker)))
-}
 pub(super) fn run(action: Action) -> Result<(), Box<dyn std::error::Error>> {
     let (selection, request) = match action {
         Action::Preview { selection } => (selection, Request::Preview),
@@ -97,7 +86,7 @@ pub(super) fn run(action: Action) -> Result<(), Box<dyn std::error::Error>> {
     let annex = artifact(&selection.child_annex, &selection.child_annex_sha256)?;
     let image = WorkerImageId::parse(&selection.image)?;
     let end = Instant::now() + Duration::from_secs(300);
-    let broker = installing_owner(&selection.config)?;
+    let broker = super::offline_owner::capture(&selection.config)?;
     let qualified = broker.qualify_worker_image(base, annex, image, end)?;
     let mut prepared = qualified.prepare_offline_switch()?;
     match request {

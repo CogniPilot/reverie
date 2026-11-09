@@ -15,11 +15,13 @@ mod gpu_access;
 pub use goal_custody::{GoalCustodyHandlerClosed, GoalCustodyHandlerFailure};
 mod image_refresh;
 mod worker_image;
+mod worker_perf;
 pub use worker_image::{
     ClosedOfflineImageInspection, OfflineImageInspectionFailure, OfflineImageSwitchClosed,
     OfflineImageSwitchError, OfflineImageSwitchFailure, PreparedOfflineImageSwitch,
     QualifiedWorkerImage, WorkerImageQualificationError, WorkerImageQualificationFailure,
 };
+pub use worker_perf::{OfflinePerfClosed, OfflinePerfFailure, PreparedOfflinePerfSwitch};
 mod installed_controller;
 pub use installed_controller::ControllerInstallFailure;
 mod installation_offer;

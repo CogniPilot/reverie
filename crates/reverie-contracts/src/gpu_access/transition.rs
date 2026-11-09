@@ -31,7 +31,7 @@ impl GpuTransitionIntent {
         }
         let before = reservation_control::fingerprint(candidate.before().as_value())?;
         let after = reservation_control::fingerprint(candidate.after().as_value())?;
-        let next = binding.gpu_rebound(candidate.after())?;
+        let next = binding.configuration_rebound(candidate.after())?;
         let value = Value(Node::Object(
             [
                 (key("schema"), string("reverie-owner-gpu-transition-v1")),
@@ -39,8 +39,8 @@ impl GpuTransitionIntent {
                 (key("request"), queue::encode_row(request)),
                 (key("beforeDigest"), string(&crate::digest::hex(&before))),
                 (key("afterDigest"), string(&crate::digest::hex(&after))),
-                (key("beforeBinding"), binding.gpu_data()),
-                (key("afterBinding"), next.gpu_data()),
+                (key("beforeBinding"), binding.configuration_data()),
+                (key("afterBinding"), next.configuration_data()),
             ]
             .into(),
         ));
@@ -76,6 +76,6 @@ impl GpuTransitionIntent {
         crate::worker_config::compact_data(self.after.as_value())
     }
     pub fn binding_bytes(&self) -> Vec<u8> {
-        crate::worker_config::compact_data(&self.after_binding.gpu_data())
+        crate::worker_config::compact_data(&self.after_binding.configuration_data())
     }
 }

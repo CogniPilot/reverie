@@ -1,6 +1,7 @@
 use super::*;
 #[derive(Debug)]
 pub enum GateError {
+    PerfData(reverie_contracts::perf_transition::PerfTransitionDataError),
     Actor(Box<reverie_host::worker_reports::ResourceJournalError>),
     RamPolicy(reverie_contracts::ram_migration::RamMigrationError),
     OriginalSource(Box<crate::installing_broker::StorageWorkflowError>),
@@ -68,6 +69,7 @@ pub enum GateError {
 impl GateError {
     pub fn code(&self) -> &'static str {
         match self {
+            Self::PerfData(error) => error.code(),
             Self::Actor(error) => error.code(),
             Self::RamPolicy(error) => error.code(),
             Self::OriginalSource(error) => error.code(),
@@ -140,6 +142,7 @@ impl std::error::Error for GateError {
             Self::OriginalSource(error) => Some(error.as_ref()),
             Self::SourceStopData(error) => Some(error),
             Self::NativeSourceStopUncertain { cause } => Some(cause.as_ref()),
+            Self::PerfData(error) => Some(error),
             Self::GpuData(error) => Some(error),
             Self::ImageFiles(error) => Some(error),
             Self::ImageTransition(error) => Some(error.as_ref()),

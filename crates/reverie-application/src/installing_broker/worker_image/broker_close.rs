@@ -2,14 +2,14 @@
 //! service/controller owner can be closed by a readonly inspection request.
 use super::*;
 use std::sync::{MutexGuard, atomic::Ordering};
-pub(super) struct UnstartedImageBroker<'a> {
+pub(in crate::installing_broker) struct UnstartedImageBroker<'a> {
     broker: &'a InstallingBroker,
     controller: Option<MutexGuard<'a, Option<reverie_host::worker_pool::ActivatedController>>>,
     attempted: bool,
     errors: Vec<BrokerServiceError>,
 }
 impl<'a> UnstartedImageBroker<'a> {
-    pub(super) fn new(broker: &'a InstallingBroker) -> Self {
+    pub(in crate::installing_broker) fn new(broker: &'a InstallingBroker) -> Self {
         Self {
             broker,
             controller: None,
@@ -17,7 +17,9 @@ impl<'a> UnstartedImageBroker<'a> {
             errors: Vec::new(),
         }
     }
-    pub(super) fn claim(&mut self) -> std::result::Result<(), OfflineImageSwitchError<'a>> {
+    pub(in crate::installing_broker) fn claim(
+        &mut self,
+    ) -> std::result::Result<(), OfflineImageSwitchError<'a>> {
         let controller =
             self.broker.controller.try_lock().map_err(|_| {
                 OfflineImageSwitchError::refused("WORKER_CONTROLLER_SLOT_UNAVAILABLE")
@@ -40,7 +42,9 @@ impl<'a> UnstartedImageBroker<'a> {
         self.controller = Some(controller);
         Ok(())
     }
-    pub(super) fn assert_controller(&self) -> std::result::Result<(), OfflineImageSwitchError<'a>> {
+    pub(in crate::installing_broker) fn assert_controller(
+        &self,
+    ) -> std::result::Result<(), OfflineImageSwitchError<'a>> {
         if self.controller.as_deref().is_some_and(Option::is_none) {
             Ok(())
         } else {
@@ -49,10 +53,10 @@ impl<'a> UnstartedImageBroker<'a> {
             ))
         }
     }
-    pub(super) fn attempted(&self) -> bool {
+    pub(in crate::installing_broker) fn attempted(&self) -> bool {
         self.attempted
     }
-    pub(super) fn close(
+    pub(in crate::installing_broker) fn close(
         &mut self,
         end: Instant,
     ) -> std::result::Result<(), OfflineImageSwitchError<'a>> {
