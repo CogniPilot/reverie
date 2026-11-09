@@ -10,6 +10,11 @@ rec {
     inherit pkgs;
     controller = nativeWorkerResourceController;
   };
+  nativeWorkerPoolImageInputs = import ./worker-pool-image-inputs.nix {
+    inherit pkgs src;
+    controllerImage = nativeWorkerResourceControllerImage;
+    anchorImage = nativeWorkerPoolAnchorImage;
+  };
   # Explicit integration output only; the shipped hybrid workerBroker below is
   # unchanged until mandatory native service/maintenance consumers qualify.
   nativeWorkerBroker = import ./native-worker-broker.nix {
@@ -18,6 +23,7 @@ rec {
     perfGuestCapsule = nativePerfGuestCapsule;
     taskPerfPolicy = workerTaskPerfPolicy;
     taskPerfPolicyV2 = workerTaskPerfPolicyV2;
+    poolImageInputs = nativeWorkerPoolImageInputs;
   };
   nativePerfGuestCapsule = import ./perf-guest-capsule.nix { inherit pkgs src; };
   workerDockerSeccomp = import ./worker-docker-profile.nix { inherit pkgs src; };

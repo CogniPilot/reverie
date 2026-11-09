@@ -10,6 +10,8 @@ pub use client::{ActivatedController, ControllerActivationFailure, ControllerSta
 pub(crate) mod directory;
 mod endpoint;
 mod engine;
+mod image_inputs_reference;
+pub use image_inputs_reference::compiled_pool_image_inputs_reference;
 mod installation_request;
 pub use installation_request::load_os_pool_installation_request;
 mod member;

@@ -12,6 +12,7 @@ use std::{path::PathBuf, process::ExitCode};
 mod image;
 mod inventory;
 mod manifest;
+mod pool_image_inputs;
 mod service;
 
 #[derive(Parser)]

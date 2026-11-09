@@ -1,6 +1,6 @@
 # Unselected native broker integration package. Its fixed build-only role emits
 # provenance after stripping/fixup, hashing the actual final installed ELF.
-{ pkgs, src, perfGuestCapsule ? null, taskPerfPolicy ? null, taskPerfPolicyV2 ? null, previousUnit ? null }:
+{ pkgs, src, perfGuestCapsule ? null, taskPerfPolicy ? null, taskPerfPolicyV2 ? null, previousUnit ? null, poolImageInputs ? null }:
 let
   # Interpolating a path copies it, even when it already names a store object.
   # Keep the original identity and its closure reference for fixed artifacts.
@@ -13,6 +13,7 @@ let
   perfPolicy = exactInput taskPerfPolicy;
   perfPolicyV2 = exactInput taskPerfPolicyV2;
   predecessor = exactInput previousUnit;
+  poolInputs = exactInput poolImageInputs;
   workspace = import ./rust-workspace-source.nix {
     inherit pkgs src;
     members = [
@@ -37,6 +38,10 @@ in pkgs.rustPlatform.buildRustPackage {
     REVERIE_FIXED_TASK_PERF_V2_MANIFEST = "${perfPolicyV2}/share/reverie/worker-perf-profile.json";
   };
   preBuild = ''
+    ${pkgs.lib.optionalString (poolImageInputs != null) ''
+      export REVERIE_FIXED_NATIVE_POOL_IMAGE_INPUTS_MANIFEST=${pkgs.lib.escapeShellArg "${poolInputs}/share/reverie/worker-pool-image-inputs.json"}
+      export REVERIE_FIXED_NATIVE_POOL_IMAGE_INPUTS_SHA256="$(${pkgs.coreutils}/bin/sha256sum "$REVERIE_FIXED_NATIVE_POOL_IMAGE_INPUTS_MANIFEST" | ${pkgs.coreutils}/bin/cut -d ' ' -f 1)"
+    ''}
     export REVERIE_FIXED_NATIVE_WORKER_SYSTEMCTL=${pkgs.systemdMinimal}/bin/systemctl
     export REVERIE_FIXED_NATIVE_WORKER_BUSCTL=${pkgs.systemdMinimal}/bin/busctl
     export REVERIE_FIXED_NATIVE_WORKER_NIX_STORE=${pkgs.nix}/bin/nix-store

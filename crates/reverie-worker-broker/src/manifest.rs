@@ -34,7 +34,8 @@ pub(super) fn publish() -> io::Result<()> {
     }))?;
     BrokerProgramData::decode(&body)
         .map_err(|_| io::Error::other("NATIVE_BROKER_MANIFEST_INVALID"))?;
-    write(Path::new(destination), &body)
+    write(Path::new(destination), &body)?;
+    super::pool_image_inputs::publish_reference(parent)
 }
 fn open(path: &Path) -> io::Result<File> {
     OpenOptions::new()
@@ -68,7 +69,7 @@ fn program(path: &Path) -> io::Result<Vec<u8>> {
     })();
     finalized(result, close(file))
 }
-fn write(path: &Path, bytes: &[u8]) -> io::Result<()> {
+pub(super) fn write(path: &Path, bytes: &[u8]) -> io::Result<()> {
     let directory = OpenOptions::new()
         .read(true)
         .custom_flags(nix::libc::O_CLOEXEC | nix::libc::O_NOFOLLOW | nix::libc::O_DIRECTORY)

@@ -10,6 +10,11 @@ in pkgs.rustPlatform.buildRustPackage {
   version = "0.1.0";
   src = workspace.source;
   cargoLock.lockFile = workspace.lockFile;
+  env = {
+    REVERIE_FIXED_BUILD_GNUTAR = "${pkgs.gnutar}/bin/tar";
+    REVERIE_FIXED_BUILD_TIMEOUT = "${pkgs.coreutils}/bin/timeout";
+    REVERIE_FIXED_BUILD_GZIP_PATH = "${pkgs.gzip}/bin";
+  };
   cargoBuildFlags = [ "-p" "reverie-policy-artifacts" ];
   cargoTestFlags = [ "-p" "reverie-policy-artifacts" ];
   doCheck = true;

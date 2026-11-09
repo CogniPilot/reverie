@@ -57,7 +57,7 @@ fn finalized<T>(primary: io::Result<T>, close: io::Result<()>) -> io::Result<T> 
         ))),
     }
 }
-fn close(file: File) -> io::Result<()> {
+pub(super) fn close(file: File) -> io::Result<()> {
     let descriptor = file.into_raw_fd();
     // SAFETY: sole File ownership was consumed. Close this owned descriptor
     // exactly once; retrying after EINTR could close an unrelated reused fd.

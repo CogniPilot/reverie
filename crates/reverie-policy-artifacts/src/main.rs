@@ -6,6 +6,7 @@ use reverie_contracts::task_perf_v1::{
 };
 use std::path::{Path, PathBuf};
 mod output;
+mod pool_images;
 mod verify;
 mod worker_child;
 
@@ -37,7 +38,9 @@ struct Arguments {
     verify_manifest: Option<PathBuf>,
 }
 fn main() {
-    let result = if worker_child::requested() {
+    let result = if pool_images::requested() {
+        pool_images::run()
+    } else if worker_child::requested() {
         worker_child::run()
     } else {
         run(Arguments::parse())
