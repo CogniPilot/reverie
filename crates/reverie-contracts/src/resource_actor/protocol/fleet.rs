@@ -5,6 +5,8 @@ use crate::reservation_control::PoolTransitionSelection;
 pub const FLEET_MAINTENANCE_PURPOSE: &str = "resource-fleet-maintenance-v1";
 mod owner;
 pub use owner::CurrentFleetMaintenanceOwner;
+mod preview;
+pub use preview::{CurrentFleetPreviewViewer, FleetPreviewRequest};
 pub struct FleetMaintenanceRequest {
     request: JournalId,
     selected: PoolTransitionSelection,
@@ -82,6 +84,18 @@ fn explicit_consent(value: &Value) -> Result<()> {
         matches!(field(value, "consent")?.0, Node::Bool(true)),
         "FLEET_MAINTENANCE_CONSENT_REQUIRED",
     )
+}
+
+fn envelope_fields(kind: &str, request: &JournalId) -> BTreeMap<Text, Value> {
+    BTreeMap::from([
+        (key("kind"), string(kind)),
+        (key("purpose"), string(FLEET_MAINTENANCE_PURPOSE)),
+        (
+            key("version"),
+            Value(Node::Number(Number::Integer("1".into()))),
+        ),
+        (key("requestId"), string(request.as_str())),
+    ])
 }
 
 #[cfg(test)]

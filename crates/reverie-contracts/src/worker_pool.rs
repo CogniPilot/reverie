@@ -173,11 +173,11 @@ fn instance_root(value: &str) -> bool {
 impl std::error::Error for PoolPolicyError {}
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     mod provider;
     use super::*;
 
-    pub(super) fn policy() -> WorkerPoolPolicy {
+    pub(crate) fn policy() -> WorkerPoolPolicy {
         WorkerPoolPolicy {
             version: 1,
             purpose: PURPOSE.into(),

@@ -20,18 +20,13 @@ impl CurrentFleetMaintenanceOwner {
 }
 impl FleetMaintenanceRequest {
     pub fn owner_challenge(&self, nonce: &JournalId) -> Result<HumanFrame> {
-        frame(Value(Node::Object(BTreeMap::from([
-            (key("kind"), string("fleet-maintenance-owner-check")),
-            (key("purpose"), string(FLEET_MAINTENANCE_PURPOSE)),
-            (
-                key("version"),
-                Value(Node::Number(Number::Integer("1".into()))),
-            ),
-            (key("requestId"), string(self.request.as_str())),
+        let mut fields = envelope_fields("fleet-maintenance-owner-check", &self.request);
+        fields.extend([
             (key("nonce"), string(nonce.as_str())),
             (key("approval"), self.selected.approval_value()),
             (key("principal"), self.principal.value()),
-        ]))))
+        ]);
+        frame(Value(Node::Object(fields)))
     }
     pub fn parse_owner_reply(
         &self,
