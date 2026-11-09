@@ -12,7 +12,10 @@ mod error;
 mod os_source;
 pub use os_source::OsPoolInstallationFailure;
 mod shared;
-pub use shared::{OfferPreparationView, UnpreparedOfferBinding};
+pub use shared::{
+    ObservedOfferTarget, OfferPreparationView, OfferTargetObservationError,
+    OfferTargetObservationFailure, UnpreparedOfferBinding,
+};
 pub(in crate::installing_broker) use shared::{RegistrationOfferGuard, SharedInstallationOffer};
 #[cfg(test)]
 pub(in crate::installing_broker) mod tests;

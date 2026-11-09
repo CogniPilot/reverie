@@ -3,7 +3,10 @@
 use super::*;
 use std::sync::{Mutex, MutexGuard};
 mod preparation;
-pub use preparation::{OfferPreparationView, UnpreparedOfferBinding};
+pub use preparation::{
+    ObservedOfferTarget, OfferPreparationView, OfferTargetObservationError,
+    OfferTargetObservationFailure, UnpreparedOfferBinding,
+};
 #[cfg(test)]
 mod tests;
 

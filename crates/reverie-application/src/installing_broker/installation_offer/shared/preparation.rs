@@ -2,6 +2,10 @@
 //! native scope; dropping it only releases its reference, never the B attempt.
 use super::*;
 use reverie_core::operations::JournalDigest;
+mod target_observation;
+pub use target_observation::{
+    ObservedOfferTarget, OfferTargetObservationError, OfferTargetObservationFailure,
+};
 
 /// Original-offer observation only. It is not target preparation, consent,
 /// fleet-drain permission, controller activation or a capacity capability.

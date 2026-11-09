@@ -1,6 +1,7 @@
 //! Real unstarted prefix only: these controls never forge a native origin,
 //! nonce, publication, successful B registration or prepared target.
 use super::*;
+mod target;
 
 fn unopened() -> (
     std::path::PathBuf,
