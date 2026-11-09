@@ -41,6 +41,12 @@ enum Action {
         #[arg(long)]
         output: PathBuf,
     },
+    WorkerChildImageAnnex {
+        #[arg(long)]
+        base_provenance: PathBuf,
+        #[arg(long)]
+        output: PathBuf,
+    },
 }
 #[derive(Serialize, Deserialize, PartialEq, Debug)]
 #[serde(deny_unknown_fields)]
@@ -75,7 +81,12 @@ pub(super) fn requested() -> bool {
     std::env::args_os().nth(1).is_some_and(|v| {
         matches!(
             v.to_str(),
-            Some("worker-child-program" | "verify-worker-child-root" | "worker-child-image")
+            Some(
+                "worker-child-program"
+                    | "verify-worker-child-root"
+                    | "worker-child-image"
+                    | "worker-child-image-annex"
+            )
         )
     })
 }
@@ -104,6 +115,10 @@ pub(super) fn run() -> Result<()> {
             base_provenance,
             output,
         } => write(&output, &image(&manifest, &base_provenance)?),
+        Action::WorkerChildImageAnnex {
+            base_provenance,
+            output,
+        } => write(&output, &derived_image(&base_provenance)?),
     }
 }
 fn need(value: bool, reason: &'static str) -> Result<()> {
@@ -179,23 +194,41 @@ fn manifest_program(path: &Path) -> Result<(Program, Pin)> {
     )?;
     Ok((document, pin))
 }
-fn image(manifest: &Path, base: &Path) -> Result<Value> {
+fn image_program(manifest: &Path) -> Result<(Program, Pin)> {
     let (document, manifest_pin) = manifest_program(manifest)?;
     need(
         Path::new(&manifest_pin.path).starts_with("/nix/store"),
         "WORKER_CHILD_IMAGE_IMMUTABLE_MANIFEST_REQUIRED",
     )?;
+    Ok((document, manifest_pin))
+}
+fn read_base(base: &Path) -> Result<(Base, Pin)> {
     let (raw, base_pin) = read(base, 4 << 20)?;
     let base: Base = serde_json::from_slice(&raw)?;
+    Ok((base, base_pin))
+}
+fn image(manifest: &Path, base: &Path) -> Result<Value> {
+    let (document, manifest_pin) = image_program(manifest)?;
+    let (base, base_pin) = read_base(base)?;
     assemble(document, manifest_pin, base, base_pin)
 }
-fn assemble(document: Program, manifest_pin: Pin, base: Base, base_pin: Pin) -> Result<Value> {
+fn derived_image(base: &Path) -> Result<Value> {
+    let (base, base_pin) = read_base(base)?;
+    let (document, manifest_pin) = image_program(Path::new(manifest_label(&base)?))?;
+    assemble(document, manifest_pin, base, base_pin)
+}
+fn manifest_label(base: &Base) -> Result<&str> {
     need(
         base.version == 1 && base.purpose == "worker-image-provenance-v1",
         "WORKER_CHILD_BASE_PROVENANCE_SCHEMA",
     )?;
+    base.image_spec["Config"]["Labels"][LABEL]
+        .as_str()
+        .ok_or_else(|| "WORKER_CHILD_IMAGE_MANIFEST_LABEL_REQUIRED".into())
+}
+fn assemble(document: Program, manifest_pin: Pin, base: Base, base_pin: Pin) -> Result<Value> {
     need(
-        base.image_spec["Config"]["Labels"][LABEL].as_str() == Some(manifest_pin.path.as_str()),
+        manifest_label(&base)? == manifest_pin.path,
         "WORKER_CHILD_IMAGE_MANIFEST_LABEL_DIFFERENT",
     )?;
     let wanted = if document.elf_machine == 62 {
@@ -278,6 +311,24 @@ mod tests {
         let digest = fields.remove("archiveConfigSHA256").unwrap();
         fields.insert("archiveConfigSha256".into(), digest);
         assert!(serde_json::from_value::<Base>(foreign_spelling).is_err());
+    }
+    #[test]
+    fn annotation_only_role_accepts_no_program_or_manifest_override() {
+        for option in ["--manifest", "--program", "--image", "--abi"] {
+            assert!(
+                Arguments::try_parse_from([
+                    "artifact",
+                    "worker-child-image-annex",
+                    "--base-provenance",
+                    "/nix/store/fixed/base.json",
+                    "--output",
+                    "/tmp/unused-annex",
+                    option,
+                    "foreign",
+                ])
+                .is_err()
+            );
+        }
     }
     #[test]
     fn annex_refuses_old_foreign_or_wrong_arch_image_and_preserves_exact_spec() {

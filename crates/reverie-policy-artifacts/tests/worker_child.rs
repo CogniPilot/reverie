@@ -71,3 +71,48 @@ fn actual_native_program_manifest_is_exclusive_and_paired_root_is_verified() {
         String::from_utf8_lossy(&verify.stderr)
     );
 }
+
+#[test]
+#[ignore = "requires the declared immutable actual v1 worker image provenance"]
+fn actual_v1_base_derives_its_only_child_annex_without_rewriting_the_base() {
+    use sha2::{Digest, Sha256};
+    let base = PathBuf::from(std::env::var_os("NIX_REVERIE_TEST_WORKER_BASE_PROVENANCE").unwrap());
+    let original = fs::read(&base).unwrap();
+    let value: serde_json::Value = serde_json::from_slice(&original).unwrap();
+    let root = private_tree();
+    let output = root.join("annex.json");
+    let produce = || {
+        Command::new(env!("CARGO_BIN_EXE_reverie-policy-artifacts"))
+            .args(["worker-child-image-annex", "--base-provenance"])
+            .arg(&base)
+            .arg("--output")
+            .arg(&output)
+            .output()
+            .unwrap()
+    };
+    let first = produce();
+    assert!(
+        first.status.success(),
+        "{}; retained {}",
+        String::from_utf8_lossy(&first.stderr),
+        root.display()
+    );
+    let annex: serde_json::Value = serde_json::from_slice(&fs::read(&output).unwrap()).unwrap();
+    let repeated = produce();
+    assert!(!repeated.status.success());
+    assert_eq!(fs::read(&base).unwrap(), original);
+    assert_eq!(
+        annex["baseProvenance"]["sha256"],
+        format!("{:x}", Sha256::digest(&original))
+    );
+    assert_eq!(annex["imageSpec"], value["imageSpec"]);
+    assert_eq!(annex["archive"], value["archive"]);
+    assert_eq!(annex["factory"], value["factory"]);
+    assert_eq!(annex["archiveConfigSHA256"], value["archiveConfigSHA256"]);
+    assert_eq!(
+        annex["workerChild"]["manifest"]["path"],
+        value["imageSpec"]["Config"]["Labels"]["org.reverie.worker.child-manifest"]
+    );
+    fs::remove_file(output).unwrap();
+    fs::remove_dir(root).unwrap();
+}
