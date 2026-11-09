@@ -19,6 +19,8 @@ use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
+#[cfg(test)]
+pub(crate) mod tests;
 #[derive(Debug)]
 pub enum WorkerRecoveryError {
     Engine(EngineError),
@@ -195,7 +197,7 @@ fn query(
     engine
         .engine
         .client
-        .run_scoped(
+        .run_scoped_waiting(
             args,
             query_end(engine),
             &engine.cancellation(),

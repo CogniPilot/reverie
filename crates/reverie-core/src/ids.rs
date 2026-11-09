@@ -39,6 +39,9 @@ macro_rules! profile_id {
 
 profile_id!(ProfileEmployeeId);
 profile_id!(ProfileSessionId);
+profile_id!(ChatRoomId);
+profile_id!(ChatMessageId);
+profile_id!(ChatImageFileId);
 
 /// A complete engine inventory reference, never process/effect authority.
 /// The legacy observer accepts the all-zero lexical ID as well.

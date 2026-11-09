@@ -1,6 +1,7 @@
 use super::*;
 use crate::legacy_json;
 use crate::task_perf_v1::{TaskPerfArtifactData, TaskPerfProfile, recognize_configuration};
+use reverie_core::task_perf::TaskPerfPolicy;
 use sha2::{Digest, Sha256};
 
 /// Parsed default-deny profile DATA, bound to exact bytes. Not native custody.
@@ -44,16 +45,19 @@ pub(super) fn check(
     let value = &prepared.value;
     let fields = object(value).map_err(|_| RootlessError::Profile)?;
     let perf = field(object(config.as_value())?, "_taskPerfPolicy").is_some();
-    if perf {
+    let policy = if perf {
         let artifact = artifact.ok_or(RootlessError::Perf)?;
         let profile = TaskPerfProfile::from_rootless_value(value.deep_clone());
         recognize_configuration(config, artifact, &profile).map_err(|_| RootlessError::Perf)?;
-    }
+        Some(artifact.manifest().policy())
+    } else {
+        None
+    };
     let rules = field(fields, "syscalls").ok_or(RootlessError::Syscalls)?;
     match &rules.0 {
         Node::Array(rules) => {
             for rule in rules {
-                check_rule(rule, perf)?;
+                check_rule(rule, policy)?;
             }
         }
         Node::Object(values) if values.is_empty() => {}
@@ -62,7 +66,7 @@ pub(super) fn check(
     }
     Ok(())
 }
-fn check_rule(rule: &Value, perf: bool) -> Result<()> {
+fn check_rule(rule: &Value, policy: Option<TaskPerfPolicy>) -> Result<()> {
     let fields = object(rule).map_err(|_| RootlessError::Syscalls)?;
     let guarded = caps(fields, "includes")?;
     let excluded = caps(fields, "excludes")?;
@@ -75,15 +79,20 @@ fn check_rule(rule: &Value, perf: bool) -> Result<()> {
                 names,
                 &["keyctl", "add_key", "request_key", "bpf", "perf_event_open"],
             )?;
-            if forbidden.intersects && !(perf && exact_perf_rule(rule)?) {
+            if forbidden.intersects
+                && !policy
+                    .map(|policy| exact_perf_rule(rule, policy))
+                    .transpose()?
+                    .unwrap_or(false)
+            {
                 return Err(RootlessError::Syscalls);
             }
         }
     }
     Ok(())
 }
-fn exact_perf_rule(rule: &Value) -> Result<bool> {
-    crate::task_perf_v1::is_task_perf_rule(rule).map_err(|_| RootlessError::Perf)
+fn exact_perf_rule(rule: &Value, policy: TaskPerfPolicy) -> Result<bool> {
+    crate::task_perf_v1::is_task_perf_rule(rule, policy).map_err(|_| RootlessError::Perf)
 }
 struct SetView {
     empty: bool,

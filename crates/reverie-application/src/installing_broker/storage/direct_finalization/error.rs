@@ -38,6 +38,7 @@ impl std::fmt::Debug for DirectStorageFinishFailure {
         match &self.owner {
             Owner::Preparing(owner) => {
                 match &owner.destination {
+                    Destination::Started(_) => value.field("phase", &"original Started native"),
                     Destination::Legacy { .. } => value.field("phase", &"legacy native"),
                     Destination::Registered { newly_claimed, .. } => value
                         .field("phase", &"registered native")

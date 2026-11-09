@@ -3,9 +3,10 @@
  *
  * Opt-in per agent. They exist only when this MCP server's own environment names an instance configuration
  * (`REVERIE_MCP_MEMORY_INSTANCE`, set in that agent's MCP entry). The caller is that instance: no tool argument
- * can select another agent's store. Ordinary opt-in uses in-process legacy recall and hard floors.
- * Final-runtime bootstrap can explicitly supply a checked native bridge binding; its requests go on
- * stdin and tool arguments cannot select the executable or caller scope.
+ * can select another agent's store. Ordinary opt-in recalls in-process (legacy-recall.ts).
+ * Final-runtime bootstrap can supply a checked native bridge; an explicit legacy bridge remains
+ * compatibility-only. Tool arguments select neither an executable nor caller scope.
+ * Hard floors always run in-process (memory-floors.ts).
  *
  * Scope: with `project`, the shared project store; without it, the caller's private store.
  *
@@ -65,7 +66,7 @@ interface InProcessMemoryToolsConfig {
   source?: never;
 }
 export type MemoryToolsConfig = InProcessMemoryToolsConfig | BridgeMemoryToolsConfig;
-export type LegacyRecall = (instance: string, request: RecallRequest) => Promise<string>;
+export type LegacyRecall = (instance: string, request: RecallRequest, signal?: AbortSignal) => Promise<string>;
 
 /** Runs one journal verb as the session this MCP server runs in; undefined when it runs outside any session. */
 export type JournalPort = (
@@ -194,43 +195,97 @@ export function journalSaveCommand(args: Record<string, unknown>): string {
   return parts.map(quote).join(' ');
 }
 
-function createBridgeMemoryTools(
+type MemoryScreen = (text: string, home: string) => string;
+type MemoryToolSet = {
+  enabled: boolean;
+  definitions(): ToolDefinition[];
+  has(name: string): boolean;
+  run(name: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<ToolResult>;
+};
+
+/** Preserve the native reader's absolute/per-fetch deadlines while composing
+ * the actual MCP cancellation signal; synchronous work remains bounded by its
+ * existing input/clock checks and shutdown still waits for real settlement. */
+const defaultRecall: LegacyRecall = async (instance, request, signal) => {
+  const clock = () => {
+    signal?.throwIfAborted();
+    return Date.now();
+  };
+  const requestEmbedding: typeof fetch = (input, init) =>
+    fetch(input, {
+      ...init,
+      signal: signal ? AbortSignal.any([signal, ...(init?.signal ? [init.signal] : [])]) : init?.signal,
+    });
+  clock();
+  const result = await legacyRecall(instance, request, {
+    home: process.env.HOME ?? '/tmp',
+    embedUrl: envValue(process.env, 'EMBED_URL') ?? '',
+    clock,
+    llama: { fetch: requestEmbedding },
+  });
+  clock();
+  return result;
+};
+
+export function createMemoryTools(
   config: BridgeMemoryToolsConfig,
-  runner: BridgeRunner = runMemoryBridge,
+  runner?: BridgeRunner,
   journal?: JournalPort,
-  access?: InstalledMemoryAccess
-) {
+  access?: InstalledMemoryAccess,
+  screen?: MemoryScreen
+): MemoryToolSet;
+export function createMemoryTools(
+  config: InProcessMemoryToolsConfig,
+  recall?: LegacyRecall,
+  journal?: JournalPort,
+  screen?: MemoryScreen
+): MemoryToolSet;
+export function createMemoryTools(
+  config: MemoryToolsConfig,
+  port?: BridgeRunner | LegacyRecall,
+  journal?: JournalPort,
+  policy?: InstalledMemoryAccess | MemoryScreen,
+  bridgeScreen?: MemoryScreen
+): MemoryToolSet {
+  const bridgeConfig: BridgeMemoryToolsConfig | undefined =
+    config.native || config.python !== undefined ? config : undefined;
+  const bridgeRunner = (bridgeConfig ? (port as BridgeRunner | undefined) : undefined) ?? runMemoryBridge;
+  const legacyRecaller = (!bridgeConfig ? (port as LegacyRecall | undefined) : undefined) ?? defaultRecall;
+  const access = bridgeConfig ? (policy as InstalledMemoryAccess | undefined) : undefined;
+  const screen = (bridgeConfig ? bridgeScreen : (policy as MemoryScreen | undefined)) ?? screenMemoryText;
   const enabled = Boolean(config.instance || config.installed);
 
   /** Only what the bridge needs: never forward this process's room or session credentials to it. */
   function bridgeEnv(): NodeJS.ProcessEnv {
-    if (config.native)
-      return config.installed
-        ? config.native.installedEnvironment()
-        : config.instance
-          ? config.native.environment(config.instance)
+    if (!bridgeConfig) throw new Error('Explicit memory bridge is not configured');
+    if (bridgeConfig.native)
+      return bridgeConfig.installed
+        ? bridgeConfig.native.installedEnvironment()
+        : bridgeConfig.instance
+          ? bridgeConfig.native.environment(bridgeConfig.instance)
           : {};
     const apiBase = envValue(process.env, 'API_BASE');
     const embedUrl = envValue(process.env, 'EMBED_URL');
     return {
       PATH: process.env.PATH ?? '/usr/bin:/bin',
       HOME: process.env.HOME ?? '/tmp',
-      PYTHONPATH: config.source,
-      ...(config.instance ? environmentEntry('INSTANCE_CONFIG', config.instance) : {}),
+      PYTHONPATH: bridgeConfig.source,
+      ...(bridgeConfig.instance ? environmentEntry('INSTANCE_CONFIG', bridgeConfig.instance) : {}),
       ...(apiBase ? environmentEntry('API_BASE', apiBase) : {}),
       ...(embedUrl ? environmentEntry('EMBED_URL', embedUrl) : {}),
     };
   }
 
   function bridge(input: string, signal?: AbortSignal) {
+    if (!bridgeConfig) throw new Error('Explicit memory bridge is not configured');
     const options = { env: bridgeEnv(), input, timeoutMs: BRIDGE_TIMEOUT_MS, signal };
-    if (config.native)
-      return runner(
-        config.native.executable,
-        config.installed ? ['--installed-context', '--expected-context', config.installed.fingerprint] : [],
+    if (bridgeConfig.native)
+      return bridgeRunner(
+        bridgeConfig.native.executable,
+        bridgeConfig.installed ? ['--installed-context', '--expected-context', bridgeConfig.installed.fingerprint] : [],
         options
       );
-    return runner(config.python, ['-m', 'reverie.memory_cli'], options);
+    return bridgeRunner(bridgeConfig.python, ['-m', 'reverie.memory_cli'], options);
   }
 
   async function journalVerb(verb: (deps: AgentDeps) => Promise<number>, signal?: AbortSignal): Promise<unknown> {
@@ -263,11 +318,10 @@ function createBridgeMemoryTools(
     if (!field('quote') && !field('source')) missing.push('quote or source');
     if (missing.length)
       return refuse(`memory_remember needs ${missing.join(', ')} from the message you are acting on.`);
-    // The same hard floors the old store applied, checked by the bridge without writing anything; fail closed.
-    const screened = await bridge(JSON.stringify({ action: 'screen', text: field('text') }), signal);
-    let floor: unknown = 'unchecked';
+    // The same hard floors the old store applied, checked in-process without writing anything; fail closed.
+    let floor = 'unchecked';
     try {
-      floor = screened.code === 0 ? (JSON.parse(screened.stdout) as { floor?: unknown }).floor : 'unchecked';
+      floor = screen(field('text'), process.env.HOME ?? '/tmp');
     } catch {
       /* stays unchecked */
     }
@@ -342,17 +396,36 @@ function createBridgeMemoryTools(
   };
 
   async function recall(body: Record<string, unknown>, signal?: AbortSignal): Promise<ToolResult> {
-    const out = await bridge(JSON.stringify(body), signal);
-    if (out.code !== 0) {
-      let reason = out.stderr.trim();
-      try {
-        reason = String(JSON.parse(reason).error ?? reason);
-      } catch {
-        /* plain text */
+    let legacy: string;
+    if (bridgeConfig) {
+      const out = await bridge(JSON.stringify(body), signal);
+      if (out.code !== 0) {
+        let reason = out.stderr.trim();
+        try {
+          reason = String(JSON.parse(reason).error ?? reason);
+        } catch {
+          /* plain text */
+        }
+        return failure('Memory lookup failed: ' + (scrubPaths(reason).slice(0, 500) || 'no detail'));
       }
-      return failure(`Memory lookup failed: ${scrubPaths(reason).slice(0, 500) || 'no detail'}`);
+      legacy = out.stdout.trim() || '[]';
+    } else {
+      try {
+        signal?.throwIfAborted();
+        legacy = await legacyRecaller(
+          config.instance!,
+          {
+            query: body.query as string,
+            ...(body.project ? { project: body.project as string } : {}),
+          },
+          signal
+        );
+        signal?.throwIfAborted();
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        return failure('Memory lookup failed: ' + (scrubPaths(reason).slice(0, 500) || 'no detail'));
+      }
     }
-    const legacy = out.stdout.trim() || '[]';
     if (!journal) return { text: legacy };
     // Recall: the journal is the store of record; the old store answers as older, read-only history until imported.
     try {
@@ -379,188 +452,4 @@ function createBridgeMemoryTools(
       };
     }
   }
-}
-
-/** The old store as the bridge read it: the caller's HOME for `~` paths and the configured embedding service. */
-const defaultRecall: LegacyRecall = (instance, request) =>
-  legacyRecall(instance, request, {
-    home: process.env.HOME ?? '/tmp',
-    embedUrl: envValue(process.env, 'EMBED_URL') ?? '',
-  });
-
-function createInProcessMemoryTools(
-  config: InProcessMemoryToolsConfig,
-  recall: LegacyRecall = defaultRecall,
-  journal?: JournalPort,
-  screen: (text: string, home: string) => string = screenMemoryText
-) {
-  const enabled = Boolean(config.instance);
-
-  async function journalVerb(verb: (deps: AgentDeps) => Promise<number>): Promise<unknown> {
-    const done = await journal!(verb);
-    if (done.code !== 0) {
-      // In JSON mode a refusal prints {success:false, error}; give the model the error, not the envelope.
-      const printed = [...done.err, ...done.out].join(' ').trim();
-      let reason = printed;
-      try {
-        reason = String((JSON.parse(printed) as { error?: unknown }).error ?? printed);
-      } catch {
-        /* plain text */
-      }
-      throw new Error(scrubPaths(reason).slice(0, 500) || `journal refused (exit ${done.code})`);
-    }
-    return (JSON.parse(done.out.join('\n')) as { data: unknown }).data;
-  }
-
-  /** Remember, through the journal only: refuse with the exact command when the caller's turn is missing. */
-  async function remember(args: Record<string, unknown>): Promise<ToolResult> {
-    const refuse = (why: string) =>
-      failure(`${why} Nothing was saved. To save it to your journal, run: ${journalSaveCommand(args)}`);
-    if (!journal)
-      return refuse(
-        'memory_remember saves to your journal as your own Reverie session, and this server is not running inside one.'
-      );
-    const field = (key: string) => (typeof args[key] === 'string' ? (args[key] as string).trim() : '');
-    const missing = ['room', 'turn'].filter((key) => !ID.test(field(key)));
-    if (!(JOURNAL_TAGS as readonly string[]).includes(field('tag'))) missing.push('tag');
-    if (!field('quote') && !field('source')) missing.push('quote or source');
-    if (missing.length)
-      return refuse(`memory_remember needs ${missing.join(', ')} from the message you are acting on.`);
-    // The same hard floors the old store applied, checked in-process without writing anything; fail closed.
-    let floor = 'unchecked';
-    try {
-      floor = screen(field('text'), process.env.HOME ?? '/tmp');
-    } catch {
-      /* stays unchecked */
-    }
-    if (floor !== '')
-      return failure(
-        floor === 'unchecked'
-          ? 'Memory save failed: the hard-floor check did not run; nothing was saved.'
-          : 'Memory save failed: memory is empty or crossed a hard floor'
-      );
-    try {
-      const saved = await journalVerb((deps) =>
-        agentJournalSave(
-          { ...deps, json: true },
-          {
-            room: field('room'),
-            turn: field('turn'),
-            text: field('text'),
-            tag: [field('tag')],
-            ...(field('quote') ? { source: [field('turn')], quote: [field('quote')] } : {}),
-            ...(field('source') ? { ref: [field('source')] } : {}),
-            ...(field('reason') ? { reason: field('reason') } : {}),
-            ...(field('project') ? { project: field('project') } : {}),
-          }
-        )
-      );
-      return { text: JSON.stringify(saved) };
-    } catch (error) {
-      return failure(`Journal save refused: ${error instanceof Error ? error.message : 'unknown error'}`);
-    }
-  }
-
-  function request(name: string, args: Record<string, unknown>): Record<string, unknown> | string {
-    const project = args.project;
-    if (project !== undefined && !MemoryProjectSchema.safeParse(project).success)
-      return 'project must be a short lowercase identifier (a-z, 0-9, _ and -)';
-    const scope = project ? { project } : { private: true };
-    if (name === 'memory_recall') {
-      const query = args.query;
-      if (typeof query !== 'string' || !query.trim() || query.length > QUERY_MAX)
-        return `query must be 1-${QUERY_MAX} characters`;
-      return { action: 'recall', query: query.trim(), ...scope };
-    }
-    const text = args.text;
-    if (typeof text !== 'string' || !text.trim() || text.length > TEXT_MAX)
-      return `text must be 1-${TEXT_MAX} characters`;
-    const source = args.source;
-    if (source !== undefined && (typeof source !== 'string' || source.length > 256))
-      return 'source must be text, at most 256 characters';
-    // The journal checks the rest (room, turn, tag and a source) in remember().
-    return { action: 'remember', text: text.trim(), ...scope };
-  }
-
-  return {
-    enabled,
-    definitions: (): ToolDefinition[] => (enabled ? memoryToolDefinitions() : []),
-    has: (name: string): boolean => enabled && (MEMORY_TOOL_NAMES as readonly string[]).includes(name),
-    async run(name: string, args: Record<string, unknown>): Promise<ToolResult> {
-      if (!enabled || !(MEMORY_TOOL_NAMES as readonly string[]).includes(name)) return failure(`Unknown tool: ${name}`);
-      const body = request(name, args);
-      if (typeof body === 'string') return failure(body);
-      if (name === 'memory_remember') return remember(args);
-      let legacy: string;
-      try {
-        legacy = await recall(config.instance!, {
-          query: body.query as string,
-          ...(body.project ? { project: body.project as string } : {}),
-        });
-      } catch (error) {
-        const reason = error instanceof Error ? error.message : String(error);
-        return failure(`Memory lookup failed: ${scrubPaths(reason).slice(0, 500) || 'no detail'}`);
-      }
-      if (!journal) return { text: legacy };
-      // Recall: the journal is the store of record; the old store answers as older, read-only history until imported.
-      try {
-        const query = body.query as string;
-        const entries = (await journalVerb((deps) =>
-          agentJournalRecall({ ...deps, json: true }, [query], undefined, body.project as string | undefined)
-        )) as { entries: unknown[] };
-        return {
-          text: JSON.stringify({
-            journal: entries.entries,
-            legacy: JSON.parse(legacy),
-            note: 'journal entries are your store of record; legacy results are older, read-only history',
-          }),
-        };
-      } catch (error) {
-        // While the journal rolls out, a failed lookup still answers from the old store, and says so.
-        return {
-          text: JSON.stringify({
-            journal: [],
-            legacy: JSON.parse(legacy),
-            note: `journal lookup failed (${error instanceof Error ? error.message : 'unknown error'}); these are only older, read-only results from the old store`,
-          }),
-        };
-      }
-    },
-  };
-}
-
-/** Preserve both callers' typed injection ports; environment-only opt-in uses
- * main's in-process path, while installed bootstrap passes a checked bridge. */
-export function createMemoryTools(
-  config: BridgeMemoryToolsConfig,
-  runner?: BridgeRunner,
-  journal?: JournalPort,
-  access?: InstalledMemoryAccess
-): ReturnType<typeof createBridgeMemoryTools>;
-export function createMemoryTools(
-  config: InProcessMemoryToolsConfig,
-  recall?: LegacyRecall,
-  journal?: JournalPort,
-  screen?: (text: string, home: string) => string
-): ReturnType<typeof createInProcessMemoryTools>;
-export function createMemoryTools(
-  config: MemoryToolsConfig,
-  port?: BridgeRunner | LegacyRecall,
-  journal?: JournalPort,
-  policy?: InstalledMemoryAccess | ((text: string, home: string) => string)
-) {
-  if (config.native || config.python !== undefined) {
-    return createBridgeMemoryTools(
-      config,
-      port as BridgeRunner | undefined,
-      journal,
-      policy as InstalledMemoryAccess | undefined
-    );
-  }
-  return createInProcessMemoryTools(
-    config,
-    port as LegacyRecall | undefined,
-    journal,
-    policy as ((text: string, home: string) => string) | undefined
-  );
 }

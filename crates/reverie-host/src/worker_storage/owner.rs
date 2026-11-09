@@ -123,7 +123,7 @@ pub struct StorageSelection {
     paths: StoragePaths,
 }
 impl StorageSelection {
-    pub(super) fn assert_runtime(&self, runtime: &WorkerRuntime) -> OwnerResult<()> {
+    pub(crate) fn assert_runtime(&self, runtime: &WorkerRuntime) -> OwnerResult<()> {
         if !Arc::ptr_eq(&self.engine, runtime.installed_engine()) {
             return Err(StorageOwnerError::Refused(
                 "WORKER_STORAGE_RUNTIME_BINDING_CHANGED",
@@ -464,5 +464,23 @@ impl WorkerRuntime {
             namespace: Namespace::capture(source)?,
             paths,
         })
+    }
+}
+
+impl LaunchStorage {
+    /// No FD/currentness read: this is only the held ownership variant. Cold
+    /// lifecycle/native work is not inferred clear from a held lease.
+    pub fn storage_owner_status(
+        &self,
+    ) -> reverie_contracts::worker_storage_status::OwnerObservation {
+        use reverie_contracts::worker_storage_status::{
+            OwnerObservation as View, OwnerPhase, RecordedOutcome,
+        };
+        let phase = match self.ownership_kind() {
+            StorageOwnershipKind::HeldLease => OwnerPhase::Held,
+            StorageOwnershipKind::UnleasedLegacy => OwnerPhase::UnleasedLegacy,
+            StorageOwnershipKind::ConsumedUnconfirmed => OwnerPhase::ConsumedUnconfirmed,
+        };
+        View::observed(phase, RecordedOutcome::NotRecorded, None, None)
     }
 }

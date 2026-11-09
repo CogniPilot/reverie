@@ -40,6 +40,7 @@ import { getErrorMessage } from './types.js';
 import { DOCUMENT_ATTACHMENT_EXTENSIONS, isSupportedAttachmentExtension } from './attachment-registry.js';
 import { daemonStatus, startDaemon, stopDaemon, type WebLaunchOptions } from './daemon-control.js';
 import { installService, serviceStatus, uninstallService, controlService, serviceLogs } from './service-installer.js';
+import { FRONT_UNAVAILABLE_EXIT, execFront, frontLaunch } from './rust-front/launch.js';
 import { isLoopbackBindHost, isUnauthenticatedNetworkAcknowledged } from './web/network-auth-policy.js';
 import { confirm, heading, isInteractive, kv, palette, rule, tint, withSpinner, type Tone } from './cli-style.js';
 import type { ToolResult } from './utils/dependency-checker.js';
@@ -1128,39 +1129,29 @@ webCmd.action(async (options) => {
     )
   );
 
+  // Selected behind the native front (the service unit's REVERIE_NATIVE_FRONT): this process becomes the front, which
+  // runs the real server as its child. Selected but unstartable exits without serving at all.
+  try {
+    const front = frontLaunch(process.env, process.argv, process.execPath);
+    if (front) execFront(front);
+  } catch (err) {
+    console.error(palette.err(`✗ ${getErrorMessage(err)}`));
+    process.exit(FRONT_UNAVAILABLE_EXIT);
+  }
+
   {
+    // Graceful shutdown on SIGTERM/SIGINT/SIGHUP, or the native front's shutdown frame. Installed before startup,
+    // so one that arrives while the server is starting is kept and acted on once it exists.
+    const shutdown = webShutdown();
+    for (const signal of ['SIGTERM', 'SIGINT', 'SIGHUP'] as const) process.on(signal, () => shutdown.request(signal));
     // The server prints its own "running at" line (it also covers the daemon and
     // service launch paths), so this one used to be a duplicate of it.
     const server = await startWebOrExit(() => startConfiguredWebServer(launch));
+    shutdown.attach(server);
     if (https) {
       console.log(palette.warn('  Note: Accept the self-signed certificate in your browser on first visit'));
     }
     console.log(palette.muted('  Press Ctrl+C to stop\n'));
-
-    // Graceful shutdown handler — flush state and clean up on SIGTERM/SIGINT
-    let shuttingDown = false;
-    const shutdown = async (signal: string) => {
-      if (shuttingDown) return;
-      shuttingDown = true;
-      console.log(palette.warn(`\n${signal} received, shutting down gracefully...`));
-      // A hung stop() must not keep the process alive: the listener is already
-      // closed by then, and a KeepAlive LaunchDaemon only respawns the server once
-      // it EXITS (systemd would SIGKILL after TimeoutStopSec; launchd does not).
-      // Seen after a self-update on macOS: port closed, process alive, service down.
-      setTimeout(() => {
-        console.error(palette.err(`Shutdown did not finish in ${SHUTDOWN_FORCE_EXIT_MS / 1000}s, forcing exit`));
-        process.exit(1);
-      }, SHUTDOWN_FORCE_EXIT_MS).unref();
-      try {
-        await server.stop();
-      } catch (err) {
-        console.error(palette.err(`Error during shutdown: ${getErrorMessage(err)}`));
-      }
-      process.exit(0);
-    };
-    process.on('SIGTERM', () => shutdown('SIGTERM'));
-    process.on('SIGINT', () => shutdown('SIGINT'));
-    process.on('SIGHUP', () => shutdown('SIGHUP'));
   }
 });
 
@@ -1179,6 +1170,63 @@ export async function startWebOrExit<T>(
     console.error(palette.err(`✗ Failed to start web server: ${getErrorMessage(err)}`));
     return exit(1);
   }
+}
+
+/**
+ * The web process's one shutdown. `request` may come before the server exists (a signal or the front's shutdown
+ * frame during startup): it is kept, and the stop runs as soon as `attach` supplies the server. The forced exit is
+ * armed at the first request either way, so a startup or stop that hangs cannot keep the process alive. A KeepAlive
+ * LaunchDaemon only respawns the server once it EXITS (systemd would SIGKILL after TimeoutStopSec; launchd does
+ * not); seen after a self-update on macOS: port closed, process alive, service down.
+ */
+export function webShutdown(
+  exit: (code: number) => never = process.exit,
+  forceMs: number = SHUTDOWN_FORCE_EXIT_MS
+): { request(signal: string): void; attach(server: { stop(): Promise<unknown> }): void } {
+  let server: { stop(): Promise<unknown> } | undefined;
+  let requested = false;
+  let stopping = false;
+  const run = () => {
+    if (!server || !requested || stopping) return;
+    stopping = true;
+    const target = server;
+    void stopWebAndExit(() => target.stop(), exit).catch(() => undefined);
+  };
+  return {
+    request(signal) {
+      if (requested) return;
+      requested = true;
+      console.log(palette.warn(`\n${signal} received, shutting down gracefully...`));
+      setTimeout(() => {
+        console.error(palette.err(`Shutdown did not finish in ${forceMs / 1000}s, forcing exit`));
+        exit(1);
+      }, forceMs).unref();
+      run();
+    },
+    attach(started) {
+      server = started;
+      run();
+    },
+  };
+}
+
+/**
+ * Stop the web server and exit with its outcome: 0 only when stop() resolved. A stop that throws (a
+ * flush or close that failed) makes this process exit 1 rather than 0. Whether the caller sees that status
+ * is the caller's: `reverie web --stop` only waits for the pid to disappear and does not read it. The exit
+ * is injectable so this is tested without ending the test runner.
+ */
+export async function stopWebAndExit(
+  stop: () => Promise<unknown>,
+  exit: (code: number) => never = process.exit
+): Promise<never> {
+  try {
+    await stop();
+  } catch (err) {
+    console.error(palette.err(`Error during shutdown: ${getErrorMessage(err)}`));
+    return exit(1);
+  }
+  return exit(0);
 }
 
 // Supervised service: the "still there after a reboot" answer, where `web -d` is

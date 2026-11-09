@@ -6,6 +6,8 @@ use std::fs;
 use std::io;
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
+mod provider;
+pub use provider::ProviderRuntimeObservation;
 
 /// Paths selected by the trusted native caller, not a request's employee/path.
 #[derive(Clone, Debug)]

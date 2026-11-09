@@ -8,6 +8,8 @@ use reverie_contracts::{
 use reverie_host::reservation_control::PolicyBinding;
 use std::sync::atomic::{AtomicBool, Ordering};
 pub(super) struct PolicyPhase {
+    pub(super) before: Arc<ValidatedWorkerSnapshot>,
+    pub(super) installed_snapshot: Option<Arc<ValidatedWorkerSnapshot>>,
     pub(super) candidate: Arc<ValidatedWorkerSnapshot>,
     pub(super) binding: PolicyBinding,
     pub(super) published: bool,
@@ -30,7 +32,7 @@ impl RetainedPreparation {
             "RESOURCE_PREPARATION_ACK_CONTEXT_REQUIRED",
         ))?;
         need(
-            self.store.is_some()
+            self.journal_available()
                 && phase.published
                 && phase.installed
                 && self.live.load(Ordering::Acquire),
@@ -52,18 +54,11 @@ impl RetainedPreparation {
             need(slot.is_none(), "RESOURCE_PREPARATION_ACK_CONTEXT_REQUIRED")?;
             *slot = Some(fence.clone());
         }
-        let result = self
-            .store
-            .as_ref()
-            .expect("live retained store")
-            .record_ack(
-                &gate.scope,
-                &self.handle,
-                reverie_core::operations::Effect::Prepare,
-                record.digest().clone(),
-                self.view.record().data().version,
-            )
-            .map_err(Into::into);
+        let result = self.journal_record_ack(
+            reverie_core::operations::Effect::Prepare,
+            record.digest().clone(),
+            self.view.record().data().version,
+        );
         let closed = match active.policy_ack.lock() {
             Ok(mut slot) => {
                 let owned = slot
@@ -101,12 +96,15 @@ impl RetainedPreparation {
         };
         validate_bound_policy(&phase.binding, expected)?;
         need(
-            self.store.is_some(),
+            self.journal_available(),
             "RESOURCE_PREPARATION_ACTIVE_HANDLE_REQUIRED",
         )
     }
 }
-fn validate_bound_policy(binding: &PolicyBinding, expected: &EffectiveWorkerConfig) -> Result<()> {
+pub(super) fn validate_bound_policy(
+    binding: &PolicyBinding,
+    expected: &EffectiveWorkerConfig,
+) -> Result<()> {
     let metadata = binding.read_for_validation()?;
     let config = reservation_policy::configuration_for_validation(&metadata)?;
     let actual = crate::worker_validation::validate_captured(config)?;

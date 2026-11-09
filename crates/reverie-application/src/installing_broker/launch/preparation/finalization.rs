@@ -23,14 +23,9 @@ impl CleanupBudget {
         broker: &InstallingBroker,
     ) -> Result<LaptopLifecycle<'_>, GateError> {
         match self {
-            Self::Bounded(end) => {
-                let end = broker
-                    .storage
-                    .runtime
-                    .stop_deadline()
-                    .map_or(end, |stop| end.min(stop));
-                broker.installed.cleanup_lifecycle_until(end)
-            }
+            Self::Bounded(end) => broker
+                .installed
+                .cleanup_lifecycle_until(&broker.storage.runtime, end),
             Self::Worker => broker.installed.cleanup_lifecycle(&broker.storage.runtime),
         }
     }

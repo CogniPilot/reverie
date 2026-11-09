@@ -5,6 +5,8 @@ mod confirmation_cases;
 mod draft_cases;
 #[path = "tests_guard_errors.rs"]
 mod guard_error_cases;
+#[path = "tests_ram_claim.rs"]
+mod ram_claim_cases;
 #[path = "tests_terminal.rs"]
 mod terminal_cases;
 
@@ -597,9 +599,13 @@ fn shared_directory_early_refusal_and_enumeration_closes_retain_evidence() {
     faults::STATE.with(|state| state.borrow_mut().close = Some(CloseRole::Walk));
     let error = directory.check().unwrap_err();
     assert_eq!(error.code(), "STORE_DIRECTORY_REBOUND");
-    assert!(
-        matches!(error,crate::StoreError::DirectoryRecheck{cause} if matches!(*cause,crate::StoreError::Io{..}))
-    );
+    let crate::StoreError::DirectoryRecheck { cause } = error else {
+        panic!("original directory recheck context");
+    };
+    let crate::StoreError::CloseUnconfirmed { cause } = *cause else {
+        panic!("actual consumed close cause remains typed");
+    };
+    assert!(matches!(*cause, crate::StoreError::Io { .. }));
     faults::STATE.with(|state| state.borrow_mut().close = Some(CloseRole::Walk));
     assert!(directory.only_lock_leaf("operations.lock").is_err());
     directory.close().unwrap();

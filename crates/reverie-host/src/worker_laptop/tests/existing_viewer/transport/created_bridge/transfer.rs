@@ -41,14 +41,25 @@ pub(super) fn inputs(
 }
 fn finish(
     fixture: &Fixture,
+    created: &CreatedLaptop,
     transferred: StartedRelayTransferred,
     connection: WorkerLaunchConnection,
     mut hold: WorkerLaunchHold,
     service: &WorkerReportService,
 ) {
-    let (existing, phone, original_request) = transferred.into_parts();
+    let (existing, phone, original_request, handoff) = transferred.into_handoff_parts();
     assert_eq!(original_request.session(), &sid());
     let runtime = fixture.runtime();
+    let original_matches = handoff.assert_created(runtime, created).is_ok()
+        && handoff.pending_existing(runtime, &existing).is_ok();
+    let other_session = ProfileSessionId::parse("bbbbbbbb-bbbb-4ccc-8ddd-eeeeeeeeeeee").unwrap();
+    let other = runtime
+        .resolve_storage(&fixture.source, &other_session)
+        .unwrap()
+        .into_legacy()
+        .unwrap();
+    let foreign_refused = handoff.assert_storage(runtime, &other).is_err();
+    other.close(end()).unwrap();
     let ExistingViewerStart::Started(viewer) = runtime
         .start_existing_viewer_for_connection(&existing, &connection, end())
         .unwrap()
@@ -62,11 +73,13 @@ fn finish(
         .reclaim_existing_relay(&existing)
         .unwrap()
         .into_parts();
+    let direct_matches = handoff.assert_storage(runtime, &storage).is_ok();
     fixture.office.close_phone(&phone, end()).unwrap();
     connection.close_socket(end()).unwrap();
     hold.release(end()).unwrap();
     service.close(end()).unwrap();
     storage.close(end()).unwrap();
+    assert!(original_matches && direct_matches && foreign_refused);
 }
 #[test]
 fn full_inventory_transfer_replaces_same_slot_and_old_created_aliases_are_fenced() {
@@ -110,7 +123,7 @@ fn full_inventory_transfer_replaces_same_slot_and_old_created_aliases_are_fenced
             .is_err()
     );
     assert!(StorageLease::acquire_migration(&fixture.source, &sid()).is_err());
-    finish(&fixture, transferred, next, next_hold, &service);
+    finish(&fixture, &created, transferred, next, next_hold, &service);
 }
 #[test]
 fn same_original_j_or_foreign_created_identity_cannot_consume_the_record() {
@@ -183,5 +196,69 @@ fn released_old_j_with_actual_live_viewer_does_not_allow_transfer() {
     let transferred = runtime
         .transfer_started_laptop_relay(&created, plan, inspected, receipt, &next)
         .unwrap();
-    finish(&fixture, transferred, next, next_hold, &service);
+    finish(&fixture, &created, transferred, next, next_hold, &service);
+}
+
+#[test]
+fn handoff_keeps_actual_existing_or_direct_finalizer_close_uncertainty_negative() {
+    if isolated("handoff_keeps_actual_existing_or_direct_finalizer_close_uncertainty_negative") {
+        return;
+    }
+    use std::sync::atomic::Ordering;
+    for direct in [false, true] {
+        let hooks = crate::captured_client::test_hooks::Hooks::default();
+        let fixture = Fixture::employee_with_hooks("created-viewer-echo", hooks.clone());
+        let runtime = fixture.runtime();
+        let service = Arc::new(WorkerReportService::from_runtime(runtime));
+        let (_client, original, mut old_hold) = accepted(&fixture, &service, "original");
+        let (created, _released) = ready(&fixture, &original);
+        let (plan, inspected, receipt) = inputs(&fixture, &created, &original, &"c".repeat(64));
+        runtime.cleanup_created_laptop_request(&created).unwrap();
+        original.close_socket(end()).unwrap();
+        old_hold.release(end()).unwrap();
+        let (_client, next, mut hold) = accepted(&fixture, &service, "later");
+        let (existing, phone, _, handoff) = runtime
+            .transfer_started_laptop_relay(&created, plan, inspected, receipt, &next)
+            .unwrap()
+            .into_handoff_parts();
+        runtime.close_existing_viewer(&existing, end()).unwrap();
+        let refused = if direct {
+            let (storage, plan, _, _, _, _) = runtime
+                .reclaim_existing_relay(&existing)
+                .unwrap()
+                .into_parts();
+            let mut owner = runtime.retain_direct_final_storage(storage, plan).unwrap();
+            hooks.close_failed.store(true, Ordering::Release);
+            assert!(owner.observe(runtime).is_err());
+            let starts = hooks.starts.load(Ordering::Acquire);
+            let refused = matches!(
+                handoff.pending_direct_finalizer(runtime, &owner),
+                Err(LaptopError::Recorded(_))
+            );
+            assert_eq!(hooks.starts.load(Ordering::Acquire), starts);
+            drop(owner);
+            refused
+        } else {
+            hooks.close_failed.store(true, Ordering::Release);
+            assert!(runtime.observe_existing_final_storage(&existing).is_err());
+            let starts = hooks.starts.load(Ordering::Acquire);
+            let refused = matches!(
+                handoff.pending_existing(runtime, &existing),
+                Err(LaptopError::Recorded(_))
+            );
+            assert_eq!(hooks.starts.load(Ordering::Acquire), starts);
+            assert!(runtime.reclaim_existing_relay(&existing).is_err());
+            refused
+        };
+        fixture.office.close_phone(&phone, end()).unwrap();
+        next.close_socket(end()).unwrap();
+        hold.release(end()).unwrap();
+        service.close(end()).unwrap();
+        assert!(StorageLease::acquire_migration(&fixture.source, &sid()).is_err());
+        assert!(runtime.close(end()).is_err());
+        assert!(
+            refused,
+            "recorded consumed-close uncertainty is never Pending"
+        );
+    }
 }

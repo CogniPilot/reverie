@@ -6,11 +6,27 @@ use std::fs;
 const SID: &str = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
 const EID: &str = "11111111-2222-4333-8444-555555555555";
 mod finalization;
+mod provider;
+mod service;
+mod started;
+mod started_prefix;
+mod supervisor;
 fn broker(tree: &Tree) -> InstallingBroker {
+    broker_with_provider(tree, None)
+}
+fn broker_with_provider(tree: &Tree, provider: Option<serde_json::Value>) -> InstallingBroker {
     let mut raw: serde_json::Value = serde_json::from_slice(&tree.raw).unwrap();
     raw.as_object_mut().unwrap().remove("resourceReservations");
     raw["budgetMode"] = serde_json::json!("admission");
     raw["memoryMiB"] = serde_json::json!(512);
+    if let Some(provider) = provider {
+        let policy = reverie_contracts::worker_pool::WorkerPoolPolicy::decode(
+            &serde_json::to_vec(&provider["policy"]).unwrap(),
+        )
+        .unwrap();
+        raw["cgroupParent"] = serde_json::json!(policy.parent_slice());
+        raw["workerPoolProvider"] = provider;
+    }
     let broker = super::super::tests::broker_configuration(tree, &raw);
     tree.write("company.json", &serde_json::to_vec(&serde_json::json!({"employees":[{"id":EID,"owner":null,"sessionId":SID,"desiredRunning":true}]})).unwrap());
     tree.write("cold-launch-control", b"fixed owned child mode");

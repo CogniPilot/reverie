@@ -25,6 +25,9 @@ class _Fixture(unittest.TestCase):
         forbid.start(); self.addCleanup(forbid.stop)
         f = F.Reservations(); f.setUp(deployment_layout=True); self.addCleanup(f.doCleanups)
         self.f, self.root = f, f.root
+        # The shared metadata fixture creates this ancestor with the shell's
+        # umask; service preflight requires the actual selected root private.
+        Path(f.config['scratchRoot']).chmod(0o700)
         self.path = self.root / 'broker.json'
         self.path.write_text(json.dumps(f.config)); self.path.chmod(0o600)
         f.native.config_file = self.path
@@ -110,7 +113,8 @@ class StartupFences(_Fixture):
         factory = (root / 'nix/native-worker-packages.nix').read_text()
         self.assertIn('worker_service.py', factory)
         self.assertRegex(factory, r'worker_service[^\n]*"\$@" check-backend')
-        self.assertIn('ExecStartPre=${workerServiceCheck}', factory)
+        self.assertIn('previousUnit = legacyWorkerService;', factory)
+        self.assertIn('ExecStartPre=${legacyWorkerServiceCheck}/bin/reverie-worker-service-check', factory)
         self.fence()
         original = S.WorkerService.__init__
         fixture = self

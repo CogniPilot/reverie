@@ -21,7 +21,7 @@ fn environment() -> Result<Value> {
         if allowed_env(key) {
             let value = value
                 .into_string()
-                .map_err(|_| Error("Invalid UTF-8 environment value"))?;
+                .map_err(|_| Error::new("Invalid UTF-8 environment value"))?;
             selected.insert(key.into(), value.into());
         }
     }
@@ -111,11 +111,11 @@ fn responses(
         }
         b'E' => {
             let message = std::str::from_utf8(&frame.payload)
-                .map_err(|_| Error("Invalid worker response"))?;
+                .map_err(|_| Error::new("Invalid worker response"))?;
             eprintln!("Reverie worker: {message}");
             return Ok(Some(1));
         }
-        _ => return Err(Error("Invalid worker response")),
+        _ => return Err(Error::new("Invalid worker response")),
     }
     Ok(None)
 }

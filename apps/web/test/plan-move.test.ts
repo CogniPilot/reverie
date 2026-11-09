@@ -19,6 +19,55 @@ const flush = async () => {
   for (let count = 0; count < 60; count++) await Promise.resolve();
 };
 
+describe('retained move destination viewer lease', () => {
+  const held = (): PlanMoveRecord => ({ id: 'held-viewer', employeeId: 'casey', name: 'Casey', oldSession: 'old',
+    newSession: 'new', fromAccount: 'first', toAccount: 'second', phase: 'recovery-required', at: 1,
+    sourceStopRequested: true, sourceCleanupVerified: true });
+  it('repairs only the recorded destination while retaining the journal and excluding adoption', async () => {
+    const h = harness([held()]);
+    const verifyViewerRepair = vi.fn(async () => () => {});
+    const lease = await h.moves.viewerReconnectGuard('casey', { sessionId: 'new', executor: { verifyViewerRepair } });
+    expect(lease()).toBe(true);
+    await expect(h.moves.resolve('held-viewer', { oldSession: 'old', newSession: 'new', toAccount: 'second' }))
+      .rejects.toThrow('still active');
+    expect(h.port.save).not.toHaveBeenCalled(); expect(h.port.stop).not.toHaveBeenCalled();
+    lease.close(); expect(lease()).toBe(false);
+    expect(await h.moves.get('held-viewer')).toMatchObject({ phase: 'recovery-required', sourceCleanupVerified: true });
+    await expect(h.moves.assertAvailable('casey')).rejects.toThrow('already has a move');
+  });
+  it.each(['source', 'foreign', 'ambiguous', 'resource', 'cleanup', 'stop', 'phase'] as const)(
+    'refuses a %s journal before requesting runtime validation', async failure => {
+      const record = held();
+      if (failure === 'foreign') record.owner = 'another-owner';
+      if (failure === 'resource') record.resourceIntent = { operationId: '11111111-1111-4111-8111-111111111111',
+        reservationId: '22222222-2222-4222-8222-222222222222', profileVersion: '1',
+        profileDigest: 'a'.repeat(64), previewDigest: 'b'.repeat(64) };
+      if (failure === 'cleanup') delete record.sourceCleanupVerified;
+      if (failure === 'stop') delete record.sourceStopRequested;
+      const h = harness(failure === 'ambiguous' ? [record, { ...record, id: 'other' }] : [record]);
+      const verifyViewerRepair = vi.fn(async () => () => {});
+      // An in-flight operation must remain excluded even when its persisted phase was eligible.
+      const first = failure === 'phase' ? await h.moves.viewerReconnectGuard('casey', {
+        sessionId: 'new', executor: { verifyViewerRepair } }) : undefined;
+      verifyViewerRepair.mockClear();
+      const lease = await h.moves.viewerReconnectGuard('casey', { sessionId: failure === 'source' ? 'old' : 'new',
+        executor: { verifyViewerRepair } });
+      expect(lease()).toBe(false); expect(verifyViewerRepair).not.toHaveBeenCalled();
+      lease.close(); first?.close(); expect(h.port.save).not.toHaveBeenCalled();
+    });
+  it('releases only its flight after account validation fails and keeps the move held', async () => {
+    const h = harness([held()]); let current = true;
+    const executor = { verifyViewerRepair: vi.fn(async () => () => { if (!current) throw Error('account changed'); }) };
+    const lease = await h.moves.viewerReconnectGuard('casey', { sessionId: 'new', executor });
+    current = false; expect(lease()).toBe(false); await expect(lease.revalidate()).resolves.toBe(false);
+    lease.close(); current = true;
+    const next = await h.moves.viewerReconnectGuard('casey', { sessionId: 'new', executor });
+    expect(next()).toBe(true); next.close();
+    expect(await h.moves.get('held-viewer')).toMatchObject({ phase: 'recovery-required' });
+    expect(h.port.save).not.toHaveBeenCalled();
+  });
+});
+
 function harness(initial: PlanMoveRecord[] = []) {
   const sessions = new Set(['old']);
   let binding = 'old';

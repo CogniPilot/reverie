@@ -5,14 +5,16 @@ mod producer;
 mod profile;
 
 pub use config::{
-    TaskPerfConfiguration, TaskPerfProjection, recognize_configuration, validate_selection_marker,
+    TaskPerfConfiguration, TaskPerfProjection, projected_selection, recognize_configuration,
+    selection_marker_policy, validate_selection_marker,
 };
 pub use manifest::{PerfSystem, TaskPerfManifest};
-pub use producer::{TaskPerfProducedBytes, produce_task_perf};
+pub use producer::{TaskPerfProducedBytes, produce_task_perf, produce_task_perf_for_policy};
 pub(crate) use profile::is_task_perf_rule;
 pub use profile::{TaskPerfArtifactData, TaskPerfProfile};
 
 use crate::legacy_json::{self, Node, Text, Value};
+pub use reverie_core::task_perf::TaskPerfPolicy;
 use reverie_core::task_perf::TaskPerfPolicyError;
 use std::collections::BTreeMap;
 use std::fmt;
@@ -20,6 +22,18 @@ use std::fmt;
 pub const MAX_ARTIFACT_BYTES: usize = 65_536;
 pub const MARKER: &str = "_taskPerfPolicy";
 const MANIFEST_PURPOSE: &str = "worker-task-perf-profile-v1";
+fn manifest_purpose(policy: TaskPerfPolicy) -> &'static str {
+    match policy {
+        TaskPerfPolicy::TaskV1 => MANIFEST_PURPOSE,
+        TaskPerfPolicy::TaskV2 => "worker-task-perf-profile-v2",
+    }
+}
+fn manifest_version(policy: TaskPerfPolicy) -> &'static str {
+    match policy {
+        TaskPerfPolicy::TaskV1 => "1",
+        TaskPerfPolicy::TaskV2 => "2",
+    }
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum TaskPerfError {
@@ -38,6 +52,7 @@ pub enum TaskPerfError {
     FixedArtifactRequired,
     FixedBaseRequired,
     Marker,
+    PolicyArtifact,
 }
 impl TaskPerfError {
     pub fn code(self) -> &'static str {
@@ -57,6 +72,7 @@ impl TaskPerfError {
             Self::FixedArtifactRequired => "TASK_PERF_FIXED_ARTIFACT_REQUIRED",
             Self::FixedBaseRequired => "TASK_PERF_FIXED_BASE_REQUIRED",
             Self::Marker => "TASK_PERF_SELECTION_MARKER",
+            Self::PolicyArtifact => "TASK_PERF_POLICY_ARTIFACT_MISMATCH",
         }
     }
 }

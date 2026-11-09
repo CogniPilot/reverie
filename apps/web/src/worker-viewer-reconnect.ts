@@ -8,6 +8,7 @@ import { z } from 'zod';
 import { ownerFor, parseBody } from './web/route-helpers.js';
 import type { RecoveryAuthority, WorkerRecoveryAuthentication } from './worker-recovery-auth.js';
 import { RECOVERY_HEADER } from './worker-recovery-auth.js';
+import type { PlanViewerReconnectLease } from './plan-move.js';
 
 const BACKOFF = [2_000, 5_000, 15_000, 30_000, 60_000] as const;
 export type ViewerReconnectResult = 'connected' | 'unavailable' | 'busy' | 'changed';
@@ -25,7 +26,7 @@ export interface ViewerReconnectDeps {
   ready(): boolean;
   /** Fresh, bound native command observation; no provider launch authority. */
   providerHealthy(employee: CompanyEmployee): boolean;
-  moveGuard(employeeId: string): Promise<() => boolean>;
+  moveGuard(employeeId: string): Promise<(() => boolean) & Partial<Pick<PlanViewerReconnectLease, 'close' | 'revalidate'>>>;
   pause(id: string): () => void;
   publish(session: Session): void;
   now?(): number;
@@ -72,11 +73,13 @@ export class WorkerViewerReconnect {
   async diagnostics(employeeId: string, expected: { sessionId: string; sessionGeneration: number }, owner?: string): Promise<ViewerReconnectStatus> {
     const status = this.status(employeeId, expected, owner);
     if (status.state !== 'blocked' || ['stale-binding','server-not-ready','binding-migration','not-running','viewer-unavailable'].includes(status.reason)) return status;
+    let current: Awaited<ReturnType<ViewerReconnectDeps['moveGuard']>> | undefined;
     try {
-      const current = await this.deps.moveGuard(employeeId);
+      current = await this.deps.moveGuard(employeeId);
       const fresh = this.status(employeeId, expected, owner);
       return !current() && fresh.state === 'blocked' ? { ...fresh, reason: 'move-in-progress' } : fresh;
     } catch { return { ...this.status(employeeId, expected, owner), state: 'blocked', reason: 'admission-unavailable' }; }
+    finally { current?.close?.(); }
   }
 
   async reconnect(employeeId: string, expected: { sessionId: string; sessionGeneration: number },
@@ -108,14 +111,14 @@ export class WorkerViewerReconnect {
     // Advance before asynchronous admission: a throwing attempt still owns its seat.
     if (automatic) this.lastAutomaticEmployeeId = employeeId;
     let release: (() => void) | undefined;
+    let moveCurrent: Awaited<ReturnType<ViewerReconnectDeps['moveGuard']>> | undefined;
     let claim: ReturnType<CompanyService['prepareWake']>;
     try {
-      let moveCurrent: () => boolean;
       try { moveCurrent = await d.moveGuard(employeeId); }
       catch (error) { outcome('admission-unavailable', 'unavailable'); throw error; }
       const current = () => {
         const employee = d.company.registeredEmployees().find(e => e.id === employeeId);
-        return authorized() && d.ready() && moveCurrent() && !!employee && fingerprint(employee) === key &&
+        return authorized() && d.ready() && !!moveCurrent?.() && !!employee && fingerprint(employee) === key &&
           d.providerHealthy(employee) && d.session(original.sessionId) === session &&
           JSON.stringify(expertRuntimeRecipe(session)) === runtime && (!claim || claim.current());
       };
@@ -123,7 +126,7 @@ export class WorkerViewerReconnect {
       claim = d.company.prepareWake(employeeId, original.sessionId);
       if (!claim || !current()) return outcome('lifecycle-in-progress', 'busy');
       release = d.pause(original.sessionId);
-      if (!await session.reconnectWorkerViewer(current)) return outcome(!authorized() ? 'authority-changed' :
+      if (!await session.reconnectWorkerViewer(current, moveCurrent.revalidate?.bind(moveCurrent))) return outcome(!authorized() ? 'authority-changed' :
         session.workerViewerReconnectBlocker ?? 'readiness-unconfirmed', current() ? 'unavailable' : 'changed');
       if (!current()) return outcome('binding-or-authority-changed', 'changed');
       d.publish(session);
@@ -131,7 +134,7 @@ export class WorkerViewerReconnect {
       return outcome('connected', 'connected');
     } finally {
       // Releasing this pause never acknowledges/replays durable unknown deliveries.
-      release?.(); claim?.finish(); this.flights.delete(employeeId);
+      release?.(); claim?.finish(); moveCurrent?.close?.(); this.flights.delete(employeeId);
     }
   }
 

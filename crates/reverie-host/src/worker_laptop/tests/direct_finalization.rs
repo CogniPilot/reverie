@@ -148,6 +148,18 @@ fn unknown_native_descriptor_close_keeps_same_query_and_lease_after_owner_drop()
     hooks.close_failed.store(true, Ordering::Release);
     assert!(owner.observe(fixture.runtime()).is_err());
     assert_eq!(hooks.starts.load(Ordering::Acquire), started + 1);
+    let diagnostic = owner.storage_owner_status();
+    let repeated = owner.storage_owner_status();
+    assert_eq!(diagnostic, repeated);
+    assert!(matches!(
+        diagnostic,
+        reverie_contracts::worker_storage_status::OwnerObservation::Observed {
+            final_storage_check: Some(reverie_contracts::worker_storage_status::CheckPhase::Failed),
+            native_pending: Some(true),
+            ..
+        }
+    ));
+    assert_eq!(hooks.starts.load(Ordering::Acquire), started + 1);
     let trace = fs::read(fixture.root.join("trace")).unwrap();
     assert!(owner.observe(fixture.runtime()).is_err());
     assert_eq!(fs::read(fixture.root.join("trace")).unwrap(), trace);

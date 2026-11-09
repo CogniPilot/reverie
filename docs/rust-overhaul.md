@@ -74,8 +74,8 @@ facts or bypass the existing supported activation workflow.
 The application resource-staging service now composes profile-store custody,
 resource selection and native GPU/perf/memory/lease observations before deriving
 the separate profile/config/policy digests. It returns a candidate only. The
-current Python broker remains selected until its full worker validation,
-admission, reservation, effect and reconciliation consumers migrate. See
+default broker package remains legacy; the explicit native service has a separate
+selection and acceptance boundary. See
 [`reverie-application`](../crates/reverie-application/README.md) for the exact
 service boundary and compatibility evidence.
 
@@ -97,7 +97,30 @@ claims a complete Rust backend or an installed rollout.
 Use the existing owners below before adding another adapter or executor. Their
 source and component tests do not establish an installed native broker.
 
-| Operation | Existing Rust owner | Integration still required |
+For the current executable and service entry points, start with the
+[native broker](../crates/reverie-worker-broker/README.md),
+[worker client](../crates/reverie-worker-client/README.md) and
+[console deployment service](../crates/reverie-deployment/README.md).
+The native broker has a recovery-before-listen service, counted handler joins,
+ordinary Cold/Reuse launch handlers, detached supervision, and fixed C controls.
+`status`, `provider-health` and `storage-status` are read-only observations;
+`stop-laptops` is a one-shot fleet stop, not a maintained deployment lease.
+The Rust client library uses the same checked exchange as the CLI. Its reply is
+data, not proof that a requested effect succeeded or its resources were released.
+
+Package selection is a separate migration boundary: `nativeWorkerBroker` is
+currently an explicit integration output, while `workerBroker` still selects
+the legacy implementation in `nix/native-worker-packages.nix`. Protected resume,
+launch and maintenance consumers must be paired with their correct program
+provenance before changing that default. An explicitly installed native service
+does not change what a fresh default installation selects. The rows below track
+the ownership boundaries to preserve, rather than a percentage-complete estimate.
+Their final column is the original integration contract, not a list of absent
+implementations: service startup, ordinary Cold/Reuse handlers and counted
+shutdown now connect several of those boundaries. Current missing dispatch and
+deployment capabilities are identified above and in the native broker README.
+
+| Operation | Existing Rust owner | Integration contract |
 | --- | --- | --- |
 | Broker bootstrap | `InstallingBroker::new` in `reverie-application`; consumes the actual validated snapshot and `WorkerRuntime`, captures mandatory telemetry before optional reservations, and retains failed construction resources | Service entry point, accepted connections and whole-service shutdown |
 | Running-laptop recovery | `InstallingBroker::recover_laptops`; ordered census/memory/budget checks, all storage claims before phones, atomic registry publication and retained cleanup owners; actual configured-Gate transaction controls | Actual listener/service invocation and real running-container canary |
@@ -115,7 +138,21 @@ source and component tests do not establish an installed native broker.
 | Nix guard finalization | `release_laptop_nix_guard` consumes the real original guard after acknowledged pane startup, retains the same storage before fallible close, and preserves created-CID cleanup after confirmed or uncertain close | Installing protected CLI receipt before close, actual admission/canonical release afterward, and a viewer consumer that rechecks the current retained record |
 | Native viewer session | Created and existing origins share one bounded inventory and captured-client constructor slot; classified reuse retains its original J/Hold, receipt and same storage box through relay and actual finalization. Fresh receipt/stop-before-reap, exact recovered Office ownership, fresh stop admission and branded final storage transfer retain uncertainty | Cold/Started reuse, direct-prefix cleanup, complete service adoption, confirmed guest resize and live OCI acceptance |
 | Employee resource policy | Existing effective-config, GPU/perf/memory projection, reservation gate and native observer owners; `configure_started_laptop_memory` applies and reads back memory policy on the same actual started record | Installing caller sequence and owner GUI/API selection for remaining settings |
+| Protected RAM owner channel | `InstallingBroker::prepare_resource_website` and `InstalledResourceWebsite::receive_operation`; native website/process/code/private-facts qualification and repeated nonce-bound current-owner checks. Exact-context query settlement and intrinsic checked-close errors preserve the original accepted channel hold | Real positive website/current-owner canary, service dispatch and closed operation continuations/results; the source constructor alone enables no endpoint |
+| RAM configuration publication | `RetainedPreparation::commit_ram_configuration` returns the same-claim, one-shot `CommittedPolicy`; consuming `AuthenticatedResourceOperation::adopt_committed_ram_policy` retains the complete Q/claim/policy/receipt owner on success or failure | Actual positive adoption, genuine terminal ownership, distinct stopped/configuration-only preparation and parent-once admission |
+| Docker worker parent | `ControllerPoolPolicy` and `OpenedWorkerPool` retain the actual policy/controller/engine/kernel owners. Isolated tests exercise two idle 48 GiB leaves beneath one 48 GiB parent, physical limits and website exclusion | Controller service/activation, persistent provider fence, outside-worker settlement, host headroom, verified new members and pressure/recovery canary |
+| RAM owner client | `ResourceOwnerAuthority::captureRam`/`captureRamPreview` and `RamResourceNativeClient` reuse current owner sessions and private transport with a distinct RAM-v2 purpose, nine-field approval and bounded draft/claim messages | Product routes, scoped agent grants, typed results/progress and GUI controls after native service integration; importing the client activates no rollout |
 | Memory tools | Native memory/MCP entry points, persistence, journal transport, staged startup/read owners and an unselected fixed-purpose guest capsule; existing-data and reverse-language compatibility controls | Actual prior-writer shutdown, real launch/image/context/grant join and coordinated package selection |
+
+The Docker parent and the existing reservation pool have different contracts.
+The former uses `memory.high=max` with an enforced aggregate hard ceiling; the
+existing reservation proof requires a finite parent high and charges requested
+hard memory. Preserve that older contract. A distinct pool operation must count
+the verified parent once and retain a persistent provider fence before allowing
+borrowing leaves. An empty new parent does not prove that old outside workers
+have settled. Retain their real process, cgroup, Office and storage owners through
+physical settlement. OFF/vacation outcomes remain configuration-only and require
+genuine stopped/absent preparation rather than an invented running baseline.
 
 Recovery entries contain actual Office and storage resources. Recovered names
 are membership data; they do not establish a canonical container/process identity
@@ -161,15 +198,18 @@ contracts. Full native completion also requires the remaining runtime/model,
 terminal, service and maintenance entry points in the cohort inventory above;
 passing a front-only trial does not retire those Python consumers.
 
-## Hybrid production selection
+## Hybrid selection and acceptance
 
 The November 7, 2026 hybrid cutover selected the qualified Rust network front
 with the existing TypeScript application. Rust owns public listeners, transport
 buffers, backpressure and child supervision; HTTP application routes,
 authentication and company stores remain in TypeScript/Node. Rust worker command
-clients are also running. The existing Python worker broker, Kokoro speech
-service and other legacy helpers remain active. Other Rust backend crates are not thereby selected as
-production services, and this is not the full native-backend migration.
+clients were also selected. That initial cutover retained the Python worker
+broker, Kokoro speech service and other legacy helpers; subsequent broker
+selection is an independent service operation. Inspect the installed service's
+actual executable and package provenance when reporting what runs. Neither the
+front selection nor a later broker selection establishes that all other backend
+crates are selected or that the runtime is Python-free.
 
 The owner-directed fix-forward cutover retained the original stopped container,
 all existing data mounts and an ordinary full console copy. Strict snapshot
@@ -198,6 +238,15 @@ staged-index conversions, are rejected by the Rust PR workflow under SPEC_0008
 while legacy implementations are being retired. The portable gate exercises
 core/contracts/routes, shared HTTP, the OPS CLI and xtask on Linux, macOS and Windows; native host adapters have their
 separate Linux gate. Neither gate proves unported runtime paths are portable.
+
+The native credential channels for resource and host-resume actors additionally
+require Linux 6.5 or later with `SO_PEERPIDFD`. The process handle comes from
+the actual accepted socket, with no PID lookup fallback. Missing support refuses
+with `WORKER_NATIVE_CHANNEL_REQUIRES_SO_PEERPIDFD` before actor host effects.
+The older Python implementation's PID lookup is not used as an exact-peer proof.
+The initial native Q and resume protocols preserve the actual Python broker's
+8192-byte frame bound and credential check on every received chunk. The existing
+TypeScript resource client's larger advertised limit does not extend Q v1.
 
 The native Ubuntu24.04 GitHub-hosted job explicitly runs `cargo xtask
 prepare-ci-userns` before verification. Ubuntu's AppArmor restriction can remove

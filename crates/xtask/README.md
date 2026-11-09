@@ -28,6 +28,19 @@ Linux CI also runs the same selected-artifact gate available locally:
 nix develop --command cargo xtask verify-worker-package
 ```
 
+The worker child has a separate Rust artifact gate:
+
+```text
+nix develop --command cargo xtask verify-worker-child-package
+```
+
+It builds the public `workerChild` binding used by `runtime` and
+`workerNativeChild`, then invokes the worker child's ignored Rust package test
+with those exact canonical artifacts. The test requires the same native ELF,
+checks `--help`, and exercises `--pane-exit` parsing through a fixed untouched
+record-scope refusal. It starts no container or service and grants no laptop
+readiness. The runner owns only fresh temporary out-links and stops on failure.
+
 This thin runner makes two explicit `nix build` calls for `.#workerExec` and
 `.#workerResourceClientManifest`, using fresh private temporary out-links. It
 canonicalizes the executable and manifest paths and supplies them to the existing

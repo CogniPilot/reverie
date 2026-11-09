@@ -6,6 +6,10 @@ use std::{
     os::unix::fs::DirBuilderExt,
     path::{Path, PathBuf},
 };
+mod claim;
+mod diagnostic;
+#[cfg(test)]
+mod tests;
 
 #[derive(Serialize, Deserialize)]
 pub(super) struct Plan {
@@ -57,11 +61,13 @@ impl Operation {
         Ok(Self { directory, plan })
     }
     pub(super) fn record(&self, name: &str, data: &Value) -> Result<()> {
-        exclusive_json(
-            &self.directory.join(format!("{name}.json")),
-            &json!({
-            "schema":"reverie-console-deployment-receipt-v1","operation":self.plan.operation,"phase":name,"data":data}),
-        )
+        self.record_written(name, data).map(|_| ())
+    }
+    pub(super) fn record_written(&self, name: &str, data: &Value) -> Result<Vec<u8>> {
+        let raw = serde_json::to_vec(&json!({
+            "schema":"reverie-console-deployment-receipt-v1","operation":self.plan.operation,"phase":name,"data":data}))?;
+        crate::installation::exclusive_bytes(&self.directory.join(format!("{name}.json")), &raw)?;
+        Ok(raw)
     }
     fn read_record(&self, name: &str) -> Result<Value> {
         let path = self.directory.join(format!("{name}.json"));
@@ -79,9 +85,30 @@ impl Operation {
     pub(super) fn exists(&self, name: &str) -> bool {
         self.directory.join(format!("{name}.json")).exists()
     }
+    pub(super) fn record_present(&self, name: &str) -> Result<bool> {
+        let path = self.directory.join(format!("{name}.json"));
+        match std::fs::symlink_metadata(&path) {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+            Err(error) => Err(error.into()),
+            Ok(_) => {
+                private(&path, false)?;
+                Ok(true)
+            }
+        }
+    }
     pub(super) fn candidate(&self) -> Result<String> {
         let value = self.read_record("candidate")?;
         Ok(model::cid(model::string(&value, "id")?)?.to_owned())
+    }
+    pub(super) fn readiness_target(&self, candidate: bool) -> Result<(String, bool)> {
+        if candidate {
+            Ok((self.candidate()?, true))
+        } else {
+            Ok((
+                model::string(&self.plan.source, "Id")?.to_owned(),
+                model::uses_front(&self.plan.source["Config"])?,
+            ))
+        }
     }
     pub(super) fn prepared(&self) -> Result<()> {
         let value = self.read_record("prepared")?;
@@ -93,6 +120,8 @@ impl Operation {
     pub(super) fn status(&self) -> Result<DeploymentStatus> {
         let mut stage = "PREVIEW";
         for (file, value) in [
+            ("claim-attempt", "CLAIM_HANDOVER_UNCONFIRMED"),
+            ("claim-acquired", "CLAIMED"),
             ("create-attempt", "CREATE_UNCONFIRMED"),
             ("candidate", "CANDIDATE_UNVALIDATED"),
             ("prepared", "PREPARED"),
@@ -103,8 +132,10 @@ impl Operation {
             ("ready", "HYBRID_READY"),
             ("rollback-attempt", "ROLLBACK_UNCONFIRMED"),
             ("restored", "RESTORED"),
+            ("successor-attempt", "CLAIM_HANDOVER_UNCONFIRMED"),
+            ("superseded", "SUPERSEDED"),
         ] {
-            if !self.exists(file) {
+            if !self.record_present(file)? {
                 continue;
             }
             let valid = self.receipt_valid(file);
@@ -126,10 +157,22 @@ impl Operation {
             } else {
                 None
             },
+            diagnostic: self.snapshot_diagnostic()?,
         })
     }
     fn receipt_valid(&self, file: &str) -> bool {
         match file {
+            "claim-acquired" => self
+                .read_record(file)
+                .is_ok_and(|r| r["operation"] == self.plan.operation),
+            "superseded" => self.read_record(file).is_ok_and(|r| {
+                self.read_record("successor-attempt").is_ok_and(|attempt| {
+                    r["successor"].is_string()
+                        && r["successor"] == attempt["successor"]
+                        && r["claimDigest"].is_string()
+                        && r["claimDigest"] == attempt["claimDigest"]
+                })
+            }),
             "prepared" => self.prepared().is_ok(),
             "snapshot" => self
                 .read_record(file)

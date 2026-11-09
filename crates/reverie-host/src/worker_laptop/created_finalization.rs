@@ -9,6 +9,7 @@ pub(super) struct StorageCheck {
     attempted: bool,
     current: Option<Arc<()>>,
     failure: Option<Arc<LaptopError>>,
+    live: Option<bool>,
 }
 pub struct CreatedStorageObservation {
     workflow: LaptopWorkflow,
@@ -26,6 +27,13 @@ impl CreatedStorageObservation {
 impl StorageCheck {
     pub(super) fn untouched(&self) -> bool {
         !self.attempted
+    }
+    /// A later real owner may borrow this same resource after a successful
+    /// LIVE readback. Its actual predecessor and local native closes are
+    /// checked separately; a false/failed observation cannot reopen it.
+    pub(super) fn available_for_started_owner(&self) -> bool {
+        self.untouched()
+            || (self.live == Some(true) && self.current.is_some() && self.failure.is_none())
     }
     pub(super) fn require_stopped(
         &self,
@@ -168,6 +176,7 @@ pub(super) fn observe_closed(
         Ok(live) => {
             let current = Arc::new(());
             record.finalization.current = Some(current.clone());
+            record.finalization.live = Some(live);
             Ok(CreatedStorageObservation {
                 workflow: workflow.clone(),
                 current,
@@ -247,4 +256,19 @@ pub(super) fn require_native_closed(runtime: &WorkerRuntime, record: &Record) ->
         publication.require_native_closed()?;
     }
     Ok(())
+}
+
+impl StorageCheck {
+    pub(super) fn diagnostic_phase(&self) -> reverie_contracts::worker_storage_status::CheckPhase {
+        use reverie_contracts::worker_storage_status::CheckPhase;
+        if !self.attempted {
+            CheckPhase::Unattempted
+        } else if self.failure.is_some() {
+            CheckPhase::Failed
+        } else if self.current.is_some() {
+            CheckPhase::Known
+        } else {
+            CheckPhase::Reading
+        }
+    }
 }

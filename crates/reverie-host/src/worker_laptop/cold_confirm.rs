@@ -136,10 +136,11 @@ fn inspect(
     )?;
     need(output.succeeded, "WORKER_COLD_NATIVE_INSPECT_FAILED")?;
     let resources = record.resources();
-    RetainedInspection::decode(
+    RetainedInspection::decode_started(
         &output.stdout,
         cid,
         resources.plan.source(),
+        resources.plan.effective_configuration(),
         resources.plan.session(),
         resources
             .storage()

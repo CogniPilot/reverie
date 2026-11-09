@@ -46,6 +46,7 @@ impl Workflows {
                 .is_some_and(create::Creation::owns_created),
             "WORKER_LAPTOP_CREATED_OWNER_REQUIRED",
         )?;
+        record.begin_cleanup()?;
         if record.cleanup.is_some() {
             return Ok(if record.phase == Phase::Stopped {
                 CreatedCleanup::Stopped(StoppedCreatedLaptop {
@@ -58,7 +59,6 @@ impl Workflows {
         // Terminal lifecycle transition under this SAME record mutex, before
         // any constructor settlement or cleanup effect. All forward methods
         // require their original Known/Held state and cannot restart it.
-        record.phase = Phase::Cleaning;
         record.cleanup = Some(Cleanup {
             budget,
             error: None,
@@ -72,7 +72,8 @@ impl Workflows {
             return Err(LaptopError::Recorded(error));
         };
         let memory = memory::close_abandoned(&mut record);
-        let result = finalized(memory, run(runtime, &mut record, &cid));
+        let perf = perf::close_abandoned(&mut record);
+        let result = finalized(finalized(memory, perf), run(runtime, &mut record, &cid));
         let result =
             result.and_then(|()| need(!record.unknown, "WORKER_LAPTOP_PRIOR_EFFECT_UNCONFIRMED"));
         if let Err(error) = result {

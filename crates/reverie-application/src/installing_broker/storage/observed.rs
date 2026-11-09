@@ -57,10 +57,31 @@ impl StorageClaim {
     pub fn observe_launch_receipt(
         &self,
     ) -> Result<reverie_host::worker_storage::LaunchReceiptObservation, StorageWorkflowError> {
+        self.observe_receipt(ReceiptConsumer::Launch)?
+            .ok_or_else(|| StorageWorkflowError::refused("WORKER_NIX_STORAGE_RETAINED"))
+    }
+    /// A different actual operation may own this SAME registered Box. The
+    /// detached supervisor defers that seat; it cannot borrow its paths or
+    /// convert its retention into a completion/stop/release acknowledgement.
+    pub(in crate::installing_broker) fn observe_supervision_receipt(
+        &self,
+    ) -> Result<Option<reverie_host::worker_storage::LaunchReceiptObservation>, StorageWorkflowError>
+    {
+        self.observe_receipt(ReceiptConsumer::Supervisor)
+    }
+    fn observe_receipt(
+        &self,
+        consumer: ReceiptConsumer,
+    ) -> Result<Option<reverie_host::worker_storage::LaunchReceiptObservation>, StorageWorkflowError>
+    {
         match &self.state {
-            ClaimState::Legacy { owner, .. } => Ok(owner.observe_launch_receipt()?),
+            ClaimState::Started(owner) => Ok(Some(owner.borrow()?.observe_launch_receipt()?)),
+            ClaimState::Legacy { owner, .. } => Ok(Some(owner.observe_launch_receipt()?)),
             ClaimState::Registered {
-                registry, identity, ..
+                registry,
+                identity,
+                paths,
+                ..
             } => {
                 let entries = registry.lock(registry.runtime.stop_deadline())?;
                 let entry = entries
@@ -72,10 +93,28 @@ impl StorageClaim {
                         "WORKER_STORAGE_CLEANUP_UNCONFIRMED",
                     ));
                 }
-                let EntryOwner::Direct(owner) = &entry.owner else {
-                    return Err(StorageWorkflowError::refused("WORKER_NIX_STORAGE_RETAINED"));
-                };
-                Ok(owner.observe_launch_receipt()?)
+                if entry.paths != *paths {
+                    return Err(StorageWorkflowError::refused(
+                        "WORKER_STORAGE_CLAIM_CHANGED",
+                    ));
+                }
+                match &entry.owner {
+                    EntryOwner::Direct(owner) => Ok(Some(owner.observe_launch_receipt()?)),
+                    EntryOwner::Finalizing(_)
+                    | EntryOwner::Source(_)
+                    | EntryOwner::StoppedRam(_)
+                    | EntryOwner::Nix(_)
+                    | EntryOwner::Laptop(_)
+                    | EntryOwner::ReplacementStop(_)
+                    | EntryOwner::OrdinaryStop(_)
+                    | EntryOwner::ControlStop(_)
+                    | EntryOwner::Existing(_) => match consumer {
+                        ReceiptConsumer::Supervisor => Ok(None),
+                        ReceiptConsumer::Launch => {
+                            Err(StorageWorkflowError::refused("WORKER_NIX_STORAGE_RETAINED"))
+                        }
+                    },
+                }
             }
         }
     }
@@ -87,6 +126,27 @@ impl StorageClaim {
         captured: &ValidatedWorkerSnapshot,
     ) -> Result<ObservedCreatePlan, OwnedCreatePreparationError> {
         match &self.state {
+            ClaimState::Started(owner) => {
+                let borrowed = owner
+                    .borrow()
+                    .map_err(OwnedCreatePreparationError::Storage)?;
+                let source = captured.configuration().clone();
+                borrowed
+                    .assert_binding(&source, borrowed.paths().session())
+                    .map_err(StorageWorkflowError::from)
+                    .map_err(OwnedCreatePreparationError::Storage)?;
+                let effective =
+                    resource_staging::effective_config(source.clone(), borrowed.paths().session())
+                        .map_err(OwnedCreatePreparationError::Effective)?;
+                borrowed
+                    .prepare_create_plan(source, effective)
+                    .map_err(|cause| match cause {
+                        reverie_host::worker_laptop::LaptopError::Plan(cause) => {
+                            OwnedCreatePreparationError::Observation(cause)
+                        }
+                        cause => OwnedCreatePreparationError::Storage(cause.into()),
+                    })
+            }
             ClaimState::Legacy { registry, owner } => observe(&registry.runtime, owner, captured),
             ClaimState::Registered {
                 registry, identity, ..
@@ -108,6 +168,10 @@ impl StorageClaim {
             }
         }
     }
+}
+enum ReceiptConsumer {
+    Launch,
+    Supervisor,
 }
 fn refused(code: &'static str) -> OwnedCreatePreparationError {
     OwnedCreatePreparationError::Storage(StorageWorkflowError::refused(code))

@@ -35,11 +35,7 @@ impl<T> PausePoint<T> {
 pub(crate) fn engine_program() -> &'static Path {
     static PROGRAM: OnceLock<PathBuf> = OnceLock::new();
     PROGRAM.get_or_init(|| {
-        let root = std::env::temp_dir().join(format!(
-            "reverie-application-engine-program-{}",
-            std::process::id()
-        ));
-        std::fs::create_dir(&root).unwrap();
+        let root = fixture_directory("reverie-application-engine-program");
         let source = root.join("child.rs");
         std::fs::write(
             &source,
@@ -59,6 +55,22 @@ pub(crate) fn engine_program() -> &'static Path {
         );
         binary
     })
+}
+/// Atomically allocate a fresh private test directory. A recycled PID must
+/// never adopt, delete or overwrite an earlier fixture's files.
+pub(crate) fn fixture_directory(label: &str) -> PathBuf {
+    let parent = std::fs::canonicalize(std::env::temp_dir()).expect("actual temporary root");
+    fixture_directory_in(&parent, label)
+}
+fn fixture_directory_in(parent: &Path, label: &str) -> PathBuf {
+    assert!(
+        !label.is_empty()
+            && label
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'-')
+    );
+    let template = parent.join(format!("{label}-{}-XXXXXX", std::process::id()));
+    nix::unistd::mkdtemp(&template).expect("fresh private owning fixture directory")
 }
 pub(crate) fn isolate_case(name: &str) -> bool {
     const KEY: &str = "REVERIE_APPLICATION_OWNING_CASE";
@@ -95,4 +107,30 @@ pub(crate) use owning_case;
 #[test]
 fn missing_exact_selector_cannot_qualify_as_a_passed_owning_case() {
     assert!(std::panic::catch_unwind(|| isolate_case("__missing_reverie_owning_case__")).is_err());
+}
+#[test]
+fn fresh_fixture_directories_preserve_existing_pid_named_files() {
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+    let parent = fixture_directory("directory-collision-control");
+    let label = "reverie-application-engine-program";
+    let stale = parent.join(format!("{label}-{}", std::process::id()));
+    std::fs::create_dir(&stale).unwrap();
+    std::fs::write(stale.join("retained"), b"existing fixture evidence").unwrap();
+    let before = std::fs::metadata(&stale).unwrap();
+    let first = fixture_directory_in(&parent, label);
+    let second = fixture_directory_in(&parent, label);
+    assert!(first != second && first != stale && second != stale);
+    for path in [&first, &second] {
+        assert_eq!(
+            std::fs::metadata(path).unwrap().permissions().mode() & 0o7777,
+            0o700
+        );
+    }
+    let after = std::fs::metadata(&stale).unwrap();
+    assert_eq!((before.dev(), before.ino()), (after.dev(), after.ino()));
+    assert_eq!(
+        std::fs::read(stale.join("retained")).unwrap(),
+        b"existing fixture evidence"
+    );
+    std::fs::remove_dir_all(parent).unwrap();
 }

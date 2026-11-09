@@ -47,12 +47,16 @@ impl WorkerRuntime {
         &self,
         created: &CreatedLaptop,
     ) -> Result<CreatedReceiptObservation> {
-        self.laptop_workflows().bound(self, &created.workflow)?;
+        self.laptop_workflows().bound_with_contention(
+            self,
+            &created.workflow,
+            ReadContention::CreatedReceipt,
+        )?;
         let record = created
             .workflow
             .record
             .try_lock()
-            .map_err(|_| LaptopError::Refused("WORKER_LAPTOP_RETAINED"))?;
+            .map_err(|error| ReadContention::CreatedReceipt.error(error))?;
         let creation = record
             .creation
             .as_ref()

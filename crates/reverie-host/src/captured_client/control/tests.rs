@@ -1,4 +1,5 @@
 use super::*;
+mod admission;
 use crate::captured_client::test_hooks::{Gate, Hooks};
 use std::{collections::BTreeMap, fs, path::PathBuf, sync::atomic::AtomicUsize};
 static NEXT: AtomicUsize = AtomicUsize::new(0);

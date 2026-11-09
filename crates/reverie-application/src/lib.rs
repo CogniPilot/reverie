@@ -3,6 +3,7 @@
 //! admission/effect custody. Returned candidates do not establish those powers.
 pub mod broker_service;
 pub mod installing_broker;
+pub use installing_broker::resource_actor;
 pub mod memory_import;
 pub mod memory_lifecycle;
 pub mod memory_recall;
@@ -13,6 +14,7 @@ pub mod reservation_observer;
 pub mod resource_staging;
 #[cfg(test)]
 mod test_process;
+pub mod worker_inventory;
 pub mod worker_launch;
 pub mod worker_recovery;
 pub mod worker_validation;

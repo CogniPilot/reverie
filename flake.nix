@@ -188,6 +188,18 @@
             console = packages.console;
             clientManifest = packages.workerResourceClientManifest;
           };
+          resourceNativeQFixtureConsole = (import ./nix/resource-native-q-fixture.nix {
+            inherit pkgs; src = source; console = packages.console; client = packages.workerNativeClient;
+          }).console;
+          resourceNativeQFixtureImage = (import ./nix/resource-native-q-fixture.nix {
+            inherit pkgs; src = source; console = packages.console; client = packages.workerNativeClient;
+          }).image;
+          resourceNativeQFixtureProvenance = import ./nix/website-image-provenance.nix {
+            inherit pkgs; src = source;
+            image = self.packages.${system}.resourceNativeQFixtureImage;
+            console = self.packages.${system}.resourceNativeQFixtureConsole;
+            clientManifest = packages.workerResourceClientManifest;
+          };
           resourceTerminalHost = import ./nix/owner-terminal-host.nix {
             inherit pkgs; src = source;
             inherit (packages) console memory memoryPackage entrypoint;
@@ -315,7 +327,12 @@
           inherit pkgs; src = source;
           image = self.lib.workerDockerImage arguments;
           toolkit = self.packages.${system}.humanTerminalToolkit;
+          workerChild = self.packages.${system}.workerChild;
           factory = { name = "lib.workerDockerImage"; } // arguments;
+        };
+      lib.workerChildImageAnnex = { system, baseProvenance }:
+        import ./nix/worker-child-image-annex.nix {
+          pkgs = pkgsFor system; src = source; inherit baseProvenance;
         };
       apps = forAllSystems (system: {
         prune = { type = "app"; program = "${self.packages.${system}.prune}/bin/reverie-prune"; meta.description = "Report eligible rebuildable output without deleting it"; };
@@ -353,7 +370,13 @@
           packages = self.packages.${system};
         in {
           inherit (packages) reverie memoryPackage start update gpuPublisher previewProxy previewService prune pruneR12 cleanupObservations ownerTerminalCore;
+          workerChildImageAnnexContexts = assert import ./tests/worker_child_image_annex_eval.nix;
+            pkgs.runCommand "reverie-worker-child-annex-context-check" { } "touch $out";
           workerPythonRuntime = import ./nix/worker-python-check.nix { inherit pkgs; python = packages.workerPython; };
+          nativeWorkerBrokerStoreInputs = pkgs.writeText "reverie-native-broker-store-inputs.json"
+            (builtins.toJSON (import ./tests/native_worker_broker_store_inputs_eval.nix {
+              inherit pkgs; src = source;
+            }));
           workerPerfTools = let perf = import ./nix/worker-perf.nix { inherit pkgs; };
             in assert builtins.elem perf (import ./nix/worker-base-tools.nix { inherit pkgs; });
               pkgs.runCommand "reverie-worker-perf-tool-check" { } ''

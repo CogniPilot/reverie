@@ -1,9 +1,16 @@
 # Laptop soft memory limits and swap
 
-The owner can opt an employee laptop into a soft RAM threshold and a finite
-swap allowance in the private worker configuration. Changes take effect through
-the normal stop, configuration reload and recreation flow. This is separate from
-live GUI editing. It does not change an existing laptop behind its running agent.
+The supported rollout direction is the shared
+[owner GUI/API workflow](owner-resource-rollout.md), backed by a Rust controller
+packaged in this repository and deployed in Docker. Instance policy belongs
+under the registered `~/reverie` root. Do not edit the host's NixOS configuration
+or hand-edit private broker files as a rollout procedure. The executor integration
+is still incomplete; a saved policy does not prove enforcement.
+
+The existing memory-policy format below describes the legacy opt-in and its
+checks. It is compatibility documentation, not a manual deployment path. Changes
+require a controlled stop, configuration publication and recreation; they do not
+silently alter a laptop beneath its running agent.
 
 For example, this **illustrative** policy permits 8 GiB of swap for a laptop with
 a separately configured RAM ceiling greater than 4 GiB:
@@ -31,9 +38,11 @@ The existing `memoryMiB` remains a finite RAM ceiling. `swapMiB` is required;
 512 MiB and strictly below that ceiling. Docker receives the RAM ceiling
 and the **combined RAM plus swap total**; `swapMiB` itself always means swap-only
 space. Zero disables swap. Unlimited swap and removal of individual RAM ceilings
-are not part of this policy version. Shared-pool borrowing without individual
-ceilings needs a separate accounting migration; this change does not relax the
-existing reservation and host-headroom checks.
+are not part of this policy version. The new shared-pool migration sets each
+individual hard ceiling to the full pool size and preserves the smaller soft
+threshold separately. Versioned session policies preserve the source policy
+while selecting the approved target. Source checks for that format are not
+evidence that the new aggregate pool is installed or a laptop has been migrated.
 
 ### Swap-only policies
 
@@ -45,7 +54,7 @@ laptop's `memory.high` must remain `max`. For example, a swap-only policy entry:
 { "swapMiB": 8192 }
 ```
 
-### Worker slice swap ceiling
+### Legacy NixOS worker slice swap ceiling
 
 Every ancestor cgroup must allow at least a laptop's swap allowance, or launch
 refuses with `RESERVATION_EFFECTIVE_SWAP_CONFLICT`. The NixOS module option
@@ -53,6 +62,10 @@ refuses with `RESERVATION_EFFECTIVE_SWAP_CONFLICT`. The NixOS module option
 swap ceiling (`MemorySwapMax`). Set it to the broker's `laptopSwapPoolMiB`.
 Zero, the default, keeps the previous swap-free pool byte for byte. Workers
 enter this slice only in `budgetMode: "pool"`.
+
+This optional legacy module is not the installation path for the Docker-native
+rollout. The new controller must derive the actual parent and verify its limits
+and each member's placement before allowing an agent to start.
 
 ### Soft threshold authority
 
@@ -75,7 +88,18 @@ and perf policies are unaffected. Existing profiles without this opt-in retain
 their previous arguments and policy identities, including unrelated zero-swap
 host-action and terminal scopes.
 
-### Root helper for soft thresholds
+### Legacy NixOS root helper for soft thresholds
+
+This section records the existing optional host module. Do not activate it as a
+substitute for the repository/Docker-native controller described above.
+
+For an existing installation with its own registered user broker, set
+`services.reverieWorkers.manageBrokerService = false` during ordinary NixOS
+owner activation. This installs the declared host slice, perf support and
+optional helper without creating a second system broker. The default remains
+`true` for installations whose system broker is managed by this module.
+This setting does not adopt, reload or restart the user broker, move containers
+into the slice, or establish that any laptop policy has been enforced.
 
 `services.reverieWorkers.softLimitHelper` installs a socket-activated root helper, one instance per
 connection. Set the broker's `softLimitHelperSocket` to `/run/reverie-soft-limit/soft-limit.sock`.

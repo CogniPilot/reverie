@@ -26,6 +26,9 @@ impl ExistingStorageObservation {
     }
 }
 impl StorageCheck {
+    pub(super) fn failure(&self) -> Option<&Arc<LaptopError>> {
+        self.failure.as_ref()
+    }
     pub(super) fn require_reclaimable(
         &self,
         owner: &ExistingViewer,
@@ -148,4 +151,22 @@ fn observe(runtime: &WorkerRuntime, record: &mut ExistingRecord) -> Result<bool>
         &inputs.plan,
         Some(&original),
     )
+}
+
+impl StorageCheck {
+    pub(super) fn diagnostic_pending(&self) -> bool {
+        self.pending.is_some()
+    }
+    pub(super) fn diagnostic_phase(&self) -> reverie_contracts::worker_storage_status::CheckPhase {
+        use reverie_contracts::worker_storage_status::CheckPhase;
+        if !self.attempted {
+            CheckPhase::Unattempted
+        } else if self.failure.is_some() {
+            CheckPhase::Failed
+        } else if self.current.is_some() {
+            CheckPhase::Known
+        } else {
+            CheckPhase::Reading
+        }
+    }
 }

@@ -145,6 +145,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f079e83a288787bcd14a6aea84cee5c87a67c5a3e660c30f557a3d24761b3527"
 
 [[package]]
+name = "chrono"
+version = "0.4.45"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1aa79e62e7697b8e29b513a68abacf485adcd1fe8284a4316c5ae868e6633327"
+dependencies = [
+ "num-traits",
+]
+
+[[package]]
 name = "clap"
 version = "4.6.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -786,6 +795,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "num-traits"
+version = "0.2.19"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "071dfc062690e90b734c0b2273ce72ad0ffa95f0c74596bc250dcfd960262841"
+dependencies = [
+ "autocfg",
+]
+
+[[package]]
 name = "num_enum"
 version = "0.7.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -971,6 +989,11 @@ checksum = "cab834c73d247e67f4fae452806d17d3c7501756d98c8808d7c9c7aa7d18f973"
 name = "reverie-application"
 version = "0.1.0"
 dependencies = [
+ "bytes",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
+ "nix",
  "reverie-contracts",
  "reverie-core",
  "reverie-host",
@@ -978,6 +1001,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "tokio",
 ]
 
 [[package]]
@@ -993,6 +1017,7 @@ dependencies = [
 name = "reverie-contracts"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "libyaml-safer",
  "regex-lite",
  "reverie-core",
@@ -1034,6 +1059,13 @@ name = "reverie-diagnostics"
 version = "0.1.0"
 dependencies = [
  "libc",
+]
+
+[[package]]
+name = "reverie-elf-bundle"
+version = "0.1.0"
+dependencies = [
+ "sha2",
 ]
 
 [[package]]
@@ -1158,6 +1190,7 @@ name = "reverie-memory-capsule"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "reverie-elf-bundle",
  "serde",
  "serde_json",
  "sha2",
@@ -1239,12 +1272,37 @@ dependencies = [
 ]
 
 [[package]]
+name = "reverie-perf-capsule"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "reverie-elf-bundle",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "reverie-perf-check"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "reverie-core",
+ "reverie-diagnostics",
+ "reverie-host",
+]
+
+[[package]]
 name = "reverie-policy-artifacts"
 version = "0.1.0"
 dependencies = [
  "clap",
  "libc",
  "reverie-contracts",
+ "reverie-core",
+ "reverie-elf-bundle",
+ "serde",
+ "serde_json",
+ "sha2",
 ]
 
 [[package]]
@@ -1331,6 +1389,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "reverie-worker-broker"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "nix",
+ "reverie-application",
+ "reverie-contracts",
+ "reverie-core",
+ "reverie-host",
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
 name = "reverie-worker-child"
 version = "0.1.0"
 dependencies = [
@@ -1348,6 +1420,21 @@ dependencies = [
  "reverie-core",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "reverie-worker-init"
+version = "0.1.0"
+dependencies = [
+ "nix",
+]
+
+[[package]]
+name = "reverie-worker-resource-controller"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "reverie-host",
 ]
 
 [[package]]

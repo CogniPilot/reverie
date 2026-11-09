@@ -337,3 +337,36 @@ fn actual_unpatched_python_engine_transcripts_match_and_unknown_effects_keep_str
         }
     }
 }
+
+#[test]
+fn storage_status_does_not_promote_local_nix_flags_to_aggregate_native_clear() {
+    let tree = Tree::new();
+    let runtime = tree.runtime("success", Hooks::default());
+    let workflow = tree.retain(&runtime, 'a');
+    let status = workflow.storage_owner_status();
+    let guard = workflow.record.try_lock().unwrap();
+    let busy = workflow.storage_owner_status();
+    drop(guard);
+    let no_new_commands = tree.trace().is_empty();
+    runtime.run_nix_store(&workflow).unwrap();
+    let (guard, storage, result) = returned(&runtime, workflow);
+    close_resources(guard, storage);
+    runtime.close(end()).unwrap();
+    result.unwrap();
+    assert!(no_new_commands);
+    assert_eq!(
+        busy,
+        reverie_contracts::worker_storage_status::OwnerObservation::Busy
+    );
+    assert!(
+        matches!(
+            status,
+            reverie_contracts::worker_storage_status::OwnerObservation::Observed {
+                native_uncertain: None,
+                native_pending: None,
+                ..
+            }
+        ),
+        "local Nix flags do not classify retained child resources"
+    );
+}

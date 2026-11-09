@@ -65,10 +65,10 @@ impl Fixture {
             names,
         })
     }
-    fn create_old(&mut self, image: &str) -> Result<()> {
+    fn create_old(&mut self, image: &str, native_source: bool) -> Result<()> {
         let previous = self.engine.image(image)?;
         require(previous["Id"] == image, "FIXTURE_IMAGE_CHANGED")?;
-        let body = self.body(&previous)?;
+        let body = self.body(&previous, native_source)?;
         let created = self.engine.json(
             "POST",
             &format!("/containers/create?name={}", self.name),
@@ -77,9 +77,19 @@ impl Fixture {
         let id = crate::model::cid(crate::model::string(&created, "Id")?)?.to_owned();
         self.ids.push(id.clone());
         self.persist("old-created", &json!({"id":id}))?;
+        let actual = self.engine.container(&id)?;
+        require(
+            model::uses_front(&actual["Config"])? == native_source,
+            "FIXTURE_SOURCE_MODE_CHANGED",
+        )?;
+        require(
+            actual["HostConfig"]["CpusetCpus"] == body["HostConfig"]["CpusetCpus"],
+            "FIXTURE_CPU_AFFINITY_CHANGED",
+        )?;
         self.engine.start(&id)
     }
-    fn body(&self, image: &Value) -> Result<Value> {
+    fn body(&self, image: &Value, native_source: bool) -> Result<Value> {
+        let affinity = driver_cpu_affinity()?;
         let mut env = BTreeMap::new();
         for entry in image["Config"]["Env"]
             .as_array()
@@ -113,12 +123,22 @@ impl Fixture {
         ] {
             env.insert(key.into(), format!("{key}={value}"));
         }
-        for key in [
-            "REVERIE_NATIVE_FRONT",
-            "REVERIE_FRONT_CHILD",
-            "REVERIE_NATIVE_FRONT_BIN",
-        ] {
+        for key in ["REVERIE_FRONT_CHILD", "REVERIE_NATIVE_FRONT_BIN"] {
             require(!env.contains_key(key), "FIXTURE_OLD_SELECTS_FRONT")?;
+        }
+        model::uses_front(&image["Config"])?;
+        if native_source {
+            // This test models an existing deployment's explicit selection even
+            // when its original image predates the default native-front flag.
+            env.insert(
+                "REVERIE_NATIVE_FRONT".into(),
+                "REVERIE_NATIVE_FRONT=1".into(),
+            );
+        } else {
+            require(
+                !env.contains_key("REVERIE_NATIVE_FRONT"),
+                "FIXTURE_OLD_SELECTS_FRONT",
+            )?;
         }
         let mounts = [("data","/instances/default"),("home","/home/agent")].into_iter().map(|(source,target)|json!({
             "Type":"bind","Source":self.root.join(source),"Target":target,"ReadOnly":false,"BindOptions":{"CreateMountpoint":false}
@@ -127,7 +147,7 @@ impl Fixture {
             json!({"Image":image["Id"],"User":"1000:100","Env":env.into_values().collect::<Vec<_>>(),
             "Entrypoint":image["Config"]["Entrypoint"],"Cmd":image["Config"]["Cmd"],
             "ExposedPorts":{"3000/tcp":{}},"HostConfig":{"Mounts":mounts,"NetworkMode":"bridge","AutoRemove":false,
-                "Init":true,"Memory":536870912u64,"MemorySwap":536870912u64,"PidsLimit":256,
+                "Init":true,"Memory":536870912u64,"MemorySwap":536870912u64,"PidsLimit":256,"CpusetCpus":affinity,
                 "PortBindings":{"3000/tcp":[{"HostIp":"127.0.0.1","HostPort":self.port.to_string()}]}}}),
         )
     }
@@ -140,15 +160,29 @@ impl Fixture {
         DeploymentError::finalized(result, service.close())
     }
     fn run_service(&mut self, service: &DeploymentService, candidate: &str) -> Result<()> {
-        let old = self.ids[0].clone();
-        service.await_ready(&old, false)?;
+        let operation = self.apply_candidate(service, candidate, "")?;
+        self.return_operation(service, &operation, "")
+    }
+    fn apply_candidate(
+        &mut self,
+        service: &DeploymentService,
+        candidate: &str,
+        receipts: &str,
+    ) -> Result<String> {
+        let selected = self.engine.container(&self.name)?;
+        let old = model::cid(model::string(&selected, "Id")?)?.to_owned();
+        require(self.ids.contains(&old), "FIXTURE_SOURCE_NOT_OWNED")?;
+        service.await_ready(&old, model::uses_front(&selected["Config"])?)?;
         let preview = service.preview(candidate)?;
         let prefix = self.name.chars().take(24).collect::<String>();
         for phase in ["candidate", "before-front", "failed-front"] {
             self.names
                 .insert(format!("/{prefix}-{phase}-{}", &preview.operation[..16]));
         }
-        self.persist("preview", &serde_json::to_value(&preview)?)?;
+        self.persist(
+            &format!("{receipts}preview"),
+            &serde_json::to_value(&preview)?,
+        )?;
         let prepared = service.prepare(&preview.operation)?;
         let id = prepared
             .candidate_id
@@ -156,16 +190,66 @@ impl Fixture {
             .ok_or_else(|| DeploymentError::new("FIXTURE_CANDIDATE_MISSING"))?;
         self.ids.push(id);
         self.candidate_is_isolated()?;
-        self.persist("prepared", &serde_json::to_value(&prepared)?)?;
+        self.persist(
+            &format!("{receipts}prepared"),
+            &serde_json::to_value(&prepared)?,
+        )?;
         require(prepared.stage == "PREPARED", "FIXTURE_PREPARE_UNCONFIRMED")?;
         let applied = service.apply(&preview.operation)?;
-        self.persist("applied", &serde_json::to_value(&applied)?)?;
+        self.persist(
+            &format!("{receipts}applied"),
+            &serde_json::to_value(&applied)?,
+        )?;
         require(applied.stage == "HYBRID_READY", "FIXTURE_APPLY_UNCONFIRMED")?;
         self.unchanged()?;
-        let returned = service.rollback(&preview.operation)?;
-        self.persist("returned", &serde_json::to_value(&returned)?)?;
+        Ok(preview.operation)
+    }
+    fn return_operation(
+        &self,
+        service: &DeploymentService,
+        operation: &str,
+        receipts: &str,
+    ) -> Result<()> {
+        let returned = service.rollback(operation)?;
+        self.persist(
+            &format!("{receipts}returned"),
+            &serde_json::to_value(&returned)?,
+        )?;
         require(returned.stage == "RESTORED", "FIXTURE_RETURN_UNCONFIRMED")?;
+        require(
+            service.status(operation)?.stage == "RESTORED",
+            "FIXTURE_RETURN_STATUS_UNCONFIRMED",
+        )?;
         self.unchanged()
+    }
+    fn run_repeated(&mut self, candidate: &str) -> Result<()> {
+        let mut service = DeploymentService::capture(&self.root)?;
+        let result = self.run_repeated_service(&service, candidate);
+        DeploymentError::finalized(result, service.close())
+    }
+    fn run_repeated_service(&mut self, service: &DeploymentService, candidate: &str) -> Result<()> {
+        let first = self.apply_candidate(service, candidate, "")?;
+        let second = self.apply_candidate(service, candidate, "second-")?;
+        require(
+            service.status(&first)?.stage == "SUPERSEDED",
+            "FIXTURE_PREDECESSOR_STILL_READY",
+        )?;
+        match service.rollback(&first) {
+            Err(error)
+                if error.code() == "DEPLOYMENT_CLAIM_SUPERSEDED_OR_UNCONFIRMED"
+                    && error.finalization_code().is_none() => {}
+            Err(error) => return Err(error),
+            Ok(_) => return Err(DeploymentError::new("FIXTURE_OLD_ROLLBACK_ACCEPTED")),
+        }
+        require(
+            service.status(&first)?.stage == "SUPERSEDED",
+            "FIXTURE_PREDECESSOR_CHANGED",
+        )?;
+        self.persist(
+            "superseded",
+            &json!({"first":first,"second":second,"oldRollbackRefused":true}),
+        )?;
+        self.return_operation(service, &second, "second-")
     }
     fn unchanged(&self) -> Result<()> {
         require(
@@ -235,9 +319,109 @@ impl Fixture {
         )
     }
 }
+
+fn driver_cpu_affinity() -> Result<String> {
+    let bytes = crate::installation::read_bounded(Path::new("/proc/self/status"), 64 * 1024)?;
+    let status = std::str::from_utf8(&bytes)
+        .map_err(|_| DeploymentError::new("FIXTURE_CPU_AFFINITY_UNKNOWN"))?;
+    affinity_from_status(status)
+}
+fn affinity_from_status(status: &str) -> Result<String> {
+    let mut fields = status
+        .lines()
+        .filter_map(|line| line.strip_prefix("Cpus_allowed_list:"));
+    let affinity = fields
+        .next()
+        .map(str::trim)
+        .ok_or_else(|| DeploymentError::new("FIXTURE_CPU_AFFINITY_UNKNOWN"))?;
+    require(
+        !affinity.is_empty()
+            && fields.next().is_none()
+            && affinity
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || matches!(byte, b',' | b'-'))
+            && affinity.split(',').all(valid_cpu_range),
+        "FIXTURE_CPU_AFFINITY_UNKNOWN",
+    )?;
+    Ok(affinity.to_owned())
+}
+fn valid_cpu_range(range: &str) -> bool {
+    match range.split_once('-') {
+        Some((first, last)) => first
+            .parse::<u32>()
+            .ok()
+            .zip(last.parse::<u32>().ok())
+            .is_some_and(|(first, last)| first <= last),
+        None => range.parse::<u32>().is_ok(),
+    }
+}
+
+#[test]
+fn fixture_cpu_affinity_preserves_the_kernel_list_without_host_specific_limits() {
+    for cpus in ["0", "0-7", "2,4-6,9", "0-191", "256-511"] {
+        let status = format!(
+            "Name:\tfixture\nCpus_allowed:\tff\nCpus_allowed_list:\t{cpus}\nMems_allowed_list:\t0\n"
+        );
+        assert_eq!(affinity_from_status(&status).unwrap(), cpus);
+    }
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn fixture_cpu_affinity_reads_actual_proc_status_despite_zero_size() {
+    let metadata = fs::metadata("/proc/self/status").unwrap();
+    assert!(metadata.is_file());
+    assert_eq!(metadata.len(), 0, "proc reports no declared content length");
+    assert!(!driver_cpu_affinity().unwrap().is_empty());
+}
+
+#[test]
+fn fixture_cpu_affinity_refuses_missing_duplicate_and_malformed_kernel_values() {
+    for cpus in [
+        "",
+        " ",
+        "-",
+        ",",
+        "0,",
+        ",0",
+        "0,,2",
+        "-1",
+        "3-1",
+        "0-1-2",
+        "0 -2",
+        "1.0",
+        "+2",
+        "all",
+        "0;1",
+        "4294967296",
+    ] {
+        assert!(
+            affinity_from_status(&format!("Cpus_allowed_list:\t{cpus}\n")).is_err(),
+            "{cpus}"
+        );
+    }
+    assert!(affinity_from_status("Cpus_allowed:\tff\n").is_err());
+    assert!(affinity_from_status("Cpus_allowed_list:\t0-7\nCpus_allowed_list:\t0-7\n").is_err());
+}
 #[test]
 #[ignore = "explicit actual Docker qualification with exact old/new image IDs and synthetic owned data"]
 fn native_swap_and_return() {
+    qualify_swap_and_return(false, false);
+}
+
+#[test]
+#[ignore = "explicit actual Docker native-to-native update and mode-correct rollback with synthetic owned data"]
+fn native_to_native_swap_and_return() {
+    qualify_swap_and_return(true, false);
+}
+
+#[test]
+#[ignore = "explicit actual Docker sequential native updates, original claim handover and checked return"]
+fn native_repeated_updates_and_return() {
+    qualify_swap_and_return(true, true);
+}
+
+fn qualify_swap_and_return(native_source: bool, repeated: bool) {
     let old = std::env::var("REVERIE_DEPLOYMENT_TEST_OLD_IMAGE")
         .expect("exact owned qualification old image");
     let new = std::env::var("REVERIE_DEPLOYMENT_TEST_NEW_IMAGE")
@@ -245,7 +429,13 @@ fn native_swap_and_return() {
     crate::model::image_id(&old).unwrap();
     crate::model::image_id(&new).unwrap();
     let mut fixture = Fixture::capture().unwrap();
-    let result = fixture.create_old(&old).and_then(|()| fixture.run(&new));
+    let result = fixture.create_old(&old, native_source).and_then(|()| {
+        if repeated {
+            fixture.run_repeated(&new)
+        } else {
+            fixture.run(&new)
+        }
+    });
     let stopped = fixture.stop_owned();
     DeploymentError::finalized(result, stopped).unwrap();
 }

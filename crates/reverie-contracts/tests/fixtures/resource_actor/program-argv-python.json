@@ -1,0 +1,59 @@
+{
+  "python": "3.13.15",
+  "source": "Program.matches raw argv bytes under WebsiteFacts selected argument bounds",
+  "cases": [
+    {
+      "argv": [
+        "/nix/store/fixture/bin/node"
+      ],
+      "sha256": "7405133805fa3e10c681cc2da2b2443b5e50247a3b7af96a1a076aec496ae87f"
+    },
+    {
+      "argv": [
+        "/nix/store/fixture/bin/node",
+        "/nix/store/fixture/entry.js"
+      ],
+      "sha256": "426a53cc516c9d013f0cd4b612da00447610342b07545b63773e0f84e080b596"
+    },
+    {
+      "argv": [
+        "/nix/store/fixture/bin/node",
+        "emoji\ud83d\ude00",
+        "line\nquote\"\\slash"
+      ],
+      "sha256": "59172101e388e0a30b1a30e213c8561edf3de494cfa6a1234164449292c4e66c"
+    },
+    {
+      "argv": [
+        "ab",
+        "c"
+      ],
+      "sha256": "629c2f14f654f026086f2aefe1855533d0897f49df86a19073be17b237361b09"
+    },
+    {
+      "argv": [
+        "a",
+        "bc"
+      ],
+      "sha256": "aa795aa4bbb6117911ef062e271bcb05ccfd58ea439da7d46a44e3a3fcefa790"
+    },
+    {
+      "argv": [
+        "/nix/store/fixture/bin/node",
+        "\ud800"
+      ],
+      "sha256": null
+    },
+    {
+      "argv": [
+        "/nix/store/fixture/bin/node",
+        "nul\u0000inside"
+      ],
+      "sha256": null
+    },
+    {
+      "argv": [],
+      "sha256": null
+    }
+  ]
+}

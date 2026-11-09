@@ -145,7 +145,40 @@ impl OrderedValue {
         true
     }
     pub(crate) fn encode(&self) -> Vec<u8> {
-        encode(self, Format::Ascii)
+        self.ascii(Format::Ascii)
+    }
+    pub(crate) fn encode_compact(&self) -> Vec<u8> {
+        self.ascii(Format::AsciiCompact)
+    }
+    pub(crate) fn encode_utf16_sorted(&self) -> Vec<u8> {
+        self.ascii(Format::AsciiUtf16Sorted)
+    }
+    /// First refusal for Python's insertion-ordered allow_nan=False encoder.
+    pub(crate) fn first_nonfinite(&self) -> Option<&'static str> {
+        let mut pending = vec![(&self.value, self.graph.root)];
+        while let Some((value, index)) = pending.pop() {
+            match (&value.0, &self.graph.nodes[index]) {
+                (Node::Number(number), OrderNode::Leaf) if number.nonfinite_name().is_some() => {
+                    return number.nonfinite_name();
+                }
+                (Node::Array(values), OrderNode::Array(order)) => {
+                    pending.extend(values.iter().zip(order).rev().map(|(v, i)| (v, *i)));
+                }
+                (Node::Object(values), OrderNode::Object(order)) => {
+                    pending.extend(
+                        order
+                            .iter()
+                            .rev()
+                            .map(|(key, i)| (values.get(key).expect("private JSON order"), *i)),
+                    );
+                }
+                _ => (),
+            }
+        }
+        None
+    }
+    fn ascii(&self, format: Format) -> Vec<u8> {
+        encode(self, format)
             .0
             .into_iter()
             .map(|cp| u8::try_from(cp).expect("ASCII JSON"))
@@ -194,20 +227,28 @@ enum Piece<'a> {
 #[derive(Clone, Copy)]
 enum Format {
     Ascii,
+    AsciiCompact,
+    AsciiUtf16Sorted,
     Repr,
     UnicodeSpaced,
     UnicodeSortedCompact,
 }
 impl Format {
     fn comma(self) -> &'static [u8] {
-        if matches!(self, Self::UnicodeSortedCompact) {
+        if matches!(
+            self,
+            Self::UnicodeSortedCompact | Self::AsciiCompact | Self::AsciiUtf16Sorted
+        ) {
             b","
         } else {
             b", "
         }
     }
     fn colon(self) -> &'static [u8] {
-        if matches!(self, Self::UnicodeSortedCompact) {
+        if matches!(
+            self,
+            Self::UnicodeSortedCompact | Self::AsciiCompact | Self::AsciiUtf16Sorted
+        ) {
             b":"
         } else {
             b": "
@@ -269,6 +310,13 @@ fn push_object<'a>(
     if matches!(format, Format::UnicodeSortedCompact) {
         selected.sort_by(|a, b| a.0.cmp(&b.0));
     }
+    if matches!(format, Format::AsciiUtf16Sorted) {
+        selected.sort_by_cached_key(|(text, _)| {
+            reverie_core::PythonTextRef::from_codepoints(&text.0)
+                .expect("checked JSON text")
+                .utf16_units()
+        });
+    }
     for (at, (key, index)) in selected.into_iter().enumerate().rev() {
         pending.push(Piece::Value(
             values.get(key).expect("private ordered key"),
@@ -290,7 +338,16 @@ fn emit_text(text: &Text, format: Format, output: &mut Vec<u32>) {
                 .map(u32::from),
         );
     } else {
-        output.extend(crate::worker_config::quoted_text(text, matches!(format, Format::Ascii)).0);
+        output.extend(
+            crate::worker_config::quoted_text(
+                text,
+                matches!(
+                    format,
+                    Format::Ascii | Format::AsciiCompact | Format::AsciiUtf16Sorted
+                ),
+            )
+            .0,
+        );
     }
 }
 fn emit_scalar(value: &Value, repr: bool, output: &mut Vec<u32>) {

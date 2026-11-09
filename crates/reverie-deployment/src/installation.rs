@@ -203,6 +203,9 @@ pub(super) fn read_bounded(path: &Path, maximum: u64) -> Result<Vec<u8>> {
 }
 pub(super) fn exclusive_json(path: &Path, value: &Value) -> Result<()> {
     let raw = serde_json::to_vec(value)?;
+    exclusive_bytes(path, &raw)
+}
+pub(super) fn exclusive_bytes(path: &Path, raw: &[u8]) -> Result<()> {
     let mut file = OpenOptions::new()
         .write(true)
         .create_new(true)
@@ -210,20 +213,24 @@ pub(super) fn exclusive_json(path: &Path, value: &Value) -> Result<()> {
         .custom_flags(nix::libc::O_NOFOLLOW)
         .open(path)?;
     let written = (|| {
-        file.write_all(&raw)?;
+        file.write_all(raw)?;
         file.sync_all()?;
         Ok(())
     })();
     let written =
         DeploymentError::finalized(written, close(file, "DEPLOYMENT_WRITE_CLOSE_UNCONFIRMED"));
+    let synced = sync_directory(
+        path.parent()
+            .ok_or_else(|| DeploymentError::new("DEPLOYMENT_PARENT"))?,
+    );
+    DeploymentError::finalized(written, synced)
+}
+pub(super) fn sync_directory(path: &Path) -> Result<()> {
     let parent = OpenOptions::new()
         .read(true)
         .custom_flags(nix::libc::O_DIRECTORY | nix::libc::O_NOFOLLOW)
-        .open(
-            path.parent()
-                .ok_or_else(|| DeploymentError::new("DEPLOYMENT_PARENT"))?,
-        );
-    let synced = match parent {
+        .open(path);
+    match parent {
         Ok(file) => {
             let synced = file.sync_all().map_err(Into::into);
             DeploymentError::finalized(
@@ -232,8 +239,7 @@ pub(super) fn exclusive_json(path: &Path, value: &Value) -> Result<()> {
             )
         }
         Err(error) => Err(error.into()),
-    };
-    DeploymentError::finalized(written, synced)
+    }
 }
 fn close(file: File, code: &'static str) -> Result<()> {
     nix::unistd::close(file).map_err(|_| DeploymentError::new(code))

@@ -51,7 +51,7 @@ fn actual_t_and_j_share_one_cap_until_exact_j_owner_closes() {
     let (_client, server) = fixture.sockets();
     assert!(matches!(
         service.accept(server, &fixture.collector, &configuration()),
-        Err(WorkerReportError::Stopping)
+        Err(WorkerReportError::Capacity)
     ));
     let (_, closed) = retained.pop().unwrap();
     closed.close(end()).unwrap();

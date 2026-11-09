@@ -93,7 +93,7 @@ impl PreparingWorkerLaunch<'_> {
             }
             match self
                 .broker()
-                .claim_storage(self.admitted.request().session())
+                .claim_launch_storage(&self.admitted.request.connection)
             {
                 Ok(storage) => return Ok(storage),
                 Err(error) if error.wait_busy() => {}

@@ -129,6 +129,61 @@ export function planMoveExecutor(runtime: PlanMoveRuntime, owner?: string): Plan
       throw new PlanMoveError('The replacement would change the approved runtime settings');
   };
 
+  const verifyRecoveryBinding = async (record: Readonly<PlanMoveRecord>, requireViewer: boolean) => {
+      assertAuthorized();
+      if (!record.newSession || record.sourceCleanupVerified !== true || record.sourceStopRequested !== true)
+        throw new PlanMoveError('Source cleanup was not durably confirmed; inspect before recovery');
+      const candidate = requireViewer ? assertAlive(record.newSession) : session(record.newSession);
+      const candidateState = candidate.toState();
+      if (candidateState.remote || candidateState.docker || candidateState.customModel)
+        throw new PlanMoveError('Remote, container and custom-model runtimes cannot be adopted as moved subscription sessions');
+      const selected = () => {
+        const state = candidate.toState(), env = candidate.getEnvOverridesForPersist?.() ?? {};
+        return JSON.stringify([state.mode, state.workingDir, candidate.subscriptionProfile?.id,
+          env.CODEX_HOME, env.CLAUDE_CONFIG_DIR, state.remote, state.docker, state.customModel]);
+      };
+      const selection = selected();
+      const employee = runtime.company.view(owner).employees.find(row => row.id === record.employeeId);
+      const generation = employee?.sessionGeneration;
+      const currentBinding = () => {
+        assertAuthorized();
+        const now = runtime.company.view(owner).employees.find(row => row.id === record.employeeId);
+        if (!now || now.sessionId !== record.newSession || now.sessionGeneration !== generation || now.desiredRunning === false || now.onVacation || now.bindingMigration)
+          throw new PlanMoveError('The employee binding or running intent changed during recovery');
+        const old = runtime.sessions.get(record.oldSession);
+        if (old && old.pid && old.muxName && !runtime.mux.isPaneDead(old.muxName))
+          throw new PlanMoveError('The original source is still running; recovery will not stop it');
+        if (runtime.sessions.get(record.newSession!) !== candidate || selected() !== selection)
+          throw new PlanMoveError('The candidate runtime or account selection changed during recovery');
+      };
+      currentBinding();
+      const account = await runtime.plans.account(record.toAccount);
+      currentBinding();
+      if (!account || candidate.mode !== planMoveHarness(account)) throw new PlanMoveError('The candidate harness or destination plan changed');
+      const allocations = await runtime.plans.allocations();
+      currentBinding();
+      if (!allocations.accounts.some(row => row.id === record.toAccount && row.sessionIds.includes(record.newSession!)))
+        throw new PlanMoveError('The candidate is not allocated to the recorded destination plan');
+      const mark = composerReadyMark(candidate.mode);
+      const fence = () => {
+        currentBinding();
+        if (record.purpose === 'runtime-refresh' &&
+            (candidate.toState().resumeSessionId || candidate.toState().codexConfig?.resumeSessionId ||
+             runtimeRefreshDigest(candidate.toState(), account, policy(candidate)) !== record.runtimeDigest))
+          throw new PlanMoveError('The approved refresh runtime changed during recovery');
+        if (!requireViewer) return;
+        assertAlive(record.newSession!);
+        if (!mark || typeof runtime.mux.capturePaneText !== 'function')
+          throw new PlanMoveError('This runtime does not support verified composer observation');
+        if (candidate.isWorking || candidate.paneDialog) throw new PlanMoveComposerNotReady();
+        const text = runtime.mux.capturePaneText(candidate.muxName!);
+        if (typeof text !== 'string') throw new PlanMoveError('The candidate composer observation is unavailable');
+        if (!nativeComposerReady(candidate.mode, text, mark)) throw new PlanMoveComposerNotReady();
+      };
+      fence();
+      return fence;
+  };
+
   const resourceTarget = (record: Readonly<PlanMoveRecord>) => {
     assertAuthorized();
     if (record.resourceOwnerScope !== undefined && (!ownerAuthority ||
@@ -194,53 +249,8 @@ export function planMoveExecutor(runtime: PlanMoveRuntime, owner?: string): Plan
           }} : {}),
         }
       : {}),
-    verifyRecovery: async (record) => {
-      assertAuthorized();
-      if (!record.newSession || record.sourceCleanupVerified !== true || record.sourceStopRequested !== true)
-        throw new PlanMoveError('Source cleanup was not durably confirmed; inspect before recovery');
-      const candidate = assertAlive(record.newSession);
-      const candidateState = candidate.toState();
-      if (candidateState.remote || candidateState.docker || candidateState.customModel)
-        throw new PlanMoveError('Remote, container and custom-model runtimes cannot be adopted as moved subscription sessions');
-      const selected = () => {
-        const state = candidate.toState(), env = candidate.getEnvOverridesForPersist?.() ?? {};
-        return JSON.stringify([state.mode, state.workingDir, candidate.subscriptionProfile?.id,
-          env.CODEX_HOME, env.CLAUDE_CONFIG_DIR, state.remote, state.docker, state.customModel]);
-      };
-      const selection = selected();
-      const employee = runtime.company.view(owner).employees.find(row => row.id === record.employeeId);
-      const generation = employee?.sessionGeneration;
-      const account = await runtime.plans.account(record.toAccount);
-      if (!account || candidate.mode !== planMoveHarness(account)) throw new PlanMoveError('The candidate harness or destination plan changed');
-      const allocations = await runtime.plans.allocations();
-      if (!allocations.accounts.some(row => row.id === record.toAccount && row.sessionIds.includes(record.newSession!)))
-        throw new PlanMoveError('The candidate is not allocated to the recorded destination plan');
-      const mark = composerReadyMark(candidate.mode);
-      const fence = () => {
-        assertAuthorized();
-        const now = runtime.company.view(owner).employees.find(row => row.id === record.employeeId);
-        if (!now || now.sessionId !== record.newSession || now.sessionGeneration !== generation || now.desiredRunning === false || now.onVacation || now.bindingMigration)
-          throw new PlanMoveError('The employee binding or running intent changed during recovery');
-        const old = runtime.sessions.get(record.oldSession);
-        if (old && old.pid && old.muxName && !runtime.mux.isPaneDead(old.muxName))
-          throw new PlanMoveError('The original source is still running; recovery will not stop it');
-        if (runtime.sessions.get(record.newSession!) !== candidate || selected() !== selection)
-          throw new PlanMoveError('The candidate runtime or account selection changed during recovery');
-        if (record.purpose === 'runtime-refresh' &&
-            (candidate.toState().resumeSessionId || candidate.toState().codexConfig?.resumeSessionId ||
-             runtimeRefreshDigest(candidate.toState(), account, policy(candidate)) !== record.runtimeDigest))
-          throw new PlanMoveError('The approved refresh runtime changed during recovery');
-        assertAlive(record.newSession!);
-        if (!mark || typeof runtime.mux.capturePaneText !== 'function')
-          throw new PlanMoveError('This runtime does not support verified composer observation');
-        if (candidate.isWorking || candidate.paneDialog) throw new PlanMoveComposerNotReady();
-        const text = runtime.mux.capturePaneText(candidate.muxName!);
-        if (typeof text !== 'string') throw new PlanMoveError('The candidate composer observation is unavailable');
-        if (!nativeComposerReady(candidate.mode, text, mark)) throw new PlanMoveComposerNotReady();
-      };
-      fence();
-      return fence;
-    },
+    verifyRecovery: record => verifyRecoveryBinding(record, true),
+    verifyViewerRepair: record => verifyRecoveryBinding(record, false),
     snapshot: async (employeeId, _owner, purpose) => {
       assertAuthorized();
       const id = binding(employeeId);

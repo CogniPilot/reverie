@@ -14,9 +14,7 @@ use std::{
 fn executable() -> &'static Path {
     static PROGRAM: OnceLock<PathBuf> = OnceLock::new();
     PROGRAM.get_or_init(|| {
-        let root =
-            std::env::temp_dir().join(format!("application-laptop-build-{}", std::process::id()));
-        fs::create_dir(&root).unwrap();
+        let root = crate::test_process::fixture_directory("application-laptop-build");
         let source = root.join("child.rs");
         fs::write(
             &source,

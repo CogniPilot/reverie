@@ -13,6 +13,8 @@ use std::{
     path::PathBuf,
     sync::atomic::{AtomicU64, Ordering},
 };
+#[path = "tests_memory_v2.rs"]
+mod memory_v2_cases;
 
 #[derive(Deserialize)]
 struct Corpus {

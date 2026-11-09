@@ -84,6 +84,33 @@ fn session_key(value: &Value) -> Result<Option<SessionKey>> {
     )))
 }
 impl Metadata {
+    /// Current-company owner comparison DATA only. The actual actor supplies
+    /// the freshly read private Metadata and retains channel/clock authority.
+    pub fn require_resource_owner(
+        &self,
+        employee: &ProfileEmployeeId,
+        expected: &Option<reverie_core::PythonText>,
+    ) -> Result<()> {
+        let mut selected = None;
+        for value in self.current_rows()? {
+            let row = object(value).ok_or(IdentityDataError::CurrentRegistry)?;
+            if !text(field(row, "id")).is_some_and(|value| value.equals_ascii(employee.as_str())) {
+                continue;
+            }
+            if selected.is_some() {
+                return Err(IdentityDataError::CurrentRegistry);
+            }
+            selected = Some(row);
+        }
+        let row = selected.ok_or(IdentityDataError::CurrentRegistry)?;
+        let expected = expected
+            .as_ref()
+            .map(|value| MetadataText::from_python_text(value.clone()));
+        if !owner_matches(field(row, "owner"), &expected) {
+            return Err(IdentityDataError::CurrentRegistry);
+        }
+        Ok(())
+    }
     pub fn company_records(&self) -> Result<CompanyRecords> {
         let company = object(&self.0).ok_or(IdentityDataError::Registry)?;
         let employees = rows(field(company, "employees")).ok_or(IdentityDataError::Registry)?;

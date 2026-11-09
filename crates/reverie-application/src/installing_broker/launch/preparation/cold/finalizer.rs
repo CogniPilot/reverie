@@ -9,6 +9,7 @@ mod entry;
 mod original;
 mod prefix;
 mod preparation_failure;
+mod reconciliation;
 mod registration;
 mod resources;
 
@@ -33,7 +34,9 @@ struct Finalizer<'a> {
     stopped: Option<StoppedCreatedLaptop>,
     target: Option<WorkerContainerName>,
     original_remainder: Option<FinalStorageRemainder>,
+    predecessor_phone: Option<reverie_host::office::OfficePhone>,
     returned: Option<Resources>,
+    bookkeeping: Option<bool>,
 }
 #[must_use = "retains the original resource phases and counted handler hold"]
 pub struct ColdFinalizationFailure<'a> {
@@ -78,7 +81,9 @@ impl<'a> ColdFinalizationFailure<'a> {
                 stopped: None,
                 target: None,
                 original_remainder: None,
+                predecessor_phone: None,
                 returned: None,
+                bookkeeping: None,
             },
         })
     }
@@ -255,7 +260,9 @@ fn finish<'a>(
         stopped: None,
         target: None,
         original_remainder: None,
+        predecessor_phone: None,
         returned: None,
+        bookkeeping: None,
     };
     // The actual original allocation finally precedes outstanding Nix close.
     cleanup.close_allocation();
@@ -283,6 +290,9 @@ fn finish<'a>(
                 .errors
                 .push(ColdError::Refused("WORKER_COLD_RESOURCE_RETAINED"));
         }
+    }
+    if cleanup.errors.is_empty() {
+        cleanup.bookkeeping = Some(storage_retained);
     }
     let scope = cleanup.owner.scope();
     if let Err(error) = budget.close_request(&scope.preparing.admitted.request) {

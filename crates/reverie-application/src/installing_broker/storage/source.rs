@@ -174,6 +174,9 @@ impl RegisteredSource {
     }
 }
 impl SourceAttachment<'_> {
+    pub(in crate::installing_broker) fn retained_source(&self) -> RegisteredSource {
+        self.source.clone()
+    }
     pub(in crate::installing_broker) fn restore_unclaimed(
         mut self,
     ) -> Result<(), StorageWorkflowError> {
@@ -199,5 +202,32 @@ impl SourceAttachment<'_> {
         // registry guard is released. There is no post-admission release gap.
         drop(entries);
         Ok(claim)
+    }
+}
+
+impl SourceRecord {
+    pub(in crate::installing_broker::storage) fn storage_owner_status(
+        &self,
+    ) -> reverie_contracts::worker_storage_status::OwnerObservation {
+        use reverie_contracts::worker_storage_status::{
+            OwnerObservation as View, OwnerPhase, RecordedOutcome,
+        };
+        match self.owner.try_lock() {
+            Ok(owner) => match owner.as_ref() {
+                Some(SourceOwned::Direct(owner)) => owner.storage_owner_status(),
+                Some(SourceOwned::Stopping(owner)) => owner.storage_owner_status(),
+                Some(SourceOwned::Closed) => {
+                    View::observed(OwnerPhase::Closed, RecordedOutcome::NotRecorded, None, None)
+                }
+                None => View::observed(
+                    OwnerPhase::Consumed,
+                    RecordedOutcome::NotRecorded,
+                    None,
+                    None,
+                ),
+            },
+            Err(std::sync::TryLockError::WouldBlock) => View::Busy,
+            Err(std::sync::TryLockError::Poisoned(_)) => View::Poisoned,
+        }
     }
 }

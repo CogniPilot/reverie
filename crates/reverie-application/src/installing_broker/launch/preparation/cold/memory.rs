@@ -23,6 +23,13 @@ impl ColdBody<'_> {
             .started
             .as_ref()
             .expect("actual start ACK");
+        let configured = self.broker().configure_controller_member(
+            source.configuration(),
+            &self.creation.as_ref().expect("actual creation").created,
+            started,
+            &connection,
+            self.end(),
+        )?;
         match network.begin_memory(started, &connection, effective.as_ref())? {
             WorkerMemoryBegin::Configured(configured) => return Ok(configured),
             WorkerMemoryBegin::Policy(policy) => self.memory = Some(MemoryJoin::Policy(policy)),
@@ -40,7 +47,13 @@ impl ColdBody<'_> {
         let Some(MemoryJoin::Policy(policy)) = &self.memory else {
             unreachable!("actual policy join");
         };
-        let applied = match network.apply_memory(policy, &connection, &digest) {
+        let effect = match configured {
+            Some(configured) => {
+                network.accept_controller_memory(policy, configured, &connection, &digest)
+            }
+            None => network.apply_memory(policy, &connection, &digest),
+        };
+        let applied = match effect {
             Ok(value) => value,
             Err(primary) => return Err(self.reject_memory(primary.into())),
         };

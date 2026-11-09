@@ -174,8 +174,11 @@ function renderConfigContent(
     case 'opencode-json':
       return JSON.stringify({
         $schema: 'https://opencode.ai/config.json',
+        enabled_providers: ['custom'],
         provider: {
           custom: {
+            npm: '@ai-sdk/openai-compatible',
+            name: 'Custom Endpoint',
             options: { baseURL: withV1Suffix(endpoint.baseUrl), apiKey },
             models: { [modelId]: {} },
           },

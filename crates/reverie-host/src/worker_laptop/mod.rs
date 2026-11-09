@@ -8,23 +8,40 @@ mod cold;
 pub(crate) mod cold_confirm;
 mod cold_prepare;
 mod connection;
+mod controller;
 pub use cold_prepare::{ColdPreparation, PreparedColdTemporary};
+pub use controller::ControllerMemberConfigured;
+pub(crate) use controller::CreatedPoolTarget;
 mod create;
+mod diagnostic;
 mod direct_finalization;
 mod error;
+pub use error::{ControllerPoolCause, ControllerPoolFailure};
 mod existing_viewer;
 pub(crate) mod final_storage;
 mod guard;
+mod handler_settlement;
 mod memory;
 mod network;
 mod pane;
+mod perf;
+mod protected;
 mod publication;
+pub use protected::{
+    ProtectedCliObservation, ProtectedCreatedObservation, ProtectedMemoryObservation,
+};
 mod request_cleanup;
 mod start;
+mod started_finalization;
 mod started_transfer;
+pub use started_finalization::StartedStorageFinalizer;
 mod storage;
 mod storage_cleanup;
-pub use started_transfer::{StartedOrdinaryStopTransferred, StartedReplacementStopTransferred};
+pub use started_transfer::{
+    StartedControlStopTransferred, StartedOrdinaryStopTransferFailure,
+    StartedOrdinaryStopTransferred, StartedReplacementStopTransferFailure,
+    StartedReplacementStopTransferred,
+};
 mod started_source;
 pub use started_source::{
     StartedLaptopSource, StartedSourceStopTransferred, StartedSourceStorageBorrow,
@@ -47,7 +64,7 @@ use crate::{
 };
 pub use cleanup::{CreatedCleanup, StoppedCreatedLaptop};
 pub use cold::{ColdCommit, ColdCommitted};
-pub use create::{CreatedLaptop, LaptopCreation};
+pub use create::{CreatedLaptop, LaptopCreateDiagnostic, LaptopCreation};
 pub use direct_finalization::{
     DirectStorageFinalizer, DirectStorageObservation, DirectStorageRetainFailure,
 };
@@ -56,7 +73,8 @@ use error::{Result, finalized, need};
 pub use existing_viewer::{
     ExistingRelayRetainFailure, ExistingRelayReturned, ExistingStorageObservation, ExistingViewer,
     ExistingViewerReceiptObservation, ExistingViewerRetainFailure, ExistingViewerReturned,
-    ExistingViewerStart, StartedRelayTransferred,
+    ExistingViewerStart, StartedRelayTransferFailure, StartedRelayTransferred,
+    StartedStorageHandoff,
 };
 pub use guard::{NixGuardRelease, NixReleasedPane};
 pub use memory::{
@@ -67,9 +85,22 @@ pub use pane::{PaneStart, StartedPane};
 use reverie_contracts::worker_launch::WorkerRequest;
 pub use start::{ContainerStart, StartedContainer};
 use std::{
-    sync::{Arc, Mutex, OnceLock},
+    sync::{Arc, Mutex, OnceLock, TryLockError},
     time::Instant,
 };
+#[derive(Clone, Copy)]
+enum ReadContention {
+    Retained,
+    CreatedReceipt,
+}
+impl ReadContention {
+    fn error<T>(self, error: TryLockError<T>) -> LaptopError {
+        match (self, error) {
+            (Self::CreatedReceipt, TryLockError::WouldBlock) => LaptopError::CreatedReceiptPending,
+            _ => LaptopError::Refused("WORKER_LAPTOP_RETAINED"),
+        }
+    }
+}
 pub(crate) use viewer::ViewerJob;
 pub use viewer::{ViewerSession, ViewerStart};
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -85,6 +116,7 @@ enum Phase {
     Known,
     Retained,
     Cleaning,
+    FinalizingStarted,
     Stopped,
     CleanupRetained,
     Consumed,
@@ -110,7 +142,7 @@ struct Inputs {
     office: OfficePhone,
 }
 struct Record {
-    source_attachment: Option<Arc<()>>,
+    source_attachment: Option<started_source::Attachment>,
     finalization: created_finalization::StorageCheck,
     cold: cold_prepare::Stage,
     resources: Option<Resources>,
@@ -124,6 +156,18 @@ struct Record {
     viewer: Option<Arc<viewer::ViewerJob>>,
 }
 impl Record {
+    /// Cached local cleanup must not revoke another actual consuming purpose.
+    /// Refuse before changing phase, returning cached success or native effects.
+    fn begin_cleanup(&mut self) -> Result<()> {
+        need(
+            self.phase != Phase::FinalizingStarted,
+            "WORKER_STARTED_FINAL_STORAGE_RETAINED",
+        )?;
+        if !matches!(self.phase, Phase::Stopped | Phase::CleanupRetained) {
+            self.phase = Phase::Cleaning;
+        }
+        Ok(())
+    }
     fn resources(&self) -> &Resources {
         self.resources.as_ref().expect("actual unreclaimed owners")
     }
@@ -321,6 +365,14 @@ impl Workflows {
         })
     }
     fn bound(&self, runtime: &WorkerRuntime, workflow: &LaptopWorkflow) -> Result<()> {
+        self.bound_with_contention(runtime, workflow, ReadContention::Retained)
+    }
+    fn bound_with_contention(
+        &self,
+        runtime: &WorkerRuntime,
+        workflow: &LaptopWorkflow,
+        contention: ReadContention,
+    ) -> Result<()> {
         need(
             Arc::ptr_eq(runtime.installed_engine(), &workflow.origin),
             "WORKER_LAPTOP_RUNTIME_CHANGED",
@@ -328,7 +380,7 @@ impl Workflows {
         let records = self
             .records
             .try_lock()
-            .map_err(|_| LaptopError::Refused("WORKER_LAPTOP_RETAINED"))?;
+            .map_err(|error| contention.error(error))?;
         need(
             records.iter().any(|r| r.is_created(&workflow.record)),
             "WORKER_LAPTOP_REPLAYED",
@@ -433,13 +485,19 @@ impl Workflows {
         let mut record = record
             .try_lock()
             .map_err(|_| LaptopError::Refused("WORKER_LAPTOP_RETAINED"))?;
+        need(
+            record.phase != Phase::FinalizingStarted,
+            "WORKER_STARTED_FINAL_STORAGE_RETAINED",
+        )?;
         if record.phase == Phase::Held && runtime.cancellation().is_cancelled() {
             record.outcome = Some(Err(Arc::new(LaptopError::Refused("WORKER_LAPTOP_STOPPED"))));
             record.phase = Phase::Known;
         }
         let viewer = record.viewer.clone();
         let memory_result = if runtime.cancellation().is_cancelled() || record.cleanup.is_some() {
-            memory::close_abandoned(&mut record)
+            let memory = memory::close_abandoned(&mut record);
+            let perf = perf::close_abandoned(&mut record);
+            finalized(memory, perf)
         } else {
             Ok(())
         };

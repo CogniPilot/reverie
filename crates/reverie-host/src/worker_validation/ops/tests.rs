@@ -84,7 +84,7 @@ fn ops_read_replacement_and_leaf_close_failures_preserve_both_causes() {
     assert!(
         matches!(error,WorkerValidationHostError::Observation(ObservationError::Finalization{primary,secondary})
         if matches!(*primary,ObservationError::Refused(ObservationFault::Changed))
-        && matches!(*secondary,ObservationError::Io(_)))
+        && matches!(*secondary,ObservationError::CloseUnconfirmed{..}))
     );
     assert_eq!(fs::read(tree.0.join("config.json")).unwrap(), b"foreign");
     assert_eq!(fs::read(tree.0.join("old.json")).unwrap(), b"{}");

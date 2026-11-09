@@ -44,12 +44,16 @@ use crate::test_process::isolate_case as isolate;
 mod cold_cases;
 #[path = "direct_finalization/tests.rs"]
 mod direct_finalization_cases;
+#[path = "stopped_ram/metadata_tests.rs"]
+mod metadata_owner_cases;
 #[path = "nix/network/tests.rs"]
 mod network_cases;
 #[path = "nix/tests.rs"]
 mod nix_cases;
 #[path = "replacement_stop/tests.rs"]
 mod replacement_stop_cases;
+#[path = "stopped_ram/tests.rs"]
+mod stopped_ram_cases;
 struct Tree(PathBuf);
 impl Tree {
     fn new() -> Self {
@@ -297,3 +301,6 @@ fn actual_installing_bootstrap_consumes_runtime_and_uses_real_wait_binding_reade
     claim.release(end()).unwrap();
     broker.storage.runtime.close(end()).unwrap();
 }
+
+#[path = "diagnostic/tests.rs"]
+mod diagnostic_cases;

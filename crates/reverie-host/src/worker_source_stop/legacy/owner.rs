@@ -172,3 +172,12 @@ impl Drop for OrdinaryLaptopStop {
         }
     }
 }
+
+impl OrdinaryLaptopStop {
+    /// Closed local DATA; never settles or advances this owner.
+    pub fn storage_owner_status(
+        &self,
+    ) -> reverie_contracts::worker_storage_status::OwnerObservation {
+        self.attempt.diagnostic()
+    }
+}

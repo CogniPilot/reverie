@@ -18,6 +18,7 @@ came from CogniPilot/rumoca at `0bab7e08c42dced38488abd298a4b9bb77d2b0cc`.
 | [SPEC_0008](SPEC_0008_SCRIPT_POLICY.md) | Rust/TypeScript and script migration | ACCEPTED |
 | [SPEC_0009](SPEC_0009_PORTABILITY.md) | Cross-platform boundaries | ACCEPTED |
 | [SPEC_0010](SPEC_0010_AGENT_OFFICE_INTERFACE.md) | Agent CLI, welcome, hooks and memory | DRAFT |
+| [SPEC_0011](SPEC_0011_BROKER_ERROR_ISOLATION.md) | Broker error scope, containment and diagnostics | DRAFT |
 
 ACCEPTED means a contributor requirement. DRAFT identifies intended design with
 implementation gaps. Neither status is installed-release evidence.

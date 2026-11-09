@@ -364,6 +364,16 @@ describe('read-only owner inspection of an interrupted move destination', () => 
     expect(test.runtime.request).not.toHaveBeenCalled(); expect(test.runtime.cleanup).not.toHaveBeenCalled();
     expect(test.sessions.get('new')!.writeViaMux).not.toHaveBeenCalled();
   });
+  it('validates the actual destination allocation for viewer repair without requiring its dead viewer or reading its composer', async () => {
+    const test = recovery(), candidate = test.sessions.get('new')!;
+    Object.assign(candidate, { pid: null }); vi.mocked(test.runtime.mux.isPaneDead).mockReturnValue(true);
+    const fence = await test.executor.verifyViewerRepair!(record); fence();
+    expect(test.runtime.mux.capturePaneText).not.toHaveBeenCalled();
+    expect(test.runtime.request).not.toHaveBeenCalled(); expect(test.runtime.cleanup).not.toHaveBeenCalled();
+    await expect(test.executor.verifyRecovery!(record)).rejects.toThrow('pane exited');
+    test.runtime.plans.allocations = vi.fn(async () => ({ generatedAt: 1, accounts: [{ id: 'first', sessionIds: ['new'] }] }));
+    await expect(test.executor.verifyViewerRepair!(record)).rejects.toThrow('allocated');
+  });
   it('does not infer source cleanup from a missing source session or journal stop request', async () => {
     const test = recovery(); await expect(test.executor.verifyRecovery!({...record, sourceCleanupVerified: undefined})).rejects.toThrow('durably confirmed');
     expect(test.runtime.plans.allocations).not.toHaveBeenCalled();

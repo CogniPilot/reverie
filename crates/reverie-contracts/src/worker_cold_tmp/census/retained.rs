@@ -1,6 +1,8 @@
 //! Fixed original confirm_retained_temporary inspection DATA. This validates
 //! neither process/mount custody nor the actual Host creation record.
 use super::*;
+mod init;
+mod perf;
 use reverie_core::{decimal::UnsignedInteger, ids::ProfileSessionId};
 pub struct RetainedInspection {
     inventory: ColdInventory,
@@ -14,6 +16,37 @@ impl RetainedInspection {
         source: &EffectiveWorkerConfig,
         session: &ProfileSessionId,
         employee: Option<&str>,
+    ) -> Result<Self> {
+        Self::decode_with_init(
+            raw,
+            cid,
+            source,
+            session,
+            employee,
+            crate::worker_launch::WorkerInitData::LegacySleep,
+        )
+    }
+    /// The actual created plan supplies its already projected boot-layout DATA.
+    /// The legacy decoder remains fixed to its original sleep/tini contract.
+    pub fn decode_started(
+        raw: &[u8],
+        cid: &ContainerId,
+        source: &EffectiveWorkerConfig,
+        effective: &EffectiveWorkerConfig,
+        session: &ProfileSessionId,
+        employee: Option<&str>,
+    ) -> Result<Self> {
+        let init = crate::worker_launch::WorkerInitData::for_effective(effective)
+            .map_err(|_| ColdDataError::Policy)?;
+        Self::decode_with_init(raw, cid, source, session, employee, init)
+    }
+    fn decode_with_init(
+        raw: &[u8],
+        cid: &ContainerId,
+        source: &EffectiveWorkerConfig,
+        session: &ProfileSessionId,
+        employee: Option<&str>,
+        init: crate::worker_launch::WorkerInitData,
     ) -> Result<Self> {
         let expected = ColdInventoryIds::decode(cid.as_str().as_bytes())?;
         let inventory = ColdInventory::decode(raw, &expected)?;
@@ -31,27 +64,7 @@ impl RetainedInspection {
             return Err(ColdDataError::Inventory);
         }
         labels(config, &deployment, session, employee)?;
-        let account = format!(
-            "{}:{}",
-            account(original, "uid")?,
-            account(original, "gid")?
-        );
-        let wanted = [
-            ("User", Value(Node::String(key(&account)))),
-            (
-                "Entrypoint",
-                Value(Node::Array(vec![Value(Node::String(key("/bin/sleep")))])),
-            ),
-            (
-                "Cmd",
-                Value(Node::Array(vec![Value(Node::String(key("infinity")))])),
-            ),
-        ];
-        for (name, expected) in wanted {
-            if !field(config, name).is_some_and(|actual| actual.python_eq(&expected)) {
-                return Err(ColdDataError::Inventory);
-            }
-        }
+        init::configuration(fields, original, config, init)?;
         // Original confirmation checks only the native identity/state header
         // here. Mount grammar belongs AFTER actual PID/fresh-inode reads.
         let state = row.state_fields()?;

@@ -140,7 +140,7 @@ impl Inner {
         )?;
         Ok(paths)
     }
-    fn source_row<'a>(
+    pub(super) fn source_row<'a>(
         &self,
         native: &ObservationContext,
         rows: &'a ObservedInventory,

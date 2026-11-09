@@ -349,6 +349,8 @@ import { deliverPlanRequest } from '../plan-request-prompt.js';
 import { registerPlanRequestRoutes } from './routes/plan-request-routes.js';
 import { planMoveExecutor, type PlanMoveRuntime } from '../plan-move-runtime.js';
 import {ResourceReplacementController, registerResourceReplacementRoutes} from '../resource-replacement-controller.js';
+import { FleetResourcesService, registerFleetResourceRoutes } from '../resource-fleet-service.js';
+import { PoolInstallationController, registerPoolInstallationRoutes } from '../pool-installation-controller.js';
 import { PlanService } from '../plan-accounts.js';
 import { PlanCostTracker } from '../plan-agent-burn.js';
 import { githubData, type GithubArgs } from '../cron/github-source.js';
@@ -357,7 +359,21 @@ import { registerBotWatches } from '../bot-watches-runtime.js';
 import { appendBurnLog, burnLogLines, burnWatchData, hostLoadData, plansPaceData } from '../cron/post-sources.js';
 import { AccountLoginService, defaultLoginDeps } from '../account-login.js';
 import { computeFrontendBuildId } from './frontend-build-id.js';
-import { closeThroughFront, type FrontChannel } from '../rust-front/front.js';
+import { closeThroughFront, FrontChannel } from '../rust-front/front.js';
+
+/** How long stop() waits for the front channel to flush its last frames, `unbind` included, before failing. */
+const FRONT_FINISH_MS = 5000;
+
+/**
+ * The front's channel when this process was started as its child. The selected launcher sets
+ * REVERIE_FRONT_CHILD before exec; the front supplies fd 3 to that child.
+ */
+export function frontFromEnvironment(
+  env: NodeJS.ProcessEnv = process.env,
+  open: () => FrontChannel = () => FrontChannel.fromInheritedFd()
+): FrontChannel | undefined {
+  return env.REVERIE_FRONT_CHILD === '1' ? open() : undefined;
+}
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -2323,7 +2339,13 @@ export class WebServer extends EventEmitter {
       session: id => this.sessions.get(id),
       ready: () => this.companyWakeReady,
       providerHealthy: employee => this.workerProviderHealth?.read(employee)?.state === 'healthy',
-      moveGuard: id => planMoves.viewerReconnectGuard(id),
+      moveGuard: id => {
+        const employee = this.companyService.registeredEmployees().find(row => row.id === id);
+        return planMoves.viewerReconnectGuard(id, employee ? { owner: employee.owner, sessionId: employee.sessionId,
+          executor: planMoveExecutor({ ...planMoveRuntime, authorized: () => this.companyWakeReady,
+            request: async () => { throw new PlanMoveError('Viewer repair cannot launch or replay a move', 403); } }, employee.owner),
+        } : undefined);
+      },
       pause: id => this.chatroomService.delivery.pauseForMigration(id),
       publish: session => {
         this._persistSessionStateNow(session);
@@ -2363,6 +2385,10 @@ export class WebServer extends EventEmitter {
         },
         ownerFor(request)
       );
+    registerFleetResourceRoutes(this.app, verifiedOwner, new FleetResourcesService(this.companyService));
+    const poolInstallation = new PoolInstallationController(ownerAuth, process.env.REVERIE_WORKER_SOCKET);
+    registerPoolInstallationRoutes(this.app, poolInstallation);
+    this.app.addHook('onClose', async () => poolInstallation.close());
     if (this.resourceReplacementEnabled === true) {
       const resources = new ResourceReplacementController(this.app, ownerAuth, this.companyService,
         this.planService, this.chatroomService, planMoves, planMoveStore, ctx, this.mux,
@@ -5664,6 +5690,8 @@ export class WebServer extends EventEmitter {
     this.pushStore.dispose();
 
     await this.app.close();
+    // A clean stop includes delivering all final frames, including unbind.
+    if (this.front) await this.front.finish(FRONT_FINISH_MS);
   }
 }
 
@@ -5680,6 +5708,31 @@ export async function startWebServer(
   resourceReplacementEnabled: boolean = false
 ): Promise<WebServer> {
   const resourceArgs: [] | [boolean] = resourceReplacementEnabled === true ? [true] : [];
+  const front = frontFromEnvironment();
+  if (front) {
+    // The front relays its own SIGTERM/SIGINT as a shutdown frame; run the process's usual shutdown for it.
+    front.on('shutdown', (signal) => process.emit(signal));
+    // A channel fault ends this generation; exit without closing, as the front expects (no response substitution).
+    front.on('fault', (fault) => {
+      console.error(`Native front channel fault: ${fault.code}`);
+      process.exit(70);
+    });
+    const fronted = new WebServer(
+      port,
+      https,
+      testMode,
+      host,
+      titleHostname,
+      allowUnauthenticatedNetwork,
+      basePath,
+      goalPorts,
+      serviceAuthConfig,
+      resourceReplacementEnabled === true,
+      front
+    );
+    await fronted.start();
+    return fronted;
+  }
   const server = new WebServer(
     port,
     https,

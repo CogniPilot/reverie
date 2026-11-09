@@ -181,7 +181,10 @@ pub(crate) fn interrupt_current<T>(operation: impl FnOnce() -> T) -> io::Result<
     // SAFETY: pthread_self captures this still-running caller. The raw value
     // stays inside thread::scope, whose join precedes caller return/unwinding;
     // it can never refer to a reaped/reused or caller-selected thread.
-    let target = unsafe { libc::pthread_self() };
+    // musl represents pthread_t as an opaque pointer, glibc as an integer.
+    // Transport only its native-width bits within this bounded C-ABI fixture;
+    // no Rust reference or dereference crosses threads and no Send impl is added.
+    let target = unsafe { libc::pthread_self() } as usize;
     let send = || {
         for _ in 0..130 {
             std::thread::sleep(Duration::from_millis(100));
@@ -190,7 +193,7 @@ pub(crate) fn interrupt_current<T>(operation: impl FnOnce() -> T) -> io::Result<
             }
             // SAFETY: target is the live scoped caller above, which cannot
             // leave this scope until this sender joins. No group is used.
-            status(unsafe { libc::pthread_kill(target, libc::SIGUSR1) })?;
+            status(unsafe { libc::pthread_kill(target as libc::pthread_t, libc::SIGUSR1) })?;
         }
         Ok(())
     };

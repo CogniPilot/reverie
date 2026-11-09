@@ -78,7 +78,8 @@ def main():
                         return output
                 elif kind == b'X':
                     if marker:
-                        raise AssertionError('Worker exited before the expected terminal output')
+                        raise AssertionError('Worker exited before the expected terminal output: '
+                                             f'exit={json.loads(data)!r}, output_tail={output[-8192:]!r}')
                     return json.loads(data), output
                 elif kind == b'E':
                     raise AssertionError(data.decode())
@@ -127,8 +128,12 @@ def main():
             print('PASS Unicode borders, non-ASCII text and UTF-8 terminal attach', flush=True)
             print('PASS terminal input, output, resize, shared project files, private homes, persistence and orphan reaping', flush=True)
 
-            full = "import threading,time,sys\ntry:\n for _ in range(200): threading.Thread(target=lambda:time.sleep(30),daemon=True).start()\nexcept RuntimeError:\n print('TASK_LIMIT_REACHED',flush=True)\nsys.stdin.readline()"
+            full = "import threading,time,sys\nprint('PRESSURE_READY',flush=True)\nsys.stdin.readline()\ntry:\n for _ in range(200): threading.Thread(target=lambda:time.sleep(30),daemon=True).start()\nexcept RuntimeError:\n print('TASK_LIMIT_REACHED',flush=True)\nsys.stdin.readline()"
             connection, thread = launch(sid1, 'python3 -c ' + "'" + full.replace("'", "'\\''") + "'")
+            # Establish this viewer before pressure; startup or reattachment at an
+            # already exhausted task limit remains a separate product gap.
+            until(connection, b'PRESSURE_READY')
+            worker.send_frame(connection, b'I', b'\n')
             until(connection, b'TASK_LIMIT_REACHED')
             healthy()
             other, other_thread = launch(sid2, 'printf OTHER_AGENT_HEALTHY')

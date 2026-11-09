@@ -1,13 +1,17 @@
 #[derive(Debug)]
 pub enum WorkerReportError {
     Stopping,
+    Capacity,
     Peer,
+    ChannelCapability,
+    ChannelClosePending,
     Frame,
     Refused,
     LaunchKind,
     LifecycleRetained,
     HandlerRetained,
     Io(std::io::Error),
+    NativeClose(crate::ObservationError),
     Telemetry(super::TelemetryError),
     Launch(reverie_contracts::worker_launch::LaunchDataError),
     Finalization {
@@ -17,16 +21,31 @@ pub enum WorkerReportError {
     Unconfirmed,
 }
 impl WorkerReportError {
+    /// Intrinsic consumed-close classification only. Busy, ordinary I/O and
+    /// generic protocol refusal do not become unknown native closes.
+    pub fn has_unconfirmed_close(&self) -> bool {
+        match self {
+            Self::NativeClose(error) => error.has_unconfirmed_close(),
+            Self::Finalization { primary, secondary } => {
+                primary.has_unconfirmed_close() || secondary.has_unconfirmed_close()
+            }
+            _ => false,
+        }
+    }
     pub fn code(&self) -> &'static str {
         match self {
             Self::Stopping => "Worker broker is stopping",
+            Self::Capacity => "WORKER_BROKER_CAPACITY",
             Self::Peer => "Worker peer identity is not authorized",
+            Self::ChannelCapability => "WORKER_NATIVE_CHANNEL_REQUIRES_SO_PEERPIDFD",
+            Self::ChannelClosePending => "WORKER_NATIVE_CHANNEL_CLOSE_PENDING",
             Self::Frame => "Worker frame is too large",
             Self::Refused => "TELEMETRY_REPORT_REFUSED",
             Self::LaunchKind => "Expected worker launch request",
             Self::LifecycleRetained => "WORKER_LAUNCH_LIFECYCLE_RETAINED",
             Self::HandlerRetained => "WORKER_HANDLER_RETAINED",
             Self::Io(_) => "Worker transport failed",
+            Self::NativeClose(_) => "WORKER_TELEMETRY_CLOSE_UNCONFIRMED",
             Self::Telemetry(_) => "TELEMETRY_REPORT_REFUSED",
             Self::Launch(error) => launch_message(error),
             Self::Finalization { .. } | Self::Unconfirmed => "WORKER_TELEMETRY_CLOSE_UNCONFIRMED",
@@ -40,7 +59,9 @@ impl WorkerReportError {
     }
     pub(super) fn wire_message(&self) -> &'static str {
         match self {
-            Self::Unconfirmed | Self::Finalization { .. } => "Worker transport failed",
+            Self::Unconfirmed | Self::Finalization { .. } | Self::NativeClose(_) => {
+                "Worker transport failed"
+            }
             _ => self.code(),
         }
     }
@@ -68,7 +89,14 @@ impl std::fmt::Display for WorkerReportError {
         f.write_str(self.code())
     }
 }
-impl std::error::Error for WorkerReportError {}
+impl std::error::Error for WorkerReportError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::NativeClose(error) => Some(error),
+            _ => None,
+        }
+    }
+}
 impl From<std::io::Error> for WorkerReportError {
     fn from(e: std::io::Error) -> Self {
         Self::Io(e)

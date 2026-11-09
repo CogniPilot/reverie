@@ -1,38 +1,68 @@
 //! Actual reuse cleanup, not a public lifecycle/storage permission.
 use super::*;
 use std::time::Instant;
+#[cfg(test)]
+mod tests;
 impl InstalledWorker {
     pub(in crate::installing_broker) fn cleanup_lifecycle(
         &self,
         runtime: &reverie_host::worker_runtime::WorkerRuntime,
     ) -> Result<LaptopLifecycle<'_>, GateError> {
-        let Some(end) = runtime.stop_deadline() else {
-            return self.lifecycle();
+        let observed = runtime.stop_deadline();
+        #[cfg(test)]
+        tests::captured(observed);
+        let poison = if observed.is_none() {
+            "WORKER_BROKER_LIFECYCLE_UNAVAILABLE"
+        } else {
+            "WORKER_BROKER_LOCK_UNAVAILABLE"
         };
-        self.cleanup_lifecycle_until(end)
+        self.cleanup_lifecycle_selected(runtime, None, poison)
     }
     pub(in crate::installing_broker) fn cleanup_lifecycle_until(
         &self,
+        runtime: &reverie_host::worker_runtime::WorkerRuntime,
         end: Instant,
+    ) -> Result<LaptopLifecycle<'_>, GateError> {
+        self.cleanup_lifecycle_selected(runtime, Some(end), "WORKER_BROKER_LOCK_UNAVAILABLE")
+    }
+    fn cleanup_lifecycle_selected(
+        &self,
+        runtime: &reverie_host::worker_runtime::WorkerRuntime,
+        ceiling: Option<Instant>,
+        poison: &'static str,
     ) -> Result<LaptopLifecycle<'_>, GateError> {
         loop {
             match self.laptops.try_lock() {
                 Ok(guard) => return Ok(LaptopLifecycle { owner: self, guard }),
                 Err(std::sync::TryLockError::Poisoned(_)) => {
-                    return Err(GateError::Refused("WORKER_BROKER_LOCK_UNAVAILABLE"));
+                    return Err(GateError::Refused(poison));
                 }
                 Err(std::sync::TryLockError::WouldBlock) => {}
             }
-            let now = Instant::now();
-            if now >= end {
-                return Err(GateError::Refused("WORKER_BROKER_LOCK_UNAVAILABLE"));
-            }
-            std::thread::sleep(
-                end.duration_since(now)
-                    .min(std::time::Duration::from_millis(1)),
-            );
+            // The initial None observation cannot grant an unbounded wait
+            // after the SAME Runtime publishes its original first-stop end.
+            // Component ceilings remain original and are never refreshed.
+            std::thread::sleep(lifecycle_pause(ceiling, runtime.stop_deadline())?);
         }
     }
+}
+fn lifecycle_pause(
+    ceiling: Option<Instant>,
+    stop: Option<Instant>,
+) -> Result<std::time::Duration, GateError> {
+    let end = match (ceiling, stop) {
+        (Some(a), Some(b)) => Some(a.min(b)),
+        (Some(a), None) | (None, Some(a)) => Some(a),
+        (None, None) => None,
+    };
+    let Some(end) = end else {
+        return Ok(std::time::Duration::from_millis(1));
+    };
+    let remaining = end.saturating_duration_since(Instant::now());
+    if remaining.is_zero() {
+        return Err(GateError::Refused("WORKER_BROKER_LOCK_UNAVAILABLE"));
+    }
+    Ok(remaining.min(std::time::Duration::from_millis(1)))
 }
 impl LaptopLifecycle<'_> {
     pub(in crate::installing_broker) fn capture_reuse_registration(

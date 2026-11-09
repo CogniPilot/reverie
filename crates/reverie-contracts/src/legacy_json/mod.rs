@@ -8,6 +8,7 @@ mod tests;
 mod text;
 mod value;
 pub(crate) use decode::GpuControlParseError;
+pub(crate) use decode::HumanParseError;
 pub(crate) use decode::{JournalParseError, JournalParsed};
 pub(crate) use equality::numeric_key;
 pub(crate) use value::{Node, Number, Text, Value, truthy};
@@ -34,21 +35,23 @@ pub(crate) fn decode_metadata_bytes(raw: &[u8]) -> Result<Value, Error> {
 pub(crate) fn decode_ordered_metadata_bytes(raw: &[u8]) -> Result<ordered::OrderedValue, Error> {
     decode::decode_ordered(&text::python_bytes(raw)?, decode::Purpose::Metadata)
 }
-/// `json.loads(str)` of already decoded text: duplicate keys last-wins and
-/// literal constants accepted. There is no byte-encoding detection, so a BOM is
-/// invalid JSON, as in Python.
-pub(crate) fn decode_text(text: &str) -> Result<Value, Error> {
-    decode::decode_last_wins(text.as_bytes())
+pub(crate) fn decode_human_protocol_bytes(
+    raw: &[u8],
+) -> Result<ordered::OrderedValue, HumanParseError> {
+    let raw = text::python_bytes(raw).map_err(HumanParseError::Json)?;
+    decode::decode_human(&raw)
 }
-/// `json.loads(bytes)` with its defaults: byte-encoding detection, duplicate
-/// keys last-wins, literal constants and the decimal conversion cap.
+/// Already decoded scalar text uses the shared Python str reader.
+pub(crate) fn decode_text(text: &str) -> Result<Value, Error> {
+    decode_python_str(text.as_bytes())
+}
+/// Default bytes JSON retains encoding detection and last-wins semantics.
 pub(crate) fn decode_loads_bytes(raw: &[u8]) -> Result<Value, Error> {
     decode::decode_last_wins(&text::python_bytes(raw)?)
 }
-/// The broker's C frame uses json.loads(bytes), without object_pairs_hook: the
-/// last duplicate key wins. Keep this mode purpose-private.
+/// Legacy C controls use Python's bytes decoder and last-duplicate-key rule.
 pub(crate) fn decode_broker_control(raw: &[u8]) -> Result<Value, Error> {
-    decode::decode_last_wins(&text::python_bytes(raw)?)
+    decode_loads_bytes(raw)
 }
 /// Normal rootless seccomp JSON uses json.loads(bytes), without object_pairs_hook.
 /// Keep this mode purpose-private; strict profile/perf/registry readers differ.

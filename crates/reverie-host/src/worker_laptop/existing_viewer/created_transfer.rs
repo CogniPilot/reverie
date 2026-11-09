@@ -2,16 +2,81 @@
 //! inventory slot. Old Created/pane aliases cannot forward after this move.
 use super::*;
 use crate::worker_reports::WorkerLaunchConnection;
+mod handoff;
+pub use handoff::StartedStorageHandoff;
 
 #[must_use = "retain both the actual relay and its original Office owner"]
 pub struct StartedRelayTransferred {
     existing: ExistingViewer,
     office: OfficePhone,
     original_request: WorkerRequest,
+    handoff: StartedStorageHandoff,
 }
 impl StartedRelayTransferred {
     pub fn into_parts(self) -> (ExistingViewer, OfficePhone, WorkerRequest) {
         (self.existing, self.office, self.original_request)
+    }
+    pub fn into_handoff_parts(
+        self,
+    ) -> (
+        ExistingViewer,
+        OfficePhone,
+        WorkerRequest,
+        StartedStorageHandoff,
+    ) {
+        (
+            self.existing,
+            self.office,
+            self.original_request,
+            self.handoff,
+        )
+    }
+}
+struct TransferInputs {
+    plan: ObservedCreatePlan,
+    inspected: ExistingLaptopInspection,
+    receipt: LaunchReceiptObservation,
+}
+#[must_use = "retain all original once-observed inputs with the unchanged Started owner"]
+pub struct StartedRelayTransferFailure {
+    inputs: TransferInputs,
+    cause: LaptopError,
+}
+impl StartedRelayTransferFailure {
+    pub fn code(&self) -> &'static str {
+        self.cause.code()
+    }
+    pub fn into_parts(
+        self,
+    ) -> (
+        ObservedCreatePlan,
+        ExistingLaptopInspection,
+        LaunchReceiptObservation,
+        LaptopError,
+    ) {
+        (
+            self.inputs.plan,
+            self.inputs.inspected,
+            self.inputs.receipt,
+            self.cause,
+        )
+    }
+}
+impl std::fmt::Display for StartedRelayTransferFailure {
+    fn fmt(&self, out: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.cause.fmt(out)
+    }
+}
+impl std::error::Error for StartedRelayTransferFailure {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&self.cause)
+    }
+}
+impl std::fmt::Debug for StartedRelayTransferFailure {
+    fn fmt(&self, out: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        out.debug_struct("StartedRelayTransferFailure")
+            .field("cause", &self.cause)
+            .finish_non_exhaustive()
     }
 }
 impl WorkerRuntime {
@@ -25,10 +90,37 @@ impl WorkerRuntime {
         inspected: ExistingLaptopInspection,
         receipt: LaunchReceiptObservation,
         connection: &WorkerLaunchConnection,
+    ) -> std::result::Result<StartedRelayTransferred, Box<StartedRelayTransferFailure>> {
+        let mut inputs = Some(TransferInputs {
+            plan,
+            inspected,
+            receipt,
+        });
+        match self.transfer_started_relay(created, &mut inputs, connection) {
+            Ok(transferred) => Ok(transferred),
+            Err(cause) => Err(Box::new(StartedRelayTransferFailure {
+                inputs: inputs.expect("all refusals precede input consumption"),
+                cause,
+            })),
+        }
+    }
+    fn transfer_started_relay(
+        &self,
+        created: &CreatedLaptop,
+        inputs: &mut Option<TransferInputs>,
+        connection: &WorkerLaunchConnection,
     ) -> Result<StartedRelayTransferred> {
+        let input = inputs.as_ref().expect("actual unconsumed transfer inputs");
         let workflows = self.laptop_workflows();
         let mut record = workflows.started_storage_record(self, created)?;
-        let next = check_transfer(self, &record, &plan, &inspected, &receipt, connection)?;
+        let next = check_transfer(
+            self,
+            &record,
+            &input.plan,
+            &input.inspected,
+            &input.receipt,
+            connection,
+        )?;
         let mut inventory = workflows
             .records
             .try_lock()
@@ -37,8 +129,14 @@ impl WorkerRuntime {
             .iter_mut()
             .find(|entry| entry.is_created(&created.workflow.record))
             .ok_or(LaptopError::Refused("WORKER_LAPTOP_REPLAYED"))?;
+        let handoff = StartedStorageHandoff::new(created, record.resources().storage());
         // Every fallible check precedes the move. Both inventories are one
         // slot, so no capacity permit is released or reacquired in between.
+        let TransferInputs {
+            plan,
+            inspected,
+            receipt,
+        } = inputs.take().expect("checked original transfer inputs");
         let Resources {
             nix,
             plan: _,
@@ -76,6 +174,7 @@ impl WorkerRuntime {
             },
             office,
             original_request: request,
+            handoff,
         })
     }
 }

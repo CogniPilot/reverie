@@ -81,6 +81,11 @@ fn native_final_query_releases_registry_lock_but_keeps_same_entry_fenced() {
             std::thread::sleep(Duration::from_millis(2));
         }
         let started = tree.0.join("query-started").exists();
+        let company = reverie_contracts::storage_identity::decode_metadata(
+            &fs::read(tree.0.join("company.json")).unwrap(),
+        )
+        .unwrap();
+        let diagnostic = registry.storage_status(&company).unwrap();
         let registry = &registry;
         let reader = scope.spawn(move || {
             let count = registry.entries.lock().unwrap().len();
@@ -94,6 +99,14 @@ fn native_final_query_releases_registry_lock_but_keeps_same_entry_fenced() {
         let (preparation, observed) = query.join().unwrap();
         reader.join().unwrap();
         assert!(started, "actual native query reached its pause");
+        assert_eq!(
+            diagnostic[0].owner_kind,
+            reverie_contracts::worker_storage_status::OwnerKind::FinalizingDirect
+        );
+        assert_eq!(
+            diagnostic[0].observation,
+            reverie_contracts::worker_storage_status::OwnerObservation::Busy
+        );
         assert_eq!(
             progress.unwrap(),
             (1, "WORKER_STORAGE_FINALIZATION_HELD".to_owned())

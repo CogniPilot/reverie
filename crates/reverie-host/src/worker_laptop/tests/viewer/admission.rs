@@ -95,14 +95,13 @@ fn permanently_closed_same_capture_refuses_viewer_before_any_native_constructor(
     assert!(fixture.runtime().close(end()).is_err());
 }
 #[test]
-fn pending_query_blocks_viewer_admission_and_pending_viewer_returns_query_busy_without_cancellation()
- {
-    if isolated(
-        "pending_query_blocks_viewer_admission_and_pending_viewer_returns_query_busy_without_cancellation",
-    ) {
+fn pending_query_and_viewer_constructor_serialize_metadata_without_cancellation() {
+    if isolated("pending_query_and_viewer_constructor_serialize_metadata_without_cancellation") {
         return;
     }
-    let fixture = Fixture::new("created-viewer-metadata");
+    let hooks = crate::captured_client::test_hooks::Hooks::default();
+    let waited = hooks.admission_waited.clone();
+    let fixture = Fixture::new_with_hooks("created-viewer-metadata", hooks);
     let (_, _, released) = released(&fixture);
     let query = Query::start(&fixture);
     let busy = gate();
@@ -123,12 +122,16 @@ fn pending_query_blocks_viewer_admission_and_pending_viewer_returns_query_busy_w
     query.release();
     query.finish();
     wait(|| constructor.entered.load(Ordering::Acquire));
-    let error = fixture
-        .runtime()
-        .readonly()
-        .query(EngineQuery::InventoryIds, end(), &CancellationToken::new())
-        .unwrap_err();
-    assert_eq!(error.fault(), EngineFault::Busy);
+    let runtime = fixture.runtime().clone();
+    let metadata = std::thread::spawn(move || {
+        runtime
+            .readonly()
+            .query(EngineQuery::InventoryIds, end(), &CancellationToken::new())
+    });
+    let until = end();
+    while !waited.load(Ordering::Acquire) && !metadata.is_finished() && Instant::now() < until {
+        std::thread::sleep(Duration::from_millis(1));
+    }
     assert_eq!(query_count(&fixture), 1);
     constructor.released.store(true, Ordering::Release);
     let ViewerStart::Started(viewer) = viewer.join().unwrap().unwrap() else {
@@ -139,6 +142,9 @@ fn pending_query_blocks_viewer_admission_and_pending_viewer_returns_query_busy_w
         .runtime()
         .close_laptop_viewer(&viewer, end())
         .unwrap();
+    let result = metadata.join().unwrap();
+    assert_eq!(result.unwrap(), "");
+    assert_eq!(query_count(&fixture), 2);
 }
 #[test]
 fn closing_racing_late_constructor_seals_handoff_and_never_renews_original_close_budget() {
@@ -271,10 +277,13 @@ fn old_query_settlement_cannot_clear_the_actual_pending_viewer_variant() {
     let error = fixture
         .runtime()
         .readonly()
-        .query(EngineQuery::InventoryIds, end(), &CancellationToken::new())
+        .query(
+            EngineQuery::InventoryIds,
+            Instant::now() + Duration::from_millis(60),
+            &CancellationToken::new(),
+        )
         .unwrap_err();
-    assert_eq!(error.fault(), EngineFault::Busy);
-    assert_eq!(query_count(&fixture), 1);
+    let queries = query_count(&fixture);
     constructor.released.store(true, Ordering::Release);
     let ViewerStart::Started(viewer) = viewer.join().unwrap().unwrap() else {
         panic!("same viewer constructor retained")
@@ -283,6 +292,11 @@ fn old_query_settlement_cannot_clear_the_actual_pending_viewer_variant() {
         .runtime()
         .close_laptop_viewer(&viewer, end())
         .unwrap();
+    assert_eq!(error.fault(), EngineFault::Deadline);
+    assert_eq!(
+        queries, 1,
+        "old query settlement must not free the actual viewer slot"
+    );
 }
 #[test]
 fn consumed_close_uncertainty_is_refused_not_complete_and_drop_retains_actual_origin() {

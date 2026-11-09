@@ -3,7 +3,7 @@
 let
   workspace = import ./rust-workspace-source.nix {
     inherit pkgs src;
-    members = [ "reverie-core" "reverie-contracts" "reverie-policy-artifacts" ];
+    members = [ "reverie-core" "reverie-contracts" "reverie-elf-bundle" "reverie-policy-artifacts" ];
   };
 in pkgs.rustPlatform.buildRustPackage {
   pname = "reverie-policy-artifacts";

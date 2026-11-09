@@ -20,6 +20,11 @@ let
 in {
   options.services.reverieWorkers = {
     enable = lib.mkEnableOption "Reverie agent resource isolation";
+    manageBrokerService = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      description = "Manage the system broker unit. Disable when a separately registered user broker owns this installation; host slices, perf support and the optional memory helper remain declarative. This does not adopt or change that external broker.";
+    };
     user = lib.mkOption { type = lib.types.str; description = "Existing host owner with authorized access to the container engine."; };
     configFile = lib.mkOption { type = lib.types.str; description = "Owner-only broker configuration outside the Nix store."; };
     stateRoot = lib.mkOption { type = lib.types.str; description = "Persistent private worker homes and per-laptop Nix stores/databases; outside scratch and shared mounts."; };
@@ -147,7 +152,7 @@ in {
         UMask = "0077";
       };
     };
-    systemd.services.reverie-worker-broker = {
+    systemd.services.reverie-worker-broker = lib.mkIf cfg.manageBrokerService {
       description = "Reverie host worker broker";
       wantedBy = [ "multi-user.target" ];
       requires = [ "docker.service" "reverie-workers.slice" ];

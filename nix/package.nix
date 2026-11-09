@@ -10,6 +10,7 @@ let
   # evaluation never has to materialize the intermediate filtered root first.
   consoleFixture = relative: builtins.path { path = (src.origSrc or src) + "/${relative}"; };
   rustRouteHandler = import ./rust-route-handler.nix { inherit pkgs src; };
+  rustFront = import ./rust-front.nix { inherit pkgs src; };
   console = pkgs.buildNpmPackage {
     pname = "reverie-console";
     version = manifest.version;
@@ -64,6 +65,8 @@ let
       # Two test files at a time (config/vitest.ci.config.ts); test/setup.ts gives each file its own HOME, temp and
       # tmux socket directory, and every server binds port 0 (test/test-ports-guard.test.ts).
       export NIX_TEST_FILE_WORKERS=2
+      # Refuse missing or duplicate registrations before the longer test batches.
+      npm test -- test/test-suite-partition.test.ts
       npm test -- test/fixed-resume-message.test.ts test/recovery-authority.test.ts \
         test/recovery-transaction.test.ts test/recovery-operation-clock.test.ts test/recovery-ledger-client.test.ts \
         test/rest-canonical-metadata.test.ts \
@@ -127,9 +130,15 @@ let
         test/company-plans-navigation.test.ts test/company-plans-width.test.ts test/plan-five-hour-ui.test.ts \
         test/plan-move-runtime.test.ts test/plan-move-composer.test.ts test/plan-move-routes.test.ts test/plan-move-company.test.ts test/plan-move-launch.test.ts \
         test/plan-move-resources.test.ts test/plan-move-resource-runtime.test.ts \
-        test/resource-owner-authority.test.ts test/resource-native-client.test.ts \
+        test/resource-owner-authority.test.ts test/resource-owner-office-authority.test.ts test/resource-native-client.test.ts \
+        test/owner-registration-identity.test.ts test/owner-registration-durability.test.ts \
         test/company-resource-binding-cas.test.ts test/resource-session-publication.test.ts \
+        test/resource-ram-session-publication.test.ts test/resource-ram-owner-incarnation.test.ts \
+        test/pool-installation-consent.test.ts \
+        test/pool-installation-enrollment.test.ts \
+        test/pool-installation-native-client.test.ts \
         test/resource-replacement-controller.test.ts test/company-laptop-memory-ui.test.ts \
+        test/company-resource-fleet-ui.test.ts test/resource-fleet-schema.test.ts test/resource-fleet-service.test.ts \
         test/agent-plan-server.test.ts test/agent-plan-request.test.ts test/agent-plan-recovery.test.ts test/agent-plan-journal-recovery.test.ts test/cli-agent-force.test.ts test/cli-agent-viewer.test.ts test/plan-request.test.ts test/plan-request-capability.test.ts test/plan-request-routes.test.ts test/plan-credential-boundary.test.ts test/plan-request-ui.test.ts test/plan-request-prompt.test.ts \
         test/embassy-builtin.test.ts test/embassy-protocol-server.test.ts test/embassy-pairing-ui.test.ts \
         test/disk-stats.test.ts test/disk-stats-ui.test.ts test/routes/system-routes.test.ts test/shared-attachments.test.ts test/routes/file-routes.test.ts \
@@ -266,7 +275,7 @@ let
         test/intent-store.test.ts test/journal-map.test.ts test/keyboard-shortcuts.test.ts test/laptop-stop-agent-client.test.ts \
         test/legacy-recall.test.ts test/link-provider-regex.test.ts test/local-echo-codex-gating.test.ts
       npm test -- test/location-overlay-commands.test.ts test/lru-map.test.ts test/markdown-anchors.test.ts test/markdown-sanitizer.test.ts \
-        test/mcp-memory-tools.test.ts test/mcp-server.test.ts test/mcp-sync-registry.test.ts test/mcp-sync-targets.test.ts \
+        test/mcp-memory-tools.test.ts test/mcp-server.test.ts test/memory-recall-cancellation.test.ts test/mcp-sync-registry.test.ts test/mcp-sync-targets.test.ts \
         test/mcp-sync.test.ts test/media-extension-parity.test.ts test/member-board-focus-server.test.ts test/member-board-focus.test.ts \
         test/member-picker.test.ts test/memory-brief.test.ts test/memory-floors.test.ts test/memory-leak-prevention.test.ts test/memory-restart-drill.test.ts \
         test/message-agent-bar.test.ts test/message-read-aloud.test.ts test/mobile-case-sheet-keyboard-lift.test.ts \
@@ -387,7 +396,7 @@ let
         test/terminal-resize-observer-survives-init.test.ts \
         test/terminal-scroll-intent.test.ts test/terminal-scroll-routing.test.ts test/terminal-shift-drag-selection.test.ts \
         test/terminal-tile-input.test.ts test/terminal-tile-scroll.test.ts test/terminal-tile-unit.test.ts test/terminal-touch-tap.test.ts \
-        test/test-env-isolation.test.ts test/test-ports-guard.test.ts test/test-suite-partition.test.ts test/tile-grid-attach.test.ts \
+        test/test-env-isolation.test.ts test/test-ports-guard.test.ts test/tile-grid-attach.test.ts \
         test/tile-grid-auto-join.test.ts test/tile-grid-cap.test.ts test/tile-grid-cells.test.ts test/tile-grid-chrome.test.ts \
         test/tile-grid-close-fallback.test.ts test/tile-grid-count-helpers.test.ts test/tile-grid-count-menu.test.ts \
         test/tile-grid-detach.test.ts test/tile-grid-dividers.test.ts test/tile-grid-entrance-styles.test.ts \
@@ -434,6 +443,7 @@ let
       find "$out/lib/reverie/node_modules" \( -path '*/node-pty/build/Makefile' -o -path '*/node-pty/*.mk' \) -delete
       makeWrapper ${pkgs.nodejs_22}/bin/node "$out/bin/reverie" \
         --prefix PATH : ${lib.getBin pkgs.util-linux}/bin \
+        --set REVERIE_NATIVE_FRONT_BIN ${rustFront}/bin/reverie-front \
         --set-default REVERIE_RUST_ROUTE_HANDLER ${rustRouteHandler}/bin/reverie-route-handler \
         --add-flags "$out/lib/reverie/dist/index.js"
       runHook postInstall
@@ -525,8 +535,7 @@ let
   # All client modes and the protected manifest move together; no Python branch.
   workerResourceClientManifest = workerNativeClientManifest;
   workerExec = workerNativeClient;
-  # Candidate only: source preparation/admission consumers still select the
-  # existing child entry point until the complete broker transition is reviewed.
+  # The broker's --pane-exit lifecycle and the bare-record ABI use one native helper.
   workerNativeChild = import ./worker-child.nix { inherit pkgs src; };
   # Same fixed native helper selected by the worker image; no shell fallback.
   workerNativeNixStorePrepare = import ./nix-store-prepare.nix { inherit pkgs src; };
@@ -539,9 +548,7 @@ let
   mcpNativeCli = import ./mcp-cli.nix { inherit pkgs src console memoryNativeCli; };
   routinesNative = import ./routines.nix { inherit pkgs src; };
   muxNative = import ./mux.nix { inherit pkgs src; };
-  workerChild = pkgs.writeShellScriptBin "reverie-worker-child" ''
-    exec ${memory}/bin/python3 -m reverie.worker child "$@"
-  '';
+  workerChild = workerNativeChild;
   # NSS 3.131.1 drops the emSign ECC Root CA - C3, emSign ECC Root CA - G3 and emSign Root CA - C1 roots after the
   # eMudhra intermediate CA compromise (Python CVE-2026-115557). The pinned nixpkgs carries 3.126; only the bundled
   # certdata.txt differs, so this is data-only and nothing else is rebuilt against it.
@@ -565,7 +572,7 @@ let
       cacert lockTools ] ++ providerLaunchers;
     pathsToLink = [ "/bin" "/share" ];
     # The images' /etc/ssl/certs comes from this same bundle (nix/image.nix).
-    passthru = { inherit cacert; };
+    passthru = { inherit cacert workerChild; };
   };
   entrypoint = pkgs.writeShellScript "reverie-start" (builtins.readFile (src + "/docker/entrypoint.sh"));
   requestUpdate = pkgs.writeShellApplication {
@@ -657,4 +664,4 @@ let
     done
   '';
 
-in { inherit reverie console memory memoryPackage runtime entrypoint kokoro hands handsTools workerExec workerResourceClientManifest workerNativeClient workerNativeClientManifest workerNativeChild workerNativeNixStorePrepare memoryNativeCli mcpNativeCli opsNativeCli routinesNative muxNative laptopTools rustRouteHandler; }
+in { inherit reverie console memory memoryPackage runtime entrypoint kokoro hands handsTools workerExec workerResourceClientManifest workerNativeClient workerNativeClientManifest workerChild workerNativeChild workerNativeNixStorePrepare memoryNativeCli mcpNativeCli opsNativeCli routinesNative muxNative laptopTools rustRouteHandler; }

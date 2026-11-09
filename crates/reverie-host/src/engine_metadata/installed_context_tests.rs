@@ -168,12 +168,12 @@ fn pending_constructor_remains_owned_across_all_clones_and_close_never_reopens()
         other
             .query(
                 EngineQuery::InventoryIds,
-                deadline(),
+                Instant::now() + Duration::from_millis(60),
                 &CancellationToken::new()
             )
             .unwrap_err()
             .fault(),
-        EngineFault::Busy
+        EngineFault::Deadline
     );
     assert!(
         installed

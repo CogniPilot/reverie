@@ -27,7 +27,7 @@ knowledge of internal JSON files or a sequence reconstructed from chat history.
 | Core/backend and public API | Rust | Authentication, scoped grants, validation, desired configuration, rollout coordination and durable user-visible status |
 | Host runtime | Rust | Engine/process supervision, cgroup enforcement, privileged helpers, native identity checks and durable host operation execution |
 | Numerical and model computation | Rust for first-party code | Scientific algorithms and computation adapters behind a computation-specific interface |
-| Packaging and host provisioning | Nix and minimal platform glue | Reproducible artifacts, service units and initial host trust installation |
+| Packaging and deployment | Nix-built artifacts and repository-defined Docker deployment | Reproducible images, declared runtime capabilities and instance initialization |
 
 The target is no first-party Python and no Python interpreter in the shipped
 service runtime, including numerical/model integrations. Replace Python-dependent
@@ -66,6 +66,35 @@ names. Form affordances can improve feedback but never become the only validator
 Do not add a generic host-administration execute-command, edit-file or privileged
 shell endpoint to make unsupported operations appear available. Existing scoped
 interactive terminal APIs remain part of the behavior to preserve.
+
+## Deployment boundary
+
+Ship the deployment definitions, controller and images from the Reverie
+repository. Keep instance configuration and durable state under the selected
+instance directory, defaulting to `~/reverie`. Do not require edits to a separate
+host-configuration repository or install instance policy in host OS configuration
+files. General host facilities such as Tailscale are independent of Reverie.
+
+Resource enforcement belongs to the declared Docker deployment. A dedicated
+Rust controller may use explicitly declared engine and cgroup capabilities;
+it must expose fixed, authenticated operations rather than a privileged shell,
+arbitrary command, path or cgroup writer. Runtime engine/cgroup state must be
+derived from the registered deployment and reconciled by its owning controller.
+Unsupported kernel or engine capabilities must be reported through the API.
+
+The worker pool has an enforced aggregate hard memory ceiling. By default each
+ordinary member's hard ceiling permits borrowing the entire allocated pool:
+for a 48 GiB pool, each member may have a 48 GiB hard ceiling while retaining its
+own smaller soft threshold. The common parent, rather than a sum of those hard
+ceilings, enforces the 48 GiB total. This is not permission to discount an
+unverified or outside-pool process during admission.
+
+Before enabling this borrowing, stop and settle existing workers outside the
+new pool. Verify the actual parent, every new member's identity, membership and
+limits, and keep the website, controller and recovery capacity outside that
+pool. Validate CPU sharing, memory pressure and perf on a canary before fleet
+rollout. Neither a configuration save nor the creation of an empty pool proves
+these properties.
 
 ## Owner experience
 

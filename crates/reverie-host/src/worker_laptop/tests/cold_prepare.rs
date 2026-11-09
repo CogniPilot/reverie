@@ -78,6 +78,60 @@ fn absent_policy_prepares_same_record_once_without_native_commands() {
     );
     assert_eq!(fs::read(fixture.root.join("trace")).unwrap(), trace);
 }
+
+#[test]
+fn absent_policy_creates_missing_session_and_employee_temporary_bind_sources() {
+    if crate::test_process::isolate_case(
+        "worker_laptop::tests::cold_prepare::absent_policy_creates_missing_session_and_employee_temporary_bind_sources",
+    ) {
+        return;
+    }
+    for employee_storage in [false, true] {
+        let fixture = Fixture::new("created-cold");
+        if employee_storage {
+            employee(&fixture);
+        }
+        let workflow = network(&fixture);
+        let scratch = workflow
+            .record
+            .try_lock()
+            .unwrap()
+            .resources()
+            .plan
+            .storage()
+            .scratch()
+            .to_owned();
+        assert!(!scratch.exists());
+        let trace = fs::read(fixture.root.join("trace")).unwrap();
+        let prepared = fixture
+            .runtime()
+            .prepare_laptop_cold_temporary(&workflow, end())
+            .unwrap();
+        let directories = [
+            fs::symlink_metadata(&scratch),
+            fs::symlink_metadata(scratch.join("tmp")),
+        ];
+        let same_workflow = matches!(prepared, ColdPreparation::Prepared(ref value) if value.same_workflow(&workflow));
+        let after = fs::read(fixture.root.join("trace")).unwrap();
+        let returned = fixture
+            .runtime()
+            .reclaim_laptop_network(workflow)
+            .unwrap_or_else(|_| panic!("known preparation returns its original owners"));
+        fixture.close_resources(returned).unwrap();
+        assert!(same_workflow);
+        assert_eq!(
+            trace, after,
+            "temporary preparation must not invoke the engine"
+        );
+        for directory in directories {
+            let directory =
+                directory.expect("cold create requires both actual temporary bind sources");
+            assert!(directory.is_dir());
+            assert_eq!(directory.permissions().mode() & 0o777, 0o700);
+            assert_eq!(directory.uid(), crate::native::uid());
+        }
+    }
+}
 #[test]
 fn enabled_skipped_preparation_never_reaches_create_or_claims_a_cold_phase() {
     if crate::test_process::isolate_case(

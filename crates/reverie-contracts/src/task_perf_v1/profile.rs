@@ -23,6 +23,9 @@ impl TaskPerfProfile {
         self.0.python_eq(&other.0)
     }
     pub fn derivative(&self) -> Result<Self> {
+        self.derivative_for_policy(TaskPerfPolicy::TaskV1)
+    }
+    pub fn derivative_for_policy(&self, policy: TaskPerfPolicy) -> Result<Self> {
         let fields = object(&self.0).ok_or(TaskPerfError::DefaultDeny)?;
         if fields
             .get(&key("defaultAction"))
@@ -35,9 +38,15 @@ impl TaskPerfProfile {
         let Some(Value(Node::Array(rules))) = fields.get(&key("syscalls")) else {
             return Err(TaskPerfError::DefaultDeny);
         };
-        let rule = rule_value()?;
+        let rule = rule_value(policy)?;
         if rules.iter().any(|existing| existing.python_eq(&rule)) {
             return Err(TaskPerfError::AlreadyApplied);
+        }
+        if policy == TaskPerfPolicy::TaskV2 {
+            let legacy = rule_value(TaskPerfPolicy::TaskV1)?;
+            if rules.iter().any(|existing| existing.python_eq(&legacy)) {
+                return Err(TaskPerfError::AlreadyApplied);
+            }
         }
         let mut derived = self.0.deep_clone();
         let Node::Object(fields) = &mut derived.0 else {
@@ -50,19 +59,30 @@ impl TaskPerfProfile {
         Ok(Self(derived))
     }
 }
-pub(crate) fn is_task_perf_rule(value: &Value) -> Result<bool> {
-    Ok(value.python_eq(&rule_value()?))
+pub(crate) fn is_task_perf_rule(value: &Value, policy: TaskPerfPolicy) -> Result<bool> {
+    Ok(value.python_eq(&rule_value(policy)?))
 }
-fn rule_value() -> Result<Value> {
-    let rule = TaskPerfPolicy::TaskV1.rule();
+fn rule_value(policy: TaskPerfPolicy) -> Result<Value> {
+    let rule = policy.rule();
+    let args = rule
+        .arguments()
+        .iter()
+        .map(|arg| {
+            format!(
+                r#"{{"index":{},"value":{},"valueTwo":{},"op":"{}"}}"#,
+                arg.index(),
+                arg.mask(),
+                arg.expected(),
+                arg.operator()
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
     let raw = format!(
-        r#"{{"names":["{}"],"action":"{}","args":[{{"index":{},"value":{},"valueTwo":{},"op":"{}"}}]}}"#,
+        r#"{{"names":["{}"],"action":"{}","args":[{}]}}"#,
         rule.syscall(),
         rule.action(),
-        rule.argument_index(),
-        rule.mask(),
-        rule.expected(),
-        rule.operator()
+        args,
     );
     Ok(legacy_json::decode_utf8(raw.as_bytes())?)
 }
@@ -85,7 +105,7 @@ impl TaskPerfArtifactData {
         }
         let base = TaskPerfProfile::decode(base)?;
         let selected = TaskPerfProfile::decode(selected)?;
-        if !selected.equivalent(&base.derivative()?) {
+        if !selected.equivalent(&base.derivative_for_policy(manifest.policy())?) {
             return Err(TaskPerfError::Derivative);
         }
         Ok(Self {

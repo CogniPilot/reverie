@@ -14,6 +14,8 @@ use std::{
 };
 
 pub(super) use crate::captured_client::test_hooks::{Gate, Hooks};
+#[path = "owner/tests.rs"]
+mod owner_cases;
 static NEXT: AtomicUsize = AtomicUsize::new(0);
 static FIXTURE: OnceLock<PathBuf> = OnceLock::new();
 pub(crate) fn program() -> &'static Path {
@@ -72,6 +74,9 @@ impl Drop for Tree {
 }
 fn deadline() -> Instant {
     Instant::now() + Duration::from_secs(2)
+}
+fn admission_deadline() -> Instant {
+    Instant::now() + Duration::from_millis(60)
 }
 fn settle(engine: &ReadonlyEngine) {
     engine.settle_owned(deadline()).unwrap();
@@ -165,23 +170,23 @@ fn actual_broker_inspection_shares_pending_constructor_and_closed_context_with_m
         engine
             .query(
                 EngineQuery::InventoryIds,
-                deadline(),
+                admission_deadline(),
                 &CancellationToken::new()
             )
             .unwrap_err()
             .fault(),
-        EngineFault::Busy
+        EngineFault::Deadline
     );
     assert_eq!(
         crate::broker_engine::inspect_laptop(
             &engine,
             &laptop_name(),
-            deadline(),
+            admission_deadline(),
             &CancellationToken::new()
         )
         .unwrap_err()
         .fault(),
-        EngineFault::Busy
+        EngineFault::Deadline
     );
     assert_eq!(starts.load(Ordering::SeqCst), 1);
     gate.released.store(true, Ordering::Release);
@@ -252,12 +257,12 @@ fn different_private_policies_share_the_same_pending_context_and_closed_admissio
         engine
             .query(
                 EngineQuery::InventoryIds,
-                deadline(),
+                admission_deadline(),
                 &CancellationToken::new()
             )
             .unwrap_err()
             .fault(),
-        EngineFault::Busy
+        EngineFault::Deadline
     );
     assert!(engine.close(Instant::now()).is_err());
     let still_pending = engine
@@ -296,6 +301,17 @@ fn expected_argv(value: &serde_json::Value, name: &str) -> Vec<String> {
         .collect()
 }
 
+#[test]
+fn worker_image_inspection_uses_closed_exact_pin_without_container_fallback() {
+    use reverie_contracts::worker_image_switch::WorkerImageId;
+    let image = WorkerImageId::parse(&format!("sha256:{}", "a".repeat(64))).unwrap();
+    let arguments = EngineQuery::WorkerImageInspect(&image).arguments().unwrap();
+    assert_eq!(
+        arguments,
+        ["image", "inspect", "--format", "{{json .}}", image.as_str()].map(OsString::from)
+    );
+    assert!(WorkerImageId::parse("--privileged").is_err());
+}
 #[test]
 fn fixed_query_arguments_and_closed_container_references_match_source() {
     let corpus: serde_json::Value = serde_json::from_str(include_str!(
@@ -427,10 +443,10 @@ fn inherited_pipe_writers_fence_new_queries_until_owned_pipe_cleanup_finishes() 
     assert!(error.is_uncertain());
     assert_eq!(
         engine
-            .query(EngineQuery::InventoryIds, deadline(), &token)
+            .query(EngineQuery::InventoryIds, admission_deadline(), &token)
             .unwrap_err()
             .fault(),
-        EngineFault::Busy
+        EngineFault::Deadline
     );
     settle(&engine);
 }
@@ -463,12 +479,12 @@ fn timed_out_constructor_is_retained_and_never_starts_an_unbounded_thread_sequen
             engine
                 .query(
                     EngineQuery::InventoryIds,
-                    deadline(),
+                    admission_deadline(),
                     &CancellationToken::new()
                 )
                 .unwrap_err()
                 .fault(),
-            EngineFault::Busy
+            EngineFault::Deadline
         );
     }
     assert_eq!(starts.load(Ordering::SeqCst), 1);
@@ -615,11 +631,11 @@ fn preparation_close_uncertainty_fences_queries_before_child_construction() {
         engine
             .query(
                 EngineQuery::InventoryIds,
-                deadline(),
+                admission_deadline(),
                 &CancellationToken::new()
             )
             .unwrap_err()
             .fault(),
-        EngineFault::Busy
+        EngineFault::Deadline
     );
 }

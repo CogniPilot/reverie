@@ -31,10 +31,18 @@ fn run() -> Result<(), Box<dyn Error>> {
         [command] if command == "verify-worker-package" => {
             worker_package::verify(&workspace_root()?)?
         }
+        [command] if command == "verify-worker-child-package" => {
+            worker_package::verify_child(&workspace_root()?)?
+        }
         [command] if command == "prepare-ci-userns" => ci_userns::prepare()?,
         [command] if command == "prepare-ci-perf" => worker_perf::prepare_ci()?,
         [command, mode] if command == "verify-worker-perf" && mode == "--ci" => {
             worker_perf::image_ci(&workspace_root()?)?;
+        }
+        [command, mode, rest @ ..]
+            if command == "verify-worker-perf" && mode == "--rootless-image" =>
+        {
+            worker_perf::rootless_image(&workspace_root()?, rest)?;
         }
         [command, mode, value, policy, manifest]
             if command == "verify-worker-perf"
@@ -65,6 +73,12 @@ fn run() -> Result<(), Box<dyn Error>> {
 }
 
 fn help() {
+    println!(
+        "cargo xtask verify-worker-child-package\n  Linux: build the public runtime-selected workerChild and native candidate, then qualify their actual ELF identity and --pane-exit ABI with the Rust package test. No container or service is started."
+    );
+    println!(
+        "cargo xtask verify-worker-perf --rootless-image sha256:IMAGE --policy-manifest PATH --image-provenance PATH --docker-tools NIX_PACKAGE --native-coreutils NIX_PACKAGE --closure JSON --core-closure JSON --task-perf-policy task-v2\n  Full multithread recording requires task-v2. Omitted policy retains the legacy task-v1 restricted/negative selector; its recording refusal is not a host limitation or capability pass. Explicit isolated Rust-owned rootless image acceptance: actual nonroot versioned task perf stat/record/report and one native inner-container workload. Uses only declared immutable public Nix artifacts and disposable containers; never prepares host settings. Kernel/package/runtime refusal is a failure, not a passed skip."
+    );
     println!(
         "cargo xtask verify-worker-perf --ci\n  Disposable Ubuntu24.04 GitHub-hosted runner only: prepare host support, build the Nix image/policy, import under an owned temporary tag, verify real perf, and clean up on either outcome. Refuses local/self-hosted use."
     );

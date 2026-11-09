@@ -42,7 +42,7 @@ fn known_closed_socket_holds_the_same_capacity_until_exact_checked_lifecycle_rel
     let (_client, socket) = fixture.sockets();
     assert!(matches!(
         service.accept(socket, &fixture.collector, &configuration()),
-        Err(WorkerReportError::Stopping)
+        Err(WorkerReportError::Capacity)
     ));
     hold.release(end()).unwrap();
     hold.release(end()).unwrap();
@@ -51,7 +51,7 @@ fn known_closed_socket_holds_the_same_capacity_until_exact_checked_lifecycle_rel
     let (_client, socket) = fixture.sockets();
     assert!(matches!(
         service.accept(socket, &fixture.collector, &configuration()),
-        Err(WorkerReportError::Stopping)
+        Err(WorkerReportError::Capacity)
     ));
     for (_, other) in others {
         other.close(end()).unwrap();
@@ -77,7 +77,7 @@ fn repeated_abandoned_closed_requests_cannot_bypass_the_actual_record_limit() {
     let (mut client, socket) = fixture.sockets();
     assert!(matches!(
         service.accept(socket, &fixture.collector, &configuration()),
-        Err(WorkerReportError::Stopping)
+        Err(WorkerReportError::Capacity)
     ));
     assert_eq!(client.read(&mut [0]).unwrap(), 0);
     assert!(

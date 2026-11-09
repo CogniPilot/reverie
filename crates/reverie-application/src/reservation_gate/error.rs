@@ -1,12 +1,16 @@
 use super::*;
 #[derive(Debug)]
 pub enum GateError {
+    Actor(Box<reverie_host::worker_reports::ResourceJournalError>),
+    RamPolicy(reverie_contracts::ram_migration::RamMigrationError),
     OriginalSource(Box<crate::installing_broker::StorageWorkflowError>),
     SourceStopData(reverie_contracts::worker_source_stop::SourceStopDataError),
     NativeSourceStopUncertain {
         cause: Box<Self>,
     },
     GpuData(reverie_contracts::gpu_access::GpuDataError),
+    ImageFiles(reverie_host::worker_image::ImageFileError),
+    ImageTransition(Arc<GateError>),
     GpuHost(reverie_host::gpu_access::GpuHostError),
     GpuApplyUncertain {
         cause: Box<Self>,
@@ -49,6 +53,7 @@ pub enum GateError {
     Image(ImageHostError),
     Observer(ObserverError),
     Journal(JournalError),
+    SharedJournal(Arc<JournalError>),
     Policy(WorkerValidationError),
     Configuration(EngineDataError),
     Refused(&'static str),
@@ -63,12 +68,16 @@ pub enum GateError {
 impl GateError {
     pub fn code(&self) -> &'static str {
         match self {
+            Self::Actor(error) => error.code(),
+            Self::RamPolicy(error) => error.code(),
             Self::OriginalSource(error) => error.code(),
             Self::SourceStopData(error) => error.code(),
             Self::NativeSourceStopUncertain { .. } => {
                 "RESOURCE_NATIVE_SOURCE_STOP_UNCERTAIN_KEEP_CLAIM"
             }
             Self::GpuData(error) => error.code(),
+            Self::ImageFiles(error) => error.code(),
+            Self::ImageTransition(error) => error.code(),
             Self::GpuHost(error) => error.code(),
             Self::GpuApplyUncertain { .. } => "GPU_APPLY_REQUIRES_RECONCILIATION",
             Self::StartData(error) => error.code(),
@@ -109,6 +118,7 @@ impl GateError {
             Self::Image(error) => error.code(),
             Self::Observer(error) => error.code(),
             Self::Journal(error) => error.code(),
+            Self::SharedJournal(error) => error.code(),
             Self::Policy(_) => "WORKER_VALIDATION_DATA",
             Self::Configuration(error) => error.code(),
             Self::Refused(code) => code,
@@ -125,10 +135,14 @@ impl std::fmt::Display for GateError {
 impl std::error::Error for GateError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
+            Self::Actor(error) => Some(error.as_ref()),
+            Self::RamPolicy(error) => Some(error),
             Self::OriginalSource(error) => Some(error.as_ref()),
             Self::SourceStopData(error) => Some(error),
             Self::NativeSourceStopUncertain { cause } => Some(cause.as_ref()),
             Self::GpuData(error) => Some(error),
+            Self::ImageFiles(error) => Some(error),
+            Self::ImageTransition(error) => Some(error.as_ref()),
             Self::GpuHost(error) => Some(error),
             Self::GpuApplyUncertain { cause } => Some(cause),
             Self::StartData(error) => Some(error),
@@ -161,6 +175,7 @@ impl std::error::Error for GateError {
             Self::Image(error) => Some(error),
             Self::Observer(error) => Some(error),
             Self::Journal(error) => Some(error),
+            Self::SharedJournal(error) => Some(error.as_ref()),
             Self::Policy(error) => Some(error),
             Self::Configuration(error) => Some(error),
             Self::Finalization { primary, .. } => Some(primary),
@@ -179,6 +194,11 @@ macro_rules! from_error {
     };
 }
 from_error!(ControlHostError, Control);
+from_error!(reverie_host::worker_image::ImageFileError, ImageFiles);
+from_error!(
+    reverie_contracts::ram_migration::RamMigrationError,
+    RamPolicy
+);
 from_error!(
     reverie_contracts::reservation_baseline::StartDataError,
     StartData

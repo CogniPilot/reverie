@@ -4,6 +4,7 @@ mod baseline;
 mod cold;
 mod custody;
 mod limits;
+mod pool;
 mod source_release;
 mod storage;
 mod targets;
@@ -37,6 +38,9 @@ pub enum ReservationKernelError {
     Refused(&'static str),
 }
 impl ReservationKernelError {
+    pub fn has_unconfirmed_close(&self) -> bool {
+        matches!(self, Self::Observation(error) if error.has_unconfirmed_close())
+    }
     pub fn code(&self) -> &'static str {
         match self {
             Self::Observation(value) => value.code(),
@@ -196,6 +200,19 @@ fn pid_start(source: &impl Source, pid: &UnsignedInteger, end: Instant) -> Resul
 pub(crate) fn existing_process_start(pid: &UnsignedInteger, end: Instant) -> Result<String> {
     pid_start(&Installed, pid, end)
 }
+/// M's Path.read_text is UTF-8, including a non-ASCII kernel comm field. Reuse
+/// the same held file reader and process token parser without the distinct
+/// protected/ordinary stop purpose's whole-file ASCII policy.
+pub(crate) fn chat_image_process_start(pid: &UnsignedInteger, end: Instant) -> Result<String> {
+    need(!pid.is_zero(), "RESERVATION_NATIVE_PID")?;
+    Ok(kernel_accounting::process_start(&text(
+        &Installed,
+        &path(&format!("{PROC}/{}/stat", pid.as_str())),
+        65536,
+        false,
+        end,
+    )?)?)
+}
 fn table(source: &impl Source, end: Instant) -> Result<MountTable> {
     table_at(source, "self", end)
 }
@@ -306,6 +323,25 @@ impl ReservationKernel {
         end: Instant,
     ) -> Result<LimitsObservation> {
         limits::observe(&Installed, row, policy, end)
+    }
+    pub fn verify_protected_pool_memory(
+        &self,
+        config: &ReservationConfiguration,
+        website: &reverie_contracts::reservation_engine::NativeLimitBinding,
+        end: Instant,
+    ) -> Result<()> {
+        pool::capture(&Installed, config, website, end).map(|_| ())
+    }
+    pub fn protected_pool_charge(
+        &self,
+        config: &ReservationConfiguration,
+        website: &reverie_contracts::reservation_engine::NativeLimitBinding,
+        row: &ContainerRow,
+        observed: &reverie_contracts::reservation_engine::NativeLimitBinding,
+        policy: &ObservedMemoryPolicy,
+        end: Instant,
+    ) -> Result<UnsignedInteger> {
+        pool::charge(&Installed, config, website, row, observed, policy, end)
     }
     pub fn custody_scan(
         &self,

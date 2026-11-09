@@ -9,6 +9,11 @@ publish.workspace = true
 clap.workspace = true
 libc.workspace = true
 reverie-contracts.workspace = true
+reverie-core.workspace = true
+reverie-elf-bundle.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+sha2.workspace = true
 
 [lints]
 workspace = true

@@ -2,7 +2,9 @@
 //! sequence; handles/data here never mint owner, admission or start authority.
 mod cleanup;
 mod cold;
+mod diagnostic;
 mod drive;
+mod handler_settlement;
 mod image;
 mod log;
 mod post_copy;

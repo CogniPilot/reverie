@@ -21,9 +21,7 @@ impl WorkerRuntime {
             "WORKER_LAPTOP_CREATED_OWNER_REQUIRED",
         )?;
         let keep = started(creation.stage);
-        if !matches!(record.phase, Phase::Stopped | Phase::CleanupRetained) {
-            record.phase = Phase::Cleaning;
-        }
+        record.begin_cleanup()?;
         if record
             .creation
             .as_ref()

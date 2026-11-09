@@ -109,7 +109,8 @@ impl ColdBody<'_> {
                 };
                 match native.reclaim(self.end()) {
                     Ok(returned) => {
-                        let (storage, plan, _previous, removal) = returned.into_cold_parts();
+                        let (storage, plan, _previous, removal, phone) = returned.into_cold_parts();
+                        self.predecessor_phone = phone;
                         self.resources = Some(Resources::Stopped(Stopped {
                             storage,
                             plan,
@@ -157,7 +158,8 @@ impl ColdBody<'_> {
         };
         match native.reclaim(self.end()) {
             Ok(returned) => {
-                let (storage, plan, _process, removal) = returned.into_cold_parts();
+                let (storage, plan, _process, removal, phone) = returned.into_cold_parts();
+                self.predecessor_phone = phone;
                 self.resources = Some(Resources::Stopped(Stopped {
                     storage,
                     plan,

@@ -9,6 +9,7 @@ use reverie_host::worker_reports::{
 use std::{os::unix::net::UnixStream, time::Instant};
 mod error;
 mod preparation;
+pub(in crate::installing_broker) mod service;
 pub(in crate::installing_broker) use preparation::StartedLaptop;
 mod viewer;
 pub use error::{LaunchAdmissionFailure, WorkerDispatchError};
@@ -132,6 +133,7 @@ impl<'a> ReceivedWorkerLaunch<'a> {
         ),
         WorkerDispatchError,
     > {
+        self.connection.assert_ordinary_origin()?;
         self.connection.assert_open(&self.broker.storage.runtime)?;
         self.broker.refresh_launch_configuration()?;
         if self.request().attach_only() != Some(true) {

@@ -1,6 +1,7 @@
 //! Actual same-runtime/lease and controlled-source process observations. Engine
 //! replies/effects are an owned Rust fixture, not live-container authority.
 use super::*;
+mod control;
 mod fixture;
 mod legacy;
 mod ordinary;

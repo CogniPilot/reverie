@@ -5,10 +5,12 @@ mod bootstrap;
 mod control;
 #[cfg(test)]
 mod installed_context_tests;
+mod owner;
 #[cfg(test)]
 pub(crate) mod tests;
 pub use bootstrap::EngineBootstrap;
 pub use control::{CancellationToken, ReadonlyEngine};
+pub use owner::MetadataQueryOwner;
 use reverie_core::ids::ContainerId;
 use std::{ffi::OsString, fmt};
 
@@ -46,10 +48,45 @@ pub enum EngineQuery<'a> {
     GpuInformation,
     TelemetryInventory,
     TelemetryInspect(&'a reverie_core::command_telemetry::TelemetryContainerId),
+    WorkerPoolInspect(&'a ContainerId),
+    WorkerImageInspect(&'a reverie_contracts::worker_image_switch::WorkerImageId),
+    ProviderPane(&'a ContainerId),
+    ProviderTop(&'a ContainerId),
 }
 impl EngineQuery<'_> {
     fn arguments(self) -> Result<Vec<OsString>> {
         let (format, ids) = match self {
+            Self::WorkerImageInspect(id) => {
+                return Ok(["image", "inspect", "--format", "{{json .}}", id.as_str()]
+                    .map(Into::into)
+                    .to_vec());
+            }
+            Self::ProviderPane(id) => {
+                return Ok([
+                    "exec",
+                    "--env",
+                    "LANG=C.UTF-8",
+                    "--env",
+                    "LC_ALL=C.UTF-8",
+                    id.as_str(),
+                    "/bin/tmux",
+                    "-u",
+                    "-L",
+                    "reverie-laptop",
+                    "display-message",
+                    "-p",
+                    "-t",
+                    "office",
+                    "#{pane_dead}|#{pane_pid}",
+                ]
+                .map(Into::into)
+                .to_vec());
+            }
+            Self::ProviderTop(id) => {
+                return Ok(["top", id.as_str(), "-eo", "pid,ppid"]
+                    .map(Into::into)
+                    .to_vec());
+            }
             Self::InventoryIds => return Ok(["ps", "-aq", "--no-trunc"].map(Into::into).to_vec()),
             Self::TelemetryInventory => {
                 return Ok([
@@ -64,6 +101,9 @@ impl EngineQuery<'_> {
                 .to_vec());
             }
             Self::TelemetryInspect(id) => {
+                return Ok(["inspect", id.as_str()].map(Into::into).to_vec());
+            }
+            Self::WorkerPoolInspect(id) => {
                 return Ok(["inspect", id.as_str()].map(Into::into).to_vec());
             }
             Self::GpuInformation => {

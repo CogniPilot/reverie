@@ -1,10 +1,12 @@
-{ pkgs, src, reverie, console, memory, runtime, worker ? false, browserRuntime ? null, chatLanguageTools ? null, rootlessDocker ? null, resourceReplacement ? false, ownerTerminalWebsite ? null, memoryGuestCapsule ? null }:
+{ pkgs, src, reverie, console, memory, runtime, worker ? false, browserRuntime ? null, chatLanguageTools ? null, rootlessDocker ? null, resourceReplacement ? false, ownerTerminalWebsite ? null, memoryGuestCapsule ? null, perfGuestCapsule ? null }:
 let
   uid = if rootlessDocker == null then 2000 else rootlessDocker.uid;
   gid = if rootlessDocker == null then 2000 else rootlessDocker.gid;
   idmap = import ./worker-idmap.nix { inherit pkgs; };
   imagePython = if worker then import ./worker-python.nix { inherit pkgs memory; } else memory;
   laptopTools = import ./laptop-tools.nix { inherit pkgs src; };
+  childArtifacts = import ./policy-artifacts.nix { inherit pkgs src; };
+  childManifest = if worker then "${runtime.workerChild}/share/reverie/worker-child-program.json" else null;
   # Kernel-start the untouched Claude/Bun ELF so /proc/self/exe names Claude,
   # not ld-linux (its bundled grep/find shims use process.execPath).
   claudeInterpreter = if pkgs.stdenv.hostPlatform.isx86_64 then "/lib64/ld-linux-x86-64.so.2"
@@ -46,6 +48,7 @@ let
       ((import ./service-auth-config.nix { inherit (pkgs) lib; }) (builtins.elemAt ownerWebArgs 6)) ];
 in assert builtins.isBool resourceReplacement && (!resourceReplacement || !worker);
 assert memoryGuestCapsule == null || worker;
+assert perfGuestCapsule == null || worker;
 assert ownerTerminalWebsite == null || (!worker && !resourceReplacement &&
   (builtins.elem ownerWebArgs [ webArgs (webArgs ++ [ "--resource-replacement" ]) ] || serviceAuthWebArgs));
 assert rootlessDocker == null || (worker && builtins.isInt uid && builtins.isInt gid && uid > 0 && gid > 0
@@ -70,6 +73,12 @@ pkgs.dockerTools.buildLayeredImage {
       # No context, service grant, default command or launcher is selected here.
       cp -r ${memoryGuestCapsule}/opt/reverie/memory opt/reverie/memory
       test ! -e opt/rvmem
+    ''}
+    ${pkgs.lib.optionalString (perfGuestCapsule != null) ''
+      # Fixed real files survive the employee's writable /nix overlay.
+      # This candidate slot does not select an installed launch policy.
+      cp -r ${perfGuestCapsule}/opt/reverie/perf opt/reverie/perf
+      test ! -e opt/rvprf
     ''}
     unlink bin/reverie
     ln -s ${reverie}/bin/reverie bin/reverie
@@ -129,6 +138,13 @@ pkgs.dockerTools.buildLayeredImage {
       ln -s ${pkgs.stdenv.cc.bintools.dynamicLinker} .${claudeInterpreter}
     ''}
     ${pkgs.lib.optionalString worker ''
+      # Bind the actual final guest alias, not a label or a candidate package.
+      ${childArtifacts}/bin/reverie-policy-artifacts verify-worker-child-root \
+        --program "$PWD/bin/reverie-worker-child" --manifest ${childManifest}
+      test ! -e opt/reverie/worker-child && test ! -L opt/reverie/worker-child
+      mkdir opt/reverie/worker-child
+      cp ${childManifest} opt/reverie/worker-child/program.json
+      chmod 444 opt/reverie/worker-child/program.json
       # Keep the interactive aliases and pytest on the laptop-only interpreter.
       for command in python python3 ${pkgs.python3.executable} pytest py.test; do
         test -L "bin/$command"
@@ -170,6 +186,11 @@ pkgs.dockerTools.buildLayeredImage {
     REGISTRY
   '';
   fakeRootCommands = ''
+    ${pkgs.lib.optionalString worker ''
+      chown -R 0:0 opt/reverie/worker-child
+      chmod 755 opt/reverie/worker-child
+      chmod 444 opt/reverie/worker-child/program.json
+    ''}
     ${pkgs.lib.optionalString (memoryGuestCapsule != null) ''
       chown -R 0:0 opt/reverie/memory
       chmod -R a-w opt/reverie/memory
@@ -202,8 +223,8 @@ pkgs.dockerTools.buildLayeredImage {
   config = {
     User = "${toString uid}:${toString gid}";
     WorkingDir = "/reverie_workspace";
-    Entrypoint = if worker then [ "/bin/sleep" ] else [ "/bin/tini" "-g" "-s" "--" "/usr/local/bin/reverie-start" ];
-    Cmd = if worker then [ "infinity" ] else if ownerTerminalWebsite != null then
+    Entrypoint = if worker then (if perfGuestCapsule == null then [ "/bin/sleep" ] else [ "/opt/reverie/perf/bin/reverie-worker-init" ]) else [ "/bin/tini" "-g" "-s" "--" "/usr/local/bin/reverie-start" ];
+    Cmd = if worker then (if perfGuestCapsule == null then [ "infinity" ] else []) else if ownerTerminalWebsite != null then
       ([ "${ownerTerminalWebsite}/libexec/reverie" ] ++ ownerTerminalWebsite.webArgs) else
       [ "reverie" "web" "--host" "0.0.0.0" "--port" "3000" ]
       ++ pkgs.lib.optionals resourceReplacement [ "--resource-replacement" ];
@@ -219,6 +240,7 @@ pkgs.dockerTools.buildLayeredImage {
       "NIX_SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt" ]
       # Laptops: Reverie's own hooks run the image's CLI, so an older `reverie` earlier on PATH (a home
       # install from before a release) cannot answer for them.
+      ++ pkgs.lib.optionals (!worker && ownerTerminalWebsite == null) [ "REVERIE_NATIVE_FRONT=1" ]
       ++ pkgs.lib.optionals worker [ "REVERIE_CLI=${reverie}/bin/reverie" ]
       ++ pkgs.lib.optionals worker [ "NIX_REMOTE=local" "NIX_PATH=nixpkgs=flake:nixpkgs"
         "TZDIR=${pkgs.tzdata}/share/zoneinfo" ]
@@ -233,6 +255,8 @@ pkgs.dockerTools.buildLayeredImage {
       "org.reverie.worker.uid" = toString uid;
       "org.reverie.worker.gid" = toString gid;
       "org.reverie.worker.rootless-docker" = if rootlessDocker == null then "0" else "1";
+    } // pkgs.lib.optionalAttrs worker {
+      "org.reverie.worker.child-manifest" = childManifest;
     } // pkgs.lib.optionalAttrs (!worker && (resourceReplacement || ownerTerminalWebsite != null)) {
       "org.reverie.website.runtime" = if ownerTerminalWebsite == null then "resource"
         else if builtins.elem "--resource-replacement" ownerTerminalWebsite.webArgs then "resource-terminal"

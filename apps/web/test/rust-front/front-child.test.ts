@@ -4,7 +4,9 @@
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { spawn, type ChildProcess } from 'node:child_process';
-import { resolve } from 'node:path';
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
 import type { Duplex } from 'node:stream';
 import { FakeFront, type FakeConnection } from './fake-front.js';
 import { responseBody, sseBody } from './http-body.js';
@@ -361,4 +363,133 @@ describe.runIf(process.platform !== 'win32')('the front-child fixture on a real 
     const request = await running.fake.next('bind_request');
     expect(request.body).toEqual({ kind: 'bind_request', listener: 'main', tls: true, port: 0, host: '127.0.0.1' });
   }, 20_000);
+});
+
+/** The production `reverie web` (src/index.ts) started as the front's child, with the fake front on its real fd 3. */
+function startProduction(port: number): Running {
+  const home = mkdtempSync(join(tmpdir(), 'front-production-'));
+  const child = spawn(
+    process.execPath,
+    ['--import', 'tsx', 'src/index.ts', 'web', '--host', '127.0.0.1', '--port', String(port)],
+    {
+      cwd: web,
+      env: { ...process.env, HOME: home, REVERIE_DATA_DIR: join(home, 'data'), REVERIE_FRONT_CHILD: '1' },
+      stdio: ['ignore', 'ignore', 'pipe', 'pipe'],
+    }
+  );
+  children.push(child);
+  const fake = new FakeFront(1n, child.stdio[3] as Duplex);
+  let stderr = '';
+  child.stderr?.on('data', (chunk: Buffer) => (stderr += chunk.toString()));
+  const exited = new Promise<number | null>((done) => child.on('exit', (code) => done(code)));
+  const channelEnded = new Promise<void>((done) => fake.peer.once('end', () => done()));
+  return { child, fake, events: [], exited, channelEnded, stderr: () => stderr } as Running & { stderr(): string };
+}
+
+/** The production server's startup is far slower than the fixture's; wait for a frame kind with that budget. */
+const arrived = (running: Running, kind: 'bind_request' | 'service_ready') =>
+  running.fake.until(() => running.fake.frames.some((frame) => frame.body.kind === kind), 60_000, `a ${kind} frame`);
+
+describe.runIf(process.platform !== 'win32')('production reverie web behind the front', () => {
+  it('keeps a shutdown frame that arrives during startup, and stops cleanly once the server is up', async () => {
+    const running = startProduction(41201);
+    await arrived(running, 'bind_request');
+    // Startup is still waiting on the bind when the front asks it to stop.
+    running.fake.send(0n, { kind: 'shutdown', signal: 'SIGTERM' });
+    running.fake.send(0n, { kind: 'bound', listener: 'main', port: 41001 });
+    expect(await running.exited).toBe(0);
+    await running.channelEnded;
+  }, 90_000);
+
+  it('stops cleanly on a shutdown frame after it is ready', async () => {
+    const running = startProduction(41202);
+    await arrived(running, 'bind_request');
+    running.fake.send(0n, { kind: 'bound', listener: 'main', port: 41002 });
+    await arrived(running, 'service_ready');
+    running.fake.send(0n, { kind: 'shutdown', signal: 'SIGTERM' });
+    expect(await running.exited).toBe(0);
+    await running.channelEnded;
+  }, 90_000);
+
+  it('refuses with 78 and serves nothing when the front is selected but not provided', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'front-production-'));
+    const child = spawn(
+      process.execPath,
+      ['--import', 'tsx', 'src/index.ts', 'web', '--host', '127.0.0.1', '--port', '41204'],
+      {
+        cwd: web,
+        env: {
+          ...process.env,
+          HOME: home,
+          REVERIE_DATA_DIR: join(home, 'data'),
+          REVERIE_NATIVE_FRONT: '1',
+          REVERIE_NATIVE_FRONT_BIN: '',
+        },
+        stdio: ['ignore', 'ignore', 'pipe'],
+      }
+    );
+    children.push(child);
+    let stderr = '';
+    child.stderr?.on('data', (chunk: Buffer) => (stderr += chunk.toString()));
+    expect(await new Promise<number | null>((done) => child.on('exit', (code) => done(code)))).toBe(78);
+    expect(stderr).toMatch(/REVERIE_NATIVE_FRONT_BIN/);
+  }, 90_000);
+
+  it('becomes the front in the same process, with its Node, entry and web arguments and a marked child', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'front-production-'));
+    // A stand-in front, written for this test only: it reports the process it runs in and what it was given.
+    const front = join(home, 'reverie-front');
+    writeFileSync(
+      front,
+      `#!${process.execPath}\nprocess.stdout.write(JSON.stringify({ pid: process.pid, argv: process.argv.slice(2), child: process.env.REVERIE_FRONT_CHILD }))\n`,
+      { mode: 0o755 }
+    );
+    const child = spawn(
+      process.execPath,
+      ['--import', 'tsx', 'src/index.ts', 'web', '--host', '127.0.0.1', '--port', '41205'],
+      {
+        cwd: web,
+        env: {
+          ...process.env,
+          HOME: home,
+          REVERIE_DATA_DIR: join(home, 'data'),
+          REVERIE_NATIVE_FRONT: '1',
+          REVERIE_NATIVE_FRONT_BIN: front,
+        },
+        stdio: ['ignore', 'pipe', 'pipe'],
+      }
+    );
+    children.push(child);
+    let stdout = '';
+    child.stdout?.on('data', (chunk: Buffer) => (stdout += chunk.toString()));
+    expect(await new Promise<number | null>((done) => child.on('exit', (code) => done(code)))).toBe(0);
+    const report = JSON.parse(stdout.slice(stdout.indexOf('{"pid"'))) as {
+      pid: number;
+      argv: string[];
+      child?: string;
+    };
+    expect(report.pid).toBe(child.pid);
+    expect(report.argv).toEqual([
+      '--node',
+      process.execPath,
+      '--entrypoint',
+      resolve(web, 'src/index.ts'),
+      '--',
+      'web',
+      '--host',
+      '127.0.0.1',
+      '--port',
+      '41205',
+    ]);
+    expect(report.child).toBe('1');
+  }, 90_000);
+
+  it('exits 70 without closing when the channel faults', async () => {
+    const running = startProduction(41203);
+    await arrived(running, 'bind_request');
+    running.fake.send(0n, { kind: 'bound', listener: 'main', port: 41003 });
+    await arrived(running, 'service_ready');
+    running.fake.peer.end();
+    expect(await running.exited).toBe(70);
+  }, 90_000);
 });

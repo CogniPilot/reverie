@@ -6,13 +6,15 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
+serde.workspace = true
+serde_json.workspace = true
 sha2.workspace = true
 libc.workspace = true
 getrandom.workspace = true
 # "signal" is for the lease CLI, which shares one Nix build with the other host tools: with it here every
 # host tool resolves the same nix features alone as together. The other host tools now also compile nix's
 # signal and process modules.
-nix = { workspace = true, features = ["term", "fs", "socket", "poll", "user", "signal"] }
+nix = { workspace = true, features = ["term", "fs", "socket", "poll", "user", "signal", "time"] }
 reverie-core.workspace = true
 reverie-diagnostics.workspace = true
 reverie-python-regex.workspace = true
@@ -34,9 +36,7 @@ rustls-platform-verifier.workspace = true
 
 [dev-dependencies]
 nix = { workspace = true, features = ["mount"] }
-serde.workspace = true
 socket2.workspace = true
-serde_json.workspace = true
 sha2.workspace = true
 
 [lints]

@@ -65,7 +65,8 @@ const REQUIRED: [&str; 22] = [
     "mounts",
     "maintenanceSessions",
 ];
-const OPTIONAL: [&str; 17] = [
+const OPTIONAL: [&str; 18] = [
+    "workerPoolProvider",
     "gpuGrants",
     "employeeGpuGrants",
     "employeePerfPolicies",
@@ -117,7 +118,7 @@ impl WorkerEnvelope {
     ) -> std::result::Result<Self, E> {
         let fields = object(config.as_value()).ok_or(WorkerSchemaError::Header)?;
         header(fields)?;
-        let base = base(fields)?;
+        let base = base(fields, &config)?;
         paths(fields)?;
         let paths = [
             "socket",
@@ -264,8 +265,16 @@ fn header(fields: &Object) -> Result<()> {
     }
     Ok(())
 }
-fn base(fields: &Object) -> Result<WorkerBase> {
-    if !text(field(fields, "cgroupParent"))?.equals_ascii("reverie-workers.slice") {
+fn base(fields: &Object, config: &EffectiveWorkerConfig) -> Result<WorkerBase> {
+    // Selection remains DATA. It permits only the exact derived spelling;
+    // installation, maintenance and allocation are checked by their owners.
+    let provider = crate::worker_pool::WorkerPoolProvider::from_config(config)
+        .map_err(|_| WorkerSchemaError::Base)?;
+    let parent = provider.as_ref().map_or_else(
+        || "reverie-workers.slice".to_owned(),
+        |selected| selected.policy().parent_slice(),
+    );
+    if !text(field(fields, "cgroupParent"))?.equals_ascii(&parent) {
         return Err(WorkerSchemaError::Base);
     }
     let resources = crate::broker_resources::template_fields(fields)?

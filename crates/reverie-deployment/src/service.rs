@@ -10,7 +10,9 @@ use std::{
     time::{Duration, Instant},
 };
 mod apply;
+mod claim;
 mod rollback;
+mod shared_writers;
 
 /// Local host-owner bootstrap service over the registered deployment. The
 /// installed owner executes this API; guests and role names confer no access.
@@ -44,6 +46,7 @@ impl DeploymentService {
             source["State"]["Running"] == true,
             "DEPLOYMENT_SOURCE_NOT_RUNNING",
         )?;
+        self.refuse_shared_writers(&source)?;
         let old_image = self.engine.image(model::string(&source, "Image")?)?;
         let candidate = self.engine.image(image)?;
         require(
@@ -103,8 +106,11 @@ impl DeploymentService {
             !operation.exists("create-attempt"),
             "DEPLOYMENT_CREATE_ALREADY_ATTEMPTED",
         )?;
-        self.claim(operation)?;
-        pins.running_mounts(&self.source_current(operation, true)?)?;
+        let before = self.source_current(operation, true)?;
+        let claim = self.claim(operation, &before)?;
+        let current = self.source_current(operation, true)?;
+        claim.finish(operation, &current)?;
+        pins.running_mounts(&current)?;
         operation.attempt("create-attempt")?;
         let name = temporary_name(operation, "candidate");
         let created = self.engine.json(
@@ -171,16 +177,12 @@ impl DeploymentService {
         }
         Ok(status)
     }
-    fn observe_ready(&self, operation: &Operation, front: bool) -> Result<()> {
+    fn observe_ready(&self, operation: &Operation, candidate: bool) -> Result<()> {
+        let (id, front) = operation.readiness_target(candidate)?;
         let pins = self.pins(operation)?;
         let result = (|| {
-            let id = if front {
-                operation.candidate()?
-            } else {
-                model::string(&operation.plan.source, "Id")?.into()
-            };
             let current = self.engine.container(&id)?;
-            if front {
+            if candidate {
                 model::candidate_matches(&current, &operation.plan.source, &operation.plan.body)?;
                 self.source_current(operation, false)?;
             } else {
@@ -247,16 +249,11 @@ impl DeploymentService {
         }
         Ok(current)
     }
-    fn claim(&self, operation: &Operation) -> Result<()> {
-        installation::exclusive_json(
-            &self
-                .installation
-                .state
-                .join("console-deployment-active.json"),
-            &json!({"operation":operation.plan.operation}),
-        )
-    }
     fn claimed(&self, operation: &Operation) -> Result<()> {
+        require(
+            !operation.record_present("successor-attempt")?,
+            "DEPLOYMENT_CLAIM_SUPERSEDED_OR_UNCONFIRMED",
+        )?;
         let bytes = installation::read_bounded(
             &self
                 .installation
@@ -278,37 +275,36 @@ impl DeploymentService {
         }
     }
     fn data_source(&self, operation: &Operation) -> Result<PathBuf> {
-        let mounts = operation.plan.source["Mounts"]
-            .as_array()
-            .ok_or_else(|| DeploymentError::new("DEPLOYMENT_MOUNTS_REQUIRED"))?;
-        let selected = mounts
-            .iter()
-            .filter(|m| m["Destination"] == "/instances/default")
-            .collect::<Vec<_>>();
-        require(
-            selected.len() == 1 && selected[0]["Type"] == "bind" && selected[0]["RW"] == true,
-            "DEPLOYMENT_DATA_BIND_REQUIRED",
-        )?;
-        for entry in operation.plan.source["Config"]["Env"]
-            .as_array()
-            .into_iter()
-            .flatten()
-        {
-            let entry = entry
-                .as_str()
-                .ok_or_else(|| DeploymentError::new("DEPLOYMENT_ENV_INVALID"))?;
-            require(
-                !entry.starts_with("REVERIE_DATA=") || entry == "REVERIE_DATA=/instances/default",
-                "DEPLOYMENT_DATA_LAYOUT_UNSUPPORTED",
-            )?;
-            require(
-                !entry.starts_with("REVERIE_DATA_DIR=")
-                    || entry == "REVERIE_DATA_DIR=/instances/default/console",
-                "DEPLOYMENT_DATA_LAYOUT_UNSUPPORTED",
-            )?;
-        }
-        Ok(PathBuf::from(model::string(selected[0], "Source")?))
+        data_source_value(&operation.plan.source)
     }
+}
+fn data_source_value(source: &Value) -> Result<PathBuf> {
+    let mounts = source["Mounts"]
+        .as_array()
+        .ok_or_else(|| DeploymentError::new("DEPLOYMENT_MOUNTS_REQUIRED"))?;
+    let selected = mounts
+        .iter()
+        .filter(|m| m["Destination"] == "/instances/default")
+        .collect::<Vec<_>>();
+    require(
+        selected.len() == 1 && selected[0]["Type"] == "bind" && selected[0]["RW"] == true,
+        "DEPLOYMENT_DATA_BIND_REQUIRED",
+    )?;
+    for entry in source["Config"]["Env"].as_array().into_iter().flatten() {
+        let entry = entry
+            .as_str()
+            .ok_or_else(|| DeploymentError::new("DEPLOYMENT_ENV_INVALID"))?;
+        require(
+            !entry.starts_with("REVERIE_DATA=") || entry == "REVERIE_DATA=/instances/default",
+            "DEPLOYMENT_DATA_LAYOUT_UNSUPPORTED",
+        )?;
+        require(
+            !entry.starts_with("REVERIE_DATA_DIR=")
+                || entry == "REVERIE_DATA_DIR=/instances/default/console",
+            "DEPLOYMENT_DATA_LAYOUT_UNSUPPORTED",
+        )?;
+    }
+    Ok(PathBuf::from(model::string(selected[0], "Source")?))
 }
 fn temporary_name(operation: &Operation, purpose: &str) -> String {
     format!(

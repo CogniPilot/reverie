@@ -233,10 +233,7 @@ fn admit_constructor(
         )?;
         match runtime.installed_engine().engine.client.admit_viewer(job) {
             Ok(()) => return Ok(()),
-            Err(error)
-                if error.fault == crate::captured_client::Fault::Busy
-                    && !error.may_have_started =>
-            {
+            Err(error) if error.is_admission_busy() => {
                 #[cfg(test)]
                 test_hooks::admission_busy();
                 std::thread::sleep(std::time::Duration::from_millis(1));

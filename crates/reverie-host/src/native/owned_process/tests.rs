@@ -71,6 +71,42 @@ fn malformed_truncated_or_multiple_rights_close_every_installed_descriptor() {
     fs::remove_file(path).unwrap();
 }
 #[test]
+fn credential_channels_close_all_unexpected_rights_even_when_ancillary_truncates() {
+    use std::os::unix::net::UnixStream;
+    let path = std::env::temp_dir().join(format!(
+        "channel-rights-{}-{}",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::SeqCst)
+    ));
+    let file = fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create_new(true)
+        .open(&path)
+        .unwrap();
+    for count in [1, 2, 16] {
+        let (receiver, sender) = UnixStream::pair().unwrap();
+        nix::sys::socket::setsockopt(&receiver, nix::sys::socket::sockopt::PassCred, &true)
+            .unwrap();
+        send(sender.as_raw_fd(), &vec![file.as_raw_fd(); count], b"x");
+        let credentials = (
+            std::process::id() as i32,
+            nix::unistd::getuid().as_raw(),
+            nix::unistd::getgid().as_raw(),
+        );
+        assert!(receive_credentials(&receiver, &mut [0; 1], credentials).is_err());
+        assert_eq!(
+            references(&path),
+            1,
+            "every installed right closed, even truncated"
+        );
+        close(receiver.into()).unwrap();
+        close(sender.into()).unwrap();
+    }
+    close(file.into()).unwrap();
+    fs::remove_file(path).unwrap();
+}
+#[test]
 fn pre_exec_failure_after_identity_transfer_never_runs_the_controlled_program() {
     let mut handshake = Handshake::new().ok().unwrap();
     let mut command = Command::new(crate::engine_metadata::tests::program());

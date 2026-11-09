@@ -1,4 +1,5 @@
 use super::*;
+mod image;
 use reverie_contracts::worker_config::encode_config;
 use serde_json::json;
 use sha2::{Digest, Sha256};
@@ -17,9 +18,13 @@ struct Fixture {
     reads: Cell<usize>,
     hook: RefCell<Option<Hook>>,
     manifest: Vec<u8>,
+    requested: Cell<Option<TaskPerfPolicy>>,
 }
 impl Fixture {
     fn new() -> Self {
+        Self::with_policy(TaskPerfPolicy::TaskV1)
+    }
+    fn with_policy(policy: TaskPerfPolicy) -> Self {
         let root = std::env::temp_dir().join(format!(
             "reverie-perf-observation-{}-{}",
             std::process::id(),
@@ -30,19 +35,24 @@ impl Fixture {
         let base=br#"{"defaultAction":"SCMP_ACT_ERRNO","syscalls":[{"names":["read"],"action":"SCMP_ACT_ALLOW"}]}"#;
         let selected = TaskPerfProfile::decode(base)
             .unwrap()
-            .derivative()
+            .derivative_for_policy(policy)
             .unwrap()
             .encode();
         fs::write(root.join("base"), base).unwrap();
         fs::write(root.join("selected"), &selected).unwrap();
         let (system, machine) = native::system().unwrap();
         let system = PerfSystem::from_linux_uname(&system, &machine).unwrap();
-        let manifest=serde_json::to_vec(&json!({"version":1,"purpose":"worker-task-perf-profile-v1","system":system.name(),"baseProfile":BASE,"baseSHA256":format!("{:x}",Sha256::digest(base)),"profile":SELECTED,"profileSHA256":format!("{:x}",Sha256::digest(&selected))})).unwrap();
+        let (version, purpose) = match policy {
+            TaskPerfPolicy::TaskV1 => (1, "worker-task-perf-profile-v1"),
+            TaskPerfPolicy::TaskV2 => (2, "worker-task-perf-profile-v2"),
+        };
+        let manifest=serde_json::to_vec(&json!({"version":version,"purpose":purpose,"system":system.name(),"baseProfile":BASE,"baseSHA256":format!("{:x}",Sha256::digest(base)),"profile":SELECTED,"profileSHA256":format!("{:x}",Sha256::digest(&selected))})).unwrap();
         let result = Self {
             root,
             reads: Cell::new(0),
             hook: RefCell::new(None),
             manifest,
+            requested: Cell::new(None),
         };
         result.company("owner-a", 1, false, true);
         result
@@ -73,7 +83,7 @@ impl Fixture {
         } else {
             "22222222-2222-4333-8444-555555555555"
         };
-        TaskPerfConfiguration::decode(&serde_json::to_vec(&json!({"employeePerfPolicies":{employee:"task-v1"},"rootlessDocker":{"enabled":true,"seccompProfile":BASE,"seccompSha256":manifest.base_sha256()},"unrelated":"preserved"})).unwrap()).unwrap()
+        TaskPerfConfiguration::decode(&serde_json::to_vec(&json!({"employeePerfPolicies":{employee:manifest.policy().name()},"rootlessDocker":{"enabled":true,"seccompProfile":BASE,"seccompSha256":manifest.base_sha256()},"unrelated":"preserved"})).unwrap()).unwrap()
     }
     fn project(&self, config: &TaskPerfConfiguration) -> Result<TaskPerfProjection> {
         let identity = self.identity();
@@ -95,7 +105,8 @@ fn actual_system() -> PerfSystem {
     PerfSystem::from_linux_uname(&system, &machine).unwrap()
 }
 impl ArtifactSource for Fixture {
-    fn manifest(&self) -> Result<PathBuf> {
+    fn manifest(&self, policy: TaskPerfPolicy) -> Result<PathBuf> {
+        self.requested.set(Some(policy));
         Ok("/nix/store/fixed-perf-manifest".into())
     }
     fn read(&self, path: &Path) -> Result<Vec<u8>> {
@@ -116,6 +127,24 @@ impl ArtifactSource for Fixture {
         }
         Ok(raw)
     }
+}
+
+#[test]
+fn v2_uses_its_own_closed_artifact_selection_and_rejects_v1_before_profile_reads() {
+    let fixture = Fixture::with_policy(TaskPerfPolicy::TaskV2);
+    let projected = fixture.project(&fixture.config(true)).unwrap();
+    assert_eq!(fixture.requested.get(), Some(TaskPerfPolicy::TaskV2));
+    assert_eq!(fixture.reads.get(), 3);
+    let value: serde_json::Value =
+        serde_json::from_slice(&encode_config(projected.configuration())).unwrap();
+    assert_eq!(value["_taskPerfPolicy"], "task-v2");
+    let legacy = Fixture::new();
+    assert!(matches!(
+        legacy.project(&fixture.config(true)),
+        Err(TaskPerfHostError::Data(TaskPerfError::PolicyArtifact))
+    ));
+    assert_eq!(legacy.requested.get(), Some(TaskPerfPolicy::TaskV2));
+    assert_eq!(legacy.reads.get(), 1, "no fallback to v1 base/profile");
 }
 
 #[test]

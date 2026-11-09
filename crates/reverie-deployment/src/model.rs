@@ -2,6 +2,8 @@ use super::*;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
+#[cfg(test)]
+mod tests;
 
 #[derive(Serialize, Deserialize)]
 pub struct DeploymentPreview {
@@ -22,6 +24,8 @@ pub struct DeploymentStatus {
     pub candidate_id: Option<String>,
     pub source_id: String,
     pub backup_verified: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub diagnostic: Option<Value>,
 }
 pub(super) fn cid(value: &str) -> Result<&str> {
     require(
@@ -105,6 +109,19 @@ fn environment(config: &Value) -> Result<Vec<String>> {
     }
     Ok(output)
 }
+/// The original container's selected mode also determines rollback readiness.
+/// Absence is the legacy Node service; every explicit mode must select the front.
+pub(super) fn uses_front(config: &Value) -> Result<bool> {
+    let env = environment(config)?;
+    let selected = env
+        .iter()
+        .find_map(|entry| entry.strip_prefix("REVERIE_NATIVE_FRONT="));
+    require(
+        selected.is_none_or(|value| value == "1"),
+        "DEPLOYMENT_FRONT_MODE_UNSUPPORTED",
+    )?;
+    Ok(selected.is_some())
+}
 pub(super) fn create_body(
     source: &Value,
     old_image: &Value,
@@ -130,15 +147,10 @@ pub(super) fn create_body(
             "DEPLOYMENT_INTERNAL_FRONT_OVERRIDE",
         )?;
     }
+    uses_front(&source["Config"])?;
     require(
-        !selected
-            .iter()
-            .any(|e| e.starts_with("REVERIE_NATIVE_FRONT=")),
-        "DEPLOYMENT_SOURCE_ALREADY_SELECTS_FRONT",
-    )?;
-    require(
-        !next.iter().any(|e| e.starts_with("REVERIE_NATIVE_FRONT=")),
-        "DEPLOYMENT_IMAGE_SELECTS_FRONT",
+        uses_front(&candidate["Config"])?,
+        "DEPLOYMENT_IMAGE_FRONT_REQUIRED",
     )?;
     let mut merged: BTreeMap<String, String> = next
         .iter()

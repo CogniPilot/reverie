@@ -32,9 +32,13 @@ impl ReservationConfiguration {
     }
     pub fn memory_policies_enabled(&self) -> bool {
         legacy_json::truthy(field(self.root(), "employeeMemoryPolicies"))
+            || crate::session_resources_v2::configured(&self.config)
     }
     pub fn pool_bytes(&self) -> Result<UnsignedInteger> {
         Ok(unsigned(field(self.root(), "poolMemoryMiB"))?.times(1_048_576))
+    }
+    pub fn cgroup_parent(&self) -> Result<String> {
+        scalar(field(self.root(), "cgroupParent"))
     }
     pub fn reserve_bytes(&self) -> Result<UnsignedInteger> {
         let selected =
@@ -159,6 +163,7 @@ pub struct ObservedMemoryPolicy {
     memory: UnsignedInteger,
     swap: UnsignedInteger,
     high: Option<UnsignedInteger>,
+    pool: bool,
 }
 impl ObservedMemoryPolicy {
     /// Read the actual existing projection, not a new policy validator. The
@@ -170,6 +175,7 @@ impl ObservedMemoryPolicy {
         };
         let policy = object(value)?;
         Ok(Some(Self {
+            pool: matches!(field(root, "budgetMode"), Some(Value(Node::String(mode))) if mode.equals_ascii("pool")),
             memory: unsigned(field(root, "memoryMiB"))?.times(1_048_576),
             swap: unsigned(field(policy, "swapMiB"))?.times(1_048_576),
             high: field(policy, "memoryHighMiB")
@@ -185,6 +191,9 @@ impl ObservedMemoryPolicy {
     }
     pub fn high(&self) -> Option<&UnsignedInteger> {
         self.high.as_ref()
+    }
+    pub fn uses_pool(&self) -> bool {
+        self.pool
     }
 }
 fn scalar(value: Option<&Value>) -> Result<String> {

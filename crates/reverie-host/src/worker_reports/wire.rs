@@ -36,7 +36,10 @@ pub(super) fn report(
     let result = collector.command_failure_report(&request)?;
     send(service, stream, b'J', &result)
 }
-pub(super) fn authenticate(service: &WorkerReportService, stream: &UnixStream) -> Result<()> {
+pub(super) fn authenticate(
+    service: &WorkerReportService,
+    stream: &UnixStream,
+) -> Result<super::WorkerPeer> {
     if service.stopping() {
         return Err(WorkerReportError::Stopping);
     }
@@ -47,7 +50,11 @@ pub(super) fn authenticate(service: &WorkerReportService, stream: &UnixStream) -
     if credentials.uid() != service.uid {
         return Err(WorkerReportError::Peer);
     }
-    Ok(())
+    Ok(super::WorkerPeer {
+        uid: credentials.uid(),
+        gid: credentials.gid(),
+        pid: credentials.pid(),
+    })
 }
 pub(super) fn receive(
     service: &WorkerReportService,

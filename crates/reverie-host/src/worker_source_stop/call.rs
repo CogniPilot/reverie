@@ -97,6 +97,14 @@ fn capture(
                     );
                     continue;
                 }
+                eprintln!(
+                    "WORKER_SOURCE_QUERY_FAILED fault={:?} cleanup={:?} admitted={} may_have_started={} uncertain={}",
+                    failure.error.fault,
+                    failure.error.cleanup,
+                    failure.call.is_some(),
+                    failure.error.may_have_started,
+                    failure.error.uncertain,
+                );
                 if failure.error.is_uncertain() {
                     *pending = failure.call;
                 }

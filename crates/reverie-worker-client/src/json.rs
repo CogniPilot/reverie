@@ -64,7 +64,7 @@ pub(crate) fn decode(raw: &[u8]) -> Result<Value> {
     integer_tokens(raw)?;
     serde_json::from_slice::<Closed>(raw)
         .map(|value| value.0)
-        .map_err(|_| Error("Invalid closed metadata"))
+        .map_err(|_| Error::new("Invalid closed metadata"))
 }
 fn integer_tokens(raw: &[u8]) -> Result<()> {
     let (mut string, mut escaped, mut index) = (false, false, 0);
@@ -99,9 +99,11 @@ fn integer_tokens(raw: &[u8]) -> Result<()> {
     Ok(())
 }
 pub(crate) fn closed<'a>(value: &'a Value, fields: &[&str]) -> Result<&'a Map<String, Value>> {
-    let map = value.as_object().ok_or(Error("Invalid closed metadata"))?;
+    let map = value
+        .as_object()
+        .ok_or(Error::new("Invalid closed metadata"))?;
     if map.len() != fields.len() || !fields.iter().all(|field| map.contains_key(*field)) {
-        return Err(Error("Invalid closed metadata"));
+        return Err(Error::new("Invalid closed metadata"));
     }
     Ok(map)
 }
@@ -109,7 +111,7 @@ pub(crate) fn need(value: bool) -> Result<()> {
     if value {
         Ok(())
     } else {
-        Err(Error("Invalid closed metadata"))
+        Err(Error::new("Invalid closed metadata"))
     }
 }
 

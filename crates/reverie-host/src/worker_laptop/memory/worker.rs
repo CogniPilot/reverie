@@ -3,6 +3,7 @@
 use super::*;
 use crate::worker_reports::WorkerLaunchConnection;
 use reverie_contracts::worker_config::{EffectiveWorkerConfig, WorkerPolicyDigest};
+mod controller;
 mod effect;
 mod readback;
 mod state;
