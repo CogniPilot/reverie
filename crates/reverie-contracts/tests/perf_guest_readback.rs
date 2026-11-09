@@ -81,6 +81,39 @@ fn writable_root_privilege_and_any_capsule_shadowing_refuse() {
         "Type":"bind","Source":"/fixture/other","Destination":"/opt/reverie/perf-other","RW":true}));
     assert!(decode(&original, &unrelated).perf_profile().is_ok());
 }
+
+#[test]
+fn guest_mounts_use_posix_roots_and_literal_backslashes_on_every_host() {
+    let (original, row) = fixture();
+    for destination in [
+        "/workspace",
+        "/C:/worker",
+        r"/opt\reverie\perf",
+        r"/opt/reverie/perf\tools",
+    ] {
+        let mut changed = row.clone();
+        changed[0]["Mounts"] = json!([{"Destination":destination}]);
+        assert!(
+            decode(&original, &changed).perf_profile().is_ok(),
+            "{destination}"
+        );
+    }
+    for destination in [
+        r"C:\worker",
+        r"\\server\share",
+        "//opt/reverie/perf",
+        "///opt/reverie/perf/bin",
+        "//opt/rvprf/preload.off",
+        "/unrelated/../workspace",
+    ] {
+        let mut changed = row.clone();
+        changed[0]["Mounts"] = json!([{"Destination":destination}]);
+        assert!(
+            decode(&original, &changed).perf_profile().is_err(),
+            "{destination}"
+        );
+    }
+}
 #[test]
 fn ambiguous_profiles_and_capability_expansion_refuse() {
     let (original, row) = fixture();
