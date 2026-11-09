@@ -100,6 +100,7 @@ struct State {
     upgrade_failure: Option<Box<crate::website_facts::WebsiteFactsError>>,
     upgrade_close_failure: Option<Box<crate::website_facts::WebsiteFactsError>>,
     checked_generation: Option<upgrade::CheckedNativeGeneration>,
+    stop_takeover: Option<upgrade::StopPendingTakeover>,
 }
 /// Contains the original partial installation or command attempt on refusal.
 pub struct WorkerServiceFailure {
@@ -139,6 +140,12 @@ impl WorkerServiceFailure {
         self.owner
             .as_ref()
             .and_then(|o| o.upgrade_close_failure.as_deref())
+    }
+    pub fn stop_takeover_error(&self) -> Option<&crate::worker_image::ImageFileError> {
+        self.owner
+            .as_ref()
+            .and_then(|owner| owner.stop_takeover.as_ref())
+            .and_then(upgrade::StopPendingTakeover::error)
     }
     /// Settle only original admitted native work and opened files. A durable
     /// unknown installation marker is never cleared by local component close.
@@ -262,6 +269,7 @@ impl State {
             upgrade_failure: None,
             upgrade_close_failure: None,
             checked_generation: None,
+            stop_takeover: None,
         })
     }
     fn run(&mut self, action: WorkerServiceAction) -> Result<String> {
@@ -392,6 +400,9 @@ impl State {
                 .close(self.end)
                 .map_err(|error| WorkerServiceError::Engine(error.into())),
         );
+        if let Some(owner) = &mut self.stop_takeover {
+            result = finalized(result, owner.close());
+        }
         if self.uncertain {
             result = finalized(
                 result,
