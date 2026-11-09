@@ -3,21 +3,35 @@
 //! consent, provider stop, storage release or global drained grant is minted.
 use super::*;
 use std::rc::Rc;
+mod cleanup_binding;
 mod progress;
+pub use cleanup_binding::WorkerOriginalHandlersCleanupBinding;
 type DrainResult<T> = std::result::Result<T, Rc<WorkerReportError>>;
 
 struct Selected {
-    record: Arc<Record>,
     interrupted: bool,
     reconciled: bool,
     primary: Option<Rc<WorkerReportError>>,
     cleanup: Option<Rc<WorkerReportError>>,
 }
-struct Originals {
+struct Selection {
     service: Arc<WorkerReportService>,
     own: Arc<Record>,
+    records: Vec<Arc<Record>>,
+}
+struct Originals {
+    selection: Arc<Selection>,
     selected: Vec<Selected>,
     end: Instant,
+}
+impl Selection {
+    fn assert_runtime(&self, runtime: &WorkerRuntime) -> Result<()> {
+        if Arc::ptr_eq(&self.service.engine, runtime.installed_engine()) {
+            Ok(())
+        } else {
+            Err(WorkerReportError::Unconfirmed)
+        }
+    }
 }
 #[must_use = "retain original records and every typed failure until known component settlement"]
 pub struct WorkerOriginalHandlersDrain {
@@ -65,11 +79,14 @@ impl WorkerActorChannel {
         {
             return Err(WorkerReportError::Unconfirmed);
         }
-        let selected = records
+        let records = records
             .iter()
             .filter(|row| !Arc::ptr_eq(row, &self.connection.record))
-            .map(|record| Selected {
-                record: Arc::clone(record),
+            .cloned()
+            .collect::<Vec<_>>();
+        let selected = records
+            .iter()
+            .map(|_| Selected {
                 interrupted: false,
                 reconciled: false,
                 primary: None,
@@ -78,8 +95,11 @@ impl WorkerActorChannel {
             .collect();
         Ok(WorkerOriginalHandlersDrain {
             originals: Some(Originals {
-                service: Arc::clone(expected),
-                own: Arc::clone(&self.connection.record),
+                selection: Arc::new(Selection {
+                    service: Arc::clone(expected),
+                    own: Arc::clone(&self.connection.record),
+                    records,
+                }),
                 selected,
                 end,
             }),
@@ -98,11 +118,7 @@ impl WorkerOriginalHandlersDrain {
             .expect("originals retained until consuming closed observation")
     }
     fn assert_runtime(&self, runtime: &WorkerRuntime) -> Result<()> {
-        if Arc::ptr_eq(&self.originals().service.engine, runtime.installed_engine()) {
-            Ok(())
-        } else {
-            Err(WorkerReportError::Unconfirmed)
-        }
+        self.originals().selection.assert_runtime(runtime)
     }
     /// Original deadline, dynamically clipped by the SAME engine's first stop.
     /// Reading this value grants no permission to interrupt or settle.
@@ -110,6 +126,7 @@ impl WorkerOriginalHandlersDrain {
         self.assert_runtime(runtime)?;
         let originals = self.originals();
         Ok(originals
+            .selection
             .service
             .engine
             .stop_deadline()

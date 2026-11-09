@@ -9,8 +9,8 @@ impl WorkerOriginalHandlersDrain {
     ) -> Result<bool> {
         self.assert_runtime(runtime)?;
         let originals = self.originals();
-        if !Arc::ptr_eq(expected, &originals.service)
-            || !Arc::ptr_eq(&channel.connection.record, &originals.own)
+        if !Arc::ptr_eq(expected, &originals.selection.service)
+            || !Arc::ptr_eq(&channel.connection.record, &originals.selection.own)
             || channel.purpose != Purpose::FleetMaintenanceWebsite
             || channel.close != ClosePhase::Open
             || Instant::now() >= self.deadline(runtime)?
@@ -27,7 +27,10 @@ impl WorkerOriginalHandlersDrain {
                 return Err(WorkerReportError::Unconfirmed);
             }
         };
-        if !records.iter().any(|row| Arc::ptr_eq(row, &originals.own)) {
+        if !records
+            .iter()
+            .any(|row| Arc::ptr_eq(row, &originals.selection.own))
+        {
             return Err(WorkerReportError::Unconfirmed);
         }
         Ok(true)
@@ -47,7 +50,7 @@ impl WorkerOriginalHandlersDrain {
         if self.interrupted {
             return Ok(WorkerHandlersProgress::Pending);
         }
-        let count = self.originals().selected.len();
+        let count = self.originals().selection.records.len();
         for index in 0..count.max(1) {
             match self.forward_current(channel, expected, runtime) {
                 Ok(true) => self.admitted = true,
@@ -58,9 +61,8 @@ impl WorkerOriginalHandlersDrain {
                 continue;
             }
             let originals = self.originals();
-            let result = originals.selected[index]
-                .record
-                .try_interrupt_original(&originals.service, originals.end);
+            let result = originals.selection.records[index]
+                .try_interrupt_original(&originals.selection.service, originals.end);
             let row = &mut self
                 .originals
                 .as_mut()
@@ -100,7 +102,7 @@ impl WorkerOriginalHandlersDrain {
         }
         let live = Instant::now() < self.deadline(runtime).map_err(Rc::new)?;
         let mut settled = true;
-        for index in 0..self.originals().selected.len() {
+        for index in 0..self.originals().selection.records.len() {
             match self.settle_original(index, live) {
                 Ok(known) => settled &= known,
                 Err(cause) => {
@@ -133,42 +135,47 @@ impl WorkerOriginalHandlersDrain {
         })
     }
     fn settle_original(&mut self, index: usize, live: bool) -> Result<bool> {
+        let record = Arc::clone(&self.originals().selection.records[index]);
         let row = &mut self
             .originals
             .as_mut()
             .expect("selected originals retained")
             .selected[index];
-        let job = match row.record.handler_job() {
+        let job = match record.handler_job() {
             Ok(Some(job)) => job,
             Ok(None) => return Ok(false),
-            Err(_) if !row.record.opaque() => return Ok(false),
+            Err(_) if !record.opaque() => return Ok(false),
             Err(cause) => return Err(cause),
         };
         if live && !row.reconciled && !job.known_settled() {
             row.reconciled = job.try_reconcile_original()?;
         }
         let joined = job.join_once()?;
-        if row.record.opaque() {
+        if record.opaque() {
             return Err(WorkerReportError::Unconfirmed);
         }
-        Ok(joined && row.record.settled())
+        Ok(joined && record.settled())
     }
     fn current_registry_settled(&self) -> Result<bool> {
         let originals = self.originals();
-        if originals.service.opaque.load(Ordering::Acquire) {
+        if originals.selection.service.opaque.load(Ordering::Acquire) {
             return Err(WorkerReportError::Unconfirmed);
         }
-        let records = match originals.service.records.try_lock() {
+        let records = match originals.selection.service.records.try_lock() {
             Ok(records) => records,
             Err(TryLockError::WouldBlock) => return Ok(false),
             Err(TryLockError::Poisoned(_)) => {
-                originals.service.opaque.store(true, Ordering::Release);
+                originals
+                    .selection
+                    .service
+                    .opaque
+                    .store(true, Ordering::Release);
                 return Err(WorkerReportError::Unconfirmed);
             }
         };
         for record in records
             .iter()
-            .filter(|record| !Arc::ptr_eq(record, &originals.own))
+            .filter(|record| !Arc::ptr_eq(record, &originals.selection.own))
         {
             if record.opaque() {
                 return Err(WorkerReportError::Unconfirmed);
@@ -187,6 +194,6 @@ impl WorkerOriginalHandlersDrain {
                 return Ok(false);
             }
         }
-        Ok(!originals.service.opaque.load(Ordering::Acquire))
+        Ok(!originals.selection.service.opaque.load(Ordering::Acquire))
     }
 }
