@@ -3,7 +3,9 @@
 use super::*;
 
 impl Attempt {
-    pub(super) fn preserve_create_diagnostics(&self) -> Result<()> {
+    pub(in crate::installing_broker::service::tests::native_cold) fn preserve_create_diagnostics(
+        &self,
+    ) -> Result<()> {
         let Some(service) = &self.service else {
             return Ok(());
         };
