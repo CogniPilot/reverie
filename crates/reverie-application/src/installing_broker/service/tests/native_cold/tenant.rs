@@ -149,12 +149,12 @@ impl Tenant {
                 .create(root.join(relative))
                 .map_err(|e| e.to_string())?;
         }
-        let raw = serde_json::json!({"version":1,"deployment":deployment,"image":inputs.image.as_str(),"serverContainer":server,"socket":root.join("broker/service.sock"),"stateRoot":root.join("state"),"companyFile":root.join("company.json"),"companyRoot":root.join("company"),"scratchRoot":root.join("scratch"),"apiSocketRoot":root.join("office"),"budgetMode":"admission","uid":1000,"gid":100,"memoryMiB":4096,"poolMemoryMiB":49152,"poolTasksMax":8192,"cgroupParent":format!("{deployment}.slice"),"pidsLimit":128,"cpus":0,"maxWorkers":1,"mounts":[{"source":root.join("work"),"destination":"/workspace","readOnly":false}],"maintenanceSessions":[],"resourceReservations":{"directory":root.join("control"),"companyId":eid.as_str(),"poolId":sid.as_str(),"ownerScopeDigest":"d".repeat(64),"hostReserveMiB":64}});
+        let raw = serde_json::json!({"version":1,"deployment":deployment,"image":inputs.image.as_str(),"serverContainer":server,"socket":root.join("broker/service.sock"),"stateRoot":root.join("state"),"companyFile":root.join("company.json"),"companyRoot":root.join("company"),"scratchRoot":root.join("scratch"),"apiSocketRoot":root.join("office"),"budgetMode":"admission","uid":1000,"gid":100,"memoryMiB":4096,"poolMemoryMiB":49152,"poolTasksMax":8192,"cgroupParent":"reverie-workers.slice","pidsLimit":128,"cpus":0,"maxWorkers":1,"mounts":[{"source":root.join("work"),"destination":"/workspace","readOnly":false}],"maintenanceSessions":[],"resourceReservations":{"directory":root.join("control"),"companyId":eid.as_str(),"poolId":sid.as_str(),"ownerScopeDigest":"d".repeat(64),"hostReserveMiB":64}});
         let bytes = serde_json::to_vec(&raw).map_err(|e| e.to_string())?;
         let source = root.join("worker.json");
         write(&source, &bytes)?;
         let config = crate::worker_validation::load_owner_config(&source)
-            .map_err(|e| e.to_string())?
+            .map_err(|e| format!("{e:?}"))?
             .configuration()
             .clone();
         let office = root.join("office").join(sid.as_str());

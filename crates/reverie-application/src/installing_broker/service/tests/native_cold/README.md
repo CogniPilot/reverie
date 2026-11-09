@@ -23,7 +23,11 @@ observer. Its READY setup is private filesystem DATA, followed by the genuine
 Gate constructor, admission/flocks and native kernel observations. The ordinary
 admission shape uses 4096 MiB per worker, 49152 MiB pool accounting, CPU quota
 zero and no selected pool provider. The 64 MiB fixture host reserve is not a
-production headroom claim. No production cgroup parent is selected or written.
+production headroom claim. The schema requires the legacy
+`reverie-workers.slice` declaration; admission mode omits it from Docker's
+creation arguments. The test checks both the actual empty Docker parent and
+the process's cgroup path before proceeding. No production parent is joined
+or written.
 
 The test creates one bounded private server anchor from the exact image, then
 uses `prepare_shared_service`, `bind_listener` and normal `poll_handler` to
