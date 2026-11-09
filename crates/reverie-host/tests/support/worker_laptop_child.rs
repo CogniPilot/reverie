@@ -42,6 +42,11 @@ fn main() {
             while !Path::new("release-laptop-create").exists() {assert!(Instant::now()<end);std::thread::sleep(Duration::from_millis(1));}
         }
         if mode=="created-nonzero" {std::process::exit(9);}
+        if mode=="created-nonzero-output" {
+            std::io::stdout().write_all(b"partial daemon reply \n").unwrap();
+            std::io::stderr().write_all(b"create rejected: fixture mount absent\n").unwrap();
+            std::process::exit(9);
+        }
         if mode=="created-noncanonical" {print!("successful create without a canonical CID\n");return;}
         if mode=="created-bad-utf8" {std::io::stdout().write_all(&[255]).unwrap();return;}
         print!("\x1c{}\x1f\n","c".repeat(64));return;

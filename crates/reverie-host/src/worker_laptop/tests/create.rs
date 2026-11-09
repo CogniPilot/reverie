@@ -89,6 +89,42 @@ fn nonzero_and_invalid_reply_keep_effect_custody_after_actual_client_settlement(
         assert!(NixStoreGuard::acquire_migration(&fixture.source, &sid()).is_err());
     }
 }
+
+#[test]
+fn completed_nonzero_create_keeps_original_bounded_output_and_unknown_without_replay() {
+    if isolated("completed_nonzero_create_keeps_original_bounded_output_and_unknown_without_replay") {
+        return;
+    }
+    let fixture = Fixture::new("created-nonzero-output");
+    let workflow = fixture.retain();
+    let telemetry = CommandTelemetry::capture(fixture.runtime(), &fixture.source).unwrap();
+    fixture.runtime().run_laptop_network(&workflow, end()).unwrap();
+    assert!(workflow.completed_create_diagnostic().unwrap().is_none());
+    assert!(matches!(fixture.runtime().create_laptop(&workflow, &telemetry, end()).unwrap(), LaptopCreation::Retained));
+    fixture.runtime().installed_engine().settle_owned(end()).unwrap();
+    let diagnostic = workflow.completed_create_diagnostic().unwrap().expect("same completed create output retained");
+    assert!(!diagnostic.succeeded());
+    assert_eq!(diagnostic.shell_code(), 9);
+    assert_eq!(diagnostic.stdout(), b"partial daemon reply \n");
+    assert_eq!(diagnostic.stderr(), b"create rejected: fixture mount absent\n");
+    let arguments = diagnostic.arguments().iter().map(|arg|arg.to_str().unwrap()).collect::<Vec<_>>().join("\0");
+    assert_eq!(arguments, fs::read_to_string(fixture.root.join("created-laptop")).unwrap());
+    {
+        let record = workflow.record.lock().unwrap();
+        assert!(record.unknown);
+        assert!(record.phase == Phase::Retained);
+    }
+    let refusal = fixture.runtime().create_laptop(&workflow, &telemetry, end()).err().expect("one-shot create cannot run again");
+    assert!(matches!(refusal,LaptopError::Refused("WORKER_LAPTOP_CREATE_PHASE")));
+    let again = workflow.completed_create_diagnostic().unwrap().unwrap();
+    assert!(Arc::ptr_eq(&diagnostic, &again));
+    assert_eq!(again.stderr(), b"create rejected: fixture mount absent\n");
+    assert_eq!(creates(&fixture), 1);
+    assert!(fixture.runtime().reclaim_laptop_network(workflow.clone()).is_err());
+    assert!(fixture.runtime().close(end()).is_err());
+    assert!(workflow.record.lock().unwrap().unknown);
+    assert!(NixStoreGuard::acquire_migration(&fixture.source, &sid()).is_err());
+}
 #[test]
 fn genuine_foreign_telemetry_origin_refuses_before_create_and_returns_original_owners() {
     let fixture = Fixture::new("created-normal");
