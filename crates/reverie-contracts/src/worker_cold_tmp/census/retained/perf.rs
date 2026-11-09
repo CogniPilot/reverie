@@ -1,6 +1,7 @@
 //! Closed perf readback over the same actual started-container inspection DATA.
 use super::*;
 use crate::task_perf_v1::TaskPerfProfile;
+use reverie_core::posix_path::PosixPath;
 
 impl RetainedInspection {
     pub fn perf_profile(&self) -> Result<TaskPerfProfile> {
@@ -38,15 +39,21 @@ impl RetainedInspection {
             let mount = object(mount).ok_or(ColdDataError::Mounts)?;
             let destination = metadata(field(mount, "Destination"), ColdDataError::Mounts)?;
             let destination = destination.scalar_text().ok_or(ColdDataError::Mounts)?;
-            let path = std::path::Path::new(&destination);
-            if !path.is_absolute()
-                || path
-                    .components()
-                    .any(|part| matches!(part, std::path::Component::ParentDir))
-                || prefixes
-                    .iter()
-                    .map(std::path::Path::new)
-                    .any(|prefix| prefix.starts_with(path) || path.starts_with(prefix))
+            // These are Linux guest paths even when the DATA reader runs on
+            // Windows. Backslashes and drive-looking components stay literal.
+            let path = PosixPath::from_scalar_text(&destination);
+            if !path.is_absolute() || path.has_parent_component() {
+                return Err(ColdDataError::Mounts);
+            }
+            // Repeated leading slashes still address the Linux guest root;
+            // never let a double-root spelling hide a capsule overlap.
+            let path = PosixPath::from_scalar_text("/").join(&PosixPath::from_scalar_text(
+                destination.trim_start_matches('/'),
+            ));
+            if prefixes
+                .iter()
+                .map(|prefix| PosixPath::from_scalar_text(prefix))
+                .any(|prefix| prefix.overlaps(&path))
             {
                 return Err(ColdDataError::Mounts);
             }
