@@ -33,9 +33,9 @@ in pkgs.runCommand "reverie-worker-child-image-annex" {
 } ''
   mkdir -p "$out/share/reverie"
   reverie-policy-artifacts worker-child-image-annex \
-    --base-provenance ${base} --output "$out/share/reverie/worker-child-image.json"
+    --base-provenance ${pkgs.lib.escapeShellArg base} --output "$out/share/reverie/worker-child-image.json"
   # Keep all actual original closure references even when the supplied immutable
   # JSON file was sealed separately and has no references in the Nix database.
-  cp ${inputs} "$out/share/reverie/worker-child-annex-inputs"
+  cp ${pkgs.lib.escapeShellArg inputs} "$out/share/reverie/worker-child-annex-inputs"
   chmod 444 "$out/share/reverie/worker-child-image.json"
 ''
