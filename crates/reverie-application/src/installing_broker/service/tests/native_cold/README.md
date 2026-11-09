@@ -29,7 +29,8 @@ creation arguments. The test checks both the actual empty Docker parent and
 the process's cgroup path before proceeding. No production parent is joined
 or written.
 
-The test creates one bounded private server anchor from the exact image, then
+The test creates one private server anchor from the exact image with the
+limits reader's required minimum of 512 MiB and no swap allowance, then
 uses `prepare_shared_service`, `bind_listener` and normal `poll_handler` to
 drive a genuine cold J and its original handler Job. A fixed finite shell job
 waits for a private work-file marker while the separate anchor checks native
