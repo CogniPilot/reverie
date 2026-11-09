@@ -231,3 +231,19 @@ fn decode(raw: &[u8]) -> Result<Value, PoolPolicyError> {
     }
     serde_json::from_slice(raw).map_err(|_| PoolPolicyError)
 }
+
+/// Image inspection DATA only. The exact immutable ID commits image contents;
+/// qualifying the selected repository-factory source remains the App's duty.
+/// Container create overrides entrypoint/user, so no image defaults are used
+/// as substitutes for the existing runtime container-level confinement checks.
+pub fn validate_pool_image_information(
+    raw: &[u8],
+    image: &crate::worker_image_switch::WorkerImageId,
+) -> Result<(), PoolPolicyError> {
+    let value = decode(raw)?;
+    let valid = value.is_object()
+        && value["Id"] == image.as_str()
+        && value["Os"] == "linux"
+        && value["Config"].is_object();
+    valid.then_some(()).ok_or(PoolPolicyError)
+}

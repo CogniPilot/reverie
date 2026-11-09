@@ -17,6 +17,8 @@ mod namespace;
 mod policy;
 mod publication;
 mod service;
+mod target_observation;
+pub use target_observation::{PoolTargetObservation, PoolTargetObservationError, PoolTargetPhase};
 #[cfg(test)]
 #[path = "target_observation/tests.rs"]
 mod target_observation_tests;

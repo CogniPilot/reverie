@@ -16,7 +16,7 @@ pub(super) struct Fixture {
     pub policy: WorkerPoolPolicy,
 }
 impl Fixture {
-    pub fn new() -> Self {
+    pub(super) fn new() -> Self {
         static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
         let program = crate::engine_metadata::tests::program();
         let root = std::env::temp_dir().join(format!(
@@ -68,17 +68,17 @@ impl Fixture {
         fixture.write("controller", image_data('b'));
         fixture
     }
-    pub fn write(&self, name: &str, value: serde_json::Value) {
+    pub(super) fn write(&self, name: &str, value: serde_json::Value) {
         fs::write(
             self.root.join(format!("{name}.json")),
             serde_json::to_vec(&value).unwrap(),
         )
         .unwrap();
     }
-    pub fn starts(&self) -> usize {
+    pub(super) fn starts(&self) -> usize {
         self.hooks.starts.load(Ordering::SeqCst)
     }
-    pub fn finish(self) {
+    pub(super) fn finish(self) {
         self.runtime.close(end()).unwrap();
         fs::remove_dir_all(self.root).unwrap();
     }

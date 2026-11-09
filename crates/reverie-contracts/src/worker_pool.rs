@@ -10,7 +10,7 @@ pub use controller_v2::{BrokerBirthData, BrokerProgramData, ControllerBirthV2};
 pub use engine::validate_anchor_inspection;
 pub use engine::{
     validate_controller_inspection, validate_controller_service_v2_inspection,
-    validate_engine_information, website_process_data,
+    validate_engine_information, validate_pool_image_information, website_process_data,
 };
 pub use provider::WorkerPoolProvider;
 
