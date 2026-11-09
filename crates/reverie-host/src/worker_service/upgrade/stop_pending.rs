@@ -171,7 +171,7 @@ impl State {
         let from = self.open_directory(&self.folder())?;
         let to = self.open_directory(&history)?;
         self.attempted = true;
-        let result = (|| {
+        let result: Result<()> = (|| {
             native::retain_stopped_service_pending(&self.files[from], &self.files[to])?;
             let archived = history.join("previous-stop-pending");
             let actual = native::PrivateFileStamp::of(&self.files[original].metadata()?);
