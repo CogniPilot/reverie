@@ -2,6 +2,7 @@
 use super::*;
 use std::rc::Rc;
 use std::sync::mpsc;
+mod cleanup_binding;
 
 fn isolated(name: &str) -> bool {
     crate::test_process::isolate_case(&format!(
