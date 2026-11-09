@@ -77,6 +77,8 @@ impl Fixture {
             .arg("--output")
             .arg(&self.output)
             .env("REVERIE_FIXED_BUILD_GNUTAR", "/not/a/runtime/override")
+            .env("TAR_OPTIONS", "--version")
+            .env("PATH", "/not/a/runtime/program/path")
             .output()
             .unwrap()
     }
