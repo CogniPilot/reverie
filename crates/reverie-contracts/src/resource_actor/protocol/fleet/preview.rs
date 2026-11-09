@@ -8,6 +8,10 @@ pub struct FleetPreviewRequest {
     request: JournalId,
     principal: ResourceOwnerPrincipal,
 }
+enum ReplyStage {
+    TargetVerificationRequired,
+    AwaitingMaintenanceConsent,
+}
 impl FleetPreviewRequest {
     pub fn decode(frame: &HumanFrame) -> Result<Self> {
         let value = frame.value();
@@ -44,6 +48,36 @@ impl FleetPreviewRequest {
         policy: &WorkerPoolPolicy,
         expires: u64,
     ) -> Result<HumanFrame> {
+        self.reply(
+            selected,
+            policy,
+            expires,
+            ReplyStage::TargetVerificationRequired,
+        )
+    }
+    /// DATA describing the native producer's qualified preview. The App must
+    /// select this only from its actual qualified owner; copied reply bytes
+    /// never supply explicit maintenance consent or effect authority.
+    pub fn qualified_reply(
+        &self,
+        selected: &PoolTransitionSelection,
+        policy: &WorkerPoolPolicy,
+        expires: u64,
+    ) -> Result<HumanFrame> {
+        self.reply(
+            selected,
+            policy,
+            expires,
+            ReplyStage::AwaitingMaintenanceConsent,
+        )
+    }
+    fn reply(
+        &self,
+        selected: &PoolTransitionSelection,
+        policy: &WorkerPoolPolicy,
+        expires: u64,
+        stage: ReplyStage,
+    ) -> Result<HumanFrame> {
         need(
             expires > 0 && expires <= reverie_core::revision::JS_SAFE_MAX,
             "FLEET_PREVIEW_EXPIRY",
@@ -54,11 +88,15 @@ impl FleetPreviewRequest {
         let raw = serde_json::to_vec(policy)
             .map_err(|_| ResourceActorDataError("FLEET_PREVIEW_POLICY"))?;
         let policy = HumanFrame::decode(&raw).map_err(frame_error)?;
+        let status = match stage {
+            ReplyStage::TargetVerificationRequired => "target-verification-required",
+            ReplyStage::AwaitingMaintenanceConsent => "awaiting-maintenance-consent",
+        };
         let mut fields = envelope_fields("fleet-preview", &self.request);
         fields.extend([
             (key("approval"), selected.approval_value()),
             (key("policy"), policy.value().deep_clone()),
-            (key("status"), string("target-verification-required")),
+            (key("status"), string(status)),
             (
                 key("expiresAtEpochMs"),
                 Value(Node::Number(Number::Integer(expires.to_string()))),

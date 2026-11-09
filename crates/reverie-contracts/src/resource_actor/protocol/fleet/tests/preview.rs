@@ -111,3 +111,40 @@ fn observed_reply_remains_explicitly_unqualified_and_does_not_rederive_selection
             .is_err()
     );
 }
+
+#[test]
+fn qualified_reply_only_requests_separate_maintenance_consent() {
+    let original = selected(&request_value()).unwrap();
+    let approval = decode(&request()).unwrap();
+    let policy = crate::worker_pool::tests::policy();
+    let expiry = 1_800_000_000_000_u64;
+    let ordinary = original
+        .observed_reply(approval.selection(), &policy, expiry)
+        .unwrap();
+    let ordinary: Json = serde_json::from_slice(&ordinary.canonical().unwrap()).unwrap();
+    let reply = original
+        .qualified_reply(approval.selection(), &policy, expiry)
+        .unwrap();
+    let reply: Json = serde_json::from_slice(&reply.canonical().unwrap()).unwrap();
+    let mut expected = ordinary;
+    expected["status"] = json!("awaiting-maintenance-consent");
+    assert_eq!(reply, expected);
+    assert!(
+        decode(&reply).is_err(),
+        "a preview reply is never a consent request"
+    );
+    for expires in [0, reverie_core::revision::JS_SAFE_MAX + 1] {
+        assert!(
+            original
+                .qualified_reply(approval.selection(), &policy, expires)
+                .is_err()
+        );
+    }
+    let mut invalid = policy;
+    invalid.memory_max_mi_b = 1;
+    assert!(
+        original
+            .qualified_reply(approval.selection(), &invalid, expiry)
+            .is_err()
+    );
+}

@@ -4,6 +4,8 @@ use super::*;
 use reverie_host::worker_pool::PoolTargetObservation;
 use std::rc::Rc;
 mod error;
+#[cfg(test)]
+mod tests;
 pub use error::OfferTargetObservationError;
 type Result<T> = std::result::Result<T, Rc<OfferTargetObservationError>>;
 
@@ -74,16 +76,57 @@ impl ObservedOfferTarget {
         if let Some(cause) = &self.primary {
             return Err(Rc::clone(cause));
         }
-        let result = if self.closed {
-            Err(OfferTargetObservationError::Refused(
+        let result = self.require_open().and_then(|()| self.observe());
+        self.retain_result(result)
+    }
+    /// Compare the SAME retained native image reads with package input DATA.
+    /// The caller must independently qualify the compiler-selected immutable
+    /// input; these returned IDs grant no artifact source or fleet authority.
+    pub fn qualify_observed_images(
+        &mut self,
+        inputs: &reverie_contracts::resource_actor::PoolImageInputsData,
+    ) -> Result<[String; 2]> {
+        if let Some(cause) = &self.primary {
+            return Err(Rc::clone(cause));
+        }
+        let result = self
+            .require_open()
+            .and_then(|()| self.compare_images(inputs));
+        self.retain_result(result)
+    }
+    fn require_open(&self) -> std::result::Result<(), OfferTargetObservationError> {
+        if self.closed {
+            return Err(OfferTargetObservationError::Refused(
                 "POOL_OFFER_TARGET_CLOSED",
-            ))
-        } else {
-            self.observe()
-        };
+            ));
+        }
+        Ok(())
+    }
+    fn retain_result<T>(
+        &mut self,
+        result: std::result::Result<T, OfferTargetObservationError>,
+    ) -> Result<T> {
         result.map_err(|cause| Rc::clone(self.primary.get_or_insert_with(|| Rc::new(cause))))
     }
-
+    fn compare_images(
+        &mut self,
+        inputs: &reverie_contracts::resource_actor::PoolImageInputsData,
+    ) -> std::result::Result<[String; 2], OfferTargetObservationError> {
+        let view = self.view.as_mut().expect("original view retained");
+        view.read_current()
+            .map_err(OfferTargetObservationError::offer)?;
+        let images = self
+            .target
+            .as_mut()
+            .ok_or(OfferTargetObservationError::Refused(
+                "POOL_OFFER_TARGET_IMAGES_REQUIRED",
+            ))?
+            .qualify_observed_images(inputs)
+            .map_err(OfferTargetObservationError::Target)?;
+        view.read_current()
+            .map_err(OfferTargetObservationError::offer)?;
+        Ok(images)
+    }
     fn observe(
         &mut self,
     ) -> std::result::Result<UnpreparedOfferBinding, OfferTargetObservationError> {
