@@ -3,6 +3,7 @@ mod accepted;
 mod cleanup;
 mod cold_prepare;
 mod create;
+mod create_diagnostics;
 mod direct_finalization;
 mod existing_viewer;
 mod guard;
