@@ -8,6 +8,7 @@ pub use chat_images::{ChatImageHandlerClosed, ChatImageHandlerFailure, ChatImage
 #[cfg(test)]
 mod bootstrap_tests;
 mod control;
+mod fleet_drain;
 mod creation;
 mod goal_custody;
 mod gpu_access;

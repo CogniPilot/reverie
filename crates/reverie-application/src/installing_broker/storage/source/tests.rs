@@ -325,3 +325,102 @@ fn actual_source_fence_keeps_prepublication_lease_after_binding_moves_to_new_ses
     attached.restore_unclaimed().unwrap();
     ordinary.release(end()).unwrap();
 }
+
+#[test]
+fn fleet_drain_source_refusal_keeps_both_original_employee_leases_without_stopping() {
+    crate::test_process::owning_case!(
+        fleet_drain_source_refusal_keeps_both_original_employee_leases_without_stopping
+    );
+    const OTHER: &str = "44444444-2222-4333-8444-555555555555";
+    let (root, broker) = Tree::bootstrap_parts(
+        &format!("test-agent-{SID}\ntest-agent-{OTHER}\n"),
+        "pool",
+        0,
+        4096,
+    );
+    let broker = Arc::new(broker);
+    let config = broker.configuration().unwrap();
+    let company = serde_json::to_vec(&serde_json::json!({"employees":[
+        {"id":EID,"owner":null,"sessionId":SID,"desiredRunning":true,"onVacation":false},
+        {"id":"bbbbbbbb-cccc-4ddd-8eee-ffffffffffff","owner":null,"sessionId":OTHER,"desiredRunning":false,"onVacation":true}
+    ]})).unwrap();
+    fs::write(root.join("company.json"), &company).unwrap();
+    for sid in [session(), ProfileSessionId::parse(OTHER).unwrap()] {
+        let mut lease = StorageLease::acquire_launch(config.configuration(), &sid).unwrap();
+        lease.prepare_storage().unwrap();
+        lease.record_storage_binding().unwrap();
+        lease.close().unwrap();
+    }
+    broker.recover_laptops().unwrap();
+    let (reference, office) = {
+        let lifecycle = broker.installed.lifecycle().unwrap();
+        let owner = lifecycle
+            .guard
+            .iter()
+            .find(|row| row.session == session())
+            .unwrap();
+        let crate::installing_broker::LaptopOwner::Recovered(owner) = &owner.owner else {
+            panic!("actual recovered source")
+        };
+        (
+            owner.storage.original_source_reference().unwrap(),
+            owner.office.clone(),
+        )
+    };
+    let attached = reference
+        .attach(config.configuration(), operation(), office)
+        .unwrap();
+    let source = attached.retained_source();
+    drop(attached);
+    let identities = broker
+        .storage
+        .lock(None)
+        .unwrap()
+        .iter()
+        .map(|row| Arc::as_ptr(&row.identity))
+        .collect::<Vec<_>>();
+    let original_source_box = {
+        let held = source.record.owner.lock().unwrap();
+        let Some(SourceOwned::Direct(owner)) = held.as_ref() else {
+            panic!("actual original source")
+        };
+        std::ptr::from_ref(owner.as_ref()) as usize
+    };
+    let mut drain = crate::installing_broker::fleet_drain::LegacyFleetDrain::new(&broker, end());
+    let result = drain.run_ordinary();
+    let retained = drain.retained();
+    let conserved = {
+        let entries = broker.storage.lock(None).unwrap();
+        identities == entries.iter().map(|row| Arc::as_ptr(&row.identity)).collect::<Vec<_>>() &&
+            entries.iter().any(|row| matches!(&row.owner, EntryOwner::Source(actual) if Arc::ptr_eq(actual, &source.record)))
+    };
+    let same_source_box = {
+        let held = source.record.owner.lock().unwrap();
+        matches!(held.as_ref(), Some(SourceOwned::Direct(owner)) if std::ptr::from_ref(owner.as_ref()) as usize == original_source_box)
+    };
+    let leases_held = [session(), ProfileSessionId::parse(OTHER).unwrap()]
+        .into_iter()
+        .all(
+            |sid| match StorageLease::acquire_launch(config.configuration(), &sid) {
+                Err(_) => true,
+                Ok(lease) => {
+                    lease.close().unwrap();
+                    false
+                }
+            },
+        );
+    let calls = fs::read_to_string(root.join("calls.txt")).unwrap();
+    let unchanged_company = fs::read(root.join("company.json")).unwrap() == company;
+    // Expected retained work is deliberately NOT called closed or removed.
+    // Default Drop retains the same original native/storage/Office owners.
+    drop(drain);
+    drop(source);
+    drop(broker);
+    eprintln!("retained original fleet fixture: {}", root.display());
+    assert!(result.is_err() && retained);
+    assert!(conserved && same_source_box && leases_held && unchanged_company);
+    assert!(
+        !calls.lines().any(|line| line.starts_with("stop\0")),
+        "no source or sibling stop may follow the strict Source refusal"
+    );
+}
