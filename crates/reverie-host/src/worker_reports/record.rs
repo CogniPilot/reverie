@@ -491,6 +491,10 @@ impl Record {
     pub(super) fn control_ready(&self) -> bool {
         self.control.try_lock().is_ok_and(|slot| slot.is_some())
     }
+    #[cfg(test)]
+    pub(super) fn test_control_guard(&self) -> MutexGuard<'_, Option<UnixStream>> {
+        self.control.lock().unwrap()
+    }
 }
 pub(super) fn close(stream: UnixStream) -> Result<()> {
     #[cfg(test)]
