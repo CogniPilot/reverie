@@ -13,6 +13,21 @@ pub(crate) struct LoadedLaunchImage {
     loaded: Arc<ValidatedWorkerSnapshot>,
 }
 impl LoadedLaunchImage {
+    pub(crate) fn load(source: &Path) -> Result<Self, GateError> {
+        Ok(Self {
+            source: source.to_owned(),
+            loaded: Arc::new(crate::worker_validation::load_owner_config(source)?),
+        })
+    }
+    pub(crate) fn require_configuration(
+        &self,
+        expected: &worker_config::EffectiveWorkerConfig,
+    ) -> Result<(), GateError> {
+        if !worker_config::equivalent(self.loaded.configuration(), expected) {
+            return Err(GateError::Refused("WORKER_IMAGE_LOADED_CANDIDATE_CHANGED"));
+        }
+        Ok(())
+    }
     pub(crate) fn source(&self) -> &Path {
         &self.source
     }
@@ -27,11 +42,7 @@ impl InstallingBroker {
         let Some(path) = before.source_path() else {
             return Ok(before);
         };
-        let loaded = crate::worker_validation::load_owner_config(path)?;
-        let proof = LoadedLaunchImage {
-            source: path.to_owned(),
-            loaded: Arc::new(loaded),
-        };
+        let proof = LoadedLaunchImage::load(path)?;
         #[cfg(test)]
         {
             let pause = self.installed.image_loaded_pause.lock().unwrap().take();

@@ -91,6 +91,7 @@ export async function bootstrap(
   const now = options.now ?? Date.now();
   const account: OwnerAccount = {
     version: 1,
+    accountId: randomUUID(),
     username: name,
     password: await hashPassword(password, OWNER_SCRYPT_PARAMS),
     mustChange: true,

@@ -1,18 +1,9 @@
 use super::*;
-use std::{fs, os::unix::fs::MetadataExt, path::Path};
+use std::{fs, path::Path};
 /// Exact `_stamp` eight-field DATA. A named signature is only an observation;
 /// it is not an inode-conditional rename against a noncooperating same-UID actor.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct GpuFileStamp {
-    device: u64,
-    inode: u64,
-    mode: u32,
-    uid: u32,
-    links: u64,
-    size: u64,
-    mtime: (i64, i64),
-    ctime: (i64, i64),
-}
+pub struct GpuFileStamp(native::PrivateFileStamp);
 impl GpuFileStamp {
     pub fn observe(path: &Path) -> Result<Self> {
         Ok(Self::of(&fs::symlink_metadata(path)?))
@@ -25,34 +16,18 @@ impl GpuFileStamp {
         }
     }
     pub(crate) fn of(info: &fs::Metadata) -> Self {
-        Self {
-            device: info.dev(),
-            inode: info.ino(),
-            mode: info.mode(),
-            uid: info.uid(),
-            links: info.nlink(),
-            size: info.len(),
-            mtime: (info.mtime(), info.mtime_nsec()),
-            ctime: (info.ctime(), info.ctime_nsec()),
-        }
+        Self(native::PrivateFileStamp::of(info))
+    }
+    pub(crate) fn from_native(stamp: native::PrivateFileStamp) -> Self {
+        Self(stamp)
     }
     pub(crate) fn named(parent: &fs::File, name: &std::ffi::OsStr) -> Result<Self> {
-        let value: native::EntryStat = native::entry_stat(parent, name)?;
-        Ok(Self {
-            device: value.device,
-            inode: value.inode,
-            mode: value.mode,
-            uid: value.uid,
-            links: value.links,
-            size: value.size,
-            mtime: value.mtime,
-            ctime: value.ctime,
-        })
+        Ok(Self(native::PrivateFileStamp::named(parent, name)?))
     }
     pub(crate) fn private(&self, owner: u32) -> bool {
-        self.mode & libc::S_IFMT == libc::S_IFREG
-            && self.mode & 0o7777 == 0o600
-            && self.uid == owner
-            && self.links == 1
+        self.0.private(owner)
+    }
+    pub(crate) fn same_renamed_file(&self, before: &Self) -> bool {
+        self.0.same_renamed_file(&before.0)
     }
 }

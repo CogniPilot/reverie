@@ -5,6 +5,8 @@ mod custody;
 mod error;
 mod source;
 mod stop_budget;
+mod stopped_ram;
+pub(crate) use stopped_ram::{StoppedRamObservation, StoppedRamPresence};
 #[cfg(test)]
 pub(crate) mod tests;
 pub use capacity::{CapacityFacts, WebsiteBinding};
@@ -68,6 +70,7 @@ impl NativeObserver {
         inherited: Option<Instant>,
     ) -> ObservationContext {
         ObservationContext {
+            metadata: self.source.capture_metadata_owner().map(Arc::new),
             observer: self.clone(),
             config: ReservationConfiguration::capture(config),
             inherited,
@@ -77,6 +80,7 @@ impl NativeObserver {
     }
 }
 pub struct ObservationContext {
+    metadata: Option<Arc<reverie_host::engine_metadata::MetadataQueryOwner>>,
     observer: NativeObserver,
     config: ReservationConfiguration,
     inherited: Option<Instant>,
@@ -127,6 +131,42 @@ impl ObservedRow<'_> {
     }
 }
 impl ObservationContext {
+    pub(crate) fn assert_inventory_origin(&self, rows: &ObservedInventory) -> Result<()> {
+        need(
+            Arc::ptr_eq(&self.origin, &rows.origin),
+            "RESERVATION_OBSERVATION_CONTEXT",
+        )
+    }
+    pub(crate) fn provider_process(
+        &self,
+        observer: &mut reverie_host::website_facts::WebsiteProcessObserver,
+        row: &ObservedRow<'_>,
+        end: Instant,
+    ) -> std::result::Result<
+        reverie_host::website_facts::ProviderProcessObservation,
+        reverie_host::website_facts::WebsiteFactsError,
+    > {
+        let convert =
+            |e: ObserverError| reverie_host::website_facts::WebsiteFactsError::Refused(e.code());
+        let end = self.deadline(Some(end)).map_err(convert)?;
+        let result = self.observer.source.provider_process(
+            self.metadata.as_deref(),
+            observer,
+            self.checked_row(row).map_err(convert)?,
+            end,
+            &self.observer.cancellation,
+        )?;
+        self.check(end).map_err(convert)?;
+        Ok(result)
+    }
+    /// Exact calls owned by THIS observation context only. Whole Runtime
+    /// shutdown retains its separate global settlement operation.
+    pub(crate) fn settle_metadata_owned(&self, end: Instant) -> Result<()> {
+        let end = self.live_stop_deadline().map_or(end, |stop| stop.min(end));
+        self.observer
+            .source
+            .settle_metadata_owner(self.metadata.as_deref(), end)
+    }
     pub(crate) fn original_target_storage(
         &self,
         paths: &StoragePaths,
@@ -173,6 +213,7 @@ impl ObservationContext {
     pub(crate) fn with_applied_configuration(&self, config: EffectiveWorkerConfig) -> Self {
         Self {
             observer: self.observer.clone(),
+            metadata: self.metadata.clone(),
             config: ReservationConfiguration::capture(config),
             inherited: self.inherited,
             origin: self.origin.clone(),
@@ -185,10 +226,12 @@ impl ObservationContext {
         supplied: Option<Instant>,
     ) -> Result<reverie_host::broker_engine::LaptopInspectOutput> {
         let end = self.deadline(supplied)?;
-        let output = self
-            .observer
-            .source
-            .inspect_laptop(name, end, &self.observer.cancellation)?;
+        let output = self.observer.source.inspect_laptop(
+            self.metadata.as_deref(),
+            name,
+            end,
+            &self.observer.cancellation,
+        )?;
         self.check(end)?;
         Ok(output)
     }
@@ -197,6 +240,7 @@ impl ObservationContext {
     pub(crate) fn with_inherited(&self, inherited: Option<Instant>) -> Self {
         Self {
             observer: self.observer.clone(),
+            metadata: self.metadata.clone(),
             config: ReservationConfiguration::capture(self.config.configuration().clone()),
             inherited,
             origin: self.origin.clone(),
@@ -231,12 +275,26 @@ impl ObservationContext {
     }
     fn engine(&self, query: EngineQuery<'_>, end: Instant) -> Result<String> {
         self.check(end)?;
-        let result = self
-            .observer
-            .source
-            .query(query, end, &self.observer.cancellation)?;
+        let result = self.observer.source.query(
+            self.metadata.as_deref(),
+            query,
+            end,
+            &self.observer.cancellation,
+        )?;
         self.check(end)?;
         Ok(result)
+    }
+    /// Full image metadata through THIS context's same native engine/query
+    /// ticket. Exact image IDs are DATA, never a load/create command.
+    pub(crate) fn worker_image_metadata(
+        &self,
+        image: &reverie_contracts::worker_image_switch::WorkerImageId,
+        end: Instant,
+    ) -> Result<String> {
+        self.engine(
+            EngineQuery::WorkerImageInspect(image),
+            self.deadline(Some(end))?,
+        )
     }
     pub fn inventory(&self, supplied: Option<Instant>) -> Result<ObservedInventory> {
         self.inventory_at(self.deadline(supplied)?)
@@ -320,6 +378,13 @@ impl ObservationContext {
         &self,
         row: &NativeLimitFields<'_>,
     ) -> Result<Option<ObservedMemoryPolicy>> {
+        self.memory_policy_fields_at(row, false)
+    }
+    fn memory_policy_fields_at(
+        &self,
+        row: &NativeLimitFields<'_>,
+        stable_pool_policy: bool,
+    ) -> Result<Option<ObservedMemoryPolicy>> {
         if !self.config.memory_policies_enabled() {
             return Ok(None);
         }
@@ -339,7 +404,8 @@ impl ObservationContext {
             .effective_config(self.config.configuration().clone(), &session)?;
         need(
             row.label_is("reverie.worker-policy", &policy_digest(&repeated).to_hex())?
-                && row.memory_matches(policy.memory())?,
+                && row.memory_matches(policy.memory())?
+                && (!stable_pool_policy || policy_digest(&effective) == policy_digest(&repeated)),
             "RESERVATION_SOURCE_POLICY",
         )?;
         Ok(Some(policy))
@@ -377,13 +443,19 @@ impl ObservationContext {
         Ok(result)
     }
     pub fn capacity(&self, inventory: &ObservedInventory) -> Result<CapacityFacts> {
-        self.capacity_at(inventory, None)
+        self.capacity_at(inventory, None, false)
+    }
+    pub(crate) fn pool_creation_capacity(
+        &self,
+        inventory: &ObservedInventory,
+    ) -> Result<CapacityFacts> {
+        self.capacity_at(inventory, None, true)
     }
     pub fn capacity_stopped_website(
         &self,
         inventory: &ObservedInventory,
         id: &ContainerId,
     ) -> Result<CapacityFacts> {
-        self.capacity_at(inventory, Some(id))
+        self.capacity_at(inventory, Some(id), false)
     }
 }

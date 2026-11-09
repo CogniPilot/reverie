@@ -8,23 +8,39 @@ mod cold;
 pub(crate) mod cold_confirm;
 mod cold_prepare;
 mod connection;
+mod controller;
 pub use cold_prepare::{ColdPreparation, PreparedColdTemporary};
+pub use controller::ControllerMemberConfigured;
+pub(crate) use controller::CreatedPoolTarget;
 mod create;
 mod direct_finalization;
 mod error;
+pub use error::{ControllerPoolCause, ControllerPoolFailure};
 mod existing_viewer;
 pub(crate) mod final_storage;
 mod guard;
+mod handler_settlement;
 mod memory;
 mod network;
 mod pane;
+mod perf;
+mod protected;
 mod publication;
+pub use protected::{
+    ProtectedCliObservation, ProtectedCreatedObservation, ProtectedMemoryObservation,
+};
 mod request_cleanup;
 mod start;
+mod started_finalization;
 mod started_transfer;
+pub use started_finalization::StartedStorageFinalizer;
 mod storage;
 mod storage_cleanup;
-pub use started_transfer::{StartedOrdinaryStopTransferred, StartedReplacementStopTransferred};
+pub use started_transfer::{
+    StartedControlStopTransferred, StartedOrdinaryStopTransferFailure,
+    StartedOrdinaryStopTransferred, StartedReplacementStopTransferFailure,
+    StartedReplacementStopTransferred,
+};
 mod started_source;
 pub use started_source::{
     StartedLaptopSource, StartedSourceStopTransferred, StartedSourceStorageBorrow,
@@ -47,7 +63,7 @@ use crate::{
 };
 pub use cleanup::{CreatedCleanup, StoppedCreatedLaptop};
 pub use cold::{ColdCommit, ColdCommitted};
-pub use create::{CreatedLaptop, LaptopCreation};
+pub use create::{CreatedLaptop, LaptopCreateDiagnostic, LaptopCreation};
 pub use direct_finalization::{
     DirectStorageFinalizer, DirectStorageObservation, DirectStorageRetainFailure,
 };
@@ -56,7 +72,7 @@ use error::{Result, finalized, need};
 pub use existing_viewer::{
     ExistingRelayRetainFailure, ExistingRelayReturned, ExistingStorageObservation, ExistingViewer,
     ExistingViewerReceiptObservation, ExistingViewerRetainFailure, ExistingViewerReturned,
-    ExistingViewerStart, StartedRelayTransferred,
+    ExistingViewerStart, StartedRelayTransferFailure, StartedRelayTransferred,
 };
 pub use guard::{NixGuardRelease, NixReleasedPane};
 pub use memory::{
@@ -85,6 +101,7 @@ enum Phase {
     Known,
     Retained,
     Cleaning,
+    FinalizingStarted,
     Stopped,
     CleanupRetained,
     Consumed,
@@ -110,7 +127,7 @@ struct Inputs {
     office: OfficePhone,
 }
 struct Record {
-    source_attachment: Option<Arc<()>>,
+    source_attachment: Option<started_source::Attachment>,
     finalization: created_finalization::StorageCheck,
     cold: cold_prepare::Stage,
     resources: Option<Resources>,
@@ -124,6 +141,18 @@ struct Record {
     viewer: Option<Arc<viewer::ViewerJob>>,
 }
 impl Record {
+    /// Cached local cleanup must not revoke another actual consuming purpose.
+    /// Refuse before changing phase, returning cached success or native effects.
+    fn begin_cleanup(&mut self) -> Result<()> {
+        need(
+            self.phase != Phase::FinalizingStarted,
+            "WORKER_STARTED_FINAL_STORAGE_RETAINED",
+        )?;
+        if !matches!(self.phase, Phase::Stopped | Phase::CleanupRetained) {
+            self.phase = Phase::Cleaning;
+        }
+        Ok(())
+    }
     fn resources(&self) -> &Resources {
         self.resources.as_ref().expect("actual unreclaimed owners")
     }
@@ -433,13 +462,19 @@ impl Workflows {
         let mut record = record
             .try_lock()
             .map_err(|_| LaptopError::Refused("WORKER_LAPTOP_RETAINED"))?;
+        need(
+            record.phase != Phase::FinalizingStarted,
+            "WORKER_STARTED_FINAL_STORAGE_RETAINED",
+        )?;
         if record.phase == Phase::Held && runtime.cancellation().is_cancelled() {
             record.outcome = Some(Err(Arc::new(LaptopError::Refused("WORKER_LAPTOP_STOPPED"))));
             record.phase = Phase::Known;
         }
         let viewer = record.viewer.clone();
         let memory_result = if runtime.cancellation().is_cancelled() || record.cleanup.is_some() {
-            memory::close_abandoned(&mut record)
+            let memory = memory::close_abandoned(&mut record);
+            let perf = perf::close_abandoned(&mut record);
+            finalized(memory, perf)
         } else {
             Ok(())
         };

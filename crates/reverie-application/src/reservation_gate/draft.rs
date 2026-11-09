@@ -144,6 +144,15 @@ impl Inner {
         employee: &JournalId,
         key: &JournalId,
     ) -> Result<(DraftPreview, TerminalClaim)> {
+        self.draft_profile_checked(employee, key, None)
+            .map(|(preview, terminal, _)| (preview, terminal))
+    }
+    pub(super) fn draft_profile_checked(
+        self: &Arc<Self>,
+        employee: &JournalId,
+        key: &JournalId,
+        authority: Option<&super::ram_preview::RamPreviewGuard<'_, '_>>,
+    ) -> Result<super::ram_preview::ObservedRamDraft> {
         // The source opens its ordinary store before the profile snapshot.
         let eid = ProfileEmployeeId::parse(employee.as_str()).expect("checked UUID");
         let capacity = Arc::new(DraftCapacity {
@@ -179,9 +188,19 @@ impl Inner {
             .ok_or(GateError::Refused(
                 "RESERVATION_TARGET_NATIVE_BINDING_CHANGED",
             ))?;
+        // The RAM-purpose selection uses this SAME genuine native observation;
+        // no claim or synthetic original baseline is created just for a digest.
+        let policy = authority
+            .map(|authority| {
+                authority.observe_policy(self, &profile, &native, &observed.observation)
+            })
+            .transpose()?;
         reservation_draft::validate_directory_names(&reservation_control::settlement_names(
             self.config()?.as_ref(),
         )?)?;
+        if let Some(authority) = authority {
+            authority.check(self)?;
+        }
         reservation_control::publish_draft(self.config()?.as_ref(), &record)?;
         let employee = ClaimEmployee::capture(
             &storage_identity::read_company_metadata(&self.identity)?,
@@ -202,6 +221,7 @@ impl Inner {
                 native,
                 observed: observed.observation,
             },
+            policy,
         ))
     }
 }

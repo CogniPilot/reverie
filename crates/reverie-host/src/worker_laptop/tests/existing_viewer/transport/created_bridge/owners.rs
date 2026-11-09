@@ -57,6 +57,13 @@ fn later_j_legacy_stop_consumes_same_storage_only_into_actual_fixed_stop_owner()
     let (created, released) = ready(&fixture, &original);
     let (plan, inspected, _receipt) =
         transfer::inputs(&fixture, &created, &original, &"c".repeat(64));
+    let failure = runtime
+        .transfer_started_laptop_ordinary_stop_for_worker(&created, plan, inspected, &original)
+        .err()
+        .unwrap();
+    let (plan, inspected, _cause) = failure.into_parts();
+    inspected.assert_plan(runtime, &plan).unwrap();
+    assert!(runtime.created_laptop_stop_target(&created).is_ok());
     runtime.cleanup_created_laptop_request(&created).unwrap();
     original.close_socket(end()).unwrap();
     old_hold.release(end()).unwrap();
@@ -126,6 +133,13 @@ fn later_j_replacement_transfer_keeps_real_process_brand_and_cannot_release_on_d
     let process = inspected
         .capture_running_replacement_process(runtime, &plan, end())
         .unwrap();
+    let failure = runtime
+        .transfer_started_laptop_replacement_stop_for_worker(&created, plan, process, &original)
+        .err()
+        .unwrap();
+    let (plan, process, _cause) = failure.into_parts();
+    process.assert_plan(runtime, &plan).unwrap();
+    assert!(runtime.created_laptop_stop_target(&created).is_ok());
     runtime.cleanup_created_laptop_request(&created).unwrap();
     original.close_socket(end()).unwrap();
     old_hold.release(end()).unwrap();

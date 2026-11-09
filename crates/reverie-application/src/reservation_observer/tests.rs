@@ -3,6 +3,8 @@ use reverie_contracts::{kernel_mounts::MountTable, worker_config};
 use reverie_core::{decimal::UnsignedInteger, ids::ProfileSessionId, posix_path::PosixPath};
 use serde_json::{Value, json};
 use std::{collections::VecDeque, sync::Mutex};
+#[path = "tests_pool.rs"]
+mod pool_cases;
 thread_local! {
     static INSTALLED_READS: std::cell::RefCell<Vec<&'static str>> = const { std::cell::RefCell::new(Vec::new()) };
 }
@@ -31,6 +33,7 @@ struct State {
     start_checks: bool,
     old_release: Option<&'static str>,
     process_starts: std::collections::BTreeMap<String, String>,
+    protected_pool: bool,
 }
 pub(crate) struct Fixture(Mutex<State>);
 impl Fixture {
@@ -61,6 +64,7 @@ impl Fixture {
             start_checks: false,
             old_release: None,
             process_starts: std::collections::BTreeMap::new(),
+            protected_pool: false,
         })))
     }
     pub(crate) fn observer(self: &Arc<Self>) -> NativeObserver {
@@ -133,6 +137,13 @@ impl Fixture {
     pub(crate) fn native_start_facts(&self) {
         self.0.lock().unwrap().start_checks = true;
     }
+    /// Synthetic kernel facts only; admission/config/locks remain real.
+    pub(crate) fn protected_pool_facts(&self) {
+        self.0.lock().unwrap().protected_pool = true;
+    }
+    pub(crate) fn host_memory_facts(&self, raw: &str) {
+        self.0.lock().unwrap().meminfo = raw.to_owned();
+    }
     pub(crate) fn old_release(&self, result: &'static str) {
         self.0.lock().unwrap().old_release = Some(result);
     }
@@ -147,6 +158,48 @@ impl Fixture {
     }
 }
 impl Source for Arc<Fixture> {
+    fn capture_metadata_owner(&self) -> Option<reverie_host::engine_metadata::MetadataQueryOwner> {
+        self.0
+            .lock()
+            .unwrap()
+            .engine
+            .as_ref()
+            .map(ReadonlyEngine::capture_query_owner)
+    }
+    fn settle_metadata_owner(
+        &self,
+        owner: Option<&reverie_host::engine_metadata::MetadataQueryOwner>,
+        end: Instant,
+    ) -> Result<()> {
+        let mut state = self.0.lock().unwrap();
+        state.events.push("settle".to_owned());
+        if let Some(engine) = state.engine.clone() {
+            drop(state);
+            let owner = owner.ok_or(ObserverError::Refused(
+                "RESERVATION_METADATA_OWNER_REQUIRED",
+            ))?;
+            owner.assert_engine(&engine)?;
+            owner.settle_owned(end)?;
+        } else {
+            need(owner.is_none(), "RESERVATION_METADATA_OWNER_ORIGIN")?;
+        }
+        Ok(())
+    }
+    fn assert_worker_runtime(
+        &self,
+        runtime: &reverie_host::worker_runtime::WorkerRuntime,
+    ) -> Result<()> {
+        let engine = self
+            .0
+            .lock()
+            .unwrap()
+            .engine
+            .clone()
+            .ok_or(ObserverError::Refused(
+                "RESERVATION_OBSERVATION_RUNTIME_ORIGIN",
+            ))?;
+        Ok(engine.assert_worker_runtime(runtime)?)
+    }
     fn verify_launch_limits(
         &self,
         _: &reverie_contracts::broker_laptop::LaunchLaptopInspection,
@@ -225,6 +278,7 @@ impl Source for Arc<Fixture> {
     }
     fn inspect_laptop(
         &self,
+        owner: Option<&reverie_host::engine_metadata::MetadataQueryOwner>,
         name: &reverie_core::worker_laptop::WorkerContainerName,
         end: Instant,
         cancellation: &CancellationToken,
@@ -233,12 +287,11 @@ impl Source for Arc<Fixture> {
         state.events.push(format!("laptop:{}", name.as_str()));
         if let Some(engine) = state.engine.clone() {
             drop(state);
-            return Ok(reverie_host::broker_engine::inspect_laptop(
-                &engine,
-                name,
-                end,
-                cancellation,
-            )?);
+            let owner = owner.ok_or(ObserverError::Refused(
+                "RESERVATION_METADATA_OWNER_REQUIRED",
+            ))?;
+            owner.assert_engine(&engine)?;
+            return Ok(owner.inspect_laptop(name, end, cancellation)?);
         }
         state
             .laptop_outputs
@@ -249,6 +302,7 @@ impl Source for Arc<Fixture> {
     }
     fn query(
         &self,
+        owner: Option<&reverie_host::engine_metadata::MetadataQueryOwner>,
         query: EngineQuery<'_>,
         end: Instant,
         cancellation: &CancellationToken,
@@ -261,6 +315,14 @@ impl Source for Arc<Fixture> {
                 EngineQuery::InspectStopped(_) => "stopped",
                 EngineQuery::GpuInformation => "gpu-info",
                 EngineQuery::TelemetryInventory | EngineQuery::TelemetryInspect(_) => "telemetry",
+                EngineQuery::WorkerPoolInspect(_)
+                | EngineQuery::WorkerImageInspect(_)
+                | EngineQuery::ProviderPane(_)
+                | EngineQuery::ProviderTop(_) => {
+                    return Err(ObserverError::Refused(
+                        "POOL_INSPECTION_FIXTURE_UNCONFIGURED",
+                    ));
+                }
             }
             .to_owned(),
         );
@@ -270,7 +332,11 @@ impl Source for Arc<Fixture> {
         }
         if let Some(engine) = state.engine.clone() {
             drop(state);
-            return Ok(engine.query(query, end, cancellation)?);
+            let owner = owner.ok_or(ObserverError::Refused(
+                "RESERVATION_METADATA_OWNER_REQUIRED",
+            ))?;
+            owner.assert_engine(&engine)?;
+            return Ok(owner.query(query, end, cancellation)?);
         }
         state
             .outputs
@@ -299,6 +365,29 @@ impl Source for Arc<Fixture> {
         } else {
             state.tables[0].clone()
         })
+    }
+    fn protected_pool(
+        &self,
+        _: &ReservationConfiguration,
+        _: &NativeLimitBinding,
+        _: Instant,
+    ) -> Result<()> {
+        let mut state = self.0.lock().unwrap();
+        state.events.push("protected-pool".to_owned());
+        need(state.protected_pool, "RESERVATION_POOL_NATIVE_REQUIRED")
+    }
+    fn pool_charge(
+        &self,
+        config: &ReservationConfiguration,
+        site: &NativeLimitBinding,
+        row: &ContainerRow,
+        binding: &NativeLimitBinding,
+        policy: &ObservedMemoryPolicy,
+        end: Instant,
+    ) -> Result<UnsignedInteger> {
+        self.protected_pool(config, site, end)?;
+        need(row.id() == binding.container_id(), "FIXTURE_POOL_BINDING")?;
+        Ok(policy.high().unwrap().clone())
     }
     fn limits(
         &self,

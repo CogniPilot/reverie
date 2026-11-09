@@ -1,6 +1,15 @@
 import { viewerHealth, type ProviderHealth } from './worker-provider-health.js';
 import { displayTime } from './display-time.js';
-import { RuntimeRecipeSchema, type RuntimeRecipe } from './expert-runtime-recipe.js';
+import { RuntimeRecipeSchema, resourceSessionSourceFacts, type RuntimeRecipe } from './expert-runtime-recipe.js';
+import type { Session } from './session.js';
+import type { PlanMoveRecord } from './plan-move.js';
+import {
+  assertResourceOperation,
+  assertRamResourceOperation,
+  type ResourceOwnerBinding,
+  type RamResourceOwnerBinding,
+  type RamResourceSessionIntent,
+} from './resource-owner-authority.js';
 import { randomInt, randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { isDeepStrictEqual } from 'node:util';
@@ -44,6 +53,12 @@ export class CompanyError extends Error {
 export interface ExpectedCompanyBinding {
   readonly employee: Readonly<CompanyEmployee>;
   readonly targetRecipe: Readonly<RuntimeRecipe>;
+  /** Closed, actual owner binding rechecked under the writer lock and at
+   * canonical rename. The surrounding expected metadata remains DATA. */
+  readonly resourceOperation?: (
+    | { purpose: 'legacy'; binding: ResourceOwnerBinding; record: Readonly<PlanMoveRecord> }
+    | { purpose: 'ram'; binding: RamResourceOwnerBinding; record: RamResourceSessionIntent }
+  ) & { source: Session; sourceFacts: ReturnType<typeof resourceSessionSourceFacts> };
 }
 
 function persistedEmployee(employee: Readonly<CompanyEmployee>): CompanyEmployee {
@@ -748,6 +763,37 @@ export class CompanyService {
     const persistedRecipe = (value: unknown) => RuntimeRecipeSchema.parse(JSON.parse(JSON.stringify(value)));
     const expectedRecipe = expected ? persistedRecipe(expected.targetRecipe) : undefined;
     const validateCandidate = () => {
+      const resource = expected?.resourceOperation;
+      if (resource) {
+        const source = resource.source;
+        if (resource.purpose === 'legacy') {
+          assertResourceOperation(resource.binding, owner, resource.record);
+          if (
+            resource.record.employeeId !== employeeId ||
+            resource.record.oldSession !== source.id ||
+            resource.record.newSession !== sessionId
+          )
+            throw new CompanyError('Approved resource publication changed', 409);
+        } else {
+          const intent = resource.record;
+          assertRamResourceOperation(resource.binding, owner, intent);
+          if (
+            intent.approval.employeeId !== employeeId ||
+            intent.sourceSid !== source.id ||
+            intent.approval.targetSid !== sessionId ||
+            intent.sourceGeneration !== expectedEmployee?.sessionGeneration
+          )
+            throw new CompanyError('Approved RAM publication changed', 409);
+        }
+        if (
+          this.deps.getSession(source.id) !== source ||
+          source.id !== expectedEmployee?.sessionId ||
+          source.owner !== owner ||
+          source.isWorking ||
+          !isDeepStrictEqual(resourceSessionSourceFacts(source), resource.sourceFacts)
+        )
+          throw new CompanyError('Approved resource source changed', 409);
+      }
       if (
         expected &&
         (this.deps.getSession(sessionId) !== session ||

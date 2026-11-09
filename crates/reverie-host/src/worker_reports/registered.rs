@@ -56,19 +56,17 @@ impl WorkerReportService {
         )
     }
     pub fn collect_worker_handlers(&self) -> Result<WorkerHandlersProgress> {
-        let records = self
-            .records
-            .try_lock()
-            .map_err(|_| WorkerReportError::Unconfirmed)?
-            .clone();
+        let records = match self.try_collect_records()? {
+            Some(records) => records.clone(),
+            None => return Ok(WorkerHandlersProgress::Pending),
+        };
         let mut pending = false;
         for record in &records {
             pending |= !record.collect_handler()?;
         }
-        let mut retained = self
-            .records
-            .try_lock()
-            .map_err(|_| WorkerReportError::Unconfirmed)?;
+        let Some(mut retained) = self.try_collect_records()? else {
+            return Ok(WorkerHandlersProgress::Pending);
+        };
         retained.retain(|record| !record.settled());
         if self.opaque.load(Ordering::Acquire) {
             return Err(WorkerReportError::Unconfirmed);
@@ -79,6 +77,16 @@ impl WorkerReportService {
             WorkerHandlersProgress::Settled
         })
     }
+    fn try_collect_records(&self) -> Result<Option<std::sync::MutexGuard<'_, Vec<Arc<Record>>>>> {
+        match self.records.try_lock() {
+            Ok(records) => Ok(Some(records)),
+            Err(std::sync::TryLockError::WouldBlock) => Ok(None),
+            Err(std::sync::TryLockError::Poisoned(_)) => {
+                self.opaque.store(true, Ordering::Release);
+                Err(WorkerReportError::Unconfirmed)
+            }
+        }
+    }
     pub(super) fn finish_registered(&self, record: &Arc<Record>) -> Result<()> {
         self.finish_accepted(record)
     }
@@ -87,6 +95,48 @@ impl WorkerReportService {
     }
 }
 impl RegisteredWorkerConnection {
+    /// All original broker verbs use this same UID-before-frame read and the
+    /// same registered handler. Each application purpose retains its own real
+    /// peer/resource policy; this handoff alone grants none of those effects.
+    pub fn receive_service_for_worker(
+        mut self,
+        collector: &CommandTelemetry,
+        configuration: &EffectiveWorkerConfig,
+    ) -> Result<super::AcceptedWorkerServiceConnection> {
+        use super::{
+            AcceptedWorkerServiceConnection as Accepted, service_connection::InitialRequest,
+        };
+        self.finish = Finish::Worker;
+        let entered = self.await_handler_publication();
+        let record = self.record.take().expect("one initial service read");
+        let request = entered
+            .and_then(|()| record.read_service_request(&self.service, collector, configuration));
+        match request {
+            Ok(InitialRequest::ReportCompleted) => {
+                self.finish_record(&record)?;
+                Ok(Accepted::ReportCompleted)
+            }
+            Ok(InitialRequest::Launch(request)) => Ok(Accepted::Launch(
+                super::launch::WorkerLaunchConnection::from_registered(
+                    self.service.clone(),
+                    record,
+                    request,
+                ),
+            )),
+            Ok(InitialRequest::Service {
+                purpose,
+                payload,
+                peer,
+            }) => Ok(Accepted::Service(super::WorkerServiceConnection::new(
+                self.service.clone(),
+                record,
+                purpose,
+                payload,
+                peer,
+            ))),
+            Err(error) => finalized(Err(error), self.finish_record(&record)),
+        }
+    }
     /// Fixed App handler entry calls this BEFORE configuration or payload work.
     /// A second call on the same thread is identity-only; another thread cannot
     /// adopt a published handler's record.

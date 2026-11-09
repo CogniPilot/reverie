@@ -457,7 +457,7 @@ export async function createHarness({
     }
     window.ReverieApp = ReverieApp;
   `);
-  for (const f of ['chatroom-ui.js', 'chat-media.js']) window.eval(read(f));
+  for (const f of ['chatroom-ui.js', 'chat-media.js', 'company-resources.js']) window.eval(read(f));
   window.app = new window.ReverieApp();
   for (const s of sessions) window.app.sessions.set(s.id, s);
   const startShell = async () => {

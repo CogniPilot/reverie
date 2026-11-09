@@ -90,6 +90,15 @@ impl From<reverie_contracts::lease_policy::LeaseDataError> for WorkerValidationC
     }
 }
 impl WorkerValidationError {
+    pub(crate) fn has_unconfirmed_close(&self) -> bool {
+        match &self.cause {
+            WorkerValidationCause::Native(host::WorkerValidationHostError::Observation(e)) => {
+                e.has_unconfirmed_close()
+            }
+            WorkerValidationCause::Rootless(e) => rootless_close_unknown(e),
+            _ => false,
+        }
+    }
     pub fn stage(&self) -> WorkerValidationStage {
         self.stage
     }
@@ -98,6 +107,15 @@ impl WorkerValidationError {
     }
     pub fn code(&self) -> &'static str {
         self.cause.code()
+    }
+}
+pub(crate) fn rootless_close_unknown(error: &rootless::RootlessHostError) -> bool {
+    use reverie_host::task_perf::TaskPerfHostError as P;
+    match error {
+        rootless::RootlessHostError::Observation(e)
+        | rootless::RootlessHostError::Perf(P::Observation(e)) => e.has_unconfirmed_close(),
+        rootless::RootlessHostError::Perf(P::Identity(e)) => e.has_unconfirmed_close(),
+        _ => false,
     }
 }
 impl std::fmt::Display for WorkerValidationError {

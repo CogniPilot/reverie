@@ -3,9 +3,6 @@
 mod capsule;
 mod execution;
 mod files;
-mod libraries;
-mod tools;
-
 use clap::Parser;
 use std::path::PathBuf;
 

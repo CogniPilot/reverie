@@ -15,6 +15,7 @@ type Abandoned = (
     Arc<RecoveryOwners>,
     Arc<CommandTelemetry>,
     Arc<WorkerReportService>,
+    Arc<chat_images::ChatImages>,
 );
 fn abandoned() -> &'static Mutex<Vec<Abandoned>> {
     static OWNERS: OnceLock<Mutex<Vec<Abandoned>>> = OnceLock::new();
@@ -42,7 +43,9 @@ impl Drop for InstallingBroker {
         // Poison/contention cannot establish absence. A captured Office also
         // remains unresolved here until a real structured shutdown consumes it;
         // closing one phone never supplies Company/global settlement.
-        if self.recovery.known_empty(&self.installed) && self.storage.known_empty_for_service_drop()
+        if self.recovery.known_empty(&self.installed)
+            && self.storage.known_empty_for_service_drop()
+            && self.images.known_empty_for_drop()
         {
             return;
         }
@@ -55,6 +58,7 @@ impl Drop for InstallingBroker {
                 self.recovery.clone(),
                 self.telemetry.clone(),
                 self.reports.clone(),
+                self.images.clone(),
             ));
     }
 }

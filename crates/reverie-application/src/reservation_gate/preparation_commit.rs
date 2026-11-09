@@ -8,9 +8,24 @@ use reverie_contracts::{
 use reverie_host::reservation_control::PolicyTransaction;
 use std::path::Path;
 impl RetainedPreparation {
-    pub fn commit_configuration(&mut self) -> Result<PreparedPolicyRecord> {
+    pub fn commit_configuration(&mut self) -> Result<CommittedPolicy> {
+        self.commit_selected(None)
+    }
+    /// The selection must match this actual retained profile/native baseline.
+    /// The caller still owns its real authenticated operation; selected DATA
+    /// never grants admission, configuration publication or a native effect.
+    pub fn commit_ram_configuration(
+        &mut self,
+        policy: &reverie_contracts::ram_migration::RamMigrationPolicy,
+    ) -> Result<CommittedPolicy> {
+        self.commit_selected(Some(policy))
+    }
+    fn commit_selected(
+        &mut self,
+        policy: Option<&reverie_contracts::ram_migration::RamMigrationPolicy>,
+    ) -> Result<CommittedPolicy> {
         need(
-            self.store.is_some(),
+            self.journal_available(),
             "RESOURCE_PREPARATION_ACTIVE_HANDLE_REQUIRED",
         )?;
         need(self.published, "RESOURCE_PREPARATION_PUBLICATION_REQUIRED")?;
@@ -18,7 +33,7 @@ impl RetainedPreparation {
             self.policy.is_none(),
             "RESOURCE_PREPARATION_CONFIG_ALREADY_ATTEMPTED",
         )?;
-        let staged = self.stage_configuration()?;
+        let staged = self.stage_selected(policy)?;
         let candidate = Arc::new(crate::worker_validation::validate_captured(
             staged.configuration().clone(),
         )?);
@@ -26,7 +41,11 @@ impl RetainedPreparation {
             "RESOURCE_PREPARATION_CONFIG_FILE_REQUIRED",
         ))?;
         match self.commit_attempt(candidate, &path) {
-            Ok(receipt) => Ok(receipt),
+            Ok(receipt) => Ok(CommittedPolicy::after_commit(
+                self,
+                receipt,
+                policy.map(|policy| policy.digest().clone()),
+            )),
             Err(error) => Err(GateError::PreparationConfigUncertain {
                 cause: Box::new(finalized::<()>(Err(error), self.close_owned()).unwrap_err()),
             }),
@@ -38,7 +57,7 @@ impl RetainedPreparation {
         path: &Path,
     ) -> Result<PreparedPolicyRecord> {
         let gate = self.gate.clone();
-        let admission = gate.admit(AdmissionBounds::default())?;
+        let admission = self.admit_preparation()?;
         let result = (|| {
             gate.finish_preparation(self, PublicationPhase::After)?;
             let installed = gate.installed.snapshot()?;
@@ -46,7 +65,7 @@ impl RetainedPreparation {
                 .custody_loaded_policy(&installed, None)?;
             let transaction = PolicyTransaction::capture(path, gate.config()?.uid()?)?;
             let mut transaction = Some(transaction);
-            let body = self.publish_policy(candidate, path, &mut transaction);
+            let body = self.publish_policy(candidate, path, &mut transaction, installed);
             let closed = transaction.take().map_or(Ok(()), |transaction| {
                 transaction.close().map_err(Into::into)
             });
@@ -65,6 +84,7 @@ impl RetainedPreparation {
         candidate: Arc<ValidatedWorkerSnapshot>,
         path: &Path,
         transaction: &mut Option<PolicyTransaction>,
+        before: Arc<ValidatedWorkerSnapshot>,
     ) -> Result<PreparedPolicyRecord> {
         let original = crate::worker_validation::load_owner_config(path)?;
         need(
@@ -72,6 +92,8 @@ impl RetainedPreparation {
             "RESOURCE_PREPARATION_CONFIG_CHANGED",
         )?;
         self.policy = Some(PolicyPhase {
+            before,
+            installed_snapshot: None,
             candidate: candidate.clone(),
             binding: transaction.as_ref().expect("actual transaction").binding(),
             published: false,

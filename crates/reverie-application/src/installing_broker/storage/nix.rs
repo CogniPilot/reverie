@@ -27,6 +27,21 @@ pub struct NixStoragePreparation {
     workflow: NixWorkflow,
 }
 impl NixStoragePreparation {
+    pub(in crate::installing_broker) fn settle_handler_native(
+        &self,
+    ) -> Result<reverie_host::worker_runtime::NativeSettlementProgress, NixStorageError> {
+        if let ReturnTo::Registered {
+            registry, identity, ..
+        } = &self.destination
+        {
+            registry.check_nix(identity, &self.workflow)?;
+        }
+        Ok(self
+            .destination
+            .registry()
+            .runtime
+            .settle_nix_native_for_handler(&self.workflow)?)
+    }
     pub fn paths(&self) -> &StoragePaths {
         &self.paths
     }
@@ -134,6 +149,13 @@ impl StorageClaim {
     ) -> Result<NixStoragePreparation, Box<NixStorageRetainFailure>> {
         let paths = self.paths().clone();
         match self.state {
+            ClaimState::Started(owner) => Err(Box::new(NixStorageRetainFailure {
+                claim: StorageClaim {
+                    state: ClaimState::Started(owner),
+                },
+                guard,
+                error: NixStorageError::Refused("WORKER_STARTED_RESOURCE_NOT_STOPPED"),
+            })),
             ClaimState::Legacy { registry, owner } => {
                 match registry.runtime.retain_nix_store(guard, *owner, prepared) {
                     Ok(workflow) => Ok(NixStoragePreparation {

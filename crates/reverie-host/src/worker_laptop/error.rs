@@ -12,6 +12,37 @@ pub struct CreateTelemetryFailure {
     cause: Mutex<crate::command_telemetry::TelemetryError>,
 }
 pub struct TelemetryCause<'a>(MutexGuard<'a, crate::command_telemetry::TelemetryError>);
+#[derive(Debug)]
+pub struct ControllerPoolFailure {
+    code: &'static str,
+    uncertain: bool,
+    cause: Mutex<crate::worker_pool::PoolError>,
+}
+pub struct ControllerPoolCause<'a>(MutexGuard<'a, crate::worker_pool::PoolError>);
+impl std::ops::Deref for ControllerPoolCause<'_> {
+    type Target = crate::worker_pool::PoolError;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+impl ControllerPoolFailure {
+    pub(super) fn new(cause: crate::worker_pool::PoolError) -> Self {
+        Self {
+            code: cause.code(),
+            uncertain: cause.close_unknown(),
+            cause: Mutex::new(cause),
+        }
+    }
+    pub fn cause(&self) -> Option<ControllerPoolCause<'_>> {
+        self.cause.try_lock().ok().map(ControllerPoolCause)
+    }
+}
+impl std::fmt::Display for ControllerPoolFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.code)
+    }
+}
+impl std::error::Error for ControllerPoolFailure {}
 impl std::ops::Deref for TelemetryCause<'_> {
     type Target = crate::command_telemetry::TelemetryError;
     fn deref(&self) -> &Self::Target {
@@ -69,6 +100,11 @@ pub enum LaptopError {
     Observation(crate::ObservationError),
     MemoryKernel(crate::reservation_kernel::ReservationKernelError),
     MemoryData(reverie_contracts::reservation_engine::EngineDataError),
+    PerfCapsule(crate::task_perf::PerfCapsuleFailure),
+    PerfPolicy(crate::task_perf::TaskPerfHostError),
+    PerfData(reverie_contracts::task_perf_v1::TaskPerfError),
+    PerfResult(reverie_contracts::task_perf_check::PerfCheckDataError),
+    ControllerPool(ControllerPoolFailure),
     MemoryIdentity(reverie_contracts::worker_recovery::RecoveryDataError),
     MemoryHelperSelection(reverie_contracts::worker_validation::WorkerValidationError),
     ColdPolicy(reverie_contracts::worker_validation::WorkerValidationError),
@@ -94,6 +130,13 @@ impl LaptopError {
             Self::ColdStorage(error) => error.unconfirmed_native(),
             Self::StorageOwner(error) => error.unconfirmed_native(),
             Self::Observation(_) => true,
+            Self::ControllerPool(error) => error.uncertain,
+            Self::MemoryKernel(error) => error.has_unconfirmed_close(),
+            Self::PerfPolicy(crate::task_perf::TaskPerfHostError::Observation(_)) => true,
+            Self::PerfPolicy(crate::task_perf::TaskPerfHostError::Identity(error)) => {
+                error.has_unconfirmed_close()
+            }
+            Self::PerfCapsule(error) => error.unconfirmed_native(),
             Self::Publication(error) => !error.cleanup_faults().is_empty(),
             Self::Finalization { primary, secondary } => {
                 primary.unconfirmed_native() || secondary.unconfirmed_native()
@@ -105,6 +148,7 @@ impl LaptopError {
     pub fn code(&self) -> &'static str {
         match self {
             Self::Refused(code) => code,
+            Self::ControllerPool(error) => error.code,
             Self::Plan(_) => "WORKER_LAPTOP_PLAN",
             Self::ExistingObservation(_) => "WORKER_EXISTING_VIEWER_OBSERVATION",
             Self::OrdinaryStop(error) => error.code(),
@@ -123,6 +167,10 @@ impl LaptopError {
             Self::Observation(_) => "WORKER_LAPTOP_NATIVE_FINALIZATION",
             Self::MemoryKernel(error) => error.code(),
             Self::MemoryData(error) => error.code(),
+            Self::PerfCapsule(_) => "TASK_PERF_CAPSULE_UNCONFIRMED",
+            Self::PerfPolicy(error) => error.code(),
+            Self::PerfData(error) => error.code(),
+            Self::PerfResult(_) => "TASK_PERF_CHECK_RESULT_INVALID",
             Self::MemoryIdentity(error) => error.code(),
             Self::MemoryHelperSelection(_) => "LAPTOP_SOFT_LIMIT_HELPER_SELECTION",
             Self::ColdPolicy(_) => "WORKER_COLD_POLICY",
@@ -140,6 +188,7 @@ impl std::error::Error for LaptopError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::Refused(_) => None,
+            Self::ControllerPool(error) => Some(error),
             Self::Plan(error) => Some(error),
             Self::ExistingObservation(error) => Some(error),
             Self::OrdinaryStop(error) => Some(error),
@@ -158,6 +207,10 @@ impl std::error::Error for LaptopError {
             Self::Observation(error) => Some(error),
             Self::MemoryKernel(error) => Some(error),
             Self::MemoryData(error) => Some(error),
+            Self::PerfCapsule(error) => Some(error),
+            Self::PerfPolicy(error) => Some(error),
+            Self::PerfData(error) => Some(error),
+            Self::PerfResult(error) => Some(error),
             Self::MemoryIdentity(error) => Some(error),
             Self::MemoryHelperSelection(error) => Some(error),
             Self::ColdPolicy(error) => Some(error),

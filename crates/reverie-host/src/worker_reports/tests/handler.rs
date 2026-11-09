@@ -6,6 +6,46 @@ use std::sync::mpsc;
 fn isolated(name: &str) -> bool {
     crate::test_process::isolate_case(&format!("worker_reports::tests::handler::{name}"))
 }
+#[test]
+fn collector_reports_actual_registry_contention_as_pending_without_settlement() {
+    if isolated("collector_reports_actual_registry_contention_as_pending_without_settlement") {
+        return;
+    }
+    let fixture = Fixture::new();
+    let service = fixture.service();
+    let held = service.records.lock().unwrap();
+    assert_eq!(
+        service.collect_worker_handlers().unwrap(),
+        WorkerHandlersProgress::Pending
+    );
+    assert!(!service.opaque.load(Ordering::Acquire));
+    drop(held);
+    assert_eq!(
+        service.collect_worker_handlers().unwrap(),
+        WorkerHandlersProgress::Settled
+    );
+    service.close(end()).unwrap();
+}
+#[test]
+fn collector_preserves_actual_poison_as_unknown_after_contention_fix() {
+    if isolated("collector_preserves_actual_poison_as_unknown_after_contention_fix") {
+        return;
+    }
+    let fixture = Fixture::new();
+    let service = Arc::new(fixture.service());
+    let worker = service.clone();
+    assert!(
+        std::thread::spawn(move || {
+            let _held = worker.records.lock().unwrap();
+            panic!("owned collector poisoning control");
+        })
+        .join()
+        .is_err()
+    );
+    assert!(service.collect_worker_handlers().is_err());
+    assert!(service.opaque.load(Ordering::Acquire));
+    assert!(service.close(end()).is_err());
+}
 fn wait(mut condition: impl FnMut() -> bool) {
     let end = end();
     while !condition() {

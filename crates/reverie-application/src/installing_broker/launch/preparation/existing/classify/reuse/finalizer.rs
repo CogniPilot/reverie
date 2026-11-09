@@ -3,6 +3,7 @@ use super::*;
 use crate::installing_broker::launch::preparation::cold::ColdFinalizationFailure;
 use crate::installing_broker::launch::preparation::finalization::CleanupBudget;
 use reverie_host::worker_laptop::ExistingStorageObservation;
+mod reconciliation;
 mod registration;
 #[cfg(test)]
 thread_local! {
@@ -28,6 +29,7 @@ pub struct ReuseFinalizationFailure<'a> {
     owner: Owner<'a>,
     primary: Option<Error>,
     errors: Vec<Error>,
+    bookkeeping: Option<(bool, bool)>,
 }
 /// Handler cleanup only. A retained running laptop is owned by the original
 /// installing registry; this report grants no global shutdown/capacity proof.
@@ -36,10 +38,20 @@ pub struct ReuseHandlerClosed {
     completed: bool,
     storage_retained: bool,
     primary: Option<Error>,
+    history: Vec<Error>,
+    classified: Option<ColdHandlerClosed>,
 }
 impl ReuseHandlerClosed {
     pub fn primary_error(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        self.primary.as_ref().map(Error::as_error)
+        self.primary
+            .as_ref()
+            .or_else(|| self.history.first())
+            .map(Error::as_error)
+            .or_else(|| {
+                self.classified
+                    .as_ref()
+                    .and_then(ColdHandlerClosed::primary_error)
+            })
     }
     pub fn completed(&self) -> bool {
         self.completed
@@ -167,11 +179,14 @@ impl<'a> ReuseViewerFailure<'a> {
                         completed: closed.completed(),
                         storage_retained: closed.storage_retained(),
                         primary,
+                        history: Vec::new(),
+                        classified: Some(closed),
                     }),
                     Err(owner) => Err(Box::new(ReuseFinalizationFailure {
                         owner: Owner::Classified(owner),
                         primary,
                         errors,
+                        bookkeeping: None,
                     })),
                 };
             }
@@ -246,6 +261,10 @@ fn finish<'a>(
             Err(next) => cleanup = *next,
         }
     }
+    let bookkeeping = cleanup
+        .errors
+        .is_empty()
+        .then_some((cleanup.completed, storage_retained));
     if let Err(error) = budget.close_request(&cleanup.owner.scope().preparing.admitted.request) {
         cleanup.errors.push(Error::Transport(error));
     }
@@ -260,12 +279,15 @@ fn finish<'a>(
             completed: cleanup.completed,
             storage_retained,
             primary: cleanup.primary,
+            history: Vec::new(),
+            classified: None,
         })
     } else {
         Err(Box::new(ReuseFinalizationFailure {
             owner: cleanup.owner,
             primary: cleanup.primary,
             errors: cleanup.errors,
+            bookkeeping,
         }))
     }
 }

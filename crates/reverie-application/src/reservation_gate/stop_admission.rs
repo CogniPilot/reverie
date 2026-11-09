@@ -8,6 +8,63 @@ enum Scope {
     Owned(admission::Admission),
     Borrowed,
 }
+pub(crate) struct FleetStopAdmission {
+    gate: Arc<Inner>,
+    admission: admission::Admission,
+}
+impl ReservationGate {
+    /// Same ordinary allocation/native guards, but the supervisor skips an
+    /// actually busy entry instead of blocking the main service accept loop.
+    pub(crate) fn try_admit_service_stop(
+        &self,
+        installed: &Arc<crate::installing_broker::InstalledWorker>,
+        budget: &WorkerStopBudget,
+        target: &WorkerContainerName,
+        end: std::time::Instant,
+    ) -> Result<Option<FleetStopAdmission>> {
+        need(
+            Arc::ptr_eq(installed, &self.inner.installed),
+            "WORKER_STOP_ADMISSION_ORIGIN",
+        )?;
+        let Some(admission) = self.inner.admit_ready_stop(end, budget)? else {
+            return Ok(None);
+        };
+        let owned = FleetStopAdmission {
+            gate: self.inner.clone(),
+            admission,
+        };
+        match owned.check_target(target) {
+            Ok(()) => Ok(Some(owned)),
+            Err(primary) => finalized(Err(primary), owned.abort()),
+        }
+    }
+    pub(crate) fn admit_fleet_stop(
+        &self,
+        installed: &Arc<crate::installing_broker::InstalledWorker>,
+        budget: &WorkerStopBudget,
+    ) -> Result<FleetStopAdmission> {
+        need(
+            Arc::ptr_eq(installed, &self.inner.installed),
+            "WORKER_STOP_ADMISSION_ORIGIN",
+        )?;
+        let admission = self.inner.admit_stop(Some(budget))?;
+        Ok(FleetStopAdmission {
+            gate: self.inner.clone(),
+            admission,
+        })
+    }
+}
+impl FleetStopAdmission {
+    pub(crate) fn check_target(&self, target: &WorkerContainerName) -> Result<()> {
+        self.gate.check_ordinary_stop(target.as_str())
+    }
+    pub(crate) fn close(self) -> Result<()> {
+        self.admission.finish()
+    }
+    pub(crate) fn abort(self) -> Result<()> {
+        self.admission.abort()
+    }
+}
 #[must_use = "finish or abort the actual same-thread stop allocation scope"]
 pub(crate) struct OrdinaryStopAdmission {
     gate: Arc<Inner>,

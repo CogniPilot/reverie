@@ -10,7 +10,10 @@ Errors settle owned processes before reporting. The shared
 blocking on a full stderr pipe/socket; diagnostic delivery never acknowledges
 cleanup or changes the original failure result.
 
-The candidate `nix build .#workerNativeChild` is not selected into worker images.
+The runtime and worker image builds select this native helper through
+`workerChild = workerNativeChild`. `cargo xtask verify-worker-child-package`
+qualifies the public selected artifact and its `--pane-exit` interface. This
+package selection does not upgrade already-running worker images.
 The [lifecycle owner](../reverie-host/src/worker_child/README.md) documents exact
 compatibility, intentional parent/receipt hardening, retained uncertainty and
 the remaining host admission/effect consumers.

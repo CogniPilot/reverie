@@ -12,6 +12,8 @@ mod linux {
     type Result<T> = std::result::Result<T, Box<dyn Error>>;
     const PROGRAM: &str = "worker-exec";
     const MANIFEST: &str = "resource-manifest";
+    const CHILD: &str = "worker-child";
+    const NATIVE_CHILD: &str = "native-worker-child";
     struct Scratch {
         path: PathBuf,
         identity: (u64, u64),
@@ -51,7 +53,7 @@ mod linux {
             if !meta.is_dir() || (meta.dev(), meta.ino()) != self.identity {
                 return Err("package scratch directory changed; retained".into());
             }
-            for name in [PROGRAM, MANIFEST] {
+            for name in [PROGRAM, MANIFEST, CHILD, NATIVE_CHILD] {
                 self.unlink(name)?;
             }
             fs::remove_dir(&self.path)?;
@@ -95,12 +97,7 @@ mod linux {
             (".#workerExec", PROGRAM),
             (".#workerResourceClientManifest", MANIFEST),
         ] {
-            run_command(
-                Command::new("nix")
-                    .args(["build", attribute, "--out-link"])
-                    .arg(scratch.path.join(name))
-                    .current_dir(root),
-            )?;
+            build(root, scratch, attribute, name)?;
         }
         let executable =
             fs::canonicalize(scratch.path.join(PROGRAM).join("bin/reverie-worker-exec"))?;
@@ -125,10 +122,75 @@ mod linux {
                 .current_dir(root),
         )
     }
+    fn build(root: &Path, scratch: &Scratch, attribute: &str, name: &str) -> Result<()> {
+        run_command(
+            Command::new("nix")
+                .args(["build", attribute, "--out-link"])
+                .arg(scratch.path.join(name))
+                .current_dir(root),
+        )
+    }
+    pub(super) fn verify_child(root: &Path) -> Result<()> {
+        let scratch = Scratch::new()?;
+        let result = (|| {
+            for (attribute, name) in [
+                (".#workerChild", CHILD),
+                (".#workerNativeChild", NATIVE_CHILD),
+            ] {
+                build(root, &scratch, attribute, name)?;
+            }
+            run_command(
+                Command::new("cargo")
+                    .args([
+                        "test",
+                        "--locked",
+                        "-p",
+                        "reverie-worker-child",
+                        "--test",
+                        "package",
+                        "--",
+                        "--ignored",
+                        "--exact",
+                        "selected_public_runtime_child_is_native_and_supports_pane_exit",
+                        "--nocapture",
+                        "--test-threads=1",
+                    ])
+                    .env(
+                        "NIX_REVERIE_TEST_SELECTED_WORKER_CHILD",
+                        fs::canonicalize(
+                            scratch.path.join(CHILD).join("bin/reverie-worker-child"),
+                        )?,
+                    )
+                    .env(
+                        "NIX_REVERIE_TEST_NATIVE_WORKER_CHILD",
+                        fs::canonicalize(
+                            scratch
+                                .path
+                                .join(NATIVE_CHILD)
+                                .join("bin/reverie-worker-child"),
+                        )?,
+                    )
+                    .current_dir(root),
+            )
+        })();
+        scratch.finish(result)
+    }
     pub(super) fn verify(root: &Path) -> Result<()> {
         let scratch = Scratch::new()?;
         let result = qualify(root, &scratch);
         scratch.finish(result)
+    }
+}
+
+pub(crate) fn verify_child(root: &std::path::Path) -> Result<(), Box<dyn std::error::Error>> {
+    #[cfg(target_os = "linux")]
+    {
+        linux::verify_child(root)
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _root = root;
+        Err("verify-worker-child-package requires Linux; no package checks ran".into())
     }
 }
 

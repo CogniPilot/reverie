@@ -36,6 +36,14 @@ impl CreatedStorageReturned {
         end: Instant,
     ) -> Result<(bool, Option<Arc<LaptopError>>), Box<CreatedStorageFinishFailure>> {
         let registry = match &self.claim.state {
+            ClaimState::Started(_) => {
+                return Err(Box::new(CreatedStorageFinishFailure {
+                    returned: self,
+                    cause: NetworkStorageError::Host(LaptopError::Refused(
+                        "WORKER_CREATED_RETURN_ORIGIN",
+                    )),
+                }));
+            }
             ClaimState::Registered { registry, .. } | ClaimState::Legacy { registry, .. } => {
                 registry.clone()
             }
@@ -50,6 +58,7 @@ impl CreatedStorageReturned {
             }));
         }
         let result = match &self.claim.state {
+            ClaimState::Started(_) => unreachable!("same checked Created Box return"),
             ClaimState::Registered {
                 registry, identity, ..
             } => super::super::super::finalization::finish_registered(

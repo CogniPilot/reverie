@@ -94,6 +94,9 @@ export interface OwnerService {
 
 export interface OwnerAccount {
   version: 1;
+  /** Account incarnation, distinct from names, display ids and session epochs.
+   * Legacy accounts acquire it only during explicit authenticated enrollment. */
+  accountId?: string;
   username: string;
   password: PasswordHash;
   /** Set by the host CLI's one-time password: the first login may only change the password. */
@@ -183,6 +186,12 @@ export class OwnerAuthStore {
     return account;
   }
 
+  /** Current registration checks must not use an mtime-cached or last-good account. */
+  readCurrent(): OwnerAccount | undefined {
+    this.cache = undefined;
+    return this.read();
+  }
+
   /** The lock file every writer holds (flock(2), exclusive) from its read to its rename. Never removed. */
   get lockFile(): string {
     return `${this.file}.lock`;
@@ -268,7 +277,21 @@ export class OwnerAuthStore {
   private async write(account: OwnerAccount): Promise<void> {
     await fs.mkdir(dirname(this.file), { recursive: true, mode: 0o700 });
     const temporary = `${this.file}.${randomUUID()}.tmp`;
-    await fs.writeFile(temporary, JSON.stringify(account, null, 2) + '\n', { mode: 0o600 });
+    const handle = await fs.open(temporary, 'wx', 0o600);
+    const errors: unknown[] = [];
+    try {
+      await handle.writeFile(JSON.stringify(account, null, 2) + '\n');
+      await handle.sync();
+    } catch (error) {
+      errors.push(error);
+    }
+    try {
+      await handle.close();
+    } catch (error) {
+      errors.push(error);
+    }
+    if (errors.length === 1) throw errors[0];
+    if (errors.length > 1) throw new AggregateError(errors, 'Owner account write and close both failed');
     await fs.rename(temporary, this.file);
     await fs.chmod(this.file, 0o600);
     this.cache = undefined;

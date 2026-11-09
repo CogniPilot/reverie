@@ -120,6 +120,10 @@ pub fn project_memory(
     resources: EffectiveWorkerConfig,
     effective: Option<&ResourcePolicy>,
 ) -> Result<memory::MemoryProjection> {
+    let resources = match memory::project_session(config, session, resources)? {
+        memory::SessionMemoryProjection::Frozen(projected) => return Ok(projected),
+        memory::SessionMemoryProjection::Legacy(resources) => resources,
+    };
     memory_observation(config, identity, session, |policies, employee| {
         Ok(memory::project(policies, resources, employee, effective)?)
     })
@@ -169,6 +173,10 @@ pub fn project_effective_memory_resources(
     session: &ProfileSessionId,
     resources: EffectiveWorkerConfig,
 ) -> Result<memory::MemoryProjection> {
+    let resources = match memory::project_session(config, session, resources)? {
+        memory::SessionMemoryProjection::Frozen(projected) => return Ok(projected),
+        memory::SessionMemoryProjection::Legacy(resources) => resources,
+    };
     if !memory::resource_projection_required(config) {
         return inactive_memory(resources);
     }

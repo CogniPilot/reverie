@@ -1,8 +1,10 @@
 //! Narrow Linux pipe/pidfd syscalls. Child identity comes from a pidfd opened
 //! by that child before exec, not from a racy parent PID lookup. No group signals.
 #![allow(unsafe_code)]
+mod ancillary;
 #[cfg(test)]
 mod tests;
+pub(crate) use ancillary::receive_credentials;
 use std::{
     io, mem,
     os::{
@@ -346,59 +348,18 @@ fn send_identity(socket: RawFd) -> io::Result<()> {
 }
 fn receive_identity(socket: RawFd) -> std::result::Result<OwnedFd, ReceiveError> {
     let mut byte = [0u8; 1];
-    let mut iov = libc::iovec {
-        iov_base: byte.as_mut_ptr().cast(),
-        iov_len: 1,
-    };
-    let mut control = [0usize; 8];
-    // SAFETY: all recvmsg buffers are writable, live and correctly aligned.
-    let mut message: libc::msghdr = unsafe { mem::zeroed() };
-    message.msg_iov = &mut iov;
-    message.msg_iovlen = 1;
-    message.msg_control = control.as_mut_ptr().cast();
-    message.msg_controllen = mem::size_of_val(&control) as _;
-    let received = unsafe {
-        libc::recvmsg(
-            socket,
-            &mut message,
-            libc::MSG_DONTWAIT | libc::MSG_CMSG_CLOEXEC,
-        )
-    };
-    if received < 0 {
-        return Err(ReceiveError {
-            close_failed: false,
-        });
-    }
-    let mut descriptors = Vec::new();
-    let mut valid = received == 1
+    let packet = ancillary::receive(socket, &mut byte).map_err(|_| ReceiveError {
+        close_failed: false,
+    })?;
+    let valid = packet.received == 1
         && byte == [71]
-        && message.msg_flags & (libc::MSG_CTRUNC | libc::MSG_TRUNC) == 0;
-    // SAFETY: recvmsg provided initialized ancillary records within control.
-    unsafe {
-        let mut header = libc::CMSG_FIRSTHDR(&message);
-        while !header.is_null() {
-            let base = libc::CMSG_LEN(0) as usize;
-            let length: usize = (*header).cmsg_len as _;
-            let size = length.saturating_sub(base);
-            if (*header).cmsg_level == libc::SOL_SOCKET && (*header).cmsg_type == libc::SCM_RIGHTS {
-                valid &= size == mem::size_of::<RawFd>();
-                for index in 0..size / mem::size_of::<RawFd>() {
-                    let fd = std::ptr::read_unaligned(
-                        libc::CMSG_DATA(header).cast::<RawFd>().add(index),
-                    );
-                    if fd >= 0 {
-                        descriptors.push(OwnedFd::from_raw_fd(fd));
-                    } else {
-                        valid = false;
-                    }
-                }
-            } else {
-                valid = false;
-            }
-            header = libc::CMSG_NXTHDR(&message, header);
-        }
-    }
-    if valid && descriptors.len() == 1 {
+        && packet.flags & (libc::MSG_CTRUNC | libc::MSG_TRUNC) == 0
+        && packet.valid
+        && packet.headers == 1
+        && packet.credentials.is_none()
+        && packet.descriptors.len() == 1;
+    let mut descriptors = packet.descriptors;
+    if valid {
         return Ok(descriptors.pop().expect("one received descriptor"));
     }
     let mut close_failed = false;

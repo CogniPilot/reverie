@@ -12,8 +12,7 @@ use std::{
 fn stop_program() -> &'static Path {
     static PROGRAM: OnceLock<PathBuf> = OnceLock::new();
     PROGRAM.get_or_init(|| {
-        let root = std::env::temp_dir().join(format!("app-stop-build-{}", std::process::id()));
-        fs::create_dir(&root).unwrap();
+        let root = crate::test_process::fixture_directory("app-stop-build");
         let source = root.join("child.rs");
         fs::write(
             &source,
@@ -135,6 +134,11 @@ fn inputs(
 }
 fn plan(claim: &StorageClaim, source: &EffectiveWorkerConfig) -> ObservedCreatePlan {
     match &claim.state {
+        ClaimState::Started(owner) => owner
+            .borrow()
+            .unwrap()
+            .prepare_create_plan(source.clone(), source.clone())
+            .unwrap(),
         ClaimState::Legacy { registry, owner } => registry
             .runtime
             .prepare_laptop_plan(source.clone(), source.clone(), owner)

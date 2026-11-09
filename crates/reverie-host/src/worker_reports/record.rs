@@ -22,6 +22,11 @@ pub(super) struct Record {
     opaque: AtomicBool,
     lifecycle: Mutex<super::retention::LifecycleHoldState>,
 }
+#[derive(Clone, Copy)]
+enum LockTimeout {
+    Opaque,
+    ActorClosePending,
+}
 impl Record {
     /// Actual predecessor completion, distinct from a closed socket whose
     /// application resources still retain their logical hold.
@@ -56,24 +61,55 @@ impl Record {
         collector: &CommandTelemetry,
         configuration: &reverie_contracts::worker_config::EffectiveWorkerConfig,
     ) -> Result<Option<reverie_contracts::worker_launch::WorkerRequest>> {
+        match self.read_initial(service, collector, configuration, false)? {
+            super::service_connection::InitialRequest::ReportCompleted => Ok(None),
+            super::service_connection::InitialRequest::Launch(request) => Ok(Some(request)),
+            super::service_connection::InitialRequest::Service { .. } => {
+                unreachable!("legacy reader refuses other purposes before handoff")
+            }
+        }
+    }
+    pub(super) fn read_service_request(
+        &self,
+        service: &WorkerReportService,
+        collector: &CommandTelemetry,
+        configuration: &reverie_contracts::worker_config::EffectiveWorkerConfig,
+    ) -> Result<super::service_connection::InitialRequest> {
+        self.read_initial(service, collector, configuration, true)
+    }
+    fn read_initial(
+        &self,
+        service: &WorkerReportService,
+        collector: &CommandTelemetry,
+        configuration: &reverie_contracts::worker_config::EffectiveWorkerConfig,
+        service_verbs: bool,
+    ) -> Result<super::service_connection::InitialRequest> {
+        use super::service_connection::InitialRequest;
         let mut slot = self.lock(&self.stream);
         let stream = slot.as_mut().ok_or(WorkerReportError::Unconfirmed)?;
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             self.prepare(stream)?;
-            wire::authenticate(service, stream)?;
+            let peer = wire::authenticate(service, stream)?;
             collector.assert_engine(&service.engine)?;
             let (header, payload) = wire::receive(service, stream)?;
             match header.kind() {
                 b'T' => {
                     wire::report(service, stream, collector, &payload)?;
-                    Ok(None)
+                    Ok(InitialRequest::ReportCompleted)
                 }
                 b'J' => {
                     reverie_contracts::worker_launch::WorkerRequest::decode(&payload, configuration)
-                        .map(Some)
+                        .map(InitialRequest::Launch)
                         .map_err(WorkerReportError::Launch)
                 }
-                _ => Err(WorkerReportError::LaunchKind),
+                kind => match super::WorkerServicePurpose::from_kind(kind) {
+                    Some(purpose) if service_verbs => Ok(InitialRequest::Service {
+                        purpose,
+                        payload,
+                        peer,
+                    }),
+                    _ => Err(WorkerReportError::LaunchKind),
+                },
             }
         }))
         .unwrap_or_else(|_| {
@@ -108,6 +144,30 @@ impl Record {
         };
         let companion = control.take().map_or(Ok(()), close);
         drop(control);
+        self.finish_closed(interrupted, closed, companion)
+    }
+    /// The actor owns its exact logical hold and terminally fences forwards.
+    /// Acquire both original socket owners BEFORE consuming either descriptor.
+    /// A wait-only refusal retains them in this SAME counted Record.
+    pub(super) fn finish_actor_channel(
+        &self,
+        budget: &super::budget::CleanupBudget<'_>,
+    ) -> Result<()> {
+        let mut stream = self.until_with(&self.stream, budget, LockTimeout::ActorClosePending)?;
+        let mut control = self.until_with(&self.control, budget, LockTimeout::ActorClosePending)?;
+        let interrupted = control.as_ref().map_or(Ok(()), wire::shutdown);
+        let closed = stream.take().map_or(Ok(()), close);
+        let companion = control.take().map_or(Ok(()), close);
+        drop(stream);
+        drop(control);
+        self.finish_closed(interrupted, closed, companion)
+    }
+    fn finish_closed(
+        &self,
+        interrupted: Result<()>,
+        closed: Result<()>,
+        companion: Result<()>,
+    ) -> Result<()> {
         if interrupted.is_err() || closed.is_err() || companion.is_err() {
             self.opaque.store(true, Ordering::Release);
         }
@@ -124,6 +184,14 @@ impl Record {
         lock: &'a Mutex<T>,
         budget: &super::budget::CleanupBudget<'_>,
     ) -> Result<MutexGuard<'a, T>> {
+        self.until_with(lock, budget, LockTimeout::Opaque)
+    }
+    fn until_with<'a, T>(
+        &self,
+        lock: &'a Mutex<T>,
+        budget: &super::budget::CleanupBudget<'_>,
+        timeout: LockTimeout,
+    ) -> Result<MutexGuard<'a, T>> {
         loop {
             match lock.try_lock() {
                 Ok(guard) => return Ok(guard),
@@ -133,13 +201,23 @@ impl Record {
                 }
                 Err(std::sync::TryLockError::WouldBlock) => {
                     #[cfg(test)]
+                    super::resume::test_hooks::lock_wait();
+                    #[cfg(test)]
                     super::tests::record_lock_contended();
                 }
             }
             if budget.pause().is_err() {
-                self.opaque.store(true, Ordering::Release);
-                return Err(WorkerReportError::Unconfirmed);
+                return Err(self.lock_timeout(timeout));
             }
+        }
+    }
+    fn lock_timeout(&self, timeout: LockTimeout) -> WorkerReportError {
+        match timeout {
+            LockTimeout::Opaque => {
+                self.opaque.store(true, Ordering::Release);
+                WorkerReportError::Unconfirmed
+            }
+            LockTimeout::ActorClosePending => WorkerReportError::ChannelClosePending,
         }
     }
     pub(super) fn new(stream: UnixStream) -> Self {
@@ -290,7 +368,7 @@ impl Record {
             super::retention::LifecycleHoldState::Held(_)
         ))
     }
-    fn handler_job(&self) -> Result<Option<std::sync::Arc<super::handler::HandlerJob>>> {
+    pub(super) fn handler_job(&self) -> Result<Option<std::sync::Arc<super::handler::HandlerJob>>> {
         match self.handler.try_lock() {
             Ok(job) => Ok(job.clone()),
             Err(std::sync::TryLockError::WouldBlock) => {

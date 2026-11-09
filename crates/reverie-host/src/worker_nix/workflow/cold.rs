@@ -113,8 +113,16 @@ impl NixReturned {
                 .clear_cold_temporary(runtime, plan, end),
             // The retained branch must have genuinely prepared on this same
             // storage owner before Office/network; no fallback clear or no-op.
-            Some(ColdStrategy::RetainAndReplace) | None => {
+            Some(ColdStrategy::RetainAndReplace) => {
                 self.resources.storage.require_cold_prepared(plan.source())
+            }
+            None => {
+                // Cleanup is optional; both temporary bind sources are not.
+                // Keep actual preparation/partial effects on this Nix owner.
+                self.resources
+                    .storage
+                    .prepare_temporary()
+                    .and_then(|_| self.resources.storage.require_cold_prepared(plan.source()))
             }
         }
         .map_err(LaptopError::ColdStorage)

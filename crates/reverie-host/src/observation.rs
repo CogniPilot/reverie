@@ -39,6 +39,10 @@ impl ObservationFault {
 pub enum ObservationError {
     Refused(ObservationFault),
     Io(io::Error),
+    /// Sole native descriptor was consumed by close; its outcome is uncertain.
+    CloseUnconfirmed {
+        cause: io::Error,
+    },
     Finalization {
         primary: Box<Self>,
         secondary: Box<Self>,
@@ -48,8 +52,17 @@ impl ObservationError {
     pub fn code(&self) -> &'static str {
         match self {
             Self::Refused(fault) => fault.code(),
-            Self::Io(_) => "HOST_ARTIFACT_IO",
+            Self::Io(_) | Self::CloseUnconfirmed { .. } => "HOST_ARTIFACT_IO",
             Self::Finalization { .. } => "HOST_ARTIFACT_FINALIZATION",
+        }
+    }
+    pub fn has_unconfirmed_close(&self) -> bool {
+        match self {
+            Self::CloseUnconfirmed { .. } => true,
+            Self::Finalization { primary, secondary } => {
+                primary.has_unconfirmed_close() || secondary.has_unconfirmed_close()
+            }
+            _ => false,
         }
     }
 }
@@ -61,7 +74,7 @@ impl fmt::Display for ObservationError {
 impl std::error::Error for ObservationError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            Self::Io(error) => Some(error),
+            Self::Io(error) | Self::CloseUnconfirmed { cause: error } => Some(error),
             Self::Finalization { primary, .. } => Some(primary),
             _ => None,
         }

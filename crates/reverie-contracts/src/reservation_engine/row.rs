@@ -43,6 +43,34 @@ impl ContainerRow {
         text(field(self.root(), "Name"))
             .is_some_and(|value| value.0.iter().copied().eq(name.chars().map(u32::from)))
     }
+    /// Image maintenance must include unlabelled deployment-name containers.
+    /// This is selection DATA only, never permission to stop or replace them.
+    pub fn image_maintenance_member(&self, deployment: &str) -> Result<bool> {
+        let name = text(field(self.root(), "Name")).ok_or(EngineDataError::Inventory)?;
+        let name = name
+            .0
+            .iter()
+            .copied()
+            .map(char::from_u32)
+            .collect::<Option<String>>()
+            .ok_or(EngineDataError::Inventory)?;
+        let name = name.strip_prefix('/').unwrap_or(&name);
+        if name.is_empty()
+            || name.len() > 254
+            || !name.as_bytes()[0].is_ascii_alphanumeric()
+            || !name
+                .bytes()
+                .all(|c| c.is_ascii_alphanumeric() || b"_.-".contains(&c))
+        {
+            return Err(EngineDataError::Inventory);
+        }
+        let label = field(self.labels()?, "reverie.worker");
+        if !matches!(label, None | Some(Value(Node::Null | Node::String(_)))) {
+            return Err(EngineDataError::Inventory);
+        }
+        Ok(name.starts_with(&format!("{deployment}-agent-"))
+            || self.label_is("reverie.worker", deployment)?)
+    }
     pub fn snapshot_digest(&self) -> Result<InventoryDigest> {
         digest(&self.value)
     }
@@ -60,6 +88,17 @@ impl ContainerRow {
     }
     pub fn running_header(&self) -> Result<()> {
         self.fields_for_limits().running_header()
+    }
+    pub fn provider_running_header(&self) -> Result<()> {
+        self.running_header()?;
+        let state = self.state()?;
+        if ["Paused", "Restarting", "Dead"]
+            .iter()
+            .any(|name| !matches!(field(state, name), Some(Value(Node::Bool(false)))))
+        {
+            return Err(EngineDataError::State);
+        }
+        Ok(())
     }
     pub fn memory_matches(&self, expected: &UnsignedInteger) -> Result<bool> {
         self.fields_for_limits().memory_matches(expected)

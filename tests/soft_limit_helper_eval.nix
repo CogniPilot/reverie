@@ -42,6 +42,11 @@ let
   failing = c: builtins.any (entry: !entry.assertion && lib.hasInfix "softlimithelper" (lib.toLower entry.message)) c.assertions;
   disabled = evaluate "6.18.39" workers;
   enabled = evaluate "6.18.39" (workers // { softLimitHelper = helper; });
+  externalBroker = evaluate "6.18.39" (workers // {
+    manageBrokerService = false;
+    softLimitHelper = helper;
+    allowedCPUs = [ 0 1 2 3 4 5 6 7 ];
+  });
   oldKernel = evaluate "6.12.0" (workers // { softLimitHelper = helper; });
   attested = evaluate "6.12.0" (workers // { softLimitHelper = helper // { backportAttested = "vendor 6.12.0-77 carries the O_NONBLOCK memory_high_write check"; }; });
   emptyAttestation = evaluate "6.12.0" (workers // { softLimitHelper = helper // { backportAttested = ""; }; });
@@ -51,6 +56,15 @@ let
   service = enabled.systemd.services."reverie-soft-limit@".serviceConfig;
   policy = builtins.fromJSON enabled.environment.etc."reverie/soft-limit-policy.json".text;
   checks = {
+    managesSystemBrokerByDefault = disabled.services.reverieWorkers.manageBrokerService &&
+      disabled.systemd.services.reverie-worker-broker.serviceConfig.User == "agent";
+    externalBrokerIsNotDuplicated = !(externalBroker.systemd.services ? reverie-worker-broker);
+    externalBrokerKeepsHostResources =
+      externalBroker.systemd.slices.reverie-workers.sliceConfig.MemoryMax == "49152M" &&
+      externalBroker.systemd.slices.reverie-workers.sliceConfig.AllowedCPUs == "0 1 2 3 4 5 6 7" &&
+      externalBroker.boot.kernel.sysctl."kernel.perf_event_paranoid" == 2 &&
+      externalBroker.systemd.sockets.reverie-soft-limit.socketConfig.ListenStream == "/run/reverie-soft-limit/soft-limit.sock" &&
+      externalBroker.environment.etc."reverie/soft-limit-policy.json".text == enabled.environment.etc."reverie/soft-limit-policy.json".text;
     cpuPlacementInheritedByDefault = !(disabled.systemd.slices.reverie-workers.sliceConfig ? AllowedCPUs);
     explicitSharedCpuPlacement = (evaluate "6.18.39" (workers // { allowedCPUs = [ 0 1 2 3 4 5 6 7 ]; })).systemd.slices.reverie-workers.sliceConfig.AllowedCPUs == "0 1 2 3 4 5 6 7";
     invalidCpuPlacementRefused = lib.all (cpus: builtins.any (entry: !entry.assertion && lib.hasInfix "allowedCPUs" entry.message)

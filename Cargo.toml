@@ -12,6 +12,7 @@ publish = false
 
 [workspace.dependencies]
 clap = { version = "4.5", features = ["derive"] }
+chrono = { version = "0.4", default-features = false, features = ["std"] }
 libc = "0.2"
 nix = { version = "0.31.3", default-features = false }
 serde = { version = "1", features = ["derive"] }
@@ -50,6 +51,7 @@ reverie-store = { path = "crates/reverie-store" }
 reverie-host = { path = "crates/reverie-host" }
 reverie-application = { path = "crates/reverie-application" }
 reverie-diagnostics = { path = "crates/reverie-diagnostics" }
+reverie-elf-bundle = { path = "crates/reverie-elf-bundle" }
 
 # Derived from CogniPilot/rumoca 0bab7e08c42dced38488abd298a4b9bb77d2b0cc.
 # Every member must opt in with [lints] workspace = true.

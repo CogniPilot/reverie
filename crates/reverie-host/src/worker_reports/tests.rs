@@ -1,13 +1,17 @@
 use super::*;
 mod close_contention;
 mod handler;
+mod handler_reconciliation;
 pub(super) fn record_lock_contended() {
     close_contention::lock_contended();
 }
 mod launch;
 mod listener;
+mod protected_peer;
 mod reference;
+mod resume_channel;
 mod retention;
+mod service_connection;
 mod worker_cleanup;
 use crate::engine_metadata::EngineBootstrap;
 use reverie_contracts::worker_config;

@@ -10,17 +10,22 @@ mod existing_viewer;
 pub(in crate::installing_broker) use existing_viewer::{
     ExistingStorageError, ExistingStoragePreparation, ExistingStorageReturned,
 };
+mod control_stop;
 mod nix;
 mod observed;
 mod ordinary_stop;
+pub(in crate::installing_broker) use control_stop::ControlStorageStop;
 mod preparation;
 mod recovery_lifetime;
 mod replacement_stop;
 pub(in crate::installing_broker) use ordinary_stop::OrdinaryStopPreparation;
 mod source;
+mod started;
+mod stopped_ram;
 pub use observed::OwnedCreatePreparationError;
 pub(crate) use source::RegisteredSource;
 pub(super) use source::SourceAttachment;
+pub(crate) use stopped_ram::{StoppedRamError, StoppedRamSource};
 #[cfg(test)]
 pub(in crate::installing_broker) mod tests;
 use super::*;
@@ -55,10 +60,12 @@ enum EntryOwner {
     Direct(Box<LaunchStorage>),
     Finalizing(FinalizingStorage),
     Source(Arc<source::SourceRecord>),
+    StoppedRam(Arc<Mutex<stopped_ram::Record>>),
     Nix(reverie_host::worker_nix::NixWorkflow),
     Laptop(reverie_host::worker_laptop::LaptopWorkflow),
     ReplacementStop(Arc<Mutex<reverie_host::worker_source_stop::OrdinaryReplacementStop>>),
     OrdinaryStop(Arc<Mutex<reverie_host::worker_source_stop::OrdinaryLaptopStop>>),
+    ControlStop(Arc<Mutex<reverie_host::worker_source_stop::ControlLaptopStop>>),
     Existing(Arc<reverie_host::worker_laptop::ExistingViewer>),
 }
 enum FinalizingStorage {
@@ -140,6 +147,13 @@ impl StorageRegistry {
         // Preserve source order and the real no-lease legacy branch: resolve
         // BEFORE the registry lock, and never census/register legacy storage.
         let selected = self.runtime.resolve_storage(source, session)?;
+        self.claim_selected(selected)
+    }
+    fn claim_selected(
+        self: &Arc<Self>,
+        selected: reverie_host::worker_storage::StorageSelection,
+    ) -> Result<StorageClaim, StorageWorkflowError> {
+        let session = selected.paths().session().clone();
         if selected.paths().kind() != StorageKind::Employee {
             return Ok(StorageClaim {
                 state: ClaimState::Legacy {
@@ -151,7 +165,7 @@ impl StorageRegistry {
         let mut entries = self.lock(None)?;
         if let Some(entry) = entries
             .iter()
-            .find(|entry| entry.paths.session() == session)
+            .find(|entry| entry.paths.session() == &session)
         {
             if matches!(entry.owner, EntryOwner::Source(_)) {
                 return Err(StorageWorkflowError::refused(
@@ -267,12 +281,15 @@ fn require_direct_release(owner: &EntryOwner) -> Result<(), StorageWorkflowError
         EntryOwner::Laptop(_) => "WORKER_LAPTOP_STORAGE_RETAINED",
         EntryOwner::Existing(_) => "WORKER_EXISTING_VIEWER_RETAINED",
         EntryOwner::Source(_) => "WORKER_ORIGINAL_SOURCE_RETAINED",
+        EntryOwner::StoppedRam(_) => "RAM_STOPPED_SOURCE_RETAINED",
         EntryOwner::ReplacementStop(_) => "WORKER_REPLACEMENT_STOP_RETAINED",
         EntryOwner::OrdinaryStop(_) => "WORKER_ORDINARY_STOP_RETAINED",
+        EntryOwner::ControlStop(_) => "WORKER_CONTROL_STOP_RETAINED",
     };
     Err(StorageWorkflowError::refused(code))
 }
 enum ClaimState {
+    Started(Box<started::StartedClaim>),
     Legacy {
         registry: Arc<StorageRegistry>,
         owner: Box<LaunchStorage>,
@@ -292,6 +309,7 @@ pub struct StorageClaim {
 impl StorageClaim {
     pub fn paths(&self) -> &StoragePaths {
         match &self.state {
+            ClaimState::Started(owner) => &owner.paths,
             ClaimState::Legacy { owner, .. } => owner.paths(),
             ClaimState::Registered { paths, .. } => paths,
         }
@@ -313,6 +331,12 @@ impl StorageClaim {
     /// filesystem calls do not have a hard kernel/disk latency guarantee.
     pub fn release(self, deadline: Instant) -> Result<(), Box<StorageReleaseFailure>> {
         match self.state {
+            ClaimState::Started(owner) => Err(Box::new(StorageReleaseFailure {
+                claim: StorageClaim {
+                    state: ClaimState::Started(owner),
+                },
+                cause: StorageWorkflowError::refused("WORKER_STARTED_STORAGE_RETAINED"),
+            })),
             ClaimState::Legacy { registry, owner } => owner.close(deadline).map_err(|failure| {
                 let (owner, cause) = failure.into_parts();
                 Box::new(StorageReleaseFailure {

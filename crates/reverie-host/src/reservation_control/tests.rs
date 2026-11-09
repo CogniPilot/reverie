@@ -3,6 +3,8 @@ use super::*;
 mod draft_cases;
 #[path = "tests_optional.rs"]
 mod optional_cases;
+#[path = "tests_pool_transition.rs"]
+mod pool_transition_cases;
 use reverie_contracts::{reservation_control::domain_digest, worker_config};
 use std::{
     os::unix::fs::{PermissionsExt, symlink},

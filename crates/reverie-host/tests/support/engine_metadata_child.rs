@@ -26,6 +26,47 @@ fn main() {
     let executable = env::current_exe().unwrap();
     let mode = executable.file_name().unwrap().to_str().unwrap();
     match mode {
+        "native-worker-service-bus" => {
+            assert_eq!(args.len(), 7);
+            assert_eq!(&args[..3], ["--user", "--json=short", "get-property"]);
+            let property = args[6].as_str();
+            let active = std::path::Path::new("manager-started").exists();
+            match property {
+                "MainPID" | "ControlPID" => println!("{{\"type\":\"u\",\"data\":{}}}", if active { 42 } else { 0 }),
+                "Job" => println!("{}", r#"{"type":"(uo)","data":[0,"/"]}"#),
+                "ExecStart" if std::path::Path::new("manager-native-mode").exists() => println!("{}", r#"{"type":"a(sasbttttuii)","data":[["/nix/store/new-broker/bin/reverie-worker-broker",["/nix/store/new-broker/bin/reverie-worker-broker","broker","--config","${REVERIE_WORKER_CONFIG}"],false,0,0,0,0,0,0,0]]}"#),
+                "ExecStart" => println!("{}", r#"{"type":"a(sasbttttuii)","data":[["/nix/store/old-broker/bin/reverie-worker-broker",["/nix/store/old-broker/bin/reverie-worker-broker","--config","${REVERIE_WORKER_CONFIG}"],false,0,0,0,0,0,0,0]]}"#),
+                "ExecStartPre" => println!("{}", r#"{"type":"a(sasbttttuii)","data":[]}"#),
+                "EnvironmentFiles" => {
+                    let path = if std::path::Path::new("manager-native-mode").exists() { "reverie/worker-pool/service/environment" } else { ".config/reverie/worker-broker.env" };
+                    println!("{{\"type\":\"a(sb)\",\"data\":[[{:?},false]]}}", std::env::current_dir().unwrap().join(path).to_str().unwrap());
+                },
+                _ => panic!("unexpected fixed manager property"),
+            }
+        },
+        "native-worker-manager-rollback" => {
+            if args == ["--user", "daemon-reload"] { std::fs::write("manager-reloaded", b"known fixed reload").unwrap();return; }
+            if args == ["--user", "start", "reverie-worker-broker.service"] { std::fs::write("manager-started", b"known fixed start").unwrap();return; }
+            assert_eq!(args, ["--user", "show", "reverie-worker-broker.service", "--property=LoadState", "--property=ActiveState", "--property=SubState", "--property=FragmentPath", "--property=DropInPaths", "--property=NeedDaemonReload"]);
+            let target=std::fs::read_link(".config/systemd/user/reverie-worker-broker.service").unwrap();
+            let (active,sub)=if std::path::Path::new("manager-started").exists(){("active","running")}else{("inactive","dead")};
+            let fragment=if std::path::Path::new("manager-fragment-link").is_file(){env::current_dir().unwrap().join(".config/systemd/user/reverie-worker-broker.service")}else{target};
+            print!("LoadState=loaded\nActiveState={active}\nSubState={sub}\nFragmentPath={}\nDropInPaths=\nNeedDaemonReload=no\n",fragment.display());
+        },
+        "native-worker-manager-legacy" | "native-worker-manager-slow" => {
+            if args == ["--user", "stop", "reverie-worker-broker.service"] {
+                let mut trace = std::fs::OpenOptions::new().append(true).create(true).open("manager-stops").unwrap();writeln!(trace,"original-stop").unwrap();
+                if mode == "native-worker-manager-slow" { std::thread::sleep(Duration::from_millis(1500)); }
+                std::fs::write("manager-stopped", b"known controlled stop").unwrap();return;
+            }
+            assert_eq!(args, ["--user", "show", "reverie-worker-broker.service", "--property=LoadState", "--property=ActiveState", "--property=SubState", "--property=FragmentPath", "--property=DropInPaths", "--property=NeedDaemonReload"]);
+            let (active,sub)=if std::path::Path::new("manager-stopped").exists(){("inactive","dead")}else{("active","running")};
+            print!("LoadState=loaded\nActiveState={active}\nSubState={sub}\nFragmentPath=/nix/store/old-worker/share/systemd/user/reverie-worker-broker.service\nDropInPaths=\nNeedDaemonReload=no\n");
+        },
+        "native-worker-manager" => {
+            assert_eq!(args, ["--user", "show", "reverie-worker-broker.service", "--property=LoadState", "--property=ActiveState", "--property=SubState", "--property=FragmentPath", "--property=DropInPaths", "--property=NeedDaemonReload"]);
+            print!("LoadState=loaded\nActiveState=active\nSubState=running\nFragmentPath=/nix/store/old-worker/share/systemd/user/reverie-worker-broker.service\nDropInPaths=\nNeedDaemonReload=no\n");
+        },
         "telemetry-bootstrap-pending" => {
             assert_eq!(args.first().map(String::as_str), Some("ps"));
             let mut trace = std::fs::OpenOptions::new().create(true).append(true).open("calls.txt").unwrap();
@@ -43,6 +84,13 @@ fn main() {
             use std::fs::{self,OpenOptions};
             let mut trace=OpenOptions::new().create(true).append(true).open("calls.txt").unwrap();
             writeln!(trace,"{}",args.join("\0")).unwrap();drop(trace);
+            if mode == "storage-writer" && std::path::Path::new("stopped-ram-control").is_file() {
+                stopped_ram(&args);
+                return;
+            }
+            if mode == "storage-writer" && std::path::Path::new("goal-inventory-control").is_file() && goal_inventory(&args) {
+                return;
+            }
             if mode == "storage-writer" && std::path::Path::new("cold-launch-control").is_file() && cold_launch(&args) {
                 return;
             }
@@ -79,7 +127,7 @@ fn main() {
                     std::thread::sleep(Duration::from_millis(2));
                 }
             }
-            let name=match args.first().map(String::as_str){Some("ps")=>"ps.out",Some("inspect")=>"inspect.out",Some("exec") if args.ends_with(&["display-message", "-p", "-t", "office", "#{pane_dead}"].map(str::to_owned)) => "pane.out",_=>std::process::exit(81)};
+            let name=match args.first().map(String::as_str){Some("ps")=>"ps.out",Some("inspect")=>"inspect.out",Some("top") if args.len()==4&&args[2..]==["-eo","pid,ppid"]=>"provider-top.out",Some("exec") if args.ends_with(&["display-message", "-p", "-t", "office", "#{pane_dead}|#{pane_pid}"].map(str::to_owned)) => "provider-pane.out",Some("exec") if args.ends_with(&["display-message", "-p", "-t", "office", "#{pane_dead}"].map(str::to_owned)) => "pane.out",_=>std::process::exit(81)};
             let raw=fs::read(name).unwrap();
             if mode=="cold-admission" && name=="inspect.out" && std::path::Path::new("inspect.next").exists() {fs::rename("inspect.next","inspect.out").unwrap();}
             io::stdout().write_all(&raw).unwrap();
@@ -159,6 +207,67 @@ fn main() {
         }
     }
 }
+
+fn stopped_ram(args: &[String]) {
+    use std::{fs, path::Path};
+    if args == ["ps", "--quiet", "--no-trunc"] {
+        io::stdout().write_all(&fs::read("ps.out").unwrap()).unwrap();
+        return;
+    }
+    let format = concat!(
+        "{\"Id\":{{json .Id}},\"Name\":{{json .Name}},\"Image\":{{json .Image}},",
+        "\"Config\":{\"Labels\":{{json .Config.Labels}}},",
+        "\"State\":{\"Running\":{{json .State.Running}},\"Pid\":{{json .State.Pid}}},",
+        "\"Mounts\":{{json .Mounts}},\"HostConfig\":{",
+        "\"Memory\":{{json .HostConfig.Memory}},\"MemorySwap\":{{json .HostConfig.MemorySwap}},",
+        "\"PidsLimit\":{{json .HostConfig.PidsLimit}},\"NanoCpus\":{{json .HostConfig.NanoCpus}}}}"
+    );
+    let stopped = format.replace(
+        "\"Pid\":{{json .State.Pid}}}",
+        concat!(
+            "\"Pid\":{{json .State.Pid}},\"Status\":{{json .State.Status}},",
+            "\"StartedAt\":{{json .State.StartedAt}},\"Paused\":{{json .State.Paused}},",
+            "\"Restarting\":{{json .State.Restarting}},\"Dead\":{{json .State.Dead}}}"
+        ),
+    );
+    let output = if args == ["ps", "-aq", "--no-trunc"] {
+        if fs::remove_file("ram-hold.next").is_ok() {
+            fs::write("ram-query-started", b"actual fixed census child entered").unwrap();
+            wait_file("ram-query-release");
+        }
+        let before = fs::read("ram-ids.out").unwrap();
+        if Path::new("ram-ids.next").is_file() {
+            fs::rename("ram-ids.next", "ram-ids.out").unwrap();
+        }
+        before
+    } else {
+        assert_eq!(args.len(), 4);
+        assert_eq!(&args[..2], ["inspect", "--format"]);
+        assert_eq!(args[3], "c".repeat(64));
+        let file = if args[2] == format {
+            "ram-row.out"
+        } else {
+            assert_eq!(args[2], stopped);
+            "ram-stopped.out"
+        };
+        fs::read(file).unwrap()
+    };
+    io::stdout().write_all(&output).unwrap();
+}
+fn goal_inventory(args: &[String]) -> bool {
+    let name = if args == ["ps","--all","--no-trunc","--quiet"] { "goal-ids.out" }
+        else if args.first().map(String::as_str) == Some("inspect") {
+            let expected = std::fs::read_to_string("goal-ids.out").unwrap();
+            assert_eq!(&args[1..],expected.lines().collect::<Vec<_>>());
+            "goal-inventory.out"
+        } else { return false; };
+    if std::path::Path::new("goal-stall-read").is_file() {
+        std::thread::sleep(Duration::from_secs(2));
+    }
+    io::stdout().write_all(&std::fs::read(name).unwrap()).unwrap();
+    if let Ok(raw) = std::fs::read("goal-ignored.stderr") { io::stderr().write_all(&raw).unwrap(); }
+    true
+}
 fn wait_file(name: &str) {
     let end = std::time::Instant::now() + Duration::from_secs(15);
     while !std::path::Path::new(name).exists() {
@@ -198,8 +307,11 @@ fn cold_launch(args: &[String]) -> bool {
         ["inspect", target] if Path::new("cold-created-args").is_file()
             && (*target == NAME || *target == "c".repeat(64)) => {
             let running = !Path::new("cold-stopped").is_file();
-            let pid = if running { 321 } else { 0 };
-            print!("[{{\"Id\":\"{}\",\"Name\":\"/{NAME}\",\"Config\":{{\"Labels\":{{\"reverie.worker\":\"test\",\"reverie.session\":\"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}}}},\"State\":{{\"Running\":{running},\"Pid\":{pid},\"Paused\":false,\"Restarting\":false,\"Dead\":false}}}}]", "c".repeat(64));
+            let pid = if running { fs::read_to_string("cold-running-pid").map_or(321, |value| value.parse::<u32>().unwrap()) } else { 0 };
+            let created = fs::read_to_string("cold-created-args").unwrap();
+            let policy = created.split('\0').find_map(|word| word.strip_prefix("reverie.worker-policy=")).unwrap();
+            assert_eq!(policy.len(), 64);
+            print!("[{{\"Id\":\"{}\",\"Name\":\"/{NAME}\",\"Config\":{{\"Labels\":{{\"reverie.worker\":\"test\",\"reverie.session\":\"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\",\"reverie.worker-policy\":\"{policy}\"}}}},\"State\":{{\"Running\":{running},\"Pid\":{pid},\"Paused\":false,\"Restarting\":false,\"Dead\":false}}}}]", "c".repeat(64));
         }
         ["network", "create", "--label", "reverie.worker=test", "--label", session, "--opt", "com.docker.network.bridge.enable_icc=false", target] => {
             assert_eq!(*session, "reverie.session=aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee");

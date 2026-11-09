@@ -36,6 +36,9 @@ pub enum StorageFault {
 pub enum StorageError {
     Refused(StorageFault),
     Io(io::Error),
+    CloseUnconfirmed {
+        cause: io::Error,
+    },
     Identity(IdentityError),
     Data(IdentityDataError),
     Settings(ResourceConfigError),
@@ -73,7 +76,7 @@ impl fmt::Display for StorageError {
 impl std::error::Error for StorageError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            Self::Io(error) => Some(error),
+            Self::Io(error) | Self::CloseUnconfirmed { cause: error } => Some(error),
             Self::Identity(error) => Some(error),
             Self::Data(error) => Some(error),
             Self::Settings(error) => Some(error),
@@ -118,6 +121,7 @@ impl From<crate::ObservationError> for StorageError {
     fn from(v: crate::ObservationError) -> Self {
         match v {
             crate::ObservationError::Io(v) => Self::Io(v),
+            crate::ObservationError::CloseUnconfirmed { cause } => Self::CloseUnconfirmed { cause },
             crate::ObservationError::Finalization { primary, secondary } => Self::Finalization {
                 primary: Box::new(Self::from(*primary)),
                 secondary: Box::new(Self::from(*secondary)),

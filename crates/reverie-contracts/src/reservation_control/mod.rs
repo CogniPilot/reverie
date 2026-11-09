@@ -2,12 +2,14 @@
 //! do not establish native custody, held admission or owner/effect authority.
 mod binding;
 mod image;
+mod pool_transition;
 use crate::{
     legacy_json::{Node, Text, Value},
     worker_config::EffectiveWorkerConfig,
 };
 pub use binding::{ControlBinding, ControlDirectory, ControlIdentity};
 pub use image::{CurrentImageData, CurrentImageDataError, validate_current_image_bytes};
+pub use pool_transition::{PoolTransitionIntent, PoolTransitionSelection};
 use sha2::{Digest, Sha256};
 use std::{collections::BTreeMap, fmt};
 type Object = BTreeMap<Text, Value>;

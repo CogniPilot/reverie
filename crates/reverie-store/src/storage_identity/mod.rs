@@ -9,8 +9,8 @@ mod tests;
 use crate::StoreError;
 pub use metadata::{DEFAULT_METADATA_LIMIT, canonical, read_metadata, read_ordered_metadata};
 pub use resolver::{
-    StorageIdentityConfig, StorageKind, StoragePaths, company_records, current_employee,
-    read_company_metadata, storage_paths, storage_start_allowed,
+    ProviderRuntimeObservation, StorageIdentityConfig, StorageKind, StoragePaths, company_records,
+    current_employee, read_company_metadata, storage_paths, storage_start_allowed,
 };
 use reverie_contracts::storage_identity::IdentityDataError;
 use std::{fmt, io};
@@ -48,6 +48,17 @@ pub enum IdentityError {
     },
 }
 impl IdentityError {
+    /// A native checked close was unconfirmed somewhere in this exact error
+    /// chain. Ordinary I/O/custody refusal alone is not close uncertainty.
+    pub fn has_unconfirmed_close(&self) -> bool {
+        match self {
+            Self::Custody(error) => error.has_unconfirmed_close(),
+            Self::Finalization { primary, secondary } => {
+                primary.has_unconfirmed_close() || secondary.has_unconfirmed_close()
+            }
+            _ => false,
+        }
+    }
     pub fn code(&self) -> &'static str {
         match self {
             Self::Refused(fault) => fault.code(),

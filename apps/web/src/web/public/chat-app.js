@@ -3462,6 +3462,7 @@ class ReverieChatApp {
       status.textContent = '';
       if (manage) {
         this.companyRecoveryFields(content, data, status);
+        this.doc.defaultView.ReverieFleetResources?.mount(this, content, dialog);
         const plugins = this.doc.defaultView?.ReverieChatPlugins;
         if (plugins) content.append(this.button('ca-btn', 'Configure server chat plugins', () => {
           void plugins.openSettings().catch(failure => this.toast(failure.message || 'Plugin settings are unavailable.', 'error'));

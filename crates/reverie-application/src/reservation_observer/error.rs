@@ -13,6 +13,9 @@ pub enum ObserverError {
     Refused(&'static str),
 }
 impl ObserverError {
+    pub(crate) fn has_unconfirmed_close(&self) -> bool {
+        matches!(self, Self::Kernel(error) if error.has_unconfirmed_close())
+    }
     pub fn code(&self) -> &'static str {
         match self {
             Self::Engine(error) => error.code(),

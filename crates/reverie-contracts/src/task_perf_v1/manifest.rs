@@ -1,5 +1,6 @@
 use super::{Result, TaskPerfError, bounded_json, key, object, string};
 use crate::legacy_json::{Node, Number};
+use reverie_core::task_perf::TaskPerfPolicy;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PerfSystem {
@@ -33,6 +34,7 @@ impl PerfSystem {
 /// Paths/hashes identify artifact bytes; this value confers no filesystem trust.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TaskPerfManifest {
+    policy: TaskPerfPolicy,
     system: PerfSystem,
     base_profile: String,
     base_sha256: String,
@@ -57,14 +59,16 @@ impl TaskPerfManifest {
         {
             return Err(TaskPerfError::Manifest);
         }
-        if !matches!(&fields[&key("version")].0, Node::Number(Number::Integer(version)) if version=="1")
-            || string(&fields[&key("purpose")]).as_deref() != Some(super::MANIFEST_PURPOSE)
-            || string(&fields[&key("system")]).as_deref() != Some(observed_system.name())
-        {
+        let policy = [TaskPerfPolicy::TaskV1, TaskPerfPolicy::TaskV2].into_iter().find(|&policy|
+            matches!(&fields[&key("version")].0, Node::Number(Number::Integer(version)) if version==super::manifest_version(policy))
+            && string(&fields[&key("purpose")]).as_deref() == Some(super::manifest_purpose(policy))
+        ).ok_or(TaskPerfError::Manifest)?;
+        if string(&fields[&key("system")]).as_deref() != Some(observed_system.name()) {
             return Err(TaskPerfError::Manifest);
         }
         let text = |name| string(&fields[&key(name)]).ok_or(TaskPerfError::Manifest);
         let result = Self {
+            policy,
             system: observed_system,
             base_profile: text("baseProfile")?,
             base_sha256: text("baseSHA256")?,
@@ -81,6 +85,9 @@ impl TaskPerfManifest {
     }
     pub fn system(&self) -> PerfSystem {
         self.system
+    }
+    pub fn policy(&self) -> TaskPerfPolicy {
+        self.policy
     }
     pub fn base_profile(&self) -> &str {
         &self.base_profile

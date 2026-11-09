@@ -17,6 +17,7 @@ import {
   type OwnerAuthDeps,
   type HumanIdentity,
   type OwnerSession,
+  type OwnerRegistrationIdentity,
 } from './service.js';
 
 const PersonSchema = z
@@ -136,6 +137,32 @@ export class OfficeAuthService extends OwnerAuthService {
           ...(p.avatar ? { avatar: p.avatar } : {}),
         };
     return undefined;
+  }
+
+  override registrationIdentity(token: string | undefined): OwnerRegistrationIdentity {
+    const person = this.identity(token),
+      session = this.session(token);
+    if (!person || person.role !== 'owner' || !session || session.restricted || !this.isMessageOwner(person.id))
+      throw new OwnerAuthError('Current unrestricted office owner is required', 403);
+    const account = this.forSession(token);
+    const identity = account === this ? super.registrationIdentity(token) : account.registrationIdentity(token);
+    return Object.freeze({ ...identity, personId: person.id });
+  }
+
+  override async enrollRegistrationIdentity(token: string | undefined): Promise<OwnerRegistrationIdentity> {
+    const person = this.identity(token),
+      session = this.session(token);
+    if (!person || person.role !== 'owner' || !session || session.restricted || !this.isMessageOwner(person.id))
+      throw new OwnerAuthError('Current unrestricted office owner is required', 403);
+    const account = this.forSession(token);
+    const enrolled =
+      account === this
+        ? await super.enrollRegistrationIdentity(token)
+        : await account.enrollRegistrationIdentity(token);
+    const current = this.registrationIdentity(token);
+    if (current.personId !== person.id || current.accountId !== enrolled.accountId)
+      throw new OwnerAuthError('Office account changed during enrollment', 403);
+    return current;
   }
 
   override isMessageOwner(humanId: string | undefined): boolean {

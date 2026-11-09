@@ -7,6 +7,10 @@ use std::{
     io,
     thread::{JoinHandle, ThreadId},
 };
+mod reconciliation;
+pub use reconciliation::{
+    WorkerHandlerCommand, WorkerHandlerDisposition, WorkerHandlerInbox, WorkerHandlerRequest,
+};
 
 pub(super) struct HandlerJob {
     parent: ThreadId,
@@ -18,6 +22,7 @@ pub(super) struct HandlerJob {
     joined: AtomicBool,
     published: AtomicBool,
     opaque: AtomicBool,
+    reconciliation: Mutex<Option<std::sync::mpsc::SyncSender<reconciliation::Request>>>,
 }
 #[must_use = "publish the actual thread handle or retain failed construction"]
 pub struct WorkerHandlerConstruction {
@@ -42,6 +47,7 @@ impl HandlerJob {
             joined: AtomicBool::new(false),
             published: AtomicBool::new(false),
             opaque: AtomicBool::new(false),
+            reconciliation: Mutex::new(None),
         }
     }
     fn bound(&self, end: Instant) -> Instant {

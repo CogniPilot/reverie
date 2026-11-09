@@ -9,8 +9,23 @@ mod listener;
 pub use listener::{
     BrokerListenerError, BrokerListenerFailure, PreparedBrokerListener, WorkerBrokerListener,
 };
+mod protected_launch;
 mod record;
 mod registered;
+pub use protected_launch::{
+    HeldProtectedWorkerLaunch, ProtectedLaunchDecodeFailure, ProtectedLaunchHoldFailure,
+    ProtectedLaunchPeerFailure, ProtectedLaunchPeerPin, WorkerProtectedLaunchConnection,
+};
+mod peer_pin;
+mod resume;
+mod service_connection;
+pub use resume::{
+    PoolRegistrationPin, ResourceJournalError, ResourceJournalPin, WorkerActorChannel,
+    WorkerActorChannelFailure, WorkerActorPinError,
+};
+pub use service_connection::{
+    AcceptedWorkerServiceConnection, WorkerPeer, WorkerServiceConnection, WorkerServicePurpose,
+};
 mod retention;
 pub(crate) mod terminal;
 pub use terminal::{ViewerRelay, ViewerRelayEnd, ViewerRelayError, ViewerRelayEvent};
@@ -24,7 +39,10 @@ use crate::{
 };
 pub use error::WorkerReportError;
 use error::{Result, finalized};
-pub use handler::WorkerHandlerConstruction;
+pub use handler::{
+    WorkerHandlerCommand, WorkerHandlerConstruction, WorkerHandlerDisposition, WorkerHandlerInbox,
+    WorkerHandlerRequest,
+};
 pub use launch::{AcceptedWorkerConnection, WorkerLaunchConnection};
 use record::Record;
 pub use registered::{RegisteredWorkerConnection, WorkerHandlersProgress};

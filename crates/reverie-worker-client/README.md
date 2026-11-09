@@ -79,6 +79,23 @@ Python-shaped v1 manifest. A one-time same-PID self-exec normalizes argv0 before
 any endpoint access, preserving protected kernel exe/argv checks for PATH and
 symlink invocations.
 
+Protected consumers rely on a connected-client lifetime contract for this
+reviewed package: `normalize_argv0` is the sole exec path and runs before
+`Connection::open`; the connected launch/relay role never execs, forks, spawns,
+duplicates or delegates its socket. The native connection creates that sole
+socket with `SOCK_CLOEXEC` and never clears the flag. Its borrowed descriptor is
+used only for the fixed transport/poll operations. Command text is sent to the
+broker, never executed by this client.
+
+Retaining a process snapshot across an awaited command challenge requires the
+actual reviewed source-to-ELF/provenance binding, exact ELF/hash/inode/argv and
+the same original socket, pidfd, connection and lifecycle hold. The v2 purpose
+string or a live PID alone does not establish this contract. Mandatory live
+guards still follow the challenge. An implementation that changes the lifetime
+contract must obtain new qualification, including a final native observation
+after the wait when snapshot stability is no longer established. None of these
+checks grants allocation, pool membership or a resource-domain terminal result.
+
 The source selects this native package as workerExec and its native manifest as
 workerResourceClientManifest together. There is no Python launcher branch or
 selected v1 manifest fallback. Its coordinated consumers include:

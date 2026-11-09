@@ -4,10 +4,30 @@
 # measurements in workerResumeProgram's normal build.
 { pkgs, src, console, ownerTerminalProgram ? null }:
 rec {
+  nativeWorkerResourceController = import ./worker-resource-controller.nix { inherit pkgs src; };
+  nativeWorkerResourceControllerImage = import ./worker-resource-controller-image.nix {
+    inherit pkgs;
+    controller = nativeWorkerResourceController;
+  };
+  # Explicit integration output only; the shipped hybrid workerBroker below is
+  # unchanged until mandatory native service/maintenance consumers qualify.
+  nativeWorkerBroker = import ./native-worker-broker.nix {
+    inherit pkgs src;
+    previousUnit = workerService;
+    perfGuestCapsule = nativePerfGuestCapsule;
+    taskPerfPolicy = workerTaskPerfPolicy;
+    taskPerfPolicyV2 = workerTaskPerfPolicyV2;
+  };
+  nativePerfGuestCapsule = import ./perf-guest-capsule.nix { inherit pkgs src; };
   workerDockerSeccomp = import ./worker-docker-profile.nix { inherit pkgs src; };
   workerTaskPerfPolicy = import ./worker-perf-profile.nix {
     inherit pkgs src;
     baseProfile = workerDockerSeccomp;
+  };
+  workerTaskPerfPolicyV2 = import ./worker-perf-profile.nix {
+    inherit pkgs src;
+    baseProfile = workerDockerSeccomp;
+    policy = "task-v2";
   };
   workerResumeProgram = import ./worker-resume-program.nix {
     inherit pkgs src console ownerTerminalProgram;

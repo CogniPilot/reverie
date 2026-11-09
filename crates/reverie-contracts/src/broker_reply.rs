@@ -8,6 +8,13 @@ use crate::legacy_json::{Node, Number, Text, Value, ordered::OrderedValue};
 
 pub struct BrokerReply(OrderedValue);
 impl BrokerReply {
+    /// Named observation readers may retain finite structured metadata. This
+    /// private boundary never admits NaN/infinity or exposes an unchecked reply.
+    pub(crate) fn observation_data(value: &Value) -> Option<Self> {
+        value
+            .is_finite()
+            .then(|| Self(OrderedValue::scalar(value.deep_clone())))
+    }
     pub fn null() -> Self {
         Self(OrderedValue::scalar(Value(Node::Null)))
     }

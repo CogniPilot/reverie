@@ -17,8 +17,11 @@ mod control;
 #[cfg(test)]
 pub(crate) mod interrupted_test;
 mod lease;
+mod perf_init;
+pub(crate) use perf_init::perf_init_pidfd;
 mod memory_namespace;
 mod memory_profile;
+pub(crate) mod metadata_socket;
 mod rename;
 pub(crate) mod socket_entry;
 pub(crate) mod worker_directory;
@@ -49,10 +52,13 @@ pub(crate) use control::{
     open_admission,
 };
 mod policy;
+mod private_stamp;
+pub(crate) use private_stamp::PrivateFileStamp;
+pub(crate) mod private_goal;
 pub(crate) use lease::observe_ops_private;
 pub(crate) use lease::observe_with_ancestors;
 pub(crate) use policy::{
-    EntryStat, PolicyEntryStamp, create_policy_temporary, entry_stat, named_policy_entry,
+    PolicyEntryStamp, create_policy_temporary, entry_stat, named_policy_entry,
     open_policy_child_directory, open_policy_original, policy_effective_uid, replace_policy,
 };
 pub(crate) use reservation::{
@@ -224,7 +230,9 @@ pub(crate) fn close(file: File) -> Result<()> {
     let result = if unsafe { libc::close(fd) } == 0 {
         Ok(())
     } else {
-        Err(std::io::Error::last_os_error().into())
+        Err(ObservationError::CloseUnconfirmed {
+            cause: std::io::Error::last_os_error(),
+        })
     };
     #[cfg(test)]
     let result = finalized(result, test_faults::closed());
@@ -251,7 +259,9 @@ pub(crate) mod test_faults {
     }
     pub(super) fn closed() -> Result<()> {
         if STATE.with(|state| std::mem::take(&mut state.borrow_mut().close)) {
-            Err(std::io::Error::other("owned injected close failure").into())
+            Err(ObservationError::CloseUnconfirmed {
+                cause: std::io::Error::other("owned injected close failure"),
+            })
         } else {
             Ok(())
         }
@@ -263,3 +273,9 @@ pub(crate) mod test_faults {
 
 #[cfg(test)]
 mod tests;
+
+mod worker_service;
+pub(crate) use worker_service::{
+    restore_previous_service_unit, retain_native_service_environment, retain_native_service_unit,
+    retain_predecessor,
+};

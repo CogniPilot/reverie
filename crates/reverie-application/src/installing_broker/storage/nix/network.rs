@@ -84,8 +84,28 @@ pub struct NetworkStoragePreparation {
     workflow: LaptopWorkflow,
 }
 impl NetworkStoragePreparation {
+    pub(in crate::installing_broker) fn settle_handler_native(
+        &self,
+    ) -> Result<reverie_host::worker_runtime::NativeSettlementProgress, NetworkStorageError> {
+        self.check()?;
+        self.destination
+            .registry()
+            .runtime
+            .settle_laptop_native_for_handler(&self.workflow)
+            .map_err(NetworkStorageError::Host)
+    }
     pub fn paths(&self) -> &StoragePaths {
         &self.paths
+    }
+    /// Original completed constructor diagnostics only; no new Runtime, effect
+    /// attempt, custody extraction or reconciliation permission is created.
+    pub fn completed_create_diagnostic(
+        &self,
+    ) -> Result<Option<Arc<reverie_host::worker_laptop::LaptopCreateDiagnostic>>, NetworkStorageError>
+    {
+        self.workflow
+            .completed_create_diagnostic()
+            .map_err(NetworkStorageError::Host)
     }
     pub fn run(&self, deadline: Instant) -> Result<LaptopNetworkProgress, NetworkStorageError> {
         self.check()?;

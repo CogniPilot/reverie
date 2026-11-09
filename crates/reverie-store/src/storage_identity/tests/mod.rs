@@ -9,6 +9,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 mod compatibility;
 mod custody;
+mod provider;
 mod resolution;
 
 pub(super) enum Point {

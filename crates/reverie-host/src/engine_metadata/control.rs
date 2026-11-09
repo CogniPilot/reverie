@@ -15,6 +15,18 @@ pub struct ReadonlyEngine {
     pub(crate) client: Arc<CapturedClient>,
 }
 impl ReadonlyEngine {
+    /// Pure exact captured-client provenance, never matching socket/path/ID
+    /// DATA and never a process, source, currentness or effect authorization.
+    pub fn assert_worker_runtime(
+        &self,
+        runtime: &crate::worker_runtime::WorkerRuntime,
+    ) -> Result<()> {
+        if Arc::ptr_eq(&self.client, &runtime.installed_engine().engine.client) {
+            Ok(())
+        } else {
+            Err(EngineError::new(super::EngineFault::Identity))
+        }
+    }
     pub fn new(bootstrap: EngineBootstrap) -> Self {
         Self {
             client: Arc::new(CapturedClient::new(bootstrap.into_command())),

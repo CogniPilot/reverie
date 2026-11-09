@@ -11,9 +11,15 @@ pub(crate) use gpu_access::PublishedGpu;
 mod history;
 mod host_jobs;
 mod image_refresh;
+mod image_switch;
+pub(crate) use image_switch::{
+    ImageGateClosed, ImageGateFailure, ImageGateTransition, ImageSwitchPreview,
+};
 mod launch;
 mod observation;
 mod ordinary_stop;
+mod pool_transition;
+pub use pool_transition::{PoolTransitionFailure, PoolTransitionFence};
 mod stop_admission;
 pub(crate) use stop_admission::OrdinaryStopAdmission;
 mod preparation;
@@ -22,12 +28,20 @@ pub(crate) use preparation_draft::{DraftRetentionFailure, EnteredResourceDraft};
 mod preparation_commit;
 mod preparation_phase;
 mod preparation_policy;
+mod preparation_receipt;
+pub use preparation_receipt::CommittedPolicy;
 mod preparation_stage;
 mod preparation_start;
 mod preparation_stop;
 pub use preparation_start::{ProtectedStartIntent, StartQualificationFacts};
 pub use preparation_stop::SourceStopFacts;
 mod profile_selection;
+mod ram_authority;
+mod ram_claim;
+mod ram_journal;
+pub(crate) use ram_claim::{EnteredRamDraft, RamDraftRetentionFailure};
+mod ram_preview;
+pub use ram_preview::RamDraftPreview;
 mod recovery;
 mod recovery_admission;
 pub(crate) use recovery_admission::RecoveryAdmission;
@@ -65,6 +79,7 @@ use std::{
     thread::ThreadId,
     time::Instant,
 };
+pub(crate) use stop_admission::FleetStopAdmission;
 
 pub struct ReservationGate {
     inner: Arc<Inner>,
@@ -80,8 +95,12 @@ struct Inner {
     state: Mutex<State>,
     changed: Condvar,
     failed_gpu: Mutex<Vec<Arc<gpu_access::TransitionRecord>>>,
+    failed_image: Mutex<Option<Arc<image_switch::ImageTransitionRecord>>>,
+    pool_transition: Mutex<Option<Arc<pool_transition::TransitionRecord>>>,
     #[cfg(test)]
     entry_capture_pause: Mutex<Option<crate::test_process::PausePoint<ObservationContext>>>,
+    #[cfg(test)]
+    entry_wait_notice: Mutex<Option<std::sync::mpsc::SyncSender<()>>>,
 }
 #[derive(Default)]
 struct State {
@@ -96,6 +115,8 @@ struct Active {
     policy_ack: Mutex<Option<Arc<preparation_policy::PolicyAckFence>>>,
     deadline: Mutex<Option<Instant>>,
     gpu_transition: Mutex<Option<Arc<gpu_access::TransitionRecord>>>,
+    image_transition: Mutex<Option<Weak<image_switch::ImageTransitionRecord>>>,
+    ram_authority: Mutex<Option<Weak<ram_authority::RamJournalAuthority>>>,
 }
 impl ReservationGate {
     /// Stop/settle the same persistent owned metadata-client context before an
@@ -109,7 +130,13 @@ impl ReservationGate {
         // prevents acknowledgement; neither failure suppresses the other.
         finalized(
             self.inner.observer.settle_owned(end).map_err(Into::into),
-            self.inner.assert_no_failed_gpu(),
+            finalized(
+                self.inner.assert_no_failed_gpu(),
+                finalized(
+                    self.inner.assert_no_failed_image(),
+                    self.inner.assert_no_pool_transition(),
+                ),
+            ),
         )
     }
     /// Installing-service input, never a request-selected Source/config path.
@@ -159,8 +186,12 @@ impl ReservationGate {
                 state: Mutex::new(State::default()),
                 changed: Condvar::new(),
                 failed_gpu: Mutex::new(Vec::new()),
+                failed_image: Mutex::new(None),
+                pool_transition: Mutex::new(None),
                 #[cfg(test)]
                 entry_capture_pause: Mutex::new(None),
+                #[cfg(test)]
+                entry_wait_notice: Mutex::new(None),
             }),
         })
     }

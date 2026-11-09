@@ -349,6 +349,8 @@ import { deliverPlanRequest } from '../plan-request-prompt.js';
 import { registerPlanRequestRoutes } from './routes/plan-request-routes.js';
 import { planMoveExecutor, type PlanMoveRuntime } from '../plan-move-runtime.js';
 import {ResourceReplacementController, registerResourceReplacementRoutes} from '../resource-replacement-controller.js';
+import { FleetResourcesService, registerFleetResourceRoutes } from '../resource-fleet-service.js';
+import { PoolInstallationController, registerPoolInstallationRoutes } from '../pool-installation-controller.js';
 import { PlanService } from '../plan-accounts.js';
 import { PlanCostTracker } from '../plan-agent-burn.js';
 import { githubData, type GithubArgs } from '../cron/github-source.js';
@@ -2363,6 +2365,10 @@ export class WebServer extends EventEmitter {
         },
         ownerFor(request)
       );
+    registerFleetResourceRoutes(this.app, verifiedOwner, new FleetResourcesService(this.companyService));
+    const poolInstallation = new PoolInstallationController(ownerAuth, process.env.REVERIE_WORKER_SOCKET);
+    registerPoolInstallationRoutes(this.app, poolInstallation);
+    this.app.addHook('onClose', async () => poolInstallation.close());
     if (this.resourceReplacementEnabled === true) {
       const resources = new ResourceReplacementController(this.app, ownerAuth, this.companyService,
         this.planService, this.chatroomService, planMoves, planMoveStore, ctx, this.mux,

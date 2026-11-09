@@ -68,7 +68,7 @@ impl RetainedPreparation {
     /// closes the retained store and keeps the existing durable reservation.
     pub fn begin_native_start(&mut self) -> Result<ProtectedStartIntent> {
         need(
-            self.store.is_some() && self.live.load(Ordering::Acquire),
+            self.journal_available() && self.live.load(Ordering::Acquire),
             "RESOURCE_PREPARATION_ACTIVE_HANDLE_REQUIRED",
         )?;
         need(
@@ -84,7 +84,7 @@ impl RetainedPreparation {
     }
     fn begin_start_attempt(&mut self) -> Result<ProtectedStartIntent> {
         let gate = self.gate.clone();
-        let admission = gate.admit(AdmissionBounds::default())?;
+        let admission = self.admit_preparation()?;
         let body = (|| {
             gate.require_host_job_idle()?;
             self.assert_start_phase(OperationState::Prepared, 3)?;
@@ -99,16 +99,8 @@ impl RetainedPreparation {
             // Preserve original precedence: failed probe does not latch an
             // attempted journal effect, while every actual effect is one-shot.
             self.start_attempted = true;
-            self.view = self
-                .store
-                .as_ref()
-                .expect("live retained store")
-                .begin_effect(
-                    &gate.scope,
-                    &self.handle,
-                    Effect::Start,
-                    self.view.record().data().version,
-                )?;
+            self.view =
+                self.journal_begin_effect(Effect::Start, self.view.record().data().version)?;
             let intent = ProtectedStartIntent(Arc::new(StartOwner {
                 gate: Arc::downgrade(&gate),
                 live: Arc::downgrade(&self.live),
@@ -140,7 +132,7 @@ impl RetainedPreparation {
         &self,
         intent: &ProtectedStartIntent,
     ) -> Result<StartQualificationFacts> {
-        let admission = self.gate.admit(AdmissionBounds::default())?;
+        let admission = self.admit_preparation()?;
         admission.inspect_native_start(self, intent)
     }
     pub(super) fn qualify_intent(
@@ -170,7 +162,7 @@ impl RetainedPreparation {
     }
     fn assert_start_phase(&self, state: OperationState, version: u64) -> Result<()> {
         need(
-            self.store.is_some()
+            self.journal_available()
                 && self.live.load(Ordering::Acquire)
                 && self.view.record().data().state == state
                 && self.view.record().data().version.get() == version,

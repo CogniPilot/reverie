@@ -75,7 +75,8 @@ impl Finalizer<'_> {
             }
         }
         self.original_remainder = Some(remainder);
-        let stopped = run_ordinary_cleanup(slot, budget)?;
+        let (stopped, predecessor_phone) = run_ordinary_cleanup(slot, budget)?;
+        self.predecessor_phone = predecessor_phone;
         let remainder = self
             .original_remainder
             .take()
@@ -151,7 +152,8 @@ impl Finalizer<'_> {
                 return Err(cause.into());
             }
         }
-        let stopped = run_ordinary_cleanup(slot, budget)?;
+        let (stopped, predecessor_phone) = run_ordinary_cleanup(slot, budget)?;
+        self.predecessor_phone = predecessor_phone;
         *slot = Some(Resources::Stopped(stopped));
         Ok(())
     }
@@ -159,7 +161,7 @@ impl Finalizer<'_> {
 fn run_ordinary_cleanup(
     slot: &mut Option<Resources>,
     budget: CleanupBudget,
-) -> Result<Stopped, ColdError> {
+) -> Result<(Stopped, Option<reverie_host::office::OfficePhone>), ColdError> {
     let Some(Resources::Legacy(native)) = slot else {
         unreachable!("same actual ordinary owner");
     };
@@ -176,12 +178,15 @@ fn run_ordinary_cleanup(
     };
     match native.reclaim(end) {
         Ok(returned) => {
-            let (storage, plan, _inspection, removal) = returned.into_cold_parts();
-            Ok(Stopped {
-                storage,
-                plan,
-                removal: Some(removal),
-            })
+            let (storage, plan, _inspection, removal, phone) = returned.into_cold_parts();
+            Ok((
+                Stopped {
+                    storage,
+                    plan,
+                    removal: Some(removal),
+                },
+                phone,
+            ))
         }
         Err(failure) => {
             let (native, cause) = failure.into_parts();

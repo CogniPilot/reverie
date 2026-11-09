@@ -5,11 +5,7 @@ use std::{path::Path, process::Command, sync::OnceLock};
 fn nix_program() -> &'static Path {
     static PROGRAM: OnceLock<PathBuf> = OnceLock::new();
     PROGRAM.get_or_init(|| {
-        let root = std::env::temp_dir().join(format!(
-            "reverie-application-nix-program-{}",
-            std::process::id()
-        ));
-        fs::create_dir(&root).unwrap();
+        let root = crate::test_process::fixture_directory("reverie-application-nix-program");
         let source = root.join("child.rs");
         fs::write(
             &source,

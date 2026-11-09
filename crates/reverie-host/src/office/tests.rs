@@ -58,14 +58,14 @@ fn resource_close_observation_requires_actual_join_and_exact_runtime_session() {
             .is_err()
     );
 }
-struct Fixture {
-    root: PathBuf,
-    service: OfficeService,
-    runtime: WorkerRuntime,
+pub(super) struct Fixture {
+    pub(super) root: PathBuf,
+    pub(super) service: OfficeService,
+    pub(super) runtime: WorkerRuntime,
     close_ok: bool,
 }
 impl Fixture {
-    fn new(address: SocketAddr) -> Self {
+    pub(super) fn new(address: SocketAddr) -> Self {
         static NEXT: AtomicU64 = AtomicU64::new(0);
         let root = std::env::temp_dir().join(format!(
             "of-{}-{}",
@@ -114,7 +114,7 @@ impl Fixture {
             close_ok: true,
         }
     }
-    fn bind(&self, name: &str) -> OfficePhone {
+    pub(super) fn bind(&self, name: &str) -> OfficePhone {
         self.service
             .bind(self.root.join(name), ProfileSessionId::parse(SID).unwrap())
             .unwrap()

@@ -15,7 +15,7 @@ use reverie_store::storage_identity;
 use std::{
     ffi::{OsStr, OsString},
     fs::{self, File},
-    io::Write,
+    io::{Read, Write},
     os::{fd::AsRawFd, unix::fs::PermissionsExt},
     path::{Path, PathBuf},
 };
@@ -145,6 +145,39 @@ impl GpuControlFiles {
 /// No failure path unlinks a named candidate. Parent FD, writer and temporary
 /// evidence are checked/retained; unknown rename/fsync is not rolled back.
 fn replace(path: &Path, bytes: &[u8], expected: Option<&GpuFileStamp>) -> Result<()> {
+    replace_mode(path, bytes, expected, None, None).map(|_| ())
+}
+/// The image purpose shares the original writer, with additional exact named
+/// readback and original group/deadline checks. GPU calls retain their mode.
+pub(crate) fn replace_image_configuration(
+    path: &Path,
+    bytes: &[u8],
+    expected: &GpuFileStamp,
+    group: u32,
+    end: std::time::Instant,
+    pending: &crate::private_pending::PendingFile,
+    fence: Option<&mut crate::worker_image::ImageRenameFence<'_>>,
+) -> Result<GpuFileStamp> {
+    replace_mode(
+        path,
+        bytes,
+        Some(expected),
+        Some((group, end, pending)),
+        fence,
+    )?
+    .ok_or(GpuHostError::Refused("WORKER_IMAGE_READBACK_REQUIRED"))
+}
+fn replace_mode(
+    path: &Path,
+    bytes: &[u8],
+    expected: Option<&GpuFileStamp>,
+    image: Option<(
+        u32,
+        std::time::Instant,
+        &crate::private_pending::PendingFile,
+    )>,
+    mut fence: Option<&mut crate::worker_image::ImageRenameFence<'_>>,
+) -> Result<Option<GpuFileStamp>> {
     let parent = path
         .parent()
         .ok_or(GpuHostError::Refused("GPU_PARENT_CUSTODY"))?;
@@ -154,6 +187,7 @@ fn replace(path: &Path, bytes: &[u8], expected: Option<&GpuFileStamp>) -> Result
     let directory = open_parent(parent)?;
     let mut attempted = false;
     let result = (|| {
+        image_current(image)?;
         let mut temporary = prepare_temporary(&directory, leaf, bytes)?;
         let result = (|| {
             #[cfg(test)]
@@ -172,12 +206,51 @@ fn replace(path: &Path, bytes: &[u8], expected: Option<&GpuFileStamp>) -> Result
                     == parent_identity(&fs::symlink_metadata(parent)?),
                 "GPU_PARENT_CUSTODY_CHANGED",
             )?;
+            if let Some((group, _, _)) = image {
+                use std::os::unix::fs::MetadataExt;
+                need(
+                    temporary
+                        .anchor
+                        .as_ref()
+                        .expect("original prepared anchor")
+                        .metadata()?
+                        .gid()
+                        == group,
+                    "WORKER_IMAGE_SOURCE_GROUP_CHANGED",
+                )?;
+            }
+            image_current(image)?;
+            if let Some((_, _, pending)) = image {
+                pending.assert_current().map_err(pending::gpu_error)?;
+            }
+            if let Some(fence) = fence.as_mut() {
+                fence
+                    .assert_current()
+                    .map_err(|e| GpuHostError::ImageFence(Box::new(e)))?;
+            }
             attempted = true;
             native::replace_policy(&directory, &temporary.name, leaf)?;
             #[cfg(test)]
             tests::hit(tests::Point::Renamed, parent, &temporary.name)?;
             directory.sync_all()?;
-            Ok(())
+            if let Some((group, _, _)) = image {
+                let published = GpuFileStamp::of(
+                    &temporary
+                        .anchor
+                        .as_ref()
+                        .expect("original prepared anchor")
+                        .metadata()?,
+                );
+                need(
+                    published.same_renamed_file(&temporary.stamp),
+                    "WORKER_IMAGE_PREPARED_CHANGED",
+                )?;
+                image_readback(&directory, leaf, bytes, &published, group)?;
+                image_current(image)?;
+                Ok(Some(published))
+            } else {
+                Ok(None)
+            }
         })();
         finalized(result, temporary.close())
     })();
@@ -187,6 +260,91 @@ fn replace(path: &Path, bytes: &[u8], expected: Option<&GpuFileStamp>) -> Result
     } else {
         result
     }
+}
+fn image_current(
+    image: Option<(
+        u32,
+        std::time::Instant,
+        &crate::private_pending::PendingFile,
+    )>,
+) -> Result<()> {
+    need(
+        image.is_none_or(|(_, end, _)| std::time::Instant::now() < end),
+        "WORKER_IMAGE_DEADLINE",
+    )
+}
+fn image_readback(
+    directory: &File,
+    leaf: &OsStr,
+    bytes: &[u8],
+    expected: &GpuFileStamp,
+    group: u32,
+) -> Result<()> {
+    use std::os::unix::fs::MetadataExt;
+    let mut file = native::open_at(
+        directory.as_raw_fd(),
+        leaf,
+        libc::O_RDONLY | libc::O_NONBLOCK,
+    )?;
+    let body = (|| {
+        need(
+            GpuFileStamp::of(&file.metadata()?) == *expected && file.metadata()?.gid() == group,
+            "WORKER_IMAGE_READBACK_CHANGED",
+        )?;
+        let mut actual = Vec::new();
+        (&mut file)
+            .take(bytes.len() as u64 + 1)
+            .read_to_end(&mut actual)?;
+        need(
+            actual == bytes
+                && GpuFileStamp::of(&file.metadata()?) == *expected
+                && file.metadata()?.gid() == group
+                && GpuFileStamp::named(directory, leaf)? == *expected,
+            "WORKER_IMAGE_READBACK_CHANGED",
+        )
+    })();
+    finalized(body, native::close(file).map_err(Into::into))
+}
+
+#[cfg(test)]
+pub(crate) fn image_after_rename_fixture_fault(close: bool) {
+    tests::hook(tests::Point::Renamed, move |parent, _| {
+        if close {
+            native::test_faults::set(None, true);
+        } else {
+            fs::rename(
+                parent.join("broker.json"),
+                parent.join("original-published-image"),
+            )?;
+            fs::write(parent.join("broker.json"), b"foreign post-rename bytes")?;
+        }
+        Ok(())
+    });
+}
+#[cfg(test)]
+pub(crate) fn clear_image_fixture_faults() {
+    tests::clear();
+}
+#[cfg(test)]
+pub(crate) fn image_pending_swap_before_cas_fixture_fault() {
+    tests::hook(tests::Point::BeforeCas, |parent, _| {
+        let pending = parent.join("resource-reservation-control.pending");
+        let bytes = fs::read(&pending)?;
+        fs::rename(&pending, parent.join("original-pending"))?;
+        fs::write(pending, bytes)?;
+        Ok(())
+    });
+}
+#[cfg(test)]
+pub(crate) fn image_path_swap_before_cas_fixture_fault(path: PathBuf) {
+    tests::hook(tests::Point::BeforeCas, move |_, _| {
+        use std::os::unix::fs::PermissionsExt;
+        let bytes = fs::read(&path)?;
+        fs::rename(&path, path.with_extension("original-fixture"))?;
+        fs::write(&path, bytes)?;
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o600))?;
+        Ok(())
+    });
 }
 struct Prepared {
     name: OsString,
@@ -265,7 +423,7 @@ fn parent_identity(info: &fs::Metadata) -> (u64, u64, u32, u32, u32) {
     use std::os::unix::fs::MetadataExt;
     (info.dev(), info.ino(), info.mode(), info.uid(), info.gid())
 }
-fn open_parent(path: &Path) -> Result<File> {
+pub(crate) fn open_parent(path: &Path) -> Result<File> {
     storage_identity::canonical(path)?;
     let components = path.components().skip(1).collect::<Vec<_>>();
     let mut directory = native::open_at(

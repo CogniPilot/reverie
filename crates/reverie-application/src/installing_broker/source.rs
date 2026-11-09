@@ -5,8 +5,10 @@ pub(crate) use super::storage::RegisteredSource;
 use super::*;
 use crate::reservation_gate::{DraftRetentionFailure, EnteredResourceDraft, RetainedPreparation};
 use reverie_core::operations::{JournalDigest, JournalId};
+mod ram;
 #[cfg(test)]
 mod tests;
+pub(in crate::installing_broker) use ram::RamSourceDraftFailure;
 
 #[derive(Debug)]
 pub enum SourceDraftError {

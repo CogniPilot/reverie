@@ -2,17 +2,51 @@
 //! lifecycle registry and effects remain private composition of this service;
 //! a captured configuration is neither owner authorization nor a start grant.
 mod bootstrap;
+mod chat_images;
 pub use bootstrap::{BootstrapSettlementError, BrokerBootstrapCause, BrokerBootstrapFailure};
+pub use chat_images::{ChatImageHandlerClosed, ChatImageHandlerFailure, ChatImagesError};
 #[cfg(test)]
 mod bootstrap_tests;
+mod control;
 mod creation;
+mod goal_custody;
 mod gpu_access;
+pub use goal_custody::{GoalCustodyHandlerClosed, GoalCustodyHandlerFailure};
 mod image_refresh;
+mod worker_image;
+pub use worker_image::{
+    ClosedOfflineImageInspection, OfflineImageInspectionFailure, OfflineImageSwitchClosed,
+    OfflineImageSwitchError, OfflineImageSwitchFailure, PreparedOfflineImageSwitch,
+    QualifiedWorkerImage, WorkerImageQualificationError, WorkerImageQualificationFailure,
+};
+mod installed_controller;
+pub use installed_controller::ControllerInstallFailure;
+mod installation_offer;
+pub use installation_offer::{
+    BrokerInstallationOffer, BrokerInstallationOfferCause, BrokerInstallationOfferFailure,
+    OsPoolInstallationFailure,
+};
 mod launch;
 mod lifecycle;
+mod pool_controller;
+pub use pool_controller::{
+    BrokerControllerBootstrap, BrokerControllerBootstrapCause, BrokerControllerBootstrapFailure,
+};
 mod recovered;
+pub mod resource_actor;
+mod service;
+pub use service::{
+    BrokerService, BrokerServiceClosed, BrokerServiceError, BrokerServiceFailure,
+    BrokerServiceStartup, BrokerStartupCause, BrokerStartupFailure,
+};
+mod seat_stop;
 pub(crate) mod source;
 mod stop_admission;
+mod stopped_ram;
+mod supervisor;
+pub use stopped_ram::{
+    EnteredStoppedRamSource, StoppedRamAborted, StoppedRamPreparationFailure, StoppedRamReport,
+};
 mod storage;
 pub(crate) use stop_admission::WorkerStopAdmission;
 mod telemetry;
@@ -159,12 +193,18 @@ impl InstalledWorker {
     }
 }
 pub struct InstallingBroker {
+    // One actual service-start attempt for this original broker. Never reset
+    // on refusal, local close, Arc clone/drop, or a failed recovery prefix.
+    service_start_claimed: std::sync::atomic::AtomicBool,
     installed: Arc<InstalledWorker>,
     gate: Option<ReservationGate>,
     storage: Arc<storage::StorageRegistry>,
     telemetry: Arc<reverie_host::command_telemetry::CommandTelemetry>,
     reports: Arc<reverie_host::worker_reports::WorkerReportService>,
     recovery: Arc<RecoveryOwners>,
+    goals: Arc<reverie_host::goal_custody::GoalCustodyState>,
+    images: Arc<chat_images::ChatImages>,
+    controller: Mutex<Option<reverie_host::worker_pool::ActivatedController>>,
 }
 impl InstallingBroker {
     /// Trusted installing bootstrap; no wire-selected native engine or path.

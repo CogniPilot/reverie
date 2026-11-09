@@ -23,8 +23,11 @@ pub(super) fn hit(point: Point, parent: &Path, name: &OsStr) -> Result<()> {
     });
     hook.map_or(Ok(()), |hook| hook(parent, name))
 }
-fn hook(point: Point, body: impl FnOnce(&Path, &OsStr) -> Result<()> + 'static) {
+pub(super) fn hook(point: Point, body: impl FnOnce(&Path, &OsStr) -> Result<()> + 'static) {
     HOOKS.with(|hooks| hooks.borrow_mut().push((point, Box::new(body))));
+}
+pub(super) fn clear() {
+    HOOKS.with(|hooks| hooks.borrow_mut().clear());
 }
 static NEXT: AtomicU64 = AtomicU64::new(0);
 struct Tree(PathBuf);
