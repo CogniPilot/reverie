@@ -15,14 +15,14 @@ let
   base = reference baseProvenance;
   document = builtins.fromJSON (builtins.readFile base);
   manifest = reference document.imageSpec.Config.Labels."org.reverie.worker.child-manifest";
-  child = builtins.fromJSON (builtins.readFile manifest);
+  # Read the manifest only in the fixed Rust build stage. Its original package
+  # closure supplies the program; pure evaluation must not inspect that file.
   declaredInputReferences = [
     base
     (reference document.archive.path)
     (reference document.source.path)
     (reference document.toolkit.manifest.path)
     manifest
-    (reference child.program.path)
   ];
   inputs = pkgs.writeText "reverie-worker-child-annex-inputs"
     (builtins.concatStringsSep "\n" declaredInputReferences + "\n");

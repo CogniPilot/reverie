@@ -5,10 +5,8 @@ let
   source = builtins.toFile "annex-eval-source" "inert fixture";
   toolkitRoot = builtins.toFile "annex-eval-toolkit" "{}";
   toolkit = raw toolkitRoot + "/share/reverie-human-terminal/manifest.json";
-  programRoot = builtins.toFile "annex-eval-program" "inert fixture";
-  program = raw programRoot + "/bin/reverie-worker-child";
-  manifest = builtins.toFile "annex-eval-manifest.json"
-    (builtins.toJSON { program.path = raw program; });
+  manifestRoot = builtins.toFile "annex-eval-manifest" "inert fixture";
+  manifest = raw manifestRoot + "/share/reverie/worker-child-program.json";
   base = builtins.toFile "annex-eval-base.json" (builtins.toJSON {
     version = 1;
     purpose = "worker-image-provenance-v1";
@@ -27,13 +25,13 @@ let
   };
   literal = import (builtins.toFile "annex-eval-literal.nix" (toString base));
   selected = (invoke literal).declaredInputReferences;
-  expected = map raw [ base archive source toolkit manifest program ];
-  roots = [ base archive source toolkitRoot manifest programRoot ];
+  expected = map raw [ base archive source toolkit manifest ];
+  roots = [ base archive source toolkitRoot manifestRoot ];
   retained = index: builtins.hasAttr (raw (builtins.elemAt roots index))
     (builtins.getContext (builtins.elemAt selected index));
   refused = builtins.tryEval (builtins.deepSeq (invoke "/tmp/foreign-base.json").declaredInputReferences true);
 in assert builtins.isPath literal;
 assert map toString selected == expected;
-assert builtins.all retained (builtins.genList (index: index) 6);
+assert builtins.all retained (builtins.genList (index: index) 5);
 assert !refused.success;
 true
