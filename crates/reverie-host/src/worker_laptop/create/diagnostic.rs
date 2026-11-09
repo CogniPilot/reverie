@@ -1,6 +1,7 @@
 //! Immutable original completed-client DATA. This supplies no absent-container,
 //! retry, cleanup or creation-success authority.
 use super::*;
+mod list;
 use crate::captured_client::CapturedOutput;
 use std::ffi::OsString;
 

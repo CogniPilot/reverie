@@ -2,6 +2,7 @@
 //! or readiness grant. Missing mandatory L/Q/service consumers remain explicit.
 use super::*;
 use reverie_host::worker_reports::{WorkerBrokerListener, WorkerReportError};
+mod create_diagnostics;
 mod handler;
 mod shutdown;
 mod supervisor;
