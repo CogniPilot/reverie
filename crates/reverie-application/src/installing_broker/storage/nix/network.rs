@@ -97,6 +97,16 @@ impl NetworkStoragePreparation {
     pub fn paths(&self) -> &StoragePaths {
         &self.paths
     }
+    /// Original completed constructor diagnostics only; no new Runtime, effect
+    /// attempt, custody extraction or reconciliation permission is created.
+    pub fn completed_create_diagnostic(
+        &self,
+    ) -> Result<Option<Arc<reverie_host::worker_laptop::LaptopCreateDiagnostic>>, NetworkStorageError>
+    {
+        self.workflow
+            .completed_create_diagnostic()
+            .map_err(NetworkStorageError::Host)
+    }
     pub fn run(&self, deadline: Instant) -> Result<LaptopNetworkProgress, NetworkStorageError> {
         self.check()?;
         self.destination

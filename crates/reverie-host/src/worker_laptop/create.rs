@@ -2,7 +2,9 @@
 //! Successful noncanonical stdout still owns the created-by-name outcome.
 use super::call_budget::CallBudget;
 use super::*;
+mod diagnostic;
 use crate::command_telemetry::CommandTelemetry;
+pub use diagnostic::LaptopCreateDiagnostic;
 use reverie_contracts::{resource_config::ResourceIdentitySettings, worker_launch};
 use reverie_core::{PythonTextRef, ids::ContainerId};
 use reverie_store::storage_identity::{self, StorageIdentityConfig, StorageKind};
@@ -28,6 +30,7 @@ pub(super) enum CreateStage {
 }
 pub(super) struct Creation {
     created: bool,
+    diagnostic: Option<Arc<LaptopCreateDiagnostic>>,
     pub(super) container: Option<ContainerId>,
     pub(super) stage: CreateStage,
     pub(super) publication: Option<super::publication::Publication>,
@@ -96,6 +99,7 @@ impl Workflows {
         // Retain the one-shot phase before the first possible constructor.
         record.creation = Some(Creation {
             created: false,
+            diagnostic: None,
             container: None,
             stage: CreateStage::Preparing,
             publication: None,
@@ -176,11 +180,17 @@ fn run(
     let output = network::call_with_budget(
         runtime,
         record,
-        argv,
+        argv.clone(),
         network::CallPurpose::Launch,
         deadline,
     )?;
     if !output.succeeded {
+        let diagnostic = Arc::new(LaptopCreateDiagnostic::capture_completed(argv, output));
+        record
+            .creation
+            .as_mut()
+            .expect("retained one-shot create")
+            .diagnostic = Some(diagnostic);
         // A nonzero client can still have caused a daemon effect. Keep every
         // owner; local client completion is not an absent-container proof.
         record.unknown = true;

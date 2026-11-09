@@ -63,7 +63,7 @@ use crate::{
 };
 pub use cleanup::{CreatedCleanup, StoppedCreatedLaptop};
 pub use cold::{ColdCommit, ColdCommitted};
-pub use create::{CreatedLaptop, LaptopCreation};
+pub use create::{CreatedLaptop, LaptopCreateDiagnostic, LaptopCreation};
 pub use direct_finalization::{
     DirectStorageFinalizer, DirectStorageObservation, DirectStorageRetainFailure,
 };
