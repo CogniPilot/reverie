@@ -1,9 +1,11 @@
 use super::*;
 mod pending;
+mod perf;
 mod terminal;
 #[cfg(test)]
 mod tests;
 pub use pending::GpuPendingFile;
+pub use perf::{PerfControlFiles, PerfPending, PerfProtectedStores, PerfTerminal};
 use reverie_contracts::{
     gpu_access::{GpuTransitionIntent, MAX_BYTES, REQUEST_FILE, encode_requests},
     reservation_engine::ReservationConfiguration,

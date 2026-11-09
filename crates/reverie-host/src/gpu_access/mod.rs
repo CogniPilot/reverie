@@ -22,7 +22,7 @@ use crate::{ObservationError, native};
 pub use cdi::CdiObservation;
 pub use files::{
     GpuControlFiles, GpuParentGuard, GpuPendingFile, GpuPrivateSnapshot, GpuProtectedStores,
-    GpuTerminalSnapshot,
+    GpuTerminalSnapshot, PerfControlFiles, PerfPending, PerfProtectedStores, PerfTerminal,
 };
 pub use hardware::GpuHardware;
 use reverie_contracts::{gpu_access::GpuDataError, reservation_engine::EngineDataError};
