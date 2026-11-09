@@ -93,6 +93,7 @@ fn actual_root_owned_store_artifact_and_native_elf_return_bytes_and_inode_data()
         ImmutableInputKind::Client,
         ImmutableInputKind::Provenance,
         ImmutableInputKind::Startup,
+        ImmutableInputKind::PoolImageInputs,
     ] {
         let observed = observer
             .observe_artifact(&fixture.reference(), kind, end())
@@ -133,6 +134,7 @@ fn actual_store_wrong_digest_small_bound_and_nonexecutable_selection_refuse() {
         ImmutableInputKind::Client,
         ImmutableInputKind::Provenance,
         ImmutableInputKind::Startup,
+        ImmutableInputKind::PoolImageInputs,
     ] {
         assert_eq!(
             observer
@@ -177,12 +179,20 @@ fn actual_store_wrong_digest_small_bound_and_nonexecutable_selection_refuse() {
 #[test]
 #[ignore = "requires explicit REVERIE_WEBSITE_INPUT_FIXTURE and REVERIE_DEPLOYMENT_COPY store paths"]
 fn actual_consumed_close_failure_keeps_primary_and_sticky_observer_without_descriptor_retry() {
+    consumed_close_failure(ImmutableInputKind::Client);
+}
+#[test]
+#[ignore = "requires explicit REVERIE_WEBSITE_INPUT_FIXTURE and REVERIE_DEPLOYMENT_COPY store paths"]
+fn actual_pool_inputs_close_failure_remains_on_the_original_immutable_reader() {
+    consumed_close_failure(ImmutableInputKind::PoolImageInputs);
+}
+fn consumed_close_failure(kind: ImmutableInputKind) {
     let fixture = Fixture::new();
     let mut observer = ImmutableInputObserver::default();
     let mut wrong = fixture.reference();
     wrong.sha256 = JournalDigest::parse(&"0".repeat(64)).unwrap();
     native::test_faults::set(None, true);
-    let first = observer.observe_artifact(&wrong, ImmutableInputKind::Client, end());
+    let first = observer.observe_artifact(&wrong, kind, end());
     native::test_faults::set(None, false);
     let error = first.err().unwrap();
     assert!(

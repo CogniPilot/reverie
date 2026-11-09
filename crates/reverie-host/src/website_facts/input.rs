@@ -13,12 +13,13 @@ pub enum ImmutableInputKind {
     Client,
     Provenance,
     Startup,
+    PoolImageInputs,
 }
 impl ImmutableInputKind {
     fn maximum(&self) -> u64 {
         match self {
             Self::Client => 8192,
-            Self::Provenance | Self::Startup => 65536,
+            Self::Provenance | Self::Startup | Self::PoolImageInputs => 65536,
         }
     }
 }
