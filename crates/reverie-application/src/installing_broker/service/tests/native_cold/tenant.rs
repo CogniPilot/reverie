@@ -10,7 +10,7 @@ pub(super) struct Inputs {
     pub base: ArtifactReference,
     pub annex: ArtifactReference,
     pub docker: PathBuf,
-    parent: PathBuf,
+    pub(super) parent: PathBuf,
 }
 impl Inputs {
     pub(super) fn capture() -> Result<Self> {

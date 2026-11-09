@@ -44,7 +44,7 @@ impl Attempt {
         self.stop_via_service()?;
         self.assert_released()
     }
-    fn viewer_eof(&mut self) -> Result<()> {
+    pub(super) fn viewer_eof(&mut self) -> Result<()> {
         // Closing this real accepted client is the website-disappearance case.
         // No X/I frame, terminal signal, stop, reconciliation or resend occurs.
         let client = self.client.take().ok_or("original viewer client missing")?;
@@ -70,7 +70,7 @@ impl Attempt {
             "original viewer active/pending registrations must settle",
         )
     }
-    fn attach_original(&mut self) -> Result<Frames> {
+    pub(super) fn attach_original(&mut self) -> Result<Frames> {
         require(self.client.is_none(), "previous viewer must close first")?;
         // Reuse the exact existing held workload by call. attachOnly prevents
         // its execution as a new command or creation if the provider is absent.
@@ -236,7 +236,7 @@ impl Attempt {
     }
 }
 
-fn process_data(process: &ProcessSnapshot) -> serde_json::Value {
+pub(super) fn process_data(process: &ProcessSnapshot) -> serde_json::Value {
     serde_json::json!({"pid":process.pid().as_str(),"startTick":process.start().as_str(),
         "parent":process.parent().as_str(),"argvDigest":process.argv_digest().as_str(),
         "executable":process.executable(),"namespaces":process.namespaces()})
@@ -258,7 +258,7 @@ impl PartialEq for ProviderBirth {
 }
 
 impl Attempt {
-    fn require_native_command_mode(
+    pub(super) fn require_native_command_mode(
         &self,
         pane: &ProcessSnapshot,
         command: &ProcessSnapshot,
@@ -290,7 +290,7 @@ impl Attempt {
         )
     }
 }
-fn argv_digest(arguments: &[&str]) -> Result<reverie_core::operations::JournalDigest> {
+pub(super) fn argv_digest(arguments: &[&str]) -> Result<reverie_core::operations::JournalDigest> {
     use sha2::{Digest, Sha256};
     let mut hash = Sha256::new();
     for argument in arguments {

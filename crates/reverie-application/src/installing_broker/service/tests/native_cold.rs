@@ -11,6 +11,7 @@ use std::{
     os::unix::net::UnixStream,
 };
 mod engine;
+mod generation;
 mod tenant;
 mod transaction;
 use engine::Cli;

@@ -57,9 +57,9 @@ systemd-installation or global native-service singleton acceptance.
 
 The separately ignored
 `actual_native_viewer_eof_reconnect_preserves_same_live_provider_and_command`
-case uses the same exact inputs and original 150-second attempt budget. It calls
-the same held-workload helper; the existing finite terminal command is unchanged,
-not duplicated or a claim that shell runtime has been retired. It closes only
+case uses the same exact inputs and original 150-second attempt budget. It reuses
+the same fixed finite workload helper, without duplicating the command or
+claiming that shell runtime has been retired. It closes only
 the first website-side Unix socket while the command is live, collects the real
 published handler thread, checks original socket/Hold settlement and lifecycle
 transients, then attaches with `attachOnly: true` to the same SID. It repeats EOF
@@ -88,3 +88,44 @@ needs a separate one-attempt execution approval outside the host rollout quiet
 window; pinning the test process alone does not pin its created containers. Unknown
 or failed results retain the original whole attempt and tenant, without replay,
 guessed-CID cleanup, manual release or resetting any marker.
+
+The ignored generation case
+`generation::actual_broker_generation_preserves_live_sibling_and_releases_retired_session`
+uses the same inputs and 3,600-iteration finite workload helper. Its original
+330-second parent deadline covers both child actors. It
+creates two synthetic employees under one private broker source/R domain. The
+48 GiB admission ceiling includes running workers from other deployments. Allow
+at least 8 GiB of uncommitted worker admission capacity for the two 4 GiB seats;
+the host budget must also fit the configured pool, anchor and reserve. Failed
+runs retain their containers and evidence, so inspect capacity before another
+separately authorized attempt. Select this exact parent case rather than every
+ignored test: its actor entry point requires the parent-created context. The
+original library-service process retains the genuine Created resource after one viewer EOF,
+keeps the sibling viewer/command live, advances only the first employee's SID and
+generation, and invokes actual service shutdown. Its closed quarantine contract
+accepts only typed retained storage/lifecycle and Runtime::Laptop error trees
+whose every leaf is exactly WORKER_LAPTOP_RETAINED. Engine, Nix, other failures,
+mixed trees and empty trees refuse handover. The same rule applies to the actual
+native-settlement result; a retained result stays native-unconfirmed, with the
+whole error retained and its private diagnostic saved. Negative process exit
+does not establish any original closure, old lease release or R acknowledgement.
+That Refused leaf remains ambiguous among mutex contention, native uncertainty
+and created custody; subsequent cleanup requires the actual fresh owner checks.
+A fresh process
+reconstructs actual Recovered owners, reattaches the sibling, observes the retired
+provider's actual stop and lease release, then launches the new current SID.
+
+An independent native observer retains the validated init, pane-controller and
+original command snapshots plus runtime publication across process replacement.
+It also verifies unchanged sibling identity, desired-running, vacation and plan
+binding. Both new and sibling workloads must complete through real output/exit
+frames before normal owned stop, service/Office/R/storage closure and nonforce
+removal of the four exact original CIDs by replacement owners. Original closure
+remains unconfirmed; the parent independently checks the four exact CIDs'
+absence. Phase files are private synchronization/data; actual process joins,
+native observations and owning finalizers establish the assertions. Failure
+retains the tenant and original native/actor owners without signals or replay.
+This is library-owner generation acceptance, not user-unit/KillMode or public
+NSS singleton installation acceptance. Normal supervisor ordering may stop the
+retired Direct resource before sibling attach becomes Existing; the separate
+focused detached-candidate test covers that Pending-neighbor selection boundary.

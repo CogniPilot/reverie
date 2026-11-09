@@ -26,7 +26,9 @@ pub(in crate::installing_broker::service::tests::native_cold::transaction) struc
     failures: Vec<ReadFailure>,
 }
 impl ProviderReader {
-    pub(super) fn new(engine: ReadonlyEngine) -> Self {
+    pub(in crate::installing_broker::service::tests::native_cold::transaction) fn new(
+        engine: ReadonlyEngine,
+    ) -> Self {
         let owner = engine.capture_query_owner();
         Self {
             engine,
@@ -40,7 +42,7 @@ impl ProviderReader {
         self.failures.push(error);
         message
     }
-    pub(super) fn observe(
+    pub(in crate::installing_broker::service::tests::native_cold::transaction) fn observe(
         &mut self,
         id: &ContainerId,
         end: Instant,
@@ -81,7 +83,10 @@ impl ProviderReader {
             observed.pane_children()[0].clone(),
         ))
     }
-    pub(super) fn close(&mut self, end: Instant) -> Result<()> {
+    pub(in crate::installing_broker::service::tests::native_cold::transaction) fn close(
+        &mut self,
+        end: Instant,
+    ) -> Result<()> {
         let metadata = self.owner.settle_owned(end);
         let process = self.process.assert_finalized();
         let mut errors = Vec::new();

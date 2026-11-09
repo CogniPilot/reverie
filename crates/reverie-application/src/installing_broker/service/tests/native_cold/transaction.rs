@@ -6,6 +6,7 @@ use reverie_host::{
 use std::collections::BTreeMap;
 mod diagnostics;
 mod exchange;
+pub(super) mod generation;
 mod reconnect;
 use exchange::Frames;
 
@@ -19,6 +20,7 @@ pub(super) struct Attempt {
     startup_failure: Option<Box<BrokerStartupFailure>>,
     bootstrap_failure: Option<Box<crate::installing_broker::BrokerBootstrapFailure>>,
     service_failure: Option<Box<BrokerServiceFailure>>,
+    native_settlement_failure: Option<reverie_host::worker_runtime::RuntimeError>,
     client: Option<UnixStream>,
     provider_reader: Option<reconnect::ProviderReader>,
     create_attempted: bool,
@@ -27,12 +29,17 @@ pub(super) struct Attempt {
     home: Option<PathBuf>,
     stopped: bool,
     complete: bool,
+    anchor_session: ProfileSessionId,
 }
 impl Attempt {
     pub(super) fn new(inputs: Inputs) -> Result<Self> {
         let tenant = Tenant::new(&inputs)?;
         let end = Instant::now() + Duration::from_secs(150);
+        Self::from_tenant(inputs, tenant, end)
+    }
+    fn from_tenant(inputs: Inputs, tenant: Tenant, end: Instant) -> Result<Self> {
         let cli = Cli::new(inputs.docker.clone(), tenant.root.clone(), end);
+        let anchor_session = tenant.sid.clone();
         Ok(Self {
             tenant,
             inputs,
@@ -43,6 +50,7 @@ impl Attempt {
             startup_failure: None,
             bootstrap_failure: None,
             service_failure: None,
+            native_settlement_failure: None,
             client: None,
             provider_reader: None,
             create_attempted: false,
@@ -51,6 +59,7 @@ impl Attempt {
             home: None,
             stopped: false,
             complete: false,
+            anchor_session,
         })
     }
     pub(super) fn run(&mut self) -> Result<()> {
@@ -104,19 +113,20 @@ impl Attempt {
         )?;
         // This is the real readonly qualifier, not parsed profile permission.
         // Its actual immutable/native query owners must close before effects.
+        let qualification_end = self.end.min(Instant::now() + Duration::from_secs(300));
         let qualified = broker
             .qualify_worker_image(
                 self.inputs.base.clone(),
                 self.inputs.annex.clone(),
                 self.inputs.image.clone(),
-                self.end,
+                qualification_end,
             )
             .map_err(|failure| {
                 let cause = failure.to_string();
                 std::mem::forget(failure);
                 cause
             })?;
-        qualified.close(self.end).map_err(|failure| {
+        qualified.close(qualification_end).map_err(|failure| {
             let cause = failure.to_string();
             std::mem::forget(failure);
             cause
@@ -141,7 +151,7 @@ impl Attempt {
                 .join(self.tenant.sid.as_str())
                 .display()
         );
-        let label = format!("reverie.cold-fixture={}", self.tenant.sid.as_str());
+        let label = format!("reverie.cold-fixture={}", self.anchor_session.as_str());
         let raw = self.cli.success(&[
             "create",
             "--name",
@@ -193,7 +203,7 @@ impl Attempt {
             row["Id"] == id
                 && row["Name"] == format!("/{}", self.tenant.server)
                 && row["Image"] == self.inputs.image.as_str()
-                && row["Config"]["Labels"]["reverie.cold-fixture"] == self.tenant.sid.as_str()
+                && row["Config"]["Labels"]["reverie.cold-fixture"] == self.anchor_session.as_str()
                 && row["State"]["Running"].as_bool() == Some(running)
                 && row["State"]["Pid"]
                     .as_u64()
@@ -227,9 +237,14 @@ impl Attempt {
         self.complete_workload(frames)
     }
     fn held_request(&self) -> Vec<u8> {
-        self.request("printf 'native-cold-canary-started\\n'; for ((i=0;i<600;i++)); do if test -f /workspace/release; then printf 'native-cold-canary-ok\\n'; exit 0; fi; sleep .1; done; exit 79")
+        self.request(held_command())
     }
     fn begin_cold(&mut self) -> Result<Frames> {
+        let frames = self.begin_held()?;
+        self.bare_record()?;
+        Ok(frames)
+    }
+    fn begin_held(&mut self) -> Result<Frames> {
         let raw = self.held_request();
         self.client = Some(exchange::connect(
             &self.tenant.root.join("broker/service.sock"),
@@ -239,14 +254,16 @@ impl Attempt {
         let mut frames = Frames::default();
         self.until(&mut frames, true)?;
         self.capture_started()?;
-        self.bare_record()?;
         Ok(frames)
     }
-    fn complete_workload(&mut self, mut frames: Frames) -> Result<()> {
+    fn complete_workload(&mut self, frames: Frames) -> Result<()> {
         tenant::write(
             &self.tenant.root.join("work/release"),
             b"release only this fixed finite workload",
         )?;
+        self.finish_workload(frames)
+    }
+    fn finish_workload(&mut self, mut frames: Frames) -> Result<()> {
         self.until(&mut frames, false)?;
         require(
             frames.errors.is_empty()
@@ -530,6 +547,9 @@ impl Attempt {
 fn require(value: bool, message: &str) -> Result<()> {
     if value { Ok(()) } else { Err(message.into()) }
 }
+fn held_command() -> &'static str {
+    "printf 'native-cold-canary-started\\n'; for ((i=0;i<3600;i++)); do if test -f /workspace/release; then printf 'native-cold-canary-ok\\n'; exit 0; fi; sleep .1; done; exit 79"
+}
 fn missing(path: &Path) -> Result<bool> {
     match fs::symlink_metadata(path) {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(true),
@@ -567,6 +587,7 @@ impl Drop for Attempt {
                 self.startup_failure.take(),
                 self.bootstrap_failure.take(),
                 self.service_failure.take(),
+                self.native_settlement_failure.take(),
                 self.client.take(),
                 self.provider_reader.take(),
             ));
