@@ -184,7 +184,7 @@ impl Inner {
         let context = self.native_context()?;
         need(
             context
-                .custody_gpu_source(&self.installed.snapshot()?, Some(end))?
+                .custody_gpu_source(self.installed.snapshot()?.as_ref(), Some(end))?
                 .equivalent(&rows),
             "PERF_NATIVE_CHANGED",
         )?;
