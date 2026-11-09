@@ -4,7 +4,13 @@ mod facts;
 mod image_time;
 mod metadata;
 mod native_client;
+mod pool_image_inputs;
 mod process;
+pub use pool_image_inputs::{
+    POOL_IMAGE_INPUT_FACTORY_FILES, POOL_IMAGE_INPUTS_PURPOSE, PoolImageInputsData, PoolImageRole,
+};
+#[cfg(test)]
+mod pool_image_inputs_tests;
 mod protocol;
 pub use protocol::{
     CurrentFleetMaintenanceOwner, CurrentFleetPreviewViewer, CurrentPoolInstallationConsent,
