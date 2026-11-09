@@ -40,12 +40,18 @@ const GPU_INFORMATION_FORMAT: &str = concat!(
     "{\"ID\":{{json .ID}},\"OSType\":{{json .OSType}},\"KernelVersion\":{{json .KernelVersion}},",
     "\"ServerVersion\":{{json .ServerVersion}},\"CDISpecDirs\":{{json .CDISpecDirs}}}"
 );
+const WORKER_POOL_INFORMATION_FORMAT: &str = concat!(
+    "{\"ID\":{{json .ID}},\"OSType\":{{json .OSType}},",
+    "\"CgroupDriver\":{{json .CgroupDriver}},\"CgroupVersion\":{{json .CgroupVersion}},",
+    "\"SecurityOptions\":{{json .SecurityOptions}}}"
+);
 
 pub enum EngineQuery<'a> {
     InventoryIds,
     InspectBatch(&'a [ContainerId]),
     InspectStopped(&'a ContainerId),
     GpuInformation,
+    WorkerPoolInformation,
     TelemetryInventory,
     TelemetryInspect(&'a reverie_core::command_telemetry::TelemetryContainerId),
     WorkerPoolInspect(&'a ContainerId),
@@ -108,6 +114,11 @@ impl EngineQuery<'_> {
             }
             Self::GpuInformation => {
                 return Ok(["info", "--format", GPU_INFORMATION_FORMAT]
+                    .map(Into::into)
+                    .to_vec());
+            }
+            Self::WorkerPoolInformation => {
+                return Ok(["info", "--format", WORKER_POOL_INFORMATION_FORMAT]
                     .map(Into::into)
                     .to_vec());
             }

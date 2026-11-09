@@ -315,7 +315,8 @@ impl Source for Arc<Fixture> {
                 EngineQuery::InspectStopped(_) => "stopped",
                 EngineQuery::GpuInformation => "gpu-info",
                 EngineQuery::TelemetryInventory | EngineQuery::TelemetryInspect(_) => "telemetry",
-                EngineQuery::WorkerPoolInspect(_)
+                EngineQuery::WorkerPoolInformation
+                | EngineQuery::WorkerPoolInspect(_)
                 | EngineQuery::WorkerImageInspect(_)
                 | EngineQuery::ProviderPane(_)
                 | EngineQuery::ProviderTop(_) => {
