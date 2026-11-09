@@ -4,6 +4,7 @@ use reverie_host::{
     worker_runtime::WorkerRuntime,
 };
 use std::collections::BTreeMap;
+mod diagnostics;
 mod exchange;
 use exchange::Frames;
 

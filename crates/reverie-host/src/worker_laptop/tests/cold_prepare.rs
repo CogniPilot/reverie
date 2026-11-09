@@ -107,7 +107,10 @@ fn absent_policy_creates_missing_session_and_employee_temporary_bind_sources() {
             .runtime()
             .prepare_laptop_cold_temporary(&workflow, end())
             .unwrap();
-        let directories = [fs::symlink_metadata(&scratch), fs::symlink_metadata(scratch.join("tmp"))];
+        let directories = [
+            fs::symlink_metadata(&scratch),
+            fs::symlink_metadata(scratch.join("tmp")),
+        ];
         let same_workflow = matches!(prepared, ColdPreparation::Prepared(ref value) if value.same_workflow(&workflow));
         let after = fs::read(fixture.root.join("trace")).unwrap();
         let returned = fixture
@@ -116,9 +119,13 @@ fn absent_policy_creates_missing_session_and_employee_temporary_bind_sources() {
             .unwrap_or_else(|_| panic!("known preparation returns its original owners"));
         fixture.close_resources(returned).unwrap();
         assert!(same_workflow);
-        assert_eq!(trace, after, "temporary preparation must not invoke the engine");
+        assert_eq!(
+            trace, after,
+            "temporary preparation must not invoke the engine"
+        );
         for directory in directories {
-            let directory = directory.expect("cold create requires both actual temporary bind sources");
+            let directory =
+                directory.expect("cold create requires both actual temporary bind sources");
             assert!(directory.is_dir());
             assert_eq!(directory.permissions().mode() & 0o777, 0o700);
             assert_eq!(directory.uid(), crate::native::uid());

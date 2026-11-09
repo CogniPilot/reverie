@@ -44,6 +44,10 @@ service closure are required before nonforce removal of the two original CIDs.
 All unknown native CLI, service or stop results retain their original owners and
 tenant evidence. There is no name-only removal, force removal, image removal,
 signal retry or blanket cleanup. An unknown result is a failed acceptance run.
+On failure, the same service's historical completed-create diagnostics are
+saved as private `create-diagnostic-N.json` files. Argument, stdout and stderr
+byte arrays preserve the original client capture; the exact synthetic worker
+name must match. These files supply no absence, retry or cleanup authority.
 
 This bounded workload does not call the upstream Office HTTP backend, a model
 provider or production website. The isolated anchor has no production network;

@@ -23,6 +23,14 @@ fn actual_qualified_native_image_cold_j_through_service_releases_r_and_stops_sam
     let inputs = Inputs::capture().expect("closed reviewed fixture inputs");
     let mut attempt = transaction::Attempt::new(inputs).expect("fresh private tenant");
     let body = attempt.run();
+    if body.is_err()
+        && let Err(error) = attempt.preserve_create_diagnostics()
+    {
+        eprintln!(
+            "COLD_J_DIAGNOSTICS_RETAINED root={:?}: {error}",
+            attempt.tenant.root
+        );
+    }
     let closed = attempt.cleanup();
     // Preserve the original root and every unknown owner before verdict. There
     // is no blanket rm, image removal, production path or auto-retry.
