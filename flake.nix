@@ -522,6 +522,9 @@
               # getfattr and getfacl: deployment snapshot tests read extended attributes and ACLs.
               pkgs.gnutar pkgs.attr pkgs.acl (pkgs.lib.getBin pkgs.util-linux)
             ] ++ pkgs.lib.optionals pkgs.stdenv.isLinux [ pkgs.iproute2 ];
+            REVERIE_FIXED_BUILD_GNUTAR = "${pkgs.gnutar}/bin/tar";
+            REVERIE_FIXED_BUILD_TIMEOUT = "${pkgs.coreutils}/bin/timeout";
+            REVERIE_FIXED_BUILD_GZIP_PATH = "${pkgs.gzip}/bin";
             shellHook = ''
               export PYTHONPATH="$PWD/python''${PYTHONPATH:+:$PYTHONPATH}"
               export REVERIE_LEASE_DIR="''${REVERIE_LEASE_DIR:-''${REVERIE_ROOT:-$HOME/reverie}/runtime/leases}"
