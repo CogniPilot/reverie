@@ -14,6 +14,11 @@ impl TargetAttempt {
         &mut self,
         broker: &Arc<InstallingBroker>,
     ) -> Result<Instant, Cause> {
+        if let Self::View(view) = self {
+            view.assert_preview_broker(broker)
+                .map_err(|e| Cause::Offer(Box::new(e)))?;
+            return Ok(view.original_deadline());
+        }
         let Self::Offer(Some(offer)) = self else {
             return Err(Cause::Refused("FLEET_PREVIEW_SETUP_REQUIRED"));
         };
@@ -47,6 +52,17 @@ impl TargetAttempt {
     pub(super) fn current(&mut self) -> Result<UnpreparedOfferBinding, Cause> {
         match self {
             Self::Observed(target) => target.read_current().map_err(Cause::Target),
+            _ => Err(Cause::Refused("FLEET_PREVIEW_TARGET_STATE")),
+        }
+    }
+    pub(super) fn qualify_images(
+        &mut self,
+        inputs: &PoolImageInputsData,
+    ) -> Result<[String; 2], Cause> {
+        match self {
+            Self::Observed(target) => target
+                .qualify_observed_images(inputs)
+                .map_err(Cause::Target),
             _ => Err(Cause::Refused("FLEET_PREVIEW_TARGET_STATE")),
         }
     }

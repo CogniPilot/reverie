@@ -106,6 +106,28 @@ impl<'a> Coverage<'a> {
         &self,
         binding: &UnpreparedOfferBinding,
     ) -> Result<reverie_contracts::reservation_control::PoolTransitionSelection> {
+        self.bound_selection(binding, None)
+    }
+    pub(super) fn qualified_selection(
+        &self,
+        binding: &UnpreparedOfferBinding,
+        inputs: &inputs::PoolInputs,
+    ) -> Result<reverie_contracts::reservation_control::PoolTransitionSelection> {
+        self.bound_selection(binding, Some(inputs))
+    }
+    fn bound_selection(
+        &self,
+        binding: &UnpreparedOfferBinding,
+        inputs: Option<&inputs::PoolInputs>,
+    ) -> Result<reverie_contracts::reservation_control::PoolTransitionSelection> {
+        let mut covered = serde_json::json!({"rows":self.rows,"company":self.company_digest,"lifecycle":self.lifecycle.data(),"storage":self.storage.rows(),
+            "offerNonce":binding.offer_nonce().as_str(),"requestDigest":binding.request_digest().as_str(),"publication":binding.publication().digest()});
+        if let Some(inputs) = inputs {
+            covered
+                .as_object_mut()
+                .expect("closed coverage object")
+                .insert("poolImageInputs".into(), inputs.binding_data());
+        }
         Ok(
             reverie_contracts::reservation_control::PoolTransitionSelection::new(
                 reverie_host::resource_facts::fresh_owner_nonce()
@@ -114,10 +136,7 @@ impl<'a> Coverage<'a> {
                     .map_err(ResourceActorError::from)?,
                 json_digest(&self.members)?,
                 digest(binding.policy_bytes()),
-                json_digest(
-                    &serde_json::json!({"rows":self.rows,"company":self.company_digest,"lifecycle":self.lifecycle.data(),"storage":self.storage.rows(),
-                "offerNonce":binding.offer_nonce().as_str(),"requestDigest":binding.request_digest().as_str(),"publication":binding.publication().digest()}),
-                )?,
+                json_digest(&covered)?,
                 reverie_core::operations::JournalDigest::parse(
                     &reverie_contracts::worker_config::config_digest(self.snapshot.configuration())
                         .to_hex(),

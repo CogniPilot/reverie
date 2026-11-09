@@ -3,6 +3,7 @@ use super::*;
 use reverie_contracts::human_protocol::HumanFrame;
 mod ancestry;
 mod budgets;
+mod fleet_ready;
 mod other_handlers;
 mod other_handlers_drain;
 mod pool_registration;
