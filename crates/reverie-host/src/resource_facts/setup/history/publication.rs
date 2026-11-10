@@ -100,6 +100,7 @@ impl ActorSetupHistoryObservation {
     }
     fn additions_current(&self, additions: &[(PathBuf, GpuFileStamp)]) -> HistoryResult<()> {
         self.time()?;
+        self.assert_retained_expired()?;
         self.files
             .as_ref()
             .ok_or(ActorSetupHistoryError::Refused(

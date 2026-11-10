@@ -5,6 +5,8 @@ use reverie_core::{
     ids::{ProfileEmployeeId, ProfileSessionId},
     operations::{JournalDigest, JournalId},
 };
+mod resume_retained;
+pub use resume_retained::RetainedExpiredResumeData;
 
 pub fn require_empty_operations(raw: &[u8]) -> SetupResult<()> {
     let document = crate::operations_v1::decode(raw).map_err(ActorSetupDataError::Operation)?;

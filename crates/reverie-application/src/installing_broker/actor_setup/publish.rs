@@ -13,12 +13,12 @@ impl<'a> Owner<'a> {
             operation.as_str() != "00000000-0000-0000-0000-000000000000",
             "ACTOR_SETUP_OPERATION_REQUIRED",
         )?;
-        let before = self
+        let source = self
             .broker
             .installed
             .snapshot()
             .map_err(OfflineActorSetupError::Gate)?;
-        let source = before.source_path().ok_or(OfflineActorSetupError::Refused(
+        let source = source.source_path().ok_or(OfflineActorSetupError::Refused(
             "ACTOR_SETUP_REGISTERED_SOURCE_REQUIRED",
         ))?;
         require(
@@ -29,13 +29,13 @@ impl<'a> Owner<'a> {
                 == source,
             "ACTOR_SETUP_SERVICE_SOURCE_CHANGED",
         )?;
-        self.locks = Some(
-            ImageMaintenanceLocks::capture(source, before.configuration(), self.end).map_err(
-                |cause| {
-                    OfflineActorSetupError::Original(OfflineImageSwitchError::maintenance(cause))
-                },
-            )?,
-        );
+        self.locks
+            .as_mut()
+            .expect("same original maintenance")
+            .assert_held_current()
+            .map_err(|cause| {
+                OfflineActorSetupError::Original(OfflineImageSwitchError::files(cause))
+            })?;
         self.facts
             .as_mut()
             .expect("same facts owner")
@@ -44,7 +44,9 @@ impl<'a> Owner<'a> {
         self.history
             .as_ref()
             .expect("same history owner")
-            .assert_current()
+            .assert_initial_actor_setup_maintenance(
+                self.locks.as_mut().expect("same original maintenance"),
+            )
             .map_err(OfflineActorSetupError::History)?;
         let preview = self.preview.as_ref().expect("same actor preview");
         self.admission = Some(

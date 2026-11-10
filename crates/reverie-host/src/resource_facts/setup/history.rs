@@ -11,6 +11,7 @@ mod error;
 mod publication;
 mod read;
 mod resume;
+mod retained_resume;
 pub use error::ActorSetupHistoryError;
 type HistoryResult<T> = std::result::Result<T, ActorSetupHistoryError>;
 
@@ -45,6 +46,11 @@ pub struct ActorSetupHistoryObservation {
     bytes: usize,
     entries: usize,
     end: Instant,
+    retained: Option<actor_setup_history::RetainedExpiredResumeData>,
+}
+enum HistoryPurpose<'a> {
+    SettledOnly,
+    InitialActorSetup(&'a mut crate::worker_image::ImageMaintenanceLocks),
 }
 /// Borrowed closure of these original history readers only. A primary refusal
 /// stays a refusal; this does not close R/service or authorize a publication.
@@ -77,9 +83,22 @@ impl ActorSetupHistoryObservation {
             bytes: 0,
             entries: 0,
             end,
+            retained: None,
         })
     }
     pub fn observe(&mut self) -> std::result::Result<(), Rc<ActorSetupHistoryError>> {
+        self.observe_purpose(HistoryPurpose::SettledOnly)
+    }
+    pub fn observe_for_initial_actor_setup(
+        &mut self,
+        locks: &mut crate::worker_image::ImageMaintenanceLocks,
+    ) -> std::result::Result<(), Rc<ActorSetupHistoryError>> {
+        self.observe_purpose(HistoryPurpose::InitialActorSetup(locks))
+    }
+    fn observe_purpose(
+        &mut self,
+        purpose: HistoryPurpose<'_>,
+    ) -> std::result::Result<(), Rc<ActorSetupHistoryError>> {
         if let Some(cause) = &self.primary {
             return Err(Rc::clone(cause));
         }
@@ -89,7 +108,7 @@ impl ActorSetupHistoryObservation {
             )));
         }
         self.attempted = true;
-        let body = self.read_snapshot();
+        let body = self.read_snapshot(purpose);
         body.map_err(|cause| Rc::clone(self.primary.get_or_insert_with(|| Rc::new(cause))))
     }
     pub fn assert_current(&self) -> std::result::Result<(), Rc<ActorSetupHistoryError>> {
@@ -114,6 +133,7 @@ impl ActorSetupHistoryObservation {
     }
     fn metadata_current(&self) -> HistoryResult<()> {
         self.time()?;
+        self.assert_retained_expired()?;
         self.files
             .as_ref()
             .ok_or(ActorSetupHistoryError::Refused(

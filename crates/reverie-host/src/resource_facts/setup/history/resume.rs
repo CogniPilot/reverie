@@ -10,6 +10,7 @@ impl ActorSetupHistoryObservation {
         &mut self,
         snapshot: &mut Snapshot,
         root: &Path,
+        purpose: &mut HistoryPurpose<'_>,
     ) -> HistoryResult<()> {
         let namespace = root.join("host-resume.namespace.json");
         let resume = root.join("host-resume");
@@ -30,10 +31,7 @@ impl ActorSetupHistoryObservation {
             return Ok(());
         }
         let names = self.directory(snapshot, &resume)?;
-        require(
-            names.len() <= 256 && !names.contains("ACTIVE.json"),
-            "ACTOR_SETUP_RESUME_ACTIVE_OR_BOUND",
-        )?;
+        require(names.len() <= 256, "ACTOR_SETUP_RESUME_ACTIVE_OR_BOUND")?;
         let info = std::fs::symlink_metadata(&resume).map_err(GoalCustodyError::from)?;
         let raw = self.small_record(snapshot, &namespace)?;
         actor_setup_history::require_resume_namespace(
@@ -45,10 +43,30 @@ impl ActorSetupHistoryObservation {
                 u64::from(info.gid()),
             ],
         )?;
+        let active = if names.contains("ACTIVE.json") {
+            let raw = self.small_record(snapshot, &resume.join("ACTIVE.json"))?;
+            let operation = actor_setup_history::RetainedExpiredResumeData::operation_id(&raw)?;
+            require(
+                names.contains(operation.as_str()),
+                "ACTOR_SETUP_RESUME_OPERATION",
+            )?;
+            Some((operation, raw))
+        } else {
+            None
+        };
         for name in names {
+            if name == "ACTIVE.json" {
+                continue;
+            }
             let operation = JournalId::parse(&name)
                 .map_err(|_| ActorSetupHistoryError::Refused("ACTOR_SETUP_RESUME_HISTORY_ENTRY"))?;
-            self.resume_operation(snapshot, &resume.join(name), &operation)?;
+            if let Some((active_operation, raw)) = &active
+                && active_operation == &operation
+            {
+                self.retain_expired_resume(snapshot, &resume.join(name), &operation, raw, purpose)?;
+            } else {
+                self.resume_operation(snapshot, &resume.join(name), &operation)?;
+            }
         }
         Ok(())
     }
@@ -63,13 +81,15 @@ impl ActorSetupHistoryObservation {
             require(
                 ["PLAN.json", "ATTEMPT.json", "RESULT.json", "COMPLETE.json"]
                     .contains(&name.as_str())
+                    || name == "operation.lock"
                     || step_name(name),
                 "ACTOR_SETUP_RESUME_HISTORY_ENTRY",
             )?;
         }
+        self.resume_operation_lock(snapshot, path, &names)?;
         let attempted = names.contains("ATTEMPT.json");
         if !attempted {
-            read::exact_names(&names, &[], &["PLAN.json"])?;
+            read::exact_names(&names, &[], &["PLAN.json", "operation.lock"])?;
             if names.contains("PLAN.json") {
                 self.payload_record(snapshot, &path.join("PLAN.json"))?;
             }
@@ -91,7 +111,14 @@ impl ActorSetupHistoryObservation {
             &digest(&result),
         )?;
         for name in names {
-            if ["PLAN.json", "RESULT.json", "COMPLETE.json"].contains(&name.as_str()) {
+            if [
+                "PLAN.json",
+                "RESULT.json",
+                "COMPLETE.json",
+                "operation.lock",
+            ]
+            .contains(&name.as_str())
+            {
                 continue;
             }
             self.payload_record(snapshot, &path.join(name))?;
@@ -99,7 +126,7 @@ impl ActorSetupHistoryObservation {
         Ok(())
     }
 }
-fn step_name(name: &str) -> bool {
+pub(super) fn step_name(name: &str) -> bool {
     ["STEP-", "ACK-"].iter().any(|prefix| {
         let Some(value) = name
             .strip_prefix(prefix)

@@ -6,6 +6,7 @@ pub enum ActorSetupHistoryError {
     Configuration(reverie_contracts::reservation_engine::EngineDataError),
     Scan(reverie_store::operations::JournalError),
     Publication(Rc<crate::gpu_access::ActorSetupControlError>),
+    Maintenance(crate::worker_image::ImageFileError),
     Finalization {
         primary: Box<Self>,
         secondary: Box<Self>,
@@ -20,6 +21,7 @@ impl ActorSetupHistoryError {
             Self::Configuration(cause) => cause.code(),
             Self::Scan(cause) => cause.code(),
             Self::Publication(cause) => cause.code(),
+            Self::Maintenance(cause) => cause.code(),
             Self::Finalization { primary, .. } => primary.code(),
         }
     }
@@ -29,6 +31,7 @@ impl ActorSetupHistoryError {
             Self::Private(GoalCustodyError::Native(cause)) => cause.has_unconfirmed_close(),
             Self::Scan(cause) => scan_unknown(cause),
             Self::Publication(cause) => cause.has_unconfirmed_close(),
+            Self::Maintenance(cause) => cause.has_unconfirmed_close(),
             Self::Finalization { primary, secondary } => {
                 primary.has_unconfirmed_close() || secondary.has_unconfirmed_close()
             }
@@ -77,6 +80,7 @@ impl std::error::Error for ActorSetupHistoryError {
             Self::Configuration(cause) => Some(cause),
             Self::Scan(cause) => Some(cause),
             Self::Publication(cause) => Some(cause.as_ref()),
+            Self::Maintenance(cause) => Some(cause),
             Self::Finalization { primary, .. } => Some(primary.as_ref()),
             Self::Refused(_) => None,
         }

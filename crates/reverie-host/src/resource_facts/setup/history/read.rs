@@ -2,7 +2,7 @@ use super::*;
 use std::path::Path;
 
 impl ActorSetupHistoryObservation {
-    pub(super) fn read_snapshot(&mut self) -> HistoryResult<()> {
+    pub(super) fn read_snapshot(&mut self, mut purpose: HistoryPurpose<'_>) -> HistoryResult<()> {
         self.time()?;
         self.files = Some(PrivateBatch::new()?);
         let mut snapshot = Snapshot {
@@ -42,7 +42,7 @@ impl ActorSetupHistoryObservation {
             let raw = self.small_record(&mut snapshot, &profiles.join("profiles.json"))?;
             actor_setup_history::require_empty_profiles(&raw)?;
         }
-        self.resume_history(&mut snapshot, &root)?;
+        self.resume_history(&mut snapshot, &root, &mut purpose)?;
         self.files.as_ref().expect("same private reader").check()?;
         self.snapshot = Some(snapshot);
         self.metadata_current()

@@ -51,7 +51,9 @@ impl<'a> Owner<'a> {
         self.history
             .as_mut()
             .expect("same history owner")
-            .observe()
+            .observe_for_initial_actor_setup(
+                self.locks.as_mut().expect("same original maintenance"),
+            )
             .map_err(OfflineActorSetupError::History)?;
         self.facts = Some(
             ActorSetupFacts::capture(
@@ -86,7 +88,7 @@ impl<'a> Owner<'a> {
         self.digest =
             Some(JournalDigest::parse(&format!("{:x}", digest.finalize())).expect("SHA256"));
         self.assert_current()?;
-        self.close_locks()
+        Ok(())
     }
     pub(super) fn assert_current(&mut self) -> Result<'a, ()> {
         self.facts
@@ -97,7 +99,9 @@ impl<'a> Owner<'a> {
         self.history
             .as_ref()
             .expect("same history owner")
-            .assert_current()
+            .assert_initial_actor_setup_maintenance(
+                self.locks.as_mut().expect("same original maintenance"),
+            )
             .map_err(OfflineActorSetupError::History)?;
         self.admission = Some(
             self.gate()?
@@ -145,7 +149,8 @@ impl<'a> Owner<'a> {
         }
         self.broker_close
             .close(self.end)
-            .map_err(OfflineActorSetupError::Original)
+            .map_err(OfflineActorSetupError::Original)?;
+        self.close_locks()
     }
     pub(super) fn cleanup(&mut self, errors: &mut Vec<OfflineActorSetupError<'a>>) {
         if let Some(facts) = &mut self.facts
