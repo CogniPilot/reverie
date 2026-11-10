@@ -2,6 +2,8 @@ use super::*;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
+mod profile;
+pub use profile::DeploymentProfile;
 #[cfg(test)]
 mod tests;
 
@@ -16,6 +18,8 @@ pub struct DeploymentPreview {
     pub refreshed_environment_keys: Vec<String>,
     pub broker_preserved: bool,
     pub backup_metadata_scope: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile: Option<DeploymentProfile>,
 }
 #[derive(Serialize, Deserialize)]
 pub struct DeploymentStatus {
@@ -55,6 +59,17 @@ pub(super) fn projection(value: &Value) -> Value {
         "HostConfig":value["HostConfig"],"Mounts":mounts})
 }
 pub(super) fn supported(source: &Value) -> Result<()> {
+    supported_base(source)?;
+    profile::source_mounts(source, DeploymentProfile::Ordinary)
+}
+pub(super) fn supported_profile(source: &Value, selected: DeploymentProfile) -> Result<()> {
+    if selected == DeploymentProfile::Ordinary {
+        return supported(source);
+    }
+    supported_base(source)?;
+    profile::source_mounts(source, selected)
+}
+fn supported_base(source: &Value) -> Result<()> {
     cid(string(source, "Id")?)?;
     let host = &source["HostConfig"];
     require(
@@ -75,13 +90,6 @@ pub(super) fn supported(source: &Value) -> Result<()> {
     for key in ["Aliases", "IPAMConfig", "Links"] {
         require(network[key].is_null(), "DEPLOYMENT_NETWORK_UNSUPPORTED")?;
     }
-    let mounts = source["Mounts"]
-        .as_array()
-        .ok_or_else(|| DeploymentError::new("DEPLOYMENT_MOUNTS_REQUIRED"))?;
-    require(
-        !mounts.is_empty() && mounts.iter().all(|m| m["Type"] == "bind"),
-        "DEPLOYMENT_MOUNTS_UNSUPPORTED",
-    )?;
     require(
         source["Config"]["Volumes"].is_null(),
         "DEPLOYMENT_ANONYMOUS_VOLUME_UNSUPPORTED",
@@ -122,10 +130,19 @@ pub(super) fn uses_front(config: &Value) -> Result<bool> {
     )?;
     Ok(selected.is_some())
 }
+#[cfg(test)]
 pub(super) fn create_body(
     source: &Value,
     old_image: &Value,
     candidate: &Value,
+) -> Result<(Value, Vec<String>)> {
+    create_body_profile(source, old_image, candidate, DeploymentProfile::Ordinary)
+}
+pub(super) fn create_body_profile(
+    source: &Value,
+    old_image: &Value,
+    candidate: &Value,
+    selected_profile: DeploymentProfile,
 ) -> Result<(Value, Vec<String>)> {
     require(
         source["Config"]["Entrypoint"] == candidate["Config"]["Entrypoint"]
@@ -183,20 +200,30 @@ pub(super) fn create_body(
         "Env".into(),
         json!(merged.into_values().collect::<Vec<_>>()),
     );
-    fields.insert("HostConfig".into(), crate::binds::project(source)?);
+    fields.insert(
+        "HostConfig".into(),
+        profile::host(source, selected_profile)?,
+    );
     fields.insert(
         "NetworkingConfig".into(),
         json!({"EndpointsConfig":{"bridge":{}}}),
     );
+    profile::validate_body(source, &body, selected_profile)?;
     Ok((body, refreshed))
 }
-pub(super) fn candidate_matches(actual: &Value, source: &Value, body: &Value) -> Result<()> {
-    supported(actual)?;
+pub(super) fn candidate_matches(
+    actual: &Value,
+    source: &Value,
+    body: &Value,
+    selected: DeploymentProfile,
+) -> Result<()> {
+    supported_profile(actual, selected)?;
+    profile::candidate(actual, selected)?;
     require(
         actual["Image"] == body["Image"],
         "DEPLOYMENT_CREATED_IMAGE_CHANGED",
     )?;
-    crate::binds::equivalent(&actual["HostConfig"], &body["HostConfig"])?;
+    crate::binds::equivalent_profile(&actual["HostConfig"], &body["HostConfig"], selected)?;
     let mut expected = body.clone();
     expected
         .as_object_mut()
@@ -210,7 +237,26 @@ pub(super) fn candidate_matches(actual: &Value, source: &Value, body: &Value) ->
         actual["Config"] == expected,
         "DEPLOYMENT_CREATED_CONFIG_CHANGED",
     )?;
-    crate::binds::same_grants(&actual["Mounts"], &source["Mounts"])
+    crate::binds::same_profile_grants(&actual["Mounts"], &source["Mounts"], selected)
+}
+pub(super) fn source_mounts(source: &Value, selected: DeploymentProfile) -> Result<()> {
+    profile::source_mounts(source, selected)
+}
+pub(super) fn observed_mounts(source: &Value) -> Result<()> {
+    profile::observed_mounts(source)
+}
+pub(super) fn validate_profile_body(
+    source: &Value,
+    body: &Value,
+    selected: DeploymentProfile,
+) -> Result<()> {
+    profile::validate_body(source, body, selected)
+}
+pub(super) fn normalized_tmpfs(value: &Value) -> Result<Value> {
+    profile::normalized_tmpfs(value)
+}
+pub(super) fn normalized_security_options(value: &Value) -> Result<Value> {
+    profile::normalized_security_options(value)
 }
 pub(super) fn port_binding(source: &Value, port: u16) -> Result<()> {
     let bindings = source["HostConfig"]["PortBindings"]

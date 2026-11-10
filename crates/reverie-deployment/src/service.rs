@@ -37,10 +37,19 @@ impl DeploymentService {
     }
     /// Freeze a release preview without changing a container or company data.
     pub fn preview(&self, image: &str) -> Result<DeploymentPreview> {
+        self.preview_with_profile(image, model::DeploymentProfile::Ordinary)
+    }
+    /// Explicit protected settings affect only the website candidate. Shared
+    /// writer exclusion, exact real bind grants and verified backup still apply.
+    pub fn preview_with_profile(
+        &self,
+        image: &str,
+        profile: model::DeploymentProfile,
+    ) -> Result<DeploymentPreview> {
         model::image_id(image)?;
         self.installation.current()?;
         let source = self.engine.container(&self.installation.name)?;
-        model::supported(&source)?;
+        model::supported_profile(&source, profile)?;
         model::port_binding(&source, self.installation.port)?;
         require(
             source["State"]["Running"] == true,
@@ -54,7 +63,7 @@ impl DeploymentService {
             "DEPLOYMENT_CANDIDATE_IMAGE_CHANGED",
         )?;
         let (body, refreshed_environment_keys) =
-            model::create_body(&source, &old_image, &candidate)?;
+            model::create_body_profile(&source, &old_image, &candidate, profile)?;
         let pins = crate::pins::Pins::capture(&source)?;
         if let Err(error) = pins.running_mounts(&source) {
             return DeploymentError::finalized(Err(error), pins.close());
@@ -72,9 +81,10 @@ impl DeploymentService {
             refreshed_environment_keys,
             broker_preserved: true,
             backup_metadata_scope:"console bytes and caller-visible metadata/ACLs/xattrs; no automatic live data restore".into(),
+            profile: profile.preview(),
         };
             let plan = Plan {
-                version: 1,
+                version: profile.version(),
                 operation,
                 container: self.installation.name.clone(),
                 installation_revision: self.installation.revision.clone(),
@@ -126,7 +136,7 @@ impl DeploymentService {
             "DEPLOYMENT_CREATE_WARNING_REQUIRES_REVIEW",
         )?;
         let actual = self.engine.container(candidate)?;
-        model::candidate_matches(&actual, &operation.plan.source, &operation.plan.body)?;
+        operation.plan.candidate_matches(&actual)?;
         require(
             actual["Name"] == format!("/{name}"),
             "DEPLOYMENT_CANDIDATE_NAME_CHANGED",
@@ -148,7 +158,7 @@ impl DeploymentService {
         let result = (|| {
             let candidate = operation.candidate()?;
             let actual = self.engine.container(&candidate)?;
-            model::candidate_matches(&actual, &operation.plan.source, &operation.plan.body)?;
+            operation.plan.candidate_matches(&actual)?;
             require(
                 actual["Name"] == format!("/{}", temporary_name(&operation, "candidate"))
                     && actual["State"]["Running"] == false
@@ -183,7 +193,7 @@ impl DeploymentService {
         let result = (|| {
             let current = self.engine.container(&id)?;
             if candidate {
-                model::candidate_matches(&current, &operation.plan.source, &operation.plan.body)?;
+                operation.plan.candidate_matches(&current)?;
                 self.source_current(operation, false)?;
             } else {
                 require(

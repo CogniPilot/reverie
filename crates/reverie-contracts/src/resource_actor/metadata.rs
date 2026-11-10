@@ -3,6 +3,11 @@ use super::*;
 mod website;
 pub use website::QualifiedWebsiteMetadata;
 pub const MAX_ENGINE_BODY: usize = 2 * 1024 * 1024;
+/// Validate a closed Config/HostConfig/Mounts candidate using the actual actor
+/// security policy. This checks DATA only, never a live website or authority.
+pub fn validate_protected_website_settings(raw: &[u8]) -> Result<()> {
+    website::validate_protected_website_settings(raw)
+}
 pub struct EngineMetadata(pub(super) Value);
 impl EngineMetadata {
     pub fn decode(raw: &[u8]) -> Result<Self> {

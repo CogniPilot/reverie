@@ -7,6 +7,10 @@ mod security;
 mod tests;
 const FULL_SPEC: &str = "WEBSITE_FULL_SPEC_CHANGED";
 
+pub(super) fn validate_protected_website_settings(raw: &[u8]) -> Result<()> {
+    security::settings(raw)
+}
+
 /// A PID declared by fully matching engine metadata, still only DATA. The
 /// native caller must independently pin/inspect the actual process and peer.
 pub struct QualifiedWebsiteMetadata {

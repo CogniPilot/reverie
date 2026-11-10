@@ -30,7 +30,7 @@ impl Operation {
                     && current["Id"] == candidate,
                 "DEPLOYMENT_PREDECESSOR_SOURCE_CHANGED",
             )?;
-            model::candidate_matches(current, &self.plan.source, &self.plan.body)
+            self.plan.candidate_matches(current)
         } else {
             require(
                 terminal == "RESTORED" && self.record_present("rollback-attempt")?,

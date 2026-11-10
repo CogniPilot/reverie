@@ -27,7 +27,7 @@ impl DeploymentService {
         )?;
         let candidate = operation.candidate()?;
         let current = self.engine.container(&candidate)?;
-        model::candidate_matches(&current, &operation.plan.source, &operation.plan.body)?;
+        operation.plan.candidate_matches(&current)?;
         let original_name = format!("/{}", operation.plan.container);
         let backup_name = format!("/{}", temporary_name(operation, "before-front"));
         let candidate_name = format!("/{}", temporary_name(operation, "candidate"));

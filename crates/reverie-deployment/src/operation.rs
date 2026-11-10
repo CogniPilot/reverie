@@ -26,8 +26,33 @@ pub(super) struct Operation {
     pub(super) directory: PathBuf,
     pub(super) plan: Plan,
 }
+impl Plan {
+    pub(super) fn profile(&self) -> model::DeploymentProfile {
+        self.preview.profile.unwrap_or_default()
+    }
+    fn validate_profile(&self) -> Result<()> {
+        let profile = self.profile();
+        require(
+            self.version == profile.version(),
+            "DEPLOYMENT_OPERATION_INVALID",
+        )?;
+        require(
+            self.preview.profile == profile.preview(),
+            "DEPLOYMENT_OPERATION_PROFILE_INVALID",
+        )?;
+        if profile == model::DeploymentProfile::ProtectedWebsite {
+            model::supported_profile(&self.source, profile)?;
+            model::validate_profile_body(&self.source, &self.body, profile)?;
+        }
+        Ok(())
+    }
+    pub(super) fn candidate_matches(&self, actual: &Value) -> Result<()> {
+        model::candidate_matches(actual, &self.source, &self.body, self.profile())
+    }
+}
 impl Operation {
     pub(super) fn create(state: &Path, plan: Plan) -> Result<Self> {
+        plan.validate_profile()?;
         let parent = state.join("console-deployments");
         std::fs::DirBuilder::new()
             .mode(0o700)
@@ -54,10 +79,8 @@ impl Operation {
             &directory.join("plan.json"),
             16 * 1024 * 1024,
         )?)?;
-        require(
-            plan.version == 1 && plan.operation == id,
-            "DEPLOYMENT_OPERATION_INVALID",
-        )?;
+        require(plan.operation == id, "DEPLOYMENT_OPERATION_INVALID")?;
+        plan.validate_profile()?;
         Ok(Self { directory, plan })
     }
     pub(super) fn record(&self, name: &str, data: &Value) -> Result<()> {

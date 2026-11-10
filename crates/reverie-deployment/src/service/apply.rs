@@ -17,7 +17,7 @@ impl DeploymentService {
         let result = (|| {
             let candidate = operation.candidate()?;
             let actual = self.engine.container(&candidate)?;
-            model::candidate_matches(&actual, &operation.plan.source, &operation.plan.body)?;
+            operation.plan.candidate_matches(&actual)?;
             require(
                 actual["Name"] == format!("/{}", temporary_name(&operation, "candidate"))
                     && actual["State"]["Running"] == false
@@ -83,7 +83,7 @@ impl DeploymentService {
         )?;
         let candidate = operation.candidate()?;
         let current = self.engine.container(&candidate)?;
-        model::candidate_matches(&current, &operation.plan.source, &operation.plan.body)?;
+        operation.plan.candidate_matches(&current)?;
         require(
             current["State"]["Running"] == false && current["State"]["Status"] == "created",
             "DEPLOYMENT_CANDIDATE_ALREADY_STARTED",
@@ -139,17 +139,15 @@ impl DeploymentService {
         operation.record("new-renamed", &json!({"id":candidate}))?;
         operation.attempt("start-attempt")?;
         pins.verify()?;
-        model::candidate_matches(
-            &self.engine.container(candidate)?,
-            &operation.plan.source,
-            &operation.plan.body,
-        )?;
+        operation
+            .plan
+            .candidate_matches(&self.engine.container(candidate)?)?;
         self.engine.start(candidate)?;
         operation.record("started", &json!({"id":candidate}))?;
         self.await_ready(candidate, true)?;
         self.source_current(operation, false)?;
         let running = self.engine.container(candidate)?;
-        model::candidate_matches(&running, &operation.plan.source, &operation.plan.body)?;
+        operation.plan.candidate_matches(&running)?;
         model::port_binding(&running, self.installation.port)?;
         require(
             running["Name"] == format!("/{}", operation.plan.container),

@@ -95,6 +95,7 @@ fn fixture_operation() -> Operation {
                 refreshed_environment_keys: Vec::new(),
                 broker_preserved: true,
                 backup_metadata_scope: "fixture".into(),
+                profile: None,
             },
             bind_identities: Vec::new(),
         },

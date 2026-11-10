@@ -1,5 +1,5 @@
 use clap::{Parser, Subcommand};
-use reverie_deployment::DeploymentService;
+use reverie_deployment::{DeploymentProfile, DeploymentService};
 use std::{path::PathBuf, process::ExitCode};
 
 #[derive(Parser)]
@@ -21,6 +21,10 @@ enum Action {
     Preview {
         #[arg(long)]
         image: String,
+        /// Ordinary preserves the current profile. Protected website adds the
+        /// fixed actor security profile without changing command or real binds.
+        #[arg(long, value_enum, default_value_t = DeploymentProfile::Ordinary)]
+        profile: DeploymentProfile,
     },
     /// Create and inspect the candidate while the old console stays online.
     Prepare { operation: String },
@@ -69,7 +73,9 @@ fn run(args: Arguments) -> Result<serde_json::Value, reverie_deployment::Deploym
     let mut service = DeploymentService::capture(&args.root)?;
     let result: Result<serde_json::Value, reverie_deployment::DeploymentError> = (|| {
         let value = match args.action {
-            Action::Preview { image } => serde_json::to_value(service.preview(&image)?)?,
+            Action::Preview { image, profile } => {
+                serde_json::to_value(service.preview_with_profile(&image, profile)?)?
+            }
             Action::Prepare { operation } => serde_json::to_value(service.prepare(&operation)?)?,
             Action::Confirm { operation } => serde_json::to_value(service.confirm(&operation)?)?,
             Action::ActivateRetained {

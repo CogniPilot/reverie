@@ -11,7 +11,7 @@ mod native_fixture;
 mod operation;
 mod pins;
 mod service;
-pub use model::{DeploymentPreview, DeploymentStatus};
+pub use model::{DeploymentPreview, DeploymentProfile, DeploymentStatus};
 pub use service::DeploymentService;
 type Result<T> = std::result::Result<T, DeploymentError>;
 fn require(value: bool, code: &'static str) -> Result<()> {

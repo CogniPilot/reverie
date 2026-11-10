@@ -32,7 +32,9 @@ mod tests;
 mod website;
 use crate::legacy_json::{self, Node, Number, Text, Value};
 pub use facts::{ArtifactReference, EngineSelection, InstalledFactsDocument};
-pub use metadata::{EngineMetadata, MAX_ENGINE_BODY, QualifiedWebsiteMetadata};
+pub use metadata::{
+    EngineMetadata, MAX_ENGINE_BODY, QualifiedWebsiteMetadata, validate_protected_website_settings,
+};
 pub use native_client::NativeResourceClientManifest;
 pub use process::{ProcessStatData, require_peer_kernel_status};
 pub use provenance::{
