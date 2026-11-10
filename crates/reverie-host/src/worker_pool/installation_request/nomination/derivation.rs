@@ -10,10 +10,11 @@ use crate::{
 use reverie_contracts::{
     resource_actor::{EngineMetadata, InstalledFactsDocument, PoolImageRole},
     resource_config::ResourceIdentitySettings,
-    worker_pool::{WorkerPoolPolicy, validate_engine_information},
+    worker_pool::{validate_engine_information, WorkerPoolPolicy},
 };
 use reverie_store::storage_identity::{self, StorageIdentityConfig};
 use std::collections::BTreeSet;
+mod historical;
 mod images;
 mod prepared_policy;
 mod revision;
@@ -35,6 +36,7 @@ pub(super) struct NominationDerivation {
     last: Option<String>,
     end: Instant,
     prepared: prepared_policy::PreparedPolicyObservation,
+    historical: historical::HistoricalRetirements,
 }
 impl NominationDerivation {
     pub(super) fn capture(runtime: &WorkerRuntime, end: Instant) -> Self {
@@ -55,6 +57,7 @@ impl NominationDerivation {
             last: None,
             end,
             prepared: Default::default(),
+            historical: Default::default(),
         }
     }
     pub(super) fn derive(
@@ -216,6 +219,7 @@ impl NominationDerivation {
         Ok(cpus)
     }
     pub(super) fn assert_metadata(&self, config: &ReservationConfiguration) -> Result<()> {
+        self.historical.assert_current()?;
         self.prepared.assert_current()?;
         need(Instant::now() < self.deadline(), "POOL_NOMINATION_DEADLINE")?;
         self.facts
@@ -253,9 +257,10 @@ impl NominationDerivation {
             .map_or(Ok(()), |files| files.close().map_err(Into::into));
         let facts = self.facts.assert_finalized().map_err(Into::into);
         let prepared = self.prepared.close();
+        let historical = self.historical.close();
         finalized(
             finalized(query, cpu),
-            finalized(finalized(company, facts), prepared),
+            finalized(finalized(company, facts), finalized(prepared, historical)),
         )
     }
 }

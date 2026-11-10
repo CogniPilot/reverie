@@ -111,6 +111,10 @@ impl NominationDerivation {
                     continue;
                 }
             }
+            let end = self.deadline();
+            if self.historical.matches_row(policy, &id, row, end)? {
+                continue;
+            }
             need(
                 name != format!("/{}", policy.anchor_name())
                     && name != format!("/{}", policy.controller_name())
