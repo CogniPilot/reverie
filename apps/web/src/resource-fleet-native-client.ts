@@ -14,14 +14,34 @@ import {
   type FleetViewerContext,
   type FleetPreviewContext,
   type FleetMigrationContext,
+  type ResourceOwnerPrincipal,
 } from './resource-owner-authority.js';
 import { answerFleetChallenge, fleetPreviewRequest, fleetMigrationRequest } from './resource-fleet-consent.js';
 import {
   NativeFleetPreviewData,
   NativeFleetMigrationData,
+  NativeFleetMigrationFailureData,
   type NativeFleetPreview,
   type NativeFleetMigration,
+  type NativeFleetMigrationFailure,
 } from './resource-fleet-native-data.js';
+
+/** Authenticated diagnostic DATA, never a terminal native outcome or replay permit. */
+export class NativeFleetMigrationFailureError extends Error {
+  readonly code: string;
+  readonly outcome = 'unconfirmed' as const;
+  constructor(readonly diagnostic: NativeFleetMigrationFailure) {
+    super(`Native shared-pool migration is unconfirmed (${diagnostic.code}). Do not resend consent.`);
+    this.name = 'NativeFleetMigrationFailureError';
+    this.code = diagnostic.code;
+  }
+}
+
+export interface FleetNativeOwnerBinding {
+  readonly ownerScopeDigest: string;
+  readonly principal: Readonly<ResourceOwnerPrincipal>;
+  readonly owner: string | undefined;
+}
 
 function need(value: unknown): asserts value {
   if (!value) throw new Error('Original native fleet outcome unavailable; do not replay migration');
@@ -125,6 +145,14 @@ export class FleetNativeClient {
   assertOwnerCurrent(): void {
     this.authority.assertContext(this.#migration ?? this.viewer);
   }
+  /** Copies binding DATA only; no retained context, socket or authority escapes. */
+  ownerBinding(): Readonly<FleetNativeOwnerBinding> {
+    return Object.freeze({
+      ownerScopeDigest: this.viewer.ownerScopeDigest,
+      principal: Object.freeze({ ...this.viewer.principal }),
+      owner: this.viewer.owner,
+    });
+  }
   close(error = new Error('Original fleet outcome is unconfirmed; do not resend consent')): void {
     if (this.#closed) return;
     this.#closed = true;
@@ -163,6 +191,17 @@ export class FleetNativeClient {
   #frame(value: unknown): void {
     need(++this.#frames <= 2048 && value && typeof value === 'object' && !Array.isArray(value));
     const frame = value as Record<string, unknown>;
+    if (frame.kind === 'fleet-migration-failure') {
+      const failure = NativeFleetMigrationFailureData.parse(value);
+      need(this.#step === 'migration' && this.#migration && this.#pending);
+      need(
+        failure.requestId === this.#migration.requestId && isDeepStrictEqual(failure.approval, this.#migration.approval)
+      );
+      this.#current();
+      this.#step = 'finished';
+      this.close(new NativeFleetMigrationFailureError(failure));
+      return;
+    }
     if (frame.kind === 'fleet-preview-owner-check' || frame.kind === 'fleet-maintenance-owner-check') {
       need(typeof frame.nonce === 'string' && !this.#nonces.has(frame.nonce));
       this.#nonces.add(frame.nonce);

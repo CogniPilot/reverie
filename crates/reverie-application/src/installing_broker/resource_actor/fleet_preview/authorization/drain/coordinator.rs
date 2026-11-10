@@ -24,6 +24,7 @@ struct Execution<'a> {
 pub struct PoolMigrationFailure<'a> {
     owner: Option<Box<Execution<'a>>>,
     cause: Option<MigrationCause<'a>>,
+    reply_error: Option<Rc<Cause>>,
 }
 pub struct PoolMigrationClosed {
     frame: FleetPreviewClosed,
@@ -72,14 +73,42 @@ impl<'a> AuthenticatedPoolMigration<'a> {
                     .take()
                     .expect("same original closed handlers"),
             }),
-            Err(cause) => Err(Box::new(PoolMigrationFailure {
-                owner: Some(owner),
-                cause: Some(cause),
-            })),
+            Err(mut cause) => {
+                let reply_error = owner.notify_failure(&mut cause);
+                Err(Box::new(PoolMigrationFailure {
+                    owner: Some(owner),
+                    cause: Some(cause),
+                    reply_error,
+                }))
+            }
         }
     }
 }
 impl<'a> Execution<'a> {
+    fn notify_failure(&mut self, cause: &mut MigrationCause<'a>) -> Option<Rc<Cause>> {
+        let code = cause.code();
+        // The consuming drain can retain Q inside its whole typed failure.
+        // Locate that same owner; never clone/reconstruct a channel or auth.
+        let preview = if let Some(auth) = &mut self.authorization {
+            Some(&mut auth.authorization.owner)
+        } else if let Some(drained) = &mut self.drained {
+            drained
+                .fleet
+                .owner
+                .as_mut()
+                .map(|owner| &mut owner.authorization.owner)
+        } else if let MigrationCause::Drain(failure) = cause {
+            failure
+                .owner
+                .as_mut()
+                .map(|owner| &mut owner.authorization.owner)
+        } else {
+            None
+        };
+        let preview = preview?;
+        preview.notify_migration_failure(code);
+        preview.migration_reply.retained_error()
+    }
     fn run(&mut self) -> std::result::Result<(), MigrationCause<'a>> {
         let original = self
             .authorization
@@ -207,6 +236,9 @@ impl<'a> Execution<'a> {
             .map_err(MigrationCause::DrainComponent)?;
         let end = preview.original_end();
         preview
+            .begin_migration_reply()
+            .map_err(MigrationCause::Native)?;
+        preview
             .frame
             .as_mut()
             .expect("same Q")
@@ -216,18 +248,23 @@ impl<'a> Execution<'a> {
         let drained = self.drained.take().expect("same completed migration");
         let mut fleet = drained.fleet;
         let owner = fleet.owner.take().expect("same closed original owner");
-        let auth = owner.authorization;
+        let mut auth = owner.authorization;
         self.handlers_closed = Some(owner.handlers);
         self.closed = Some(FleetPreviewClosed {
             primary: auth.owner.primary.clone(),
             target_cleanup: auth.owner.target_cleanup.clone(),
             frame_cleanup: auth.owner.frame_cleanup.clone(),
+            migration_reply: std::mem::take(&mut auth.owner.migration_reply),
         });
         Ok(())
     }
 }
 impl Drop for PoolMigrationFailure<'_> {
     fn drop(&mut self) {
-        std::mem::forget((self.owner.take(), self.cause.take()));
+        std::mem::forget((
+            self.owner.take(),
+            self.cause.take(),
+            self.reply_error.take(),
+        ));
     }
 }

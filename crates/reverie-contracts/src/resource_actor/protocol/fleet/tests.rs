@@ -1,6 +1,7 @@
 use super::*;
 use serde_json::{Value as Json, json};
 mod preview;
+mod result;
 
 const REQUEST: &str = "10000000-0000-4000-8000-000000000001";
 const OPERATION: &str = "10000000-0000-4000-8000-000000000002";

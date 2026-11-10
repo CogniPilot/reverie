@@ -12,7 +12,7 @@ pub(super) enum MigrationCause<'a> {
     Refused(&'static str),
 }
 impl MigrationCause<'_> {
-    fn code(&self) -> &'static str {
+    pub(super) fn code(&self) -> &'static str {
         match self {
             Self::Authorization(cause) => cause.code(),
             Self::Gate(cause) => cause.code(),
@@ -37,6 +37,11 @@ impl PoolMigrationFailure<'_> {
     pub fn code(&self) -> &'static str {
         self.cause.as_ref().expect("original cause").code()
     }
+    pub fn reply_error(&self) -> Option<FleetMaintenanceCheckError> {
+        self.reply_error
+            .as_ref()
+            .map(FleetMaintenanceCheckError::retained)
+    }
 }
 impl std::fmt::Debug for PoolMigrationFailure<'_> {
     fn fmt(&self, out: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -47,7 +52,11 @@ impl std::fmt::Debug for PoolMigrationFailure<'_> {
 }
 impl std::fmt::Display for PoolMigrationFailure<'_> {
     fn fmt(&self, out: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        out.write_str(self.code())
+        out.write_str(self.code())?;
+        if let Some(cause) = &self.reply_error {
+            write!(out, "; reply: {cause}")?;
+        }
+        Ok(())
     }
 }
 impl std::error::Error for PoolMigrationFailure<'_> {
@@ -70,5 +79,34 @@ impl std::error::Error for PoolMigrationFailure<'_> {
             },
             MigrationCause::Refused(_) => None,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn failed_reply_preserves_original_primary_and_independent_typed_secondary() {
+        // Diagnostic access only: no Q, execution or native owner is fabricated.
+        let failure = PoolMigrationFailure {
+            owner: None,
+            cause: Some(MigrationCause::Native(Cause::Refused(
+                "PRIMARY_NATIVE_FAILURE",
+            ))),
+            reply_error: Some(Rc::new(Cause::Refused("SECONDARY_REPLY_FAILURE"))),
+        };
+        assert_eq!(failure.code(), "PRIMARY_NATIVE_FAILURE");
+        assert_eq!(
+            failure.reply_error().unwrap().code(),
+            "SECONDARY_REPLY_FAILURE"
+        );
+        assert_eq!(
+            std::error::Error::source(&failure).unwrap().to_string(),
+            "PRIMARY_NATIVE_FAILURE"
+        );
+        assert_eq!(
+            failure.to_string(),
+            "PRIMARY_NATIVE_FAILURE; reply: SECONDARY_REPLY_FAILURE"
+        );
     }
 }

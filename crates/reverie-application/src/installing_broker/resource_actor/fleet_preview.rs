@@ -8,6 +8,7 @@ mod close;
 mod coverage;
 mod dispatch;
 mod error;
+mod failure_reply;
 pub(in crate::installing_broker) use dispatch::FleetDispatchFailure;
 mod inputs;
 mod owner;
@@ -41,6 +42,7 @@ pub(super) struct NativeFleetPreview<'a> {
     maintenance_request: Option<FleetMaintenanceRequest>,
     maintenance_owner: Option<CurrentFleetMaintenanceOwner>,
     maintenance_checks: usize,
+    migration_reply: failure_reply::MigrationReply,
     closed: bool,
 }
 pub struct FleetPreviewFailure<'a> {
@@ -50,8 +52,12 @@ pub struct FleetPreviewClosed {
     primary: Option<Rc<Cause>>,
     target_cleanup: Option<Rc<Cause>>,
     frame_cleanup: Option<Rc<Cause>>,
+    migration_reply: failure_reply::MigrationReply,
 }
 impl FleetPreviewClosed {
+    pub fn reply_error_code(&self) -> Option<&'static str> {
+        self.migration_reply.error().map(Cause::code)
+    }
     pub fn primary_error_code(&self) -> Option<&'static str> {
         self.primary
             .as_ref()
@@ -68,6 +74,9 @@ impl std::fmt::Display for FleetPreviewClosed {
             .flatten()
         {
             write!(out, ": {cause}")?;
+        }
+        if let Some(cause) = self.migration_reply.error() {
+            write!(out, ": reply: {cause}")?;
         }
         Ok(())
     }
@@ -111,6 +120,7 @@ impl<'a> NativeFleetPreview<'a> {
             maintenance_request: None,
             maintenance_owner: None,
             maintenance_checks: 0,
+            migration_reply: failure_reply::MigrationReply::default(),
             closed: false,
         }
     }
@@ -123,6 +133,9 @@ impl FleetPreviewFailure<'_> {
     }
     pub fn primary_error_code(&self) -> Option<&'static str> {
         self.owner.primary.as_ref().map(|cause| cause.code())
+    }
+    pub fn reply_error_code(&self) -> Option<&'static str> {
+        self.owner.migration_reply.error().map(Cause::code)
     }
     /// Immutable local diagnostic over the same original typed cause. It is
     /// intentionally thread-confined and must not enter shared GateError.
@@ -142,6 +155,7 @@ impl FleetPreviewFailure<'_> {
             primary: self.owner.primary.take(),
             target_cleanup: self.owner.target_cleanup.take(),
             frame_cleanup: self.owner.frame_cleanup.take(),
+            migration_reply: std::mem::take(&mut self.owner.migration_reply),
         })
     }
 }
@@ -157,6 +171,9 @@ impl std::fmt::Display for FleetPreviewFailure<'_> {
         .flatten()
         {
             write!(out, ": {cause}")?;
+        }
+        if let Some(cause) = self.owner.migration_reply.error() {
+            write!(out, ": reply: {cause}")?;
         }
         Ok(())
     }
@@ -176,6 +193,7 @@ impl Drop for NativeFleetPreview<'_> {
             std::mem::forget(self.primary.take());
             std::mem::forget(self.target_cleanup.take());
             std::mem::forget(self.frame_cleanup.take());
+            std::mem::forget(std::mem::take(&mut self.migration_reply));
         }
     }
 }

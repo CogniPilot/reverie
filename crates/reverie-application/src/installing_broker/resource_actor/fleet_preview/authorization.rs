@@ -153,7 +153,7 @@ impl NativeFleetPreview<'_> {
             }
         }
     }
-    fn refresh_maintenance_owner(&mut self) -> Result<()> {
+    pub(super) fn refresh_maintenance_owner(&mut self) -> Result<()> {
         self.maintenance_checks = self.maintenance_checks.saturating_add(1);
         if self.maintenance_checks > 256 {
             return Err(Cause::Refused("FLEET_MAINTENANCE_CHALLENGE_BOUND"));
@@ -191,7 +191,7 @@ impl NativeFleetPreview<'_> {
         self.assert_preview_live()?;
         self.assert_maintenance_owner_live()
     }
-    fn assert_maintenance_owner_live(&self) -> Result<()> {
+    pub(super) fn assert_maintenance_owner_live(&self) -> Result<()> {
         let current = self
             .maintenance_owner
             .as_ref()

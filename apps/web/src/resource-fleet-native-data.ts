@@ -42,6 +42,16 @@ export const NativeFleetMigrationData = z
   })
   .strict()
   .readonly();
+export const NativeFleetMigrationFailureData = z
+  .object({
+    ...envelope,
+    kind: z.literal('fleet-migration-failure'),
+    approval: FleetApprovalData,
+    outcome: z.literal('unconfirmed'),
+    code: z.string().regex(/^[A-Z][A-Z0-9_]{0,95}$/),
+  })
+  .strict()
+  .readonly();
 export const NativeFleetPreviewRequest = z.object({}).strict();
 export const NativeFleetApplyRequest = z
   .object({
@@ -72,3 +82,4 @@ export const FleetMigrationChallenge = z
   .strict();
 export type NativeFleetPreview = z.infer<typeof NativeFleetPreviewData>;
 export type NativeFleetMigration = z.infer<typeof NativeFleetMigrationData>;
+export type NativeFleetMigrationFailure = z.infer<typeof NativeFleetMigrationFailureData>;

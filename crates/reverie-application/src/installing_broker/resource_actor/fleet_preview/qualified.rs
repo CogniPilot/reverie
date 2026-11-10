@@ -94,6 +94,7 @@ impl<'a> NativeFleetPreview<'a> {
     }
     pub(super) fn into_failure(mut self, cause: Cause) -> Box<FleetPreviewFailure<'a>> {
         self.primary.get_or_insert_with(|| Rc::new(cause));
+        self.notify_migration_failure(self.primary.as_ref().expect("retained primary").code());
         Box::new(FleetPreviewFailure { owner: self })
     }
 }

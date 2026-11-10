@@ -1,10 +1,34 @@
-//! Terminal DATA only. The native owning coordinator alone may emit this
-//! after actual publication and checked terminal release.
+//! Migration reply DATA. Success requires actual publication and checked
+//! terminal release; a failure diagnostic preserves an unconfirmed outcome.
 use super::*;
 use crate::worker_pool::WorkerPoolPolicy;
 use reverie_core::ids::{ProfileEmployeeId, ProfileSessionId};
 
 impl FleetMaintenanceRequest {
+    /// Diagnostic DATA only. An unconfirmed outcome never releases any native
+    /// owner or authorizes replay, cleanup, admission or employee restoration.
+    pub fn migration_failure(&self, code: &str) -> Result<HumanFrame> {
+        need(
+            self.action == FleetMaintenanceAction::MigratePool,
+            "POOL_MIGRATION_CONSENT_REQUIRED",
+        )?;
+        need(
+            (1..=96).contains(&code.len())
+                && code.as_bytes()[0].is_ascii_uppercase()
+                && code
+                    .bytes()
+                    .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit() || b == b'_'),
+            "POOL_MIGRATION_FAILURE_CODE",
+        )?;
+        let mut fields = envelope_fields("fleet-migration-failure", &self.request);
+        fields.extend([
+            (key("approval"), self.selected.approval_value()),
+            (key("outcome"), string("unconfirmed")),
+            (key("code"), string(code)),
+        ]);
+        frame(Value(Node::Object(fields)))
+    }
+
     pub fn migration_result(
         &self,
         policy: &WorkerPoolPolicy,
