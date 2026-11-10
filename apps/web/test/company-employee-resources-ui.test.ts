@@ -324,6 +324,28 @@ it('dispatches a single edit from fresh native status and refreshes the verified
   expect(panel()!.querySelector('[role="status"]')?.textContent).toContain('Change applied. Running limits verified');
 });
 
+it('submits a v4 edit ID using secure random bytes when randomUUID is unavailable', async () => {
+  const { h, panel, resourceCalls } = await setup({
+    reply: () => ({ ok: true, data: editable() }),
+    edit: () => ({ ok: false, status: 503, error: 'Controlled unconfirmed result' }),
+  });
+  const crypto = h.dom.window.crypto;
+  Object.defineProperty(crypto, 'randomUUID', { value: undefined });
+  let draws = 0;
+  Object.defineProperty(crypto, 'getRandomValues', {
+    value: (bytes: Uint8Array) => {
+      draws++;
+      expect(bytes).toHaveLength(16);
+      return bytes.fill(0xff);
+    },
+  });
+  panel()!.querySelector<HTMLButtonElement>('button[type="submit"]')!.click();
+  await h.flush();
+  expect(draws).toBe(1);
+  expect(resourceCalls().map(({ method }) => method)).toEqual(['GET', 'POST']);
+  expect(resourceCalls()[1].body).toMatchObject({ operationId: 'ffffffff-ffff-4fff-bfff-ffffffffffff' });
+});
+
 it('keeps a visible unconfirmed error and never resends an edit', async () => {
   const error = 'The RAM and CPU change was not confirmed.';
   const { h, panel, resourceCalls, refresh } = await setup({
