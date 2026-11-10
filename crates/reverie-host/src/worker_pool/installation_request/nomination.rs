@@ -24,7 +24,9 @@ use std::{
     path::{Path, PathBuf},
     time::Instant,
 };
+mod derivation;
 mod error;
+use derivation::NominationDerivation;
 mod publish;
 pub use error::{PoolNominationError, PoolNominationFailure};
 type Result<T> = std::result::Result<T, PoolNominationError>;
@@ -33,6 +35,8 @@ type Result<T> = std::result::Result<T, PoolNominationError>;
 pub struct PoolNominationPublished {
     path: PathBuf,
     digest: String,
+    canonical: Vec<u8>,
+    proposed_from_hard: Vec<String>,
 }
 impl PoolNominationPublished {
     pub fn path(&self) -> &Path {
@@ -41,15 +45,29 @@ impl PoolNominationPublished {
     pub fn request_digest(&self) -> &str {
         &self.digest
     }
+    pub fn canonical_request(&self) -> &[u8] {
+        &self.canonical
+    }
+    pub fn proposed_from_hard(&self) -> &[String] {
+        &self.proposed_from_hard
+    }
+}
+enum InputPurpose {
+    Request,
+    Enrollment,
 }
 struct NominationOwner {
     source: Option<PathBuf>,
     config: ReservationConfiguration,
     selection: PathBuf,
+    purpose: InputPurpose,
     runtime: WorkerRuntime,
     input: Option<PrivateBatch>,
     input_stamp: Option<Fingerprint>,
     raw: Option<Vec<u8>>,
+    enrollment: Option<Vec<u8>>,
+    proposed_from_hard: Vec<String>,
+    derived: Option<NominationDerivation>,
     request: Option<PoolInstallationRequestData>,
     immutable: ImmutableInputObserver,
     image_raw: Option<ObservedImmutableInput>,
@@ -72,14 +90,51 @@ pub fn publish_os_pool_nomination(
     runtime: WorkerRuntime,
     end: Instant,
 ) -> std::result::Result<PoolNominationPublished, Box<PoolNominationFailure>> {
+    publish_selected_nomination(
+        source,
+        config,
+        selection,
+        runtime,
+        end,
+        InputPurpose::Request,
+    )
+}
+pub fn publish_current_os_pool_nomination(
+    source: Option<&Path>,
+    config: &EffectiveWorkerConfig,
+    enrollment: &Path,
+    runtime: WorkerRuntime,
+    end: Instant,
+) -> std::result::Result<PoolNominationPublished, Box<PoolNominationFailure>> {
+    publish_selected_nomination(
+        source,
+        config,
+        enrollment,
+        runtime,
+        end,
+        InputPurpose::Enrollment,
+    )
+}
+fn publish_selected_nomination(
+    source: Option<&Path>,
+    config: &EffectiveWorkerConfig,
+    selection: &Path,
+    runtime: WorkerRuntime,
+    end: Instant,
+    purpose: InputPurpose,
+) -> std::result::Result<PoolNominationPublished, Box<PoolNominationFailure>> {
     let mut owner = Box::new(NominationOwner {
         source: source.map(Path::to_owned),
         config: ReservationConfiguration::capture(config.clone()),
         selection: selection.to_owned(),
+        purpose,
         runtime,
         input: None,
         input_stamp: None,
         raw: None,
+        enrollment: None,
+        proposed_from_hard: Vec::new(),
+        derived: None,
         request: None,
         immutable: Default::default(),
         image_raw: None,
@@ -155,14 +210,31 @@ impl NominationOwner {
             self.directory_identities
                 .push((path, native::private_goal::identity(&info)));
         }
-        self.input = Some(PrivateBatch::new()?);
-        let input = self.input.as_mut().expect("retained input reader");
-        let (stamp, raw) = input.read_exact_private_json(&self.selection)?;
-        self.input_stamp = Some(stamp);
-        self.raw = Some(raw);
-        self.request = Some(PoolInstallationRequestData::decode(
-            self.raw.as_ref().expect("original input bytes"),
-        )?);
+        self.read_selection()?;
+        self.read_fixed_images()?;
+        match self.purpose {
+            InputPurpose::Request => {
+                self.observe_images()?;
+            }
+            InputPurpose::Enrollment => {
+                self.enrollment = self.raw.take();
+                self.derived = Some(NominationDerivation::capture(&self.runtime, self.end));
+                let (request, fallbacks) = self
+                    .derived
+                    .as_mut()
+                    .expect("retained actual derived owner")
+                    .derive(
+                        &self.runtime,
+                        &self.config,
+                        self.images.as_ref().expect("fixed input"),
+                        self.enrollment.as_ref().expect("original enrollment DATA"),
+                        &self.directories.as_ref().expect("fixed root").root,
+                    )?;
+                self.raw = Some(request.canonical_bytes().to_vec());
+                self.request = Some(request);
+                self.proposed_from_hard = fallbacks;
+            }
+        }
         let policy = self
             .request
             .as_ref()
@@ -176,11 +248,31 @@ impl NominationOwner {
                 && policy.deployment == self.config.deployment()?,
             "POOL_NOMINATION_INSTANCE",
         )?;
-        self.observe_images()?;
         self.close_preflight()?;
         self.assert_preflight()
     }
-    fn observe_images(&mut self) -> Result<()> {
+    fn read_selection(&mut self) -> Result<()> {
+        self.input = Some(PrivateBatch::new()?);
+        let (stamp, raw) = self
+            .input
+            .as_mut()
+            .expect("retained input reader")
+            .read_exact_private_json(&self.selection)?;
+        self.input_stamp = Some(stamp);
+        self.raw = Some(raw);
+        match self.purpose {
+            InputPurpose::Request => {
+                self.request = Some(PoolInstallationRequestData::decode(
+                    self.raw.as_ref().expect("original input bytes"),
+                )?)
+            }
+            InputPurpose::Enrollment => PoolInstallationRequestData::validate_enrollment(
+                self.raw.as_ref().expect("original enrollment DATA"),
+            )?,
+        }
+        Ok(())
+    }
+    fn read_fixed_images(&mut self) -> Result<()> {
         let reference = compiled_pool_image_inputs_reference()?.ok_or(
             PoolNominationError::Refused("POOL_IMAGE_FIXED_REFERENCE_REQUIRED"),
         )?;
@@ -195,6 +287,9 @@ impl NominationOwner {
                 .expect("stored immutable input")
                 .bytes(),
         )?);
+        Ok(())
+    }
+    fn observe_images(&mut self) -> Result<()> {
         let policy = self.request.as_ref().expect("original request").policy();
         self.target = Some(PoolTargetObservation::capture(
             &self.runtime,

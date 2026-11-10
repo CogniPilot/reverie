@@ -4,6 +4,7 @@ use super::*;
 use crate::worker_pool::WorkerPoolPolicy;
 use sha2::{Digest, Sha256};
 mod consent;
+mod nomination;
 pub use consent::{
     CurrentPoolInstallationConsent, CurrentPoolInstallationViewer,
     POOL_INSTALLATION_CONSENT_PURPOSE, PoolInstallationConsentRequest,
@@ -16,6 +17,7 @@ pub struct PoolInstallationRequestData {
     principal: ResourceOwnerPrincipal,
     policy: WorkerPoolPolicy,
     digest: JournalDigest,
+    canonical: Vec<u8>,
 }
 impl PoolInstallationRequestData {
     pub fn decode(raw: &[u8]) -> Result<Self> {
@@ -32,12 +34,13 @@ impl PoolInstallationRequestData {
             WorkerPoolPolicy::decode(&crate::worker_config::compact_data(field(value, "policy")?))
                 .map_err(|_| ResourceActorDataError("POOL_INSTALLATION_REQUEST_POLICY"))?;
         let canonical = frame.canonical().map_err(frame_error)?;
-        let digest = JournalDigest::parse(&format!("{:x}", Sha256::digest(canonical)))
+        let digest = JournalDigest::parse(&format!("{:x}", Sha256::digest(&canonical)))
             .expect("SHA256 of canonical data");
         Ok(Self {
             principal,
             policy,
             digest,
+            canonical,
         })
     }
     pub fn principal(&self) -> &ResourceOwnerPrincipal {
@@ -48,6 +51,10 @@ impl PoolInstallationRequestData {
     }
     pub fn digest(&self) -> &JournalDigest {
         &self.digest
+    }
+    /// Canonical closed nomination DATA; never an enrollment or consent proof.
+    pub fn canonical_bytes(&self) -> &[u8] {
+        &self.canonical
     }
 }
 

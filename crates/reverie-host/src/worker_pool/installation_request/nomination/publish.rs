@@ -5,6 +5,9 @@ impl NominationOwner {
         self.assert_input_metadata()?;
         self.immutable.assert_finalized()?;
         self.assert_source()?;
+        if let Some(derived) = &self.derived {
+            derived.assert_metadata(&self.config)?;
+        }
         self.assert_input_metadata()?;
         self.current()
     }
@@ -66,6 +69,13 @@ impl NominationOwner {
                 .digest()
                 .as_str()
                 .to_owned(),
+            canonical: self
+                .request
+                .as_ref()
+                .expect("same nominated request")
+                .canonical_bytes()
+                .to_vec(),
+            proposed_from_hard: self.proposed_from_hard.clone(),
         })
     }
     fn readback(&self) -> Result<()> {
@@ -135,6 +145,9 @@ impl NominationOwner {
             "POOL_NOMINATION_PROTECTED_STORE_CHANGED",
         )?;
         self.assert_output_metadata()?;
+        if let Some(derived) = &self.derived {
+            derived.assert_metadata(&self.config)?;
+        }
         self.assert_directory_names()?;
         self.current()
     }
@@ -158,7 +171,11 @@ impl NominationOwner {
             target.close(&self.runtime).map_err(Into::into)
         });
         let immutable = self.immutable.assert_finalized().map_err(Into::into);
-        finalized(finalized(input, target), immutable)
+        let derived = self
+            .derived
+            .as_mut()
+            .map_or(Ok(()), NominationDerivation::close);
+        finalized(finalized(input, target), finalized(immutable, derived))
     }
     pub(super) fn close(&mut self) -> Result<()> {
         let output = self.close_output();

@@ -318,6 +318,7 @@ impl Source for Arc<Fixture> {
                 EngineQuery::GpuInformation => "gpu-info",
                 EngineQuery::TelemetryInventory | EngineQuery::TelemetryInspect(_) => "telemetry",
                 EngineQuery::WorkerPoolInformation
+                | EngineQuery::WorkerPoolImageInventory
                 | EngineQuery::WorkerPoolInspect(_)
                 | EngineQuery::WorkerImageInspect(_)
                 | EngineQuery::ProviderPane(_)

@@ -10,7 +10,8 @@ use std::{
 };
 mod nomination;
 pub use nomination::{
-    PoolNominationError, PoolNominationFailure, PoolNominationPublished, publish_os_pool_nomination,
+    PoolNominationError, PoolNominationFailure, PoolNominationPublished,
+    publish_current_os_pool_nomination, publish_os_pool_nomination,
 };
 
 /// Read only the registered account's private, fixed installation request.

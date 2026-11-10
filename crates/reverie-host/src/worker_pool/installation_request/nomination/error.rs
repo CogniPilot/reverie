@@ -12,6 +12,10 @@ pub enum PoolNominationError {
     Configuration(reverie_contracts::reservation_engine::EngineDataError),
     Data(reverie_contracts::resource_actor::ResourceActorDataError),
     Files(crate::gpu_access::GpuHostError),
+    Identity(reverie_store::storage_identity::IdentityError),
+    Resources(reverie_contracts::broker_resources::ResourceConfigError),
+    Facts(crate::resource_facts::ResourceFactsError),
+    Engine(crate::engine_metadata::EngineError),
     Runtime(crate::worker_runtime::RuntimeError),
     Finalization(Box<Self>, Box<Self>),
 }
@@ -28,6 +32,10 @@ impl PoolNominationError {
             Self::Configuration(e) => e.code(),
             Self::Data(e) => e.code(),
             Self::Files(e) => e.code(),
+            Self::Identity(e) => e.code(),
+            Self::Resources(e) => e.code(),
+            Self::Facts(e) => e.code(),
+            Self::Engine(e) => e.code(),
             Self::Runtime(_) => "POOL_NOMINATION_RUNTIME_CLOSE",
             Self::Finalization(primary, _) => primary.code(),
         }
@@ -51,6 +59,10 @@ impl std::error::Error for PoolNominationError {
             Self::Configuration(e) => Some(e),
             Self::Data(e) => Some(e),
             Self::Files(e) => Some(e),
+            Self::Identity(e) => Some(e),
+            Self::Resources(e) => Some(e),
+            Self::Facts(e) => Some(e),
+            Self::Engine(e) => Some(e),
             Self::Runtime(e) => Some(e),
             Self::Finalization(primary, _) => Some(primary),
         }
@@ -80,6 +92,13 @@ from_error!(
     Data
 );
 from_error!(crate::gpu_access::GpuHostError, Files);
+from_error!(reverie_store::storage_identity::IdentityError, Identity);
+from_error!(
+    reverie_contracts::broker_resources::ResourceConfigError,
+    Resources
+);
+from_error!(crate::resource_facts::ResourceFactsError, Facts);
+from_error!(crate::engine_metadata::EngineError, Engine);
 from_error!(crate::worker_runtime::RuntimeError, Runtime);
 
 #[must_use = "retain original metadata/runtime/publication owners; never replay a partial import"]

@@ -15,7 +15,7 @@ mod gpu_access;
 pub use goal_custody::{GoalCustodyHandlerClosed, GoalCustodyHandlerFailure};
 mod image_refresh;
 mod os_pool_nomination;
-pub use os_pool_nomination::nominate_os_worker_pool;
+pub use os_pool_nomination::{nominate_os_worker_pool, nominate_current_os_worker_pool};
 mod worker_image;
 mod worker_perf;
 pub use worker_image::{

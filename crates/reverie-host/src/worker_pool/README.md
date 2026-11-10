@@ -154,7 +154,20 @@ fixed private `~/reverie/worker-pool/registration-request.json` exclusively, the
 checks readback and original native closure. An existing or partial request is
 never overwritten, deleted, adopted as success or automatically replayed. The
 registered instance directory must already exist. This import is not the future
-principal-only command that derives a nomination from current approved settings.
+principal-only derivation command described below.
+
+`pool prepare-nomination-v1 --config SOURCE --enrollment FILE` accepts only the
+explicit enrollment response DATA. It reads the registered actor/website,
+current company/configuration, actual compatible daemon, uniquely matching
+loaded fixed images and the cgroup-v2 effective CPU set. The proposed parent is
+48 GiB/8192 tasks with CPU weight100. Existing finite employee soft highs are
+preserved; otherwise the current effective hard ceiling is reported explicitly
+as a **proposed** soft high, not an already-approved soft policy. Nonzero swap
+is refused without rewriting it. The complete nomination and fallback employee
+IDs are returned for review. Only later fresh Q maintenance consent can approve
+that exact policy before any controller or fleet effects. Actor setup and
+loaded factory images are prerequisites; no policy/image/CPU overrides or
+credential lookup are accepted by this owner-facing command.
 
 The packaged service has two closed recipes. Existing commands default to
 `--role broker`; `--role offer-pool-v1` selects only the second immutable packaged

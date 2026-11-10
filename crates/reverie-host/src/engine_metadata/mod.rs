@@ -52,6 +52,7 @@ pub enum EngineQuery<'a> {
     InspectStopped(&'a ContainerId),
     GpuInformation,
     WorkerPoolInformation,
+    WorkerPoolImageInventory,
     TelemetryInventory,
     TelemetryInspect(&'a reverie_core::command_telemetry::TelemetryContainerId),
     WorkerPoolInspect(&'a ContainerId),
@@ -62,6 +63,11 @@ pub enum EngineQuery<'a> {
 impl EngineQuery<'_> {
     fn arguments(self) -> Result<Vec<OsString>> {
         let (format, ids) = match self {
+            Self::WorkerPoolImageInventory => {
+                return Ok(["image", "ls", "--all", "--no-trunc", "--quiet"]
+                    .map(Into::into)
+                    .to_vec());
+            }
             Self::WorkerImageInspect(id) => {
                 return Ok(["image", "inspect", "--format", "{{json .}}", id.as_str()]
                     .map(Into::into)
