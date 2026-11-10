@@ -129,7 +129,7 @@ impl ControllerBirthPublication {
         self.check()?;
         self.directories.open_root()?;
         self.check()?;
-        for index in 1..=2 {
+        for index in 1..=3 {
             self.directories.open_child(index)?;
             self.check()?;
         }

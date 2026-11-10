@@ -52,6 +52,7 @@ use std::{fmt, io};
 pub enum PoolError {
     Refused(&'static str),
     Io(io::Error),
+    PublicationDirectory(Box<reverie_store::operations::JournalError>),
     Observation(crate::ObservationError),
     Finalization(Box<PoolError>, Box<PoolError>),
     MetadataClose(Box<PoolError>),
@@ -71,6 +72,7 @@ impl std::error::Error for PoolError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::Io(error) => Some(error),
+            Self::PublicationDirectory(error) => Some(error.as_ref()),
             Self::Observation(error) => Some(error),
             Self::Finalization(primary, _) => Some(primary),
             Self::MetadataClose(error) => Some(error),
@@ -88,6 +90,7 @@ impl PoolError {
         match self {
             Self::Refused(code) => code,
             Self::Io(_) => "WORKER_POOL_IO_UNKNOWN",
+            Self::PublicationDirectory(_) => "WORKER_POOL_PUBLICATION_DIRECTORY_SCAN",
             Self::Observation(_) => "WORKER_POOL_CLOSE_UNKNOWN",
             Self::Finalization(_, _) => "WORKER_POOL_FINALIZATION_UNKNOWN",
             Self::MetadataClose(_) => "WORKER_POOL_CLOSE_UNKNOWN",
@@ -101,7 +104,7 @@ impl PoolError {
     }
     pub(crate) fn close_unknown(&self) -> bool {
         match self {
-            Self::MetadataClose(_) => true,
+            Self::MetadataClose(_) | Self::PublicationDirectory(_) => true,
             Self::Observation(error) => error.has_unconfirmed_close(),
             Self::Member(error) => error.unconfirmed_native(),
             Self::Channel(error) => error.has_unconfirmed_close(),
