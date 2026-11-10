@@ -9,6 +9,9 @@ use reverie_contracts::task_perf_capsule::{
 use std::{fmt, path::Path, time::Instant};
 
 const MANIFEST: Option<&str> = option_env!("REVERIE_FIXED_PERF_GUEST_CAPSULE_MANIFEST");
+pub(crate) fn manifest_reference() -> Option<&'static str> {
+    MANIFEST
+}
 
 #[derive(Debug)]
 pub(crate) enum CapsuleError {

@@ -3,6 +3,7 @@
 use super::call_budget::CallBudget;
 use super::*;
 mod diagnostic;
+mod perf_image;
 use crate::command_telemetry::CommandTelemetry;
 pub use diagnostic::LaptopCreateDiagnostic;
 use reverie_contracts::{resource_config::ResourceIdentitySettings, worker_launch};
@@ -142,6 +143,7 @@ fn run(
     telemetry
         .assert_runtime(runtime)
         .map_err(|error| LaptopError::Telemetry(CreateTelemetryFailure::new(error)))?;
+    perf_image::assert_current(runtime, record, deadline)?;
     let resources = record.resources();
     resources
         .held_nix()?

@@ -7,6 +7,44 @@ pub const MAX_INVENTORY_BYTES: usize = 4 * 1024 * 1024;
 pub const PREFIX: &str = "/opt/reverie/perf";
 pub const ABSENT_PREFIX: &str = "/opt/rvprf";
 pub const WORKER_INIT: &str = "/opt/reverie/perf/bin/reverie-worker-init";
+pub const IMAGE_MANIFEST_LABEL: &str = "org.reverie.worker.perf-capsule-manifest";
+
+/// Image metadata DATA only. Trusted factory/source qualification and actual
+/// guest init/inventory readback remain independently required by their owners.
+pub fn assert_image_binding(
+    raw: &[u8],
+    expected_image: &str,
+    expected_manifest: &str,
+) -> Result<()> {
+    #[derive(Deserialize)]
+    struct Image {
+        #[serde(rename = "Id")]
+        id: String,
+        #[serde(rename = "Config")]
+        config: Config,
+    }
+    #[derive(Deserialize)]
+    struct Config {
+        #[serde(rename = "Labels")]
+        labels: BTreeMap<String, String>,
+    }
+    if raw.len() > MAX_INVENTORY_BYTES {
+        return Err(PerfCapsuleDataError);
+    }
+    let images: Vec<Image> = serde_json::from_slice(raw).map_err(|_| PerfCapsuleDataError)?;
+    if images.len() != 1
+        || images[0].id != expected_image
+        || images[0]
+            .config
+            .labels
+            .get(IMAGE_MANIFEST_LABEL)
+            .map(String::as_str)
+            != Some(expected_manifest)
+    {
+        return Err(PerfCapsuleDataError);
+    }
+    Ok(())
+}
 
 #[derive(Debug)]
 pub struct PerfCapsuleDataError;
