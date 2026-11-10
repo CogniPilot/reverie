@@ -77,3 +77,10 @@ The new read bounds are 32 MiB for the lock, 2 MiB for provenance/hash/config
 documents, 8 MiB per patched file and 16 MiB for Cargo metadata. Patched source
 paths must contain only relative normal components, with no symlink leaf.
 These are build input checks, not an owner workflow or a running Codex check.
+
+The old `nix/codex-observer/verify-inputs.py` and Nix's inline Python report
+amendment are retired. The selected native source/vendor producers qualified
+the current pinned inputs: eight Git sources, 1,296 registry packages and 160
+workspace members in locked, offline Cargo metadata. The original source code
+was reviewed for report-byte compatibility; no legacy Python comparison run
+or Codex native/runtime acceptance is claimed.
