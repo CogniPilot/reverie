@@ -25,7 +25,7 @@ impl DeploymentService {
         self.claimed(&operation)?;
         let source = self.source_current(&operation, true)?;
         let (mut historical, _) = self.profile_body(
-            &source,
+            &operation.plan.source,
             &operation.plan.preview.candidate_image,
             model::DeploymentProfile::ProtectedWebsite,
         )?;
