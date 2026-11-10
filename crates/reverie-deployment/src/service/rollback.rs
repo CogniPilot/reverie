@@ -3,7 +3,7 @@ impl DeploymentService {
     /// Restore only the exact retained old container. This never restores data,
     /// reconfigures the broker, deletes a container or invents a release receipt.
     pub fn rollback(&self, id: &str) -> Result<DeploymentStatus> {
-        let operation = self.operation(id)?;
+        let operation = self.effect_operation(id)?;
         let pins = self.pins(&operation)?;
         let result = self.rollback_pinned(&operation, &pins);
         DeploymentError::finalized(result, pins.close())

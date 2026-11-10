@@ -11,6 +11,7 @@ use std::{
 };
 mod apply;
 mod claim;
+mod invalid_create;
 mod rollback;
 mod shared_writers;
 use apply::OperationDeadline;
@@ -140,7 +141,7 @@ impl DeploymentService {
     }
     fn prepare_scoped(&self, id: &str, deadline: OperationDeadline) -> Result<DeploymentStatus> {
         deadline.check()?;
-        let operation = self.operation(id)?;
+        let operation = self.effect_operation(id)?;
         self.source_current(&operation, true)?;
         let pins = self.pins(&operation)?;
         let result = self.prepare_pinned(&operation, &pins, deadline);
@@ -192,7 +193,7 @@ impl DeploymentService {
     /// Reinspect the recorded sleeping candidate without repeating creation.
     /// This explicit recovery action still checks the original running source.
     pub fn confirm(&self, id: &str) -> Result<DeploymentStatus> {
-        let operation = self.operation(id)?;
+        let operation = self.effect_operation(id)?;
         self.claimed(&operation)?;
         self.source_current(&operation, true)?;
         let pins = self.pins(&operation)?;
@@ -372,7 +373,7 @@ fn data_source_value(source: &Value) -> Result<PathBuf> {
     }
     Ok(PathBuf::from(model::string(selected[0], "Source")?))
 }
-fn temporary_name(operation: &Operation, purpose: &str) -> String {
+pub(crate) fn temporary_name(operation: &Operation, purpose: &str) -> String {
     format!(
         "{}-{purpose}-{}",
         operation

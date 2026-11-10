@@ -43,7 +43,7 @@ impl DeploymentService {
     /// Explicit owner recovery after backup verification refused. Preserve a
     /// full ordinary copy, with no claim that independently live writers paused.
     pub fn activate_retained(&self, id: &str) -> Result<DeploymentStatus> {
-        let operation = self.operation(id)?;
+        let operation = self.effect_operation(id)?;
         self.claimed(&operation)?;
         operation.prepared()?;
         self.source_current(&operation, false)?;
@@ -101,7 +101,7 @@ impl DeploymentService {
     }
     fn apply_scoped(&self, id: &str, deadline: OperationDeadline) -> Result<DeploymentStatus> {
         deadline.check()?;
-        let operation = self.operation(id)?;
+        let operation = self.effect_operation(id)?;
         let pins = self.pins(&operation)?;
         let result = self.apply_pinned(&operation, &pins, deadline);
         DeploymentError::finalized(result, pins.close()).map_err(|error| {

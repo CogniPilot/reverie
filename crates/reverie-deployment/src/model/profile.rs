@@ -17,7 +17,7 @@ impl DeploymentProfile {
     pub(crate) fn version(self) -> u32 {
         match self {
             Self::Ordinary => 1,
-            Self::ProtectedWebsite => 2,
+            Self::ProtectedWebsite => 3,
         }
     }
     pub(crate) fn preview(self) -> Option<Self> {
@@ -62,7 +62,7 @@ fn protected_host(source: &Value) -> Result<Value> {
         "SecurityOpt".into(),
         security::protected(&source["HostConfig"]["SecurityOpt"])?,
     );
-    fields.insert("PidMode".into(), json!("private"));
+    fields.insert("PidMode".into(), json!(""));
     fields.insert("IpcMode".into(), json!("private"));
     fields.insert("Tmpfs".into(), ephemeral::options(source)?);
     Ok(host)
@@ -92,6 +92,17 @@ pub(super) fn candidate(actual: &Value, profile: DeploymentProfile) -> Result<()
         ephemeral::protected(actual)?;
     }
     Ok(())
+}
+/// Historical version-2 requests are readable for inspection/recovery only.
+/// Their sole constructor difference is Docker's invalid explicit PID mode.
+pub(super) fn validate_legacy_invalid_body(source: &Value, body: &Value) -> Result<()> {
+    require(
+        body["HostConfig"]["PidMode"] == "private",
+        "DEPLOYMENT_NOT_LEGACY_INVALID_CREATE",
+    )?;
+    let mut canonical = body.clone();
+    canonical["HostConfig"]["PidMode"] = json!("");
+    validate_body(source, &canonical, DeploymentProfile::ProtectedWebsite)
 }
 pub(super) fn settings(config: &Value, host: &Value, mounts: &Value) -> Result<()> {
     let raw = serde_json::to_vec(&json!({"Config":config,"HostConfig":host,"Mounts":mounts}))?;

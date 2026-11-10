@@ -30,6 +30,9 @@ enum Action {
     Prepare { operation: String },
     /// Reinspect a recorded sleeping candidate after a refused validation; never creates again.
     Confirm { operation: String },
+    /// Retire only a historical v2 request proven invalid before Docker create.
+    /// Never retries creation or recovers an arbitrary unknown request.
+    RecoverInvalidCreate { operation: String },
     /// Owner fix-forward recovery: retain an ordinary data copy, without verified consistency.
     ActivateRetained {
         operation: String,
@@ -78,6 +81,9 @@ fn run(args: Arguments) -> Result<serde_json::Value, reverie_deployment::Deploym
             }
             Action::Prepare { operation } => serde_json::to_value(service.prepare(&operation)?)?,
             Action::Confirm { operation } => serde_json::to_value(service.confirm(&operation)?)?,
+            Action::RecoverInvalidCreate { operation } => {
+                serde_json::to_value(service.recover_invalid_create(&operation)?)?
+            }
             Action::ActivateRetained {
                 operation,
                 accept_unverified_backup: _,

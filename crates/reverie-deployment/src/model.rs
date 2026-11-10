@@ -252,6 +252,9 @@ pub(super) fn validate_profile_body(
 ) -> Result<()> {
     profile::validate_body(source, body, selected)
 }
+pub(super) fn validate_legacy_invalid_body(source: &Value, body: &Value) -> Result<()> {
+    profile::validate_legacy_invalid_body(source, body)
+}
 pub(super) fn normalized_tmpfs(value: &Value) -> Result<Value> {
     profile::normalized_tmpfs(value)
 }

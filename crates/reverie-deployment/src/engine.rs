@@ -131,7 +131,12 @@ impl Engine {
             .send_request(request)
             .await
             .map_err(|_| DeploymentError::new("DEPLOYMENT_ENGINE_RESPONSE_UNKNOWN"))?;
-        let success = response.status().is_success();
+        let success =
+            if method == "GET" && matches!(path, "/containers/json?all=1" | "/version" | "/info") {
+                response.status() == hyper::StatusCode::OK
+            } else {
+                response.status().is_success()
+            };
         let mut body = response.into_body();
         let mut bytes = Vec::new();
         while let Some(frame) = body.frame().await {
