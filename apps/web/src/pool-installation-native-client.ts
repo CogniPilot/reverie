@@ -2,8 +2,13 @@
  * All decoded values are DATA; only the native retained offer can install.
  */
 import { Socket } from 'node:net';
-import { lstat } from 'node:fs/promises';
-import { isAbsolute, normalize } from 'node:path';
+import {
+  NativeOwnerFrames,
+  observeOwnerSocket,
+  connectOwnerSocket,
+  sendOwnerHello,
+  writeOwnerFrame,
+} from './native-owner-channel.js';
 import type { FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import {
@@ -19,38 +24,11 @@ import {
   poolInstallationConsentRequest,
 } from './pool-installation-consent.js';
 
-const UUID = z
-  .string()
-  .uuid()
-  .refine((v) => v === v.toLowerCase() && v !== '00000000-0000-0000-0000-000000000000');
-const Principal = z
-  .object({
-    accountId: UUID,
-    personId: z.union([z.literal('owner'), UUID]),
-    sessionEpoch: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
-  })
-  .strict()
-  .readonly();
-const Policy = z
-  .object({
-    version: z.literal(1),
-    purpose: z.literal('reverie-docker-worker-pool-v1'),
-    deployment: z.string(),
-    instanceRoot: z.string(),
-    engineId: UUID,
-    anchorImage: z.string().regex(/^sha256:[a-f0-9]{64}$/),
-    controllerImage: z.string().regex(/^sha256:[a-f0-9]{64}$/),
-    websiteContainer: z.string().regex(/^[a-f0-9]{64}$/),
-    brokerUid: z.number().int().nonnegative(),
-    brokerGid: z.number().int().nonnegative(),
-    memoryMaxMiB: z.literal(49152),
-    poolTasksMax: z.number().int().positive(),
-    cpuWeight: z.number().int().min(1).max(10000),
-    allowedCpus: z.array(z.number().int().nonnegative()).min(1).readonly(),
-    employeeMemoryHighMiB: z.record(UUID, z.number().int().positive().max(49152)).readonly(),
-  })
-  .strict()
-  .readonly();
+import {
+  NativeOwnerId as UUID,
+  NativeOwnerPrincipal as Principal,
+  NativePoolPolicy as Policy,
+} from './native-owner-data.js';
 const Offer = z
   .object({
     kind: z.enum(['pool-installation-offer', 'pool-installation-viewed']),
@@ -78,7 +56,7 @@ export class PoolInstallationNativeClient {
   #view?: PoolInstallationOfferContext;
   #consent?: PoolInstallationConsentContext;
   #offer?: PoolInstallationView;
-  #buffer = Buffer.alloc(0);
+  readonly #decoder = new NativeOwnerFrames('pool-registration');
   #ready = false;
   #closed = false;
   #viewSent = false;
@@ -114,38 +92,14 @@ export class PoolInstallationNativeClient {
   ): Promise<PoolInstallationNativeClient> {
     // Actual cookie/current principal is checked BEFORE a B connection can be opened.
     const viewer = authority.capturePoolInstallationViewer(request);
-    need(isAbsolute(path) && normalize(path) === path && !/[\0\r\n]/.test(path) && process.getuid);
-    const before = await lstat(path, { bigint: true });
-    need(before.isSocket() && before.uid === BigInt(process.getuid()) && (before.mode & 0o077n) === 0n);
+    const before = await observeOwnerSocket(path);
     authority.assertContext(viewer);
     const socket = new Socket(),
       client = new PoolInstallationNativeClient(socket, authority, request, viewer);
     try {
-      await new Promise<void>((resolve, reject) => {
-        const timer = setTimeout(() => {
-          socket.destroy();
-          reject(new Error('Native pool connection expired'));
-        }, 3000);
-        socket.once('connect', () => {
-          clearTimeout(timer);
-          resolve();
-        });
-        socket.once('error', (error) => {
-          clearTimeout(timer);
-          reject(error);
-        });
-        socket.connect(path);
-      });
-      const after = await lstat(path, { bigint: true });
-      need(
-        before.dev === after.dev && before.ino === after.ino && before.mode === after.mode && before.uid === after.uid
-      );
+      await connectOwnerSocket(socket, path, before);
       authority.assertContext(viewer);
-      const raw = Buffer.from(JSON.stringify({ purpose: 'host-pool-registration-v1', version: 1 })),
-        header = Buffer.alloc(5);
-      header[0] = 'B'.charCodeAt(0);
-      header.writeUInt32BE(raw.length, 1);
-      socket.write(Buffer.concat([header, raw]));
+      sendOwnerHello(socket, 'pool-registration');
       return client;
     } catch (error) {
       client.close();
@@ -211,11 +165,7 @@ export class PoolInstallationNativeClient {
   #write(value: unknown): void {
     this.#current();
     need(++this.#frames <= 2048);
-    const raw = Buffer.from(JSON.stringify(value));
-    need(raw.length > 0 && raw.length <= 8192);
-    const header = Buffer.alloc(4);
-    header.writeUInt32BE(raw.length);
-    this.#socket.write(Buffer.concat([header, raw]));
+    writeOwnerFrame(this.#socket, value);
   }
   #sendView(): void {
     need(!this.#viewSent);
@@ -224,28 +174,17 @@ export class PoolInstallationNativeClient {
   }
   #data(data: Buffer): void {
     this.#current();
-    this.#buffer = Buffer.concat([this.#buffer, data]);
-    need(this.#buffer.length <= 16384);
-    if (!this.#ready) {
-      const end = this.#buffer.indexOf(10);
-      if (end < 0) {
-        need(this.#buffer.length <= 64);
-        return;
+    this.#decoder.accept(
+      data,
+      () => {
+        this.#ready = true;
+        if (this.#pending && !this.#viewSent) this.#sendView();
+      },
+      (value) => {
+        need(++this.#frames <= 2048);
+        this.#frame(value);
       }
-      need(this.#buffer.subarray(0, end + 1).toString() === 'POOL_REGISTRATION_CHANNEL_V1\n');
-      this.#buffer = this.#buffer.subarray(end + 1);
-      this.#ready = true;
-      if (this.#pending && !this.#viewSent) this.#sendView();
-    }
-    while (this.#buffer.length >= 4) {
-      const size = this.#buffer.readUInt32BE(0);
-      need(size > 0 && size <= 8192);
-      if (this.#buffer.length < size + 4) break;
-      const raw = this.#buffer.subarray(4, size + 4);
-      this.#buffer = this.#buffer.subarray(size + 4);
-      need(++this.#frames <= 2048);
-      this.#frame(JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(raw)));
-    }
+    );
   }
   #frame(value: unknown): void {
     need(value && typeof value === 'object' && !Array.isArray(value));

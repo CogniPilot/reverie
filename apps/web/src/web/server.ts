@@ -2385,7 +2385,16 @@ export class WebServer extends EventEmitter {
         },
         ownerFor(request)
       );
-    registerFleetResourceRoutes(this.app, verifiedOwner, new FleetResourcesService(this.companyService));
+    const fleetResources = new FleetResourcesService(this.companyService, ownerAuth, process.env.REVERIE_WORKER_SOCKET, {
+        wakeEmployee: (id, options) => this.companyWake.wakeOne(id, options),
+        refreshHealth: async () => {
+          if (!this.workerProviderHealth) throw new Error('Native employee health is unavailable');
+          await this.workerProviderHealth.refresh();
+        },
+        providerHealth: (employee) => this.workerProviderHealth?.read(employee),
+    });
+    registerFleetResourceRoutes(this.app, verifiedOwner, fleetResources);
+    this.app.addHook('onClose', async () => fleetResources.close());
     const poolInstallation = new PoolInstallationController(ownerAuth, process.env.REVERIE_WORKER_SOCKET);
     registerPoolInstallationRoutes(this.app, poolInstallation);
     this.app.addHook('onClose', async () => poolInstallation.close());

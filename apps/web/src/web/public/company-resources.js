@@ -79,6 +79,9 @@
       this.content = shell.el('div', 'ca-fleet-content');
       this.setup = shell.el('section', 'ca-fleet-installation');
       this.setupBusy = false;
+      this.native = shell.el('section', 'ca-fleet-native');
+      this.nativeBusy = false;
+      this.nativePreview = null;
       this.draft = shell.el('div', 'ca-fleet-preview');
       this.results = shell.el('div', 'ca-fleet-results');
       this.refresh = shell.button('ca-btn', 'Refresh laptop fleet status', () => this.load(), {
@@ -97,6 +100,7 @@
         this.status,
         this.error,
         this.setup,
+        this.native,
         this.content,
         this.draft,
         this.results,
@@ -177,6 +181,9 @@
       this.setup.querySelectorAll('button').forEach((node) => {
         node.disabled = this.busy || this.setupBusy || this.storageFailed || this.pending.size > 0;
       });
+      this.native.querySelectorAll('button').forEach((node) => {
+        node.disabled = this.busy || this.nativeBusy || this.storageFailed || this.owner === null;
+      });
     }
     invalidate() {
       this.preview = null;
@@ -239,7 +246,7 @@
         this.status.textContent = this.pending.size
           ? 'A rollout is in progress or unconfirmed. Check rollout before preparing another.'
           : !data.canPreview || data.operations === null || data.unmanagedLaptops === null
-            ? 'Host setup or verification is incomplete. No rollout can be prepared.'
+            ? 'Detailed fleet observations are unavailable. Review the host-selected migration separately.'
             : 'Requested settings and verified running values are shown separately.';
       } catch (error) {
         this.failed = true;
@@ -300,6 +307,7 @@
         data = this.data;
       this.renderBlockers(this.content, data.blockers);
       this.renderSetup();
+      this.renderNative();
       if (data.operations === null)
         this.content.append(
           s.el('p', 'ca-hint', 'Rollout history is unavailable. Existing operations have not been ruled out.')
@@ -349,6 +357,231 @@
         void this.prepare();
       });
       this.content.append(this.form);
+    }
+    nativeKey() {
+      return `reverie:native-pool-migration:${this.owner}`;
+    }
+    readNativePending() {
+      const raw = this.shell.doc.defaultView.localStorage.getItem(this.nativeKey());
+      if (!raw) return null;
+      const record = JSON.parse(raw);
+      if (!record || !id(record.operationId)) throw new Error('Original migration recovery record is unavailable');
+      return record;
+    }
+    renderNative() {
+      const s = this.shell;
+      this.native.replaceChildren(s.el('h4', '', 'Host-selected shared RAM and CPU pool'));
+      this.native.append(
+        s.el(
+          'p',
+          'ca-hint',
+          'Review the host-approved pool policy on its original connection. This does not infer running laptop limits, image choices or rollout history from employee settings.'
+        )
+      );
+      try {
+        const pending = this.readNativePending();
+        if (pending) {
+          this.native.append(
+            s.el(
+              'p',
+              'ca-hint',
+              'An original migration was attempted. Check its outcome; consent and employee starts will not be replayed.'
+            )
+          );
+          this.native.append(
+            s.button('ca-btn', 'Check original shared-pool migration', () => this.checkNative(pending))
+          );
+          return;
+        }
+        this.native.append(s.button('ca-btn', 'Review host-selected migration', () => this.prepareNative()));
+        const preview = this.nativePreview;
+        if (!preview) return;
+        const selected = preview.policy;
+        this.native.append(
+          s.el(
+            'p',
+            'ca-hint',
+            `Host-selected pool: ${selected.memoryMaxMiB.toLocaleString()} MiB hard RAM; CPU weight ${selected.cpuWeight}; CPUs ${selected.allowedCpus.join(', ')}.`
+          )
+        );
+        const rows = s.el('ul');
+        for (const [employeeId, high] of Object.entries(selected.employeeMemoryHighMiB)) {
+          const name = this.data?.employees.find((employee) => employee.employeeId === employeeId)?.name || employeeId;
+          rows.append(s.el('li', '', `${name}: ${high.toLocaleString()} MiB soft RAM threshold.`));
+        }
+        this.native.append(
+          rows,
+          s.el(
+            'p',
+            'ca-hint',
+            `Preview expires ${new Date(preview.expiresAtEpochMs).toLocaleTimeString()}. Activation stops the approved laptops; ordinary startup then attempts only the approved employees who are still in office. Pool activation and employee recovery are reported separately.`
+          )
+        );
+        this.native.append(
+          s.button('ca-btn is-danger', 'Activate shared pool and recreate existing laptops', () => this.applyNative())
+        );
+      } catch {
+        this.storageFailed = true;
+        this.native.append(
+          s.el(
+            'p',
+            'ca-company-error',
+            'The original migration recovery record cannot be read. No new consent will be sent.'
+          )
+        );
+      }
+    }
+    async prepareNative() {
+      if (this.nativeBusy || this.busy || this.storageFailed) return;
+      this.nativeBusy = true;
+      this.sync();
+      try {
+        await this.identity();
+        this.requireNoPending();
+        if (this.readNativePending()) throw new Error('Check the original migration before preparing another');
+        const reply = await this.shell.app._chatApi(`${ROOT}/native-preview`, { method: 'POST', body: {} });
+        await this.identity();
+        if (!reply.ok) throw new Error(reply.error || 'This host has not made native migration available');
+        const value = reply.data;
+        if (
+          !value ||
+          value.kind !== 'fleet-preview' ||
+          value.purpose !== 'resource-fleet-maintenance-v1' ||
+          value.version !== 1 ||
+          value.status !== 'awaiting-maintenance-consent' ||
+          !id(value.requestId) ||
+          !id(value.approval?.previewId) ||
+          !id(value.approval?.operationId) ||
+          !/^[a-f0-9]{64}$/.test(value.approval?.revisionDigest) ||
+          !Number.isSafeInteger(value.expiresAtEpochMs) ||
+          value.expiresAtEpochMs <= Date.now() ||
+          value.policy?.memoryMaxMiB !== 49152 ||
+          !Number.isSafeInteger(value.policy.cpuWeight) ||
+          !Array.isArray(value.policy.allowedCpus) ||
+          !value.policy.employeeMemoryHighMiB
+        )
+          throw new Error('The host-selected migration preview could not be verified');
+        this.nativePreview = value;
+        this.error.textContent = '';
+        this.renderNative();
+      } catch (error) {
+        this.nativePreview = null;
+        this.error.textContent = error.message || 'Native migration preview is unavailable';
+      } finally {
+        this.nativeBusy = false;
+        this.sync();
+      }
+    }
+    async applyNative() {
+      const preview = this.nativePreview;
+      if (!preview || this.nativeBusy || this.busy || this.storageFailed) return;
+      const confirmed = await this.shell.confirmCompanyAction(
+        'Shared RAM and CPU pool',
+        'Activate the host-approved shared pool and recreate the approved laptops through normal startup? Employees who are stopped, away, retired or moved will not be started. An unconfirmed outcome must be inspected rather than retried.',
+        'Activate shared pool and recreate existing laptops'
+      );
+      if (!confirmed || this.nativePreview !== preview || this.nativeBusy || this.busy || !this.dialog.isConnected)
+        return;
+      this.nativeBusy = true;
+      this.sync();
+      try {
+        await this.identity();
+        this.requireNoPending();
+        if (this.readNativePending() || Date.now() >= preview.expiresAtEpochMs)
+          throw new Error('Original migration is pending or its preview expired; no consent sent');
+        const record = { operationId: preview.approval.operationId },
+          raw = JSON.stringify(record);
+        this.shell.doc.defaultView.localStorage.setItem(this.nativeKey(), raw);
+        if (this.shell.doc.defaultView.localStorage.getItem(this.nativeKey()) !== raw)
+          throw new Error('Migration recovery record could not be saved; no consent sent');
+        this.nativePreview = null; // Local one-shot before the HTTP dispatch.
+        const reply = await this.shell.app._chatApi(`${ROOT}/native-apply`, {
+          method: 'POST',
+          body: {
+            previewId: preview.approval.previewId,
+            expectedRevision: preview.approval.revisionDigest,
+            consent: true,
+            verb: 'migrate-pool',
+          },
+        });
+        await this.identity();
+        if (!reply.ok) throw new Error(reply.error || 'Original migration remains unconfirmed; do not resend consent');
+        this.showNativeResult(reply.data, record.operationId);
+      } catch (error) {
+        this.error.textContent = error.message || 'Original migration remains unconfirmed';
+      } finally {
+        this.nativeBusy = false;
+        this.renderNative();
+        this.sync();
+      }
+    }
+    async checkNative(record) {
+      if (this.nativeBusy || this.busy) return;
+      this.nativeBusy = true;
+      this.sync();
+      try {
+        await this.identity();
+        const reply = await this.shell.app._chatApi(`${ROOT}/native-result`, {
+          method: 'POST',
+          body: { operationId: record.operationId },
+        });
+        await this.identity();
+        if (!reply.ok)
+          throw new Error(reply.error || 'Original migration result is unavailable; its recovery record remains');
+        this.showNativeResult(reply.data, record.operationId);
+      } catch (error) {
+        this.error.textContent = error.message || 'Original migration remains unconfirmed';
+      } finally {
+        this.nativeBusy = false;
+        this.renderNative();
+        this.sync();
+      }
+    }
+    showNativeResult(value, operationId) {
+      if (
+        !value ||
+        value.operationId !== operationId ||
+        !['previewed', 'pending', 'pool-configured', 'unknown'].includes(value.state) ||
+        typeof value.blocksFurtherChanges !== 'boolean' ||
+        !Array.isArray(value.restore)
+      )
+        throw new Error('Original migration result could not be verified');
+      if (
+        value.native !== null &&
+        (value.native?.kind !== 'fleet-migration-result' ||
+          value.native?.phase !== 'pool-configured' ||
+          value.native?.approval?.operationId !== operationId)
+      )
+        throw new Error('Native activation result could not be verified');
+      this.results.replaceChildren(this.shell.el('h4', '', 'Original shared-pool migration'));
+      this.results.append(
+        this.shell.el(
+          'p',
+          'ca-hint',
+          value.native
+            ? 'The native host confirmed shared-pool activation. Employee recovery is listed separately.'
+            : 'Shared-pool activation is pending or unconfirmed. No consent will be replayed.'
+        )
+      );
+      for (const row of value.restore) {
+        if (
+          !id(row.employeeId) ||
+          !id(row.sessionId) ||
+          !['wake-confirmed', 'skipped-current-intent', 'unknown'].includes(row.state)
+        )
+          throw new Error('Employee recovery result is unavailable');
+        const name =
+          this.data?.employees.find((employee) => employee.employeeId === row.employeeId)?.name || row.employeeId;
+        this.results.append(
+          this.shell.el(
+            'p',
+            'ca-hint',
+            `${name}: ${row.state === 'wake-confirmed' ? 'normal startup confirmed' : row.state === 'skipped-current-intent' ? 'not started because current attendance or session changed' : 'startup unconfirmed; not retried'}.`
+          )
+        );
+      }
+      if (!value.blocksFurtherChanges && value.state === 'pool-configured' && value.native !== null)
+        this.shell.doc.defaultView.localStorage.removeItem(this.nativeKey());
     }
     setupKey() {
       return `reverie:worker-pool-installation:${this.owner}`;
