@@ -311,7 +311,9 @@
           packages = import ./nix/package.nix { inherit pkgs; src = source; };
         };
       lib.workerRuntimePackages = { system, runtimeSource ? source, runtimePkgs ? pkgsFor system, runChecks ? true }:
-        import ./nix/worker-runtime-packages.nix { pkgs = runtimePkgs; src = runtimeSource; inherit runChecks; };
+        import ./nix/worker-runtime-packages.nix {
+          pkgs = runtimePkgs; src = runtimeSource; artifactSource = source; inherit runChecks;
+        };
       lib.workerDockerImage = { system, uid, gid, subuidStart ? 100000, subgidStart ? 100000, subidCount ? 65536, browser ? false, runtimePackages ? packagesFor system, perfGuestCapsule ? runtimePackages.nativePerfGuestCapsule }:
         let pkgs = pkgsFor system; packages = runtimePackages;
         in assert builtins.isBool browser; import ./nix/image.nix {

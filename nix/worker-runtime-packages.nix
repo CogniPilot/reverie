@@ -1,6 +1,6 @@
 # Trusted build-time composition of one immutable runtime source and package set.
 # Disabling checks changes build policy, never the selected program sources.
-{ pkgs, src, runChecks ? true }:
+{ pkgs, src, artifactSource ? src, runChecks ? true }:
 let
   noChecks = { doCheck = false; doInstallCheck = false; };
   python = pkgs.python3.override {
@@ -17,7 +17,9 @@ let
     python3Packages = python.pkgs;
   };
   packages = import (src + "/nix/package.nix") { pkgs = runtimePkgs; inherit src; };
-  artifacts = import (src + "/nix/policy-artifacts.nix") { pkgs = runtimePkgs; inherit src; };
+  artifacts = import (artifactSource + "/nix/policy-artifacts.nix") {
+    pkgs = runtimePkgs; src = artifactSource;
+  };
 in assert builtins.isBool runChecks;
 packages // {
   laptopTools = if runChecks then packages.laptopTools
