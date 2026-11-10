@@ -313,7 +313,7 @@
       lib.workerDockerImage = { system, uid, gid, subuidStart ? 100000, subgidStart ? 100000, subidCount ? 65536, browser ? false, runtimePackages ? packagesFor system, perfGuestCapsule ? runtimePackages.nativePerfGuestCapsule }:
         let pkgs = pkgsFor system; packages = runtimePackages;
         in assert builtins.isBool browser; import ./nix/image.nix {
-          inherit pkgs; src = source;
+          inherit pkgs runtimePackages; src = source;
           inherit (packages) reverie console memory runtime;
           worker = true;
           inherit perfGuestCapsule;
@@ -329,6 +329,7 @@
           image = self.lib.workerDockerImage (arguments // { inherit perfGuestCapsule runtimePackages; });
           toolkit = runtimePackages.humanTerminalToolkit;
           workerChild = runtimePackages.workerChild;
+          artifacts = runtimePackages.policyArtifacts;
           factory = { name = "lib.workerDockerImage"; } // arguments;
         };
       lib.workerChildImageAnnex = { system, baseProvenance }:

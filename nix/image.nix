@@ -1,11 +1,13 @@
-{ pkgs, src, reverie, console, memory, runtime, worker ? false, browserRuntime ? null, chatLanguageTools ? null, rootlessDocker ? null, resourceReplacement ? false, ownerTerminalWebsite ? null, memoryGuestCapsule ? null, perfGuestCapsule ? null }:
+{ pkgs, src, reverie, console, memory, runtime, runtimePackages ? null, worker ? false, browserRuntime ? null, chatLanguageTools ? null, rootlessDocker ? null, resourceReplacement ? false, ownerTerminalWebsite ? null, memoryGuestCapsule ? null, perfGuestCapsule ? null }:
 let
   uid = if rootlessDocker == null then 2000 else rootlessDocker.uid;
   gid = if rootlessDocker == null then 2000 else rootlessDocker.gid;
   idmap = import ./worker-idmap.nix { inherit pkgs; };
   imagePython = if worker then import ./worker-python.nix { inherit pkgs memory; } else memory;
-  laptopTools = import ./laptop-tools.nix { inherit pkgs src; };
-  childArtifacts = import ./policy-artifacts.nix { inherit pkgs src; };
+  laptopTools = if runtimePackages == null then import ./laptop-tools.nix { inherit pkgs src; }
+    else runtimePackages.laptopTools;
+  childArtifacts = if runtimePackages == null then import ./policy-artifacts.nix { inherit pkgs src; }
+    else runtimePackages.policyArtifacts;
   childManifest = if worker then "${runtime.workerChild}/share/reverie/worker-child-program.json" else null;
   # Kernel-start the untouched Claude/Bun ELF so /proc/self/exe names Claude,
   # not ld-linux (its bundled grep/find shims use process.execPath).
@@ -13,8 +15,10 @@ let
     else if pkgs.stdenv.hostPlatform.isAarch64 then "/lib/ld-linux-aarch64.so.1"
     else null;
   entrypoint = pkgs.writeShellScript "reverie-start" (builtins.readFile (src + "/docker/entrypoint.sh"));
-  humanToolkit = import ./human-terminal-toolkit.nix { inherit pkgs src; };
-  nixPrepare = import ./nix-store-prepare.nix { inherit pkgs src; };
+  humanToolkit = if runtimePackages == null then import ./human-terminal-toolkit.nix { inherit pkgs src; }
+    else runtimePackages.humanTerminalToolkit;
+  nixPrepare = if runtimePackages == null then import ./nix-store-prepare.nix { inherit pkgs src; }
+    else runtimePackages.workerNativeNixStorePrepare;
   # dockerTools.caCertificates, but from the runtime's CA bundle rather than the pinned nixpkgs' older one.
   caCertificates = pkgs.runCommand "ca-certificates" { } ''
     mkdir -p $out/etc/ssl/certs $out/etc/pki/tls/certs

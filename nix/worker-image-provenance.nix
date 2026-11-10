@@ -1,8 +1,7 @@
 # Fixed factory inputs only. No caller-selected image, toolkit or native authority.
-{ pkgs, src, image, toolkit, factory, workerChild }:
+{ pkgs, src, image, toolkit, factory, workerChild, artifacts ? import ./policy-artifacts.nix { inherit pkgs src; } }:
 let
   profile = pkgs.writeText "reverie-worker-factory-profile.json" (builtins.toJSON factory);
-  artifacts = import ./policy-artifacts.nix { inherit pkgs src; };
 in pkgs.runCommand "reverie-worker-image-provenance" {
   nativeBuildInputs = [ pkgs.python3 ];
   meta.platforms = pkgs.lib.platforms.linux;
