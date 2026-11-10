@@ -137,6 +137,7 @@ fn abandoned_publication_keeps_original_metadata_owners() {
 
 #[test]
 fn original_deadline_and_production_instance_scope_refuse_before_file_effects() {
+    use super::bootstrap::{RegisteredBirthSource, SourceKind};
     let tree = Fixture::new();
     let mut expired = tree.owner();
     expired.deadline = Instant::now() - Duration::from_nanos(1);
@@ -144,10 +145,15 @@ fn original_deadline_and_production_instance_scope_refuse_before_file_effects() 
     assert!(!tree.root.join("worker-pool").exists());
     expired.close().unwrap();
     let data = tree.birth();
+    let source = tree.root.join("worker.json");
+    fs::write(&source, b"{}").unwrap();
+    fs::set_permissions(&source, fs::Permissions::from_mode(0o600)).unwrap();
+    let (selection, _) = RegisteredBirthSource::capture(&source, SourceKind::Installation).unwrap();
     assert_eq!(
         ControllerBirthPublication::unopened(
             &tree.runtime,
-            data,
+            data.into(),
+            selection,
             Instant::now() + Duration::from_secs(5)
         )
         .err()
@@ -156,4 +162,44 @@ fn original_deadline_and_production_instance_scope_refuse_before_file_effects() 
         "WORKER_POOL_PUBLICATION_INSTANCE"
     );
     assert!(!tree.root.join("worker-pool").exists());
+}
+
+#[test]
+fn restored_birth_source_refuses_a_pending_control_transition() {
+    use super::bootstrap::{RegisteredBirthSource, SourceKind};
+    let tree = Fixture::new();
+    let source = tree.root.join("worker.json");
+    let state = tree.root.join("state");
+    fs::create_dir(&state).unwrap();
+    let raw = serde_json::to_vec(&serde_json::json!({
+        "stateRoot":state,
+        "resourceReservations":{"directory":tree.root.join("control")},
+        "workerPoolProvider":{
+            "version":2,"purpose":"reverie-docker-worker-pool-provider-v2",
+            "policy":tree.birth().policy(),"memberRevision":7,"memberOverrides":{}
+        }
+    }))
+    .unwrap();
+    fs::write(&source, raw).unwrap();
+    fs::set_permissions(&source, fs::Permissions::from_mode(0o600)).unwrap();
+    let legacy = RegisteredBirthSource::capture(&source, SourceKind::Installation);
+    assert_eq!(
+        legacy.err().unwrap().code(),
+        "WORKER_POOL_COMMITTED_BIRTH_REQUIRED"
+    );
+    let (original, _) = RegisteredBirthSource::capture(&source, SourceKind::Restoration).unwrap();
+    let marker = state.join("resource-reservation-control.pending");
+    fs::write(&marker, b"original pending record").unwrap();
+    assert_eq!(
+        original.assert_current().unwrap_err().code(),
+        "WORKER_POOL_BIRTH_SOURCE_PENDING"
+    );
+    let reopened = RegisteredBirthSource::capture(&source, SourceKind::Restoration);
+    assert_eq!(
+        reopened.err().unwrap().code(),
+        "WORKER_POOL_BIRTH_SOURCE_PENDING"
+    );
+    assert_eq!(fs::read(&marker).unwrap(), b"original pending record");
+    fs::remove_file(marker).unwrap();
+    original.assert_current().unwrap();
 }

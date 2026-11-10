@@ -12,7 +12,9 @@ use crate::{
     native,
     worker_runtime::{WorkerRuntime, WorkerStopBudget},
 };
-use reverie_contracts::worker_pool::ControllerBirthV2;
+use reverie_contracts::worker_pool::{
+    ControllerBirthV2, ControllerServiceBirth, RetainedPoolAnchor,
+};
 use sha2::{Digest, Sha256};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::{fs::File, time::Instant};
@@ -43,7 +45,8 @@ impl PublishedControllerBirthData {
 /// getter, replacement, replay, cached-existing success or automatic removal.
 #[must_use = "retain partial publication through checked metadata finalization"]
 pub struct ControllerBirthPublication {
-    birth: ControllerBirthV2,
+    birth: ControllerServiceBirth,
+    source: Option<bootstrap::RegisteredBirthSource>,
     raw: Vec<u8>,
     digest: [u8; 32],
     filename: String,
@@ -63,15 +66,17 @@ pub struct ControllerBirthPublication {
 impl ControllerBirthPublication {
     /// Only the retained bootstrap wrapper supplies this actual birth record.
     /// Construction is read-only and does not create ~/reverie implicitly.
-    pub(crate) fn unopened(
+    fn unopened(
         runtime: &WorkerRuntime,
-        birth: ControllerBirthV2,
+        birth: ControllerServiceBirth,
+        source: bootstrap::RegisteredBirthSource,
         end: Instant,
     ) -> Result<Self> {
         let ids = runtime.worker_identity().ids();
+        let identity = birth.identity();
         need(
-            birth.broker().ids() == [ids.uid(), ids.gid()]
-                && birth.policy().deployment == runtime.worker_identity().deployment()
+            identity.broker().ids() == [ids.uid(), ids.gid()]
+                && identity.policy().deployment == runtime.worker_identity().deployment()
                 && ids.uid() == native::uid()
                 && ids.gid() == nix::unistd::getegid().as_raw(),
             "WORKER_POOL_PUBLICATION_SCOPE",
@@ -79,24 +84,28 @@ impl ControllerBirthPublication {
         let home = native::python_path(&native::home_directory(None)?)?;
         let root = home.join("reverie");
         need(
-            root == std::path::Path::new(&birth.policy().instance_root),
+            root == std::path::Path::new(&identity.policy().instance_root),
             "WORKER_POOL_PUBLICATION_INSTANCE",
         )?;
-        Self::new(runtime, birth, root, end)
+        let mut owner = Self::new(runtime, birth, root, end)?;
+        owner.source = Some(source);
+        Ok(owner)
     }
     fn new(
         runtime: &WorkerRuntime,
-        birth: ControllerBirthV2,
+        birth: impl Into<ControllerServiceBirth>,
         root: std::path::PathBuf,
         end: Instant,
     ) -> Result<Self> {
         let ids = runtime.worker_identity().ids();
+        let birth = birth.into();
         let raw = birth
             .encode()
             .map_err(|_| PoolError::Refused("WORKER_POOL_BIRTH_INVALID"))?;
         let digest: [u8; 32] = Sha256::digest(&raw).into();
         Ok(Self {
             birth,
+            source: None,
             raw,
             digest,
             filename: format!("{}.json", super::policy::digest_text(digest)),
@@ -127,17 +136,22 @@ impl ControllerBirthPublication {
     }
     fn publish_once(&mut self) -> Result<()> {
         self.check()?;
+        self.assert_source_current()?;
         self.directories.open_root()?;
         self.check()?;
         for index in 1..=3 {
             self.directories.open_child(index)?;
             self.check()?;
         }
+        self.assert_source_current()?;
+        self.check()?;
         self.write_version()?;
         self.check()?;
         self.directories.sync()?;
         self.check()?;
         self.observe_version()?;
+        self.assert_source_current()?;
+        self.check()?;
         self.published = true;
         Ok(())
     }
@@ -155,6 +169,12 @@ impl ControllerBirthPublication {
             "WORKER_POOL_PUBLICATION_CLOSED_OR_EXPIRED",
         )
     }
+    fn assert_source_current(&self) -> Result<()> {
+        if let Some(source) = &self.source {
+            source.assert_current()?;
+        }
+        Ok(())
+    }
     pub fn assert_current(&self) -> Result<()> {
         self.latch(self.current())
     }
@@ -162,6 +182,7 @@ impl ControllerBirthPublication {
         self.check()?;
         need(self.published, "WORKER_POOL_BIRTH_NOT_PUBLISHED")?;
         self.observe_version()?;
+        self.assert_source_current()?;
         self.check()
     }
     pub fn reference_data(&self) -> Result<PublishedControllerBirthData> {
@@ -179,6 +200,12 @@ impl ControllerBirthPublication {
         })
     }
     pub fn birth_data(&self) -> &ControllerBirthV2 {
+        self.birth.identity()
+    }
+    pub fn retained_anchor(&self) -> Option<&RetainedPoolAnchor> {
+        self.birth.retained_anchor()
+    }
+    pub(super) fn service_birth(&self) -> &ControllerServiceBirth {
         &self.birth
     }
     fn latch<T>(&self, result: Result<T>) -> Result<T> {

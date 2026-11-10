@@ -70,6 +70,7 @@ impl BrokerBootstrapBinding {
         end: Instant,
     ) -> std::result::Result<ActivatedController, Box<ControllerActivationFailure>> {
         let policy = publication.birth_data().policy().clone();
+        let member_policy_edit = member_policy::EditState::from_birth(publication.service_birth());
         let query = runtime.installed_engine().readonly().capture_query_owner();
         let mut owner = ControllerState {
             binding: self,
@@ -93,7 +94,7 @@ impl BrokerBootstrapBinding {
             cleanup_end: None,
             original_end: end.min(Instant::now() + Duration::from_secs(20)),
             capacity_failure: None,
-            member_policy_edit: member_policy::EditState::default(),
+            member_policy_edit,
         };
         match owner.activate(runtime, host_reserve_mib) {
             Ok(()) => Ok(ActivatedController {
@@ -238,12 +239,31 @@ impl ControllerState {
         self.effect_unknown = false;
         let inspected = self.inspect_controller(runtime, self.original_end)?;
         self.connect(runtime, &inspected, self.original_end)?;
+        let restored = super::service::protocol::RestoredBirthAck::from_birth(
+            self.publication.service_birth(),
+            self.digest,
+        );
+        if let Some(restored) = &restored {
+            let reply = self.exchange(
+                serde_json::json!({"verb":"status","requestId":fresh_id()?}),
+                self.original_end,
+            )?;
+            restored.assert_reply(&reply, "opening")?;
+        }
         self.publication.assert_current()?;
+        let verb = if self.publication.retained_anchor().is_some() {
+            "resume"
+        } else {
+            "activate"
+        };
         self.effect_unknown = true;
         let reply = self.exchange(
-            serde_json::json!({"verb":"activate","requestId":fresh_id()?,"hostReserveMiB":reserve}),
+            serde_json::json!({"verb":verb,"requestId":fresh_id()?,"hostReserveMiB":reserve}),
             self.original_end,
         )?;
+        if let Some(restored) = &restored {
+            restored.assert_reply(&reply, "active")?;
+        }
         self.capture_parent(runtime, &reply, self.original_end)?;
         self.member_policy_edit.negotiate(&reply);
         self.effect_unknown = false;
@@ -475,22 +495,41 @@ impl ControllerState {
             .as_u64()
             .and_then(|pid| u32::try_from(pid).ok())
             .ok_or(PoolError::Refused("WORKER_POOL_ANCHOR_PID"))?;
-        reverie_contracts::worker_pool::validate_anchor_inspection(
-            &serde_json::to_vec(&values[0])
-                .map_err(|_| PoolError::Refused("WORKER_POOL_ANCHOR_REPLY"))?,
-            &self.policy,
-            &id,
-            pid,
-            &hex(self.digest),
-        )
-        .map_err(|_| PoolError::Refused("WORKER_POOL_ANCHOR_REPLY"))?;
+        let inspected = serde_json::to_vec(&values[0])
+            .map_err(|_| PoolError::Refused("WORKER_POOL_ANCHOR_REPLY"))?;
+        let retained = self.publication.retained_anchor();
+        if let Some(anchor) = retained {
+            need(
+                anchor.container_id() == id && anchor.pid() == pid && reply["anchor"]["pid"] == pid,
+                "WORKER_POOL_RETAINED_ANCHOR_IDENTITY",
+            )?;
+            reverie_contracts::worker_pool::validate_retained_anchor_inspection(
+                &inspected,
+                &self.policy,
+                anchor,
+            )
+            .map_err(|_| PoolError::Refused("WORKER_POOL_RETAINED_ANCHOR_INSPECTION"))?;
+        } else {
+            reverie_contracts::worker_pool::validate_anchor_inspection(
+                &inspected,
+                &self.policy,
+                &id,
+                pid,
+                &hex(self.digest),
+            )
+            .map_err(|_| PoolError::Refused("WORKER_POOL_ANCHOR_REPLY"))?;
+        }
         self.anchor = Some(id);
         self.anchor_pid = pid;
-        self.directory.acquire(
-            &self.policy,
-            self.anchor.as_deref().expect("actual observed anchor"),
-            pid,
-        )?;
+        if let Some(anchor) = retained {
+            self.directory.acquire_retained(&self.policy, anchor)?;
+        } else {
+            self.directory.acquire(
+                &self.policy,
+                self.anchor.as_deref().expect("actual observed anchor"),
+                pid,
+            )?;
+        }
         self.directory.assert_limits(&self.policy)
     }
     fn assert_current(&mut self, runtime: &WorkerRuntime, end: Instant) -> Result<()> {
@@ -683,5 +722,6 @@ pub use member_policy::{
     PreparedMemberPolicyEdit,
 };
 mod member;
+mod retained_anchor;
 mod setup;
 use setup::{controller_arguments, prepare_control_directory};

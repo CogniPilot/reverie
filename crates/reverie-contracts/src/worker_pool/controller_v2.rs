@@ -3,6 +3,8 @@
 use super::*;
 use crate::resource_actor::CodeFile;
 use reverie_core::{PythonText, operations::JournalDigest};
+mod restored;
+pub use restored::{CommittedMemberSnapshot, ControllerServiceBirth};
 #[cfg(test)]
 mod tests;
 
@@ -174,6 +176,9 @@ impl ControllerBirthV2 {
             return Err(PoolPolicyError);
         }
         let value: BirthDocument = serde_json::from_slice(raw).map_err(|_| PoolPolicyError)?;
+        Self::checked_document(value)
+    }
+    fn checked_document(value: BirthDocument) -> Result<Self, PoolPolicyError> {
         if value.version != 2 || value.purpose != SERVICE_PURPOSE {
             return Err(PoolPolicyError);
         }
@@ -184,18 +189,20 @@ impl ControllerBirthV2 {
         )
     }
     pub fn encode(&self) -> Result<Vec<u8>, PoolPolicyError> {
-        let raw = serde_json::to_vec(&BirthDocument {
+        let raw = serde_json::to_vec(&self.document()).map_err(|_| PoolPolicyError)?;
+        if raw.len() > 65_536 {
+            return Err(PoolPolicyError);
+        }
+        Ok(raw)
+    }
+    fn document(&self) -> BirthDocument {
+        BirthDocument {
             version: 2,
             purpose: SERVICE_PURPOSE.into(),
             policy: self.policy.clone(),
             broker: self.broker.clone(),
             program: self.program.document(),
-        })
-        .map_err(|_| PoolPolicyError)?;
-        if raw.len() > 65_536 {
-            return Err(PoolPolicyError);
         }
-        Ok(raw)
     }
     pub fn policy(&self) -> &WorkerPoolPolicy {
         &self.policy

@@ -3,6 +3,7 @@
 //! This is not a production controller factory or authenticated Q substitute.
 use super::*;
 use crate::worker_pool::directory::fixture::OwnedLimitFixture;
+use reverie_core::operations::JournalDigest;
 use std::io::BufRead;
 
 const CASE: &str = "worker_pool::tests::actual_two_hard_leaves_share_confined_pool";
@@ -32,10 +33,12 @@ pub(in crate::worker_pool::tests) fn probe_child() {
         owner.add_leaf(leaf[2].clone(), leaf[3].parse().unwrap());
         acknowledge(&format!("LEAF_READY_{index}"));
     }
-    // The external fixture checks both live containers before requesting the
-    // final same-FD observation and explicit metadata close.
+    // Reopen the parent after closing the original descriptors while the
+    // external fixture keeps both exact live worker containers running.
     assert_eq!(command(&mut input), ["VERIFY"]);
-    owner.observe();
+    let birth =
+        JournalDigest::parse(&std::env::var("REVERIE_POOL_CONTEXT_VERSION").unwrap()).unwrap();
+    owner.reopen_with_running_leaves(&birth);
     acknowledge("BOTH_READY");
     let mut exit = [0];
     input.read_exact(&mut exit).unwrap();

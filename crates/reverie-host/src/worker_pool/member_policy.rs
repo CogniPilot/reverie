@@ -1,11 +1,20 @@
 use super::*;
-use reverie_contracts::worker_pool::WorkerPoolMemberPolicy;
+use reverie_contracts::worker_pool::{ControllerServiceBirth, WorkerPoolMemberPolicy};
 use std::collections::BTreeMap;
 
 #[derive(Default)]
 pub(super) struct MemberPolicies(BTreeMap<String, WorkerPoolMemberPolicy>);
 
 impl MemberPolicies {
+    pub(super) fn from_birth(birth: Option<&ControllerServiceBirth>) -> (Self, u64) {
+        birth
+            .and_then(ControllerServiceBirth::member_snapshot)
+            .map_or_else(
+                || (Self::default(), 0),
+                |snapshot| (Self(snapshot.overrides().clone()), snapshot.revision()),
+            )
+    }
+
     pub(super) fn overrides(&self) -> &BTreeMap<String, WorkerPoolMemberPolicy> {
         &self.0
     }

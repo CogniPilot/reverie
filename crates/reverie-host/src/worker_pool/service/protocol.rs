@@ -42,6 +42,10 @@ pub(in crate::worker_pool) enum Request {
         request_id: String,
         host_reserve_mi_b: u32,
     },
+    Resume {
+        request_id: String,
+        host_reserve_mi_b: u32,
+    },
     ConfigureMember {
         request_id: String,
         employee: String,
@@ -106,6 +110,9 @@ impl Request {
         match &value {
             Self::Activate {
                 host_reserve_mi_b, ..
+            }
+            | Self::Resume {
+                host_reserve_mi_b, ..
             } => need(
                 *host_reserve_mi_b >= 256,
                 "WORKER_POOL_CONTROL_HOST_RESERVE",
@@ -153,6 +160,7 @@ impl Request {
             | Self::ContinueOriginal { request_id }
             | Self::Close { request_id }
             | Self::Activate { request_id, .. }
+            | Self::Resume { request_id, .. }
             | Self::ConfigureMember { request_id, .. }
             | Self::ObserveMember { request_id, .. }
             | Self::ApplyMemberPolicy { request_id, .. }
@@ -190,6 +198,49 @@ pub(in crate::worker_pool) struct Reply<'a> {
     pub(in crate::worker_pool) anchor: Option<AnchorData>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(in crate::worker_pool) member_policy_edit_version: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(in crate::worker_pool) restored_birth: Option<RestoredBirthAck>,
+}
+
+#[derive(Clone, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub(in crate::worker_pool) struct RestoredBirthAck {
+    birth_sha256: String,
+    member_revision: u64,
+}
+
+impl RestoredBirthAck {
+    pub(in crate::worker_pool) fn from_birth(
+        birth: &reverie_contracts::worker_pool::ControllerServiceBirth,
+        digest: [u8; 32],
+    ) -> Option<Self> {
+        birth.restored().then(|| Self {
+            birth_sha256: super::super::policy::digest_text(digest),
+            member_revision: birth
+                .member_snapshot()
+                .map_or(0, |snapshot| snapshot.revision()),
+        })
+    }
+
+    pub(in crate::worker_pool) fn assert_reply(
+        &self,
+        reply: &serde_json::Value,
+        phase: &'static str,
+    ) -> Result<()> {
+        let observed = reply
+            .get("restoredBirth")
+            .ok_or(PoolError::Refused("WORKER_POOL_RESTORED_BIRTH_UNSUPPORTED"))?;
+        let observed: Self = serde_json::from_value(observed.clone())
+            .map_err(|_| PoolError::Refused("WORKER_POOL_RESTORED_BIRTH_ACK"))?;
+        need(
+            &observed == self
+                && reply["memberPolicyEditVersion"] == MEMBER_POLICY_EDIT_VERSION
+                && reply["known"] == true
+                && reply["phase"] == phase
+                && reply["primaryError"].is_null(),
+            "WORKER_POOL_RESTORED_BIRTH_ACK",
+        )
+    }
 }
 #[derive(Serialize)]
 pub(in crate::worker_pool) struct AnchorData {
@@ -249,5 +300,25 @@ mod tests {
         ))
         .unwrap();
         assert!(received.end <= before + std::time::Duration::from_secs(21));
+    }
+
+    #[test]
+    fn resume_accepts_only_the_original_correlation_and_bounded_reserve() {
+        let mut request = serde_json::json!({
+            "verb":"resume","requestId":"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee","hostReserveMiB":256
+        });
+        let received = Request::decode(&frame(request.clone(), u64::MAX)).unwrap();
+        assert!(matches!(
+            received.request,
+            Request::Resume {
+                host_reserve_mi_b: 256,
+                ..
+            }
+        ));
+        request["anchor"] = serde_json::json!("a".repeat(64));
+        assert!(Request::decode(&frame(request.clone(), u64::MAX)).is_err());
+        request.as_object_mut().unwrap().remove("anchor");
+        request["hostReserveMiB"] = serde_json::json!(255);
+        assert!(Request::decode(&frame(request, u64::MAX)).is_err());
     }
 }

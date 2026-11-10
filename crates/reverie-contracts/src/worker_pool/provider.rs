@@ -58,19 +58,27 @@ impl UncheckedProvider {
             _ => return Err(PoolPolicyError),
         };
         policy.validate()?;
-        for (employee, settings) in &member_overrides {
-            if birth_member_policy(&policy, employee).is_none_or(|birth| birth == *settings)
-                || settings.memory_high_mib() >= policy.memory_max_mi_b
-            {
-                return Err(PoolPolicyError);
-            }
-        }
+        validate_member_overrides(&policy, &member_overrides)?;
         Ok(WorkerPoolProvider {
             policy,
             member_overrides,
             member_revision,
         })
     }
+}
+
+pub(super) fn validate_member_overrides(
+    policy: &WorkerPoolPolicy,
+    overrides: &BTreeMap<String, WorkerPoolMemberPolicy>,
+) -> Result<(), PoolPolicyError> {
+    for (employee, settings) in overrides {
+        if birth_member_policy(policy, employee).is_none_or(|birth| birth == *settings)
+            || settings.memory_high_mib() >= policy.memory_max_mi_b
+        {
+            return Err(PoolPolicyError);
+        }
+    }
+    Ok(())
 }
 
 fn provider_key() -> Text {

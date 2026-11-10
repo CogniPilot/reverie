@@ -24,6 +24,130 @@ fn birth() -> ControllerBirthV2 {
     )
     .unwrap()
 }
+
+fn committed(
+    birth: &ControllerBirthV2,
+    revision: u64,
+    overrides: serde_json::Value,
+) -> WorkerPoolProvider {
+    let data = json!({"workerPoolProvider": {
+        "version": 2,
+        "purpose": "reverie-docker-worker-pool-provider-v2",
+        "policy": birth.policy(),
+        "memberRevision": revision,
+        "memberOverrides": overrides
+    }});
+    let configuration = crate::worker_config::decode(&serde_json::to_vec(&data).unwrap()).unwrap();
+    WorkerPoolProvider::from_config(&configuration)
+        .unwrap()
+        .unwrap()
+}
+
+#[test]
+fn restored_birth_roundtrips_nonzero_revision_with_or_without_overrides() {
+    let birth = birth();
+    let employee = birth
+        .policy()
+        .employee_memory_high_mi_b
+        .keys()
+        .next()
+        .unwrap();
+    let changed = json!({employee: {"memoryHighMiB": 8192, "cpuWeight": 200}});
+    for (revision, overrides) in [(7, changed), (8, json!({}))] {
+        let provider = committed(&birth, revision, overrides);
+        let restored =
+            ControllerServiceBirth::from_installed_provider(birth.clone(), &provider, None)
+                .unwrap();
+        let raw = restored.encode().unwrap();
+        assert!(ControllerBirthV2::decode(&raw).is_err());
+        let decoded = ControllerServiceBirth::decode(&raw).unwrap();
+        assert!(decoded.identity() == &birth);
+        assert!(decoded.retained_anchor().is_none());
+        let snapshot = decoded.member_snapshot().unwrap();
+        assert_eq!(snapshot.revision(), revision);
+        assert_eq!(snapshot.overrides(), provider.member_overrides());
+    }
+    let original = birth.encode().unwrap();
+    assert_eq!(
+        ControllerServiceBirth::from(birth).encode().unwrap(),
+        original
+    );
+    assert!(
+        !ControllerServiceBirth::decode(&original)
+            .unwrap()
+            .restored()
+    );
+}
+
+#[test]
+fn restored_birth_refuses_missing_edited_revision_and_forged_override_data() {
+    let birth = birth();
+    let employee = "22222222-2222-4222-8222-222222222222";
+    let provider = committed(
+        &birth,
+        7,
+        json!({employee: {"memoryHighMiB": 8192, "cpuWeight": 200}}),
+    );
+    let raw = ControllerServiceBirth::from_installed_provider(birth, &provider, None)
+        .unwrap()
+        .encode()
+        .unwrap();
+    let original: serde_json::Value = serde_json::from_slice(&raw).unwrap();
+    let mut missing = original.clone();
+    missing.as_object_mut().unwrap().remove("members");
+    assert!(ControllerServiceBirth::decode(&serde_json::to_vec(&missing).unwrap()).is_err());
+    for members in [
+        json!(null),
+        json!({"revision": 0, "overrides": {}}),
+        json!({"revision": 7, "overrides": {"55555555-5555-4555-8555-555555555555": {"memoryHighMiB": 8192, "cpuWeight": 200}}}),
+        json!({"revision": 7, "overrides": {employee: {"memoryHighMiB": 49152, "cpuWeight": 200}}}),
+        json!({"revision": 7, "overrides": {employee: {"memoryHighMiB": 8192, "cpuWeight": 200}}, "confirmed": true}),
+    ] {
+        let mut malformed = original.clone();
+        malformed["members"] = members;
+        assert!(ControllerServiceBirth::decode(&serde_json::to_vec(&malformed).unwrap()).is_err());
+    }
+    let entry = format!(r#""{employee}":{{"memoryHighMiB":8192,"cpuWeight":200}}"#);
+    let original = String::from_utf8(raw).unwrap();
+    let duplicate = original.replacen(&entry, &format!("{entry},{entry}"), 1);
+    assert_ne!(original, duplicate);
+    assert!(ControllerServiceBirth::decode(duplicate.as_bytes()).is_err());
+}
+
+#[test]
+fn retained_anchor_can_restore_a_v1_or_v2_provider() {
+    let birth = birth();
+    let anchor: RetainedPoolAnchor = serde_json::from_value(json!({
+        "containerId":"f".repeat(64),"originalBirthDigest":"e".repeat(64),
+        "bootId":"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+        "pid":430,"processStart":"70000","parentIdentity":[12,22],"leafIdentity":[12,27]
+    }))
+    .unwrap();
+    let legacy = json!({"workerPoolProvider": {
+        "version":1,"purpose":"reverie-docker-worker-pool-provider-v1","policy":birth.policy()
+    }});
+    let configuration =
+        crate::worker_config::decode(&serde_json::to_vec(&legacy).unwrap()).unwrap();
+    let legacy = WorkerPoolProvider::from_config(&configuration)
+        .unwrap()
+        .unwrap();
+    let edited = committed(&birth, 8, json!({}));
+    assert!(ControllerServiceBirth::from_installed_provider(birth.clone(), &legacy, None).is_err());
+    for provider in [legacy, edited] {
+        let restored = ControllerServiceBirth::from_installed_provider(
+            birth.clone(),
+            &provider,
+            Some(anchor.clone()),
+        )
+        .unwrap();
+        let decoded = ControllerServiceBirth::decode(&restored.encode().unwrap()).unwrap();
+        assert_eq!(decoded.retained_anchor(), Some(&anchor));
+        assert_eq!(
+            decoded.member_snapshot().map(|members| members.revision()),
+            (provider.member_revision() > 0).then(|| provider.member_revision()),
+        );
+    }
+}
 #[test]
 fn v2_birth_data_roundtrips_without_widening_original_policy_schema() {
     let original = birth();

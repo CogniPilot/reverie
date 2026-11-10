@@ -29,6 +29,18 @@ pub(super) struct EditState {
 }
 
 impl EditState {
+    pub(super) fn from_birth(
+        birth: &reverie_contracts::worker_pool::ControllerServiceBirth,
+    ) -> Self {
+        let (policies, revision) =
+            crate::worker_pool::member_policy::MemberPolicies::from_birth(Some(birth));
+        Self {
+            policies,
+            revision,
+            ..Self::default()
+        }
+    }
+
     pub(super) fn negotiate(&mut self, reply: &serde_json::Value) {
         self.supported = reply
             .get("memberPolicyEditVersion")

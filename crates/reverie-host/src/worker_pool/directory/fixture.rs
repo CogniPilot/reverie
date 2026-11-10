@@ -121,6 +121,21 @@ impl OwnedLimitFixture {
         }
     }
 
+    pub(in crate::worker_pool) fn reopen_with_running_leaves(&mut self, birth: &JournalDigest) {
+        assert!(self.stage == Stage::Configured && self.leaves.len() == 2);
+        let anchor = ContainerId::parse(&self.anchor).unwrap();
+        let retained = self
+            .directory
+            .retained_anchor_data(&anchor, self.pid, birth)
+            .unwrap();
+        self.directory.close().unwrap();
+        self.directory = PoolDirectory::unopened(&self.policy);
+        self.directory
+            .acquire_retained(&self.policy, &retained)
+            .unwrap();
+        self.observe();
+    }
+
     pub(in crate::worker_pool) fn close(&mut self) {
         self.observe();
         assert_eq!(self.leaves.len(), 2);

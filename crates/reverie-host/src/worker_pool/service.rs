@@ -17,6 +17,7 @@ struct State {
     member_attempted: Vec<String>,
     member_policies: super::member_policy::MemberPolicies,
     member_policy_revision: u64,
+    restored_birth: Option<protocol::RestoredBirthAck>,
     edit: Option<member_policy::EditAttempt>,
     primary: Option<PoolError>,
 }
@@ -41,6 +42,11 @@ impl State {
         } else {
             "opening"
         }
+    }
+    fn primary_error(&self) -> Option<&PoolError> {
+        self.primary
+            .as_ref()
+            .or_else(|| self.member_failure.as_ref().map(|owner| owner.cause()))
     }
     fn directory(&self) -> Result<&PoolDirectory> {
         self.directory
@@ -83,6 +89,12 @@ pub struct ControllerServingFailure<'a> {
 }
 impl<'a> ControllerServing<'a> {
     pub(super) fn new(peer: ControllerPeer<'a>, policy: &'a ControllerPoolPolicy) -> Self {
+        let birth = policy.service_birth();
+        let (member_policies, member_policy_revision) =
+            super::member_policy::MemberPolicies::from_birth(birth);
+        let restored_birth = birth.and_then(|birth| {
+            protocol::RestoredBirthAck::from_birth(birth, policy.version_digest_data())
+        });
         Self {
             peer,
             policy,
@@ -92,8 +104,9 @@ impl<'a> ControllerServing<'a> {
                 anchor: anchor::Anchor::default(),
                 member_failure: None,
                 member_attempted: Vec::new(),
-                member_policies: super::member_policy::MemberPolicies::default(),
-                member_policy_revision: 0,
+                member_policies,
+                member_policy_revision,
+                restored_birth,
                 edit: None,
                 primary: None,
             },
@@ -147,6 +160,13 @@ impl<'a> ControllerServing<'a> {
                     self.state
                         .activate(self.policy, *host_reserve_mi_b, received.end)
                 }
+                protocol::Request::Resume {
+                    host_reserve_mi_b, ..
+                } => {
+                    phase = "active";
+                    self.state
+                        .resume(self.policy, *host_reserve_mi_b, received.end)
+                }
                 protocol::Request::ConfigureMember {
                     employee,
                     session,
@@ -188,12 +208,7 @@ impl<'a> ControllerServing<'a> {
                 self.state.primary.get_or_insert(error);
                 phase = "retained";
             }
-            let primary = self.state.primary.as_ref().or_else(|| {
-                self.state
-                    .member_failure
-                    .as_ref()
-                    .map(|owner| owner.cause())
-            });
+            let primary = self.state.primary_error();
             Self::reply(
                 &mut self.peer,
                 &self.state,
@@ -221,6 +236,7 @@ impl<'a> ControllerServing<'a> {
                 .state
                 .commit_member_policy(self.policy, &mut self.peer, operation, end),
             protocol::Request::Activate { .. }
+            | protocol::Request::Resume { .. }
             | protocol::Request::ConfigureMember { .. }
             | protocol::Request::ObserveMember { .. }
                 if self.state.edit.is_some() =>
@@ -258,7 +274,9 @@ impl<'a> ControllerServing<'a> {
     ) -> Result<()> {
         let capability = matches!(
             request,
-            protocol::Request::Status { .. } | protocol::Request::Activate { .. }
+            protocol::Request::Status { .. }
+                | protocol::Request::Activate { .. }
+                | protocol::Request::Resume { .. }
         )
         .then_some(protocol::MEMBER_POLICY_EDIT_VERSION);
         peer.reply(
@@ -273,6 +291,7 @@ impl<'a> ControllerServing<'a> {
                     pid: state.anchor.pid,
                 }),
                 member_policy_edit_version: capability,
+                restored_birth: capability.and_then(|_| state.restored_birth.clone()),
             },
             Instant::now() + Duration::from_secs(2),
         )
@@ -303,7 +322,7 @@ impl ControllerServingFailure<'_> {
         self.owner.close_components()
     }
 }
-fn check(end: Instant) -> Result<()> {
+pub(super) fn check(end: Instant) -> Result<()> {
     need(Instant::now() < end, "WORKER_POOL_ACTIVATION_DEADLINE")
 }
 fn hex(value: [u8; 32]) -> String {

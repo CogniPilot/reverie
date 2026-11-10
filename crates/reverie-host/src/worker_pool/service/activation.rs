@@ -9,14 +9,11 @@ impl State {
         reserve: u32,
         end: Instant,
     ) -> Result<()> {
-        check(end)?;
         need(
-            self.stage == InstallationStage::Opening,
-            "WORKER_POOL_ACTIVATION_ALREADY_ATTEMPTED",
+            policy.bound_anchor().is_none(),
+            "WORKER_POOL_RETAINED_ANCHOR_RESUME_REQUIRED",
         )?;
-        // Latched before every Docker/cgroup effect. No second Activate may
-        // reconstruct this attempt or silently repair a partially written pool.
-        self.stage = InstallationStage::Attempted;
+        self.begin_activation(end)?;
         self.assert_headroom(policy, reserve)?;
         self.anchor.create(policy, end)?;
         let id = self.anchor.id.as_deref().expect("actual original anchor");
@@ -33,6 +30,44 @@ impl State {
         self.assert_headroom(policy, reserve)?;
         check(end)?;
         self.stage = InstallationStage::Confirmed;
+        Ok(())
+    }
+
+    pub(super) fn resume(
+        &mut self,
+        policy: &ControllerPoolPolicy,
+        reserve: u32,
+        end: Instant,
+    ) -> Result<()> {
+        let anchor = policy
+            .bound_anchor()
+            .ok_or(PoolError::Refused("WORKER_POOL_RETAINED_ANCHOR_REQUIRED"))?;
+        self.begin_activation(end)?;
+        // The existing parent remains charged for the same pool. Reopening
+        // only reads existing limits and never configures a leaf or parent.
+        need(reserve >= 256, "WORKER_POOL_CONTROL_RESERVE")?;
+        policy.assert_current()?;
+        self.anchor.reopen(policy, anchor, end)?;
+        self.directory
+            .as_mut()
+            .ok_or(PoolError::Refused("WORKER_POOL_DIRECTORY_CLOSED"))?
+            .acquire_retained(policy.data(), anchor)?;
+        policy.assert_current()?;
+        policy.assert_anchor(anchor.container_id(), anchor.pid())?;
+        self.directory()?.assert_retained_anchor(anchor)?;
+        self.directory()?.assert_limits(policy.data())?;
+        check(end)?;
+        self.stage = InstallationStage::Confirmed;
+        Ok(())
+    }
+
+    fn begin_activation(&mut self, end: Instant) -> Result<()> {
+        check(end)?;
+        need(
+            self.stage == InstallationStage::Opening,
+            "WORKER_POOL_ACTIVATION_ALREADY_ATTEMPTED",
+        )?;
+        self.stage = InstallationStage::Attempted;
         Ok(())
     }
     fn assert_headroom(&self, policy: &ControllerPoolPolicy, reserve: u32) -> Result<()> {
