@@ -64,6 +64,7 @@
       this.shell = shell;
       this.dialog = dialog;
       this.employee = employee;
+      this.path = `/api/company/resources/employees/${encodeURIComponent(employee.id)}`;
       this.sequence = 0;
       this.busy = false;
       this.host = shell.el('section', 'ca-employee-resources');
@@ -92,13 +93,7 @@
         typeof input === 'string' && /^(0|[1-9][0-9]{0,19})$/.test(input) && BigInt(input) <= 18446744073709551615n;
       const limit = (input) => input === 'max' || decimal(input);
       const positive = (input) => Number.isSafeInteger(input) && input > 0;
-      const capabilities = [
-        'softMemoryLive',
-        'cpuWeightLive',
-        'hardMemoryReplacement',
-        'perfReplacement',
-        'gpuReplacement',
-      ];
+      const caps = value?.capabilities;
       return (
         value?.version === 1 &&
         value.employeeId === this.employee.id &&
@@ -108,9 +103,15 @@
         value.readOnly === true &&
         value.perfObserved === null &&
         value.perfObservationReason === 'OWN_PROCESS_PROBE_REQUIRED' &&
-        value.capabilities &&
-        Object.keys(value.capabilities).length === capabilities.length &&
-        capabilities.every((key) => value.capabilities[key] === false) &&
+        caps &&
+        Object.keys(caps).length === 5 &&
+        typeof caps.softMemoryLive === 'boolean' &&
+        typeof caps.cpuWeightLive === 'boolean' &&
+        caps.hardMemoryReplacement === false &&
+        caps.perfReplacement === false &&
+        caps.gpuReplacement === false &&
+        (!(caps.softMemoryLive || caps.cpuWeightLive) ||
+          (value.state === 'running' && positive(value.requested?.memoryHighMiB))) &&
         (value.requested === null ||
           (value.requested &&
             (value.requested.memoryHighMiB === null || positive(value.requested.memoryHighMiB)) &&
@@ -129,33 +130,113 @@
         (value.state === 'uninstalled') === (value.requested === null)
       );
     }
-    async load() {
-      if (this.busy || !this.host.isConnected) return;
-      const sequence = ++this.sequence;
+    current(sequence) {
+      return this.host.isConnected && sequence === this.sequence;
+    }
+    start(message) {
       this.busy = true;
       this.refresh.disabled = true;
-      this.status.textContent = 'Checking running limits…';
+      this.content.querySelector('form')?.remove();
+      this.status.textContent = message;
       this.error.textContent = '';
+      return ++this.sequence;
+    }
+    finish(sequence) {
+      if (!this.current(sequence)) return;
+      this.busy = false;
+      this.refresh.disabled = false;
+    }
+    async readStatus(sequence) {
+      const reply = await this.shell.app._chatApi(this.path);
+      if (!this.current(sequence)) return;
+      if (!reply.ok) throw new Error(reply.error || 'Running resource limits are unavailable. Refresh to try again.');
+      if (!this.valid(reply.data))
+        throw new Error('The current employee resource status could not be verified. Refresh the profile.');
+      this.render(reply.data);
+    }
+    async load() {
+      if (this.busy || !this.host.isConnected) return;
+      const sequence = this.start('Checking running limits…');
       try {
-        const reply = await this.shell.app._chatApi(
-          `/api/company/resources/employees/${encodeURIComponent(this.employee.id)}`
-        );
-        if (!this.host.isConnected || sequence !== this.sequence) return;
-        if (!reply.ok) throw new Error(reply.error || 'Running resource limits are unavailable. Refresh to try again.');
-        if (!this.valid(reply.data))
-          throw new Error('The current employee resource status could not be verified. Refresh the profile.');
-        this.render(reply.data);
+        await this.readStatus(sequence);
       } catch (error) {
-        if (this.host.isConnected && sequence === this.sequence) {
+        if (this.current(sequence)) {
           this.content.replaceChildren();
           this.status.textContent = 'Running limits are unconfirmed.';
           this.error.textContent = error.message || 'Resource status is unavailable. Refresh to try again.';
         }
       } finally {
-        if (sequence === this.sequence) {
-          this.busy = false;
-          this.refresh.disabled = false;
+        this.finish(sequence);
+      }
+    }
+    renderEdit(value) {
+      const s = this.shell;
+      const form = s.el('form', 'ca-fleet-form');
+      const field = (label, name, initial, maximum) => {
+        const input = s.el('input', 'ca-input');
+        input.name = name;
+        input.type = 'number';
+        input.min = '1';
+        input.max = String(maximum);
+        input.step = '1';
+        input.required = true;
+        input.value = String(initial);
+        const caption = s.el('label', '', label);
+        caption.append(input);
+        form.append(caption);
+        return input;
+      };
+      const memoryHigh = field('Soft RAM (MiB)', 'memoryHighMiB', value.requested.memoryHighMiB, 49152);
+      const cpuWeight = field('CPU share weight', 'cpuWeight', value.requested.cpuWeight, 10000);
+      const submit = s.button('ca-btn', 'Apply RAM and CPU limits', null, { text: 'Apply RAM and CPU limits' });
+      submit.type = 'submit';
+      form.append(submit);
+      form.addEventListener('submit', (event) => {
+        event.preventDefault();
+        if (!form.isConnected || !form.reportValidity()) return;
+        void this.apply(value, memoryHigh.valueAsNumber, cpuWeight.valueAsNumber);
+      });
+      return form;
+    }
+    async apply(value, memoryHighMiB, cpuWeight) {
+      if (this.busy || !this.host.isConnected) return;
+      const sequence = this.start('Applying RAM and CPU limits…');
+      let applied = false;
+      try {
+        const approval = {
+          sessionId: value.sessionId,
+          operationId: window.crypto.randomUUID(),
+          expectedRevision: value.revision,
+          memoryHighMiB,
+          cpuWeight,
+        };
+        const reply = await this.shell.app._chatApi(`${this.path}/policy`, { method: 'POST', body: approval });
+        if (!this.current(sequence)) return;
+        if (!reply.ok) throw new Error(reply.error || 'The RAM and CPU change was not confirmed.');
+        const result = reply.data;
+        if (
+          result?.version !== 1 ||
+          result.state !== 'applied' ||
+          result.employeeId !== this.employee.id ||
+          result.sessionId !== approval.sessionId ||
+          result.operationId !== approval.operationId ||
+          result.memoryHighMiB !== memoryHighMiB ||
+          result.cpuWeight !== cpuWeight
+        )
+          throw new Error('The RAM and CPU change was not confirmed.');
+        applied = true;
+        this.status.textContent = 'Change applied. Checking running limits…';
+        await this.readStatus(sequence);
+        if (this.current(sequence)) this.status.textContent = `Change applied. ${this.status.textContent}`;
+      } catch (error) {
+        if (this.current(sequence)) {
+          this.status.textContent = applied
+            ? 'Change applied. Running limits could not be refreshed.'
+            : 'Refresh the running limits before making another change.';
+          this.error.textContent = error.message || 'The RAM and CPU change was not confirmed.';
         }
+      } finally {
+        this.finish(sequence);
       }
     }
     render(value) {
@@ -198,6 +279,8 @@
         observed ? (observed.cpuMax.startsWith('max ') ? 'No quota' : observed.cpuMax) : 'Unconfirmed'
       );
       table.append(thead, body);
+      const editable =
+        value.state === 'running' && value.capabilities.softMemoryLive && value.capabilities.cpuWeightLive;
       this.content.replaceChildren(
         table,
         s.el(
@@ -205,11 +288,9 @@
           'ca-hint',
           'Soft RAM applies reclaim pressure without reserving RAM. CPU weight shares CPU under contention.'
         ),
-        s.el(
-          'p',
-          'ca-hint',
-          'Live RAM and CPU edits are not supported by this controller. Your running work has not been changed.'
-        ),
+        editable
+          ? this.renderEdit(value)
+          : s.el('p', 'ca-hint', 'Live RAM and CPU edits are not supported for this laptop.'),
         s.el(
           'p',
           'ca-hint',

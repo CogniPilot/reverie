@@ -21,6 +21,22 @@ let app: FastifyInstance, root: string, server: Server, service: EmployeeResourc
 let token: string, employeeId: string, sessionId: string;
 let peers: Set<Socket>, frames: Record<string, unknown>[], connected: number;
 let response: Record<string, unknown>;
+let editMode: 'applied' | 'lost-reply' | 'refused' | 'no-proof' | 'foreign-challenge';
+let editOverride: Record<string, unknown>;
+const approval = () => ({
+  sessionId,
+  operationId: randomUUID(),
+  expectedRevision: 'b'.repeat(64),
+  memoryHighMiB: 12288,
+  cpuWeight: 180,
+});
+const edit = (payload = approval(), selectedHeaders = headers()) =>
+  app.inject({
+    method: 'POST',
+    url: `/api/company/resources/employees/${employeeId}/policy`,
+    headers: selectedHeaders,
+    payload,
+  });
 const frame = (value: unknown) => {
   const body = Buffer.from(JSON.stringify(value)),
     header = Buffer.alloc(4);
@@ -75,12 +91,28 @@ beforeEach(async () => {
   peers = new Set();
   frames = [];
   connected = 0;
+  editMode = 'applied';
+  editOverride = {};
   server = createServer((socket) => {
     connected++;
     peers.add(socket);
     socket.on('close', () => peers.delete(socket));
     let buffer = Buffer.alloc(0),
       greeted = false;
+    let operation: Record<string, unknown>;
+    const applied = () => {
+      const selected = operation.approval as ReturnType<typeof approval>;
+      return {
+        version: 1,
+        employeeId,
+        sessionId: selected.sessionId,
+        operationId: selected.operationId,
+        state: 'applied',
+        memoryHighMiB: selected.memoryHighMiB,
+        cpuWeight: selected.cpuWeight,
+        ...editOverride,
+      };
+    };
     socket.on('data', (chunk) => {
       buffer = Buffer.concat([buffer, chunk]);
       if (!greeted) {
@@ -102,18 +134,42 @@ beforeEach(async () => {
         const value = JSON.parse(buffer.subarray(4, size + 4).toString()) as Record<string, unknown>;
         buffer = buffer.subarray(4 + size);
         frames.push(value);
-        if (value.kind === 'resource-operation')
+        if (value.kind === 'resource-operation') {
+          operation = value;
+          const editing = value.verb === 'employee-policy-edit';
+          if (editing && editMode === 'no-proof') {
+            socket.write(frame({ kind: 'resource-result', requestId: value.requestId, value: applied() }));
+            continue;
+          }
           socket.write(
             frame({
               kind: 'resource-owner-check',
               requestId: value.requestId,
               nonce: randomUUID(),
-              stage: 'status',
+              stage: editing ? 'employee-policy-edit' : 'status',
               employeeId,
-              approval: null,
+              approval: editing
+                ? editMode === 'foreign-challenge'
+                  ? { ...(value.approval as object), operationId: randomUUID() }
+                  : value.approval
+                : null,
             })
           );
-        else socket.write(frame({ kind: 'resource-result', requestId: value.requestId, value: response }));
+        } else if (operation.verb !== 'employee-policy-edit') {
+          socket.write(frame({ kind: 'resource-result', requestId: value.requestId, value: response }));
+        } else if (editMode === 'lost-reply') {
+          socket.destroy();
+        } else if (editMode === 'refused') {
+          socket.write(
+            frame({
+              kind: 'resource-refused',
+              requestId: value.requestId,
+              reason: 'WORKER_POOL_MEMBER_EDIT_UNSUPPORTED',
+            })
+          );
+        } else {
+          socket.write(frame({ kind: 'resource-result', requestId: value.requestId, value: applied() }));
+        }
       }
     });
   });
@@ -176,4 +232,80 @@ it('rejects anonymous and mixed guest/service headers before opening any native 
   }
   expect(connected).toBe(0);
   expect(frames).toHaveLength(0);
+});
+
+it('submits one exact RAM and CPU edit with current owner proof on the same native channel', async () => {
+  const selected = approval();
+  const result = await edit(selected);
+  expect(result.statusCode).toBe(200);
+  expect(result.headers['cache-control']).toBe('no-store');
+  expect(result.json().data).toEqual({
+    version: 1,
+    employeeId,
+    sessionId,
+    operationId: selected.operationId,
+    state: 'applied',
+    memoryHighMiB: selected.memoryHighMiB,
+    cpuWeight: selected.cpuWeight,
+  });
+  expect(connected).toBe(1);
+  expect(frames).toHaveLength(2);
+  expect(Object.keys(frames[0]).sort()).toEqual(['approval', 'employeeId', 'kind', 'requestId', 'verb']);
+  expect(frames[0]).toMatchObject({
+    kind: 'resource-operation',
+    verb: 'employee-policy-edit',
+    employeeId,
+    approval: selected,
+  });
+  expect(frames[1]).toMatchObject({
+    kind: 'resource-owner-current',
+    requestId: frames[0].requestId,
+    stage: 'employee-policy-edit',
+    approval: selected,
+  });
+  expect(JSON.stringify(frames)).not.toContain(token);
+});
+
+it('refuses malformed, foreign-origin, guest and stale-session edits before opening the socket', async () => {
+  expect((await edit({ ...approval(), memoryHighMiB: 49153 })).statusCode).toBe(400);
+  expect((await edit({ ...approval(), cpuWeight: 1.5 })).statusCode).toBe(400);
+  expect((await edit(approval(), { ...headers(), origin: 'https://foreign.invalid' })).statusCode).toBe(403);
+  expect((await edit(approval(), { ...headers(), cookie: '' })).statusCode).toBe(403);
+  expect((await edit({ ...approval(), sessionId: randomUUID() })).statusCode).toBe(409);
+  expect(connected).toBe(0);
+});
+
+it.each(['sessionId', 'operationId', 'employeeId', 'memoryHighMiB', 'cpuWeight'] as const)(
+  'does not accept a native applied result with a changed %s',
+  async (field) => {
+    editOverride = { [field]: field.endsWith('Id') ? randomUUID() : 333 };
+    const result = await edit();
+    expect(result.statusCode).toBe(503);
+    expect(result.json()).toMatchObject({ success: false, errorCode: 'EMPLOYEE_RESOURCE_EDIT_UNCONFIRMED' });
+    expect(result.json().data).toBeUndefined();
+    expect(connected).toBe(1);
+    expect(frames.filter((row) => row.kind === 'resource-operation')).toHaveLength(1);
+  }
+);
+
+it.each(['no-proof', 'foreign-challenge', 'lost-reply'] as const)(
+  'keeps a %s edit unconfirmed without another native request',
+  async (mode) => {
+    editMode = mode;
+    const result = await edit();
+    expect(result.statusCode).toBe(503);
+    expect(result.json()).toMatchObject({ success: false, errorCode: 'EMPLOYEE_RESOURCE_EDIT_UNCONFIRMED' });
+    expect(connected).toBe(1);
+    expect(frames.filter((row) => row.kind === 'resource-operation')).toHaveLength(1);
+    expect(frames.filter((row) => row.kind === 'resource-owner-current')).toHaveLength(mode === 'lost-reply' ? 1 : 0);
+  }
+);
+
+it('preserves the fixed native refusal code without claiming an unverified success', async () => {
+  editMode = 'refused';
+  const result = await edit();
+  expect(result.statusCode).toBe(409);
+  expect(result.json()).toMatchObject({ success: false, errorCode: 'WORKER_POOL_MEMBER_EDIT_UNSUPPORTED' });
+  expect(result.json().data).toBeUndefined();
+  expect(connected).toBe(1);
 });

@@ -9,6 +9,7 @@ import { OwnerAuthService } from './owner-auth/service.js';
 import { OWNER_COOKIE, SERVICE_HEADER, sameOrigin } from './owner-auth/policy.js';
 import { ownerFor } from './web/route-helpers.js';
 import { EmployeeGpuIntentData, type EmployeeGpuIntent } from './employee-gpu-data.js';
+import { EmployeePolicyEditApproval } from './resource-employee-data.js';
 
 const PURPOSE = 'resource-replacement-v1';
 const RAM_PURPOSE = 'resource-ram-pool-v2';
@@ -88,6 +89,12 @@ export interface RamGpuRequestContext extends ResourceContext<typeof RAM_PURPOSE
   readonly stage: 'gpu-request';
   readonly employeeId: string;
   readonly approval: Readonly<EmployeeGpuIntent>;
+  readonly principal: Readonly<ResourceOwnerPrincipal>;
+}
+export interface RamEmployeePolicyEditContext extends ResourceContext<typeof RAM_PURPOSE> {
+  readonly stage: 'employee-policy-edit';
+  readonly employeeId: string;
+  readonly approval: EmployeePolicyEditApproval;
   readonly principal: Readonly<ResourceOwnerPrincipal>;
 }
 /** Current canonical identity DATA, meaningful only with its actual retained
@@ -175,7 +182,8 @@ export type AnyResourceContext =
   | RamResourcePreviewContext
   | RamResourceStatusContext
   | RamGpuStatusContext
-  | RamGpuRequestContext;
+  | RamGpuRequestContext
+  | RamEmployeePolicyEditContext;
 type AuthorityContext =
   | AnyResourceContext
   | PoolInstallationViewerContext
@@ -311,6 +319,7 @@ export class ResourceOwnerAuthority {
   readonly #auth: OwnerAuthService;
   readonly #epoch = randomBytes(32).toString('hex');
   readonly #contexts = new WeakSet<object>();
+  readonly #submittedEmployeePolicies = new WeakSet<RamEmployeePolicyEditContext>();
   readonly #poolViews = new WeakSet<object>();
   readonly #consentedPoolViews = new WeakSet<object>();
   readonly #fleetViews = new WeakMap<FleetPreviewContext, FleetViewerContext>();
@@ -441,6 +450,20 @@ export class ResourceOwnerAuthority {
       RAM_PURPOSE,
       Date.now() + 35_000
     );
+  }
+  captureRamEmployeePolicyEdit(
+    request: FastifyRequest,
+    employeeId: string,
+    value: EmployeePolicyEditApproval
+  ): RamEmployeePolicyEditContext {
+    need(UUID.test(employeeId) && employeeId !== NIL_UUID);
+    const approval = EmployeePolicyEditApproval.parse(value);
+    return this.#capture(request, { stage: 'employee-policy-edit' as const, employeeId, approval }, RAM_PURPOSE);
+  }
+  consumeEmployeePolicyEdit(context: RamEmployeePolicyEditContext): void {
+    this.assertContext(context);
+    need(context.stage === 'employee-policy-edit' && !this.#submittedEmployeePolicies.has(context));
+    this.#submittedEmployeePolicies.add(context);
   }
   capturePoolInstallationViewer(request: FastifyRequest): PoolInstallationViewerContext {
     return this.#capture(
@@ -644,6 +667,7 @@ export class ResourceOwnerAuthority {
       | { stage: 'status'; employeeId: string }
       | { stage: 'gpu-status'; employeeId: string; sessionId: string }
       | { stage: 'gpu-request'; employeeId: string; approval: Readonly<EmployeeGpuIntent> }
+      | { stage: 'employee-policy-edit'; employeeId: string; approval: EmployeePolicyEditApproval }
       | { stage: 'viewer' | 'fleet-viewer'; requestId: string }
       | (PoolInstallationSelection & ({ stage: 'offer' } | { stage: 'consent'; consent: true }))
       | { stage: 'fleet-preview'; requestId: string; approval: Readonly<FleetApproval> }

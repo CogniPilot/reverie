@@ -2,14 +2,27 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { CompanyService } from './company-service.js';
 import { OwnerAuthService } from './owner-auth/service.js';
-import { ResourceOwnerAuthority } from './resource-owner-authority.js';
-import { ResourceNativeClient } from './resource-native-client.js';
-import { EmployeeResourceStatus } from './resource-employee-data.js';
+import { ResourceOwnerAuthority, ResourceOwnerAuthorizationError } from './resource-owner-authority.js';
+import { ResourceNativeClient, ResourceNativeRefusal } from './resource-native-client.js';
+import {
+  EmployeePolicyEditApproval,
+  EmployeePolicyEditResult,
+  EmployeeResourceStatus,
+} from './resource-employee-data.js';
 import { NativeOwnerId } from './native-owner-data.js';
 import { ownerFor } from './web/route-helpers.js';
 import type { OwnerVerifier } from './owner-auth/marks.js';
-import { ResourceOwnerAuthorizationError } from './resource-owner-authority.js';
 import { SERVICE_HEADER } from './owner-auth/policy.js';
+
+class EmployeePolicyRouteError extends Error {
+  constructor(
+    readonly status: number,
+    readonly code: string,
+    message: string
+  ) {
+    super(message);
+  }
+}
 
 export class EmployeeResourcesService {
   readonly #authority: ResourceOwnerAuthority;
@@ -25,23 +38,27 @@ export class EmployeeResourcesService {
   close(): void {
     this.#authority.close();
   }
+  #employee(request: FastifyRequest, employeeId: string) {
+    return this.company.view(ownerFor(request)).employees.find((row) => row.id === employeeId);
+  }
+  #sameSession(request: FastifyRequest, employeeId: string, sessionId: string, generation: number): boolean {
+    const current = this.#employee(request, employeeId);
+    return current?.sessionId === sessionId && current.sessionGeneration === generation;
+  }
   async status(request: FastifyRequest, employeeId: string): Promise<EmployeeResourceStatus> {
     NativeOwnerId.parse(employeeId);
     const context = this.#authority.captureRamStatus(request, employeeId);
-    const employee = this.company.view(ownerFor(request)).employees.find((row) => row.id === employeeId);
+    const employee = this.#employee(request, employeeId);
     if (!employee || !this.socket) throw new Error('The current employee and native resource service are required');
     const sessionId = NativeOwnerId.parse(employee.sessionId);
     const client = await ResourceNativeClient.openRam(this.socket, this.#authority, context);
     try {
       const data = EmployeeResourceStatus.parse(await client.request('employee-status', { employeeId, sessionId }));
       this.#authority.assertContext(context);
-      const current = this.company.view(ownerFor(request)).employees.find((row) => row.id === employeeId);
       if (
         data.employeeId !== employeeId ||
         data.sessionId !== sessionId ||
-        !current ||
-        current.sessionId !== sessionId ||
-        current.sessionGeneration !== employee.sessionGeneration
+        !this.#sameSession(request, employeeId, sessionId, employee.sessionGeneration)
       )
         throw new Error('The original employee session changed during resource observation');
       return data;
@@ -49,6 +66,58 @@ export class EmployeeResourcesService {
       client.close();
     }
   }
+  async edit(
+    request: FastifyRequest,
+    employeeId: string,
+    approval: EmployeePolicyEditApproval
+  ): Promise<EmployeePolicyEditResult> {
+    NativeOwnerId.parse(employeeId);
+    const context = this.#authority.captureRamEmployeePolicyEdit(request, employeeId, approval);
+    const employee = this.#employee(request, employeeId);
+    if (!employee || employee.sessionId !== context.approval.sessionId)
+      throw new EmployeePolicyRouteError(
+        409,
+        'EMPLOYEE_RESOURCE_SESSION_CHANGED',
+        'This laptop session changed. Refresh the profile before editing its limits.'
+      );
+    if (!this.socket)
+      throw new EmployeePolicyRouteError(
+        503,
+        'EMPLOYEE_RESOURCE_EDIT_UNAVAILABLE',
+        'Live RAM and CPU changes are unavailable.'
+      );
+    const client = await ResourceNativeClient.openRam(this.socket, this.#authority, context);
+    try {
+      const result = EmployeePolicyEditResult.parse(
+        await client.request('employee-policy-edit', { employeeId, approval: context.approval })
+      );
+      this.#authority.assertContext(context);
+      if (!this.#sameSession(request, employeeId, context.approval.sessionId, employee.sessionGeneration))
+        throw new Error('The selected employee session changed during the original edit');
+      return result;
+    } catch (error) {
+      // A completed wire refusal is distinct from revocation, a lost reply or
+      // an uncorrelated result after dispatch. The latter disclose no facts.
+      if (error instanceof ResourceNativeRefusal) throw error;
+      throw new EmployeePolicyRouteError(
+        503,
+        'EMPLOYEE_RESOURCE_EDIT_UNCONFIRMED',
+        'The RAM and CPU change was not confirmed. Refresh the running limits before making another change.'
+      );
+    } finally {
+      client.close();
+    }
+  }
+}
+
+function isResourceOwner(verifiedOwner: OwnerVerifier, request: FastifyRequest): boolean {
+  return (
+    verifiedOwner(request) &&
+    request.headers.authorization === undefined &&
+    request.headers[SERVICE_HEADER] === undefined &&
+    request.headers['x-reverie-parent-session'] === undefined &&
+    !Object.keys(request.headers).some((name) => name.startsWith('x-reverie-goal-'))
+  );
 }
 
 /** A live native observation is required even when the ordinary auth hook is disabled. */
@@ -61,12 +130,7 @@ export function registerEmployeeResourceRoutes(
     '/api/company/resources/employees/:employeeId',
     async (request, reply) => {
       reply.header('Cache-Control', 'no-store');
-      if (
-        !verifiedOwner(request) ||
-        request.headers.authorization !== undefined ||
-        request.headers[SERVICE_HEADER] !== undefined ||
-        Object.keys(request.headers).some((name) => name.startsWith('x-reverie-goal-'))
-      )
+      if (!isResourceOwner(verifiedOwner, request))
         return reply.code(403).send({ success: false, error: 'Company owner authorization is required' });
       if (!NativeOwnerId.safeParse(request.params.employeeId).success)
         return reply.code(400).send({ success: false, error: 'Invalid employee identifier' });
@@ -77,6 +141,36 @@ export function registerEmployeeResourceRoutes(
           success: false,
           code: 'EMPLOYEE_RESOURCE_OBSERVATION_UNAVAILABLE',
           error: 'The original native employee resource observation is unavailable',
+        });
+      }
+    }
+  );
+  app.post<{ Params: { employeeId: string } }>(
+    '/api/company/resources/employees/:employeeId/policy',
+    async (request, reply) => {
+      reply.header('Cache-Control', 'no-store');
+      if (!isResourceOwner(verifiedOwner, request))
+        return reply.code(403).send({ success: false, error: 'Company owner authorization is required' });
+      const approval = EmployeePolicyEditApproval.safeParse(request.body);
+      if (!NativeOwnerId.safeParse(request.params.employeeId).success || !approval.success)
+        return reply.code(400).send({ success: false, error: 'Invalid RAM and CPU settings' });
+      try {
+        return { success: true, data: await service.edit(request, request.params.employeeId, approval.data) };
+      } catch (error) {
+        if (error instanceof ResourceOwnerAuthorizationError)
+          return reply.code(403).send({ success: false, error: 'Company owner authorization is required' });
+        if (error instanceof EmployeePolicyRouteError)
+          return reply.code(error.status).send({ success: false, errorCode: error.code, error: error.message });
+        if (error instanceof ResourceNativeRefusal)
+          return reply.code(409).send({
+            success: false,
+            errorCode: error.reason,
+            error: 'The native controller refused the RAM and CPU change. Refresh the running limits.',
+          });
+        return reply.code(503).send({
+          success: false,
+          errorCode: 'EMPLOYEE_RESOURCE_EDIT_UNAVAILABLE',
+          error: 'Live RAM and CPU changes are unavailable.',
         });
       }
     }

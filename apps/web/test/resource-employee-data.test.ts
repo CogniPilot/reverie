@@ -1,6 +1,6 @@
 /** Wire consistency controls, without fabricated host authority or effects. */
 import { expect, it } from 'vitest';
-import { EmployeeResourceStatus } from '../src/resource-employee-data.js';
+import { EmployeePolicyEditApproval, EmployeeResourceStatus } from '../src/resource-employee-data.js';
 const requested = {
   memoryHighMiB: 8192,
   memoryMaxMiB: 49152,
@@ -56,7 +56,8 @@ it('refuses invented running observations, capability promotion and malformed na
     { ...status(), requested: null },
     { ...status(), state: 'stopped' },
     { ...status(), perfObserved: true },
-    { ...status(), capabilities: { ...status().capabilities, softMemoryLive: true } },
+    { ...status(), capabilities: { ...status().capabilities, hardMemoryReplacement: true } },
+    { ...status(), state: 'stopped', observed: null, capabilities: { ...status().capabilities, softMemoryLive: true } },
     { ...status(), observed: { ...observation, cpuWeight: 0 } },
     { ...status(), observed: { ...observation, memoryCurrentBytes: '18446744073709551616' } },
     { ...status(), observed: { ...observation, allowedCpus: [0, 0] } },
@@ -65,4 +66,27 @@ it('refuses invented running observations, capability promotion and malformed na
   expect(
     EmployeeResourceStatus.parse({ ...status(), state: 'uninstalled', requested: null, observed: null }).observed
   ).toBeNull();
+});
+
+it('decodes native live capabilities without making the GET observation an edit', () => {
+  const value = status();
+  value.capabilities.softMemoryLive = true;
+  value.capabilities.cpuWeightLive = true;
+  expect(EmployeeResourceStatus.parse(value)).toMatchObject({
+    capabilities: { softMemoryLive: true, cpuWeightLive: true },
+    readOnly: true,
+  });
+});
+
+it('freezes the exact five approval fields and refuses extra data', () => {
+  const value = {
+    sessionId: status().sessionId,
+    operationId: status().employeeId,
+    expectedRevision: status().revision,
+    memoryHighMiB: 49152,
+    cpuWeight: 10000,
+  };
+  expect(EmployeePolicyEditApproval.parse(value)).toEqual(value);
+  expect(Object.isFrozen(EmployeePolicyEditApproval.parse(value))).toBe(true);
+  expect(EmployeePolicyEditApproval.safeParse({ ...value, memoryMaxMiB: 49152 }).success).toBe(false);
 });

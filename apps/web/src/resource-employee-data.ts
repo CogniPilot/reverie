@@ -8,6 +8,31 @@ const Decimal = z
   .refine((value) => BigInt(value) <= 18446744073709551615n);
 const Limit = z.union([z.literal('max'), Decimal]);
 const CpuWeight = z.number().int().min(1).max(10000);
+const MemoryHighMiB = z.number().int().min(1).max(49152);
+const Revision = z.string().regex(/^[a-f0-9]{64}$/);
+export const EmployeePolicyEditApproval = z
+  .object({
+    sessionId: NativeOwnerId,
+    operationId: NativeOwnerId,
+    expectedRevision: Revision,
+    memoryHighMiB: MemoryHighMiB,
+    cpuWeight: CpuWeight,
+  })
+  .strict()
+  .readonly();
+export type EmployeePolicyEditApproval = z.infer<typeof EmployeePolicyEditApproval>;
+export const EmployeePolicyEditResult = z
+  .object({
+    version: z.literal(1),
+    employeeId: NativeOwnerId,
+    sessionId: NativeOwnerId,
+    operationId: NativeOwnerId,
+    state: z.literal('applied'),
+    memoryHighMiB: MemoryHighMiB,
+    cpuWeight: CpuWeight,
+  })
+  .strict();
+export type EmployeePolicyEditResult = z.infer<typeof EmployeePolicyEditResult>;
 const Cpus = z
   .array(z.number().int().min(0).max(65535))
   .min(1)
@@ -15,7 +40,7 @@ const Cpus = z
   .refine((values) => values.every((value, index) => index === 0 || values[index - 1] < value));
 export const EmployeeResourceRequested = z
   .object({
-    memoryHighMiB: z.number().int().positive().max(49152).nullable(),
+    memoryHighMiB: MemoryHighMiB.nullable(),
     memoryMaxMiB: z.literal(49152),
     cpuWeight: CpuWeight,
     allowedCpus: Cpus,
@@ -44,7 +69,7 @@ export const EmployeeResourceStatus = z
     version: z.literal(1),
     employeeId: NativeOwnerId,
     sessionId: NativeOwnerId,
-    revision: z.string().regex(/^[a-f0-9]{64}$/),
+    revision: Revision,
     state: z.enum(['uninstalled', 'absent', 'stopped', 'controller-unavailable', 'running']),
     requested: EmployeeResourceRequested.nullable(),
     observed: EmployeeResourceObserved.nullable(),
@@ -52,8 +77,8 @@ export const EmployeeResourceStatus = z
     perfObservationReason: z.literal('OWN_PROCESS_PROBE_REQUIRED'),
     capabilities: z
       .object({
-        softMemoryLive: z.literal(false),
-        cpuWeightLive: z.literal(false),
+        softMemoryLive: z.boolean(),
+        cpuWeightLive: z.boolean(),
         hardMemoryReplacement: z.literal(false),
         perfReplacement: z.literal(false),
         gpuReplacement: z.literal(false),
@@ -65,7 +90,9 @@ export const EmployeeResourceStatus = z
   .superRefine((value, context) => {
     if (
       (value.state === 'running') !== (value.observed !== null) ||
-      (value.state === 'uninstalled') !== (value.requested === null)
+      (value.state === 'uninstalled') !== (value.requested === null) ||
+      ((value.capabilities.softMemoryLive || value.capabilities.cpuWeightLive) &&
+        (value.state !== 'running' || value.requested?.memoryHighMiB == null))
     ) {
       context.addIssue({ code: 'custom', message: 'Native resource state and observations disagree' });
     }

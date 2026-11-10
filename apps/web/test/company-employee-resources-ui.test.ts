@@ -50,7 +50,13 @@ const running = (): EmployeeResourceStatus => ({
   readOnly: true,
 });
 type Reply = { ok: boolean; data?: unknown; status?: number; error?: string };
-async function setup(options: { reply?: () => Reply | Promise<Reply>; verified?: boolean } = {}) {
+async function setup(
+  options: {
+    reply?: () => Reply | Promise<Reply>;
+    edit?: (body: Record<string, unknown>) => Reply | Promise<Reply>;
+    verified?: boolean;
+  } = {}
+) {
   const employee = {
     id: employeeId,
     sessionId: cachedSid,
@@ -71,6 +77,7 @@ async function setup(options: { reply?: () => Reply | Promise<Reply>; verified?:
   h.app._chatApi = async (path: string, request?: any) => {
     calls.push({ path, method: request?.method ?? 'GET', body: request?.body });
     if (path === endpoint) return options.reply ? options.reply() : { ok: true, data: running() };
+    if (path === endpoint + '/policy' && options.edit) return options.edit(request.body);
     if (path === '/api/company') return { ok: true, data: structuredClone(company) };
     if (path === '/api/chatrooms/phone-status')
       return {
@@ -179,9 +186,9 @@ it.each([
     },
   ],
   [
-    'unexpected edit capability',
+    'unexpected hard memory edit capability',
     (data: any) => {
-      data.capabilities.softMemoryLive = true;
+      data.capabilities.hardMemoryReplacement = true;
     },
   ],
 ] as const)('refuses %s data without presenting fabricated verification or controls', async (_label, mutate) => {
@@ -246,4 +253,90 @@ it('does not mount or fetch native status when owner authorization changes befor
   expect(panel()).toBeNull();
   expect(resourceCalls()).toEqual([]);
   noEffects();
+});
+
+const editable = () => {
+  const value = running();
+  value.capabilities.softMemoryLive = true;
+  value.capabilities.cpuWeightLive = true;
+  return value;
+};
+
+it('leaves the summary read-only if only one live capability is present', async () => {
+  const value = editable();
+  value.capabilities.cpuWeightLive = false;
+  const { panel, noEffects } = await setup({ reply: () => ({ ok: true, data: value }) });
+  expect(cells(panel()!, 'Soft RAM')).toEqual(['8 GiB', '4 GiB']);
+  expect(panel()!.querySelector('form')).toBeNull();
+  noEffects();
+});
+
+it('dispatches a single edit from fresh native status and refreshes the verified table after correlated success', async () => {
+  let current = editable();
+  let release!: (reply: Reply) => void;
+  const { h, panel, resourceCalls } = await setup({
+    reply: () => ({ ok: true, data: current }),
+    edit: () =>
+      new Promise<Reply>((resolve) => {
+        release = resolve;
+      }),
+  });
+  const form = panel()!.querySelector('form')!;
+  const submit = form.querySelector<HTMLButtonElement>('button[type="submit"]')!;
+  form.querySelector<HTMLInputElement>('[name="memoryHighMiB"]')!.value = '12288';
+  form.querySelector<HTMLInputElement>('[name="cpuWeight"]')!.value = '180';
+  expect(submit.textContent).toBe('Apply RAM and CPU limits');
+  submit.click();
+  submit.click();
+  await h.flush();
+  expect(resourceCalls().map(({ method }) => method)).toEqual(['GET', 'POST']);
+  expect(panel()!.querySelector('form')).toBeNull();
+  const body = resourceCalls()[1].body as Record<string, unknown>;
+  expect(body).toEqual({
+    sessionId: currentSid,
+    operationId: expect.stringMatching(/^[a-f0-9-]{36}$/),
+    expectedRevision: 'a'.repeat(64),
+    memoryHighMiB: 12288,
+    cpuWeight: 180,
+  });
+  current = editable();
+  current.revision = 'f'.repeat(64);
+  current.requested!.memoryHighMiB = 12288;
+  current.requested!.cpuWeight = 180;
+  current.observed!.memoryHighBytes = String(12288 * 1048576);
+  current.observed!.cpuWeight = 180;
+  release({
+    ok: true,
+    data: {
+      version: 1,
+      employeeId,
+      sessionId: body.sessionId,
+      operationId: body.operationId,
+      state: 'applied',
+      memoryHighMiB: body.memoryHighMiB,
+      cpuWeight: body.cpuWeight,
+    },
+  });
+  await h.flush();
+  expect(resourceCalls().map(({ method }) => method)).toEqual(['GET', 'POST', 'GET']);
+  expect(cells(panel()!, 'Soft RAM')).toEqual(['12 GiB', '12 GiB']);
+  expect(cells(panel()!, 'CPU share weight')).toEqual(['180', '180']);
+  expect(panel()!.querySelector('[role="status"]')?.textContent).toContain('Change applied. Running limits verified');
+});
+
+it('keeps a visible unconfirmed error and never resends an edit', async () => {
+  const error = 'The RAM and CPU change was not confirmed.';
+  const { h, panel, resourceCalls, refresh } = await setup({
+    reply: () => ({ ok: true, data: editable() }),
+    edit: () => ({ ok: false, status: 503, error }),
+  });
+  panel()!.querySelector<HTMLButtonElement>('button[type="submit"]')!.click();
+  await h.flush();
+  expect(panel()!.querySelector('[role="alert"]')?.textContent).toBe(error);
+  expect(panel()!.querySelector('form')).toBeNull();
+  expect(cells(panel()!, 'Soft RAM')).toEqual(['8 GiB', '4 GiB']);
+  expect(resourceCalls().map(({ method }) => method)).toEqual(['GET', 'POST']);
+  refresh().click();
+  await h.flush();
+  expect(resourceCalls().map(({ method }) => method)).toEqual(['GET', 'POST', 'GET']);
 });
