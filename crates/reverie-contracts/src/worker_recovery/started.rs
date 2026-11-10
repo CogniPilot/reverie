@@ -233,4 +233,39 @@ mod tests {
         changed[0]["HostConfig"]["Memory"] = json!(2147483648.0);
         assert!(row.same_memory_observation(&decode(&changed)).unwrap());
     }
+    #[test]
+    fn website_inspection_tolerates_mount_order_but_preserves_every_row_and_field() {
+        let (fixture, _, cid, _) = fixture();
+        let mut original = fixture[0].clone();
+        let first = json!({"Type":"bind","Source":"/private/data","Destination":"/data","RW":true});
+        let second =
+            json!({"Type":"bind","Source":"/nix/store","Destination":"/nix/store","RW":false});
+        original["Mounts"] = json!([first, second, first]);
+        let mut reordered = original.clone();
+        reordered["Mounts"] = json!([second, first, first]);
+        let compare = |other: &Json| {
+            RecoveryInspection::same_container_object_inspection(
+                cid.as_str(),
+                &serde_json::to_vec(&original).unwrap(),
+                &serde_json::to_vec(other).unwrap(),
+            )
+        };
+        assert!(compare(&reordered).unwrap());
+        for (path, replacement) in [
+            ("/Mounts", json!([second, first])),
+            ("/Mounts/0/RW", json!(true)),
+            ("/Mounts/1/Source", json!("/different")),
+            ("/State/Pid", json!(322)),
+            ("/HostConfig/Memory", json!(4096)),
+        ] {
+            let mut changed = reordered.clone();
+            *changed.pointer_mut(path).unwrap() = replacement;
+            assert!(!compare(&changed).unwrap(), "{path}");
+        }
+        let mut changed = reordered;
+        changed["ExtraDaemonField"] = json!("changed");
+        assert!(!compare(&changed).unwrap());
+        changed["Id"] = json!("d".repeat(64));
+        assert!(compare(&changed).is_err());
+    }
 }

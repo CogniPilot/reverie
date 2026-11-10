@@ -375,3 +375,54 @@ describe('Company Settings laptop fleet', () => {
     expect(section().querySelector('img,script')).toBeNull();
   });
 });
+
+describe('Failed native shared pool setup recovery', () => {
+  const operationId = '33333333-4444-4555-8666-777777777777';
+  const key = 'reverie:native-pool-migration:owner';
+  it('preserves UNKNOWN history and requires a new review without replaying activation or starts', async () => {
+    const { h, button, calls } = await setup({
+      saved: { [key]: JSON.stringify({ operationId }) },
+      replies: {
+        '/native-reconcile': () => ({
+          ok: true,
+          data: {
+            operationId,
+            priorOutcome: 'unconfirmed',
+            currentState: 'pool-uninstalled',
+            historyRecorded: true,
+            evidenceDigest: 'e'.repeat(64),
+            observationNonce: '44444444-5555-4666-8777-888888888888',
+            startsAuthorized: false,
+            activationAuthorized: false,
+          },
+        }),
+      },
+    });
+    button('Recover setup after a failed activation').click();
+    await h.flush();
+    expect(h.window.localStorage.getItem(key)).toBeNull();
+    expect(JSON.parse(h.window.localStorage.getItem(key + ':unconfirmed-history'))).toMatchObject([
+      { operationId, priorOutcome: 'unconfirmed', evidenceDigest: 'e'.repeat(64) },
+    ]);
+    expect(button('Review host-selected migration')).not.toBeNull();
+    expect(calls.filter((row) => row.path.endsWith('/native-reconcile'))).toHaveLength(1);
+    expect(calls.some((row) => /native-(apply|preview)$/.test(row.path))).toBe(false);
+  });
+  it('keeps the pending reference when the recovery reply is lost', async () => {
+    const original = JSON.stringify({ operationId });
+    const { h, button, calls } = await setup({
+      saved: { [key]: original },
+      replies: {
+        '/native-reconcile': () => {
+          throw new Error('lost reply');
+        },
+      },
+    });
+    button('Recover setup after a failed activation').click();
+    await h.flush();
+    expect(h.window.localStorage.getItem(key)).toBe(original);
+    expect(h.window.localStorage.getItem(key + ':unconfirmed-history')).toBeNull();
+    expect(button('Recover setup after a failed activation')).not.toBeNull();
+    expect(calls.some((row) => /native-(apply|preview)$/.test(row.path))).toBe(false);
+  });
+});
