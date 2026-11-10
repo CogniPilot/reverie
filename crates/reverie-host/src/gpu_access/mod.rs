@@ -3,6 +3,8 @@
 mod active;
 mod consumers;
 mod current;
+mod preflight;
+pub use preflight::{preflight_binding, preflight_configuration};
 mod files;
 pub(crate) use files::WorkerProtectedStores;
 #[cfg(test)]

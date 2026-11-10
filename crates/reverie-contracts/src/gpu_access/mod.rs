@@ -7,6 +7,7 @@ mod current;
 mod engine;
 mod native_row;
 mod peers;
+pub mod preflight;
 mod queue;
 mod status;
 mod transition;

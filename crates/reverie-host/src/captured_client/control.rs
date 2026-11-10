@@ -53,6 +53,7 @@ pub(super) struct Job {
     pub(super) policy: Policy,
     pub(super) nix_tail: bool,
     pub(super) stdout_only: bool,
+    pub(super) raw_stdout: bool,
     #[cfg(test)]
     pub(super) hooks: super::test_hooks::Hooks,
 }
@@ -119,6 +120,7 @@ enum ExecutionMode {
     CombinedWaiting,
     NixTail,
     GoalStdout,
+    GpuPreflightStdout,
 }
 impl CallFailure {
     fn before_admission(error: EngineError) -> Self {
@@ -417,6 +419,25 @@ impl CapturedClient {
             ExecutionMode::GoalStdout,
         )
     }
+    /// The closed GPU preflight reader accepts JSON bytes (including Python's
+    /// byte-JSON BOM encodings) and discards stderr at spawn. It retains the
+    /// same admitted native job, absolute deadline and checked finalizers.
+    pub(crate) fn run_gpu_preflight(
+        &self,
+        args: Vec<OsString>,
+        deadline: Instant,
+        cancellation: &CancellationToken,
+        policy: Policy,
+    ) -> std::result::Result<CapturedOutput, CallFailure> {
+        self.run_owned(
+            args,
+            deadline,
+            cancellation,
+            policy,
+            &mut None,
+            ExecutionMode::GpuPreflightStdout,
+        )
+    }
     /// The closed guest bootstrap alone streams a one-shot installed
     /// registration file and retains diagnostic tails. Failed admission leaves
     /// input with its caller; admitted input belongs to Process before the
@@ -480,7 +501,9 @@ impl CapturedClient {
                 Err(error)
                     if matches!(
                         mode,
-                        ExecutionMode::CombinedWaiting | ExecutionMode::GoalStdout
+                        ExecutionMode::CombinedWaiting
+                            | ExecutionMode::GoalStdout
+                            | ExecutionMode::GpuPreflightStdout
                     ) && error.is_admission_busy() =>
                 {
                     #[cfg(test)]
@@ -568,7 +591,11 @@ impl CapturedClient {
             }),
             policy,
             nix_tail: matches!(mode, ExecutionMode::NixTail),
-            stdout_only: matches!(mode, ExecutionMode::GoalStdout),
+            stdout_only: matches!(
+                mode,
+                ExecutionMode::GoalStdout | ExecutionMode::GpuPreflightStdout
+            ),
+            raw_stdout: matches!(mode, ExecutionMode::GpuPreflightStdout),
             #[cfg(test)]
             hooks: self.bootstrap.hooks.clone(),
         });

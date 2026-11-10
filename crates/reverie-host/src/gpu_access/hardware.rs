@@ -1,4 +1,5 @@
 use super::*;
+use reverie_core::device_policy::NvidiaCdiDevice;
 use reverie_core::gpu_access::{GpuChoice, GpuDeviceUuid, PhysicalGpu};
 use std::{
     collections::BTreeSet,
@@ -24,6 +25,14 @@ impl GpuHardware {
             root: Path::new(GPU_ROOT),
         }
         .physical(device)
+    }
+    /// Standalone preflight preserves the caller's valid CDI UUID spelling;
+    /// the queue's separate lowercase representation is not imposed here.
+    pub fn physical_device(device: &NvidiaCdiDevice) -> Result<PhysicalGpu> {
+        Driver {
+            root: Path::new(GPU_ROOT),
+        }
+        .physical_device(device)
     }
     pub fn engine_information(
         engine: &crate::engine_metadata::ReadonlyEngine,
@@ -76,10 +85,13 @@ impl Driver<'_> {
         Ok(choices)
     }
     fn physical(&self, device: &GpuDeviceUuid) -> Result<PhysicalGpu> {
+        self.physical_device(&device.device())
+    }
+    fn physical_device(&self, device: &NvidiaCdiDevice) -> Result<PhysicalGpu> {
         let mut selected = Vec::new();
         for (index, entry) in fs::read_dir(self.root)?.enumerate() {
             let entry = information_entry(entry?, index, 64)?;
-            if let Some(value) = PhysicalGpu::selected(&information(&entry)?, &device.device())? {
+            if let Some(value) = PhysicalGpu::selected(&information(&entry)?, device)? {
                 selected.push(value);
             }
         }

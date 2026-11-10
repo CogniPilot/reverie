@@ -68,6 +68,13 @@ impl Clone for EffectiveWorkerConfig {
     }
 }
 impl EffectiveWorkerConfig {
+    /// Preserve the already decoded private metadata's Python-byte JSON and
+    /// insertion order. This adds no file custody or worker validation claim.
+    pub fn from_private_metadata(
+        metadata: &crate::storage_identity::OrderedMetadata,
+    ) -> Result<Self, WorkerConfigError> {
+        Self::from_ordered(metadata.ordered().clone())
+    }
     pub(crate) fn patch_employee_perf_policy(
         &mut self,
         employee: &reverie_core::ids::ProfileEmployeeId,

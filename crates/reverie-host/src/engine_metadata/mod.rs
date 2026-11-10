@@ -3,9 +3,11 @@
 //! commands, owner authorization, engine identity or mutation permission.
 mod bootstrap;
 mod control;
+mod gpu_preflight;
 #[cfg(test)]
 mod installed_context_tests;
 mod owner;
+pub use gpu_preflight::{GpuPreflightEngine, GpuPreflightQuery};
 #[cfg(test)]
 pub(crate) mod tests;
 pub use bootstrap::EngineBootstrap;

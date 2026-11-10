@@ -5,6 +5,7 @@ use reverie_contracts::{
     gpu_access::{CdiDocument, CdiSelectedEdits, GpuEngineInformation},
     storage_identity::MetadataText,
 };
+use reverie_core::device_policy::NvidiaCdiDevice;
 use reverie_core::{gpu_access::GpuDeviceUuid, posix_path::PosixPath};
 use std::{
     fs,
@@ -55,6 +56,15 @@ impl GpuHardware {
         device: &GpuDeviceUuid,
         end: Instant,
     ) -> Result<CdiObservation> {
+        Self::cdi_device(info, &device.device(), end)
+    }
+    /// Exact standalone device spelling. This is still only the existing
+    /// numeric/edit observation; the complete preflight report is separate.
+    pub fn cdi_device(
+        info: &GpuEngineInformation,
+        device: &NvidiaCdiDevice,
+        end: Instant,
+    ) -> Result<CdiObservation> {
         let end = end.min(Instant::now() + Duration::from_secs(5));
         let mut count = 0;
         let mut total = 0;
@@ -72,7 +82,7 @@ impl GpuHardware {
 }
 fn selected_entries(
     entries: Vec<PosixPath>,
-    device: &GpuDeviceUuid,
+    device: &NvidiaCdiDevice,
     end: Instant,
     total: &mut usize,
 ) -> Result<Vec<CdiObservation>> {
@@ -92,7 +102,7 @@ fn selected_entries(
             "GPU_CDI_BOUND_OR_DEADLINE",
         )?;
         let document = CdiDocument::decode(&raw)?;
-        if let Some(edits) = document.selected(&device.device())? {
+        if let Some(edits) = document.selected(device)? {
             selected.push(CdiObservation {
                 path,
                 stamp,

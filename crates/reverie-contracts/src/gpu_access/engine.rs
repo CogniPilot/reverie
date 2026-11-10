@@ -4,6 +4,13 @@ use crate::{legacy_json, storage_identity::MetadataText};
 /// ordinary last-key-wins/nonfinite Python-str JSON equality for the recheck.
 pub struct GpuEngineInformation(Value);
 impl GpuEngineInformation {
+    /// Standalone preflight calls json.loads on raw subprocess bytes. Keep its
+    /// BOM/UTF16/32 detection separate from the broker's decoded-str reader.
+    pub fn decode_preflight(stdout: &[u8]) -> Result<Self> {
+        Ok(Self(
+            legacy_json::decode_loads_bytes(stdout).map_err(|_| GpuDataError::CdiDocument)?,
+        ))
+    }
     pub fn decode(stdout: &[u8]) -> Result<Self> {
         Ok(Self(
             legacy_json::decode_python_str(stdout).map_err(|_| GpuDataError::CdiDocument)?,
