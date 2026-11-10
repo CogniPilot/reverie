@@ -13,6 +13,17 @@ pub(in crate::worker_service) struct StopPendingTakeover {
     close_attempted: bool,
     archive: Option<(PathBuf, native::PrivateFileStamp, u32)>,
 }
+struct StopOrigin<'a> {
+    old: &'a Path,
+    expected: &'a ExpectedCommands,
+    source: &'a publication::SourceSnapshot,
+    pending: &'a Path,
+    stamp: &'a native::PrivateFileStamp,
+    group: u32,
+    original: usize,
+    stopped: &'a ServiceGroupData,
+}
+const RECOVERY_DENIAL: &[u8] = b"NATIVE_STOP_RECOVERY_DENIAL_V1\n";
 impl StopPendingTakeover {
     fn empty() -> Self {
         Self {
@@ -154,7 +165,16 @@ impl State {
         // Existing old binaries do not take update.lock. Keep an ORIGINAL
         // run/failure fence across archive -> exclusive new pending, so an old
         // broker cannot start through that short name-change interval.
-        let barrier = self.stop_pending_barrier()?;
+        let barrier = self.stop_pending_barrier(&StopOrigin {
+            old,
+            expected,
+            source,
+            pending: &path,
+            stamp: &stamp,
+            group,
+            original,
+            stopped: &group_proof,
+        })?;
         let history = self.upgrade_history(old, &source.digest, true)?;
         self.assert_upgrade_stopped(old, expected, true)?;
         self.assert_force_group_current(&group_proof)?;
@@ -204,7 +224,10 @@ impl State {
         result?;
         Ok(Some(history))
     }
-    fn stop_pending_barrier(&self) -> Result<(PathBuf, native::PrivateFileStamp)> {
+    fn stop_pending_barrier(
+        &mut self,
+        origin: &StopOrigin<'_>,
+    ) -> Result<(PathBuf, native::PrivateFileStamp)> {
         for name in ["native-failure", "native-running"] {
             let path = self.folder().join(name);
             match fs::symlink_metadata(&path) {
@@ -216,8 +239,89 @@ impl State {
                 }
             }
         }
-        Err(WorkerServiceError::Refused(
-            "NATIVE_SERVICE_STOP_TAKEOVER_REQUIRES_RETAINED_RUN_FENCE",
-        ))
+        self.publish_stop_recovery_denial(origin)
+    }
+    fn assert_stop_origin(&mut self, origin: &StopOrigin<'_>) -> Result<()> {
+        self.assert_upgrade_stopped(origin.old, origin.expected, true)?;
+        self.assert_force_group_current(origin.stopped)?;
+        self.stop_takeover
+            .as_mut()
+            .expect("same original takeover")
+            .current()?;
+        need(
+            self.source_snapshot()?.raw == origin.source.raw,
+            "NATIVE_SERVICE_UPGRADE_SOURCE_CHANGED",
+        )?;
+        need(
+            native::PrivateFileStamp::of(&fs::symlink_metadata(origin.pending)?) == *origin.stamp
+                && fs::symlink_metadata(origin.pending)?.gid() == origin.group
+                && native::PrivateFileStamp::of(&self.files[origin.original].metadata()?)
+                    == *origin.stamp,
+            "NATIVE_SERVICE_STOP_PENDING_CHANGED",
+        )
+    }
+    fn publish_stop_recovery_denial(
+        &mut self,
+        origin: &StopOrigin<'_>,
+    ) -> Result<(PathBuf, native::PrivateFileStamp)> {
+        need(
+            !self.uncertain,
+            "NATIVE_SERVICE_STOP_RECOVERY_ALREADY_UNCONFIRMED",
+        )?;
+        self.assert_stop_origin(origin)?;
+        let folder = self.folder();
+        let directory = self.open_directory(&folder)?;
+        let identity = native::private_goal::identity(&self.files[directory].metadata()?);
+        self.assert_stop_origin(origin)?;
+        need(
+            native::private_goal::identity(&fs::symlink_metadata(&folder)?) == identity,
+            "NATIVE_SERVICE_STOP_RECOVERY_DIRECTORY_CHANGED",
+        )?;
+        let (path, stamp) = self.write_stop_recovery_denial(directory, &folder)?;
+        self.assert_stop_origin(origin)?;
+        need(
+            native::private_goal::identity(&self.files[directory].metadata()?) == identity
+                && native::private_goal::identity(&fs::symlink_metadata(&folder)?) == identity
+                && native::PrivateFileStamp::of(&fs::symlink_metadata(&path)?) == stamp,
+            "NATIVE_SERVICE_STOP_RECOVERY_DENIAL_CHANGED",
+        )?;
+        // This new publication is known. The old STOP remains UNKNOWN, both
+        // names deny startup, and original checked closure still follows.
+        self.uncertain = false;
+        Ok((path, stamp))
+    }
+    fn write_stop_recovery_denial(
+        &mut self,
+        directory: usize,
+        folder: &Path,
+    ) -> Result<(PathBuf, native::PrivateFileStamp)> {
+        self.attempted = true;
+        self.uncertain = true;
+        let writer = native::create_policy_temporary(
+            &self.files[directory],
+            std::ffi::OsStr::new("native-failure"),
+        )?;
+        self.files.push(writer);
+        let writer = self.files.len() - 1;
+        self.files[writer].write_all(RECOVERY_DENIAL)?;
+        self.files[writer].sync_all()?;
+        self.files[directory].sync_all()?;
+        let path = folder.join("native-failure");
+        private(&path, false)?;
+        let stamp = native::PrivateFileStamp::of(&self.files[writer].metadata()?);
+        need(
+            native::PrivateFileStamp::of(&fs::symlink_metadata(&path)?) == stamp
+                && self.read_private(&path)?.as_bytes() == RECOVERY_DENIAL,
+            "NATIVE_SERVICE_STOP_RECOVERY_DENIAL_CHANGED",
+        )?;
+        Ok((path, stamp))
+    }
+    #[cfg(test)]
+    pub(in crate::worker_service) fn stop_recovery_denial_for_test(
+        &mut self,
+    ) -> Result<(PathBuf, native::PrivateFileStamp)> {
+        let folder = self.folder();
+        let directory = self.open_directory(&folder)?;
+        self.write_stop_recovery_denial(directory, &folder)
     }
 }

@@ -1,6 +1,11 @@
 use super::*;
 use std::os::unix::fs::PermissionsExt;
 fn selection() -> (State, PathBuf, PathBuf, PathBuf) {
+    selection_with_action(WorkerServiceAction::Upgrade {
+        force_stopped: false,
+    })
+}
+fn selection_with_action(action: WorkerServiceAction) -> (State, PathBuf, PathBuf, PathBuf) {
     let (mut state, root, program) = fixture_mode("native-worker-manager-rollback");
     state.root = root.join("reverie");
     state.source = state.root.join("worker.json");
@@ -24,11 +29,7 @@ fn selection() -> (State, PathBuf, PathBuf, PathBuf) {
     }
     let history = state.folder().join("history");
     fs::DirBuilder::new().mode(0o700).create(&history).unwrap();
-    state
-        .begin_attempt(&WorkerServiceAction::Upgrade {
-            force_stopped: false,
-        })
-        .unwrap();
+    state.begin_attempt(&action).unwrap();
     (state, root, program, history)
 }
 #[test]
@@ -116,6 +117,54 @@ fn forced_marker_archival_preserves_unknown_bytes_and_never_touches_resource_pen
         b"original R unknown; no clear permission"
     );
     assert!(state.folder().join("pending").is_file());
+    fs::remove_dir_all(root).unwrap();
+}
+#[test]
+fn never_running_stop_recovery_keeps_a_genuine_denial_until_upgrade_archives_it() {
+    let (mut state, root, _, history) = selection_with_action(WorkerServiceAction::Stop);
+    let pending = state.folder().join("pending");
+    assert!(!state.folder().join("native-running").exists());
+    let (barrier, _) = state.stop_recovery_denial_for_test().unwrap();
+    assert_eq!(
+        fs::read(&barrier).unwrap(),
+        b"NATIVE_STOP_RECOVERY_DENIAL_V1\n"
+    );
+    assert!(crate::worker_service::failure_fence::assert_failure_absent(&barrier).is_err());
+    assert_eq!(
+        fs::read(&pending).unwrap(),
+        pending_bytes(&WorkerServiceAction::Stop)
+    );
+    assert!(state.attempted && state.uncertain);
+    state.archive_old_markers(&history).unwrap();
+    assert_eq!(
+        fs::read(history.join("native-failure")).unwrap(),
+        b"NATIVE_STOP_RECOVERY_DENIAL_V1\n"
+    );
+    assert!(pending.is_file());
+    assert_eq!(
+        state.close().unwrap_err().code(),
+        "NATIVE_SERVICE_ORIGINAL_EFFECT_RETAINED"
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+#[test]
+fn racing_recovery_denial_never_overwrites_existing_history_or_releases_stop() {
+    let (mut state, root, _, _) = selection_with_action(WorkerServiceAction::Stop);
+    let pending = state.folder().join("pending");
+    let barrier = state.folder().join("native-failure");
+    fs::write(&barrier, b"earlier UNKNOWN record").unwrap();
+    fs::set_permissions(&barrier, fs::Permissions::from_mode(0o600)).unwrap();
+    assert!(state.stop_recovery_denial_for_test().is_err());
+    assert_eq!(fs::read(&barrier).unwrap(), b"earlier UNKNOWN record");
+    assert_eq!(
+        fs::read(pending).unwrap(),
+        pending_bytes(&WorkerServiceAction::Stop)
+    );
+    assert!(state.attempted && state.uncertain);
+    assert_eq!(
+        state.close().unwrap_err().code(),
+        "NATIVE_SERVICE_ORIGINAL_EFFECT_RETAINED"
+    );
     fs::remove_dir_all(root).unwrap();
 }
 #[test]
