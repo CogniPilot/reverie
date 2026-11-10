@@ -22,6 +22,39 @@ fn policy() -> WorkerPoolPolicy {
         )]),
     }
 }
+
+#[test]
+#[ignore = "requires explicitly selected private recorded birth and failed inspection DATA; no native effects"]
+fn recorded_failed_service_v2_preserves_actual_readback_and_rejects_environment_overrides() {
+    use sha2::{Digest, Sha256};
+    let birth_bytes =
+        std::fs::read(std::env::var_os("REVERIE_POOL_RECORDED_BIRTH").unwrap()).unwrap();
+    let birth = ControllerBirthV2::decode(&birth_bytes).unwrap();
+    let raw = std::fs::read(std::env::var_os("REVERIE_POOL_RECORDED_INSPECTION").unwrap()).unwrap();
+    let value: Value = serde_json::from_slice(&raw).unwrap();
+    let cid = value["Id"].as_str().unwrap();
+    let name = value["Name"].as_str().unwrap().strip_prefix('/').unwrap();
+    let digest = value["Config"]["Labels"]["reverie.pool.birth-policy"]
+        .as_str()
+        .unwrap();
+    assert_eq!(format!("{:x}", Sha256::digest(&birth_bytes)), digest);
+    let check = |bytes: &[u8]| {
+        validate_failed_controller_service_v2_inspection(bytes, birth.policy(), cid, digest, name)
+    };
+    check(&raw).unwrap();
+    assert!(
+        validate_controller_service_v2_inspection(&raw, birth.policy(), cid, 0, digest).is_err()
+    );
+    for env in [
+        json!(["LANG=C.UTF-8", "PATH=/bin", "EXTRA=1"]),
+        json!(["LANG=C.UTF-8", "LANG=C.UTF-8"]),
+        json!(["LANG=C.UTF-8", "PATH=/other"]),
+    ] {
+        let mut changed = value.clone();
+        changed["Config"]["Env"] = env;
+        assert!(check(&serde_json::to_vec(&changed).unwrap()).is_err());
+    }
+}
 fn controller(policy: &WorkerPoolPolicy) -> Value {
     let digest = "d".repeat(64);
     let mounts = [

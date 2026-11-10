@@ -1,5 +1,90 @@
 use super::*;
+use crate::worker_service::stopped::bus::BusReader;
 use std::os::unix::fs::PermissionsExt;
+#[test]
+fn failed_reset_is_fixed_unit_only_and_keeps_denial_and_original_manager_invocation() {
+    let (mut state, root, _, _) = selection();
+    fs::write(root.join("manager-failed"), b"failed original invocation").unwrap();
+    let before = state.observe().unwrap();
+    let pending = fs::read(state.folder().join("pending")).unwrap();
+    let mut bus = BusReader::controlled(&state).unwrap();
+    let original = bus.stopped_group().unwrap();
+    state.reset_failed_manager(&before).unwrap();
+    assert!(
+        state
+            .observe()
+            .unwrap()
+            .require_action_finished(&WorkerServiceAction::Stop)
+            .is_ok()
+    );
+    assert!(bus.stopped_group().unwrap() == original);
+    assert_eq!(fs::read(state.folder().join("pending")).unwrap(), pending);
+    assert!(root.join("manager-reset-attempted").is_file());
+    assert!(!root.join("manager-started").exists());
+    bus.close().unwrap();
+    state.close().unwrap();
+    fs::remove_dir_all(root).unwrap();
+}
+#[test]
+fn reset_refusal_or_reactivation_never_establishes_stopped_state() {
+    for fault in ["manager-reset-refused", "manager-reset-reactivate"] {
+        let (mut state, root, _, _) = selection();
+        fs::write(root.join("manager-failed"), b"failed invocation").unwrap();
+        fs::write(root.join(fault), b"controlled fault").unwrap();
+        let before = state.observe().unwrap();
+        assert!(state.reset_failed_manager(&before).is_err());
+        assert!(state.folder().join("pending").is_file());
+        state.close().unwrap();
+        fs::remove_dir_all(root).unwrap();
+    }
+}
+#[test]
+fn reset_does_not_adopt_a_replaced_original_invocation() {
+    let (mut state, root, _, _) = selection();
+    fs::write(root.join("manager-failed"), b"failed invocation").unwrap();
+    fs::write(
+        root.join("manager-reset-new-invocation"),
+        b"controlled replacement",
+    )
+    .unwrap();
+    let mut bus = BusReader::controlled(&state).unwrap();
+    let original = bus.stopped_group().unwrap();
+    let before = state.observe().unwrap();
+    state.reset_failed_manager(&before).unwrap();
+    // Production's retained native group check refuses this changed tuple.
+    assert!(bus.stopped_group().unwrap() != original);
+    assert!(state.folder().join("pending").is_file());
+    bus.close().unwrap();
+    state.close().unwrap();
+    fs::remove_dir_all(root).unwrap();
+}
+#[test]
+fn lost_reset_reply_keeps_original_call_and_denial_without_resending() {
+    let (mut state, root, _, _) = selection();
+    fs::write(root.join("manager-failed"), b"failed invocation").unwrap();
+    fs::write(root.join("manager-reset-lost"), b"hold original reply").unwrap();
+    let before = state.observe().unwrap();
+    state.attempted = true;
+    state.end = Instant::now() + Duration::from_millis(200);
+    assert!(state.reset_failed_manager(&before).is_err());
+    assert!(state.uncertain && state.call.is_some());
+    assert!(state.command(&["reset-failed", UNIT]).is_err());
+    assert!(state.folder().join("pending").is_file());
+    fs::write(root.join("release-reset"), b"test teardown only").unwrap();
+    // Settle the isolated test child for teardown; the original service
+    // operation retains its expired deadline and uncertain outcome.
+    state
+        .client
+        .settle_call(
+            state.call.as_ref().unwrap(),
+            Instant::now() + Duration::from_secs(3),
+        )
+        .unwrap();
+    assert!(state.close().is_err());
+    assert!(state.finish_attempt().is_err());
+    assert!(state.folder().join("pending").is_file());
+    fs::remove_dir_all(root).unwrap();
+}
 fn selection() -> (State, PathBuf, PathBuf, PathBuf) {
     selection_with_action(WorkerServiceAction::Upgrade {
         force_stopped: false,

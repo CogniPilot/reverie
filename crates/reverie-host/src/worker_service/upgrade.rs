@@ -4,6 +4,7 @@ use super::*;
 use reverie_contracts::worker_pool::BrokerProgramData;
 use std::io::Read;
 use stopped::bus::{BusReader, ExpectedCommands, ServiceGroupData};
+mod failed_reset;
 mod stop_pending;
 pub(super) use stop_pending::StopPendingTakeover;
 
@@ -71,6 +72,7 @@ impl State {
         if let Some(group) = &group {
             self.assert_force_group_current(group)?;
             self.archive_old_markers(&history)?;
+            self.reset_failed_upgrade(&old, &expected, group)?;
         }
         self.assert_no_native_actor()?;
         self.replace_native_links(&history, &old)?;
@@ -82,9 +84,7 @@ impl State {
         self.command(&["daemon-reload"])?;
         let selected = self.observe()?;
         self.assert_installed(&selected)?;
-        selected.require_action_finished(&WorkerServiceAction::Upgrade {
-            force_stopped: force,
-        })?;
+        selected.require_action_finished(&WorkerServiceAction::Stop)?;
         if let Some(group) = &group {
             self.assert_force_group_current(group)?;
         }

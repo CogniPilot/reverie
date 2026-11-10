@@ -109,7 +109,7 @@ fn future_sources_follow_dangling_aliases_but_refuse_nonabsence_errors() {
     assert!(resolve_strict_text(&python_text(&tree.0.join("dangling/tail"))).is_err());
     if nix::unistd::geteuid().as_raw() != 0 {
         use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(tree.0.join("dir"), fs::Permissions::from_mode(0)).unwrap();
+        fs::set_permissions(tree.0.join("dir"), fs::Permissions::from_mode(0o0)).unwrap();
         let denied = resolve("dir/child/future");
         fs::set_permissions(tree.0.join("dir"), fs::Permissions::from_mode(0o700)).unwrap();
         assert_eq!(denied.unwrap_err().kind(), io::ErrorKind::PermissionDenied);
