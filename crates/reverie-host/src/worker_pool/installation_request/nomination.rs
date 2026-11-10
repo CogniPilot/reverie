@@ -24,14 +24,17 @@ use std::{
     path::{Path, PathBuf},
     time::Instant,
 };
+mod absence;
 mod derivation;
+pub use absence::PoolAbsenceObservation;
 mod error;
 use derivation::NominationDerivation;
 mod publish;
 mod revision;
 pub use error::{PoolNominationError, PoolNominationFailure};
 pub use revision::{
-    PoolNominationRevisionFailure, retire_failed_os_pool_installation, revise_os_pool_nomination,
+    PoolNominationRevisionFailure, rebase_uninstalled_os_pool_nomination,
+    retire_failed_os_pool_installation, revise_os_pool_nomination,
 };
 type Result<T> = std::result::Result<T, PoolNominationError>;
 

@@ -4,6 +4,27 @@ use crate::storage_identity::Metadata;
 use reverie_core::ids::ProfileEmployeeId;
 use std::collections::BTreeSet;
 impl PoolInstallationRequestData {
+    /// Rebase an uninstalled proposal onto the independently observed current
+    /// website. No caller-supplied CID or policy override is admitted here.
+    pub fn with_observed_website(&self, fresh: &Self) -> Result<Self> {
+        need(
+            crate::worker_config::compact_data(&self.principal.value())
+                == crate::worker_config::compact_data(&fresh.principal.value()),
+            "POOL_NOMINATION_PRINCIPAL_CHANGED",
+        )?;
+        let mut next = fresh.policy.clone();
+        next.employee_memory_high_mi_b = self.policy.employee_memory_high_mi_b.clone();
+        let mut comparison = next.clone();
+        comparison.website_container = self.policy.website_container.clone();
+        need(
+            comparison == self.policy,
+            "POOL_NOMINATION_NONWEBSITE_BINDINGS_CHANGED",
+        )?;
+        Self::from_enrollment(
+            &crate::worker_config::compact_data(&self.principal.value()),
+            &next,
+        )
+    }
     /// A fixed-artifact proposal successor only; all principal and non-image
     /// values remain the same and still need independent website consent.
     pub fn with_fixed_images(&self, images: [String; 2]) -> Result<Self> {

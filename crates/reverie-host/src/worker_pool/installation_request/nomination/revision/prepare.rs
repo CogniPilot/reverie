@@ -3,6 +3,17 @@ use reverie_contracts::worker_pool::WorkerPoolProvider;
 impl RevisionOwner {
     pub(super) fn prepare(&mut self) -> Result<()> {
         let root = os_root()?;
+        if self.rebase_website {
+            match fs::symlink_metadata(root.join("worker-pool/policies")) {
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => (),
+                Err(error) => return Err(error.into()),
+                Ok(_) => {
+                    return Err(PoolNominationError::Refused(
+                        "POOL_REBASE_PREPARED_NAMESPACE_RETAINED",
+                    ));
+                }
+            }
+        }
         self.nominal.selection = root.join("worker-pool/registration-request.json");
         let source = self
             .nominal
@@ -71,12 +82,17 @@ impl RevisionOwner {
             )?;
         let mut nonhigh = fresh.policy().clone();
         nonhigh.employee_memory_high_mi_b = original.policy().employee_memory_high_mi_b.clone();
+        if self.rebase_website {
+            nonhigh.website_container = original.policy().website_container.clone();
+        }
         need(
             nonhigh == *original.policy(),
             "POOL_NOMINATION_NONHIGH_BINDINGS_CHANGED",
         )?;
         if let Some(retirement) = &mut self.retirement {
             self.next = Some(retirement.prepare(&mut self.nominal)?);
+        } else if self.rebase_website {
+            self.next = Some(original.with_observed_website(&fresh)?);
         } else {
             self.next = Some(
                 self.nominal

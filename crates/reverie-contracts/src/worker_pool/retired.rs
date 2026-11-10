@@ -84,11 +84,13 @@ impl RetiredControllerData {
         {
             return Err(PoolPolicyError);
         }
-        // Historical images and soft thresholds are preserved, not selected
-        // into the new proposal. Every other instance/engine/website/UID/CPU
+        // Historical images, website incarnations and soft thresholds stay
+        // bound to their original request/receipt, not the new proposal.
+        // Every other instance/engine/UID/CPU
         // binding must still match this exact installation.
         let mut scope = birth.policy().clone();
         scope.controller_image = current.controller_image.clone();
+        scope.website_container = current.website_container.clone();
         scope.employee_memory_high_mi_b = current.employee_memory_high_mi_b.clone();
         if scope != *current {
             return Err(PoolPolicyError);

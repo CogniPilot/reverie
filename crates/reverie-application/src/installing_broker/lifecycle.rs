@@ -15,6 +15,11 @@ pub(super) struct LaunchGeneration(Arc<Generation>);
 pub(super) struct DrainingOwner {
     generation: LaunchGeneration,
 }
+impl DrainingOwner {
+    pub(super) fn serial_data(&self) -> &str {
+        self.generation.serial().as_str()
+    }
+}
 /// Negative same-registry fence for one genuine detached stop attempt.
 pub(super) struct DetachedStopToken {
     session: ProfileSessionId,
@@ -186,6 +191,12 @@ impl<'a> LaptopLifecycle<'a> {
             return Err(GateError::Refused("WORKER_STOP_ACTIVE_LAUNCH_OR_VIEWER"));
         }
         Ok(self.mint_drain_owner())
+    }
+    pub(super) fn begin_uninstalled_observation(&mut self) -> Result<DrainingOwner, GateError> {
+        if !self.guard.is_empty() {
+            return Err(GateError::Refused("POOL_ABSENCE_REGISTRATIONS_RETAINED"));
+        }
+        self.begin_control_drain()
     }
     /// Named service-maintenance denial precedes interruption of actual active
     /// originals. It grants no stop or closure; finalizers keep their owners.

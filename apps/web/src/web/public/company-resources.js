@@ -391,6 +391,9 @@
           this.native.append(
             s.button('ca-btn', 'Check original shared-pool migration', () => this.checkNative(pending), {
               text: 'Check migration',
+            }),
+            s.button('ca-btn', 'Recover setup after a failed activation', () => this.recoverNative(pending), {
+              text: 'Recover failed setup',
             })
           );
           return;
@@ -539,6 +542,55 @@
         this.showNativeResult(reply.data, record.operationId);
       } catch (error) {
         this.error.textContent = error.message || 'Original migration remains unconfirmed';
+      } finally {
+        this.nativeBusy = false;
+        this.renderNative();
+        this.sync();
+      }
+    }
+    async recoverNative(record) {
+      if (this.nativeBusy || this.busy || this.storageFailed) return;
+      const confirmed = await this.shell.confirmCompanyAction(
+        'Shared RAM setup',
+        'Preserve the previous attempt as unconfirmed, verify the current installation has no active shared pool, and prepare a fresh setup review.',
+        'Recover failed setup'
+      );
+      if (!confirmed || this.nativeBusy || this.busy || !this.dialog.isConnected) return;
+      this.nativeBusy = true;
+      this.sync();
+      try {
+        await this.identity();
+        if (this.readNativePending()?.operationId !== record.operationId)
+          throw new Error('Original migration reference changed; no recovery was requested');
+        const reply = await this.shell.app._chatApi(`${ROOT}/native-reconcile`, {
+          method: 'POST', body: {operationId: record.operationId, preserveUnconfirmedHistory: true},
+        });
+        await this.identity();
+        const result = reply.data;
+        if (!reply.ok) throw new Error(reply.error || 'Failed setup recovery is unavailable');
+        if (!result || result.operationId !== record.operationId || result.priorOutcome !== 'unconfirmed' ||
+            result.currentState !== 'pool-uninstalled' || result.historyRecorded !== true ||
+            result.activationAuthorized !== false || result.startsAuthorized !== false ||
+            !/^[a-f0-9]{64}$/.test(result.evidenceDigest) || !id(result.observationNonce))
+          throw new Error('Current installation recovery evidence could not be verified');
+        if (this.readNativePending()?.operationId !== record.operationId)
+          throw new Error('Original migration reference changed; its record was kept');
+        const storage = this.shell.doc.defaultView.localStorage;
+        const historyKey = `${this.nativeKey()}:unconfirmed-history`;
+        const history = JSON.parse(storage.getItem(historyKey) || '[]');
+        if (!Array.isArray(history) || history.length >= 100)
+          throw new Error('Local unconfirmed setup history is unavailable or full');
+        const raw = JSON.stringify([...history, {operationId: record.operationId,
+          priorOutcome: 'unconfirmed', evidenceDigest: result.evidenceDigest, observationNonce: result.observationNonce}]);
+        storage.setItem(historyKey, raw);
+        if (storage.getItem(historyKey) !== raw) throw new Error('Unconfirmed setup history could not be preserved');
+        storage.removeItem(this.nativeKey());
+        this.nativePreview = null;
+        this.error.textContent = '';
+        this.results.replaceChildren(this.shell.el('p', 'ca-hint',
+          'The current shared pool is absent. The previous attempt remains unconfirmed in history. Review the shared-pool setup again to activate it.'));
+      } catch (error) {
+        this.error.textContent = error.message || 'Failed setup remains unconfirmed';
       } finally {
         this.nativeBusy = false;
         this.renderNative();

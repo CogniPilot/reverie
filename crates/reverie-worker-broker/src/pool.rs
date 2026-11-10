@@ -8,6 +8,14 @@ use std::{
 };
 #[derive(Subcommand)]
 pub(super) enum Action {
+    /// Observe the current protected website and rebase only an uninstalled
+    /// proposal; no controller, worker, policy activation or consent is started.
+    RebaseUninstalledNominationV1 {
+        #[arg(long)]
+        config: PathBuf,
+        #[arg(long)]
+        expected_request_digest: String,
+    },
     /// Preserve one failed pre-serving controller and its original evidence,
     /// then derive a new fixed-image proposal. No activation or worker start.
     RetireFailedInstallationV1 {
@@ -49,6 +57,22 @@ pub(super) enum Action {
 }
 pub(super) fn run(action: Action) -> Result<(), Box<dyn std::error::Error>> {
     match action {
+        Action::RebaseUninstalledNominationV1 {
+            config,
+            expected_request_digest,
+        } => {
+            let expected = JournalDigest::parse(&expected_request_digest)?;
+            let (snapshot, runtime) = capture(&config)?;
+            let result = reverie_application::installing_broker::rebase_uninstalled_os_worker_pool_nomination(
+                &snapshot, runtime, &expected, Instant::now() + Duration::from_secs(30),
+            )?;
+            println!(
+                "{}",
+                serde_json::json!({"nominationRebased":true,"requestDigest":result.request_digest(),
+                "requiresFreshOffer":true,"requiresExplicitMaintenanceConsent":true,"started":false})
+            );
+            Ok(())
+        }
         Action::RetireFailedInstallationV1 {
             config,
             expected_request_digest,

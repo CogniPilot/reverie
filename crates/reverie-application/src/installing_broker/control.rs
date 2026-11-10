@@ -13,6 +13,7 @@ use std::{
     rc::Rc,
     time::{Duration, Instant},
 };
+mod pool_recovery;
 mod query;
 mod quiesce;
 #[cfg(test)]
@@ -34,6 +35,7 @@ enum Cause {
     Observation(Arc<crate::reservation_observer::ObserverError>),
     Provider(Rc<reverie_host::website_facts::WebsiteFactsError>),
     Refused(&'static str),
+    Pool(Rc<reverie_host::worker_pool::PoolNominationError>),
 }
 impl fmt::Display for Cause {
     fn fmt(&self, out: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -51,6 +53,7 @@ impl fmt::Display for Cause {
             Self::Observation(e) => e.fmt(out),
             Self::Provider(e) => e.fmt(out),
             Self::Refused(e) => out.write_str(e),
+            Self::Pool(e) => e.fmt(out),
         }
     }
 }
@@ -94,6 +97,9 @@ struct Frame<'a> {
     completed: bool,
     identity_unknown: Option<Arc<reverie_store::storage_identity::IdentityError>>,
     health: Option<query::HealthReaders>,
+    absence: Option<reverie_host::worker_pool::PoolAbsenceObservation>,
+    recovery_drain: Option<lifecycle::DrainingOwner>,
+    recovery_exclusion: Option<reverie_host::worker_reports::WorkerRecoveryExclusion>,
 }
 pub(in crate::installing_broker) struct ControlFailure<'a> {
     owner: Option<Box<Frame<'a>>>,
@@ -126,6 +132,9 @@ impl InstallingBroker {
             completed: false,
             identity_unknown: None,
             health: None,
+            absence: None,
+            recovery_drain: None,
+            recovery_exclusion: None,
         });
         match owner.run() {
             Ok(()) => Ok(()),
@@ -158,6 +167,7 @@ impl Frame<'_> {
             WorkerControlRequest::Status => return self.status(),
             WorkerControlRequest::ProviderHealth => return self.provider_health(),
             WorkerControlRequest::StorageStatus => return self.storage_status(),
+            WorkerControlRequest::PoolRecoveryStatus => return self.pool_recovery_status(),
             WorkerControlRequest::UnsupportedStopAgent => return self.unsupported_stop(),
             WorkerControlRequest::StopLaptops => {}
             WorkerControlRequest::QuiesceForDeployment => return self.quiesce_for_deployment(),
@@ -176,6 +186,7 @@ impl Frame<'_> {
         Ok(())
     }
     fn close_transport(&mut self) -> Result<(), Cause> {
+        self.close_recovery_observation()?;
         let socket = self.connection.close_socket_for_worker();
         let readers = self.close_health_readers();
         socket?;
@@ -206,6 +217,7 @@ impl ControlFailure<'_> {
                     WorkerControlRequest::Status
                         | WorkerControlRequest::ProviderHealth
                         | WorkerControlRequest::StorageStatus
+                        | WorkerControlRequest::PoolRecoveryStatus
                 )
             });
         (readonly
@@ -294,6 +306,9 @@ impl Drop for Frame<'_> {
                 self.closed_handlers.take(),
                 self.census.take(),
                 self.health.take(),
+                self.absence.take(),
+                self.recovery_drain.take(),
+                self.recovery_exclusion.take(),
             ));
         }
     }

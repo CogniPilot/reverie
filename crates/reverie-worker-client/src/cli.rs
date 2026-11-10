@@ -58,6 +58,8 @@ enum Control {
     ProviderHealth,
     /// Observe original live storage-owner kinds/phases; never reconcile or retry.
     StorageStatus,
+    /// Observe current uninstalled pool state; never resolve an old operation.
+    PoolRecoveryStatus,
     StopLaptops,
     QuiesceForDeployment,
     Shutdown,
@@ -72,6 +74,7 @@ impl Control {
             Self::Status => crate::control::Action::Status.name(),
             Self::ProviderHealth => crate::control::Action::ProviderHealth.name(),
             Self::StorageStatus => crate::control::Action::StorageStatus.name(),
+            Self::PoolRecoveryStatus => crate::control::Action::PoolRecoveryStatus.name(),
             Self::StopLaptops => crate::control::Action::StopLaptops.name(),
             Self::QuiesceForDeployment => crate::control::Action::QuiesceForDeployment.name(),
             Self::Shutdown => "shutdown",

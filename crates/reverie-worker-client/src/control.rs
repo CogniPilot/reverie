@@ -17,6 +17,7 @@ pub enum Action {
     Status,
     ProviderHealth,
     StorageStatus,
+    PoolRecoveryStatus,
     StopLaptops,
     QuiesceForDeployment,
 }
@@ -26,6 +27,7 @@ impl Action {
             Self::Status => "status",
             Self::ProviderHealth => "provider-health",
             Self::StorageStatus => "storage-status",
+            Self::PoolRecoveryStatus => "pool-recovery-status",
             Self::StopLaptops => "stop-laptops",
             Self::QuiesceForDeployment => "quiesce-for-deployment",
         }

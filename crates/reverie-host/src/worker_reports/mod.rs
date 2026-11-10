@@ -23,7 +23,7 @@ pub use resume::{
     PoolRegistrationPin, ResourceJournalError, ResourceJournalPin, WorkerActorChannel,
     WorkerActorChannelFailure, WorkerActorPinError, WorkerOriginalHandlersCleanupBinding,
     WorkerOriginalHandlersCleanupError, WorkerOriginalHandlersClosed, WorkerOriginalHandlersDrain,
-    WorkerOriginalInterruptionProgress, WorkerServiceMaintenanceHandlers,
+    WorkerOriginalInterruptionProgress, WorkerRecoveryExclusion, WorkerServiceMaintenanceHandlers,
 };
 pub use service_connection::{
     AcceptedWorkerServiceConnection, WorkerPeer, WorkerServiceConnection, WorkerServicePurpose,

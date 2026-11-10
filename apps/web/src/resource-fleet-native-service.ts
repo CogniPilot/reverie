@@ -1,5 +1,7 @@
 /** Thin HTTP custody for the original native Q; no native rollout decisions. */
 import type { FastifyRequest } from 'fastify';
+import { isDeepStrictEqual } from 'node:util';
+import { FleetRecoveryHistory, FleetRecoveryRequest, PoolAbsenceData, requireFreshPoolAbsence } from './resource-fleet-recovery.js';
 import type { CompanyService } from './company-service.js';
 import type { CompanyWakeReport } from './company-wake.js';
 import type { CompanyEmployee } from './company-types.js';
@@ -24,6 +26,7 @@ export interface FleetEmployeeRecovery {
   wakeEmployee: FleetWakeEmployee;
   refreshHealth(): Promise<void>;
   providerHealth(employee: CompanyEmployee): ProviderHealth | undefined;
+  observeUninstalledPool?(): Promise<unknown>;
 }
 type RestoreOutcome = {
   employeeId: string;
@@ -32,6 +35,7 @@ type RestoreOutcome = {
   report: CompanyWakeReport | null;
 };
 type Entry = {
+  archivedAsUnconfirmed?: string;
   client: FleetNativeClient;
   preview: NativeFleetPreview;
   attempted: boolean;
@@ -44,11 +48,14 @@ export class FleetNativeService {
   readonly #authority: ResourceOwnerAuthority;
   readonly #entries = new Map<string, Entry>();
   #opening = false;
+  #reconciling = false;
+  #closed = false;
   constructor(
     private readonly company: CompanyService,
     auth: OwnerAuthService,
     private readonly socket: string | undefined,
-    private readonly recovery?: FleetEmployeeRecovery
+    private readonly recovery?: FleetEmployeeRecovery,
+    private readonly history?: FleetRecoveryHistory
   ) {
     this.#authority = new ResourceOwnerAuthority(auth);
   }
@@ -57,7 +64,7 @@ export class FleetNativeService {
     NativeFleetPreviewRequest.parse(request.body);
     if (!this.socket || !this.recovery)
       throw new Error('The native migration service and ordinary employee recovery must be configured');
-    if (this.#opening || [...this.#entries.values()].some((entry) => this.#blocks(entry)))
+    if (this.#closed || this.#reconciling || this.#opening || [...this.#entries.values()].some((entry) => this.#blocks(entry)))
       throw new Error('An original fleet migration is pending or unconfirmed; inspect its result');
     for (const [id, entry] of this.#entries) {
       if (!entry.attempted && Date.now() < entry.preview.expiresAtEpochMs) {
@@ -105,6 +112,7 @@ export class FleetNativeService {
     }
   }
   async apply(request: FastifyRequest) {
+    if (this.#closed || this.#reconciling) throw new Error('Fleet recovery is in progress');
     this.#authority.captureFleetViewer(request);
     const selected = NativeFleetApplyRequest.parse(request.body);
     const entry = [...this.#entries.values()].find((value) => value.preview.approval.previewId === selected.previewId);
@@ -142,7 +150,37 @@ export class FleetNativeService {
     };
   }
   #blocks(entry: Entry): boolean {
-    return entry.attempted && (entry.state === 'pending' || entry.state === 'unknown');
+    return !entry.archivedAsUnconfirmed && entry.attempted && (entry.state === 'pending' || entry.state === 'unknown');
+  }
+  async reconcile(request: FastifyRequest) {
+    const viewer = this.#authority.captureFleetViewer(request);
+    const selected = FleetRecoveryRequest.parse(request.body);
+    if (this.#closed || this.#opening || this.#reconciling || !this.recovery?.observeUninstalledPool || !this.history)
+      throw new Error('Failed setup recovery is unavailable or already in progress');
+    this.#reconciling = true;
+    try {
+      const evidence = PoolAbsenceData.parse(await this.recovery.observeUninstalledPool());
+      const current = () => {
+        if (this.#closed) throw new Error('Fleet service closed during recovery');
+        this.#authority.assertContext(viewer);
+        this.#authority.assertFleetSession(request, viewer);
+        if (!isDeepStrictEqual(evidence.principal, viewer.principal))
+          throw new Error('Current host nomination belongs to another owner session');
+      };
+      current(); requireFreshPoolAbsence(evidence);
+      const record = await this.history.record(selected.operationId, viewer.ownerScopeDigest, evidence, current);
+      current(); requireFreshPoolAbsence(evidence);
+      const prior = this.#entries.get(selected.operationId);
+      if (prior) {
+        prior.client.assertSession(request);
+        prior.archivedAsUnconfirmed = evidence.nonce;
+        prior.client.close();
+      }
+      return {operationId: selected.operationId, priorOutcome: 'unconfirmed' as const,
+        currentState: 'pool-uninstalled' as const, historyRecorded: true as const,
+        evidenceDigest: record.evidenceDigest, observationNonce: evidence.nonce,
+        activationAuthorized: false as const, startsAuthorized: false as const};
+    } finally { this.#reconciling = false; }
   }
   async #restore(entry: Entry, request: FastifyRequest): Promise<void> {
     const result = entry.native;
@@ -198,6 +236,7 @@ export class FleetNativeService {
     }
   }
   close(): void {
+    this.#closed = true;
     for (const entry of this.#entries.values()) entry.client.close();
     this.#authority.close();
   }

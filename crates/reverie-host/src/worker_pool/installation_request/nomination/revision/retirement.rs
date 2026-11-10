@@ -135,5 +135,6 @@ pub fn retire_failed_os_pool_installation(
         publication: None,
         attempted: false,
         retirement: Some(Retirement::empty()),
+        rebase_website: false,
     }))
 }

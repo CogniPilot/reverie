@@ -6,6 +6,7 @@ mod current_pin;
 mod io;
 mod original_handlers;
 pub use current_pin::WorkerActorPinError;
+pub use original_handlers::WorkerRecoveryExclusion;
 pub use original_handlers::{
     WorkerOriginalHandlersCleanupBinding, WorkerOriginalHandlersCleanupError,
     WorkerOriginalHandlersClosed, WorkerOriginalHandlersDrain, WorkerOriginalInterruptionProgress,

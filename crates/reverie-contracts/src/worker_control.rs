@@ -5,6 +5,7 @@ pub enum WorkerControlRequest {
     Status,
     ProviderHealth,
     StorageStatus,
+    PoolRecoveryStatus,
     UnsupportedStopAgent,
 }
 
@@ -22,6 +23,7 @@ impl WorkerControlRequest {
             Some("status") if fields.len() == 1 => Ok(Self::Status),
             Some("provider-health") if fields.len() == 1 => Ok(Self::ProviderHealth),
             Some("storage-status") if fields.len() == 1 => Ok(Self::StorageStatus),
+            Some("pool-recovery-status") if fields.len() == 1 => Ok(Self::PoolRecoveryStatus),
             Some("stop-agent") if stop_agent(fields) => Ok(Self::UnsupportedStopAgent),
             _ => Err("WORKER_CONTROL_UNSUPPORTED"),
         }

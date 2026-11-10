@@ -6,10 +6,12 @@ use std::rc::Rc;
 mod cleanup_binding;
 mod maintenance;
 mod progress;
+mod recovery;
 pub use cleanup_binding::{
     WorkerOriginalHandlersCleanupBinding, WorkerOriginalHandlersCleanupError,
 };
 pub use maintenance::WorkerServiceMaintenanceHandlers;
+pub use recovery::WorkerRecoveryExclusion;
 type DrainResult<T> = std::result::Result<T, Rc<WorkerReportError>>;
 
 struct Selected {

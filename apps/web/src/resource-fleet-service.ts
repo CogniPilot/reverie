@@ -5,6 +5,7 @@ import type { OwnerVerifier } from './owner-auth/marks.js';
 import { OwnerAuthService } from './owner-auth/service.js';
 import { ResourceOwnerAuthorizationError } from './resource-owner-authority.js';
 import { FleetNativeService, type FleetEmployeeRecovery } from './resource-fleet-native-service.js';
+import { FleetRecoveryHistory, FleetRecoveryRequest } from './resource-fleet-recovery.js';
 import {
   NativeFleetPreviewRequest,
   NativeFleetApplyRequest,
@@ -34,9 +35,11 @@ export class FleetResourcesService {
     private readonly company: CompanyService,
     auth?: OwnerAuthService,
     socket?: string,
-    recovery?: FleetEmployeeRecovery
+    recovery?: FleetEmployeeRecovery,
+    recoveryHistoryPath?: string
   ) {
-    if (auth) this.native = new FleetNativeService(company, auth, socket, recovery);
+    if (auth) this.native = new FleetNativeService(company, auth, socket, recovery,
+      recoveryHistoryPath ? new FleetRecoveryHistory(recoveryHistoryPath) : undefined);
   }
   close(): void {
     this.native?.close();
@@ -110,6 +113,7 @@ export function registerFleetResourceRoutes(
     ['preview', NativeFleetPreviewRequest],
     ['apply', NativeFleetApplyRequest],
     ['result', NativeFleetResultRequest],
+    ['reconcile', FleetRecoveryRequest],
   ] as const;
   for (const [action, schema] of native) {
     app.post(`/api/company/resources/fleet/native-${action}`, async (request, reply) => {
@@ -126,7 +130,9 @@ export function registerFleetResourceRoutes(
             ? await service.native.preview(request)
             : action === 'apply'
               ? await service.native.apply(request)
-              : service.native.result(request);
+              : action === 'reconcile'
+                ? await service.native.reconcile(request)
+                : service.native.result(request);
         return { success: true, data };
       } catch (error) {
         return reply.code(error instanceof ResourceOwnerAuthorizationError ? 403 : 503).send({

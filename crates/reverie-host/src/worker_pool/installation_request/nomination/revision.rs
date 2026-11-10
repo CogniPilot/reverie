@@ -30,6 +30,7 @@ struct RevisionOwner {
     publication: Option<publication::Publication>,
     attempted: bool,
     retirement: Option<retirement::Retirement>,
+    rebase_website: bool,
 }
 #[must_use = "retain the same revision owner; a partial publication is not replayable"]
 pub struct PoolNominationRevisionFailure {
@@ -97,8 +98,45 @@ pub fn revise_os_pool_nomination(
         publication: None,
         attempted: false,
         retirement: None,
+        rebase_website: false,
     });
     finish_revision(owner)
+}
+/// Rebind proposal DATA after supported website replacement, only with no
+/// provider/controller/parent/endpoint/prepared-birth and all staff stopped.
+pub fn rebase_uninstalled_os_pool_nomination(
+    source: Option<&Path>,
+    config: &EffectiveWorkerConfig,
+    expected: &JournalDigest,
+    runtime: WorkerRuntime,
+    end: Instant,
+) -> std::result::Result<PoolNominationPublished, Box<PoolNominationRevisionFailure>> {
+    finish_revision(Box::new(RevisionOwner {
+        nominal: Box::new(NominationOwner::capture(
+            source,
+            config,
+            Path::new(""),
+            runtime,
+            end,
+            InputPurpose::Request,
+        )),
+        expected: expected.clone(),
+        default: 0,
+        overrides: Vec::new(),
+        next: None,
+        stopped: None,
+        service: None,
+        service_origin: None,
+        closed_service: None,
+        service_failure: None,
+        locks: None,
+        closed_locks: None,
+        lock_failure: None,
+        publication: None,
+        attempted: false,
+        retirement: None,
+        rebase_website: true,
+    }))
 }
 fn finish_revision(
     mut owner: Box<RevisionOwner>,

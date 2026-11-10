@@ -2392,7 +2392,8 @@ export class WebServer extends EventEmitter {
           await this.workerProviderHealth.refresh();
         },
         providerHealth: (employee) => this.workerProviderHealth?.read(employee),
-    });
+        observeUninstalledPool: () => laptopPower('pool-recovery-status'),
+    }, dataPath('fleet-setup-recovery.json'));
     registerFleetResourceRoutes(this.app, verifiedOwner, fleetResources);
     this.app.addHook('onClose', async () => fleetResources.close());
     const poolInstallation = new PoolInstallationController(ownerAuth, process.env.REVERIE_WORKER_SOCKET);

@@ -61,7 +61,7 @@ impl NominationDerivation {
             )),
         }
     }
-    fn assert_census(
+    pub(in crate::worker_pool::installation_request::nomination) fn assert_census(
         &mut self,
         runtime: &WorkerRuntime,
         policy: &WorkerPoolPolicy,

@@ -8,6 +8,22 @@ use reverie_host::{
 };
 use std::{path::Path, time::Instant};
 
+pub fn rebase_uninstalled_os_worker_pool_nomination(
+    snapshot: &ValidatedWorkerSnapshot,
+    runtime: WorkerRuntime,
+    expected: &JournalDigest,
+    end: Instant,
+) -> Result<PoolNominationPublished, Box<reverie_host::worker_pool::PoolNominationRevisionFailure>>
+{
+    reverie_host::worker_pool::rebase_uninstalled_os_pool_nomination(
+        snapshot.source_path(),
+        snapshot.configuration(),
+        expected,
+        runtime,
+        end,
+    )
+}
+
 /// Revise proposal DATA only while its actual original Offer service is stopped.
 /// A new actual offer and independent website maintenance consent remain required.
 pub fn revise_os_worker_pool_nomination(

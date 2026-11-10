@@ -19,9 +19,10 @@ pub use image_inputs_reference::{
 mod installation_request;
 pub use installation_request::load_os_pool_installation_request;
 pub use installation_request::{
-    PoolNominationError, PoolNominationFailure, PoolNominationPublished,
+    PoolAbsenceObservation, PoolNominationError, PoolNominationFailure, PoolNominationPublished,
     PoolNominationRevisionFailure, publish_current_os_pool_nomination, publish_os_pool_nomination,
-    retire_failed_os_pool_installation, revise_os_pool_nomination,
+    rebase_uninstalled_os_pool_nomination, retire_failed_os_pool_installation,
+    revise_os_pool_nomination,
 };
 mod member;
 mod namespace;
