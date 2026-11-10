@@ -97,12 +97,12 @@ impl<'a> Owner<'a> {
             })
             .map_err(InitialWebsiteRolloutError::Actor)?,
         );
+        self.assert_service_current()?;
         let prepared = self
             .actor
             .take()
             .expect("actual original actor preparation");
         let expected = prepared.preview_digest().clone();
-        self.assert_service_current()?;
         let service = self
             .service
             .take()
