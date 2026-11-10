@@ -71,6 +71,7 @@ impl Fixture {
         NativeObserver {
             source: Arc::new(self.clone()),
             cancellation: CancellationToken::new(),
+            controller: None,
         }
     }
     /// Only the kernel observations remain synthetic. Every metadata query and
@@ -84,6 +85,7 @@ impl Fixture {
         NativeObserver {
             source: Arc::new(self.clone()),
             cancellation,
+            controller: None,
         }
     }
     pub(crate) fn inventory(&self, rows: &[Value]) {

@@ -215,6 +215,12 @@ impl BrokerBootstrapBinding {
             ids.uid() == native::uid() && ids.gid() == nix::unistd::getgid().as_raw(),
             "WORKER_POOL_NATIVE_BROKER_IDS",
         )?;
+        self.assert_original_current(end)
+    }
+    /// Reobserve only the original captured native owner. Callers must check
+    /// their same-runtime/read-client provenance before using this private tail.
+    pub(super) fn assert_original_current(&mut self, end: Instant) -> Result<()> {
+        self.budget(end)?;
         self.pidfd_live()?;
         let program = self
             .program

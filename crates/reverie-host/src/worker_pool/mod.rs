@@ -6,7 +6,9 @@ mod client;
 #[cfg(test)]
 mod close_classification_tests;
 mod controller_limits;
-pub use client::{ActivatedController, ControllerActivationFailure, ControllerStatusData};
+pub use client::{
+    ActivatedController, ControllerActivationFailure, ControllerCapacity, ControllerStatusData,
+};
 pub(crate) mod directory;
 mod endpoint;
 mod engine;

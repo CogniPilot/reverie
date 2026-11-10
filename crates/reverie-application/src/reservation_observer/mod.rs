@@ -3,6 +3,7 @@
 mod capacity;
 mod custody;
 mod error;
+mod shared_pool;
 mod source;
 mod stop_budget;
 mod stopped_ram;
@@ -36,6 +37,7 @@ use std::{
 pub struct NativeObserver {
     source: Arc<dyn Source>,
     cancellation: CancellationToken,
+    controller: Option<crate::installing_broker::InstalledControllerSlot>,
 }
 impl NativeObserver {
     /// Actual worker memory reads share its existing capture, cancellation and
@@ -47,6 +49,7 @@ impl NativeObserver {
         let observer = Self {
             source: Arc::new(Installed::new(runtime.readonly())),
             cancellation: runtime.cancellation(),
+            controller: None,
         };
         observer.capture(config, runtime.stop_deadline())
     }
@@ -54,7 +57,16 @@ impl NativeObserver {
         Self {
             source: Arc::new(Installed::new(engine)),
             cancellation: CancellationToken::new(),
+            controller: None,
         }
+    }
+    pub(crate) fn with_installed_controller(
+        engine: ReadonlyEngine,
+        controller: crate::installing_broker::InstalledControllerSlot,
+    ) -> Self {
+        let mut observer = Self::new(engine);
+        observer.controller = Some(controller);
+        observer
     }
     pub fn cancellation(&self) -> CancellationToken {
         self.cancellation.clone()

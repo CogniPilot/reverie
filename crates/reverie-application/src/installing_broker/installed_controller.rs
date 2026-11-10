@@ -6,6 +6,11 @@ use reverie_host::worker_pool::{ActivatedController, PoolError};
 use reverie_host::worker_reports::WorkerLaunchConnection;
 use std::time::Instant;
 
+/// One allocation owns the consuming native controller success. Gate borrows
+/// this same slot; no status document or second controller is installed there.
+pub(crate) type InstalledControllerSlot =
+    Arc<Mutex<Option<reverie_host::worker_pool::ActivatedController>>>;
+
 #[must_use = "retain the same activated controller when transfer refuses"]
 pub struct ControllerInstallFailure {
     owner: ActivatedController,

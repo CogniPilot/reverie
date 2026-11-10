@@ -22,6 +22,7 @@ pub use worker_image::{
 };
 mod installed_controller;
 pub use installed_controller::ControllerInstallFailure;
+pub(crate) use installed_controller::InstalledControllerSlot;
 mod installation_offer;
 pub use installation_offer::{
     BrokerInstallationOffer, BrokerInstallationOfferCause, BrokerInstallationOfferFailure,
@@ -206,7 +207,7 @@ pub struct InstallingBroker {
     recovery: Arc<RecoveryOwners>,
     goals: Arc<reverie_host::goal_custody::GoalCustodyState>,
     images: Arc<chat_images::ChatImages>,
-    controller: Mutex<Option<reverie_host::worker_pool::ActivatedController>>,
+    controller: InstalledControllerSlot,
 }
 impl InstallingBroker {
     /// Trusted installing bootstrap; no wire-selected native engine or path.

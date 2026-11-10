@@ -54,6 +54,7 @@ struct ControllerState {
     stop_attempted: bool,
     cleanup_end: Option<Instant>,
     original_end: Instant,
+    capacity_failure: Option<Box<PoolError>>,
 }
 pub struct ControllerActivationFailure {
     owner: ActivatedController,
@@ -90,6 +91,7 @@ impl BrokerBootstrapBinding {
             stop_attempted: false,
             cleanup_end: None,
             original_end: end.min(Instant::now() + Duration::from_secs(20)),
+            capacity_failure: None,
         };
         match owner.activate(runtime, host_reserve_mib) {
             Ok(()) => Ok(ActivatedController {
@@ -125,6 +127,10 @@ impl ActivatedController {
     }
     pub fn close_components(&mut self, end: Instant) -> Result<()> {
         self.state_mut().close_components(end)
+    }
+    /// The first actual native accounting cause remains with this SAME owner.
+    pub fn capacity_failure(&self) -> Option<&PoolError> {
+        self.state().capacity_failure.as_deref()
     }
     pub(crate) fn configure_target(
         &mut self,
@@ -227,6 +233,9 @@ impl ControllerState {
         self.query
             .assert_engine(&runtime.installed_engine().readonly())
             .map_err(PoolError::Engine)?;
+        self.inspect_original_controller(end)
+    }
+    fn inspect_original_controller(&self, end: Instant) -> Result<serde_json::Value> {
         let id = self
             .controller
             .as_ref()
@@ -236,7 +245,7 @@ impl ControllerState {
             .query(
                 EngineQuery::WorkerPoolInspect(id),
                 end,
-                &runtime.cancellation(),
+                &self.binding.engine.cancellation(),
             )
             .map_err(PoolError::Engine)?;
         let values: Vec<serde_json::Value> = serde_json::from_str(&raw)
@@ -425,12 +434,23 @@ impl ControllerState {
         self.directory.assert_limits(&self.policy)
     }
     fn assert_current(&mut self, runtime: &WorkerRuntime, end: Instant) -> Result<()> {
-        need(
-            self.active && !self.close_unknown && !self.effect_unknown,
-            "WORKER_POOL_CONTROLLER_NOT_ACTIVE",
-        )?;
+        self.require_active()?;
         self.binding.assert_current(runtime, end)?;
-        self.verify_peer(&self.inspect_controller(runtime, end)?)?;
+        self.assert_original_controller_current(end)
+    }
+    fn require_active(&self) -> Result<()> {
+        need(
+            self.active
+                && !self.close_unknown
+                && !self.effect_unknown
+                && self.capacity_failure.is_none(),
+            "WORKER_POOL_CONTROLLER_NOT_ACTIVE",
+        )
+    }
+    fn assert_original_controller_current(&mut self, end: Instant) -> Result<()> {
+        self.require_active()?;
+        self.binding.assert_original_current(end)?;
+        self.verify_peer(&self.inspect_original_controller(end)?)?;
         self.directory.assert_anchor_current(
             self.anchor.as_deref().expect("active original anchor"),
             self.anchor_pid,
@@ -491,7 +511,7 @@ impl ControllerState {
         );
         closed?;
         need(
-            !self.close_unknown && !self.effect_unknown,
+            !self.close_unknown && !self.effect_unknown && self.capacity_failure.is_none(),
             "WORKER_POOL_CONTROLLER_EFFECT_UNCONFIRMED",
         )
     }
@@ -575,6 +595,8 @@ fn fresh_id() -> Result<String> {
         .map(|id| id.as_str().into())
         .map_err(|_| PoolError::Refused("WORKER_POOL_RANDOM"))
 }
+mod capacity;
+pub use capacity::ControllerCapacity;
 mod io;
 mod member;
 mod setup;

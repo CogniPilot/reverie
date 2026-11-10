@@ -43,6 +43,7 @@ struct BootstrapOwner {
     runtime: WorkerRuntime,
     telemetry: Option<Arc<CommandTelemetry>>,
     images: Option<Arc<chat_images::ChatImages>>,
+    controller: InstalledControllerSlot,
 }
 /// Owns the SAME consumed Runtime, original installed snapshot and all complete
 /// startup owners. No raw-runtime/authority extractor or replacement constructor.
@@ -169,7 +170,7 @@ impl BootstrapOwner {
         ));
         // Python constructor754: telemetry is complete BEFORE configured Gate
         // checks/marker reads. Office is constructed later in recovery/launch.
-        gate(&self.installed, &self.runtime, &current)
+        gate(&self.installed, &self.runtime, &current, &self.controller)
             .map_err(|error| BrokerBootstrapCause::Gate(Box::new(error)))
     }
 }
@@ -177,6 +178,7 @@ fn gate(
     installed: &Arc<InstalledWorker>,
     runtime: &WorkerRuntime,
     current: &ValidatedWorkerSnapshot,
+    controller: &InstalledControllerSlot,
 ) -> Result<Option<ReservationGate>, GateError> {
     let has_option =
         reverie_contracts::worker_validation::WorkerValidationData::new(current.configuration())
@@ -189,7 +191,7 @@ fn gate(
     {
         Ok(Some(ReservationGate::from_installed(
             installed.clone(),
-            NativeObserver::new(runtime.readonly()),
+            NativeObserver::with_installed_controller(runtime.readonly(), controller.clone()),
         )?))
     } else {
         Ok(None)
@@ -205,6 +207,7 @@ impl InstallingBroker {
             runtime,
             telemetry: None,
             images: None,
+            controller: Arc::new(Mutex::new(None)),
         };
         let gate = match owner.prepare() {
             Ok(gate) => gate,
@@ -231,7 +234,7 @@ impl InstallingBroker {
             recovery: Arc::new(RecoveryOwners::new()),
             goals: Arc::new(reverie_host::goal_custody::GoalCustodyState::new()),
             images: owner.images.expect("actual pre-telemetry image manager"),
-            controller: Mutex::new(None),
+            controller: owner.controller,
         })
     }
 }
