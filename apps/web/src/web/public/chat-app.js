@@ -3553,9 +3553,9 @@ class ReverieChatApp {
   }
 
   /**
-   * Owner-only hiring settings: who may hire for the owner, the two hire caps with their current use, and the active hires,
-   * flagging any whose session is gone. PUT /api/experts-settings replaces the whole settings object, so each save starts
-   * from a fresh read and changes only these fields.
+   * Owner-only hiring limits with their current use and active hire history.
+   * Historical session absence is separate from current employee availability.
+   * Limit changes use the existing settings store with an atomic checked baseline.
    */
   companyHiringFields(employees) {
     const form = this.el('form', 'ca-company-hiring');
@@ -3571,30 +3571,19 @@ class ReverieChatApp {
       return { wrap, input };
     };
     const perDay = number('Hires in any 24 hours', 20), active = number('Active hires at most', 50);
-    const delegates = this.el('fieldset', 'ca-company-hiring-delegates');
     const hires = this.el('div', 'ca-company-hiring-active');
     const save = this.el('button', 'ca-btn is-primary', 'Save hiring settings'); save.type = 'submit'; save.disabled = true;
     const actions = this.el('div', 'ca-dialog-actions'); actions.append(save);
-    form.append(this.el('h3', '', 'Hiring'), usage, perDay.wrap, active.wrap, delegates, actions, status, error, hires);
+    form.append(this.el('h3', '', 'Hiring'), usage, perDay.wrap, active.wrap,
+      this.el('p', 'ca-hint', 'Set who may hire and retire employees on their profile’s Permissions tab.'), actions, status, error, hires);
     const when = (ms) => globalThis.ReverieTime?.format(ms) ?? new Date(ms).toLocaleString('en-US', { timeZone: 'UTC', timeZoneName: 'short' });
-    let shown = null; // the delegates and caps this section last showed, to notice a change made elsewhere before a save
-    const hiring = (settings) => JSON.stringify([[...(settings.hireDelegates || [])].sort(), settings.maxHiresPerDay, settings.maxActive]);
+    let shown = null;
+    const hiring = (settings) => JSON.stringify([settings.maxHiresPerDay, settings.maxActive]);
     const render = (data) => {
       const settings = data.settings || {}, limits = data.limits || {};
       shown = hiring(settings);
       usage.textContent = `In the last 24 hours: ${limits.hiresLast24h} of ${limits.maxHiresPerDay} hires. Active now: ${limits.active} of ${limits.maxActive}.`;
       perDay.input.value = String(settings.maxHiresPerDay); active.input.value = String(settings.maxActive);
-      // Delegates are session ids: pick from the roster, and keep showing a listed one that no current expert holds.
-      const chosen = new Set(settings.hireDelegates || []);
-      const rows = employees.filter((e) => e.sessionId).map((e) => [e.sessionId, e.position ? `${e.name} · ${e.position}` : e.name]);
-      for (const id of chosen) if (!rows.some(([sid]) => sid === id)) rows.push([id, `Session ${id.slice(0, 8)} (no current expert)`]);
-      delegates.replaceChildren(this.el('legend', '', 'Who may hire for you'),
-        this.el('p', 'ca-hint', 'A delegate may hire and retire experts within these limits, without asking you each time.'));
-      for (const [sid, text] of rows) {
-        const wrap = this.el('label', 'ca-label'); const box = this.el('input');
-        box.type = 'checkbox'; box.name = 'hireDelegate'; box.value = sid; box.checked = chosen.has(sid);
-        wrap.append(box, this.el('span', '', text)); delegates.append(wrap);
-      }
       const templates = new Map((data.experts || []).map((t) => [t.id, t.name]));
       const who = (by) => by === 'owner' ? 'you' : by.startsWith('agent:')
         ? employees.find((e) => e.sessionId === by.slice(6))?.name ?? `session ${by.slice(6, 14)}` : by;
@@ -3607,7 +3596,7 @@ class ReverieChatApp {
         row.append(this.el('strong', '', name),
           this.el('p', 'ca-hint', `${templates.get(h.templateId) ?? h.templateId}, hired by ${who(h.by)} ${when(h.hiredAt)}. ${h.reason}`));
         // Still counted against the active cap until it is retired.
-        if (h.sessionLive === false) row.append(this.el('p', 'ca-company-error', 'Its session no longer exists. It still counts as active until it is retired.'));
+        if (h.sessionLive === false) row.append(this.el('p', 'ca-hint', 'The original hire session is not present. Check the employee profile for their current session. This hire record remains active.'));
         hires.append(row);
       }
       save.disabled = false;
@@ -3619,8 +3608,6 @@ class ReverieChatApp {
     };
     form.addEventListener('submit', async (event) => {
       event.preventDefault(); if (save.disabled || !form.reportValidity()) return;
-      const hireDelegates = [...delegates.querySelectorAll('input[name="hireDelegate"]:checked')].map((box) => box.value);
-      if (hireDelegates.length > 20) { error.textContent = 'Choose at most 20 delegates.'; return; }
       save.disabled = true; error.textContent = ''; status.textContent = '';
       try {
         const fresh = await this.app._chatApi('/api/experts');
@@ -3629,8 +3616,9 @@ class ReverieChatApp {
           render(fresh.data);
           throw new Error('Hiring settings were changed elsewhere since this page loaded. They are shown again; review them and save once more.');
         }
-        const body = { ...fresh.data.settings, hireDelegates, maxHiresPerDay: Number(perDay.input.value), maxActive: Number(active.input.value) };
-        const saved = await this.app._chatApi('/api/experts-settings', { method: 'PUT', body });
+        const body = { expected: { maxHiresPerDay: fresh.data.settings.maxHiresPerDay, maxActive: fresh.data.settings.maxActive },
+          limits: { maxHiresPerDay: Number(perDay.input.value), maxActive: Number(active.input.value) } };
+        const saved = await this.app._chatApi('/api/experts-settings/hiring-limits', { method: 'PATCH', body });
         if (!saved.ok) throw new Error(saved.error || 'Hiring settings could not be saved.');
         status.textContent = 'Hiring settings saved.';
         await load();
@@ -8685,6 +8673,53 @@ class ReverieChatApp {
     void load();
   }
 
+  employeeHiringFields(container, employee, dialog) {
+    const host = this.el('fieldset', 'ca-profile-hiring');
+    host.append(this.el('legend', '', 'Hiring'));
+    const label = this.el('label', 'ca-hint', ' May hire and retire employees within company limits');
+    const enabled = this.el('input'); enabled.type = 'checkbox'; enabled.disabled = true;
+    enabled.setAttribute('aria-label', `Hiring permission for ${employee.name}`); label.prepend(enabled);
+    const status = this.el('p', 'ca-hint'); status.setAttribute('role', 'status');
+    const error = this.el('p', 'ca-company-error'); error.setAttribute('role', 'alert');
+    let shown = null, busy = false;
+    const live = () => dialog.isConnected && host.isConnected;
+    const load = async () => {
+      if (busy || !live()) return;
+      busy = true; enabled.disabled = true; error.textContent = '';
+      try {
+        const result = await this.app._chatApi(`/api/company/employees/${encodeURIComponent(employee.id)}/hiring-permission`);
+        if (!live()) return;
+        const value = result.data;
+        if (!result.ok || value?.employeeId !== employee.id || typeof value.sessionId !== 'string' || typeof value.enabled !== 'boolean' || !['employee', 'legacy-session', 'none'].includes(value.source))
+          throw new Error(result.error || 'Hiring permission could not be verified.');
+        shown = value; enabled.checked = value.enabled;
+        status.textContent = value.source === 'employee' ? 'Permission follows this employee when their plan changes.'
+          : value.source === 'legacy-session' ? 'Legacy permission applies to this session only. Turn it off and back on to attach it to the employee.'
+          : 'No hiring permission.';
+      } catch (failure) { shown = null; if (live()) error.textContent = failure.message; }
+      finally { busy = false; if (live()) enabled.disabled = shown === null; }
+    };
+    enabled.addEventListener('change', async () => {
+      if (busy || !live() || !shown) return;
+      const expected = shown, selected = enabled.checked;
+      busy = true; enabled.disabled = true; error.textContent = ''; status.textContent = 'Saving hiring permission…';
+      try {
+        const result = await this.app._chatApi(`/api/company/employees/${encodeURIComponent(employee.id)}/hiring-permission`, {
+          method: 'PUT', body: { expectedSessionId: expected.sessionId, expected: expected.enabled, enabled: selected },
+        });
+        if (!live()) return;
+        const value = result.data;
+        if (!result.ok || value?.employeeId !== employee.id || value.sessionId !== expected.sessionId || value.enabled !== selected)
+          throw new Error(result.error || 'Permission save is unconfirmed. Refresh before trying again.');
+        shown = value; enabled.checked = value.enabled; status.textContent = 'Hiring permission saved.';
+      } catch (failure) {
+        shown = null; if (live()) { error.textContent = failure.message; status.textContent = 'Save is unconfirmed; refresh the current permission.'; }
+      } finally { busy = false; if (live()) enabled.disabled = shown === null; }
+    });
+    host.append(label, status, error, this.button('ca-btn', `Refresh hiring permission for ${employee.name}`, () => load(), { text: 'Refresh permission' }));
+    container.append(host); void load();
+  }
+
   employeePermissionFields(container, employee) {
     const label = this.el('label', 'ca-hint', ' May recover employees and reconnect terminal viewers');
     label.title = 'Explicit recovery delegation. Viewer-only repair preserves the provider; current scoped office authentication and native checks still apply. This does not grant provider transfers or owner access.';
@@ -8996,7 +9031,7 @@ class ReverieChatApp {
       saveHint.textContent = key === 'credentials'
         ? 'PATs and access checkboxes save immediately. Cancel does not undo saved PATs or access changes.'
         : key === 'permissions'
-        ? 'Permissions save immediately. GPU requests show their own status. Cancel does not undo saved requests or session actions.'
+        ? 'Permissions save immediately. RAM and CPU changes require Preview and Apply. GPU requests show their own status. Cancel does not undo saved changes or session actions.'
         : 'Profile changes are saved together. Cancel discards unsaved profile edits.';
       body.scrollTop = 0;
     };
@@ -9029,7 +9064,9 @@ class ReverieChatApp {
       for (const key of ['permissions', 'effectiveBoardPermissions', 'boardPermissionSources', 'onVacation', 'desiredRunning', 'sessionId', 'sessionGeneration'])
         if (Object.hasOwn(current, key)) employee[key] = current[key];
       management.replaceChildren(); this.employeePermissionFields(management, employee);
+      this.employeeHiringFields(management, employee, dialog);
       this.employeeGpuFields(management, employee, dialog);
+      globalThis.ReverieFleetResources?.mountEmployee(this, management, dialog, employee.id);
       credentials.replaceChildren(); this.publicationCredentialsFields(credentials, employee);
       this.employeeLifecycleFields(management, employee, onSaved, dialog);
       management.append(this.button('ca-btn', `Open ${employee.name}'s journal map`, () => this.openJournalMap(employee), { text: 'Journal map' }));

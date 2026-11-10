@@ -60,9 +60,10 @@
     );
 
   class FleetPanel {
-    constructor(shell, container, dialog) {
+    constructor(shell, container, dialog, employeeId = null) {
       this.shell = shell;
       this.dialog = dialog;
+      this.employeeId = employeeId;
       this.owner = null;
       this.pending = new Set();
       this.rows = new Map();
@@ -80,6 +81,10 @@
       this.setup = shell.el('section', 'ca-fleet-installation');
       this.setupBusy = false;
       this.native = shell.el('section', 'ca-fleet-native');
+      this.nativeFeedback = shell.el('p', 'ca-hint');
+      this.nativeFeedback.setAttribute('role', 'status');
+      this.nativeFeedback.setAttribute('aria-live', 'polite');
+      this.nativeFeedback.tabIndex = -1;
       this.nativeBusy = false;
       this.nativePreview = null;
       this.draft = shell.el('div', 'ca-fleet-preview');
@@ -91,7 +96,7 @@
         text: 'Check rollout',
       });
       this.host.append(
-        shell.el('h3', '', 'Laptop fleet'),
+        shell.el('h3', '', employeeId ? 'Laptop RAM and CPU' : 'Laptop fleet'),
         shell.el(
           'p',
           'ca-hint',
@@ -101,12 +106,13 @@
         this.error,
         this.setup,
         this.native,
+        this.results,
         this.content,
         this.draft,
-        this.results,
         this.refresh,
         this.check
       );
+      this.setup.hidden = this.native.hidden = employeeId !== null;
       container.append(this.host);
       void this.load();
     }
@@ -172,7 +178,7 @@
         this.rows.size === 0 ||
         !this.data.images.length;
       this.content.querySelectorAll('input,select,textarea,button').forEach((node) => {
-        node.disabled = locked;
+        node.disabled = node.hasAttribute('data-fleet-profile') ? this.busy : locked;
       });
       this.refresh.disabled = this.busy;
       this.check.disabled = this.busy;
@@ -338,9 +344,38 @@
       const empty = s.el('option', '', 'Choose an employee for the first replacement');
       empty.value = '';
       this.canary.append(empty);
-      for (const employee of data.employees) this.form.append(this.renderEmployee(employee));
+      const employees = this.employeeId
+        ? data.employees.filter((employee) => employee.employeeId === this.employeeId)
+        : data.employees;
+      if (this.employeeId) {
+        for (const employee of employees) this.form.append(this.renderEmployee(employee));
+        if (!employees.length)
+          this.form.append(
+            s.el('p', 'ca-company-error', 'This employee has no verified fleet record. Refresh status.')
+          );
+        this.canary.value = this.employeeId;
+        const imageId = employees[0]?.desiredImageId;
+        if (imageId) this.image.value = imageId;
+      } else {
+        const scroll = s.el('div', 'ca-fleet-table-scroll');
+        const table = s.el('table', 'ca-fleet-table');
+        const head = s.el('thead'),
+          headings = s.el('tr');
+        for (const label of ['Employee', 'Status', 'Requested RAM / CPU', 'Verified RAM / CPU']) {
+          const cell = s.el('th', '', label);
+          cell.scope = 'col';
+          headings.append(cell);
+        }
+        head.append(headings);
+        const body = s.el('tbody');
+        for (const employee of employees) body.append(this.renderEmployeeSummary(employee));
+        table.append(head, body);
+        scroll.append(table);
+        this.form.append(scroll);
+      }
       const canaryLabel = s.el('label', 'ca-label');
       canaryLabel.append(s.el('span', '', 'Canary employee'), this.canary);
+      canaryLabel.hidden = this.employeeId !== null;
       this.note = s.el('textarea', 'ca-field');
       this.note.rows = 3;
       this.note.maxLength = 12000;
@@ -378,6 +413,7 @@
           'Review the host-approved pool policy on its original connection. This does not infer running laptop limits, image choices or rollout history from employee settings.'
         )
       );
+      this.native.append(this.nativeFeedback);
       try {
         const pending = this.readNativePending();
         if (pending) {
@@ -413,13 +449,19 @@
             `Host-selected pool: ${selected.memoryMaxMiB.toLocaleString()} MiB hard RAM; CPU weight ${selected.cpuWeight}; CPUs ${selected.allowedCpus.join(', ')}.`
           )
         );
-        const rows = s.el('ul');
+        const details = s.el('details');
+        details.append(s.el('summary', '', `Employee thresholds · ${Object.keys(selected.employeeMemoryHighMiB).length}`),
+          s.el('p', 'ca-hint', 'Soft thresholds do not reserve RAM. They apply when each laptop is running.'));
+        const rows = s.el('table', 'ca-fleet-table');
         for (const [employeeId, high] of Object.entries(selected.employeeMemoryHighMiB)) {
           const name = this.data?.employees.find((employee) => employee.employeeId === employeeId)?.name || employeeId;
-          rows.append(s.el('li', '', `${name}: ${high.toLocaleString()} MiB soft RAM threshold.`));
+          const row = s.el('tr');
+          row.append(s.el('td', '', name), s.el('td', '', `${high.toLocaleString()} MiB soft RAM`));
+          rows.append(row);
         }
+        details.append(rows);
         this.native.append(
-          rows,
+          details,
           s.el(
             'p',
             'ca-hint',
@@ -440,11 +482,26 @@
             'The original migration recovery record cannot be read. No new consent will be sent.'
           )
         );
+      } finally {
+        if (this.nativeFeedback.getAttribute('role') === 'alert') this.focusNativeFailure();
       }
+    }
+    focusNativeFailure() {
+      if (!this.nativeFeedback.isConnected) return;
+      this.nativeFeedback.focus({ preventScroll: true });
+      this.nativeFeedback.scrollIntoView?.({ block: 'nearest' });
+    }
+    reportNative(message, failed = false) {
+      this.nativeFeedback.textContent = message;
+      this.nativeFeedback.className = failed ? 'ca-company-error' : 'ca-hint';
+      this.nativeFeedback.setAttribute('role', failed ? 'alert' : 'status');
+      if (failed) this.focusNativeFailure();
     }
     async prepareNative() {
       if (this.nativeBusy || this.busy || this.storageFailed) return;
       this.nativeBusy = true;
+      this.results.replaceChildren();
+      this.reportNative('Checking the shared-pool setup…');
       this.sync();
       try {
         await this.identity();
@@ -474,10 +531,12 @@
           throw new Error('The host-selected migration preview could not be verified');
         this.nativePreview = value;
         this.error.textContent = '';
+        this.reportNative('Review the proposed settings below. No activation has been sent.');
         this.renderNative();
       } catch (error) {
         this.nativePreview = null;
         this.error.textContent = error.message || 'Native migration preview is unavailable';
+        this.reportNative(this.error.textContent, true);
       } finally {
         this.nativeBusy = false;
         this.sync();
@@ -494,7 +553,10 @@
       if (!confirmed || this.nativePreview !== preview || this.nativeBusy || this.busy || !this.dialog.isConnected)
         return;
       this.nativeBusy = true;
+      this.results.replaceChildren();
+      this.reportNative('Activating the shared pool. Employee startup will be reported separately…');
       this.sync();
+      let sent = false;
       try {
         await this.identity();
         this.requireNoPending();
@@ -506,6 +568,7 @@
         if (this.shell.doc.defaultView.localStorage.getItem(this.nativeKey()) !== raw)
           throw new Error('Migration recovery record could not be saved; no consent sent');
         this.nativePreview = null; // Local one-shot before the HTTP dispatch.
+        sent = true;
         const reply = await this.shell.app._chatApi(`${ROOT}/native-apply`, {
           method: 'POST',
           body: {
@@ -520,6 +583,7 @@
         this.showNativeResult(reply.data, record.operationId);
       } catch (error) {
         this.error.textContent = error.message || 'Original migration remains unconfirmed';
+        this.reportNative(`${this.error.textContent}. ${sent ? 'Activation is unconfirmed; use Check migration to inspect this attempt.' : 'No activation request was sent.'}`, true);
       } finally {
         this.nativeBusy = false;
         this.renderNative();
@@ -529,6 +593,7 @@
     async checkNative(record) {
       if (this.nativeBusy || this.busy) return;
       this.nativeBusy = true;
+      this.reportNative('Checking the original activation…');
       this.sync();
       try {
         await this.identity();
@@ -542,6 +607,7 @@
         this.showNativeResult(reply.data, record.operationId);
       } catch (error) {
         this.error.textContent = error.message || 'Original migration remains unconfirmed';
+        this.reportNative(this.error.textContent, true);
       } finally {
         this.nativeBusy = false;
         this.renderNative();
@@ -557,21 +623,30 @@
       );
       if (!confirmed || this.nativeBusy || this.busy || !this.dialog.isConnected) return;
       this.nativeBusy = true;
+      this.reportNative('Checking whether a fresh setup review is available…');
       this.sync();
       try {
         await this.identity();
         if (this.readNativePending()?.operationId !== record.operationId)
           throw new Error('Original migration reference changed; no recovery was requested');
         const reply = await this.shell.app._chatApi(`${ROOT}/native-reconcile`, {
-          method: 'POST', body: {operationId: record.operationId, preserveUnconfirmedHistory: true},
+          method: 'POST',
+          body: { operationId: record.operationId, preserveUnconfirmedHistory: true },
         });
         await this.identity();
         const result = reply.data;
         if (!reply.ok) throw new Error(reply.error || 'Failed setup recovery is unavailable');
-        if (!result || result.operationId !== record.operationId || result.priorOutcome !== 'unconfirmed' ||
-            result.currentState !== 'pool-uninstalled' || result.historyRecorded !== true ||
-            result.activationAuthorized !== false || result.startsAuthorized !== false ||
-            !/^[a-f0-9]{64}$/.test(result.evidenceDigest) || !id(result.observationNonce))
+        if (
+          !result ||
+          result.operationId !== record.operationId ||
+          result.priorOutcome !== 'unconfirmed' ||
+          result.currentState !== 'pool-uninstalled' ||
+          result.historyRecorded !== true ||
+          result.activationAuthorized !== false ||
+          result.startsAuthorized !== false ||
+          !/^[a-f0-9]{64}$/.test(result.evidenceDigest) ||
+          !id(result.observationNonce)
+        )
           throw new Error('Current installation recovery evidence could not be verified');
         if (this.readNativePending()?.operationId !== record.operationId)
           throw new Error('Original migration reference changed; its record was kept');
@@ -580,17 +655,27 @@
         const history = JSON.parse(storage.getItem(historyKey) || '[]');
         if (!Array.isArray(history) || history.length >= 100)
           throw new Error('Local unconfirmed setup history is unavailable or full');
-        const raw = JSON.stringify([...history, {operationId: record.operationId,
-          priorOutcome: 'unconfirmed', evidenceDigest: result.evidenceDigest, observationNonce: result.observationNonce}]);
+        const raw = JSON.stringify([
+          ...history,
+          {
+            operationId: record.operationId,
+            priorOutcome: 'unconfirmed',
+            evidenceDigest: result.evidenceDigest,
+            observationNonce: result.observationNonce,
+          },
+        ]);
         storage.setItem(historyKey, raw);
         if (storage.getItem(historyKey) !== raw) throw new Error('Unconfirmed setup history could not be preserved');
         storage.removeItem(this.nativeKey());
         this.nativePreview = null;
         this.error.textContent = '';
-        this.results.replaceChildren(this.shell.el('p', 'ca-hint',
-          'The current shared pool is absent. The previous attempt remains unconfirmed in history. Review the shared-pool setup again to activate it.'));
+        this.results.replaceChildren();
+        this.reportNative(
+          'The shared pool is absent. The previous attempt remains unconfirmed in history. Review the shared-pool setup again to activate it.'
+        );
       } catch (error) {
         this.error.textContent = error.message || 'Failed setup remains unconfirmed';
+        this.reportNative(this.error.textContent, true);
       } finally {
         this.nativeBusy = false;
         this.renderNative();
@@ -614,6 +699,14 @@
       )
         throw new Error('Native activation result could not be verified');
       this.results.replaceChildren(this.shell.el('h4', '', 'Original shared-pool migration'));
+      this.reportNative(
+        value.state === 'unknown'
+          ? 'Shared-pool activation or employee startup is unconfirmed. Check this migration before taking another action.'
+          : value.native
+            ? 'The host confirmed shared-pool activation. Employee startup results are below.'
+            : 'Shared-pool activation is pending. Check this migration for its result.',
+        value.state === 'unknown'
+      );
       this.results.append(
         this.shell.el(
           'p',
@@ -642,6 +735,7 @@
       }
       if (!value.blocksFurtherChanges && value.state === 'pool-configured' && value.native !== null)
         this.shell.doc.defaultView.localStorage.removeItem(this.nativeKey());
+      this.error.textContent = '';
     }
     setupKey() {
       return `reverie:worker-pool-installation:${this.owner}`;
@@ -885,6 +979,18 @@
       );
       if (data.pool.desired) {
         const value = data.pool.desired;
+        if (this.employeeId) {
+          this.poolValues = () => ({ ...value, allowedCpus: [...value.allowedCpus] });
+          this.cpus = { value: value.allowedCpus.join(',') };
+          poolBox.append(
+            s.el(
+              'p',
+              'ca-hint',
+              'Shared pool settings are managed in Company settings. This preview changes only this employee.'
+            )
+          );
+          return poolBox;
+        }
         let highValue = () => null;
         if (value.memoryHighMiB === null) {
           poolBox.append(s.el('p', 'ca-hint', 'Pool soft RAM is unbounded; the hard pool ceiling still applies.'));
@@ -909,9 +1015,48 @@
         });
       } else {
         this.poolValues = null;
-        poolBox.append(s.el('p', 'ca-hint', 'Pool settings are unavailable until host setup is verified.'));
+        poolBox.append(s.el('p', 'ca-hint', 'Live pool settings are unavailable from this server.'));
       }
       return poolBox;
+    }
+    renderEmployeeSummary(employee) {
+      const s = this.shell,
+        row = s.el('tr');
+      const name = s.el('td');
+      const open = s.button(
+        'ca-btn',
+        `Resource permissions for ${employee.name}`,
+        async () => {
+          const reply = await s.app._chatApi('/api/company');
+          const current =
+            reply.ok &&
+            reply.data?.canManage === true &&
+            reply.data.employees?.find((item) => item.id === employee.employeeId);
+          if (!current) {
+            this.error.textContent = 'Employee profile is unavailable. Refresh Company.';
+            return;
+          }
+          s.openEmployeeProfile(current);
+          s.doc.querySelector('[data-profile-tab="permissions"]')?.click();
+        },
+        { text: employee.name }
+      );
+      name.append(open);
+      open.setAttribute('data-fleet-profile', '');
+      row.append(
+        name,
+        s.el('td', '', `${employee.state}${employee.reason ? `: ${employee.reason}` : ''}`),
+        s.el('td', '', employee.desired ? limits(employee.desired) : 'Unavailable'),
+        s.el('td', '', limits(employee.observed))
+      );
+      row.title = `Requested image: ${employee.desiredImageId || 'Unavailable'}. Running image: ${employee.observedImageId || 'Not verified'}.`;
+      if (employee.desired) {
+        this.rows.set(employee.employeeId, () => ({ ...employee.desired }));
+        const option = s.el('option', '', employee.name);
+        option.value = employee.employeeId;
+        this.canary.append(option);
+      }
+      return row;
     }
     renderEmployee(employee) {
       const s = this.shell;
@@ -1123,5 +1268,8 @@
       }
     }
   }
-  window.ReverieFleetResources = { mount: (shell, container, dialog) => new FleetPanel(shell, container, dialog) };
+  window.ReverieFleetResources = {
+    mount: (shell, container, dialog) => new FleetPanel(shell, container, dialog),
+    mountEmployee: (shell, container, dialog, employeeId) => new FleetPanel(shell, container, dialog, employeeId),
+  };
 })();

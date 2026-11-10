@@ -564,6 +564,10 @@ html[data-skin='rose-pine-dawn'] .ca-root {
 .ca-fleet-policy .ca-label { min-width:0; }
 .ca-fleet-preview,.ca-fleet-operation { margin:12px 0; overflow-wrap:anywhere; }
 .ca-fleet-resources > button { margin:4px 8px 4px 0; }
+.ca-fleet-table-scroll { overflow-x:auto; }
+.ca-fleet-table { width:100%; border-collapse:collapse; font-size:12px; }
+.ca-fleet-table th,.ca-fleet-table td { padding:8px; text-align:left; vertical-align:top; border-bottom:1px solid var(--ca-line); }
+.ca-fleet-table th { color:var(--ca-muted); }
 .ca-runtime-settings { margin:auto; width:min(600px,calc(100vw - 32px)); max-width:none; max-height:85dvh; overflow:auto; box-sizing:border-box; }
 .ca-runtime-settings h2 { margin:0 0 8px; font-size:20px; }
 .ca-runtime-form { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; margin:16px 0; }

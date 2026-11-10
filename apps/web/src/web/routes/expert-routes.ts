@@ -100,6 +100,8 @@ export interface ExpertRouteDeps {
   /** Stop a session through the console's cleanup path (no history or data directories are removed). */
   stopSession(sessionId: string): Promise<void>;
   sessionExists(sessionId: string): boolean;
+  /** Stable employee lookup; current session identity, never a role-based grant. */
+  employeeSession?(employeeId: string, owner: string | undefined): string | undefined;
   /** Current names in this company, for distinct template hires (identity stays the employee id). */
   employeeNames(owner: string | undefined): string[];
   hireEmployee(input: {
@@ -191,13 +193,17 @@ export function registerExpertRoutes(app: FastifyInstance, deps: ExpertRouteDeps
     if (!agentCall(req) || req.headers['x-reverie-service-token'] !== undefined || !deps.callerSession(req))
       throw new ExpertError('Verified owner or listed agent delegate required', 403);
   };
+  const canHireSession = (req: FastifyRequest, settings: ReturnType<typeof parseExpertSettings>, session: string): boolean =>
+    settings.hireDelegates.includes(session) || settings.hireEmployeeDelegates.some(
+      (employeeId) => deps.employeeSession?.(employeeId, ownerFor(req)) === session
+    );
   /** The owner, or a listed delegate session. An unresolved or unlisted agent is refused. */
   const hiringActor = (req: FastifyRequest): Actor => {
     if ((deps.verifiedOwner ?? NO_OWNER)(req)) return { kind: 'owner', label: getAuthUser(req).username || 'owner' };
     if (!agentCall(req) || req.headers['x-reverie-service-token'] !== undefined) throw new ExpertError('Verified owner or listed agent delegate required', 403);
     const session = deps.callerSession(req);
     if (!session) throw new ExpertError('Unknown agent session', 403);
-    if (!deps.store.snapshot().settings.hireDelegates.includes(session))
+    if (!canHireSession(req, deps.store.snapshot().settings, session))
       throw new ExpertError('This session may not hire or retire experts; the owner lists delegates', 403);
     return { kind: 'delegate', session, label: `agent:${session}` };
   };
@@ -315,6 +321,89 @@ export function registerExpertRoutes(app: FastifyInstance, deps: ExpertRouteDeps
     })
   );
 
+  const employeeSession = (req: FastifyRequest): { employeeId: string; sessionId: string } => {
+    ownerOnly(req, 'changes employee hiring permissions');
+    if (!deps.employeeSession) throw new ExpertError('Employee hiring permissions are unavailable', 503);
+    const { id: employeeId } = req.params as { id: string };
+    const sessionId = deps.employeeSession(employeeId, ownerFor(req));
+    if (!sessionId) throw new ExpertError('Current employee session is unavailable', 409);
+    return { employeeId, sessionId };
+  };
+  app.patch('/api/experts-settings/hiring-limits', async (req, reply) =>
+    run(reply, async () => {
+      ownerOnly(req, 'changes company hiring limits');
+      const caps = z
+        .object({ maxHiresPerDay: z.number().int().min(0).max(20), maxActive: z.number().int().min(0).max(50) })
+        .strict();
+      const selected = parseBody(z.object({ expected: caps, limits: caps }).strict(), req.body);
+      const settings = await deps.store.update((state) => {
+        if (
+          state.settings.maxHiresPerDay !== selected.expected.maxHiresPerDay ||
+          state.settings.maxActive !== selected.expected.maxActive
+        )
+          throw new ExpertError('Hiring limits changed; refresh before saving', 409);
+        state.settings = parseExpertSettings({ ...state.settings, ...selected.limits });
+        return state.settings;
+      });
+      await deps.audit({
+        admin: getAuthUser(req).username,
+        action: 'expert_hiring_limits',
+        ip: req.ip,
+        detail: selected.limits,
+      });
+      return { settings };
+    })
+  );
+  app.get('/api/company/employees/:id/hiring-permission', async (req, reply) =>
+    run(reply, async () => {
+      const current = employeeSession(req);
+      await deps.store.load();
+      const after = employeeSession(req);
+      if (after.sessionId !== current.sessionId)
+        throw new ExpertError('Employee session changed; refresh permission', 409);
+      const settings = deps.store.snapshot().settings;
+      const stable = settings.hireEmployeeDelegates.includes(current.employeeId);
+      const legacy = settings.hireDelegates.includes(current.sessionId);
+      return { ...current, enabled: stable || legacy, source: stable ? 'employee' : legacy ? 'legacy-session' : 'none' };
+    })
+  );
+  app.put('/api/company/employees/:id/hiring-permission', async (req, reply) =>
+    run(reply, async () => {
+      const current = employeeSession(req);
+      const selected = parseBody(
+        z.object({ expectedSessionId: z.string().min(1).max(100), expected: z.boolean(), enabled: z.boolean() }).strict(),
+        req.body
+      );
+      if (current.sessionId !== selected.expectedSessionId)
+        throw new ExpertError('Employee session changed; refresh permission', 409);
+      const result = await deps.store.update((state) => {
+        if (
+          employeeSession(req).sessionId !== current.sessionId ||
+          (state.settings.hireEmployeeDelegates.includes(current.employeeId) || state.settings.hireDelegates.includes(current.sessionId)) !== selected.expected
+        )
+          throw new ExpertError('Hiring permission changed; refresh before saving', 409);
+        const delegates = new Set(state.settings.hireDelegates);
+        const employees = new Set(state.settings.hireEmployeeDelegates);
+        // Explicit profile edits migrate only this current legacy SID grant.
+        // New grants remain bound to the employee across session moves.
+        delegates.delete(current.sessionId);
+        if (selected.enabled) employees.add(current.employeeId); else employees.delete(current.employeeId);
+        state.settings = parseExpertSettings({ ...state.settings, hireDelegates: [...delegates], hireEmployeeDelegates: [...employees] });
+        return { ...current, enabled: selected.enabled, source: selected.enabled ? 'employee' : 'none' };
+      });
+      await deps.audit({
+        admin: getAuthUser(req).username,
+        action: 'employee_hiring_permission',
+        target: current.employeeId,
+        ip: req.ip,
+        detail: { sessionId: current.sessionId, enabled: result.enabled },
+      });
+      if (employeeSession(req).sessionId !== current.sessionId)
+        throw new ExpertError('Employee moved while the permission was saved. Refresh to inspect the saved employee permission.', 409);
+      return result;
+    })
+  );
+
   /**
    * One hire, inside the hire gate. `overrides` (name, position, reporting line, rooms) come only from a delegate's
    * request the owner approved; a direct hire takes them from the template.
@@ -389,7 +478,7 @@ export function registerExpertRoutes(app: FastifyInstance, deps: ExpertRouteDeps
         const authorized = () => {
           if (actor.kind !== 'delegate') return true;
           const latest = deps.store.snapshot();
-          return deps.callerSession(req) === actor.session && latest.settings.hireDelegates.includes(actor.session) &&
+          return deps.callerSession(req) === actor.session && canHireSession(req, latest.settings, actor.session) &&
             latest.settings.delegateWorkingRoot === delegatedRoot && (!latest.settings.requireBudgetStopForDelegates || !!body.budgetStop) &&
             latest.hires.filter(hire => hire.hiredAt > now() - DAY_MS).length < latest.settings.maxHiresPerDay &&
             latest.hires.filter(hire => hire.status === 'active').length < latest.settings.maxActive &&
@@ -696,11 +785,11 @@ export function registerExpertRoutes(app: FastifyInstance, deps: ExpertRouteDeps
     run(reply, async () => {
       requireHiringPrincipal(req);
       await deps.store.load();
-      const actor = hiringActor(req);
       const body = parseBody(RetireBodySchema, req.body);
       if (findCredential(body.reason)) throw new ExpertError('reason: looks like a credential');
       const { id } = req.params as { id: string };
       return serial(async () => {
+        const actor = hiringActor(req);
         const state = deps.store.snapshot();
         const hire = state.hires.find((h) => h.templateId === id && h.sessionId === body.sessionId && h.status === 'active');
         if (!hire) throw new ExpertError('No active hire of this template with that session', 404);

@@ -12,6 +12,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { CompanyStore } from '../src/company-store.js';
+import * as companyFiles from '../src/company-store.js';
 import { CompanyService } from '../src/company-service.js';
 import { ChatroomStore } from '../src/chatroom-store.js';
 import { ExpertStore, sessionCreateBody, type SessionLaunch } from '../src/experts.js';
@@ -76,6 +77,7 @@ describe('experts api', () => {
   let counter: number;
   let plans: PlanReading[] | Error;
   let plansGate: Promise<void> | undefined;
+  let planReadEntered: (() => void) | undefined;
   let routes: ExpertRoutes;
   let expertStore: ExpertStore;
   let stopFails: Set<string>;
@@ -87,72 +89,82 @@ describe('experts api', () => {
     expertStore = store;
     app = Fastify();
     installRouteErrorHandler(app);
-    routes = registerExpertRoutes(app, { ...({
-      store,
-      callerSession: (req) => {
-        const raw = req.headers[HEADER];
-        return typeof raw === 'string' && sessions.has(raw.trim()) ? raw.trim() : undefined;
+    routes = registerExpertRoutes(app, {
+      ...{
+        store,
+        callerSession: (req) => {
+          const raw = req.headers[HEADER];
+          return typeof raw === 'string' && sessions.has(raw.trim()) ? raw.trim() : undefined;
+        },
+        createSession: async (_req, launch) => {
+          sessionCreateBody(launch); // the real body builder must accept every launch the routes produce
+          launches.push(launch);
+          const id = `hired-${++counter}`;
+          sessions.set(id, { id, name: launch.name, mode: launch.mode });
+          return id;
+        },
+        startSession: async (id) => {
+          expect(company.view().employees.some((employee) => employee.sessionId === id)).toBe(true);
+          expect(rooms.get(sideRoom)!.members.some((member) => member.sessionId === id)).toBe(true);
+          if (activationFails) throw new Error('Synthetic startup failure');
+          activated.push(id);
+        },
+        stopSession: async (id) => {
+          if (stopFails.has(id)) throw new Error('tmux did not answer');
+          stopped.push(id);
+          sessions.delete(id);
+        },
+        sessionExists: (id) => sessions.has(id),
+        employeeSession: (id, owner) => company.view(owner).employees.find((employee) => employee.id === id)?.sessionId,
+        employeeNames: (owner) => company.view(owner).employees.map((employee) => employee.name),
+        hireEmployee: (input) => company.hire({ ...input, researchEnabled: false }),
+        inviteEmployee: (employeeId, roomId, owner) => void company.invite(employeeId, roomId, owner),
+        removeEmployee: async (employeeId) => {
+          await company.store.update((state) => {
+            state.employees = state.employees.filter((e) => e.id !== employeeId);
+          });
+        },
+        leaveRoom: (roomId, sessionId) => void rooms.removeMember(roomId, sessionId),
+        postNotice: (roomId, text) => {
+          if (noticeFails) throw new Error('room unavailable');
+          rooms.post(roomId, { kind: 'system', name: 'experts' }, text, 'all', clock);
+        },
+        audit: async (entry) => {
+          audits.push(entry);
+        },
+        noticeRoomFallback: opts.fallbackRoom === null ? undefined : (opts.fallbackRoom ?? noticeRoom),
+        roomExists: (roomId) => !!rooms.get(roomId),
+        readPlans: async () => {
+          planReadEntered?.();
+          if (plansGate) await plansGate;
+          if (plans instanceof Error) throw plans;
+          return structuredClone(plans);
+        },
+        sendToSession: opts.noSend
+          ? undefined
+          : (roomId, sessionId, text) => {
+              if (sendFails) throw new Error('pane closed');
+              rooms.post(roomId, { kind: 'system', name: 'experts' }, text, [sessionId], clock);
+            },
+        budgetCheckEveryMs: 0,
+        now: () => clock,
       },
-      createSession: async (_req, launch) => {
-        sessionCreateBody(launch); // the real body builder must accept every launch the routes produce
-        launches.push(launch);
-        const id = `hired-${++counter}`;
-        sessions.set(id, { id, name: launch.name, mode: launch.mode });
-        return id;
-      },
-      startSession: async (id) => {
-        expect(company.view().employees.some(employee => employee.sessionId === id)).toBe(true);
-        expect(rooms.get(sideRoom)!.members.some(member => member.sessionId === id)).toBe(true);
-        if (activationFails) throw new Error('Synthetic startup failure');
-        activated.push(id);
-      },
-      stopSession: async (id) => {
-        if (stopFails.has(id)) throw new Error('tmux did not answer');
-        stopped.push(id);
-        sessions.delete(id);
-      },
-      sessionExists: (id) => sessions.has(id),
-      employeeNames: (owner) => company.view(owner).employees.map(employee => employee.name),
-      hireEmployee: (input) => company.hire({ ...input, researchEnabled: false }),
-      inviteEmployee: (employeeId, roomId, owner) => void company.invite(employeeId, roomId, owner),
-      removeEmployee: async (employeeId) => {
-        await company.store.update((state) => {
-          state.employees = state.employees.filter((e) => e.id !== employeeId);
-        });
-      },
-      leaveRoom: (roomId, sessionId) => void rooms.removeMember(roomId, sessionId),
-      postNotice: (roomId, text) => {
-        if (noticeFails) throw new Error('room unavailable');
-        rooms.post(roomId, { kind: 'system', name: 'experts' }, text, 'all', clock);
-      },
-      audit: async (entry) => {
-        audits.push(entry);
-      },
-      noticeRoomFallback: opts.fallbackRoom === null ? undefined : (opts.fallbackRoom ?? noticeRoom),
-      roomExists: (roomId) => !!rooms.get(roomId),
-      readPlans: async () => {
-        if (plansGate) await plansGate;
-        if (plans instanceof Error) throw plans;
-        return structuredClone(plans);
-      },
-      sendToSession: opts.noSend
-        ? undefined
-        : (roomId, sessionId, text) => {
-            if (sendFails) throw new Error('pane closed');
-            rooms.post(roomId, { kind: 'system', name: 'experts' }, text, [sessionId], clock);
-          },
-      budgetCheckEveryMs: 0,
-      now: () => clock,
-    }), verifiedOwner: trustedFixtureOwner });
+      verifiedOwner: trustedFixtureOwner,
+    });
     await app.ready();
   };
 
-  const req = (method: 'GET' | 'PUT' | 'POST' | 'DELETE', url: string, payload?: unknown, agent?: string) =>
+  const req = (method: 'GET' | 'PUT' | 'POST' | 'DELETE' | 'PATCH', url: string, payload?: unknown, agent?: string) =>
     app.inject({ method, url, payload: payload as never, headers: agent === undefined ? {} : { [HEADER]: agent } });
   const state = async () => JSON.parse(await readFile(file, 'utf8'));
   const setSettings = (settings: Record<string, unknown>) => req('PUT', '/api/experts-settings', settings);
   const hire = (id: string, agent?: string, extra: Record<string, unknown> = {}) =>
-    req('POST', `/api/experts/${id}/hire`, { workingDir: dir, reason: 'Need a reviewer for the parser work', ...extra }, agent);
+    req(
+      'POST',
+      `/api/experts/${id}/hire`,
+      { workingDir: dir, reason: 'Need a reviewer for the parser work', ...extra },
+      agent
+    );
 
   beforeEach(async () => {
     dir = await mkdtemp(join(tmpdir(), 'experts-api-'));
@@ -178,6 +190,7 @@ describe('experts api', () => {
     clock = Date.parse('2026-10-15T12:00:00Z');
     plans = [{ id: 'plan-a', weeklyPercent: 40, updatedAt: clock }];
     plansGate = undefined;
+    planReadEntered = undefined;
     rooms = new ChatroomStore();
     noticeRoom = rooms.create('notices', undefined, clock).id;
     sideRoom = rooms.create('reviews', undefined, clock).id;
@@ -231,10 +244,106 @@ describe('experts api', () => {
 
   it('returns the whole settings object, so a PUT can write back a read-modify-write copy', async () => {
     const before = (await req('GET', '/api/experts')).json().data.settings;
-    expect(before).toMatchObject({ maxHiresPerDay: expect.any(Number), maxActive: expect.any(Number), hireDelegates: expect.any(Array) });
+    expect(before).toMatchObject({
+      maxHiresPerDay: expect.any(Number),
+      maxActive: expect.any(Number),
+      hireDelegates: expect.any(Array),
+    });
     const put = await req('PUT', '/api/experts-settings', { ...before, maxActive: before.maxActive + 1 });
     expect(put.statusCode).toBe(200);
-    expect((await req('GET', '/api/experts')).json().data.settings).toEqual({ ...before, maxActive: before.maxActive + 1 });
+    expect((await req('GET', '/api/experts')).json().data.settings).toEqual({
+      ...before,
+      maxActive: before.maxActive + 1,
+    });
+  });
+
+  it('changes one current employee hiring grant atomically and refuses stale sessions or agent callers', async () => {
+    await setSettings({ hireDelegates: [OTHER_AGENT], maxActive: 7 });
+    const employee = await company.hire({
+      name: 'Grant target',
+      icon: 'G',
+      position: 'Builder',
+      expertise: ['building'],
+      sessionId: DELEGATE,
+      researchEnabled: false,
+    });
+    const url = `/api/company/employees/${employee.id}/hiring-permission`;
+    expect((await req('GET', url)).json().data).toEqual({
+      employeeId: employee.id,
+      sessionId: DELEGATE,
+      enabled: false,
+      source: 'none',
+    });
+    const body = { expectedSessionId: DELEGATE, expected: false, enabled: true };
+    expect((await req('PUT', url, body, OTHER_AGENT)).statusCode).toBe(403);
+    expect((await req('PUT', url, { ...body, expectedSessionId: OTHER_AGENT })).statusCode).toBe(409);
+    expect((await req('PUT', url, body)).statusCode).toBe(200);
+    expect((await req('PUT', url, body)).statusCode).toBe(409);
+    const saved = (await req('GET', '/api/experts')).json().data.settings;
+    expect(saved.hireDelegates).toEqual([OTHER_AGENT]);
+    expect(saved.hireEmployeeDelegates).toEqual([employee.id]);
+    expect(saved.maxActive).toBe(7);
+  });
+
+  it('changes hiring limits without replacing concurrent individual permissions and refuses stale caps', async () => {
+    const before = (await req('GET', '/api/experts')).json().data.settings;
+    await setSettings({ ...before, hireDelegates: [DELEGATE] });
+    const body = {
+      expected: { maxHiresPerDay: before.maxHiresPerDay, maxActive: before.maxActive },
+      limits: { maxHiresPerDay: 4, maxActive: 8 },
+    };
+    expect((await req('PATCH', '/api/experts-settings/hiring-limits', body, DELEGATE)).statusCode).toBe(403);
+    expect((await req('PATCH', '/api/experts-settings/hiring-limits', body)).statusCode).toBe(200);
+    expect((await req('PATCH', '/api/experts-settings/hiring-limits', body)).statusCode).toBe(409);
+    expect((await req('GET', '/api/experts')).json().data.settings).toMatchObject({
+      hireDelegates: [DELEGATE],
+      maxActive: 8,
+      maxHiresPerDay: 4,
+    });
+  });
+
+  it('keeps an employee grant safe through a rebind during its actual file write', async () => {
+    await setSettings({ hireDelegates: [DELEGATE, 'unrelated-legacy'], delegateWorkingRoot: dir, maxActive: 7 });
+    await req('PUT', '/api/experts/alpha', { ...alpha, rooms: [sideRoom] });
+    const employee = await company.hire({ name: 'Mover', icon: 'M', position: 'Builder', expertise: ['building'], sessionId: DELEGATE, researchEnabled: false });
+    const url = `/api/company/employees/${employee.id}/hiring-permission`;
+    expect((await req('GET', url)).json().data.source).toBe('legacy-session');
+    const write = companyFiles.writeCompanyStateFile;
+    let moved = false;
+    const spy = vi.spyOn(companyFiles, 'writeCompanyStateFile').mockImplementation(async (path, bytes, validate) => {
+      if (path === file && !moved) { moved = true; await company.rebind(employee.id, undefined, OTHER_AGENT); }
+      return write(path, bytes, validate);
+    });
+    const response = await req('PUT', url, { expectedSessionId: DELEGATE, expected: true, enabled: true });
+    spy.mockRestore();
+    expect(response.statusCode).toBe(409);
+    expect(sessions.has(DELEGATE)).toBe(true);
+    expect((await state()).settings).toMatchObject({ hireDelegates: ['unrelated-legacy'], hireEmployeeDelegates: [employee.id] });
+    expect((await req('GET', url)).json().data).toMatchObject({ sessionId: OTHER_AGENT, enabled: true, source: 'employee' });
+    expect((await hire('alpha', DELEGATE)).statusCode).toBe(403);
+    expect((await hire('alpha', OTHER_AGENT)).statusCode).toBe(200);
+  });
+
+  it('rechecks a queued retirement after the authorized employee moves, before stopping anyone', async () => {
+    await setSettings({ maxActive: 7, delegateWorkingRoot: dir });
+    await req('PUT', '/api/experts/alpha', { ...alpha, rooms: [sideRoom] });
+    await req('PUT', '/api/experts/beta', { ...beta, rooms: [sideRoom] });
+    const employee = await company.hire({ name: 'Mover', icon: 'M', position: 'Builder', expertise: ['building'], sessionId: DELEGATE, researchEnabled: false });
+    await req('PUT', `/api/company/employees/${employee.id}/hiring-permission`, { expectedSessionId: DELEGATE, expected: false, enabled: true });
+    const target = (await hire('alpha')).json().data.hire;
+    let release!: () => void;
+    const entered = new Promise<void>((resolve) => { planReadEntered = resolve; });
+    plansGate = new Promise<void>((resolve) => { release = resolve; });
+    const holding = hire('beta', undefined, { budgetStop: { planId: 'plan-a', weeklyPercent: 90 } }).then(value => value);
+    await entered;
+    const queued = req('POST', '/api/experts/alpha/retire', { sessionId: target.sessionId, reason: 'Finish review' }, DELEGATE).then(value => value);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    await company.rebind(employee.id, undefined, OTHER_AGENT);
+    release();
+    expect((await holding).statusCode).toBe(200);
+    expect((await queued).statusCode).toBe(403);
+    expect(stopped).toEqual([]);
+    expect((await state()).hires.find((row: any) => row.id === target.id).status).toBe('active');
   });
 
   it('lets the owner create, update and delete a template, with an audit line each', async () => {
@@ -243,7 +352,11 @@ describe('experts api', () => {
     const first = created.json().data.expert;
     clock += 1000;
     const updated = await req('PUT', '/api/experts/gamma', { ...beta, name: 'Gamma', role: 'Lead test writer' });
-    expect(updated.json().data.expert).toMatchObject({ role: 'Lead test writer', createdAt: first.createdAt, updatedAt: clock });
+    expect(updated.json().data.expert).toMatchObject({
+      role: 'Lead test writer',
+      createdAt: first.createdAt,
+      updatedAt: clock,
+    });
     expect((await state()).templates.find((t: { id: string }) => t.id === 'gamma').role).toBe('Lead test writer');
     const removed = await req('DELETE', '/api/experts/gamma');
     expect(removed.statusCode).toBe(200);
@@ -336,7 +449,12 @@ describe('experts api', () => {
         expect.objectContaining({ workingDir: dir, mode: 'claude', name: 'Alpha', icon: 'A' }),
       ]);
       const employee = company.view().employees.find((e) => e.id === employeeId);
-      expect(employee).toMatchObject({ sessionId, name: 'Alpha', position: 'Compiler reviewer', researchEnabled: false });
+      expect(employee).toMatchObject({
+        sessionId,
+        name: 'Alpha',
+        position: 'Compiler reviewer',
+        researchEnabled: false,
+      });
       expect(rooms.get(sideRoom)!.members.map((m) => m.sessionId)).toContain(sessionId);
       const notices = rooms.get(noticeRoom)!.messages.filter((m) => m.from.kind === 'system');
       expect(notices).toHaveLength(1);
@@ -355,11 +473,23 @@ describe('experts api', () => {
     it('disambiguates repeated template hires against actual company names before launch, preserving stable identities', async () => {
       await setSettings({ maxHiresPerDay: 10, maxActive: 10 });
       const first = (await hire('alpha')).json().data;
-      await company.hire({ name: 'ALPHA 2', icon: 'A', position: 'Existing colleague', expertise: ['Testing'], sessionId: OTHER_AGENT, researchEnabled: false });
+      await company.hire({
+        name: 'ALPHA 2',
+        icon: 'A',
+        position: 'Existing colleague',
+        expertise: ['Testing'],
+        sessionId: OTHER_AGENT,
+        researchEnabled: false,
+      });
       const second = (await hire('alpha')).json().data;
       const third = (await hire('alpha')).json().data;
-      expect(launches.map(launch => launch.name)).toEqual(['Alpha', 'Alpha 3', 'Alpha 4']);
-      expect(company.view().employees.map(employee => employee.name)).toEqual(['Alpha', 'ALPHA 2', 'Alpha 3', 'Alpha 4']);
+      expect(launches.map((launch) => launch.name)).toEqual(['Alpha', 'Alpha 3', 'Alpha 4']);
+      expect(company.view().employees.map((employee) => employee.name)).toEqual([
+        'Alpha',
+        'ALPHA 2',
+        'Alpha 3',
+        'Alpha 4',
+      ]);
       expect(new Set([first.employeeId, second.employeeId, third.employeeId]).size).toBe(3);
       expect((await state()).hires.map((record: any) => record.templateId)).toEqual(['alpha', 'alpha', 'alpha']);
       expect(rooms.get(noticeRoom)!.messages.at(-1)?.text).toContain('Alpha 4');
@@ -386,7 +516,13 @@ describe('experts api', () => {
       expect(launches).toHaveLength(0);
       const ok = await hire('alpha', DELEGATE);
       expect(ok.statusCode).toBe(200);
-      expect(company.view().employees[0].permissions).toEqual({ recoverEmployees: false, manageOffice: false, moveOwnPlan: false, managePlans: false, manageGoals: false });
+      expect(company.view().employees[0].permissions).toEqual({
+        recoverEmployees: false,
+        manageOffice: false,
+        moveOwnPlan: false,
+        managePlans: false,
+        manageGoals: false,
+      });
     });
 
     it('refuses the third hire in 24 hours with 409 and creates nothing', async () => {
@@ -440,11 +576,13 @@ describe('experts api', () => {
       const response = await hire('alpha', DELEGATE);
       expect(response.statusCode).toBe(503);
       expect(response.json().error).toContain('runtime could not start');
-      expect(activated).toEqual([]); expect(stopped).toEqual(['hired-1']);
-      expect(sessions.has('hired-1')).toBe(false); expect(company.view().employees).toHaveLength(0);
+      expect(activated).toEqual([]);
+      expect(stopped).toEqual(['hired-1']);
+      expect(sessions.has('hired-1')).toBe(false);
+      expect(company.view().employees).toHaveLength(0);
       expect(rooms.get(sideRoom)!.members).toHaveLength(0);
       expect((await state()).hires).toHaveLength(0);
-      expect(rooms.get(noticeRoom)!.messages.some(message => message.text.includes('Expert hired'))).toBe(false);
+      expect(rooms.get(noticeRoom)!.messages.some((message) => message.text.includes('Expert hired'))).toBe(false);
     });
 
     it('refuses to hire with no notice room configured, before creating anything', async () => {
@@ -461,11 +599,19 @@ describe('experts api', () => {
       const workFile = join(dir, 'notes.txt');
       await writeFile(workFile, 'kept');
       const { sessionId, employeeId } = (await hire('alpha')).json().data;
-      const notAllowed = await req('POST', '/api/experts/alpha/retire', { sessionId, reason: 'Work is finished' }, OTHER_AGENT);
+      const notAllowed = await req(
+        'POST',
+        '/api/experts/alpha/retire',
+        { sessionId, reason: 'Work is finished' },
+        OTHER_AGENT
+      );
       expect(notAllowed.statusCode).toBe(403);
       const res = await req('POST', '/api/experts/alpha/retire', { sessionId, reason: 'Work is finished' }, DELEGATE);
       expect(res.statusCode).toBe(200);
-      expect(res.json().data).toMatchObject({ notice: true, hire: { status: 'retired', retiredBy: `agent:${DELEGATE}` } });
+      expect(res.json().data).toMatchObject({
+        notice: true,
+        hire: { status: 'retired', retiredBy: `agent:${DELEGATE}` },
+      });
       expect(stopped).toEqual([sessionId]);
       expect(company.view().employees.map((e) => e.id)).toEqual([employeeId]);
       expect(await readFile(workFile, 'utf8')).toBe('kept');
@@ -477,7 +623,9 @@ describe('experts api', () => {
       expect(retiredText).toContain('Expert retired');
       expect(retiredText).toContain('Removed: the session (its console row, running process and paste uploads)');
       expect(retiredText).toContain("Kept: the hire and employee records, the working directory, the agent's memory");
-      expect((await req('POST', '/api/experts/alpha/retire', { sessionId, reason: 'again please' })).statusCode).toBe(404);
+      expect((await req('POST', '/api/experts/alpha/retire', { sessionId, reason: 'again please' })).statusCode).toBe(
+        404
+      );
     });
 
     it('marks each active hire with whether its session still exists', async () => {
@@ -485,10 +633,19 @@ describe('experts api', () => {
       const gone = (await hire('alpha')).json().data.sessionId;
       sessions.delete(gone); // the session was removed outside the experts routes
       const hires = (await req('GET', '/api/experts')).json().data.hires;
-      expect(hires.find((h: { sessionId: string }) => h.sessionId === kept)).toMatchObject({ status: 'active', sessionLive: true });
-      expect(hires.find((h: { sessionId: string }) => h.sessionId === gone)).toMatchObject({ status: 'active', sessionLive: false });
+      expect(hires.find((h: { sessionId: string }) => h.sessionId === kept)).toMatchObject({
+        status: 'active',
+        sessionLive: true,
+      });
+      expect(hires.find((h: { sessionId: string }) => h.sessionId === gone)).toMatchObject({
+        status: 'active',
+        sessionLive: false,
+      });
       await req('POST', '/api/experts/alpha/retire', { sessionId: kept, reason: 'Work is finished' });
-      expect((await req('GET', '/api/experts')).json().data.hires.find((h: { sessionId: string }) => h.sessionId === kept).sessionLive).toBeUndefined();
+      expect(
+        (await req('GET', '/api/experts')).json().data.hires.find((h: { sessionId: string }) => h.sessionId === kept)
+          .sessionLive
+      ).toBeUndefined();
     });
 
     it('refuses to delete a template with an active hire', async () => {
@@ -552,7 +709,11 @@ describe('experts api', () => {
     const setWeekly = (weeklyPercent: number | null, updatedAt = clock) => {
       plans = [{ id: 'plan-a', weeklyPercent, updatedAt }];
     };
-    const noticeTexts = () => rooms.get(noticeRoom)!.messages.filter((m) => m.to === 'all').map((m) => m.text);
+    const noticeTexts = () =>
+      rooms
+        .get(noticeRoom)!
+        .messages.filter((m) => m.to === 'all')
+        .map((m) => m.text);
     const checkpoints = (sessionId: string) =>
       rooms
         .get(noticeRoom)!
@@ -571,9 +732,15 @@ describe('experts api', () => {
     });
 
     it('validates the budget stop at hire', async () => {
-      expect((await hire('alpha', undefined, { budgetStop: { planId: 'nope', weeklyPercent: 80 } })).statusCode).toBe(400);
-      expect((await hire('alpha', undefined, { budgetStop: { planId: 'plan-a', weeklyPercent: 0 } })).statusCode).toBe(400);
-      expect((await hire('alpha', undefined, { budgetStop: { planId: 'plan-a', weeklyPercent: 101 } })).statusCode).toBe(400);
+      expect((await hire('alpha', undefined, { budgetStop: { planId: 'nope', weeklyPercent: 80 } })).statusCode).toBe(
+        400
+      );
+      expect((await hire('alpha', undefined, { budgetStop: { planId: 'plan-a', weeklyPercent: 0 } })).statusCode).toBe(
+        400
+      );
+      expect(
+        (await hire('alpha', undefined, { budgetStop: { planId: 'plan-a', weeklyPercent: 101 } })).statusCode
+      ).toBe(400);
       expect((await hire('alpha', undefined, { budgetStop: { planId: 'plan-a' } })).statusCode).toBe(400);
       expect(launches).toHaveLength(0);
       // Plans unreadable at hire: accepted, and the hourly check reports it.
@@ -614,7 +781,10 @@ describe('experts api', () => {
       expect((await routes.checkBudgetStops(clock)).retired).toEqual([h.id]);
       expect(stopped).toEqual([sessionId]);
       expect(await record(h.id)).toMatchObject({ status: 'retired', retiredBy: 'budget-stop' });
-      expect(audits.at(-1)).toMatchObject({ action: 'expert_retire', detail: expect.objectContaining({ by: 'budget-stop' }) });
+      expect(audits.at(-1)).toMatchObject({
+        action: 'expert_retire',
+        detail: expect.objectContaining({ by: 'budget-stop' }),
+      });
       expect(noticeTexts().at(-1)).toContain('Expert retired');
       expect(noticeTexts().at(-1)).toContain('by budget-stop');
     });
@@ -669,7 +839,9 @@ describe('experts api', () => {
       expect(pass.failed).toEqual([h.id]);
       expect(stopped).toEqual([sessionId]);
       expect(await record(h.id)).toMatchObject({ status: 'active' });
-      expect(noticeTexts().at(-1)).toBe(`Budget stop could not retire session ${sessionId}: disk full; retrying hourly.`);
+      expect(noticeTexts().at(-1)).toBe(
+        `Budget stop could not retire session ${sessionId}: disk full; retrying hourly.`
+      );
       clock += 60 * MIN;
       expect((await routes.checkBudgetStops(clock)).retired).toEqual([h.id]);
       expect(stopped).toEqual([sessionId]); // no second stopSession: the session is gone
@@ -693,7 +865,10 @@ describe('experts api', () => {
       expect(failNotices()).toEqual([
         `Budget stop could not retire session ${first.sessionId}: tmux did not answer; retrying hourly.`,
       ]);
-      expect(await record(first.hire.id)).toMatchObject({ status: 'active', budgetStop: { retireFailNoticeAt: clock } });
+      expect(await record(first.hire.id)).toMatchObject({
+        status: 'active',
+        budgetStop: { retireFailNoticeAt: clock },
+      });
       clock += 30 * MIN;
       expect((await routes.checkBudgetStops(clock)).failed).toEqual([first.hire.id]);
       expect(failNotices()).toHaveLength(1);
@@ -758,36 +933,65 @@ describe('experts api', () => {
 
   describe('hire requests', () => {
     const ask = (agent: string | undefined, extra: Record<string, unknown> = {}, id = 'alpha') =>
-      req('POST', `/api/experts/${id}/hire-requests`, { workingDir: dir, reason: 'Need a second parser reviewer', ...extra }, agent);
+      req(
+        'POST',
+        `/api/experts/${id}/hire-requests`,
+        { workingDir: dir, reason: 'Need a second parser reviewer', ...extra },
+        agent
+      );
     const decide = (requestId: string, verb: 'approve' | 'decline' | 'withdraw', agent?: string, body: unknown = {}) =>
       req('POST', `/api/experts-hire-requests/${requestId}/${verb}`, body, agent);
     const employee = (name: string) => company.view().employees.find((e) => e.name === name);
 
     beforeEach(async () => {
-      await setSettings({ hireDelegates: [DELEGATE], noticeRoomId: noticeRoom, delegateWorkingRoot: dir, maxHiresPerDay: 3 });
+      await setSettings({
+        hireDelegates: [DELEGATE],
+        noticeRoomId: noticeRoom,
+        delegateWorkingRoot: dir,
+        maxHiresPerDay: 3,
+      });
       await req('PUT', '/api/experts/alpha', { ...alpha, rooms: [sideRoom] });
     });
 
     it('a delegate asks for a full hire; nothing is created until the owner approves', async () => {
-      const asked = await ask(DELEGATE, { name: 'Parsa', position: 'Parser reviewer', rooms: [sideRoom], mode: 'codex' });
+      const asked = await ask(DELEGATE, {
+        name: 'Parsa',
+        position: 'Parser reviewer',
+        rooms: [sideRoom],
+        mode: 'codex',
+      });
       expect(asked.statusCode).toBe(200);
       const request = asked.json().data.request;
-      expect(request).toMatchObject({ templateId: 'alpha', status: 'pending', requestedBy: `agent:${DELEGATE}`,
-        fields: { name: 'Parsa', position: 'Parser reviewer', rooms: [sideRoom], mode: 'codex' } });
+      expect(request).toMatchObject({
+        templateId: 'alpha',
+        status: 'pending',
+        requestedBy: `agent:${DELEGATE}`,
+        fields: { name: 'Parsa', position: 'Parser reviewer', rooms: [sideRoom], mode: 'codex' },
+      });
       expect(launches).toEqual([]);
       expect(company.view().employees).toEqual([]);
-      expect(rooms.get(noticeRoom)!.messages.at(-1)!.text).toContain(`Hire request ${request.id} from agent:${DELEGATE}`);
-      expect(audits.at(-1)).toMatchObject({ action: 'expert_hire_request', target: 'alpha', detail: { requestId: request.id } });
+      expect(rooms.get(noticeRoom)!.messages.at(-1)!.text).toContain(
+        `Hire request ${request.id} from agent:${DELEGATE}`
+      );
+      expect(audits.at(-1)).toMatchObject({
+        action: 'expert_hire_request',
+        target: 'alpha',
+        detail: { requestId: request.id },
+      });
       // The owner sees every request; the delegate its own; an unlisted agent nothing.
       expect((await req('GET', '/api/experts-hire-requests')).json().data.requests).toHaveLength(1);
-      expect((await req('GET', '/api/experts-hire-requests', undefined, DELEGATE)).json().data.requests).toHaveLength(1);
+      expect((await req('GET', '/api/experts-hire-requests', undefined, DELEGATE)).json().data.requests).toHaveLength(
+        1
+      );
       expect((await req('GET', '/api/experts-hire-requests', undefined, OTHER_AGENT)).statusCode).toBe(403);
       expect((await ask(OTHER_AGENT)).statusCode).toBe(403);
     });
 
     it('the owner approves once: the hire runs as the owner with the overrides, and the request records it', async () => {
       const lead = (await hire('alpha')).json().data.employeeId;
-      const requestId = (await ask(DELEGATE, { name: 'Parsa', position: 'Parser reviewer', reportsTo: lead, mode: 'codex' })).json().data.request.id;
+      const requestId = (
+        await ask(DELEGATE, { name: 'Parsa', position: 'Parser reviewer', reportsTo: lead, mode: 'codex' })
+      ).json().data.request.id;
       expect((await decide(requestId, 'approve', DELEGATE)).statusCode).toBe(403); // never the delegate itself
       const approved = await decide(requestId, 'approve');
       expect(approved.statusCode).toBe(200);
@@ -795,9 +999,15 @@ describe('experts api', () => {
       expect(data.request).toMatchObject({ status: 'approved', decidedBy: 'owner', hireId: data.hire.id });
       expect(data.hire).toMatchObject({ by: 'owner', requestId, templateId: 'alpha' });
       expect(launches.at(-1)).toMatchObject({ name: 'Parsa', mode: 'codex' }); // the owner path allows the requested harness
-      expect(employee('Parsa')).toMatchObject({ position: 'Parser reviewer', reportsTo: lead, sessionId: data.sessionId });
+      expect(employee('Parsa')).toMatchObject({
+        position: 'Parser reviewer',
+        reportsTo: lead,
+        sessionId: data.sessionId,
+      });
       expect(rooms.get(sideRoom)!.members.some((m) => m.sessionId === data.sessionId)).toBe(true);
-      expect(rooms.get(noticeRoom)!.messages.at(-1)!.text).toContain(`approving request ${requestId} from agent:${DELEGATE}`);
+      expect(rooms.get(noticeRoom)!.messages.at(-1)!.text).toContain(
+        `approving request ${requestId} from agent:${DELEGATE}`
+      );
       expect(audits.map((a) => a.action).slice(-2)).toEqual(['expert_hire', 'expert_hire_request_approve']);
       for (const verb of ['approve', 'decline'] as const) expect((await decide(requestId, verb)).statusCode).toBe(409);
       expect(launches).toHaveLength(2);
@@ -805,9 +1015,19 @@ describe('experts api', () => {
 
     it('re-runs every check at approval and leaves the request pending when one fails', async () => {
       const requestId = (await ask(DELEGATE)).json().data.request.id;
-      await setSettings({ hireDelegates: [DELEGATE], noticeRoomId: noticeRoom, delegateWorkingRoot: dir, maxHiresPerDay: 0 });
+      await setSettings({
+        hireDelegates: [DELEGATE],
+        noticeRoomId: noticeRoom,
+        delegateWorkingRoot: dir,
+        maxHiresPerDay: 0,
+      });
       expect((await decide(requestId, 'approve')).statusCode).toBe(409); // today's cap, as for any owner hire
-      await setSettings({ hireDelegates: [DELEGATE], noticeRoomId: noticeRoom, delegateWorkingRoot: dir, maxHiresPerDay: 3 });
+      await setSettings({
+        hireDelegates: [DELEGATE],
+        noticeRoomId: noticeRoom,
+        delegateWorkingRoot: dir,
+        maxHiresPerDay: 3,
+      });
       activationFails = true;
       expect((await decide(requestId, 'approve')).statusCode).toBe(503); // a failed start undoes the hire
       activationFails = false;
@@ -858,14 +1078,21 @@ describe('experts api', () => {
 
     it('hires only the exact template the request named: an edit during the approval, even in the same millisecond, refuses it', async () => {
       // Review control HIRE-REQUEST-TEMPLATE-BINDING1 (1): the template changes while the approval waits on its async plan check.
-      const during = (await ask(DELEGATE, { budgetStop: { planId: 'plan-a', weeklyPercent: 80 } })).json().data.request.id;
+      const during = (await ask(DELEGATE, { budgetStop: { planId: 'plan-a', weeklyPercent: 80 } })).json().data.request
+        .id;
       let release!: () => void;
-      plansGate = new Promise<void>((resolve) => { release = resolve; });
+      plansGate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
       const approving = decide(during, 'approve');
       await new Promise((r) => setTimeout(r, 20));
       clock += 1000;
-      expect((await req('PUT', '/api/experts/alpha', { ...alpha, rooms: [sideRoom], defaults: { mode: 'codex' } })).statusCode).toBe(200);
-      release(); plansGate = undefined;
+      expect(
+        (await req('PUT', '/api/experts/alpha', { ...alpha, rooms: [sideRoom], defaults: { mode: 'codex' } }))
+          .statusCode
+      ).toBe(200);
+      release();
+      plansGate = undefined;
       const refused = await approving;
       expect(refused.statusCode).toBe(409);
       expect(refused.json().error).toContain('template changed');
@@ -873,7 +1100,16 @@ describe('experts api', () => {
       expect((await state()).hireRequests.find((r: { id: string }) => r.id === during).status).toBe('pending');
       // (2): the template changes without its timestamp moving, so only its content tells.
       const same = (await ask(DELEGATE)).json().data.request.id;
-      expect((await req('PUT', '/api/experts/alpha', { ...alpha, rooms: [sideRoom], defaults: { mode: 'claude' }, role: 'Edited in the same ms' })).statusCode).toBe(200);
+      expect(
+        (
+          await req('PUT', '/api/experts/alpha', {
+            ...alpha,
+            rooms: [sideRoom],
+            defaults: { mode: 'claude' },
+            role: 'Edited in the same ms',
+          })
+        ).statusCode
+      ).toBe(200);
       expect((await decide(same, 'approve')).statusCode).toBe(409);
       expect(launches).toEqual([]);
       // A request made against the current template still hires it.
@@ -884,7 +1120,9 @@ describe('experts api', () => {
 
     it('lets the owner close an approval a restart left unfinished, without hiring', async () => {
       const requestId = (await ask(DELEGATE)).json().data.request.id;
-      await expertStore.update((s) => { s.hireRequests[0].status = 'approving'; });
+      await expertStore.update((s) => {
+        s.hireRequests[0].status = 'approving';
+      });
       expect((await decide(requestId, 'approve')).statusCode).toBe(409);
       expect((await decide(requestId, 'decline')).json().data.request.status).toBe('declined');
       expect(launches).toEqual([]);
@@ -898,9 +1136,15 @@ describe('experts api', () => {
     expect(classify('POST', '/api/experts/:id/retire', '/api/experts/alpha/retire')).toBe('agent');
     expect(classify('POST', '/api/experts/:id/hire-requests', '/api/experts/alpha/hire-requests')).toBe('agent');
     expect(classify('GET', '/api/experts-hire-requests', '/api/experts-hire-requests')).toBe('agent');
-    expect(classify('POST', '/api/experts-hire-requests/:requestId/withdraw', '/api/experts-hire-requests/r/withdraw')).toBe('agent');
-    expect(classify('POST', '/api/experts-hire-requests/:requestId/approve', '/api/experts-hire-requests/r/approve')).toBe('owner');
-    expect(classify('POST', '/api/experts-hire-requests/:requestId/decline', '/api/experts-hire-requests/r/decline')).toBe('owner');
+    expect(
+      classify('POST', '/api/experts-hire-requests/:requestId/withdraw', '/api/experts-hire-requests/r/withdraw')
+    ).toBe('agent');
+    expect(
+      classify('POST', '/api/experts-hire-requests/:requestId/approve', '/api/experts-hire-requests/r/approve')
+    ).toBe('owner');
+    expect(
+      classify('POST', '/api/experts-hire-requests/:requestId/decline', '/api/experts-hire-requests/r/decline')
+    ).toBe('owner');
     expect(classify('PUT', '/api/experts/:id', '/api/experts/alpha')).toBe('owner');
     expect(classify('DELETE', '/api/experts/:id', '/api/experts/alpha')).toBe('owner');
     expect(classify('PUT', '/api/experts-settings', '/api/experts-settings')).toBe('owner');

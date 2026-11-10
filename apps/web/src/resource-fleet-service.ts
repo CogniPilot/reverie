@@ -23,9 +23,8 @@ import {
 
 const HOST_SETUP: FleetBlocker = Object.freeze({
   code: 'FLEET_HOST_SETUP_REQUIRED',
-  message: 'Verified fleet observations are unavailable. No rollout has started from this status query.',
-  remedy:
-    'Complete the supported host setup for image rollout, RAM thresholds, CPU sharing and reserved recovery capacity.',
+  message: 'Live fleet status and routine resource edits are unavailable in this build.',
+  remedy: 'Shared-pool setup and employee recovery are reported separately. This status query cannot verify running limits.',
 });
 
 /** The server cannot infer cgroup enforcement or image identity from employee settings. */
@@ -57,7 +56,7 @@ export class FleetResourcesService {
         employeeId: employee.id,
         name: employee.name,
         state: employee.onVacation ? 'vacation' : employee.desiredRunning === false ? 'off' : 'unverified',
-        reason: 'The host has not verified this laptop image or its resource controllers.',
+        reason: 'No live resource observation is available from this server.',
         desired: null,
         observed: null,
         desiredImageId: null,

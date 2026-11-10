@@ -62,6 +62,7 @@ async function setup(
     data?: any;
     replies?: Record<string, (body: any) => any>;
     saved?: Record<string, string>;
+    employee?: string;
   } = {}
 ) {
   const h = await createHarness({
@@ -100,6 +101,14 @@ async function setup(
   vi.spyOn(h.shell, 'confirmCompanyAction').mockResolvedValue(true);
   await h.shell.openCompanySettings();
   await h.flush();
+  if (options.employee) {
+    const old = h.document.querySelector('.ca-fleet-resources')!;
+    const container = old.parentElement!;
+    const dialog = old.closest('dialog')!;
+    old.remove();
+    h.window.ReverieFleetResources.mountEmployee(h.shell, container, dialog, options.employee);
+    await h.flush();
+  }
   const section = () => h.document.querySelector('.ca-fleet-resources') as HTMLElement;
   const button = (label: string) => section().querySelector(`[aria-label="${label}"]`) as HTMLButtonElement;
   const submit = async () => {
@@ -179,9 +188,26 @@ describe('Company Settings laptop fleet', () => {
     expect(section().textContent).toContain('Soft RAM unbounded; hard RAM 4,096 MiB');
     expect(section().textContent).toContain('perf not tested');
     expect(section().textContent).toContain('Reserved recovery employee');
-    expect(section().textContent).toContain('Running image: old-image');
-    expect(section().querySelector<HTMLInputElement>('[aria-label="River soft RAM (MiB)"]')!.value).toBe('4096');
+    expect(section().querySelector('tbody tr')?.getAttribute('title')).toContain('Running image: old-image');
+    expect(section().querySelector('[aria-label="River soft RAM (MiB)"]')).toBeNull();
+    expect(section().querySelector('tbody')?.textContent).toContain('Soft RAM 4,096 MiB; hard RAM 8,192 MiB');
     expect(section().querySelector('[aria-label="Recovery soft RAM (MiB)"]')).toBeNull();
+  });
+  it('edits one employee through the same fleet preview service without changing shared pool settings', async () => {
+    const { section, submit, calls } = await setup({
+      employee: employeeId,
+      replies: { '/preview': (body) => preview(body) },
+    });
+    const soft = section().querySelector<HTMLInputElement>('[aria-label="River soft RAM (MiB)"]')!;
+    soft.value = '6144';
+    expect(section().querySelector('[aria-label="Pool hard RAM (MiB)"]')).toBeNull();
+    expect((section().querySelector('.ca-fleet-native') as HTMLElement).hidden).toBe(true);
+    await submit();
+    expect(calls.at(-1)?.body).toMatchObject({
+      policies: [{ employeeId, ...desired, memoryHighMiB: 6144 }],
+      pool: initial().pool.desired,
+      canaryEmployeeId: employeeId,
+    });
   });
   it('previews exact policies and sends only the selected preview/revision once, even after two confirmation clicks', async () => {
     const { h, calls, section, button, submit } = await setup({
@@ -218,7 +244,7 @@ describe('Company Settings laptop fleet', () => {
     expect(parent.textContent).toContain('Running: Soft RAM unbounded; hard RAM 49,152 MiB');
     expect(parent.textContent).toContain('Pool soft RAM is unbounded; the hard pool ceiling still applies.');
     expect(parent.querySelector('[aria-label="Pool soft RAM (MiB)"]')).toBeNull();
-    expect(section().querySelector<HTMLInputElement>('[aria-label="River soft RAM (MiB)"]')!.value).toBe('4096');
+    expect(section().querySelector('tbody')?.textContent).toContain('Soft RAM 4,096 MiB');
     await submit();
     expect(calls.at(-1)?.body.pool).toEqual(pool);
     expect(calls.at(-1)?.body.pool.memoryHighMiB).toBeNull();
@@ -246,7 +272,7 @@ describe('Company Settings laptop fleet', () => {
       replies: { '/preview': (body) => preview(body, { canApply: allowed }) },
     });
     await submit();
-    const input = section().querySelector<HTMLInputElement>('[aria-label="River CPU weight"]')!;
+    const input = section().querySelector<HTMLInputElement>('[aria-label="Pool CPU weight"]')!;
     input.value = '200';
     input.dispatchEvent(new h.window.Event('input', { bubbles: true }));
     expect(section().querySelector('[aria-label="Apply previewed fleet rollout"]')).toBeNull();
@@ -424,5 +450,69 @@ describe('Failed native shared pool setup recovery', () => {
     expect(h.window.localStorage.getItem(key + ':unconfirmed-history')).toBeNull();
     expect(button('Recover setup after a failed activation')).not.toBeNull();
     expect(calls.some((row) => /native-(apply|preview)$/.test(row.path))).toBe(false);
+    expect(h.document.querySelector('.ca-fleet-native [role="alert"]')?.textContent).toContain('lost reply');
+  });
+  it('shows an unconfirmed result beside its action and preserves the original reference', async () => {
+    const original = JSON.stringify({ operationId });
+    const { h, button, section, calls } = await setup({
+      saved: { [key]: original },
+      replies: {
+        '/native-result': () => ({
+          ok: true,
+          data: {
+            operationId,
+            state: 'unknown',
+            blocksFurtherChanges: true,
+            native: null,
+            restore: [],
+          },
+        }),
+      },
+    });
+    button('Check original shared-pool migration').click();
+    await h.flush();
+    const message = section().querySelector('.ca-fleet-native [role="alert"]');
+    expect(message?.textContent).toContain('unconfirmed');
+    expect(h.document.activeElement).toBe(message);
+    expect(h.window.localStorage.getItem(key)).toBe(original);
+    expect(section().querySelector('.ca-fleet-results')?.nextElementSibling?.className).toBe('ca-fleet-content');
+    expect(calls.some((row) => /native-(apply|preview)$/.test(row.path))).toBe(false);
+  });
+  it('announces a pending check immediately and displays its lost reply locally', async () => {
+    let reject!: (reason: Error) => void;
+    const { h, button, section } = await setup({
+      saved: { [key]: JSON.stringify({ operationId }) },
+      replies: {
+        '/native-result': () =>
+          new Promise((_resolve, fail) => {
+            reject = fail;
+          }),
+      },
+    });
+    button('Check original shared-pool migration').click();
+    await h.flush();
+    expect(section().querySelector('.ca-fleet-native [role="status"]')?.textContent).toContain('Checking');
+    expect(button('Check original shared-pool migration').disabled).toBe(true);
+    reject(new Error('connection closed'));
+    await h.flush();
+    expect(section().querySelector('.ca-fleet-native [role="alert"]')?.textContent).toBe('connection closed');
+    expect(button('Check original shared-pool migration').disabled).toBe(false);
+  });
+  it('clears a stale error when a later check verifies the original activation', async () => {
+    let unavailable = true;
+    const { h, button, section } = await setup({ saved: { [key]: JSON.stringify({ operationId }) }, replies: {
+      '/native-result': () => {
+        if (unavailable) throw new Error('lost observation');
+        return { ok: true, data: { operationId, state: 'pool-configured', blocksFurtherChanges: false,
+          native: { kind: 'fleet-migration-result', phase: 'pool-configured', approval: { operationId } }, restore: [] } };
+      },
+    } });
+    button('Check original shared-pool migration').click(); await h.flush();
+    expect(section().querySelector('.ca-fleet-native [role="alert"]')?.textContent).toContain('lost observation');
+    unavailable = false;
+    button('Check original shared-pool migration').click(); await h.flush();
+    expect(section().querySelector('.ca-company-error')?.textContent).toBe('');
+    expect(section().querySelector('.ca-fleet-native [role="alert"]')).toBeNull();
+    expect(h.window.localStorage.getItem(key)).toBeNull();
   });
 });

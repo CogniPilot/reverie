@@ -125,6 +125,8 @@ export const ExpertSettingsSchema = z
   .object({
     /** Session ids (owner-managed) that may hire and retire on the owner's behalf. */
     hireDelegates: z.array(z.string().trim().min(1).max(100)).max(20).default([]),
+    /** Employee identities; authorization follows only their current session. */
+    hireEmployeeDelegates: z.array(z.string().trim().min(1).max(100)).max(20).default([]),
     /** Hires in any rolling 24 hours, across every caller. */
     maxHiresPerDay: z.number().int().min(0).max(20).default(2),
     /** Hires not yet retired. */
@@ -143,7 +145,9 @@ export const ExpertSettingsSchema = z
     /** Minutes between the budget-stop checkpoint request and the retirement. */
     budgetStopGraceMinutes: z.number().int().min(1).max(120).default(10),
   })
-  .strict();
+  .strict()
+  .refine((settings) => settings.hireDelegates.length + settings.hireEmployeeDelegates.length <= 20,
+    'Choose at most 20 hiring delegates across employee and legacy session permissions');
 export type ExpertSettings = z.infer<typeof ExpertSettingsSchema>;
 
 /** What a hire body sets: stop the hire once this plan's weekly usage reaches `weeklyPercent`. */
@@ -261,7 +265,8 @@ export function parseExpertSettings(raw: unknown): ExpertSettings {
     const issue = parsed.error.issues[0];
     throw new ExpertError(`${issue?.path.join('.') || 'body'}: ${issue?.message ?? 'invalid'}`);
   }
-  return { ...parsed.data, hireDelegates: [...new Set(parsed.data.hireDelegates)] };
+  return { ...parsed.data, hireDelegates: [...new Set(parsed.data.hireDelegates)],
+    hireEmployeeDelegates: [...new Set(parsed.data.hireEmployeeDelegates)] };
 }
 
 const emptyState = (): ExpertState => ({
