@@ -277,5 +277,6 @@ mod tests;
 mod worker_service;
 pub(crate) use worker_service::{
     restore_previous_service_unit, retain_native_service_environment, retain_native_service_unit,
-    retain_predecessor, retain_upgrade_failure, retain_upgrade_package, retain_upgrade_running,
+    retain_predecessor, retain_stopped_service_pending, retain_upgrade_failure,
+    retain_upgrade_package, retain_upgrade_running,
 };

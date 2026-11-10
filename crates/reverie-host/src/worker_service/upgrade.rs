@@ -4,6 +4,8 @@ use super::*;
 use reverie_contracts::worker_pool::BrokerProgramData;
 use std::io::Read;
 use stopped::bus::{BusReader, ExpectedCommands, ServiceGroupData};
+mod stop_pending;
+pub(super) use stop_pending::StopPendingTakeover;
 
 /// Present only after the actual immutable program/unit and original owned
 /// selection were checked. No caller or wire constructor is exposed.
@@ -37,6 +39,11 @@ impl State {
         let expected = ExpectedCommands::capture(&old_body, &self.home)?;
         self.upgrade_bus = Some(BusReader::capture(self)?);
         self.close_metadata()?;
+        let retained_stop = if force {
+            self.take_over_stopped_pending(&old, &expected, &source)?
+        } else {
+            None
+        };
         self.begin_attempt(&WorkerServiceAction::Upgrade {
             force_stopped: force,
         })?;
@@ -55,7 +62,10 @@ impl State {
         } else {
             None
         };
-        let history = self.upgrade_history(&old, &source.digest, force)?;
+        let history = match retained_stop {
+            Some(history) => history,
+            None => self.upgrade_history(&old, &source.digest, force)?,
+        };
         self.pin_package_at(&history.join("gcroot"))?;
         self.assert_upgrade_stopped(&old, &expected, force)?;
         if let Some(group) = &group {

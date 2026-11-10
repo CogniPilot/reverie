@@ -12,6 +12,8 @@ use std::{path::PathBuf, process::ExitCode};
 mod image;
 mod inventory;
 mod manifest;
+mod offline_owner;
+mod perf;
 mod pool_image_inputs;
 mod service;
 
@@ -38,6 +40,13 @@ enum Role {
     Image {
         #[command(subcommand)]
         action: image::Action,
+    },
+    /// Preview or apply employee task profiling policy while the registered
+    /// service and workers are stopped. Apply preserves employee data and
+    /// does not restart the service or recreate laptops.
+    Perf {
+        #[command(subcommand)]
+        action: perf::Action,
     },
     /// Validate an existing configuration and print its snapshot digest as JSON.
     /// Reads the file and its declared host paths without starting the broker.
@@ -93,6 +102,7 @@ fn run(arguments: Arguments) -> Result<(), Box<dyn std::error::Error>> {
     match arguments.command {
         Role::Inventory { config } => inventory::run(&config),
         Role::Image { action } => image::run(action),
+        Role::Perf { action } => perf::run(action),
         Role::CheckConfig { config } => {
             let snapshot = load_owner_config(&config).inspect_err(|error| {
                 eprintln!("Configuration validation stage: {:?}", error.stage());

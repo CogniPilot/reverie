@@ -47,3 +47,6 @@ pub(crate) fn retain_upgrade_running(source: &File, destination: &File) -> io::R
 pub(crate) fn retain_upgrade_failure(source: &File, destination: &File) -> io::Result<()> {
     super::rename::noreplace(source, c"native-failure", destination, c"native-failure")
 }
+pub(crate) fn retain_stopped_service_pending(source: &File, destination: &File) -> io::Result<()> {
+    super::rename::noreplace(source, c"pending", destination, c"previous-stop-pending")
+}

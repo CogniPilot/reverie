@@ -136,6 +136,7 @@ fn fixture_mode(mode: &str) -> (State, PathBuf, PathBuf) {
         upgrade_failure: None,
         upgrade_close_failure: None,
         checked_generation: None,
+        stop_takeover: None,
     };
 
     (state, root, program)

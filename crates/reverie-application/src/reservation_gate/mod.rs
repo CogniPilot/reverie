@@ -18,6 +18,8 @@ pub(crate) use image_switch::{
 mod launch;
 mod observation;
 mod ordinary_stop;
+mod perf_transition;
+pub(crate) use perf_transition::{PerfAdmission, PerfPreview};
 mod pool_transition;
 pub use pool_transition::{PoolTransitionFailure, PoolTransitionFence};
 mod stop_admission;

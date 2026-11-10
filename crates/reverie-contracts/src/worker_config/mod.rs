@@ -65,6 +65,37 @@ impl Clone for EffectiveWorkerConfig {
     }
 }
 impl EffectiveWorkerConfig {
+    pub(crate) fn patch_employee_perf_policy(
+        &mut self,
+        employee: &reverie_core::ids::ProfileEmployeeId,
+        policy: Option<reverie_core::task_perf::TaskPerfPolicy>,
+    ) -> Option<()> {
+        let Node::Object(root) = &mut self.0.0 else {
+            return None;
+        };
+        let name = Text("employeePerfPolicies".chars().map(u32::from).collect());
+        if policy.is_none() && !root.contains_key(&name) {
+            return Some(());
+        }
+        let value = root
+            .entry(name)
+            .or_insert_with(|| Value(Node::Object(BTreeMap::new())));
+        let Node::Object(map) = &mut value.0 else {
+            return None;
+        };
+        let employee = Text(employee.as_str().chars().map(u32::from).collect());
+        if let Some(policy) = policy {
+            map.insert(
+                employee,
+                Value(Node::String(Text(
+                    policy.name().chars().map(u32::from).collect(),
+                ))),
+            );
+        } else {
+            map.remove(&employee);
+        }
+        Some(())
+    }
     pub(crate) fn patch_employee_gpu_grant(
         &mut self,
         employee: &reverie_core::operations::JournalId,

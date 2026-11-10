@@ -145,6 +145,14 @@ pub struct ValidatedWorkerSnapshot {
     source_path: Option<std::path::PathBuf>,
 }
 impl ValidatedWorkerSnapshot {
+    pub(crate) fn validate_perf_candidate(
+        &self,
+        candidate: &reverie_contracts::perf_transition::PerfTransition,
+    ) -> Result<Self> {
+        let mut next = validate_captured(candidate.after().clone())?;
+        next.source_path = self.source_path.clone();
+        Ok(next)
+    }
     pub(crate) fn validate_gpu_candidate(
         &self,
         candidate: &reverie_contracts::gpu_access::GpuCandidate,
