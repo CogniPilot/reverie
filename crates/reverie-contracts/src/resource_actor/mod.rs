@@ -14,9 +14,9 @@ mod pool_image_inputs_tests;
 mod protocol;
 pub use protocol::{
     CurrentFleetMaintenanceOwner, CurrentFleetPreviewViewer, CurrentPoolInstallationConsent,
-    CurrentPoolInstallationViewer, CurrentResourceOwner, FLEET_MAINTENANCE_PURPOSE,
-    FleetMaintenanceAction, FleetMaintenanceRequest, FleetPreviewRequest,
-    POOL_INSTALLATION_CONSENT_PURPOSE, POOL_INSTALLATION_REQUEST_PURPOSE,
+    CurrentPoolInstallationViewer, CurrentResourceOwner, EmployeePolicyEdit,
+    FLEET_MAINTENANCE_PURPOSE, FleetMaintenanceAction, FleetMaintenanceRequest,
+    FleetPreviewRequest, POOL_INSTALLATION_CONSENT_PURPOSE, POOL_INSTALLATION_REQUEST_PURPOSE,
     POOL_REGISTRATION_PURPOSE, PoolInstallationConsentRequest, PoolInstallationOfferViewData,
     PoolInstallationRequestData, PoolInstallationViewRequest, RAM_POOL_PURPOSE,
     RamLaunchCommandData, RamPreviewFields, ResourceContinuationRequest, ResourceContinuationVerb,

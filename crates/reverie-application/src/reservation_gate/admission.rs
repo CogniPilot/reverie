@@ -23,7 +23,7 @@ impl AdmissionBounds {
 }
 pub(super) struct Admission {
     gate: Arc<Inner>,
-    active: Arc<Active>,
+    pub(super) active: Arc<Active>,
     finished: bool,
     ram_journal: Option<super::ram_journal::SharedJournal>,
     _thread: std::marker::PhantomData<std::rc::Rc<()>>,
@@ -357,7 +357,7 @@ impl Admission {
                 .quarantine()
         })
     }
-    fn finish_result<T>(mut self, result: Result<T>) -> Result<T> {
+    pub(super) fn finish_result<T>(mut self, result: Result<T>) -> Result<T> {
         let purpose = if result.is_ok() {
             CleanupPurpose::BoundaryClosed
         } else {

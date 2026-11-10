@@ -1,4 +1,5 @@
 use super::*;
+use reverie_contracts::worker_pool::WorkerPoolMemberPolicy;
 use std::ffi::OsStr;
 
 pub(super) fn observe(
@@ -22,7 +23,7 @@ pub(super) fn observe(
         return Ok(false);
     }
     let value = &values[0];
-    let Ok((pid, high, tasks)) = identity(owner, row, binding, value) else {
+    let Ok((pid, effective, tasks)) = identity(owner, row, binding, value) else {
         // Unproved DATA earns no discount. The caller retains the already
         // native-verified full hard binding, not a guessed membership credit.
         return Ok(false);
@@ -48,7 +49,7 @@ pub(super) fn observe(
     )?;
     let body = (|| {
         let original = directory::identity(&file)?;
-        limits(owner, &file, high, tasks)?;
+        limits(owner, &file, effective, tasks)?;
         process_current(pid, &start, &expected)?;
         let current = owner
             .query
@@ -68,7 +69,7 @@ pub(super) fn observe(
             "WORKER_POOL_CAPACITY_MEMBER_CHANGED",
         )?;
         observe_parent(owner, end)?;
-        limits(owner, &file, high, tasks)?;
+        limits(owner, &file, effective, tasks)?;
         process_current(pid, &start, &expected)?;
         let named = native::open_at(
             owner.directory.parent()?.as_raw_fd(),
@@ -100,7 +101,7 @@ fn identity(
     row: &ContainerRow,
     binding: &NativeLimitBinding,
     value: &serde_json::Value,
-) -> Result<(u32, u64, u32)> {
+) -> Result<(u32, WorkerPoolMemberPolicy, u32)> {
     let labels = &value["Config"]["Labels"];
     let employee = labels["reverie.employee"]
         .as_str()
@@ -148,30 +149,33 @@ fn identity(
             && value["HostConfig"]["CpuQuota"] == 0,
         "WORKER_POOL_CAPACITY_MEMBER_INSPECTION",
     )?;
-    let high = owner
-        .policy
-        .employee_memory_high_mi_b
-        .get(employee)
-        .ok_or(PoolError::Refused("WORKER_POOL_CAPACITY_MEMBER_POLICY"))?;
+    let effective = owner
+        .member_policy_edit
+        .effective(&owner.policy, employee)?;
     let tasks = declared
         .tasks()
         .to_u64()
         .and_then(|tasks| u32::try_from(tasks).ok())
         .ok_or(PoolError::Refused("WORKER_POOL_CAPACITY_MEMBER_TASKS"))?;
-    PoolMemberLimits::try_new(owner.policy.cpu_weight, tasks)?;
-    Ok((pid, u64::from(*high) * 1_048_576, tasks))
+    PoolMemberLimits::try_new(effective.cpu_weight(), tasks)?;
+    Ok((pid, effective, tasks))
 }
-fn limits(owner: &ControllerState, file: &File, high: u64, tasks: u32) -> Result<()> {
+fn limits(
+    owner: &ControllerState,
+    file: &File,
+    effective: WorkerPoolMemberPolicy,
+    tasks: u32,
+) -> Result<()> {
     for (name, expected) in [
         (
             "memory.max",
             (u64::from(owner.policy.memory_max_mi_b) * 1_048_576).to_string(),
         ),
-        ("memory.high", high.to_string()),
+        ("memory.high", effective.memory_high_bytes().to_string()),
         ("memory.swap.max", "0".into()),
         ("pids.max", tasks.to_string()),
         ("cpu.max", "max 100000".into()),
-        ("cpu.weight", owner.policy.cpu_weight.to_string()),
+        ("cpu.weight", effective.cpu_weight().to_string()),
     ] {
         need(
             directory::read_at(file, name)?.trim() == expected,

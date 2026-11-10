@@ -22,6 +22,7 @@ impl ActivatedController {
             ));
         }
         let owner = self.state_mut();
+        owner.require_no_member_policy_edit()?;
         need(
             std::sync::Arc::ptr_eq(&owner.binding.engine, runtime.installed_engine()),
             "WORKER_POOL_BROKER_RUNTIME_CHANGED",

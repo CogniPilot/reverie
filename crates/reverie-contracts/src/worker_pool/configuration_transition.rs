@@ -1,6 +1,6 @@
 //! Before/after publication DATA only. No native owner, consent, pending,
 //! admission, controller installation or checked file-CAS follows from this.
-use super::{PoolPolicyError, WorkerPoolPolicy, WorkerPoolProvider};
+use super::{PoolPolicyError, WorkerPoolMemberPolicy, WorkerPoolPolicy, WorkerPoolProvider};
 use crate::{
     broker_resources::{self, ResourceConfigError},
     device_policy::{DeviceConfigError, memory},
@@ -27,6 +27,29 @@ pub struct WorkerPoolConfigurationTransition {
     before_binding: ControlBinding,
     after_binding: ControlBinding,
     policy: WorkerPoolPolicy,
+    member_edit: Option<PoolMemberPolicyEdit>,
+}
+
+pub struct PoolMemberPolicyEdit {
+    employee: ProfileEmployeeId,
+    previous: WorkerPoolMemberPolicy,
+    requested: WorkerPoolMemberPolicy,
+    previous_revision: u64,
+}
+
+impl PoolMemberPolicyEdit {
+    pub fn employee(&self) -> &ProfileEmployeeId {
+        &self.employee
+    }
+    pub fn previous(&self) -> WorkerPoolMemberPolicy {
+        self.previous
+    }
+    pub fn requested(&self) -> WorkerPoolMemberPolicy {
+        self.requested
+    }
+    pub fn previous_revision(&self) -> u64 {
+        self.previous_revision
+    }
 }
 impl WorkerPoolConfigurationTransition {
     pub fn prepare(
@@ -55,7 +78,60 @@ impl WorkerPoolConfigurationTransition {
             before_binding: binding.clone(),
             after_binding,
             policy: policy.clone(),
+            member_edit: None,
         })
+    }
+
+    /// Prepare configuration and control-binding data for one live edit.
+    /// The original pool policy and every peer's settings are preserved.
+    pub fn prepare_member_edit(
+        before: &EffectiveWorkerConfig,
+        binding: &ControlBinding,
+        employee: ProfileEmployeeId,
+        settings: WorkerPoolMemberPolicy,
+        expected_revision: u64,
+    ) -> Result<Self> {
+        let domain = reservation_control::domain_digest(before)
+            .map_err(PoolConfigurationDataError::Control)?;
+        need(
+            domain == *binding.domain(),
+            "WORKER_POOL_CONFIGURATION_DOMAIN",
+        )?;
+        let provider = WorkerPoolProvider::from_config(before)
+            .map_err(PoolConfigurationDataError::Policy)?
+            .ok_or(PoolConfigurationDataError::Refused(
+                "WORKER_POOL_PROVIDER_REQUIRED",
+            ))?;
+        need(
+            expected_revision == provider.member_revision(),
+            "WORKER_POOL_MEMBER_REVISION_CHANGED",
+        )?;
+        let previous = provider.member_policy(employee.as_str()).ok_or(
+            PoolConfigurationDataError::Refused("WORKER_POOL_MEMBER_POLICY"),
+        )?;
+        need(previous != settings, "WORKER_POOL_MEMBER_POLICY_UNCHANGED")?;
+        let after = WorkerPoolProvider::project_member_policy(before, &employee, settings)
+            .map_err(PoolConfigurationDataError::Policy)?;
+        let after_binding = binding
+            .configuration_rebound(&after)
+            .map_err(PoolConfigurationDataError::Control)?;
+        Ok(Self {
+            before: before.clone(),
+            after,
+            before_binding: binding.clone(),
+            after_binding,
+            policy: provider.policy().clone(),
+            member_edit: Some(PoolMemberPolicyEdit {
+                employee,
+                previous,
+                requested: settings,
+                previous_revision: expected_revision,
+            }),
+        })
+    }
+
+    pub fn member_edit(&self) -> Option<&PoolMemberPolicyEdit> {
+        self.member_edit.as_ref()
     }
     pub fn before(&self) -> &EffectiveWorkerConfig {
         &self.before

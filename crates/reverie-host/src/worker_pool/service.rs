@@ -6,6 +6,7 @@ use std::time::{Duration, Instant};
 mod activation;
 mod anchor;
 mod member;
+mod member_policy;
 pub(super) mod protocol;
 
 struct State {
@@ -14,16 +15,28 @@ struct State {
     anchor: anchor::Anchor,
     member_failure: Option<super::member::MemberComponent>,
     member_attempted: Vec<String>,
+    member_policies: super::member_policy::MemberPolicies,
+    member_policy_revision: u64,
+    edit: Option<member_policy::EditAttempt>,
     primary: Option<PoolError>,
 }
 impl State {
     fn continue_original(&mut self) -> Result<()> {
-        self.member_failure
+        let member = self
+            .member_failure
             .as_mut()
-            .map_or(Ok(()), super::member::MemberComponent::close)
+            .map_or(Ok(()), super::member::MemberComponent::close);
+        let edit = self
+            .edit
+            .as_mut()
+            .map_or(Ok(()), member_policy::EditAttempt::close_components);
+        finalized(member, edit)?;
+        need(self.edit.is_none(), "WORKER_POOL_MEMBER_EDIT_RETAINED")
     }
     fn phase(&self) -> &'static str {
-        if self.stage == InstallationStage::Confirmed {
+        if self.edit.is_some() {
+            "memberPolicyRetained"
+        } else if self.stage == InstallationStage::Confirmed {
             "active"
         } else {
             "opening"
@@ -35,10 +48,7 @@ impl State {
             .ok_or(PoolError::Refused("WORKER_POOL_DIRECTORY_CLOSED"))
     }
     fn close(&mut self) -> Result<()> {
-        let member = self
-            .member_failure
-            .as_mut()
-            .map_or(Ok(()), super::member::MemberComponent::close);
+        let member = self.continue_original();
         let directory = self.directory.as_mut().map_or(Ok(()), PoolDirectory::close);
         finalized(member, directory)?;
         need(
@@ -54,6 +64,8 @@ impl Drop for State {
             std::mem::take(&mut self.anchor),
             self.member_failure.take(),
             std::mem::take(&mut self.member_attempted),
+            std::mem::take(&mut self.member_policies),
+            self.edit.take(),
             self.primary.take(),
         ));
     }
@@ -80,6 +92,9 @@ impl<'a> ControllerServing<'a> {
                 anchor: anchor::Anchor::default(),
                 member_failure: None,
                 member_attempted: Vec::new(),
+                member_policies: super::member_policy::MemberPolicies::default(),
+                member_policy_revision: 0,
+                edit: None,
                 primary: None,
             },
         }
@@ -103,6 +118,9 @@ impl<'a> ControllerServing<'a> {
                 .peer
                 .receive_request(Instant::now() + Duration::from_secs(2))?;
             let request = received.request;
+            if self.handle_member_policy_request(&request, received.end)? {
+                continue;
+            }
             let mut close = false;
             let mut phase = "retained";
             let result = match &request {
@@ -161,6 +179,10 @@ impl<'a> ControllerServing<'a> {
                         received.end,
                     )
                 }
+                protocol::Request::ApplyMemberPolicy { .. }
+                | protocol::Request::CommitMemberPolicy { .. } => {
+                    unreachable!("employee policy replies are handled separately")
+                }
             };
             if let Err(error) = result {
                 self.state.primary.get_or_insert(error);
@@ -172,28 +194,88 @@ impl<'a> ControllerServing<'a> {
                     .as_ref()
                     .map(|owner| owner.cause())
             });
-            let reply = protocol::Reply {
-                version: 1,
-                request_id: request.id(),
+            Self::reply(
+                &mut self.peer,
+                &self.state,
+                &request,
                 phase,
-                known: primary.is_none(),
-                primary_error: primary.map(PoolError::code),
-                anchor: self
-                    .state
-                    .anchor
-                    .id
-                    .as_ref()
-                    .map(|id| protocol::AnchorData {
-                        container: id.clone(),
-                        pid: self.state.anchor.pid,
-                    }),
-            };
-            self.peer
-                .reply(&reply, Instant::now() + Duration::from_secs(2))?;
+                primary.is_none(),
+                primary,
+            )?;
             if close {
                 return self.close_reply();
             }
         }
+    }
+    fn handle_member_policy_request(
+        &mut self,
+        request: &protocol::Request,
+        end: Instant,
+    ) -> Result<bool> {
+        let reply = match request {
+            protocol::Request::ApplyMemberPolicy { edit, .. } => {
+                self.state
+                    .apply_member_policy(self.policy, &mut self.peer, edit, end)
+            }
+            protocol::Request::CommitMemberPolicy { operation, .. } => self
+                .state
+                .commit_member_policy(self.policy, &mut self.peer, operation, end),
+            protocol::Request::Activate { .. }
+            | protocol::Request::ConfigureMember { .. }
+            | protocol::Request::ObserveMember { .. }
+                if self.state.edit.is_some() =>
+            {
+                member_policy::EditReply::Retained
+            }
+            _ => return Ok(false),
+        };
+        let error = match &reply {
+            member_policy::EditReply::Refused(error) => Some(error),
+            member_policy::EditReply::Retained => self
+                .state
+                .edit
+                .as_ref()
+                .and_then(member_policy::EditAttempt::failure),
+            _ => None,
+        };
+        Self::reply(
+            &mut self.peer,
+            &self.state,
+            request,
+            reply.phase(),
+            reply.known(),
+            error,
+        )?;
+        Ok(true)
+    }
+    fn reply(
+        peer: &mut ControllerPeer<'_>,
+        state: &State,
+        request: &protocol::Request,
+        phase: &'static str,
+        known: bool,
+        primary: Option<&PoolError>,
+    ) -> Result<()> {
+        let capability = matches!(
+            request,
+            protocol::Request::Status { .. } | protocol::Request::Activate { .. }
+        )
+        .then_some(protocol::MEMBER_POLICY_EDIT_VERSION);
+        peer.reply(
+            &protocol::Reply {
+                version: 1,
+                request_id: request.id(),
+                phase,
+                known,
+                primary_error: primary.map(PoolError::code),
+                anchor: state.anchor.id.as_ref().map(|id| protocol::AnchorData {
+                    container: id.clone(),
+                    pid: state.anchor.pid,
+                }),
+                member_policy_edit_version: capability,
+            },
+            Instant::now() + Duration::from_secs(2),
+        )
     }
     fn close_reply(&mut self) -> Result<()> {
         let peer = self.peer.close();

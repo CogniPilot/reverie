@@ -55,6 +55,7 @@ struct ControllerState {
     cleanup_end: Option<Instant>,
     original_end: Instant,
     capacity_failure: Option<Box<PoolError>>,
+    member_policy_edit: member_policy::EditState,
 }
 pub struct ControllerActivationFailure {
     owner: ActivatedController,
@@ -92,6 +93,7 @@ impl BrokerBootstrapBinding {
             cleanup_end: None,
             original_end: end.min(Instant::now() + Duration::from_secs(20)),
             capacity_failure: None,
+            member_policy_edit: member_policy::EditState::default(),
         };
         match owner.activate(runtime, host_reserve_mib) {
             Ok(()) => Ok(ActivatedController {
@@ -137,6 +139,9 @@ impl ActivatedController {
     pub(crate) fn retain_member_result<T>(&mut self, result: Result<T>) -> Result<T> {
         match result {
             Ok(value) => Ok(value),
+            Err(PoolError::MemberPolicyEditInProgress) => {
+                Err(PoolError::MemberPolicyEditInProgress)
+            }
             Err(PoolError::Member(error)) if !error.unconfirmed_native() => {
                 // Known pre-effect member refusal remains in its original
                 // workflow. Native unknowns are latched by actual record state
@@ -240,6 +245,7 @@ impl ControllerState {
             self.original_end,
         )?;
         self.capture_parent(runtime, &reply, self.original_end)?;
+        self.member_policy_edit.negotiate(&reply);
         self.effect_unknown = false;
         self.publication.assert_current()?;
         self.publication.close()?;
@@ -493,6 +499,17 @@ impl ControllerState {
         self.assert_original_controller_current(end)
     }
     fn require_active(&self) -> Result<()> {
+        self.require_no_member_policy_edit()?;
+        self.require_controller_active()?;
+        Ok(())
+    }
+    fn require_no_member_policy_edit(&self) -> Result<()> {
+        if self.member_policy_edit.attempt.is_some() {
+            return Err(PoolError::MemberPolicyEditInProgress);
+        }
+        Ok(())
+    }
+    fn require_controller_active(&self) -> Result<()> {
         need(
             self.active
                 && !self.close_unknown
@@ -515,6 +532,7 @@ impl ControllerState {
         self.directory.assert_limits(&self.policy)
     }
     fn close_components(&mut self, end: Instant) -> Result<()> {
+        self.require_no_member_policy_edit()?;
         self.active = false;
         let end = *self.cleanup_end.get_or_insert_with(|| {
             self.binding
@@ -658,6 +676,12 @@ mod creation_pool;
 mod employee_status;
 pub use employee_status::EmployeeResourceObservation;
 mod io;
+mod member_policy;
+pub use member_policy::{
+    MemberPolicyEditCommitted, MemberPolicyEditError, MemberPolicyEditRejected,
+    MemberPolicyEditSelection, MemberPolicyEditSettlement, MemberPolicyEditVerified,
+    PreparedMemberPolicyEdit,
+};
 mod member;
 mod setup;
 use setup::{controller_arguments, prepare_control_directory};

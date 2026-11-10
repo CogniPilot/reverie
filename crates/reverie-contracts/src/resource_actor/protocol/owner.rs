@@ -85,6 +85,7 @@ impl ResourceOperationRequest {
         }
         let approved = field(value, "approval")?;
         self.require_gpu_intent_echo(approved)?;
+        self.require_employee_policy_edit_echo(approved)?;
         need(
             approved.python_eq(&self.approval_value()),
             "RESOURCE_RAM_APPROVAL_CHANGED",

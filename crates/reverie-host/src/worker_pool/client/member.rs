@@ -1,10 +1,11 @@
 use super::*;
 use crate::worker_laptop::CreatedPoolTarget;
+use reverie_contracts::worker_pool::WorkerPoolMemberPolicy;
 pub(crate) struct MemberObservation {
     pub(crate) pid: u32,
     pub(crate) start: String,
     pub(crate) leaf: (u64, u64),
-    pub(crate) high: u64,
+    pub(crate) settings: WorkerPoolMemberPolicy,
     pub(crate) group: String,
 }
 impl ControllerState {
@@ -49,13 +50,9 @@ impl ControllerState {
             "WORKER_POOL_MEMBER_MEMBERSHIP",
         )?;
         let start = directory::process_start(pid)?;
-        let high = u64::from(
-            *self
-                .policy
-                .employee_memory_high_mi_b
-                .get(target.employee().as_str())
-                .ok_or(PoolError::Refused("WORKER_POOL_MEMBER_POLICY"))?,
-        ) * 1_048_576;
+        let settings = self
+            .member_policy_edit
+            .effective(&self.policy, target.employee().as_str())?;
         let file = native::open_at(
             self.directory.parent()?.as_raw_fd(),
             std::ffi::OsStr::new(&format!("docker-{}.scope", target.container().as_str())),
@@ -68,10 +65,10 @@ impl ControllerState {
                     "memory.max",
                     (u64::from(self.policy.memory_max_mi_b) * 1_048_576).to_string(),
                 ),
-                ("memory.high", high.to_string()),
+                ("memory.high", settings.memory_high_bytes().to_string()),
                 ("memory.swap.max", "0".into()),
                 ("cpu.max", "max 100000".into()),
-                ("cpu.weight", self.policy.cpu_weight.to_string()),
+                ("cpu.weight", settings.cpu_weight().to_string()),
             ] {
                 need(
                     directory::read_at(&file, name)?.trim() == wanted,
@@ -116,7 +113,7 @@ impl ControllerState {
             pid,
             start,
             leaf,
-            high,
+            settings,
             group,
         })
     }

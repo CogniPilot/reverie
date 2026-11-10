@@ -43,7 +43,7 @@ impl PublicationState {
         self.phase = Phase::Prepared;
         Ok(())
     }
-    fn assert_before(&self, proof: &PendingProof) -> Result<()> {
+    pub(super) fn assert_before(&self, proof: &PendingProof) -> Result<()> {
         self.actor.assert_current()?;
         self.parents
             .as_ref()

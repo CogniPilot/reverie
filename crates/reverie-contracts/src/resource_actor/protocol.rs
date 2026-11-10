@@ -21,6 +21,7 @@ pub use fleet::{
     decode_fleet_maintenance_hello,
 };
 mod installation;
+mod member_policy;
 mod owner;
 mod principal;
 mod registration;
@@ -34,6 +35,7 @@ pub use installation::{
     PoolInstallationConsentRequest, PoolInstallationOfferViewData, PoolInstallationRequestData,
     PoolInstallationViewRequest,
 };
+pub use member_policy::EmployeePolicyEdit;
 pub use owner::CurrentResourceOwner;
 pub use principal::ResourceOwnerPrincipal;
 pub use registration::{POOL_REGISTRATION_PURPOSE, decode_pool_registration_hello};
@@ -44,6 +46,10 @@ pub enum ResourceRequestSelection {
     EmployeeStatus {
         employee_id: ProfileEmployeeId,
         session_id: ProfileSessionId,
+    },
+    EmployeePolicyEdit {
+        employee_id: ProfileEmployeeId,
+        approval: EmployeePolicyEdit,
     },
     GpuStatus {
         employee_id: ProfileEmployeeId,
@@ -111,6 +117,7 @@ impl ResourceOperationRequest {
             }
             "gpu-status" => (gpu::status(value)?, None),
             "gpu-request" => gpu::request(value)?,
+            "employee-policy-edit" => member_policy::request(value)?,
             "draft" => {
                 closed(
                     value,
@@ -159,6 +166,7 @@ impl ResourceOperationRequest {
         match &self.selected {
             ResourceRequestSelection::Preview { employee_id, .. }
             | ResourceRequestSelection::EmployeeStatus { employee_id, .. }
+            | ResourceRequestSelection::EmployeePolicyEdit { employee_id, .. }
             | ResourceRequestSelection::GpuStatus { employee_id, .. }
             | ResourceRequestSelection::GpuRequest { employee_id, .. }
             | ResourceRequestSelection::Apply { employee_id, .. } => employee_id,
@@ -180,6 +188,7 @@ impl ResourceOperationRequest {
     fn stage(&self) -> &'static str {
         match self.selected {
             ResourceRequestSelection::EmployeeStatus { .. } => "status",
+            ResourceRequestSelection::EmployeePolicyEdit { .. } => "employee-policy-edit",
             ResourceRequestSelection::GpuStatus { .. } => "gpu-status",
             ResourceRequestSelection::GpuRequest { .. } => "gpu-request",
             ResourceRequestSelection::Apply { .. } => "apply",

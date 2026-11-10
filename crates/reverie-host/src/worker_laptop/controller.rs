@@ -44,9 +44,16 @@ pub struct ControllerMemberConfigured {
     start: String,
     leaf: (u64, u64),
     high: u64,
+    settings: reverie_contracts::worker_pool::WorkerPoolMemberPolicy,
     group: String,
 }
 impl ControllerMemberConfigured {
+    pub(in crate::worker_laptop) fn settings(
+        &self,
+    ) -> reverie_contracts::worker_pool::WorkerPoolMemberPolicy {
+        self.settings
+    }
+
     pub(in crate::worker_laptop) fn assert_memory(
         &self,
         runtime: &WorkerRuntime,
@@ -175,6 +182,13 @@ impl ActivatedController {
             .employee()
             .ok_or(PoolError::Refused("WORKER_POOL_EMPLOYEE_REQUIRED"))?
             .clone();
+        let provider = reverie_contracts::worker_pool::WorkerPoolProvider::from_config(
+            record.resources().plan.source(),
+        )
+        .map_err(|_| PoolError::Refused("WORKER_POOL_PROVIDER_INVALID"))?
+        .ok_or(PoolError::Refused("WORKER_POOL_CREATE_PROVIDER_CHANGED"))?;
+        self.assert_member_policy_provider(&provider)?;
+        self.assert_member_policy_unfenced()?;
         let container = created
             .container_id()
             .ok_or(PoolError::Refused("WORKER_POOL_CREATED_CID"))?
@@ -202,7 +216,8 @@ impl ActivatedController {
                     process: native.pid,
                     start: native.start,
                     leaf: native.leaf,
-                    high: native.high,
+                    high: native.settings.memory_high_bytes(),
+                    settings: native.settings,
                     group: native.group,
                 })
             }

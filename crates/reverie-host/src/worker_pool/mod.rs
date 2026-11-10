@@ -8,7 +8,9 @@ mod close_classification_tests;
 mod controller_limits;
 pub use client::{
     ActivatedController, ControllerActivationFailure, ControllerCapacity, ControllerStatusData,
-    EmployeeResourceObservation,
+    EmployeeResourceObservation, MemberPolicyEditCommitted, MemberPolicyEditError,
+    MemberPolicyEditRejected, MemberPolicyEditSelection, MemberPolicyEditSettlement,
+    MemberPolicyEditVerified, PreparedMemberPolicyEdit,
 };
 pub(crate) mod directory;
 mod endpoint;
@@ -26,6 +28,7 @@ pub use installation_request::{
     retire_failed_os_pool_installation, revise_os_pool_nomination,
 };
 mod member;
+mod member_policy;
 mod namespace;
 mod policy;
 mod publication;
@@ -64,6 +67,7 @@ pub enum PoolError {
     Channel(crate::worker_reports::WorkerReportError),
     CreationBudget(reverie_contracts::creation_budget::CreationBudgetError),
     CreationDeadline,
+    MemberPolicyEditInProgress,
 }
 impl fmt::Display for PoolError {
     fn fmt(&self, output: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -83,7 +87,7 @@ impl std::error::Error for PoolError {
             Self::Member(error) => Some(error.as_ref()),
             Self::Channel(error) => Some(error),
             Self::CreationBudget(error) => Some(error),
-            Self::Refused(_) | Self::CreationDeadline => None,
+            Self::Refused(_) | Self::CreationDeadline | Self::MemberPolicyEditInProgress => None,
         }
     }
 }
@@ -105,6 +109,7 @@ impl PoolError {
             Self::Channel(error) => error.code(),
             Self::CreationBudget(error) => error.code(),
             Self::CreationDeadline => "WORKER_POOL_CREATION_BUDGET_DEADLINE",
+            Self::MemberPolicyEditInProgress => "WORKER_POOL_MEMBER_EDIT_RETAINED",
         }
     }
     pub(crate) fn close_unknown(&self) -> bool {

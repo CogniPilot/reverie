@@ -54,7 +54,7 @@ impl ActivatedController {
         Ok(data)
     }
 }
-fn observe(
+pub(super) fn observe(
     owner: &mut ControllerState,
     query: &MetadataQueryOwner,
     runtime: &WorkerRuntime,
@@ -213,7 +213,7 @@ fn inspect(
         )
         .map_err(PoolError::Engine)
 }
-fn assert_current(
+pub(super) fn assert_current(
     owner: &mut ControllerState,
     query: &MetadataQueryOwner,
     processes: &mut WebsiteProcessObserver,

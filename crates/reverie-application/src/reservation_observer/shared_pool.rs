@@ -39,6 +39,9 @@ impl ObservationContext {
         match (provider.as_ref(), owner) {
             (None, None) => Ok(None),
             (Some(provider), Some(owner)) => {
+                owner
+                    .assert_member_policy_provider(provider)
+                    .map_err(|error| ObserverError::Refused(error.code()))?;
                 need(
                     self.config.pool_bytes()?
                         == UnsignedInteger::from_u64(

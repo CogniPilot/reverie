@@ -7,6 +7,8 @@ use reverie_contracts::{
     task_perf_v1::TaskPerfConfiguration,
     worker_pool::WorkerPoolProvider,
 };
+use reverie_core::ids::{ContainerId, ProfileEmployeeId, ProfileSessionId};
+use reverie_host::worker_pool::EmployeeResourceObservation;
 use reverie_store::storage_identity::{self, StorageIdentityConfig};
 use sha2::{Digest, Sha256};
 
@@ -26,7 +28,9 @@ impl AuthenticatedResourceOperation<'_> {
         let (employee, session) = (employee_id.clone(), session_id.clone());
         self.assert_current()?;
         let owner = self.current_owner()?.owner().clone();
-        let value = observe(&mut self.website.frame, &employee, &session, &owner)?;
+        let value =
+            EmployeeResources::observe(&mut self.website.frame, &employee, &session, &owner)?
+                .status(&employee, &session);
         self.assert_current()?;
         let raw = serde_json::to_vec(&serde_json::json!({
             "kind":"resource-result","requestId":self.request().request_id().as_str(),"value":value,
@@ -35,64 +39,141 @@ impl AuthenticatedResourceOperation<'_> {
         HumanFrame::decode(&raw).map_err(Into::into)
     }
 }
-fn observe(
-    frame: &mut Frame<'_>,
-    employee: &reverie_core::ids::ProfileEmployeeId,
-    session: &reverie_core::ids::ProfileSessionId,
-    owner: &Option<reverie_core::PythonText>,
-) -> Result<serde_json::Value> {
-    let end = frame.deadline;
-    let before = read_company(frame)?;
-    let current = before
-        .current_employee(
-            employee,
-            session,
-            &owner
-                .as_ref()
-                .map(|value| MetadataText::from_python_text(value.clone())),
-        )?
-        .ok_or(ResourceActorError::Refused(
-            "EMPLOYEE_RESOURCE_CURRENT_SESSION",
+
+pub(super) struct EmployeeResources {
+    pub(super) snapshot: Arc<ValidatedWorkerSnapshot>,
+    pub(super) current: CurrentEmployee,
+    pub(super) provider: Option<WorkerPoolProvider>,
+    pub(super) container: Option<ContainerId>,
+    pub(super) observed: Option<EmployeeResourceObservation>,
+    pub(super) revision: String,
+    pub(super) live: bool,
+    before: Metadata,
+    inventory: crate::reservation_observer::ObservedInventory,
+    requested: Option<serde_json::Value>,
+    state: &'static str,
+}
+
+impl EmployeeResources {
+    pub(super) fn observe(
+        frame: &mut Frame<'_>,
+        employee: &ProfileEmployeeId,
+        session: &ProfileSessionId,
+        owner: &Option<reverie_core::PythonText>,
+    ) -> Result<Self> {
+        let end = frame.deadline;
+        let before = read_company(frame)?;
+        let current = before
+            .current_employee(
+                employee,
+                session,
+                &owner
+                    .as_ref()
+                    .map(|value| MetadataText::from_python_text(value.clone())),
+            )?
+            .ok_or(ResourceActorError::Refused(
+                "EMPLOYEE_RESOURCE_CURRENT_SESSION",
+            ))?;
+        let snapshot = Arc::clone(frame.snapshot.as_ref().expect("actual bound configuration"));
+        let provider = WorkerPoolProvider::from_config(snapshot.configuration())
+            .map_err(|_| ResourceActorError::Refused("EMPLOYEE_RESOURCE_PROVIDER"))?;
+        let inventory_result = frame
+            .context
+            .as_ref()
+            .expect("original native context")
+            .custody(Some(end))
+            .map_err(ResourceActorError::from);
+        let inventory = frame.retain_stateless_result(inventory_result)?;
+        let row = inventory
+            .employee_selected(snapshot.configuration(), &current)
+            .map_err(|_| ResourceActorError::Refused("EMPLOYEE_RESOURCE_CONTAINER_BINDING"))?;
+        let container = row.as_ref().map(|row| row.data().id().clone());
+        let (state, observed, supported) =
+            observe_member(frame, provider.as_ref(), row.as_ref(), &current, end)?;
+        let live = supported && snapshot.source_path().is_some();
+        let requested = requested_policy(snapshot.configuration(), provider.as_ref(), employee)?;
+        assert_after(frame, &before, &current, &inventory, end)?;
+        let domain =
+            reverie_contracts::reservation_control::domain_digest(snapshot.configuration())
+                .map_err(|_| ResourceActorError::Refused("EMPLOYEE_RESOURCE_DOMAIN"))?
+                .to_hex();
+        let running = observed.as_ref().map(|row| {
+            (
+                &row.container_id,
+                row.pid,
+                &row.process_start,
+                &row.leaf_device,
+                &row.leaf_inode,
+                &row.memory_high_bytes,
+                row.cpu_weight,
+            )
+        });
+        let revision_bytes = serde_json::to_vec(&(
+            domain,
+            before.company_snapshot_digest()?,
+            employee.as_str(),
+            session.as_str(),
+            &requested,
+            running,
+        ))
+        .map_err(|_| ResourceActorError::Refused("EMPLOYEE_RESOURCE_ENCODING"))?;
+        let revision = Sha256::digest(revision_bytes)
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect::<String>();
+        Ok(Self {
+            snapshot,
+            current,
+            provider,
+            container,
+            observed,
+            revision,
+            live,
+            before,
+            inventory,
+            requested,
+            state,
+        })
+    }
+
+    fn status(
+        &self,
+        employee: &ProfileEmployeeId,
+        session: &ProfileSessionId,
+    ) -> serde_json::Value {
+        serde_json::json!({
+            "version":1,"employeeId":employee.as_str(),"sessionId":session.as_str(),
+            "revision":self.revision,"state":self.state,"requested":self.requested,"observed":self.observed,
+            "perfObserved":null,"perfObservationReason":"OWN_PROCESS_PROBE_REQUIRED",
+            "capabilities":{"softMemoryLive":self.live,"cpuWeightLive":self.live,"hardMemoryReplacement":false,
+                "perfReplacement":false,"gpuReplacement":false},
+            "readOnly":true,
+        })
+    }
+
+    pub(super) fn assert_current(&self, frame: &mut Frame<'_>, end: Instant) -> Result<()> {
+        assert_after(frame, &self.before, &self.current, &self.inventory, end)
+    }
+
+    pub(super) fn assert_unique(&self) -> Result<()> {
+        let selected = self.container.as_ref().ok_or(ResourceActorError::Refused(
+            "EMPLOYEE_RESOURCE_CURRENT_CONTAINER",
         ))?;
-    let snapshot = Arc::clone(frame.snapshot.as_ref().expect("actual bound configuration"));
-    let provider = WorkerPoolProvider::from_config(snapshot.configuration())
-        .map_err(|_| ResourceActorError::Refused("EMPLOYEE_RESOURCE_PROVIDER"))?;
-    let inventory_result = frame
-        .context
-        .as_ref()
-        .expect("original native context")
-        .custody(Some(end))
-        .map_err(ResourceActorError::from);
-    let inventory = frame.retain_stateless_result(inventory_result)?;
-    let row = inventory
-        .employee_selected(snapshot.configuration(), &current)
-        .map_err(|_| ResourceActorError::Refused("EMPLOYEE_RESOURCE_CONTAINER_BINDING"))?;
-    let (state, observed) = observe_member(frame, provider.as_ref(), row.as_ref(), &current, end)?;
-    let requested = requested_policy(snapshot.configuration(), provider.as_ref(), employee)?;
-    assert_after(frame, &before, &current, &inventory, end)?;
-    let domain = reverie_contracts::reservation_control::domain_digest(snapshot.configuration())
-        .map_err(|_| ResourceActorError::Refused("EMPLOYEE_RESOURCE_DOMAIN"))?
-        .to_hex();
-    let revision_bytes = serde_json::to_vec(&(
-        domain,
-        before.company_snapshot_digest()?,
-        employee.as_str(),
-        session.as_str(),
-        &requested,
-    ))
-    .map_err(|_| ResourceActorError::Refused("EMPLOYEE_RESOURCE_ENCODING"))?;
-    let revision = Sha256::digest(revision_bytes)
-        .iter()
-        .map(|b| format!("{b:02x}"))
-        .collect::<String>();
-    Ok(serde_json::json!({
-        "version":1,"employeeId":employee.as_str(),"sessionId":session.as_str(),
-        "revision":revision,"state":state,"requested":requested,"observed":observed,
-        "perfObserved":null,"perfObservationReason":"OWN_PROCESS_PROBE_REQUIRED",
-        "capabilities":{"softMemoryLive":false,"cpuWeightLive":false,"hardMemoryReplacement":false,
-            "perfReplacement":false,"gpuReplacement":false},
-        "readOnly":true,
-    }))
+        for row in self.inventory.rows() {
+            let row = row.data();
+            if row.id() != selected
+                && row
+                    .label_is("reverie.employee", self.current.identity().as_str())
+                    .map_err(GateError::from)?
+                && row.running().map_err(GateError::from)?
+            {
+                return Err(ResourceActorError::Refused(
+                    "EMPLOYEE_RESOURCE_CONTAINER_AMBIGUOUS",
+                ));
+            }
+        }
+        Ok(())
+    }
 }
 fn observe_member(
     frame: &mut Frame<'_>,
@@ -100,14 +181,11 @@ fn observe_member(
     row: Option<&crate::reservation_observer::ObservedRow<'_>>,
     current: &CurrentEmployee,
     end: Instant,
-) -> Result<(
-    &'static str,
-    Option<reverie_host::worker_pool::EmployeeResourceObservation>,
-)> {
+) -> Result<(&'static str, Option<EmployeeResourceObservation>, bool)> {
     let mut observed = None;
+    let mut live = false;
     let mut state = "uninstalled";
     if let Some(provider) = provider {
-        let policy = provider.policy();
         state = match row {
             None => "absent",
             Some(row) if !row.data().running().map_err(GateError::from)? => "stopped",
@@ -117,10 +195,9 @@ fn observe_member(
                     ResourceActorError::Refused("WORKER_CONTROLLER_SLOT_UNAVAILABLE")
                 })?;
                 if let Some(controller) = slot.as_mut() {
-                    need(
-                        controller.policy_data() == policy,
-                        "EMPLOYEE_RESOURCE_POLICY_CHANGED",
-                    )?;
+                    controller
+                        .assert_member_policy_provider(provider)
+                        .map_err(|cause| ResourceActorError::Controller(Box::new(cause)))?;
                     let query = frame
                         .context
                         .as_ref()
@@ -136,6 +213,7 @@ fn observe_member(
                             end,
                         )
                         .map_err(|cause| ResourceActorError::Controller(Box::new(cause)));
+                    live = controller.member_policy_edit_supported();
                     drop(slot);
                     observed = Some(frame.retain_stateless_result(native)?);
                     "running"
@@ -145,7 +223,7 @@ fn observe_member(
             }
         };
     }
-    Ok((state, observed))
+    Ok((state, observed, live))
 }
 fn requested_policy(
     config: &reverie_contracts::worker_config::EffectiveWorkerConfig,
@@ -154,14 +232,15 @@ fn requested_policy(
 ) -> Result<Option<serde_json::Value>> {
     if let Some(provider) = provider {
         let policy = provider.policy();
+        let member = provider.member_policy(employee.as_str());
         let perf = TaskPerfConfiguration::validate(config)
             .map_err(|_| ResourceActorError::Refused("EMPLOYEE_RESOURCE_PERF_POLICY"))?
             .selected(Some(employee))
             .map_or("off", |policy| policy.name());
         Ok(Some(serde_json::json!({
-            "memoryHighMiB": policy.employee_memory_high_mi_b.get(employee.as_str()),
+            "memoryHighMiB": member.map(|settings| settings.memory_high_mib()),
             "memoryMaxMiB": policy.memory_max_mi_b,
-            "cpuWeight": policy.cpu_weight,
+            "cpuWeight": member.map_or(policy.cpu_weight, |settings| settings.cpu_weight()),
             "allowedCpus": policy.allowed_cpus,
             "perfPolicy": perf,
         })))
@@ -196,7 +275,7 @@ fn assert_after(
     )?;
     Ok(())
 }
-fn read_company(frame: &mut Frame<'_>) -> Result<Metadata> {
+pub(super) fn read_company(frame: &mut Frame<'_>) -> Result<Metadata> {
     let settings = ResourceIdentitySettings::capture_worker_config(
         frame
             .snapshot
@@ -211,7 +290,7 @@ fn read_company(frame: &mut Frame<'_>) -> Result<Metadata> {
         .map_err(Into::into);
     frame.retain_stateless_result(read)
 }
-fn assert_current_binding(company: &Metadata, original: &CurrentEmployee) -> Result<()> {
+pub(super) fn assert_current_binding(company: &Metadata, original: &CurrentEmployee) -> Result<()> {
     need(
         company
             .current_employee(original.identity(), original.session(), original.owner())?

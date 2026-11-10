@@ -22,11 +22,17 @@ impl PlanBinding {
     pub(super) fn capture(
         runtime: &WorkerRuntime,
         plan: &ObservedCreatePlan,
-        policy: &reverie_contracts::worker_pool::WorkerPoolPolicy,
+        controller: &ActivatedController,
     ) -> PoolResult<Self> {
         pool_need(plan.same_runtime(runtime), "WORKER_POOL_CREATE_RUNTIME")?;
-        selected(plan.source(), policy)?;
-        selected(plan.effective_configuration(), policy)?;
+        let policy = controller.policy_data();
+        let source = selected(plan.source())?;
+        controller.assert_member_policy_provider(&source)?;
+        let effective = selected(plan.effective_configuration())?;
+        pool_need(
+            effective.policy() == policy && effective.member_revision() == 0,
+            "WORKER_POOL_CREATE_PROVIDER_CHANGED",
+        )?;
         let resources = reverie_contracts::resource_config::checked_effective_policy(
             plan.effective_configuration(),
         )
@@ -86,16 +92,10 @@ impl PlanBinding {
 }
 fn selected(
     config: &reverie_contracts::worker_config::EffectiveWorkerConfig,
-    policy: &reverie_contracts::worker_pool::WorkerPoolPolicy,
-) -> PoolResult<()> {
-    let selected = WorkerPoolProvider::from_config(config)
-        .map_err(|_| PoolError::Refused("WORKER_POOL_PROVIDER_INVALID"))?;
-    pool_need(
-        selected
-            .as_ref()
-            .is_some_and(|selected| selected.policy() == policy),
-        "WORKER_POOL_CREATE_PROVIDER_CHANGED",
-    )
+) -> PoolResult<WorkerPoolProvider> {
+    WorkerPoolProvider::from_config(config)
+        .map_err(|_| PoolError::Refused("WORKER_POOL_PROVIDER_INVALID"))?
+        .ok_or(PoolError::Refused("WORKER_POOL_CREATE_PROVIDER_CHANGED"))
 }
 fn resources_current(
     resources: &ResourcePolicy,

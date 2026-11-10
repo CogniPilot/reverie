@@ -20,8 +20,9 @@ pub use image::{CurrentImageBinding, ImageHostError, capture_current_image};
 pub use policy::{PolicyBinding, PolicyFileStamp, PolicyTransaction, publish_prepared_policy};
 pub(crate) use pool_transition::PoolRenameFence;
 pub use pool_transition::{
-    PoolPublication, PoolPublicationCause, PoolPublicationFailure, PoolPublicationPrepared,
-    PoolTerminal, PoolTransitionPending,
+    MemberPolicyCancellation, MemberPolicyPending, MemberPolicyPublication, PoolPublication,
+    PoolPublicationCause, PoolPublicationFailure, PoolPublicationPrepared, PoolTerminal,
+    PoolTransitionPending,
 };
 pub use publication::{
     PublicationStamp, assert_native_publication, observe_publication, publish_publication,
@@ -175,7 +176,25 @@ fn need(value: bool, code: &'static str) -> Result<()> {
         Err(ControlHostError::Refused(code))
     }
 }
-pub struct AdmissionLock(native::HeldAdmission);
+pub struct AdmissionLock {
+    native: native::HeldAdmission,
+    acquisition: std::sync::Arc<AdmissionAcquisition>,
+    close_attempted: bool,
+}
+
+struct AdmissionAcquisition {
+    checked_closed: std::sync::atomic::AtomicBool,
+}
+
+impl AdmissionAcquisition {
+    fn assert_closed(&self) -> Result<()> {
+        need(
+            self.checked_closed
+                .load(std::sync::atomic::Ordering::Acquire),
+            "RESERVATION_ORIGINAL_ADMISSION_CLOSE_UNCONFIRMED",
+        )
+    }
+}
 /// Contention is returned only after the unsuccessful native acquisition's
 /// descriptor has checked-close. It never describes a partial launch/effect.
 pub enum AdmissionLockAttempt {
@@ -185,7 +204,13 @@ pub enum AdmissionLockAttempt {
 impl AdmissionLock {
     pub fn try_acquire(config: &ReservationConfiguration) -> Result<AdmissionLockAttempt> {
         match native::open_admission(config.control_paths()?.root()) {
-            Ok(lock) => Ok(AdmissionLockAttempt::Acquired(Self(lock))),
+            Ok(native) => Ok(AdmissionLockAttempt::Acquired(Self {
+                native,
+                acquisition: std::sync::Arc::new(AdmissionAcquisition {
+                    checked_closed: std::sync::atomic::AtomicBool::new(false),
+                }),
+                close_attempted: false,
+            })),
             Err(ObservationError::Refused(crate::ObservationFault::AdmissionBusy)) => {
                 Ok(AdmissionLockAttempt::Contended)
             }
@@ -206,13 +231,20 @@ impl AdmissionLock {
         binding: &ControlBinding,
     ) -> Result<()> {
         Ok(self
-            .0
+            .native
             .assert_current(binding.admission_lock(), config.uid()?)?)
     }
     /// Checked exactly-once close. The application must finish it before
     /// acknowledging admission; closing does not grant capacity credit.
     pub fn close(&mut self) -> Result<()> {
-        Ok(self.0.close()?)
+        let first_attempt = !std::mem::replace(&mut self.close_attempted, true);
+        self.native.close()?;
+        if first_attempt {
+            self.acquisition
+                .checked_closed
+                .store(true, std::sync::atomic::Ordering::Release);
+        }
+        Ok(())
     }
 }
 pub fn pending_present(config: &ReservationConfiguration) -> Result<bool> {

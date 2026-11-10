@@ -9,6 +9,7 @@ mod claim;
 mod cursor;
 mod employee_status;
 mod gpu;
+mod member_policy;
 mod preview;
 mod receipt;
 mod reference;

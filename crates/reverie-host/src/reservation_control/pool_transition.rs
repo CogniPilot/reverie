@@ -6,8 +6,8 @@ use std::sync::{Arc, Mutex};
 mod publication;
 pub(crate) use publication::PoolRenameFence;
 pub use publication::{
-    PoolPublication, PoolPublicationCause, PoolPublicationFailure, PoolPublicationPrepared,
-    PoolTerminal,
+    MemberPolicyCancellation, MemberPolicyPending, MemberPolicyPublication, PoolPublication,
+    PoolPublicationCause, PoolPublicationFailure, PoolPublicationPrepared, PoolTerminal,
 };
 
 #[must_use = "retain the original pending/publication owner until checked terminal release"]
@@ -23,11 +23,40 @@ struct PendingOwner {
 struct PendingProof {
     config: ReservationConfiguration,
     binding: ControlBinding,
-    intent: Arc<PoolTransitionIntent>,
+    intent: PendingIntent,
     path: std::path::PathBuf,
     stamp: native::PrivateFileStamp,
     unconfirmed: Mutex<Option<Arc<ObservationError>>>,
 }
+
+enum PendingIntent {
+    Fleet(Arc<PoolTransitionIntent>),
+    Member {
+        transition: Arc<reverie_contracts::worker_pool::WorkerPoolConfigurationTransition>,
+        bytes: Vec<u8>,
+    },
+}
+
+impl PendingIntent {
+    fn bytes(&self) -> &[u8] {
+        match self {
+            Self::Fleet(intent) => intent.bytes(),
+            Self::Member { bytes, .. } => bytes,
+        }
+    }
+
+    fn assert_configuration(&self, config: &ReservationConfiguration) -> Result<()> {
+        let matches = match self {
+            Self::Fleet(intent) => intent.assert_configuration(config.configuration()).is_ok(),
+            Self::Member { transition, .. } => {
+                use reverie_contracts::worker_config::config_digest;
+                config_digest(transition.before()) == config_digest(config.configuration())
+            }
+        };
+        need(matches, "POOL_TRANSITION_CONFIGURATION_CHANGED")
+    }
+}
+
 impl PoolTransitionPending {
     /// May leave durable partial evidence on Err. The application must retain
     /// its actual attempt record before entering this exclusive writer.
@@ -37,10 +66,17 @@ impl PoolTransitionPending {
         admission: &AdmissionLock,
         intent: Arc<PoolTransitionIntent>,
     ) -> Result<Self> {
+        Self::establish_selected(config, binding, admission, PendingIntent::Fleet(intent))
+    }
+
+    fn establish_selected(
+        config: &ReservationConfiguration,
+        binding: &ControlBinding,
+        admission: &AdmissionLock,
+        intent: PendingIntent,
+    ) -> Result<Self> {
         admission.assert_current(config, binding)?;
-        intent
-            .assert_configuration(config.configuration())
-            .map_err(|_| ControlHostError::Refused("POOL_TRANSITION_CONFIGURATION_CHANGED"))?;
+        intent.assert_configuration(config)?;
         let uid = config.uid()?;
         let paths = config.control_paths()?;
         let (directory, observed) = native::held_control_directory(&paths.binding().parent(), uid)?;
@@ -101,11 +137,7 @@ impl PoolTransitionPending {
         owner.proof.assert_known_close()?;
         // Preserve the denial-only API's original typed close refusal. The
         // paired publication methods own their separate first-failure latch.
-        owner
-            .proof
-            .intent
-            .assert_configuration(config.configuration())
-            .map_err(|_| ControlHostError::Refused("POOL_TRANSITION_CONFIGURATION_CHANGED"))?;
+        owner.proof.intent.assert_configuration(config)?;
         need(
             owner.file.unreleased(),
             "POOL_TRANSITION_REQUIRES_RECONCILIATION",

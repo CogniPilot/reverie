@@ -184,6 +184,7 @@ impl Inner {
         self.assert_pool_guard()?;
         self.assert_no_failed_gpu()?;
         self.assert_no_failed_image()?;
+        self.assert_no_failed_member_policy()?;
         let active = self.held(scope)?;
         if let Some(cleanup) = &active.original_cleanup {
             cleanup.assert_selected(self)?;

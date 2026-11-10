@@ -13,6 +13,29 @@ use std::{
 };
 static NEXT: AtomicU64 = AtomicU64::new(0);
 #[test]
+fn admission_checked_close_is_bound_to_the_original_acquisition() {
+    let tree = Tree::new();
+    let mut first = AdmissionLock::acquire(&tree.config).unwrap();
+    let original = std::sync::Arc::clone(&first.acquisition);
+    assert!(original.assert_closed().is_err());
+    native::test_faults::set(None, true);
+    assert!(first.close().is_err());
+    native::test_faults::set(None, false);
+    first.close().unwrap();
+    assert!(
+        original.assert_closed().is_err(),
+        "a consumed close cannot be retried"
+    );
+    let mut next = AdmissionLock::acquire(&tree.config).unwrap();
+    assert!(!std::sync::Arc::ptr_eq(&next.acquisition, &original));
+    next.close().unwrap();
+    next.acquisition.assert_closed().unwrap();
+    assert!(
+        original.assert_closed().is_err(),
+        "another acquisition cannot settle the original"
+    );
+}
+#[test]
 fn typed_admission_contention_requires_checked_clean_constructor_close() {
     let tree = Tree::new();
     let mut first = AdmissionLock::acquire(&tree.config).unwrap();

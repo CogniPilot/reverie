@@ -26,7 +26,7 @@ impl ActivatedController {
     ) -> PoolResult<PoolMemberCreation<'_>> {
         let end = runtime.stop_deadline().map_or(end, |stop| stop.min(end));
         pool_need(Instant::now() < end, "WORKER_POOL_MEMBER_CREATION_DEADLINE")?;
-        let plan = PlanBinding::capture(runtime, plan, self.policy_data())?;
+        let plan = PlanBinding::capture(runtime, plan, self)?;
         let current = self.assert_current(runtime, end);
         self.retain_member_result(current)?;
         Ok(PoolMemberCreation {
@@ -154,7 +154,7 @@ fn workflow_plan(
         .resources
         .as_ref()
         .ok_or(PoolError::Refused("WORKER_POOL_CREATED_RESOURCES_RETURNED"))?;
-    PlanBinding::capture(runtime, &resources.plan, controller.policy_data())
+    PlanBinding::capture(runtime, &resources.plan, controller)
 }
 fn pool_need(value: bool, code: &'static str) -> PoolResult<()> {
     value.then_some(()).ok_or(PoolError::Refused(code))

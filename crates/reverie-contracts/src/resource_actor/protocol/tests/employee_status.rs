@@ -37,3 +37,47 @@ fn employee_status_is_readonly_preview_authority_with_exact_employee_session() {
         assert!(ResourceOperationRequest::decode(&human(&changed)).is_err());
     }
 }
+
+#[test]
+fn employee_policy_edit_requires_exact_typed_owner_approval() {
+    let value = json!({
+        "kind":"resource-operation","requestId":RID,"verb":"employee-policy-edit","employeeId":EID,
+        "approval":{"sessionId":SID,"operationId":NONCE,"expectedRevision":"a".repeat(64),
+            "memoryHighMiB":8192,"cpuWeight":100}
+    });
+    let actual = request(&value);
+    assert!(matches!(actual.selection(),
+        ResourceRequestSelection::EmployeePolicyEdit { employee_id, approval }
+        if employee_id.as_str() == EID && approval.session().as_str() == SID
+           && approval.requested().memory_high_mib() == 8192
+    ));
+    let mut owner = reply(&value);
+    owner["stage"] = json!("employee-policy-edit");
+    assert!(actual.parse_owner_reply(&human(&owner), &nonce()).is_ok());
+    for (name, changed) in [
+        ("sessionId", json!(RID)),
+        ("operationId", json!(RID)),
+        ("expectedRevision", json!("b".repeat(64))),
+        ("memoryHighMiB", json!(8193)),
+        ("cpuWeight", json!(100.0)),
+        ("extra", json!(true)),
+    ] {
+        let mut changed_owner = owner.clone();
+        changed_owner["approval"][name] = changed;
+        assert!(
+            actual
+                .parse_owner_reply(&human(&changed_owner), &nonce())
+                .is_err()
+        );
+    }
+    for (name, changed) in [
+        ("memoryHighMiB", json!(49153)),
+        ("cpuWeight", json!(0)),
+        ("cpuWeight", json!(true)),
+        ("expectedRevision", json!("A".repeat(64))),
+    ] {
+        let mut changed_request = value.clone();
+        changed_request["approval"][name] = changed;
+        assert!(ResourceOperationRequest::decode(&human(&changed_request)).is_err());
+    }
+}

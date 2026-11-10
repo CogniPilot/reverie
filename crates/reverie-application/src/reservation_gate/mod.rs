@@ -18,6 +18,8 @@ pub(crate) use image_switch::{
     ImageGateClosed, ImageGateFailure, ImageGateTransition, ImageSwitchPreview,
 };
 mod launch;
+mod member_policy;
+pub(crate) use member_policy::{MemberPolicyAdmission, MemberPolicyEnd};
 mod observation;
 mod ordinary_stop;
 mod perf_transition;
@@ -101,6 +103,7 @@ struct Inner {
     changed: Condvar,
     failed_gpu: Mutex<Vec<Arc<gpu_access::TransitionRecord>>>,
     failed_image: Mutex<Option<Arc<image_switch::ImageTransitionRecord>>>,
+    failed_member_policy: Mutex<Option<member_policy::RetainedMemberPolicy>>,
     pool_transition: Mutex<Option<Arc<pool_transition::TransitionRecord>>>,
     #[cfg(test)]
     entry_capture_pause: Mutex<Option<crate::test_process::PausePoint<ObservationContext>>>,
@@ -140,7 +143,10 @@ impl ReservationGate {
                 self.inner.assert_no_failed_gpu(),
                 finalized(
                     self.inner.assert_no_failed_image(),
-                    self.inner.assert_no_pool_transition(),
+                    finalized(
+                        self.inner.assert_no_pool_transition(),
+                        self.inner.assert_no_failed_member_policy(),
+                    ),
                 ),
             ),
         )
@@ -193,6 +199,7 @@ impl ReservationGate {
                 changed: Condvar::new(),
                 failed_gpu: Mutex::new(Vec::new()),
                 failed_image: Mutex::new(None),
+                failed_member_policy: Mutex::new(None),
                 pool_transition: Mutex::new(None),
                 #[cfg(test)]
                 entry_capture_pause: Mutex::new(None),

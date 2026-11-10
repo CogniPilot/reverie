@@ -439,7 +439,29 @@ impl ObservationContext {
                 && (!stable_pool_policy || policy_digest(&effective) == policy_digest(&repeated)),
             "RESERVATION_SOURCE_POLICY",
         )?;
-        Ok(Some(policy))
+        self.running_memory_policy(row, policy).map(Some)
+    }
+    fn running_memory_policy(
+        &self,
+        row: &NativeLimitFields<'_>,
+        policy: ObservedMemoryPolicy,
+    ) -> Result<ObservedMemoryPolicy> {
+        if !policy.uses_pool() {
+            return Ok(policy);
+        }
+        let Some(provider) = reverie_contracts::worker_pool::WorkerPoolProvider::from_config(
+            self.config.configuration(),
+        )
+        .map_err(|_| ObserverError::Refused("RESERVATION_POOL_PROVIDER_INVALID"))?
+        else {
+            return Ok(policy);
+        };
+        for (employee, settings) in provider.member_overrides() {
+            if row.label_is("reverie.employee", employee)? {
+                return Ok(policy.with_pool_member_policy(*settings)?);
+            }
+        }
+        Ok(policy)
     }
     pub fn storage(
         &self,

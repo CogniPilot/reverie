@@ -15,7 +15,15 @@ impl WorkerRuntime {
         configured.assert_memory(self, &observed.workflow, connection, digest)?;
         let (mut record, row, policy, budget) =
             effect::begin_effect(self.laptop_workflows(), self, observed, connection)?;
-        let result = accept_readback(self, &mut record, row, policy, digest, budget);
+        let result = accept_readback(
+            self,
+            &mut record,
+            row,
+            policy,
+            digest,
+            budget,
+            configured.settings(),
+        );
         effect::finish_effect(&mut record, &observed.workflow, result)
     }
 }
@@ -26,6 +34,7 @@ fn accept_readback(
     policy: ObservedMemoryPolicy,
     digest: &WorkerPolicyDigest,
     budget: CallBudget,
+    controller_policy: reverie_contracts::worker_pool::WorkerPoolMemberPolicy,
 ) -> Result<Pending> {
     // Any refusal is after the original controller effect; preserve that
     // distinction in the existing memory outcome and cleanup state.
@@ -54,6 +63,7 @@ fn accept_readback(
             row,
             target: outer,
             attempted: true,
+            controller_policy: Some(controller_policy),
             budget,
         }),
         Err(error) => classify(finalized(Err(error), outer.close()), true),

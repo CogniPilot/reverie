@@ -10,6 +10,19 @@ Allowed still requires task authorization. Unknown means unverified; unavailable
 
 Before self-refresh, brief the account, model/effort, approved artifact and handoff. Check your plan grant and follow [Models](/handbook/models). Refresh never installs code, changes the worker target or grants owner access.
 
+## Profile your workload
+
+On a laptop with PERF enabled, run `perf` inside the laptop as your regular user. Record samples from your own workload and its threads with a bounded buffer. Replace `./your-program` with the command you want to profile.
+
+```bash
+perf record --inherit --all-user --no-buildid-cache --no-buildid \
+  --mmap-pages 64 --freq 99 --event task-clock:u --max-size 8M \
+  --output profile.data -- ./your-program
+perf report --stdio --input profile.data
+```
+
+Keep the executable and its symbols available when reading the report. The task policy permits per-process user-space events.
+
 ## Board decision requests
 
 For status, dates, check-ins and decision buttons, see [Board tasks and decisions](/handbook/board).

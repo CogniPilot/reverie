@@ -25,6 +25,7 @@ impl ActivatedController {
         end: Instant,
     ) -> Result<ControllerCapacity<'_>> {
         let owner = self.state_mut();
+        owner.require_no_member_policy_edit()?;
         owner
             .query
             .assert_engine(engine)

@@ -15,11 +15,13 @@ use std::{
 };
 mod error;
 mod fence;
+mod member;
 mod prepared;
 mod terminal;
 pub(super) use error::FailureLedger;
 pub use error::{PoolPublicationCause, PoolPublicationFailure};
 pub(crate) use fence::PoolRenameFence;
+pub use member::{MemberPolicyCancellation, MemberPolicyPending, MemberPolicyPublication};
 
 #[must_use = "only the same pending owner can consume this preparation brand"]
 pub struct PoolPublicationPrepared {
@@ -76,6 +78,22 @@ impl PoolTransitionPending {
     /// pure candidate only after its separate authority/currentness checks.
     /// Store this SAME pending owner before entering any fallible read.
     pub fn prepare_publication(
+        &mut self,
+        source: &Path,
+        transition: Arc<WorkerPoolConfigurationTransition>,
+        actor: ActorRebindPlan,
+        admission: &AdmissionLock,
+        stop: &WorkerStopBudget,
+        end: Instant,
+    ) -> Result<PoolPublicationPrepared> {
+        need(
+            transition.member_edit().is_none(),
+            "POOL_FLEET_CONFIGURATION_REQUIRED",
+        )?;
+        self.prepare_selected_publication(source, transition, actor, admission, stop, end)
+    }
+
+    fn prepare_selected_publication(
         &mut self,
         source: &Path,
         transition: Arc<WorkerPoolConfigurationTransition>,
