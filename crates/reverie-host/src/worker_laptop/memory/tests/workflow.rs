@@ -87,7 +87,7 @@ fn actual_started(
     else {
         panic!("actual start");
     };
-    let row = json!([{"Id":"c".repeat(64),"Name":format!("/fixture-agent-{SID}"),"Config":{"Labels":{"reverie.worker":"fixture","reverie.session":SID,"reverie.worker-policy":digest}},"State":{"Running":true,"Pid":321}}]);
+    let row = json!([{"Id":"c".repeat(64),"Name":format!("/fixture-agent-{SID}"),"Config":{"Labels":{"reverie.worker":"fixture","reverie.session":SID,"reverie.worker-policy":digest}},"State":{"Running":true,"Pid":321},"Mounts":[]}]);
     fs::write(
         fixture.root.join("memory-inspect.json"),
         serde_json::to_vec(&row).unwrap(),

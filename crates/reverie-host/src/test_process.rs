@@ -40,12 +40,14 @@ pub(crate) fn isolate_cold_namespace(name: &str) -> bool {
             crate::native::uid().to_string(),
             std::env::var("REVERIE_COLD_NAMESPACE_UID").unwrap()
         );
-        if retained_mount_case(name) {
+        if retained_reference_case(name) {
             assert_ne!(
                 std::fs::read_link("/proc/self/ns/net").unwrap().as_os_str(),
                 std::env::var_os("REVERIE_COLD_PARENT_NETWORK").unwrap(),
-                "fixed finish control must not reinterpret host Unix paths beneath its own /tmp mount"
+                "the retained reference controls must own their Unix socket census"
             );
+        }
+        if retained_mount_case(name) {
             let status = std::fs::read_to_string("/proc/self/status").unwrap();
             let caps = status
                 .lines()
@@ -89,12 +91,15 @@ pub(crate) fn isolate_cold_namespace(name: &str) -> bool {
     // util-linux explicitly carries this new namespace's granted capabilities
     // across exec. Only fixed retained-finish tests require actual bind mounts;
     // ordinary same-UID permission/UNKNOWN and required root cases are unchanged.
-    if retained_mount_case(name) {
-        command.args(["--keep-caps", "--net"]);
+    if retained_reference_case(name) {
+        command.arg("--net");
         command.env(
             "REVERIE_COLD_PARENT_NETWORK",
             std::fs::read_link("/proc/self/ns/net").unwrap(),
         );
+    }
+    if retained_mount_case(name) {
+        command.arg("--keep-caps");
     }
     let output = command
         .arg(&executable)
@@ -202,6 +207,10 @@ fn executable_digest(file: &mut std::fs::File) -> [u8; 32] {
 }
 fn retained_mount_case(name: &str) -> bool {
     name.starts_with("worker_laptop::tests::cold_prepare::retained::finish::")
+}
+fn retained_reference_case(name: &str) -> bool {
+    name.starts_with("worker_laptop::tests::cold_prepare::retained::")
+        || name.starts_with("worker_storage::cold_tmp::retained::references::tests::actual_")
 }
 fn cold_fixture_root(name: &str, nonce: &str) -> std::path::PathBuf {
     let leaf = format!("cn-{}", &nonce[nonce.len() - 8..]);
