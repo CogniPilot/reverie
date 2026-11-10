@@ -1,6 +1,7 @@
 //! Fixed Nix producer DATA only. No filesystem, archive extraction, installed
 //! custody, running-image acceptance, process execution or owner authority.
 mod archive;
+mod protected;
 mod startup;
 mod worker;
 use super::*;

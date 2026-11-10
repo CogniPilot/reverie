@@ -185,29 +185,8 @@ fn canonical(name: &[u8]) -> Result<()> {
 pub(super) fn regular_entry(kind: tar::EntryType) -> bool {
     kind.is_file() || kind.is_contiguous()
 }
-pub(super) fn python_name(mut raw: &[u8]) -> PythonText {
-    let mut points = Vec::new();
-    while !raw.is_empty() {
-        match std::str::from_utf8(raw) {
-            Ok(text) => {
-                points.extend(text.chars().map(u32::from));
-                break;
-            }
-            Err(error) => {
-                let good = error.valid_up_to();
-                points.extend(
-                    std::str::from_utf8(&raw[..good])
-                        .expect("validated UTF8 prefix")
-                        .chars()
-                        .map(u32::from),
-                );
-                let bad = error.error_len().unwrap_or(raw.len() - good);
-                points.extend(raw[good..good + bad].iter().map(|&b| 0xdc00 + u32::from(b)));
-                raw = &raw[good + bad..];
-            }
-        }
-    }
-    PythonText::try_new(points).expect("surrogateescape codepoints")
+pub(super) fn python_name(raw: &[u8]) -> PythonText {
+    PythonText::try_new(reverie_core::posix_text::decode(raw)).expect("filesystem codepoints")
 }
 pub(super) fn drain<R: Read>(archive: tar::Archive<R>) -> Result<()> {
     io::copy(&mut archive.into_inner(), &mut io::sink())?;

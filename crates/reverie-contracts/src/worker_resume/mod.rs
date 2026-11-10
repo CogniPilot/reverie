@@ -1,7 +1,12 @@
 //! Closed host-resume DATA formats. These codecs grant no website, employee,
 //! process, native-running, maintenance, operation or replay authority.
+mod build;
 mod protocol;
 mod recipe;
+pub use build::{
+    MAX_PROGRAM_BYTES, MAX_PROGRAM_ENTRIES, MAX_PROGRAM_FILE_BYTES, MAX_PROGRAM_MANIFEST_BYTES,
+    PROGRAM_PURPOSE, ResumeProgramBuild,
+};
 #[cfg(test)]
 mod tests;
 use crate::legacy_json::{self, Node, Text, Value};

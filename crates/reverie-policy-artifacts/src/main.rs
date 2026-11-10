@@ -12,6 +12,7 @@ mod human_toolkit;
 mod idmap;
 mod output;
 mod pool_images;
+mod resume_program;
 mod verify;
 mod website_provenance;
 mod worker_child;
@@ -45,7 +46,9 @@ struct Arguments {
     verify_manifest: Option<PathBuf>,
 }
 fn main() {
-    let result = if human_toolkit::requested() {
+    let result = if resume_program::requested() {
+        resume_program::run()
+    } else if human_toolkit::requested() {
         human_toolkit::run()
     } else if worker_provenance::requested() {
         worker_provenance::run()

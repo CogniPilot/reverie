@@ -7,7 +7,10 @@ use sha2::{Digest, Sha256};
 use std::{
     fs::{self, File, Metadata, OpenOptions},
     io::Read,
-    os::unix::fs::{MetadataExt, OpenOptionsExt},
+    os::unix::{
+        ffi::{OsStrExt, OsStringExt},
+        fs::{MetadataExt, OpenOptionsExt},
+    },
     path::Path,
     time::Instant,
 };
@@ -89,6 +92,7 @@ pub(super) struct Measured {
     pub pin: CodeFile,
     pub elf: bool,
     pub executable: bool,
+    pub mode: u32,
 }
 pub(super) fn code(path: &Path, end: Instant) -> Result<Measured> {
     with(path, 256 << 20, true, |file| {
@@ -118,22 +122,18 @@ pub(super) fn code(path: &Path, end: Instant) -> Result<Measured> {
             },
             elf: prefix == b"\x7fELF",
             executable: metadata.mode() & 0o111 != 0,
+            mode: metadata.mode() & 0o7777,
         })
     })
 }
 pub(super) fn text(path: &Path) -> Result<PythonText> {
-    Ok(PythonText::from_scalar_text(
-        path.to_str().ok_or("WEBSITE_BUILD_PATH_UTF8")?,
+    Ok(PythonText::try_new(reverie_core::posix_text::decode(
+        path.as_os_str().as_bytes(),
     ))
+    .expect("filesystem codepoints"))
 }
 pub(super) fn path(text: &PythonText) -> Result<std::path::PathBuf> {
-    let value: Option<String> = text
-        .codepoints()
-        .iter()
-        .copied()
-        .map(char::from_u32)
-        .collect();
-    Ok(value.ok_or("WEBSITE_BUILD_NATIVE_PATH_ENCODING")?.into())
+    Ok(std::ffi::OsString::from_vec(reverie_core::posix_text::encode(text.codepoints())?).into())
 }
 pub(super) fn combine<T>(first: Result<T>, second: Result<()>) -> Result<T> {
     match (first, second) {

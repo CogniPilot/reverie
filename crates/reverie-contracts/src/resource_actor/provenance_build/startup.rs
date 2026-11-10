@@ -12,8 +12,19 @@ pub struct WebsiteStartupBuildGraph {
 impl WebsiteStartupBuildGraph {
     pub fn decode(raw: &[u8], console: &PythonText, node: &PythonText) -> Result<Self> {
         let value = decode(raw, 65536)?;
+        Self::from_value(&value, console, node)
+    }
+    /// Additional closed H web/argument policy for the resume build purpose.
+    /// Ordinary website graph decoding retains its existing separate policy.
+    pub fn decode_protected(raw: &[u8], console: &PythonText, node: &PythonText) -> Result<Self> {
+        let value = decode(raw, 65536)?;
+        let graph = Self::from_value(&value, console, node)?;
+        super::protected::validate(&value)?;
+        Ok(graph)
+    }
+    fn from_value(value: &Value, console: &PythonText, node: &PythonText) -> Result<Self> {
         closed(
-            &value,
+            value,
             &[
                 "version",
                 "purpose",
@@ -28,18 +39,18 @@ impl WebsiteStartupBuildGraph {
             ],
         )?;
         need(
-            unsigned(field(&value, "version")?)?.as_str() == "1"
-                && scalar(field(&value, "purpose")?)? == "owner-terminal-website-program-v1",
+            unsigned(field(value, "version")?)?.as_str() == "1"
+                && scalar(field(value, "purpose")?)? == "owner-terminal-website-program-v1",
             "WEBSITE_BUILD_STARTUP_SCHEMA",
         )?;
-        let argv = array(field(&value, "argvPrefix")?)?
+        let argv = array(field(value, "argvPrefix")?)?
             .iter()
             .map(text)
             .collect::<Result<Vec<_>>>()?;
-        let invocation = text(field(&value, "nodeInvocation")?)?;
-        let wrapper = text(field(&value, "nodeWrapper")?)?;
-        let executable = text(field(&value, "nodeExecutable")?)?;
-        let entry = text(field(&value, "applicationEntry")?)?;
+        let invocation = text(field(value, "nodeInvocation")?)?;
+        let wrapper = text(field(value, "nodeWrapper")?)?;
+        let executable = text(field(value, "nodeExecutable")?)?;
+        let entry = text(field(value, "applicationEntry")?)?;
         let mut expected_entry = console.codepoints().to_vec();
         expected_entry.extend("/lib/reverie/dist/index.js".chars().map(u32::from));
         need(
@@ -58,11 +69,11 @@ impl WebsiteStartupBuildGraph {
             executable,
             wrapper,
             entry,
-            text(field(&value, "normalEntrypoint")?)?,
+            text(field(value, "normalEntrypoint")?)?,
         ];
         let (python_invocation, python_executable) =
-            python(field(&value, "startupPython")?, &mut required)?;
-        let code = code_files(field(&value, "codeFiles")?)?;
+            python(field(value, "startupPython")?, &mut required)?;
+        let code = code_files(field(value, "codeFiles")?)?;
         need(
             required
                 .iter()

@@ -157,3 +157,30 @@ the toolkit recipe from its declared artifact source, with the original runtime
 source supplying C bytes and the same selected check policy supplying the tool.
 An explicitly older artifact-source recipe retains its original argument shape
 and implementation; the current recipe and default selection use Rust.
+
+`worker-resume-program --console PATH --node PATH
+[--owner-terminal-program PATH] --output PATH` replaces the Nix resume-program
+manifest producer. It records every console file, empty directory and symlink,
+plus the resolved Node file while retaining its original invocation spelling.
+Regular files keep their raw SHA-256, byte count and permission mode. Symlinks
+keep their raw target spelling, are never traversed, and must resolve inside
+the console; directory inventories, link resolutions and full metadata stamps
+are checked again before output. Immutable namespace/store ownership remains
+separate from the toolkit builder's fresh-output UID policy.
+
+The v1 document retains the four ordered startup argument vectors, Python
+codepoint ordering and compact ASCII encoding. Bounds are 65,536 total graph
+entries, 2 GiB of console/Node file bytes, 256 MiB per file and 16 MiB of encoded
+manifest. Byte and encoded-output budgets are checked incrementally. The final
+entry count now includes Node and pending empty directories; the old producer
+could undercount those, while its runtime peer already rejects an oversized
+final graph. These are closed build safety checks, not a partial file subset.
+
+Optional H selection separately validates the existing generic startup graph,
+exact protected web/Python arguments and config pathname, aliases and all raw
+code hashes under its original 512 MiB graph budget. It adds only the existing
+`ownerTerminalProgram` reference to the resume manifest; external H code is not
+merged into console files. The config pathname is data and is never opened.
+The shared POSIX filename codec preserves surrogateescape bytes. No program,
+interpreter, website or worker executes. Python runtime peer imports remain
+active, so the Python module cannot yet be deleted.
