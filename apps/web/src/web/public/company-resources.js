@@ -389,11 +389,17 @@
             )
           );
           this.native.append(
-            s.button('ca-btn', 'Check original shared-pool migration', () => this.checkNative(pending))
+            s.button('ca-btn', 'Check original shared-pool migration', () => this.checkNative(pending), {
+              text: 'Check migration',
+            })
           );
           return;
         }
-        this.native.append(s.button('ca-btn', 'Review host-selected migration', () => this.prepareNative()));
+        this.native.append(
+          s.button('ca-btn', 'Review host-selected migration', () => this.prepareNative(), {
+            text: 'Review shared RAM and CPU pool',
+          })
+        );
         const preview = this.nativePreview;
         if (!preview) return;
         const selected = preview.policy;
@@ -418,7 +424,9 @@
           )
         );
         this.native.append(
-          s.button('ca-btn is-danger', 'Activate shared pool and recreate existing laptops', () => this.applyNative())
+          s.button('ca-btn is-danger', 'Activate shared pool and recreate existing laptops', () => this.applyNative(), {
+            text: 'Activate shared pool',
+          })
         );
       } catch {
         this.storageFailed = true;
@@ -621,10 +629,22 @@
           )
         );
         if (!pending.unavailable)
-          this.setup.append(s.button('ca-btn', 'Check original pool installation', () => this.checkSetup(pending)));
+          this.setup.append(
+            s.button('ca-btn', 'Check original pool installation', () => this.checkSetup(pending), {
+              text: 'Check installation',
+            })
+          );
       } else {
-        this.setup.append(s.button('ca-btn', 'Review native worker pool setup', () => this.openSetup()));
-        this.setup.append(s.button('ca-btn', 'Enroll this owner account for native setup', () => this.enrollSetup()));
+        this.setup.append(
+          s.button('ca-btn', 'Review native worker pool setup', () => this.openSetup(), {
+            text: 'Review controller setup',
+          })
+        );
+        this.setup.append(
+          s.button('ca-btn', 'Enroll this owner account for native setup', () => this.enrollSetup(), {
+            text: 'Enroll owner account',
+          })
+        );
       }
     }
     async enrollSetup() {
@@ -712,8 +732,11 @@
           )
         );
         this.setup.append(
-          this.shell.button('ca-btn is-danger', 'Consent to this native pool installation', () =>
-            this.consentSetup(view)
+          this.shell.button(
+            'ca-btn is-danger',
+            'Consent to this native pool installation',
+            () => this.consentSetup(view),
+            { text: 'Install controller' }
           )
         );
       } catch (error) {
