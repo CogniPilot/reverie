@@ -2,6 +2,8 @@
 //! ignored values are validated too, and duplicate/non-string keys/aliases
 //! refuse globally. This is host policy DATA, never a device entitlement.
 mod json;
+mod preflight;
+pub use preflight::CdiPreflightEdits;
 mod scalar;
 mod yaml;
 mod yaml_text;
@@ -12,6 +14,8 @@ use std::collections::BTreeSet;
 
 enum CdiValue {
     Atom,
+    Primitive(Value),
+    YamlInteger(String),
     Text(MetadataText),
     Bytes(usize),
     List(Vec<usize>),
@@ -85,6 +89,12 @@ impl CdiDocument {
         }
     }
     pub fn selected(&self, device: &NvidiaCdiDevice) -> Result<Option<CdiSelectedEdits>> {
+        Ok(self.selected_index(device)?.map(|(_, edits)| edits))
+    }
+    fn selected_index(
+        &self,
+        device: &NvidiaCdiDevice,
+    ) -> Result<Option<(usize, CdiSelectedEdits)>> {
         let rows = self
             .field(self.root, "devices")?
             .ok_or(GpuDataError::CdiDocument)?;
@@ -116,7 +126,7 @@ impl CdiDocument {
                 .scalar_text()
                 .is_some_and(|name| format!("nvidia.com/gpu={name}") == device.as_str())
             {
-                selected = Some(self.edits(row)?);
+                selected = Some((row, self.edits(row)?));
             }
         }
         Ok(selected)

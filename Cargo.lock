@@ -1137,6 +1137,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "reverie-gpu-preflight"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "nix",
+ "reverie-application",
+ "reverie-contracts",
+ "reverie-core",
+ "reverie-diagnostics",
+ "reverie-host",
+]
+
+[[package]]
 name = "reverie-host"
 version = "0.1.0"
 dependencies = [

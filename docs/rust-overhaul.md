@@ -92,6 +92,13 @@ The TypeScript resource diagnostics correction remains compatible with the
 later Rust backend. Remaining cohorts are pending; no source result here
 claims a complete Rust backend or an installed rollout.
 
+The standalone GPU preflight CLI now selects native Rust through
+`nix/worker-gpu-support.nix`, reusing the application, storage, CDI, rootless and
+captured-engine owners. It preserves the complete metadata report and original
+rechecks without a Python/YAML runtime launcher. The Python helper module stays
+until its remaining service imports migrate; this selection alone establishes
+no installed GPU workload or office rollout.
+
 ## Native integration map
 
 Use the existing owners below before adding another adapter or executor. Their

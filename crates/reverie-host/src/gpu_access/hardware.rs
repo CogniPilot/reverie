@@ -47,11 +47,16 @@ impl GpuHardware {
             )
             .map_err(GpuHostError::Engine)?;
         let info = reverie_contracts::gpu_access::GpuEngineInformation::decode(raw.as_bytes())?;
+        Self::require_same_kernel(&info)?;
+        Ok(info)
+    }
+    pub fn require_same_kernel(
+        info: &reverie_contracts::gpu_access::GpuEngineInformation,
+    ) -> Result<()> {
         need(
             info.same_kernel(&native::kernel_release()?),
             "GPU_SAME_KERNEL_ENGINE_REQUIRED",
-        )?;
-        Ok(info)
+        )
     }
 }
 struct Driver<'a> {

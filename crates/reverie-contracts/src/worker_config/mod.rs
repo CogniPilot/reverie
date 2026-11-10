@@ -111,6 +111,22 @@ impl EffectiveWorkerConfig {
         employee: &reverie_core::operations::JournalId,
         device: Option<&reverie_core::gpu_access::GpuDeviceUuid>,
     ) -> Option<()> {
+        let device = device.map(reverie_core::gpu_access::GpuDeviceUuid::device);
+        self.patch_gpu_entry(
+            employee.as_str(),
+            device
+                .as_ref()
+                .map(reverie_core::device_policy::NvidiaCdiDevice::as_str),
+        )
+    }
+    pub(crate) fn patch_preflight_gpu_grant(
+        &mut self,
+        employee: &reverie_core::ids::ProfileEmployeeId,
+        device: &reverie_core::device_policy::NvidiaCdiDevice,
+    ) -> Option<()> {
+        self.patch_gpu_entry(employee.as_str(), Some(device.as_str()))
+    }
+    fn patch_gpu_entry(&mut self, employee: &str, device: Option<&str>) -> Option<()> {
         let Node::Object(root) = &mut self.0.0 else {
             unreachable!("worker object invariant");
         };
@@ -121,13 +137,11 @@ impl EffectiveWorkerConfig {
         let Node::Object(grants) = &mut grants.0 else {
             return None;
         };
-        let employee = Text(employee.as_str().chars().map(u32::from).collect());
+        let employee = Text(employee.chars().map(u32::from).collect());
         if let Some(device) = device {
             grants.insert(
                 employee,
-                Value(Node::String(Text(
-                    device.device().as_str().chars().map(u32::from).collect(),
-                ))),
+                Value(Node::String(Text(device.chars().map(u32::from).collect()))),
             );
         } else {
             grants.remove(&employee);

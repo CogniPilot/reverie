@@ -9,6 +9,8 @@ use reverie_contracts::{
 use reverie_core::ids::ProfileEmployeeId;
 use reverie_store::storage_identity::{self, StorageIdentityConfig};
 use std::{fs, os::unix::fs::MetadataExt, path::Path};
+mod process;
+pub use process::preflight_process;
 
 /// Standalone S.read_metadata policy, not the ordinary broker loader's
 /// last-wins text/unbounded/hardlink-compatible owner configuration policy.

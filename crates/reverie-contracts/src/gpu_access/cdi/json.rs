@@ -7,7 +7,7 @@ pub(super) fn document(value: Value) -> CdiDocument {
             Node::String(value) => CdiValue::Text(MetadataText::from_text(value)),
             Node::Array(values) => CdiValue::List(array(values, &mut nodes, &mut pending)),
             Node::Object(values) => CdiValue::Map(object(values, &mut nodes, &mut pending)),
-            _ => CdiValue::Atom,
+            scalar => CdiValue::Primitive(Value(scalar)),
         };
     }
     CdiDocument { nodes, root: 0 }

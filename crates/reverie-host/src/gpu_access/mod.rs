@@ -4,7 +4,7 @@ mod active;
 mod consumers;
 mod current;
 mod preflight;
-pub use preflight::{preflight_binding, preflight_configuration};
+pub use preflight::{preflight_binding, preflight_configuration, preflight_process};
 mod files;
 pub(crate) use files::WorkerProtectedStores;
 #[cfg(test)]
@@ -22,7 +22,7 @@ pub use consumers::installed_consumers;
 pub use current::current_employee;
 mod cdi;
 use crate::{ObservationError, native};
-pub use cdi::CdiObservation;
+pub use cdi::{CdiObservation, PreflightCdiObservation};
 pub use files::{
     ActorSetupControlError, ActorSetupControlFiles, ActorSetupPending, ActorSetupTerminal,
     GpuControlFiles, GpuParentGuard, GpuPendingFile, GpuPrivateSnapshot, GpuProtectedStores,

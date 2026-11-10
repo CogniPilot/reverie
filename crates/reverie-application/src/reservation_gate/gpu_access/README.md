@@ -37,10 +37,12 @@ Tests use actual owned files, admission flocks, CAS/fsync/close producers and
 private synthetic kernel/driver/engine observation ports. They do not qualify
 live GPUs, installed device custody or the eventual wire/launch consumer.
 
-Existing Python C dispatch/canonical J callsites and the standalone GPU preflight
-CLI remain migration debt until the actual native broker selects this service.
-This cohort does not replace the separate full preflight CLI or claim retirement
-of the old broker, installed image tooling, live device qualification or launch.
+The standalone preflight now composes the shared observers through the native
+`reverie_application::gpu_preflight` service. `worker-gpu-support.nix` selects
+its fixed `reverie-worker-gpu` executable. Its byte-JSON queries, complete CDI
+path values and report serialization are separate from the queue's narrower
+projection. Legacy services still import the Python helper module. This does
+not establish installed GPU/image qualification or retire the old broker.
 
 Actual admission precedes the purpose-private lifecycle mutex wait, matching the
 existing creation-budget caller. That wait retains the original operation end;
