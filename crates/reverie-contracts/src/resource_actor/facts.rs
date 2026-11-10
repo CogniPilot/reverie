@@ -1,4 +1,5 @@
 use super::*;
+mod rebind;
 
 /// Installer-selected references, never request-selected executable authority.
 #[derive(Clone, Eq, PartialEq)]
