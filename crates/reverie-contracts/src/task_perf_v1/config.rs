@@ -96,10 +96,10 @@ impl TaskPerfConfiguration {
             // paths. The consuming host validates the configured file and
             // its actual hash; this DATA join requires that same fixed hash.
             // Only the fixed verified DERIVED profile is ever projected.
-            if !docker
+            if docker
                 .get(&key("seccompProfile"))
                 .and_then(string)
-                .is_some_and(|path| super::manifest::nix_path(&path).is_ok())
+                .is_none_or(|path| super::manifest::nix_path(&path).is_err())
                 || docker
                     .get(&key("seccompSha256"))
                     .and_then(string)
