@@ -35,7 +35,7 @@ is closed once with errors checked; both primary and close errors survive.
 Failed builds can leave partial, unpublished files. Nix publishes only a
 successful derivation; the program never cleans or adopts another build's data.
 
-`nix/policy-artifacts.nix` projects the three actual crate inputs and the
+`nix/policy-artifacts.nix` projects the four selected crate inputs and the
 transitive Cargo lock closure. Unrelated workspace members, lock entries, host
 code and website files do not change this producer's identity. Changes to an
 actual policy/producer dependency or toolchain intentionally do. The initial
@@ -138,3 +138,22 @@ including the old Python files. Those files cannot yet be deleted. This pin
 set is not complete Rust source provenance; qualification must separately bind
 the exact Rust source, tool ELF and selected Nix factory. Native runtime image,
 custody, canary, resource, ownership and consent checks remain unchanged.
+
+`human-terminal-manifest --root PATH --system SYSTEM` replaces the inline
+Python manifest generator in the static human-terminal toolkit recipe. It
+accepts only a canonical direct Nix-store build output with builder-owned,
+protected directories and the exact two expected regular 0555 program files.
+Builder identity comes from the actual effective UID. This fresh-output reader
+is separate from the immutable-input reader's namespace/store-owner policy.
+Input files are bounded to 16 MiB and checked against retained descriptor/path
+identities; all static ELF validation uses the shared parser. Input file closes
+finish before exclusive manifest creation; retained directory closes also have
+checked outcomes before the Nix derivation may succeed. Neither program runs.
+
+The manifest keeps the existing three fields, fixed guest paths, raw hashes and
+lengths, compact sorted ASCII bytes and newline. The C source/compiler flags and
+readelf checks remain in the same Nix recipe. Worker runtime composition selects
+the toolkit recipe from its declared artifact source, with the original runtime
+source supplying C bytes and the same selected check policy supplying the tool.
+An explicitly older artifact-source recipe retains its original argument shape
+and implementation; the current recipe and default selection use Rust.

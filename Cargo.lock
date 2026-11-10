@@ -1348,6 +1348,7 @@ dependencies = [
  "clap",
  "flate2",
  "libc",
+ "nix",
  "reverie-contracts",
  "reverie-core",
  "reverie-elf-bundle",

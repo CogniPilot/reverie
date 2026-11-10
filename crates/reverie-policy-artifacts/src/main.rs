@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 mod build_archive;
 mod build_input;
 mod codex_inputs;
+mod human_toolkit;
 mod idmap;
 mod output;
 mod pool_images;
@@ -44,7 +45,9 @@ struct Arguments {
     verify_manifest: Option<PathBuf>,
 }
 fn main() {
-    let result = if worker_provenance::requested() {
+    let result = if human_toolkit::requested() {
+        human_toolkit::run()
+    } else if worker_provenance::requested() {
         worker_provenance::run()
     } else if website_provenance::requested() {
         website_provenance::run()

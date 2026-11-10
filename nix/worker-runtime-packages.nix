@@ -20,12 +20,16 @@ let
   artifacts = import (artifactSource + "/nix/policy-artifacts.nix") {
     pkgs = runtimePkgs; src = artifactSource;
   };
+  selectedArtifacts = if runChecks then artifacts else artifacts.overrideAttrs (_: noChecks);
+  toolkitRecipe = import (artifactSource + "/nix/human-terminal-toolkit.nix");
+  toolkitInputs = { pkgs = runtimePkgs; inherit src; }
+    // pkgs.lib.optionalAttrs ((builtins.functionArgs toolkitRecipe) ? artifacts) {
+      artifacts = selectedArtifacts;
+    };
 in assert builtins.isBool runChecks;
 packages // {
   laptopTools = if runChecks then packages.laptopTools
     else packages.laptopTools.overrideAttrs (_: noChecks);
-  policyArtifacts = if runChecks then artifacts else artifacts.overrideAttrs (_: noChecks);
-  humanTerminalToolkit = import (src + "/nix/human-terminal-toolkit.nix") {
-    pkgs = runtimePkgs; inherit src;
-  };
+  policyArtifacts = selectedArtifacts;
+  humanTerminalToolkit = toolkitRecipe toolkitInputs;
 }
