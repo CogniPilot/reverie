@@ -12,6 +12,28 @@ use std::{
     sync::atomic::{AtomicU64, Ordering},
 };
 static NEXT: AtomicU64 = AtomicU64::new(0);
+#[test]
+fn typed_admission_contention_requires_checked_clean_constructor_close() {
+    let tree = Tree::new();
+    let mut first = AdmissionLock::acquire(&tree.config).unwrap();
+    assert!(matches!(
+        AdmissionLock::try_acquire(&tree.config).unwrap(),
+        AdmissionLockAttempt::Contended
+    ));
+    native::test_faults::set(None, true);
+    assert!(matches!(
+        AdmissionLock::try_acquire(&tree.config),
+        Err(ControlHostError::Native(
+            ObservationError::Finalization { .. }
+        ))
+    ));
+    native::test_faults::set(None, false);
+    first.close().unwrap();
+    match AdmissionLock::try_acquire(&tree.config).unwrap() {
+        AdmissionLockAttempt::Acquired(mut next) => next.close().unwrap(),
+        AdmissionLockAttempt::Contended => panic!("original lock has checked-close"),
+    }
+}
 struct Tree {
     root: PathBuf,
     config: ReservationConfiguration,

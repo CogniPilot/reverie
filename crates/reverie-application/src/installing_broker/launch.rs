@@ -146,7 +146,13 @@ impl<'a> ReceivedWorkerLaunch<'a> {
             .broker
             .resource_reservations()?
             .map(|gate| {
-                gate.admit_ordinary_launch(self.request().session(), AdmissionBounds::default())
+                gate.admit_ordinary_launch(
+                    self.request().session(),
+                    AdmissionBounds {
+                        operation: None,
+                        entry: Some(std::time::Instant::now() + std::time::Duration::from_secs(10)),
+                    },
+                )
             })
             .transpose()?;
         Ok((snapshot, admission))

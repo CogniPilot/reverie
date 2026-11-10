@@ -1,5 +1,6 @@
 use super::*;
 use std::time::Duration;
+mod contention;
 mod fleet_cleanup;
 /// Monotonic installing-service bounds. Entry waiting is bounded independently
 /// from the operation body; neither path creates a protected start capability.
@@ -131,9 +132,14 @@ impl Inner {
             Ok(config) => config,
             Err(error) => return finalized(Err(error), entry.cancel()),
         };
-        let lock = match AdmissionLock::acquire(&config) {
+        let acquired = if native_budget.is_none() && end.is_some() {
+            self.acquire_contended_entry(&config, end.expect("bounded entry"))
+        } else {
+            AdmissionLock::acquire(&config).map_err(GateError::from)
+        };
+        let lock = match acquired {
             Ok(lock) => lock,
-            Err(error) => return finalized(Err(error.into()), entry.cancel()),
+            Err(error) => return finalized(Err(error), entry.cancel()),
         };
         let active = Arc::new(Active {
             thread: std::thread::current().id(),

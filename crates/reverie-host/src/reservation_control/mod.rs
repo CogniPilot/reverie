@@ -176,11 +176,29 @@ fn need(value: bool, code: &'static str) -> Result<()> {
     }
 }
 pub struct AdmissionLock(native::HeldAdmission);
+/// Contention is returned only after the unsuccessful native acquisition's
+/// descriptor has checked-close. It never describes a partial launch/effect.
+pub enum AdmissionLockAttempt {
+    Acquired(AdmissionLock),
+    Contended,
+}
 impl AdmissionLock {
+    pub fn try_acquire(config: &ReservationConfiguration) -> Result<AdmissionLockAttempt> {
+        match native::open_admission(config.control_paths()?.root()) {
+            Ok(lock) => Ok(AdmissionLockAttempt::Acquired(Self(lock))),
+            Err(ObservationError::Refused(crate::ObservationFault::AdmissionBusy)) => {
+                Ok(AdmissionLockAttempt::Contended)
+            }
+            Err(error) => Err(error.into()),
+        }
+    }
     pub fn acquire(config: &ReservationConfiguration) -> Result<Self> {
-        Ok(Self(native::open_admission(
-            config.control_paths()?.root(),
-        )?))
+        match Self::try_acquire(config)? {
+            AdmissionLockAttempt::Acquired(lock) => Ok(lock),
+            AdmissionLockAttempt::Contended => {
+                Err(ObservationError::Refused(crate::ObservationFault::AdmissionBusy).into())
+            }
+        }
     }
     pub fn assert_current(
         &self,

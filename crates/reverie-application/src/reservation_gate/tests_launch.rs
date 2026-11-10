@@ -5,6 +5,89 @@ use reverie_core::{
 };
 #[path = "tests_launch_pool_candidate.rs"]
 mod candidate_cases;
+#[test]
+fn bounded_launch_waits_for_external_clean_contention_then_uses_same_original_entry() {
+    crate::test_process::owning_case!(
+        bounded_launch_waits_for_external_clean_contention_then_uses_same_original_entry
+    );
+    let (setup, _, gate) = prepared();
+    let mut external = AdmissionLock::acquire(&gate.inner.config().unwrap()).unwrap();
+    let release = std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(60));
+        external.close().unwrap();
+    });
+    let admission = gate
+        .admit_ordinary_launch(
+            &source_session(&setup),
+            AdmissionBounds {
+                entry: Some(Instant::now() + std::time::Duration::from_secs(2)),
+                operation: None,
+            },
+        )
+        .unwrap();
+    release.join().unwrap();
+    assert!(gate.inner.state.lock().unwrap().active.is_some());
+    admission.close().unwrap();
+    assert!(gate.inner.state.lock().unwrap().entering.is_none());
+}
+#[test]
+fn bounded_launch_contention_expiry_never_enters_or_clears_another_lock() {
+    crate::test_process::owning_case!(
+        bounded_launch_contention_expiry_never_enters_or_clears_another_lock
+    );
+    let (setup, fixture, gate) = prepared();
+    let mut external = AdmissionLock::acquire(&gate.inner.config().unwrap()).unwrap();
+    let queried = fixture.events().len();
+    let result = gate.admit_ordinary_launch(
+        &source_session(&setup),
+        AdmissionBounds {
+            entry: Some(Instant::now() + std::time::Duration::from_millis(80)),
+            operation: None,
+        },
+    );
+    assert_eq!(
+        result.err().unwrap().code(),
+        "RESERVATION_ADMISSION_DEADLINE"
+    );
+    assert_eq!(fixture.events().len(), queried);
+    let state = gate.inner.state.lock().unwrap();
+    assert!(state.active.is_none() && state.entering.is_none());
+    drop(state);
+    assert!(AdmissionLock::acquire(&gate.inner.config().unwrap()).is_err());
+    external.close().unwrap();
+}
+#[test]
+fn cancelled_bounded_launch_contention_does_not_start_or_release_other_admission() {
+    crate::test_process::owning_case!(
+        cancelled_bounded_launch_contention_does_not_start_or_release_other_admission
+    );
+    let (setup, fixture, gate) = prepared();
+    let mut external = AdmissionLock::acquire(&gate.inner.config().unwrap()).unwrap();
+    let cancellation = gate.cancellation();
+    let cancel = std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        cancellation.cancel();
+    });
+    let queried = fixture.events().len();
+    let result = gate.admit_ordinary_launch(
+        &source_session(&setup),
+        AdmissionBounds {
+            entry: Some(Instant::now() + std::time::Duration::from_secs(2)),
+            operation: None,
+        },
+    );
+    cancel.join().unwrap();
+    assert_eq!(
+        result.err().unwrap().code(),
+        "RESERVATION_ADMISSION_CANCELLED"
+    );
+    assert_eq!(fixture.events().len(), queried);
+    let state = gate.inner.state.lock().unwrap();
+    assert!(state.active.is_none() && state.entering.is_none());
+    drop(state);
+    assert!(AdmissionLock::acquire(&gate.inner.config().unwrap()).is_err());
+    external.close().unwrap();
+}
 
 fn policy(mode: BudgetMode, memory: u32, pool: u32) -> ResourcePolicy {
     ResourcePolicy::try_new(
