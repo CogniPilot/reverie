@@ -18,7 +18,10 @@ use std::{
 mod failure_fence;
 mod run_fence;
 pub use run_fence::{NativeServiceRunAttempt, NativeServiceRunFailure, begin_service_run};
+mod command;
 mod manager;
+mod quiesce;
+pub use quiesce::{DeploymentServiceQuiesceFailure, quiesce_stopped_worker_service};
 mod publication;
 mod rollback;
 mod stopped;
@@ -30,7 +33,7 @@ pub use reverie_contracts::worker_service::NativeWorkerServiceRole;
 pub use stopped::{
     ClosedImageServiceMaintenance, ClosedStoppedWorkerService, ImageServiceMaintenance,
     StoppedServiceFailure, StoppedServiceOrigin, StoppedWorkerService,
-    capture_stopped_worker_service,
+    capture_stopped_worker_service, capture_stopped_worker_service_for_role,
 };
 #[cfg(test)]
 mod tests;
@@ -39,6 +42,7 @@ pub enum WorkerServiceAction {
     Install,
     Start,
     Stop,
+    QuiesceStop,
     Status,
     Rollback { start_previous: bool },
     Upgrade { force_stopped: bool },
@@ -49,6 +53,9 @@ pub enum WorkerServiceError {
     Io(std::io::Error),
     Engine(EngineError),
     Program(&'static str),
+    Control(Arc<reverie_worker_client::ControlError>),
+    Configuration(reverie_contracts::worker_config::WorkerConfigError),
+    Schema(reverie_contracts::worker_schema::WorkerSchemaError),
     Finalization(Box<Self>, Box<Self>),
 }
 impl std::fmt::Display for WorkerServiceError {
@@ -58,11 +65,24 @@ impl std::fmt::Display for WorkerServiceError {
             Self::Io(e) => write!(f, "NATIVE_SERVICE_IO: {e}"),
             Self::Engine(e) => write!(f, "NATIVE_SERVICE_COMMAND: {e}"),
             Self::Program(code) => write!(f, "NATIVE_SERVICE_PROGRAM: {code}"),
+            Self::Control(error) => write!(f, "NATIVE_SERVICE_QUIESCE: {error}"),
+            Self::Configuration(error) => error.fmt(f),
+            Self::Schema(error) => error.fmt(f),
             Self::Finalization(a, b) => write!(f, "{a}; {b}"),
         }
     }
 }
-impl std::error::Error for WorkerServiceError {}
+impl std::error::Error for WorkerServiceError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Control(e) => Some(e.as_ref()),
+            Self::Configuration(e) => Some(e),
+            Self::Schema(e) => Some(e),
+            Self::Finalization(primary, _) => Some(primary.as_ref()),
+            _ => None,
+        }
+    }
+}
 impl From<std::io::Error> for WorkerServiceError {
     fn from(value: std::io::Error) -> Self {
         Self::Io(value)
@@ -102,6 +122,24 @@ struct State {
     upgrade_close_failure: Option<Box<crate::website_facts::WebsiteFactsError>>,
     checked_generation: Option<upgrade::CheckedNativeGeneration>,
     stop_takeover: Option<upgrade::StopPendingTakeover>,
+    quiescence_failure: Option<Arc<reverie_worker_client::ControlError>>,
+}
+/// Closed construction budgets. The long deployment owner is never obtained
+/// by extending an already captured Status/image/PERF observation.
+enum CapturePurpose<'a> {
+    Command(&'a WorkerServiceAction),
+    DeploymentMaintenance,
+}
+impl CapturePurpose<'_> {
+    fn maximum(&self) -> Duration {
+        Duration::from_secs(match self {
+            Self::DeploymentMaintenance => 900,
+            Self::Command(WorkerServiceAction::Upgrade { .. }) => 90,
+            Self::Command(WorkerServiceAction::Stop) => 45,
+            Self::Command(WorkerServiceAction::QuiesceStop) => 180,
+            Self::Command(_) => 20,
+        })
+    }
 }
 /// Contains the original partial installation or command attempt on refusal.
 pub struct WorkerServiceFailure {
@@ -210,6 +248,21 @@ impl State {
         action: &WorkerServiceAction,
         role: NativeWorkerServiceRole,
     ) -> Result<Self> {
+        Self::capture_purpose(source, end, CapturePurpose::Command(action), role)
+    }
+    fn capture_deployment_maintenance(
+        source: &Path,
+        end: Instant,
+        role: NativeWorkerServiceRole,
+    ) -> Result<Self> {
+        Self::capture_purpose(source, end, CapturePurpose::DeploymentMaintenance, role)
+    }
+    fn capture_purpose(
+        source: &Path,
+        end: Instant,
+        purpose: CapturePurpose<'_>,
+        role: NativeWorkerServiceRole,
+    ) -> Result<Self> {
         need(
             !nix::unistd::geteuid().is_root(),
             "NATIVE_SERVICE_ORDINARY_OWNER_REQUIRED",
@@ -265,14 +318,7 @@ impl State {
             call: None,
             files: Vec::new(),
             last: None,
-            end: end.min(
-                Instant::now()
-                    + Duration::from_secs(match action {
-                        WorkerServiceAction::Upgrade { .. } => 90,
-                        WorkerServiceAction::Stop => 45,
-                        _ => 20,
-                    }),
-            ),
+            end: end.min(Instant::now() + purpose.maximum()),
             attempted: false,
             uncertain: false,
             marker: false,
@@ -283,6 +329,7 @@ impl State {
             upgrade_close_failure: None,
             checked_generation: None,
             stop_takeover: None,
+            quiescence_failure: None,
         })
     }
     fn run(&mut self, action: WorkerServiceAction) -> Result<String> {
@@ -314,33 +361,10 @@ impl State {
             WorkerServiceAction::Rollback { start_previous } => {
                 self.rollback(observed, start_previous)?
             }
-            WorkerServiceAction::Start | WorkerServiceAction::Stop => {
-                if matches!(action, WorkerServiceAction::Stop) {
-                    self.assert_stoppable(&observed)?;
-                } else {
-                    self.assert_installed(&observed)?;
-                }
-                self.begin_attempt(&action)?;
-                self.attempted = true;
-                self.command(&[
-                    if matches!(action, WorkerServiceAction::Start) {
-                        "start"
-                    } else {
-                        "stop"
-                    },
-                    UNIT,
-                ])?;
-                let current = self.observe()?;
-                need(
-                    current.fragment == observed.fragment,
-                    "NATIVE_SERVICE_GENERATION_CHANGED_DURING_COMMAND",
-                )?;
-                if matches!(action, WorkerServiceAction::Stop) {
-                    self.assert_stoppable(&current)?;
-                } else {
-                    self.assert_installed(&current)?;
-                }
-                current.require_action_finished(&action)?;
+            WorkerServiceAction::Start
+            | WorkerServiceAction::Stop
+            | WorkerServiceAction::QuiesceStop => {
+                self.run_service_command(&action, observed)?;
             }
             WorkerServiceAction::Status => unreachable!(),
         }
@@ -490,7 +514,9 @@ fn pending_bytes(action: &WorkerServiceAction) -> &'static [u8] {
     match action {
         WorkerServiceAction::Install => b"NATIVE_SERVICE_INSTALL_PENDING_V1\n",
         WorkerServiceAction::Start => b"NATIVE_SERVICE_START_PENDING_V1\n",
-        WorkerServiceAction::Stop => b"NATIVE_SERVICE_STOP_PENDING_V1\n",
+        WorkerServiceAction::Stop | WorkerServiceAction::QuiesceStop => {
+            b"NATIVE_SERVICE_STOP_PENDING_V1\n"
+        }
         WorkerServiceAction::Status => b"NATIVE_SERVICE_READONLY_V1\n",
         WorkerServiceAction::Rollback { .. } => b"NATIVE_SERVICE_ROLLBACK_PENDING_V1\n",
         WorkerServiceAction::Upgrade { .. } => b"NATIVE_SERVICE_UPGRADE_PENDING_V1\n",

@@ -79,15 +79,17 @@ enum Stage {
     Attempted,
     Closed,
     Drained,
+    ServiceStopped,
 }
 enum DrainPurpose<'borrow, 'owner> {
     Ordinary,
+    ServiceStop,
     Transition(&'borrow AuthenticatedFleetMaintenance<'owner>),
 }
 impl DrainPurpose<'_, '_> {
     fn assert_live(&self) -> Result<(), DrainCause> {
         match self {
-            Self::Ordinary => Ok(()),
+            Self::Ordinary | Self::ServiceStop => Ok(()),
             Self::Transition(authorization) => authorization
                 .assert_live()
                 .map_err(DrainCause::Authorization),
@@ -110,6 +112,53 @@ pub(super) struct LegacyFleetDrain<'a> {
     finalization_failed: bool,
 }
 impl<'a> LegacyFleetDrain<'a> {
+    pub(super) fn with_service_drain(
+        broker: &'a Arc<InstallingBroker>,
+        end: Instant,
+        owner: lifecycle::DrainingOwner,
+    ) -> Self {
+        let mut result = Self::new(broker, end);
+        result.drain = Some(owner);
+        result
+    }
+    pub(super) fn run_service_stop(&mut self) -> Result<(), DrainCause> {
+        let snapshot = self.begin()?;
+        if self.drain.is_none() {
+            return Err(DrainCause::Refused("WORKER_SERVICE_DRAIN_REQUIRED"));
+        }
+        self.admission = self
+            .broker
+            .resource_reservations()?
+            .map(|gate| {
+                gate.admit_fleet_stop(
+                    &self.broker.installed,
+                    &self.broker.storage.runtime.stop_budget(),
+                )
+            })
+            .transpose()?;
+        self.run_admitted(snapshot, DrainPurpose::ServiceStop)
+    }
+    /// Publish first-stop while SAME generation denial is still held. Every
+    /// subsequent J observes cancellation even after the lifecycle is finished.
+    pub(super) fn stop_service_after_drain(&mut self) -> Result<(), DrainCause> {
+        self.assert_drained()?;
+        self.broker.storage.runtime.request_stop();
+        self.finish_transition()?;
+        self.stage = Stage::ServiceStopped;
+        Ok(())
+    }
+    pub(super) fn service_stop_finished(&self) -> bool {
+        self.stage == Stage::ServiceStopped
+            && !self.finalization_failed
+            && self.drain.is_none()
+            && self.admission.is_none()
+            && self.originals.is_empty()
+            && self.loose.is_none()
+            && self
+                .seats
+                .iter()
+                .all(|s| s.stop.is_none() && s.claim.is_none())
+    }
     pub(super) fn finish_transition(&mut self) -> Result<(), DrainCause> {
         self.assert_drained()?;
         let mut lifecycle = self.broker.installed.lifecycle()?;
@@ -226,7 +275,11 @@ impl<'a> LegacyFleetDrain<'a> {
                 admission.check_target(&entry.name)?;
             }
         }
-        self.drain = Some(lifecycle.begin_control_drain()?);
+        match purpose {
+            DrainPurpose::ServiceStop => lifecycle
+                .assert_service_drain(self.drain.as_ref().expect("original service drain"))?,
+            _ => self.drain = Some(lifecycle.begin_control_drain()?),
+        }
         self.originals = std::mem::take(&mut **lifecycle.guard);
         self.prepare_registered(snapshot.configuration())?;
         for (sid, _) in census.entries() {
@@ -266,7 +319,7 @@ impl<'a> LegacyFleetDrain<'a> {
                 self.drain = None;
                 self.stage = Stage::Closed;
             }
-            DrainPurpose::Transition(_) => self.stage = Stage::Drained,
+            DrainPurpose::Transition(_) | DrainPurpose::ServiceStop => self.stage = Stage::Drained,
         }
         Ok(())
     }
@@ -397,10 +450,11 @@ impl<'a> LegacyFleetDrain<'a> {
 }
 impl Drop for LegacyFleetDrain<'_> {
     fn drop(&mut self) {
-        if self.stage != Stage::Closed {
+        if !matches!(self.stage, Stage::Closed | Stage::ServiceStopped) {
             std::mem::forget((
                 Arc::clone(self.broker),
                 self.admission.take(),
+                self.drain.take(),
                 self.census.take(),
                 self.loose.take(),
                 std::mem::take(&mut self.originals),

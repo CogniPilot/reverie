@@ -150,6 +150,9 @@ fn service_code(error: &crate::worker_service::WorkerServiceError) -> &'static s
         E::Io(_) => "WORKER_IMAGE_SERVICE_METADATA_IO",
         E::Engine(e) => e.code(),
         E::Program(code) => code,
+        E::Control(_) => "NATIVE_SERVICE_QUIESCE",
+        E::Configuration(error) => error.code(),
+        E::Schema(_) => "NATIVE_SERVICE_CONFIGURATION_SCHEMA",
         E::Finalization(primary, _) => service_code(primary),
     }
 }

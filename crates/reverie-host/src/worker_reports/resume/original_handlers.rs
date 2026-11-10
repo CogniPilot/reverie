@@ -4,10 +4,12 @@
 use super::*;
 use std::rc::Rc;
 mod cleanup_binding;
+mod maintenance;
 mod progress;
 pub use cleanup_binding::{
     WorkerOriginalHandlersCleanupBinding, WorkerOriginalHandlersCleanupError,
 };
+pub use maintenance::WorkerServiceMaintenanceHandlers;
 type DrainResult<T> = std::result::Result<T, Rc<WorkerReportError>>;
 
 struct Selected {
@@ -20,6 +22,16 @@ struct Selection {
     service: Arc<WorkerReportService>,
     own: Arc<Record>,
     records: Vec<Arc<Record>>,
+    purpose: SelectionPurpose,
+}
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum SelectionPurpose {
+    Fleet,
+    Deployment,
+}
+enum ForwardOwner<'a> {
+    Fleet(&'a WorkerActorChannel),
+    Deployment(&'a WorkerServiceConnection),
 }
 struct Originals {
     selection: Arc<Selection>,
@@ -80,6 +92,25 @@ impl WorkerActorChannel {
             return Err(WorkerReportError::Unconfirmed);
         }
         self.require_connected()?;
+        WorkerOriginalHandlersDrain::capture(
+            &self.connection,
+            expected,
+            end,
+            SelectionPurpose::Fleet,
+        )
+    }
+}
+impl WorkerOriginalHandlersDrain {
+    fn capture(
+        connection: &WorkerServiceConnection,
+        expected: &Arc<WorkerReportService>,
+        end: Instant,
+        purpose: SelectionPurpose,
+    ) -> Result<Self> {
+        connection.assert_service(expected)?;
+        if expected.stopping() || connection.record.opaque() {
+            return Err(WorkerReportError::Unconfirmed);
+        }
         let records = expected.records.try_lock().map_err(|error| {
             if matches!(error, TryLockError::Poisoned(_)) {
                 expected.opaque.store(true, Ordering::Release);
@@ -88,13 +119,13 @@ impl WorkerActorChannel {
         })?;
         if !records
             .iter()
-            .any(|row| Arc::ptr_eq(row, &self.connection.record))
+            .any(|row| Arc::ptr_eq(row, &connection.record))
         {
             return Err(WorkerReportError::Unconfirmed);
         }
         let records = records
             .iter()
-            .filter(|row| !Arc::ptr_eq(row, &self.connection.record))
+            .filter(|row| !Arc::ptr_eq(row, &connection.record))
             .cloned()
             .collect::<Vec<_>>();
         let selected = records
@@ -110,8 +141,9 @@ impl WorkerActorChannel {
             originals: Some(Originals {
                 selection: Arc::new(Selection {
                     service: Arc::clone(expected),
-                    own: Arc::clone(&self.connection.record),
+                    own: Arc::clone(&connection.record),
                     records,
+                    purpose,
                 }),
                 selected,
                 end,

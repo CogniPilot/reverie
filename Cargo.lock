@@ -1108,6 +1108,7 @@ dependencies = [
  "reverie-http",
  "reverie-python-regex",
  "reverie-store",
+ "reverie-worker-client",
  "rustls",
  "rustls-platform-verifier",
  "serde",

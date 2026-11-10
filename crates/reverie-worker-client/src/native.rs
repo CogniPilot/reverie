@@ -84,22 +84,25 @@ impl Endpoint {
         Ok(())
     }
     pub(crate) fn check(&self, stream: &UnixStream) -> Result<()> {
-        // SAFETY: zeroed ucred is valid output storage, with its exact length.
-        let mut peer: libc::ucred = unsafe { std::mem::zeroed() };
-        let mut size = std::mem::size_of_val(&peer) as libc::socklen_t;
-        let status = unsafe {
-            libc::getsockopt(
-                stream.as_raw_fd(),
-                libc::SOL_SOCKET,
-                libc::SO_PEERCRED,
-                (&mut peer as *mut libc::ucred).cast(),
-                &mut size,
-            )
-        };
-        if status != 0 || size as usize != std::mem::size_of_val(&peer) {
+        self.accept_peer(peer_uid(stream)?)
+    }
+    /// Only the acknowledged service-quiesce operation expects unlink during
+    /// the exchange. Keep the SAME connected peer and original anchor; accept
+    /// named absence only when that exact anchored socket has no links left.
+    pub(crate) fn check_quiesced(&self, stream: &UnixStream) -> Result<()> {
+        if peer_uid(stream)? != uid() || stamp(&self.anchor.metadata()?) != self.stamp {
             return Err(Error::new("Private worker broker peer changed"));
         }
-        self.accept_peer(peer.uid)
+        match std::fs::symlink_metadata(&self.path) {
+            Ok(meta) if stamp(&meta) == self.stamp => Ok(()),
+            Err(error)
+                if error.kind() == std::io::ErrorKind::NotFound
+                    && self.anchor.metadata()?.nlink() == 0 =>
+            {
+                Ok(())
+            }
+            _ => Err(Error::new("Private worker broker endpoint changed")),
+        }
     }
     fn accept_peer(&self, peer_uid: u32) -> Result<()> {
         if peer_uid != uid() {
@@ -110,6 +113,24 @@ impl Endpoint {
     pub(crate) fn close(self) -> Result<()> {
         close(self.anchor.into_raw_fd())
     }
+}
+fn peer_uid(stream: &UnixStream) -> Result<u32> {
+    // SAFETY: zeroed ucred is valid output storage, with its exact length.
+    let mut peer: libc::ucred = unsafe { std::mem::zeroed() };
+    let mut size = std::mem::size_of_val(&peer) as libc::socklen_t;
+    let status = unsafe {
+        libc::getsockopt(
+            stream.as_raw_fd(),
+            libc::SOL_SOCKET,
+            libc::SO_PEERCRED,
+            (&mut peer as *mut libc::ucred).cast(),
+            &mut size,
+        )
+    };
+    if status != 0 || size as usize != std::mem::size_of_val(&peer) {
+        return Err(Error::new("Private worker broker peer changed"));
+    }
+    Ok(peer.uid)
 }
 pub(crate) fn wait(fd: i32, events: i16, deadline: Option<Instant>) -> Result<()> {
     loop {

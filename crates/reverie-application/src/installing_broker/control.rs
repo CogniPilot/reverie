@@ -14,6 +14,7 @@ use std::{
     time::{Duration, Instant},
 };
 mod query;
+mod quiesce;
 #[cfg(test)]
 mod tests;
 
@@ -24,6 +25,11 @@ enum Cause {
     Native(SourceStopError),
     Drain(DrainCause),
     Report(reverie_host::worker_reports::WorkerReportError),
+    Handlers(Rc<reverie_host::worker_reports::WorkerReportError>),
+    Finalization {
+        primary: Box<Self>,
+        secondary: Box<Self>,
+    },
     Identity(Arc<reverie_store::storage_identity::IdentityError>),
     Observation(Arc<crate::reservation_observer::ObserverError>),
     Provider(Rc<reverie_host::website_facts::WebsiteFactsError>),
@@ -37,6 +43,10 @@ impl fmt::Display for Cause {
             Self::Native(e) => e.fmt(out),
             Self::Drain(e) => e.fmt(out),
             Self::Report(e) => e.fmt(out),
+            Self::Handlers(e) => e.fmt(out),
+            Self::Finalization { primary, secondary } => {
+                write!(out, "{primary}; cleanup: {secondary}")
+            }
             Self::Identity(e) => e.fmt(out),
             Self::Observation(e) => e.fmt(out),
             Self::Provider(e) => e.fmt(out),
@@ -77,6 +87,9 @@ struct Frame<'a> {
     hold: Option<WorkerLaunchHold>,
     census: Option<ControlStopCensus>,
     native: Option<Box<LegacyFleetDrain<'a>>>,
+    service_drain: Option<lifecycle::DrainingOwner>,
+    handlers: Option<reverie_host::worker_reports::WorkerServiceMaintenanceHandlers>,
+    closed_handlers: Option<reverie_host::worker_reports::WorkerOriginalHandlersClosed>,
     end: Instant,
     completed: bool,
     identity_unknown: Option<Arc<reverie_store::storage_identity::IdentityError>>,
@@ -106,6 +119,9 @@ impl InstallingBroker {
             hold: None,
             census: None,
             native: None,
+            service_drain: None,
+            handlers: None,
+            closed_handlers: None,
             end: Instant::now() + Duration::from_secs(120),
             completed: false,
             identity_unknown: None,
@@ -144,6 +160,7 @@ impl Frame<'_> {
             WorkerControlRequest::StorageStatus => return self.storage_status(),
             WorkerControlRequest::UnsupportedStopAgent => return self.unsupported_stop(),
             WorkerControlRequest::StopLaptops => {}
+            WorkerControlRequest::QuiesceForDeployment => return self.quiesce_for_deployment(),
         }
         self.stop_laptops()
     }
@@ -204,6 +221,12 @@ impl ControlFailure<'_> {
         };
         let runtime = &owner.broker.storage.runtime;
         let mut known = true;
+        if let Some(handlers) = &mut owner.handlers {
+            known &= matches!(
+                handlers.settle(runtime),
+                Ok(reverie_host::worker_reports::WorkerHandlersProgress::Settled)
+            );
+        }
         if let Some(census) = &mut owner.census
             && let Err(cause) = census.settle(runtime, owner.end)
         {
@@ -214,10 +237,14 @@ impl ControlFailure<'_> {
             let failures = native.settle_components();
             known &= failures.is_empty();
             self.causes.extend(failures.into_iter().map(Cause::Drain));
-            if !known || native.retained() {
+            let service_stopped = matches!(
+                owner.action.as_ref(),
+                Some(WorkerControlRequest::QuiesceForDeployment)
+            ) && native.service_stop_finished();
+            if !known || (native.retained() && !service_stopped) {
                 return false;
             }
-            if let Err(cause) = native.abort_admission() {
+            if !service_stopped && let Err(cause) = native.abort_admission() {
                 self.causes.push(cause.into());
                 return false;
             }
@@ -236,7 +263,10 @@ impl ControlFailure<'_> {
                 // failure. Reconcile cannot replay a read or grow diagnostics.
                 if !matches!(
                     cause,
-                    Cause::Identity(_) | Cause::Observation(_) | Cause::Provider(_)
+                    Cause::Identity(_)
+                        | Cause::Observation(_)
+                        | Cause::Provider(_)
+                        | Cause::Handlers(_)
                 ) {
                     self.causes.push(cause);
                 }
@@ -259,6 +289,9 @@ impl Drop for Frame<'_> {
                 Arc::clone(self.broker),
                 self.hold.take(),
                 self.native.take(),
+                self.service_drain.take(),
+                self.handlers.take(),
+                self.closed_handlers.take(),
                 self.census.take(),
                 self.health.take(),
             ));

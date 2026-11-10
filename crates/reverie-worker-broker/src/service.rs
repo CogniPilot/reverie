@@ -11,6 +11,8 @@ pub(super) enum Action {
     Install,
     Start,
     Stop,
+    /// Drain actual original viewers/laptops, then stop the same service.
+    QuiesceStop,
     Status,
     Rollback,
     Upgrade,
@@ -51,6 +53,7 @@ pub(super) fn run(
         Action::Install => WorkerServiceAction::Install,
         Action::Start => WorkerServiceAction::Start,
         Action::Stop => WorkerServiceAction::Stop,
+        Action::QuiesceStop => WorkerServiceAction::QuiesceStop,
         Action::Status => WorkerServiceAction::Status,
         Action::Rollback => WorkerServiceAction::Rollback { start_previous },
         Action::Upgrade => WorkerServiceAction::Upgrade { force_stopped },
@@ -58,6 +61,7 @@ pub(super) fn run(
     let maximum = match action {
         WorkerServiceAction::Upgrade { .. } => 90,
         WorkerServiceAction::Stop => 45,
+        WorkerServiceAction::QuiesceStop => 180,
         _ => 20,
     };
     let end = Instant::now() + Duration::from_secs(maximum);

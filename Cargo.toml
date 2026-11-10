@@ -49,6 +49,7 @@ reverie-core = { path = "crates/reverie-core" }
 reverie-contracts = { path = "crates/reverie-contracts" }
 reverie-store = { path = "crates/reverie-store" }
 reverie-host = { path = "crates/reverie-host" }
+reverie-worker-client = { path = "crates/reverie-worker-client" }
 reverie-application = { path = "crates/reverie-application" }
 reverie-diagnostics = { path = "crates/reverie-diagnostics" }
 reverie-elf-bundle = { path = "crates/reverie-elf-bundle" }

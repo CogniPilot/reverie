@@ -44,9 +44,9 @@ impl ObservedUnit {
     pub(super) fn require_action_finished(&self, action: &WorkerServiceAction) -> Result<()> {
         let expected = match action {
             WorkerServiceAction::Start => self.active == "active" && self.sub == "running",
-            WorkerServiceAction::Stop | WorkerServiceAction::Install => {
-                self.active == "inactive" && self.sub == "dead"
-            }
+            WorkerServiceAction::Stop
+            | WorkerServiceAction::QuiesceStop
+            | WorkerServiceAction::Install => self.active == "inactive" && self.sub == "dead",
             WorkerServiceAction::Status => true,
             WorkerServiceAction::Rollback { .. } => self.active == "inactive" && self.sub == "dead",
             WorkerServiceAction::Upgrade { force_stopped } => {

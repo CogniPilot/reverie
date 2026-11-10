@@ -56,7 +56,8 @@ impl WorkerOriginalHandlersCleanupBinding {
         expected: &Arc<WorkerReportService>,
         runtime: &WorkerRuntime,
     ) -> BindingResult {
-        if !self.selection.same_runtime(runtime)
+        if self.selection.purpose != SelectionPurpose::Fleet
+            || !self.selection.same_runtime(runtime)
             || !Arc::ptr_eq(expected, &self.selection.service)
             || !Arc::ptr_eq(&channel.connection.record, &self.selection.own)
             || channel.purpose != Purpose::FleetMaintenanceWebsite

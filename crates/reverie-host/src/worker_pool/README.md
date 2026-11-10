@@ -178,3 +178,20 @@ arbitrary unit, executable or command argument can be supplied. Offer startup
 still owns its original five-minute deadline; images and owner enrollment must
 be prepared beforehand. Actor installation and actual authenticated fleet
 maintenance remain separate required components.
+
+# Maintained service quiescence
+
+`reverie-worker-broker service quiesce-stop --config SOURCE` is an opt-in
+native service operation. Its closed `quiesce-for-deployment` C request denies
+new launches, settles the original active handler records, and uses the original
+fleet stop owners before requesting service shutdown. A broker without that
+operation refuses it; the client never retries a failed or lost reply. The
+service action requires its current packaged unit before creating pending or
+calling C; it cannot be used to quiesce an older predecessor broker.
+
+The owning Host `quiesce_stopped_worker_service` API additionally returns the
+existing image-maintenance service fence. Keep that actual owner through the
+deployment's fresh complete writer census, effects and checked finalizers, then
+close and release it last. The standalone CLI proves its stopped service only;
+its reply does not authorize a deployment or preserve a fence across CLI exit.
+Ordinary `stop-laptops` and `service stop` keep their existing behavior.

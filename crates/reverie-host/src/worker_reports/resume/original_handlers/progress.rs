@@ -29,22 +29,38 @@ impl WorkerOriginalHandlersDrain {
     }
     fn forward_current(
         &self,
-        channel: &WorkerActorChannel,
+        owner: &ForwardOwner<'_>,
         expected: &Arc<WorkerReportService>,
         runtime: &WorkerRuntime,
     ) -> Result<bool> {
         self.assert_runtime(runtime)?;
         let originals = self.originals();
         if !Arc::ptr_eq(expected, &originals.selection.service)
-            || !Arc::ptr_eq(&channel.connection.record, &originals.selection.own)
-            || channel.purpose != Purpose::FleetMaintenanceWebsite
-            || channel.close != ClosePhase::Open
             || Instant::now() >= self.deadline(runtime)?
         {
             return Err(WorkerReportError::Unconfirmed);
         }
-        channel.assert_service(expected)?;
-        channel.require_connected()?;
+        match owner {
+            ForwardOwner::Fleet(channel) => {
+                if originals.selection.purpose != SelectionPurpose::Fleet
+                    || !Arc::ptr_eq(&channel.connection.record, &originals.selection.own)
+                    || channel.purpose != Purpose::FleetMaintenanceWebsite
+                    || channel.close != ClosePhase::Open
+                {
+                    return Err(WorkerReportError::Unconfirmed);
+                }
+                channel.assert_service(expected)?;
+                channel.require_connected()?;
+            }
+            ForwardOwner::Deployment(connection) => {
+                maintenance::assert_connection(connection, expected, runtime)?;
+                if originals.selection.purpose != SelectionPurpose::Deployment
+                    || !Arc::ptr_eq(&connection.record, &originals.selection.own)
+                {
+                    return Err(WorkerReportError::Unconfirmed);
+                }
+            }
+        }
         let records = match expected.records.try_lock() {
             Ok(records) => records,
             Err(TryLockError::WouldBlock) => return Ok(false),
@@ -70,6 +86,14 @@ impl WorkerOriginalHandlersDrain {
         expected: &Arc<WorkerReportService>,
         runtime: &WorkerRuntime,
     ) -> DrainResult<WorkerHandlersProgress> {
+        self.interrupt_owned(ForwardOwner::Fleet(channel), expected, runtime)
+    }
+    pub(super) fn interrupt_owned(
+        &mut self,
+        owner: ForwardOwner<'_>,
+        expected: &Arc<WorkerReportService>,
+        runtime: &WorkerRuntime,
+    ) -> DrainResult<WorkerHandlersProgress> {
         if let Some(cause) = self.primary.as_ref().or(self.cleanup.as_ref()) {
             return Err(Rc::clone(cause));
         }
@@ -78,7 +102,7 @@ impl WorkerOriginalHandlersDrain {
         }
         let count = self.originals().selection.records.len();
         for index in 0..count.max(1) {
-            match self.forward_current(channel, expected, runtime) {
+            match self.forward_current(&owner, expected, runtime) {
                 Ok(true) => self.admitted = true,
                 Ok(false) => return Ok(WorkerHandlersProgress::Pending),
                 Err(cause) => return Err(self.primary(cause)),

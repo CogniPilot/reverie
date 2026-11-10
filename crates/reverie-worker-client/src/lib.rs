@@ -32,7 +32,13 @@ fn execute(operation: Operation) -> Result<u8> {
     let result = match operation {
         Operation::Launch { request, reference } => relay::run(&mut connection, request, reference),
         Operation::Control(request) => {
-            let result = control::exchange(&mut connection, request);
+            let result = if request.get("action").and_then(serde_json::Value::as_str)
+                == Some("quiesce-for-deployment")
+            {
+                control::exchange_quiesce(&mut connection)
+            } else {
+                control::exchange(&mut connection, request)
+            };
             let raw = connection.finish(result)?;
             return emit(&raw);
         }
