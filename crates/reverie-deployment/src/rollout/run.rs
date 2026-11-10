@@ -3,15 +3,19 @@ impl<'a> Owner<'a> {
     pub(super) fn run(&mut self) -> RolloutResult<'a, InitialWebsiteRolloutClosed> {
         self.preflight()?;
         self.service = Some(
-            quiesce_stopped_worker_service(
-                &self.source,
-                if self.refresh {
-                    NativeWorkerServiceRole::PoolOfferV1
-                } else {
-                    NativeWorkerServiceRole::Broker
-                },
-                self.end,
-            )
+            (if self.refresh {
+                maintain_stopped_deployment_service(
+                    &self.source,
+                    NativeWorkerServiceRole::PoolOfferV1,
+                    self.end,
+                )
+            } else {
+                quiesce_stopped_worker_service(
+                    &self.source,
+                    NativeWorkerServiceRole::Broker,
+                    self.end,
+                )
+            })
             .map_err(InitialWebsiteRolloutError::Quiesce)?,
         );
         self.end = self.end.min(

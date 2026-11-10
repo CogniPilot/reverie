@@ -21,7 +21,10 @@ pub use run_fence::{NativeServiceRunAttempt, NativeServiceRunFailure, begin_serv
 mod command;
 mod manager;
 mod quiesce;
-pub use quiesce::{DeploymentServiceQuiesceFailure, quiesce_stopped_worker_service};
+pub use quiesce::{
+    DeploymentServiceQuiesceFailure, maintain_stopped_deployment_service,
+    quiesce_stopped_worker_service,
+};
 mod publication;
 mod rollback;
 mod stopped;

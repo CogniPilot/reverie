@@ -21,7 +21,8 @@ use reverie_host::{
     resource_facts::{ResourceFactsError, fresh_owner_nonce},
     worker_service::{
         ClosedImageServiceMaintenance, DeploymentServiceQuiesceFailure, ImageServiceMaintenance,
-        NativeWorkerServiceRole, quiesce_stopped_worker_service,
+        NativeWorkerServiceRole, maintain_stopped_deployment_service,
+        quiesce_stopped_worker_service,
     },
 };
 use std::{

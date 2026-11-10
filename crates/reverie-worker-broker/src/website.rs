@@ -17,7 +17,7 @@ pub(super) struct Selection {
 #[derive(Subcommand)]
 pub(super) enum Action {
     /// Update an already selected actor with the actual new website facts.
-    /// Requires an uninstalled pool and leaves employees stopped.
+    /// Requires an uninstalled pool and an inactive broker; leaves employees stopped.
     UpdateUninstalled {
         #[command(flatten)]
         selection: Selection,

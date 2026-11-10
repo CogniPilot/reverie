@@ -89,6 +89,16 @@ pub fn quiesce_stopped_worker_service(
 ) -> std::result::Result<ImageServiceMaintenance, DeploymentServiceQuiesceFailure> {
     run_native_worker_service_for_role(source, WorkerServiceAction::QuiesceStop, role, end)
         .map_err(DeploymentServiceQuiesceFailure::Stop)?;
+    maintain_stopped_deployment_service(source, role, end)
+}
+/// Retain an already-inactive registered service using its actual manager,
+/// original generation, empty process/cgroup observation and IMAGE fence.
+/// No acknowledgement is requested from a process that has already stopped.
+pub fn maintain_stopped_deployment_service(
+    source: &Path,
+    role: NativeWorkerServiceRole,
+    end: Instant,
+) -> std::result::Result<ImageServiceMaintenance, DeploymentServiceQuiesceFailure> {
     stopped::capture_deployment_maintenance(source, end, role)
         .map_err(DeploymentServiceQuiesceFailure::Maintenance)?
         .begin_image_transition()
