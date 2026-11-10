@@ -109,13 +109,17 @@ impl Archive {
         let layer = root.join(&digest).join("layer.tar");
         fs::create_dir(layer.parent().unwrap()).unwrap();
         fs::rename(layer_tmp, &layer).unwrap();
-        let (entry, cmd) = if role == "controller" {
-            ("/bin/reverie-worker-resource-controller", json!([]))
+        let entry = if role == "controller" {
+            "/bin/reverie-worker-resource-controller"
         } else {
-            ("/bin/sleep", json!(["infinity"]))
+            "/bin/sleep"
         };
+        let mut image_config = json!({"Entrypoint":[entry],"Env":["PATH=/bin","LANG=C.UTF-8"],"User":"0:0","WorkingDir":"/"});
+        if role != "controller" {
+            image_config["Cmd"] = json!(["infinity"]);
+        }
         let config = json!({"created":"1970-01-01T00:00:01+00:00","architecture":"amd64","os":"linux",
-            "config":{"Entrypoint":[entry],"Cmd":cmd,"Env":["PATH=/bin","LANG=C.UTF-8"],"User":"0:0","WorkingDir":"/"},
+            "config":image_config,
             "rootfs":{"type":"layers","diff_ids":[format!("sha256:{digest}")]}});
         let raw = serde_json::to_vec(&config).unwrap();
         let config_name = format!("{}.json", hash(&raw));

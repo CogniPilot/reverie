@@ -73,14 +73,17 @@ pub(super) fn config(
         "POOL_IMAGE_ROOTFS",
     )?;
     let config = &value["config"];
-    let (entry, cmd) = if controller {
-        ("/bin/reverie-worker-resource-controller", json!([]))
+    let (entry, command_matches) = if controller {
+        (
+            "/bin/reverie-worker-resource-controller",
+            config.get("Cmd").is_none(),
+        )
     } else {
-        ("/bin/sleep", json!(["infinity"]))
+        ("/bin/sleep", config["Cmd"] == json!(["infinity"]))
     };
     need(
         config["Entrypoint"] == json!([entry])
-            && config["Cmd"] == cmd
+            && command_matches
             && config["Env"] == json!(["PATH=/bin", "LANG=C.UTF-8"])
             && config["User"] == "0:0"
             && config["WorkingDir"] == "/",
