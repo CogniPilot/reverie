@@ -20,6 +20,7 @@ pub use process::ProviderProcessObservation;
 #[cfg(test)]
 pub(crate) use process::tests::metadata as process_test_metadata;
 pub use process::{PeerInitSnapshot, PeerProcessSnapshot, ProcessSnapshot, WebsiteProcessObserver};
+pub use process::{SetupNodeObservation, SetupNodeSelection};
 use reverie_contracts::resource_actor::{EngineMetadata, EngineSelection};
 use reverie_core::operations::JournalDigest;
 use std::{fmt, io, path::PathBuf};
@@ -27,6 +28,7 @@ use std::{fmt, io, path::PathBuf};
 #[derive(Debug)]
 pub enum WebsiteFactsError {
     Refused(&'static str),
+    Engine(crate::engine_metadata::EngineError),
     Io(io::Error),
     Channel(crate::worker_reports::WorkerReportError),
     Cleanup,
@@ -39,6 +41,7 @@ impl WebsiteFactsError {
     pub fn code(&self) -> &'static str {
         match self {
             Self::Refused(code) => code,
+            Self::Engine(error) => error.code(),
             Self::Io(_) => "ENGINE_METADATA_UNAVAILABLE",
             Self::Channel(error) => error.code(),
             Self::Cleanup => "ENGINE_METADATA_CLOSE_UNCONFIRMED",

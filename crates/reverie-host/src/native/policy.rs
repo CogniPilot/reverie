@@ -116,3 +116,17 @@ pub(crate) fn replace_policy(parent: &File, temporary: &OsStr, target: &OsStr) -
         Err(io::Error::last_os_error())
     }
 }
+/// Initial actor setup publishes only this fixed absent leaf. Reuse the native
+/// no-replace owner so a newly appeared actor is never overwritten.
+pub(crate) fn publish_absent_actor_policy(
+    parent: &File,
+    temporary: &OsStr,
+    target: &OsStr,
+) -> io::Result<()> {
+    if target != OsStr::new("resource-actor.json") {
+        return Err(io::ErrorKind::InvalidInput.into());
+    }
+    let from = CString::new(temporary.as_bytes()).map_err(|_| io::ErrorKind::InvalidInput)?;
+    let to = CString::new(target.as_bytes()).map_err(|_| io::ErrorKind::InvalidInput)?;
+    super::rename::noreplace(parent, &from, parent, &to)
+}

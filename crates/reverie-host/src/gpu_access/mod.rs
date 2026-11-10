@@ -22,6 +22,7 @@ mod cdi;
 use crate::{ObservationError, native};
 pub use cdi::CdiObservation;
 pub use files::{
+    ActorSetupControlError, ActorSetupControlFiles, ActorSetupPending, ActorSetupTerminal,
     GpuControlFiles, GpuParentGuard, GpuPendingFile, GpuPrivateSnapshot, GpuProtectedStores,
     GpuTerminalSnapshot, PerfControlFiles, PerfPending, PerfProtectedStores, PerfTerminal,
 };
@@ -43,6 +44,7 @@ pub enum GpuHostError {
     Engine(crate::engine_metadata::EngineError),
     ImageFence(Box<crate::worker_image::ImageFileError>),
     PoolFence(Box<crate::reservation_control::ControlHostError>),
+    AdmissionFence(Box<crate::reservation_control::ControlHostError>),
     Finalized {
         primary: Box<Self>,
         secondary: Box<Self>,
@@ -62,7 +64,7 @@ impl GpuHostError {
             Self::Physical(error) => error.code(),
             Self::Engine(error) => error.code(),
             Self::ImageFence(error) => error.code(),
-            Self::PoolFence(error) => error.code(),
+            Self::PoolFence(error) | Self::AdmissionFence(error) => error.code(),
             Self::Finalized { primary, .. } => primary.code(),
             Self::PublicationUnknown(_) => "GPU_PUBLICATION_UNCONFIRMED",
         }
@@ -71,7 +73,7 @@ impl GpuHostError {
         match self {
             Self::PublicationUnknown(_) => true,
             Self::ImageFence(error) => error.is_uncertain(),
-            Self::PoolFence(error) => error.has_unconfirmed_close(),
+            Self::PoolFence(error) | Self::AdmissionFence(error) => error.has_unconfirmed_close(),
             Self::Finalized { primary, secondary } => {
                 primary.is_uncertain() || secondary.is_uncertain()
             }
@@ -84,7 +86,7 @@ impl GpuHostError {
             Self::Native(error) => error.has_unconfirmed_close(),
             Self::Metadata(error) => error.has_unconfirmed_close(),
             Self::ImageFence(error) => error.has_unconfirmed_close(),
-            Self::PoolFence(error) => error.has_unconfirmed_close(),
+            Self::PoolFence(error) | Self::AdmissionFence(error) => error.has_unconfirmed_close(),
             Self::Finalized { primary, secondary } => {
                 primary.has_unconfirmed_close() || secondary.has_unconfirmed_close()
             }

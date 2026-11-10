@@ -1,6 +1,11 @@
 //! Actual installing-service current configuration owner. Native admission,
 //! lifecycle registry and effects remain private composition of this service;
 //! a captured configuration is neither owner authorization nor a start grant.
+mod actor_setup;
+pub use actor_setup::{
+    OfflineActorSetupClosed, OfflineActorSetupError, OfflineActorSetupFailure,
+    PreparedOfflineActorSetup,
+};
 mod bootstrap;
 mod chat_images;
 pub use bootstrap::{BootstrapSettlementError, BrokerBootstrapCause, BrokerBootstrapFailure};

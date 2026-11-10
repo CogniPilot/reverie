@@ -22,6 +22,15 @@ impl QualifiedWebsiteMetadata {
     }
 }
 impl EngineMetadata {
+    /// Derive complete selected fields from the actual daemon document. This
+    /// DATA constructor does not attest its input, its process, or an installer.
+    pub fn installation_website_digests(&self) -> Result<[JournalDigest; 3]> {
+        Ok([
+            digest(required(&self.0, "Config")?)?,
+            digest(&host_config(required(&self.0, "HostConfig")?)?)?,
+            digest(&mounts::normalize(required(&self.0, "Mounts")?)?)?,
+        ])
+    }
     pub fn qualify_website(&self, selected: &WebsiteSelection) -> Result<QualifiedWebsiteMetadata> {
         let pid = header(&self.0, selected)?;
         need(

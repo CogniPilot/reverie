@@ -59,7 +59,8 @@ pub(crate) use lease::observe_ops_private;
 pub(crate) use lease::observe_with_ancestors;
 pub(crate) use policy::{
     PolicyEntryStamp, create_policy_temporary, entry_stat, named_policy_entry,
-    open_policy_child_directory, open_policy_original, policy_effective_uid, replace_policy,
+    open_policy_child_directory, open_policy_original, policy_effective_uid,
+    publish_absent_actor_policy, replace_policy,
 };
 pub(crate) use reservation::{
     read_reservation, reservation_identity, reservation_identity_text, reservation_location,

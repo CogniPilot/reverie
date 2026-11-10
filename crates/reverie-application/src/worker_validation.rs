@@ -145,6 +145,12 @@ pub struct ValidatedWorkerSnapshot {
     source_path: Option<std::path::PathBuf>,
 }
 impl ValidatedWorkerSnapshot {
+    pub(crate) fn validate_actor_setup_candidate(
+        &self,
+        candidate: &reverie_contracts::resource_actor::ActorSetupTransition,
+    ) -> Result<Self> {
+        self.validate_candidate_configuration(candidate.after().clone())
+    }
     pub(crate) fn validate_perf_candidate(
         &self,
         candidate: &reverie_contracts::perf_transition::PerfTransition,

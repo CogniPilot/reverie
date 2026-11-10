@@ -1,8 +1,11 @@
 //! Existing-only installed private facts observation. No provisioning, engine
 //! access, process authentication, current-owner grant or launch authority.
+mod fixed_reference;
 mod rebind;
 #[cfg(test)]
 mod tests;
+pub use fixed_reference::compiled_actor_image_provenance_reference;
+mod setup;
 use crate::{
     goal_custody::{
         GoalCustodyError,
@@ -15,6 +18,8 @@ use reverie_contracts::{
     resource_actor::{InstalledFactsDocument, ResourceActorDataError, ResourceActorSettings},
     worker_config::EffectiveWorkerConfig,
 };
+pub use setup::{ActorSetupFacts, ActorSetupFactsError};
+pub use setup::{ActorSetupHistoryClosed, ActorSetupHistoryError, ActorSetupHistoryObservation};
 use std::{fmt, path::Path, time::Instant};
 
 #[derive(Debug)]

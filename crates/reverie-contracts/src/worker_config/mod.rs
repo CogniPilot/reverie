@@ -1,5 +1,6 @@
 //! Legacy effective-worker JSON bytes, with Python's default spaces and ASCII.
 //! Inputs are projected data, never evidence of validation, readiness or authority.
+mod actor;
 mod encode;
 mod publication;
 /// Python `repr(float)` for a finite value (shared by named byte encoders).

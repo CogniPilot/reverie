@@ -10,6 +10,16 @@ pub fn validate_protected_website_settings(raw: &[u8]) -> Result<()> {
 }
 pub struct EngineMetadata(pub(super) Value);
 impl EngineMetadata {
+    /// Daemon-declared DATA; native callers must independently compare the
+    /// selected socket/client and actual host kernel around all observations.
+    pub fn declared_engine_id(&self) -> Result<String> {
+        let id = scalar(field(&self.0, "ID")?)?;
+        need(
+            !id.is_empty() && id.chars().count() <= 200,
+            "ENGINE_ID_REQUIRED",
+        )?;
+        Ok(id)
+    }
     pub fn decode(raw: &[u8]) -> Result<Self> {
         need(raw.len() <= MAX_ENGINE_BODY, "ENGINE_METADATA_UNAVAILABLE")?;
         legacy_json::decode_rootless_profile(raw)

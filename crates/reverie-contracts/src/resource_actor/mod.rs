@@ -27,6 +27,9 @@ mod provenance;
 mod worker_image;
 pub use worker_image::WorkerImageProvenance;
 mod settings;
+mod setup;
+pub use setup::history as actor_setup_history;
+pub use setup::{ActorSetupDataError, ActorSetupTransition};
 #[cfg(test)]
 mod tests;
 mod website;

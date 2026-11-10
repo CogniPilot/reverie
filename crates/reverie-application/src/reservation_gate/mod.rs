@@ -2,6 +2,8 @@
 //! not an HTTP authority or a process/start permit. Effect-owner cohorts remain
 //! separate from the read-side admission dependencies.
 mod admission;
+mod actor_setup;
+pub(crate) use actor_setup::{ActorSetupAdmission, ActorSetupPreview};
 mod claim;
 mod draft;
 mod error;

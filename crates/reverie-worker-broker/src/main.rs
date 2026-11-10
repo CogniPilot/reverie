@@ -9,6 +9,7 @@ use reverie_host::{
     worker_runtime::WorkerRuntime,
 };
 use std::{path::PathBuf, process::ExitCode};
+mod actor;
 mod image;
 mod inventory;
 mod manifest;
@@ -30,6 +31,13 @@ struct Arguments {
 }
 #[derive(Subcommand)]
 enum Role {
+    /// Inspect or install the fixed running website actor identity. Apply
+    /// requires an inactive native service and unchanged employee policies;
+    /// it does not start the service or authorize a resource-pool rollout.
+    Actor {
+        #[command(subcommand)]
+        action: actor::Action,
+    },
     /// Explicit OS-owner pool nomination; never installs or starts resources.
     Pool {
         #[command(subcommand)]
@@ -110,6 +118,7 @@ fn main() -> ExitCode {
 }
 fn run(arguments: Arguments) -> Result<(), Box<dyn std::error::Error>> {
     match arguments.command {
+        Role::Actor { action } => actor::run(action),
         Role::Pool { action } => pool::run(action),
         Role::Inventory { config } => inventory::run(&config),
         Role::Image { action } => image::run(action),

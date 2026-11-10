@@ -56,7 +56,9 @@ impl ReservationGate {
             let eid = JournalId::parse(intent.employee().as_str())?;
             let current = reverie_host::gpu_access::current_employee(config, &eid)?;
             self.inner.perf_peer_policies(&intent, &current)?;
-            let company = self.inner.perf_company(config)?;
+            let company = self
+                .inner
+                .transition_company_digest(config, "PERF_COMPANY_CHANGED")?;
             let rows = Arc::new(self.inner.perf_idle(intent.employee(), &current, end)?);
             let mut census = rows
                 .rows()
@@ -151,9 +153,10 @@ impl Inner {
         }
         Ok(())
     }
-    fn perf_company(
+    pub(super) fn transition_company_digest(
         &self,
         config: &reverie_contracts::worker_config::EffectiveWorkerConfig,
+        changed: &'static str,
     ) -> Result<String> {
         let settings =
             reverie_contracts::resource_config::ResourceIdentitySettings::capture_worker_config(
@@ -165,7 +168,7 @@ impl Inner {
             );
         reverie_store::storage_identity::read_company_metadata(&identity)?
             .company_snapshot_digest()
-            .map_err(|_| GateError::Refused("PERF_COMPANY_CHANGED"))
+            .map_err(|_| GateError::Refused(changed))
     }
     fn perf_idle(
         self: &Arc<Self>,
@@ -236,7 +239,8 @@ impl Inner {
         self.perf_peer_policies(&preview.intent, &current)?;
         need(
             current.data() == preview.current.data()
-                && self.perf_company(config)? == preview.company,
+                && self.transition_company_digest(config, "PERF_COMPANY_CHANGED")?
+                    == preview.company,
             "PERF_EMPLOYEE_CHANGED",
         )?;
         let rows = self.perf_idle(preview.intent.employee(), &current, end)?;
@@ -269,7 +273,11 @@ impl PerfAdmission<'_> {
         )?;
         need(
             current.data() == preview.current.data()
-                && self.gate.inner.perf_company(preview.intent.after())? == preview.company,
+                && self
+                    .gate
+                    .inner
+                    .transition_company_digest(preview.intent.after(), "PERF_COMPANY_CHANGED")?
+                    == preview.company,
             "PERF_EMPLOYEE_CHANGED",
         )
     }
