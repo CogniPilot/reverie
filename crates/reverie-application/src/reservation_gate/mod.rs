@@ -22,6 +22,7 @@ mod perf_transition;
 pub(crate) use perf_transition::{PerfAdmission, PerfPreview};
 mod pool_transition;
 pub use pool_transition::{PoolTransitionFailure, PoolTransitionFence};
+pub(crate) use pool_transition::{PoolMigrationPublished, PublishedPool};
 mod stop_admission;
 pub(crate) use stop_admission::OrdinaryStopAdmission;
 mod preparation;

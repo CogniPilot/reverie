@@ -26,6 +26,9 @@ impl FleetMaintenanceRequest {
             (key("approval"), self.selected.approval_value()),
             (key("principal"), self.principal.value()),
         ]);
+        if self.action == FleetMaintenanceAction::MigratePool {
+            fields.insert(key("verb"), string("migrate-pool"));
+        }
         frame(Value(Node::Object(fields)))
     }
     pub fn parse_owner_reply(
@@ -34,21 +37,22 @@ impl FleetMaintenanceRequest {
         nonce: &JournalId,
     ) -> Result<CurrentFleetMaintenanceOwner> {
         let value = frame.value();
-        closed(
-            value,
-            &[
-                "kind",
-                "purpose",
-                "version",
-                "requestId",
-                "nonce",
-                "approval",
-                "principal",
-                "consent",
-                "ownerScopeDigest",
-                "expiresAtEpochMs",
-            ],
-        )?;
+        let mut fields = vec![
+            "kind",
+            "purpose",
+            "version",
+            "requestId",
+            "nonce",
+            "approval",
+            "principal",
+            "consent",
+            "ownerScopeDigest",
+            "expiresAtEpochMs",
+        ];
+        if self.action == FleetMaintenanceAction::MigratePool {
+            fields.push("verb");
+        }
+        closed(value, &fields)?;
         purpose_version(value)?;
         explicit_consent(value)?;
         self.assert_owner_binding(value, nonce)?;
@@ -63,6 +67,9 @@ impl FleetMaintenanceRequest {
         })
     }
     fn assert_owner_binding(&self, value: &Value, nonce: &JournalId) -> Result<()> {
+        if self.action == FleetMaintenanceAction::MigratePool {
+            literal(field(value, "verb")?, "migrate-pool")?;
+        }
         for (field_name, expected) in [
             ("kind", "fleet-maintenance-owner-current"),
             ("requestId", self.request.as_str()),

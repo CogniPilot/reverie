@@ -49,6 +49,45 @@ impl OfferPreparationView {
 }
 
 impl ObservedOfferTarget {
+    pub(in crate::installing_broker) fn migration_identity(&self) -> MigrationOfferIdentity {
+        self.view
+            .as_ref()
+            .expect("original view")
+            .migration_identity()
+    }
+    pub(in crate::installing_broker) fn take_migration_source(
+        &mut self,
+        authorization: &crate::installing_broker::resource_actor::PoolMigrationSourceAuthorization<
+            '_,
+        >,
+    ) -> Result<(BrokerControllerBootstrap, u32)> {
+        if let Some(cause) = &self.primary {
+            return Err(Rc::clone(cause));
+        }
+        self.close_components()?;
+        let result = self
+            .view
+            .as_mut()
+            .expect("original view")
+            .take_migration_source(authorization)
+            .map_err(OfferTargetObservationError::offer);
+        self.retain_result(result)
+    }
+    pub(in crate::installing_broker) fn assert_migration_transferred(&self) -> Result<()> {
+        if let Some(cause) = &self.primary {
+            return Err(Rc::clone(cause));
+        }
+        if !self.closed {
+            return Err(Rc::new(OfferTargetObservationError::Refused(
+                "POOL_MIGRATION_QUERY_RETAINED",
+            )));
+        }
+        self.view
+            .as_ref()
+            .expect("original view")
+            .assert_migration_transferred()
+            .map_err(|cause| Rc::new(OfferTargetObservationError::offer(cause)))
+    }
     pub(in crate::installing_broker) fn assert_fleet_preview_binding(
         &self,
         broker: &InstallingBroker,

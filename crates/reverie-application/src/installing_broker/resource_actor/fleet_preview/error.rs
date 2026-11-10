@@ -5,6 +5,8 @@ pub(super) enum Cause {
     Offer(Box<BrokerInstallationOfferCause>),
     Target(Rc<OfferTargetObservationError>),
     Storage(storage::StorageWorkflowError),
+    PoolConfiguration(reverie_contracts::worker_pool::PoolConfigurationDataError),
+    Pool(reverie_host::worker_pool::PoolError),
     Refused(&'static str),
     Finalization {
         primary: Box<Self>,
@@ -19,6 +21,8 @@ impl Cause {
             Self::Offer(e) => e.code(),
             Self::Target(e) => e.code(),
             Self::Storage(e) => e.code(),
+            Self::PoolConfiguration(e) => e.code(),
+            Self::Pool(e) => e.code(),
             Self::Refused(code) => code,
             Self::Finalization { primary, .. } => primary.code(),
         }
@@ -69,6 +73,8 @@ impl std::error::Error for Cause {
             Self::Offer(e) => Some(e.as_ref()),
             Self::Target(e) => Some(e.as_ref()),
             Self::Storage(e) => Some(e),
+            Self::PoolConfiguration(e) => Some(e),
+            Self::Pool(e) => Some(e),
             Self::Refused(_) => None,
             Self::Finalization { primary, .. } => Some(primary.as_ref()),
         }

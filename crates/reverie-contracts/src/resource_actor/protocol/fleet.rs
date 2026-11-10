@@ -4,10 +4,17 @@ use crate::reservation_control::PoolTransitionSelection;
 
 pub const FLEET_MAINTENANCE_PURPOSE: &str = "resource-fleet-maintenance-v1";
 mod owner;
+mod result;
 pub use owner::CurrentFleetMaintenanceOwner;
 mod preview;
 pub use preview::{CurrentFleetPreviewViewer, FleetPreviewRequest};
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum FleetMaintenanceAction {
+    Drain,
+    MigratePool,
+}
 pub struct FleetMaintenanceRequest {
+    action: FleetMaintenanceAction,
     request: JournalId,
     selected: PoolTransitionSelection,
     principal: ResourceOwnerPrincipal,
@@ -29,7 +36,13 @@ impl FleetMaintenanceRequest {
             ],
         )?;
         literal(field(value, "kind")?, "fleet-maintenance")?;
-        literal(field(value, "verb")?, "drain")?;
+        let action = match &field(value, "verb")?.0 {
+            Node::String(value) if value.equals_ascii("drain") => FleetMaintenanceAction::Drain,
+            Node::String(value) if value.equals_ascii("migrate-pool") => {
+                FleetMaintenanceAction::MigratePool
+            }
+            _ => return Err(ResourceActorDataError("FLEET_MAINTENANCE_VERB")),
+        };
         purpose_version(value)?;
         explicit_consent(value)?;
         let approved = field(value, "approval")?;
@@ -45,6 +58,7 @@ impl FleetMaintenanceRequest {
             ],
         )?;
         Ok(Self {
+            action,
             request: identifier(field(value, "requestId")?)?,
             selected: PoolTransitionSelection::new(
                 identifier(field(approved, "operationId")?)?,
@@ -59,6 +73,9 @@ impl FleetMaintenanceRequest {
     }
     pub fn request_id(&self) -> &JournalId {
         &self.request
+    }
+    pub fn action(&self) -> FleetMaintenanceAction {
+        self.action
     }
     pub fn selection(&self) -> &PoolTransitionSelection {
         &self.selected

@@ -2,7 +2,9 @@
 //! native scope; dropping it only releases its reference, never the B attempt.
 use super::*;
 use reverie_core::operations::JournalDigest;
+mod migration;
 mod target_observation;
+pub(in crate::installing_broker) use migration::MigrationOfferIdentity;
 pub use target_observation::{
     ObservedOfferTarget, OfferTargetObservationError, OfferTargetObservationFailure,
 };
@@ -66,6 +68,9 @@ impl SharedInstallationOffer {
 }
 
 impl OfferPreparationView {
+    pub(in crate::installing_broker) fn migration_identity(&self) -> MigrationOfferIdentity {
+        MigrationOfferIdentity::capture(self)
+    }
     pub(in crate::installing_broker) fn original_deadline(&self) -> Instant {
         self.deadline
     }

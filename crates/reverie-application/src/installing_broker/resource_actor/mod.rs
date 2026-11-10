@@ -9,8 +9,9 @@ mod error;
 mod fleet_preview;
 pub(in crate::installing_broker) use error::gate_close_unknown;
 pub use fleet_preview::{
-    AuthenticatedFleetMaintenance, DrainedLegacyFleet, FleetMaintenanceCheckError,
-    FleetPreviewClosed, FleetPreviewFailure, LegacyFleetDrainError, LegacyFleetDrainFailure,
+    AuthenticatedFleetMaintenance, AuthenticatedPoolMigration, DrainedLegacyFleet,
+    DrainedPoolMigration, FleetMaintenanceCheckError, FleetPreviewClosed, FleetPreviewFailure,
+    LegacyFleetDrainError, LegacyFleetDrainFailure, PoolMigrationClosed, PoolMigrationFailure,
     QualifiedFleetPreview,
 };
 #[cfg(test)]
@@ -28,6 +29,8 @@ use super::*;
 use crate::reservation_observer::ObservationContext;
 pub use error::{ResourceActorError, ResourceActorFailure};
 use error::{Result, need};
+pub(in crate::installing_broker) use fleet_preview::FleetDispatchFailure;
+pub(in crate::installing_broker) use fleet_preview::PoolMigrationSourceAuthorization;
 pub use operation::{
     AuthenticatedResourceOperation, ClaimedRamOperation, CommittedRamFailure,
     CommittedRamOperation, PreparedResourceStart, RamClaimFailure, RamPreparationFailure,
@@ -211,6 +214,12 @@ impl Frame<'_> {
         }
     }
     fn assert_metadata(&self, end: Instant) -> Result<()> {
+        let snapshot = self.assert_configuration_owner(end)?;
+        self.private
+            .assert_metadata(snapshot.configuration(), end)?;
+        Ok(())
+    }
+    fn assert_configuration_owner(&self, end: Instant) -> Result<&Arc<ValidatedWorkerSnapshot>> {
         need(
             !self.failed && Instant::now() < end && Instant::now() < self.deadline,
             "RESOURCE_ACTOR_CHANNEL_EXPIRED",
@@ -223,9 +232,7 @@ impl Frame<'_> {
             Arc::ptr_eq(snapshot, &self.broker.configuration()?),
             "RESOURCE_ACTOR_CONFIGURATION_CHANGED",
         )?;
-        self.private
-            .assert_metadata(snapshot.configuration(), end)?;
-        Ok(())
+        Ok(snapshot)
     }
 }
 impl InstalledResourceWebsite<'_> {

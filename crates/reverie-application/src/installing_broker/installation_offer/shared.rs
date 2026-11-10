@@ -3,6 +3,7 @@
 use super::*;
 use std::sync::{Mutex, MutexGuard};
 mod preparation;
+pub(in crate::installing_broker) use preparation::MigrationOfferIdentity;
 pub use preparation::{
     ObservedOfferTarget, OfferPreparationView, OfferTargetObservationError,
     OfferTargetObservationFailure, UnpreparedOfferBinding,

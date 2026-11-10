@@ -7,20 +7,22 @@ use crate::{
     reservation_gate::PoolTransitionFence,
 };
 use reverie_host::worker_reports::WorkerOriginalHandlersClosed;
+mod coordinator;
+pub use coordinator::{PoolMigrationClosed, PoolMigrationFailure};
 
-struct Owner<'a> {
-    authorization: AuthenticatedFleetMaintenance<'a>,
-    broker: &'a Arc<InstallingBroker>,
+pub(super) struct Owner<'a> {
+    pub(super) authorization: AuthenticatedFleetMaintenance<'a>,
+    pub(super) broker: &'a Arc<InstallingBroker>,
     _retained_broker: Arc<InstallingBroker>,
-    fence: PoolTransitionFence,
-    handlers: WorkerOriginalHandlersClosed,
-    drain: LegacyFleetDrain<'a>,
+    pub(super) fence: PoolTransitionFence,
+    pub(super) handlers: WorkerOriginalHandlersClosed,
+    pub(super) drain: LegacyFleetDrain<'a>,
 }
 /// Deployment-scoped actual stopped/closed legacy resources, not a whole-host
 /// capacity or activated-parent certificate. No copied DATA constructor exists.
 #[must_use = "retain the original auth/fence/lifecycle until owning publication"]
 pub struct DrainedLegacyFleet<'a> {
-    owner: Option<Box<Owner<'a>>>,
+    pub(super) owner: Option<Box<Owner<'a>>>,
 }
 pub struct LegacyFleetDrainError(DrainCause);
 impl LegacyFleetDrainError {
@@ -61,6 +63,15 @@ impl<'a> AuthenticatedFleetMaintenance<'a> {
         fence: PoolTransitionFence,
         handlers: WorkerOriginalHandlersClosed,
     ) -> std::result::Result<DrainedLegacyFleet<'a>, Box<LegacyFleetDrainFailure<'a>>> {
+        self.drain_consuming(broker, fence, handlers, FleetMaintenanceAction::Drain)
+    }
+    pub(super) fn drain_consuming(
+        self,
+        broker: &'a Arc<InstallingBroker>,
+        fence: PoolTransitionFence,
+        handlers: WorkerOriginalHandlersClosed,
+        action: FleetMaintenanceAction,
+    ) -> std::result::Result<DrainedLegacyFleet<'a>, Box<LegacyFleetDrainFailure<'a>>> {
         let end = self.owner.original_end();
         // Consume every original owner before the first fallible validation.
         let mut owner = Box::new(Owner {
@@ -71,7 +82,18 @@ impl<'a> AuthenticatedFleetMaintenance<'a> {
             handlers,
             drain: LegacyFleetDrain::new(broker, end),
         });
-        match owner.run() {
+        let checked = if owner
+            .authorization
+            .owner
+            .maintenance_request
+            .as_ref()
+            .is_some_and(|request| request.action() == action)
+        {
+            owner.run()
+        } else {
+            Err(DrainCause::Refused("FLEET_MAINTENANCE_ACTION_CHANGED"))
+        };
+        match checked {
             Ok(()) => Ok(DrainedLegacyFleet { owner: Some(owner) }),
             Err(primary) => Err(Box::new(LegacyFleetDrainFailure {
                 owner: Some(owner),
@@ -93,7 +115,7 @@ impl<'a> AuthenticatedFleetMaintenance<'a> {
         self.owner.retain_check(checked)?;
         let body = self
             .owner
-            .assert_post_handler_native()
+            .assert_interruption_native()
             .and_then(|()| self.owner.refresh_maintenance_owner())
             .and_then(|()| self.owner.assert_post_handler_native())
             .and_then(|()| self.owner.assert_maintenance_live());
@@ -102,6 +124,10 @@ impl<'a> AuthenticatedFleetMaintenance<'a> {
 }
 impl NativeFleetPreview<'_> {
     fn assert_post_handler_native(&mut self) -> Result<()> {
+        self.assert_interruption_native()?;
+        self.assert_maintenance_live()
+    }
+    pub(super) fn assert_interruption_native(&mut self) -> Result<()> {
         let end = self.original_end();
         self.frame
             .as_mut()
@@ -114,7 +140,7 @@ impl NativeFleetPreview<'_> {
             .assert_after_original_handlers(self.frame.as_mut().expect("same Q"), end)?;
         self.compare_fixed_images()?;
         self.assert_inputs_current()?;
-        self.assert_maintenance_live()
+        self.assert_preview_live()
     }
 }
 impl Owner<'_> {

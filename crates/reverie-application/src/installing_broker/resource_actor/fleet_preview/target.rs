@@ -4,12 +4,45 @@ pub(super) enum TargetAttempt {
     View(OfferPreparationView),
     Observed(Box<ObservedOfferTarget>),
     Failed(Box<OfferTargetObservationFailure>),
+    Transferred {
+        target: Box<ObservedOfferTarget>,
+        binding: UnpreparedOfferBinding,
+    },
     Moving,
 }
 pub(super) struct TargetClosed<'a> {
     _owner: &'a mut TargetAttempt,
 }
 impl TargetAttempt {
+    pub(super) fn assert_migration_transferred(&self) -> Result<()> {
+        let Self::Transferred { target, .. } = self else {
+            return Err(Cause::Refused("POOL_MIGRATION_SOURCE_NOT_TRANSFERRED"));
+        };
+        target.assert_migration_transferred().map_err(Cause::Target)
+    }
+    pub(super) fn migration_identity(&self) -> Result<installation_offer::MigrationOfferIdentity> {
+        match self {
+            Self::Observed(target) => Ok(target.migration_identity()),
+            _ => Err(Cause::Refused("POOL_MIGRATION_TARGET_STATE")),
+        }
+    }
+    pub(super) fn transfer_migration_source(
+        &mut self,
+        authorization: &PoolMigrationSourceAuthorization<'_>,
+        binding: UnpreparedOfferBinding,
+    ) -> Result<(BrokerControllerBootstrap, u32)> {
+        let Self::Observed(target) = self else {
+            return Err(Cause::Refused("POOL_MIGRATION_TARGET_STATE"));
+        };
+        let source = target
+            .take_migration_source(authorization)
+            .map_err(Cause::Target)?;
+        let Self::Observed(target) = std::mem::replace(self, Self::Moving) else {
+            unreachable!("same target retained across transfer");
+        };
+        *self = Self::Transferred { target, binding };
+        Ok(source)
+    }
     pub(super) fn capture_view(
         &mut self,
         broker: &Arc<InstallingBroker>,
@@ -52,6 +85,12 @@ impl TargetAttempt {
     pub(super) fn current(&mut self) -> Result<UnpreparedOfferBinding, Cause> {
         match self {
             Self::Observed(target) => target.read_current().map_err(Cause::Target),
+            Self::Transferred { target, binding } => {
+                target
+                    .assert_migration_transferred()
+                    .map_err(Cause::Target)?;
+                Ok(binding.clone())
+            }
             _ => Err(Cause::Refused("FLEET_PREVIEW_TARGET_STATE")),
         }
     }
@@ -71,6 +110,9 @@ impl TargetAttempt {
         frame: &Frame<'_>,
         principal: &ResourceOwnerPrincipal,
     ) -> Result<(), Cause> {
+        if let Self::Transferred { target, .. } = self {
+            return target.assert_migration_transferred().map_err(Cause::Target);
+        }
         let Self::Observed(target) = self else {
             return Err(Cause::Refused("FLEET_PREVIEW_TARGET_STATE"));
         };
@@ -89,6 +131,9 @@ impl TargetAttempt {
                 let _closed = target.close_queries().map_err(Cause::Target)?;
             }
             Self::Failed(target) => {
+                let _closed = target.close_queries().map_err(Cause::Target)?;
+            }
+            Self::Transferred { target, .. } => {
                 let _closed = target.close_queries().map_err(Cause::Target)?;
             }
             Self::Moving => return Err(Cause::Refused("FLEET_PREVIEW_TARGET_STATE")),

@@ -1,7 +1,7 @@
 use super::*;
 
 impl Inner {
-    pub(in crate::reservation_gate) fn admit_transition_fleet_cleanup(
+    pub(in crate::reservation_gate) fn admit_transition_entry(
         self: &Arc<Self>,
         cleanup: pool_transition::OriginalCleanupAdmission,
         budget: &reverie_host::worker_runtime::WorkerStopBudget,

@@ -15,13 +15,13 @@ mod protocol;
 pub use protocol::{
     CurrentFleetMaintenanceOwner, CurrentFleetPreviewViewer, CurrentPoolInstallationConsent,
     CurrentPoolInstallationViewer, CurrentResourceOwner, FLEET_MAINTENANCE_PURPOSE,
-    FleetMaintenanceRequest, FleetPreviewRequest, POOL_INSTALLATION_CONSENT_PURPOSE,
-    POOL_INSTALLATION_REQUEST_PURPOSE, POOL_REGISTRATION_PURPOSE, PoolInstallationConsentRequest,
-    PoolInstallationOfferViewData, PoolInstallationRequestData, PoolInstallationViewRequest,
-    RAM_POOL_PURPOSE, RamLaunchCommandData, RamPreviewFields, ResourceContinuationRequest,
-    ResourceContinuationVerb, ResourceOperationRequest, ResourceOwnerPrincipal,
-    ResourceRequestSelection, decode_fleet_maintenance_hello, decode_pool_registration_hello,
-    decode_ram_pool_hello,
+    FleetMaintenanceAction, FleetMaintenanceRequest, FleetPreviewRequest,
+    POOL_INSTALLATION_CONSENT_PURPOSE, POOL_INSTALLATION_REQUEST_PURPOSE,
+    POOL_REGISTRATION_PURPOSE, PoolInstallationConsentRequest, PoolInstallationOfferViewData,
+    PoolInstallationRequestData, PoolInstallationViewRequest, RAM_POOL_PURPOSE,
+    RamLaunchCommandData, RamPreviewFields, ResourceContinuationRequest, ResourceContinuationVerb,
+    ResourceOperationRequest, ResourceOwnerPrincipal, ResourceRequestSelection,
+    decode_fleet_maintenance_hello, decode_pool_registration_hello, decode_ram_pool_hello,
 };
 mod provenance;
 mod worker_image;

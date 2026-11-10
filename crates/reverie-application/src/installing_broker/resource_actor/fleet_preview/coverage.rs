@@ -19,6 +19,28 @@ pub(super) struct Coverage<'a> {
     runtimes: Vec<ProviderRuntimeObservation>,
 }
 impl<'a> Coverage<'a> {
+    pub(super) fn session_employees(
+        &self,
+    ) -> Result<std::collections::BTreeMap<ProfileSessionId, reverie_core::ids::ProfileEmployeeId>>
+    {
+        self.company
+            .company_records()
+            .and_then(|records| records.session_employees())
+            .map_err(ResourceActorError::from)
+            .map_err(Into::into)
+    }
+    pub(super) fn restore_bindings(
+        &self,
+    ) -> Result<Vec<(reverie_core::ids::ProfileEmployeeId, ProfileSessionId)>> {
+        Ok(self
+            .company
+            .provider_health_bindings()
+            .map_err(ResourceActorError::from)?
+            .into_iter()
+            .filter(|row| row.eligible())
+            .map(|row| (row.employee().clone(), row.session().clone()))
+            .collect())
+    }
     pub(super) fn same_inventory(&self, rows: &ObservedInventory) -> bool {
         self.inventory.equivalent(rows)
     }
@@ -152,7 +174,7 @@ impl<'a> Coverage<'a> {
         }
         Ok(())
     }
-    fn read_current_company(&self, frame: &mut Frame<'_>) -> Result<Metadata> {
+    pub(super) fn read_current_company(&self, frame: &mut Frame<'_>) -> Result<Metadata> {
         let company = read_company(frame)?;
         if !self.company.equivalent(&company)
             || company

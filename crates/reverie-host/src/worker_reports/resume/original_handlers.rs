@@ -47,6 +47,13 @@ pub struct WorkerOriginalHandlersDrain {
     primary: Option<Rc<WorkerReportError>>,
     cleanup: Option<Rc<WorkerReportError>>,
 }
+/// Progress of the SAME original shutdown operation only. Issued is not a
+/// handler join, socket/Hold close, native stop or fleet-closure certificate.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum WorkerOriginalInterruptionProgress {
+    Pending,
+    Issued,
+}
 /// Known handler/socket/Hold component observations, never native resource or
 /// fleet closure. Earlier primary and cleanup diagnostics remain available.
 pub struct WorkerOriginalHandlersClosed {

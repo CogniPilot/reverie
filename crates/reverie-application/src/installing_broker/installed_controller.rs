@@ -6,6 +6,7 @@ use reverie_host::worker_pool::{ActivatedController, PoolError};
 use reverie_host::worker_reports::WorkerLaunchConnection;
 use std::time::Instant;
 mod creation;
+mod publication;
 pub(in crate::installing_broker) use creation::InstalledControllerBorrow;
 pub(crate) use creation::InstalledMemberCreation;
 

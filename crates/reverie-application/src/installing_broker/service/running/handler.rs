@@ -4,7 +4,7 @@ use super::*;
 use crate::installing_broker::launch::service::{HandlerReturned, run_service_launch};
 use crate::installing_broker::{
     installation_offer::SharedInstallationOffer,
-    resource_actor::{FleetPreviewFailure, PoolRegistrationFailure, ResourceOperationFailure},
+    resource_actor::{FleetDispatchFailure, PoolRegistrationFailure, ResourceOperationFailure},
 };
 use reverie_host::worker_reports::{
     AcceptedWorkerServiceConnection, RegisteredWorkerConnection, WorkerHandlerCommand,
@@ -20,7 +20,7 @@ enum Retained<'a> {
     Goal(Box<GoalCustodyHandlerFailure>),
     Registration(Box<PoolRegistrationFailure<'a>>),
     ResourceOperation(Box<ResourceOperationFailure<'a>>),
-    FleetPreview(Box<FleetPreviewFailure<'a>>),
+    FleetPreview(Box<FleetDispatchFailure<'a>>),
     Socket(WorkerServiceConnection),
 }
 struct Stack<'a> {
@@ -150,7 +150,7 @@ pub(super) fn run(
                 )
                 .is_ok() =>
         {
-            match broker.handle_fleet_preview(connection, installation_offer.clone()) {
+            match broker.handle_fleet_operation(connection, installation_offer.clone()) {
                 Ok(closed) => {
                     if closed.primary_error_code().is_some() {
                         eprintln!("{closed}");

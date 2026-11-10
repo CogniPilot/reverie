@@ -26,7 +26,7 @@ impl InstallingBroker {
     }
 }
 impl<'a> NativeFleetPreview<'a> {
-    fn qualify_fixed_inputs(&mut self) -> Result<()> {
+    pub(super) fn qualify_fixed_inputs(&mut self) -> Result<()> {
         self.read_fixed_inputs()?;
         self.assert_qualified_native()?;
         self.check_viewer()?;

@@ -110,6 +110,30 @@ pub(super) struct LegacyFleetDrain<'a> {
     finalization_failed: bool,
 }
 impl<'a> LegacyFleetDrain<'a> {
+    pub(super) fn finish_transition(&mut self) -> Result<(), DrainCause> {
+        self.assert_drained()?;
+        let mut lifecycle = self.broker.installed.lifecycle()?;
+        lifecycle.finish_control_drain(self.drain.as_ref().expect("same actual drain"))?;
+        self.drain = None;
+        self.stage = Stage::Closed;
+        Ok(())
+    }
+    pub(super) fn assert_drained(&self) -> Result<(), DrainCause> {
+        if self.stage != Stage::Drained
+            || self.finalization_failed
+            || self.drain.is_none()
+            || self.admission.is_some()
+            || !self.originals.is_empty()
+            || self.loose.is_some()
+            || self
+                .seats
+                .iter()
+                .any(|seat| seat.stop.is_some() || seat.claim.is_some())
+        {
+            return Err(DrainCause::Refused("WORKER_FLEET_NOT_DRAINED"));
+        }
+        Ok(())
+    }
     pub(super) fn new(broker: &'a Arc<InstallingBroker>, end: Instant) -> Self {
         Self {
             broker,

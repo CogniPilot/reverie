@@ -4,9 +4,15 @@
 use super::*;
 mod binding;
 mod drain;
-pub use drain::{DrainedLegacyFleet, LegacyFleetDrainError, LegacyFleetDrainFailure};
+pub use drain::{
+    DrainedLegacyFleet, LegacyFleetDrainError, LegacyFleetDrainFailure, PoolMigrationClosed,
+    PoolMigrationFailure,
+};
 mod handlers;
 use handlers::OriginalHandlersPhase;
+mod migration;
+pub(in crate::installing_broker) use migration::PoolMigrationSourceAuthorization;
+pub use migration::{AuthenticatedPoolMigration, DrainedPoolMigration};
 #[cfg(test)]
 mod tests;
 mod window;
@@ -183,6 +189,9 @@ impl NativeFleetPreview<'_> {
     }
     fn assert_maintenance_live(&self) -> Result<()> {
         self.assert_preview_live()?;
+        self.assert_maintenance_owner_live()
+    }
+    fn assert_maintenance_owner_live(&self) -> Result<()> {
         let current = self
             .maintenance_owner
             .as_ref()

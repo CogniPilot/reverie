@@ -3,6 +3,8 @@ use super::*;
 use reverie_contracts::reservation_control::{PoolTransitionIntent, PoolTransitionSelection};
 use reverie_host::reservation_control::PoolTransitionPending;
 mod cleanup;
+mod publication;
+pub(crate) use publication::{PoolMigrationPublished, PublishedPool};
 pub(super) use cleanup::OriginalCleanupAdmission;
 #[cfg(test)]
 mod tests;
@@ -18,6 +20,7 @@ pub(super) struct TransitionRecord {
     pending: Mutex<Pending>,
     original_cleanup:
         Mutex<Option<reverie_host::worker_reports::WorkerOriginalHandlersCleanupBinding>>,
+    published: Mutex<Option<Arc<publication::PublishedConfiguration>>>,
 }
 /// Minted only after the exclusive durable writer and actual admission close.
 /// It grants no maintenance effect, capacity credit or pending-file removal.
@@ -120,6 +123,7 @@ impl ReservationGate {
                 intent,
                 pending: Mutex::new(Pending::Attempted),
                 original_cleanup: Mutex::new(None),
+                published: Mutex::new(None),
             });
             self.inner.retain_pool_transition(&record)?;
             fence = Some(PoolTransitionFence {

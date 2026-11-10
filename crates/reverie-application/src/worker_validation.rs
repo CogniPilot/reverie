@@ -149,15 +149,25 @@ impl ValidatedWorkerSnapshot {
         &self,
         candidate: &reverie_contracts::perf_transition::PerfTransition,
     ) -> Result<Self> {
-        let mut next = validate_captured(candidate.after().clone())?;
-        next.source_path = self.source_path.clone();
-        Ok(next)
+        self.validate_candidate_configuration(candidate.after().clone())
     }
     pub(crate) fn validate_gpu_candidate(
         &self,
         candidate: &reverie_contracts::gpu_access::GpuCandidate,
     ) -> Result<Self> {
-        let mut next = validate_captured(candidate.after().clone())?;
+        self.validate_candidate_configuration(candidate.after().clone())
+    }
+    pub(crate) fn validate_pool_candidate(
+        &self,
+        candidate: &reverie_contracts::worker_pool::WorkerPoolConfigurationTransition,
+    ) -> Result<Self> {
+        self.validate_candidate_configuration(candidate.after().clone())
+    }
+    fn validate_candidate_configuration(
+        &self,
+        configuration: EffectiveWorkerConfig,
+    ) -> Result<Self> {
+        let mut next = validate_captured(configuration)?;
         next.source_path = self.source_path.clone();
         Ok(next)
     }

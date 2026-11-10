@@ -12,6 +12,7 @@ mod error;
 mod os_source;
 pub use os_source::OsPoolInstallationFailure;
 mod shared;
+pub(in crate::installing_broker) use shared::MigrationOfferIdentity;
 pub use shared::{
     ObservedOfferTarget, OfferPreparationView, OfferTargetObservationError,
     OfferTargetObservationFailure, UnpreparedOfferBinding,

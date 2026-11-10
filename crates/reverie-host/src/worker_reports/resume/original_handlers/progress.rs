@@ -1,6 +1,32 @@
 use super::*;
 
 impl WorkerOriginalHandlersDrain {
+    /// Advance only unfinished rows of this SAME retained operation. The
+    /// original per-row issued flags, records, budget and error owners remain
+    /// authoritative; a completed shutdown is never issued a second time.
+    pub fn advance_interruption(
+        &mut self,
+        channel: &WorkerActorChannel,
+        expected: &Arc<WorkerReportService>,
+        runtime: &WorkerRuntime,
+    ) -> DrainResult<WorkerOriginalInterruptionProgress> {
+        let originals = self.originals();
+        if !Arc::ptr_eq(expected, &originals.selection.service)
+            || !Arc::ptr_eq(&channel.connection.record, &originals.selection.own)
+            || channel.purpose != Purpose::FleetMaintenanceWebsite
+        {
+            return Err(self.primary(WorkerReportError::Unconfirmed));
+        }
+        if let Err(cause) = self.assert_runtime(runtime) {
+            return Err(self.primary(cause));
+        }
+        self.interrupt(channel, expected, runtime)?;
+        Ok(if self.admitted && self.interrupted {
+            WorkerOriginalInterruptionProgress::Issued
+        } else {
+            WorkerOriginalInterruptionProgress::Pending
+        })
+    }
     fn forward_current(
         &self,
         channel: &WorkerActorChannel,

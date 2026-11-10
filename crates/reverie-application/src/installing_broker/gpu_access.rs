@@ -27,10 +27,20 @@ impl InstalledWorker {
         &self,
         end: std::time::Instant,
     ) -> Result<LaptopLifecycle<'_>, GateError> {
+        self.lifecycle_with_deadline(LifecycleDeadline::Gpu(end))
+    }
+    pub(crate) fn pool_lifecycle(
+        &self,
+        proof: &crate::reservation_gate::PublishedPool,
+    ) -> Result<LaptopLifecycle<'_>, GateError> {
+        self.lifecycle_with_deadline(LifecycleDeadline::Pool(proof))
+    }
+    fn lifecycle_with_deadline(
+        &self,
+        deadline: LifecycleDeadline<'_>,
+    ) -> Result<LaptopLifecycle<'_>, GateError> {
         loop {
-            if std::time::Instant::now() >= end {
-                return Err(GateError::Refused("GPU_APPLY_DEADLINE"));
-            }
+            let end = deadline.current()?;
             let guard = match self.laptops.try_lock() {
                 Ok(guard) => guard,
                 Err(std::sync::TryLockError::Poisoned(_)) => {
@@ -44,9 +54,7 @@ impl InstalledWorker {
                     continue;
                 }
             };
-            if std::time::Instant::now() >= end {
-                return Err(GateError::Refused("GPU_APPLY_DEADLINE"));
-            }
+            deadline.current()?;
             return Ok(LaptopLifecycle { owner: self, guard });
         }
     }
@@ -61,6 +69,50 @@ impl InstalledWorker {
             return Err(GateError::Refused("GPU_LIFECYCLE_CHANGED"));
         }
         let (before, after, binding) = proof.into_parts();
+        self.publish_configuration_tuple(
+            &before,
+            &after,
+            &binding,
+            context,
+            slot,
+            ControllerPublication::Unchanged,
+        )
+    }
+    pub(crate) fn publish_pool(
+        &self,
+        proof: &crate::reservation_gate::PublishedPool,
+        lifecycle: &LaptopLifecycle<'_>,
+        context: &mut crate::reservation_observer::ObservationContext,
+        binding: &RwLock<reverie_contracts::reservation_control::ControlBinding>,
+        controller_slot: &installed_controller::InstalledControllerSlot,
+        controller: &mut Option<reverie_host::worker_pool::ActivatedController>,
+    ) -> Result<(), GateError> {
+        if !lifecycle.belongs_to(self) {
+            return Err(GateError::Refused("POOL_LIFECYCLE_CHANGED"));
+        }
+        let (before, after, next_binding) = proof.parts();
+        self.publish_configuration_tuple(
+            before,
+            after,
+            next_binding,
+            context,
+            binding,
+            ControllerPublication::Install {
+                slot: controller_slot,
+                owner: controller,
+                proof,
+            },
+        )
+    }
+    fn publish_configuration_tuple(
+        &self,
+        before: &Arc<ValidatedWorkerSnapshot>,
+        after: &Arc<ValidatedWorkerSnapshot>,
+        binding: &reverie_contracts::reservation_control::ControlBinding,
+        context: &mut crate::reservation_observer::ObservationContext,
+        slot: &RwLock<reverie_contracts::reservation_control::ControlBinding>,
+        controller: ControllerPublication<'_>,
+    ) -> Result<(), GateError> {
         let mut current = self
             .current
             .write()
@@ -68,7 +120,7 @@ impl InstalledWorker {
         let mut bound = slot
             .write()
             .map_err(|_| GateError::Refused("RESERVATION_ADMISSION_UNAVAILABLE"))?;
-        if !Arc::ptr_eq(&current.snapshot, &before)
+        if !Arc::ptr_eq(&current.snapshot, before)
             || before.source_path() != after.source_path()
             || !reverie_contracts::worker_config::equivalent(
                 context.configuration(),
@@ -78,12 +130,59 @@ impl InstalledWorker {
             return Err(GateError::Refused("GPU_CONFIG_CHANGED"));
         }
         let next_context = context.with_applied_configuration(after.configuration().clone());
-        let next = CurrentInstalled::capture(after);
-        // Every fallible lock/check and complete tuple derivation has ended.
-        // Gate state/context/current/binding stay held across all three writes.
+        let next = CurrentInstalled::capture(Arc::clone(after));
+        let next_binding = binding.clone();
+        let mut install = match controller {
+            ControllerPublication::Unchanged => None,
+            ControllerPublication::Install { slot, owner, proof } => {
+                let target = slot
+                    .try_lock()
+                    .map_err(|_| GateError::Refused("WORKER_CONTROLLER_SLOT_UNAVAILABLE"))?;
+                if target.is_some() || owner.is_none() {
+                    return Err(GateError::Refused("WORKER_CONTROLLER_INSTALL_CHANGED"));
+                }
+                Some((target, owner, proof))
+            }
+        };
+        if let Some((_, _, proof)) = &install {
+            proof.assert_live()?;
+        }
+        // All fallible preparation and the final original-budget check ended.
+        // Every tuple lock stays held across configuration/controller writes.
         *context = next_context;
         *current = next;
-        *bound = binding;
+        *bound = next_binding;
+        if let Some((target, owner, _)) = &mut install {
+            **target = owner.take();
+        }
         Ok(())
+    }
+}
+enum ControllerPublication<'a> {
+    Unchanged,
+    Install {
+        slot: &'a installed_controller::InstalledControllerSlot,
+        owner: &'a mut Option<reverie_host::worker_pool::ActivatedController>,
+        proof: &'a crate::reservation_gate::PublishedPool,
+    },
+}
+enum LifecycleDeadline<'a> {
+    Gpu(std::time::Instant),
+    Pool(&'a crate::reservation_gate::PublishedPool),
+}
+impl LifecycleDeadline<'_> {
+    fn current(&self) -> Result<std::time::Instant, GateError> {
+        match self {
+            Self::Gpu(end) => {
+                if std::time::Instant::now() >= *end {
+                    return Err(GateError::Refused("GPU_APPLY_DEADLINE"));
+                }
+                Ok(*end)
+            }
+            Self::Pool(proof) => {
+                proof.assert_live()?;
+                Ok(proof.deadline())
+            }
+        }
     }
 }

@@ -6,16 +6,20 @@ use std::rc::Rc;
 mod authorization;
 mod close;
 mod coverage;
+mod dispatch;
 mod error;
+pub(in crate::installing_broker) use dispatch::FleetDispatchFailure;
 mod inputs;
 mod owner;
 mod qualified;
 mod target;
 #[cfg(test)]
 mod tests;
+pub(in crate::installing_broker) use authorization::PoolMigrationSourceAuthorization;
 pub use authorization::{
-    AuthenticatedFleetMaintenance, DrainedLegacyFleet, FleetMaintenanceCheckError,
-    LegacyFleetDrainError, LegacyFleetDrainFailure,
+    AuthenticatedFleetMaintenance, AuthenticatedPoolMigration, DrainedLegacyFleet,
+    DrainedPoolMigration, FleetMaintenanceCheckError, LegacyFleetDrainError,
+    LegacyFleetDrainFailure, PoolMigrationClosed, PoolMigrationFailure,
 };
 use error::Cause;
 pub use qualified::QualifiedFleetPreview;

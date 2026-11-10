@@ -33,7 +33,7 @@ impl ReservationGate {
             "WORKER_STOP_ADMISSION_ORIGIN",
         )?;
         let purpose = fence.legacy_fleet_cleanup(closed, authorization.fleet_stop_targets()?)?;
-        let admission = self.inner.admit_transition_fleet_cleanup(
+        let admission = self.inner.admit_transition_entry(
             purpose,
             budget,
             authorization.fleet_stop_deadline(),

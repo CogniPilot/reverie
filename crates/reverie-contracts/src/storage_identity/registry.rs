@@ -23,6 +23,27 @@ pub struct CompanyRecords {
     records: Vec<RegistryEmployee>,
 }
 impl CompanyRecords {
+    /// Canonical current and retired SID bindings, after the same full company
+    /// ambiguity check. These values grant no migration or stop permission.
+    pub fn session_employees(
+        &self,
+    ) -> Result<std::collections::BTreeMap<ProfileSessionId, ProfileEmployeeId>> {
+        let mut sessions = std::collections::BTreeMap::new();
+        for row in &self.records {
+            let Some(session) = &row.session else {
+                continue;
+            };
+            let session = session
+                .scalar_text()
+                .and_then(|value| ProfileSessionId::parse(&value).ok())
+                .ok_or(IdentityDataError::CanonicalIdentity)?;
+            let employee = row.canonical_identity()?;
+            if sessions.insert(session, employee).is_some() {
+                return Err(IdentityDataError::AmbiguousRegistry);
+            }
+        }
+        Ok(sessions)
+    }
     pub fn records(&self) -> &[RegistryEmployee] {
         &self.records
     }

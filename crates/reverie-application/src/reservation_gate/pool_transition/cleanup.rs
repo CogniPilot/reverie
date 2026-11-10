@@ -19,6 +19,7 @@ enum CleanupTarget {
         base: reverie_core::worker_schema::WorkerBase,
         targets: Arc<Vec<WorkerContainerName>>,
     },
+    PoolPublication,
 }
 impl PoolTransitionFence {
     pub(crate) fn assert_gate(&self, gate: &ReservationGate) -> Result<()> {
@@ -101,6 +102,14 @@ impl PoolTransitionFence {
             },
         })
     }
+    pub(in crate::reservation_gate) fn pool_publication(&self) -> Result<OriginalCleanupAdmission> {
+        self.assert_handlers_outside_admission()?;
+        self.current()?;
+        Ok(OriginalCleanupAdmission {
+            record: Arc::clone(&self.record),
+            target: CleanupTarget::PoolPublication,
+        })
+    }
 }
 impl Inner {
     pub(in crate::reservation_gate) fn original_cleanup(
@@ -180,7 +189,10 @@ impl OriginalCleanupAdmission {
         &self,
         gate: &Arc<Inner>,
     ) -> Result<()> {
-        if !matches!(&self.target, CleanupTarget::LegacyFleet { .. }) {
+        if !matches!(
+            &self.target,
+            CleanupTarget::LegacyFleet { .. } | CleanupTarget::PoolPublication
+        ) {
             return Ok(());
         }
         self.assert_pending(gate)?;
@@ -208,10 +220,7 @@ impl OriginalCleanupAdmission {
                 .is_some_and(|actual| Arc::ptr_eq(actual, &self.record)),
             "POOL_TRANSITION_REQUIRES_RECONCILIATION",
         )?;
-        self.record
-            .intent
-            .assert_configuration(gate.config()?.configuration())?;
-        Ok(())
+        self.record.assert_live_configuration(gate)
     }
     pub(in crate::reservation_gate) fn assert_pending(&self, gate: &Inner) -> Result<()> {
         self.assert_selected(gate)?;
@@ -228,6 +237,7 @@ impl OriginalCleanupAdmission {
                     && WorkerContainerName::from_recovered_name_data(base, target.as_str())
                         .is_some()
             }
+            CleanupTarget::PoolPublication => false,
         };
         need(selected, "WORKER_HANDLER_CLEANUP_TARGET")
     }

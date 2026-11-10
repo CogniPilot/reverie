@@ -5,6 +5,7 @@ use reverie_host::worker_reports::{
     WorkerHandlersProgress, WorkerOriginalHandlersCleanupBinding, WorkerOriginalHandlersClosed,
     WorkerOriginalHandlersDrain,
 };
+mod advance;
 
 pub(super) enum OriginalHandlersPhase {
     Uncaptured,
@@ -33,8 +34,8 @@ impl AuthenticatedFleetMaintenance<'_> {
         })();
         self.owner.retain_check(body)
     }
-    /// Exactly one forward attempt. A Pending/error result never permits a
-    /// second interruption; retain this original drain and settle its jobs.
+    /// Start one original interruption operation. Pending may only advance
+    /// through advance_original_handlers on these SAME retained selected rows.
     pub fn interrupt_original_handlers(
         &mut self,
         fence: &PoolTransitionFence,
@@ -109,7 +110,7 @@ impl AuthenticatedFleetMaintenance<'_> {
         fence.assert_cleanup_selection(&closed.cleanup_binding())?;
         Ok(())
     }
-    fn assert_interrupted_selection(
+    pub(super) fn assert_interrupted_selection(
         &self,
         fence: &PoolTransitionFence,
         other: &WorkerOriginalHandlersCleanupBinding,
