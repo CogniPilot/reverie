@@ -1,0 +1,290 @@
+//! Stopped original Offer-service owner for one high-threshold DATA revision.
+use super::*;
+use crate::{
+    worker_image::{ClosedImageMaintenance, ImageMaintenanceFailure, ImageMaintenanceLocks},
+    worker_service::{
+        ClosedImageServiceMaintenance, ImageServiceMaintenance, NativeWorkerServiceRole,
+        StoppedServiceFailure, StoppedServiceOrigin, StoppedWorkerService,
+        capture_stopped_worker_service_for_role,
+    },
+};
+use reverie_core::{ids::ProfileEmployeeId, operations::JournalDigest};
+use std::fmt;
+mod prepare;
+mod publication;
+struct RevisionOwner {
+    nominal: Box<NominationOwner>,
+    expected: JournalDigest,
+    default: u32,
+    overrides: Vec<(ProfileEmployeeId, u32)>,
+    next: Option<PoolInstallationRequestData>,
+    stopped: Option<StoppedWorkerService>,
+    service: Option<ImageServiceMaintenance>,
+    service_origin: Option<StoppedServiceOrigin>,
+    closed_service: Option<ClosedImageServiceMaintenance>,
+    service_failure: Option<Box<StoppedServiceFailure>>,
+    locks: Option<ImageMaintenanceLocks>,
+    closed_locks: Option<ClosedImageMaintenance>,
+    lock_failure: Option<Box<ImageMaintenanceFailure>>,
+    publication: Option<publication::Publication>,
+    attempted: bool,
+}
+#[must_use = "retain the same revision owner; a partial publication is not replayable"]
+pub struct PoolNominationRevisionFailure {
+    owner: Option<Box<RevisionOwner>>,
+    cause: Option<PoolNominationError>,
+}
+impl PoolNominationRevisionFailure {
+    pub fn cause(&self) -> &PoolNominationError {
+        self.cause.as_ref().expect("same cause")
+    }
+}
+impl fmt::Debug for PoolNominationRevisionFailure {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("PoolNominationRevisionFailure")
+            .field(&self.cause())
+            .finish()
+    }
+}
+impl fmt::Display for PoolNominationRevisionFailure {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.cause().fmt(f)
+    }
+}
+impl std::error::Error for PoolNominationRevisionFailure {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(self.cause())
+    }
+}
+impl Drop for PoolNominationRevisionFailure {
+    fn drop(&mut self) {
+        std::mem::forget((self.owner.take(), self.cause.take()));
+    }
+}
+pub fn revise_os_pool_nomination(
+    source: Option<&Path>,
+    config: &EffectiveWorkerConfig,
+    expected: &JournalDigest,
+    default: u32,
+    overrides: Vec<(ProfileEmployeeId, u32)>,
+    runtime: WorkerRuntime,
+    end: Instant,
+) -> std::result::Result<PoolNominationPublished, Box<PoolNominationRevisionFailure>> {
+    let mut owner = Box::new(RevisionOwner {
+        nominal: Box::new(NominationOwner::capture(
+            source,
+            config,
+            Path::new(""),
+            runtime,
+            end,
+            InputPurpose::Request,
+        )),
+        expected: expected.clone(),
+        default,
+        overrides,
+        next: None,
+        stopped: None,
+        service: None,
+        service_origin: None,
+        closed_service: None,
+        service_failure: None,
+        locks: None,
+        closed_locks: None,
+        lock_failure: None,
+        publication: None,
+        attempted: false,
+    });
+    let result = owner.run();
+    match result {
+        Ok(result) => Ok(result),
+        Err(primary) => {
+            let cause = match owner.close_components() {
+                Ok(()) => primary,
+                Err(cleanup) => {
+                    PoolNominationError::Finalization(Box::new(primary), Box::new(cleanup))
+                }
+            };
+            Err(Box::new(PoolNominationRevisionFailure {
+                owner: Some(owner),
+                cause: Some(cause),
+            }))
+        }
+    }
+}
+impl RevisionOwner {
+    fn run(&mut self) -> Result<PoolNominationPublished> {
+        self.prepare()?;
+        self.begin_fence()?;
+        self.publication = Some(publication::Publication::empty());
+        self.publication
+            .as_mut()
+            .expect("retained before opening")
+            .capture(&self.nominal)?;
+        self.assert_before()?;
+        self.attempted = true;
+        self.publication
+            .as_mut()
+            .expect("original file owners")
+            .publish(
+                &self.nominal,
+                self.next.as_ref().expect("checked next DATA"),
+                self.locks.as_mut().expect("same locks"),
+                self.service.as_ref().expect("same IMAGE"),
+            )?;
+        self.assert_after()?;
+        self.close_components()?;
+        self.assert_after_files()?;
+        self.closed_locks
+            .as_ref()
+            .expect("checked locks close")
+            .assert_current()?;
+        let source = self.nominal.source.as_ref().expect("original source");
+        let origin = self.service_origin.as_ref().expect("original IMAGE origin");
+        let closed = self
+            .closed_service
+            .as_ref()
+            .expect("same known service closure");
+        need(
+            closed.source() == source && closed.belongs_to(origin),
+            "POOL_NOMINATION_SERVICE_RECEIPT_CHANGED",
+        )?;
+        let service = self.closed_service.take().expect("checked service close");
+        let closed = service
+            .release()
+            .map_err(|cause| self.keep_service(cause))?;
+        let source = self.nominal.source.as_ref().expect("original source");
+        let origin = self.service_origin.as_ref().expect("original IMAGE origin");
+        need(
+            closed.source() == source && closed.belongs_to(origin),
+            "POOL_NOMINATION_SERVICE_RECEIPT_CHANGED",
+        )?;
+        let next = self.next.as_ref().expect("same new nomination");
+        Ok(PoolNominationPublished {
+            path: self.nominal.selection.clone(),
+            digest: next.digest().as_str().to_owned(),
+            canonical: next.canonical_bytes().to_vec(),
+            proposed_from_hard: Vec::new(),
+        })
+    }
+    fn begin_fence(&mut self) -> Result<()> {
+        need(
+            !self.attempted,
+            "POOL_NOMINATION_REVISION_ALREADY_ATTEMPTED",
+        )?;
+        let stopped = self.stopped.take().expect("same stopped Offer proof");
+        self.service = Some(
+            stopped
+                .begin_image_transition()
+                .map_err(|cause| self.keep_service(cause))?,
+        );
+        self.service_origin = Some(self.service.as_ref().expect("same IMAGE owner").origin());
+        Ok(())
+    }
+    fn keep_service(&mut self, cause: Box<StoppedServiceFailure>) -> PoolNominationError {
+        let code = cause.primary_error().code();
+        self.service_failure = Some(cause);
+        PoolNominationError::Refused(code)
+    }
+    fn close_components(&mut self) -> Result<()> {
+        let files = self
+            .publication
+            .as_mut()
+            .map_or(Ok(()), publication::Publication::close);
+        let nominal = self.nominal.close();
+        let locks = if let Some(locks) = self.locks.take() {
+            match locks.close() {
+                Ok(closed) => {
+                    self.closed_locks = Some(closed);
+                    Ok(())
+                }
+                Err(cause) => {
+                    let code = cause.cause().code();
+                    self.lock_failure = Some(cause);
+                    Err(PoolNominationError::Refused(code))
+                }
+            }
+        } else {
+            Ok(())
+        };
+        let service = if let Some(service) = self.service.take() {
+            match service.close() {
+                Ok(closed) => {
+                    self.closed_service = Some(closed);
+                    Ok(())
+                }
+                Err(cause) => Err(self.keep_service(cause)),
+            }
+        } else if let Some(stopped) = self.stopped.take() {
+            stopped
+                .finish()
+                .map(|_| ())
+                .map_err(|cause| self.keep_service(cause))
+        } else {
+            Ok(())
+        };
+        finalized(finalized(files, nominal), finalized(locks, service))
+    }
+    fn assert_before(&mut self) -> Result<()> {
+        self.nominal.assert_preflight()?;
+        self.nominal
+            .derived
+            .as_mut()
+            .expect("fresh derivation")
+            .assert_uninstalled(
+                &self.nominal.runtime,
+                self.nominal
+                    .request
+                    .as_ref()
+                    .expect("original proposal")
+                    .policy(),
+            )?;
+        self.nominal
+            .derived
+            .as_ref()
+            .expect("same native company")
+            .assert_metadata(&self.nominal.config)?;
+        self.locks
+            .as_mut()
+            .expect("same locks")
+            .assert_held_current()?;
+        self.service.as_mut().expect("same IMAGE").revalidate()?;
+        self.nominal.assert_preflight()
+    }
+    fn assert_after(&mut self) -> Result<()> {
+        self.nominal
+            .derived
+            .as_mut()
+            .expect("same derivation")
+            .assert_uninstalled(
+                &self.nominal.runtime,
+                self.next.as_ref().expect("new proposal").policy(),
+            )?;
+        self.nominal
+            .derived
+            .as_ref()
+            .expect("same company")
+            .assert_metadata(&self.nominal.config)?;
+        self.nominal.assert_source()?;
+        self.locks
+            .as_mut()
+            .expect("same locks")
+            .assert_held_current()?;
+        self.service.as_mut().expect("same IMAGE").revalidate()?;
+        self.assert_after_files()
+    }
+    fn assert_after_files(&self) -> Result<()> {
+        self.nominal.current()?;
+        need(
+            self.nominal
+                .stores
+                .as_ref()
+                .expect("same stores")
+                .unchanged()?,
+            "POOL_NOMINATION_PROTECTED_STORE_CHANGED",
+        )?;
+        self.publication
+            .as_ref()
+            .expect("original publication")
+            .assert_published(&self.nominal, self.next.as_ref().expect("new DATA"))
+    }
+}

@@ -1,7 +1,7 @@
 //! Pure time-bound DATA checks, not fabricated qualified/native owner tests.
 use super::*;
 #[test]
-fn original_deadline_and_original_preview_expiry_both_bound_consent() {
+fn original_deadline_bounds_the_separate_human_consent_window() {
     let now = Instant::now();
     let epoch = 1_000_000;
     let (expires, end) =
@@ -10,8 +10,8 @@ fn original_deadline_and_original_preview_expiry_both_bound_consent() {
     assert_eq!(end, now + Duration::from_secs(3));
     let (expires, end) =
         window::consent_window(now + Duration::from_secs(20), epoch + 2000, epoch, now).unwrap();
-    assert_eq!(expires, epoch + 2000);
-    assert_eq!(end, now + Duration::from_secs(2));
+    assert_eq!(expires, epoch + 20_000);
+    assert_eq!(end, now + Duration::from_secs(20));
 }
 #[test]
 fn expired_originals_and_overflow_refuse_without_a_new_window() {

@@ -28,7 +28,9 @@ mod derivation;
 mod error;
 use derivation::NominationDerivation;
 mod publish;
+mod revision;
 pub use error::{PoolNominationError, PoolNominationFailure};
+pub use revision::{PoolNominationRevisionFailure, revise_os_pool_nomination};
 type Result<T> = std::result::Result<T, PoolNominationError>;
 
 /// Known checked publication of selection DATA, never setup/readiness consent.
@@ -123,33 +125,9 @@ fn publish_selected_nomination(
     end: Instant,
     purpose: InputPurpose,
 ) -> std::result::Result<PoolNominationPublished, Box<PoolNominationFailure>> {
-    let mut owner = Box::new(NominationOwner {
-        source: source.map(Path::to_owned),
-        config: ReservationConfiguration::capture(config.clone()),
-        selection: selection.to_owned(),
-        purpose,
-        runtime,
-        input: None,
-        input_stamp: None,
-        raw: None,
-        enrollment: None,
-        proposed_from_hard: Vec::new(),
-        derived: None,
-        request: None,
-        immutable: Default::default(),
-        image_raw: None,
-        images: None,
-        target: None,
-        directories: None,
-        directory_identities: Vec::new(),
-        before: None,
-        stores: None,
-        output: None,
-        output_stamp: None,
-        end,
-        attempted: false,
-        runtime_closed: false,
-    });
+    let mut owner = Box::new(NominationOwner::capture(
+        source, config, selection, runtime, end, purpose,
+    ));
     let body = owner.prepare().and_then(|()| owner.publish());
     let cleanup = owner.close();
     let finished = finalized(body, cleanup).and_then(|published| {
@@ -162,6 +140,42 @@ fn publish_selected_nomination(
     }
 }
 impl NominationOwner {
+    fn capture(
+        source: Option<&Path>,
+        config: &EffectiveWorkerConfig,
+        selection: &Path,
+        runtime: WorkerRuntime,
+        end: Instant,
+        purpose: InputPurpose,
+    ) -> Self {
+        Self {
+            source: source.map(Path::to_owned),
+            config: ReservationConfiguration::capture(config.clone()),
+            selection: selection.to_owned(),
+            purpose,
+            runtime,
+            input: None,
+            input_stamp: None,
+            raw: None,
+            enrollment: None,
+            proposed_from_hard: Vec::new(),
+            derived: None,
+            request: None,
+            immutable: Default::default(),
+            image_raw: None,
+            images: None,
+            target: None,
+            directories: None,
+            directory_identities: Vec::new(),
+            before: None,
+            stores: None,
+            output: None,
+            output_stamp: None,
+            end,
+            attempted: false,
+            runtime_closed: false,
+        }
+    }
     fn prepare(&mut self) -> Result<()> {
         self.current()?;
         let root = os_root()?;

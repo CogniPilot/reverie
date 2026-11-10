@@ -18,7 +18,8 @@ mod installation_request;
 pub use installation_request::load_os_pool_installation_request;
 pub use installation_request::{
     PoolNominationError, PoolNominationFailure, PoolNominationPublished,
-    publish_current_os_pool_nomination, publish_os_pool_nomination,
+    PoolNominationRevisionFailure, publish_current_os_pool_nomination, publish_os_pool_nomination,
+    revise_os_pool_nomination,
 };
 mod member;
 mod namespace;

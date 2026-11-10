@@ -15,6 +15,7 @@ use reverie_contracts::{
 use reverie_store::storage_identity::{self, StorageIdentityConfig};
 use std::collections::BTreeSet;
 mod images;
+mod revision;
 
 pub(super) struct NominationDerivation {
     facts: InstalledFactsObserver,

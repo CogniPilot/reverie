@@ -67,10 +67,15 @@ impl InstallingBroker {
             return Box::new(FleetDispatchFailure::Preview(owner.into_failure(cause)))
                 .settle_for_worker();
         }
-        let authorization = QualifiedFleetPreview { owner }
+        let authorization = match (QualifiedFleetPreview { owner })
             .authenticate_maintenance()
             .and_then(AuthenticatedFleetMaintenance::into_pool_migration)
-            .map_err(|owner| Box::new(FleetDispatchFailure::Preview(owner)))?;
+        {
+            Ok(authorization) => authorization,
+            Err(owner) => {
+                return Box::new(FleetDispatchFailure::Preview(owner)).settle_for_worker();
+            }
+        };
         authorization
             .execute(self)
             .map(FleetDispatchClosed::Migration)

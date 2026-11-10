@@ -1,12 +1,25 @@
 //! Explicit owner-local import. Request bytes are the existing closed OS
 //! nomination DATA, never a runtime file destination or execution permission.
 use clap::Subcommand;
+use reverie_core::{ids::ProfileEmployeeId, operations::JournalDigest};
 use std::{
     path::{Path, PathBuf},
     time::{Duration, Instant},
 };
 #[derive(Subcommand)]
 pub(super) enum Action {
+    /// Revise only proposed soft thresholds under the original stopped Offer
+    /// service. Preserves the old inode; never grants activation or wakes staff.
+    ReviseNominationV1 {
+        #[arg(long)]
+        config: PathBuf,
+        #[arg(long)]
+        expected_request_digest: String,
+        #[arg(long)]
+        default_high_mib: u32,
+        #[arg(long = "employee-high", value_parser = employee_high)]
+        employee_high: Vec<(ProfileEmployeeId, u32)>,
+    },
     /// Import the closed OS nomination. Principal must be the explicit
     /// enrollment response; both loaded images must match packaged inputs.
     /// Refuses any existing fixed request; never overwrites or restarts.
@@ -28,6 +41,33 @@ pub(super) enum Action {
 }
 pub(super) fn run(action: Action) -> Result<(), Box<dyn std::error::Error>> {
     match action {
+        Action::ReviseNominationV1 {
+            config,
+            expected_request_digest,
+            default_high_mib,
+            employee_high,
+        } => {
+            let expected = JournalDigest::parse(&expected_request_digest)?;
+            let (snapshot, runtime) = capture(&config)?;
+            let published =
+                reverie_application::installing_broker::revise_os_worker_pool_nomination(
+                    &snapshot,
+                    runtime,
+                    &expected,
+                    default_high_mib,
+                    employee_high,
+                    Instant::now() + Duration::from_secs(30),
+                )?;
+            let request: serde_json::Value = serde_json::from_slice(published.canonical_request())?;
+            println!(
+                "{}",
+                serde_json::json!({"nominationRevised":true,"path":published.path(),
+                "requestDigest":published.request_digest(),"proposedNomination":request,
+                "defaultHighMiBMaterializedForCurrentRoster":default_high_mib,
+                "requiresFreshOffer":true,"requiresExplicitMaintenanceConsent":true,"started":false})
+            );
+            Ok(())
+        }
         Action::PrepareNominationV1 { config, enrollment } => {
             let end = Instant::now() + Duration::from_secs(30);
             let (snapshot, runtime) = capture(&config)?;
@@ -62,6 +102,17 @@ pub(super) fn run(action: Action) -> Result<(), Box<dyn std::error::Error>> {
             Ok(())
         }
     }
+}
+fn employee_high(raw: &str) -> Result<(ProfileEmployeeId, u32), String> {
+    let (id, high) = raw
+        .split_once('=')
+        .ok_or_else(|| "Use canonical-employee-UUID=MiB".to_owned())?;
+    let id =
+        ProfileEmployeeId::parse(id).map_err(|_| "Employee must be a canonical UUID".to_owned())?;
+    let high = high
+        .parse::<u32>()
+        .map_err(|_| "Soft RAM must be integer MiB".to_owned())?;
+    Ok((id, high))
 }
 fn capture(
     config: &Path,

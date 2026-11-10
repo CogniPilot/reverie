@@ -2,6 +2,7 @@
 //! separately derived policy. Only the real website owner can later consent.
 use super::*;
 mod policy;
+mod revision;
 impl PoolInstallationRequestData {
     /// Closed DATA validation only, before any native observation is necessary.
     pub fn validate_enrollment(enrollment: &[u8]) -> Result<()> {
