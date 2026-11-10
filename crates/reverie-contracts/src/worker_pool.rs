@@ -2,8 +2,10 @@
 //! installed-controller, maintenance, admission or kernel-readback capability.
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+mod anchor_recovery;
 mod configuration_transition;
 mod controller_v2;
+pub use anchor_recovery::RetainedPoolAnchor;
 pub use configuration_transition::{
     PoolConfigurationDataError, PoolMemberPolicyEdit, WorkerPoolConfigurationTransition,
 };
@@ -13,11 +15,11 @@ mod provider;
 mod retired;
 pub use controller_v2::SERVICE_PURPOSE as CONTROLLER_SERVICE_V2_PURPOSE;
 pub use controller_v2::{BrokerBirthData, BrokerProgramData, ControllerBirthV2};
-pub use engine::validate_anchor_inspection;
 pub use engine::{
-    validate_controller_inspection, validate_controller_service_v2_inspection,
-    validate_engine_information, validate_failed_controller_service_v2_inspection,
-    validate_pool_image_information, website_process_data,
+    validate_anchor_inspection, validate_controller_inspection,
+    validate_controller_service_v2_inspection, validate_engine_information,
+    validate_failed_controller_service_v2_inspection, validate_pool_image_information,
+    validate_retained_anchor_inspection, website_process_data,
 };
 pub use member_policy::WorkerPoolMemberPolicy;
 pub use provider::WorkerPoolProvider;

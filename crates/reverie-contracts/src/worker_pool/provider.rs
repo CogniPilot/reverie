@@ -86,6 +86,38 @@ fn birth_member_policy(
 }
 
 impl WorkerPoolProvider {
+    pub(super) fn for_replacement(
+        config: &EffectiveWorkerConfig,
+        policy: &WorkerPoolPolicy,
+    ) -> Result<Value, PoolPolicyError> {
+        let Some(previous) = Self::from_config(config)?.filter(|old| old.member_revision > 0)
+        else {
+            return encode_provider(&ProviderV1 {
+                version: 1,
+                purpose: PURPOSE.to_owned(),
+                policy: policy.clone(),
+            });
+        };
+        let mut overrides = BTreeMap::new();
+        for (employee, settings) in previous.member_overrides {
+            let birth = birth_member_policy(policy, &employee).ok_or(PoolPolicyError)?;
+            if settings == birth {
+                continue;
+            }
+            if settings.memory_high_mib() >= policy.memory_max_mi_b {
+                return Err(PoolPolicyError);
+            }
+            overrides.insert(employee, settings);
+        }
+        encode_provider(&ProviderV2 {
+            version: 2,
+            purpose: EDITABLE_PURPOSE.to_owned(),
+            policy: policy.clone(),
+            member_revision: previous.member_revision,
+            member_overrides: overrides,
+        })
+    }
+
     pub fn from_config(config: &EffectiveWorkerConfig) -> Result<Option<Self>, PoolPolicyError> {
         let Node::Object(root) = &config.as_value().0 else {
             return Err(PoolPolicyError);

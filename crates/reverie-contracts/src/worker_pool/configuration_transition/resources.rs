@@ -9,7 +9,8 @@ pub(super) fn candidate(
         .map_err(PoolConfigurationDataError::Resources)?;
     let defaults = crate::resource_config::checked_effective_policy(before)
         .map_err(PoolConfigurationDataError::Resources)?;
-    WorkerPoolProvider::from_config(before).map_err(PoolConfigurationDataError::Policy)?;
+    let provider = WorkerPoolProvider::for_replacement(before, policy)
+        .map_err(PoolConfigurationDataError::Policy)?;
     let memory = memory::validate(before).map_err(PoolConfigurationDataError::Memory)?;
     let mut fields: Object = object(before.as_value())?
         .iter()
@@ -23,16 +24,7 @@ pub(super) fn candidate(
         key("employeeMemoryPolicies"),
         memory_policies::employees(&memory, policy)?,
     );
-    let raw = serde_json::to_vec(&serde_json::json!({
-        "version":1,"purpose":super::super::provider::PURPOSE,"policy":policy
-    }))
-    .expect("fixed checked pool policy DATA");
-    fields.insert(
-        key("workerPoolProvider"),
-        crate::legacy_json::decode_utf8(&raw).map_err(|_| {
-            PoolConfigurationDataError::Refused("WORKER_POOL_CONFIGURATION_PROVIDER")
-        })?,
-    );
+    fields.insert(key("workerPoolProvider"), provider);
     before
         .pool_configuration_fields(fields)
         .ok_or(PoolConfigurationDataError::Refused(

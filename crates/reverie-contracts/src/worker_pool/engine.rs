@@ -256,6 +256,41 @@ pub fn validate_anchor_inspection(
     policy_digest: &str,
 ) -> Result<(), PoolPolicyError> {
     let value = decode(raw)?;
+    anchor_spec(&value, policy, cid, pid, policy_digest)
+}
+
+pub fn validate_retained_anchor_inspection(
+    raw: &[u8],
+    policy: &WorkerPoolPolicy,
+    anchor: &RetainedPoolAnchor,
+) -> Result<(), PoolPolicyError> {
+    let value = decode(raw)?;
+    anchor_spec(
+        &value,
+        policy,
+        anchor.container_id(),
+        anchor.pid(),
+        anchor.original_birth_digest(),
+    )?;
+    let state = &value["State"];
+    let host = &value["HostConfig"];
+    let stable = state["Status"] == "running"
+        && state["Dead"] == false
+        && state["OOMKilled"] == false
+        && state["Error"] == ""
+        && value["RestartCount"] == 0
+        && host["AutoRemove"] == false
+        && host["RestartPolicy"] == json!({"Name":"no","MaximumRetryCount":0});
+    stable.then_some(()).ok_or(PoolPolicyError)
+}
+
+fn anchor_spec(
+    value: &Value,
+    policy: &WorkerPoolPolicy,
+    cid: &str,
+    pid: u32,
+    policy_digest: &str,
+) -> Result<(), PoolPolicyError> {
     let host = &value["HostConfig"];
     let config = &value["Config"];
     let valid = hex_id(cid)

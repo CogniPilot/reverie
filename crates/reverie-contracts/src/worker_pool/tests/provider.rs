@@ -221,3 +221,55 @@ fn existing_birth_threshold_at_hard_ceiling_can_be_read_and_restored() {
     assert_eq!(provider.member_policy(EMPLOYEE), Some(birth));
     assert_eq!(provider.member_revision(), 2);
 }
+
+#[test]
+fn replacement_preserves_committed_overrides_and_revision() {
+    let mut original = policy();
+    original.employee_memory_high_mi_b.insert(PEER.into(), 2048);
+    let before = configuration(serde_json::json!({
+        "workerPoolProvider":{"version":1,"purpose":"reverie-docker-worker-pool-provider-v1",
+        "policy":original}
+    }));
+    let edited = WorkerPoolProvider::project_member_policy(
+        &before,
+        &ProfileEmployeeId::parse(EMPLOYEE).unwrap(),
+        WorkerPoolMemberPolicy::new(16_384, 300).unwrap(),
+    )
+    .unwrap();
+    let projected = |new_policy: &WorkerPoolPolicy| {
+        let field = WorkerPoolProvider::for_replacement(&edited, new_policy).unwrap();
+        let wire: serde_json::Value =
+            serde_json::from_slice(&worker_config::compact_data(&field)).unwrap();
+        WorkerPoolProvider::from_config(&configuration(serde_json::json!({
+            "workerPoolProvider":wire
+        })))
+        .unwrap()
+        .unwrap()
+    };
+    let mut replacement = original.clone();
+    replacement.controller_image = format!("sha256:{}", "f".repeat(64));
+    replacement
+        .employee_memory_high_mi_b
+        .insert(PEER.into(), 4096);
+    let selected = projected(&replacement);
+    assert_eq!(selected.policy(), &replacement);
+    assert_eq!(selected.member_revision(), 1);
+    assert_eq!(
+        selected.member_policy(EMPLOYEE),
+        WorkerPoolMemberPolicy::new(16_384, 300).ok()
+    );
+    assert_eq!(
+        selected.member_policy(PEER),
+        WorkerPoolMemberPolicy::new(4096, 100).ok()
+    );
+
+    replacement
+        .employee_memory_high_mi_b
+        .insert(EMPLOYEE.into(), 16_384);
+    replacement.cpu_weight = 300;
+    let selected = projected(&replacement);
+    assert!(selected.member_overrides().is_empty());
+    assert_eq!(selected.member_revision(), 1);
+    replacement.employee_memory_high_mi_b.remove(EMPLOYEE);
+    assert!(WorkerPoolProvider::for_replacement(&edited, &replacement).is_err());
+}

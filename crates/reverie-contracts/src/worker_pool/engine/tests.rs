@@ -154,6 +154,53 @@ fn valid_v2(value: &Value, policy: &WorkerPoolPolicy) -> bool {
     )
     .is_ok()
 }
+
+#[test]
+fn retained_anchor_requires_original_birth_and_a_stable_container() {
+    let policy = policy();
+    let cid = "e".repeat(64);
+    let original = "d".repeat(64);
+    let anchor: RetainedPoolAnchor = serde_json::from_value(json!({
+        "containerId":cid,"originalBirthDigest":original,"pid":123,"processStart":"805",
+        "parentIdentity":[10,11],"leafIdentity":[10,12]
+    }))
+    .unwrap();
+    let inspection = json!({
+        "Id":cid,"Image":policy.anchor_image,"Name":format!("/{}",policy.anchor_name()),
+        "RestartCount":0,
+        "State":{"Pid":123,"Status":"running","Running":true,"Paused":false,"Restarting":false,
+            "Dead":false,"OOMKilled":false,"Error":""},
+        "Config":{"User":format!("{}:{}",policy.broker_uid,policy.broker_gid),"Entrypoint":["/bin/sleep"],
+            "Cmd":["infinity"],"Labels":{"reverie.pool.anchor":policy.deployment,
+                "reverie.pool.birth-policy":original}},
+        "HostConfig":{"CgroupParent":policy.parent_slice(),"Privileged":false,"ReadonlyRootfs":true,
+            "NetworkMode":"none","CapDrop":["ALL"],"CapAdd":null,
+            "SecurityOpt":["no-new-privileges:true"],"Memory":67_108_864,"MemorySwap":67_108_864,
+            "PidsLimit":16,"CpuShares":2,"CpuQuota":0,"NanoCpus":0,"CpusetCpus":policy.cpu_list(),
+            "AutoRemove":false,"RestartPolicy":{"Name":"no","MaximumRetryCount":0}},
+        "Mounts":[]
+    });
+    let valid = |value: &Value| {
+        validate_retained_anchor_inspection(&serde_json::to_vec(value).unwrap(), &policy, &anchor)
+            .is_ok()
+    };
+    assert!(valid(&inspection));
+    for (pointer, value) in [
+        (
+            "/Config/Labels/reverie.pool.birth-policy",
+            json!("f".repeat(64)),
+        ),
+        ("/State/Pid", json!(124)),
+        ("/State/Status", json!("removing")),
+        ("/State/Restarting", json!(true)),
+        ("/RestartCount", json!(1)),
+        ("/HostConfig/RestartPolicy/Name", json!("always")),
+    ] {
+        let mut changed = inspection.clone();
+        *changed.pointer_mut(pointer).unwrap() = value;
+        assert!(!valid(&changed), "{pointer}");
+    }
+}
 #[test]
 fn service_v2_is_exact_fifth_control_bind_without_silently_relaxing_v1() {
     let policy = policy();
