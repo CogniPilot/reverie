@@ -24,6 +24,38 @@ class EmployeePolicyRouteError extends Error {
   }
 }
 
+const knownPolicyRefusals = new Map([
+  ['EMPLOYEE_RESOURCE_REVISION_CHANGED', 'The running resource revision changed. Refresh the running limits.'],
+  ['EMPLOYEE_RESOURCE_EDIT_UNAVAILABLE', 'Live RAM and CPU changes are unavailable for this laptop.'],
+  ['EMPLOYEE_RESOURCE_POLICY_UNCHANGED', 'The requested RAM and CPU limits are already set.'],
+  ['EMPLOYEE_RESOURCE_POLICY_INVALID', 'The requested RAM or CPU limit is outside the supported policy.'],
+  [
+    'EMPLOYEE_RESOURCE_EDIT_REFUSED',
+    'The native controller refused the RAM and CPU change. Refresh the running limits.',
+  ],
+  ['EMPLOYEE_RESOURCE_ACTIVE_OPERATION', 'A resource operation is already active. Refresh the running limits.'],
+  ['RESERVATION_ADMISSION_LOCK_BUSY', 'The resource service is busy. Refresh the running limits.'],
+]);
+
+function unconfirmedEdit(): EmployeePolicyRouteError {
+  return new EmployeePolicyRouteError(
+    503,
+    'EMPLOYEE_RESOURCE_EDIT_UNCONFIRMED',
+    'The RAM and CPU change was not confirmed. Refresh the running limits before making another change.'
+  );
+}
+
+function policyRefusal(reason: string): EmployeePolicyRouteError {
+  if (reason === 'EMPLOYEE_RESOURCE_RECONCILIATION_REQUIRED')
+    return new EmployeePolicyRouteError(
+      503,
+      reason,
+      'The RAM and CPU change requires reconciliation. Refresh the running limits before making another change.'
+    );
+  const message = knownPolicyRefusals.get(reason);
+  return message ? new EmployeePolicyRouteError(409, reason, message) : unconfirmedEdit();
+}
+
 export class EmployeeResourcesService {
   readonly #authority: ResourceOwnerAuthority;
   constructor(
@@ -96,14 +128,9 @@ export class EmployeeResourcesService {
         throw new Error('The selected employee session changed during the original edit');
       return result;
     } catch (error) {
-      // A completed wire refusal is distinct from revocation, a lost reply or
-      // an uncorrelated result after dispatch. The latter disclose no facts.
-      if (error instanceof ResourceNativeRefusal) throw error;
-      throw new EmployeePolicyRouteError(
-        503,
-        'EMPLOYEE_RESOURCE_EDIT_UNCONFIRMED',
-        'The RAM and CPU change was not confirmed. Refresh the running limits before making another change.'
-      );
+      // The native refusal envelope also carries unknown and reconciliation
+      // outcomes. Only the closed no-effect catalog becomes a conflict.
+      throw error instanceof ResourceNativeRefusal ? policyRefusal(error.reason) : unconfirmedEdit();
     } finally {
       client.close();
     }
@@ -161,12 +188,6 @@ export function registerEmployeeResourceRoutes(
           return reply.code(403).send({ success: false, error: 'Company owner authorization is required' });
         if (error instanceof EmployeePolicyRouteError)
           return reply.code(error.status).send({ success: false, errorCode: error.code, error: error.message });
-        if (error instanceof ResourceNativeRefusal)
-          return reply.code(409).send({
-            success: false,
-            errorCode: error.reason,
-            error: 'The native controller refused the RAM and CPU change. Refresh the running limits.',
-          });
         return reply.code(503).send({
           success: false,
           errorCode: 'EMPLOYEE_RESOURCE_EDIT_UNAVAILABLE',

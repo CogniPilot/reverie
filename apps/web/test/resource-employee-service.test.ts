@@ -23,6 +23,7 @@ let peers: Set<Socket>, frames: Record<string, unknown>[], connected: number;
 let response: Record<string, unknown>;
 let editMode: 'applied' | 'lost-reply' | 'refused' | 'no-proof' | 'foreign-challenge';
 let editOverride: Record<string, unknown>;
+let nativeRefusal: string;
 const approval = () => ({
   sessionId,
   operationId: randomUUID(),
@@ -93,6 +94,7 @@ beforeEach(async () => {
   connected = 0;
   editMode = 'applied';
   editOverride = {};
+  nativeRefusal = 'EMPLOYEE_RESOURCE_EDIT_UNAVAILABLE';
   server = createServer((socket) => {
     connected++;
     peers.add(socket);
@@ -164,7 +166,7 @@ beforeEach(async () => {
             frame({
               kind: 'resource-refused',
               requestId: value.requestId,
-              reason: 'WORKER_POOL_MEMBER_EDIT_UNSUPPORTED',
+              reason: nativeRefusal,
             })
           );
         } else {
@@ -305,7 +307,22 @@ it('preserves the fixed native refusal code without claiming an unverified succe
   editMode = 'refused';
   const result = await edit();
   expect(result.statusCode).toBe(409);
-  expect(result.json()).toMatchObject({ success: false, errorCode: 'WORKER_POOL_MEMBER_EDIT_UNSUPPORTED' });
+  expect(result.json()).toMatchObject({ success: false, errorCode: 'EMPLOYEE_RESOURCE_EDIT_UNAVAILABLE' });
   expect(result.json().data).toBeUndefined();
   expect(connected).toBe(1);
+});
+
+it.each([
+  ['RESOURCE_OPERATION_UNCONFIRMED_KEEP_CLAIM', 'EMPLOYEE_RESOURCE_EDIT_UNCONFIRMED', 'was not confirmed'],
+  ['EMPLOYEE_RESOURCE_RECONCILIATION_REQUIRED', 'EMPLOYEE_RESOURCE_RECONCILIATION_REQUIRED', 'requires reconciliation'],
+  ['WORKER_POOL_MEMBER_EDIT_UNSUPPORTED', 'EMPLOYEE_RESOURCE_EDIT_UNCONFIRMED', 'was not confirmed'],
+])('projects native %s without reporting a known refusal', async (reason, code, message) => {
+  editMode = 'refused';
+  nativeRefusal = reason;
+  const result = await edit();
+  expect(result.statusCode).toBe(503);
+  expect(result.json()).toMatchObject({ success: false, errorCode: code, error: expect.stringContaining(message) });
+  expect(result.json().data).toBeUndefined();
+  expect(connected).toBe(1);
+  expect(frames.filter((row) => row.kind === 'resource-operation')).toHaveLength(1);
 });
