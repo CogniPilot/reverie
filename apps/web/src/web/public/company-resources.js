@@ -59,11 +59,171 @@
         : item
     );
 
-  class FleetPanel {
-    constructor(shell, container, dialog, employeeId = null) {
+  class EmployeePanel {
+    constructor(shell, container, dialog, employee) {
       this.shell = shell;
       this.dialog = dialog;
-      this.employeeId = employeeId;
+      this.employee = employee;
+      this.sequence = 0;
+      this.busy = false;
+      this.host = shell.el('section', 'ca-employee-resources');
+      this.host.setAttribute('aria-label', `RAM and CPU for ${employee.name}`);
+      this.status = shell.el('p', 'ca-hint', 'Checking running limits…');
+      this.status.setAttribute('role', 'status');
+      this.error = shell.el('p', 'ca-company-error');
+      this.error.setAttribute('role', 'alert');
+      this.content = shell.el('div');
+      this.refresh = shell.button('ca-btn', `Refresh resource status for ${employee.name}`, () => this.load(), {
+        text: 'Refresh resource status',
+      });
+      this.host.append(shell.el('h3', '', 'Laptop RAM and CPU'), this.status, this.error, this.content, this.refresh);
+      container.append(this.host);
+      dialog.addEventListener(
+        'close',
+        () => {
+          this.sequence++;
+        },
+        { once: true }
+      );
+      void this.load();
+    }
+    valid(value) {
+      const decimal = (input) =>
+        typeof input === 'string' && /^(0|[1-9][0-9]{0,19})$/.test(input) && BigInt(input) <= 18446744073709551615n;
+      const limit = (input) => input === 'max' || decimal(input);
+      const positive = (input) => Number.isSafeInteger(input) && input > 0;
+      const capabilities = [
+        'softMemoryLive',
+        'cpuWeightLive',
+        'hardMemoryReplacement',
+        'perfReplacement',
+        'gpuReplacement',
+      ];
+      return (
+        value?.version === 1 &&
+        value.employeeId === this.employee.id &&
+        value.sessionId === this.employee.sessionId &&
+        /^[a-f0-9]{64}$/.test(value.revision) &&
+        ['uninstalled', 'absent', 'stopped', 'controller-unavailable', 'running'].includes(value.state) &&
+        value.readOnly === true &&
+        value.perfObserved === null &&
+        value.perfObservationReason === 'OWN_PROCESS_PROBE_REQUIRED' &&
+        value.capabilities &&
+        Object.keys(value.capabilities).length === capabilities.length &&
+        capabilities.every((key) => value.capabilities[key] === false) &&
+        (value.requested === null ||
+          (value.requested &&
+            (value.requested.memoryHighMiB === null || positive(value.requested.memoryHighMiB)) &&
+            positive(value.requested.memoryMaxMiB) &&
+            positive(value.requested.cpuWeight) &&
+            ['off', 'task-v1', 'task-v2'].includes(value.requested.perfPolicy))) &&
+        (value.observed === null ||
+          (value.observed &&
+            ['memoryHighBytes', 'memoryMaxBytes', 'memorySwapMaxBytes'].every((key) => limit(value.observed[key])) &&
+            decimal(value.observed.memoryCurrentBytes) &&
+            Number.isSafeInteger(value.observed.cpuWeight) &&
+            value.observed.cpuWeight > 0 &&
+            typeof value.observed.cpuMax === 'string' &&
+            /^(max|[1-9][0-9]*) [1-9][0-9]*$/.test(value.observed.cpuMax))) &&
+        (value.state === 'running') === (value.observed !== null) &&
+        (value.state === 'uninstalled') === (value.requested === null)
+      );
+    }
+    async load() {
+      if (this.busy || !this.host.isConnected) return;
+      const sequence = ++this.sequence;
+      this.busy = true;
+      this.refresh.disabled = true;
+      this.status.textContent = 'Checking running limits…';
+      this.error.textContent = '';
+      try {
+        const reply = await this.shell.app._chatApi(
+          `/api/company/resources/employees/${encodeURIComponent(this.employee.id)}`
+        );
+        if (!this.host.isConnected || sequence !== this.sequence) return;
+        if (!reply.ok) throw new Error(reply.error || 'Running resource limits are unavailable. Refresh to try again.');
+        if (!this.valid(reply.data))
+          throw new Error('The current employee resource status could not be verified. Refresh the profile.');
+        this.render(reply.data);
+      } catch (error) {
+        if (this.host.isConnected && sequence === this.sequence) {
+          this.content.replaceChildren();
+          this.status.textContent = 'Running limits are unconfirmed.';
+          this.error.textContent = error.message || 'Resource status is unavailable. Refresh to try again.';
+        }
+      } finally {
+        if (sequence === this.sequence) {
+          this.busy = false;
+          this.refresh.disabled = false;
+        }
+      }
+    }
+    render(value) {
+      const s = this.shell,
+        requested = value.requested,
+        observed = value.observed;
+      const bytes = (number) =>
+        number === 'max' ? 'Unbounded' : `${Number((BigInt(number) * 100n) / 1073741824n) / 100} GiB`;
+      const mib = (number) => (number === null ? 'Unbounded' : `${number / 1024} GiB`);
+      const table = s.el('table', 'ca-fleet-table');
+      const head = s.el('tr');
+      for (const label of ['Setting', 'Requested', 'Verified running']) head.append(s.el('th', '', label));
+      const thead = s.el('thead');
+      thead.append(head);
+      const body = s.el('tbody');
+      const row = (name, wanted, actual) => {
+        const tr = s.el('tr');
+        tr.append(s.el('th', '', name), s.el('td', '', wanted), s.el('td', '', actual));
+        body.append(tr);
+      };
+      row(
+        'Soft RAM',
+        requested ? mib(requested.memoryHighMiB) : 'Unavailable',
+        observed ? bytes(observed.memoryHighBytes) : 'Unconfirmed'
+      );
+      row(
+        'Hard RAM ceiling',
+        requested ? mib(requested.memoryMaxMiB) : 'Unavailable',
+        observed ? bytes(observed.memoryMaxBytes) : 'Unconfirmed'
+      );
+      row('RAM in use', '—', observed ? bytes(observed.memoryCurrentBytes) : 'Unconfirmed');
+      row(
+        'CPU share weight',
+        requested ? String(requested.cpuWeight) : 'Unavailable',
+        observed ? String(observed.cpuWeight) : 'Unconfirmed'
+      );
+      row(
+        'CPU quota',
+        '—',
+        observed ? (observed.cpuMax.startsWith('max ') ? 'No quota' : observed.cpuMax) : 'Unconfirmed'
+      );
+      table.append(thead, body);
+      this.content.replaceChildren(
+        table,
+        s.el(
+          'p',
+          'ca-hint',
+          'Soft RAM applies reclaim pressure without reserving RAM. CPU weight shares CPU under contention.'
+        ),
+        s.el(
+          'p',
+          'ca-hint',
+          'Live RAM and CPU edits are not supported by this controller. Your running work has not been changed.'
+        ),
+        s.el(
+          'p',
+          'ca-hint',
+          `PERF policy: ${requested ? (requested.perfPolicy === 'off' ? 'off' : 'enabled') : 'unavailable'}. Actual profiling access requires a separate probe.`
+        )
+      );
+      this.status.textContent = `${value.state === 'running' ? 'Running limits verified' : `Laptop ${value.state}`}. Checked ${new Date().toLocaleTimeString()}.`;
+    }
+  }
+
+  class FleetPanel {
+    constructor(shell, container, dialog) {
+      this.shell = shell;
+      this.dialog = dialog;
       this.owner = null;
       this.pending = new Set();
       this.rows = new Map();
@@ -96,7 +256,7 @@
         text: 'Check rollout',
       });
       this.host.append(
-        shell.el('h3', '', employeeId ? 'Laptop RAM and CPU' : 'Laptop fleet'),
+        shell.el('h3', '', 'Laptop fleet'),
         shell.el(
           'p',
           'ca-hint',
@@ -112,7 +272,6 @@
         this.refresh,
         this.check
       );
-      this.setup.hidden = this.native.hidden = employeeId !== null;
       container.append(this.host);
       void this.load();
     }
@@ -288,24 +447,6 @@
       container.append(wrap);
       return input;
     }
-    policyFields(container, label, value) {
-      const high = this.number(container, `${label} soft RAM (MiB)`, value.memoryHighMiB);
-      const max = this.number(container, `${label} hard RAM (MiB)`, value.memoryMaxMiB);
-      const cpu = this.number(container, `${label} CPU weight`, value.cpuWeight);
-      const wrap = this.shell.el('label', 'ca-label');
-      const perf = this.shell.el('input');
-      perf.type = 'checkbox';
-      perf.checked = value.perfEnabled;
-      perf.setAttribute('aria-label', `${label} perf`);
-      wrap.append(perf, this.shell.el('span', '', 'Enable perf'));
-      container.append(wrap);
-      return () => ({
-        memoryHighMiB: Number(high.value),
-        memoryMaxMiB: Number(max.value),
-        cpuWeight: Number(cpu.value),
-        perfEnabled: perf.checked,
-      });
-    }
     render() {
       this.content.replaceChildren();
       this.rows.clear();
@@ -344,19 +485,7 @@
       const empty = s.el('option', '', 'Choose an employee for the first replacement');
       empty.value = '';
       this.canary.append(empty);
-      const employees = this.employeeId
-        ? data.employees.filter((employee) => employee.employeeId === this.employeeId)
-        : data.employees;
-      if (this.employeeId) {
-        for (const employee of employees) this.form.append(this.renderEmployee(employee));
-        if (!employees.length)
-          this.form.append(
-            s.el('p', 'ca-company-error', 'This employee has no verified fleet record. Refresh status.')
-          );
-        this.canary.value = this.employeeId;
-        const imageId = employees[0]?.desiredImageId;
-        if (imageId) this.image.value = imageId;
-      } else {
+      {
         const scroll = s.el('div', 'ca-fleet-table-scroll');
         const table = s.el('table', 'ca-fleet-table');
         const head = s.el('thead'),
@@ -368,14 +497,13 @@
         }
         head.append(headings);
         const body = s.el('tbody');
-        for (const employee of employees) body.append(this.renderEmployeeSummary(employee));
+        for (const employee of data.employees) body.append(this.renderEmployeeSummary(employee));
         table.append(head, body);
         scroll.append(table);
         this.form.append(scroll);
       }
       const canaryLabel = s.el('label', 'ca-label');
       canaryLabel.append(s.el('span', '', 'Canary employee'), this.canary);
-      canaryLabel.hidden = this.employeeId !== null;
       this.note = s.el('textarea', 'ca-field');
       this.note.rows = 3;
       this.note.maxLength = 12000;
@@ -414,6 +542,11 @@
         )
       );
       this.native.append(this.nativeFeedback);
+      this.native.append(
+        s.button('ca-btn', 'Check saved shared-pool migrations', () => this.discoverNative(), {
+          text: 'Check saved migrations',
+        })
+      );
       try {
         const pending = this.readNativePending();
         if (pending) {
@@ -450,8 +583,10 @@
           )
         );
         const details = s.el('details');
-        details.append(s.el('summary', '', `Employee thresholds · ${Object.keys(selected.employeeMemoryHighMiB).length}`),
-          s.el('p', 'ca-hint', 'Soft thresholds do not reserve RAM. They apply when each laptop is running.'));
+        details.append(
+          s.el('summary', '', `Employee thresholds · ${Object.keys(selected.employeeMemoryHighMiB).length}`),
+          s.el('p', 'ca-hint', 'Soft thresholds do not reserve RAM. They apply when each laptop is running.')
+        );
         const rows = s.el('table', 'ca-fleet-table');
         for (const [employeeId, high] of Object.entries(selected.employeeMemoryHighMiB)) {
           const name = this.data?.employees.find((employee) => employee.employeeId === employeeId)?.name || employeeId;
@@ -583,7 +718,10 @@
         this.showNativeResult(reply.data, record.operationId);
       } catch (error) {
         this.error.textContent = error.message || 'Original migration remains unconfirmed';
-        this.reportNative(`${this.error.textContent}. ${sent ? 'Activation is unconfirmed; use Check migration to inspect this attempt.' : 'No activation request was sent.'}`, true);
+        this.reportNative(
+          `${this.error.textContent}. ${sent ? 'Activation is unconfirmed; use Check migration to inspect this attempt.' : 'No activation request was sent.'}`,
+          true
+        );
       } finally {
         this.nativeBusy = false;
         this.renderNative();
@@ -607,6 +745,61 @@
         this.showNativeResult(reply.data, record.operationId);
       } catch (error) {
         this.error.textContent = error.message || 'Original migration remains unconfirmed';
+        this.reportNative(this.error.textContent, true);
+      } finally {
+        this.nativeBusy = false;
+        this.renderNative();
+        this.sync();
+      }
+    }
+    async discoverNative() {
+      if (this.nativeBusy || this.busy) return;
+      this.nativeBusy = true;
+      this.reportNative('Checking saved migrations…');
+      this.sync();
+      try {
+        await this.identity();
+        const reply = await this.shell.app._chatApi(`${ROOT}/native-operations`, { method: 'POST', body: {} });
+        await this.identity();
+        if (!this.dialog.isConnected) return;
+        const history = reply.data;
+        if (!reply.ok) throw new Error(reply.error || 'Saved migration history is unavailable.');
+        if (
+          !history ||
+          typeof history.available !== 'boolean' ||
+          typeof history.blocksFurtherChanges !== 'boolean' ||
+          !Array.isArray(history.operations) ||
+          history.operations.length > 256 ||
+          history.operations.some(
+            (row) =>
+              !id(row.operationId) ||
+              typeof row.blocksFurtherChanges !== 'boolean' ||
+              !['previewed', 'pending', 'pool-configured', 'unknown'].includes(row.state)
+          )
+        )
+          throw new Error('Saved migration history could not be verified.');
+        this.results.replaceChildren(this.shell.el('h4', '', 'Saved shared-pool migrations'));
+        for (const row of history.operations) {
+          const line = this.shell.el('p', 'ca-hint', `${row.operationId}: ${row.state}. `);
+          line.append(
+            this.shell.button('ca-btn', `Check saved migration ${row.operationId}`, () => this.checkNative(row), {
+              text: 'Check outcome',
+            })
+          );
+          this.results.append(line);
+        }
+        if (!history.available)
+          throw new Error('Saved migration history is unavailable or incomplete. Absence does not confirm completion.');
+        this.error.textContent = '';
+        this.reportNative(
+          history.blocksFurtherChanges
+            ? 'A saved migration is in progress or unconfirmed. Check its outcome before another change.'
+            : history.operations.length
+              ? 'Saved outcomes are available below. They do not verify the current running pool.'
+              : 'No migrations were recorded in this history. This does not verify the running pool.'
+        );
+      } catch (error) {
+        this.error.textContent = error.message || 'Saved migration history is unavailable.';
         this.reportNative(this.error.textContent, true);
       } finally {
         this.nativeBusy = false;
@@ -698,12 +891,37 @@
           value.native?.approval?.operationId !== operationId)
       )
         throw new Error('Native activation result could not be verified');
+      if (
+        value.failure &&
+        (!/^[A-Z][A-Z0-9_]{0,79}$/.test(value.failure.code) ||
+          typeof value.failure.message !== 'string' ||
+          value.failure.message.length > 256)
+      )
+        throw new Error('Migration diagnostic could not be verified');
+      if (
+        value.nativeFailure &&
+        (value.nativeFailure.approval?.operationId !== operationId ||
+          value.nativeFailure.outcome !== 'unconfirmed' ||
+          !/^[A-Z][A-Z0-9_]{0,95}$/.test(value.nativeFailure.code))
+      )
+        throw new Error('Native diagnostic could not be verified');
+      if (
+        value.restore.some(
+          (row) =>
+            !id(row.employeeId) ||
+            !id(row.sessionId) ||
+            !['pending', 'wake-confirmed', 'skipped-current-intent', 'unknown'].includes(row.state)
+        )
+      )
+        throw new Error('Employee recovery result is unavailable');
       this.results.replaceChildren(this.shell.el('h4', '', 'Original shared-pool migration'));
       this.reportNative(
-        value.state === 'unknown'
-          ? 'Shared-pool activation or employee startup is unconfirmed. Check this migration before taking another action.'
-          : value.native
-            ? 'The host confirmed shared-pool activation. Employee startup results are below.'
+        value.native
+          ? value.state === 'unknown'
+            ? 'The original activation was confirmed; employee startup is unconfirmed. Check the recovery results below.'
+            : 'The original shared-pool activation was confirmed. Employee startup results are below.'
+          : value.state === 'unknown'
+            ? 'The original shared-pool activation is unconfirmed. Check this migration before taking another action.'
             : 'Shared-pool activation is pending. Check this migration for its result.',
         value.state === 'unknown'
       );
@@ -712,28 +930,39 @@
           'p',
           'ca-hint',
           value.native
-            ? 'The native host confirmed shared-pool activation. Employee recovery is listed separately.'
+            ? 'The native host confirmed this activation. Employee recovery is listed separately; this historical result does not verify the current running pool.'
             : 'Shared-pool activation is pending or unconfirmed. No consent will be replayed.'
         )
       );
+      if (value.failure) {
+        this.results.append(this.shell.el('p', 'ca-company-error', `${value.failure.code}: ${value.failure.message}`));
+      }
+      if (value.nativeFailure) {
+        this.results.append(
+          this.shell.el(
+            'p',
+            'ca-company-error',
+            `Host diagnostic: ${value.nativeFailure.code}. The outcome remains unconfirmed.`
+          )
+        );
+      }
       for (const row of value.restore) {
-        if (
-          !id(row.employeeId) ||
-          !id(row.sessionId) ||
-          !['wake-confirmed', 'skipped-current-intent', 'unknown'].includes(row.state)
-        )
-          throw new Error('Employee recovery result is unavailable');
         const name =
           this.data?.employees.find((employee) => employee.employeeId === row.employeeId)?.name || row.employeeId;
         this.results.append(
           this.shell.el(
             'p',
             'ca-hint',
-            `${name}: ${row.state === 'wake-confirmed' ? 'normal startup confirmed' : row.state === 'skipped-current-intent' ? 'not started because current attendance or session changed' : 'startup unconfirmed; not retried'}.`
+            `${name}: ${row.state === 'pending' ? 'startup intent recorded; outcome pending' : row.state === 'wake-confirmed' ? 'normal startup confirmed' : row.state === 'skipped-current-intent' ? 'not started because current attendance or session changed' : 'startup unconfirmed; not retried'}.`
           )
         );
       }
-      if (!value.blocksFurtherChanges && value.state === 'pool-configured' && value.native !== null)
+      if (
+        !value.blocksFurtherChanges &&
+        value.state === 'pool-configured' &&
+        value.native !== null &&
+        this.readNativePending()?.operationId === operationId
+      )
         this.shell.doc.defaultView.localStorage.removeItem(this.nativeKey());
       this.error.textContent = '';
     }
@@ -979,18 +1208,6 @@
       );
       if (data.pool.desired) {
         const value = data.pool.desired;
-        if (this.employeeId) {
-          this.poolValues = () => ({ ...value, allowedCpus: [...value.allowedCpus] });
-          this.cpus = { value: value.allowedCpus.join(',') };
-          poolBox.append(
-            s.el(
-              'p',
-              'ca-hint',
-              'Shared pool settings are managed in Company settings. This preview changes only this employee.'
-            )
-          );
-          return poolBox;
-        }
         let highValue = () => null;
         if (value.memoryHighMiB === null) {
           poolBox.append(s.el('p', 'ca-hint', 'Pool soft RAM is unbounded; the hard pool ceiling still applies.'));
@@ -1057,29 +1274,6 @@
         this.canary.append(option);
       }
       return row;
-    }
-    renderEmployee(employee) {
-      const s = this.shell;
-      const box = s.el('fieldset', 'ca-fleet-policy');
-      box.append(s.el('legend', '', employee.name));
-      box.append(
-        s.el('p', 'ca-hint', `${employee.state}${employee.reason ? `: ${employee.reason}` : ''}`),
-        s.el('p', 'ca-hint', `Running: ${limits(employee.observed)}`)
-      );
-      box.append(
-        s.el(
-          'p',
-          'ca-hint',
-          `Requested image: ${employee.desiredImageId || 'Unavailable'}. Running image: ${employee.observedImageId || 'Not verified'}.`
-        )
-      );
-      if (employee.desired) {
-        this.rows.set(employee.employeeId, this.policyFields(box, employee.name, employee.desired));
-        const option = s.el('option', '', employee.name);
-        option.value = employee.employeeId;
-        this.canary.append(option);
-      } else box.append(s.el('p', 'ca-hint', 'No editable policy was provided for this laptop.'));
-      return box;
     }
     async prepare() {
       if (
@@ -1270,6 +1464,6 @@
   }
   window.ReverieFleetResources = {
     mount: (shell, container, dialog) => new FleetPanel(shell, container, dialog),
-    mountEmployee: (shell, container, dialog, employeeId) => new FleetPanel(shell, container, dialog, employeeId),
+    mountEmployee: (shell, container, dialog, employee) => new EmployeePanel(shell, container, dialog, employee),
   };
 })();

@@ -9066,7 +9066,7 @@ class ReverieChatApp {
       management.replaceChildren(); this.employeePermissionFields(management, employee);
       this.employeeHiringFields(management, employee, dialog);
       this.employeeGpuFields(management, employee, dialog);
-      globalThis.ReverieFleetResources?.mountEmployee(this, management, dialog, employee.id);
+      globalThis.ReverieFleetResources?.mountEmployee(this, management, dialog, employee);
       credentials.replaceChildren(); this.publicationCredentialsFields(credentials, employee);
       this.employeeLifecycleFields(management, employee, onSaved, dialog);
       management.append(this.button('ca-btn', `Open ${employee.name}'s journal map`, () => this.openJournalMap(employee), { text: 'Journal map' }));

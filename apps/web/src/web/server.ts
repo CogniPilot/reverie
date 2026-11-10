@@ -350,6 +350,7 @@ import { registerPlanRequestRoutes } from './routes/plan-request-routes.js';
 import { planMoveExecutor, type PlanMoveRuntime } from '../plan-move-runtime.js';
 import {ResourceReplacementController, registerResourceReplacementRoutes} from '../resource-replacement-controller.js';
 import { FleetResourcesService, registerFleetResourceRoutes } from '../resource-fleet-service.js';
+import { EmployeeResourcesService, registerEmployeeResourceRoutes } from '../resource-employee-service.js';
 import { PoolInstallationController, registerPoolInstallationRoutes } from '../pool-installation-controller.js';
 import { PlanService } from '../plan-accounts.js';
 import { PlanCostTracker } from '../plan-agent-burn.js';
@@ -2397,6 +2398,9 @@ export class WebServer extends EventEmitter {
     }, dataPath('fleet-setup-recovery.json'), dataPath('fleet-migration-operations.json'));
     registerFleetResourceRoutes(this.app, verifiedOwner, fleetResources);
     this.app.addHook('onClose', async () => fleetResources.close());
+    const employeeResources = new EmployeeResourcesService(this.companyService, ownerAuth, process.env.REVERIE_WORKER_SOCKET);
+    registerEmployeeResourceRoutes(this.app, verifiedOwner, employeeResources);
+    this.app.addHook('onClose', async () => employeeResources.close());
     const poolInstallation = new PoolInstallationController(ownerAuth, process.env.REVERIE_WORKER_SOCKET);
     registerPoolInstallationRoutes(this.app, poolInstallation);
     this.app.addHook('onClose', async () => poolInstallation.close());
