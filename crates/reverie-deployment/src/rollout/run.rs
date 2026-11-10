@@ -3,8 +3,16 @@ impl<'a> Owner<'a> {
     pub(super) fn run(&mut self) -> RolloutResult<'a, InitialWebsiteRolloutClosed> {
         self.preflight()?;
         self.service = Some(
-            quiesce_stopped_worker_service(&self.source, NativeWorkerServiceRole::Broker, self.end)
-                .map_err(InitialWebsiteRolloutError::Quiesce)?,
+            quiesce_stopped_worker_service(
+                &self.source,
+                if self.refresh {
+                    NativeWorkerServiceRole::PoolOfferV1
+                } else {
+                    NativeWorkerServiceRole::Broker
+                },
+                self.end,
+            )
+            .map_err(InitialWebsiteRolloutError::Quiesce)?,
         );
         self.end = self.end.min(
             self.service
@@ -48,9 +56,12 @@ impl<'a> Owner<'a> {
             .operation;
         self.check_time()?;
         self.status = Some(
-            deployment
-                .apply_before(operation, self.end)
-                .map_err(InitialWebsiteRolloutError::Deployment)?,
+            (if self.skip_backup {
+                deployment.apply_without_backup_before(operation, self.end)
+            } else {
+                deployment.apply_before(operation, self.end)
+            })
+            .map_err(InitialWebsiteRolloutError::Deployment)?,
         );
         self.assert_service_current()?;
         let deployment = self.deployment.as_ref().expect("same deployment owner");
@@ -79,15 +90,19 @@ impl<'a> Owner<'a> {
         self.check_time()?;
         self.actor_attempted = true;
         self.actor = Some(
-            self.broker
-                .prepare_offline_actor_setup(self.end)
-                .map_err(InitialWebsiteRolloutError::Actor)?,
+            (if self.refresh {
+                self.broker.prepare_offline_actor_refresh(self.end)
+            } else {
+                self.broker.prepare_offline_actor_setup(self.end)
+            })
+            .map_err(InitialWebsiteRolloutError::Actor)?,
         );
         let prepared = self
             .actor
             .take()
             .expect("actual original actor preparation");
         let expected = prepared.preview_digest().clone();
+        self.assert_service_current()?;
         let service = self
             .service
             .take()
@@ -113,12 +128,10 @@ impl<'a> Owner<'a> {
             .broker
             .configuration()
             .map_err(InitialWebsiteRolloutError::Gate)?;
-        ResourceActorSettings::require_unselected(original.configuration())
-            .map_err(InitialWebsiteRolloutError::Data)?;
+        self.require_actor_mode(original.configuration())?;
         let current =
             load_owner_config(&self.source).map_err(InitialWebsiteRolloutError::Validation)?;
-        ResourceActorSettings::require_unselected(current.configuration())
-            .map_err(InitialWebsiteRolloutError::Data)?;
+        self.require_actor_mode(current.configuration())?;
         require(
             current.source_path() == original.source_path()
                 && worker_config::equivalent(current.configuration(), original.configuration())
@@ -126,6 +139,11 @@ impl<'a> Owner<'a> {
                     == original.configuration().session_resource_order(),
             "INITIAL_WEBSITE_SOURCE_CHANGED",
         )?;
+        if self.refresh {
+            self.previous_facts
+                .observe(current.configuration(), self.end)
+                .map_err(InitialWebsiteRolloutError::Bootstrap)?;
+        }
         self.source = current
             .source_path()
             .ok_or(InitialWebsiteRolloutError::Refused(
@@ -158,6 +176,25 @@ impl<'a> Owner<'a> {
             .expect("same deployment owner")
             .check_initial_website_selection(&self.image)
             .map_err(InitialWebsiteRolloutError::Deployment)
+    }
+    fn require_actor_mode(
+        &self,
+        config: &worker_config::EffectiveWorkerConfig,
+    ) -> RolloutResult<'a, ()> {
+        if self.refresh {
+            ResourceActorSettings::capture(config).map_err(InitialWebsiteRolloutError::Data)?;
+            require(
+                reverie_contracts::worker_pool::WorkerPoolProvider::from_config(config)
+                    .map_err(|_| {
+                        InitialWebsiteRolloutError::Refused("WEBSITE_UPDATE_POOL_CONFIGURATION")
+                    })?
+                    .is_none(),
+                "WEBSITE_UPDATE_ACTIVE_POOL_REQUIRES_MIGRATION",
+            )
+        } else {
+            ResourceActorSettings::require_unselected(config)
+                .map_err(InitialWebsiteRolloutError::Data)
+        }
     }
     fn qualify_target(&mut self) -> RolloutResult<'a, ()> {
         use reverie_contracts::resource_actor::{EngineMetadata, WebsiteImageProvenance};
@@ -212,6 +249,18 @@ impl<'a> Owner<'a> {
             .as_mut()
             .expect("same actual IMAGE fence")
             .revalidate()
-            .map_err(InitialWebsiteRolloutError::Service)
+            .map_err(InitialWebsiteRolloutError::Service)?;
+        if self.refresh {
+            self.previous_facts
+                .assert_metadata(
+                    self.broker
+                        .configuration()
+                        .map_err(InitialWebsiteRolloutError::Gate)?
+                        .configuration(),
+                    self.end,
+                )
+                .map_err(InitialWebsiteRolloutError::Bootstrap)?;
+        }
+        Ok(())
     }
 }

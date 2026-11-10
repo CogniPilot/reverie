@@ -91,7 +91,12 @@ impl SetupState {
             self.host(native::python_path(&intent.actor_path().codepoints()).map_err(Into::into))?;
         let absent = self.host(GpuFileStamp::observe_optional(&actor))?.is_none();
         self.host(need(
-            actor == root.join("resource-actor.json") && absent,
+            actor == root.join("resource-actor.json")
+                && (if self.refresh {
+                    !absent && self.previous_actor.is_some()
+                } else {
+                    absent
+                }),
             "ACTOR_SETUP_ACTOR_ALREADY_PRESENT",
         ))?;
         self.host(need(

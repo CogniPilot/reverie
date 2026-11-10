@@ -1,9 +1,17 @@
 use super::*;
 impl ActorSetupControlFiles {
     pub fn capture(source: &Path, before: &EffectiveWorkerConfig) -> Self {
+        Self::capture_mode(source, before, false)
+    }
+    pub fn capture_refresh(source: &Path, before: &EffectiveWorkerConfig) -> Self {
+        Self::capture_mode(source, before, true)
+    }
+    fn capture_mode(source: &Path, before: &EffectiveWorkerConfig, refresh: bool) -> Self {
         Self {
             owner: Some(Box::new(SetupState {
                 files: GpuControlFiles::capture(source, before),
+                refresh,
+                previous_actor: None,
                 brand: Arc::new(()),
                 causes: Rc::new(RefCell::new(Causes::default())),
                 source: None,

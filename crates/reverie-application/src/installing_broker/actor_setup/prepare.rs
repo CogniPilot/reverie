@@ -21,10 +21,11 @@ impl<'a> Owner<'a> {
         let source = before.source_path().ok_or(OfflineActorSetupError::Refused(
             "ACTOR_SETUP_REGISTERED_SOURCE_REQUIRED",
         ))?;
-        self.files = Some(ActorSetupControlFiles::capture(
-            source,
-            before.configuration(),
-        ));
+        self.files = Some((if self.refresh {
+            ActorSetupControlFiles::capture_refresh
+        } else {
+            ActorSetupControlFiles::capture
+        })(source, before.configuration()));
         self.locks = Some(
             ImageMaintenanceLocks::capture(source, before.configuration(), self.end).map_err(
                 |cause| {
@@ -48,13 +49,14 @@ impl<'a> Owner<'a> {
             )
             .map_err(|cause| OfflineActorSetupError::History(Rc::new(cause)))?,
         );
-        self.history
-            .as_mut()
-            .expect("same history owner")
-            .observe_for_initial_actor_setup(
-                self.locks.as_mut().expect("same original maintenance"),
-            )
-            .map_err(OfflineActorSetupError::History)?;
+        let history = self.history.as_mut().expect("same history owner");
+        let locks = self.locks.as_mut().expect("same original maintenance");
+        (if self.refresh {
+            history.observe_for_actor_refresh(locks)
+        } else {
+            history.observe_for_initial_actor_setup(locks)
+        })
+        .map_err(OfflineActorSetupError::History)?;
         self.facts = Some(
             ActorSetupFacts::capture(
                 &self.broker.storage.runtime,

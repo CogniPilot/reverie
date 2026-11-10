@@ -139,7 +139,8 @@ impl ActorSetupHistoryObservation {
                     "resource-reservation-control.pending",
                 ]
                 .contains(&name)
-                    && expected.insert(name.to_owned()),
+                    && (expected.insert(name.to_owned())
+                        || (self.refresh && name == "resource-actor.json")),
                 "ACTOR_SETUP_HISTORY_FOREIGN_PUBLICATION",
             )?;
             let info = std::fs::symlink_metadata(path).map_err(GoalCustodyError::from)?;

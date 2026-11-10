@@ -69,14 +69,34 @@ impl SetupState {
         let uid = self.host(self.files.config.uid().map_err(GpuHostError::from))?;
         let raw = self.host(read_raw(&source, configuration.stamp(), uid))?;
         let intent = Arc::new(
-            ActorSetupTransition::prepare(self.files.config.configuration(), &raw, binding)
-                .map_err(|e| {
-                    self.causes
-                        .borrow_mut()
-                        .record(ActorSetupControlError::Data(e))
-                })?,
+            (if self.refresh {
+                ActorSetupTransition::prepare_refresh
+            } else {
+                ActorSetupTransition::prepare
+            })(self.files.config.configuration(), &raw, binding)
+            .map_err(|e| {
+                self.causes
+                    .borrow_mut()
+                    .record(ActorSetupControlError::Data(e))
+            })?,
         );
         let path = self.host(self.files.binding_path())?;
+        if self.refresh {
+            let actor = self
+                .host(native::python_path(&intent.actor_path().codepoints()).map_err(Into::into))?;
+            let stamp = self.host(GpuFileStamp::observe(&actor))?;
+            let bytes = self.host(read_raw(&actor, &stamp, uid))?;
+            let document =
+                reverie_contracts::resource_actor::InstalledFactsDocument::decode(&bytes)
+                    .map_err(|_| self.refuse("ACTOR_REFRESH_PREVIOUS_DOCUMENT"))?;
+            let settings =
+                reverie_contracts::resource_actor::ResourceActorSettings::capture(intent.before())
+                    .map_err(|_| self.refuse("ACTOR_REFRESH_PREVIOUS_DOCUMENT"))?;
+            settings
+                .require_document(&document)
+                .map_err(|_| self.refuse("ACTOR_REFRESH_PREVIOUS_DOMAIN"))?;
+            self.previous_actor = Some((stamp.clone(), self.host(group(&actor, &stamp))?, bytes));
+        }
         self.groups = Some((
             self.host(group(&source, configuration.stamp()))?,
             self.host(group(&path, current_binding.stamp()))?,
@@ -87,7 +107,26 @@ impl SetupState {
         self.intent = Some(intent.clone());
         Ok(intent)
     }
+    pub(super) fn assert_previous_actor(&self) -> Result<()> {
+        if let Some((stamp, group_id, bytes)) = &self.previous_actor {
+            let actor = native::python_path(
+                &self
+                    .intent
+                    .as_ref()
+                    .expect("same intent")
+                    .actor_path()
+                    .codepoints(),
+            )?;
+            need(
+                group(&actor, stamp)? == *group_id
+                    && read_raw(&actor, stamp, self.files.config.uid()?)? == *bytes,
+                "ACTOR_REFRESH_PREVIOUS_CHANGED",
+            )?;
+        }
+        Ok(())
+    }
     pub(super) fn assert_before(&self) -> Result<()> {
+        self.assert_previous_actor()?;
         let intent = self
             .intent
             .as_ref()

@@ -148,6 +148,36 @@ impl ActorSetupTransition {
             actor_path,
         })
     }
+    /// Explicit metadata refresh of the already selected fixed actor. The
+    /// complete configuration and binding remain identical.
+    pub fn prepare_refresh(
+        before: &EffectiveWorkerConfig,
+        raw: &[u8],
+        binding: &ControlBinding,
+    ) -> SetupResult<Self> {
+        let decoded = worker_config::decode(raw).map_err(ActorSetupDataError::Configuration)?;
+        need_setup(
+            worker_config::equivalent(&decoded, before)
+                && decoded.session_resource_order() == before.session_resource_order()
+                && reservation_control::domain_digest(before)
+                    .map_err(ActorSetupDataError::Control)?
+                    == *binding.domain(),
+            "ACTOR_REFRESH_CONFIGURATION_CHANGED",
+        )?;
+        let selected =
+            ResourceActorSettings::capture(before).map_err(ActorSetupDataError::Actor)?;
+        Ok(Self {
+            before: before.clone(),
+            after: before.clone(),
+            before_binding: binding.clone(),
+            after_binding: binding.clone(),
+            bytes: raw.to_vec(),
+            actor_path: selected.path().clone(),
+        })
+    }
+    pub fn is_refresh(&self) -> bool {
+        worker_config::equivalent(&self.before, &self.after)
+    }
     pub fn before(&self) -> &EffectiveWorkerConfig {
         &self.before
     }

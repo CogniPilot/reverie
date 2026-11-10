@@ -47,6 +47,7 @@ pub struct ActorSetupHistoryObservation {
     entries: usize,
     end: Instant,
     retained: Option<actor_setup_history::RetainedExpiredResumeData>,
+    refresh: bool,
 }
 enum HistoryPurpose<'a> {
     SettledOnly,
@@ -84,7 +85,20 @@ impl ActorSetupHistoryObservation {
             entries: 0,
             end,
             retained: None,
+            refresh: false,
         })
+    }
+    pub fn observe_for_actor_refresh(
+        &mut self,
+        locks: &mut crate::worker_image::ImageMaintenanceLocks,
+    ) -> std::result::Result<(), Rc<ActorSetupHistoryError>> {
+        if self.attempted {
+            return Err(Rc::new(ActorSetupHistoryError::Refused(
+                "ACTOR_SETUP_HISTORY_ALREADY_OBSERVED",
+            )));
+        }
+        self.refresh = true;
+        self.observe_purpose(HistoryPurpose::InitialActorSetup(locks))
     }
     pub fn observe(&mut self) -> std::result::Result<(), Rc<ActorSetupHistoryError>> {
         self.observe_purpose(HistoryPurpose::SettledOnly)

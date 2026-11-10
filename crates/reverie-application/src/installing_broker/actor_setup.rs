@@ -23,6 +23,7 @@ pub struct PreparedOfflineActorSetup<'a> {
 }
 struct Owner<'a> {
     broker: &'a InstallingBroker,
+    refresh: bool,
     broker_close: UnstartedImageBroker<'a>,
     files: Option<ActorSetupControlFiles>,
     facts: Option<ActorSetupFacts>,
@@ -55,8 +56,22 @@ impl InstallingBroker {
         &self,
         end: Instant,
     ) -> std::result::Result<PreparedOfflineActorSetup<'_>, Box<OfflineActorSetupFailure<'_>>> {
+        self.prepare_actor_mode(end, false)
+    }
+    pub fn prepare_offline_actor_refresh(
+        &self,
+        end: Instant,
+    ) -> std::result::Result<PreparedOfflineActorSetup<'_>, Box<OfflineActorSetupFailure<'_>>> {
+        self.prepare_actor_mode(end, true)
+    }
+    fn prepare_actor_mode(
+        &self,
+        end: Instant,
+        refresh: bool,
+    ) -> std::result::Result<PreparedOfflineActorSetup<'_>, Box<OfflineActorSetupFailure<'_>>> {
         let mut owner = Box::new(Owner {
             broker: self,
+            refresh,
             broker_close: UnstartedImageBroker::new(self),
             files: None,
             facts: None,

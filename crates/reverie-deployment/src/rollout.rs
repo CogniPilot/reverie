@@ -45,6 +45,9 @@ struct Owner<'a> {
     closed_service: Option<ClosedImageServiceMaintenance>,
     actor: Option<PreparedOfflineActorSetup<'a>>,
     actor_attempted: bool,
+    previous_facts: reverie_host::resource_facts::InstalledFactsObserver,
+    refresh: bool,
+    skip_backup: bool,
     input: reverie_host::website_facts::ImmutableInputObserver,
     deployment_close_attempted: bool,
     end: Instant,
@@ -77,6 +80,29 @@ pub fn rollout_initial_website<'a>(
     image: &str,
     end: Instant,
 ) -> std::result::Result<InitialWebsiteRolloutClosed, Box<InitialWebsiteRolloutFailure<'a>>> {
+    rollout_website_mode(broker, root, source, image, end, false, false)
+}
+/// Update the registered protected website and refresh its selected actor under
+/// the same original stopped-service fence. This does not activate a pool.
+pub fn update_uninstalled_website<'a>(
+    broker: &'a InstallingBroker,
+    root: &Path,
+    source: &Path,
+    image: &str,
+    end: Instant,
+    skip_backup: bool,
+) -> std::result::Result<InitialWebsiteRolloutClosed, Box<InitialWebsiteRolloutFailure<'a>>> {
+    rollout_website_mode(broker, root, source, image, end, true, skip_backup)
+}
+fn rollout_website_mode<'a>(
+    broker: &'a InstallingBroker,
+    root: &Path,
+    source: &Path,
+    image: &str,
+    end: Instant,
+    refresh: bool,
+    skip_backup: bool,
+) -> std::result::Result<InitialWebsiteRolloutClosed, Box<InitialWebsiteRolloutFailure<'a>>> {
     let mut owner = Box::new(Owner {
         broker,
         root: root.to_owned(),
@@ -90,6 +116,9 @@ pub fn rollout_initial_website<'a>(
         closed_service: None,
         actor: None,
         actor_attempted: false,
+        previous_facts: Default::default(),
+        refresh,
+        skip_backup,
         input: Default::default(),
         deployment_close_attempted: false,
         end,

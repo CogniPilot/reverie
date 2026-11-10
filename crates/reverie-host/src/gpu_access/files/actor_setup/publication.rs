@@ -54,6 +54,7 @@ impl SetupState {
             &actor,
             (source_stamp, binding_stamp),
             groups,
+            self.previous_actor.as_ref(),
             &mut fence,
         );
         let leaves = result.map_err(|e| causes.borrow_mut().host(e))?;
@@ -83,11 +84,28 @@ fn publish_three(
     actor: &Path,
     stamps: (GpuFileStamp, GpuFileStamp),
     groups: (u32, u32),
+    previous: Option<&(GpuFileStamp, u32, Vec<u8>)>,
     fence: &mut ActorSetupRenameFence<'_>,
 ) -> Result<Vec<(PathBuf, GpuFileStamp, u32)>> {
     let proof = fence.pending.proof.clone();
     let pending = fence.pending;
     let file = pending.file.as_ref().expect("same actual pending");
+    if let Some((stamp, actor_group, _)) = previous {
+        let after = replace_actor_configuration(
+            actor,
+            &proof.facts_raw,
+            Some(stamp),
+            *actor_group,
+            proof.deadline(),
+            file,
+            fence,
+        )?;
+        return Ok(vec![
+            (source.to_owned(), stamps.0, groups.0),
+            (binding.to_owned(), stamps.1, groups.1),
+            (actor.to_owned(), after, *actor_group),
+        ]);
+    }
     let source_after = replace_actor_configuration(
         source,
         proof.intent.configuration_bytes(),

@@ -33,6 +33,8 @@ pub struct ActorSetupControlFiles {
 }
 struct SetupState {
     files: GpuControlFiles,
+    refresh: bool,
+    previous_actor: Option<(GpuFileStamp, u32, Vec<u8>)>,
     brand: Arc<()>,
     causes: Rc<RefCell<Causes>>,
     source: Option<GpuPrivateSnapshot>,

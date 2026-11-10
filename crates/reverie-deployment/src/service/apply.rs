@@ -91,6 +91,54 @@ impl DeploymentService {
         })();
         DeploymentError::finalized(result, pins.close())
     }
+    /// Explicit owner-selected update without a backup. All ordinary source,
+    /// pins, candidate, writer exclusion and one-attempt swap guards still hold.
+    pub(crate) fn apply_without_backup_before(
+        &self,
+        id: &str,
+        end: Instant,
+    ) -> Result<DeploymentStatus> {
+        let deadline = OperationDeadline::Initial(end);
+        deadline.check()?;
+        let operation = self.effect_operation(id)?;
+        let pins = self.pins(&operation)?;
+        let result = (|| {
+            self.claimed(&operation)?;
+            operation.prepared()?;
+            require(
+                !operation.exists("stop-attempt")
+                    && !operation.exists("old-rename-attempt")
+                    && !operation.exists("start-attempt"),
+                "DEPLOYMENT_SWAP_ALREADY_ATTEMPTED",
+            )?;
+            let source = self.source_current(&operation, true)?;
+            require(
+                source["Name"] == format!("/{}", self.installation.name),
+                "DEPLOYMENT_SOURCE_NAME_CHANGED",
+            )?;
+            let candidate = operation.candidate()?;
+            let actual = self.engine.container(&candidate)?;
+            operation.plan.candidate_matches(&actual)?;
+            require(
+                actual["Name"] == format!("/{}", temporary_name(&operation, "candidate"))
+                    && actual["State"]["Running"] == false
+                    && actual["State"]["Status"] == "created",
+                "DEPLOYMENT_CANDIDATE_NOT_SLEEPING",
+            )?;
+            pins.running_mounts(&source)?;
+            self.refuse_shared_writers(&source)?;
+            deadline.check()?;
+            operation.record("unverified-backup-accepted", &json!({"backupVerified":false,
+                "backupCreated":false,"policy":"explicit-owner-skip-backup","sourceDataDeleted":false}))?;
+            operation.attempt("stop-attempt")?;
+            self.engine.stop(model::string(&source, "Id")?)?;
+            self.source_current(&operation, false)?;
+            pins.verify()?;
+            self.swap_scoped(&operation, &candidate, &pins, deadline)?;
+            operation.status()
+        })();
+        DeploymentError::finalized(result, pins.close())
+    }
     /// Execute the exact prepared release. The stopped-data copy and rehearsal
     /// must finish before the old container is renamed. No bulk employee wake.
     pub fn apply(&self, id: &str) -> Result<DeploymentStatus> {

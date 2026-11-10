@@ -14,7 +14,19 @@ impl ActorSetupHistoryObservation {
         exact_names(
             &names,
             &["admission.lock", "operations", "profiles"],
-            &["host-resume", "host-resume.namespace.json"],
+            if self.refresh {
+                &[
+                    "host-resume",
+                    "host-resume.namespace.json",
+                    "resource-actor.json",
+                ]
+            } else {
+                &["host-resume", "host-resume.namespace.json"]
+            },
+        )?;
+        require(
+            !self.refresh || names.contains("resource-actor.json"),
+            "ACTOR_REFRESH_PREVIOUS_MISSING",
         )?;
         self.inspect_record(&mut snapshot, &root.join("admission.lock"))?;
         let operations = root.join("operations");
