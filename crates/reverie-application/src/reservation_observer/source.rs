@@ -112,7 +112,7 @@ pub(super) trait Source: Send + Sync {
         &self,
         config: &ReservationConfiguration,
         paths: &CustodyPaths,
-        rows: &InventoryRows,
+        inventory: &reverie_contracts::reservation_engine::CustodyInventory<'_>,
         table: &MountTable,
         end: Instant,
     ) -> Result<()>;
@@ -311,11 +311,13 @@ impl Source for Installed {
         &self,
         config: &ReservationConfiguration,
         paths: &CustodyPaths,
-        rows: &InventoryRows,
+        inventory: &reverie_contracts::reservation_engine::CustodyInventory<'_>,
         table: &MountTable,
         end: Instant,
     ) -> Result<()> {
-        Ok(self.kernel.custody_paths(config, paths, rows, table, end)?)
+        Ok(self
+            .kernel
+            .custody_paths_with_stopped(config, paths, inventory, table, end)?)
     }
     fn storage(
         &self,

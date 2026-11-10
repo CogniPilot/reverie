@@ -1,4 +1,4 @@
-//! Explicit force-stopped retention of one exact original STOP marker. This
+//! Explicit force-stopped retention of one exact original maintenance marker. This
 //! does not acknowledge its prior command or any R/resource completion.
 use super::*;
 use crate::worker_image::{
@@ -140,9 +140,8 @@ impl State {
         let stamp = native::PrivateFileStamp::of(&metadata);
         let group = metadata.gid();
         let raw = self.read_private(&path)?;
-        need(
-            raw.as_bytes() == pending_bytes(&WorkerServiceAction::Stop),
-            "NATIVE_SERVICE_FORCE_REQUIRES_EXACT_STOP_PENDING",
+        let kind = RetainedServicePending::decode(raw.as_bytes()).ok_or(
+            WorkerServiceError::Refused("NATIVE_SERVICE_FORCE_REQUIRES_EXACT_MAINTENANCE_PENDING"),
         )?;
         let original = self.files.len() - 1;
         need(
@@ -192,8 +191,8 @@ impl State {
         let to = self.open_directory(&history)?;
         self.attempted = true;
         let result: Result<()> = (|| {
-            native::retain_stopped_service_pending(&self.files[from], &self.files[to])?;
-            let archived = history.join("previous-stop-pending");
+            native::retain_stopped_service_pending(&self.files[from], &self.files[to], kind)?;
+            let archived = history.join(kind.archive_name());
             let actual = native::PrivateFileStamp::of(&self.files[original].metadata()?);
             need(
                 actual.same_renamed_file(&stamp)
@@ -202,8 +201,7 @@ impl State {
                 "NATIVE_SERVICE_STOP_ARCHIVE_CHANGED",
             )?;
             need(
-                self.read_private(&archived)?.as_bytes()
-                    == pending_bytes(&WorkerServiceAction::Stop),
+                self.read_private(&archived)?.as_bytes() == kind.bytes(),
                 "NATIVE_SERVICE_STOP_ARCHIVE_CHANGED",
             )?;
             self.stop_takeover

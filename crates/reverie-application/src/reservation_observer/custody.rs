@@ -79,17 +79,52 @@ impl ObservationContext {
         let source = &self.observer.source;
         let table = source.mount_table(end)?;
         let before = self.inventory_at(end)?;
-        source.custody_scan(&self.config, &paths, &before.rows, &table, end)?;
+        let inventory = self.classify_custody_sources(&paths, &before.rows, &table, end)?;
         need(
             source.mount_table(end)? == table,
             "RESERVATION_MOUNT_TABLE_CHANGED",
         )?;
         let after = self.inventory_at(end)?;
         need(
-            before.rows.mount_shape()? == after.rows.mount_shape()?,
+            before.rows.mount_custody_shape()? == after.rows.mount_custody_shape()?,
             "RESERVATION_MOUNT_INVENTORY_CHANGED",
         )?;
+        for id in inventory.stopped_ids() {
+            let raw = self.engine(EngineQuery::InspectStopped(id), end)?;
+            inventory.assert_stopped_current(id, &raw)?;
+        }
         self.check(end)?;
         Ok(before)
+    }
+    fn classify_custody_sources<'a>(
+        &self,
+        paths: &CustodyPaths,
+        rows: &'a InventoryRows,
+        table: &reverie_contracts::kernel_mounts::MountTable,
+        end: Instant,
+    ) -> Result<reverie_contracts::reservation_engine::CustodyInventory<'a>> {
+        use reverie_host::reservation_kernel::ReservationKernelError;
+        let mut inventory = reverie_contracts::reservation_engine::CustodyInventory::new(rows);
+        loop {
+            match self
+                .observer
+                .source
+                .custody_scan(&self.config, paths, &inventory, table, end)
+            {
+                Err(ObserverError::Kernel(ReservationKernelError::StoppedMountStateRequired(
+                    id,
+                ))) => {
+                    // A bounded read-only classification query, never an
+                    // effect retry. The checked constructor binds the full
+                    // fresh row and refuses duplicate or transitional replies.
+                    let raw = self.engine(EngineQuery::InspectStopped(&id), end)?;
+                    inventory.observe_stopped(&id, &raw)?;
+                }
+                other => {
+                    other?;
+                    return Ok(inventory);
+                }
+            }
+        }
     }
 }

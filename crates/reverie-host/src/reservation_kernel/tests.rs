@@ -150,6 +150,9 @@ impl Source for Fixture {
         }
         Ok(result)
     }
+    fn resolve_future(&self, p: &PosixPath) -> Result<PosixPath> {
+        Ok(native::resolve_future_text(&p.codepoints())?)
+    }
     fn identity_text(&self, points: &[u32]) -> Result<[u64; 4]> {
         let raw = native::python_path(points)?;
         let selected = if raw.starts_with("/proc") || raw.starts_with(CGROUP) {

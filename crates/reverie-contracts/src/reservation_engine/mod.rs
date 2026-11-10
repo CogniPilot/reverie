@@ -2,6 +2,7 @@
 //! admission authority are separate; all unknown row/mount fields are retained.
 mod binding;
 mod config;
+mod custody;
 mod fields;
 mod row;
 mod stopped;
@@ -13,6 +14,7 @@ pub use config::{
     ControlBindingPaths, ControlPaths, ObservedMemoryPolicy, ReservationConfiguration,
     StorageIdentityRef, StoragePathText,
 };
+pub use custody::CustodyInventory;
 pub use fields::{DeclaredLimits, NativeLimitFields};
 use reverie_core::{decimal::UnsignedInteger, ids::ContainerId};
 pub use row::{ContainerRow, StoppedWebsite};
@@ -191,6 +193,22 @@ impl InventoryRows {
         self.rows
             .iter()
             .map(|row| Ok((row.id.clone(), row.mounts_digest()?)))
+            .collect()
+    }
+    /// Include the ordinary native state when missing stopped mount sources
+    /// are classified. Unchanged Mounts alone cannot establish a stable scan.
+    pub fn mount_custody_shape(
+        &self,
+    ) -> Result<Vec<(ContainerId, InventoryDigest, InventoryDigest)>> {
+        self.rows
+            .iter()
+            .map(|row| {
+                Ok((
+                    row.id.clone(),
+                    row.mounts_digest()?,
+                    digest(field(row.root(), "State").ok_or(EngineDataError::State)?)?,
+                ))
+            })
             .collect()
     }
 }

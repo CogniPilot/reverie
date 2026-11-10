@@ -15,7 +15,7 @@ mod service;
 pub use model::{DeploymentPreview, DeploymentProfile, DeploymentStatus};
 pub use rollout::{
     InitialWebsiteRolloutClosed, InitialWebsiteRolloutError, InitialWebsiteRolloutFailure,
-    rollout_initial_website, update_uninstalled_website,
+    recover_uninstalled_website_actor, rollout_initial_website, update_uninstalled_website,
 };
 pub use service::DeploymentService;
 type Result<T> = std::result::Result<T, DeploymentError>;

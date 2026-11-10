@@ -81,10 +81,13 @@ impl<'a> InitialWebsiteRolloutFailure<'a> {
         &self.cleanup
     }
     pub fn deployment_operation(&self) -> Option<&str> {
-        self.owner
-            .as_ref()
-            .and_then(|owner| owner.preview.as_ref())
-            .map(|preview| preview.operation.as_str())
+        self.owner.as_ref().and_then(|owner| {
+            owner
+                .preview
+                .as_ref()
+                .map(|preview| preview.operation.as_str())
+                .or_else(|| owner.flow.recovery_operation())
+        })
     }
     pub fn operation_id(&self) -> Option<&str> {
         self.owner

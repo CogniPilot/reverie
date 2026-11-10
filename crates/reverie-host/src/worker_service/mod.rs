@@ -527,12 +527,38 @@ fn immutable_tool(path: &Path) -> Result<()> {
     immutable(&path.canonicalize()?)
 }
 
+/// Only these exact interrupted maintenance kinds can be archived by the
+/// force-stopped owner. Classification never acknowledges the old outcome.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum RetainedServicePending {
+    Stop,
+    Image,
+}
+impl RetainedServicePending {
+    pub(crate) const fn bytes(self) -> &'static [u8] {
+        match self {
+            Self::Stop => b"NATIVE_SERVICE_STOP_PENDING_V1\n",
+            Self::Image => b"NATIVE_SERVICE_IMAGE_TRANSITION_PENDING_V1\n",
+        }
+    }
+    pub(crate) fn decode(raw: &[u8]) -> Option<Self> {
+        [Self::Stop, Self::Image]
+            .into_iter()
+            .find(|kind| kind.bytes() == raw)
+    }
+    pub(crate) const fn archive_name(self) -> &'static str {
+        match self {
+            Self::Stop => "previous-stop-pending",
+            Self::Image => "previous-image-pending",
+        }
+    }
+}
 fn pending_bytes(action: &WorkerServiceAction) -> &'static [u8] {
     match action {
         WorkerServiceAction::Install => b"NATIVE_SERVICE_INSTALL_PENDING_V1\n",
         WorkerServiceAction::Start => b"NATIVE_SERVICE_START_PENDING_V1\n",
         WorkerServiceAction::Stop | WorkerServiceAction::QuiesceStop => {
-            b"NATIVE_SERVICE_STOP_PENDING_V1\n"
+            RetainedServicePending::Stop.bytes()
         }
         WorkerServiceAction::Status => b"NATIVE_SERVICE_READONLY_V1\n",
         WorkerServiceAction::Rollback { .. } => b"NATIVE_SERVICE_ROLLBACK_PENDING_V1\n",

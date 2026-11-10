@@ -94,6 +94,26 @@ impl InstallingBroker {
     }
 }
 impl<'a> PreparedOfflineActorSetup<'a> {
+    /// Consumes a mismatch together with all original preparation owners.
+    pub fn require_website(
+        mut self,
+        container: &reverie_core::ids::ContainerId,
+        image: &str,
+    ) -> std::result::Result<Self, Box<OfflineActorSetupFailure<'a>>> {
+        let mut owner = self.owner.take().expect("same actor owner");
+        let body = owner.assert_current().and_then(|()| {
+            owner
+                .facts
+                .as_ref()
+                .expect("same native facts")
+                .require_website(container, image)
+                .map_err(OfflineActorSetupError::Facts)
+        });
+        match body {
+            Ok(()) => Ok(Self { owner: Some(owner) }),
+            Err(cause) => Err(OfflineActorSetupFailure::new(owner, cause)),
+        }
+    }
     pub fn preview_digest(&self) -> &JournalDigest {
         self.owner
             .as_ref()

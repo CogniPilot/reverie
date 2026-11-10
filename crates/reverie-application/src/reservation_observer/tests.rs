@@ -423,7 +423,7 @@ impl Source for Arc<Fixture> {
         &self,
         _: &ReservationConfiguration,
         targets: &reverie_host::reservation_kernel::CustodyPaths,
-        _: &InventoryRows,
+        _: &reverie_contracts::reservation_engine::CustodyInventory<'_>,
         _: &MountTable,
         _: Instant,
     ) -> Result<()> {
@@ -659,6 +659,26 @@ fn custody_rechecks_full_mount_shape_but_does_not_replace_first_census() {
             "table", "ps", "inspect", "custody", "table", "ps", "inspect"
         ]
     );
+}
+#[test]
+fn custody_refuses_native_state_changes_even_when_mounts_are_unchanged() {
+    for state in [
+        json!({"Running":false,"Pid":0}),
+        json!({"Running":true,"Pid":999}),
+    ] {
+        let fixture = Fixture::new();
+        let first = row(1, true);
+        let mut second = first.clone();
+        second["State"] = state;
+        fixture.inventory(&[first]);
+        fixture.inventory(&[second]);
+        let observer = fixture.observer();
+        let context = observer.capture(configuration(), None);
+        assert_eq!(
+            result_code(context.custody(None)),
+            Some("RESERVATION_MOUNT_INVENTORY_CHANGED")
+        );
+    }
 }
 #[test]
 fn actual_image_target_uses_same_context_engine_deadline_and_complete_census() {

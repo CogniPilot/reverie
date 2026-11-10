@@ -17,17 +17,29 @@ struct Resolver {
     pending: Vec<Pending>,
     remaining: usize,
     seen: BTreeMap<Vec<u32>, Option<Vec<u32>>>,
-    strict: bool,
+    mode: Mode,
+}
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum Mode {
+    Strict,
+    Optional,
+    Future,
 }
 pub(crate) fn resolve_strict_text(points: &[u32]) -> io::Result<PosixPath> {
-    resolve_text(points, true)
+    resolve_text(points, Mode::Strict)
 }
 pub(crate) fn resolve_optional_text(points: &[u32]) -> io::Result<PosixPath> {
-    resolve_text(points, false)
+    resolve_text(points, Mode::Optional)
 }
-fn resolve_text(points: &[u32], strict: bool) -> io::Result<PosixPath> {
+/// Resolve a future bind source. Only absence is tolerated; access failures,
+/// non-directory ancestors and symlink loops remain failures. This is path
+/// DATA, never evidence that a running mount or its inode has been observed.
+pub(crate) fn resolve_future_text(points: &[u32]) -> io::Result<PosixPath> {
+    resolve_text(points, Mode::Future)
+}
+fn resolve_text(points: &[u32], mode: Mode) -> io::Result<PosixPath> {
     let input = PosixPath::try_new(points).map_err(|_| io::ErrorKind::InvalidInput)?;
-    if strict && !input.is_absolute() {
+    if mode != Mode::Optional && !input.is_absolute() {
         return Err(io::ErrorKind::InvalidInput.into());
     }
     let initial = if input.is_absolute() {
@@ -48,7 +60,7 @@ fn resolve_text(points: &[u32], strict: bool) -> io::Result<PosixPath> {
         remaining: pending.len(),
         pending,
         seen: BTreeMap::new(),
-        strict,
+        mode,
     }
     .resolve()
 }
@@ -93,14 +105,17 @@ impl Resolver {
         let native = python_path(&candidate)?;
         let metadata = match fs::symlink_metadata(&native) {
             Ok(value) => value,
-            Err(_) if !self.strict => {
+            Err(error)
+                if self.mode == Mode::Optional
+                    || (self.mode == Mode::Future && error.kind() == io::ErrorKind::NotFound) =>
+            {
                 self.path = candidate;
                 return Ok(());
             }
             Err(error) => return Err(error),
         };
         if !metadata.file_type().is_symlink() {
-            if self.strict && self.remaining > 0 && !metadata.is_dir() {
+            if self.mode != Mode::Optional && self.remaining > 0 && !metadata.is_dir() {
                 return Err(io::Error::from_raw_os_error(libc::ENOTDIR));
             }
             self.path = candidate;
@@ -109,14 +124,14 @@ impl Resolver {
         if let Some(target) = self.seen.get(&candidate) {
             self.path = match target {
                 Some(target) => target.clone(),
-                None if !self.strict => candidate,
+                None if self.mode == Mode::Optional => candidate,
                 None => return Err(io::Error::from_raw_os_error(libc::ELOOP)),
             };
             return Ok(());
         }
         let target = match fs::read_link(&native) {
             Ok(target) => python_text(&target),
-            Err(_) if !self.strict => {
+            Err(_) if self.mode == Mode::Optional => {
                 self.path = candidate;
                 return Ok(());
             }

@@ -2,8 +2,13 @@ use super::*;
 impl<'a> Owner<'a> {
     pub(super) fn run(&mut self) -> RolloutResult<'a, InitialWebsiteRolloutClosed> {
         self.preflight()?;
+        self.begin_service_maintenance()?;
+        self.prepare_website_phase()?;
+        self.install_actor()
+    }
+    fn begin_service_maintenance(&mut self) -> RolloutResult<'a, ()> {
         self.service = Some(
-            (if self.refresh {
+            (if self.flow.refresh() {
                 maintain_stopped_deployment_service(
                     &self.source,
                     NativeWorkerServiceRole::PoolOfferV1,
@@ -30,7 +35,21 @@ impl<'a> Owner<'a> {
             .restrict_initial_website(self.end)
             .map_err(InitialWebsiteRolloutError::Deployment)?;
         self.assert_service_current()?;
-        self.check_time()?;
+        self.check_time()
+    }
+    fn prepare_website_phase(&mut self) -> RolloutResult<'a, ()> {
+        if let Some(operation) = self.flow.recovery_operation() {
+            self.status = Some(
+                self.deployment
+                    .as_ref()
+                    .expect("same deployment owner")
+                    .actor_recovery_status(operation, &self.image, self.end)
+                    .map_err(InitialWebsiteRolloutError::Deployment)?,
+            );
+            self.close_deployment()?;
+            self.assert_service_current()?;
+            return Ok(());
+        }
         let deployment = self.deployment.as_ref().expect("same deployment owner");
         // Quiesce owns its original STOP/IMAGE records. The actual deployment
         // OP is retained before any candidate creation or apply effects.
@@ -60,7 +79,7 @@ impl<'a> Owner<'a> {
             .operation;
         self.check_time()?;
         self.status = Some(
-            (if self.skip_backup {
+            (if self.flow.skip_backup() {
                 deployment.apply_without_backup_before(operation, self.end)
             } else {
                 deployment.apply_before(operation, self.end)
@@ -88,18 +107,33 @@ impl<'a> Owner<'a> {
         // maintenance owner. Release this original lock first, keep IMAGE.
         self.close_deployment()?;
         self.assert_service_current()?;
-        self.install_actor()
+        Ok(())
     }
     fn install_actor(&mut self) -> RolloutResult<'a, InitialWebsiteRolloutClosed> {
         self.check_time()?;
         self.actor_attempted = true;
         self.actor = Some(
-            (if self.refresh {
+            (if self.flow.refresh() {
                 self.broker.prepare_offline_actor_refresh(self.end)
             } else {
                 self.broker.prepare_offline_actor_setup(self.end)
             })
             .map_err(InitialWebsiteRolloutError::Actor)?,
+        );
+        let candidate = self
+            .status
+            .as_ref()
+            .and_then(|status| status.candidate_id.as_deref())
+            .and_then(|id| reverie_core::ids::ContainerId::parse(id).ok())
+            .ok_or(InitialWebsiteRolloutError::Refused(
+                "DEPLOYMENT_ACTOR_RECOVERY_SELECTION_CHANGED",
+            ))?;
+        self.actor = Some(
+            self.actor
+                .take()
+                .expect("same actual actor preparation")
+                .require_website(&candidate, &self.image)
+                .map_err(InitialWebsiteRolloutError::Actor)?,
         );
         self.assert_service_current()?;
         let prepared = self
@@ -143,7 +177,7 @@ impl<'a> Owner<'a> {
                     == original.configuration().session_resource_order(),
             "INITIAL_WEBSITE_SOURCE_CHANGED",
         )?;
-        if self.refresh {
+        if self.flow.refresh() {
             self.previous_facts
                 .observe(current.configuration(), self.end)
                 .map_err(InitialWebsiteRolloutError::Bootstrap)?;
@@ -185,7 +219,7 @@ impl<'a> Owner<'a> {
         &self,
         config: &worker_config::EffectiveWorkerConfig,
     ) -> RolloutResult<'a, ()> {
-        if self.refresh {
+        if self.flow.refresh() {
             ResourceActorSettings::capture(config).map_err(InitialWebsiteRolloutError::Data)?;
             require(
                 reverie_contracts::worker_pool::WorkerPoolProvider::from_config(config)
@@ -254,7 +288,7 @@ impl<'a> Owner<'a> {
             .expect("same actual IMAGE fence")
             .revalidate()
             .map_err(InitialWebsiteRolloutError::Service)?;
-        if self.refresh {
+        if self.flow.refresh() {
             self.previous_facts
                 .assert_metadata(
                     self.broker

@@ -88,3 +88,30 @@ fn optional_resolution_matches_python_errors_missing_tails_and_string_provenance
         }
     }
 }
+#[test]
+fn future_sources_follow_dangling_aliases_but_refuse_nonabsence_errors() {
+    let tree = Tree::new();
+    let resolve = |suffix: &str| resolve_future_text(&python_text(&tree.0.join(suffix)));
+    assert_eq!(
+        resolve("dangling/tail").unwrap().codepoints(),
+        python_text(&tree.0.join("missing/tail"))
+    );
+    for suffix in ["file/child", "file-slash/child"] {
+        assert_eq!(
+            resolve(suffix).unwrap_err().raw_os_error(),
+            Some(libc::ENOTDIR)
+        );
+    }
+    assert_eq!(
+        resolve("loop/child").unwrap_err().raw_os_error(),
+        Some(libc::ELOOP)
+    );
+    assert!(resolve_strict_text(&python_text(&tree.0.join("dangling/tail"))).is_err());
+    if nix::unistd::geteuid().as_raw() != 0 {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(tree.0.join("dir"), fs::Permissions::from_mode(0)).unwrap();
+        let denied = resolve("dir/child/future");
+        fs::set_permissions(tree.0.join("dir"), fs::Permissions::from_mode(0o700)).unwrap();
+        assert_eq!(denied.unwrap_err().kind(), io::ErrorKind::PermissionDenied);
+    }
+}

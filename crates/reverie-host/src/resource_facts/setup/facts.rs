@@ -128,6 +128,28 @@ impl ActorSetupFacts {
                 ))
             })
     }
+    /// Compare the SAME retained native facts with a deployment's selection
+    /// DATA. This does not authenticate a different independently read website.
+    pub fn require_website(
+        &self,
+        container: &reverie_core::ids::ContainerId,
+        image: &str,
+    ) -> std::result::Result<(), Rc<ActorSetupFactsError>> {
+        self.document_bytes()?;
+        let selected = &self
+            .bound
+            .as_ref()
+            .expect("same observed facts")
+            .document
+            .website;
+        if selected.container == *container && selected.image == image {
+            Ok(())
+        } else {
+            Err(Rc::new(ActorSetupFactsError::Refused(
+                "ACTOR_SETUP_DEPLOYMENT_SELECTION_CHANGED",
+            )))
+        }
+    }
     pub fn primary_error(&self) -> Option<&ActorSetupFactsError> {
         self.primary.as_deref()
     }

@@ -120,6 +120,65 @@ fn forced_marker_archival_preserves_unknown_bytes_and_never_touches_resource_pen
     fs::remove_dir_all(root).unwrap();
 }
 #[test]
+fn retained_maintenance_codec_accepts_only_exact_stop_or_image_pending() {
+    for kind in [RetainedServicePending::Stop, RetainedServicePending::Image] {
+        assert_eq!(RetainedServicePending::decode(kind.bytes()), Some(kind));
+        let mut changed = kind.bytes().to_vec();
+        changed.push(b' ');
+        assert_eq!(RetainedServicePending::decode(&changed), None);
+    }
+    for action in [
+        WorkerServiceAction::Start,
+        WorkerServiceAction::Install,
+        WorkerServiceAction::Upgrade {
+            force_stopped: true,
+        },
+        WorkerServiceAction::Rollback {
+            start_previous: true,
+        },
+    ] {
+        assert_eq!(RetainedServicePending::decode(pending_bytes(&action)), None);
+    }
+}
+#[test]
+fn exact_image_pending_archival_keeps_original_inode_and_collision_is_unchanged() {
+    use std::os::unix::fs::MetadataExt;
+    let (mut state, root, _, history) = selection_with_action(WorkerServiceAction::Stop);
+    let pending = state.folder().join("pending");
+    fs::write(&pending, RetainedServicePending::Image.bytes()).unwrap();
+    let original = fs::File::open(&pending).unwrap();
+    let before = original.metadata().unwrap();
+    let target = history.join(RetainedServicePending::Image.archive_name());
+    fs::write(&target, b"earlier unknown record").unwrap();
+    let from = fs::File::open(state.folder()).unwrap();
+    let to = fs::File::open(&history).unwrap();
+    assert_eq!(
+        native::retain_stopped_service_pending(&from, &to, RetainedServicePending::Image)
+            .unwrap_err()
+            .kind(),
+        std::io::ErrorKind::AlreadyExists
+    );
+    assert_eq!(
+        fs::read(&pending).unwrap(),
+        RetainedServicePending::Image.bytes()
+    );
+    assert_eq!(fs::read(&target).unwrap(), b"earlier unknown record");
+    fs::remove_file(&target).unwrap();
+    native::retain_stopped_service_pending(&from, &to, RetainedServicePending::Image).unwrap();
+    let after = fs::metadata(&target).unwrap();
+    assert_eq!((before.dev(), before.ino()), (after.dev(), after.ino()));
+    assert_eq!(
+        fs::read(&target).unwrap(),
+        RetainedServicePending::Image.bytes()
+    );
+    assert!(!pending.exists());
+    // Only the standalone rename component was exercised; the actual service
+    // owner is intentionally still uncertain and cannot release an attempt.
+    assert!(state.finish_attempt().is_err());
+    let _ = state.close();
+    fs::remove_dir_all(root).unwrap();
+}
+#[test]
 fn never_running_stop_recovery_keeps_a_genuine_denial_until_upgrade_archives_it() {
     let (mut state, root, _, history) = selection_with_action(WorkerServiceAction::Stop);
     let pending = state.folder().join("pending");

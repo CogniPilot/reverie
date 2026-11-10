@@ -1,4 +1,5 @@
 use super::*;
+use reverie_contracts::reservation_engine::{CustodyInventory, StoppedState};
 pub(super) fn scan(
     source: &impl Source,
     config: &ReservationConfiguration,
@@ -23,15 +24,40 @@ pub(super) fn scan_targets(
     table: &MountTable,
     end: Instant,
 ) -> Result<()> {
-    let mut sources = config.configured_sources()?;
-    for row in rows.rows() {
-        sources.extend(row.mount_sources()?);
+    scan_with_stopped(
+        source,
+        config,
+        targets,
+        &CustodyInventory::new(rows),
+        table,
+        end,
+    )
+}
+pub(super) fn scan_with_stopped(
+    source: &impl Source,
+    config: &ReservationConfiguration,
+    targets: &CustodyPaths,
+    inventory: &CustodyInventory<'_>,
+    table: &MountTable,
+    end: Instant,
+) -> Result<()> {
+    let mut sources = config
+        .configured_sources()?
+        .into_iter()
+        .map(|path| (path, None))
+        .collect::<Vec<_>>();
+    for row in inventory.rows().rows() {
+        sources.extend(
+            row.mount_sources()?
+                .into_iter()
+                .map(|path| (path, Some(row))),
+        );
     }
-    for selected in sources {
+    for (selected, row) in sources {
         check(end)?;
         let selected = PosixPath::try_new(selected.codepoints())
             .map_err(|_| ReservationKernelError::Refused("RESERVATION_MOUNT_INVENTORY"))?;
-        let real = source.resolve(&selected)?;
+        let real = resolve_source(source, &selected, row, inventory)?;
         need(
             selected.is_absolute() && !selected.has_parent_component(),
             "RESERVATION_MOUNT_INVENTORY",
@@ -41,6 +67,31 @@ pub(super) fn scan_targets(
         }
     }
     check(end)
+}
+fn resolve_source(
+    source: &impl Source,
+    selected: &PosixPath,
+    row: Option<&ContainerRow>,
+    inventory: &CustodyInventory<'_>,
+) -> Result<PosixPath> {
+    match source.resolve(selected) {
+        Err(ReservationKernelError::Observation(ObservationError::Io(error)))
+            if error.kind() == io::ErrorKind::NotFound =>
+        {
+            let Some(row) = row.filter(|row| StoppedState::validate_ordinary(row).is_ok()) else {
+                return Err(error.into());
+            };
+            let state = inventory.stopped(row).ok_or_else(|| {
+                ReservationKernelError::StoppedMountStateRequired(row.id().clone())
+            })?;
+            need(
+                state.permits_future_mount_source(row)?,
+                "RESERVATION_STOPPED_MOUNT_CHANGED",
+            )?;
+            source.resolve_future(selected)
+        }
+        other => other,
+    }
 }
 fn target_exposure(
     source: &impl Source,

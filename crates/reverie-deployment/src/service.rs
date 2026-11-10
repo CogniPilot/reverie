@@ -23,6 +23,33 @@ pub struct DeploymentService {
     engine: Engine,
 }
 impl DeploymentService {
+    /// Reobserve the exact already-ready protected deployment, without any
+    /// preparation/apply call. The held update lock protects these reads.
+    pub(crate) fn actor_recovery_status(
+        &self,
+        id: &str,
+        image: &str,
+        end: Instant,
+    ) -> Result<DeploymentStatus> {
+        let operation = self.operation(id)?;
+        require(
+            operation.plan.profile() == DeploymentProfile::ProtectedWebsite
+                && operation.plan.preview.candidate_image == image,
+            "DEPLOYMENT_ACTOR_RECOVERY_SELECTION_CHANGED",
+        )?;
+        let status = self.status_before(id, end)?;
+        require(
+            status.stage == "HYBRID_READY",
+            "DEPLOYMENT_ACTOR_RECOVERY_NOT_READY",
+        )?;
+        let (candidate, _) = operation.readiness_target(true)?;
+        let current = self.engine.container(&self.installation.name)?;
+        require(
+            current["Id"] == candidate && current["Image"] == image,
+            "DEPLOYMENT_ACTOR_RECOVERY_SELECTION_CHANGED",
+        )?;
+        Ok(status)
+    }
     pub(crate) fn restrict_initial_website(&mut self, end: Instant) -> Result<()> {
         self.engine.restrict_initial_website(end)
     }

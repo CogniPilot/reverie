@@ -16,6 +16,14 @@ pub(super) struct Selection {
 }
 #[derive(Subcommand)]
 pub(super) enum Action {
+    /// Refresh only the actor after an already-ready protected deployment.
+    /// Requires a fresh inactive service; never swaps the website or wakes employees.
+    RecoverUninstalledActor {
+        #[command(flatten)]
+        selection: Selection,
+        #[arg(long)]
+        deployment_operation: String,
+    },
     /// Update an already selected actor with the actual new website facts.
     /// Requires an uninstalled pool and an inactive broker; leaves employees stopped.
     UpdateUninstalled {
@@ -36,16 +44,29 @@ pub(super) enum Action {
     },
 }
 pub(super) fn run(action: Action) -> Result<(), Box<dyn std::error::Error>> {
-    let (selection, update, skip_backup) = match action {
-        Action::Rollout { selection } => (selection, false, false),
+    let (selection, update, skip_backup, recovery) = match action {
+        Action::Rollout { selection } => (selection, false, false, None),
+        Action::RecoverUninstalledActor {
+            selection,
+            deployment_operation,
+        } => (selection, true, false, Some(deployment_operation)),
         Action::UpdateUninstalled {
             selection,
             skip_backup,
-        } => (selection, true, skip_backup),
+        } => (selection, true, skip_backup, None),
     };
     let end = Instant::now() + Duration::from_secs(900);
     let broker = super::offline_owner::capture(&selection.config)?;
-    let outcome = if update {
+    let outcome = if let Some(operation) = recovery {
+        reverie_deployment::recover_uninstalled_website_actor(
+            broker,
+            &selection.root,
+            &selection.config,
+            &selection.image,
+            &operation,
+            end,
+        )
+    } else if update {
         reverie_deployment::update_uninstalled_website(
             broker,
             &selection.root,
