@@ -39,6 +39,10 @@ pub const RAM_POOL_PURPOSE: &str = "resource-ram-pool-v2";
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ResourceRequestSelection {
+    EmployeeStatus {
+        employee_id: ProfileEmployeeId,
+        session_id: ProfileSessionId,
+    },
     Preview {
         employee_id: ProfileEmployeeId,
         idempotency_key: JournalId,
@@ -79,6 +83,22 @@ impl ResourceOperationRequest {
         literal(field(value, "kind")?, "resource-operation")?;
         let request = identifier(field(value, "requestId")?)?;
         let (selected, approval) = match scalar(field(value, "verb")?)?.as_str() {
+            "employee-status" => {
+                closed(
+                    value,
+                    &["kind", "requestId", "verb", "employeeId", "sessionId"],
+                )?;
+                (
+                    ResourceRequestSelection::EmployeeStatus {
+                        employee_id: employee(field(value, "employeeId")?)?,
+                        session_id: ProfileSessionId::parse(
+                            identifier(field(value, "sessionId")?)?.as_str(),
+                        )
+                        .map_err(|_| ResourceActorDataError("RESOURCE_RAM_UUID"))?,
+                    },
+                    None,
+                )
+            }
             "draft" => {
                 closed(
                     value,
@@ -126,6 +146,7 @@ impl ResourceOperationRequest {
     pub fn employee_id(&self) -> &ProfileEmployeeId {
         match &self.selected {
             ResourceRequestSelection::Preview { employee_id, .. }
+            | ResourceRequestSelection::EmployeeStatus { employee_id, .. }
             | ResourceRequestSelection::Apply { employee_id, .. } => employee_id,
         }
     }
@@ -143,7 +164,12 @@ impl ResourceOperationRequest {
         )
     }
     fn stage(&self) -> &'static str {
-        if self.approval.is_some() {
+        if matches!(
+            self.selected,
+            ResourceRequestSelection::EmployeeStatus { .. }
+        ) {
+            "status"
+        } else if self.approval.is_some() {
             "apply"
         } else {
             "preview"

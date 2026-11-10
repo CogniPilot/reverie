@@ -284,12 +284,18 @@ impl ControllerState {
         self.inspect_original_controller(end)
     }
     fn inspect_original_controller(&self, end: Instant) -> Result<serde_json::Value> {
+        self.inspect_controller_with_query(&self.query, end)
+    }
+    fn inspect_controller_with_query(
+        &self,
+        query: &MetadataQueryOwner,
+        end: Instant,
+    ) -> Result<serde_json::Value> {
         let id = self
             .controller
             .as_ref()
             .ok_or(PoolError::Refused("WORKER_POOL_CONTROLLER_UNKNOWN"))?;
-        let raw = self
-            .query
+        let raw = query
             .query(
                 EngineQuery::WorkerPoolInspect(id),
                 end,
@@ -498,7 +504,10 @@ impl ControllerState {
     fn assert_original_controller_current(&mut self, end: Instant) -> Result<()> {
         self.require_active()?;
         self.binding.assert_original_current(end)?;
-        self.verify_peer(&self.inspect_original_controller(end)?)?;
+        self.assert_controller_with_query(&self.query, end)
+    }
+    fn assert_controller_with_query(&self, query: &MetadataQueryOwner, end: Instant) -> Result<()> {
+        self.verify_peer(&self.inspect_controller_with_query(query, end)?)?;
         self.directory.assert_anchor_current(
             self.anchor.as_deref().expect("active original anchor"),
             self.anchor_pid,
@@ -646,6 +655,8 @@ fn fresh_id() -> Result<String> {
 mod capacity;
 pub use capacity::ControllerCapacity;
 mod creation_pool;
+mod employee_status;
+pub use employee_status::EmployeeResourceObservation;
 mod io;
 mod member;
 mod setup;

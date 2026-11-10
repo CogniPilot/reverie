@@ -71,6 +71,12 @@ export interface RamResourcePreviewContext extends ResourceContext<typeof RAM_PU
   readonly employeeId: string;
   readonly principal: Readonly<ResourceOwnerPrincipal>;
 }
+/** Read-only employee observation; this stage cannot authorize a draft or Apply. */
+export interface RamResourceStatusContext extends ResourceContext<typeof RAM_PURPOSE> {
+  readonly stage: 'status';
+  readonly employeeId: string;
+  readonly principal: Readonly<ResourceOwnerPrincipal>;
+}
 /** Current canonical identity DATA, meaningful only with its actual retained
  * context, cookie/session and attested native channel. */
 export interface ResourceOwnerPrincipal {
@@ -153,7 +159,8 @@ export type AnyResourceContext =
   | ResourceOwnerContext
   | ResourcePreviewContext
   | RamResourceOwnerContext
-  | RamResourcePreviewContext;
+  | RamResourcePreviewContext
+  | RamResourceStatusContext;
 type AuthorityContext =
   | AnyResourceContext
   | PoolInstallationViewerContext
@@ -308,12 +315,14 @@ export class ResourceOwnerAuthority {
   #identity(
     request: FastifyRequest,
     token: string,
-    purpose: ResourcePurpose = PURPOSE
+    purpose: ResourcePurpose = PURPOSE,
+    access: 'operation' | 'employee-status' = 'operation'
   ): { key: string; principal?: Readonly<ResourceOwnerPrincipal> } {
     need(
       !this.#closed &&
-        request.method === 'POST' &&
-        sameOrigin(request) &&
+        (access === 'employee-status'
+          ? purpose === RAM_PURPOSE && request.method === 'GET'
+          : request.method === 'POST' && sameOrigin(request)) &&
         request.cookies?.[OWNER_COOKIE] === token &&
         request.headers.authorization === undefined &&
         request.headers[SERVICE_HEADER] === undefined &&
@@ -393,6 +402,10 @@ export class ResourceOwnerAuthority {
   captureRamPreview(request: FastifyRequest, employeeId: string): RamResourcePreviewContext {
     need(typeof employeeId === 'string' && UUID.test(employeeId));
     return this.#capture(request, { stage: 'preview' as const, employeeId }, RAM_PURPOSE);
+  }
+  captureRamStatus(request: FastifyRequest, employeeId: string): RamResourceStatusContext {
+    need(typeof employeeId === 'string' && UUID.test(employeeId) && employeeId !== NIL_UUID);
+    return this.#capture(request, { stage: 'status' as const, employeeId }, RAM_PURPOSE);
   }
   capturePoolInstallationViewer(request: FastifyRequest): PoolInstallationViewerContext {
     return this.#capture(
@@ -593,6 +606,7 @@ export class ResourceOwnerAuthority {
     T extends
       | { stage: 'apply'; approval: Readonly<ResourceApproval> }
       | { stage: 'preview'; employeeId: string }
+      | { stage: 'status'; employeeId: string }
       | { stage: 'viewer' | 'fleet-viewer'; requestId: string }
       | (PoolInstallationSelection & ({ stage: 'offer' } | { stage: 'consent'; consent: true }))
       | { stage: 'fleet-preview'; requestId: string; approval: Readonly<FleetApproval> }
@@ -612,7 +626,8 @@ export class ResourceOwnerAuthority {
   ): Readonly<ResourceContext<P> & T> & PrincipalFor<P> {
     const token = request.cookies?.[OWNER_COOKIE];
     need(typeof token === 'string' && token.length > 0 && token.length <= 4096);
-    const identity = this.#identity(request, token, purpose),
+    const access = selected.stage === 'status' ? 'employee-status' : 'operation';
+    const identity = this.#identity(request, token, purpose, access),
       owner = ownerFor(request);
     if (origin) {
       this.assertContext(origin);
@@ -626,7 +641,7 @@ export class ResourceOwnerAuthority {
         this.#contexts.has(context) &&
           Date.now() >= issued &&
           Date.now() < expires &&
-          this.#identity(request, token, purpose).key === identity.key
+          this.#identity(request, token, purpose, access).key === identity.key
       );
     };
     const context = Object.freeze({

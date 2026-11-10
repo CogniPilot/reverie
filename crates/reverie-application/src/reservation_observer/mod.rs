@@ -116,6 +116,16 @@ impl ObservedInventory {
         current: &reverie_contracts::storage_identity::CurrentEmployee,
     ) -> std::result::Result<Option<ObservedRow<'_>>, reverie_contracts::gpu_access::GpuDataError>
     {
+        self.employee_selected(config, current)
+    }
+    /// Reuse the same exact current EID/SID/name/label selection and native
+    /// context origin. This grants no GPU, resource mutation or release.
+    pub(crate) fn employee_selected(
+        &self,
+        config: &EffectiveWorkerConfig,
+        current: &reverie_contracts::storage_identity::CurrentEmployee,
+    ) -> std::result::Result<Option<ObservedRow<'_>>, reverie_contracts::gpu_access::GpuDataError>
+    {
         let selected =
             reverie_contracts::gpu_access::selected_container(&self.rows, config, current)?;
         Ok(selected
@@ -143,6 +153,15 @@ impl ObservedRow<'_> {
     }
 }
 impl ObservationContext {
+    /// Borrow the SAME original context's readonly native calls and custody.
+    /// Callers must join the actual runtime/engine; this creates no new owner.
+    pub(crate) fn metadata_query_owner(
+        &self,
+    ) -> Result<&reverie_host::engine_metadata::MetadataQueryOwner> {
+        self.metadata.as_deref().ok_or(ObserverError::Refused(
+            "RESERVATION_NATIVE_METADATA_OWNER_REQUIRED",
+        ))
+    }
     pub(crate) fn assert_inventory_origin(&self, rows: &ObservedInventory) -> Result<()> {
         need(
             Arc::ptr_eq(&self.origin, &rows.origin),

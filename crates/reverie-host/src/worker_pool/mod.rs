@@ -8,6 +8,7 @@ mod close_classification_tests;
 mod controller_limits;
 pub use client::{
     ActivatedController, ControllerActivationFailure, ControllerCapacity, ControllerStatusData,
+    EmployeeResourceObservation,
 };
 pub(crate) mod directory;
 mod endpoint;
@@ -87,6 +88,9 @@ impl std::error::Error for PoolError {
     }
 }
 impl PoolError {
+    pub fn has_unconfirmed_close(&self) -> bool {
+        self.close_unknown()
+    }
     pub fn code(&self) -> &'static str {
         match self {
             Self::Refused(code) => code,
@@ -107,6 +111,7 @@ impl PoolError {
         match self {
             Self::MetadataClose(_) | Self::PublicationDirectory(_) => true,
             Self::Observation(error) => error.has_unconfirmed_close(),
+            Self::BootstrapFacts(error) => error.has_unconfirmed_close(),
             Self::Member(error) => error.unconfirmed_native(),
             Self::Channel(error) => error.has_unconfirmed_close(),
             Self::Finalization(primary, secondary) => {

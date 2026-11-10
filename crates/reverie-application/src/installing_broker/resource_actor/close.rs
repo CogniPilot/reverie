@@ -11,7 +11,12 @@ impl<'a> Frame<'a> {
     }
     pub(super) fn close_metadata(&mut self, end: Instant) -> Result<FrameMetadataClosed<'_, 'a>> {
         self.failed = true;
-        let readers: [Result<()>; 8] = [
+        let readers: [Result<()>; 9] = [
+            if self.employee_close.is_some() {
+                Err(ResourceActorError::EmployeeCloseUnconfirmed)
+            } else {
+                Ok(())
+            },
             self.unconfirmed
                 .as_ref()
                 .map_or(Ok(()), |cause| Err(cause.error())),

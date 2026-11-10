@@ -32,12 +32,23 @@ pub enum WebsiteFactsError {
     Io(io::Error),
     Channel(crate::worker_reports::WorkerReportError),
     Cleanup,
+    DescriptorClose,
     Finalization {
         primary: Box<Self>,
         secondary: Box<Self>,
     },
 }
 impl WebsiteFactsError {
+    pub fn has_unconfirmed_close(&self) -> bool {
+        match self {
+            Self::Cleanup | Self::DescriptorClose => true,
+            Self::Channel(error) => error.has_unconfirmed_close(),
+            Self::Finalization { primary, secondary } => {
+                primary.has_unconfirmed_close() || secondary.has_unconfirmed_close()
+            }
+            Self::Refused(_) | Self::Io(_) | Self::Engine(_) => false,
+        }
+    }
     pub fn code(&self) -> &'static str {
         match self {
             Self::Refused(code) => code,
@@ -45,6 +56,7 @@ impl WebsiteFactsError {
             Self::Io(_) => "ENGINE_METADATA_UNAVAILABLE",
             Self::Channel(error) => error.code(),
             Self::Cleanup => "ENGINE_METADATA_CLOSE_UNCONFIRMED",
+            Self::DescriptorClose => "BACKEND_CODE_CLOSE_UNCONFIRMED",
             Self::Finalization { .. } => "ENGINE_METADATA_FINALIZATION",
         }
     }

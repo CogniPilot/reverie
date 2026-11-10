@@ -7,6 +7,7 @@ use reverie_store::storage_identity::{self, StorageIdentityConfig};
 use std::time::{SystemTime, UNIX_EPOCH};
 mod claim;
 mod cursor;
+mod employee_status;
 mod preview;
 mod receipt;
 mod reference;

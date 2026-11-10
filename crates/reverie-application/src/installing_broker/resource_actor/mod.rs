@@ -84,6 +84,7 @@ struct Frame<'a> {
     failed: bool,
     frames: usize,
     unconfirmed: Option<custody::RetainedClose>,
+    employee_close: Option<Box<reverie_host::worker_pool::PoolError>>,
 }
 #[must_use = "retain this exact protected channel through actual operation and checked close"]
 pub struct InstalledResourceWebsite<'a> {
@@ -165,6 +166,7 @@ impl<'a> Frame<'a> {
             failed: false,
             frames: 0,
             unconfirmed: None,
+            employee_close: None,
         }
     }
 }
@@ -268,6 +270,7 @@ impl Drop for Frame<'_> {
             // counted accepted record and native producer on uncertainty.
             std::mem::forget(std::mem::replace(&mut self.transport, Transport::Closed));
             std::mem::forget(self.context.take());
+            std::mem::forget(self.employee_close.take());
         }
     }
 }

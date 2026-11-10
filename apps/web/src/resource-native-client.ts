@@ -24,6 +24,7 @@ import {
   type AnyResourceContext,
   type RamResourceOwnerContext,
   type RamResourcePreviewContext,
+  type RamResourceStatusContext,
 } from './resource-owner-authority.js';
 
 const MAX_FRAME = 64 * 1024;
@@ -59,10 +60,14 @@ const Check = z
     approval: Approval.nullable(),
   })
   .strict();
-const RamCheck = Check.extend({ approval: RamApproval.nullable() }).strict();
+const RamCheck = Check.extend({
+  approval: RamApproval.nullable(),
+  stage: z.enum(['preview', 'apply', 'status']),
+}).strict();
 const RamDraft = z
   .object({ employeeId: UUID, idempotencyKey: UUID, memoryMiB: z.number().int().min(512).max(1_048_576) })
   .strict();
+const EmployeeStatus = z.object({ employeeId: UUID, sessionId: UUID }).strict();
 const RamClaim = z.object({ approval: RamApproval }).strict();
 const RamReference = z
   .object({
@@ -334,7 +339,7 @@ export class ResourceNativeClient {
   static async openRam(
     path: string,
     authority: ResourceOwnerAuthority,
-    context: RamResourceOwnerContext | RamResourcePreviewContext
+    context: RamResourceOwnerContext | RamResourcePreviewContext | RamResourceStatusContext
   ): Promise<ResourceNativeClient> {
     need(context.purpose === 'resource-ram-pool-v2');
     return this.#open(path, authority, context);
@@ -504,7 +509,8 @@ export class ResourceNativeClient {
       const approval: Readonly<ResourceApproval> | null =
         this.#context.stage === 'apply' ? this.#context.approval : null;
       need(
-        check.employeeId === (approval?.employeeId ?? (this.#context as ResourcePreviewContext).employeeId) &&
+        check.employeeId ===
+          (this.#context.stage === 'apply' ? this.#context.approval.employeeId : this.#context.employeeId) &&
           isDeepStrictEqual(check.approval, approval)
       );
       const ownerReply = {
@@ -623,6 +629,7 @@ export class ResourceNativeClient {
   }
   async request(
     verb:
+      | 'employee-status'
       | 'draft'
       | 'claim'
       | 'publication'
@@ -642,7 +649,13 @@ export class ResourceNativeClient {
     let ramReference: string | undefined;
     if (this.#context.purpose === 'resource-ram-pool-v2') {
       need(readiness === undefined);
-      if (verb === 'draft') {
+      if (verb === 'employee-status') {
+        const selected = EmployeeStatus.parse(fields);
+        need(
+          this.#context.stage === 'status' && selected.employeeId === this.#context.employeeId && launch === undefined
+        );
+        selectedFields = Object.freeze(selected);
+      } else if (verb === 'draft') {
         const selected = RamDraft.parse(fields);
         need(
           this.#context.stage === 'preview' && selected.employeeId === this.#context.employeeId && launch === undefined
@@ -668,10 +681,21 @@ export class ResourceNativeClient {
       }
     }
     need(
-      ['draft', 'claim', 'publication', 'prepare', 'source-stop', 'start', 'verify', 'finalize', 'completion'].includes(
-        verb
-      ) &&
-        this.#context.stage === (verb === 'draft' || verb === 'completion' ? 'preview' : 'apply') &&
+      [
+        'employee-status',
+        'draft',
+        'claim',
+        'publication',
+        'prepare',
+        'source-stop',
+        'start',
+        'verify',
+        'finalize',
+        'completion',
+      ].includes(verb) &&
+        (verb !== 'employee-status' || this.#context.purpose === 'resource-ram-pool-v2') &&
+        this.#context.stage ===
+          (verb === 'employee-status' ? 'status' : verb === 'draft' || verb === 'completion' ? 'preview' : 'apply') &&
         Object.keys(fields).every((key) => !['kind', 'requestId', 'verb'].includes(key)) &&
         (verb === 'start'
           ? this.#context.purpose === 'resource-ram-pool-v2'

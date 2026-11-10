@@ -1,6 +1,7 @@
 use super::*;
 #[derive(Debug)]
 pub enum ResourceActorError {
+    EmployeeCloseUnconfirmed,
     RetainedGateClose(Arc<GateError>),
     Refused(&'static str),
     Gate(Box<GateError>),
@@ -10,6 +11,7 @@ pub enum ResourceActorError {
     Native(reverie_host::website_facts::WebsiteFactsError),
     Channel(reverie_host::worker_reports::WorkerReportError),
     Observer(crate::reservation_observer::ObserverError),
+    Controller(Box<reverie_host::worker_pool::PoolError>),
     Frame(reverie_contracts::human_protocol::HumanFrameError),
     RetainedCompanyClose(Arc<reverie_store::storage_identity::IdentityError>),
     RetainedKernelClose(Arc<reverie_host::reservation_kernel::ReservationKernelError>),
@@ -26,6 +28,7 @@ pub enum ResourceActorError {
 impl ResourceActorError {
     pub fn code(&self) -> &'static str {
         match self {
+            Self::EmployeeCloseUnconfirmed => "EMPLOYEE_RESOURCE_CLOSE_UNCONFIRMED",
             Self::RetainedGateClose(error) => error.code(),
             Self::Refused(code) => code,
             Self::Gate(e) => e.code(),
@@ -35,6 +38,7 @@ impl ResourceActorError {
             Self::Native(e) => e.code(),
             Self::Channel(e) => e.code(),
             Self::Observer(e) => e.code(),
+            Self::Controller(e) => e.code(),
             Self::Frame(e) => e.code(),
             Self::RetainedCompanyClose(e) => e.code(),
             Self::RetainedKernelClose(e) => e.code(),
@@ -45,9 +49,11 @@ impl ResourceActorError {
     }
     pub(super) fn has_unconfirmed_close(&self) -> bool {
         match self {
+            Self::EmployeeCloseUnconfirmed => true,
             Self::RetainedGateClose(error) => gate_close_unknown(error),
             Self::Gate(error) => gate_close_unknown(error),
             Self::Observer(error) => error.has_unconfirmed_close(),
+            Self::Controller(error) => error.has_unconfirmed_close(),
             Self::Channel(error) => error.has_unconfirmed_close(),
             Self::RetainedCompanyClose(error) => error.has_unconfirmed_close(),
             Self::RetainedKernelClose(error) => error.has_unconfirmed_close(),
@@ -71,6 +77,7 @@ impl std::error::Error for ResourceActorError {
             Self::RetainedGateClose(error) => Some(&**error),
             Self::Gate(error) => Some(&**error),
             Self::Observer(error) => Some(error),
+            Self::Controller(error) => Some(&**error),
             Self::RetainedCompanyClose(error) => Some(&**error),
             Self::RetainedKernelClose(error) => Some(&**error),
             Self::RetainedControlClose(error) => Some(&**error),
