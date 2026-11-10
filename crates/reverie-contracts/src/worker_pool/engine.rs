@@ -162,7 +162,12 @@ fn controller_spec(
         && host["CapDrop"] == json!(["ALL"])
         && (host["CapAdd"].is_null() || host["CapAdd"] == json!([]))
         && (host["GroupAdd"].is_null() || host["GroupAdd"] == json!([]))
-        && host["SecurityOpt"] == json!(["no-new-privileges:true"]);
+        // Docker may append its SELinux label-disable default for the fixed
+        // host-PID service. Keep every other option and the v1 codec exact.
+        && (host["SecurityOpt"] == json!(["no-new-privileges:true"])
+            || (service_v2
+                && host["SecurityOpt"]
+                    == json!(["no-new-privileges:true", "label=disable"])));
     if !valid {
         return Err(PoolPolicyError);
     }
