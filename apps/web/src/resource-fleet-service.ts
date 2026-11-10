@@ -6,6 +6,8 @@ import { OwnerAuthService } from './owner-auth/service.js';
 import { ResourceOwnerAuthorizationError } from './resource-owner-authority.js';
 import { FleetNativeService, type FleetEmployeeRecovery } from './resource-fleet-native-service.js';
 import { FleetRecoveryHistory, FleetRecoveryRequest } from './resource-fleet-recovery.js';
+import { FleetOperationStore } from './resource-fleet-operation-store.js';
+import { NativeFleetMigrationFailureError } from './resource-fleet-native-client.js';
 import {
   NativeFleetPreviewRequest,
   NativeFleetApplyRequest,
@@ -24,7 +26,8 @@ import {
 const HOST_SETUP: FleetBlocker = Object.freeze({
   code: 'FLEET_HOST_SETUP_REQUIRED',
   message: 'Live fleet status and routine resource edits are unavailable in this build.',
-  remedy: 'Shared-pool setup and employee recovery are reported separately. This status query cannot verify running limits.',
+  remedy:
+    'Shared-pool setup and employee recovery are reported separately. This status query cannot verify running limits.',
 });
 
 /** The server cannot infer cgroup enforcement or image identity from employee settings. */
@@ -35,10 +38,18 @@ export class FleetResourcesService {
     auth?: OwnerAuthService,
     socket?: string,
     recovery?: FleetEmployeeRecovery,
-    recoveryHistoryPath?: string
+    recoveryHistoryPath?: string,
+    operationHistoryPath?: string
   ) {
-    if (auth) this.native = new FleetNativeService(company, auth, socket, recovery,
-      recoveryHistoryPath ? new FleetRecoveryHistory(recoveryHistoryPath) : undefined);
+    if (auth)
+      this.native = new FleetNativeService(
+        company,
+        auth,
+        socket,
+        recovery,
+        recoveryHistoryPath ? new FleetRecoveryHistory(recoveryHistoryPath) : undefined,
+        operationHistoryPath ? new FleetOperationStore(operationHistoryPath) : undefined
+      );
   }
   close(): void {
     this.native?.close();
@@ -114,6 +125,23 @@ export function registerFleetResourceRoutes(
     ['result', NativeFleetResultRequest],
     ['reconcile', FleetRecoveryRequest],
   ] as const;
+  app.post('/api/company/resources/fleet/native-operations', async (request, reply) => {
+    reply.header('Cache-Control', 'no-store');
+    if (!authorize(request))
+      return reply.code(403).send({ success: false, error: 'Company owner authorization is required' });
+    if (!NativeFleetPreviewRequest.safeParse(request.body).success)
+      return reply.code(400).send({ success: false, error: 'Invalid fleet history request' });
+    if (!service.native)
+      return reply.code(503).send({ success: false, error: 'Fleet operation history is unavailable' });
+    try {
+      return { success: true, data: await service.native.operationHistory(request) };
+    } catch (error) {
+      return reply.code(error instanceof ResourceOwnerAuthorizationError ? 403 : 503).send({
+        success: false,
+        error: 'Original fleet operation history is unavailable',
+      });
+    }
+  });
   for (const [action, schema] of native) {
     app.post(`/api/company/resources/fleet/native-${action}`, async (request, reply) => {
       reply.header('Cache-Control', 'no-store');
@@ -131,12 +159,23 @@ export function registerFleetResourceRoutes(
               ? await service.native.apply(request)
               : action === 'reconcile'
                 ? await service.native.reconcile(request)
-                : service.native.result(request);
+                : await service.native.result(request);
         return { success: true, data };
       } catch (error) {
-        return reply.code(error instanceof ResourceOwnerAuthorizationError ? 403 : 503).send({
+        if (error instanceof ResourceOwnerAuthorizationError)
+          return reply.code(403).send({ success: false, error: 'Company owner authorization is required' });
+        const nativeCode =
+          error instanceof NativeFleetMigrationFailureError &&
+          error.outcome === 'unconfirmed' &&
+          typeof error.code === 'string' &&
+          /^[A-Z][A-Z0-9_]{0,95}$/.test(error.code)
+            ? error.code
+            : undefined;
+        return reply.code(503).send({
           success: false,
-          error: error instanceof Error ? error.message : 'Original native fleet outcome is unavailable',
+          code: nativeCode ?? 'FLEET_NATIVE_OUTCOME_UNCONFIRMED',
+          outcome: 'unconfirmed',
+          error: 'Original native fleet outcome is unavailable. Inspect the original operation; do not replay it.',
         });
       }
     });
