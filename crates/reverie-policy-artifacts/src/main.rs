@@ -5,6 +5,7 @@ use reverie_contracts::task_perf_v1::{
     MAX_ARTIFACT_BYTES, PerfSystem, TaskPerfPolicy, produce_task_perf_for_policy,
 };
 use std::path::{Path, PathBuf};
+mod codex_inputs;
 mod output;
 mod pool_images;
 mod verify;
@@ -38,7 +39,9 @@ struct Arguments {
     verify_manifest: Option<PathBuf>,
 }
 fn main() {
-    let result = if pool_images::requested() {
+    let result = if codex_inputs::requested() {
+        codex_inputs::run()
+    } else if pool_images::requested() {
         pool_images::run()
     } else if worker_child::requested() {
         worker_child::run()

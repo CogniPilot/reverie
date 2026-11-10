@@ -63,3 +63,17 @@ third-party TOML generator and other build
 tools can themselves use Python; this cohort removes the selected first-party
 policy producers, not every build-time interpreter. No deployment, engine
 operation, perf syscall or service-runtime Python removal is claimed here.
+
+`codex-observer-inputs source|vendor ROOT PROVENANCE GIT_HASHES` qualifies the
+optional diagnostic candidate's public build inputs. It preserves the reviewed
+lock hash, Git revisions and output hashes, registry checksums/count, patched
+source hashes and complete vendor crate inventory. Vendor configuration must
+still select `vendored-sources`. It runs no program. The Nix wrapper separately
+runs locked, offline Cargo metadata and passes its completed JSON through
+`--cargo-metadata FILE` to the vendor report. The original sorted, spaced report
+format is retained, and `nativeBuildOrRuntimeAcceptance` remains false.
+
+The new read bounds are 32 MiB for the lock, 2 MiB for provenance/hash/config
+documents, 8 MiB per patched file and 16 MiB for Cargo metadata. Patched source
+paths must contain only relative normal components, with no symlink leaf.
+These are build input checks, not an owner workflow or a running Codex check.
