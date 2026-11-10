@@ -155,3 +155,41 @@ fn service_v2_is_exact_fifth_control_bind_without_silently_relaxing_v1() {
         assert!(!valid_v2(&changed, &policy));
     }
 }
+#[test]
+fn service_v2_accepts_docker_environment_order_without_accepting_overrides() {
+    let policy = policy();
+    let mut value = service_v2(&policy);
+    value["Config"]["Env"] = json!(["LANG=C.UTF-8", "PATH=/bin"]);
+    assert!(valid_v2(&value, &policy));
+    for bad in [
+        json!([]),
+        json!(["PATH=/bin"]),
+        json!(["PATH=/bin", "PATH=/bin"]),
+        json!(["LANG=C.UTF-8", "PATH=/bin", "PATH=/elsewhere"]),
+        json!(["PATH=/bin", "LANG=C.UTF-8", "EXTRA=1"]),
+        json!(["PATH=/elsewhere", "LANG=C.UTF-8"]),
+        json!(["PATH=/bin", "LANG=C"]),
+        json!(["LANG=C.UTF-8", null]),
+        json!({"PATH":"/bin","LANG":"C.UTF-8"}),
+    ] {
+        value["Config"]["Env"] = bad;
+        assert!(!valid_v2(&value, &policy));
+    }
+    let mut original = controller(&policy);
+    original["Config"]["Env"] = json!(["LANG=C.UTF-8", "PATH=/bin"]);
+    assert!(!valid(&original, &policy));
+}
+#[test]
+fn failed_startup_classification_is_exact_and_not_a_general_error_allowlist() {
+    assert!(super::super::failed_controller_startup_log(
+        b"WORKER_POOL_CONTROLLER_SPEC\n"
+    ));
+    for bad in [
+        b"WORKER_POOL_CONTROLLER_SPEC".as_slice(),
+        b"WORKER_POOL_CONTROLLER_SPEC\nOTHER_FAILURE\n",
+        b"WORKER_POOL_PARENT_WRITE\n",
+        b"",
+    ] {
+        assert!(!super::super::failed_controller_startup_log(bad));
+    }
+}

@@ -17,7 +17,7 @@ pub use engine::{
     validate_pool_image_information, website_process_data,
 };
 pub use provider::WorkerPoolProvider;
-pub use retired::RetiredControllerData;
+pub use retired::{RetiredControllerData, failed_controller_startup_log};
 
 pub const PURPOSE: &str = "reverie-docker-worker-pool-v1";
 pub const MEMORY_MAX_MIB: u32 = 49_152;

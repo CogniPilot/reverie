@@ -4,6 +4,18 @@ use super::*;
 use crate::{resource_actor::PoolInstallationRequestData, worker_recovery::RecoveryInspection};
 use sha2::{Digest, Sha256};
 
+/// Fixed failure diagnostics only, never proof of stage, absence or cleanup.
+/// The retiring owner separately checks immutable source, full inspection,
+/// original process death, endpoint/parent absence and exact retained bytes.
+pub fn failed_controller_startup_log(raw: &[u8]) -> bool {
+    matches!(
+        raw,
+        b"WORKER_POOL_ENGINE_ROOT_PEER_REQUIRED\nWORKER_POOL_CLOSE_UNKNOWN\n"
+            | b"WORKER_POOL_WEBSITE_CHANGED\n"
+            | b"WORKER_POOL_CONTROLLER_SPEC\n"
+    )
+}
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 struct Receipt {
@@ -45,11 +57,7 @@ impl RetiredControllerData {
             || !hex_id(&value.birth_digest)
             || !hex_id(&value.original_request_digest)
             || !value.container_stdout.is_empty()
-            || !matches!(
-                value.container_stderr.as_slice(),
-                b"WORKER_POOL_ENGINE_ROOT_PEER_REQUIRED\nWORKER_POOL_CLOSE_UNKNOWN\n"
-                    | b"WORKER_POOL_WEBSITE_CHANGED\n"
-            )
+            || !failed_controller_startup_log(&value.container_stderr)
             || hash(&value.original_inspection_bytes) != value.original_inspection_sha256
             || hash(&value.container_stdout) != value.stdout_sha256
             || hash(&value.container_stderr) != value.stderr_sha256

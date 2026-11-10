@@ -1,6 +1,6 @@
 use super::*;
 use reverie_contracts::{
-    worker_pool::{validate_failed_controller_service_v2_inspection, WorkerPoolPolicy},
+    worker_pool::{WorkerPoolPolicy, validate_failed_controller_service_v2_inspection},
     worker_recovery::RecoveryInspection,
 };
 impl Retirement {
@@ -32,11 +32,7 @@ impl Retirement {
         let logs = self.logs.as_ref().expect("actual retained logs");
         need(
             logs.stdout.is_empty()
-                && matches!(
-                    logs.stderr.as_slice(),
-                    b"WORKER_POOL_ENGINE_ROOT_PEER_REQUIRED\nWORKER_POOL_CLOSE_UNKNOWN\n"
-                        | b"WORKER_POOL_WEBSITE_CHANGED\n"
-                ),
+                && reverie_contracts::worker_pool::failed_controller_startup_log(&logs.stderr),
             "POOL_RETIRE_FAILED_PREFIX_REQUIRED",
         )?;
         let reference = compiled_pool_image_inputs_reference()?.ok_or(

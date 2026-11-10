@@ -135,7 +135,7 @@ fn controller_spec(
             } else {
                 json!(["serve", "--policy-sha256", birth_digest])
             }
-        && config["Env"] == json!(["PATH=/bin", "LANG=C.UTF-8"])
+        && controller_environment(&config["Env"], service_v2)
         && labels["reverie.resource-controller"] == policy.deployment
         && labels["reverie.pool.purpose"]
             == if service_v2 {
@@ -172,6 +172,12 @@ fn controller_spec(
         return Err(PoolPolicyError);
     }
     mounts(&value["Mounts"], policy, service_v2)
+}
+fn controller_environment(value: &Value, service_v2: bool) -> bool {
+    // Docker may reorder these two unique fixed variables. No additional,
+    // duplicate, overridden or malformed variable is accepted. V1 stays exact.
+    value == &json!(["PATH=/bin", "LANG=C.UTF-8"])
+        || (service_v2 && value == &json!(["LANG=C.UTF-8", "PATH=/bin"]))
 }
 pub fn website_process_data(raw: &[u8], expected: &str) -> Result<Option<u32>, PoolPolicyError> {
     let value = decode(raw)?;
