@@ -2,6 +2,17 @@
 use super::*;
 use reverie_core::ids::{ContainerId, ProfileEmployeeId};
 impl NominationDerivation {
+    pub(in crate::worker_pool::installation_request::nomination) fn assert_retired_pending_policy(
+        &self,
+        digest: &reverie_core::operations::JournalDigest,
+        request: &PoolInstallationRequestData,
+    ) -> Result<()> {
+        need(
+            self.historical
+                .contains_validated_policy(digest, request.principal())?,
+            "POOL_PENDING_RETIRED_POLICY_REQUIRED",
+        )
+    }
     pub(in crate::worker_pool::installation_request::nomination) fn revised_highs(
         &self,
         original: &PoolInstallationRequestData,

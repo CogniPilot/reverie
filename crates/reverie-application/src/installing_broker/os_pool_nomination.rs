@@ -8,6 +8,24 @@ use reverie_host::{
 };
 use std::{path::Path, time::Instant};
 
+pub fn recover_uninstalled_os_worker_pool_pending(
+    snapshot: &ValidatedWorkerSnapshot,
+    runtime: WorkerRuntime,
+    expected: &JournalDigest,
+    pending_digest: &JournalDigest,
+    end: Instant,
+) -> Result<PoolNominationPublished, Box<reverie_host::worker_pool::PoolNominationRevisionFailure>>
+{
+    reverie_host::worker_pool::recover_uninstalled_os_pool_pending(
+        snapshot.source_path(),
+        snapshot.configuration(),
+        expected,
+        pending_digest,
+        runtime,
+        end,
+    )
+}
+
 pub fn rebase_uninstalled_os_worker_pool_nomination(
     snapshot: &ValidatedWorkerSnapshot,
     runtime: WorkerRuntime,

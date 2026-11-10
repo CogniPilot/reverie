@@ -34,7 +34,8 @@ mod revision;
 pub use error::{PoolNominationError, PoolNominationFailure};
 pub use revision::{
     PoolNominationRevisionFailure, rebase_uninstalled_os_pool_nomination,
-    retire_failed_os_pool_installation, revise_os_pool_nomination,
+    recover_uninstalled_os_pool_pending, retire_failed_os_pool_installation,
+    revise_os_pool_nomination,
 };
 type Result<T> = std::result::Result<T, PoolNominationError>;
 

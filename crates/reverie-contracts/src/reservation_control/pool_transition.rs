@@ -53,6 +53,52 @@ pub struct PoolTransitionIntent {
     bytes: Vec<u8>,
 }
 impl PoolTransitionIntent {
+    /// Read-only reconstruction of one existing denial record. Matching it
+    /// grants no old-operation completion, replay or archive authority.
+    pub fn decode_pending(
+        raw: &[u8],
+        scope: &OperationScope,
+        binding: &ControlBinding,
+        config: &EffectiveWorkerConfig,
+    ) -> Result<Self> {
+        if raw.is_empty() || raw.len() > 4096 {
+            return Err(ControlDataError::BindingSchema);
+        }
+        let value = crate::legacy_json::decode_strict_bytes(raw)
+            .map_err(|_| ControlDataError::BindingSchema)?;
+        let fields = object(&value)?;
+        let text = |name: &str| -> Result<String> {
+            let Value(Node::String(value)) = field(fields, name)? else {
+                return Err(ControlDataError::BindingSchema);
+            };
+            value
+                .0
+                .iter()
+                .copied()
+                .map(char::from_u32)
+                .collect::<Option<String>>()
+                .ok_or(ControlDataError::BindingSchema)
+        };
+        let id = |name| JournalId::parse(&text(name)?).map_err(|_| ControlDataError::BindingSchema);
+        let hash =
+            |name| JournalDigest::parse(&text(name)?).map_err(|_| ControlDataError::BindingSchema);
+        let selected = PoolTransitionSelection::new(
+            id("operationId")?,
+            id("previewId")?,
+            hash("cohortDigest")?,
+            hash("poolPolicyDigest")?,
+            hash("coverageDigest")?,
+            hash("revisionDigest")?,
+        );
+        let intent = Self::capture(&selected, scope, binding, config)?;
+        if intent.bytes != raw {
+            return Err(ControlDataError::BindingSchema);
+        }
+        Ok(intent)
+    }
+    pub fn pool_policy_digest(&self) -> &JournalDigest {
+        &self.selected.pool_policy
+    }
     pub fn capture(
         selected: &PoolTransitionSelection,
         scope: &OperationScope,

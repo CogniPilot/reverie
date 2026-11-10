@@ -18,6 +18,22 @@ pub(super) struct Publication {
     published: bool,
 }
 impl Publication {
+    pub(super) fn assert_unchanged(&self, owner: &NominationOwner) -> Result<()> {
+        need(
+            !self.archived && !self.published,
+            "POOL_PENDING_PROPOSAL_CHANGED",
+        )?;
+        self.assert_history_current(owner)?;
+        if self.original.is_some() {
+            self.assert_old(owner, 1)
+        } else {
+            PrivateBatch::check_exact_private_json(
+                &owner.selection,
+                owner.input_stamp.as_ref().expect("original request stamp"),
+            )
+            .map_err(Into::into)
+        }
+    }
     pub(super) fn history_path(&self) -> &Path {
         &self.history
     }
@@ -99,6 +115,15 @@ impl Publication {
         ));
         self.archive = self.history.join("request-before.json");
         self.temporary = format!("registration-request.next-{}", nonce.as_str());
+        self.history_fd
+            .as_ref()
+            .expect("original history")
+            .sync_all()?;
+        self.history_root_fd
+            .as_ref()
+            .expect("original history parent")
+            .sync_all()?;
+        parent.directories[1].sync_all()?;
         Ok(())
     }
     pub(super) fn publish(
@@ -302,7 +327,7 @@ impl Publication {
         finalized(finalized(writer, old), finalized(history, parent))
     }
 }
-fn private_file(info: &fs::Metadata, links: u64) -> Result<()> {
+pub(super) fn private_file(info: &fs::Metadata, links: u64) -> Result<()> {
     need(
         info.is_file()
             && info.uid() == native::uid()
@@ -323,7 +348,7 @@ fn same_inode(before: &fs::Metadata, after: &fs::Metadata, links: u64) -> Result
         "POOL_NOMINATION_ARCHIVE_CHANGED",
     )
 }
-fn private_directory(path: &Path) -> Result<()> {
+pub(super) fn private_directory(path: &Path) -> Result<()> {
     let info = fs::symlink_metadata(path)?;
     need(
         info.is_dir()

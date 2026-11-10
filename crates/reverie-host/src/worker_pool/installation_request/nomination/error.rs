@@ -20,6 +20,7 @@ pub enum PoolNominationError {
     Runtime(crate::worker_runtime::RuntimeError),
     Service(crate::worker_service::WorkerServiceError),
     Maintenance(crate::worker_image::ImageFileError),
+    Control(Box<crate::reservation_control::ControlHostError>),
     Finalization(Box<Self>, Box<Self>),
 }
 impl PoolNominationError {
@@ -43,6 +44,7 @@ impl PoolNominationError {
             Self::Runtime(_) => "POOL_NOMINATION_RUNTIME_CLOSE",
             Self::Service(e) => e.code(),
             Self::Maintenance(e) => e.code(),
+            Self::Control(e) => e.code(),
             Self::Finalization(primary, _) => primary.code(),
         }
     }
@@ -73,6 +75,7 @@ impl std::error::Error for PoolNominationError {
             Self::Runtime(e) => Some(e),
             Self::Service(e) => Some(e),
             Self::Maintenance(e) => Some(e),
+            Self::Control(e) => Some(e.as_ref()),
             Self::Finalization(primary, _) => Some(primary),
         }
     }
@@ -112,6 +115,11 @@ from_error!(crate::engine_metadata::EngineError, Engine);
 from_error!(crate::worker_runtime::RuntimeError, Runtime);
 from_error!(crate::worker_service::WorkerServiceError, Service);
 from_error!(crate::worker_image::ImageFileError, Maintenance);
+impl From<crate::reservation_control::ControlHostError> for PoolNominationError {
+    fn from(error: crate::reservation_control::ControlHostError) -> Self {
+        Self::Control(Box::new(error))
+    }
+}
 
 #[must_use = "retain original metadata/runtime/publication owners; never replay a partial import"]
 pub struct PoolNominationFailure {

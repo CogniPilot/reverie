@@ -8,6 +8,16 @@ use std::{
 };
 #[derive(Subcommand)]
 pub(super) enum Action {
+    /// Preserve the denial record from one uninstalled failed pool as UNKNOWN.
+    /// Requires actual stopped service/R/IMAGE/native absence; starts nothing.
+    RecoverUninstalledPendingV1 {
+        #[arg(long)]
+        config: PathBuf,
+        #[arg(long)]
+        expected_request_digest: String,
+        #[arg(long)]
+        expected_pending_digest: String,
+    },
     /// Observe the current protected website and rebase only an uninstalled
     /// proposal; no controller, worker, policy activation or consent is started.
     RebaseUninstalledNominationV1 {
@@ -57,6 +67,30 @@ pub(super) enum Action {
 }
 pub(super) fn run(action: Action) -> Result<(), Box<dyn std::error::Error>> {
     match action {
+        Action::RecoverUninstalledPendingV1 {
+            config,
+            expected_request_digest,
+            expected_pending_digest,
+        } => {
+            let expected = JournalDigest::parse(&expected_request_digest)?;
+            let pending = JournalDigest::parse(&expected_pending_digest)?;
+            let (snapshot, runtime) = capture(&config)?;
+            let result =
+                reverie_application::installing_broker::recover_uninstalled_os_worker_pool_pending(
+                    &snapshot,
+                    runtime,
+                    &expected,
+                    &pending,
+                    Instant::now() + Duration::from_secs(30),
+                )?;
+            println!(
+                "{}",
+                serde_json::json!({"pendingArchivedAsUnconfirmed":true,"priorOutcome":"unconfirmed",
+                "requestDigest":result.request_digest(),"requiresFreshOffer":true,
+                "requiresExplicitMaintenanceConsent":true,"started":false})
+            );
+            Ok(())
+        }
         Action::RebaseUninstalledNominationV1 {
             config,
             expected_request_digest,

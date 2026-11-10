@@ -24,7 +24,9 @@ mod memory_profile;
 pub(crate) mod metadata_socket;
 mod pool_retirement;
 mod rename;
-pub(crate) use pool_retirement::{archive_failed_pool_control, archive_failed_pool_policies};
+pub(crate) use pool_retirement::{
+    archive_failed_pool_control, archive_failed_pool_policies, archive_uninstalled_pool_pending,
+};
 pub(crate) mod socket_entry;
 pub(crate) mod worker_directory;
 pub(crate) use cold_temporary::{

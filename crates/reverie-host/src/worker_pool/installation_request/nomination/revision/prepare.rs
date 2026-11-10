@@ -3,7 +3,7 @@ use reverie_contracts::worker_pool::WorkerPoolProvider;
 impl RevisionOwner {
     pub(super) fn prepare(&mut self) -> Result<()> {
         let root = os_root()?;
-        if self.rebase_website {
+        if matches!(self.purpose, RevisionPurpose::RebaseWebsite) {
             match fs::symlink_metadata(root.join("worker-pool/policies")) {
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => (),
                 Err(error) => return Err(error.into()),
@@ -61,6 +61,9 @@ impl RevisionOwner {
             original.digest() == &self.expected,
             "POOL_NOMINATION_EXPECTED_DIGEST_CHANGED",
         )?;
+        if let Some(pending) = self.purpose.pending_mut() {
+            pending.observe(&self.nominal)?;
+        }
         let principal = serde_json::to_vec(&serde_json::json!({"accountId":original.principal().account_id(),
             "personId":original.principal().person_id(),"sessionEpoch":original.principal().session_epoch()}))
             .map_err(|_| PoolNominationError::Refused("POOL_NOMINATION_PRINCIPAL"))?;
@@ -82,7 +85,7 @@ impl RevisionOwner {
             )?;
         let mut nonhigh = fresh.policy().clone();
         nonhigh.employee_memory_high_mi_b = original.policy().employee_memory_high_mi_b.clone();
-        if self.rebase_website {
+        if matches!(self.purpose, RevisionPurpose::RebaseWebsite) {
             nonhigh.website_container = original.policy().website_container.clone();
         }
         need(
@@ -91,7 +94,11 @@ impl RevisionOwner {
         )?;
         if let Some(retirement) = &mut self.retirement {
             self.next = Some(retirement.prepare(&mut self.nominal)?);
-        } else if self.rebase_website {
+        } else if matches!(self.purpose, RevisionPurpose::RecoverPending(_)) {
+            self.next = Some(PoolInstallationRequestData::decode(
+                original.canonical_bytes(),
+            )?);
+        } else if matches!(self.purpose, RevisionPurpose::RebaseWebsite) {
             self.next = Some(original.with_observed_website(&fresh)?);
         } else {
             self.next = Some(
@@ -103,11 +110,15 @@ impl RevisionOwner {
             );
         }
         need(
-            self.next.as_ref().expect("next").digest()
-                != self.nominal.request.as_ref().expect("old").digest(),
+            matches!(self.purpose, RevisionPurpose::RecoverPending(_))
+                || self.next.as_ref().expect("next").digest()
+                    != self.nominal.request.as_ref().expect("old").digest(),
             "POOL_NOMINATION_UNCHANGED",
         )?;
         self.assert_uninstalled()?;
+        if let Some(pending) = self.purpose.pending() {
+            pending.assert_before(&self.nominal)?;
+        }
         self.nominal.assert_preflight()?;
         self.stopped
             .as_mut()

@@ -16,11 +16,6 @@ pub(super) struct Selection {
 }
 #[derive(Subcommand)]
 pub(super) enum Action {
-    /// INITIAL setup only: quiesce the registered broker/workers, verify a
-    /// complete backup/rehearsal, deploy the protected website, and install its
-    /// fixed actor facts under the SAME service fence. Refuses an existing
-    /// actor selector. Leaves broker/workers stopped; no pool consent/start or
-    /// automatic rollback/retry occurs. Inspect reported OP after a lost reply.
     /// Update an already selected actor with the actual new website facts.
     /// Requires an uninstalled pool and leaves employees stopped.
     UpdateUninstalled {
@@ -30,6 +25,11 @@ pub(super) enum Action {
         #[arg(long)]
         skip_backup: bool,
     },
+    /// INITIAL setup only: quiesce the registered broker/workers, verify a
+    /// complete backup/rehearsal, deploy the protected website, and install its
+    /// fixed actor facts under the SAME service fence. Refuses an existing
+    /// actor selector. Leaves broker/workers stopped; no pool consent/start or
+    /// automatic rollback/retry occurs. Inspect reported OP after a lost reply.
     Rollout {
         #[command(flatten)]
         selection: Selection,

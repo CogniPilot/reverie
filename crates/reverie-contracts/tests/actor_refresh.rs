@@ -59,3 +59,67 @@ fn refresh_refuses_unselected_actor_or_changed_configuration() {
     let (_, _, wrong_binding) = fixture(false);
     assert!(ActorSetupTransition::prepare_refresh(&config, &raw, &wrong_binding).is_err());
 }
+
+#[test]
+fn unknown_pool_pending_requires_exact_original_scope_configuration_and_all_fields() {
+    use reverie_contracts::reservation_control::{PoolTransitionIntent, PoolTransitionSelection};
+    use reverie_core::operations::{JournalDigest, JournalId, OperationScope};
+    let (_, config, binding) = fixture(true);
+    let option = reverie_contracts::worker_validation::WorkerValidationData::new(&config)
+        .reservation()
+        .unwrap()
+        .unwrap();
+    let scope = OperationScope {
+        company_id: option.company().clone(),
+        owner_scope_digest: option.owner_scope().clone(),
+    };
+    let selection = PoolTransitionSelection::new(
+        JournalId::parse("aaaaaaaa-0000-4000-8000-000000000001").unwrap(),
+        JournalId::parse("aaaaaaaa-0000-4000-8000-000000000002").unwrap(),
+        JournalDigest::parse(&"a".repeat(64)).unwrap(),
+        JournalDigest::parse(&"b".repeat(64)).unwrap(),
+        JournalDigest::parse(&"c".repeat(64)).unwrap(),
+        JournalDigest::parse(&worker_config::config_digest(&config).to_hex()).unwrap(),
+    );
+    let original = PoolTransitionIntent::capture(&selection, &scope, &binding, &config).unwrap();
+    let decoded =
+        PoolTransitionIntent::decode_pending(original.bytes(), &scope, &binding, &config).unwrap();
+    assert_eq!(decoded.bytes(), original.bytes());
+    assert_eq!(decoded.operation_id(), selection.operation_id());
+    let value: Value = serde_json::from_slice(original.bytes()).unwrap();
+    for key in [
+        "schema",
+        "state",
+        "companyId",
+        "ownerScopeDigest",
+        "configurationDigest",
+        "revisionDigest",
+    ] {
+        let mut changed = value.clone();
+        changed[key] = json!("wrong");
+        assert!(
+            PoolTransitionIntent::decode_pending(
+                &serde_json::to_vec(&changed).unwrap(),
+                &scope,
+                &binding,
+                &config
+            )
+            .is_err(),
+            "{key}"
+        );
+    }
+    let mut changed = value;
+    changed["completed"] = json!(true);
+    assert!(
+        PoolTransitionIntent::decode_pending(
+            &serde_json::to_vec(&changed).unwrap(),
+            &scope,
+            &binding,
+            &config
+        )
+        .is_err()
+    );
+    assert!(
+        PoolTransitionIntent::decode_pending(&vec![b' '; 4097], &scope, &binding, &config).is_err()
+    );
+}

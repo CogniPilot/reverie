@@ -3,6 +3,7 @@
 use super::*;
 use reverie_contracts::worker_pool::{ControllerBirthV2, RetiredControllerData};
 use reverie_core::ids::{ContainerId, ProfileSessionId};
+use reverie_core::operations::JournalDigest;
 use std::{ffi::OsStr, io::Read};
 
 #[derive(Default)]
@@ -34,6 +35,32 @@ struct ArchiveBirth {
     bytes: Vec<u8>,
 }
 impl HistoricalRetirements {
+    pub(super) fn contains_validated_policy(
+        &self,
+        digest: &JournalDigest,
+        principal: &reverie_contracts::resource_actor::ResourceOwnerPrincipal,
+    ) -> Result<bool> {
+        use sha2::Digest;
+        self.assert_current()?;
+        for entry in &self.entries {
+            if let Some(birth) = &entry.binding {
+                let request = PoolInstallationRequestData::decode(&entry.request)?;
+                if request.principal().account_id() == principal.account_id()
+                    && request.principal().person_id() == principal.person_id()
+                    && request.principal().session_epoch() == principal.session_epoch()
+                    && format!(
+                        "{:x}",
+                        sha2::Sha256::digest(serde_json::to_vec(birth.policy()).map_err(|_| {
+                            PoolNominationError::Refused("POOL_PENDING_POLICY_ENCODING")
+                        })?)
+                    ) == digest.as_str()
+                {
+                    return Ok(true);
+                }
+            }
+        }
+        Ok(false)
+    }
     pub(super) fn matches_row(
         &mut self,
         policy: &WorkerPoolPolicy,

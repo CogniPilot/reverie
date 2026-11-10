@@ -10,7 +10,27 @@ use crate::{
 };
 use reverie_core::{ids::ProfileEmployeeId, operations::JournalDigest};
 use std::fmt;
+mod pending_recovery;
 mod prepare;
+enum RevisionPurpose {
+    Highs,
+    RebaseWebsite,
+    RecoverPending(Box<pending_recovery::PendingRecovery>),
+}
+impl RevisionPurpose {
+    fn pending(&self) -> Option<&pending_recovery::PendingRecovery> {
+        match self {
+            Self::RecoverPending(owner) => Some(owner),
+            _ => None,
+        }
+    }
+    fn pending_mut(&mut self) -> Option<&mut pending_recovery::PendingRecovery> {
+        match self {
+            Self::RecoverPending(owner) => Some(owner),
+            _ => None,
+        }
+    }
+}
 mod publication;
 pub(super) mod retirement;
 struct RevisionOwner {
@@ -30,7 +50,7 @@ struct RevisionOwner {
     publication: Option<publication::Publication>,
     attempted: bool,
     retirement: Option<retirement::Retirement>,
-    rebase_website: bool,
+    purpose: RevisionPurpose,
 }
 #[must_use = "retain the same revision owner; a partial publication is not replayable"]
 pub struct PoolNominationRevisionFailure {
@@ -98,7 +118,7 @@ pub fn revise_os_pool_nomination(
         publication: None,
         attempted: false,
         retirement: None,
-        rebase_website: false,
+        purpose: RevisionPurpose::Highs,
     });
     finish_revision(owner)
 }
@@ -135,9 +155,47 @@ pub fn rebase_uninstalled_os_pool_nomination(
         publication: None,
         attempted: false,
         retirement: None,
-        rebase_website: true,
+        purpose: RevisionPurpose::RebaseWebsite,
     }))
 }
+pub fn recover_uninstalled_os_pool_pending(
+    source: Option<&Path>,
+    config: &EffectiveWorkerConfig,
+    expected: &JournalDigest,
+    pending_digest: &JournalDigest,
+    runtime: WorkerRuntime,
+    end: Instant,
+) -> std::result::Result<PoolNominationPublished, Box<PoolNominationRevisionFailure>> {
+    finish_revision(Box::new(RevisionOwner {
+        nominal: Box::new(NominationOwner::capture(
+            source,
+            config,
+            Path::new(""),
+            runtime,
+            end,
+            InputPurpose::Request,
+        )),
+        expected: expected.clone(),
+        default: 0,
+        overrides: Vec::new(),
+        next: None,
+        stopped: None,
+        service: None,
+        service_origin: None,
+        closed_service: None,
+        service_failure: None,
+        locks: None,
+        closed_locks: None,
+        lock_failure: None,
+        publication: None,
+        attempted: false,
+        retirement: None,
+        purpose: RevisionPurpose::RecoverPending(Box::new(
+            pending_recovery::PendingRecovery::capture(pending_digest.clone()),
+        )),
+    }))
+}
+
 fn finish_revision(
     mut owner: Box<RevisionOwner>,
 ) -> std::result::Result<PoolNominationPublished, Box<PoolNominationRevisionFailure>> {
@@ -177,15 +235,34 @@ impl RevisionOwner {
                 self.service.as_ref().expect("same IMAGE"),
             )?;
         }
-        self.publication
-            .as_mut()
-            .expect("original file owners")
-            .publish(
-                &self.nominal,
-                self.next.as_ref().expect("checked next DATA"),
-                self.locks.as_mut().expect("same locks"),
-                self.service.as_ref().expect("same IMAGE"),
-            )?;
+        if !matches!(self.purpose, RevisionPurpose::RecoverPending(_)) {
+            self.publication
+                .as_mut()
+                .expect("original file owners")
+                .publish(
+                    &self.nominal,
+                    self.next.as_ref().expect("checked next DATA"),
+                    self.locks.as_mut().expect("same locks"),
+                    self.service.as_ref().expect("same IMAGE"),
+                )?;
+        } else {
+            self.publication
+                .as_ref()
+                .expect("same history")
+                .assert_unchanged(&self.nominal)?;
+        }
+        if self.purpose.pending().is_some() {
+            self.assert_uninstalled()?;
+            self.purpose
+                .pending_mut()
+                .expect("original pending owner")
+                .archive(
+                    &self.nominal,
+                    self.publication.as_ref().expect("same history"),
+                    self.locks.as_mut().expect("same IMAGE locks"),
+                    self.service.as_ref().expect("same stopped service"),
+                )?;
+        }
         self.assert_after()?;
         self.close_components()?;
         self.assert_after_files()?;
@@ -248,7 +325,11 @@ impl RevisionOwner {
         let retirement = self.retirement.as_mut().map_or(Ok(()), |owner| {
             owner.close(&self.nominal.runtime, self.nominal.end)
         });
-        let nominal = self.nominal.close();
+        let pending = self
+            .purpose
+            .pending_mut()
+            .map_or(Ok(()), pending_recovery::PendingRecovery::close);
+        let nominal = finalized(self.nominal.close(), pending);
         let locks = if let Some(locks) = self.locks.take() {
             match locks.close() {
                 Ok(closed) => {
@@ -286,6 +367,9 @@ impl RevisionOwner {
         )
     }
     fn assert_before(&mut self) -> Result<()> {
+        if let Some(pending) = self.purpose.pending() {
+            pending.assert_before(&self.nominal)?;
+        }
         self.nominal.assert_preflight()?;
         self.assert_uninstalled()?;
         self.nominal
@@ -330,6 +414,12 @@ impl RevisionOwner {
         }
     }
     fn assert_after_files(&self) -> Result<()> {
+        if let Some(pending) = self.purpose.pending() {
+            pending.assert_after(
+                &self.nominal,
+                self.publication.as_ref().expect("same history"),
+            )?;
+        }
         if let Some(retirement) = &self.retirement {
             retirement.assert_metadata()?;
         }
@@ -347,9 +437,11 @@ impl RevisionOwner {
                 .unchanged()?,
             "POOL_NOMINATION_PROTECTED_STORE_CHANGED",
         )?;
-        self.publication
-            .as_ref()
-            .expect("original publication")
-            .assert_published(&self.nominal, self.next.as_ref().expect("new DATA"))
+        let publication = self.publication.as_ref().expect("original publication");
+        if matches!(self.purpose, RevisionPurpose::RecoverPending(_)) {
+            publication.assert_unchanged(&self.nominal)
+        } else {
+            publication.assert_published(&self.nominal, self.next.as_ref().expect("new DATA"))
+        }
     }
 }
