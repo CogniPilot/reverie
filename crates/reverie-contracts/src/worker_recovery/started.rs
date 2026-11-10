@@ -40,6 +40,22 @@ impl RecoveryInspection {
     pub fn same_memory_observation(&self, other: &Self) -> bool {
         self.value.python_eq(&other.value)
     }
+    /// Same whole perf observation, except the daemon's unordered Mounts list.
+    /// Every complete mount row and every other field remain in the comparison.
+    pub fn same_perf_observation(&self, other: &Self) -> Result<bool> {
+        let canonical = |original: &Value| -> Result<Value> {
+            let mut value = original.deep_clone();
+            let Node::Object(fields) = &mut value.0 else {
+                return Err(RecoveryDataError::InspectionUnavailable);
+            };
+            let Some(Value(Node::Array(mounts))) = fields.get_mut(&key("Mounts")) else {
+                return Err(RecoveryDataError::InspectionUnavailable);
+            };
+            *mounts = crate::worker_cold_tmp::canonical_mount_rows(mounts);
+            Ok(value)
+        };
+        Ok(canonical(&self.value)?.python_eq(&canonical(&other.value)?))
+    }
 }
 
 #[cfg(test)]

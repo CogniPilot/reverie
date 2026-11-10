@@ -97,7 +97,10 @@ impl Facts {
         need(
             self.pid == other.pid
                 && self.start == other.start
-                && self.recovery.same_memory_observation(&other.recovery)
+                && self
+                    .recovery
+                    .same_perf_observation(&other.recovery)
+                    .map_err(LaptopError::MemoryIdentity)?
                 && self
                     .identity
                     .same_observation(&other.identity)
