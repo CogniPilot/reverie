@@ -83,8 +83,10 @@ impl ResourceOperationRequest {
         ] {
             literal(field(value, name)?, expected)?;
         }
+        let approved = field(value, "approval")?;
+        self.require_gpu_intent_echo(approved)?;
         need(
-            field(value, "approval")?.python_eq(&self.approval_value()),
+            approved.python_eq(&self.approval_value()),
             "RESOURCE_RAM_APPROVAL_CHANGED",
         )?;
         let owner = match &field(value, "owner")?.0 {

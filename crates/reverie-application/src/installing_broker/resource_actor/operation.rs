@@ -8,6 +8,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 mod claim;
 mod cursor;
 mod employee_status;
+mod gpu;
 mod preview;
 mod receipt;
 mod reference;

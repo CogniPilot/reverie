@@ -143,6 +143,8 @@ fn retained<'a>(
 fn dispatch(operation: &mut AuthenticatedResourceOperation<'_>) -> Result<()> {
     let reply = match operation.request().selection() {
         ResourceRequestSelection::EmployeeStatus { .. } => operation.employee_status_reply(),
+        ResourceRequestSelection::GpuStatus { .. }
+        | ResourceRequestSelection::GpuRequest { .. } => operation.gpu_reply(),
         ResourceRequestSelection::Preview { .. } => operation.preview_reply(),
         ResourceRequestSelection::Apply { .. } => {
             operation.assert_current()?;

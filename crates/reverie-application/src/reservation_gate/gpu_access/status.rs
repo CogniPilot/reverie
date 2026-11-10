@@ -3,16 +3,22 @@ use reverie_core::gpu_access::{GpuActiveData, GpuApplied, GpuChoicesData};
 impl<P: Platform> Service<'_, P> {
     pub(super) fn status(&self, employee: Employee, end: Instant) -> Result<GpuStatusData> {
         let admission = self.gate.inner.admit(Self::bounds(end))?;
-        let result = self.status_body(employee, end);
+        let result = self.status_body(employee, end, None);
         admission.conclude(result)
     }
-    fn status_body(&self, employee: Employee, end: Instant) -> Result<GpuStatusData> {
+    pub(super) fn status_body(
+        &self,
+        employee: Employee,
+        end: Instant,
+        website: Option<&WebsiteGpu<'_, '_>>,
+    ) -> Result<GpuStatusData> {
         let config = self.gate.inner.config()?;
         let config = config.configuration();
         let files = self.files(config)?;
         let original = self.private_current(&files, config)?;
         let employee = employee.resolve()?;
         let current = reverie_host::gpu_access::current_employee(config, &employee)?;
+        WebsiteGpu::require_current(website, self.gate, &current)?;
         let binding = self.binding(config, &current)?;
         let (requests, request_stamp) = self.requests(&files)?;
         let request = requests.requests().get(&employee).cloned();
@@ -29,6 +35,7 @@ impl<P: Platform> Service<'_, P> {
             Ok(choices) => {
                 GpuChoicesData::known(choices).map_err(gpu_access::GpuDataError::from)?
             }
+            Err(error) if error.has_unconfirmed_close() => return Err(error.into()),
             Err(_) => GpuChoicesData::unknown(),
         };
         let native = self.gate.inner.native_context()?;
@@ -44,6 +51,7 @@ impl<P: Platform> Service<'_, P> {
                 && self.requests(&files)?.1 == request_stamp,
             "GPU_STATUS_CHANGED",
         )?;
+        WebsiteGpu::require_current(website, self.gate, &latest)?;
         Ok(
             GpuStatusData::new(employee, binding, request, choices, applied, active)
                 .map_err(gpu_access::GpuDataError::from)?,
@@ -76,10 +84,12 @@ impl<P: Platform> Service<'_, P> {
             self.platform.active(&row.data().pid()?, &physical)?;
             Ok::<_, GateError>(())
         })();
-        Ok(if observed.is_ok() {
-            GpuActiveData::ObservedDevice(device.clone())
-        } else {
-            GpuActiveData::UnknownRunning
-        })
+        match observed {
+            Ok(()) => Ok(GpuActiveData::ObservedDevice(device.clone())),
+            Err(error) if crate::installing_broker::resource_actor::gate_close_unknown(&error) => {
+                Err(error)
+            }
+            Err(_) => Ok(GpuActiveData::UnknownRunning),
+        }
     }
 }

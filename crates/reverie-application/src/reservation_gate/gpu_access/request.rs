@@ -9,22 +9,24 @@ impl<P: Platform> Service<'_, P> {
         end: Instant,
     ) -> Result<GpuStatusData> {
         let admission = self.gate.inner.admit(Self::bounds(end))?;
-        let result = self.queue(selector, &intent);
+        let result = self.queue(Employee::Selector(selector), &intent, None);
         let (employee, request) = admission.conclude(result)?;
         self.apply(&employee, &request, end)?;
         self.status(Employee::Checked(employee), end)
     }
-    fn queue(
+    pub(super) fn queue(
         &self,
-        selector: GpuEmployeeSelector,
+        employee: Employee,
         intent: &GpuIntent,
+        website: Option<&WebsiteGpu<'_, '_>>,
     ) -> Result<(JournalId, GpuQueuedRequest)> {
         let config = self.gate.inner.config()?;
         let config = config.configuration();
         let files = self.files(config)?;
         let original = self.private_current(&files, config)?;
-        let employee = selector.employee_id()?;
+        let employee = employee.resolve()?;
         let current = reverie_host::gpu_access::current_employee(config, &employee)?;
+        WebsiteGpu::require_current(website, self.gate, &current)?;
         let binding = self.binding(config, &current)?;
         let (requests, stamp) = self.requests(&files)?;
         let previous = requests.requests().get(&employee);
@@ -59,6 +61,7 @@ impl<P: Platform> Service<'_, P> {
             latest.data() == current.data() && self.private_current(&files, config)? == original,
             "GPU_REQUEST_CAS_CHANGED",
         )?;
+        WebsiteGpu::require_current(website, self.gate, &latest)?;
         files.publish_requests(&document, stamp.as_ref())?;
         Ok((employee, queued))
     }

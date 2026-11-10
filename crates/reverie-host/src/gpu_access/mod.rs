@@ -83,7 +83,7 @@ impl GpuHostError {
         }
     }
     /// Descriptor-close opacity only. Rename outcome uncertainty is separate.
-    pub(crate) fn has_unconfirmed_close(&self) -> bool {
+    pub fn has_unconfirmed_close(&self) -> bool {
         match self {
             Self::Native(error) => error.has_unconfirmed_close(),
             Self::Metadata(error) => error.has_unconfirmed_close(),

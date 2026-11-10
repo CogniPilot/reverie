@@ -8,6 +8,7 @@ import type { FastifyRequest } from 'fastify';
 import { OwnerAuthService } from './owner-auth/service.js';
 import { OWNER_COOKIE, SERVICE_HEADER, sameOrigin } from './owner-auth/policy.js';
 import { ownerFor } from './web/route-helpers.js';
+import { EmployeeGpuIntentData, type EmployeeGpuIntent } from './employee-gpu-data.js';
 
 const PURPOSE = 'resource-replacement-v1';
 const RAM_PURPOSE = 'resource-ram-pool-v2';
@@ -75,6 +76,18 @@ export interface RamResourcePreviewContext extends ResourceContext<typeof RAM_PU
 export interface RamResourceStatusContext extends ResourceContext<typeof RAM_PURPOSE> {
   readonly stage: 'status';
   readonly employeeId: string;
+  readonly principal: Readonly<ResourceOwnerPrincipal>;
+}
+export interface RamGpuStatusContext extends ResourceContext<typeof RAM_PURPOSE> {
+  readonly stage: 'gpu-status';
+  readonly employeeId: string;
+  readonly sessionId: string;
+  readonly principal: Readonly<ResourceOwnerPrincipal>;
+}
+export interface RamGpuRequestContext extends ResourceContext<typeof RAM_PURPOSE> {
+  readonly stage: 'gpu-request';
+  readonly employeeId: string;
+  readonly approval: Readonly<EmployeeGpuIntent>;
   readonly principal: Readonly<ResourceOwnerPrincipal>;
 }
 /** Current canonical identity DATA, meaningful only with its actual retained
@@ -160,7 +173,9 @@ export type AnyResourceContext =
   | ResourcePreviewContext
   | RamResourceOwnerContext
   | RamResourcePreviewContext
-  | RamResourceStatusContext;
+  | RamResourceStatusContext
+  | RamGpuStatusContext
+  | RamGpuRequestContext;
 type AuthorityContext =
   | AnyResourceContext
   | PoolInstallationViewerContext
@@ -407,6 +422,26 @@ export class ResourceOwnerAuthority {
     need(typeof employeeId === 'string' && UUID.test(employeeId) && employeeId !== NIL_UUID);
     return this.#capture(request, { stage: 'status' as const, employeeId }, RAM_PURPOSE);
   }
+  captureRamGpuStatus(request: FastifyRequest, employeeId: string, sessionId: string): RamGpuStatusContext {
+    need(UUID.test(employeeId) && employeeId !== NIL_UUID && UUID.test(sessionId) && sessionId !== NIL_UUID);
+    return this.#capture(
+      request,
+      { stage: 'gpu-status' as const, employeeId, sessionId },
+      RAM_PURPOSE,
+      Date.now() + 35_000
+    );
+  }
+  captureRamGpuRequest(request: FastifyRequest, employeeId: string, value: EmployeeGpuIntent): RamGpuRequestContext {
+    need(UUID.test(employeeId) && employeeId !== NIL_UUID);
+    const selected = EmployeeGpuIntentData.parse(value);
+    const approval = Object.freeze({ ...selected, expected: Object.freeze(selected.expected) });
+    return this.#capture(
+      request,
+      { stage: 'gpu-request' as const, employeeId, approval },
+      RAM_PURPOSE,
+      Date.now() + 35_000
+    );
+  }
   capturePoolInstallationViewer(request: FastifyRequest): PoolInstallationViewerContext {
     return this.#capture(
       request,
@@ -607,6 +642,8 @@ export class ResourceOwnerAuthority {
       | { stage: 'apply'; approval: Readonly<ResourceApproval> }
       | { stage: 'preview'; employeeId: string }
       | { stage: 'status'; employeeId: string }
+      | { stage: 'gpu-status'; employeeId: string; sessionId: string }
+      | { stage: 'gpu-request'; employeeId: string; approval: Readonly<EmployeeGpuIntent> }
       | { stage: 'viewer' | 'fleet-viewer'; requestId: string }
       | (PoolInstallationSelection & ({ stage: 'offer' } | { stage: 'consent'; consent: true }))
       | { stage: 'fleet-preview'; requestId: string; approval: Readonly<FleetApproval> }
@@ -626,7 +663,7 @@ export class ResourceOwnerAuthority {
   ): Readonly<ResourceContext<P> & T> & PrincipalFor<P> {
     const token = request.cookies?.[OWNER_COOKIE];
     need(typeof token === 'string' && token.length > 0 && token.length <= 4096);
-    const access = selected.stage === 'status' ? 'employee-status' : 'operation';
+    const access = selected.stage === 'status' || selected.stage === 'gpu-status' ? 'employee-status' : 'operation';
     const identity = this.#identity(request, token, purpose, access),
       owner = ownerFor(request);
     if (origin) {

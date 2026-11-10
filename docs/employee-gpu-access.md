@@ -22,8 +22,8 @@ the verified policy. Legacy overrides, retained work, missing native facts or
 an installed protected consumer needing a config rebind can require coordinated
 operator maintenance. They are not bypassed by the GUI.
 
-The standard server selects its existing `REVERIE_WORKER_SOCKET`. The fixed C
-control protocol supplies bounded status and request replies. No Docker socket
+The standard server selects its existing `REVERIE_WORKER_SOCKET`. The installed website resource channel verifies the current owner and employee binding
+for bounded status and request replies. No Docker socket
 or host configuration path is exposed to the browser. A missing or older host
 backend reports unavailable; the GUI does not claim that access is off, applied,
 or active. An unconfirmed request is never retried automatically: refresh the

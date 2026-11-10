@@ -7,7 +7,7 @@ mod dispatch;
 pub use dispatch::{ResourceOperationClosed, ResourceOperationFailure};
 mod error;
 mod fleet_preview;
-pub(in crate::installing_broker) use error::gate_close_unknown;
+pub(crate) use error::gate_close_unknown;
 pub use fleet_preview::{
     AuthenticatedFleetMaintenance, AuthenticatedPoolMigration, DrainedLegacyFleet,
     DrainedPoolMigration, FleetMaintenanceCheckError, FleetPreviewClosed, FleetPreviewFailure,

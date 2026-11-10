@@ -1837,7 +1837,9 @@ export class WebServer extends EventEmitter {
       agentSession: currentAgentSession,
       company: owner => this.companyService.view(owner),
     }, memoryScopePublisher);
-    registerEmployeeGpuRoutes(this.app, this.companyService, new EmployeeGpuClient(process.env.REVERIE_WORKER_SOCKET), verifiedOwner);
+    const employeeGpu = new EmployeeGpuClient(process.env.REVERIE_WORKER_SOCKET, ownerAuth);
+    registerEmployeeGpuRoutes(this.app, this.companyService, employeeGpu, verifiedOwner);
+    this.app.addHook('onClose', async () => employeeGpu.close());
     registerCompanyRoutes(
       this.app,
       ctx,

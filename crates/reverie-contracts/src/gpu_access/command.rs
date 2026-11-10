@@ -52,12 +52,25 @@ pub fn decode_command(raw: &[u8]) -> Result<GpuCommand> {
     {
         return Err(GpuDataError::RequestSchema);
     }
-    let expected = expected(field(fields, "expected").ok_or(GpuAccessError::RequestCasSchema)?)?;
-    let device = device(fields)?;
+    let intent = intent(fields)?;
     Ok(GpuCommand::Request {
         employee: selector(fields)?,
-        intent: GpuIntent::new(expected, device),
+        intent,
     })
+}
+/// The protected website carries the same request intent as its closed approval.
+pub(crate) fn decode_website_intent(value: &Value) -> Result<GpuIntent> {
+    let fields = object(value).ok_or(GpuDataError::RequestSchema)?;
+    if !exact(fields, &["expected", "enabled"])
+        && !exact(fields, &["expected", "enabled", "deviceUuid"])
+    {
+        return Err(GpuDataError::RequestSchema);
+    }
+    intent(fields)
+}
+fn intent(fields: &Object) -> Result<GpuIntent> {
+    let expected = expected(field(fields, "expected").ok_or(GpuAccessError::RequestCasSchema)?)?;
+    Ok(GpuIntent::new(expected, device(fields)?))
 }
 fn selector(fields: &Object) -> Result<GpuEmployeeSelector> {
     Ok(GpuEmployeeSelector(

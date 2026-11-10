@@ -3,6 +3,7 @@
 use super::*;
 use crate::human_protocol::HumanFrame;
 use reverie_core::{
+    gpu_access::GpuIntent,
     ids::{ProfileEmployeeId, ProfileSessionId},
     operations::JournalId,
     revision::ProfileVersion,
@@ -11,6 +12,7 @@ mod approval;
 mod command;
 mod continuation;
 mod fleet;
+mod gpu;
 pub use command::RamLaunchCommandData;
 pub use continuation::{ResourceContinuationRequest, ResourceContinuationVerb};
 pub use fleet::{
@@ -42,6 +44,14 @@ pub enum ResourceRequestSelection {
     EmployeeStatus {
         employee_id: ProfileEmployeeId,
         session_id: ProfileSessionId,
+    },
+    GpuStatus {
+        employee_id: ProfileEmployeeId,
+        session_id: ProfileSessionId,
+    },
+    GpuRequest {
+        employee_id: ProfileEmployeeId,
+        intent: GpuIntent,
     },
     Preview {
         employee_id: ProfileEmployeeId,
@@ -99,6 +109,8 @@ impl ResourceOperationRequest {
                     None,
                 )
             }
+            "gpu-status" => (gpu::status(value)?, None),
+            "gpu-request" => gpu::request(value)?,
             "draft" => {
                 closed(
                     value,
@@ -147,6 +159,8 @@ impl ResourceOperationRequest {
         match &self.selected {
             ResourceRequestSelection::Preview { employee_id, .. }
             | ResourceRequestSelection::EmployeeStatus { employee_id, .. }
+            | ResourceRequestSelection::GpuStatus { employee_id, .. }
+            | ResourceRequestSelection::GpuRequest { employee_id, .. }
             | ResourceRequestSelection::Apply { employee_id, .. } => employee_id,
         }
     }
@@ -164,15 +178,12 @@ impl ResourceOperationRequest {
         )
     }
     fn stage(&self) -> &'static str {
-        if matches!(
-            self.selected,
-            ResourceRequestSelection::EmployeeStatus { .. }
-        ) {
-            "status"
-        } else if self.approval.is_some() {
-            "apply"
-        } else {
-            "preview"
+        match self.selected {
+            ResourceRequestSelection::EmployeeStatus { .. } => "status",
+            ResourceRequestSelection::GpuStatus { .. } => "gpu-status",
+            ResourceRequestSelection::GpuRequest { .. } => "gpu-request",
+            ResourceRequestSelection::Apply { .. } => "apply",
+            ResourceRequestSelection::Preview { .. } => "preview",
         }
     }
     fn approval_value(&self) -> Value {

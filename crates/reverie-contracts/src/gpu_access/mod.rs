@@ -13,6 +13,7 @@ mod status;
 mod transition;
 use crate::legacy_json::{Node, Number, Text, Value};
 pub use cdi::{CdiDocument, CdiPreflightEdits, CdiSelectedEdits};
+pub(crate) use command::decode_website_intent;
 pub use command::{GpuCommand, GpuEmployeeSelector, decode_command};
 pub use configuration::{
     GpuCandidate, applied, has_resource_actor, patch_employee_grant, private_config_matches,

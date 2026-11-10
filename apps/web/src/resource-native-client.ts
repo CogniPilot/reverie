@@ -9,6 +9,7 @@ import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { performance } from 'node:perf_hooks';
 import { z } from 'zod';
+import { EmployeeGpuIntentData } from './employee-gpu-data.js';
 import { Session } from './session.js';
 import type { PlanMoveRecord } from './plan-move.js';
 import { ResourceWorkerLaunch } from './resource-worker-launch.js';
@@ -17,7 +18,6 @@ import { RamResourceSessionLaunchTask } from './resource-ram-session.js';
 import {
   ResourceOwnerAuthority,
   assertResourceOperation,
-  type ResourceApproval,
   type ResourceOwnerBinding,
   type ResourceOwnerContext,
   type ResourcePreviewContext,
@@ -25,6 +25,8 @@ import {
   type RamResourceOwnerContext,
   type RamResourcePreviewContext,
   type RamResourceStatusContext,
+  type RamGpuStatusContext,
+  type RamGpuRequestContext,
 } from './resource-owner-authority.js';
 
 const MAX_FRAME = 64 * 1024;
@@ -61,13 +63,14 @@ const Check = z
   })
   .strict();
 const RamCheck = Check.extend({
-  approval: RamApproval.nullable(),
-  stage: z.enum(['preview', 'apply', 'status']),
+  approval: z.union([RamApproval, EmployeeGpuIntentData]).nullable(),
+  stage: z.enum(['preview', 'apply', 'status', 'gpu-status', 'gpu-request']),
 }).strict();
 const RamDraft = z
   .object({ employeeId: UUID, idempotencyKey: UUID, memoryMiB: z.number().int().min(512).max(1_048_576) })
   .strict();
 const EmployeeStatus = z.object({ employeeId: UUID, sessionId: UUID }).strict();
+const GpuRequest = z.object({ employeeId: UUID, approval: EmployeeGpuIntentData }).strict();
 const RamClaim = z.object({ approval: RamApproval }).strict();
 const RamReference = z
   .object({
@@ -339,7 +342,12 @@ export class ResourceNativeClient {
   static async openRam(
     path: string,
     authority: ResourceOwnerAuthority,
-    context: RamResourceOwnerContext | RamResourcePreviewContext | RamResourceStatusContext
+    context:
+      | RamResourceOwnerContext
+      | RamResourcePreviewContext
+      | RamResourceStatusContext
+      | RamGpuStatusContext
+      | RamGpuRequestContext
   ): Promise<ResourceNativeClient> {
     need(context.purpose === 'resource-ram-pool-v2');
     return this.#open(path, authority, context);
@@ -506,8 +514,7 @@ export class ResourceNativeClient {
           check.stage === this.#context.stage
       );
       pending.challenges.add(check.nonce);
-      const approval: Readonly<ResourceApproval> | null =
-        this.#context.stage === 'apply' ? this.#context.approval : null;
+      const approval = 'approval' in this.#context ? this.#context.approval : null;
       need(
         check.employeeId ===
           (this.#context.stage === 'apply' ? this.#context.approval.employeeId : this.#context.employeeId) &&
@@ -594,6 +601,8 @@ export class ResourceNativeClient {
     } else {
       const reply = Reply.parse(value);
       need(reply.requestId === pending.id);
+      if (this.#context.stage === 'gpu-status' || this.#context.stage === 'gpu-request')
+        need(pending.challenges.size > 0);
       pending.resultSeen = true;
       void (async () => {
         try {
@@ -630,6 +639,8 @@ export class ResourceNativeClient {
   async request(
     verb:
       | 'employee-status'
+      | 'gpu-status'
+      | 'gpu-request'
       | 'draft'
       | 'claim'
       | 'publication'
@@ -655,6 +666,24 @@ export class ResourceNativeClient {
           this.#context.stage === 'status' && selected.employeeId === this.#context.employeeId && launch === undefined
         );
         selectedFields = Object.freeze(selected);
+      } else if (verb === 'gpu-status') {
+        const selected = EmployeeStatus.parse(fields);
+        need(
+          this.#context.stage === 'gpu-status' &&
+            selected.employeeId === this.#context.employeeId &&
+            selected.sessionId === this.#context.sessionId &&
+            launch === undefined
+        );
+        selectedFields = Object.freeze(selected);
+      } else if (verb === 'gpu-request') {
+        const selected = GpuRequest.parse(fields);
+        need(
+          this.#context.stage === 'gpu-request' &&
+            selected.employeeId === this.#context.employeeId &&
+            isDeepStrictEqual(selected.approval, this.#context.approval) &&
+            launch === undefined
+        );
+        selectedFields = Object.freeze({ employeeId: selected.employeeId, approval: this.#context.approval });
       } else if (verb === 'draft') {
         const selected = RamDraft.parse(fields);
         need(
@@ -683,6 +712,8 @@ export class ResourceNativeClient {
     need(
       [
         'employee-status',
+        'gpu-status',
+        'gpu-request',
         'draft',
         'claim',
         'publication',
@@ -693,9 +724,16 @@ export class ResourceNativeClient {
         'finalize',
         'completion',
       ].includes(verb) &&
-        (verb !== 'employee-status' || this.#context.purpose === 'resource-ram-pool-v2') &&
+        (!['employee-status', 'gpu-status', 'gpu-request'].includes(verb) ||
+          this.#context.purpose === 'resource-ram-pool-v2') &&
         this.#context.stage ===
-          (verb === 'employee-status' ? 'status' : verb === 'draft' || verb === 'completion' ? 'preview' : 'apply') &&
+          (verb === 'gpu-status' || verb === 'gpu-request'
+            ? verb
+            : verb === 'employee-status'
+              ? 'status'
+              : verb === 'draft' || verb === 'completion'
+                ? 'preview'
+                : 'apply') &&
         Object.keys(fields).every((key) => !['kind', 'requestId', 'verb'].includes(key)) &&
         (verb === 'start'
           ? this.#context.purpose === 'resource-ram-pool-v2'
