@@ -7,7 +7,7 @@ use hyper_util::rt::TokioIo;
 use serde_json::Value;
 use std::{
     path::{Path, PathBuf},
-    time::Duration,
+    time::{Duration, Instant},
 };
 use tokio::{net::UnixStream, runtime::Runtime};
 
@@ -17,6 +17,7 @@ mod tests;
 pub(super) struct Engine {
     socket: PathBuf,
     runtime: Runtime,
+    initial_website_end: Option<Instant>,
 }
 impl Engine {
     pub(super) fn new(socket: &Path) -> Result<Self> {
@@ -31,10 +32,19 @@ impl Engine {
         Ok(Self {
             socket: socket.to_owned(),
             runtime,
+            initial_website_end: None,
         })
     }
     pub(super) fn json(&self, method: &str, path: &str, body: Option<&Value>) -> Result<Value> {
         self.json_with_policy(method, path, body, Duration::from_secs(75), 0)
+    }
+    pub(super) fn restrict_initial_website(&mut self, end: Instant) -> Result<()> {
+        require(Instant::now() < end, "DEPLOYMENT_OPERATION_DEADLINE")?;
+        self.initial_website_end = Some(
+            self.initial_website_end
+                .map_or(end, |original| original.min(end)),
+        );
+        Ok(())
     }
     fn json_with_policy(
         &self,
@@ -44,10 +54,27 @@ impl Engine {
         timeout: Duration,
         expected_uid: u32,
     ) -> Result<Value> {
+        if self.initial_website_end.is_none() {
+            return self.runtime.block_on(async {
+                tokio::time::timeout(timeout, self.exchange(method, path, body, expected_uid))
+                    .await
+                    .map_err(|_| DeploymentError::new("DEPLOYMENT_ENGINE_RESPONSE_UNKNOWN"))?
+            });
+        }
+        let end = Instant::now() + timeout;
+        let end = self
+            .initial_website_end
+            .map_or(end, |original| end.min(original));
+        require(Instant::now() < end, "DEPLOYMENT_OPERATION_DEADLINE")?;
         self.runtime.block_on(async {
-            tokio::time::timeout(timeout, self.exchange(method, path, body, expected_uid))
-                .await
-                .map_err(|_| DeploymentError::new("DEPLOYMENT_ENGINE_RESPONSE_UNKNOWN"))?
+            let result = tokio::time::timeout_at(
+                tokio::time::Instant::from_std(end),
+                self.exchange(method, path, body, expected_uid),
+            )
+            .await
+            .map_err(|_| DeploymentError::new("DEPLOYMENT_ENGINE_RESPONSE_UNKNOWN"))?;
+            require(Instant::now() < end, "DEPLOYMENT_ENGINE_RESPONSE_UNKNOWN")?;
+            result
         })
     }
     async fn exchange(

@@ -13,6 +13,7 @@ mod apply;
 mod claim;
 mod rollback;
 mod shared_writers;
+use apply::OperationDeadline;
 
 /// Local host-owner bootstrap service over the registered deployment. The
 /// installed owner executes this API; guests and role names confer no access.
@@ -21,6 +22,51 @@ pub struct DeploymentService {
     engine: Engine,
 }
 impl DeploymentService {
+    pub(crate) fn restrict_initial_website(&mut self, end: Instant) -> Result<()> {
+        self.engine.restrict_initial_website(end)
+    }
+    pub(crate) fn registered_container_name(&self) -> &str {
+        &self.installation.name
+    }
+    pub(crate) fn initial_actor_image(&self, image: &str) -> Result<Value> {
+        model::image_id(image)?;
+        self.engine.image(image)
+    }
+    /// Read-only compatibility before the whole initial owner quiesces any
+    /// worker. This is not a preview OP, writer exclusion or deployment grant.
+    pub(crate) fn check_initial_website_selection(&self, image: &str) -> Result<()> {
+        model::image_id(image)?;
+        let source = self.profile_source(model::DeploymentProfile::ProtectedWebsite)?;
+        self.profile_body(&source, image, model::DeploymentProfile::ProtectedWebsite)?;
+        let pins = crate::pins::Pins::capture(&source)?;
+        let result = pins.running_mounts(&source);
+        DeploymentError::finalized(result, pins.close())
+    }
+    fn profile_source(&self, profile: model::DeploymentProfile) -> Result<Value> {
+        self.installation.current()?;
+        let source = self.engine.container(&self.installation.name)?;
+        model::supported_profile(&source, profile)?;
+        model::port_binding(&source, self.installation.port)?;
+        require(
+            source["State"]["Running"] == true,
+            "DEPLOYMENT_SOURCE_NOT_RUNNING",
+        )?;
+        Ok(source)
+    }
+    fn profile_body(
+        &self,
+        source: &Value,
+        image: &str,
+        profile: model::DeploymentProfile,
+    ) -> Result<(Value, Vec<String>)> {
+        let old_image = self.engine.image(model::string(source, "Image")?)?;
+        let candidate = self.engine.image(image)?;
+        require(
+            candidate["Id"] == image,
+            "DEPLOYMENT_CANDIDATE_IMAGE_CHANGED",
+        )?;
+        model::create_body_profile(source, &old_image, &candidate, profile)
+    }
     pub fn close(&mut self) -> Result<()> {
         self.installation.close()
     }
@@ -47,23 +93,9 @@ impl DeploymentService {
         profile: model::DeploymentProfile,
     ) -> Result<DeploymentPreview> {
         model::image_id(image)?;
-        self.installation.current()?;
-        let source = self.engine.container(&self.installation.name)?;
-        model::supported_profile(&source, profile)?;
-        model::port_binding(&source, self.installation.port)?;
-        require(
-            source["State"]["Running"] == true,
-            "DEPLOYMENT_SOURCE_NOT_RUNNING",
-        )?;
+        let source = self.profile_source(profile)?;
         self.refuse_shared_writers(&source)?;
-        let old_image = self.engine.image(model::string(&source, "Image")?)?;
-        let candidate = self.engine.image(image)?;
-        require(
-            candidate["Id"] == image,
-            "DEPLOYMENT_CANDIDATE_IMAGE_CHANGED",
-        )?;
-        let (body, refreshed_environment_keys) =
-            model::create_body_profile(&source, &old_image, &candidate, profile)?;
+        let (body, refreshed_environment_keys) = self.profile_body(&source, image, profile)?;
         let pins = crate::pins::Pins::capture(&source)?;
         if let Err(error) = pins.running_mounts(&source) {
             return DeploymentError::finalized(Err(error), pins.close());
@@ -101,16 +133,24 @@ impl DeploymentService {
     /// Create a checked sleeping candidate. Ports bind only when it is started.
     /// An uncertain create is never resubmitted automatically.
     pub fn prepare(&self, id: &str) -> Result<DeploymentStatus> {
+        self.prepare_scoped(id, OperationDeadline::Ordinary)
+    }
+    pub(crate) fn prepare_before(&self, id: &str, end: Instant) -> Result<DeploymentStatus> {
+        self.prepare_scoped(id, OperationDeadline::Initial(end))
+    }
+    fn prepare_scoped(&self, id: &str, deadline: OperationDeadline) -> Result<DeploymentStatus> {
+        deadline.check()?;
         let operation = self.operation(id)?;
         self.source_current(&operation, true)?;
         let pins = self.pins(&operation)?;
-        let result = self.prepare_pinned(&operation, &pins);
+        let result = self.prepare_pinned(&operation, &pins, deadline);
         DeploymentError::finalized(result, pins.close())
     }
     fn prepare_pinned(
         &self,
         operation: &Operation,
         pins: &crate::pins::Pins,
+        deadline: OperationDeadline,
     ) -> Result<DeploymentStatus> {
         require(
             !operation.exists("create-attempt"),
@@ -122,6 +162,7 @@ impl DeploymentService {
         claim.finish(operation, &current)?;
         pins.running_mounts(&current)?;
         operation.attempt("create-attempt")?;
+        deadline.check()?;
         let name = temporary_name(operation, "candidate");
         let created = self.engine.json(
             "POST",
@@ -175,19 +216,32 @@ impl DeploymentService {
         DeploymentError::finalized(result, pins.close())
     }
     pub fn status(&self, id: &str) -> Result<DeploymentStatus> {
+        self.status_scoped(id, OperationDeadline::Ordinary)
+    }
+    pub(crate) fn status_before(&self, id: &str, end: Instant) -> Result<DeploymentStatus> {
+        self.status_scoped(id, OperationDeadline::Initial(end))
+    }
+    fn status_scoped(&self, id: &str, deadline: OperationDeadline) -> Result<DeploymentStatus> {
+        deadline.check()?;
         let operation = self.operation(id)?;
         let mut status = operation.status()?;
         let observed = match status.stage.as_str() {
-            "HYBRID_READY" => self.observe_ready(&operation, true),
-            "RESTORED" => self.observe_ready(&operation, false),
+            "HYBRID_READY" => self.observe_ready(&operation, true, deadline),
+            "RESTORED" => self.observe_ready(&operation, false, deadline),
             _ => Ok(()),
         };
         if observed.is_err() {
             status.stage = "READINESS_UNCONFIRMED".into();
         }
+        deadline.check()?;
         Ok(status)
     }
-    fn observe_ready(&self, operation: &Operation, candidate: bool) -> Result<()> {
+    fn observe_ready(
+        &self,
+        operation: &Operation,
+        candidate: bool,
+        deadline: OperationDeadline,
+    ) -> Result<()> {
         let (id, front) = operation.readiness_target(candidate)?;
         let pins = self.pins(operation)?;
         let result = (|| {
@@ -209,10 +263,12 @@ impl DeploymentService {
             model::port_binding(&current, self.installation.port)?;
             pins.running_mounts(&current)?;
             require(
-                apply::status_responds(self.installation.port),
+                apply::status_responds_scoped(self.installation.port, deadline),
                 "DEPLOYMENT_READINESS_UNCONFIRMED",
             )?;
-            self.process_tree(&id, front)
+            deadline.check()?;
+            self.process_tree(&id, front)?;
+            deadline.check()
         })();
         DeploymentError::finalized(result, pins.close())
     }

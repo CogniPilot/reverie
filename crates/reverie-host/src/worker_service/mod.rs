@@ -58,6 +58,20 @@ pub enum WorkerServiceError {
     Schema(reverie_contracts::worker_schema::WorkerSchemaError),
     Finalization(Box<Self>, Box<Self>),
 }
+impl WorkerServiceError {
+    /// Stable diagnostic classification; the original typed cause is retained.
+    pub fn code(&self) -> &'static str {
+        match self {
+            Self::Refused(code) | Self::Program(code) => code,
+            Self::Io(_) => "NATIVE_SERVICE_IO",
+            Self::Engine(error) => error.code(),
+            Self::Control(_) => "NATIVE_SERVICE_QUIESCE",
+            Self::Configuration(error) => error.code(),
+            Self::Schema(_) => "NATIVE_SERVICE_CONFIGURATION_SCHEMA",
+            Self::Finalization(primary, _) => primary.code(),
+        }
+    }
+}
 impl std::fmt::Display for WorkerServiceError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {

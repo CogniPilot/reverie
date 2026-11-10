@@ -18,6 +18,7 @@ mod perf;
 mod pool;
 mod pool_image_inputs;
 mod service;
+mod website;
 
 #[derive(Parser)]
 #[command(
@@ -31,6 +32,12 @@ struct Arguments {
 }
 #[derive(Subcommand)]
 enum Role {
+    /// Initial maintained protected website and actor setup. Stops the native
+    /// broker/workers through their actual owners; never restarts them.
+    Website {
+        #[command(subcommand)]
+        action: website::Action,
+    },
     /// Inspect or install the fixed running website actor identity. Apply
     /// requires an inactive native service and unchanged employee policies;
     /// it does not start the service or authorize a resource-pool rollout.
@@ -118,6 +125,7 @@ fn main() -> ExitCode {
 }
 fn run(arguments: Arguments) -> Result<(), Box<dyn std::error::Error>> {
     match arguments.command {
+        Role::Website { action } => website::run(action),
         Role::Actor { action } => actor::run(action),
         Role::Pool { action } => pool::run(action),
         Role::Inventory { config } => inventory::run(&config),

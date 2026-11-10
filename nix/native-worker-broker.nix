@@ -19,7 +19,7 @@ let
     inherit pkgs src;
     members = [
       "reverie-worker-broker" "reverie-application" "reverie-host" "reverie-worker-client"
-      "reverie-core" "reverie-contracts" "reverie-store" "reverie-http"
+      "reverie-core" "reverie-contracts" "reverie-store" "reverie-http" "reverie-deployment"
       "reverie-diagnostics" "reverie-python-regex"
     ];
     vendors = [ "rustpython-sre-engine" "rustpython-wtf8" ];
@@ -31,6 +31,11 @@ in pkgs.rustPlatform.buildRustPackage {
   cargoLock.lockFile = workspace.lockFile;
   cargoBuildFlags = [ "-p" "reverie-worker-broker" ];
   cargoTestFlags = [ "-p" "reverie-worker-broker" ];
+  # The embedded deployment library uses these same fixed snapshot tools.
+  REVERIE_DEPLOYMENT_TAR = "${pkgs.gnutar}/bin/tar";
+  REVERIE_DEPLOYMENT_GETFATTR = "${pkgs.attr}/bin/getfattr";
+  REVERIE_DEPLOYMENT_GETFACL = "${pkgs.acl}/bin/getfacl";
+  REVERIE_DEPLOYMENT_COPY = "${pkgs.coreutils}/bin/cp";
   env = pkgs.lib.optionalAttrs (perfGuestCapsule != null) {
     REVERIE_FIXED_PERF_GUEST_CAPSULE_MANIFEST = "${capsule}/opt/reverie/perf/build-inputs.json";
   } // pkgs.lib.optionalAttrs (taskPerfPolicy != null) {

@@ -19,6 +19,8 @@ bytes.workspace = true
 nix = { workspace = true, features = ["fs", "user", "socket"] }
 reverie-host.workspace = true
 reverie-contracts.workspace = true
+reverie-application.workspace = true
+reverie-core.workspace = true
 
 [lints]
 workspace = true
