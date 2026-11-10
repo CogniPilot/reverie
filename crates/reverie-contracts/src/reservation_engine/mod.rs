@@ -199,14 +199,17 @@ impl InventoryRows {
     /// are classified. Unchanged Mounts alone cannot establish a stable scan.
     pub fn mount_custody_shape(
         &self,
-    ) -> Result<Vec<(ContainerId, InventoryDigest, InventoryDigest)>> {
+    ) -> Result<Vec<(ContainerId, InventoryDigest, Option<InventoryDigest>)>> {
         self.rows
             .iter()
             .map(|row| {
                 Ok((
                     row.id.clone(),
                     row.mounts_digest()?,
-                    digest(field(row.root(), "State").ok_or(EngineDataError::State)?)?,
+                    // Stable absence is comparable, including on a cold
+                    // recovery row with strictly resolved mount sources.
+                    // Future-source classification still requires StoppedState.
+                    field(row.root(), "State").map(digest).transpose()?,
                 ))
             })
             .collect()

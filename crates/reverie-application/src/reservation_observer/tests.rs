@@ -681,6 +681,22 @@ fn custody_refuses_native_state_changes_even_when_mounts_are_unchanged() {
     }
 }
 #[test]
+fn custody_distinguishes_absent_state_from_explicit_null() {
+    let fixture = Fixture::new();
+    let mut absent = row(1, true);
+    absent.as_object_mut().unwrap().remove("State");
+    let mut null = absent.clone();
+    null["State"] = Value::Null;
+    fixture.inventory(&[absent]);
+    fixture.inventory(&[null]);
+    let observer = fixture.observer();
+    let context = observer.capture(configuration(), None);
+    assert_eq!(
+        result_code(context.custody(None)),
+        Some("RESERVATION_MOUNT_INVENTORY_CHANGED")
+    );
+}
+#[test]
 fn actual_image_target_uses_same_context_engine_deadline_and_complete_census() {
     use std::os::unix::fs::PermissionsExt;
     static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
