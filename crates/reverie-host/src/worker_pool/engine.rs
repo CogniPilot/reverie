@@ -150,8 +150,14 @@ impl EngineObserver {
                 "WORKER_POOL_WEBSITE_INSIDE_POOL",
             )?;
         }
+        let current = self.read(&target)?;
         need(
-            self.read(&target)? == website,
+            reverie_contracts::worker_recovery::RecoveryInspection::same_container_object_inspection(
+                &policy.website_container,
+                &website,
+                &current,
+            )
+            .map_err(|_| PoolError::Refused("WORKER_POOL_WEBSITE_IDENTITY"))?,
             "WORKER_POOL_WEBSITE_CHANGED",
         )
     }
