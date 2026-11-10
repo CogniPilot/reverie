@@ -10,7 +10,7 @@ impl Inner {
         end: Instant,
     ) -> Result<AdmissionLock> {
         let cancellation = self.observer.cancellation();
-        loop {
+        let mut lock = loop {
             need(
                 !cancellation.is_cancelled(),
                 "RESERVATION_ADMISSION_CANCELLED",
@@ -19,24 +19,23 @@ impl Inner {
             let remaining = end.saturating_duration_since(Instant::now());
             need(!remaining.is_zero(), "RESERVATION_ADMISSION_DEADLINE")?;
             match AdmissionLock::try_acquire(config)? {
-                AdmissionLockAttempt::Acquired(mut lock) => {
-                    if Instant::now() >= end || cancellation.is_cancelled() {
-                        let code = if cancellation.is_cancelled() {
-                            "RESERVATION_ADMISSION_CANCELLED"
-                        } else {
-                            "RESERVATION_ADMISSION_DEADLINE"
-                        };
-                        return finalized(
-                            Err(GateError::Refused(code)),
-                            lock.close().map_err(Into::into),
-                        );
-                    }
-                    return Ok(lock);
-                }
+                AdmissionLockAttempt::Acquired(lock) => break lock,
                 AdmissionLockAttempt::Contended => {
                     std::thread::sleep(remaining.min(Duration::from_millis(20)))
                 }
             }
+        };
+        if Instant::now() >= end || cancellation.is_cancelled() {
+            let code = if cancellation.is_cancelled() {
+                "RESERVATION_ADMISSION_CANCELLED"
+            } else {
+                "RESERVATION_ADMISSION_DEADLINE"
+            };
+            return finalized(
+                Err(GateError::Refused(code)),
+                lock.close().map_err(Into::into),
+            );
         }
+        Ok(lock)
     }
 }

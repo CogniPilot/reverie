@@ -3,17 +3,19 @@ use reverie_contracts::worker_pool::{ControllerBirthV2, WorkerPoolPolicy};
 use sha2::Digest;
 use std::{ffi::OsStr, io::Read};
 
+type RetainedBirthFile = (
+    String,
+    Option<File>,
+    Option<native::PrivateFileStamp>,
+    Vec<u8>,
+);
+
 #[derive(Default)]
 pub(super) struct Namespace {
     root: PathBuf,
     history: Option<PathBuf>,
     directories: Vec<(Option<File>, Option<native::private_goal::PathIdentity>)>,
-    files: Vec<(
-        String,
-        Option<File>,
-        Option<native::PrivateFileStamp>,
-        Vec<u8>,
-    )>,
+    files: Vec<RetainedBirthFile>,
     selected: Option<ControllerBirthV2>,
     policy: Option<WorkerPoolPolicy>,
     attempted: bool,
@@ -260,16 +262,17 @@ impl Namespace {
                 )?;
             }
         }
-        if self.archived {
-            for name in ["policies", "control"] {
-                match fs::symlink_metadata(self.root.join(name)) {
-                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => (),
-                    Err(e) => return Err(e.into()),
-                    Ok(_) => {
-                        return Err(PoolNominationError::Refused(
-                            "POOL_RETIRE_NAMESPACE_RECREATED",
-                        ));
-                    }
+        if !self.archived {
+            return Ok(());
+        }
+        for name in ["policies", "control"] {
+            match fs::symlink_metadata(self.root.join(name)) {
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => (),
+                Err(e) => return Err(e.into()),
+                Ok(_) => {
+                    return Err(PoolNominationError::Refused(
+                        "POOL_RETIRE_NAMESPACE_RECREATED",
+                    ));
                 }
             }
         }

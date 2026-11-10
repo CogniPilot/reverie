@@ -36,9 +36,9 @@ impl std::fmt::Display for FleetDispatchFailure<'_> {
 }
 impl FleetDispatchFailure<'_> {
     pub(in crate::installing_broker) fn settle_for_worker(
-        self: Box<Self>,
+        self,
     ) -> std::result::Result<FleetDispatchClosed, Box<Self>> {
-        match *self {
+        match self {
             Self::Preview(owner) => owner
                 .settle_for_worker()
                 .map(FleetDispatchClosed::Preview)
@@ -64,8 +64,7 @@ impl InstallingBroker {
             .prepare(self)
             .and_then(|()| owner.qualify_fixed_inputs())
         {
-            return Box::new(FleetDispatchFailure::Preview(owner.into_failure(cause)))
-                .settle_for_worker();
+            return FleetDispatchFailure::Preview(owner.into_failure(cause)).settle_for_worker();
         }
         let authorization = match (QualifiedFleetPreview { owner })
             .authenticate_maintenance()
@@ -73,7 +72,7 @@ impl InstallingBroker {
         {
             Ok(authorization) => authorization,
             Err(owner) => {
-                return Box::new(FleetDispatchFailure::Preview(owner)).settle_for_worker();
+                return FleetDispatchFailure::Preview(owner).settle_for_worker();
             }
         };
         authorization

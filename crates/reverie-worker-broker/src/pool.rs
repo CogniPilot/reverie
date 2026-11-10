@@ -110,53 +110,18 @@ pub(super) fn run(action: Action) -> Result<(), Box<dyn std::error::Error>> {
         Action::RetireFailedInstallationV1 {
             config,
             expected_request_digest,
-        } => {
-            let expected = JournalDigest::parse(&expected_request_digest)?;
-            let (snapshot, runtime) = capture(&config)?;
-            let result =
-                reverie_application::installing_broker::retire_failed_os_worker_pool_installation(
-                    &snapshot,
-                    runtime,
-                    &expected,
-                    Instant::now() + Duration::from_secs(30),
-                )?;
-            let request: serde_json::Value = serde_json::from_slice(result.canonical_request())?;
-            println!(
-                "{}",
-                serde_json::json!({"failedInstallationRetired":true,
-                "originalActivationCompleted":false,"nominationRevised":true,
-                "path":result.path(),"requestDigest":result.request_digest(),"proposedNomination":request,
-                "requiresFreshOffer":true,"requiresExplicitMaintenanceConsent":true,"started":false})
-            );
-            Ok(())
-        }
+        } => retire_failed_installation(&config, &expected_request_digest),
         Action::ReviseNominationV1 {
             config,
             expected_request_digest,
             default_high_mib,
             employee_high,
-        } => {
-            let expected = JournalDigest::parse(&expected_request_digest)?;
-            let (snapshot, runtime) = capture(&config)?;
-            let published =
-                reverie_application::installing_broker::revise_os_worker_pool_nomination(
-                    &snapshot,
-                    runtime,
-                    &expected,
-                    default_high_mib,
-                    employee_high,
-                    Instant::now() + Duration::from_secs(30),
-                )?;
-            let request: serde_json::Value = serde_json::from_slice(published.canonical_request())?;
-            println!(
-                "{}",
-                serde_json::json!({"nominationRevised":true,"path":published.path(),
-                "requestDigest":published.request_digest(),"proposedNomination":request,
-                "defaultHighMiBMaterializedForCurrentRoster":default_high_mib,
-                "requiresFreshOffer":true,"requiresExplicitMaintenanceConsent":true,"started":false})
-            );
-            Ok(())
-        }
+        } => revise_nomination(
+            &config,
+            &expected_request_digest,
+            default_high_mib,
+            employee_high,
+        ),
         Action::PrepareNominationV1 { config, enrollment } => {
             let end = Instant::now() + Duration::from_secs(30);
             let (snapshot, runtime) = capture(&config)?;
@@ -191,6 +156,54 @@ pub(super) fn run(action: Action) -> Result<(), Box<dyn std::error::Error>> {
             Ok(())
         }
     }
+}
+fn retire_failed_installation(
+    config: &Path,
+    expected_request_digest: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let expected = JournalDigest::parse(expected_request_digest)?;
+    let (snapshot, runtime) = capture(config)?;
+    let result = reverie_application::installing_broker::retire_failed_os_worker_pool_installation(
+        &snapshot,
+        runtime,
+        &expected,
+        Instant::now() + Duration::from_secs(30),
+    )?;
+    let request: serde_json::Value = serde_json::from_slice(result.canonical_request())?;
+    println!(
+        "{}",
+        serde_json::json!({"failedInstallationRetired":true,
+        "originalActivationCompleted":false,"nominationRevised":true,
+        "path":result.path(),"requestDigest":result.request_digest(),"proposedNomination":request,
+        "requiresFreshOffer":true,"requiresExplicitMaintenanceConsent":true,"started":false})
+    );
+    Ok(())
+}
+fn revise_nomination(
+    config: &Path,
+    expected_request_digest: &str,
+    default_high_mib: u32,
+    employee_high: Vec<(ProfileEmployeeId, u32)>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let expected = JournalDigest::parse(expected_request_digest)?;
+    let (snapshot, runtime) = capture(config)?;
+    let published = reverie_application::installing_broker::revise_os_worker_pool_nomination(
+        &snapshot,
+        runtime,
+        &expected,
+        default_high_mib,
+        employee_high,
+        Instant::now() + Duration::from_secs(30),
+    )?;
+    let request: serde_json::Value = serde_json::from_slice(published.canonical_request())?;
+    println!(
+        "{}",
+        serde_json::json!({"nominationRevised":true,"path":published.path(),
+        "requestDigest":published.request_digest(),"proposedNomination":request,
+        "defaultHighMiBMaterializedForCurrentRoster":default_high_mib,
+        "requiresFreshOffer":true,"requiresExplicitMaintenanceConsent":true,"started":false})
+    );
+    Ok(())
 }
 fn employee_high(raw: &str) -> Result<(ProfileEmployeeId, u32), String> {
     let (id, high) = raw

@@ -15,46 +15,7 @@ impl RevisionOwner {
             }
         }
         self.nominal.selection = root.join("worker-pool/registration-request.json");
-        let source = self
-            .nominal
-            .source
-            .as_ref()
-            .ok_or(PoolNominationError::Refused(
-                "POOL_NOMINATION_ORIGINAL_SOURCE_REQUIRED",
-            ))?
-            .clone();
-        need(
-            WorkerPoolProvider::from_config(self.nominal.config.configuration())
-                .map_err(|_| PoolNominationError::Refused("POOL_NOMINATION_PROVIDER"))?
-                .is_none(),
-            "POOL_NOMINATION_ALREADY_INSTALLED",
-        )?;
-        self.stopped = Some(
-            capture_stopped_worker_service_for_role(
-                &source,
-                self.nominal.end,
-                NativeWorkerServiceRole::PoolOfferV1,
-            )
-            .map_err(|cause| self.keep_service(cause))?,
-        );
-        self.nominal.end = self
-            .nominal
-            .end
-            .min(self.stopped.as_ref().expect("original stop").end());
-        self.locks = Some(
-            match ImageMaintenanceLocks::capture(
-                &source,
-                self.nominal.config.configuration(),
-                self.nominal.end,
-            ) {
-                Ok(locks) => locks,
-                Err(cause) => {
-                    let code = cause.cause().code();
-                    self.lock_failure = Some(cause);
-                    return Err(PoolNominationError::Refused(code));
-                }
-            },
-        );
+        self.capture_stopped_maintenance()?;
         self.nominal.prepare()?;
         let original = self.nominal.request.as_ref().expect("original proposal");
         need(
@@ -128,6 +89,49 @@ impl RevisionOwner {
             .as_mut()
             .expect("same locks")
             .assert_held_current()?;
+        Ok(())
+    }
+    fn capture_stopped_maintenance(&mut self) -> Result<()> {
+        let source = self
+            .nominal
+            .source
+            .as_ref()
+            .ok_or(PoolNominationError::Refused(
+                "POOL_NOMINATION_ORIGINAL_SOURCE_REQUIRED",
+            ))?
+            .clone();
+        need(
+            WorkerPoolProvider::from_config(self.nominal.config.configuration())
+                .map_err(|_| PoolNominationError::Refused("POOL_NOMINATION_PROVIDER"))?
+                .is_none(),
+            "POOL_NOMINATION_ALREADY_INSTALLED",
+        )?;
+        self.stopped = Some(
+            capture_stopped_worker_service_for_role(
+                &source,
+                self.nominal.end,
+                NativeWorkerServiceRole::PoolOfferV1,
+            )
+            .map_err(|cause| self.keep_service(cause))?,
+        );
+        self.nominal.end = self
+            .nominal
+            .end
+            .min(self.stopped.as_ref().expect("original stop").end());
+        self.locks = Some(
+            match ImageMaintenanceLocks::capture(
+                &source,
+                self.nominal.config.configuration(),
+                self.nominal.end,
+            ) {
+                Ok(locks) => locks,
+                Err(cause) => {
+                    let code = cause.cause().code();
+                    self.lock_failure = Some(cause);
+                    return Err(PoolNominationError::Refused(code));
+                }
+            },
+        );
         Ok(())
     }
 }

@@ -4,8 +4,8 @@ use reverie_contracts::reservation_control::{PoolTransitionIntent, PoolTransitio
 use reverie_host::reservation_control::PoolTransitionPending;
 mod cleanup;
 mod publication;
-pub(crate) use publication::{PoolMigrationPublished, PublishedPool};
 pub(super) use cleanup::OriginalCleanupAdmission;
+pub(crate) use publication::{PoolMigrationPublished, PublishedPool};
 #[cfg(test)]
 mod tests;
 

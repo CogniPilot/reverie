@@ -22,7 +22,10 @@ pub fn compiled_previous_pool_image_inputs_reference() -> io::Result<Option<Arti
     )
 }
 
-fn fixed_reference(path: Option<&str>, digest: Option<&str>) -> io::Result<Option<ArtifactReference>> {
+fn fixed_reference(
+    path: Option<&str>,
+    digest: Option<&str>,
+) -> io::Result<Option<ArtifactReference>> {
     match (path, digest) {
         (None, None) => Ok(None),
         (Some(path), Some(digest)) => {

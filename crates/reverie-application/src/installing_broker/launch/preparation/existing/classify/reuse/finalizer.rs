@@ -291,6 +291,17 @@ fn finish<'a>(
         }))
     }
 }
+fn stop_completed_native(retained: &RetainedReuse<'_>) -> Result<(), ExistingStorageError> {
+    let target = retained.native.target()?;
+    let admission = retained
+        .scope
+        .preparing
+        .admit_original_cleanup(&target)
+        .map_err(StorageWorkflowError::from)?;
+    retained
+        .native
+        .stop_under_admission(retained.scope.preparing.broker(), admission)
+}
 impl<'a> Finalizer<'a> {
     fn close_native(&mut self, budget: CleanupBudget) {
         let Owner::Native { retained, session } = &mut self.owner else {
@@ -300,27 +311,18 @@ impl<'a> Finalizer<'a> {
             Ok(target) => self.target = Some(target),
             Err(error) => self.errors.push(Error::Storage(error)),
         }
-        match retained.native.completed() {
+        let completed = match retained.native.completed() {
             Ok(completed) => {
                 self.completed = completed;
-                if completed {
-                    let stopped = (|| {
-                        let target = retained.native.target()?;
-                        let admission = retained
-                            .scope
-                            .preparing
-                            .admit_original_cleanup(&target)
-                            .map_err(StorageWorkflowError::from)?;
-                        retained
-                            .native
-                            .stop_under_admission(retained.scope.preparing.broker(), admission)
-                    })();
-                    if let Err(error) = stopped {
-                        self.errors.push(Error::Storage(error));
-                    }
-                }
+                completed
             }
-            Err(error) => self.errors.push(Error::Storage(error)),
+            Err(error) => {
+                self.errors.push(Error::Storage(error));
+                false
+            }
+        };
+        if completed && let Err(error) = stop_completed_native(retained) {
+            self.errors.push(Error::Storage(error));
         }
         // After actual stop, native ownership first acquires its original
         // guard, then starts TERM/KILL. Bookkeeping cannot consume that grace.

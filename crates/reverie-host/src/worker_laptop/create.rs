@@ -216,13 +216,13 @@ fn run(
         .scalar_text()
         .expect("scalar capture");
     created.container = ContainerId::parse(&trimmed).ok();
-    if let Some(member) = member {
-        if let Err(error) = member.assert_plan(runtime, &record.resources().plan) {
-            // The create ACK already owns the target. A failed parent/native
-            // postcheck cannot turn that effect into a known absent resource.
-            record.unknown = true;
-            return Err(controller::pool_error(error));
-        }
+    if let Some(member) = member
+        && let Err(error) = member.assert_plan(runtime, &record.resources().plan)
+    {
+        // The create ACK already owns the target. A failed parent/native
+        // postcheck cannot turn that effect into a known absent resource.
+        record.unknown = true;
+        return Err(controller::pool_error(error));
     }
     Ok(())
 }

@@ -1,8 +1,8 @@
 //! Actual reservation admission/control composition. This internal service is
 //! not an HTTP authority or a process/start permit. Effect-owner cohorts remain
 //! separate from the read-side admission dependencies.
-mod admission;
 mod actor_setup;
+mod admission;
 pub(crate) use actor_setup::{ActorSetupAdmission, ActorSetupPreview};
 mod claim;
 mod draft;
@@ -23,8 +23,8 @@ mod ordinary_stop;
 mod perf_transition;
 pub(crate) use perf_transition::{PerfAdmission, PerfPreview};
 mod pool_transition;
-pub use pool_transition::{PoolTransitionFailure, PoolTransitionFence};
 pub(crate) use pool_transition::{PoolMigrationPublished, PublishedPool};
+pub use pool_transition::{PoolTransitionFailure, PoolTransitionFence};
 mod stop_admission;
 pub(crate) use stop_admission::OrdinaryStopAdmission;
 mod preparation;

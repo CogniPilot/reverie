@@ -54,18 +54,7 @@ pub(super) fn assert_absent(operation: &Operation, inventory: &Value) -> Result<
             )?;
             refuse_reference(operation, name)?;
         }
-        if !row["Labels"].is_null() {
-            let labels = row["Labels"].as_object().ok_or_else(|| {
-                DeploymentError::new("DEPLOYMENT_INVALID_CREATE_INVENTORY_UNCONFIRMED")
-            })?;
-            for (key, value) in labels {
-                let value = value.as_str().ok_or_else(|| {
-                    DeploymentError::new("DEPLOYMENT_INVALID_CREATE_INVENTORY_UNCONFIRMED")
-                })?;
-                refuse_reference(operation, key)?;
-                refuse_reference(operation, value)?;
-            }
-        }
+        assert_no_label_reference(operation, &row["Labels"])?;
     }
     require(
         ids.contains(model::string(&operation.plan.source, "Id")?),
@@ -76,6 +65,22 @@ pub(super) fn assert_absent(operation: &Operation, inventory: &Value) -> Result<
         "DEPLOYMENT_INVALID_CREATE_SOURCE_ABSENT",
     )?;
     Ok(rows.len())
+}
+fn assert_no_label_reference(operation: &Operation, labels: &Value) -> Result<()> {
+    if labels.is_null() {
+        return Ok(());
+    }
+    let labels = labels
+        .as_object()
+        .ok_or_else(|| DeploymentError::new("DEPLOYMENT_INVALID_CREATE_INVENTORY_UNCONFIRMED"))?;
+    for (key, value) in labels {
+        let value = value.as_str().ok_or_else(|| {
+            DeploymentError::new("DEPLOYMENT_INVALID_CREATE_INVENTORY_UNCONFIRMED")
+        })?;
+        refuse_reference(operation, key)?;
+        refuse_reference(operation, value)?;
+    }
+    Ok(())
 }
 fn refuse_reference(operation: &Operation, value: &str) -> Result<()> {
     require(

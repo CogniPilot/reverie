@@ -10,7 +10,7 @@ use crate::{
 use reverie_contracts::{
     resource_actor::{EngineMetadata, InstalledFactsDocument, PoolImageRole},
     resource_config::ResourceIdentitySettings,
-    worker_pool::{validate_engine_information, WorkerPoolPolicy},
+    worker_pool::{WorkerPoolPolicy, validate_engine_information},
 };
 use reverie_store::storage_identity::{self, StorageIdentityConfig};
 use std::collections::BTreeSet;

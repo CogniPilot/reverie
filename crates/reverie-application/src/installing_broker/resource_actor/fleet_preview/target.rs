@@ -6,7 +6,7 @@ pub(super) enum TargetAttempt {
     Failed(Box<OfferTargetObservationFailure>),
     Transferred {
         target: Box<ObservedOfferTarget>,
-        binding: UnpreparedOfferBinding,
+        binding: Box<UnpreparedOfferBinding>,
     },
     Moving,
 }
@@ -40,7 +40,10 @@ impl TargetAttempt {
         let Self::Observed(target) = std::mem::replace(self, Self::Moving) else {
             unreachable!("same target retained across transfer");
         };
-        *self = Self::Transferred { target, binding };
+        *self = Self::Transferred {
+            target,
+            binding: Box::new(binding),
+        };
         Ok(source)
     }
     pub(super) fn capture_view(
@@ -89,7 +92,7 @@ impl TargetAttempt {
                 target
                     .assert_migration_transferred()
                     .map_err(Cause::Target)?;
-                Ok(binding.clone())
+                Ok(binding.as_ref().clone())
             }
             _ => Err(Cause::Refused("FLEET_PREVIEW_TARGET_STATE")),
         }

@@ -89,6 +89,7 @@ impl NominationDerivation {
             !ids.is_empty() && ids.len() <= 256,
             "POOL_NOMINATION_CENSUS",
         )?;
+        let pool = PathBuf::from(&policy.instance_root).join("worker-pool");
         let mut website = false;
         let mut failed_seen = false;
         for id in ids {
@@ -115,12 +116,12 @@ impl NominationDerivation {
                 labels.values().all(|v| v.is_string()),
                 "POOL_NOMINATION_CENSUS",
             )?;
-            if let Some(retirement) = retirement {
-                if retirement.matches_row(policy, &id, row)? {
-                    need(!failed_seen, "POOL_RETIRE_AMBIGUOUS_CONTROLLER")?;
-                    failed_seen = true;
-                    continue;
-                }
+            if let Some(retirement) = retirement
+                && retirement.matches_row(policy, &id, row)?
+            {
+                need(!failed_seen, "POOL_RETIRE_AMBIGUOUS_CONTROLLER")?;
+                failed_seen = true;
+                continue;
             }
             let end = self.deadline();
             if self.historical.matches_row(policy, &id, row, end)? {
@@ -150,25 +151,7 @@ impl NominationDerivation {
                     "POOL_NOMINATION_WORKERS_MUST_BE_STOPPED",
                 )?;
             }
-            let mounts = row["Mounts"]
-                .as_array()
-                .ok_or(PoolNominationError::Refused("POOL_NOMINATION_CENSUS"))?;
-            let pool = PathBuf::from(&policy.instance_root).join("worker-pool");
-            for mount in mounts {
-                let rw = mount["RW"]
-                    .as_bool()
-                    .ok_or(PoolNominationError::Refused("POOL_NOMINATION_CENSUS"))?;
-                if rw && mount["Type"] == "bind" {
-                    let source = mount["Source"]
-                        .as_str()
-                        .ok_or(PoolNominationError::Refused("POOL_NOMINATION_CENSUS"))?;
-                    let source = Path::new(source);
-                    need(
-                        !source.starts_with(&pool) && !pool.starts_with(source),
-                        "POOL_NOMINATION_POOL_WRITER",
-                    )?;
-                }
-            }
+            assert_no_pool_writer(row, &pool)?;
             website |= id.as_str() == policy.website_container;
         }
         need(website, "POOL_NOMINATION_WEBSITE_REQUIRED")?;
@@ -178,4 +161,26 @@ impl NominationDerivation {
         )?;
         Ok(())
     }
+}
+fn assert_no_pool_writer(row: &serde_json::Value, pool: &Path) -> Result<()> {
+    let mounts = row["Mounts"]
+        .as_array()
+        .ok_or(PoolNominationError::Refused("POOL_NOMINATION_CENSUS"))?;
+    for mount in mounts {
+        let rw = mount["RW"]
+            .as_bool()
+            .ok_or(PoolNominationError::Refused("POOL_NOMINATION_CENSUS"))?;
+        if !rw || mount["Type"] != "bind" {
+            continue;
+        }
+        let source = mount["Source"]
+            .as_str()
+            .ok_or(PoolNominationError::Refused("POOL_NOMINATION_CENSUS"))?;
+        let source = Path::new(source);
+        need(
+            !source.starts_with(pool) && !pool.starts_with(source),
+            "POOL_NOMINATION_POOL_WRITER",
+        )?;
+    }
+    Ok(())
 }

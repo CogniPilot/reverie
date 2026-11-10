@@ -100,11 +100,11 @@ fn run(
         record.unknown = true;
         return Err(LaptopError::Refused("WORKER_LAPTOP_START_UNCONFIRMED"));
     }
-    if let Some(member) = member {
-        if let Err(error) = member.assert_plan(runtime, &record.resources().plan) {
-            record.unknown = true;
-            return Err(controller::pool_error(error));
-        }
+    if let Some(member) = member
+        && let Err(error) = member.assert_plan(runtime, &record.resources().plan)
+    {
+        record.unknown = true;
+        return Err(controller::pool_error(error));
     }
     Ok(())
 }

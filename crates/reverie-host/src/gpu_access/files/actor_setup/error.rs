@@ -90,10 +90,10 @@ impl Causes {
         self.primary.get_or_insert_with(|| Rc::new(error)).clone()
     }
     pub(super) fn host(&mut self, error: GpuHostError) -> Rc<ActorSetupControlError> {
-        if self.primary.is_some() {
+        if let Some(primary) = &self.primary {
             self.cleanup
                 .get_or_insert_with(|| Rc::new(ActorSetupControlError::Host(error)));
-            self.primary.as_ref().expect("original cause").clone()
+            primary.clone()
         } else {
             self.record(ActorSetupControlError::Host(error))
         }

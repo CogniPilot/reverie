@@ -41,23 +41,7 @@ impl ControllerState {
                 &runtime.cancellation(),
             )
             .map_err(PoolError::Engine)?;
-        let rows: Vec<serde_json::Value> = serde_json::from_str(&raw)
-            .map_err(|_| PoolError::Refused("WORKER_POOL_MEMBER_INSPECTION"))?;
-        need(rows.len() == 1, "WORKER_POOL_MEMBER_INSPECTION")?;
-        let row = &rows[0];
-        let pid = row["State"]["Pid"]
-            .as_u64()
-            .and_then(|p| u32::try_from(p).ok())
-            .filter(|p| *p > 1)
-            .ok_or(PoolError::Refused("WORKER_POOL_MEMBER_PID"))?;
-        need(
-            row["Id"] == target.container().as_str()
-                && row["State"]["Running"] == true
-                && row["Config"]["Labels"]["reverie.worker"] == self.policy.deployment
-                && row["Config"]["Labels"]["reverie.employee"] == target.employee().as_str()
-                && row["Config"]["Labels"]["reverie.session"] == target.session().as_str(),
-            "WORKER_POOL_MEMBER_INSPECTION",
-        )?;
+        let pid = self.inspected_member_pid(target, &raw)?;
         let group = self.policy.parent_cgroup_relative();
         let expected = format!("0::/{group}/docker-{}.scope\n", target.container().as_str());
         need(
@@ -135,5 +119,25 @@ impl ControllerState {
             high,
             group,
         })
+    }
+    fn inspected_member_pid(&self, target: &CreatedPoolTarget<'_>, raw: &str) -> Result<u32> {
+        let rows: Vec<serde_json::Value> = serde_json::from_str(raw)
+            .map_err(|_| PoolError::Refused("WORKER_POOL_MEMBER_INSPECTION"))?;
+        need(rows.len() == 1, "WORKER_POOL_MEMBER_INSPECTION")?;
+        let row = &rows[0];
+        let pid = row["State"]["Pid"]
+            .as_u64()
+            .and_then(|p| u32::try_from(p).ok())
+            .filter(|p| *p > 1)
+            .ok_or(PoolError::Refused("WORKER_POOL_MEMBER_PID"))?;
+        need(
+            row["Id"] == target.container().as_str()
+                && row["State"]["Running"] == true
+                && row["Config"]["Labels"]["reverie.worker"] == self.policy.deployment
+                && row["Config"]["Labels"]["reverie.employee"] == target.employee().as_str()
+                && row["Config"]["Labels"]["reverie.session"] == target.session().as_str(),
+            "WORKER_POOL_MEMBER_INSPECTION",
+        )?;
+        Ok(pid)
     }
 }

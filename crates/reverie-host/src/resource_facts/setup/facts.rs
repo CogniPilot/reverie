@@ -248,10 +248,8 @@ impl Drop for ActorSetupFacts {
             let query = self.engine.capture_query_owner();
             std::mem::forget(std::mem::replace(&mut self.query, query));
             std::mem::forget(self.http.take());
-            std::mem::forget(std::mem::take(&mut self.input));
             std::mem::forget(std::mem::take(&mut self.code));
             std::mem::forget(std::mem::take(&mut self.aliases));
-            std::mem::forget(std::mem::take(&mut self.processes));
             std::mem::forget((self.bound.take(), self.primary.take(), self.cleanup.take()));
         }
     }

@@ -132,8 +132,8 @@ impl Inner {
             Ok(config) => config,
             Err(error) => return finalized(Err(error), entry.cancel()),
         };
-        let acquired = if native_budget.is_none() && end.is_some() {
-            self.acquire_contended_entry(&config, end.expect("bounded entry"))
+        let acquired = if let (None, Some(end)) = (native_budget, end) {
+            self.acquire_contended_entry(&config, end)
         } else {
             AdmissionLock::acquire(&config).map_err(GateError::from)
         };

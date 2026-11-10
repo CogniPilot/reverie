@@ -24,7 +24,7 @@ impl State {
         let config = reverie_contracts::worker_config::decode_owner_text(before.raw.as_bytes())
             .map_err(WorkerServiceError::Configuration)?;
         let envelope = WorkerEnvelope::capture(config).map_err(WorkerServiceError::Schema)?;
-        let endpoint = native::python_path(&envelope.path(WorkerPath::Socket).codepoints())?;
+        let endpoint = native::python_path(envelope.path(WorkerPath::Socket).codepoints())?;
         // This State already owns its exclusive original STOP pending. No
         // supported concurrent start/upgrade may pass it while C drains.
         let reply = reverie_worker_client::control::call(

@@ -7,31 +7,7 @@ impl ActorSetupFacts {
             selected.uid() == native::uid() && selected.gid() == nix::unistd::getgid().as_raw(),
             "ACTOR_SETUP_ORDINARY_OWNER",
         )?;
-        let native_info =
-            EngineMetadata::decode(self.query(EngineQuery::GpuInformation)?.as_bytes())?;
-        let engine_id = native_info.declared_engine_id()?;
-        let kernel = native::kernel_release()
-            .map_err(|_| ActorSetupFactsError::Refused("ACTOR_SETUP_SAME_KERNEL_REQUIRED"))?;
-        native_info.require_same_kernel(&engine_id, &kernel)?;
-        // This is the existing controller's fixed rootful engine endpoint.
-        // Matching actual client ID/kernel is mandatory, not inferred by path.
-        let socket = "/var/run/docker.sock";
-        let info = std::fs::symlink_metadata(socket)?;
-        require(
-            info.file_type().is_socket(),
-            "ACTOR_SETUP_ENGINE_SOCKET_REQUIRED",
-        )?;
-        let engine = EngineSelection {
-            socket: PythonText::from_scalar_text(socket),
-            identity: [
-                info.dev(),
-                info.ino(),
-                u64::from(info.uid()),
-                u64::from(info.gid()),
-            ]
-            .map(UnsignedInteger::from_u64),
-            id: engine_id,
-        };
+        let engine = self.engine_selection()?;
         self.http = Some(WebsiteMetadataObserver::new(&engine)?);
         let end = self.deadline();
         self.http
@@ -110,6 +86,33 @@ impl ActorSetupFacts {
             node: process.node().clone(),
         });
         self.guard()
+    }
+    fn engine_selection(&mut self) -> FactsResult<EngineSelection> {
+        let native_info =
+            EngineMetadata::decode(self.query(EngineQuery::GpuInformation)?.as_bytes())?;
+        let engine_id = native_info.declared_engine_id()?;
+        let kernel = native::kernel_release()
+            .map_err(|_| ActorSetupFactsError::Refused("ACTOR_SETUP_SAME_KERNEL_REQUIRED"))?;
+        native_info.require_same_kernel(&engine_id, &kernel)?;
+        // This is the existing controller's fixed rootful engine endpoint.
+        // Matching actual client ID/kernel is mandatory, not inferred by path.
+        let socket = "/var/run/docker.sock";
+        let info = std::fs::symlink_metadata(socket)?;
+        require(
+            info.file_type().is_socket(),
+            "ACTOR_SETUP_ENGINE_SOCKET_REQUIRED",
+        )?;
+        Ok(EngineSelection {
+            socket: PythonText::from_scalar_text(socket),
+            identity: [
+                info.dev(),
+                info.ino(),
+                u64::from(info.uid()),
+                u64::from(info.gid()),
+            ]
+            .map(UnsignedInteger::from_u64),
+            id: engine_id,
+        })
     }
     pub(super) fn inputs(
         &mut self,

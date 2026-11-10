@@ -135,7 +135,7 @@ impl PoolAbsenceObservation {
             .derived
             .as_mut()
             .expect("same actual native observations");
-        let (fresh, _) = derived.derive(runtime, &self.config, &images, &principal, &root)?;
+        let (fresh, _) = derived.derive(runtime, &self.config, &images, &principal, root)?;
         let mut nonhigh = fresh.policy().clone();
         nonhigh.employee_memory_high_mi_b = original.policy().employee_memory_high_mi_b.clone();
         need(

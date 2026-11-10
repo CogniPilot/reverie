@@ -20,16 +20,7 @@ impl NominationDerivation {
                 .map_err(|_| PoolNominationError::Refused("POOL_NOMINATION_IMAGE_INVENTORY"))?;
             let raw = self.query(runtime, EngineQuery::WorkerImageInspect(&id))?;
             let image = EngineMetadata::decode(raw.as_bytes())?;
-            for (index, role) in [PoolImageRole::Anchor, PoolImageRole::Controller]
-                .into_iter()
-                .enumerate()
-            {
-                if let Ok(found) = image.qualify_pool_image(inputs, role) {
-                    need(found == value, "POOL_NOMINATION_IMAGE_ID_CHANGED")?;
-                    need(selected[index].is_none(), "POOL_NOMINATION_IMAGE_AMBIGUOUS")?;
-                    selected[index] = Some(found);
-                }
-            }
+            select_image_roles(&image, inputs, &value, &mut selected)?;
         }
         let [anchor, controller] = selected;
         let anchor = anchor.ok_or(PoolNominationError::Refused(
@@ -41,4 +32,23 @@ impl NominationDerivation {
         need(anchor != controller, "POOL_NOMINATION_IMAGE_AMBIGUOUS")?;
         Ok([anchor, controller])
     }
+}
+fn select_image_roles(
+    image: &EngineMetadata,
+    inputs: &PoolImageInputsData,
+    value: &str,
+    selected: &mut [Option<String>; 2],
+) -> Result<()> {
+    for (index, role) in [PoolImageRole::Anchor, PoolImageRole::Controller]
+        .into_iter()
+        .enumerate()
+    {
+        let Ok(found) = image.qualify_pool_image(inputs, role) else {
+            continue;
+        };
+        need(found == value, "POOL_NOMINATION_IMAGE_ID_CHANGED")?;
+        need(selected[index].is_none(), "POOL_NOMINATION_IMAGE_AMBIGUOUS")?;
+        selected[index] = Some(found);
+    }
+    Ok(())
 }

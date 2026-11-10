@@ -105,21 +105,21 @@ fn fact(name: &[u8], member: &mut tar::Entry<'_, impl Read>, files: &[CodeFile])
         mode: member.header().mode()? & 0o7777,
         pin: None,
     };
-    if let Some(expected) = target(name, files) {
-        if kind == Kind::File {
-            need(
-                member.size() == expected.bytes && member.size() <= 16 << 20,
-                "WORKER_BUILD_ARCHIVED_TOOLKIT_SIZE",
-            )?;
-            let mut raw = Vec::new();
-            member.take((16 << 20) + 1).read_to_end(&mut raw)?;
-            let digest = format!("{:x}", Sha256::digest(&raw));
-            need(
-                raw.len() as u64 == expected.bytes && digest == expected.sha256.as_str(),
-                "WORKER_BUILD_ARCHIVED_TOOLKIT_BYTES",
-            )?;
-            fact.pin = Some((digest, raw.len() as u64));
-        }
+    if let Some(expected) = target(name, files)
+        && kind == Kind::File
+    {
+        need(
+            member.size() == expected.bytes && member.size() <= 16 << 20,
+            "WORKER_BUILD_ARCHIVED_TOOLKIT_SIZE",
+        )?;
+        let mut raw = Vec::new();
+        member.take((16 << 20) + 1).read_to_end(&mut raw)?;
+        let digest = format!("{:x}", Sha256::digest(&raw));
+        need(
+            raw.len() as u64 == expected.bytes && digest == expected.sha256.as_str(),
+            "WORKER_BUILD_ARCHIVED_TOOLKIT_BYTES",
+        )?;
+        fact.pin = Some((digest, raw.len() as u64));
     }
     Ok(fact)
 }

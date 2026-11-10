@@ -139,10 +139,10 @@ fn verify_linkage(
             return Err(refused("unclosed ID-map ELF dependency"));
         }
     }
-    if let Some(interpreter) = tools.interpreter(path)? {
-        if interpreter != format!("{}/lib/{loader}", LAYOUT.prefix()) {
-            return Err(refused("ID-map interpreter escapes fixed image prefix"));
-        }
+    if let Some(interpreter) = tools.interpreter(path)?
+        && interpreter != format!("{}/lib/{loader}", LAYOUT.prefix())
+    {
+        return Err(refused("ID-map interpreter escapes fixed image prefix"));
     }
     if !is_loader && tools.patch(&["--print-rpath"], path)? != format!("{}/lib", LAYOUT.prefix()) {
         return Err(refused("ID-map search path escapes fixed image prefix"));
