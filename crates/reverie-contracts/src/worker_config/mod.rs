@@ -1,10 +1,12 @@
 //! Legacy effective-worker JSON bytes, with Python's default spaces and ASCII.
 //! Inputs are projected data, never evidence of validation, readiness or authority.
 mod encode;
+mod publication;
 /// Python `repr(float)` for a finite value (shared by named byte encoders).
 pub(crate) use encode::float as python_float_repr;
 /// Python `json.dumps` of one string with the default `ensure_ascii`.
 pub(crate) use encode::string as python_json_string;
+pub(crate) use publication::publication_bytes;
 
 use crate::legacy_json::{self, Node, Text, Value};
 use sha2::{Digest, Sha256};
@@ -163,6 +165,18 @@ impl EffectiveWorkerConfig {
             _ => Vec::new(),
         };
         Self(Value(Node::Object(value)), order)
+    }
+    pub(crate) fn pool_configuration_fields(&self, fields: BTreeMap<Text, Value>) -> Option<Self> {
+        let mut after = Self::from_object(fields);
+        let mut before_keys = self.1.clone();
+        let mut after_keys = after.1.clone();
+        before_keys.sort_by(|a, b| a.codepoints().cmp(b.codepoints()));
+        after_keys.sort_by(|a, b| a.codepoints().cmp(b.codepoints()));
+        if before_keys != after_keys {
+            return None;
+        }
+        after.1 = self.1.clone();
+        Some(after)
     }
 }
 /// Python dictionary equality for captured configuration DATA, distinct from

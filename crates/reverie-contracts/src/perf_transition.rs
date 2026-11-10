@@ -1,6 +1,5 @@
 //! Fixed PERF-only cold transition DATA; never filesystem or launch authority.
 use crate::{
-    legacy_json::{Node, Text, Value},
     reservation_control::{self, ControlBinding},
     task_perf_v1::TaskPerfConfiguration,
     worker_config::{self, EffectiveWorkerConfig},
@@ -36,9 +35,6 @@ impl PerfTransitionDataError {
 }
 impl std::error::Error for PerfTransitionDataError {}
 type Result<T> = std::result::Result<T, PerfTransitionDataError>;
-fn key(value: &str) -> Text {
-    Text(value.chars().map(u32::from).collect())
-}
 
 pub struct PerfTransition {
     before: EffectiveWorkerConfig,
@@ -133,7 +129,7 @@ impl PerfTransition {
             .is_ok_and(|value| value.python_eq(metadata.as_value()))
     }
     pub fn configuration_bytes(&self) -> Vec<u8> {
-        configuration_bytes(&self.after)
+        worker_config::publication_bytes(&self.after)
     }
     pub fn binding_bytes(&self) -> Vec<u8> {
         worker_config::compact_data(&self.binding.configuration_data())
@@ -153,47 +149,4 @@ impl PerfTransition {
         }))
         .expect("fixed scalar PERF pending DATA")
     }
-}
-
-// Preserve session-resource iteration order both in memory and when the
-// published document is subsequently loaded by the next native broker.
-fn configuration_bytes(config: &EffectiveWorkerConfig) -> Vec<u8> {
-    let Node::Object(fields) = &config.as_value().0 else {
-        unreachable!("worker object");
-    };
-    let mut output = vec![b'{'];
-    for (index, (name, value)) in fields.iter().enumerate() {
-        if index != 0 {
-            output.push(b',');
-        }
-        output.extend(worker_config::compact_data(&Value(Node::String(
-            name.clone(),
-        ))));
-        output.push(b':');
-        if name == &key("sessionResources")
-            && let Node::Object(resources) = &value.0
-        {
-            output.push(b'{');
-            for (index, name) in config.session_resource_order().iter().enumerate() {
-                if index != 0 {
-                    output.push(b',');
-                }
-                let name = Text(name.codepoints().to_vec());
-                output.extend(worker_config::compact_data(&Value(Node::String(
-                    name.clone(),
-                ))));
-                output.push(b':');
-                output.extend(worker_config::compact_data(
-                    resources
-                        .get(&name)
-                        .expect("captured session-resource order"),
-                ));
-            }
-            output.push(b'}');
-        } else {
-            output.extend(worker_config::compact_data(value));
-        }
-    }
-    output.push(b'}');
-    output
 }

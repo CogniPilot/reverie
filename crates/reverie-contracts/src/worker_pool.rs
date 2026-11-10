@@ -2,7 +2,9 @@
 //! installed-controller, maintenance, admission or kernel-readback capability.
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+mod configuration_transition;
 mod controller_v2;
+pub use configuration_transition::{PoolConfigurationDataError, WorkerPoolConfigurationTransition};
 mod engine;
 mod provider;
 pub use controller_v2::SERVICE_PURPOSE as CONTROLLER_SERVICE_V2_PURPOSE;

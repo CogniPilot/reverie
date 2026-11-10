@@ -7,7 +7,7 @@ use crate::{
 };
 use serde::Deserialize;
 
-const PURPOSE: &str = "reverie-docker-worker-pool-provider-v1";
+pub(super) const PURPOSE: &str = "reverie-docker-worker-pool-provider-v1";
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
