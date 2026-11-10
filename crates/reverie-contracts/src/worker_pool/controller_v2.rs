@@ -137,6 +137,12 @@ impl BrokerBirthData {
     pub fn ids(&self) -> [u32; 2] {
         [self.uid, self.gid]
     }
+    pub fn executable_identity(&self) -> [u64; 2] {
+        self.executable
+    }
+    pub fn argv_digest(&self) -> &str {
+        &self.argv_sha256
+    }
 }
 
 #[derive(Clone, Eq, PartialEq)]

@@ -22,7 +22,8 @@ pub use engine::{
     validate_anchor_inspection, validate_controller_inspection,
     validate_controller_service_v2_inspection, validate_engine_information,
     validate_failed_controller_service_v2_inspection, validate_pool_image_information,
-    validate_retained_anchor_inspection, website_process_data,
+    validate_retained_anchor_inspection, validate_stopped_controller_service_v2_inspection,
+    website_process_data,
 };
 pub use member_policy::WorkerPoolMemberPolicy;
 pub use provider::WorkerPoolProvider;

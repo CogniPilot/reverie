@@ -156,6 +156,57 @@ fn valid_v2(value: &Value, policy: &WorkerPoolPolicy) -> bool {
 }
 
 #[test]
+fn stopped_predecessor_preserves_exit_status_without_qualifying_live_or_partial_rows() {
+    let policy = policy();
+    let id = "e".repeat(64);
+    let digest = "d".repeat(64);
+    let mut value = service_v2(&policy);
+    let check = |value: &Value| {
+        validate_stopped_controller_service_v2_inspection(
+            &serde_json::to_vec(value).unwrap(),
+            &policy,
+            &id,
+            &digest,
+        )
+    };
+    assert!(check(&value).is_err());
+    value["HostConfig"]["AutoRemove"] = json!(false);
+    value["HostConfig"]["RestartPolicy"] = json!({"Name":"no","MaximumRetryCount":0});
+    value["RestartCount"] = json!(0);
+    value["State"] = json!({
+        "Pid":0,"Running":false,"Paused":false,"Restarting":false,"Dead":false,"Status":"exited",
+        "ExitCode":143,"OOMKilled":false,"Error":"",
+        "StartedAt":"2026-11-10T00:00:00Z","FinishedAt":"2026-11-10T00:01:00Z"
+    });
+    assert_eq!(check(&value).unwrap(), 143);
+    assert!(
+        validate_failed_controller_service_v2_inspection(
+            &serde_json::to_vec(&value).unwrap(),
+            &policy,
+            &id,
+            &digest,
+            &policy.controller_name(),
+        )
+        .is_err()
+    );
+    for (field, replacement) in [
+        ("Pid", json!(1)),
+        ("Running", json!(true)),
+        ("Restarting", json!(true)),
+        ("Dead", json!(true)),
+        ("Status", json!("removing")),
+        ("ExitCode", json!(256)),
+        ("ExitCode", json!(null)),
+    ] {
+        let mut changed = value.clone();
+        changed["State"][field] = replacement;
+        assert!(check(&changed).is_err(), "{field}");
+    }
+    value["Mounts"].as_array_mut().unwrap().pop();
+    assert!(check(&value).is_err());
+}
+
+#[test]
 fn retained_anchor_requires_original_birth_and_a_stable_container() {
     let policy = policy();
     let cid = "e".repeat(64);

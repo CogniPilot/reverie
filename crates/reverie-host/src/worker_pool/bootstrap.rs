@@ -26,6 +26,17 @@ mod arguments;
 #[cfg(test)]
 mod tests;
 
+pub(super) fn assert_predecessor_source(birth: &ControllerBirthV2, source: &Path) -> Result<()> {
+    use arguments::Role;
+    let executable = native::python_path(birth.program().code().path.codepoints())?;
+    let actual = birth.broker().argv_digest();
+    need(
+        Role::Broker.source_digest(&executable, source)? == actual
+            || Role::InstallationOfferV1.source_digest(&executable, source)? == actual,
+        "WORKER_POOL_PREDECESSOR_SOURCE_ARGUMENTS",
+    )
+}
+
 #[must_use = "retain the actual binding through controller bootstrap and uncertainty"]
 pub struct BrokerBootstrapBinding {
     role: arguments::Role,

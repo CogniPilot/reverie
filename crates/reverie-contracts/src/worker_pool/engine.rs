@@ -80,15 +80,42 @@ pub fn validate_failed_controller_service_v2_inspection(
     birth_digest: &str,
     name: &str,
 ) -> Result<(), PoolPolicyError> {
+    if stopped_controller(raw, policy, cid, birth_digest, name)? != 1 {
+        return Err(PoolPolicyError);
+    }
+    Ok(())
+}
+
+/// Complete stopped service-v2 controller DATA and its exact exit status.
+/// A stopped state alone does not prove that an earlier attempt settled.
+pub fn validate_stopped_controller_service_v2_inspection(
+    raw: &[u8],
+    policy: &WorkerPoolPolicy,
+    cid: &str,
+    birth_digest: &str,
+) -> Result<u8, PoolPolicyError> {
+    stopped_controller(raw, policy, cid, birth_digest, &policy.controller_name())
+}
+
+fn stopped_controller(
+    raw: &[u8],
+    policy: &WorkerPoolPolicy,
+    cid: &str,
+    birth_digest: &str,
+    name: &str,
+) -> Result<u8, PoolPolicyError> {
     let value = decode(raw)?;
     let state = &value["State"];
+    let exit_code = state["ExitCode"]
+        .as_u64()
+        .and_then(|code| u8::try_from(code).ok())
+        .ok_or(PoolPolicyError)?;
     let valid = state["Pid"] == 0
         && state["Running"] == false
         && state["Paused"] == false
         && state["Restarting"] == false
         && state["Dead"] == false
         && state["Status"] == "exited"
-        && state["ExitCode"] == 1
         && state["OOMKilled"] == false
         && state["Error"] == ""
         && state["StartedAt"]
@@ -103,7 +130,8 @@ pub fn validate_failed_controller_service_v2_inspection(
     if !valid {
         return Err(PoolPolicyError);
     }
-    controller_spec(&value, policy, cid, birth_digest, true, name)
+    controller_spec(&value, policy, cid, birth_digest, true, name)?;
+    Ok(exit_code)
 }
 fn controller_spec(
     value: &Value,

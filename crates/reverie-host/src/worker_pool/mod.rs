@@ -31,6 +31,8 @@ mod member;
 mod member_policy;
 mod namespace;
 mod policy;
+mod predecessor;
+pub use predecessor::{PoolPredecessorError, PoolPredecessorFailure, PreparedPoolPredecessor};
 mod publication;
 mod service;
 mod target_observation;
