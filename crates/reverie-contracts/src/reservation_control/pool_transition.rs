@@ -49,8 +49,7 @@ impl PoolTransitionSelection {
     }
 }
 pub struct PoolTransitionIntent {
-    operation: JournalId,
-    revision: JournalDigest,
+    selected: PoolTransitionSelection,
     bytes: Vec<u8>,
 }
 impl PoolTransitionIntent {
@@ -81,19 +80,22 @@ impl PoolTransitionIntent {
             (key("configurationDigest"), text(&binding.domain().to_hex())),
         ]);
         Ok(Self {
-            operation: selected.operation.clone(),
-            revision: selected.revision.clone(),
+            selected: selected.clone(),
             bytes: crate::worker_config::compact_data(&document),
         })
     }
     pub fn operation_id(&self) -> &JournalId {
-        &self.operation
+        self.selected.operation_id()
+    }
+    /// The original complete selection DATA; copied values grant no effects.
+    pub fn selection(&self) -> &PoolTransitionSelection {
+        &self.selected
     }
     pub fn bytes(&self) -> &[u8] {
         &self.bytes
     }
     pub fn assert_configuration(&self, config: &EffectiveWorkerConfig) -> Result<()> {
-        if self.revision.as_str() == crate::worker_config::config_digest(config).to_hex() {
+        if self.selected.revision.as_str() == crate::worker_config::config_digest(config).to_hex() {
             Ok(())
         } else {
             Err(ControlDataError::DomainChanged)

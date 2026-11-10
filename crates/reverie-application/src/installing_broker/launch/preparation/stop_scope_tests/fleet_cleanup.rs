@@ -40,9 +40,9 @@ fn frame(kind: u8, raw: &[u8]) -> (UnixStream, UnixStream) {
     (client, server)
 }
 fn original(broker: &InstallingBroker) -> Original {
-    let (client, server) = frame(b'J', br#"{"sessionId":"00000000-0000-0000-0000-000000000000","cwd":"/work","command":"echo hello","env":{},"cols":80,"rows":24}"#);
+    let (client, server) = frame(b'J', br#"{"sessionId":"00000000-0000-0000-0000-000000000000","cwd":"/workspace","command":"echo hello","env":{},"cols":80,"rows":24}"#);
     let mut registered = broker.reports.register_worker_connection(server).unwrap();
-    let mut construction = registered.reserve_handler().unwrap();
+    let construction = registered.reserve_handler().unwrap();
     let config = broker.configuration().unwrap().configuration().clone();
     let telemetry = broker.telemetry.clone();
     let (sent, received) = mpsc::channel();
@@ -284,4 +284,50 @@ fn late_same_sid_and_foreign_originals_cannot_borrow_fenced_cleanup() {
     bound.unwrap();
     assert!(wrong_q && wrong_binding && wrong_broker && repeat && rejected_before_queries);
     assert!(late_refused && foreign_refused && other_refused && same_sid && unchanged);
+}
+
+#[test]
+fn selected_original_cleanup_requires_the_same_pending_stamp_to_remain_present() {
+    crate::test_process::owning_case!(
+        selected_original_cleanup_requires_the_same_pending_stamp_to_remain_present
+    );
+    let tree = Tree::new();
+    let broker = configured(&tree);
+    let original = original(&broker);
+    let (_client, q) = fleet(&broker);
+    let drain = q
+        .retain_other_original_handlers(&broker.reports, &broker.storage.runtime, end())
+        .unwrap();
+    let mut fence = fence(&broker);
+    let bound = broker.bind_pool_original_cleanup(&mut fence, &q, &drain);
+    let pending = tree.root.join("state/resource-reservation-control.pending");
+    let retained = tree.root.join("retained-original-pending");
+    let bytes = std::fs::read(&pending).unwrap();
+    std::fs::rename(&pending, &retained).unwrap();
+    let name = target(&broker, &original);
+    let (refused, closed) = match broker.admit_original_handler_cleanup(&original.connection, &name)
+    {
+        Err(_) => (true, Ok(())),
+        Ok(scope) => (false, scope.abort()),
+    };
+    // Restore the exact original file, not a reconstruction of its bytes,
+    // before actual handler teardown or any feature verdict.
+    let restored = std::fs::rename(&retained, &pending);
+    let unchanged = std::fs::read(&pending).ok().as_deref() == Some(bytes.as_slice());
+    let calls = trace(&tree);
+    finish(&broker, vec![original], q, drain);
+    bound.unwrap();
+    closed.unwrap();
+    restored.unwrap();
+    assert!(unchanged);
+    assert!(
+        refused,
+        "selected cleanup admitted without its original pending stamp"
+    );
+    assert!(
+        calls
+            .split(|byte| *byte == b'\n')
+            .filter(|line| !line.is_empty())
+            .all(|line| line.starts_with(b"ps\0") || line.starts_with(b"inspect\0"))
+    );
 }

@@ -67,7 +67,9 @@ fn lease_busy(snapshot: &ValidatedWorkerSnapshot, session: &str) -> bool {
 fn stopped(tree: &Tree, session: &str) {
     tree.write("inspect.out", &serde_json::to_vec(&serde_json::json!([{"Config":{"Labels":{"reverie.worker":"test","reverie.session":session}},"State":{"Running":false}}])).unwrap());
 }
-fn fixture_close(mut failure: Box<PreparationFailure<'_>>) {
+pub(in crate::installing_broker::launch::preparation) fn fixture_close(
+    mut failure: Box<PreparationFailure<'_>>,
+) {
     assert!(failure.cleanup.is_empty());
     failure.storage.take().unwrap().release(end()).unwrap();
     let mut token = failure.active.take().unwrap();

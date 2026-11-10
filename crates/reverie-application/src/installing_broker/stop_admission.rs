@@ -10,6 +10,43 @@ pub(crate) struct WorkerStopAdmission<'a> {
     gate: Option<OrdinaryStopAdmission>,
 }
 impl InstallingBroker {
+    pub(in crate::installing_broker) fn bind_pool_original_cleanup(
+        &self,
+        fence: &mut crate::reservation_gate::PoolTransitionFence,
+        channel: &reverie_host::worker_reports::WorkerActorChannel,
+        drain: &reverie_host::worker_reports::WorkerOriginalHandlersDrain,
+    ) -> Result<(), GateError> {
+        let gate = self
+            .resource_reservations()?
+            .ok_or(GateError::Refused("POOL_TRANSITION_GATE_REQUIRED"))?;
+        fence.assert_gate(gate)?;
+        let binding = drain.cleanup_binding();
+        binding.assert_owner(channel, &self.reports, &self.storage.runtime)?;
+        fence.bind_original_cleanup(binding)
+    }
+    pub(in crate::installing_broker) fn admit_original_handler_cleanup(
+        &self,
+        connection: &reverie_host::worker_reports::WorkerLaunchConnection,
+        target: &WorkerContainerName,
+    ) -> Result<WorkerStopAdmission<'_>, GateError> {
+        if !connection.same_runtime(&self.storage.runtime) {
+            return Err(GateError::Refused("WORKER_STOP_ADMISSION_ORIGIN"));
+        }
+        let Some(gate) = self.resource_reservations()? else {
+            return self.admit_ordinary_stop(target);
+        };
+        let gate = gate.admit_original_handler_cleanup(
+            &self.installed,
+            connection,
+            target,
+            &self.storage.runtime,
+        )?;
+        Ok(WorkerStopAdmission {
+            broker: self,
+            target: target.clone(),
+            gate: Some(gate),
+        })
+    }
     pub(crate) fn admit_ordinary_stop(
         &self,
         target: &WorkerContainerName,

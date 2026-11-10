@@ -85,6 +85,9 @@ impl ReservationGate {
             Arc::ptr_eq(installed, &self.inner.installed),
             "WORKER_STOP_ADMISSION_ORIGIN",
         )?;
+        // Ordinary callers cannot inherit an original-handler cleanup purpose
+        // merely because the same thread currently owns that admission.
+        self.inner.assert_no_pool_transition()?;
         let borrowed = self
             .inner
             .state
@@ -116,6 +119,40 @@ impl ReservationGate {
             .inherit_native_budget(native_budget)
             .and_then(|()| scope.gate.check_ordinary_stop(target.as_str()));
         match checked {
+            Ok(()) => Ok(scope),
+            Err(cause) => scope.fail(cause),
+        }
+    }
+}
+impl ReservationGate {
+    pub(crate) fn admit_original_handler_cleanup(
+        &self,
+        installed: &Arc<crate::installing_broker::InstalledWorker>,
+        connection: &reverie_host::worker_reports::WorkerLaunchConnection,
+        target: &WorkerContainerName,
+        runtime: &WorkerRuntime,
+    ) -> Result<OrdinaryStopAdmission> {
+        need(
+            Arc::ptr_eq(installed, &self.inner.installed) && connection.same_runtime(runtime),
+            "WORKER_STOP_ADMISSION_ORIGIN",
+        )?;
+        let budget = runtime.stop_budget();
+        let Some(cleanup) = self.inner.original_cleanup(connection, target, runtime)? else {
+            return self.admit_ordinary_stop(installed, target, Some(&budget));
+        };
+        cleanup.assert_target(target)?;
+        let admission = self.inner.admit_original_cleanup(cleanup, &budget)?;
+        let active = match self.inner.held(None) {
+            Ok(active) => active,
+            Err(cause) => return admission.conclude(Err(cause)),
+        };
+        let scope = OrdinaryStopAdmission {
+            gate: self.inner.clone(),
+            active,
+            scope: Scope::Owned(admission),
+            budget: Some(budget),
+        };
+        match scope.gate.check_ordinary_stop(target.as_str()) {
             Ok(()) => Ok(scope),
             Err(cause) => scope.fail(cause),
         }

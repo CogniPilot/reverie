@@ -5,7 +5,9 @@ use super::*;
 use std::rc::Rc;
 mod cleanup_binding;
 mod progress;
-pub use cleanup_binding::WorkerOriginalHandlersCleanupBinding;
+pub use cleanup_binding::{
+    WorkerOriginalHandlersCleanupBinding, WorkerOriginalHandlersCleanupError,
+};
 type DrainResult<T> = std::result::Result<T, Rc<WorkerReportError>>;
 
 struct Selected {
@@ -25,8 +27,11 @@ struct Originals {
     end: Instant,
 }
 impl Selection {
+    fn same_runtime(&self, runtime: &WorkerRuntime) -> bool {
+        Arc::ptr_eq(&self.service.engine, runtime.installed_engine())
+    }
     fn assert_runtime(&self, runtime: &WorkerRuntime) -> Result<()> {
-        if Arc::ptr_eq(&self.service.engine, runtime.installed_engine()) {
+        if self.same_runtime(runtime) {
             Ok(())
         } else {
             Err(WorkerReportError::Unconfirmed)

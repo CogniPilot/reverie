@@ -181,10 +181,13 @@ impl Inner {
         Ok(active.clone())
     }
     pub(super) fn guard(&self, scope: Option<&OperationScope>) -> Result<ObservedInventory> {
-        self.assert_no_pool_transition()?;
+        self.assert_pool_guard()?;
         self.assert_no_failed_gpu()?;
         self.assert_no_failed_image()?;
         let active = self.held(scope)?;
+        if let Some(cleanup) = &active.original_cleanup {
+            cleanup.assert_selected(self)?;
+        }
         let inherited = *active
             .deadline
             .lock()
@@ -195,7 +198,9 @@ impl Inner {
             domain_digest(config.configuration())? == *binding.domain(),
             "RESERVATION_DOMAIN_CHANGED",
         )?;
-        if reservation_control::pending_present(&config)? {
+        if let Some(cleanup) = &active.original_cleanup {
+            cleanup.assert_pending(self)?;
+        } else if reservation_control::pending_present(&config)? {
             self.image_or_gpu_pending_current(&active)?;
         }
         let image = self

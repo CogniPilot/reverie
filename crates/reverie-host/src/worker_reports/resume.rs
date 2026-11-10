@@ -7,7 +7,8 @@ mod io;
 mod original_handlers;
 pub use current_pin::WorkerActorPinError;
 pub use original_handlers::{
-    WorkerOriginalHandlersCleanupBinding, WorkerOriginalHandlersClosed, WorkerOriginalHandlersDrain,
+    WorkerOriginalHandlersCleanupBinding, WorkerOriginalHandlersCleanupError,
+    WorkerOriginalHandlersClosed, WorkerOriginalHandlersDrain,
 };
 mod pool_registration;
 pub use pool_registration::PoolRegistrationPin;

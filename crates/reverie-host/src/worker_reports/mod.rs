@@ -22,7 +22,7 @@ mod service_connection;
 pub use resume::{
     PoolRegistrationPin, ResourceJournalError, ResourceJournalPin, WorkerActorChannel,
     WorkerActorChannelFailure, WorkerActorPinError, WorkerOriginalHandlersCleanupBinding,
-    WorkerOriginalHandlersClosed, WorkerOriginalHandlersDrain,
+    WorkerOriginalHandlersCleanupError, WorkerOriginalHandlersClosed, WorkerOriginalHandlersDrain,
 };
 pub use service_connection::{
     AcceptedWorkerServiceConnection, WorkerPeer, WorkerServiceConnection, WorkerServicePurpose,

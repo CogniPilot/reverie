@@ -83,6 +83,7 @@ impl std::error::Error for ResourceActorError {
 }
 pub(in crate::installing_broker) fn gate_close_unknown(error: &GateError) -> bool {
     match error {
+        GateError::HandlerCleanup(_) => false,
         GateError::Actor(error) => error.has_unconfirmed_close(),
         GateError::ImageFiles(error) => error.has_unconfirmed_close(),
         GateError::ImageTransition(error) => gate_close_unknown(error),

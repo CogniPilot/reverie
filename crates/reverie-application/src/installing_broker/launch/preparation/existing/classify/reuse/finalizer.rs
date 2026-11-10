@@ -303,12 +303,21 @@ impl<'a> Finalizer<'a> {
         match retained.native.completed() {
             Ok(completed) => {
                 self.completed = completed;
-                if completed
-                    && let Err(error) = retained
-                        .native
-                        .stop_completed(retained.scope.preparing.broker())
-                {
-                    self.errors.push(Error::Storage(error));
+                if completed {
+                    let stopped = (|| {
+                        let target = retained.native.target()?;
+                        let admission = retained
+                            .scope
+                            .preparing
+                            .admit_original_cleanup(&target)
+                            .map_err(StorageWorkflowError::from)?;
+                        retained
+                            .native
+                            .stop_under_admission(retained.scope.preparing.broker(), admission)
+                    })();
+                    if let Err(error) = stopped {
+                        self.errors.push(Error::Storage(error));
+                    }
                 }
             }
             Err(error) => self.errors.push(Error::Storage(error)),

@@ -2,6 +2,7 @@
 //! This owner is not installed into the ordinary handler until a genuine
 //! same-transition Gate effect consumer exists.
 use super::*;
+mod binding;
 #[cfg(test)]
 mod tests;
 mod window;

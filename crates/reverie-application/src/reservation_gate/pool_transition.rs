@@ -2,6 +2,8 @@
 use super::*;
 use reverie_contracts::reservation_control::{PoolTransitionIntent, PoolTransitionSelection};
 use reverie_host::reservation_control::PoolTransitionPending;
+mod cleanup;
+pub(super) use cleanup::OriginalCleanupAdmission;
 #[cfg(test)]
 mod tests;
 
@@ -14,6 +16,8 @@ pub(super) struct TransitionRecord {
     binding: ControlBinding,
     intent: Arc<PoolTransitionIntent>,
     pending: Mutex<Pending>,
+    original_cleanup:
+        Mutex<Option<reverie_host::worker_reports::WorkerOriginalHandlersCleanupBinding>>,
 }
 /// Minted only after the exclusive durable writer and actual admission close.
 /// It grants no maintenance effect, capacity credit or pending-file removal.
@@ -108,6 +112,7 @@ impl ReservationGate {
                 binding,
                 intent,
                 pending: Mutex::new(Pending::Attempted),
+                original_cleanup: Mutex::new(None),
             });
             self.inner.retain_pool_transition(&record)?;
             fence = Some(PoolTransitionFence {
@@ -210,20 +215,22 @@ impl PoolTransitionFence {
                 &self.record.binding,
                 &admission,
             )?;
-            let pending = self
-                .record
-                .pending
-                .lock()
-                .map_err(|_| GateError::Refused("POOL_TRANSITION_REQUIRES_RECONCILIATION"))?;
-            let Pending::Published(pending) = &*pending else {
-                return Err(GateError::Refused(
-                    "POOL_TRANSITION_REQUIRES_RECONCILIATION",
-                ));
-            };
-            pending
-                .assert_current(&self.record.config)
-                .map_err(Into::into)
+            self.record.assert_pending()
         })();
         finalized(body, admission.close().map_err(Into::into))
+    }
+}
+impl TransitionRecord {
+    fn assert_pending(&self) -> Result<()> {
+        let pending = self
+            .pending
+            .lock()
+            .map_err(|_| GateError::Refused("POOL_TRANSITION_REQUIRES_RECONCILIATION"))?;
+        let Pending::Published(pending) = &*pending else {
+            return Err(GateError::Refused(
+                "POOL_TRANSITION_REQUIRES_RECONCILIATION",
+            ));
+        };
+        pending.assert_current(&self.config).map_err(Into::into)
     }
 }

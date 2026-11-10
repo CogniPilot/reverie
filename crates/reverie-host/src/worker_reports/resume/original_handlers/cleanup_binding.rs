@@ -2,6 +2,23 @@
 use super::*;
 use crate::worker_reports::terminal::RelayIdentity;
 
+/// Pure provenance refusal. These checks perform no native acquisition or
+/// close, and cannot retain a transport/database failure in a shared Gate.
+#[derive(Clone, Copy, Debug)]
+pub struct WorkerOriginalHandlersCleanupError;
+impl WorkerOriginalHandlersCleanupError {
+    pub fn code(&self) -> &'static str {
+        "WORKER_ORIGINAL_HANDLER_BINDING_REFUSED"
+    }
+}
+impl std::fmt::Display for WorkerOriginalHandlersCleanupError {
+    fn fmt(&self, out: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        out.write_str(self.code())
+    }
+}
+impl std::error::Error for WorkerOriginalHandlersCleanupError {}
+type BindingResult = std::result::Result<(), WorkerOriginalHandlersCleanupError>;
+
 /// Opaque, immutable provenance retained with the actual App transition.
 /// Its records are the SAME selection used by original interruption/settlement;
 /// local progress and original typed diagnostics remain with the drain owner.
@@ -23,15 +40,16 @@ impl WorkerOriginalHandlersCleanupBinding {
         channel: &WorkerActorChannel,
         expected: &Arc<WorkerReportService>,
         runtime: &WorkerRuntime,
-    ) -> Result<()> {
-        self.selection.assert_runtime(runtime)?;
-        if !Arc::ptr_eq(expected, &self.selection.service)
+    ) -> BindingResult {
+        if !self.selection.same_runtime(runtime)
+            || !Arc::ptr_eq(expected, &self.selection.service)
             || !Arc::ptr_eq(&channel.connection.record, &self.selection.own)
             || channel.purpose != Purpose::FleetMaintenanceWebsite
+            || !Arc::ptr_eq(&channel.connection.service, expected)
         {
-            return Err(WorkerReportError::Unconfirmed);
+            return Err(WorkerOriginalHandlersCleanupError);
         }
-        channel.assert_service(expected)
+        Ok(())
     }
     /// Match only this original typed J against the retained selection. The
     /// Gate must separately check its current transition, pending and target;
@@ -40,9 +58,9 @@ impl WorkerOriginalHandlersCleanupBinding {
         &self,
         connection: &WorkerLaunchConnection,
         runtime: &WorkerRuntime,
-    ) -> Result<()> {
-        self.selection.assert_runtime(runtime)?;
-        if connection.same_runtime(runtime)
+    ) -> BindingResult {
+        if self.selection.same_runtime(runtime)
+            && connection.same_runtime(runtime)
             && self.selection.records.iter().any(|record| {
                 connection.has_viewer_identity(&RelayIdentity::new(
                     &self.selection.service,
@@ -52,7 +70,7 @@ impl WorkerOriginalHandlersCleanupBinding {
         {
             Ok(())
         } else {
-            Err(WorkerReportError::Unconfirmed)
+            Err(WorkerOriginalHandlersCleanupError)
         }
     }
 }

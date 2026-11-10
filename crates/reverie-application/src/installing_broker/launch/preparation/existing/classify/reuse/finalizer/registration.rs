@@ -31,7 +31,7 @@ impl Finalizer<'_> {
             .ok_or(GateError::Refused("WORKER_REUSE_TARGET_REQUIRED"))?;
         // Gate -> lifecycle is the original lock order. Never acquire a fresh
         // allocation flock while holding the application lifecycle mutex.
-        let admission = broker.admit_ordinary_stop(target)?;
+        let admission = scope.preparing.admit_original_cleanup(target)?;
         let body = (|| {
             admission.assert_broker(broker)?;
             admission.assert_target(target)?;

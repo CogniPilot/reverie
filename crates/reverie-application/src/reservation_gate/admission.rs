@@ -38,6 +38,7 @@ pub(super) struct Entering {
 pub(super) struct Entry {
     gate: Arc<Inner>,
     token: Arc<()>,
+    original_cleanup: Option<pool_transition::OriginalCleanupAdmission>,
     finished: bool,
     _thread: std::marker::PhantomData<std::rc::Rc<()>>,
 }
@@ -59,6 +60,14 @@ impl Inner {
         budget: Option<&reverie_host::worker_runtime::WorkerStopBudget>,
     ) -> Result<Admission> {
         self.admit_selected(AdmissionBounds::default(), None, budget)
+    }
+    pub(super) fn admit_original_cleanup(
+        self: &Arc<Self>,
+        cleanup: pool_transition::OriginalCleanupAdmission,
+        budget: &reverie_host::worker_runtime::WorkerStopBudget,
+    ) -> Result<Admission> {
+        let entry = self.reserve_selected_entry(None, Some(cleanup))?;
+        self.enter_reserved(AdmissionBounds::default(), None, None, Some(budget), entry)
     }
     fn admit_selected(
         self: &Arc<Self>,
@@ -100,6 +109,7 @@ impl Inner {
         let entry = Entry {
             gate: self.clone(),
             token,
+            original_cleanup: None,
             finished: false,
             _thread: std::marker::PhantomData,
         };
@@ -134,6 +144,7 @@ impl Inner {
             gpu_transition: Mutex::new(None),
             image_transition: Mutex::new(None),
             ram_authority: Mutex::new(None),
+            original_cleanup: entry.original_cleanup.clone(),
         });
         #[cfg(test)]
         {
@@ -177,7 +188,14 @@ impl Inner {
         }
     }
     pub(super) fn reserve_entry(self: &Arc<Self>, end: Option<Instant>) -> Result<Entry> {
-        self.assert_no_pool_transition()?;
+        self.reserve_selected_entry(end, None)
+    }
+    fn reserve_selected_entry(
+        self: &Arc<Self>,
+        end: Option<Instant>,
+        original_cleanup: Option<pool_transition::OriginalCleanupAdmission>,
+    ) -> Result<Entry> {
+        self.assert_entry_purpose(original_cleanup.as_ref())?;
         self.assert_no_failed_image()?;
         let mut state = self
             .state
@@ -219,7 +237,7 @@ impl Inner {
                     .map_err(|_| GateError::Refused("RESERVATION_ADMISSION_UNAVAILABLE"))?
             };
         }
-        self.assert_no_pool_transition()?;
+        self.assert_entry_purpose(original_cleanup.as_ref())?;
         self.assert_no_failed_image()?;
         let token = Arc::new(());
         state.entering = Some(Entering {
@@ -230,6 +248,7 @@ impl Inner {
         Ok(Entry {
             gate: self.clone(),
             token,
+            original_cleanup,
             finished: false,
             _thread: std::marker::PhantomData,
         })

@@ -117,6 +117,7 @@ struct Active {
     gpu_transition: Mutex<Option<Arc<gpu_access::TransitionRecord>>>,
     image_transition: Mutex<Option<Weak<image_switch::ImageTransitionRecord>>>,
     ram_authority: Mutex<Option<Weak<ram_authority::RamJournalAuthority>>>,
+    original_cleanup: Option<pool_transition::OriginalCleanupAdmission>,
 }
 impl ReservationGate {
     /// Stop/settle the same persistent owned metadata-client context before an
