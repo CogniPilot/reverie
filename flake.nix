@@ -310,8 +310,8 @@
           inherit pkgs serviceAuthConfig; src = source;
           packages = import ./nix/package.nix { inherit pkgs; src = source; };
         };
-      lib.workerDockerImage = { system, uid, gid, subuidStart ? 100000, subgidStart ? 100000, subidCount ? 65536, browser ? false, perfGuestCapsule ? self.packages.${system}.nativePerfGuestCapsule }:
-        let pkgs = pkgsFor system; packages = packagesFor system;
+      lib.workerDockerImage = { system, uid, gid, subuidStart ? 100000, subgidStart ? 100000, subidCount ? 65536, browser ? false, runtimePackages ? packagesFor system, perfGuestCapsule ? runtimePackages.nativePerfGuestCapsule }:
+        let pkgs = pkgsFor system; packages = runtimePackages;
         in assert builtins.isBool browser; import ./nix/image.nix {
           inherit pkgs; src = source;
           inherit (packages) reverie console memory runtime;
@@ -320,15 +320,15 @@
           rootlessDocker = { inherit uid gid subuidStart subgidStart subidCount; };
           browserRuntime = if browser then packages.browserRuntime else null;
         };
-      lib.workerDockerImageProvenance = { system, uid, gid, subuidStart ? 100000, subgidStart ? 100000, subidCount ? 65536, browser ? false, perfGuestCapsule ? self.packages.${system}.nativePerfGuestCapsule }:
+      lib.workerDockerImageProvenance = { system, uid, gid, subuidStart ? 100000, subgidStart ? 100000, subidCount ? 65536, browser ? false, runtimePackages ? packagesFor system, perfGuestCapsule ? runtimePackages.nativePerfGuestCapsule }:
         let
           pkgs = pkgsFor system;
           arguments = { inherit system uid gid subuidStart subgidStart subidCount browser; };
         in import ./nix/worker-image-provenance.nix {
           inherit pkgs; src = source;
-          image = self.lib.workerDockerImage (arguments // { inherit perfGuestCapsule; });
-          toolkit = self.packages.${system}.humanTerminalToolkit;
-          workerChild = self.packages.${system}.workerChild;
+          image = self.lib.workerDockerImage (arguments // { inherit perfGuestCapsule runtimePackages; });
+          toolkit = runtimePackages.humanTerminalToolkit;
+          workerChild = runtimePackages.workerChild;
           factory = { name = "lib.workerDockerImage"; } // arguments;
         };
       lib.workerChildImageAnnex = { system, baseProvenance }:
