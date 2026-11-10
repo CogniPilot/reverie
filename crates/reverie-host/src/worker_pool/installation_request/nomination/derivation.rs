@@ -133,7 +133,7 @@ impl NominationDerivation {
             .website
             .container
             .clone();
-        let raw = self.query(runtime, EngineQuery::WorkerPoolInspect(&site))?;
+        let raw = self.query(runtime, EngineQuery::WorkerPoolWebsiteInspect(&site))?;
         EngineMetadata::decode(raw.as_bytes())?.qualify_website(
             &self
                 .document

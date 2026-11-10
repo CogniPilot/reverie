@@ -320,6 +320,7 @@ impl Source for Arc<Fixture> {
                 EngineQuery::WorkerPoolInformation
                 | EngineQuery::WorkerPoolImageInventory
                 | EngineQuery::WorkerPoolInspect(_)
+                | EngineQuery::WorkerPoolWebsiteInspect(_)
                 | EngineQuery::WorkerImageInspect(_)
                 | EngineQuery::ProviderPane(_)
                 | EngineQuery::ProviderTop(_) => {

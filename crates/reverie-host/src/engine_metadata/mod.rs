@@ -56,6 +56,9 @@ pub enum EngineQuery<'a> {
     TelemetryInventory,
     TelemetryInspect(&'a reverie_core::command_telemetry::TelemetryContainerId),
     WorkerPoolInspect(&'a ContainerId),
+    /// Whole website object for the existing actor facts validator. Other pool
+    /// inspectors retain their original one-element-array contract.
+    WorkerPoolWebsiteInspect(&'a ContainerId),
     WorkerImageInspect(&'a reverie_contracts::worker_image_switch::WorkerImageId),
     ProviderPane(&'a ContainerId),
     ProviderTop(&'a ContainerId),
@@ -117,6 +120,11 @@ impl EngineQuery<'_> {
             }
             Self::WorkerPoolInspect(id) => {
                 return Ok(["inspect", id.as_str()].map(Into::into).to_vec());
+            }
+            Self::WorkerPoolWebsiteInspect(id) => {
+                return Ok(["inspect", "--format", "{{json .}}", id.as_str()]
+                    .map(Into::into)
+                    .to_vec());
             }
             Self::GpuInformation => {
                 return Ok(["info", "--format", GPU_INFORMATION_FORMAT]
