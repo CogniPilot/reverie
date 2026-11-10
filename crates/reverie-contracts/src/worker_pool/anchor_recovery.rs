@@ -8,6 +8,7 @@ use reverie_core::{decimal::UnsignedInteger, ids::ContainerId, operations::Journ
 pub struct RetainedPoolAnchor {
     container_id: String,
     original_birth_digest: String,
+    boot_id: String,
     pid: u32,
     process_start: String,
     parent_identity: [u64; 2],
@@ -19,6 +20,7 @@ pub struct RetainedPoolAnchor {
 struct AnchorData {
     container_id: String,
     original_birth_digest: String,
+    boot_id: String,
     pid: u32,
     process_start: String,
     parent_identity: [u64; 2],
@@ -29,6 +31,7 @@ impl RetainedPoolAnchor {
     pub fn from_observations(
         container: &ContainerId,
         birth: &JournalDigest,
+        boot: &str,
         pid: u32,
         start: &str,
         parent: (u64, u64),
@@ -37,6 +40,7 @@ impl RetainedPoolAnchor {
         Self::try_from(AnchorData {
             container_id: container.as_str().to_owned(),
             original_birth_digest: birth.as_str().to_owned(),
+            boot_id: boot.to_owned(),
             pid,
             process_start: start.to_owned(),
             parent_identity: parent.into(),
@@ -56,8 +60,15 @@ impl RetainedPoolAnchor {
         self.pid
     }
 
-    pub fn matches_kernel(&self, start: &str, parent: (u64, u64), leaf: (u64, u64)) -> bool {
-        self.process_start == start
+    pub fn matches_kernel(
+        &self,
+        boot: &str,
+        start: &str,
+        parent: (u64, u64),
+        leaf: (u64, u64),
+    ) -> bool {
+        self.boot_id == boot
+            && self.process_start == start
             && self.parent_identity == <[u64; 2]>::from(parent)
             && self.leaf_identity == <[u64; 2]>::from(leaf)
     }
@@ -71,6 +82,7 @@ impl TryFrom<AnchorData> for RetainedPoolAnchor {
         let valid = data.pid > 1
             && hex_id(&data.container_id)
             && JournalDigest::parse(&data.original_birth_digest).is_ok()
+            && uuid(&data.boot_id)
             && start.is_some_and(|start| {
                 start.as_str() == data.process_start
                     && start.to_u64().is_some_and(|ticks| ticks > 0)
@@ -85,6 +97,7 @@ impl TryFrom<AnchorData> for RetainedPoolAnchor {
         Ok(Self {
             container_id: data.container_id,
             original_birth_digest: data.original_birth_digest,
+            boot_id: data.boot_id,
             pid: data.pid,
             process_start: data.process_start,
             parent_identity: data.parent_identity,
@@ -100,20 +113,28 @@ mod tests {
 
     #[test]
     fn retained_anchor_recovery_binds_process_and_both_cgroup_inodes() {
+        let boot = "11111111-1111-4111-8111-111111111111";
         let wire = json!({
             "containerId":"a".repeat(64),"originalBirthDigest":"b".repeat(64),
-            "pid":430,"processStart":"70000","parentIdentity":[12,22],"leafIdentity":[12,27]
+            "bootId":boot,"pid":430,"processStart":"70000","parentIdentity":[12,22],"leafIdentity":[12,27]
         });
         let anchor: RetainedPoolAnchor = serde_json::from_value(wire.clone()).unwrap();
         assert_eq!(serde_json::to_value(&anchor).unwrap(), wire);
-        assert!(anchor.matches_kernel("70000", (12, 22), (12, 27)));
-        assert!(!anchor.matches_kernel("70001", (12, 22), (12, 27)));
-        assert!(!anchor.matches_kernel("70000", (12, 23), (12, 27)));
-        assert!(!anchor.matches_kernel("70000", (12, 22), (12, 28)));
+        assert!(anchor.matches_kernel(boot, "70000", (12, 22), (12, 27)));
+        assert!(!anchor.matches_kernel(
+            "21111111-1111-4111-8111-111111111111",
+            "70000",
+            (12, 22),
+            (12, 27)
+        ));
+        assert!(!anchor.matches_kernel(boot, "70001", (12, 22), (12, 27)));
+        assert!(!anchor.matches_kernel(boot, "70000", (12, 23), (12, 27)));
+        assert!(!anchor.matches_kernel(boot, "70000", (12, 22), (12, 28)));
         for (field, value) in [
             ("pid", json!(0)),
             ("containerId", json!("a".repeat(12))),
             ("originalBirthDigest", json!("B".repeat(64))),
+            ("bootId", json!("00000000-0000-0000-0000-000000000000")),
             ("processStart", json!("070000")),
             ("leafIdentity", json!([12, 22])),
             ("leafIdentity", json!([13, 27])),

@@ -161,7 +161,8 @@ fn retained_anchor_requires_original_birth_and_a_stable_container() {
     let cid = "e".repeat(64);
     let original = "d".repeat(64);
     let anchor: RetainedPoolAnchor = serde_json::from_value(json!({
-        "containerId":cid,"originalBirthDigest":original,"pid":123,"processStart":"805",
+        "containerId":cid,"originalBirthDigest":original,"bootId":"11111111-1111-4111-8111-111111111111",
+        "pid":123,"processStart":"805",
         "parentIdentity":[10,11],"leafIdentity":[10,12]
     }))
     .unwrap();
