@@ -10,7 +10,15 @@ use reverie_host::{
 #[derive(Clone)]
 pub(in crate::reservation_gate) struct OriginalCleanupAdmission {
     record: Arc<TransitionRecord>,
-    target: WorkerContainerName,
+    target: CleanupTarget,
+}
+#[derive(Clone)]
+enum CleanupTarget {
+    OriginalHandler(WorkerContainerName),
+    LegacyFleet {
+        base: reverie_core::worker_schema::WorkerBase,
+        targets: Arc<Vec<WorkerContainerName>>,
+    },
 }
 impl PoolTransitionFence {
     pub(crate) fn assert_gate(&self, gate: &ReservationGate) -> Result<()> {
@@ -40,6 +48,58 @@ impl PoolTransitionFence {
         need(slot.is_none(), "POOL_TRANSITION_CLEANUP_ALREADY_BOUND")?;
         *slot = Some(binding);
         Ok(())
+    }
+    pub(crate) fn assert_cleanup_selection(
+        &self,
+        binding: &WorkerOriginalHandlersCleanupBinding,
+    ) -> Result<()> {
+        self.assert_handlers_outside_admission()?;
+        self.current()?;
+        self.assert_cleanup_provenance(binding)
+    }
+    pub(crate) fn assert_handlers_outside_admission(&self) -> Result<()> {
+        need(
+            !self
+                .gate
+                .state
+                .lock()
+                .map_err(|_| GateError::Refused("RESERVATION_ADMISSION_UNAVAILABLE"))?
+                .active
+                .as_ref()
+                .is_some_and(|active| {
+                    active.thread == std::thread::current().id()
+                        && active.process == std::process::id()
+                }),
+            "POOL_TRANSITION_HANDLER_DRAIN_WITH_ADMISSION",
+        )
+    }
+    pub(crate) fn assert_cleanup_provenance(
+        &self,
+        binding: &WorkerOriginalHandlersCleanupBinding,
+    ) -> Result<()> {
+        self.record
+            .original_cleanup
+            .lock()
+            .map_err(|_| GateError::Refused("POOL_TRANSITION_REQUIRES_RECONCILIATION"))?
+            .as_ref()
+            .ok_or(GateError::Refused("POOL_TRANSITION_CLEANUP_NOT_BOUND"))?
+            .assert_same_selection(binding)?;
+        Ok(())
+    }
+    pub(in crate::reservation_gate) fn legacy_fleet_cleanup(
+        &self,
+        closed: &reverie_host::worker_reports::WorkerOriginalHandlersClosed,
+        targets: Vec<WorkerContainerName>,
+    ) -> Result<OriginalCleanupAdmission> {
+        self.assert_cleanup_selection(&closed.cleanup_binding())?;
+        let snapshot = self.gate.installed.snapshot()?;
+        Ok(OriginalCleanupAdmission {
+            record: Arc::clone(&self.record),
+            target: CleanupTarget::LegacyFleet {
+                base: snapshot.envelope().base().clone(),
+                targets: Arc::new(targets),
+            },
+        })
     }
 }
 impl Inner {
@@ -80,7 +140,7 @@ impl Inner {
         )?;
         let admitted = OriginalCleanupAdmission {
             record,
-            target: target.clone(),
+            target: CleanupTarget::OriginalHandler(target.clone()),
         };
         admitted.assert_selected(self)?;
         Ok(Some(admitted))
@@ -116,6 +176,29 @@ impl Inner {
     }
 }
 impl OriginalCleanupAdmission {
+    pub(in crate::reservation_gate) fn assert_fleet_history(
+        &self,
+        gate: &Arc<Inner>,
+    ) -> Result<()> {
+        if !matches!(&self.target, CleanupTarget::LegacyFleet { .. }) {
+            return Ok(());
+        }
+        self.assert_pending(gate)?;
+        gate.require_host_job_idle()?;
+        let document = gate.document()?;
+        need(
+            gate.active_operations(&document)?.is_empty(),
+            "POOL_TRANSITION_RESOURCE_WORK_RETAINED",
+        )?;
+        need(
+            document.operations().is_empty(),
+            "POOL_TRANSITION_RESOURCE_HISTORY_RETAINED",
+        )?;
+        need(
+            reservation_control::read_host_job_intent(gate.config()?.as_ref())?.is_none(),
+            "POOL_TRANSITION_HOST_HISTORY_RETAINED",
+        )
+    }
     pub(in crate::reservation_gate) fn assert_selected(&self, gate: &Inner) -> Result<()> {
         need(
             gate.pool_transition
@@ -138,6 +221,14 @@ impl OriginalCleanupAdmission {
         &self,
         target: &WorkerContainerName,
     ) -> Result<()> {
-        need(&self.target == target, "WORKER_HANDLER_CLEANUP_TARGET")
+        let selected = match &self.target {
+            CleanupTarget::OriginalHandler(original) => original == target,
+            CleanupTarget::LegacyFleet { base, targets } => {
+                targets.contains(target)
+                    && WorkerContainerName::from_recovered_name_data(base, target.as_str())
+                        .is_some()
+            }
+        };
+        need(selected, "WORKER_HANDLER_CLEANUP_TARGET")
     }
 }

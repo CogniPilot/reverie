@@ -19,6 +19,41 @@ pub(super) struct Coverage<'a> {
     runtimes: Vec<ProviderRuntimeObservation>,
 }
 impl<'a> Coverage<'a> {
+    pub(super) fn same_inventory(&self, rows: &ObservedInventory) -> bool {
+        self.inventory.equivalent(rows)
+    }
+    pub(super) fn stop_targets(&self) -> Result<Vec<WorkerContainerName>> {
+        let mut targets = self.lifecycle.registered_names();
+        let base = self.snapshot.envelope().base();
+        for row in self.inventory.rows() {
+            let data = row.data();
+            if !data
+                .image_maintenance_member(base.deployment())
+                .map_err(GateError::from)?
+                || !data.running().map_err(GateError::from)?
+            {
+                continue;
+            }
+            let sid = data
+                .memory_session(base.deployment())
+                .map_err(GateError::from)?
+                .ok_or(Cause::Refused("FLEET_PREVIEW_UNCOVERED_MEMBER"))?;
+            let prefixed = WorkerContainerName::for_session(base, &sid);
+            let name = if data.name_is(&format!("/{}", prefixed.as_str())) {
+                prefixed
+            } else if data.name_is(&format!("/{sid}")) {
+                WorkerContainerName::from_recovered_name_data(base, sid.as_str())
+                    .ok_or(Cause::Refused("FLEET_PREVIEW_UNCOVERED_MEMBER"))?
+                    .1
+            } else {
+                return Err(Cause::Refused("FLEET_PREVIEW_UNCOVERED_MEMBER"));
+            };
+            if !targets.contains(&name) {
+                targets.push(name);
+            }
+        }
+        Ok(targets)
+    }
     pub(super) fn capture(frame: &mut Frame<'a>, end: Instant) -> Result<Self> {
         let broker = frame.broker;
         let snapshot = frame
@@ -61,6 +96,32 @@ impl<'a> Coverage<'a> {
         }
         assert_inventory_origin(frame, &self.inventory)?;
         self.assert_registries_current(frame)?;
+        self.assert_native_current(frame, end)?;
+        self.assert_registries_current(frame)
+    }
+    /// Only the original registries may have completed their selected J
+    /// finalizers. Every native row/birth and the complete source/company stay
+    /// identical; a native stop/removal during J settlement conservatively refuses.
+    pub(super) fn assert_after_original_handlers(
+        &self,
+        frame: &mut Frame<'_>,
+        end: Instant,
+    ) -> Result<()> {
+        if !std::ptr::eq(self.broker, frame.broker)
+            || !frame
+                .snapshot
+                .as_ref()
+                .is_some_and(|s| Arc::ptr_eq(s, &self.snapshot))
+        {
+            return Err(Cause::Refused("FLEET_PREVIEW_CONTEXT_CHANGED"));
+        }
+        assert_inventory_origin(frame, &self.inventory)?;
+        self.read_current_company(frame)?;
+        self.assert_native_current(frame, end)?;
+        self.read_current_company(frame)?;
+        Ok(())
+    }
+    fn assert_native_current(&self, frame: &mut Frame<'_>, end: Instant) -> Result<()> {
         let result = context(frame)?.custody(Some(end)).map_err(Into::into);
         let current = frame.retain_stateless_result(result)?;
         if !self.inventory.equivalent(&current) {
@@ -79,12 +140,19 @@ impl<'a> Coverage<'a> {
                 .map_err(Into::into);
             frame.retain_stateless_result(result)?;
         }
-        // Native census/process/runtime reads may wait. Recheck the SAME
-        // original registrations and complete company after those waits.
-        self.assert_registries_current(frame)?;
         Ok(())
     }
     fn assert_registries_current(&self, frame: &mut Frame<'_>) -> Result<()> {
+        let company = self.read_current_company(frame)?;
+        self.lifecycle.assert_current(&frame.broker.installed)?;
+        self.storage
+            .assert_current(&frame.broker.storage, &company)?;
+        if !Arc::ptr_eq(&self.snapshot, &frame.broker.configuration()?) {
+            return Err(Cause::Refused("FLEET_PREVIEW_CONFIGURATION_CHANGED"));
+        }
+        Ok(())
+    }
+    fn read_current_company(&self, frame: &mut Frame<'_>) -> Result<Metadata> {
         let company = read_company(frame)?;
         if !self.company.equivalent(&company)
             || company
@@ -94,13 +162,10 @@ impl<'a> Coverage<'a> {
         {
             return Err(Cause::Refused("FLEET_PREVIEW_COMPANY_CHANGED"));
         }
-        self.lifecycle.assert_current(&frame.broker.installed)?;
-        self.storage
-            .assert_current(&frame.broker.storage, &company)?;
         if !Arc::ptr_eq(&self.snapshot, &frame.broker.configuration()?) {
             return Err(Cause::Refused("FLEET_PREVIEW_CONFIGURATION_CHANGED"));
         }
-        Ok(())
+        Ok(company)
     }
     pub(super) fn selection(
         &self,

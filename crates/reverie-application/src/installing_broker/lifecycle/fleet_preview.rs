@@ -76,6 +76,12 @@ impl InstalledWorker {
     }
 }
 impl FleetRegistrationSnapshot<'_> {
+    pub(in crate::installing_broker) fn registered_names(&self) -> Vec<WorkerContainerName> {
+        self.registered
+            .iter()
+            .map(|entry| entry.name.clone())
+            .collect()
+    }
     pub(in crate::installing_broker) fn paths_for_session(
         &self,
         session: &ProfileSessionId,

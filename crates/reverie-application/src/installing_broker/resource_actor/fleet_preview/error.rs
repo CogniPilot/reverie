@@ -1,5 +1,6 @@
 use super::*;
 pub(super) enum Cause {
+    OriginalHandlers(Rc<reverie_host::worker_reports::WorkerReportError>),
     Actor(ResourceActorError),
     Offer(Box<BrokerInstallationOfferCause>),
     Target(Rc<OfferTargetObservationError>),
@@ -13,6 +14,7 @@ pub(super) enum Cause {
 impl Cause {
     pub(super) fn code(&self) -> &'static str {
         match self {
+            Self::OriginalHandlers(e) => e.code(),
             Self::Actor(e) => e.code(),
             Self::Offer(e) => e.code(),
             Self::Target(e) => e.code(),
@@ -62,6 +64,7 @@ impl std::fmt::Display for Cause {
 impl std::error::Error for Cause {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
+            Self::OriginalHandlers(e) => Some(e.as_ref()),
             Self::Actor(e) => Some(e),
             Self::Offer(e) => Some(e.as_ref()),
             Self::Target(e) => Some(e.as_ref()),

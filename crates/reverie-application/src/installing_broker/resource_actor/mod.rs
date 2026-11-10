@@ -9,8 +9,9 @@ mod error;
 mod fleet_preview;
 pub(in crate::installing_broker) use error::gate_close_unknown;
 pub use fleet_preview::{
-    AuthenticatedFleetMaintenance, FleetMaintenanceCheckError, FleetPreviewClosed,
-    FleetPreviewFailure, QualifiedFleetPreview,
+    AuthenticatedFleetMaintenance, DrainedLegacyFleet, FleetMaintenanceCheckError,
+    FleetPreviewClosed, FleetPreviewFailure, LegacyFleetDrainError, LegacyFleetDrainFailure,
+    QualifiedFleetPreview,
 };
 #[cfg(test)]
 mod native_fixture;

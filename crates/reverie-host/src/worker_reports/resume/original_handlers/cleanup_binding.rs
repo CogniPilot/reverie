@@ -32,7 +32,22 @@ impl WorkerOriginalHandlersDrain {
         }
     }
 }
+impl WorkerOriginalHandlersClosed {
+    /// Same physically settled record selection; no native-resource closure.
+    pub fn cleanup_binding(&self) -> WorkerOriginalHandlersCleanupBinding {
+        WorkerOriginalHandlersCleanupBinding {
+            selection: Arc::clone(&self.selection),
+        }
+    }
+}
 impl WorkerOriginalHandlersCleanupBinding {
+    pub fn assert_same_selection(&self, other: &Self) -> BindingResult {
+        if Arc::ptr_eq(&self.selection, &other.selection) {
+            Ok(())
+        } else {
+            Err(WorkerOriginalHandlersCleanupError)
+        }
+    }
     /// Match the actual originating fleet Q, service and runtime. Identity
     /// survives EOF/cancellation; it does not establish current authority.
     pub fn assert_owner(

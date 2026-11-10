@@ -50,6 +50,7 @@ pub struct WorkerOriginalHandlersDrain {
 /// Known handler/socket/Hold component observations, never native resource or
 /// fleet closure. Earlier primary and cleanup diagnostics remain available.
 pub struct WorkerOriginalHandlersClosed {
+    selection: Arc<Selection>,
     primary: Option<Rc<WorkerReportError>>,
     cleanup: Option<Rc<WorkerReportError>>,
     causes: Vec<Rc<WorkerReportError>>,
@@ -157,6 +158,7 @@ impl WorkerOriginalHandlersDrain {
             .flatten()
             .collect();
         Ok(WorkerOriginalHandlersClosed {
+            selection: originals.selection,
             primary: self.primary.take(),
             cleanup: self.cleanup.take(),
             causes,

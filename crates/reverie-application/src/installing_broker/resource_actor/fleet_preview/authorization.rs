@@ -3,6 +3,10 @@
 //! same-transition Gate effect consumer exists.
 use super::*;
 mod binding;
+mod drain;
+pub use drain::{DrainedLegacyFleet, LegacyFleetDrainError, LegacyFleetDrainFailure};
+mod handlers;
+use handlers::OriginalHandlersPhase;
 #[cfg(test)]
 mod tests;
 mod window;
@@ -45,6 +49,7 @@ impl std::error::Error for FleetMaintenanceCheckError {
 /// original frame/offer deadline; they never renew that operation budget.
 pub struct AuthenticatedFleetMaintenance<'a> {
     owner: NativeFleetPreview<'a>,
+    handlers: OriginalHandlersPhase,
 }
 impl<'a> QualifiedFleetPreview<'a> {
     /// Send the actual qualified tuple, then read explicit consent and a fresh
@@ -57,7 +62,10 @@ impl<'a> QualifiedFleetPreview<'a> {
         if let Err(cause) = owner.receive_maintenance_consent() {
             return Err(owner.into_failure(cause));
         }
-        Ok(AuthenticatedFleetMaintenance { owner })
+        Ok(AuthenticatedFleetMaintenance {
+            owner,
+            handlers: OriginalHandlersPhase::Uncaptured,
+        })
     }
 }
 impl NativeFleetPreview<'_> {

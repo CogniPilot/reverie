@@ -13,7 +13,10 @@ mod qualified;
 mod target;
 #[cfg(test)]
 mod tests;
-pub use authorization::{AuthenticatedFleetMaintenance, FleetMaintenanceCheckError};
+pub use authorization::{
+    AuthenticatedFleetMaintenance, DrainedLegacyFleet, FleetMaintenanceCheckError,
+    LegacyFleetDrainError, LegacyFleetDrainFailure,
+};
 use error::Cause;
 pub use qualified::QualifiedFleetPreview;
 use target::TargetAttempt;

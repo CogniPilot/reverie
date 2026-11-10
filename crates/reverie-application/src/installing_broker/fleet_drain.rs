@@ -1,13 +1,15 @@
 //! Original C stop resources shared with the separately authorized fleet owner.
 //! Construction supplies no effect, admission or pool capability.
+use super::resource_actor::{AuthenticatedFleetMaintenance, FleetMaintenanceCheckError};
 use super::seat_stop::SeatStop as Seat;
 use super::*;
-use crate::reservation_gate::FleetStopAdmission;
+use crate::reservation_gate::{FleetStopAdmission, PoolTransitionFence};
 use reverie_host::worker_source_stop::{ControlStopCensus, SourceStopError};
 use std::time::Instant;
 
 #[derive(Debug)]
 pub(super) enum DrainCause {
+    Authorization(FleetMaintenanceCheckError),
     Gate(GateError),
     Storage(StorageWorkflowError),
     Native(SourceStopError),
@@ -20,6 +22,7 @@ pub(super) enum DrainCause {
 impl std::fmt::Display for DrainCause {
     fn fmt(&self, out: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::Authorization(e) => e.fmt(out),
             Self::Gate(e) => e.fmt(out),
             Self::Storage(e) => e.fmt(out),
             Self::Native(e) => e.fmt(out),
@@ -45,12 +48,51 @@ impl From<SourceStopError> for DrainCause {
         Self::Native(e)
     }
 }
+impl DrainCause {
+    pub(super) fn code(&self) -> &'static str {
+        match self {
+            Self::Authorization(e) => e.code(),
+            Self::Gate(e) => e.code(),
+            Self::Storage(e) => e.code(),
+            Self::Native(e) => e.code(),
+            Self::Refused(code) => code,
+            Self::Finalization { primary, .. } => primary.code(),
+        }
+    }
+}
+impl std::error::Error for DrainCause {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Authorization(e) => Some(e),
+            Self::Gate(e) => Some(e),
+            Self::Storage(e) => Some(e),
+            Self::Native(e) => Some(e),
+            Self::Refused(_) => None,
+            Self::Finalization { primary, .. } => Some(primary.as_ref()),
+        }
+    }
+}
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 enum Stage {
     Ready,
     Attempted,
     Closed,
+    Drained,
+}
+enum DrainPurpose<'borrow, 'owner> {
+    Ordinary,
+    Transition(&'borrow AuthenticatedFleetMaintenance<'owner>),
+}
+impl DrainPurpose<'_, '_> {
+    fn assert_live(&self) -> Result<(), DrainCause> {
+        match self {
+            Self::Ordinary => Ok(()),
+            Self::Transition(authorization) => authorization
+                .assert_live()
+                .map_err(DrainCause::Authorization),
+        }
+    }
 }
 
 pub(super) struct LegacyFleetDrain<'a> {
@@ -85,14 +127,7 @@ impl<'a> LegacyFleetDrain<'a> {
         }
     }
     pub(super) fn run_ordinary(&mut self) -> Result<(), DrainCause> {
-        if self.stage != Stage::Ready {
-            return Err(DrainCause::Refused("WORKER_FLEET_DRAIN_ALREADY_ATTEMPTED"));
-        }
-        self.stage = Stage::Attempted;
-        if Instant::now() >= self.end {
-            return Err(DrainCause::Refused("WORKER_FLEET_DRAIN_DEADLINE"));
-        }
-        let snapshot = self.broker.configuration()?;
+        let snapshot = self.begin()?;
         self.admission = self
             .broker
             .resource_reservations()?
@@ -103,6 +138,44 @@ impl<'a> LegacyFleetDrain<'a> {
                 )
             })
             .transpose()?;
+        self.run_admitted(snapshot, DrainPurpose::Ordinary)
+    }
+    pub(super) fn run_transition(
+        &mut self,
+        authorization: &mut AuthenticatedFleetMaintenance<'_>,
+        fence: &PoolTransitionFence,
+        closed: &reverie_host::worker_reports::WorkerOriginalHandlersClosed,
+    ) -> Result<(), DrainCause> {
+        let snapshot = self.begin()?;
+        let gate = self
+            .broker
+            .resource_reservations()?
+            .ok_or(DrainCause::Refused("POOL_TRANSITION_GATE_REQUIRED"))?;
+        self.admission = Some(gate.admit_transition_fleet_stop(
+            authorization,
+            fence,
+            closed,
+            &self.broker.installed,
+            &self.broker.storage.runtime.stop_budget(),
+        )?);
+        self.run_admitted(snapshot, DrainPurpose::Transition(authorization))
+    }
+    fn begin(&mut self) -> Result<Arc<ValidatedWorkerSnapshot>, DrainCause> {
+        if self.stage != Stage::Ready {
+            return Err(DrainCause::Refused("WORKER_FLEET_DRAIN_ALREADY_ATTEMPTED"));
+        }
+        self.stage = Stage::Attempted;
+        if Instant::now() >= self.end {
+            return Err(DrainCause::Refused("WORKER_FLEET_DRAIN_DEADLINE"));
+        }
+        self.broker.configuration().map_err(Into::into)
+    }
+    fn run_admitted(
+        &mut self,
+        snapshot: Arc<ValidatedWorkerSnapshot>,
+        purpose: DrainPurpose<'_, '_>,
+    ) -> Result<(), DrainCause> {
+        purpose.assert_live()?;
         let mut lifecycle = self.broker.installed.lifecycle()?;
         // Exact original J owners must finish before C can consume idle storage.
         if !lifecycle.guard.transients_empty() {
@@ -142,8 +215,10 @@ impl<'a> LegacyFleetDrain<'a> {
             self.prepare_loose(snapshot.configuration(), None)?;
         }
         for seat in &self.seats {
+            purpose.assert_live()?;
             seat.stop.as_ref().expect("actual stop owner").stop()?;
         }
+        purpose.assert_live()?;
         if !self
             .census
             .as_mut()
@@ -161,9 +236,14 @@ impl<'a> LegacyFleetDrain<'a> {
             self.finalization_failed = true;
             return Err(cause.into());
         }
-        lifecycle.finish_control_drain(self.drain.as_ref().expect("actual drain"))?;
-        self.drain = None;
-        self.stage = Stage::Closed;
+        match purpose {
+            DrainPurpose::Ordinary => {
+                lifecycle.finish_control_drain(self.drain.as_ref().expect("actual drain"))?;
+                self.drain = None;
+                self.stage = Stage::Closed;
+            }
+            DrainPurpose::Transition(_) => self.stage = Stage::Drained,
+        }
         Ok(())
     }
     fn prepare_registered(
