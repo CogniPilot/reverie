@@ -16,6 +16,9 @@ mod image_inputs_reference;
 pub use image_inputs_reference::compiled_pool_image_inputs_reference;
 mod installation_request;
 pub use installation_request::load_os_pool_installation_request;
+pub use installation_request::{
+    PoolNominationError, PoolNominationFailure, PoolNominationPublished, publish_os_pool_nomination,
+};
 mod member;
 mod namespace;
 mod policy;

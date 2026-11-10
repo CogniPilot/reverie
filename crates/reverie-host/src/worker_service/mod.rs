@@ -26,6 +26,7 @@ mod upgrade;
 pub use failure_fence::{assert_no_service_failure, record_service_failure};
 use manager::ObservedUnit;
 use publication::environment;
+pub use reverie_contracts::worker_service::NativeWorkerServiceRole;
 pub use stopped::{
     ClosedImageServiceMaintenance, ClosedStoppedWorkerService, ImageServiceMaintenance,
     StoppedServiceFailure, StoppedServiceOrigin, StoppedWorkerService,
@@ -165,7 +166,16 @@ pub fn run_native_worker_service(
     action: WorkerServiceAction,
     end: Instant,
 ) -> std::result::Result<String, Box<WorkerServiceFailure>> {
-    let mut state = match State::capture(source, end, &action) {
+    run_native_worker_service_for_role(source, action, NativeWorkerServiceRole::Broker, end)
+}
+/// Same original installation/upgrade owners, with only the two packaged roles.
+pub fn run_native_worker_service_for_role(
+    source: &Path,
+    action: WorkerServiceAction,
+    role: NativeWorkerServiceRole,
+    end: Instant,
+) -> std::result::Result<String, Box<WorkerServiceFailure>> {
+    let mut state = match State::capture_for_role(source, end, &action, role) {
         Ok(state) => Box::new(state),
         Err(primary) => {
             return Err(Box::new(WorkerServiceFailure {
@@ -192,6 +202,14 @@ pub fn run_native_worker_service(
 }
 impl State {
     fn capture(source: &Path, end: Instant, action: &WorkerServiceAction) -> Result<Self> {
+        Self::capture_for_role(source, end, action, NativeWorkerServiceRole::Broker)
+    }
+    fn capture_for_role(
+        source: &Path,
+        end: Instant,
+        action: &WorkerServiceAction,
+        role: NativeWorkerServiceRole,
+    ) -> Result<Self> {
         need(
             !nix::unistd::geteuid().is_root(),
             "NATIVE_SERVICE_ORDINARY_OWNER_REQUIRED",
@@ -205,12 +223,7 @@ impl State {
             "NATIVE_SERVICE_INSTANCE_SOURCE_REQUIRED",
         )?;
         private(&source, false)?;
-        let unit = PathBuf::from(
-            option_env!("REVERIE_FIXED_NATIVE_WORKER_SERVICE_UNIT").ok_or(
-                WorkerServiceError::Refused("NATIVE_SERVICE_PACKAGED_UNIT_REQUIRED"),
-            )?,
-        );
-        immutable(&unit)?;
+        let unit = packaged_role_unit(role)?;
         let program = PathBuf::from(option_env!("REVERIE_FIXED_NATIVE_WORKER_SYSTEMCTL").ok_or(
             WorkerServiceError::Refused("NATIVE_SERVICE_PACKAGED_SYSTEMCTL_REQUIRED"),
         )?);
@@ -413,6 +426,19 @@ impl State {
         }
         result
     }
+}
+fn packaged_role_unit(role: NativeWorkerServiceRole) -> Result<PathBuf> {
+    let selected = match role {
+        NativeWorkerServiceRole::Broker => option_env!("REVERIE_FIXED_NATIVE_WORKER_SERVICE_UNIT"),
+        NativeWorkerServiceRole::PoolOfferV1 => {
+            option_env!("REVERIE_FIXED_NATIVE_POOL_OFFER_SERVICE_UNIT")
+        }
+    };
+    let unit = PathBuf::from(selected.ok_or(WorkerServiceError::Refused(
+        "NATIVE_SERVICE_PACKAGED_UNIT_REQUIRED",
+    ))?);
+    immutable(&unit)?;
+    Ok(unit)
 }
 fn private(path: &Path, directory: bool) -> Result<()> {
     let m = fs::symlink_metadata(path)?;

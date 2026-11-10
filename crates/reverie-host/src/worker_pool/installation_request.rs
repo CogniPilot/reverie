@@ -8,12 +8,18 @@ use std::{
     os::{fd::AsRawFd, unix::fs::MetadataExt},
     path::PathBuf,
 };
+mod nomination;
+pub use nomination::{
+    PoolNominationError, PoolNominationFailure, PoolNominationPublished, publish_os_pool_nomination,
+};
 
 /// Read only the registered account's private, fixed installation request.
 /// Environment HOME, command-line paths and wire requests cannot redirect it.
 pub fn load_os_pool_installation_request() -> Result<PoolInstallationRequestData> {
-    let root = native::python_path(&native::home_directory(None)?)?.join("reverie");
-    read_request(root)
+    read_request(os_root()?)
+}
+fn os_root() -> Result<PathBuf> {
+    Ok(native::python_path(&native::home_directory(None)?)?.join("reverie"))
 }
 
 fn read_request(root: PathBuf) -> Result<PoolInstallationRequestData> {
@@ -31,6 +37,10 @@ struct RequestSource {
 }
 impl RequestSource {
     fn read(&mut self) -> Result<PoolInstallationRequestData> {
+        self.open()?;
+        self.read_open()
+    }
+    fn open(&mut self) -> Result<()> {
         need(
             fs::canonicalize(&self.root)? == self.root,
             "POOL_REQUEST_ROOT",
@@ -47,6 +57,9 @@ impl RequestSource {
             libc::O_RDONLY | libc::O_DIRECTORY,
         )?);
         self.assert_directory(1)?;
+        Ok(())
+    }
+    fn read_open(&self) -> Result<PoolInstallationRequestData> {
         let path = PathBuf::from(format!(
             "/proc/self/fd/{}/registration-request.json",
             self.directories[1].as_raw_fd()

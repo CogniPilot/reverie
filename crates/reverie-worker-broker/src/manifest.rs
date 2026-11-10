@@ -118,16 +118,32 @@ pub(super) fn publish_service_unit() -> io::Result<()> {
         .ok_or_else(|| io::Error::other("NATIVE_SERVICE_BUILD_SLOT_REQUIRED"))?;
     let target = option_env!("REVERIE_FIXED_NATIVE_WORKER_SERVICE_UNIT")
         .ok_or_else(|| io::Error::other("NATIVE_SERVICE_BUILD_SLOT_REQUIRED"))?;
-    let expected = Path::new(executable)
+    let package = Path::new(executable)
         .parent()
         .and_then(Path::parent)
-        .ok_or(io::ErrorKind::InvalidInput)?
-        .join("share/systemd/user/reverie-worker-broker.service");
-    if Path::new(target) != expected || std::env::current_exe()? != Path::new(executable) {
+        .ok_or(io::ErrorKind::InvalidInput)?;
+    if std::env::current_exe()? != Path::new(executable) {
         return Err(io::Error::other("NATIVE_SERVICE_BUILD_SLOT_CHANGED"));
     }
-    let body = reverie_contracts::worker_service::native_unit(executable);
-    write(Path::new(target), body.as_bytes())
+    use reverie_contracts::worker_service::{NativeWorkerServiceRole, native_unit_for_role};
+    for (role, target) in [
+        (NativeWorkerServiceRole::Broker, Some(target)),
+        (
+            NativeWorkerServiceRole::PoolOfferV1,
+            option_env!("REVERIE_FIXED_NATIVE_POOL_OFFER_SERVICE_UNIT"),
+        ),
+    ] {
+        if let Some(target) = target {
+            if Path::new(target) != package.join(role.unit_relative_path()) {
+                return Err(io::Error::other("NATIVE_SERVICE_BUILD_SLOT_CHANGED"));
+            }
+            write(
+                Path::new(target),
+                native_unit_for_role(executable, role).as_bytes(),
+            )?;
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]

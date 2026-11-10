@@ -138,10 +138,15 @@ impl State {
         let package = unit.ancestors().nth(4).ok_or(WorkerServiceError::Refused(
             "NATIVE_SERVICE_UPGRADE_PACKAGE",
         ))?;
-        need(
-            unit == package.join("share/systemd/user").join(UNIT),
+        let role = [
+            NativeWorkerServiceRole::Broker,
+            NativeWorkerServiceRole::PoolOfferV1,
+        ]
+        .into_iter()
+        .find(|role| unit == package.join(role.unit_relative_path()))
+        .ok_or(WorkerServiceError::Refused(
             "NATIVE_SERVICE_UPGRADE_PACKAGE",
-        )?;
+        ))?;
         let raw = self.read_immutable(&package.join("share/reverie/worker-broker-program.json"))?;
         let selected = BrokerProgramData::decode(raw.as_bytes())
             .map_err(|_| WorkerServiceError::Refused("NATIVE_SERVICE_UPGRADE_PROGRAM"))?;
@@ -164,7 +169,7 @@ impl State {
         observed.map_err(|e| self.retain_program_error(e))?;
         let body = self.read_immutable(unit)?;
         need(
-            body == reverie_contracts::worker_service::native_unit(&executable),
+            body == reverie_contracts::worker_service::native_unit_for_role(&executable, role),
             "NATIVE_SERVICE_UPGRADE_UNIT_RECIPE",
         )?;
         Ok(body)

@@ -14,6 +14,7 @@ mod inventory;
 mod manifest;
 mod offline_owner;
 mod perf;
+mod pool;
 mod pool_image_inputs;
 mod service;
 
@@ -29,6 +30,11 @@ struct Arguments {
 }
 #[derive(Subcommand)]
 enum Role {
+    /// Explicit OS-owner pool nomination; never installs or starts resources.
+    Pool {
+        #[command(subcommand)]
+        action: pool::Action,
+    },
     /// Read the registered OS-owner employee/declared-plan inventory without
     /// starting a broker or exposing private model, thread or account fields.
     Inventory {
@@ -74,6 +80,10 @@ enum Role {
     /// Explicit ordinary-owner native unit bootstrap/control.
     Service {
         action: service::Action,
+        /// Only these two immutable packaged recipes can be selected. The
+        /// default preserves the ordinary registered broker role.
+        #[arg(long, value_enum, default_value_t = service::Role::Broker)]
+        role: service::Role,
         #[arg(long)]
         start_previous: bool,
         /// Start the new broker only after a known completed native upgrade.
@@ -100,6 +110,7 @@ fn main() -> ExitCode {
 }
 fn run(arguments: Arguments) -> Result<(), Box<dyn std::error::Error>> {
     match arguments.command {
+        Role::Pool { action } => pool::run(action),
         Role::Inventory { config } => inventory::run(&config),
         Role::Image { action } => image::run(action),
         Role::Perf { action } => perf::run(action),
@@ -123,11 +134,19 @@ fn run(arguments: Arguments) -> Result<(), Box<dyn std::error::Error>> {
         Role::ServiceUnit => Ok(manifest::publish_service_unit()?),
         Role::Service {
             action,
+            role,
             config,
             start_previous,
             restart,
             force_stopped,
-        } => service::run(action, &config, start_previous, restart, force_stopped),
+        } => service::run(
+            action,
+            &config,
+            start_previous,
+            restart,
+            force_stopped,
+            role,
+        ),
         Role::Broker { config } => serve(config, false),
         Role::OfferPoolV1 { config } => serve(config, true),
     }

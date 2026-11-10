@@ -1,6 +1,6 @@
 # Unselected native broker integration package. Its fixed build-only role emits
 # provenance after stripping/fixup, hashing the actual final installed ELF.
-{ pkgs, src, perfGuestCapsule ? null, taskPerfPolicy ? null, taskPerfPolicyV2 ? null, previousUnit ? null, poolImageInputs ? null }:
+{ pkgs, src, perfGuestCapsule ? null, taskPerfPolicy ? null, taskPerfPolicyV2 ? null, previousUnit ? null, poolImageInputs ? null, resourceActorProvenance ? null }:
 let
   # Interpolating a path copies it, even when it already names a store object.
   # Keep the original identity and its closure reference for fixed artifacts.
@@ -14,6 +14,7 @@ let
   perfPolicyV2 = exactInput taskPerfPolicyV2;
   predecessor = exactInput previousUnit;
   poolInputs = exactInput poolImageInputs;
+  actorProvenance = exactInput resourceActorProvenance;
   workspace = import ./rust-workspace-source.nix {
     inherit pkgs src;
     members = [
@@ -38,6 +39,10 @@ in pkgs.rustPlatform.buildRustPackage {
     REVERIE_FIXED_TASK_PERF_V2_MANIFEST = "${perfPolicyV2}/share/reverie/worker-perf-profile.json";
   };
   preBuild = ''
+    ${pkgs.lib.optionalString (resourceActorProvenance != null) ''
+      export REVERIE_FIXED_NATIVE_ACTOR_IMAGE_PROVENANCE_MANIFEST=${pkgs.lib.escapeShellArg "${actorProvenance}/share/reverie/website-image.json"}
+      export REVERIE_FIXED_NATIVE_ACTOR_IMAGE_PROVENANCE_SHA256="$(${pkgs.coreutils}/bin/sha256sum "$REVERIE_FIXED_NATIVE_ACTOR_IMAGE_PROVENANCE_MANIFEST" | ${pkgs.coreutils}/bin/cut -d ' ' -f 1)"
+    ''}
     ${pkgs.lib.optionalString (poolImageInputs != null) ''
       export REVERIE_FIXED_NATIVE_POOL_IMAGE_INPUTS_MANIFEST=${pkgs.lib.escapeShellArg "${poolInputs}/share/reverie/worker-pool-image-inputs.json"}
       export REVERIE_FIXED_NATIVE_POOL_IMAGE_INPUTS_SHA256="$(${pkgs.coreutils}/bin/sha256sum "$REVERIE_FIXED_NATIVE_POOL_IMAGE_INPUTS_MANIFEST" | ${pkgs.coreutils}/bin/cut -d ' ' -f 1)"
@@ -46,6 +51,7 @@ in pkgs.rustPlatform.buildRustPackage {
     export REVERIE_FIXED_NATIVE_WORKER_BUSCTL=${pkgs.systemdMinimal}/bin/busctl
     export REVERIE_FIXED_NATIVE_WORKER_NIX_STORE=${pkgs.nix}/bin/nix-store
     export REVERIE_FIXED_NATIVE_WORKER_SERVICE_UNIT="$out/share/systemd/user/reverie-worker-broker.service"
+    export REVERIE_FIXED_NATIVE_POOL_OFFER_SERVICE_UNIT="$out/share/systemd/pool-offer/reverie-worker-broker.service"
     ${pkgs.lib.optionalString (previousUnit != null) "export REVERIE_FIXED_PREVIOUS_WORKER_SERVICE_UNIT=${predecessor}/share/systemd/user/reverie-worker-broker.service"}
     export REVERIE_FIXED_NATIVE_WORKER_ENGINE=${pkgs.docker-client}/bin/docker
     export REVERIE_FIXED_NATIVE_WORKER_BROKER_EXECUTABLE="$out/bin/reverie-worker-broker"
@@ -55,6 +61,7 @@ in pkgs.rustPlatform.buildRustPackage {
     mkdir -p "$out/share/reverie"
     "$out/bin/reverie-worker-broker" origin-manifest
     mkdir -p "$out/share/systemd/user"
+    mkdir -p "$out/share/systemd/pool-offer"
     "$out/bin/reverie-worker-broker" service-unit
   '';
   doCheck = true;

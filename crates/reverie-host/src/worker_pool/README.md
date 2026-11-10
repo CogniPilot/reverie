@@ -142,3 +142,26 @@ refused by the existing v1 initializer before any limit write. Privileged
 Activate/Configure, a selected native controller, broker member joins and the
 complete supported installation workflow remain required work. Component
 filesystem tests do not establish genuine native-broker origin or activation.
+
+## Explicit OS nomination and service role
+
+`reverie-worker-broker pool nominate-v1 --config SOURCE --request FILE` imports
+the existing closed installation-request DATA. The explicit enrollment principal
+and nominated policy are not authentication or consent. The command checks the
+actual NSS instance and owner, current configuration, fixed packaged image input,
+and the actual daemon and complete loaded image observations. It writes only the
+fixed private `~/reverie/worker-pool/registration-request.json` exclusively, then
+checks readback and original native closure. An existing or partial request is
+never overwritten, deleted, adopted as success or automatically replayed. The
+registered instance directory must already exist. This import is not the future
+principal-only command that derives a nomination from current approved settings.
+
+The packaged service has two closed recipes. Existing commands default to
+`--role broker`; `--role offer-pool-v1` selects only the second immutable packaged
+unit and its exact original argv. Install/upgrade/start/stop retain the same
+source, stopped-generation, pending, predecessor and checked-close rules. An
+explicit upgrade `--restart` carries that same selected role into start. No
+arbitrary unit, executable or command argument can be supplied. Offer startup
+still owns its original five-minute deadline; images and owner enrollment must
+be prepared beforehand. Actor installation and actual authenticated fleet
+maintenance remain separate required components.
