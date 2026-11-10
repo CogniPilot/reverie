@@ -78,6 +78,17 @@ pkgs.dockerTools.buildLayeredImage {
       # Fixed real files survive the employee's writable /nix overlay.
       # This candidate slot does not select an installed launch policy.
       cp -r ${perfGuestCapsule}/opt/reverie/perf opt/reverie/perf
+      for directory in opt opt/reverie opt/reverie/perf opt/reverie/perf/bin; do
+        test -d "$directory" && test ! -L "$directory"
+      done
+      for program in perf reverie-perf-check reverie-worker-init; do
+        test -f "opt/reverie/perf/bin/$program"
+        test ! -L "opt/reverie/perf/bin/$program"
+        test -x "opt/reverie/perf/bin/$program"
+      done
+      test -f opt/reverie/perf/build-inputs.json
+      test ! -L opt/reverie/perf/build-inputs.json
+      chmod -R a-w opt/reverie/perf
       test ! -e opt/rvprf
     ''}
     unlink bin/reverie
@@ -223,8 +234,10 @@ pkgs.dockerTools.buildLayeredImage {
   config = {
     User = "${toString uid}:${toString gid}";
     WorkingDir = "/reverie_workspace";
-    Entrypoint = if worker then (if perfGuestCapsule == null then [ "/bin/sleep" ] else [ "/opt/reverie/perf/bin/reverie-worker-init" ]) else [ "/bin/tini" "-g" "-s" "--" "/usr/local/bin/reverie-start" ];
-    Cmd = if worker then (if perfGuestCapsule == null then [ "infinity" ] else []) else if ownerTerminalWebsite != null then
+    # Keep the worker factory-v1 program ABI. Actual native J selects its fixed
+    # task-v2 init explicitly; payload presence alone selects no launch policy.
+    Entrypoint = if worker then [ "/bin/sleep" ] else [ "/bin/tini" "-g" "-s" "--" "/usr/local/bin/reverie-start" ];
+    Cmd = if worker then [ "infinity" ] else if ownerTerminalWebsite != null then
       ([ "${ownerTerminalWebsite}/libexec/reverie" ] ++ ownerTerminalWebsite.webArgs) else
       [ "reverie" "web" "--host" "0.0.0.0" "--port" "3000" ]
       ++ pkgs.lib.optionals resourceReplacement [ "--resource-replacement" ];
@@ -257,6 +270,8 @@ pkgs.dockerTools.buildLayeredImage {
       "org.reverie.worker.rootless-docker" = if rootlessDocker == null then "0" else "1";
     } // pkgs.lib.optionalAttrs worker {
       "org.reverie.worker.child-manifest" = childManifest;
+    } // pkgs.lib.optionalAttrs (worker && perfGuestCapsule != null) {
+      "org.reverie.worker.perf-capsule-manifest" = "${perfGuestCapsule}/opt/reverie/perf/build-inputs.json";
     } // pkgs.lib.optionalAttrs (!worker && (resourceReplacement || ownerTerminalWebsite != null)) {
       "org.reverie.website.runtime" = if ownerTerminalWebsite == null then "resource"
         else if builtins.elem "--resource-replacement" ownerTerminalWebsite.webArgs then "resource-terminal"
