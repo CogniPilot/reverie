@@ -128,9 +128,51 @@ impl ActivatedController {
     pub fn close_components(&mut self, end: Instant) -> Result<()> {
         self.state_mut().close_components(end)
     }
-    /// The first actual native accounting cause remains with this SAME owner.
+    /// The first actual native capacity/member cause remains with this SAME owner.
     pub fn capacity_failure(&self) -> Option<&PoolError> {
         self.state().capacity_failure.as_deref()
+    }
+    /// Retain the first whole member/preparation cause in the SAME original
+    /// controller, whose mutex already owns this Send but non-Sync error tree.
+    pub(crate) fn retain_member_result<T>(&mut self, result: Result<T>) -> Result<T> {
+        match result {
+            Ok(value) => Ok(value),
+            Err(PoolError::Member(error)) if !error.unconfirmed_native() => {
+                // Known pre-effect member refusal remains in its original
+                // workflow. Native unknowns are latched by actual record state
+                // before this projection, not inferred from error wording.
+                Err(PoolError::Member(error))
+            }
+            Err(error) => {
+                self.retain_member_cause(error);
+                Err(PoolError::Refused("WORKER_POOL_MEMBER_RETAINED"))
+            }
+        }
+    }
+    pub(crate) fn retain_member_cause(&mut self, error: PoolError) {
+        self.state_mut().retain_native_error(error);
+    }
+    pub(crate) fn observe_member_capacity(
+        &mut self,
+        website: &reverie_contracts::reservation_engine::NativeLimitBinding,
+        end: Instant,
+    ) -> Result<ControllerCapacity<'_>> {
+        let end = self
+            .state()
+            .binding
+            .stop
+            .deadline()
+            .map_or(end, |stop| end.min(stop));
+        need(Instant::now() < end, "WORKER_POOL_MEMBER_CREATION_DEADLINE")?;
+        let engine = self.state().binding.engine.readonly();
+        let policy = self.policy_data().clone();
+        let ids = need(
+            policy.broker_uid == native::uid()
+                && policy.broker_gid == nix::unistd::getgid().as_raw(),
+            "WORKER_POOL_NATIVE_BROKER_IDS",
+        );
+        self.retain_member_result(ids)?;
+        self.observe_capacity(&engine, &policy, website, end)
     }
     pub(crate) fn configure_target(
         &mut self,
@@ -142,6 +184,12 @@ impl ActivatedController {
     }
 }
 impl ControllerState {
+    fn retain_native_error(&mut self, error: PoolError) {
+        self.close_unknown |= error.close_unknown();
+        if self.capacity_failure.is_none() {
+            self.capacity_failure = Some(Box::new(error));
+        }
+    }
     fn policy_data(&self) -> &WorkerPoolPolicy {
         &self.policy
     }
@@ -597,6 +645,7 @@ fn fresh_id() -> Result<String> {
 }
 mod capacity;
 pub use capacity::ControllerCapacity;
+mod creation_pool;
 mod io;
 mod member;
 mod setup;

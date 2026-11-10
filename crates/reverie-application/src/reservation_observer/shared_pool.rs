@@ -5,6 +5,26 @@ use reverie_core::decimal::UnsignedInteger;
 use reverie_host::worker_pool::{ActivatedController, ControllerCapacity};
 
 impl ObservationContext {
+    pub(super) fn member_capacity<'owner>(
+        &self,
+        member: &'owner mut crate::installing_broker::InstalledMemberCreation<'_>,
+        website: &WebsiteBinding,
+        end: Instant,
+    ) -> Result<ControllerCapacity<'owner>> {
+        member
+            .assert_slot(self.observer.controller.as_ref())
+            .map_err(|error| ObserverError::Refused(error.code()))?;
+        self.observer
+            .source
+            .assert_worker_runtime(member.runtime())?;
+        let WebsiteBinding::Running(website) = website else {
+            return Err(ObserverError::Refused("RESERVATION_POOL_WEBSITE_REQUIRED"));
+        };
+        member
+            .observe_capacity(website, end)
+            .map_err(|error| ObserverError::Refused(error.code()))
+    }
+
     pub(super) fn shared_capacity<'owner>(
         &self,
         slot: Option<&'owner mut Option<ActivatedController>>,

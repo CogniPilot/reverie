@@ -5,6 +5,15 @@ impl ControllerState {
         command: serde_json::Value,
         end: Instant,
     ) -> Result<serde_json::Value> {
+        // One component ceiling shared by the wire and native loops. Repeated
+        // readiness waits cannot renew it or outlive the SAME first stop.
+        let end = end.min(Instant::now() + Duration::from_secs(20));
+        let end = self
+            .binding
+            .stop
+            .deadline()
+            .map_or(end, |stop| end.min(stop));
+        let stop = &self.binding.stop;
         let id = command["requestId"]
             .as_str()
             .ok_or(PoolError::Refused("WORKER_POOL_REQUEST"))?
@@ -24,7 +33,7 @@ impl ControllerState {
             .ok_or(PoolError::Refused("WORKER_POOL_CHANNEL"))?;
         let mut written = 0;
         while written < bytes.len() {
-            need(Instant::now() < end, "WORKER_POOL_MESSAGE_DEADLINE")?;
+            message_current(stop, end)?;
             match socket.write(&bytes[written..]) {
                 Ok(0) => return Err(PoolError::Refused("WORKER_POOL_CHANNEL_ENDED")),
                 Ok(count) => written += count,
@@ -34,10 +43,10 @@ impl ControllerState {
                 Err(error) => return Err(error.into()),
             }
         }
-        let prefix = read_exact(socket, 4, end, &mut self.close_unknown)?;
+        let prefix = read_exact(socket, 4, end, stop, &mut self.close_unknown)?;
         let count = u32::from_be_bytes(prefix.try_into().expect("four bytes")) as usize;
         need((1..=8192).contains(&count), "WORKER_POOL_REPLY_BOUND")?;
-        let raw = read_exact(socket, count, end, &mut self.close_unknown)?;
+        let raw = read_exact(socket, count, end, stop, &mut self.close_unknown)?;
         let value: serde_json::Value =
             serde_json::from_slice(&raw).map_err(|_| PoolError::Refused("WORKER_POOL_REPLY"))?;
         need(
@@ -51,6 +60,7 @@ fn read_exact(
     socket: &mut UnixStream,
     count: usize,
     end: Instant,
+    stop: &crate::worker_runtime::WorkerStopBudget,
     unknown: &mut bool,
 ) -> Result<Vec<u8>> {
     let mut bytes = vec![0; count];
@@ -59,7 +69,7 @@ fn read_exact(
         .map_err(std::io::Error::from)?;
     let expected = (peer.pid(), peer.uid(), peer.gid());
     while read < count {
-        need(Instant::now() < end, "WORKER_POOL_MESSAGE_DEADLINE")?;
+        message_current(stop, end)?;
         match native::owned_process::receive_credentials(socket, &mut bytes[read..], expected) {
             Ok(0) => return Err(PoolError::Refused("WORKER_POOL_CHANNEL_ENDED")),
             Ok(count) => read += count,
@@ -74,4 +84,8 @@ fn read_exact(
         }
     }
     Ok(bytes)
+}
+fn message_current(stop: &crate::worker_runtime::WorkerStopBudget, end: Instant) -> Result<()> {
+    let end = stop.deadline().map_or(end, |stop| end.min(stop));
+    need(Instant::now() < end, "WORKER_POOL_MESSAGE_DEADLINE")
 }

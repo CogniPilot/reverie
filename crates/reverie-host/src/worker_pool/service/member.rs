@@ -81,7 +81,13 @@ impl State {
                 let unchanged = policy
                     .engine
                     .inspect(container)
-                    .and_then(|current| need(current == raw, "WORKER_POOL_MEMBER_CHANGED"));
+                    .and_then(|current| {
+                        let same = reverie_contracts::worker_recovery::RecoveryInspection::same_container_object_inspection(
+                            container, &raw, &current,
+                        )
+                        .map_err(|_| PoolError::Refused("WORKER_POOL_MEMBER_INSPECTION"))?;
+                        need(same, "WORKER_POOL_MEMBER_CHANGED")
+                    });
                 let closed = owner.close();
                 if let Err(primary) = finalized(unchanged, closed) {
                     self.member_failure = Some(owner.into_component(primary));

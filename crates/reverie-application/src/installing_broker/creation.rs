@@ -30,6 +30,7 @@ pub enum CreationBudgetError {
     Capacity(capacity::CapacityError),
     Configuration(reverie_contracts::reservation_engine::EngineDataError),
     Gate(GateError),
+    Controller(reverie_host::worker_pool::PoolError),
     Refused(&'static str),
 }
 impl CreationBudgetError {
@@ -43,6 +44,7 @@ impl CreationBudgetError {
             Self::Capacity(error) => error.code(),
             Self::Configuration(error) => error.code(),
             Self::Gate(error) => error.code(),
+            Self::Controller(error) => error.code(),
             Self::Effective(error) => error.code(),
             Self::Refused(code) => code,
         }
@@ -65,6 +67,7 @@ impl std::error::Error for CreationBudgetError {
             Self::Capacity(error) => Some(error),
             Self::Configuration(error) => Some(error),
             Self::Gate(error) => Some(error),
+            Self::Controller(error) => Some(error),
             Self::Refused(_) => None,
         }
     }
@@ -96,6 +99,8 @@ conversion!(
     Configuration
 );
 conversion!(GateError, Gate);
+conversion!(reverie_host::worker_pool::PoolError, Controller);
+mod controller;
 type Result<T> = std::result::Result<T, CreationBudgetError>;
 fn need(value: bool, code: &'static str) -> Result<()> {
     if value {
@@ -159,6 +164,18 @@ impl InstallingBroker {
         require_headroom: bool,
     ) -> Result<()> {
         let policy = checked_effective_policy(resources)?;
+        let source = self.configuration()?;
+        let provider =
+            reverie_contracts::worker_pool::WorkerPoolProvider::from_config(source.configuration())
+                .map_err(|_| CreationBudgetError::Refused("WORKER_POOL_PROVIDER_INVALID"))?;
+        if provider.is_some() {
+            self.borrow_controller_for_creation()?.check_pool(
+                &policy,
+                require_headroom,
+                Installed(&self.storage.runtime).end(),
+            )?;
+            return Ok(());
+        }
         Ok(CreationKernel::check_pool(
             &policy,
             require_headroom,
@@ -187,6 +204,17 @@ impl InstallingBroker {
         resources: &EffectiveWorkerConfig,
         admission: Option<&OrdinaryLaunchAdmission>,
     ) -> Result<()> {
+        self.check_creation_budget_selected_locked(lifecycle, session, resources, admission, None)
+    }
+
+    fn check_creation_budget_selected_locked(
+        &self,
+        lifecycle: &LaptopLifecycle<'_>,
+        session: &ProfileSessionId,
+        resources: &EffectiveWorkerConfig,
+        admission: Option<&OrdinaryLaunchAdmission>,
+        member: Option<&mut super::installed_controller::InstalledMemberCreation<'_>>,
+    ) -> Result<()> {
         need(
             lifecycle.belongs_to(&self.installed),
             "WORKER_CREATION_LIFECYCLE_ORIGIN",
@@ -203,11 +231,12 @@ impl InstallingBroker {
             deployment: snapshot.envelope().base().deployment(),
             max_workers: usize::from(snapshot.envelope().base().max_workers()),
         };
-        check(
+        check_selected(
             &inputs,
             &registered,
             self.gate.as_ref(),
             admission,
+            member,
             &Installed(&self.storage.runtime),
         )
     }
@@ -219,11 +248,22 @@ struct Inputs<'a> {
     deployment: &'a str,
     max_workers: usize,
 }
+#[cfg(test)]
 fn check(
     inputs: &Inputs<'_>,
     registered: &[WorkerContainerName],
     gate: Option<&ReservationGate>,
     admission: Option<&OrdinaryLaunchAdmission>,
+    source: &impl Source,
+) -> Result<()> {
+    check_selected(inputs, registered, gate, admission, None, source)
+}
+fn check_selected(
+    inputs: &Inputs<'_>,
+    registered: &[WorkerContainerName],
+    gate: Option<&ReservationGate>,
+    admission: Option<&OrdinaryLaunchAdmission>,
+    member: Option<&mut super::installed_controller::InstalledMemberCreation<'_>>,
     source: &impl Source,
 ) -> Result<()> {
     let names = CreationPeerNames::capture(&source.names()?, registered, inputs.deployment);
@@ -234,7 +274,7 @@ fn check(
     if configured.memory_policies_enabled() {
         swap_budget(&configured, &rows, inputs.resources, source)?;
     }
-    if gate.is_some() || data::has_reservation_option(inputs.config) {
+    if member.is_some() || gate.is_some() || data::has_reservation_option(inputs.config) {
         let (Some(gate), Some(admission)) = (gate, admission) else {
             return Err(CreationBudgetError::Refused(
                 "Resource reservation control requires reconciliation",
@@ -244,7 +284,10 @@ fn check(
             admission.session() == inputs.session && admission.belongs_to(gate),
             "WORKER_CREATION_ADMISSION_CONTEXT",
         )?;
-        admission.check_creation(&checked_effective_policy(inputs.resources)?)?;
+        match member {
+            Some(member) => admission.check_member_creation(member)?,
+            None => admission.check_creation(&checked_effective_policy(inputs.resources)?)?,
+        };
         return Ok(());
     }
     let outside = if let Some(candidate) = data::admitted_memory(inputs.resources)? {

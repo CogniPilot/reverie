@@ -22,7 +22,7 @@ pub use worker_image::{
 };
 mod installed_controller;
 pub use installed_controller::ControllerInstallFailure;
-pub(crate) use installed_controller::InstalledControllerSlot;
+pub(crate) use installed_controller::{InstalledControllerSlot, InstalledMemberCreation};
 mod installation_offer;
 pub use installation_offer::{
     BrokerInstallationOffer, BrokerInstallationOfferCause, BrokerInstallationOfferFailure,

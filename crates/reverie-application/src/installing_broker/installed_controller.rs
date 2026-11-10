@@ -5,6 +5,9 @@ use reverie_host::worker_laptop::{ControllerMemberConfigured, CreatedLaptop, Sta
 use reverie_host::worker_pool::{ActivatedController, PoolError};
 use reverie_host::worker_reports::WorkerLaunchConnection;
 use std::time::Instant;
+mod creation;
+pub(in crate::installing_broker) use creation::InstalledControllerBorrow;
+pub(crate) use creation::InstalledMemberCreation;
 
 /// One allocation owns the consuming native controller success. Gate borrows
 /// this same slot; no status document or second controller is installed there.

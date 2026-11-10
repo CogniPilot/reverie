@@ -43,6 +43,22 @@ impl ObservationContext {
         stopped: Option<&ContainerId>,
         pool_creation: bool,
     ) -> Result<CapacityFacts> {
+        self.capacity_selected(inventory, stopped, pool_creation, None)
+    }
+    pub(crate) fn member_creation_capacity(
+        &self,
+        inventory: &ObservedInventory,
+        member: &mut crate::installing_broker::InstalledMemberCreation<'_>,
+    ) -> Result<CapacityFacts> {
+        self.capacity_selected(inventory, None, true, Some(member))
+    }
+    fn capacity_selected(
+        &self,
+        inventory: &ObservedInventory,
+        stopped: Option<&ContainerId>,
+        pool_creation: bool,
+        member: Option<&mut crate::installing_broker::InstalledMemberCreation<'_>>,
+    ) -> Result<CapacityFacts> {
         let end = self.deadline(None)?;
         need(
             Arc::ptr_eq(&self.origin, &inventory.origin),
@@ -61,16 +77,22 @@ impl ObservationContext {
             None => WebsiteBinding::Running(self.limits_at(sites[0], end)?),
             Some(id) => WebsiteBinding::Stopped(sites[0].stopped_website(id)?),
         };
+        // A prospective member already borrows the SAME slot. Re-locking it
+        // would fail and could never establish the original create guarantee.
         let mut slot = self
             .observer
             .controller
             .as_ref()
+            .filter(|_| member.is_none())
             .map(|slot| {
                 slot.try_lock()
                     .map_err(|_| ObserverError::Refused("RESERVATION_POOL_CONTROLLER_UNAVAILABLE"))
             })
             .transpose()?;
-        let mut shared = self.shared_capacity(slot.as_deref_mut(), &website, end)?;
+        let mut shared = match member {
+            Some(member) => Some(self.member_capacity(member, &website, end)?),
+            None => self.shared_capacity(slot.as_deref_mut(), &website, end)?,
+        };
         if pool_creation && shared.is_none() {
             let WebsiteBinding::Running(binding) = &website else {
                 return Err(ObserverError::Refused("RESERVATION_POOL_WEBSITE_REQUIRED"));

@@ -82,8 +82,12 @@ impl State {
             .map_err(|_| PoolError::Refused("WORKER_POOL_HOST_ACCOUNTING"))?,
             "WORKER_POOL_HOST_HEADROOM",
         )?;
+        let current = policy.engine.inspect(&data.website_container)?;
         need(
-            policy.engine.inspect(&data.website_container)? == raw,
+            reverie_contracts::worker_recovery::RecoveryInspection::same_container_object_inspection(
+                &data.website_container, &raw, &current,
+            )
+            .map_err(|_| PoolError::Refused("WORKER_POOL_WEBSITE_IDENTITY"))?,
             "WORKER_POOL_WEBSITE_CHANGED",
         )
     }

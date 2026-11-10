@@ -111,15 +111,21 @@ impl ControllerState {
         let closed = native::close(file).map_err(PoolError::from);
         self.close_unknown |= closed.is_err();
         let leaf = finalized(checked, closed)?;
+        let current = self
+            .query
+            .query(
+                EngineQuery::WorkerPoolInspect(target.container()),
+                end,
+                &runtime.cancellation(),
+            )
+            .map_err(PoolError::Engine)?;
         need(
-            self.query
-                .query(
-                    EngineQuery::WorkerPoolInspect(target.container()),
-                    end,
-                    &runtime.cancellation(),
-                )
-                .map_err(PoolError::Engine)?
-                == raw,
+            reverie_contracts::worker_recovery::RecoveryInspection::same_container_inspection(
+                target.container(),
+                &raw,
+                &current,
+            )
+            .map_err(|_| PoolError::Refused("WORKER_POOL_MEMBER_INSPECTION"))?,
             "WORKER_POOL_MEMBER_CHANGED",
         )?;
         Ok(MemberObservation {

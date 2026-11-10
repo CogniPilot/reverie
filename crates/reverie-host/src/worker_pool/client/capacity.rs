@@ -111,10 +111,7 @@ impl ControllerState {
         match result {
             Ok(value) => Ok(value),
             Err(error) => {
-                self.close_unknown |= error.close_unknown();
-                if self.capacity_failure.is_none() {
-                    self.capacity_failure = Some(Box::new(error));
-                }
+                self.retain_native_error(error);
                 Err(PoolError::Refused("WORKER_POOL_CAPACITY_RETAINED"))
             }
         }
@@ -122,6 +119,10 @@ impl ControllerState {
 }
 fn capture(owner: &mut ControllerState, website: &NativeLimitBinding, end: Instant) -> Result<u64> {
     check_end(owner, end)?;
+    need(
+        website.container_id().as_str() == owner.policy.website_container,
+        "WORKER_POOL_CAPACITY_WEBSITE_CHANGED",
+    )?;
     let parent = PosixPath::from_scalar_text(&owner.policy.parent_cgroup_relative());
     let own_group = reverie_contracts::kernel_accounting::CgroupMembership::observer(
         &directory::bounded_path("/proc/self/cgroup", 4096)?,

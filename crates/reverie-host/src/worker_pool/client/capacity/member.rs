@@ -50,16 +50,21 @@ pub(super) fn observe(
         let original = directory::identity(&file)?;
         limits(owner, &file, high, tasks)?;
         process_current(pid, &start, &expected)?;
+        let current = owner
+            .query
+            .query(
+                EngineQuery::WorkerPoolInspect(row.id()),
+                end,
+                &owner.binding.engine.cancellation(),
+            )
+            .map_err(PoolError::Engine)?;
         need(
-            owner
-                .query
-                .query(
-                    EngineQuery::WorkerPoolInspect(row.id()),
-                    end,
-                    &owner.binding.engine.cancellation(),
-                )
-                .map_err(PoolError::Engine)?
-                == raw,
+            reverie_contracts::worker_recovery::RecoveryInspection::same_container_inspection(
+                row.id(),
+                &raw,
+                &current,
+            )
+            .map_err(|_| PoolError::Refused("WORKER_POOL_CAPACITY_MEMBER_CHANGED"))?,
             "WORKER_POOL_CAPACITY_MEMBER_CHANGED",
         )?;
         observe_parent(owner, end)?;

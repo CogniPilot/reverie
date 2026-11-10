@@ -29,6 +29,7 @@ mod target_observation_tests;
 pub use service::{ControllerServing, ControllerServingFailure};
 #[cfg(test)]
 mod tests;
+pub use crate::worker_laptop::PoolMemberCreation;
 pub use bootstrap::{BrokerBootstrapBinding, BrokerBootstrapFailure};
 use directory::PoolDirectory;
 pub use endpoint::{
@@ -49,6 +50,10 @@ pub enum PoolError {
     MetadataClose(Box<PoolError>),
     BootstrapFacts(Box<crate::website_facts::WebsiteFactsError>),
     Engine(crate::engine_metadata::EngineError),
+    Member(std::sync::Arc<crate::worker_laptop::LaptopError>),
+    Channel(crate::worker_reports::WorkerReportError),
+    CreationBudget(reverie_contracts::creation_budget::CreationBudgetError),
+    CreationDeadline,
 }
 impl fmt::Display for PoolError {
     fn fmt(&self, output: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -64,7 +69,10 @@ impl std::error::Error for PoolError {
             Self::MetadataClose(error) => Some(error),
             Self::BootstrapFacts(error) => Some(error),
             Self::Engine(error) => Some(error),
-            Self::Refused(_) => None,
+            Self::Member(error) => Some(error.as_ref()),
+            Self::Channel(error) => Some(error),
+            Self::CreationBudget(error) => Some(error),
+            Self::Refused(_) | Self::CreationDeadline => None,
         }
     }
 }
@@ -78,12 +86,18 @@ impl PoolError {
             Self::MetadataClose(_) => "WORKER_POOL_CLOSE_UNKNOWN",
             Self::BootstrapFacts(error) => error.code(),
             Self::Engine(_) => "WORKER_POOL_CAPTURED_ENGINE",
+            Self::Member(error) => error.code(),
+            Self::Channel(error) => error.code(),
+            Self::CreationBudget(error) => error.code(),
+            Self::CreationDeadline => "WORKER_POOL_CREATION_BUDGET_DEADLINE",
         }
     }
     pub(crate) fn close_unknown(&self) -> bool {
         match self {
             Self::MetadataClose(_) => true,
             Self::Observation(error) => error.has_unconfirmed_close(),
+            Self::Member(error) => error.unconfirmed_native(),
+            Self::Channel(error) => error.has_unconfirmed_close(),
             Self::Finalization(primary, secondary) => {
                 primary.close_unknown() || secondary.close_unknown()
             }

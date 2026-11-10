@@ -5,6 +5,10 @@ use crate::worker_reports::WorkerLaunchConnection;
 use reverie_contracts::worker_config::WorkerPolicyDigest;
 use reverie_core::ids::{ContainerId, ProfileEmployeeId, ProfileSessionId};
 
+mod creation;
+pub use creation::PoolMemberCreation;
+pub(super) use creation::{check_member, retain_outcome};
+
 pub(crate) struct CreatedPoolTarget<'a> {
     record: &'a Record,
     employee: ProfileEmployeeId,
@@ -128,7 +132,7 @@ impl ControllerMemberConfigured {
         Ok(())
     }
 }
-fn pool_error(error: PoolError) -> LaptopError {
+pub(super) fn pool_error(error: PoolError) -> LaptopError {
     LaptopError::ControllerPool(error::ControllerPoolFailure::new(error))
 }
 impl ActivatedController {
@@ -158,6 +162,7 @@ impl ActivatedController {
             || record.unknown
             || !record.creation.as_ref().is_some_and(|c| {
                 c.stage == create::CreateStage::Started
+                    && !c.controller_member_attempted
                     && c.container.as_ref() == created.container_id()
             })
         {
@@ -175,6 +180,11 @@ impl ActivatedController {
             .ok_or(PoolError::Refused("WORKER_POOL_CREATED_CID"))?
             .clone();
         let policy = record.resources().plan.arguments().policy_digest().clone();
+        record
+            .creation
+            .as_mut()
+            .expect("actual Created")
+            .controller_member_attempted = true;
         record.phase = Phase::Running;
         let target = CreatedPoolTarget {
             record: &record,

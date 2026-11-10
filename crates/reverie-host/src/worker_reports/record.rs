@@ -455,6 +455,27 @@ impl Record {
     pub(super) fn can_progress(&self) -> bool {
         !self.finished() && !self.opaque.load(Ordering::Acquire)
     }
+    /// Actual terminal state only. Ordinary hold contention remains pending;
+    /// a poisoned/opaque record can never become known inactivity.
+    pub(super) fn terminal_progress(&self) -> Result<Option<bool>> {
+        if self.opaque() {
+            return Err(WorkerReportError::Unconfirmed);
+        }
+        let hold = match self.lifecycle.try_lock() {
+            Ok(hold) => hold,
+            Err(std::sync::TryLockError::WouldBlock) => return Ok(None),
+            Err(std::sync::TryLockError::Poisoned(_)) => {
+                self.mark_opaque();
+                return Err(WorkerReportError::Unconfirmed);
+            }
+        };
+        let live =
+            !self.finished() && matches!(*hold, super::retention::LifecycleHoldState::Held(_));
+        if self.opaque() {
+            return Err(WorkerReportError::Unconfirmed);
+        }
+        Ok(Some(live))
+    }
     pub(super) fn opaque(&self) -> bool {
         self.opaque.load(Ordering::Acquire)
     }
