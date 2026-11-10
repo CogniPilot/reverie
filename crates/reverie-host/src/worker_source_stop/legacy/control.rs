@@ -56,6 +56,7 @@ impl WorkerRuntime {
             attempt: OrdinaryStopAttempt {
                 origin: self.installed_engine().clone(),
                 phase: LegacyPhase::Held,
+                purpose: LegacyPurpose::Control,
                 name,
                 session,
                 container: None,
