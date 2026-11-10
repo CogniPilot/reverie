@@ -74,7 +74,8 @@ pub(crate) fn isolate_cold_namespace(name: &str) -> bool {
         );
     }
     if retained_mount_case(name) {
-        command.arg("--keep-caps");
+        // The overmount also hides the checkout when Cargo runs under /tmp.
+        command.arg("--keep-caps").current_dir(&root);
     }
     let output = command
         .arg(&executable)
