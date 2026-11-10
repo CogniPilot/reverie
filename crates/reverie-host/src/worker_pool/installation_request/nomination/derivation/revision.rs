@@ -108,9 +108,9 @@ impl NominationDerivation {
             website |= id.as_str() == policy.website_container;
         }
         need(website, "POOL_NOMINATION_WEBSITE_REQUIRED")?;
+        self.prepared.observe(policy)?;
         for path in [
             PathBuf::from(&policy.instance_root).join("worker-pool/control"),
-            PathBuf::from(&policy.instance_root).join("worker-pool/policies"),
             PathBuf::from("/sys/fs/cgroup").join(policy.parent_cgroup_relative()),
         ] {
             match fs::symlink_metadata(path) {

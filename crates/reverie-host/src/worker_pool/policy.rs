@@ -374,7 +374,7 @@ fn file_identity(file: &File) -> Result<(u64, u64)> {
     )?;
     Ok((metadata.dev(), metadata.ino()))
 }
-fn read_policy(
+pub(super) fn read_policy(
     file: &File,
     digest: [u8; 32],
     service_v2: bool,

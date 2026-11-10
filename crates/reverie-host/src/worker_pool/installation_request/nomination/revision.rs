@@ -257,7 +257,11 @@ impl RevisionOwner {
             .expect("same derivation")
             .assert_uninstalled(
                 &self.nominal.runtime,
-                self.next.as_ref().expect("new proposal").policy(),
+                self.nominal
+                    .request
+                    .as_ref()
+                    .expect("original proposal")
+                    .policy(),
             )?;
         self.nominal
             .derived
@@ -274,6 +278,11 @@ impl RevisionOwner {
     }
     fn assert_after_files(&self) -> Result<()> {
         self.nominal.current()?;
+        self.nominal
+            .derived
+            .as_ref()
+            .expect("same retained prepared DATA")
+            .assert_metadata(&self.nominal.config)?;
         need(
             self.nominal
                 .stores
