@@ -23,3 +23,8 @@ Outputs contain regular read-only files, with no symlinks, setid bits or
 capability grant from this builder. The image factory owns its existing
 capability metadata separately. Memory and Perf retain their existing layout
 and `$ORIGIN` behavior.
+
+`require_static_elf64` is a metadata-only worker toolkit check. It validates
+little-endian ELF64 identity and target, all program segment bounds and every
+dynamic table, rejects PT_INTERP/DT_NEEDED, and requires a load segment. It does
+not execute the input, grant access or qualify a running process.

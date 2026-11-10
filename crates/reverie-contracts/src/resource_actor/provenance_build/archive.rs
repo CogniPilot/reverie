@@ -35,6 +35,9 @@ impl WebsiteArchiveManifest {
     pub fn config_member(&self) -> &str {
         &self.config
     }
+    pub fn layer_members(&self) -> &[PythonText] {
+        &self.layers
+    }
 }
 pub struct WebsiteArchiveConfiguration {
     pub(super) digest: JournalDigest,

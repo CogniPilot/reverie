@@ -1,8 +1,7 @@
 //! Immutable website factory observations only. Never starts a website,
 //! executes image members or substitutes for native installation authority.
-mod archive;
-mod input;
 use crate::output;
+use crate::{build_archive as archive, build_input as input};
 use clap::Parser;
 use reverie_contracts::resource_actor::{
     ArtifactReference, NativeResourceClientManifest, ProgramSelection, WebsiteProvenanceBuild,

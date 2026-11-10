@@ -1,5 +1,5 @@
 use super::*;
-pub(super) fn toolkit(value: &Value) -> Result<Vec<CodeFile>> {
+pub(in crate::resource_actor) fn toolkit(value: &Value) -> Result<Vec<CodeFile>> {
     closed(value, &["version", "static", "manifest", "files"])?;
     need(
         matches!(&field(value,"version")?.0,Node::Number(Number::Integer(v)) if v=="1")
@@ -29,7 +29,7 @@ pub(super) fn toolkit(value: &Value) -> Result<Vec<CodeFile>> {
     }
     Ok(vec![code(field(value, "manifest")?)?])
 }
-pub(super) fn validate(factory: &Value, image: &Value) -> Result<()> {
+pub(in crate::resource_actor) fn validate(factory: &Value, image: &Value) -> Result<()> {
     closed(
         factory,
         &[

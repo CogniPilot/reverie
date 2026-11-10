@@ -1,6 +1,5 @@
 //! Read-only Nix build custody. Namespace mapping is derived from the actual
 //! root/store metadata, never from a caller-selected UID or environment value.
-use super::{Result, need};
 use crate::output;
 use reverie_contracts::resource_actor::CodeFile;
 use reverie_core::{PythonText, operations::JournalDigest};
@@ -12,6 +11,10 @@ use std::{
     path::Path,
     time::Instant,
 };
+pub(super) type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
+pub(super) fn need(value: bool, reason: &'static str) -> Result<()> {
+    if value { Ok(()) } else { Err(reason.into()) }
+}
 
 fn stamp(m: &Metadata) -> (u64, u64, u64, i64, i64, i64, i64) {
     (

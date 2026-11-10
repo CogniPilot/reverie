@@ -116,3 +116,25 @@ The Python website provenance module remains for active worker provenance and
 resource-actor helper imports, as well as historical factory source pins.
 Moving the selected website build invocation does not retire those consumers
 or remove all build-time/service-runtime Python.
+
+`worker-image-provenance --archive PATH --source PATH --profile PATH
+--toolkit-manifest PATH --output PATH` replaces the worker Nix provenance
+producer. It reuses the same retained immutable-input and metadata readers,
+the lossless v1 codec and existing worker factory validation. It additionally
+hashes the complete original compressed archive and each complete raw layer
+stream, including tar padding and bytes after logical EOF. An additional pass
+checks nested layer extension bounds before any logical nested tar iterator.
+The original two-million-member budget is shared across layers; each layer
+retains at most 4,096 selected whiteout/path events. Layer whiteouts apply to
+lower state before ordered additions, and final toolkit paths must remain
+direct root-owned regular 0555 files under protected directories.
+
+The shared ELF bundler validates all ELF64 program/dynamic headers, target
+machine and bounds, requires a load segment and rejects interpreters and
+dynamic dependencies. It executes neither terminal program. The Nix producer
+still writes worker-image-provenance-v1 plus the existing native-child annex.
+Its eleven source pins remain the exact legacy v1 selected-factory inputs,
+including the old Python files. Those files cannot yet be deleted. This pin
+set is not complete Rust source provenance; qualification must separately bind
+the exact Rust source, tool ELF and selected Nix factory. Native runtime image,
+custody, canary, resource, ownership and consent checks remain unchanged.

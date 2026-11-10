@@ -2,9 +2,11 @@
 //! custody, running-image acceptance, process execution or owner authority.
 mod archive;
 mod startup;
+mod worker;
 use super::*;
 pub use archive::{WebsiteArchiveConfiguration, WebsiteArchiveManifest};
 pub use startup::WebsiteStartupBuildGraph;
+pub use worker::{HUMAN_TERMINAL_FILES, WORKER_IMAGE_V1_FACTORY_FILES, WorkerImageProvenanceBuild};
 
 pub struct WebsiteProvenanceBuild {
     archive: WebsiteArchiveConfiguration,

@@ -28,8 +28,13 @@ image load, broker configuration write or laptop recreation occurs in this build
 
 The producer binds the complete image Config/RootFS/platform/creation metadata,
 archive bytes, fixed factory/source inputs and exact static toolkit manifest. It
-pins the selected producer/import/wiring files inside the full immutable source
-path; those selected hashes alone do not attest the entire Nix toolchain closure.
+retains the exact eleven legacy v1 selected-factory file pins inside the full
+immutable source path. Those files are rehashed even after their build entry
+points migrate to Rust. They do not identify the complete Rust producer or
+attest the entire Nix toolchain closure. The selected Rust package requires its
+own exact source, executable and Nix factory qualification; the legacy pin list
+cannot replace that association. Changing or deleting those legacy pin inputs
+requires a paired, versioned reader/producer migration.
 Complete Config/RootFS and archive verification remain separate required facts. It
 hashes the actual layer streams and verifies the final direct, root-owned mode
 0555 toolkit files and protected ancestors, including later replacements and

@@ -1,7 +1,7 @@
 //! Streaming metadata-only archive reads from one held immutable input.
 //! A raw pass bounds extended headers BEFORE tar's logical iterator allocates
 //! them. No file is extracted, and no layer-content/privacy proof is produced.
-use super::{Result, input, need};
+use crate::build_input::{self as input, Result, need};
 use flate2::read::MultiGzDecoder;
 use reverie_contracts::resource_actor::{WebsiteArchiveConfiguration, WebsiteArchiveManifest};
 use reverie_core::PythonText;
@@ -17,15 +17,32 @@ const MAX_UNPACKED: u64 = 64 << 30;
 const MAX_EXTENSIONS: u64 = 8 << 20;
 
 pub(super) fn configuration(path: &Path, end: Instant) -> Result<WebsiteArchiveConfiguration> {
-    input::with(path, 16 << 30, false, |file| {
-        raw_pass(file, end)?;
-        let (manifest, regular) = census(file, end)?;
-        let selected = WebsiteArchiveManifest::decode(&manifest, &regular)?;
-        let raw = selected_config(file, selected.config_member().as_bytes(), end)?;
-        Ok(WebsiteArchiveConfiguration::decode(&raw, &selected)?)
-    })
+    input::with(
+        path,
+        16 << 30,
+        false,
+        |file| Ok(held_metadata(file, end)?.0),
+    )
 }
-fn stream(file: &mut File, end: Instant) -> Result<tar::Archive<Bounded<Box<dyn Read + '_>>>> {
+pub(super) fn held_metadata(
+    file: &mut File,
+    end: Instant,
+) -> Result<(WebsiteArchiveConfiguration, WebsiteArchiveManifest)> {
+    let mut archive = stream(file, end)?;
+    check_extensions(&mut archive)?;
+    drain(archive)?;
+    let (manifest, regular) = census(file, end)?;
+    let selected = WebsiteArchiveManifest::decode(&manifest, &regular)?;
+    let raw = selected_config(file, selected.config_member().as_bytes(), end)?;
+    Ok((
+        WebsiteArchiveConfiguration::decode(&raw, &selected)?,
+        selected,
+    ))
+}
+pub(super) fn stream(
+    file: &mut File,
+    end: Instant,
+) -> Result<tar::Archive<Bounded<Box<dyn Read + '_>>>> {
     file.rewind()?;
     let mut magic = [0_u8; 2];
     file.read_exact(&mut magic)?;
@@ -41,8 +58,7 @@ fn stream(file: &mut File, end: Instant) -> Result<tar::Archive<Bounded<Box<dyn 
         end,
     }))
 }
-fn raw_pass(file: &mut File, end: Instant) -> Result<()> {
-    let mut archive = stream(file, end)?;
+pub(super) fn check_extensions(archive: &mut tar::Archive<impl Read>) -> Result<()> {
     let mut extensions = 0_u64;
     for entry in archive.entries()?.raw(true) {
         let mut entry = entry?;
@@ -69,7 +85,7 @@ fn raw_pass(file: &mut File, end: Instant) -> Result<()> {
         }
         io::copy(&mut entry, &mut io::sink())?;
     }
-    drain(archive)
+    Ok(())
 }
 fn check_pax(entry: &mut tar::Entry<'_, impl Read>) -> Result<()> {
     let mut seen = BTreeSet::new();
@@ -166,10 +182,10 @@ fn canonical(name: &[u8]) -> Result<()> {
         "WEBSITE_BUILD_CANONICAL_MEMBER",
     )
 }
-fn regular_entry(kind: tar::EntryType) -> bool {
+pub(super) fn regular_entry(kind: tar::EntryType) -> bool {
     kind.is_file() || kind.is_contiguous()
 }
-fn python_name(mut raw: &[u8]) -> PythonText {
+pub(super) fn python_name(mut raw: &[u8]) -> PythonText {
     let mut points = Vec::new();
     while !raw.is_empty() {
         match std::str::from_utf8(raw) {
@@ -193,11 +209,11 @@ fn python_name(mut raw: &[u8]) -> PythonText {
     }
     PythonText::try_new(points).expect("surrogateescape codepoints")
 }
-fn drain<R: Read>(archive: tar::Archive<R>) -> Result<()> {
+pub(super) fn drain<R: Read>(archive: tar::Archive<R>) -> Result<()> {
     io::copy(&mut archive.into_inner(), &mut io::sink())?;
     Ok(())
 }
-struct Bounded<R> {
+pub(super) struct Bounded<R> {
     reader: R,
     count: u64,
     end: Instant,
