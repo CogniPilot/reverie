@@ -6,6 +6,7 @@ use reverie_contracts::task_perf_v1::{
 };
 use std::path::{Path, PathBuf};
 mod codex_inputs;
+mod idmap;
 mod output;
 mod pool_images;
 mod verify;
@@ -39,7 +40,9 @@ struct Arguments {
     verify_manifest: Option<PathBuf>,
 }
 fn main() {
-    let result = if codex_inputs::requested() {
+    let result = if idmap::requested() {
+        idmap::run()
+    } else if codex_inputs::requested() {
         codex_inputs::run()
     } else if pool_images::requested() {
         pool_images::run()

@@ -1,11 +1,15 @@
 # Only these two helpers may gain initial-namespace ID-mapping capabilities.
 # Their interpreter, libraries and plugin fallback must not use writable /nix.
-{ pkgs }:
+{ pkgs, artifacts ? import ./policy-artifacts.nix { inherit pkgs; src = ../.; } }:
+let
+  closure = pkgs.closureInfo { rootPaths = [ pkgs.shadow ]; };
+in
 pkgs.runCommand "reverie-worker-idmap" {
-  nativeBuildInputs = [ pkgs.python3 pkgs.patchelf ];
   preferLocalBuild = true;
   allowSubstitutes = false;
 } ''
-  ${pkgs.python3}/bin/python3 ${./worker-idmap.py} \
-    --shadow ${pkgs.shadow} --output "$out" --patchelf ${pkgs.patchelf}/bin/patchelf
+  ${artifacts}/bin/reverie-policy-artifacts idmap-image \
+    --shadow ${pkgs.shadow} --output "$out" \
+    --closure ${closure}/store-paths \
+    --patchelf ${pkgs.patchelf}/bin/patchelf --readelf ${pkgs.binutils}/bin/readelf
 ''

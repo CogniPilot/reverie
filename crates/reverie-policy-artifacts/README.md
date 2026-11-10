@@ -84,3 +84,9 @@ the current pinned inputs: eight Git sources, 1,296 registry packages and 160
 workspace members in locked, offline Cargo metadata. The original source code
 was reviewed for report-byte compatibility; no legacy Python comparison run
 or Codex native/runtime acceptance is claimed.
+
+`idmap-image --shadow PATH --closure PATH --patchelf PATH --readelf PATH
+--output PATH` delegates the fixed two-helper image prefix to the shared Rust
+ELF bundler. It uses declared Nix build inputs and a fresh output root. Neither
+helper is executed; no user/group mapping, file capability or setid grant is
+performed. The existing image factory still owns capability installation.

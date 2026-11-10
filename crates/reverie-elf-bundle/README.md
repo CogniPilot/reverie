@@ -12,3 +12,14 @@ producer with maintained `patchelf` and `readelf` inputs.
 
 These APIs accept build input paths. They are not shipped runtime endpoints
 and do not establish image identity, installation consent or a resource grant.
+
+`build_idmap` assembles the fixed `newuidmap`/`newgidmap` image prefix using
+the same dependency traversal. It reads ELF metadata without executing either
+helper, checks one loader and consistent ELF machine/class, and verifies every
+relocated dependency against the selected library set. The Idmap layout uses
+only `/opt/reverie-idmap/lib` as RPATH, preserves the old system-preload path
+behavior, and redirects original Nix fallback strings to `/opt/idmap/`.
+Outputs contain regular read-only files, with no symlinks, setid bits or
+capability grant from this builder. The image factory owns its existing
+capability metadata separately. Memory and Perf retain their existing layout
+and `$ORIGIN` behavior.
