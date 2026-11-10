@@ -30,7 +30,9 @@ use derivation::NominationDerivation;
 mod publish;
 mod revision;
 pub use error::{PoolNominationError, PoolNominationFailure};
-pub use revision::{PoolNominationRevisionFailure, revise_os_pool_nomination};
+pub use revision::{
+    PoolNominationRevisionFailure, retire_failed_os_pool_installation, revise_os_pool_nomination,
+};
 type Result<T> = std::result::Result<T, PoolNominationError>;
 
 /// Known checked publication of selection DATA, never setup/readiness consent.
@@ -57,6 +59,7 @@ impl PoolNominationPublished {
 enum InputPurpose {
     Request,
     Enrollment,
+    FailedInstallation,
 }
 struct NominationOwner {
     source: Option<PathBuf>,
@@ -227,7 +230,7 @@ impl NominationOwner {
         self.read_selection()?;
         self.read_fixed_images()?;
         match self.purpose {
-            InputPurpose::Request => {
+            InputPurpose::Request | InputPurpose::FailedInstallation => {
                 self.observe_images()?;
             }
             InputPurpose::Enrollment => {
@@ -275,7 +278,7 @@ impl NominationOwner {
         self.input_stamp = Some(stamp);
         self.raw = Some(raw);
         match self.purpose {
-            InputPurpose::Request => {
+            InputPurpose::Request | InputPurpose::FailedInstallation => {
                 self.request = Some(PoolInstallationRequestData::decode(
                     self.raw.as_ref().expect("original input bytes"),
                 )?)
@@ -287,9 +290,15 @@ impl NominationOwner {
         Ok(())
     }
     fn read_fixed_images(&mut self) -> Result<()> {
-        let reference = compiled_pool_image_inputs_reference()?.ok_or(
-            PoolNominationError::Refused("POOL_IMAGE_FIXED_REFERENCE_REQUIRED"),
-        )?;
+        let reference = match self.purpose {
+            InputPurpose::FailedInstallation => {
+                crate::worker_pool::compiled_previous_pool_image_inputs_reference()?
+            }
+            _ => compiled_pool_image_inputs_reference()?,
+        }
+        .ok_or(PoolNominationError::Refused(
+            "POOL_IMAGE_FIXED_REFERENCE_REQUIRED",
+        ))?;
         self.image_raw = Some(self.immutable.observe_artifact(
             &reference,
             ImmutableInputKind::PoolImageInputs,

@@ -4,6 +4,7 @@ use std::fmt;
 pub enum PoolNominationError {
     Refused(&'static str),
     Io(std::io::Error),
+    Journal(reverie_store::operations::JournalError),
     Native(crate::ObservationError),
     Private(crate::goal_custody::GoalCustodyError),
     Pool(crate::worker_pool::PoolError),
@@ -26,6 +27,7 @@ impl PoolNominationError {
         match self {
             Self::Refused(code) => code,
             Self::Io(_) => "POOL_NOMINATION_IO",
+            Self::Journal(_) => "POOL_RETIRE_NAMESPACE_SCAN",
             Self::Native(e) => e.code(),
             Self::Private(e) => e.code(),
             Self::Pool(e) => e.code(),
@@ -55,6 +57,7 @@ impl std::error::Error for PoolNominationError {
         match self {
             Self::Refused(_) => None,
             Self::Io(e) => Some(e),
+            Self::Journal(e) => Some(e),
             Self::Native(e) => Some(e),
             Self::Private(e) => Some(e),
             Self::Pool(e) => Some(e),
@@ -84,6 +87,7 @@ macro_rules! from_error {
     };
 }
 from_error!(std::io::Error, Io);
+from_error!(reverie_store::operations::JournalError, Journal);
 from_error!(crate::ObservationError, Native);
 from_error!(crate::goal_custody::GoalCustodyError, Private);
 from_error!(crate::worker_pool::PoolError, Pool);

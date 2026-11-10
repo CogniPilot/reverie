@@ -1,6 +1,6 @@
 use super::*;
 impl NominationDerivation {
-    pub(super) fn find_images(
+    pub(in crate::worker_pool::installation_request::nomination) fn find_images(
         &mut self,
         runtime: &WorkerRuntime,
         inputs: &PoolImageInputsData,

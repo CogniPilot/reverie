@@ -53,19 +53,74 @@ fn controller(
     service_v2: bool,
 ) -> Result<(), PoolPolicyError> {
     let value = decode(raw)?;
+    let state = &value["State"];
+    if !(pid > 1
+        && state["Pid"] == pid
+        && state["Running"] == true
+        && state["Paused"] == false
+        && state["Restarting"] == false)
+    {
+        return Err(PoolPolicyError);
+    }
+    controller_spec(
+        &value,
+        policy,
+        cid,
+        birth_digest,
+        service_v2,
+        &policy.controller_name(),
+    )
+}
+/// Failed service-v2 component DATA only. Never activation or cleanup authority.
+/// The host owner must independently bind its original attempt and native state.
+pub fn validate_failed_controller_service_v2_inspection(
+    raw: &[u8],
+    policy: &WorkerPoolPolicy,
+    cid: &str,
+    birth_digest: &str,
+    name: &str,
+) -> Result<(), PoolPolicyError> {
+    let value = decode(raw)?;
+    let state = &value["State"];
+    let valid = state["Pid"] == 0
+        && state["Running"] == false
+        && state["Paused"] == false
+        && state["Restarting"] == false
+        && state["Dead"] == false
+        && state["Status"] == "exited"
+        && state["ExitCode"] == 1
+        && state["OOMKilled"] == false
+        && state["Error"] == ""
+        && state["StartedAt"]
+            .as_str()
+            .is_some_and(|v| !v.starts_with("0001-") && !v.is_empty())
+        && state["FinishedAt"]
+            .as_str()
+            .is_some_and(|v| !v.starts_with("0001-") && !v.is_empty())
+        && value["RestartCount"] == 0
+        && value["HostConfig"]["AutoRemove"] == false
+        && value["HostConfig"]["RestartPolicy"] == json!({"Name":"no","MaximumRetryCount":0});
+    if !valid {
+        return Err(PoolPolicyError);
+    }
+    controller_spec(&value, policy, cid, birth_digest, true, name)
+}
+fn controller_spec(
+    value: &Value,
+    policy: &WorkerPoolPolicy,
+    cid: &str,
+    birth_digest: &str,
+    service_v2: bool,
+    name: &str,
+) -> Result<(), PoolPolicyError> {
     let host = &value["HostConfig"];
     let config = &value["Config"];
     let labels = &config["Labels"];
     let valid = hex_id(cid)
         && hex_id(birth_digest)
-        && pid > 1
         && value["Id"] == cid
         && value["Image"] == policy.controller_image
-        && value["Name"] == format!("/{}", policy.controller_name())
-        && value["State"]["Pid"] == pid
-        && value["State"]["Running"] == true
-        && value["State"]["Paused"] == false
-        && value["State"]["Restarting"] == false
+        && value["Name"] == format!("/{name}")
         && config["User"] == format!("0:{}", policy.broker_gid)
         && config["Entrypoint"] == json!(["/bin/reverie-worker-resource-controller"])
         && config["Cmd"]

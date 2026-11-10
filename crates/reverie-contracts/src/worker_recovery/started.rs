@@ -95,6 +95,48 @@ impl RecoveryInspection {
         }
         before.same_mount_set_observation(&after)
     }
+    /// Whole stopped-container readback for one explicitly named rename. Only
+    /// that exact Name transition and Mounts row ordering are normalized.
+    /// No retirement, completion or native-effect authority is minted here.
+    pub fn same_renamed_container_object_inspection(
+        expected: &str,
+        before: &[u8],
+        after: &[u8],
+        old_name: &str,
+        new_name: &str,
+    ) -> Result<bool> {
+        let expected = ContainerId::parse(expected).map_err(|_| RecoveryDataError::MemoryTarget)?;
+        let decode = |raw| -> Result<Self> {
+            let value = legacy_json::decode_engine_inventory(raw)
+                .map_err(|_| RecoveryDataError::InspectionUnavailable)?;
+            if !matches!(
+                field(&value, "State")?.and_then(|v| field(v, "Running").ok().flatten()),
+                Some(Value(Node::Bool(false)))
+            ) {
+                return Err(RecoveryDataError::MemoryTarget);
+            }
+            Ok(Self {
+                value,
+                running: false,
+            })
+        };
+        let before = decode(before)?;
+        let mut after = decode(after)?;
+        for (row, name) in [(&before, old_name), (&after, new_name)] {
+            if !matches!(field(&row.value,"Name")?,Some(Value(Node::String(v))) if v.equals_ascii(&format!("/{name}")))
+            {
+                return Err(RecoveryDataError::MemoryTarget);
+            }
+        }
+        let original_name = field(&before.value, "Name")?
+            .ok_or(RecoveryDataError::MemoryTarget)?
+            .deep_clone();
+        let Node::Object(fields) = &mut after.value.0 else {
+            return Err(RecoveryDataError::MemoryTarget);
+        };
+        fields.insert(key("Name"), original_name);
+        Self::same_container_rows(&expected, before, after)
+    }
     fn same_mount_set_observation(&self, other: &Self) -> Result<bool> {
         let canonical = |original: &Value| -> Result<Value> {
             let mut value = original.deep_clone();

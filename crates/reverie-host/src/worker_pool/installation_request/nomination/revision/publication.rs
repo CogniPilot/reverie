@@ -18,6 +18,17 @@ pub(super) struct Publication {
     published: bool,
 }
 impl Publication {
+    pub(super) fn history_path(&self) -> &Path {
+        &self.history
+    }
+    pub(super) fn history_fd(&self) -> &File {
+        self.history_fd
+            .as_ref()
+            .expect("original history directory")
+    }
+    pub(super) fn assert_history_bound(&self, owner: &NominationOwner) -> Result<()> {
+        self.assert_history_current(owner)
+    }
     pub(super) fn empty() -> Self {
         Self {
             original: None,
@@ -322,7 +333,7 @@ fn private_directory(path: &Path) -> Result<()> {
         "POOL_NOMINATION_HISTORY_CUSTODY",
     )
 }
-fn fence(
+pub(super) fn fence(
     owner: &NominationOwner,
     locks: &mut ImageMaintenanceLocks,
     service: &ImageServiceMaintenance,

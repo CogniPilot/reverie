@@ -156,7 +156,11 @@ impl NominationDerivation {
         )?;
         Ok((request, fallbacks))
     }
-    fn query(&mut self, runtime: &WorkerRuntime, query: EngineQuery<'_>) -> Result<String> {
+    pub(super) fn query(
+        &mut self,
+        runtime: &WorkerRuntime,
+        query: EngineQuery<'_>,
+    ) -> Result<String> {
         self.last = Some(
             self.reader
                 .query(query, self.deadline(), &runtime.cancellation())?,

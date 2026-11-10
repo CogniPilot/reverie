@@ -4,6 +4,18 @@ use crate::storage_identity::Metadata;
 use reverie_core::ids::ProfileEmployeeId;
 use std::collections::BTreeSet;
 impl PoolInstallationRequestData {
+    /// A fixed-artifact proposal successor only; all principal and non-image
+    /// values remain the same and still need independent website consent.
+    pub fn with_fixed_images(&self, images: [String; 2]) -> Result<Self> {
+        need(images[0] != images[1], "POOL_NOMINATION_FIXED_IMAGES")?;
+        let mut policy = self.policy.clone();
+        policy.anchor_image = images[0].clone();
+        policy.controller_image = images[1].clone();
+        Self::from_enrollment(
+            &crate::worker_config::compact_data(&self.principal.value()),
+            &policy,
+        )
+    }
     pub fn with_employee_highs(
         &self,
         company: &Metadata,

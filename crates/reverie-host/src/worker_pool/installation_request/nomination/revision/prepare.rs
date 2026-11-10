@@ -75,22 +75,23 @@ impl RevisionOwner {
             nonhigh == *original.policy(),
             "POOL_NOMINATION_NONHIGH_BINDINGS_CHANGED",
         )?;
-        self.next = Some(
-            self.nominal
-                .derived
-                .as_ref()
-                .expect("actual company")
-                .revised_highs(original, self.default, &self.overrides)?,
-        );
+        if let Some(retirement) = &mut self.retirement {
+            self.next = Some(retirement.prepare(&mut self.nominal)?);
+        } else {
+            self.next = Some(
+                self.nominal
+                    .derived
+                    .as_ref()
+                    .expect("actual company")
+                    .revised_highs(original, self.default, &self.overrides)?,
+            );
+        }
         need(
-            self.next.as_ref().expect("next").digest() != original.digest(),
+            self.next.as_ref().expect("next").digest()
+                != self.nominal.request.as_ref().expect("old").digest(),
             "POOL_NOMINATION_UNCHANGED",
         )?;
-        self.nominal
-            .derived
-            .as_mut()
-            .expect("actual census")
-            .assert_uninstalled(&self.nominal.runtime, original.policy())?;
+        self.assert_uninstalled()?;
         self.nominal.assert_preflight()?;
         self.stopped
             .as_mut()

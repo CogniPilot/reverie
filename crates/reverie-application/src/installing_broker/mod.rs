@@ -21,7 +21,8 @@ pub use goal_custody::{GoalCustodyHandlerClosed, GoalCustodyHandlerFailure};
 mod image_refresh;
 mod os_pool_nomination;
 pub use os_pool_nomination::{
-    nominate_current_os_worker_pool, nominate_os_worker_pool, revise_os_worker_pool_nomination,
+    nominate_current_os_worker_pool, nominate_os_worker_pool,
+    retire_failed_os_worker_pool_installation, revise_os_worker_pool_nomination,
 };
 mod worker_image;
 mod worker_perf;

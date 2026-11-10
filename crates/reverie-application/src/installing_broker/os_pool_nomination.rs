@@ -60,3 +60,22 @@ pub fn nominate_current_os_worker_pool(
         end,
     )
 }
+
+/// Retain a failed pre-serving installation and derive a new fixed-image
+/// proposal under the actual stopped original Offer-service owner. This is
+/// negative retirement, not original B completion or fresh fleet consent.
+pub fn retire_failed_os_worker_pool_installation(
+    snapshot: &ValidatedWorkerSnapshot,
+    runtime: WorkerRuntime,
+    expected: &JournalDigest,
+    end: Instant,
+) -> Result<PoolNominationPublished, Box<reverie_host::worker_pool::PoolNominationRevisionFailure>>
+{
+    reverie_host::worker_pool::retire_failed_os_pool_installation(
+        snapshot.source_path(),
+        snapshot.configuration(),
+        expected,
+        runtime,
+        end,
+    )
+}

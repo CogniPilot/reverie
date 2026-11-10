@@ -26,6 +26,47 @@ impl NominationDerivation {
         runtime: &WorkerRuntime,
         policy: &WorkerPoolPolicy,
     ) -> Result<()> {
+        self.assert_census(runtime, policy, None)?;
+        self.prepared.observe(policy)?;
+        for path in [
+            PathBuf::from(&policy.instance_root).join("worker-pool/control"),
+            PathBuf::from("/sys/fs/cgroup").join(policy.parent_cgroup_relative()),
+        ] {
+            match fs::symlink_metadata(path) {
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => (),
+                Err(e) => return Err(e.into()),
+                Ok(_) => {
+                    return Err(PoolNominationError::Refused(
+                        "POOL_NOMINATION_INSTALLATION_RETAINED",
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+    pub(in crate::worker_pool::installation_request::nomination) fn assert_failed_installation_census(
+        &mut self,
+        runtime: &WorkerRuntime,
+        policy: &WorkerPoolPolicy,
+        retirement: &super::super::revision::retirement::Retirement,
+    ) -> Result<()> {
+        self.assert_census(runtime, policy, Some(retirement))?;
+        match fs::symlink_metadata(
+            PathBuf::from("/sys/fs/cgroup").join(policy.parent_cgroup_relative()),
+        ) {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(e.into()),
+            Ok(_) => Err(PoolNominationError::Refused(
+                "POOL_NOMINATION_INSTALLATION_RETAINED",
+            )),
+        }
+    }
+    fn assert_census(
+        &mut self,
+        runtime: &WorkerRuntime,
+        policy: &WorkerPoolPolicy,
+        retirement: Option<&super::super::revision::retirement::Retirement>,
+    ) -> Result<()> {
         let raw = self.query(runtime, EngineQuery::InventoryIds)?;
         let mut ids = BTreeSet::new();
         for line in raw.lines() {
@@ -38,6 +79,7 @@ impl NominationDerivation {
             "POOL_NOMINATION_CENSUS",
         )?;
         let mut website = false;
+        let mut failed_seen = false;
         for id in ids {
             let raw = self.query(runtime, EngineQuery::WorkerPoolInspect(&id))?;
             let values: Vec<serde_json::Value> = serde_json::from_str(&raw)
@@ -62,6 +104,13 @@ impl NominationDerivation {
                 labels.values().all(|v| v.is_string()),
                 "POOL_NOMINATION_CENSUS",
             )?;
+            if let Some(retirement) = retirement {
+                if retirement.matches_row(policy, &id, row)? {
+                    need(!failed_seen, "POOL_RETIRE_AMBIGUOUS_CONTROLLER")?;
+                    failed_seen = true;
+                    continue;
+                }
+            }
             need(
                 name != format!("/{}", policy.anchor_name())
                     && name != format!("/{}", policy.controller_name())
@@ -108,21 +157,10 @@ impl NominationDerivation {
             website |= id.as_str() == policy.website_container;
         }
         need(website, "POOL_NOMINATION_WEBSITE_REQUIRED")?;
-        self.prepared.observe(policy)?;
-        for path in [
-            PathBuf::from(&policy.instance_root).join("worker-pool/control"),
-            PathBuf::from("/sys/fs/cgroup").join(policy.parent_cgroup_relative()),
-        ] {
-            match fs::symlink_metadata(path) {
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => (),
-                Err(e) => return Err(e.into()),
-                Ok(_) => {
-                    return Err(PoolNominationError::Refused(
-                        "POOL_NOMINATION_INSTALLATION_RETAINED",
-                    ));
-                }
-            }
-        }
+        need(
+            retirement.is_none() || failed_seen,
+            "POOL_RETIRE_CONTROLLER_DISAPPEARED",
+        )?;
         Ok(())
     }
 }

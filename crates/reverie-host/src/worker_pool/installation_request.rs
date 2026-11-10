@@ -12,7 +12,7 @@ mod nomination;
 pub use nomination::{
     PoolNominationError, PoolNominationFailure, PoolNominationPublished,
     PoolNominationRevisionFailure, publish_current_os_pool_nomination, publish_os_pool_nomination,
-    revise_os_pool_nomination,
+    retire_failed_os_pool_installation, revise_os_pool_nomination,
 };
 
 /// Read only the registered account's private, fixed installation request.

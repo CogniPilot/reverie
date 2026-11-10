@@ -12,6 +12,7 @@ use reverie_core::{ids::ProfileEmployeeId, operations::JournalDigest};
 use std::fmt;
 mod prepare;
 mod publication;
+pub(super) mod retirement;
 struct RevisionOwner {
     nominal: Box<NominationOwner>,
     expected: JournalDigest,
@@ -28,6 +29,7 @@ struct RevisionOwner {
     lock_failure: Option<Box<ImageMaintenanceFailure>>,
     publication: Option<publication::Publication>,
     attempted: bool,
+    retirement: Option<retirement::Retirement>,
 }
 #[must_use = "retain the same revision owner; a partial publication is not replayable"]
 pub struct PoolNominationRevisionFailure {
@@ -61,6 +63,7 @@ impl Drop for PoolNominationRevisionFailure {
         std::mem::forget((self.owner.take(), self.cause.take()));
     }
 }
+pub use retirement::retire_failed_os_pool_installation;
 pub fn revise_os_pool_nomination(
     source: Option<&Path>,
     config: &EffectiveWorkerConfig,
@@ -70,7 +73,7 @@ pub fn revise_os_pool_nomination(
     runtime: WorkerRuntime,
     end: Instant,
 ) -> std::result::Result<PoolNominationPublished, Box<PoolNominationRevisionFailure>> {
-    let mut owner = Box::new(RevisionOwner {
+    let owner = Box::new(RevisionOwner {
         nominal: Box::new(NominationOwner::capture(
             source,
             config,
@@ -93,7 +96,13 @@ pub fn revise_os_pool_nomination(
         lock_failure: None,
         publication: None,
         attempted: false,
+        retirement: None,
     });
+    finish_revision(owner)
+}
+fn finish_revision(
+    mut owner: Box<RevisionOwner>,
+) -> std::result::Result<PoolNominationPublished, Box<PoolNominationRevisionFailure>> {
     let result = owner.run();
     match result {
         Ok(result) => Ok(result),
@@ -122,6 +131,14 @@ impl RevisionOwner {
             .capture(&self.nominal)?;
         self.assert_before()?;
         self.attempted = true;
+        if let Some(retirement) = &mut self.retirement {
+            retirement.publish(
+                &mut self.nominal,
+                self.publication.as_ref().expect("owned history"),
+                self.locks.as_mut().expect("same locks"),
+                self.service.as_ref().expect("same IMAGE"),
+            )?;
+        }
         self.publication
             .as_mut()
             .expect("original file owners")
@@ -190,6 +207,9 @@ impl RevisionOwner {
             .publication
             .as_mut()
             .map_or(Ok(()), publication::Publication::close);
+        let retirement = self.retirement.as_mut().map_or(Ok(()), |owner| {
+            owner.close(&self.nominal.runtime, self.nominal.end)
+        });
         let nominal = self.nominal.close();
         let locks = if let Some(locks) = self.locks.take() {
             match locks.close() {
@@ -222,22 +242,14 @@ impl RevisionOwner {
         } else {
             Ok(())
         };
-        finalized(finalized(files, nominal), finalized(locks, service))
+        finalized(
+            finalized(finalized(files, retirement), nominal),
+            finalized(locks, service),
+        )
     }
     fn assert_before(&mut self) -> Result<()> {
         self.nominal.assert_preflight()?;
-        self.nominal
-            .derived
-            .as_mut()
-            .expect("fresh derivation")
-            .assert_uninstalled(
-                &self.nominal.runtime,
-                self.nominal
-                    .request
-                    .as_ref()
-                    .expect("original proposal")
-                    .policy(),
-            )?;
+        self.assert_uninstalled()?;
         self.nominal
             .derived
             .as_ref()
@@ -251,18 +263,7 @@ impl RevisionOwner {
         self.nominal.assert_preflight()
     }
     fn assert_after(&mut self) -> Result<()> {
-        self.nominal
-            .derived
-            .as_mut()
-            .expect("same derivation")
-            .assert_uninstalled(
-                &self.nominal.runtime,
-                self.nominal
-                    .request
-                    .as_ref()
-                    .expect("original proposal")
-                    .policy(),
-            )?;
+        self.assert_uninstalled()?;
         self.nominal
             .derived
             .as_ref()
@@ -276,7 +277,24 @@ impl RevisionOwner {
         self.service.as_mut().expect("same IMAGE").revalidate()?;
         self.assert_after_files()
     }
+    fn assert_uninstalled(&mut self) -> Result<()> {
+        if let Some(retirement) = &mut self.retirement {
+            retirement.assert_current(&mut self.nominal)
+        } else {
+            self.nominal
+                .derived
+                .as_mut()
+                .expect("original derivation")
+                .assert_uninstalled(
+                    &self.nominal.runtime,
+                    self.nominal.request.as_ref().expect("old request").policy(),
+                )
+        }
+    }
     fn assert_after_files(&self) -> Result<()> {
+        if let Some(retirement) = &self.retirement {
+            retirement.assert_metadata()?;
+        }
         self.nominal.current()?;
         self.nominal
             .derived

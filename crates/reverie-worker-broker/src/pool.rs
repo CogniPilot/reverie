@@ -8,6 +8,14 @@ use std::{
 };
 #[derive(Subcommand)]
 pub(super) enum Action {
+    /// Preserve one failed pre-serving controller and its original evidence,
+    /// then derive a new fixed-image proposal. No activation or worker start.
+    RetireFailedInstallationV1 {
+        #[arg(long)]
+        config: PathBuf,
+        #[arg(long)]
+        expected_request_digest: String,
+    },
     /// Revise only proposed soft thresholds under the original stopped Offer
     /// service. Preserves the old inode; never grants activation or wakes staff.
     ReviseNominationV1 {
@@ -41,6 +49,29 @@ pub(super) enum Action {
 }
 pub(super) fn run(action: Action) -> Result<(), Box<dyn std::error::Error>> {
     match action {
+        Action::RetireFailedInstallationV1 {
+            config,
+            expected_request_digest,
+        } => {
+            let expected = JournalDigest::parse(&expected_request_digest)?;
+            let (snapshot, runtime) = capture(&config)?;
+            let result =
+                reverie_application::installing_broker::retire_failed_os_worker_pool_installation(
+                    &snapshot,
+                    runtime,
+                    &expected,
+                    Instant::now() + Duration::from_secs(30),
+                )?;
+            let request: serde_json::Value = serde_json::from_slice(result.canonical_request())?;
+            println!(
+                "{}",
+                serde_json::json!({"failedInstallationRetired":true,
+                "originalActivationCompleted":false,"nominationRevised":true,
+                "path":result.path(),"requestDigest":result.request_digest(),"proposedNomination":request,
+                "requiresFreshOffer":true,"requiresExplicitMaintenanceConsent":true,"started":false})
+            );
+            Ok(())
+        }
         Action::ReviseNominationV1 {
             config,
             expected_request_digest,
