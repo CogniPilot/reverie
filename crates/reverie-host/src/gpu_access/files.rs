@@ -1,6 +1,10 @@
 use super::*;
 mod pending;
 mod perf;
+mod protected;
+pub(crate) use protected::WorkerProtectedStores;
+mod rename_fence;
+use rename_fence::ConfigurationRenameFence;
 mod terminal;
 #[cfg(test)]
 mod tests;
@@ -165,9 +169,28 @@ pub(crate) fn replace_image_configuration(
         bytes,
         Some(expected),
         Some((group, end, pending)),
-        fence,
+        fence.map(ConfigurationRenameFence::Image),
     )?
     .ok_or(GpuHostError::Refused("WORKER_IMAGE_READBACK_REQUIRED"))
+}
+/// Same strict writer with the closed original-pool-admission fence.
+pub(crate) fn replace_pool_configuration(
+    path: &Path,
+    bytes: &[u8],
+    expected: &GpuFileStamp,
+    group: u32,
+    end: std::time::Instant,
+    pending: &crate::private_pending::PendingFile,
+    fence: &mut crate::reservation_control::PoolRenameFence<'_>,
+) -> Result<GpuFileStamp> {
+    replace_mode(
+        path,
+        bytes,
+        Some(expected),
+        Some((group, end, pending)),
+        Some(ConfigurationRenameFence::Pool(fence)),
+    )?
+    .ok_or(GpuHostError::Refused("POOL_PUBLICATION_READBACK_REQUIRED"))
 }
 fn replace_mode(
     path: &Path,
@@ -178,7 +201,7 @@ fn replace_mode(
         std::time::Instant,
         &crate::private_pending::PendingFile,
     )>,
-    mut fence: Option<&mut crate::worker_image::ImageRenameFence<'_>>,
+    mut fence: Option<ConfigurationRenameFence<'_, '_>>,
 ) -> Result<Option<GpuFileStamp>> {
     let parent = path
         .parent()
@@ -226,9 +249,7 @@ fn replace_mode(
                 pending.assert_current().map_err(pending::gpu_error)?;
             }
             if let Some(fence) = fence.as_mut() {
-                fence
-                    .assert_current()
-                    .map_err(|e| GpuHostError::ImageFence(Box::new(e)))?;
+                fence.assert_current()?;
             }
             attempted = true;
             native::replace_policy(&directory, &temporary.name, leaf)?;

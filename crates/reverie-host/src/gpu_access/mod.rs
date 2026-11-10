@@ -4,14 +4,15 @@ mod active;
 mod consumers;
 mod current;
 mod files;
+pub(crate) use files::WorkerProtectedStores;
 #[cfg(test)]
 pub(crate) use files::image_path_swap_before_cas_fixture_fault;
 #[cfg(test)]
 pub(crate) use files::image_pending_swap_before_cas_fixture_fault;
 pub(crate) use files::open_parent as open_control_parent;
-pub(crate) use files::replace_image_configuration;
 #[cfg(test)]
 pub(crate) use files::{clear_image_fixture_faults, image_after_rename_fixture_fault};
+pub(crate) use files::{replace_image_configuration, replace_pool_configuration};
 mod hardware;
 mod stamp;
 pub use active::observe_active_device;
@@ -41,6 +42,7 @@ pub enum GpuHostError {
     Physical(reverie_core::gpu_access::GpuAccessError),
     Engine(crate::engine_metadata::EngineError),
     ImageFence(Box<crate::worker_image::ImageFileError>),
+    PoolFence(Box<crate::reservation_control::ControlHostError>),
     Finalized {
         primary: Box<Self>,
         secondary: Box<Self>,
@@ -60,6 +62,7 @@ impl GpuHostError {
             Self::Physical(error) => error.code(),
             Self::Engine(error) => error.code(),
             Self::ImageFence(error) => error.code(),
+            Self::PoolFence(error) => error.code(),
             Self::Finalized { primary, .. } => primary.code(),
             Self::PublicationUnknown(_) => "GPU_PUBLICATION_UNCONFIRMED",
         }
@@ -68,9 +71,24 @@ impl GpuHostError {
         match self {
             Self::PublicationUnknown(_) => true,
             Self::ImageFence(error) => error.is_uncertain(),
+            Self::PoolFence(error) => error.has_unconfirmed_close(),
             Self::Finalized { primary, secondary } => {
                 primary.is_uncertain() || secondary.is_uncertain()
             }
+            _ => false,
+        }
+    }
+    /// Descriptor-close opacity only. Rename outcome uncertainty is separate.
+    pub(crate) fn has_unconfirmed_close(&self) -> bool {
+        match self {
+            Self::Native(error) => error.has_unconfirmed_close(),
+            Self::Metadata(error) => error.has_unconfirmed_close(),
+            Self::ImageFence(error) => error.has_unconfirmed_close(),
+            Self::PoolFence(error) => error.has_unconfirmed_close(),
+            Self::Finalized { primary, secondary } => {
+                primary.has_unconfirmed_close() || secondary.has_unconfirmed_close()
+            }
+            Self::PublicationUnknown(error) => error.has_unconfirmed_close(),
             _ => false,
         }
     }

@@ -91,6 +91,19 @@ impl PendingFile {
     /// is no owned descriptor close after unlink and no Drop/retry cleanup.
     pub(crate) fn release(&mut self, end: Option<Instant>) -> Result<()> {
         self.assert_current()?;
+        self.unlink_before(end)
+    }
+    /// Original pool budget, read after the final named-file check and directly
+    /// before the one unlink. This never constructs a grace or replacement budget.
+    pub(crate) fn release_with_stop(
+        &mut self,
+        end: Instant,
+        stop: &crate::worker_runtime::WorkerStopBudget,
+    ) -> Result<()> {
+        self.assert_current()?;
+        self.unlink_before(Some(stop.deadline().map_or(end, |stop| end.min(stop))))
+    }
+    fn unlink_before(&mut self, end: Option<Instant>) -> Result<()> {
         if end.is_some_and(|end| Instant::now() >= end) {
             return Err(PendingError::Deadline);
         }

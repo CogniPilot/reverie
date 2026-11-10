@@ -40,7 +40,7 @@ pub struct PerfPending {
     preview: JournalDigest,
     end: Instant,
 }
-pub struct PerfProtectedStores(Vec<(PathBuf, Option<GpuFileStamp>)>);
+pub struct PerfProtectedStores(WorkerProtectedStores);
 /// Exact final file observations, never held admission or global closure.
 pub struct PerfTerminal {
     brand: Arc<()>,
@@ -115,22 +115,9 @@ impl PerfState {
         self.live()?;
         let result = (|| {
             if self.protected.is_none() {
-                let root =
-                    native::python_path(&self.files.config.control_paths()?.root().codepoints())?;
-                let mut leaves = Vec::new();
-                for path in [
-                    root.join("admission.lock"),
-                    root.join("profiles/profiles.lock"),
-                    root.join("operations/operations.lock"),
-                    root.join("profiles/profiles.json"),
-                    root.join("operations/operations.json"),
-                    root.join("operations/task-perf-owner-requests.json"),
-                    self.files.requests_path()?,
-                ] {
-                    let stamp = GpuFileStamp::observe_optional(&path)?;
-                    leaves.push((path, stamp));
-                }
-                self.protected = Some(Arc::new(PerfProtectedStores(leaves)));
+                self.protected = Some(Arc::new(PerfProtectedStores(
+                    WorkerProtectedStores::capture(&self.files.config)?,
+                )));
             }
             let protected = self.protected.as_ref().expect("captured original stores");
             protected.assert_current()?;

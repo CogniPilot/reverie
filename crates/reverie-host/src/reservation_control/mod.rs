@@ -18,7 +18,11 @@ pub use history::{
 };
 pub use image::{CurrentImageBinding, ImageHostError, capture_current_image};
 pub use policy::{PolicyBinding, PolicyFileStamp, PolicyTransaction, publish_prepared_policy};
-pub use pool_transition::PoolTransitionPending;
+pub(crate) use pool_transition::PoolRenameFence;
+pub use pool_transition::{
+    PoolPublication, PoolPublicationCause, PoolPublicationFailure, PoolPublicationPrepared,
+    PoolTerminal, PoolTransitionPending,
+};
 pub use publication::{
     PublicationStamp, assert_native_publication, observe_publication, publish_publication,
 };
@@ -55,6 +59,10 @@ pub enum ControlHostError {
     },
     Native(ObservationError),
     PoolTransitionClose(std::sync::Arc<ObservationError>),
+    PoolPublication(std::sync::Arc<PoolPublicationFailure>),
+    PoolWriter(Box<crate::gpu_access::GpuHostError>),
+    PoolActor(Box<crate::resource_facts::ResourceFactsError>),
+    PoolReleaseUnknown(Box<Self>),
     /// Preserve ledger/finalizer variants for typed inspection; no erased
     /// io::Error wrapper is needed to reach a secondary checked-close error.
     Journal(reverie_store::operations::JournalError),
@@ -70,6 +78,10 @@ impl ControlHostError {
             Self::Finalization { primary, .. } => primary.code(),
             Self::Native(e) => e.code(),
             Self::PoolTransitionClose(e) => e.code(),
+            Self::PoolPublication(e) => e.code(),
+            Self::PoolWriter(e) => e.code(),
+            Self::PoolActor(e) => e.code(),
+            Self::PoolReleaseUnknown(_) => "POOL_TRANSITION_RELEASE_UNCONFIRMED",
             Self::Journal(e) => e.code(),
             Self::Metadata(e) => e.code(),
             Self::Configuration(e) => e.code(),
@@ -82,6 +94,10 @@ impl ControlHostError {
         match self {
             Self::Native(error) => error.has_unconfirmed_close(),
             Self::PoolTransitionClose(error) => error.has_unconfirmed_close(),
+            Self::PoolPublication(error) => error.has_unconfirmed_close(),
+            Self::PoolWriter(error) => error.has_unconfirmed_close(),
+            Self::PoolActor(error) => error.has_unconfirmed_close(),
+            Self::PoolReleaseUnknown(error) => error.has_unconfirmed_close(),
             Self::Metadata(error) => error.has_unconfirmed_close(),
             Self::Finalization { primary, secondary } => {
                 primary.has_unconfirmed_close() || secondary.has_unconfirmed_close()
@@ -110,6 +126,10 @@ impl std::error::Error for ControlHostError {
             Self::Finalization { primary, .. } => Some(primary),
             Self::Native(error) => Some(error),
             Self::PoolTransitionClose(error) => Some(error.as_ref()),
+            Self::PoolPublication(error) => Some(error.as_ref()),
+            Self::PoolWriter(error) => Some(error.as_ref()),
+            Self::PoolActor(error) => Some(error.as_ref()),
+            Self::PoolReleaseUnknown(error) => Some(error.as_ref()),
             Self::Journal(error) => Some(error),
             Self::Metadata(error) => Some(error),
             Self::Configuration(error) => Some(error),
@@ -120,6 +140,16 @@ impl std::error::Error for ControlHostError {
 impl From<ObservationError> for ControlHostError {
     fn from(value: ObservationError) -> Self {
         Self::Native(value)
+    }
+}
+impl From<crate::gpu_access::GpuHostError> for ControlHostError {
+    fn from(value: crate::gpu_access::GpuHostError) -> Self {
+        Self::PoolWriter(Box::new(value))
+    }
+}
+impl From<crate::resource_facts::ResourceFactsError> for ControlHostError {
+    fn from(value: crate::resource_facts::ResourceFactsError) -> Self {
+        Self::PoolActor(Box::new(value))
     }
 }
 impl From<IdentityError> for ControlHostError {
