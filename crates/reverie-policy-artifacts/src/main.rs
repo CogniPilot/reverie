@@ -10,6 +10,7 @@ mod idmap;
 mod output;
 mod pool_images;
 mod verify;
+mod website_provenance;
 mod worker_child;
 
 #[derive(Parser)]
@@ -40,7 +41,9 @@ struct Arguments {
     verify_manifest: Option<PathBuf>,
 }
 fn main() {
-    let result = if idmap::requested() {
+    let result = if website_provenance::requested() {
+        website_provenance::run()
+    } else if idmap::requested() {
         idmap::run()
     } else if codex_inputs::requested() {
         codex_inputs::run()

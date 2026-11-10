@@ -24,6 +24,11 @@ pub use protocol::{
     decode_fleet_maintenance_hello, decode_pool_registration_hello, decode_ram_pool_hello,
 };
 mod provenance;
+mod provenance_build;
+pub use provenance_build::{
+    WebsiteArchiveConfiguration, WebsiteArchiveManifest, WebsiteProvenanceBuild,
+    WebsiteStartupBuildGraph,
+};
 mod worker_image;
 pub use worker_image::WorkerImageProvenance;
 mod settings;

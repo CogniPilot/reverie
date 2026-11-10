@@ -90,3 +90,29 @@ or Codex native/runtime acceptance is claimed.
 ELF bundler. It uses declared Nix build inputs and a fresh output root. Neither
 helper is executed; no user/group mapping, file capability or setid grant is
 performed. The existing image factory still owns capability installation.
+
+`website-image-provenance --archive PATH --console PATH --node PATH
+--client-manifest PATH [--program-manifest PATH] --output PATH` replaces the
+website Nix provenance producer. The build-only reader derives Nix namespace
+ownership from the actual root/store, checks immutable file identity and closes
+every opened input/output with errors retained. Contracts owns the lossless
+v1 metadata, complete Config, native-client schema, optional startup graph,
+aware creation timestamp and sorted compact ASCII encoding. Raw Node invocation
+and resolved executable remain distinct. No image member is executed or
+extracted. This neither loads nor deploys an image, proves layer contents or
+privacy, grants authority, nor changes an installed runtime.
+
+Inputs retain the original 16 GiB archive, 64 GiB expanded stream, 4 MiB JSON,
+4,096 logical member, 256 MiB per-code-file and optional 512 MiB code-graph
+bounds. One 300-second deadline covers all reads. Streaming passes bound memory
+without retaining every configuration or any layer. Before logical tar parsing,
+a raw pass limits GNU/PAX extension records to 4 MiB each and 8 MiB total.
+This fixed-factory reader accepts plain/gzip archives, rejects sparse/global
+PAX records, size-changing PAX and repeated PAX keys; the old general Python
+archive API could accept additional formats. Those are explicit build safety
+restrictions, not a claim of compatibility for arbitrary legacy CLI inputs.
+
+The Python website provenance module remains for active worker provenance and
+resource-actor helper imports, as well as historical factory source pins.
+Moving the selected website build invocation does not retire those consumers
+or remove all build-time/service-runtime Python.
