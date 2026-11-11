@@ -18,15 +18,15 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import {frontendPrototypeMethods} from './helpers/frontend-declarations.js';
 
 const PUBLIC_DIR = fileURLToPath(new URL('../src/web/public', import.meta.url));
 
 const appJs = readFileSync(join(PUBLIC_DIR, 'app.js'), 'utf-8');
 const constantsJs = readFileSync(join(PUBLIC_DIR, 'constants.js'), 'utf-8');
-const allModules = readdirSync(PUBLIC_DIR)
+const modules = readdirSync(PUBLIC_DIR)
   .filter((name) => name.endsWith('.js'))
-  .map((name) => readFileSync(join(PUBLIC_DIR, name), 'utf-8'))
-  .join('\n');
+  .map(name => ({name, methods: frontendPrototypeMethods(readFileSync(join(PUBLIC_DIR, name), 'utf-8'), 'ReverieApp')}));
 
 /** `[SSE_EVENTS.FOO, '_onFoo'],` entries of the dispatch table. */
 function dispatchEntries(): { constant: string; handler: string }[] {
@@ -54,7 +54,7 @@ describe('SSE dispatch table', () => {
   it('names only handlers that some frontend module actually defines', () => {
     const missing = dispatchEntries()
       .map((entry) => entry.handler)
-      .filter((handler) => !new RegExp(`(^|\\s)${handler}\\s*\\(`, 'm').test(allModules));
+      .filter(handler => !modules.some(module => module.methods.includes(handler)));
     expect(missing).toEqual([]);
   });
 
@@ -64,15 +64,9 @@ describe('SSE dispatch table', () => {
     // wins and the earlier one never runs. The existence check above cannot see that
     // (both names resolve), which is how a duplicate banner handler can leave a toast
     // dead with no error anywhere.
-    const byModule = readdirSync(PUBLIC_DIR)
-      .filter((name) => name.endsWith('.js'))
-      .map((name) => ({ name, source: readFileSync(join(PUBLIC_DIR, name), 'utf-8') }));
     const shadowed = dispatchEntries()
       .map((entry) => entry.handler)
-      .filter((handler) => {
-        const re = new RegExp(`(^|\\s)${handler}\\s*\\(`, 'm');
-        return byModule.filter((mod) => re.test(mod.source)).length > 1;
-      });
+      .filter(handler => modules.flatMap(module => module.methods.filter(name => name === handler)).length > 1);
     expect(shadowed).toEqual([]);
   });
 });

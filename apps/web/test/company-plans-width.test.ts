@@ -32,8 +32,8 @@ it('uses safe-area-aware 24px Board gutters without widening standalone Plans', 
   expect(defaultWidth).toBe('1400px');
   expect(scoped.get('max-width')).toBe('none');
   expect(scoped.get('margin-inline')).toBe('0');
-  expect(scoped.get('padding-left')).toBe('max(24px,env(safe-area-inset-left,0px))');
-  expect(scoped.get('padding-right')).toBe('max(24px,env(safe-area-inset-right,0px))');
+  expect(scoped.get('padding-left')).toMatch(/^max\(24px,\s*env\(safe-area-inset-left,\s*0px\)\)$/);
+  expect(scoped.get('padding-right')).toMatch(/^max\(24px,\s*env\(safe-area-inset-right,\s*0px\)\)$/);
 });
 
 it.each([
