@@ -68,6 +68,7 @@ let
       # Refuse missing or duplicate registrations before the longer test batches.
       npm test -- test/test-suite-partition.test.ts test/test-selection.test.ts
       npm test -- test/account-replacement-profile.test.ts
+      npm test -- test/workspace-hook-preparation.test.ts test/launch-reservation.test.ts
       npm test -- test/approvals-ui-held.test.ts
       npm test -- test/browser-coverage-collection.test.ts test/browser-coverage-execution.test.ts test/browser-coverage-report.test.ts test/browser-coverage-convert.test.ts
       npm test -- test/company-employee-resources-ui.test.ts test/resource-employee-data.test.ts \

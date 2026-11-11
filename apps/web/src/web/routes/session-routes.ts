@@ -1575,7 +1575,7 @@ export function registerSessionRoutes(
         parentSessionId,
       });
 
-<<<<<<< HEAD
+      createdSession = session;
       let tabLayout: TabLayout;
       try {
         const placement = body.tabGroupId ? { tabGroupId: body.tabGroupId } : undefined;
@@ -1587,12 +1587,6 @@ export function registerSessionRoutes(
         if (ctx.sessions.get(session.id) !== session) await session.stop(false);
         throw error;
       }
-=======
-      createdSession = session;
-      const tabLayout = body.tabGroupId
-        ? await ctx.addSession(session, { tabGroupId: body.tabGroupId })
-        : await ctx.addSession(session);
->>>>>>> bd35187ef (fix: fence workspace hooks and provider consent by launch)
       ctx.store.incrementSessionsCreated();
       ctx.persistSessionState(session);
       if (!claim.admitDispatch()) throw new Error('The original replacement claim is no longer current; no provider start was admitted');
