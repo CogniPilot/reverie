@@ -12,6 +12,9 @@ import {
   observeOffice,
   requireOfficeReady,
   paint,
+  closeCoveredPage,
+  closeCoveredContext,
+  closeCoveredBrowser,
   type CompanyView,
 } from './helpers/office-browser.js';
 
@@ -97,21 +100,21 @@ beforeAll(async () => {
   const setupBlocked: string[] = [];
   await contextFor(setup, office.origin(), setupBlocked);
   const setupPage = await setup.newPage();
-  await observeOffice(setupPage);
+  await observeOffice(setupPage, 'office-owner-controls:setup');
   await claimOwner(setupPage, office.origin(), username, password);
   expect(setupBlocked).toEqual([]);
-  await setup.close();
+  await closeCoveredContext(setup);
   employees = await office.seedStoppedEmployees();
   audit = await browser.newContext();
   await contextFor(audit, office.origin(), setupBlocked);
   const login = await audit.newPage();
-  await observeOffice(login);
+  await observeOffice(login, 'office-owner-controls:login');
   await signedIn(login, office.origin(), username, password);
   ownerState = await audit.storageState();
-  await login.close();
+  await closeCoveredPage(login);
 }, 60_000);
 
-beforeEach(async () => {
+beforeEach(async (testContext) => {
   blocked = [];
   errors = [];
   responses = [];
@@ -133,7 +136,7 @@ beforeEach(async () => {
   context = await browser.newContext({ storageState: ownerState, viewport: { width: 1280, height: 900 } });
   await contextFor(context, office.origin(), blocked);
   page = await context.newPage();
-  await observeOffice(page);
+  await observeOffice(page, 'office-owner-controls:' + testContext.task.name);
   page.on('pageerror', (error) => errors.push(error.message));
   page.on('response', (response) =>
     responses.push({
@@ -154,12 +157,12 @@ afterEach(async () => {
     expect(blocked).toEqual([]);
     expect(errors).toEqual([]);
   } finally {
-    await context?.close();
+    if (context) await closeCoveredContext(context);
   }
 });
 afterAll(async () => {
   try {
-    await browser?.close();
+    if (browser) await closeCoveredBrowser(browser);
   } finally {
     await office?.close();
   }

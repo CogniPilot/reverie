@@ -5,7 +5,16 @@ import { randomBytes } from 'node:crypto';
 import { expect, it } from 'vitest';
 import { chromium, type Browser, type BrowserContext, type Page } from 'playwright';
 import { createIsolatedOffice } from './helpers/isolated-office.js';
-import { contextFor, signedIn, json, claimOwner, observeOffice, paint } from './helpers/office-browser.js';
+import {
+  contextFor,
+  signedIn,
+  json,
+  claimOwner,
+  observeOffice,
+  paint,
+  closeCoveredContext,
+  closeCoveredBrowser,
+} from './helpers/office-browser.js';
 
 const artifacts = process.env.TEST_OFFICE_SCREENSHOT_DIR;
 const executablePath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH;
@@ -175,7 +184,7 @@ it('inventories real owner screens and converges GUI/API state without starting 
     await contextFor(setup, origin, blocked);
     const page = await setup.newPage();
     observe(page);
-    await observeOffice(page);
+    await observeOffice(page, 'office-server:setup');
     await claimOwner(page, origin, username, password, (stage) =>
       record(page, 'owner', stage, 'desktop', inventory, exercised)
     );
@@ -191,7 +200,7 @@ it('inventories real owner screens and converges GUI/API state without starting 
         await record(page, kind, 'empty', viewport.name, inventory, exercised);
       }
     }
-    await setup.close();
+    await closeCoveredContext(setup);
     contexts = [];
 
     const employees = await office.seedStoppedEmployees();
@@ -202,7 +211,7 @@ it('inventories real owner screens and converges GUI/API state without starting 
       await contextFor(context, origin, blocked);
       const p = await context.newPage();
       observe(p);
-      await observeOffice(p);
+      await observeOffice(p, 'office-server:' + viewport.name);
       await signedIn(p, origin, username, password, () =>
         record(p, 'owner', 'login', viewport.name, inventory, exercised)
       );
@@ -297,7 +306,7 @@ it('inventories real owner screens and converges GUI/API state without starting 
       }
       expect(await json(p, '/api/sessions')).toEqual([]);
       await office.assertNoRunningIntent();
-      await context.close();
+      await closeCoveredContext(context);
       contexts = contexts.filter((item) => item !== context);
     }
     expect(assets.length).toBeGreaterThan(20);
@@ -345,9 +354,9 @@ it('inventories real owner screens and converges GUI/API state without starting 
     } finally {
       try {
         try {
-          await Promise.all(contexts.map((context) => context.close()));
+          await Promise.all(contexts.map((context) => closeCoveredContext(context)));
         } finally {
-          await browser?.close();
+          if (browser) await closeCoveredBrowser(browser);
         }
       } finally {
         await office.close();

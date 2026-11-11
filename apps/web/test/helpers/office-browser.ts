@@ -2,13 +2,19 @@
 import { expect } from 'vitest';
 import type { BrowserContext, Page } from 'playwright';
 import type { CompanyService } from '../../src/company-service.js';
+import { beginBrowserCoverage } from './browser-coverage.js';
+export { closeCoveredPage, closeCoveredContext, closeCoveredBrowser } from './browser-coverage.js';
 export type CompanyView = ReturnType<CompanyService['view']>;
 
 type Probe = { errors: string[]; assets: string[]; initOrigins: string[] };
 const probes = new WeakMap<Page, Probe>();
+const ownedOrigins = new WeakMap<BrowserContext, string>();
 
 /** Observe Chromium's actual network frames; no endpoint or EventSource is replaced. */
-export async function observeOffice(page: Page) {
+export async function observeOffice(page: Page, label: string) {
+  const origin = ownedOrigins.get(page.context());
+  if (!origin) throw new Error('Install the owned-origin boundary before observing a page');
+  await beginBrowserCoverage(page, origin, label);
   const probe: Probe = { errors: [], assets: [], initOrigins: [] };
   probes.set(page, probe);
   page.on('pageerror', (error) => probe.errors.push(error.message));
@@ -75,6 +81,7 @@ const forbidden = (method: string, path: string) =>
     /^\/api\/company\/(?:hire|resources)/.test(path));
 
 export async function contextFor(context: BrowserContext, origin: string, blocked: string[]) {
+  ownedOrigins.set(context, origin);
   await context.routeWebSocket('**/*', (socket) => {
     blocked.push(`WEBSOCKET ${new URL(socket.url()).pathname}`);
     socket.close({ code: 1008, reason: 'This no-worker fixture permits no runtime sockets' });
