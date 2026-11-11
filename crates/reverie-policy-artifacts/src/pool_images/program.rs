@@ -111,7 +111,14 @@ impl Witness<'_> {
         for entry in archive.entries()? {
             need(Instant::now() < end, "POOL_IMAGE_PROGRAM_DEADLINE")?;
             let mut entry = entry?;
-            let name = name(&entry.path()?)?;
+            let path = entry.path()?;
+            // dockerTools writes absolute store members. Compare their image-root
+            // names without extracting; traversal and normalized duplicates still refuse.
+            let name = name(path.strip_prefix("/").unwrap_or(&path))?;
+            need(
+                !name.is_empty() || entry.header().entry_type().is_dir(),
+                "POOL_IMAGE_PROGRAM_PARENT",
+            )?;
             need(
                 !name.split('/').any(|part| part.starts_with(".wh.")),
                 "POOL_IMAGE_PROGRAM_WHITEOUT",
