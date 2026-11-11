@@ -1,8 +1,19 @@
 /** Actual Chromium coverage; no application request or provider is simulated. */
 import { createHash, randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { linkSync, lstatSync, mkdirSync, readFileSync, readdirSync, unlinkSync, writeFileSync } from 'node:fs';
-import { dirname, join, relative, resolve, sep } from 'node:path';
+import {
+  linkSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
+import { delimiter, dirname, join, relative, resolve, sep } from 'node:path';
 import { z } from 'zod';
 import ts from 'typescript';
 import type { Browser, BrowserContext, Page } from 'playwright';
@@ -47,9 +58,55 @@ const thirdParty = new Set([
   'vendor/xterm-addon-serialize.min.js',
   'vendor/xterm-addon-unicode11.min.js',
   'vendor/xterm-addon-webgl.min.js',
+  'vendor/exceljs.min.js',
+  'vendor/fflate.min.js',
   'gesture/wasm/vision_wasm_internal.js',
   'gesture/wasm/vision_wasm_nosimd_internal.js',
 ]);
+const reproduced = [...generated, 'vendor/exceljs.min.js', 'vendor/fflate.min.js'];
+
+/** A fresh canonical build must agree with the bytes the source server serves. */
+export function requireReproducedAsset(file: string, code: string, outputs: ReadonlyMap<string, string>): string {
+  const expected = outputs.get(file);
+  if (expected === undefined || expected !== code)
+    throw new Error(`Coverage asset differs from fresh canonical output: ${file}`);
+  return hash(expected);
+}
+
+export function requireReproducedAssets(publicRoot: string, outputs: ReadonlyMap<string, string>): Map<string, string> {
+  return new Map(
+    reproduced.map((file) => {
+      const path = join(publicRoot, file);
+      try {
+        if (!lstatSync(path).isFile()) throw new Error('not regular');
+      } catch {
+        throw new Error(`Required coverage asset missing or not regular: ${file}`);
+      }
+      return [file, requireReproducedAsset(file, readFileSync(path, 'utf8'), outputs)];
+    })
+  );
+}
+
+function freshCanonicalOutputs(appRoot: string): Map<string, string> {
+  if (process.env.VITEST !== 'true') throw new Error('Coverage derivation requires the isolated test runner');
+  const output = mkdtempSync(join(tmpdir(), 'browser-coverage-derived-'));
+  try {
+    execFileSync(process.execPath, [join(appRoot, 'scripts/prepare-test-vendor.mjs'), output], {
+      cwd: appRoot,
+      timeout: 30_000,
+      maxBuffer: 4 * 1024 * 1024,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: {
+        ...process.env,
+        PATH: dirname(process.execPath) + delimiter + process.env.PATH,
+        npm_config_offline: 'true',
+      },
+    });
+    return new Map(reproduced.map((file) => [file, readFileSync(join(output, file.slice('vendor/'.length)), 'utf8')]));
+  } finally {
+    rmSync(output, { recursive: true, force: true });
+  }
+}
 
 export function provenance(file: string, tracked: boolean): Provenance {
   if (generated.has(file)) return 'generated-first-party';
@@ -189,6 +246,18 @@ export function sourceCatalog(appRoot: string): Source[] {
     return { name, code, tracked: tracked.has(name) };
   };
   const publicRoot = join(appRoot, 'src/web/public');
+  const generator = verify(join(appRoot, 'scripts/prepare-test-vendor.mjs'));
+  const spreadsheet = verify(join(appRoot, 'scripts/prepare-spreadsheet-assets.mjs'));
+  const lock = verify(join(appRoot, 'package-lock.json'));
+  const inputs = [...tracked].filter(
+    (name) =>
+      name.startsWith(posix(relative(gitRoot, appRoot)) + '/packages/xterm-zerolag-input/src/') && name.endsWith('.ts')
+  );
+  if (!inputs.length || !generator.tracked || !spreadsheet.tracked || !lock.tracked)
+    throw new Error('Coverage derivation lacks tracked generator, lock or authored inputs');
+  const inputHashes = inputs.sort().map((name) => `${name}:${hash(verify(join(gitRoot, name)).code)}`);
+  const fresh = freshCanonicalOutputs(appRoot);
+  const reproducedProofs = requireReproducedAssets(publicRoot, fresh);
   const aliases: Record<string, string[]> = {};
   const routeInputs: string[] = [];
   for (const route of ['board-page-routes.ts', 'plans-page-routes.ts']) {
@@ -204,18 +273,12 @@ export function sourceCatalog(appRoot: string): Source[] {
     if (/\.[cm]?js$/.test(file)) {
       const category = provenance(local, input.tracked);
       let evidence = input.tracked ? `Git ${revision}:${input.name}` : 'Untracked asset; provenance not verified';
-      if (category === 'generated-first-party') {
-        const generator = verify(join(appRoot, 'scripts/prepare-test-vendor.mjs'));
-        const lock = verify(join(appRoot, 'package-lock.json'));
-        const inputs = [...tracked].filter(
-          (name) =>
-            name.startsWith(posix(relative(gitRoot, appRoot)) + '/packages/xterm-zerolag-input/src/') &&
-            name.endsWith('.ts')
-        );
-        if (!inputs.length || !generator.tracked || !lock.tracked)
-          throw new Error(`Generated coverage asset lacks Git source authority: ${local}`);
-        const inputHashes = inputs.sort().map((name) => `${name}:${hash(verify(join(gitRoot, name)).code)}`);
-        evidence = `Generated first-party; generator ${hash(generator.code)}; lock ${hash(lock.code)}; inputs ${hash(inputHashes.join('\n'))}`;
+      const proof = reproducedProofs.get(local);
+      if (proof) {
+        evidence =
+          category === 'generated-first-party'
+            ? `Fresh canonical output ${proof}; generator ${hash(generator.code)}; lock ${hash(lock.code)}; inputs ${hash(inputHashes.join('\n'))}`
+            : `Third-party fresh canonical output ${proof}; preparer ${hash(spreadsheet.code)}; lock ${hash(lock.code)}`;
       }
       output.push({
         id: input.name,
@@ -534,7 +597,7 @@ export class BrowserCoverageCollection {
             'Mixed, third-party and unknown provenance are reported separately.',
             'Unmatched server-rendered/injected scripts and workers remain explicit collection gaps; no completeness is claimed.',
             'Anonymous scripts are disabled and uncollected; they are not included in omission counts.',
-            'Declared generated echo outputs are observed bytes with tracked input provenance; this collector has not freshly reproduced their derivation.',
+            'Echo and spreadsheet bundles are byte-matched to fresh canonical preparer outputs; other generated/mixed assets have no such derivation proof.',
             'Out-of-process or unattributed execution contexts remain explicit gaps and cannot qualify iframe execution.',
           ],
         },

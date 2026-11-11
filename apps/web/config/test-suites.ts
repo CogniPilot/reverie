@@ -118,6 +118,8 @@ export const NON_CI_TEST_GLOBS = [...MOBILE_TEST_GLOBS, ...PERF_TEST_GLOBS, ...B
  * on one of those lines; list it here only with the reason it cannot run there.
  */
 export const NIX_UNCHECKED_TESTS: Record<string, string> = {
+  'test/browser-coverage-git-integration.test.ts':
+    'Requires the real checkout Git object database to verify source authority; runs in the full web CI suite, not flattened packaged Nix source.',
   'test/advisor-model.test.ts':
     '8 of 31 fail: the spawn command now wraps its settings in a /bin/sh -c launcher, which this test\'s settings-JSON parser cannot read.',
   'test/agent-skill-mode-lists.test.ts':

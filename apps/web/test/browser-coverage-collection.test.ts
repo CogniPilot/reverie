@@ -1,20 +1,21 @@
 import { createHash } from 'node:crypto';
 import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
 import { afterEach, expect, it } from 'vitest';
 import type { Execution } from './helpers/browser-coverage-execution.js';
 import {
   canonicalScript,
   provenance,
   publicFiles,
-  sourceCatalog,
   catalogIdentity,
   readRawBaseline,
   inlineScripts,
   servedAliases,
   scriptRoutes,
   type Source,
+  requireReproducedAsset,
+  requireReproducedAssets,
 } from './helpers/browser-coverage.js';
 
 const code = 'function selected() { return true; } selected();';
@@ -81,11 +82,36 @@ it('keeps vendor, generated first-party, mixed and unresolved ownership distinct
   expect(provenance('vendor/xterm-zerolag-input.js', false)).toBe('generated-first-party');
   expect(provenance('vendor/xterm-predictive-echo.js', false)).toBe('generated-first-party');
   expect(provenance('vendor/xterm.min.js', false)).toBe('third-party');
+  expect(provenance('vendor/exceljs.min.js', false)).toBe('third-party');
+  expect(provenance('vendor/fflate.min.js', false)).toBe('third-party');
   expect(provenance('gesture/gesture-reverie.js', true)).toBe('mixed');
   expect(provenance('gesture/wasm/vision_wasm_internal.js', true)).toBe('third-party');
   expect(provenance('vendor/new-owned-module.js', true)).toBe('unknown');
   expect(provenance('nested/authored-module.js', true)).toBe('unknown');
   expect(provenance('selected.js', true)).toBe('raw-authored');
+});
+
+it('requires exact fresh output bytes and refuses missing or changed generated assets', () => {
+  const outputs = new Map([['vendor/owned.js', code]]);
+  expect(requireReproducedAsset('vendor/owned.js', code, outputs)).toBe(source.sha256);
+  expect(() => requireReproducedAsset('vendor/owned.js', code + '\nchanged();', outputs)).toThrow(
+    'fresh canonical output'
+  );
+  expect(() => requireReproducedAsset('vendor/missing.js', code, outputs)).toThrow('fresh canonical output');
+});
+
+it('requires every generated asset at preflight instead of dropping a missing asset from the catalog', () => {
+  const root = mkdtempSync(join(tmpdir(), 'browser-required-assets-'));
+  roots.push(root);
+  mkdirSync(join(root, 'vendor'));
+  const files = ['xterm-zerolag-input.js', 'xterm-predictive-echo.js', 'exceljs.min.js', 'fflate.min.js'];
+  const outputs = new Map(files.map((file) => ['vendor/' + file, code]));
+  for (const file of files) writeFileSync(join(root, 'vendor', file), code);
+  expect(requireReproducedAssets(root, outputs).size).toBe(4);
+  rmSync(join(root, 'vendor/xterm-predictive-echo.js'));
+  expect(() => requireReproducedAssets(root, outputs)).toThrow(
+    'Required coverage asset missing or not regular: vendor/xterm-predictive-echo.js'
+  );
 });
 
 it('records external, anonymous, server-generated and unknown sources as explicit omissions', () => {
@@ -171,19 +197,6 @@ it('refuses source symlinks rather than following them outside the inventory', (
   writeFileSync(join(root, 'original.js'), code);
   symlinkSync(join(root, 'original.js'), join(root, 'alias.js'));
   expect(() => publicFiles(root)).toThrow('source symlink');
-});
-
-it('inventories actual Git-verified source and unvisited generated assets without needing a browser', () => {
-  const sources = sourceCatalog(resolve(import.meta.dirname, '..'));
-  expect(sources.find((entry) => entry.asset === '/chat-app.js')).toMatchObject({
-    provenance: 'raw-authored',
-    kind: 'external',
-  });
-  expect(sources.find((entry) => entry.asset === '/gesture/gesture-reverie.js')).toMatchObject({ provenance: 'mixed' });
-  expect(sources.filter((entry) => entry.provenance === 'raw-authored').length).toBeGreaterThan(70);
-  expect(sources.every((entry) => /^[a-f0-9]{64}$/.test(entry.sha256) && /^[a-f0-9]{40}$/.test(entry.revision))).toBe(
-    true
-  );
 });
 
 function execution(kind: 'main' | 'iframe'): Execution {
