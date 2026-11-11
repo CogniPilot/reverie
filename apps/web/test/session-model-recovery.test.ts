@@ -176,6 +176,8 @@ describe('a launch model and an advisor survive recovery together', () => {
         setAttached: () => {},
         respawnPane: async (options: RespawnPaneOptions) => {
           respawns.push(options);
+          if (options.admitted && !options.admitted()) return null;
+          options.onProviderDispatch?.(); // The fake pane now actually dispatches.
           return 4242;
         },
       } as unknown as TerminalMultiplexer;

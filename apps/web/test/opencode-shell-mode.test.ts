@@ -13,6 +13,7 @@ import {
   type OpencodeTypingIo,
 } from '../src/opencode-input.js';
 import { Session } from '../src/session.js';
+import type { MuxInputOptions } from '../src/mux-interface.js';
 import { ChatroomDelivery, WAKE_LINE, type DeliverySession } from '../src/chatroom-delivery.js';
 import { withWriteGate } from '../src/submit-settle.js';
 
@@ -181,25 +182,31 @@ describe('typing into an OpenCode pane', () => {
 describe('who gets the guard', () => {
   function session(mode: 'opencode' | 'claude') {
     const s = new Session({ workingDir: '/tmp', name: 'w1-demo', mode });
-    const sendInput = vi.fn(async () => true);
-    (s as unknown as { _mux: unknown; _muxSession: unknown })._mux = { sendInput };
-    (s as unknown as { _mux: unknown; _muxSession: unknown })._muxSession = { sessionId: s.id };
+    const sendInput = vi.fn(async (_id: string, _text: string, options: MuxInputOptions = {}) =>
+      !options.admitted || options.admitted());
+    const record = {sessionId: s.id, muxName: 'reverie-guard-fixture', pid: 999_999_983, owner: s.owner};
+    (s as unknown as { _mux: unknown; _muxSession: unknown })._mux = { sendInput, getSession: () => record };
+    (s as unknown as { _mux: unknown; _muxSession: unknown })._muxSession = record;
     return { s, sendInput };
   }
 
   it('an OpenCode pane gets a fullwidth "!" and the opencode typing path, only when the caller asks for the guard', async () => {
     const { s, sendInput } = session('opencode');
     await s.writeViaMux('hello! world\r', { opencodeGuard: true });
-    expect(sendInput).toHaveBeenLastCalledWith(s.id, `hello${FULLWIDTH_BANG} world\r`, { opencode: true });
+    expect(sendInput).toHaveBeenLastCalledWith(s.id, `hello${FULLWIDTH_BANG} world\r`, { opencode: true, admitted: expect.any(Function) });
+    expect(sendInput.mock.calls.at(-1)?.[2]?.admitted?.()).toBe(true);
     // a person's typing (no guard flag) is untouched, "!" and all
     await s.writeViaMux('!ls\r', { fromUser: true });
-    expect(sendInput).toHaveBeenLastCalledWith(s.id, '!ls\r', undefined);
+    expect(sendInput).toHaveBeenLastCalledWith(s.id, '!ls\r', {admitted: expect.any(Function)});
+    const original = sendInput.mock.calls.at(-1)?.[2]?.admitted;
+    expect(original?.()).toBe(true); s.owner = 'changed-owner'; expect(original?.()).toBe(false);
   });
 
   it('a person\u2019s text (remote wake, an approval answer) keeps its leading ! and the guarded typing path', async () => {
     const { s, sendInput } = session('opencode');
     await s.writeViaMux('!ls here! now\r', { opencodeGuard: 'person' });
-    expect(sendInput).toHaveBeenLastCalledWith(s.id, `!ls here${FULLWIDTH_BANG} now\r`, { opencode: 'person' });
+    expect(sendInput).toHaveBeenLastCalledWith(s.id, `!ls here${FULLWIDTH_BANG} now\r`, { opencode: 'person', admitted: expect.any(Function) });
+    expect(sendInput.mock.calls.at(-1)?.[2]?.admitted?.()).toBe(true);
   });
 
   it('the submit verifier\u2019s retry Enter takes the OpenCode path (so a pane left in shell mode is cleared first)', async () => {
@@ -209,20 +216,23 @@ describe('who gets the guard', () => {
     sendInput.mockClear();
     const verifier = (s as unknown as { _submitVerifier: { deps: { sendEnter: () => Promise<boolean> | undefined } } })._submitVerifier;
     await verifier.deps.sendEnter();
-    expect(sendInput).toHaveBeenCalledWith(s.id, '\r', { opencode: true });
+    expect(sendInput).toHaveBeenCalledWith(s.id, '\r', { opencode: true, admitted: expect.any(Function) });
+    expect(sendInput.mock.calls.at(-1)?.[2]?.admitted?.()).toBe(true);
     // and a Claude pane\u2019s retry is the plain one
     const claude = session('claude');
     (claude.s as unknown as { _mux: { capturePaneText: () => string } })._mux.capturePaneText = () => '';
     await claude.s.writeViaMux('hello\r');
     claude.sendInput.mockClear();
     await (claude.s as unknown as { _submitVerifier: { deps: { sendEnter: () => Promise<boolean> | undefined } } })._submitVerifier.deps.sendEnter();
-    expect(claude.sendInput).toHaveBeenCalledWith(claude.s.id, '\r', undefined);
+    expect(claude.sendInput).toHaveBeenCalledWith(claude.s.id, '\r', {admitted: expect.any(Function)});
+    expect(claude.sendInput.mock.calls.at(-1)?.[2]?.admitted?.()).toBe(true);
   });
 
   it('a Claude pane is unchanged even when the guard is asked for', async () => {
     const { s, sendInput } = session('claude');
     await s.writeViaMux('hello! world\r', { opencodeGuard: true });
-    expect(sendInput).toHaveBeenLastCalledWith(s.id, 'hello! world\r', undefined);
+    expect(sendInput).toHaveBeenLastCalledWith(s.id, 'hello! world\r', {admitted: expect.any(Function)});
+    expect(sendInput.mock.calls.at(-1)?.[2]?.admitted?.()).toBe(true);
   });
 
   it('chat delivery types nothing into an OpenCode pane (no verified composer glyph); its member reads through its hooks', async () => {
