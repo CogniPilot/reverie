@@ -3888,6 +3888,8 @@ class ReverieApp {
           this._holdInputRecovery(sessionId);
         } else if (msg.t === 'ir') {
           this._onWsInputRefusal(msg.seq, msg, sessionId);
+        } else if (msg.t === 'ip') {
+          this._onWsInputPending(msg.seq, msg, sessionId);
         } else if (msg.t === 'zc') {
           // Resize confirm — the geometry the PTY actually holds, which is not
           // always the one this client asked for (issue #464).
@@ -4284,7 +4286,10 @@ class ReverieApp {
     const sock = this._inputSocketFor(sessionId);
     if (sock) {
       for (const rec of list) {
-        if (rec.sentAt !== 0) continue;
+        if (rec.sentAt !== 0) {
+          if (rec.receiptPending === true) break;
+          continue;
+        }
         try {
           sock.ws.send(JSON.stringify({ t: 'i', d: rec.data, seq: rec.seq, cid: this._clientId,
             ...(rec.useMux ? {useMux: true} : {}) }));
@@ -4293,6 +4298,7 @@ class ReverieApp {
         } catch {
           break; // socket died mid-send — reconnect/POST drainer retries
         }
+        if (rec.receiptPending === true) break; // Only look up the original; later text waits for its receipt.
       }
       return;
     }
@@ -4305,6 +4311,7 @@ class ReverieApp {
       try {
         for (;;) {
           if (this._sessionInputHeld(sessionId)) break;
+          if ((this._inputRetryAt?.get(sessionId) || 0) > Date.now()) break;
           const cur = this._pendingDeliveries.get(sessionId);
           if (!cur || cur.length === 0) break;
           // If the WebSocket came back mid-drain, yield to it (the acked stream)
@@ -4329,6 +4336,38 @@ class ReverieApp {
             resp = null;
           }
           if (resp && resp.ok) {
+            let payload;
+            try {payload = await resp.json();} catch {
+              // A 2xx may be only a pending receipt. An unreadable body cannot
+              // confirm delivery or authorize replay of the original input.
+              this._dropUnconfirmedInput(sessionId, rec);
+              break;
+            }
+            if (payload?.success === false || payload?.recoveryRequired === true || payload?.data?.recoveryRequired === true
+              || payload?.data?.unconfirmed === true || payload?.data?.held === true || this._sessionInputHeld(sessionId)) {
+              this._dropUnconfirmedInput(sessionId, rec);
+              break;
+            }
+            if (payload?.data?.typedUnsent === true) {
+              this._dropUnconfirmedInput(sessionId, rec,
+                payload.data.delivered === false && payload.data.confirmed !== true && !payload.data.pending);
+              break;
+            }
+            if (payload?.data?.delivered === false) {
+              if (payload.data.confirmed === true || payload.data.pending === true) this._dropUnconfirmedInput(sessionId, rec);
+              else {
+                rec.sentAt = 0;
+                this._inputRetryAt ||= new Map();
+                this._inputRetryAt.set(sessionId, Date.now() + 1000);
+              }
+              break;
+            }
+            if (payload?.data && Object.prototype.hasOwnProperty.call(payload.data, 'pending')) {
+              if (payload.success === true && payload.data.pending === true && Object.keys(payload.data).length === 1)
+                this._rememberPendingInput(sessionId, rec.seq, rec);
+              else this._dropUnconfirmedInput(sessionId, rec);
+              break;
+            }
             this._ackDelivery(sessionId, rec.seq);
           } else if (resp && (resp.status === 404 || resp.status === 410)) {
             // Session no longer exists — the input can never land. Drop it
@@ -4375,6 +4414,7 @@ class ReverieApp {
   /** Finalize this queue entry without claiming its input was delivered. */
   _dropUnconfirmedInput(sessionId, rec, typedUnsent = false) {
     if (!typedUnsent) this._holdInputRecovery(sessionId);
+    else this._inputRetryAt?.delete(sessionId); // The pending lookup ended; a manual Enter is a new user request.
     this._ackDelivery(sessionId, rec.seq, false);
     // Persist even while later frames remain: a reload must not replay the
     // uncertain/unsent frame during the normal debounce window.
@@ -4387,12 +4427,15 @@ class ReverieApp {
   /** Drop an ACKed record (by exact seq) and persist. */
   _ackDelivery(sessionId, seq, delivered = true) {
     let matched = false;
+    let resumePending = false;
     const list = this._pendingDeliveries.get(sessionId);
     if (list) {
       const idx = list.findIndex((r) => r.seq === seq);
       if (idx !== -1) {
         matched = true;
+        resumePending = delivered && list[idx].receiptPending === true;
         list.splice(idx, 1);
+        if (resumePending) this._inputRetryAt?.delete(sessionId);
         if (list.length === 0) this._pendingDeliveries.delete(sessionId);
         // When nothing is left pending anywhere, flush durable state immediately
         // (not debounced) so a reload in the next 250ms can't redeliver an
@@ -4410,6 +4453,7 @@ class ReverieApp {
     // Clearing action alerts here hid a LIVE alert on this device alone (the
     // other devices stayed red and a reload re-seeded it straight back).
     if (delivered && matched) this.markIdleAlertSeen?.(sessionId);
+    if (resumePending) this._drainSession(sessionId);
   }
 
   /**
@@ -4428,12 +4472,37 @@ class ReverieApp {
    * land — and re-sending it would type the same thing twice.
    */
   _onWsInputRefusal(seq, msg, sessionId) {
-    if (msg?.retryable !== true || msg.reason !== 'capacity' || !Number.isInteger(seq) || this._sessionInputHeld(sessionId)) return;
+    if (msg?.t !== 'ir' || msg.seq !== seq || msg.retryable !== true || !['capacity', 'unavailable'].includes(msg.reason)
+      || !Number.isSafeInteger(seq) || seq < 0 || msg.confirmed === true || msg.unconfirmed === true || msg.held === true
+      || this._sessionInputHeld(sessionId)) return;
     const rec = this._pendingDeliveries.get(sessionId)?.find(record => record.seq === seq);
     if (!rec) return;
     rec.sentAt = 0;
     this._inputRetryAt ||= new Map();
     this._inputRetryAt.set(sessionId, Date.now() + 1000);
+    if (msg.reason === 'unavailable' && rec.unavailableWarned !== true) {
+      rec.unavailableWarned = true;
+      this._persistReliableNow();
+      this.showToast?.('Terminal not ready; input remains queued', 'warning');
+    }
+  }
+
+  /** A pending receipt is no delivery proof and no uncertainty-clear grant. */
+  _rememberPendingInput(sessionId, seq, original) {
+    if (!sessionId || !Number.isSafeInteger(seq) || seq < 0 || this._sessionInputHeld(sessionId)) return false;
+    const rec = this._pendingDeliveries.get(sessionId)?.find(record => record.seq === seq);
+    if (!rec || (original && rec !== original)) return false;
+    rec.receiptPending = true;
+    rec.sentAt = 0;
+    this._inputRetryAt ||= new Map();
+    this._inputRetryAt.set(sessionId, Date.now() + 1000);
+    this._persistReliableNow();
+    return true;
+  }
+
+  _onWsInputPending(seq, msg, sessionId) {
+    if (msg?.t !== 'ip' || msg.seq !== seq || Object.keys(msg).some(key => key !== 't' && key !== 'seq')) return;
+    this._rememberPendingInput(sessionId, seq);
   }
 
   _onWsInputAck(seq, msg, sessionId = this._wsSessionId) {
@@ -4447,11 +4516,21 @@ class ReverieApp {
       if (rec && msg.unconfirmed === true) this._dropUnconfirmedInput(sessionId, rec);
       return;
     }
+    if (msg && (Object.prototype.hasOwnProperty.call(msg, 'typedUnsent') || msg.delivered === false)) {
+      if (this._sessionInputHeld(sessionId) || msg.typedUnsent !== true || msg.delivered !== false
+        || msg.confirmed === true || msg.dup || msg.err) return;
+      const rec = this._pendingDeliveries.get(sessionId)?.find(record => record.seq === seq);
+      if (rec) this._dropUnconfirmedInput(sessionId, rec, true);
+      return;
+    }
     if (msg?.confirmed === true) {
       this._ackDelivery(sessionId, seq);
       return;
     }
     if (this._sessionInputHeld(sessionId)) return;
+    // A legacy watermark/plain ACK cannot settle a receipt the server explicitly
+    // reported pending. Only its positive confirmed receipt resumes later text.
+    if (this._pendingDeliveries.get(sessionId)?.some(record => record.seq === seq && record.receiptPending === true)) return;
     if (msg && msg.err) {
       // Refused for good (e.g. over the size limit): retrying cannot help.
       const rec = (this._pendingDeliveries.get(sessionId) || []).find((r) => r.seq === seq);
@@ -4592,6 +4671,8 @@ class ReverieApp {
                 ts: r.ts || Date.now(),
                 tries: 0,
                 sentAt: 0,
+                ...(r.receiptPending === true ? {receiptPending: true} : {}),
+                ...(r.unavailableWarned === true ? {unavailableWarned: true} : {}),
               }));
             if (kept.length) this._pendingDeliveries.set(s, kept);
           }
@@ -4629,6 +4710,8 @@ class ReverieApp {
           useMux: r.useMux,
           ts: r.ts,
           tries: r.tries,
+          ...(r.receiptPending === true ? {receiptPending: true} : {}),
+          ...(r.unavailableWarned === true ? {unavailableWarned: true} : {}),
         }));
         for (const r of list) bytes += r.data.length;
       }
