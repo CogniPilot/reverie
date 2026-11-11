@@ -145,3 +145,49 @@ fn record_encoder_retains_request_field_order_and_fixed_broker_overrides() {
     let expected = include_bytes!("fixtures/worker_child/producer.json");
     assert_eq!(encoded, expected);
 }
+
+#[test]
+fn hook_generation_survives_validated_request_record_and_child_environment() {
+    let config = worker_config::decode(
+        br#"{"mounts":[{"source":"/owned","destination":"/project","readOnly":false}]}"#,
+    )
+    .unwrap();
+    let raw = br#"{"env":{"REVERIE_HOOK_GENERATION":"private-launch-generation"},"rows":24,"command":"x","cwd":"/project","cols":80,"sessionId":"00000000-0000-0000-0000-000000000000"}"#;
+    let request = WorkerRequest::decode(raw, &config).unwrap();
+    let encoded = reverie_contracts::worker_child::encode_launch_record(&request);
+    let record = PrivateChildRecord::decode(&encoded).unwrap();
+    let environment = ChildEnvironment::prepare(
+        vec![(text("REVERIE_HOOK_GENERATION"), text("stale-inherited"))],
+        record.requested_environment().unwrap(),
+        &TemporaryEnvironmentRoot::global(),
+        false,
+    )
+    .unwrap();
+    let values = environment
+        .entries()
+        .iter()
+        .filter(|(key, _)| key.equals_ascii("REVERIE_HOOK_GENERATION"))
+        .collect::<Vec<_>>();
+    assert_eq!(values.len(), 1);
+    assert_eq!(
+        values[0].1,
+        ChildEnvironmentValue::Text(text("private-launch-generation"))
+    );
+    for key in [
+        "REVERIE_HOOK_GENERATION_EXTRA",
+        "REVERIE_HOOK_GENERATION=",
+        "REVERIE_HOOK_GENERATION\0",
+    ] {
+        assert!(reverie_core::worker_launch::EnvironmentKey::parse(key).is_err());
+    }
+    let denied = raw
+        .windows(b"REVERIE_HOOK_GENERATION".len())
+        .position(|part| part == b"REVERIE_HOOK_GENERATION")
+        .unwrap();
+    let mut extended = raw.to_vec();
+    extended.splice(
+        denied..denied + b"REVERIE_HOOK_GENERATION".len(),
+        b"REVERIE_HOOK_GENERATION_EXTRA".iter().copied(),
+    );
+    assert!(WorkerRequest::decode(&extended, &config).is_err());
+}

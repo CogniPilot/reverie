@@ -4,6 +4,8 @@
 mod construction;
 #[path = "native_tests.rs"]
 mod native;
+#[path = "packaged_hook_tests.rs"]
+mod packaged_hooks;
 mod retention;
 mod telemetry;
 use super::*;

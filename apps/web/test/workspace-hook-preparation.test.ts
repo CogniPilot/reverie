@@ -43,7 +43,7 @@ const sessions: Session[] = [];
 beforeEach(async () => {workspace = await mkdtemp(join(tmpdir(), 'hook-preparation-')); transport.envs.length = 0; transport.writes.length = 0;});
 afterEach(async () => {
   for (const session of sessions.splice(0)) {sessionWaits.cancelAll(session.id); approvalInbox.resolveForSession(session.id, 'session_ended'); await session.stop(false);}
-  await rm(workspace, {recursive: true, force: true}); vi.restoreAllMocks();
+  await rm(workspace, {recursive: true, force: true}); vi.restoreAllMocks(); vi.unstubAllEnvs();
 });
 async function start(extra: Partial<ConstructorParameters<typeof Session>[0]> = {}) {
   const proof = await prepareWorkspaceHooks(workspace, 'install', {scaffold: false, enabled: async () => true});
@@ -67,6 +67,30 @@ it('prepares configuration without completing waits or serializing private gener
   let completed = false; void wait.then(() => {completed = true;});
   await new Promise(resolve => setTimeout(resolve, 5)); expect(completed).toBe(false);
   sessionWaits.cancelAll(session.id); await wait;
+});
+it('issues a private epoch for a freshly prepared worker start without trusting restored state', async () => {
+  vi.stubEnv('REVERIE_WORKER_SOCKET', '/synthetic-owned-fixture/worker.sock');
+  const pending = await controlledMuxStart(); pending.succeed(); await pending.starting;
+  const prepared = pending.session, generation = pending.token;
+  expect(typeof generation === 'string' && generation.length > 0).toBe(true);
+  expect(prepared.runtimeHealthScope).toBe('terminal');
+  expect(prepared.admitHookReport(generation)).toBe('current');
+  for (const options of [{prepared:false, expected:'refused'}, {viewer:true, expected:'legacy-attachment'}]) {
+    const restored = await controlledMuxStart(options); restored.succeed(); await restored.starting;
+    expect(restored.session.workspaceHookConfiguration).toBe('unknown');
+    expect(restored.session.admitHookReport(generation)).toBe(options.expected);
+    expect(restored.token).toBe('');
+    expect(resolveWaitSignals('stop', {mode:'claude',...sessionHookOptions(restored.session)}).error).toContain('unknown');
+  }
+});
+it('refuses damaged native-worker restart preparation before touching the current provider epoch', async () => {
+  vi.stubEnv('REVERIE_WORKER_SOCKET', '/synthetic-owned-fixture/worker.sock');
+  const active = await controlledMuxStart(); active.succeed(); await active.starting;
+  await writeFile(join(workspace,'.claude/settings.local.json'), '{ damaged fixture settings');
+  await expect(active.session.restartCli()).rejects.toMatchObject({name:'WorkspaceHookPreparationError'});
+  expect(active.mux.respawnPane).not.toHaveBeenCalled();
+  expect(active.session.admitHookReport(active.token)).toBe('current');
+  expect(active.session.providerDispatchHeld).toBe(false);
 });
 it('consumes proof once and refuses serialized lookalikes', async () => {
   const proof = await prepareWorkspaceHooks(workspace, 'install', {scaffold: false, enabled: async () => true});
@@ -193,19 +217,20 @@ function deferred<T>() {
   const promise = new Promise<T>((yes, no) => {resolve = yes; reject = no;});
   return {promise, resolve, reject};
 }
-async function controlledMuxStart() {
+async function controlledMuxStart(options: {prepared?: boolean; viewer?: boolean} = {}) {
   const dispatched = deferred<{envOverrides: Record<string, string>}>();
   const settlement = deferred<{muxName: string; sessionId: string; pid: number}>();
   const mux = {isAvailable: () => true, backend: 'tmux', muxSessionExists: () => true, isPaneDead: () => false,
     setAttached: vi.fn(), createSession: vi.fn(async (options) => {options.onProviderDispatch?.(); dispatched.resolve(options); return settlement.promise;}),
     respawnPane: vi.fn(async (options) => {options.onProviderDispatch?.(); return 999_999_995;})};
   const proof = await prepareWorkspaceHooks(workspace, 'install', {scaffold: false, enabled: async () => true});
-  const session = new Session({workingDir: workspace, workspaceHookPreparation: proof, useMux: true, mux: mux as never});
+  const session = new Session({workingDir: workspace, workspaceHookPreparation: options.prepared === false ? undefined : proof,
+    workerAttachOnly: options.viewer === true, useMux: true, mux: mux as never});
   sessions.push(session);
   let allowed = true;
   const starting = session.startInteractive(() => allowed);
-  const options = await dispatched.promise;
-  return {session, mux, starting, token: options.envOverrides.REVERIE_HOOK_GENERATION,
+  const dispatch = await dispatched.promise;
+  return {session, mux, starting, token: dispatch.envOverrides.REVERIE_HOOK_GENERATION,
     succeed: () => settlement.resolve({muxName: 'synthetic-current-pane', sessionId: session.id, pid: 999_999_997}),
     fail: () => {allowed = false; settlement.reject(new Error('synthetic launch outcome unconfirmed'));}};
 }

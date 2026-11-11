@@ -905,7 +905,7 @@ export class Session extends EventEmitter {
     authority: () => boolean, eligible: () => boolean = authority, viewerOnly = false): HookProviderDispatch {
     const initialEpoch = this.#workspaceHookEpoch;
     const mode = this.mode;
-    const generation = configuration === 'prepared' && !viewerOnly && !this._workerBacked && !this._remote && !this._docker
+    const generation = configuration === 'prepared' && !viewerOnly && !this._remote && !this._docker
       ? uuidv4() : undefined;
     let phase: {state: 'staged'} | {state: 'dispatched' | 'refused' | 'failed' | 'succeeded'; epoch: number} = {state: 'staged'};
     const current = () => authority() && (viewerOnly || this._providerEffectsAdmitted()) && !this._closing && !this._isStopped && mode === this.mode
@@ -3079,7 +3079,7 @@ export class Session extends EventEmitter {
     const originalMode = this.mode;
     const current = () => stillCurrent() && this.mode === originalMode && !this._closing && !this._isStopped;
     if (!current() || !dispatchAdmitted()) return false;
-    const preparation = !this._workerBacked && !this._remote && !this._docker
+    const preparation = !this._remote && !this._docker
       ? await prepareWorkspaceHooks(this.workingDir, workspaceHookPolicy(this.mode, 'sessionCreate'), {scaffold: false})
       : undefined;
     // Filesystem preparation cannot authorize a stop of a replacement provider.

@@ -36,6 +36,8 @@ fn launch_attach_and_resource_frames_preserve_stdio_and_environment() {
         let mut child = Process::spawn(
             tree.command(&args)
                 .env("CODEX_PROFILE", "λ")
+                .env("REVERIE_HOOK_GENERATION", "private-launch-generation")
+                .env("REVERIE_HOOK_GENERATION_EXTRA", "not-a-generation-key")
                 .env("PATH", "/secret")
                 .env("REVERIE_OWNER_TOKEN", "never"),
         );
@@ -49,7 +51,10 @@ fn launch_attach_and_resource_frames_preserve_stdio_and_environment() {
         } else {
             &outer
         };
-        assert_eq!(request["env"], json!({"CODEX_PROFILE":"λ"}));
+        assert_eq!(
+            request["env"],
+            json!({"CODEX_PROFILE":"λ", "REVERIE_HOOK_GENERATION":"private-launch-generation"})
+        );
         assert_eq!(request["cols"], 120);
         assert_eq!(request["rows"], 40);
         assert_eq!(request["cwd"], "/workspace/λ");
