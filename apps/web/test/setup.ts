@@ -27,15 +27,18 @@ const originalTemp = {
   TEMP: process.env.TEMP,
   TMUX_TMPDIR: process.env.TMUX_TMPDIR,
 };
+const originalXdg = {
+  XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME,
+  XDG_CACHE_HOME: process.env.XDG_CACHE_HOME,
+  XDG_DATA_HOME: process.env.XDG_DATA_HOME,
+};
 const originalPlaywrightBrowsersPath = process.env.PLAYWRIGHT_BROWSERS_PATH;
 // Refuse to run against a live instance. A data dir holding `state.json` belongs
 // to a running Reverie, so this run shares that instance's memory limit and can
 // reach live state through anything the env strip below misses. On 2026-10-15
 // a run in the live container OOM-killed the CTO pane and wrote fixtures into
 // live state. Run the suite in a development container instead.
-const liveDataDir = [process.env.REVERIE_DATA_DIR].find(
-  (dir) => !!dir && existsSync(join(dir, 'state.json'))
-);
+const liveDataDir = [process.env.REVERIE_DATA_DIR].find((dir) => !!dir && existsSync(join(dir, 'state.json')));
 if (liveDataDir) {
   throw new Error(
     `Refusing to run tests inside a live Reverie instance (data dir ${liveDataDir}). ` +
@@ -55,6 +58,9 @@ if (originalPlaywrightBrowsersPath === undefined && originalHome) {
 }
 process.env.HOME = testHome;
 process.env.USERPROFILE = testHome;
+process.env.XDG_CONFIG_HOME = join(testHome, '.config');
+process.env.XDG_CACHE_HOME = join(testHome, '.cache');
+process.env.XDG_DATA_HOME = join(testHome, '.local', 'share');
 // Temp dirs too: tests make their own with mkdtemp(tmpdir()) and many never remove them (about 12k dirs, 1.9 GB on
 // one laptop in six days). Point the temp dir at one per-file directory that the teardown below removes, so it takes
 // them all with it; os.tmpdir() reads these on every call, so this covers every test file and helper. It is a short
@@ -92,6 +98,28 @@ delete process.env.REVERIE_BASE_URL;
 // a transcript fixture under the temp HOME's `~/.claude/projects` then reads "no transcript"
 // (found at merge of #467: test/session-custom-model-restart.test.ts went red).
 delete process.env.CLAUDE_CONFIG_DIR;
+// These override HOME or contain provider configuration/credentials. Strip them
+// before importing application modules, just as for the Claude account above.
+delete process.env.CODEX_HOME;
+delete process.env.DSH_HOME;
+delete process.env.GEMINI_CLI_HOME;
+delete process.env.GROK_HOME;
+delete process.env.PI_CODING_AGENT_DIR;
+delete process.env.OPENCODE_CONFIG;
+delete process.env.OPENCODE_CONFIG_DIR;
+delete process.env.OPENCODE_CONFIG_CONTENT;
+delete process.env.GOOGLE_APPLICATION_CREDENTIALS;
+delete process.env.ANTHROPIC_AUTH_TOKEN;
+delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
+delete process.env.OPENAI_ACCESS_TOKEN;
+delete process.env.CODEX_AUTH_TOKEN;
+delete process.env.GOOGLE_OAUTH_ACCESS_TOKEN;
+delete process.env.OMP_AUTH_BROKER_TOKEN;
+// Covers built-in and custom providers without inheriting a developer's key.
+// Native fixture opt-ins, Nix bindings and browser/tool installation paths stay.
+for (const key of Object.keys(process.env)) {
+  if (key.endsWith('_API_KEY')) delete process.env[key];
+}
 
 // Instance selection is PROCESS-WIDE and is what `src/config/instance.ts` derives
 // both the data dir and the tmux socket from, so a shell that exports any of these
@@ -157,6 +185,10 @@ afterAll(async () => {
   else process.env.PLAYWRIGHT_BROWSERS_PATH = originalPlaywrightBrowsersPath;
 
   for (const [key, value] of Object.entries(originalTemp)) {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
+  for (const [key, value] of Object.entries(originalXdg)) {
     if (value === undefined) delete process.env[key];
     else process.env[key] = value;
   }
