@@ -2394,6 +2394,90 @@ describe('session-routes', () => {
   // ========== GET /api/history/sessions ==========
 
   describe('GET /api/history/sessions', () => {
+    async function historyFixture(workingDir: string, sessionId: string, cwd?: string): Promise<string> {
+      const projectKey = workingDir.replace(/[^A-Za-z0-9]/g, '-');
+      const projDir = join(process.env.HOME!, '.claude', 'projects', projectKey);
+      await mkdir(projDir, { recursive: true });
+      const line = JSON.stringify({ type: 'user', cwd, message: { role: 'user', content: 'synthetic history' } }) + '\n';
+      await writeFile(join(projDir, `${sessionId}.jsonl`), line + '#'.repeat(4200 - line.length));
+      return projectKey;
+    }
+
+    it.each(['nix-shell.fixture', 'cache.v1_build-2'].flatMap(ancestor =>
+      ['.dotcase', 'cache.repo'].map(leaf => ({ ancestor, leaf }))
+    ))('decodes mixed internal periods and a $leaf directory beneath $ancestor', async ({ ancestor, leaf }) => {
+      const root = await mkdtemp(join(process.env.HOME!, 'history-dots-'));
+      const realDir = join(root, ancestor, leaf);
+      await mkdir(realDir, { recursive: true });
+      await mkdir(join(root, ancestor, leaf.replace(/\./g, '')), { recursive: true });
+      const sessionId = '0000000a-000c-4000-8000-000000000019';
+      const projectKey = await historyFixture(realDir, sessionId);
+      try {
+        const res = await harness.app.inject({ method: 'GET', url: `/api/history/sessions?projectKey=${projectKey}` });
+        expect(res.statusCode).toBe(200);
+        const row = res.json().data.sessions.find((s: { sessionId: string }) => s.sessionId === sessionId);
+        expect(row).toMatchObject({ workingDir: realDir, workingDirExact: false });
+        expect(row.workingDir).not.toContain('//');
+      } finally {
+        await rm(root, { recursive: true, force: true });
+        await rm(join(process.env.HOME!, '.claude', 'projects', projectKey), { recursive: true, force: true });
+      }
+    });
+
+    it('keeps the transcript cwd authoritative when an encoded period path exists and the original cwd is gone', async () => {
+      const root = await mkdtemp(join(process.env.HOME!, 'history-cwd-'));
+      const encodedDir = join(root, 'nix-shell.fixture', '.dotcase');
+      const originalCwd = join(root, 'removed.worktree', '.original');
+      await mkdir(encodedDir, { recursive: true });
+      const projectKey = await historyFixture(encodedDir, '0000000a-000c-4000-8000-000000000020', originalCwd);
+      try {
+        const res = await harness.app.inject({ method: 'GET', url: `/api/history/sessions?projectKey=${projectKey}` });
+        expect(res.json().data.sessions).toEqual([expect.objectContaining({ workingDir: originalCwd, workingDirExact: true })]);
+        expect(existsSync(originalCwd)).toBe(false);
+      } finally {
+        await rm(root, { recursive: true, force: true });
+        await rm(join(process.env.HOME!, '.claude', 'projects', projectKey), { recursive: true, force: true });
+      }
+    });
+
+    it('does not expose a foreign owner through a decoded internal-period directory', async () => {
+      const root = await mkdtemp(join(process.env.HOME!, 'history-scope-'));
+      vi.stubEnv('REVERIE_MULTIUSER', '1');
+      vi.stubEnv('REVERIE_USER_SPACES_DIR', join(root, 'users.fixture'));
+      const foreignDir = join(root, 'users.fixture', 'bob', 'cases', '.foreign');
+      const ownDir = join(root, 'users.fixture', 'alice', 'cases', '.own');
+      await mkdir(foreignDir, { recursive: true });
+      await mkdir(ownDir, { recursive: true });
+      const projectKey = await historyFixture(foreignDir, '0000000a-000c-4000-8000-000000000021');
+      const ownId = '0000000a-000c-4000-8000-000000000022';
+      const ownKey = await historyFixture(ownDir, ownId);
+      const escapedDir = join(dirname(ownDir), '.linked.part');
+      await symlink(foreignDir, escapedDir);
+      const escapedKey = await historyFixture(escapedDir, '0000000a-000c-4000-8000-000000000023');
+      const scoped = await createEnvelopeHarness((app, ctx) => {
+        app.addHook('onRequest', async req => { req.authUser = { username: 'alice', role: 'user' }; });
+        registerSessionRoutes(app, ctx, { remoteWake: wakeRegistry, verifiedOwner: trustedFixtureOwner });
+      });
+      try {
+        const own = await scoped.app.inject({ method: 'GET', url: `/api/history/sessions?projectKey=${ownKey}` });
+        expect(own.json().data.sessions).toEqual([expect.objectContaining({ sessionId: ownId, workingDir: ownDir })]);
+        const res = await scoped.app.inject({ method: 'GET', url: `/api/history/sessions?projectKey=${projectKey}` });
+        expect(res.json().data).toEqual({ sessions: [], total: 0 });
+        const escaped = await scoped.app.inject({ method: 'GET', url: `/api/history/sessions?projectKey=${escapedKey}` });
+        expect(escaped.json().data).toEqual({ sessions: [], total: 0 });
+        const all = await scoped.app.inject({ method: 'GET', url: '/api/history/sessions' });
+        expect(all.json().data.sessions.map((s: { sessionId: string }) => s.sessionId)).toEqual([ownId]);
+        const traversal = await scoped.app.inject({ method: 'GET', url: '/api/history/sessions?projectKey=..' });
+        expect(traversal.json().data).toEqual({ sessions: [], total: 0 });
+      } finally {
+        await scoped.app.close();
+        vi.unstubAllEnvs();
+        await rm(root, { recursive: true, force: true });
+        for (const key of [projectKey, ownKey, escapedKey])
+          await rm(join(process.env.HOME!, '.claude', 'projects', key), { recursive: true, force: true });
+      }
+    });
+
     it('returns sessions array', async () => {
       const res = await harness.app.inject({
         method: 'GET',

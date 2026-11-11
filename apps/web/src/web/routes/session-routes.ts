@@ -5366,6 +5366,22 @@ export function registerSessionRoutes(
   async function decodeProjectKey(projKey: string): Promise<string> {
     const encoded = projKey.startsWith('-') ? projKey.slice(1) : projKey;
     const segments = encoded.split('-');
+    const componentWindow = 4;
+
+    // Preserve the legacy dash/underscore precedence. Internal periods need
+    // mixed joins (e.g. nix-shell.opaque), not a uniform dot join. The existing
+    // four-segment window bounds this to 27 combinations; only exact CLI-key
+    // round trips become additional candidates, and stat still must prove them.
+    const componentCandidates = (start: number, end: number, underscoreFirst = false): string[] => {
+      const parts = segments.slice(start, end + 1);
+      if (parts.length > componentWindow) return [];
+      const basic = underscoreFirst ? [parts.join('_'), parts.join('-')] : [parts.join('-'), parts.join('_')];
+      const mixed = parts.slice(1).reduce<string[]>((prefixes, part) =>
+        prefixes.flatMap(prefix => ['-', '_', '.'].map(separator => prefix + separator + part)), [parts[0]]);
+      const periodCandidates = mixed.filter(child => child.includes('.') && child.replace(/[^A-Za-z0-9]/g, '-') === parts.join('-'));
+      return [...new Set([...basic, ...periodCandidates])].filter(child =>
+        child !== '' && child !== '.' && child !== '..' && !child.includes('/') && !child.includes('\\'));
+    };
 
     const isDirCache = new Map<string, boolean>();
     const isDir = async (p: string): Promise<boolean> => {
@@ -5384,22 +5400,10 @@ export function registerSessionRoutes(
     // dash-containing directory names win over shorter same-prefix siblings.
     async function tryDecode(idx: number, current: string): Promise<string | null> {
       if (idx >= segments.length) return current;
-      const maxLook = Math.min(idx + 4, segments.length);
+      const maxLook = Math.min(idx + componentWindow, segments.length);
       // Longest first: end = maxLook-1 down to idx
       for (let end = maxLook - 1; end >= idx; end--) {
-        const candidates: string[] = [];
-        if (end === idx) {
-          // Skip an EMPTY segment: `isDir(current + '/' + '')` stats `current + '/'`,
-          // which always succeeds, so the empty candidate would match unconditionally
-          // and swallow the doubled dash that is the whole signature of a dotdir. It
-          // then resolves "/home/x/.sib" to "/home/x//sib" whenever a non-dot sibling
-          // exists, and shadows the dotdir branch below in every other case.
-          if (segments[idx] !== '') candidates.push(segments[idx]);
-        } else {
-          candidates.push(segments.slice(idx, end + 1).join('-'));
-          candidates.push(segments.slice(idx, end + 1).join('_'));
-        }
-        for (const child of candidates) {
+        for (const child of componentCandidates(idx, end)) {
           const candidate = current + '/' + child;
           if (await isDir(candidate)) {
             const result = await tryDecode(end + 1, candidate);
@@ -5411,13 +5415,9 @@ export function registerSessionRoutes(
       // original path (e.g. "/home/timkjr/.reverie") collapses into an empty
       // split segment here. Retry this window as a dotdir/dotfile: ".<join>".
       if (segments[idx] === '' && idx + 1 < segments.length) {
-        const dotMaxLook = Math.min(idx + 1 + 4, segments.length);
+        const dotMaxLook = Math.min(idx + 1 + componentWindow, segments.length);
         for (let end = dotMaxLook - 1; end >= idx + 1; end--) {
-          const dotCandidates =
-            end === idx + 1
-              ? [segments[idx + 1]]
-              : [segments.slice(idx + 1, end + 1).join('-'), segments.slice(idx + 1, end + 1).join('_')];
-          for (const child of dotCandidates) {
+          for (const child of componentCandidates(idx + 1, end)) {
             const candidate = current + '/.' + child;
             if (await isDir(candidate)) {
               const result = await tryDecode(end + 1, candidate);
@@ -5439,19 +5439,9 @@ export function registerSessionRoutes(
     let i = 0;
     while (i < segments.length) {
       let matched = false;
-      const maxLook = Math.min(i + 4, segments.length);
+      const maxLook = Math.min(i + componentWindow, segments.length);
       for (let end = i; end < maxLook; end++) {
-        const candidates: string[] = [];
-        if (end === i) {
-          // Same empty-segment skip as tryDecode above. This loop is shortest-match
-          // first, so without it the empty candidate matches on the very first try
-          // and sets `matched`, leaving the dotdir branch below permanently dead.
-          if (segments[i] !== '') candidates.push(segments[i]);
-        } else {
-          candidates.push(segments.slice(i, end + 1).join('_'));
-          candidates.push(segments.slice(i, end + 1).join('-'));
-        }
-        for (const child of candidates) {
+        for (const child of componentCandidates(i, end, true)) {
           const candidate = current + '/' + child;
           if (await isDir(candidate)) {
             current = candidate;
@@ -5463,13 +5453,9 @@ export function registerSessionRoutes(
         if (matched) break;
       }
       if (!matched && segments[i] === '' && i + 1 < segments.length) {
-        const dotMaxLook = Math.min(i + 1 + 4, segments.length);
+        const dotMaxLook = Math.min(i + 1 + componentWindow, segments.length);
         for (let end = i + 1; end < dotMaxLook; end++) {
-          const dotCandidates =
-            end === i + 1
-              ? [segments[i + 1]]
-              : [segments.slice(i + 1, end + 1).join('_'), segments.slice(i + 1, end + 1).join('-')];
-          for (const child of dotCandidates) {
+          for (const child of componentCandidates(i + 1, end, true)) {
             const candidate = current + '/.' + child;
             if (await isDir(candidate)) {
               current = candidate;
