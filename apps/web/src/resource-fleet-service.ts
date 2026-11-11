@@ -8,6 +8,7 @@ import { FleetNativeService, type FleetEmployeeRecovery } from './resource-fleet
 import { FleetRecoveryHistory, FleetRecoveryRequest } from './resource-fleet-recovery.js';
 import { FleetOperationStore } from './resource-fleet-operation-store.js';
 import { NativeFleetMigrationFailureError } from './resource-fleet-native-client.js';
+import { FleetReplyCodecUpgradeRequired, NativeFleetPreviewRefusal } from './native-owner-channel.js';
 import {
   NativeFleetPreviewRequest,
   NativeFleetApplyRequest,
@@ -164,6 +165,24 @@ export function registerFleetResourceRoutes(
       } catch (error) {
         if (error instanceof ResourceOwnerAuthorizationError)
           return reply.code(403).send({ success: false, error: 'Company owner authorization is required' });
+        if (action === 'preview' && error instanceof FleetReplyCodecUpgradeRequired)
+          return reply.code(503).send({
+            success: false,
+            code: error.code,
+            outcome: 'upgrade-required',
+            consentDispatched: false,
+            error: error.message,
+          });
+        if (action === 'preview' && error instanceof NativeFleetPreviewRefusal)
+          return reply
+            .code(503)
+            .send({
+              success: false,
+              code: error.code,
+              outcome: 'not-started',
+              consentDispatched: false,
+              error: error.message,
+            });
         const nativeCode =
           error instanceof NativeFleetMigrationFailureError &&
           error.outcome === 'unconfirmed' &&

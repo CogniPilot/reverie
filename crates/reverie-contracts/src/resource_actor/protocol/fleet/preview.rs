@@ -47,7 +47,7 @@ impl FleetPreviewRequest {
         selected: &PoolTransitionSelection,
         policy: &WorkerPoolPolicy,
         expires: u64,
-    ) -> Result<HumanFrame> {
+    ) -> Result<FleetReplyFrame> {
         self.reply(
             selected,
             policy,
@@ -63,7 +63,7 @@ impl FleetPreviewRequest {
         selected: &PoolTransitionSelection,
         policy: &WorkerPoolPolicy,
         expires: u64,
-    ) -> Result<HumanFrame> {
+    ) -> Result<FleetReplyFrame> {
         self.reply(
             selected,
             policy,
@@ -77,7 +77,7 @@ impl FleetPreviewRequest {
         policy: &WorkerPoolPolicy,
         expires: u64,
         stage: ReplyStage,
-    ) -> Result<HumanFrame> {
+    ) -> Result<FleetReplyFrame> {
         need(
             expires > 0 && expires <= reverie_core::revision::JS_SAFE_MAX,
             "FLEET_PREVIEW_EXPIRY",
@@ -87,7 +87,8 @@ impl FleetPreviewRequest {
             .map_err(|_| ResourceActorDataError("FLEET_PREVIEW_POLICY"))?;
         let raw = serde_json::to_vec(policy)
             .map_err(|_| ResourceActorDataError("FLEET_PREVIEW_POLICY"))?;
-        let policy = HumanFrame::decode(&raw).map_err(frame_error)?;
+        let policy =
+            HumanFrame::decode_bounded(&raw, FLEET_REPLY_MAX_FRAME).map_err(frame_error)?;
         let status = match stage {
             ReplyStage::TargetVerificationRequired => "target-verification-required",
             ReplyStage::AwaitingMaintenanceConsent => "awaiting-maintenance-consent",
@@ -102,6 +103,6 @@ impl FleetPreviewRequest {
                 Value(Node::Number(Number::Integer(expires.to_string()))),
             ),
         ]);
-        frame(Value(Node::Object(fields)))
+        FleetReplyFrame::encode(Value(Node::Object(fields)))
     }
 }

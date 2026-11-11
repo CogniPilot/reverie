@@ -145,20 +145,11 @@ pub(super) fn run(
         }
         Ok(AcceptedWorkerServiceConnection::Service(connection))
             if connection.purpose() == WorkerServicePurpose::ResourceActor
-                && reverie_contracts::resource_actor::decode_fleet_maintenance_hello(
+                && reverie_contracts::resource_actor::is_fleet_maintenance_hello(
                     connection.request_bytes(),
-                )
-                .is_ok() =>
+                ) =>
         {
-            match broker.handle_fleet_operation(connection, installation_offer.clone()) {
-                Ok(closed) => {
-                    if closed.primary_error_code().is_some() {
-                        eprintln!("{closed}");
-                    }
-                    None
-                }
-                Err(owner) => Some(Retained::FleetPreview(owner)),
-            }
+            fleet(&broker, connection, installation_offer.clone())
         }
         Ok(AcceptedWorkerServiceConnection::Service(connection)) => service(&broker, connection),
         Err(error) => {
@@ -192,6 +183,36 @@ pub(super) fn run(
         }
     }
 }
+fn fleet<'a>(
+    broker: &'a Arc<InstallingBroker>,
+    connection: WorkerServiceConnection,
+    offer: Option<SharedInstallationOffer>,
+) -> Option<Retained<'a>> {
+    if let Err(cause) = reverie_contracts::resource_actor::decode_fleet_maintenance_hello(
+        connection.request_bytes(),
+    ) {
+        if let Err(error) = connection.report_failure(cause.code()) {
+            eprintln!("{error}");
+        }
+        return match connection.close_socket_for_worker() {
+            Ok(_) => None,
+            Err(error) => {
+                eprintln!("{error}");
+                Some(Retained::Socket(connection))
+            }
+        };
+    }
+    match broker.handle_fleet_operation(connection, offer) {
+        Ok(closed) => {
+            if closed.primary_error_code().is_some() {
+                eprintln!("{closed}");
+            }
+            None
+        }
+        Err(owner) => Some(Retained::FleetPreview(owner)),
+    }
+}
+
 fn registration<'a>(
     broker: &'a Arc<InstallingBroker>,
     connection: WorkerServiceConnection,

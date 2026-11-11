@@ -7,7 +7,7 @@ fn connection(broker: &Arc<InstallingBroker>) -> (UnixStream, WorkerServiceConne
     client
         .set_read_timeout(Some(Duration::from_secs(3)))
         .unwrap();
-    let raw = br#"{"purpose":"resource-fleet-maintenance-v1","version":1}"#;
+    let raw = br#"{"purpose":"resource-fleet-maintenance-v1","version":1,"replyVersion":2}"#;
     client
         .write_all(
             &WorkerFrameHeader::for_payload(b'Q', raw.len())

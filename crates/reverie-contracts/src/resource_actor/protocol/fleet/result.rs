@@ -29,28 +29,26 @@ impl FleetMaintenanceRequest {
         frame(Value(Node::Object(fields)))
     }
 
-    pub fn migration_result(
+    pub fn prepare_migration_result(
         &self,
         policy: &WorkerPoolPolicy,
-        configuration: &str,
-        domain: &str,
         restore: &[(ProfileEmployeeId, ProfileSessionId)],
-    ) -> Result<HumanFrame> {
+    ) -> Result<PreparedFleetMigrationReply> {
         need(
             self.action == FleetMaintenanceAction::MigratePool,
             "POOL_MIGRATION_CONSENT_REQUIRED",
         )?;
-        let configuration = JournalDigest::parse(configuration)
-            .map_err(|_| ResourceActorDataError("POOL_MIGRATION_CONFIGURATION_DIGEST"))?;
-        let domain = JournalDigest::parse(domain)
-            .map_err(|_| ResourceActorDataError("POOL_MIGRATION_DOMAIN_DIGEST"))?;
         policy
             .validate()
             .map_err(|_| ResourceActorDataError("FLEET_PREVIEW_POLICY"))?;
         let raw = serde_json::to_vec(policy)
             .map_err(|_| ResourceActorDataError("FLEET_PREVIEW_POLICY"))?;
-        let policy = HumanFrame::decode(&raw).map_err(frame_error)?;
-        need(restore.len() <= 64, "POOL_MIGRATION_RESTORE_BOUND")?;
+        let policy =
+            HumanFrame::decode_bounded(&raw, FLEET_REPLY_MAX_FRAME).map_err(frame_error)?;
+        need(
+            restore.len() <= crate::storage_identity::MAX_PROVIDER_EMPLOYEES,
+            "POOL_MIGRATION_RESTORE_BOUND",
+        )?;
         let mut employees = std::collections::BTreeSet::new();
         let mut sessions = std::collections::BTreeSet::new();
         let mut rows = Vec::new();
@@ -69,10 +67,10 @@ impl FleetMaintenanceRequest {
             (key("approval"), self.selected.approval_value()),
             (key("phase"), string("pool-configured")),
             (key("policy"), policy.value().deep_clone()),
-            (key("configurationDigest"), string(configuration.as_str())),
-            (key("domainDigest"), string(domain.as_str())),
+            (key("configurationDigest"), string(&"0".repeat(64))),
+            (key("domainDigest"), string(&"0".repeat(64))),
             (key("restore"), Value(Node::Array(rows))),
         ]);
-        frame(Value(Node::Object(fields)))
+        PreparedFleetMigrationReply::prepare(Value(Node::Object(fields)))
     }
 }

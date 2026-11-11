@@ -32,7 +32,7 @@ fn q(broker: &InstallingBroker) -> (UnixStream, WorkerActorChannel) {
     client
         .set_read_timeout(Some(std::time::Duration::from_secs(3)))
         .unwrap();
-    let raw = br#"{"purpose":"resource-fleet-maintenance-v1","version":1}"#;
+    let raw = br#"{"purpose":"resource-fleet-maintenance-v1","version":1,"replyVersion":2}"#;
     client
         .write_all(
             &reverie_core::worker_wire::WorkerFrameHeader::for_payload(b'Q', raw.len())
@@ -59,9 +59,9 @@ fn q(broker: &InstallingBroker) -> (UnixStream, WorkerActorChannel) {
         .unwrap();
     channel.pin_peer().unwrap();
     channel.greet(super::super::tests::end()).unwrap();
-    let mut greeting = [0; b"FLEET_MAINTENANCE_CHANNEL_V1\n".len()];
+    let mut greeting = [0; b"FLEET_MAINTENANCE_CHANNEL_V2\n".len()];
     client.read_exact(&mut greeting).unwrap();
-    assert_eq!(&greeting, b"FLEET_MAINTENANCE_CHANNEL_V1\n");
+    assert_eq!(&greeting, b"FLEET_MAINTENANCE_CHANNEL_V2\n");
     (client, channel)
 }
 fn selection(broker: &InstallingBroker) -> PoolTransitionSelection {

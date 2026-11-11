@@ -1,5 +1,6 @@
 use super::*;
 use serde_json::{Value as Json, json};
+mod capacity;
 mod preview;
 mod result;
 
@@ -24,10 +25,23 @@ fn decode(value: &Json) -> Result<FleetMaintenanceRequest> {
 }
 #[test]
 fn accepts_only_distinct_explicit_fleet_approval_data() {
-    let hello =
-        serde_json::to_vec(&json!({"purpose":FLEET_MAINTENANCE_PURPOSE,"version":1})).unwrap();
+    let hello = serde_json::to_vec(
+        &json!({"purpose":FLEET_MAINTENANCE_PURPOSE,"version":1,"replyVersion":2}),
+    )
+    .unwrap();
     assert!(decode_fleet_maintenance_hello(&hello).is_ok());
     assert!(decode(&request()).is_ok());
+    for value in [
+        json!({"purpose":FLEET_MAINTENANCE_PURPOSE,"version":1}),
+        json!({"purpose":FLEET_MAINTENANCE_PURPOSE,"version":1,"replyVersion":1}),
+    ] {
+        assert_eq!(
+            decode_fleet_maintenance_hello(&serde_json::to_vec(&value).unwrap())
+                .unwrap_err()
+                .code(),
+            "FLEET_REPLY_CODEC_UPGRADE_REQUIRED"
+        );
+    }
 }
 #[test]
 fn per_employee_and_installation_consent_cannot_substitute_for_fleet() {

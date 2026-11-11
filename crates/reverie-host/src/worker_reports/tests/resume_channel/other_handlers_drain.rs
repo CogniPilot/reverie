@@ -26,7 +26,7 @@ fn fleet_channel(
     send(
         &mut client,
         b'Q',
-        br#"{"purpose":"resource-fleet-maintenance-v1","version":1}"#,
+        br#"{"purpose":"resource-fleet-maintenance-v1","version":1,"replyVersion":2}"#,
     );
     let mut channel = accepted(fixture, service, server)
         .retain_fleet_maintenance_website_channel(&fixture.runtime)
@@ -34,9 +34,9 @@ fn fleet_channel(
         .unwrap();
     channel.pin_peer().unwrap();
     channel.greet(end()).unwrap();
-    let mut greeting = [0; b"FLEET_MAINTENANCE_CHANNEL_V1\n".len()];
+    let mut greeting = [0; b"FLEET_MAINTENANCE_CHANNEL_V2\n".len()];
     client.read_exact(&mut greeting).unwrap();
-    assert_eq!(&greeting, b"FLEET_MAINTENANCE_CHANNEL_V1\n");
+    assert_eq!(&greeting, b"FLEET_MAINTENANCE_CHANNEL_V2\n");
     (client, channel)
 }
 

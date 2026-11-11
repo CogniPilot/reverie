@@ -17,8 +17,9 @@ pub use command::RamLaunchCommandData;
 pub use continuation::{ResourceContinuationRequest, ResourceContinuationVerb};
 pub use fleet::{
     CurrentFleetMaintenanceOwner, CurrentFleetPreviewViewer, FLEET_MAINTENANCE_PURPOSE,
-    FleetMaintenanceAction, FleetMaintenanceRequest, FleetPreviewRequest,
-    decode_fleet_maintenance_hello,
+    FLEET_REPLY_MAX_FRAME, FleetMaintenanceAction, FleetMaintenanceRequest, FleetPreviewRequest,
+    FleetReplyFrame, PreparedFleetMigrationReply, decode_fleet_maintenance_hello,
+    is_fleet_maintenance_hello,
 };
 mod installation;
 mod member_policy;

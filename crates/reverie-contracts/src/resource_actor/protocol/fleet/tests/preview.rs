@@ -1,6 +1,6 @@
 use super::*;
 
-fn request_value() -> Json {
+pub(super) fn request_value() -> Json {
     let mut value = request();
     for name in ["consent", "approval", "verb"] {
         value.as_object_mut().unwrap().remove(name);
@@ -8,7 +8,7 @@ fn request_value() -> Json {
     value["kind"] = json!("fleet-preview");
     value
 }
-fn selected(value: &Json) -> Result<FleetPreviewRequest> {
+pub(super) fn selected(value: &Json) -> Result<FleetPreviewRequest> {
     FleetPreviewRequest::decode(&human(value))
 }
 fn current_value() -> Json {
@@ -89,7 +89,7 @@ fn observed_reply_remains_explicitly_unqualified_and_does_not_rederive_selection
     let reply = original
         .observed_reply(approval.selection(), &policy, expiry)
         .unwrap();
-    let reply: Json = serde_json::from_slice(&reply.canonical().unwrap()).unwrap();
+    let reply: Json = serde_json::from_slice(reply.bytes()).unwrap();
     assert_eq!(reply["approval"], request()["approval"]);
     assert_eq!(reply["policy"], serde_json::to_value(&policy).unwrap());
     assert_eq!(reply["requestId"], REQUEST);
@@ -121,11 +121,11 @@ fn qualified_reply_only_requests_separate_maintenance_consent() {
     let ordinary = original
         .observed_reply(approval.selection(), &policy, expiry)
         .unwrap();
-    let ordinary: Json = serde_json::from_slice(&ordinary.canonical().unwrap()).unwrap();
+    let ordinary: Json = serde_json::from_slice(ordinary.bytes()).unwrap();
     let reply = original
         .qualified_reply(approval.selection(), &policy, expiry)
         .unwrap();
-    let reply: Json = serde_json::from_slice(&reply.canonical().unwrap()).unwrap();
+    let reply: Json = serde_json::from_slice(reply.bytes()).unwrap();
     let mut expected = ordinary;
     expected["status"] = json!("awaiting-maintenance-consent");
     assert_eq!(reply, expected);

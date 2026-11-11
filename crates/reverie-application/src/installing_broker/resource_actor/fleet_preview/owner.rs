@@ -134,7 +134,7 @@ impl<'a> NativeFleetPreview<'a> {
                 binding.policy(),
                 expires,
             )?;
-        frame.send(&reply, frame.deadline)?;
+        frame.send_fleet_reply(&reply, frame.deadline)?;
         Ok(())
     }
 }

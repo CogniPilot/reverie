@@ -1,6 +1,7 @@
 //! Current-company provider observation DATA, never a launch/stop grant.
 use super::*;
 use crate::broker_reply::BrokerReply;
+pub const MAX_PROVIDER_EMPLOYEES: usize = 64;
 
 const FIELDS: [&str; 9] = [
     "id",
@@ -124,7 +125,7 @@ impl Metadata {
         let Some(Value(Node::Array(rows))) = field(company, "employees") else {
             return Err(IdentityDataError::CurrentRegistry);
         };
-        if rows.len() > 64 {
+        if rows.len() > MAX_PROVIDER_EMPLOYEES {
             return Err(IdentityDataError::RegistryBound);
         }
         let mut bindings = Vec::new();

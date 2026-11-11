@@ -11,7 +11,7 @@ fn equal_native_census_data_from_a_foreign_context_is_not_the_frames_origin() {
     let fixture = super::super::tests::Fixture::new();
     let (client, connection) = fixture.accept(
         b'Q',
-        br#"{"purpose":"resource-fleet-maintenance-v1","version":1}"#,
+        br#"{"purpose":"resource-fleet-maintenance-v1","version":1,"replyVersion":2}"#,
     );
     let end = Instant::now() + Duration::from_secs(3);
     let mut frame = Frame::incoming(
@@ -108,7 +108,7 @@ fn actual_failed_origin_closes_its_q_without_poisoning_original_b_offer() {
     client
         .set_read_timeout(Some(Duration::from_secs(3)))
         .unwrap();
-    let raw = br#"{"purpose":"resource-fleet-maintenance-v1","version":1}"#;
+    let raw = br#"{"purpose":"resource-fleet-maintenance-v1","version":1,"replyVersion":2}"#;
     client
         .write_all(
             &WorkerFrameHeader::for_payload(b'Q', raw.len())

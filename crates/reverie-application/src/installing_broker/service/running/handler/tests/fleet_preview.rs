@@ -76,13 +76,19 @@ fn actual_fleet_missing_offer_refuses_setup_and_leaves_ram_routing_unchanged() {
         &service,
         &broker,
         &root,
-        br#"{"purpose":"resource-fleet-maintenance-v1","version":1}"#,
+        br#"{"purpose":"resource-fleet-maintenance-v1","version":1,"replyVersion":2}"#,
     );
     let ram = exercise(
         &service,
         &broker,
         &root,
         br#"{"purpose":"resource-ram-pool-v2","version":2}"#,
+    );
+    let old_web = exercise(
+        &service,
+        &broker,
+        &root,
+        br#"{"purpose":"resource-fleet-maintenance-v1","version":1}"#,
     );
     let no_native_change = std::fs::read(root.join("calls.txt")).unwrap() == before;
     let active = !broker.storage.runtime.cancellation().is_cancelled();
@@ -92,5 +98,10 @@ fn actual_fleet_missing_offer_refuses_setup_and_leaves_ram_routing_unchanged() {
     closed.unwrap();
     std::fs::remove_dir_all(root).unwrap();
     assert_eq!(fleet.0.as_deref(), Some("FLEET_PREVIEW_SETUP_REQUIRED"));
+    assert_eq!(
+        old_web.0.as_deref(),
+        Some("FLEET_REPLY_CODEC_UPGRADE_REQUIRED")
+    );
+    assert!(old_web.1);
     assert!(fleet.1 && ram.1 && ram.0.is_none() && no_native_change && active);
 }

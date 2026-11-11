@@ -113,7 +113,7 @@ impl NativeFleetPreview<'_> {
                 expires,
             )?;
         let frame = self.frame.as_mut().expect("same original Q");
-        frame.send(&reply, end)?;
+        frame.send_fleet_reply(&reply, end)?;
         let consent = self.receive_consent_when_ready(end, expires)?;
         self.maintenance_request = Some(FleetMaintenanceRequest::decode(&consent)?);
         let request = self

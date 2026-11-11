@@ -4,8 +4,10 @@ use crate::reservation_control::PoolTransitionSelection;
 
 pub const FLEET_MAINTENANCE_PURPOSE: &str = "resource-fleet-maintenance-v1";
 mod owner;
+mod reply;
 mod result;
 pub use owner::CurrentFleetMaintenanceOwner;
+pub use reply::{FLEET_REPLY_MAX_FRAME, FleetReplyFrame, PreparedFleetMigrationReply};
 mod preview;
 pub use preview::{CurrentFleetPreviewViewer, FleetPreviewRequest};
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -86,8 +88,21 @@ impl FleetMaintenanceRequest {
 }
 pub fn decode_fleet_maintenance_hello(raw: &[u8]) -> Result<()> {
     let frame = HumanFrame::decode(raw).map_err(frame_error)?;
-    closed(frame.value(), &["purpose", "version"])?;
-    purpose_version(frame.value())
+    let value = frame.value();
+    literal(field(value, "purpose")?, FLEET_MAINTENANCE_PURPOSE)?;
+    need(
+        matches!(field(value, "replyVersion").map(|v| &v.0), Ok(Node::Number(Number::Integer(v))) if v == "2"),
+        "FLEET_REPLY_CODEC_UPGRADE_REQUIRED",
+    )?;
+    closed(value, &["purpose", "version", "replyVersion"])?;
+    purpose_version(value)
+}
+/// Routing DATA only. A matching purpose must still pass the closed codec
+/// negotiation before a hold, preview, consent or fleet effect is possible.
+pub fn is_fleet_maintenance_hello(raw: &[u8]) -> bool {
+    HumanFrame::decode(raw).is_ok_and(|frame| {
+        field(frame.value(), "purpose").is_ok_and(|v| literal(v, FLEET_MAINTENANCE_PURPOSE).is_ok())
+    })
 }
 fn purpose_version(value: &Value) -> Result<()> {
     literal(field(value, "purpose")?, FLEET_MAINTENANCE_PURPOSE)?;

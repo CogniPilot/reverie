@@ -10,7 +10,7 @@ fn fleet(
     send(
         &mut client,
         b'Q',
-        br#"{"purpose":"resource-fleet-maintenance-v1","version":1}"#,
+        br#"{"purpose":"resource-fleet-maintenance-v1","version":1,"replyVersion":2}"#,
     );
     let channel = accepted(fixture, service, server)
         .retain_fleet_maintenance_website_channel(&fixture.runtime)
@@ -21,9 +21,9 @@ fn fleet(
 fn greet(client: &mut UnixStream, channel: &mut WorkerActorChannel) {
     channel.pin_peer().unwrap();
     channel.greet(end()).unwrap();
-    let mut raw = [0; b"FLEET_MAINTENANCE_CHANNEL_V1\n".len()];
+    let mut raw = [0; b"FLEET_MAINTENANCE_CHANNEL_V2\n".len()];
     client.read_exact(&mut raw).unwrap();
-    assert_eq!(&raw, b"FLEET_MAINTENANCE_CHANNEL_V1\n");
+    assert_eq!(&raw, b"FLEET_MAINTENANCE_CHANNEL_V2\n");
 }
 #[test]
 fn fleet_ready_keeps_the_original_byte_record_and_hold_until_actual_read() {

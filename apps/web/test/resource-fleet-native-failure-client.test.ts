@@ -25,6 +25,8 @@ const approval = {
   revisionDigest: 'd'.repeat(64),
 };
 type Mode =
+  | 'old-broker'
+  | 'old-broker-refuses'
   | 'normal'
   | 'foreign-request'
   | 'foreign-approval'
@@ -114,10 +116,18 @@ beforeEach(async () => {
           const size = buffer.readUInt32BE(1);
           if (buffer.length < size + 5) return;
           expect(buffer[0]).toBe('Q'.charCodeAt(0));
-          expect(JSON.parse(buffer.subarray(5, size + 5).toString())).toEqual({ purpose, version: 1 });
+          expect(JSON.parse(buffer.subarray(5, size + 5).toString())).toEqual({ purpose, version: 1, replyVersion: 2 });
           buffer = buffer.subarray(size + 5);
           greeted = true;
-          socket.write('FLEET_MAINTENANCE_CHANNEL_V1\n');
+          if (mode === 'old-broker-refuses') {
+            const raw = Buffer.from('RESOURCE_ACTOR_CHANNEL_ORIGIN');
+            const header = Buffer.alloc(5);
+            header[0] = 69;
+            header.writeUInt32BE(raw.length, 1);
+            socket.write(Buffer.concat([header, raw]));
+            return;
+          }
+          socket.write(mode === 'old-broker' ? 'FLEET_MAINTENANCE_CHANNEL_V1\n' : 'FLEET_MAINTENANCE_CHANNEL_V2\n');
         }
         while (buffer.length >= 4) {
           const size = buffer.readUInt32BE(0);
@@ -258,5 +268,22 @@ it('refuses a failure frame before original migration consent', async () => {
   mode = 'before-consent';
   expect((await post('/preview')).statusCode).toBe(503);
   expect(error).not.toBeInstanceOf(NativeFleetMigrationFailureError);
+  expect(consents).toBe(0);
+});
+it('refuses an old broker codec before sending a preview or fleet consent', async () => {
+  mode = 'old-broker';
+  const response = await post('/preview');
+  expect(response.statusCode).toBe(503);
+  expect(response.json().error).toContain('FLEET_REPLY_CODEC_UPGRADE_REQUIRED');
+  expect(error).not.toBeInstanceOf(NativeFleetMigrationFailureError);
+  expect(connections).toBe(1);
+  expect(consents).toBe(0);
+});
+it('retains a pre-preview refusal when an old closed hello decoder rejects the new codec', async () => {
+  mode = 'old-broker-refuses';
+  const response = await post('/preview');
+  expect(response.statusCode).toBe(503);
+  expect(response.json().error).toContain('before any fleet consent was sent');
+  expect(connections).toBe(1);
   expect(consents).toBe(0);
 });

@@ -155,6 +155,30 @@ preparation separate from running-source preparation. A configured policy,
 successful isolated test or closed socket cannot substitute for any of those
 ownership joins or the final pressure/recovery acceptance.
 
+## Fleet reply codec compatibility
+
+The fleet Q handshake requires `replyVersion: 2` and the native
+`FLEET_MAINTENANCE_CHANNEL_V2` greeting. Update the website and native broker
+together. Missing or unsupported codec negotiation is refused before preview,
+consent, handler interruption or pool publication; there is no version-one
+fallback. Persisted version-one operation data and reply JSON retain their
+existing schemas. Package provenance is not proof that an older website/broker
+pair supports this codec.
+
+Incoming requests, owner checks, pool registration and ordinary resource replies
+remain limited to 8 KiB. Only the closed fleet preview/result output type has a
+64 KiB budget. The maximum supported provider registry remains 64 employees;
+the pool policy may separately retain 256 employee thresholds. A maximal valid
+policy with 4,096 CPUs, a 4,096-byte escaped instance path and 64 restoration rows
+encodes to 63,543 bytes in the contract regression.
+
+Before interrupting handlers or draining employees, the coordinator encodes and
+validates all variable-length result fields from the original approved policy
+and restoration cohort. Publication then fills only the two fixed-width digest
+slots from its actual configuration and control-domain receipt. This prepared
+reply is data; it neither authorizes effects nor establishes that publication
+or employee recovery succeeded.
+
 ## Perf qualification boundary
 
 The explicit native image test is

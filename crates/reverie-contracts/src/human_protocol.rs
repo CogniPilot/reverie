@@ -21,7 +21,10 @@ type Result<T> = std::result::Result<T, HumanFrameError>;
 pub struct HumanFrame(OrderedValue);
 impl HumanFrame {
     pub fn decode(raw: &[u8]) -> Result<Self> {
-        need(raw.len() <= MAX_FRAME, "REQUEST_BOUND")?;
+        Self::decode_bounded(raw, MAX_FRAME)
+    }
+    pub(crate) fn decode_bounded(raw: &[u8], maximum: usize) -> Result<Self> {
+        need(raw.len() <= maximum, "REQUEST_BOUND")?;
         depth(raw)?;
         legacy_json::decode_human_protocol_bytes(raw)
             .map(Self)
@@ -38,9 +41,12 @@ impl HumanFrame {
         &self.0.value
     }
     pub fn canonical(&self) -> Result<Vec<u8>> {
+        self.canonical_bounded(MAX_FRAME)
+    }
+    pub(crate) fn canonical_bounded(&self, maximum: usize) -> Result<Vec<u8>> {
         finite(self.0.first_nonfinite())?;
         let raw = self.0.encode_compact();
-        need(!raw.is_empty() && raw.len() <= MAX_FRAME, "FRAME_BOUND")?;
+        need(!raw.is_empty() && raw.len() <= maximum, "FRAME_BOUND")?;
         Ok(raw)
     }
     pub fn decode_canonical(raw: &[u8]) -> Result<Self> {

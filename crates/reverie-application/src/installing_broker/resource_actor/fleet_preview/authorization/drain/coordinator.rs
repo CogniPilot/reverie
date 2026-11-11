@@ -123,6 +123,10 @@ impl<'a> Execution<'a> {
         if !std::ptr::eq(original, self.broker.as_ref()) {
             return Err(MigrationCause::Refused("POOL_MIGRATION_FOREIGN_BROKER"));
         }
+        // All variable-size response fields come from this same approved Q.
+        // Prepare before even capturing/interrupting original handlers. The
+        // publication receipt later fills only checked fixed-width digests.
+        let reply = self.prepare_reply()?;
         self.drain_originals()?;
         let gate = self
             .broker
@@ -152,7 +156,33 @@ impl<'a> Execution<'a> {
             gate.publish_drained_pool(migration, &mut self.controller)
                 .map_err(MigrationCause::Gate)?,
         );
-        self.complete()
+        self.complete(reply)
+    }
+    fn prepare_reply(
+        &mut self,
+    ) -> std::result::Result<PreparedFleetMigrationReply, MigrationCause<'a>> {
+        let preview = &mut self
+            .authorization
+            .as_mut()
+            .expect("actual consent")
+            .authorization
+            .owner;
+        preview
+            .assert_qualified_native()
+            .map_err(MigrationCause::Native)?;
+        let binding = preview.assert_binding().map_err(MigrationCause::Native)?;
+        let restore = preview
+            .coverage
+            .as_ref()
+            .expect("approved company")
+            .restore_bindings()
+            .map_err(MigrationCause::Native)?;
+        preview
+            .maintenance_request
+            .as_ref()
+            .expect("actual migration request")
+            .prepare_migration_result(binding.policy(), &restore)
+            .map_err(|cause| MigrationCause::Native(cause.into()))
     }
     fn drain_originals(&mut self) -> std::result::Result<(), MigrationCause<'a>> {
         let auth = self
@@ -202,7 +232,10 @@ impl<'a> Execution<'a> {
         );
         Ok(())
     }
-    fn complete(&mut self) -> std::result::Result<(), MigrationCause<'a>> {
+    fn complete(
+        &mut self,
+        reply: PreparedFleetMigrationReply,
+    ) -> std::result::Result<(), MigrationCause<'a>> {
         let migration = self.drained.as_mut().expect("actual drained migration");
         let owner = migration.fleet.owner.as_mut().expect("original resources");
         let publication = self
@@ -211,23 +244,8 @@ impl<'a> Execution<'a> {
             .expect("Gate terminal release success");
         let transition = publication.transition();
         let preview = &mut owner.authorization.owner;
-        let restore = preview
-            .coverage
-            .as_ref()
-            .expect("approved company")
-            .restore_bindings()
-            .map_err(MigrationCause::Native)?;
-        let frame = preview
-            .maintenance_request
-            .as_ref()
-            .expect("actual migration request")
-            .migration_result(
-                transition.policy(),
-                &reverie_contracts::worker_config::config_digest(transition.after()).to_hex(),
-                &transition.after_binding().domain().to_hex(),
-                &restore,
-            )
-            .map_err(|cause| MigrationCause::Native(cause.into()))?;
+        let configuration = reverie_contracts::worker_config::config_digest(transition.after());
+        let frame = reply.finish(&configuration, transition.after_binding().domain());
         // Lifecycle remains denied until the Gate has checked-close/released
         // the original pending. The terminal reply claims no worker restart.
         owner
@@ -242,7 +260,7 @@ impl<'a> Execution<'a> {
             .frame
             .as_mut()
             .expect("same Q")
-            .send(&frame, end)
+            .send_fleet_reply(&frame, end)
             .map_err(|cause| MigrationCause::Native(cause.into()))?;
         preview.close_components().map_err(MigrationCause::Native)?;
         let drained = self.drained.take().expect("same completed migration");
