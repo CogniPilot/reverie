@@ -1,8 +1,8 @@
 //! Explicitly opted-in daemon fixture. No production mounts, names or sessions.
 use super::*;
 use std::{ffi::OsString, os::unix::fs::MetadataExt};
-
-const IMAGE: &str = "sha256:9a061fe51e3d0934fbeb512a7670a22618cd4ddd5bd8301155c6167c17a75278";
+mod packaged;
+const WORKER_IMAGE: &str = "REVERIE_VIEWER_TEST_WORKER_IMAGE";
 const CASE: &str = "worker_viewer::tests::docker::docker_tmux_disconnect_and_service_termination_preserve_exact_pane";
 
 struct Container {
@@ -75,24 +75,33 @@ fn docker_tmux_disconnect_and_service_termination_preserve_exact_pane() {
     }
     exercise();
 }
-fn create_container() -> (Container, String) {
-    let docker = std::env::split_paths(&std::env::var_os("PATH").unwrap())
-        .map(|path| path.join("docker"))
-        .find(|path| path.is_file())
-        .expect("fixed local Docker executable");
+fn create_container(fixture: &Fixture) -> (Container, String) {
+    let docker = docker_path();
+    let image = immutable_image(&docker, WORKER_IMAGE);
+    let user = format!(
+        "{}:{}",
+        crate::native::uid(),
+        nix::unistd::getgid().as_raw()
+    );
+    assert!(
+        crate::native::uid() > 0,
+        "run the canary as an ordinary engine user"
+    );
+    let passwd = fixture.root.join("passwd");
+    fs::write(
+        &passwd,
+        format!(
+            "worker:x:{}:{}:Synthetic worker:/tmp:/bin/sh\n",
+            crate::native::uid(),
+            nix::unistd::getgid().as_raw()
+        ),
+    )
+    .unwrap();
     let deployment = format!(
         "viewer-canary-{}",
         &crate::resource_facts::fresh_owner_nonce().unwrap().as_str()[..12]
     );
     let name = format!("{deployment}-agent-{SID}");
-    let image = Command::new(&docker)
-        .args(["image", "inspect", IMAGE])
-        .output()
-        .unwrap();
-    assert!(
-        image.status.success(),
-        "required immutable image must already exist; no pull attempted"
-    );
     let output = Command::new(&docker)
         .args([
             "create",
@@ -109,7 +118,16 @@ fn create_container() -> (Container, String) {
             "--memory",
             "256m",
             "--user",
-            "1000:100",
+            &user,
+            "--workdir",
+            "/tmp",
+            "--env",
+            "HOME=/tmp",
+            "--mount",
+            &format!(
+                "type=bind,src={},dst=/etc/passwd,readonly",
+                passwd.display()
+            ),
             "--label",
             &format!("reverie.worker={deployment}"),
             "--label",
@@ -118,7 +136,7 @@ fn create_container() -> (Container, String) {
             "reverie.employee=11111111-2222-4333-8444-555555555555",
             "--entrypoint",
             "/bin/sleep",
-            IMAGE,
+            &image,
             "infinity",
         ])
         .output()
@@ -155,11 +173,7 @@ fn service(
     container: &Container,
     deployment: String,
 ) -> Arc<WorkerViewerService> {
-    let source = fixture.root.join("broker.json");
-    let mut config: serde_json::Value =
-        serde_json::from_slice(&fs::read(&source).unwrap()).unwrap();
-    config["deployment"] = deployment.into();
-    fs::write(&source, serde_json::to_vec(&config).unwrap()).unwrap();
+    let source = configuration(fixture, deployment);
     let mut environment =
         BTreeMap::<OsString, OsString>::from([("PATH".into(), std::env::var_os("PATH").unwrap())]);
     if let Some(host) = std::env::var_os("DOCKER_HOST") {
@@ -176,9 +190,71 @@ fn service(
     )
     .unwrap()
 }
+fn configuration(fixture: &Fixture, deployment: String) -> PathBuf {
+    let source = fixture.root.join("broker.json");
+    let mut config: serde_json::Value =
+        serde_json::from_slice(&fs::read(&source).unwrap()).unwrap();
+    config["deployment"] = deployment.into();
+    config["gid"] = nix::unistd::getgid().as_raw().into();
+    fs::write(&source, serde_json::to_vec(&config).unwrap()).unwrap();
+    source
+}
+
+fn docker_path() -> PathBuf {
+    std::env::split_paths(&std::env::var_os("PATH").unwrap())
+        .map(|path| path.join("docker"))
+        .find(|path| path.is_file())
+        .expect("fixed local Docker executable")
+}
+fn immutable_image_id(value: &str) -> bool {
+    value.strip_prefix("sha256:").is_some_and(|hex| {
+        hex.len() == 64
+            && hex
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    })
+}
+fn immutable_image(docker: &Path, variable: &str) -> String {
+    let selected =
+        std::env::var(variable).expect("explicit immutable canary image environment is required");
+    assert!(
+        immutable_image_id(&selected),
+        "canary images require canonical immutable IDs"
+    );
+    let output = Command::new(docker)
+        .args(["image", "inspect", "--format", "{{.Id}}", &selected])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "required image must already be loaded; no pull attempted"
+    );
+    assert_eq!(
+        String::from_utf8(output.stdout).unwrap().trim(),
+        selected,
+        "loaded image must match selected immutable ID"
+    );
+    selected
+}
+#[test]
+fn immutable_image_input_rejects_mutable_and_malformed_names() {
+    assert!(immutable_image_id(&format!("sha256:{}", "a".repeat(64))));
+    for value in [
+        "latest",
+        "reverie/worker:current",
+        "sha256:abc",
+        "sha256:",
+        "",
+        "sha256:GG",
+    ] {
+        assert!(!immutable_image_id(value));
+    }
+    assert!(!immutable_image_id(&format!("sha256:{}\n", "a".repeat(64))));
+    assert!(!immutable_image_id(&format!("sha256:{}", "A".repeat(64))));
+}
 fn exercise() {
     let fixture = Fixture::new();
-    let (container, deployment) = create_container();
+    let (container, deployment) = create_container(&fixture);
     let service = service(&fixture, &container, deployment);
     let original_pane = container.pane();
     assert!(original_pane.ends_with(":0"));
