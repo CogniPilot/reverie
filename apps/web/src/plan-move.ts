@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import {assertResourceOperation, type ResourceOwnerBinding} from './resource-owner-authority.js';
 import {ResourceHistoricalSettlement} from './resource-native-client.js';
+import { accountReplacementProfile } from './utils/account-replacement-profile.js';
 
 export type PlanMovePhase =
   | 'waiting'
@@ -364,7 +365,7 @@ export class PlanMoves {
         throw new PlanMoveError('The employee or account changed; refresh before moving');
       if (input.purpose === 'runtime-refresh') {
         if (input.fromAccount !== input.toAccount || input.forceBusy || !input.handoff.trim() ||
-            !['codex', 'claude'].includes(snapshot.mode ?? '') ||
+            !accountReplacementProfile(snapshot.mode) ||
             (input.model !== undefined && input.model !== snapshot.model) ||
             (input.targetMode !== undefined && input.targetMode !== snapshot.mode) ||
             !input.runtimeDigest || !/^[a-f0-9]{64}$/.test(input.runtimeDigest) || snapshot.runtimeDigest !== input.runtimeDigest)

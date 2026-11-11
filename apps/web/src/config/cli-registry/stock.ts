@@ -232,6 +232,7 @@ const CLAUDE: CliEntry = {
   },
   capabilities: {
     external: false,
+    accountReplacementProfile: 'anthropic-account-v1',
     // Claude indents its transcript body two columns and puts its own ●/✻/❯ markers
     // in them, so a copy can drop two and paste flush. Claude and codex are the only
     // entries that declare this, because theirs are the only gutters that have been measured.
@@ -546,6 +547,7 @@ const OPENCODE: CliEntry = {
     // last `┃` row on screen is the composer's agent/model row (or the permission box's
     // closing bar), never the prompt text, so the submit verifier stands down.
     composerReadyMark: 'tab agents',
+    accountReplacementRefusal: 'OpenCode thread moves require a launch-then-stop adapter and are not supported yet',
     workDetect: {
       promptGlyph: '┃',
       workingLine: '[⬝■]{8}',
@@ -700,6 +702,7 @@ const CODEX: CliEntry = {
     // Nothing is misfiled by that (codex raises no idle prompts), and there is no row to
     // match until codex pins one.
     composerReadyMark: '? for shortcuts',
+    accountReplacementProfile: 'openai-account-v1',
     workDetect: {
       promptGlyph: '›',
       workingLine: '[Ee]sc to interrupt',

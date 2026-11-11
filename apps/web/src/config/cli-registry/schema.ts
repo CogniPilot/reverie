@@ -14,7 +14,7 @@
 
 import { z } from 'zod';
 import { compileVersionRegex, countCaptureGroups, TOKEN_PATTERNS } from './patterns.js';
-import { isKnownLauncherProfile, isKnownSetenvProfile } from './profiles.js';
+import { ACCOUNT_REPLACEMENT_PROFILE_NAMES, isKnownLauncherProfile, isKnownSetenvProfile } from './profiles.js';
 import type { AgentSkillDir, LaunchDefaultSettingKey, McpConfigFormat, ModelConfigResolverName } from './types.js';
 
 /** `capabilities.agentSkillDir`: every value must stay a fixed, relative, `..`-free path. */
@@ -299,6 +299,8 @@ const workspaceHookPolicySchema = z.enum(['install', 'refresh-only', 'none']);
 
 const capabilitiesSchema = z
   .object({
+    accountReplacementProfile: z.enum(ACCOUNT_REPLACEMENT_PROFILE_NAMES).optional(),
+    accountReplacementRefusal: z.string().min(1).max(240).optional(),
     chatDelivery: z.literal('poll').optional(),
     external: z.boolean(),
     requiresMux: z.boolean(),

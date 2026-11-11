@@ -25,6 +25,7 @@ import {
 import { resourceWorkerLaunch, ramResourceWorkerLaunch, type ResourceWorkerLaunch } from './resource-worker-launch.js';
 import { RamResourceSessionReadiness } from './resource-readiness.js';
 import { RamResourceSessionLaunchTask } from './resource-ram-session.js';
+import { accountReplacementProfile } from './utils/account-replacement-profile.js';
 
 const UUID = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/;
 const registered = new WeakSet<object>();
@@ -98,6 +99,7 @@ class SessionPublication {
     );
     const before = employee(company, preview.employeeId),
       source = sessions.sessions.get(before.sessionId);
+    const profile = accountReplacementProfile(source?.mode);
     if (purpose === 'ram')
       need(
         Number.isSafeInteger(before.sessionGeneration) &&
@@ -112,7 +114,7 @@ class SessionPublication {
         !source.remote &&
         !source.docker &&
         !source.getCustomModelForPersist() &&
-        ['claude', 'codex'].includes(source.mode) &&
+        profile &&
         before.desiredRunning &&
         !before.onVacation &&
         targetSid !== source.id &&
@@ -128,19 +130,11 @@ class SessionPublication {
     this.#target = targetSid;
     this.#before = before;
     this.#facts = structuredClone(sourceFacts(source));
-    this.#saved = structuredClone(source.toState());
+    this.#saved = profile.freshState(source.toState());
     need(isDeepStrictEqual(this.#facts.recipe, before.runtimeRecipe));
     // Normal runtime-refresh starts a fresh provider conversation and delivers
     // the explicit handoff. Preserve settings; never resume the old consumer.
-    delete this.#saved.resumeSessionId;
-    delete this.#saved.runtimeThreads;
-    delete this.#saved.claudeSessionChain;
-    delete this.#saved.claudeSessionIdPending;
-    if (this.#saved.mode === 'codex' && this.#saved.codexConfig) delete this.#saved.codexConfig.resumeSessionId;
-    this.#targetRecipe = structuredClone(this.#facts.recipe);
-    this.#targetRecipe.runtimeThreads = {};
-    if (this.#targetRecipe.mode === 'codex' && this.#targetRecipe.configs.codexConfig)
-      delete this.#targetRecipe.configs.codexConfig.resumeSessionId;
+    this.#targetRecipe = profile.freshRecipe(this.#facts.recipe);
     registered.add(this);
     Object.freeze(this);
   }

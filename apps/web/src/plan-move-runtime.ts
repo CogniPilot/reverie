@@ -8,6 +8,7 @@ import { PlanMoveError, PlanMoveComposerNotReady, type PlanMoveExecutor, type Pl
 import { planMoveHarness, planMoveLaunch, runtimeRefreshDigest } from './plan-move-launch.js';
 import { composerReadyMark } from './cli-agent.js';
 import { claudeComposerIsReady } from './plan-move-composer.js';
+import { accountReplacementProfile, accountReplacementRefusal } from './utils/account-replacement-profile.js';
 import { fullAccessAlertRoom } from './full-access-default.js';
 import { capturePlanProcesses, survivingPlanProcesses } from './plan-move-processes.js';
 import { submitRecoveryPrompt } from './company-recovery-prompt.js';
@@ -57,7 +58,7 @@ export interface PlanMoveRuntime {
 /** Preserve the configured marker; add only the strict native composer shape. */
 function nativeComposerReady(mode: string, text: string, mark: string): boolean {
   return text.includes(mark) ||
-    (mode === 'claude' && claudeComposerIsReady(text));
+    accountReplacementProfile(mode)?.composerReadyFallback(text, claudeComposerIsReady) === true;
 }
 
 export function planMoveExecutor(runtime: PlanMoveRuntime, owner?: string): PlanMoveExecutor {
@@ -257,12 +258,8 @@ export function planMoveExecutor(runtime: PlanMoveRuntime, owner?: string): Plan
       if (!id) throw new PlanMoveError('Unknown current employee', 404);
       const current = session(id);
       const saved = current.toState();
-      if (saved.mode !== 'claude' && saved.mode !== 'codex')
-        throw new PlanMoveError(
-          saved.mode === 'opencode'
-            ? 'OpenCode thread moves are not supported yet'
-            : 'Custom harnesses cannot move plans in this version'
-        );
+      const profile = accountReplacementProfile(saved.mode);
+      if (!profile) throw new PlanMoveError(accountReplacementRefusal(saved.mode) ?? 'Custom harnesses cannot move plans in this version');
       if (saved.remote || saved.docker || saved.customModel)
         throw new PlanMoveError('This session type cannot move plans');
       if (!current.pid || !current.muxName || runtime.mux.isPaneDead(current.muxName))
@@ -283,7 +280,7 @@ export function planMoveExecutor(runtime: PlanMoveRuntime, owner?: string): Plan
         account: account.id,
         working: current.isWorking,
         mode: saved.mode,
-        model: saved.mode === 'codex' ? saved.codexConfig?.model : saved.model,
+        model: profile.model(saved),
         ...(runtimeDigest ? { runtimeDigest } : {}),
       };
     },

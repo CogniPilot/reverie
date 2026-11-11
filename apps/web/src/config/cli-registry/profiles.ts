@@ -76,6 +76,11 @@ export const SETENV_PROFILE_NAMES = [
 export type LauncherProfileName = (typeof LAUNCHER_PROFILE_NAMES)[number];
 export type SetenvProfileName = (typeof SETENV_PROFILE_NAMES)[number];
 
+/** Closed, stock-owned account replacement protocols. Their pure codecs live in
+ * account-replacement-policy.ts; eligibility is resolved from the actual registry. */
+export const ACCOUNT_REPLACEMENT_PROFILE_NAMES = ['anthropic-account-v1', 'openai-account-v1'] as const;
+export type AccountReplacementProfileName = (typeof ACCOUNT_REPLACEMENT_PROFILE_NAMES)[number];
+
 /**
  * Transcript readers, selected via `capabilities.transcript`. Unlike the profile registries
  * above this one is closed over the schema enum itself rather than an open string, since

@@ -11,6 +11,7 @@
  */
 
 import type { TokenPattern } from './patterns.js';
+import type { AccountReplacementProfileName } from './profiles.js';
 
 /**
  * A CLI identifier. Branded so an arbitrary string cannot be passed where a validated id is
@@ -352,6 +353,10 @@ export type WorkspaceHookPhase = 'sessionCreate' | 'freshCase' | 'existingCase';
 export type WorkspaceHookProfile = Record<WorkspaceHookPhase, WorkspaceHookPolicy>;
 
 export interface CliCapabilities {
+  /** A shipped protocol implementation, usable only with canonical resolved stock provenance. */
+  accountReplacementProfile?: AccountReplacementProfileName;
+  /** Stock explanation when an account replacement adapter is unavailable. */
+  accountReplacementRefusal?: string;
   /** Workspace file authoring, independent from runtime lifecycle hook support. */
   workspaceHooks: WorkspaceHookProfile;
   /** Positive opt-in: reads its server-authorized rooms through the API; never type into its pane. */
