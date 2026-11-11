@@ -132,6 +132,20 @@ impl Archive {
     pub(super) fn layer_digest(&mut self, member: &str) -> Result<String> {
         Ok(self.extract(member, false)?.hash)
     }
+    pub(super) fn verify_program(
+        &mut self,
+        selected: &[String],
+        path: &Path,
+        digest: &str,
+        bytes: u64,
+    ) -> Result<()> {
+        self.assert_stamp()?;
+        let end = self.end;
+        let file = self.original()?;
+        file.rewind()?;
+        super::program::verify(file, selected, path, digest, bytes, end)?;
+        self.assert_current()
+    }
     fn extract(&mut self, member: &str, metadata: bool) -> Result<Readback> {
         self.assert_stamp()?;
         let seconds = self

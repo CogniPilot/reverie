@@ -3,10 +3,18 @@ pub(super) struct ImageInput {
     pub(super) archive: CodeFile,
     pub(super) config: JournalDigest,
     pub(super) image: Value,
+    pub(super) program: Option<CodeFile>,
 }
 impl ImageInput {
-    pub(super) fn decode(value: &Value, system: &System) -> Result<Self> {
-        closed(value, &["archive", "archiveConfigSHA256", "imageSpec"])?;
+    pub(super) fn decode(value: &Value, system: &System, program_bound: bool) -> Result<Self> {
+        if program_bound {
+            closed(
+                value,
+                &["archive", "archiveConfigSHA256", "imageSpec", "program"],
+            )?;
+        } else {
+            closed(value, &["archive", "archiveConfigSHA256", "imageSpec"])?;
+        }
         let archive = field(value, "archive")?;
         closed(archive, &["path", "sha256", "bytes"])?;
         let image = field(value, "imageSpec")?;
@@ -19,8 +27,28 @@ impl ImageInput {
             },
             config: digest(field(value, "archiveConfigSHA256")?)?,
             image: image.deep_clone(),
+            program: program_bound
+                .then(|| program(field(value, "program")?))
+                .transpose()?,
         })
     }
+}
+fn program(value: &Value) -> Result<CodeFile> {
+    closed(value, &["path", "sha256", "bytes"])?;
+    let path = absolute(field(value, "path")?)?;
+    let name = scalar(field(value, "path")?)?;
+    let bytes = positive(field(value, "bytes")?)?;
+    need(
+        name.starts_with("/nix/store/")
+            && name.ends_with("/bin/reverie-worker-resource-controller")
+            && bytes <= 64 * 1024 * 1024,
+        "POOL_IMAGE_INPUTS_PROGRAM",
+    )?;
+    Ok(CodeFile {
+        path,
+        sha256: digest(field(value, "sha256")?)?,
+        bytes,
+    })
 }
 fn validate_image(value: &Value, system: &System) -> Result<()> {
     closed(

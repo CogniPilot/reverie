@@ -5,6 +5,7 @@ mod image;
 use image::ImageInput;
 
 pub const POOL_IMAGE_INPUTS_PURPOSE: &str = "worker-pool-image-inputs-v1";
+pub const POOL_IMAGE_INPUTS_PROGRAM_PURPOSE: &str = "worker-pool-image-inputs-v2";
 pub const POOL_IMAGE_INPUT_FACTORY_FILES: [&str; 7] = [
     "nix/worker-pool-anchor-image.nix",
     "nix/worker-resource-controller-image.nix",
@@ -82,9 +83,12 @@ impl PoolImageInputsData {
                 "anchor",
             ],
         )?;
+        let version = scalar_integer(field(&value, "version")?)?;
+        let program_bound = version == "2";
         need(
-            matches!(&field(&value,"version")?.0,Node::Number(Number::Integer(v)) if v=="1")
-                && scalar(field(&value, "purpose")?)? == POOL_IMAGE_INPUTS_PURPOSE,
+            (version == "1" && scalar(field(&value, "purpose")?)? == POOL_IMAGE_INPUTS_PURPOSE)
+                || (program_bound
+                    && scalar(field(&value, "purpose")?)? == POOL_IMAGE_INPUTS_PROGRAM_PURPOSE),
             "POOL_IMAGE_INPUTS_PURPOSE",
         )?;
         let system = System::decode(field(&value, "system")?)?;
@@ -93,8 +97,8 @@ impl PoolImageInputsData {
         let files = source_files(field(source, "files")?)?;
         Ok(Self {
             source: absolute(field(source, "path")?)?,
-            controller: ImageInput::decode(field(&value, "controller")?, &system)?,
-            anchor: ImageInput::decode(field(&value, "anchor")?, &system)?,
+            controller: ImageInput::decode(field(&value, "controller")?, &system, program_bound)?,
+            anchor: ImageInput::decode(field(&value, "anchor")?, &system, false)?,
             system,
             files,
         })
@@ -121,6 +125,17 @@ impl PoolImageInputsData {
     }
     pub fn archive_config_digest(&self, role: PoolImageRole) -> &JournalDigest {
         &self.selected(role).config
+    }
+    /// Present only when the factory measured this executable inside the exact controller image.
+    pub fn controller_program(&self) -> Option<&CodeFile> {
+        self.controller.program.as_ref()
+    }
+}
+
+fn scalar_integer(value: &Value) -> Result<&str> {
+    match &value.0 {
+        Node::Number(Number::Integer(value)) => Ok(value),
+        _ => Err(ResourceActorDataError("POOL_IMAGE_INPUTS_PURPOSE")),
     }
 }
 fn source_files(value: &Value) -> Result<BTreeMap<&'static str, FilePin>> {

@@ -57,6 +57,26 @@ pub struct ImmutableInputObserver {
     close_uncertain: bool,
 }
 impl ImmutableInputObserver {
+    /// A factory-pinned controller decoder, not a runtime-selected program or origin grant.
+    pub(crate) fn observe_controller_program(
+        &mut self,
+        selected: &CodeFile,
+        end: Instant,
+    ) -> Result<()> {
+        self.current(end)?;
+        let path = nix_path(&selected.path)?;
+        let mut files = Descriptors::default();
+        let body = read_native(
+            &mut files,
+            &path,
+            &selected.sha256,
+            Some(selected.bytes),
+            None,
+            end,
+        )
+        .map(|_| ());
+        files.finish(body, &mut self.close_uncertain)
+    }
     /// Actual immutable ELF/hash/length observation for the closed worker child
     /// profile. No execution, process identity or maintenance authority.
     pub fn observe_worker_child_program(

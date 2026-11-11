@@ -13,6 +13,47 @@ use std::{
 };
 
 #[test]
+fn unmeasured_retained_birth_refuses_before_publication_directory_or_engine_effects() {
+    let tree = Fixture::new();
+    let birth = tree.birth();
+    let config=reverie_contracts::worker_config::decode(&serde_json::to_vec(&serde_json::json!({
+        "workerPoolProvider":{"version":1,"purpose":"reverie-docker-worker-pool-provider-v1","policy":birth.policy()}
+    })).unwrap()).unwrap();
+    let provider = reverie_contracts::worker_pool::WorkerPoolProvider::from_config(&config)
+        .unwrap()
+        .unwrap();
+    let anchor = serde_json::from_value(serde_json::json!({
+        "containerId":"a".repeat(64),"originalBirthDigest":"b".repeat(64),
+        "bootId":"11111111-1111-4111-8111-111111111111","pid":42,"processStart":"100",
+        "parentIdentity":[12,22],"leafIdentity":[12,27]
+    }))
+    .unwrap();
+    let retained =
+        ControllerServiceBirth::from_installed_provider(birth, &provider, Some(anchor)).unwrap();
+    let end = Instant::now() + Duration::from_secs(10);
+    let mut owner =
+        ControllerBirthPublication::new(&tree.runtime, retained, tree.root.clone(), end).unwrap();
+    owner.compatibility = Some(
+        super::super::birth_compatibility::ControllerBirthCompatibility::without_factory_for_test(
+            &tree.runtime,
+            end,
+        ),
+    );
+    let failure = owner.publish().unwrap_err();
+    assert_eq!(
+        failure.birth_compatibility_error().unwrap().code(),
+        "WORKER_POOL_CONTROLLER_BIRTH_CAPABILITY_UNMEASURED"
+    );
+    assert!(!tree.root.join("worker-pool").exists());
+    assert_eq!(tree.starts.load(std::sync::atomic::Ordering::SeqCst), 0);
+    assert!(
+        owner.publish().is_err(),
+        "no fallback or fresh offer after refusal"
+    );
+    owner.close().unwrap();
+}
+
+#[test]
 fn birth_metadata_has_exact_bytes_modes_and_readonly_receipt_without_activation() {
     let tree = Fixture::new();
     let mut owner = tree.owner();

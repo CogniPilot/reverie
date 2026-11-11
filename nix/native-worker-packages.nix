@@ -22,6 +22,7 @@ rec {
   nativeWorkerPoolImageInputs = import ./worker-pool-image-inputs.nix {
     inherit pkgs src;
     controllerImage = nativeWorkerResourceControllerImage;
+    controllerProgram = nativeWorkerResourceController;
     anchorImage = nativeWorkerPoolAnchorImage;
   };
   # Explicit integration output only; the shipped hybrid workerBroker below is

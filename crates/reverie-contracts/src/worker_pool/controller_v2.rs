@@ -3,7 +3,9 @@
 use super::*;
 use crate::resource_actor::CodeFile;
 use reverie_core::{PythonText, operations::JournalDigest};
+mod check;
 mod restored;
+pub use check::ControllerBirthCheck;
 pub use restored::{CommittedMemberSnapshot, ControllerServiceBirth};
 #[cfg(test)]
 mod tests;

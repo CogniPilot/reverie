@@ -2,11 +2,12 @@
 mod archive;
 mod error;
 mod metadata;
+mod program;
 use archive::Archive;
 use clap::Parser;
 use error::{Error, Result, finalized, need};
 use reverie_contracts::resource_actor::{
-    POOL_IMAGE_INPUT_FACTORY_FILES, POOL_IMAGE_INPUTS_PURPOSE, PoolImageInputsData,
+    POOL_IMAGE_INPUT_FACTORY_FILES, POOL_IMAGE_INPUTS_PROGRAM_PURPOSE, PoolImageInputsData,
 };
 use serde_json::{Map, Value, json};
 use std::{
@@ -20,6 +21,8 @@ struct Arguments {
     system: String,
     #[arg(long)]
     controller_archive: PathBuf,
+    #[arg(long)]
+    controller_program: PathBuf,
     #[arg(long)]
     anchor_archive: PathBuf,
     #[arg(long)]
@@ -41,10 +44,20 @@ pub(super) fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
 }
 fn seal(args: Arguments) -> Result<()> {
     let end = Instant::now() + Duration::from_secs(300);
-    let controller = measure(&args.controller_archive, true, &args.system, end)?;
+    let mut controller = measure(&args.controller_archive, true, &args.system, end)?;
+    let archive_digest = controller["archive"]["sha256"]
+        .as_str()
+        .ok_or(Error::Refused("POOL_IMAGE_PROGRAM_ARCHIVE"))?;
+    let measured = program::measure(
+        &args.controller_archive,
+        &args.controller_program,
+        archive_digest,
+        end,
+    )?;
+    controller["program"] = measured;
     let anchor = measure(&args.anchor_archive, false, &args.system, end)?;
     let source = source(&args.source, end)?;
-    let raw = serde_json::to_vec(&json!({"version":1,"purpose":POOL_IMAGE_INPUTS_PURPOSE,"system":args.system,"source":source,"controller":controller,"anchor":anchor}))
+    let raw = serde_json::to_vec(&json!({"version":2,"purpose":POOL_IMAGE_INPUTS_PROGRAM_PURPOSE,"system":args.system,"source":source,"controller":controller,"anchor":anchor}))
         .map_err(|_| Error::Refused("POOL_IMAGE_MANIFEST_ENCODING"))?;
     need(
         raw.len() <= archive::MAX_METADATA && Instant::now() < end,

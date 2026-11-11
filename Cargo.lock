@@ -1502,6 +1502,7 @@ name = "reverie-worker-resource-controller"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "reverie-contracts",
  "reverie-host",
 ]
 

@@ -7,7 +7,8 @@ mod native_client;
 mod pool_image_inputs;
 mod process;
 pub use pool_image_inputs::{
-    POOL_IMAGE_INPUT_FACTORY_FILES, POOL_IMAGE_INPUTS_PURPOSE, PoolImageInputsData, PoolImageRole,
+    POOL_IMAGE_INPUT_FACTORY_FILES, POOL_IMAGE_INPUTS_PROGRAM_PURPOSE, POOL_IMAGE_INPUTS_PURPOSE,
+    PoolImageInputsData, PoolImageRole,
 };
 #[cfg(test)]
 mod pool_image_inputs_tests;

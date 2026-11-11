@@ -25,6 +25,50 @@ fn birth() -> ControllerBirthV2 {
     .unwrap()
 }
 
+#[test]
+fn decoder_acknowledgement_matches_the_actual_producer_and_refuses_stale_or_downgraded_replies() {
+    let original = birth();
+    let provider = committed(&original, 7, json!({}));
+    let anchor = serde_json::from_value(json!({
+        "containerId":"a".repeat(64),"originalBirthDigest":"b".repeat(64),
+        "bootId":"11111111-1111-4111-8111-111111111111","pid":42,"processStart":"100",
+        "parentIdentity":[12,22],"leafIdentity":[12,27]
+    }))
+    .unwrap();
+    let retained =
+        ControllerServiceBirth::from_installed_provider(original.clone(), &provider, Some(anchor))
+            .unwrap()
+            .encode()
+            .unwrap();
+    assert!(ControllerBirthV2::decode(&retained).is_err());
+    let checked = ControllerBirthCheck::from_birth(&retained).unwrap();
+    let reply = checked.encode().unwrap();
+    assert_eq!(
+        ControllerBirthCheck::verify_reply(&reply, &retained).unwrap(),
+        checked
+    );
+    for (name, replacement) in [
+        ("birthVersion", json!(2)),
+        ("retainedAnchor", json!(false)),
+        ("memberRevision", json!(8)),
+        ("birthSha256", json!("c".repeat(64))),
+        ("purpose", json!("other")),
+        ("version", json!(2)),
+    ] {
+        let mut changed: serde_json::Value = serde_json::from_slice(&reply).unwrap();
+        changed[name] = replacement;
+        assert!(
+            ControllerBirthCheck::verify_reply(&serde_json::to_vec(&changed).unwrap(), &retained)
+                .is_err()
+        );
+    }
+    assert!(ControllerBirthCheck::verify_reply(&reply, &original.encode().unwrap()).is_err());
+    let duplicate = String::from_utf8(reply)
+        .unwrap()
+        .replacen("{", "{\"version\":1,", 1);
+    assert!(ControllerBirthCheck::verify_reply(duplicate.as_bytes(), &retained).is_err());
+}
+
 fn committed(
     birth: &ControllerBirthV2,
     revision: u64,

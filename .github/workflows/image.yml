@@ -308,6 +308,28 @@ jobs:
             cargo test -p reverie-host worker_viewer::tests::docker \
               -- --ignored --nocapture --test-threads=1 \
             2>&1 | tee acceptance/native-viewer.log
+      - name: Qualify the factory-pinned retained controller birth decoder
+        env:
+          CARGO_TARGET_DIR: ${{ runner.temp }}/reverie-viewer-target
+          CARGO_BUILD_JOBS: '2'
+        run: |
+          set -euo pipefail
+          mkdir -p acceptance
+          # Build exact image/program provenance; no image is loaded or run.
+          nix build .#nativeWorkerPoolImageInputs --out-link "$RUNNER_TEMP/controller-birth-inputs" \
+            --no-write-lock-file --max-jobs 2 --cores 2 --print-build-logs \
+            2>&1 | tee acceptance/controller-birth-build.log
+          export REVERIE_CONTROLLER_CHECK_INPUTS
+          REVERIE_CONTROLLER_CHECK_INPUTS=$(readlink -f "$RUNNER_TEMP/controller-birth-inputs/share/reverie/worker-pool-image-inputs.json")
+          test -f "$REVERIE_CONTROLLER_CHECK_INPUTS"
+          export REVERIE_CONTROLLER_CHECK_INPUTS_SHA256
+          REVERIE_CONTROLLER_CHECK_INPUTS_SHA256=$(sha256sum "$REVERIE_CONTROLLER_CHECK_INPUTS" | cut -d ' ' -f1)
+          # This consumes real producer bytes through the measured packaged decoder.
+          # It qualifies decoder compatibility, not native pool/controller readiness.
+          nix develop --command cargo test -p reverie-host \
+            worker_pool::birth_compatibility::tests::actual_factory_pinned_current_decoder_consumes_produced_retained_birth_without_engine_or_publication \
+            -- --exact --ignored --nocapture \
+            2>&1 | tee acceptance/controller-birth-check.log
       - name: Build the sandboxed browser and exercise synthetic office controls
         run: |
           set -euo pipefail

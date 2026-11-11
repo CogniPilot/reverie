@@ -62,6 +62,7 @@ pub struct ControllerBirthPublication {
     closed: bool,
     close_unknown: bool,
     failed: AtomicBool,
+    compatibility: Option<super::birth_compatibility::ControllerBirthCompatibility>,
 }
 impl ControllerBirthPublication {
     /// Only the retained bootstrap wrapper supplies this actual birth record.
@@ -103,6 +104,9 @@ impl ControllerBirthPublication {
             .encode()
             .map_err(|_| PoolError::Refused("WORKER_POOL_BIRTH_INVALID"))?;
         let digest: [u8; 32] = Sha256::digest(&raw).into();
+        let compatibility = birth
+            .restored()
+            .then(|| super::birth_compatibility::ControllerBirthCompatibility::new(runtime, end));
         Ok(Self {
             birth,
             source: None,
@@ -121,6 +125,7 @@ impl ControllerBirthPublication {
             closed: false,
             close_unknown: false,
             failed: AtomicBool::new(false),
+            compatibility,
         })
     }
     /// Called only while the actual outer bootstrap/operation owner retains
@@ -137,6 +142,11 @@ impl ControllerBirthPublication {
     fn publish_once(&mut self) -> Result<()> {
         self.check()?;
         self.assert_source_current()?;
+        if let Some(compatibility) = &mut self.compatibility {
+            compatibility.check(&self.birth, &self.raw)?;
+        }
+        self.assert_source_current()?;
+        self.check()?;
         self.directories.open_root()?;
         self.check()?;
         for index in 1..=3 {
@@ -233,7 +243,14 @@ impl ControllerBirthPublication {
             .map(|_| ())
             .map_err(Into::into);
         let directories = self.directories.close();
-        let result = finalized(finalized(writer, reader), directories);
+        let compatibility = self.compatibility.as_mut().map_or(
+            Ok(()),
+            super::birth_compatibility::ControllerBirthCompatibility::close,
+        );
+        let result = finalized(
+            finalized(writer, reader),
+            finalized(directories, compatibility),
+        );
         self.close_unknown |= result.is_err();
         result?;
         need(!self.close_unknown, "WORKER_POOL_PUBLICATION_CLOSE_UNKNOWN")

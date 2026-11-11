@@ -15,8 +15,8 @@ mod provider;
 mod retired;
 pub use controller_v2::SERVICE_PURPOSE as CONTROLLER_SERVICE_V2_PURPOSE;
 pub use controller_v2::{
-    BrokerBirthData, BrokerProgramData, CommittedMemberSnapshot, ControllerBirthV2,
-    ControllerServiceBirth,
+    BrokerBirthData, BrokerProgramData, CommittedMemberSnapshot, ControllerBirthCheck,
+    ControllerBirthV2, ControllerServiceBirth,
 };
 pub use engine::{
     validate_anchor_inspection, validate_controller_inspection,

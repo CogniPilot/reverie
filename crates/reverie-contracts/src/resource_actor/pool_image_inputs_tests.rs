@@ -74,6 +74,55 @@ fn closed_two_role_inputs_keep_measured_source_archive_and_platform_data() {
 }
 
 #[test]
+fn controller_program_measurement_is_explicit_versioned_and_not_inferred_for_legacy_inputs() {
+    let legacy = document();
+    assert!(decode(&legacy).unwrap().controller_program().is_none());
+    let mut measured = legacy.clone();
+    measured["version"] = json!(2);
+    measured["purpose"] = json!(POOL_IMAGE_INPUTS_PROGRAM_PURPOSE);
+    measured["controller"]["program"] = json!({
+        "path":"/nix/store/factory-controller/bin/reverie-worker-resource-controller",
+        "sha256":"d".repeat(64),"bytes":4096
+    });
+    assert_eq!(
+        decode(&measured)
+            .unwrap()
+            .controller_program()
+            .unwrap()
+            .bytes,
+        4096
+    );
+    let mut absent = measured.clone();
+    absent["controller"]
+        .as_object_mut()
+        .unwrap()
+        .remove("program");
+    assert!(decode(&absent).is_err());
+    for (pointer, replacement) in [
+        (
+            "/controller/program/path",
+            json!("/tmp/controller/bin/reverie-worker-resource-controller"),
+        ),
+        (
+            "/controller/program/path",
+            json!("/nix/store/factory-controller/bin/other"),
+        ),
+        ("/controller/program/sha256", json!("bad")),
+        ("/controller/program/bytes", json!(0)),
+    ] {
+        let mut changed = measured.clone();
+        *changed.pointer_mut(pointer).unwrap() = replacement;
+        assert!(decode(&changed).is_err(), "{pointer}");
+    }
+    measured["version"] = json!(1);
+    measured["purpose"] = json!(POOL_IMAGE_INPUTS_PURPOSE);
+    assert!(
+        decode(&measured).is_err(),
+        "legacy fields cannot acquire implicit capability"
+    );
+}
+
+#[test]
 fn full_loaded_fields_use_existing_legacy_and_native_descriptor_identity_rules() {
     let value = document();
     let selected = decode(&value).unwrap();

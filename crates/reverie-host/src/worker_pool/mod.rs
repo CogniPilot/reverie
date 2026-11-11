@@ -1,6 +1,8 @@
 //! Docker-controller cgroup ownership. Public policy/anchor values are data;
 //! the installed witness retains the actual opened kernel directory. This is
 //! not a Gate, storage lease, stop receipt or global shutdown acknowledgement.
+mod birth_compatibility;
+pub use birth_compatibility::ControllerBirthCompatibilityError;
 mod bootstrap;
 mod client;
 #[cfg(test)]
@@ -91,6 +93,7 @@ pub enum PoolError {
     CreationDeadline,
     MemberPolicyEditInProgress,
     MemberRequestRefused(MemberRequestRefusal),
+    BirthCompatibility(Box<ControllerBirthCompatibilityError>),
 }
 impl fmt::Display for PoolError {
     fn fmt(&self, output: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -110,6 +113,7 @@ impl std::error::Error for PoolError {
             Self::Member(error) => Some(error.as_ref()),
             Self::Channel(error) => Some(error),
             Self::CreationBudget(error) => Some(error),
+            Self::BirthCompatibility(error) => Some(error.as_ref()),
             Self::Refused(_)
             | Self::CreationDeadline
             | Self::MemberPolicyEditInProgress
@@ -118,6 +122,15 @@ impl std::error::Error for PoolError {
     }
 }
 impl PoolError {
+    pub fn birth_compatibility_error(&self) -> Option<&ControllerBirthCompatibilityError> {
+        match self {
+            Self::BirthCompatibility(error) => Some(error),
+            Self::Finalization(primary, _) | Self::MetadataClose(primary) => {
+                primary.birth_compatibility_error()
+            }
+            _ => None,
+        }
+    }
     pub fn has_unconfirmed_close(&self) -> bool {
         self.close_unknown()
     }
@@ -137,6 +150,7 @@ impl PoolError {
             Self::CreationDeadline => "WORKER_POOL_CREATION_BUDGET_DEADLINE",
             Self::MemberPolicyEditInProgress => "WORKER_POOL_MEMBER_EDIT_RETAINED",
             Self::MemberRequestRefused(refusal) => refusal.code(),
+            Self::BirthCompatibility(error) => error.code(),
         }
     }
     pub(crate) fn close_unknown(&self) -> bool {
@@ -146,6 +160,7 @@ impl PoolError {
             Self::BootstrapFacts(error) => error.has_unconfirmed_close(),
             Self::Member(error) => error.unconfirmed_native(),
             Self::Channel(error) => error.has_unconfirmed_close(),
+            Self::BirthCompatibility(error) => error.has_unconfirmed_close(),
             Self::Finalization(primary, secondary) => {
                 primary.close_unknown() || secondary.close_unknown()
             }

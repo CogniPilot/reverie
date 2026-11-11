@@ -383,6 +383,27 @@ impl CapturedClient {
             ExecutionMode::Combined,
         )
     }
+    /// Fixed pure controller decoder only. The original bounded birth input is
+    /// consumed by Process before spawn, using the same checked input custody.
+    pub(crate) fn check_controller_birth(
+        &self,
+        deadline: Instant,
+        cancellation: &CancellationToken,
+        input: &mut Option<std::fs::File>,
+    ) -> std::result::Result<CapturedOutput, CallFailure> {
+        self.run_owned(
+            vec!["check-birth".into()],
+            deadline,
+            cancellation,
+            Policy {
+                maximum: std::time::Duration::from_secs(10),
+                maximum_output: 4096,
+                successful_exit: true,
+            },
+            input,
+            ExecutionMode::CombinedWaiting,
+        )
+    }
     /// Fixed metadata readers own this whole bounded query window. Effect
     /// owners with their own live stop/admission loop use immediate run_scoped.
     pub(crate) fn run_scoped_waiting(

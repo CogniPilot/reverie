@@ -23,6 +23,20 @@ enum PoolRestoreFailure {
 }
 
 impl BrokerPoolRestoreError {
+    /// Public typed compatibility detail for the API adapter, without exposing
+    /// the private birth input, selected executable or native observer owners.
+    pub fn birth_compatibility_error(
+        &self,
+    ) -> Option<&reverie_host::worker_pool::ControllerBirthCompatibilityError> {
+        match &self.0 {
+            PoolRestoreFailure::Bootstrap(error) => match error.cause() {
+                crate::installing_broker::pool_controller::BrokerControllerBootstrapCause::Observation(error) =>
+                    error.birth_compatibility_error(),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
     pub fn code(&self) -> &'static str {
         match &self.0 {
             PoolRestoreFailure::Bootstrap(error) => error.cause().code(),
