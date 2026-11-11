@@ -26,7 +26,7 @@ function fixture() {
   writeFileSync(join(root, 'test/owner.test.ts'), testBody);
   const declarations = scanJavaScript('src/panel.js', source);
   const manifest: Manifest = {
-    version: 1,
+    version: 2,
     sources: [...INVENTORY_SOURCES],
     gapBudget: 0,
     gaps: [],
@@ -42,7 +42,7 @@ function fixture() {
     mappings: [
       {
         declaration: declarations[0].id,
-        scenario: 'owner.save',
+        scenarios: ['owner.save'],
         remaining: 'Authorization, validation and conflict states still need qualification.',
       },
     ],
@@ -89,6 +89,32 @@ it('rejects duplicate mappings, removed scenarios, and a larger unqualified gap 
   manifest.mappings = [];
   manifest.gaps.push({ declaration: declarations[0].id, reason: 'Behavior remains to be qualified' });
   expect(validateManifest(root, manifest, declarations)).toContain('Reviewed gap budget exceeded');
+});
+
+it('requires version 2 and nonempty unique scenario IDs for each mapped declaration', () => {
+  const { root, manifest, declarations } = fixture();
+  expect(validateManifest(root, { ...manifest, version: 1 } as unknown as Manifest, declarations)).toEqual([
+    'Unknown manifest version: expected 2',
+  ]);
+  manifest.mappings[0].scenarios = [];
+  expect(validateManifest(root, manifest, declarations)).toContainEqual(
+    expect.stringContaining('Mapping requires scenario IDs')
+  );
+  manifest.mappings[0].scenarios = ['owner.save', 'owner.save'];
+  expect(validateManifest(root, manifest, declarations)).toContainEqual(
+    expect.stringContaining('Duplicate scenario link')
+  );
+  manifest.mappings[0].scenarios = [''];
+  expect(validateManifest(root, manifest, declarations)).toContainEqual(
+    expect.stringContaining('Mapping contains an empty scenario ID')
+  );
+  manifest.mappings[0].scenarios = ['owner.save', 'owner.readback'];
+  manifest.scenarios['owner.readback'] = {
+    ...manifest.scenarios['owner.save'],
+    assertions: ["expect(await readOwner()).toEqual('Synthetic owner')"],
+    outcome: 'The saved value is returned on a subsequent read.',
+  };
+  expect(validateManifest(root, manifest, declarations)).toEqual([]);
 });
 
 it('rejects missing test files, renamed scenarios, and deleted assertions', () => {

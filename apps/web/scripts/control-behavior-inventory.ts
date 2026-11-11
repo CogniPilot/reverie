@@ -21,10 +21,10 @@ export interface Scenario {
 }
 
 export interface Manifest {
-  version: 1;
+  version: 2;
   sources: string[];
   scenarios: Record<string, Scenario>;
-  mappings: Array<{ declaration: string; scenario: string; remaining: string }>;
+  mappings: Array<{ declaration: string; scenarios: string[]; remaining: string }>;
   gaps: Array<{ declaration: string; reason: string }>;
   gapBudget: number;
   limitations: string[];
@@ -214,7 +214,7 @@ export function validateManifest(
   declarations = scanSources(root, INVENTORY_SOURCES)
 ): string[] {
   const errors: string[] = [];
-  if (manifest.version !== 1) errors.push('Unknown manifest version');
+  if (manifest.version !== 2) return ['Unknown manifest version: expected 2'];
   if (JSON.stringify(manifest.sources) !== JSON.stringify(INVENTORY_SOURCES))
     errors.push('Source surface list differs from the reviewed scanner scope');
   const actual = new Map(declarations.map((entry) => [entry.id, entry]));
@@ -263,7 +263,18 @@ export function validateManifest(
     }
   }
   for (const mapping of manifest.mappings) {
-    if (!manifest.scenarios[mapping.scenario]) errors.push(`Missing mapped scenario: ${mapping.scenario}`);
+    if (!Array.isArray(mapping.scenarios) || mapping.scenarios.length === 0)
+      errors.push(`Mapping requires scenario IDs: ${mapping.declaration}`);
+    else {
+      const seen = new Set<string>();
+      for (const id of mapping.scenarios) {
+        if (typeof id !== 'string' || !id.trim())
+          errors.push(`Mapping contains an empty scenario ID: ${mapping.declaration}`);
+        else if (!manifest.scenarios[id]) errors.push(`Missing mapped scenario: ${id}`);
+        if (seen.has(id)) errors.push(`Duplicate scenario link: ${mapping.declaration}: ${id}`);
+        seen.add(id);
+      }
+    }
     if (!mapping.remaining.trim()) errors.push(`Mapping lacks remaining state gaps: ${mapping.declaration}`);
     if (actual.get(mapping.declaration)?.kind !== 'control')
       errors.push(`Unresolved declaration cannot carry a scenario link: ${mapping.declaration}`);
@@ -281,7 +292,11 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
       {
         sources: manifest.sources,
         declarations: declarations.length,
-        reviewedScenarioLinks: manifest.mappings.length,
+        mappedDeclarations: manifest.mappings.length,
+        reviewedScenarioLinks: manifest.mappings.reduce(
+          (count, mapping) => count + (Array.isArray(mapping.scenarios) ? mapping.scenarios.length : 0),
+          0
+        ),
         interpretation: 'Static registration integrity only; the associated scenario must also execute and pass.',
         existingGaps: manifest.gaps.length,
         detectionGaps: declarations.filter((entry) => entry.kind === 'detection-gap').length,

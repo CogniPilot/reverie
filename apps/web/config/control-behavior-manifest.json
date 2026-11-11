@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "sources": [
     "src/web/public/chat-app.js",
     "src/web/public/company-ui.js",
@@ -45,23 +45,248 @@
         "expect(await resources.getByRole('button', { name: 'Apply RAM and CPU limits', exact: true }).count()).toBe(0)"
       ],
       "outcome": "Missing native resource authority stays visibly unconfirmed, offers a working status refresh, returns real 503 and exposes no Apply control."
+    },
+    "office.owner-details.cancel": {
+      "test": "test/office-owner-controls.browser.test.ts",
+      "title": "discards unsaved owner edits when the company dialog closes",
+      "assertions": [
+        ".fill('Unsaved owner')",
+        ".getByRole('button', { name: 'Close company settings', exact: true }).click()",
+        "expect((await api()).settings.ownerName).toBe('Synthetic owner')",
+        ".inputValue()).toBe('Synthetic owner')"
+      ],
+      "outcome": "Closing without Save discards owner edits; the API and reopened GUI retain the saved name."
+    },
+    "office.owner-details.trim-and-preserve": {
+      "test": "test/office-owner-controls.browser.test.ts",
+      "title": "persists trimmed owner details while preserving an unrelated saved setting",
+      "assertions": [
+        "await api('/api/company/settings', 'PUT', { timeZone: 'Europe/London' })",
+        ".fill('  Updated owner  ')",
+        ".getByRole('button', { name: 'Save owner details', exact: true }).click()",
+        "expect((await api()).settings).toMatchObject({ ownerName: 'Updated owner', ownerTitle: 'Director', timeZone: 'Europe/London', })"
+      ],
+      "outcome": "The GUI trims owner fields, persists both, and preserves an independently saved time zone."
+    },
+    "office.time-zone.invalid-and-retry": {
+      "test": "test/office-owner-controls.browser.test.ts",
+      "title": "shows invalid time zone validation without writing and saves a valid retry",
+      "assertions": [
+        ".fill('Not/A-Time-Zone')",
+        "await visibleError(error)",
+        "expect((await api()).settings.timeZone).toBe('UTC')",
+        "expect(responses.filter((response) => response.method === 'PUT' && response.path === '/api/company/settings')).toEqual([])",
+        ".fill('Europe/London')",
+        ".poll(async () => (await api()).settings.timeZone).toBe('Europe/London')"
+      ],
+      "outcome": "An invalid zone is visibly refused before a write; correcting it saves through the real API."
+    },
+    "office.owner-details.offline-and-retry": {
+      "test": "test/office-owner-controls.browser.test.ts",
+      "title": "reports a real disconnected save without writing and commits exactly one online retry",
+      "assertions": [
+        "await context.setOffline(true)",
+        "await visibleError(dialog.locator(':scope > [role=\"alert\"]'))",
+        "expect((await api()).settings.ownerName).toBe('Synthetic owner')",
+        "await context.setOffline(false)",
+        ".poll(async () => (await api()).settings.ownerName).toBe('Retried owner')",
+        "expect(responses.filter((response) => response.method === 'PUT' && response.path === '/api/company/settings' && response.status === 200)).toHaveLength(1)"
+      ],
+      "outcome": "Real network loss is visible and the independent online API proves no write; one explicit online retry commits once."
+    },
+    "office.owner-details.authority-lost": {
+      "test": "test/office-owner-controls.browser.test.ts",
+      "title": "requires owner sign-in after browser authority is lost and does not save stale edits",
+      "assertions": [
+        "await context.clearCookies()",
+        ".getByRole('button', { name: 'Save owner details', exact: true }).click()",
+        "await page.waitForURL('**/owner/login**')",
+        "response.path === '/api/company' && response.status === 401",
+        "expect((await api()).settings.ownerName).toBe('Synthetic owner')"
+      ],
+      "outcome": "Losing browser authority yields a real 401 and visible sign-in page without changing saved owner details."
+    },
+    "office.employee-profile.cancel": {
+      "test": "test/office-owner-controls.browser.test.ts",
+      "title": "cancels employee profile edits without changing persisted role or skills",
+      "assertions": [
+        ".fill('Unsaved role')",
+        ".fill('Unsaved skill')",
+        ".getByRole('button', { name: 'Cancel', exact: true }).click()",
+        "expect(await current()).toMatchObject({ position: 'Synthetic reviewer', expertise: ['Browser acceptance'] })",
+        ".inputValue()).toBe('Synthetic reviewer')"
+      ],
+      "outcome": "Cancel discards unsaved profile fields; the API and reopened GUI retain the previous profile."
+    },
+    "office.employee-profile.save": {
+      "test": "test/office-owner-controls.browser.test.ts",
+      "title": "saves employee profile fields through the real API while preserving OFF intent",
+      "assertions": [
+        ".fill('  Review engineer  ')",
+        ".getByRole('button', { name: 'Save profile', exact: true }).click()",
+        "await expect.poll(() => dialog.isVisible()).toBe(false)",
+        "expect(await current()).toMatchObject({ position: 'Review engineer', expertise: ['TypeScript', 'Rust'], responsibilities: ['Review changes', 'Write acceptance checks'], desiredRunning: false, onVacation: true, })"
+      ],
+      "outcome": "The real GUI saves trimmed role, skills and responsibilities while the employee remains OFF."
+    },
+    "office.employee-profile.invalid-skills-and-retry": {
+      "test": "test/office-owner-controls.browser.test.ts",
+      "title": "shows the real excessive-skills refusal and preserves edits for a corrected retry",
+      "assertions": [
+        "expect((await rejected).status()).toBe(400)",
+        "await visibleError(dialog.locator('.ca-profile-save-error'))",
+        "expect((await current()).expertise).toEqual(['Browser acceptance'])",
+        ".fill('Corrected skill')",
+        "expect((await current()).expertise).toEqual(['Corrected skill'])"
+      ],
+      "outcome": "Excessive skills produce a real 400 and visible error without mutation; corrected edits can be saved."
+    },
+    "office.employee-profile.reporting-cycle-and-retry": {
+      "test": "test/office-owner-controls.browser.test.ts",
+      "title": "refuses a concurrent reporting cycle without partial mutation and accepts a safe retry",
+      "assertions": [
+        "await api(`/api/company/employees/${employees[1].id}`, 'PUT', { reportsTo: employees[0].id })",
+        ".getByLabel('Reports to', { exact: true }).selectOption(employees[1].id)",
+        "await visibleError(dialog.locator('.ca-profile-save-error'))",
+        "expect((await current()).reportsTo).toBe('owner')",
+        ".getByLabel('Reports to', { exact: true }).selectOption('owner')",
+        "await expect.poll(() => dialog.isVisible()).toBe(false)",
+        "expect((await current()).reportsTo).toBe('owner')"
+      ],
+      "outcome": "A real concurrent graph change prevents a reporting cycle without partial mutation; a safe retry is accepted."
+    },
+    "office.employee-recovery.cancel-keeps-saved": {
+      "test": "test/office-owner-controls.browser.test.ts",
+      "title": "keeps an immediately saved recovery permission when Cancel closes the profile",
+      "assertions": [
+        "await permission.check()",
+        "await expect.poll(async () => (await current()).permissions.recoverEmployees).toBe(true)",
+        ".getByRole('button', { name: 'Cancel', exact: true }).click()",
+        "expect((await current()).permissions.recoverEmployees).toBe(true)",
+        ".isChecked()).toBe(true)"
+      ],
+      "outcome": "Recovery permissions save immediately and remain persisted and checked after Cancel and reopening."
+    },
+    "office.employee-hiring.conflict-refresh-and-retry": {
+      "test": "test/office-owner-controls.browser.test.ts",
+      "title": "reports a real hiring permission conflict and recovers by refreshing the current value",
+      "assertions": [
+        "await api(hiringPath(), 'PUT', { expectedSessionId: baseline.sessionId, expected: baseline.enabled, enabled: true })",
+        "await permission.check()",
+        "expect((await conflict).status()).toBe(409)",
+        "await visibleError(error)",
+        "expect(await permission.isDisabled()).toBe(true)",
+        ".getByRole('button', { name: `Refresh hiring permission for ${employees[0].name}`, exact: true }).click()",
+        "await expect.poll(() => permission.isEnabled()).toBe(true)",
+        "expect(await permission.isChecked()).toBe(true)",
+        "await permission.uncheck()",
+        "await expect.poll(async () => (await api<Hiring>(hiringPath())).enabled).toBe(false)"
+      ],
+      "outcome": "A real stale-value conflict returns 409, holds the checkbox, and recovers through Refresh before a successful explicit retry."
     }
   },
   "mappings": [
     {
       "declaration": "src/web/public/chat-app.js::ReverieChatApp.openCompanySettings::save::button:Save owner details",
-      "scenario": "office.owner-details.persisted",
-      "remaining": "Unauthorized, invalid, conflicting, disconnected and unconfirmed-save states are not qualified by this scenario."
+      "remaining": "Length validation, concurrent settings writers, lost replies after commit and other owner fields still need separate qualification.",
+      "scenarios": [
+        "office.owner-details.persisted",
+        "office.owner-details.trim-and-preserve",
+        "office.owner-details.offline-and-retry",
+        "office.owner-details.authority-lost"
+      ]
     },
     {
       "declaration": "src/web/public/chat-app.js::ReverieChatApp.employeePermissionFields::recovery::input:[binding label]",
-      "scenario": "office.employee-recovery.permission-roundtrip",
-      "remaining": "Delegated actor, denied authority, stale binding, failed write and reconciliation states remain to be qualified."
+      "remaining": "Delegated actor, denied authority, stale binding, failed write and ambiguous save reconciliation remain gaps.",
+      "scenarios": [
+        "office.employee-recovery.permission-roundtrip",
+        "office.employee-recovery.cancel-keeps-saved"
+      ]
     },
     {
       "declaration": "src/web/public/company-resources.js::EmployeePanel.constructor::inline::button:Refresh resource status for ${employee.name}",
-      "scenario": "office.employee-resources.unconfigured-refresh",
-      "remaining": "Healthy native observations, stale replies, timeout, reconnect and changed authority remain to be qualified."
+      "remaining": "Healthy native observations, stale replies, timeout, reconnect and changed authority remain to be qualified.",
+      "scenarios": [
+        "office.employee-resources.unconfigured-refresh"
+      ]
+    },
+    {
+      "declaration": "src/web/public/chat-app.js::ReverieChatApp.openCompanySettings::input::input:[binding label]",
+      "scenarios": [
+        "office.owner-details.cancel",
+        "office.owner-details.trim-and-preserve",
+        "office.owner-details.offline-and-retry",
+        "office.owner-details.authority-lost"
+      ],
+      "remaining": "Additional dynamic instances, length bounds, keyboard editing and changes during an in-flight save remain gaps."
+    },
+    {
+      "declaration": "src/web/public/chat-app.js::ReverieChatApp.openCompanySettings::close::button:Close company settings",
+      "scenarios": [
+        "office.owner-details.cancel"
+      ],
+      "remaining": "Escape, backdrop, in-flight saves and already-saved immediate changes remain separate closing states."
+    },
+    {
+      "declaration": "src/web/public/chat-app.js::ReverieChatApp.openCompany::paint::button:Company settings",
+      "scenarios": [
+        "office.owner-details.cancel",
+        "office.time-zone.invalid-and-retry"
+      ],
+      "remaining": "Non-owner opening, unavailable company reads, phone authority failures and duplicate-open focus remain gaps."
+    },
+    {
+      "declaration": "src/web/public/chat-app.js::ReverieChatApp.companyTimeZoneForm::input::input:[binding label]",
+      "scenarios": [
+        "office.time-zone.invalid-and-retry"
+      ],
+      "remaining": "Empty values, browser/server timezone disagreement, concurrent saves, authority loss and ambiguous committed replies remain gaps."
+    },
+    {
+      "declaration": "src/web/public/chat-app.js::ReverieChatApp.companyTimeZoneForm::save::button:Save time zone",
+      "scenarios": [
+        "office.time-zone.invalid-and-retry"
+      ],
+      "remaining": "Empty values, browser/server timezone disagreement, concurrent saves, authority loss and ambiguous committed replies remain gaps."
+    },
+    {
+      "declaration": "src/web/public/chat-app.js::ReverieChatApp.openEmployeeProfile::save::button:Save profile",
+      "scenarios": [
+        "office.employee-profile.save",
+        "office.employee-profile.invalid-skills-and-retry",
+        "office.employee-profile.reporting-cycle-and-retry"
+      ],
+      "remaining": "Identity, avatar, voice, core beliefs, denied authority and lost/ambiguous writes remain unqualified states."
+    },
+    {
+      "declaration": "src/web/public/chat-app.js::ReverieChatApp.openEmployeeProfile::cancel::button:Cancel",
+      "scenarios": [
+        "office.employee-profile.cancel",
+        "office.employee-recovery.cancel-keeps-saved"
+      ],
+      "remaining": "Unsaved identity/avatar/core fields and in-flight native or permission requests require separate scenarios."
+    },
+    {
+      "declaration": "src/web/public/chat-app.js::ReverieChatApp.openEmployeeProfile::parent::select:[binding label]",
+      "scenarios": [
+        "office.employee-profile.reporting-cycle-and-retry"
+      ],
+      "remaining": "Missing parent, retired employee, default-coordinator changes and actor/session-generation changes remain gaps."
+    },
+    {
+      "declaration": "src/web/public/chat-app.js::ReverieChatApp.employeeHiringFields::enabled::input:[binding label]",
+      "scenarios": [
+        "office.employee-hiring.conflict-refresh-and-retry"
+      ],
+      "remaining": "Employee rebinding, legacy-session conversion, denied authority, disconnected refresh and lost replies remain gaps."
+    },
+    {
+      "declaration": "src/web/public/chat-app.js::ReverieChatApp.employeeHiringFields::inline::button:Refresh hiring permission for ${employee.name}",
+      "scenarios": [
+        "office.employee-hiring.conflict-refresh-and-retry"
+      ],
+      "remaining": "Employee rebinding, legacy-session conversion, denied authority, disconnected refresh and lost replies remain gaps."
     }
   ],
   "gaps": [
@@ -151,14 +376,6 @@
     },
     {
       "declaration": "src/web/public/chat-app.js::ReverieChatApp.companyRecoveryFields::save::button:Save recovery",
-      "reason": "No reviewed declaration-to-scenario behavioral contract; screenshot or test-file existence does not qualify this control."
-    },
-    {
-      "declaration": "src/web/public/chat-app.js::ReverieChatApp.companyTimeZoneForm::input::input:[binding label]",
-      "reason": "No reviewed declaration-to-scenario behavioral contract; screenshot or test-file existence does not qualify this control."
-    },
-    {
-      "declaration": "src/web/public/chat-app.js::ReverieChatApp.companyTimeZoneForm::save::button:Save time zone",
       "reason": "No reviewed declaration-to-scenario behavioral contract; screenshot or test-file existence does not qualify this control."
     },
     {
@@ -255,14 +472,6 @@
     },
     {
       "declaration": "src/web/public/chat-app.js::ReverieChatApp.employeeGpuFields::save::button:Save GPU request for ${employee.name}",
-      "reason": "No reviewed declaration-to-scenario behavioral contract; screenshot or test-file existence does not qualify this control."
-    },
-    {
-      "declaration": "src/web/public/chat-app.js::ReverieChatApp.employeeHiringFields::enabled::input:[binding label]",
-      "reason": "No reviewed declaration-to-scenario behavioral contract; screenshot or test-file existence does not qualify this control."
-    },
-    {
-      "declaration": "src/web/public/chat-app.js::ReverieChatApp.employeeHiringFields::inline::button:Refresh hiring permission for ${employee.name}",
       "reason": "No reviewed declaration-to-scenario behavioral contract; screenshot or test-file existence does not qualify this control."
     },
     {
@@ -482,10 +691,6 @@
       "reason": "Detection gap: dynamic-constructor:da7564622270"
     },
     {
-      "declaration": "src/web/public/chat-app.js::ReverieChatApp.openCompany::paint::button:Company settings",
-      "reason": "No reviewed declaration-to-scenario behavioral contract; screenshot or test-file existence does not qualify this control."
-    },
-    {
       "declaration": "src/web/public/chat-app.js::ReverieChatApp.openCompany::paint::button:Suggest another name",
       "reason": "No reviewed declaration-to-scenario behavioral contract; screenshot or test-file existence does not qualify this control."
     },
@@ -518,10 +723,6 @@
       "reason": "No reviewed declaration-to-scenario behavioral contract; screenshot or test-file existence does not qualify this control."
     },
     {
-      "declaration": "src/web/public/chat-app.js::ReverieChatApp.openCompanySettings::close::button:Close company settings",
-      "reason": "No reviewed declaration-to-scenario behavioral contract; screenshot or test-file existence does not qualify this control."
-    },
-    {
       "declaration": "src/web/public/chat-app.js::ReverieChatApp.openCompanySettings::inline::button:Configure server chat plugins",
       "reason": "No reviewed declaration-to-scenario behavioral contract; screenshot or test-file existence does not qualify this control."
     },
@@ -531,10 +732,6 @@
     },
     {
       "declaration": "src/web/public/chat-app.js::ReverieChatApp.openCompanySettings::inline::summary:Research receipts",
-      "reason": "No reviewed declaration-to-scenario behavioral contract; screenshot or test-file existence does not qualify this control."
-    },
-    {
-      "declaration": "src/web/public/chat-app.js::ReverieChatApp.openCompanySettings::input::input:[binding label]",
       "reason": "No reviewed declaration-to-scenario behavioral contract; screenshot or test-file existence does not qualify this control."
     },
     {
@@ -594,10 +791,6 @@
       "reason": "No reviewed declaration-to-scenario behavioral contract; screenshot or test-file existence does not qualify this control."
     },
     {
-      "declaration": "src/web/public/chat-app.js::ReverieChatApp.openEmployeeProfile::cancel::button:Cancel",
-      "reason": "No reviewed declaration-to-scenario behavioral contract; screenshot or test-file existence does not qualify this control."
-    },
-    {
       "declaration": "src/web/public/chat-app.js::ReverieChatApp.openEmployeeProfile::inline::button:Close profile for ${employee.name}",
       "reason": "No reviewed declaration-to-scenario behavioral contract; screenshot or test-file existence does not qualify this control."
     },
@@ -626,15 +819,7 @@
       "reason": "Detection gap: dynamic-constructor:7421b1cd6b6d"
     },
     {
-      "declaration": "src/web/public/chat-app.js::ReverieChatApp.openEmployeeProfile::parent::select:[binding label]",
-      "reason": "No reviewed declaration-to-scenario behavioral contract; screenshot or test-file existence does not qualify this control."
-    },
-    {
       "declaration": "src/web/public/chat-app.js::ReverieChatApp.openEmployeeProfile::pronouns::input:[binding label]",
-      "reason": "No reviewed declaration-to-scenario behavioral contract; screenshot or test-file existence does not qualify this control."
-    },
-    {
-      "declaration": "src/web/public/chat-app.js::ReverieChatApp.openEmployeeProfile::save::button:Save profile",
       "reason": "No reviewed declaration-to-scenario behavioral contract; screenshot or test-file existence does not qualify this control."
     },
     {
@@ -4734,13 +4919,14 @@
       "reason": "No reviewed declaration-to-scenario behavioral contract; screenshot or test-file existence does not qualify this control."
     }
   ],
-  "gapBudget": 1167,
+  "gapBudget": 1157,
   "limitations": [
     "This source ratchet recognizes named button/el/literalText/createElement constructors, static HTML tags and inline JavaScript. It is not an exhaustive JavaScript renderer analysis.",
     "Dynamic labels/tags, embedded markup, semantic roles, duplicate declarations and external script dependencies remain explicit detection gaps, never inferred coverage.",
     "Property-assigned labels, arbitrary wrappers, imported modules outside the listed source surface, CSS interactions and runtime-only branches require additional source review and behavioral scenarios.",
     "Mappings qualify only their named assertion scenario. The remaining state gaps on each mapping are unresolved; no control or whole-site completeness is claimed.",
     "Scenario title and ordered assertion tokens are static integrity anchors, not proof the test passed. CI must execute the actual associated test runner.",
-    "New or changed declarations fail without manifest registration. The explicit gap list and budget are reviewed configuration, not an immutable promise that gaps can never increase."
+    "New or changed declarations fail without manifest registration. The explicit gap list and budget are reviewed configuration, not an immutable promise that gaps can never increase.",
+    "A declaration may link several reviewed state scenarios. None of these links removes the explicit remaining state gaps or qualifies an unresolved constructor."
   ]
 }
