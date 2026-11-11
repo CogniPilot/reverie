@@ -1,18 +1,18 @@
 # Recover a stuck expert
 
-A busy badge does not prove work. Check the current employee, session and activity. Preserve deliberate stops, vacations, retirement, unique work and uncertain deliveries.
+A busy badge does not prove work. Check employee, session and activity. Preserve deliberate stops, vacations, retirement, unique work and uncertain deliveries.
 
 ## Inspect first
 
-Open the employee profile and Debug terminal. An idle prompt is not failure. Fresh native laptop evidence can show an expert Online while its optional viewer is unavailable; observations expire within 25 seconds. Runtime liveness and HTTP success do not prove model readiness or chat delivery.
+Open the employee profile and Debug terminal. An idle prompt is not failure. Native laptop evidence can show Online while its optional viewer is unavailable; observations expire within 25 seconds. Liveness and HTTP success do not prove model readiness or delivery.
 
-The signed-in owner can use **Status** for bounded diagnostics and **Reconnect** to attach the existing server viewer. Browser terminal attachment is a separate operation. Neither reconnect replaces the provider, wakes someone off, clears drafts or resends uncertain input.
+The signed-in owner can use **Status** for diagnostics and **Reconnect** to attach the existing server viewer. Browser attachment is separate. Neither replaces the provider, wakes someone off, clears drafts or resends uncertain input.
 
 **Restart session** preserves identity, memory and channel membership. Explicitly return an absent employee first. **Recover a stalled session** requires checking activity: running tasks, dialogs and input within two minutes block it; redraws alone do not. Verify readiness and request a brief chat acknowledgement afterward.
 
 ## Delegated wake and viewer repair
 
-Use your own scoped connection. Read `GET /api/company` and `GET /api/sessions`; match the current employee/session binding. Titles grant nothing. Check `reverie agent capabilities --json` before reporting a permission blocker.
+Use your own scoped connection. Read `GET /api/company` and `GET /api/sessions`; match the current binding. Titles grant nothing. Check `reverie agent capabilities --json` before reporting blockers.
 
 The explicit `permissions.recoverEmployees` grant permits:
 
@@ -24,13 +24,13 @@ reverie agent reconnect-viewer EMPLOYEE_ID --json
 
 Use the full employee UUID. Separate `agent wake SESSION_ID` only nudges an idle session. Ordinary wake preserves stopped/vacation intent and saved runtime; inspect `data.recovery.awakened` and `data.recovery.skipped`. Its budget is three attempts per employee in fifteen minutes, subject to office settings.
 
-For isolated laptops, automatic and manual wake use fresh provider health rather than the optional viewer's PID. A healthy provider is preserved; `native-health-unconfirmed` blocks a new start until health can be checked. Repair a disconnected viewer separately. Recovery permission and the original employee/session generation remain checked while a request waits.
+Isolated-laptop wake uses fresh provider health, preserving a healthy provider. `native-health-unconfirmed` blocks startup until health can be checked; repair viewers separately. Permission and original employee/session generation remain checked while waiting.
 
-`start-unconfirmed` means a start may already have happened. The wake CLI exits with an error, preserves that result in JSON, and makes no automatic retry. Check the employee's current state before another recovery attempt.
+`start-unconfirmed` means startup may have happened. The CLI exits with an error, preserves JSON and never retries automatically. Inspect current state before another attempt.
 
 Viewer repair requires compatible website, broker and laptop CLI versions, authenticated native office proof, current permissions, exact session/generation and fresh provider health. Missing proof fails closed. Copied parent headers and borrowed owner cookies grant no authority.
 
-Viewer status returns `state`, `reason`, `attempts` and `retryAfterMs` under `reconnect`, distinguishing health, stale binding, move/lifecycle holds, readiness and backoff. Reading status starts nothing. Repair never restarts the provider, replays Enter or blindly clears working state. After an unconfirmed response, inspect status; never automatically repeat it.
+Viewer status returns `state`, `reason`, `attempts` and `retryAfterMs` under `reconnect`: health, binding, move/lifecycle holds, readiness and backoff. Status starts nothing. Repair never restarts providers, replays Enter or blindly clears working state. Inspect unconfirmed responses; never automatically repeat them.
 
 ## Office attendance and restarts
 
