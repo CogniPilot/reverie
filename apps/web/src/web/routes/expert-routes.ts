@@ -10,8 +10,8 @@ import { NO_OWNER, type OwnerVerifier } from '../../owner-auth/marks.js';
  *   nothing is retired or trimmed to make room.
  * - A hire creates the session through the console's own session route, registers it as an employee,
  *   joins the template's rooms and posts one notice. Without a notice room, or if the notice cannot be
- *   posted, the hire fails and every step already taken is undone. An admin-audit line is written
- *   before the response.
+ *   posted after launch, its unconfirmed status is retained without stopping the employee. Startup
+ *   dispatch is durably recorded first; uncertainty preserves identity and requires inspection.
  * - A delegate hire uses the template's mode and account (a `mode` or `accountProfileId` in its body is
  *   refused with 403), and its `workingDir` must be inside `settings.delegateWorkingRoot` (unset: 403).
  * - Retiring stops the session through the console's session cleanup and marks the hire retired.
@@ -42,6 +42,7 @@ import {
   MAX_HIRE_RECORDS,
   ModelIdSchema,
   findCredential,
+  expertHireUsage,
   parseExpertSettings,
   parseExpertTemplate,
   templateDigest,
@@ -94,9 +95,9 @@ export interface ExpertRouteDeps {
   /** The agent session an `X-Reverie-Parent-Session` header resolves to, if any. */
   callerSession(req: FastifyRequest): string | undefined;
   /** Create the session through the console's session-creation route; resolves to its id. */
-  createSession(req: FastifyRequest, launch: SessionLaunch, delegate?: { sessionId: string; authorized(): boolean }): Promise<string>;
+  createSession(req: FastifyRequest, launch: SessionLaunch, admission: { delegateSessionId?: string; authorized(): boolean }): Promise<string>;
   /** Start only the freshly created runtime, after its persistent identity and rooms exist. */
-  startSession(sessionId: string): Promise<void>;
+  startSession(sessionId: string, admitted: () => boolean): Promise<void>;
   /** Stop a session through the console's cleanup path (no history or data directories are removed). */
   stopSession(sessionId: string): Promise<void>;
   sessionExists(sessionId: string): boolean;
@@ -104,6 +105,7 @@ export interface ExpertRouteDeps {
   employeeSession?(employeeId: string, owner: string | undefined): string | undefined;
   /** Current names in this company, for distinct template hires (identity stays the employee id). */
   employeeNames(owner: string | undefined): string[];
+  validateHireReportingLine(owner: string | undefined, reportsTo?: string): void;
   hireEmployee(input: {
     owner?: string;
     name: string;
@@ -112,14 +114,11 @@ export interface ExpertRouteDeps {
     expertise: string[];
     sessionId: string;
     reportsTo?: string;
-  }): Promise<{ id: string }>;
-  inviteEmployee(employeeId: string, roomId: string, owner: string | undefined): void;
-  /** Rollback only: remove an employee record this hire just created. */
-  removeEmployee(employeeId: string): Promise<void>;
-  /** Rollback only: take the session out of a room this hire just joined. */
-  leaveRoom(roomId: string, sessionId: string): void;
-  /** Rollback only: drop the temporary-worker profile the session route records for a new agent session. */
-  forgetSpawnProfile?(owner: string | undefined, sessionId: string): Promise<void>;
+  }, admitted: () => boolean): Promise<{ id: string; sessionId: string; sessionGeneration: number }>;
+  /** Canonical lookup by the exact newly-created session and company owner; never a name match. */
+  employeeForSession(sessionId: string, owner: string | undefined):
+    { id: string; sessionId: string; sessionGeneration: number } | undefined;
+  inviteEmployee(employeeId: string, roomId: string, owner: string | undefined): void | Promise<void>;
   postNotice(roomId: string, text: string): void | Promise<void>;
   audit(entry: ExpertAuditEntry): Promise<void>;
   /** Notice room when the settings name none (REVERIE_EXPERTS_NOTICE_ROOM). */
@@ -163,6 +162,17 @@ const RetireBodySchema = z
 
 type Actor = { kind: 'owner'; label: string } | { kind: 'delegate'; session: string; label: string };
 type HireOverrides = Pick<HireRequestFields, 'name' | 'position' | 'reportsTo' | 'rooms'>;
+
+/** A retained identity/session is an inspection handle, never permission or a native launch receipt. */
+class HireRecoveryError extends ExpertError {
+  constructor(readonly retained: { sessionId?: string; employeeId?: string; hireId?: string; requestId?: string }) {
+    super(
+      'Hire creation, startup or persistence was not confirmed. Existing employee and session data were retained; ' +
+      'inspect the hire request and company before recovery. Do not submit another hire to retry startup.',
+      503
+    );
+  }
+}
 
 const statusCode = (status: number): ApiErrorCode =>
   status === 403
@@ -214,7 +224,8 @@ export function registerExpertRoutes(app: FastifyInstance, deps: ExpertRouteDeps
       const status = error instanceof ExpertError ? error.status : (error as { status?: unknown }).status;
       if (typeof status !== 'number' || (error as { body?: unknown }).body) throw error;
       reply.code(status);
-      return createErrorResponse(statusCode(status), (error as Error).message);
+      const response = createErrorResponse(statusCode(status), (error as Error).message);
+      return error instanceof HireRecoveryError ? { ...response, recovery: { kind: 'hire-retained', ...error.retained } } : response;
     }
   };
   // Hires and retirements run one at a time, so two concurrent requests cannot both pass a cap.
@@ -226,21 +237,23 @@ export function registerExpertRoutes(app: FastifyInstance, deps: ExpertRouteDeps
   };
   const noticeRoom = (): string | undefined => deps.store.snapshot().settings.noticeRoomId ?? deps.noticeRoomFallback;
 
-  app.get('/api/experts', async (_req, reply) =>
+  app.get('/api/experts', async (req, reply) =>
     run(reply, async () => {
       await deps.store.load();
       const state = deps.store.snapshot();
-      const since = now() - DAY_MS;
+      const usage = expertHireUsage(state, now());
       return {
         experts: state.templates,
         // An active hire whose session no longer exists still counts against maxActive until it is retired.
-        hires: state.hires.map((h) => (h.status === 'active' ? { ...h, sessionLive: deps.sessionExists(h.sessionId) } : h)),
+        hires: state.hires.filter(hire => hire.owner === ownerFor(req))
+          .map((h) => (h.status === 'active' ? { ...h, sessionLive: deps.sessionExists(h.sessionId) } : h)),
         // The whole settings object: PUT /api/experts-settings replaces it, so a caller reads, changes and writes it back.
         settings: state.settings,
+        storageUncertain: deps.store.storageUncertain,
         limits: {
-          hiresLast24h: state.hires.filter((h) => h.hiredAt > since).length,
+          hiresLast24h: usage.recent,
           maxHiresPerDay: state.settings.maxHiresPerDay,
-          active: state.hires.filter((h) => h.status === 'active').length,
+          active: usage.active,
           maxActive: state.settings.maxActive,
         },
       };
@@ -254,7 +267,7 @@ export function registerExpertRoutes(app: FastifyInstance, deps: ExpertRouteDeps
       const state = deps.store.snapshot();
       const expert = state.templates.find((t) => t.id === id);
       if (!expert) throw new ExpertError('No such expert template', 404);
-      return { expert, hires: state.hires.filter((h) => h.templateId === id) };
+      return { expert, hires: state.hires.filter((h) => h.templateId === id && h.owner === ownerFor(req)) };
     })
   );
 
@@ -410,6 +423,7 @@ export function registerExpertRoutes(app: FastifyInstance, deps: ExpertRouteDeps
    */
   const hireNow = async (req: FastifyRequest, actor: Actor, id: string, body: z.infer<typeof HireBodySchema>,
     overrides: HireOverrides = {}, requested?: { requestId: string; by: string; templateSha256: string }) => {
+      deps.store.assertWritable();
       if (findCredential(body.reason)) throw new ExpertError('reason: looks like a credential');
       const owner = ownerFor(req);
       let delegatedRoot: string | undefined;
@@ -468,21 +482,22 @@ export function registerExpertRoutes(app: FastifyInstance, deps: ExpertRouteDeps
         const room = noticeRoom();
         if (!room) throw new ExpertError('No notice room is configured, so hiring is off', 503);
         const at = now();
-        const recent = state.hires.filter((h) => h.hiredAt > at - DAY_MS).length;
-        const active = state.hires.filter((h) => h.status === 'active').length;
+        const { recent, active } = expertHireUsage(state, at);
         if (recent >= settings.maxHiresPerDay)
           throw new ExpertError(`Hire limit reached: ${recent} of ${settings.maxHiresPerDay} in the last 24 hours`, 409);
         if (active >= settings.maxActive)
           throw new ExpertError(`Active expert limit reached: ${active} of ${settings.maxActive}; retire one first`, 409);
         if (state.hires.length >= MAX_HIRE_RECORDS) throw new ExpertError('Hire record limit reached', 409);
+        const pendingHireId = randomUUID();
         const authorized = () => {
-          if (actor.kind !== 'delegate') return true;
+          if (deps.store.storageUncertain) return false;
           const latest = deps.store.snapshot();
+          const usage = expertHireUsage(latest, now(), pendingHireId, requested?.requestId);
+          if (usage.recent >= latest.settings.maxHiresPerDay || usage.active >= latest.settings.maxActive ||
+              JSON.stringify(latest.templates.find(row => row.id === id)) !== JSON.stringify(template)) return false;
+          if (actor.kind !== 'delegate') return (deps.verifiedOwner ?? NO_OWNER)(req) && ownerFor(req) === owner;
           return deps.callerSession(req) === actor.session && canHireSession(req, latest.settings, actor.session) &&
-            latest.settings.delegateWorkingRoot === delegatedRoot && (!latest.settings.requireBudgetStopForDelegates || !!body.budgetStop) &&
-            latest.hires.filter(hire => hire.hiredAt > now() - DAY_MS).length < latest.settings.maxHiresPerDay &&
-            latest.hires.filter(hire => hire.status === 'active').length < latest.settings.maxActive &&
-            JSON.stringify(latest.templates.find(row => row.id === id)) === JSON.stringify(template);
+            latest.settings.delegateWorkingRoot === delegatedRoot && (!latest.settings.requireBudgetStopForDelegates || !!body.budgetStop);
         };
         if (!bound(deps.store.snapshot().templates.find(row => row.id === id))) throw templateChanged();
         if (!authorized()) throw new ExpertError('The delegated hire authorization changed; ask the owner to review it', 403);
@@ -498,23 +513,62 @@ export function registerExpertRoutes(app: FastifyInstance, deps: ExpertRouteDeps
         const missingRoom = overrides.rooms && deps.roomExists ? rooms.find((roomId) => !deps.roomExists!(roomId)) : undefined;
         if (missingRoom !== undefined) throw new ExpertError(`rooms: no room with id "${flat(missingRoom).slice(0, 100)}"`);
         const position = overrides.position ?? template.role;
-        const sessionId = await deps.createSession(req, {
-          workingDir: body.workingDir,
-          mode: body.mode ?? template.defaults.mode,
-          name: employeeName,
-          icon: template.icon,
-          model: body.model ?? (body.mode && body.mode !== template.defaults.mode ? undefined : template.defaults.model),
-          effort: body.effort ?? template.defaults.effort,
-          accountProfileId: body.accountProfileId ?? template.defaults.accountProfileId,
-        }, actor.kind === 'delegate' ? { sessionId: actor.session, authorized } : undefined);
-        // Undo steps, newest first. The session goes last, after everything that refers to it.
-        const undo: Array<() => unknown> = [
-          () => deps.stopSession(sessionId),
-          () => deps.forgetSpawnProfile?.(owner, sessionId),
-        ];
-        let record: ExpertHire;
+        deps.validateHireReportingLine(owner, overrides.reportsTo);
+        deps.store.assertWritable();
+        if (requested) {
+          try {
+            await deps.store.update(
+              (state) => {
+                const request = requestOf(state, requested.requestId);
+                if (request.status !== 'approving' || request.hireId || request.reservation)
+                  throw new ExpertError('Hire approval is already held or linked', 409);
+                request.reservation = { phase: 'creation-issued', at };
+              },
+              () => {
+                if (!authorized()) throw new ExpertError('Hire authority changed before creation publication', 403);
+              }
+            );
+          } catch (error) {
+            // No create call was made. Only a known unpublished refusal can return to pending.
+            if (!deps.store.storageUncertain) throw error;
+            throw new HireRecoveryError({ requestId: requested.requestId });
+          }
+        }
+        let sessionId: string;
         try {
-          const employee = await deps.hireEmployee({
+          sessionId = await deps.createSession(
+            req,
+            {
+              workingDir: body.workingDir,
+              mode: body.mode ?? template.defaults.mode,
+              name: employeeName,
+              icon: template.icon,
+              model: body.model ?? (body.mode && body.mode !== template.defaults.mode ? undefined : template.defaults.model),
+              effort: body.effort ?? template.defaults.effort,
+              accountProfileId: body.accountProfileId ?? template.defaults.accountProfileId,
+            },
+            { ...(actor.kind === 'delegate' ? { delegateSessionId: actor.session } : {}), authorized }
+          );
+        } catch {
+          throw new HireRecoveryError(requested ? { requestId: requested.requestId } : {});
+        }
+        if (requested) {
+          try {
+            await deps.store.update((state) => {
+              const request = requestOf(state, requested.requestId);
+              if (request.status !== 'approving' || request.hireId || request.reservation?.phase !== 'creation-issued')
+                throw new ExpertError('Hire approval is already held or linked', 409);
+              request.reservation = { phase: 'session-bound', sessionId, at: request.reservation.at };
+            });
+          } catch {
+            throw new HireRecoveryError({ sessionId });
+          }
+        }
+        // Once canonical creation is attempted, a rejection does not prove no identity was committed.
+        let employee: Awaited<ReturnType<ExpertRouteDeps['hireEmployee']>> | undefined;
+        let bindingUnconfirmed = false;
+        try {
+          employee = await deps.hireEmployee({
             owner,
             name: employeeName,
             icon: template.icon,
@@ -522,78 +576,176 @@ export function registerExpertRoutes(app: FastifyInstance, deps: ExpertRouteDeps
             expertise: template.expertise.length ? template.expertise.slice(0, 12) : [template.role],
             sessionId,
             ...(overrides.reportsTo !== undefined ? { reportsTo: overrides.reportsTo } : {}),
-          });
-          undo.unshift(() => deps.removeEmployee(employee.id));
-          // A hire with a budget stop also joins the notice room, where its checkpoint request is sent.
-          const joins = body.budgetStop && !rooms.includes(room) ? [...rooms, room] : rooms;
-          for (const roomId of joins) {
-            deps.inviteEmployee(employee.id, roomId, owner);
-            undo.unshift(() => deps.leaveRoom(roomId, sessionId));
-          }
-          if (!bound(deps.store.snapshot().templates.find(row => row.id === id))) throw templateChanged();
-          if (!authorized()) throw new ExpertError('The delegated hire authorization changed before startup', 403);
-          try {
-            await deps.startSession(sessionId);
-          } catch {
-            throw new ExpertError('The expert runtime could not start, so the hire was undone', 503);
-          }
-          record = {
-            id: randomUUID(),
-            templateId: template.id,
-            sessionId,
-            employeeId: employee.id,
-            ...(owner !== undefined ? {owner} : {}),
-            by: actor.kind === 'owner' ? 'owner' : actor.label,
-            reason: body.reason,
-            hiredAt: at,
-            status: 'active',
-            ...(body.budgetStop ? { budgetStop: { ...body.budgetStop } } : {}),
-            ...(requested ? { requestId: requested.requestId } : {}),
-          };
-          const hireId = record.id;
-          await deps.store.update((s) => {
-            s.hires.push(record);
-          });
-          undo.unshift(() =>
-            deps.store.update((s) => {
-              s.hires = s.hires.filter((h) => h.id !== hireId);
-            })
-          );
-          try {
-            await deps.postNotice(
-              room,
-              `Expert hired: ${template.icon} ${employeeName} (${position}) from template "${template.id}" by ${record.by}` +
-                (requested ? `, approving request ${requested.requestId} from ${requested.by}` : '') + '. ' +
-                `Reason: ${flat(body.reason)}. Session ${sessionId}. ` +
-                (body.budgetStop
-                  ? `Budget stop: plan ${body.budgetStop.planId} at ${body.budgetStop.weeklyPercent}% weekly. `
-                  : '') +
-                `Hires in the last 24 hours: ${recent + 1}/${settings.maxHiresPerDay}; active: ${active + 1}/${settings.maxActive}.`
-            );
-          } catch (error) {
-            throw new ExpertError(
-              `The hire notice could not be posted, so the hire was undone: ${error instanceof Error ? error.message : String(error)}`,
-              503
-            );
-          }
-        } catch (error) {
-          for (const step of undo) {
-            try {
-              await step();
-            } catch (undoError) {
-              console.error('[experts] hire rollback step failed:', undoError instanceof Error ? undoError.message : undoError);
-            }
-          }
-          throw error;
+          }, authorized);
+        } catch {
+          bindingUnconfirmed = true;
+          employee = deps.employeeForSession(sessionId, owner);
         }
-        await deps.audit({
-          admin: actor.label,
-          action: 'expert_hire',
-          target: template.id,
-          ip: req.ip,
-          detail: { template: template.id, sessionId, by: record.by, employeeId: record.employeeId, ...(requested ? { requestId: requested.requestId } : {}) },
-        });
-        return { hire: record, sessionId, employeeId: record.employeeId };
+        if (!employee || employee.sessionId !== sessionId) throw new HireRecoveryError({ sessionId });
+        const canonical = deps.employeeForSession(sessionId, owner);
+        if (!canonical || canonical.id !== employee.id || canonical.sessionGeneration !== employee.sessionGeneration)
+          throw new HireRecoveryError({ sessionId });
+        const record: ExpertHire = {
+          id: pendingHireId,
+          templateId: template.id,
+          sessionId,
+          employeeId: employee.id,
+          ...(owner !== undefined ? { owner } : {}),
+          by: actor.kind === 'owner' ? 'owner' : actor.label,
+          reason: body.reason,
+          hiredAt: at,
+          status: 'active',
+          startup: { phase: bindingUnconfirmed ? 'not-issued' : 'prepared', sessionGeneration: canonical.sessionGeneration },
+          notice: 'unconfirmed',
+          audit: 'unconfirmed',
+          ...(body.budgetStop ? { budgetStop: { ...body.budgetStop } } : {}),
+          ...(requested ? { requestId: requested.requestId } : {}),
+        };
+        const retained = { sessionId, employeeId: record.employeeId, hireId: record.id };
+        const assertLaunch = () => {
+          deps.store.assertWritable();
+          if (!bound(deps.store.snapshot().templates.find((row) => row.id === id))) throw templateChanged();
+          if (!authorized()) throw new ExpertError('The hire authorization changed before startup', 403);
+          const current = deps.employeeForSession(sessionId, owner);
+          if (!current || current.id !== record.employeeId || current.sessionGeneration !== canonical.sessionGeneration)
+            throw new ExpertError('The canonical hire binding changed before startup', 409);
+        };
+        const transition = async (
+          expected: ExpertHire['startup']['phase'],
+          phase: 'issued' | 'launch-returned' | 'recovery-required' | 'not-issued'
+        ) => {
+          await deps.store.update(
+            (state) => {
+              const hire = state.hires.find((row) => row.id === record.id);
+              if (
+                !hire ||
+                hire.employeeId !== record.employeeId ||
+                hire.sessionId !== sessionId ||
+                hire.startup.phase !== expected
+              )
+                throw new ExpertError('The retained hire startup changed; inspect its current state', 409);
+              hire.startup = { phase, sessionGeneration: canonical.sessionGeneration };
+            },
+            phase === 'issued' ? assertLaunch : undefined
+          );
+        };
+        try {
+          await deps.store.update((state) => {
+            state.hires.push(record);
+            if (requested) {
+              const request = requestOf(state, requested.requestId);
+              if (request.status !== 'approving' || request.hireId)
+                throw new ExpertError('Hire request is already linked or no longer approving', 409);
+              request.hireId = record.id;
+            }
+          });
+          if (bindingUnconfirmed) throw new HireRecoveryError(retained);
+          const joins = body.budgetStop && !rooms.includes(room) ? [...rooms, room] : rooms;
+          try {
+            for (const roomId of joins) {
+              assertLaunch();
+              await deps.inviteEmployee(record.employeeId, roomId, owner);
+            }
+            assertLaunch();
+          } catch {
+            await transition('prepared', 'not-issued');
+            throw new HireRecoveryError(retained);
+          }
+          // The durable issued row must exist before the Promise can invoke any native launch.
+          await transition('prepared', 'issued');
+          try {
+            assertLaunch();
+            await deps.startSession(sessionId, () => {
+              try {
+                assertLaunch();
+                return true;
+              } catch {
+                return false;
+              }
+            });
+          } catch {
+            await transition('issued', 'recovery-required');
+            throw new HireRecoveryError(retained);
+          }
+          await transition('issued', 'launch-returned');
+        } catch {
+          // Never stop, remove the canonical employee, forget its profile, or replay startup here.
+          // A write rejection may have renamed the file; ExpertStore blocks subsequent stale writes.
+          throw new HireRecoveryError(retained);
+        }
+        let notice: 'posted' | 'unconfirmed' = 'unconfirmed';
+        let audit: 'recorded' | 'unconfirmed' = 'unconfirmed';
+        try {
+          await deps.postNotice(
+            room,
+            'Expert hired: ' +
+              template.icon +
+              ' ' +
+              employeeName +
+              ' (' +
+              position +
+              ') from template "' +
+              template.id +
+              '" by ' +
+              record.by +
+              (requested ? ', approving request ' + requested.requestId + ' from ' + requested.by : '') +
+              '. ' +
+              'Reason: ' +
+              flat(body.reason) +
+              '. Session ' +
+              sessionId +
+              '. ' +
+              (body.budgetStop
+                ? 'Budget stop: plan ' + body.budgetStop.planId + ' at ' + body.budgetStop.weeklyPercent + '% weekly. '
+                : '') +
+              'Hires in the last 24 hours: ' +
+              (recent + 1) +
+              '/' +
+              settings.maxHiresPerDay +
+              '; active: ' +
+              (active + 1) +
+              '/' +
+              settings.maxActive +
+              '.'
+          );
+          notice = 'posted';
+        } catch {
+          /* Ancillary failure cannot undo a launch. The API retains its unconfirmed status. */
+        }
+        try {
+          await deps.audit({
+            admin: actor.label,
+            action: 'expert_hire',
+            target: template.id,
+            ip: req.ip,
+            detail: {
+              template: template.id,
+              sessionId,
+              by: record.by,
+              employeeId: record.employeeId,
+              ...(requested ? { requestId: requested.requestId } : {}),
+            },
+          });
+          audit = 'recorded';
+        } catch {
+          /* Report uncertainty without restarting or deleting the employee. */
+        }
+        try {
+          await deps.store.update((state) => {
+            const hire = state.hires.find((row) => row.id === record.id);
+            if (!hire || hire.startup.phase !== 'launch-returned')
+              throw new ExpertError('Hire startup changed before notification publication', 409);
+            Object.assign(hire, { notice, audit });
+          });
+        } catch {
+          throw new HireRecoveryError(retained);
+        }
+        return {
+          hire: deps.store.snapshot().hires.find((row) => row.id === record.id)!,
+          sessionId,
+          employeeId: record.employeeId,
+        };
+
   };
 
   app.post('/api/experts/:id/hire', async (req, reply) =>
@@ -637,7 +789,8 @@ export function registerExpertRoutes(app: FastifyInstance, deps: ExpertRouteDeps
           throw new ExpertError(`You have ${open.length} hire requests waiting; withdraw one or wait for the owner`, 409);
         if (state.hireRequests.length >= MAX_HIRE_REQUESTS) throw new ExpertError('Hire request record limit reached', 409);
         const next: ExpertHireRequest = {
-          id: randomUUID(), templateId: id, templateSha256: templateDigest(template), fields: { ...fields },
+          id: randomUUID(), ...(ownerFor(req) !== undefined ? { owner: ownerFor(req) } : {}),
+          templateId: id, templateSha256: templateDigest(template), fields: { ...fields },
           requestedBy: actor.label, requestedAt: now(), status: 'pending',
         };
         state.hireRequests.push(next);
@@ -664,7 +817,7 @@ export function registerExpertRoutes(app: FastifyInstance, deps: ExpertRouteDeps
       requireHiringPrincipal(req);
       await deps.store.load();
       const actor = hiringActor(req);
-      const all = deps.store.snapshot().hireRequests;
+      const all = deps.store.snapshot().hireRequests.filter(request => request.owner === ownerFor(req));
       return { requests: actor.kind === 'owner' ? all : all.filter((r) => r.requestedBy === actor.label) };
     })
   );
@@ -677,6 +830,7 @@ export function registerExpertRoutes(app: FastifyInstance, deps: ExpertRouteDeps
       return serial(async () => {
         const state = deps.store.snapshot();
         const request = requestOf(state, requestId);
+        if (request.owner !== ownerFor(req)) throw new ExpertError('Hire request belongs to a different or unverified company scope', 403);
         decided(request);
         const template = state.templates.find((t) => t.id === request.templateId);
         if (!template) throw new ExpertError('The template of this request no longer exists; decline it', 409);
@@ -691,7 +845,12 @@ export function registerExpertRoutes(app: FastifyInstance, deps: ExpertRouteDeps
             parseBody(HireBodySchema, body), { name, position, reportsTo, rooms },
             { requestId, by: request.requestedBy, templateSha256: request.templateSha256 });
         } catch (error) {
-          await deps.store.update((s) => { requestOf(s, requestId).status = 'pending'; });
+          // A linked or ambiguous approval is held for inspection, never made replayable.
+          if (!(error instanceof HireRecoveryError) && !deps.store.storageUncertain)
+            await deps.store.update((s) => {
+              const current = requestOf(s, requestId);
+              if (!current.hireId && !current.reservation) current.status = 'pending';
+            });
           throw error;
         }
         const approved = await deps.store.update((s) => {
@@ -714,9 +873,11 @@ export function registerExpertRoutes(app: FastifyInstance, deps: ExpertRouteDeps
       const { requestId } = req.params as { requestId: string };
       const request = await serial(() => deps.store.update((s) => {
         const r = requestOf(s, requestId);
+        if (r.owner !== ownerFor(req)) throw new ExpertError('Hire request belongs to a different or unverified company scope', 403);
         // Inside the hire gate, `approving` can only be left over from an approval that never finished (a restart):
         // the owner may close it after checking Company. Closing never undoes a hire that did happen.
         if (r.status !== 'approving') decided(r);
+        if (r.hireId || r.reservation) throw new ExpertError('This approval holds an unconfirmed creation or retained hire. Inspect it before recovery; declining cannot reset its startup.', 409);
         Object.assign(r, { status: 'declined', decidedAt: now(), decidedBy: 'owner', ...(note ? { note } : {}) });
         return r;
       }));
@@ -735,6 +896,7 @@ export function registerExpertRoutes(app: FastifyInstance, deps: ExpertRouteDeps
       const { requestId } = req.params as { requestId: string };
       const request = await serial(() => deps.store.update((s) => {
         const r = requestOf(s, requestId);
+        if (r.owner !== ownerFor(req)) throw new ExpertError('Hire request belongs to a different or unverified company scope', 403);
         if (r.requestedBy !== actor.label) throw new ExpertError('Only the delegate that made this request may withdraw it', 403);
         decided(r);
         Object.assign(r, { status: 'withdrawn', decidedAt: now(), decidedBy: actor.label });

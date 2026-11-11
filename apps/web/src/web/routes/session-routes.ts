@@ -1,5 +1,7 @@
 import { NO_OWNER, type OwnerVerifier } from '../../owner-auth/marks.js';
 import { delegatedSessionStartAdmission } from '../../owner-auth/delegated-session-create.js';
+import { sessionCreateAdmission } from '../../owner-auth/session-create-admission.js';
+import type { TabLayout } from '../../tab-layout.js';
 import { runtimeSwitches } from './session-runtime-routes.js';
 import { clampExternalCliBypassForOwner } from '../../session-config-clamp.js';
 /**
@@ -1166,6 +1168,11 @@ export function registerSessionRoutes(
   // ========== Session Creation ==========
 
   app.post('/api/sessions', async (req, reply) => {
+    const admitted = sessionCreateAdmission(req);
+    const assertAdmission = () => {
+      if (admitted && !admitted()) throw new Error('Session creation admission changed during preparation');
+    };
+    assertAdmission();
     const owner = ownerFor(req);
     // Global + per-user session cap.
     const capMsg = sessionCapacityMessage(ctx.sessions, owner);
@@ -1502,6 +1509,9 @@ export function registerSessionRoutes(
       return createErrorResponse(spawnRefusalCode(error), getErrorMessage(error));
     }
     try {
+      // Await every option before the final construction guard. Constructor argument evaluation must not yield afterward.
+      const envOverrides = { ...(await clampEnvOverridesForOwner(owner, body.envOverrides)), ...subscriptionLaunch(req).env };
+      assertAdmission();
       const session = new Session({
         workingDir,
         mode,
@@ -1521,10 +1531,7 @@ export function registerSessionRoutes(
         deepSeekConfig: mode === 'deepseek' ? gatedDeepSeekConfig : undefined,
         ompConfig: resolveOmpConfigForCreate(mode, workingDir, launchBody.ompConfig),
         resumeSessionId: validatedResumeId,
-        envOverrides: {
-          ...(await clampEnvOverridesForOwner(owner, body.envOverrides)),
-          ...subscriptionLaunch(req).env,
-        },
+        envOverrides,
         subscriptionProfile: subscriptionLaunch(req).selection,
         effort: body.effort,
         advisorModel: body.advisorModel,
@@ -1534,9 +1541,17 @@ export function registerSessionRoutes(
         parentSessionId,
       });
 
-      const tabLayout = body.tabGroupId
-        ? await ctx.addSession(session, { tabGroupId: body.tabGroupId })
-        : await ctx.addSession(session);
+      let tabLayout: TabLayout;
+      try {
+        const placement = body.tabGroupId ? { tabGroupId: body.tabGroupId } : undefined;
+        tabLayout = admitted
+          ? await ctx.addSession(session, placement, admitted)
+          : placement ? await ctx.addSession(session, placement) : await ctx.addSession(session);
+      } catch (error) {
+        // This newly-owned object has never launched. Dispose its local trackers only; never signal any provider/mux.
+        if (ctx.sessions.get(session.id) !== session) await session.stop(false);
+        throw error;
+      }
       ctx.store.incrementSessionsCreated();
       ctx.persistSessionState(session);
       await ctx.setupSessionListeners(session);

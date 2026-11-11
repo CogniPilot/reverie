@@ -15,7 +15,7 @@ import { CompanyStore } from '../src/company-store.js';
 import * as companyFiles from '../src/company-store.js';
 import { CompanyService } from '../src/company-service.js';
 import { ChatroomStore } from '../src/chatroom-store.js';
-import { DAY_MS, ExpertStore, sessionCreateBody, type SessionLaunch } from '../src/experts.js';
+import { DAY_MS, ExpertStore, ExpertHireSchema, HireReservationSchema, LegacyExpertStateSchema, ExpertStartupSchema, sessionCreateBody, type SessionLaunch, type ExpertState } from '../src/experts.js';
 import {
   registerExpertRoutes,
   type ExpertAuditEntry,
@@ -70,6 +70,12 @@ describe('experts api', () => {
   let stopped: string[];
   let noticeFails: boolean;
   let activationFails: boolean;
+  let creationFails: boolean;
+  let creationFailsAfter: boolean;
+  let activationFailsAfter: boolean;
+  let bindingFails: boolean;
+  let auditFails: boolean;
+  let inviteFailsAsync: boolean;
   let activated: string[];
   let clock: number;
   let noticeRoom: string;
@@ -99,15 +105,19 @@ describe('experts api', () => {
         createSession: async (_req, launch) => {
           sessionCreateBody(launch); // the real body builder must accept every launch the routes produce
           launches.push(launch);
+          if (creationFails) throw new Error('Synthetic creation rejection without a no-effect receipt');
           const id = `hired-${++counter}`;
           sessions.set(id, { id, name: launch.name, mode: launch.mode });
+          if (creationFailsAfter) throw new Error('Synthetic post-creation rejection before SID return');
           return id;
         },
-        startSession: async (id) => {
+        startSession: async (id, admitted) => {
+          expect(admitted()).toBe(true);
           expect(company.view().employees.some((employee) => employee.sessionId === id)).toBe(true);
           expect(rooms.get(sideRoom)!.members.some((member) => member.sessionId === id)).toBe(true);
           if (activationFails) throw new Error('Synthetic startup failure');
           activated.push(id);
+          if (activationFailsAfter) throw new Error('Synthetic failure after launch');
         },
         stopSession: async (id) => {
           if (stopFails.has(id)) throw new Error('tmux did not answer');
@@ -116,20 +126,20 @@ describe('experts api', () => {
         },
         sessionExists: (id) => sessions.has(id),
         employeeSession: (id, owner) => company.view(owner).employees.find((employee) => employee.id === id)?.sessionId,
+        employeeForSession: (id, owner) => company.view(owner).employees.find((employee) => employee.sessionId === id),
         employeeNames: (owner) => company.view(owner).employees.map((employee) => employee.name),
-        hireEmployee: (input) => company.hire({ ...input, researchEnabled: false }),
-        inviteEmployee: (employeeId, roomId, owner) => void company.invite(employeeId, roomId, owner),
-        removeEmployee: async (employeeId) => {
-          await company.store.update((state) => {
-            state.employees = state.employees.filter((e) => e.id !== employeeId);
-          });
+        validateHireReportingLine: (owner, reportsTo) => company.validateHireReportingLine(owner, reportsTo),
+        hireEmployee: (input, admitted) => company.hire({ ...input, researchEnabled: false }, admitted),
+        inviteEmployee: async (employeeId, roomId, owner) => {
+          if (inviteFailsAsync) { await Promise.resolve(); throw new Error('Synthetic asynchronous invite failure'); }
+          company.invite(employeeId, roomId, owner);
         },
-        leaveRoom: (roomId, sessionId) => void rooms.removeMember(roomId, sessionId),
         postNotice: (roomId, text) => {
           if (noticeFails) throw new Error('room unavailable');
           rooms.post(roomId, { kind: 'system', name: 'experts' }, text, 'all', clock);
         },
         audit: async (entry) => {
+          if (auditFails) throw new Error('Synthetic audit failure');
           audits.push(entry);
         },
         noticeRoomFallback: opts.fallbackRoom === null ? undefined : (opts.fallbackRoom ?? noticeRoom),
@@ -183,6 +193,12 @@ describe('experts api', () => {
     stopped = [];
     noticeFails = false;
     activationFails = false;
+    creationFails = false;
+    creationFailsAfter = false;
+    activationFailsAfter = false;
+    bindingFails = false;
+    auditFails = false;
+    inviteFailsAsync = false;
     activated = [];
     stopFails = new Set();
     sendFails = false;
@@ -198,6 +214,7 @@ describe('experts api', () => {
     await companyStore.init();
     company = new CompanyService(companyStore, {
       getSession: (id) => sessions.get(id),
+      bindIdentity: () => { if (bindingFails) throw new Error('Synthetic post-commit identity binding failure'); },
       chatrooms: {
         rooms: () => rooms.list(),
         room: (id) => rooms.get(id),
@@ -219,6 +236,7 @@ describe('experts api', () => {
   });
 
   afterEach(async () => {
+    vi.restoreAllMocks();
     await app.close();
     await rm(dir, { recursive: true, force: true });
   });
@@ -558,31 +576,269 @@ describe('experts api', () => {
       expect((await state()).hires.map((h: { status: string }) => h.status)).toEqual(['active']);
     });
 
-    it('fails the hire and leaves nothing behind when the notice cannot be posted', async () => {
+    it('retains a launch and reports its unconfirmed notice instead of undoing the employee', async () => {
       noticeFails = true;
       const res = await hire('alpha');
-      expect(res.statusCode).toBe(503);
+      expect(res.statusCode).toBe(200);
       expect(launches).toHaveLength(1);
-      expect(stopped).toEqual(['hired-1']);
-      expect(sessions.has('hired-1')).toBe(false);
-      expect(company.view().employees).toHaveLength(0);
-      expect(rooms.get(sideRoom)!.members).toHaveLength(0);
-      expect((await state()).hires).toHaveLength(0);
-      expect(audits).toHaveLength(0);
+      expect(stopped).toEqual([]);
+      expect(sessions.has('hired-1')).toBe(true);
+      expect(company.view().employees).toHaveLength(1);
+      expect(rooms.get(sideRoom)!.members.map(member => member.sessionId)).toContain('hired-1');
+      expect(res.json().data.hire).toMatchObject({ notice: 'unconfirmed', startup: { phase: 'launch-returned', sessionGeneration: 1 } });
+      expect((await state()).hires).toHaveLength(1);
+      expect(audits).toHaveLength(1);
     });
 
-    it('awaits activation after registering identity and rooms, and rolls everything back if startup fails', async () => {
+    it('retains identity and rooms when startup rejects without a no-effect receipt', async () => {
       activationFails = true;
       const response = await hire('alpha', DELEGATE);
       expect(response.statusCode).toBe(503);
-      expect(response.json().error).toContain('runtime could not start');
+      expect(response.json()).toMatchObject({ success: false, recovery: { kind: 'hire-retained', sessionId: 'hired-1', employeeId: expect.any(String), hireId: expect.any(String) } });
       expect(activated).toEqual([]);
-      expect(stopped).toEqual(['hired-1']);
-      expect(sessions.has('hired-1')).toBe(false);
-      expect(company.view().employees).toHaveLength(0);
-      expect(rooms.get(sideRoom)!.members).toHaveLength(0);
-      expect((await state()).hires).toHaveLength(0);
+      expect(stopped).toEqual([]);
+      expect(sessions.has('hired-1')).toBe(true);
+      expect(company.view().employees.map(employee => employee.id)).toEqual([response.json().recovery.employeeId]);
+      expect(rooms.get(sideRoom)!.members.map(member => member.sessionId)).toContain('hired-1');
+      expect((await state()).hires[0]).toMatchObject({ id: response.json().recovery.hireId, startup: { phase: 'recovery-required', sessionGeneration: 1 } });
       expect(rooms.get(noticeRoom)!.messages.some((message) => message.text.includes('Expert hired'))).toBe(false);
+    });
+
+    it('retains the exact canonical identity when launch effects precede a rejected startup Promise', async () => {
+      activationFailsAfter = true;
+      const response = await hire('alpha');
+      expect(response.statusCode).toBe(503);
+      expect(activated).toEqual(['hired-1']);
+      const retained = response.json().recovery;
+      expect(company.view().employees).toEqual([expect.objectContaining({ id: retained.employeeId, sessionId: retained.sessionId, sessionGeneration: 1 })]);
+      expect((await state()).hires).toEqual([expect.objectContaining({ id: retained.hireId, status: 'active', startup: { phase: 'recovery-required', sessionGeneration: 1 } })]);
+      expect(stopped).toEqual([]);
+      const data = (await req('GET', '/api/experts')).json().data;
+      expect(data.limits.active).toBe(1);
+      expect(data.hires[0].sessionLive).toBe(true); // session existence is separate from launch/readiness proof
+    });
+
+    it('preserves the exact newly-created session employee after the actual post-commit bind callback throws', async () => {
+      bindingFails = true;
+      const response = await hire('alpha');
+      expect(response.statusCode).toBe(503);
+      const retained = response.json().recovery;
+      expect(company.view().employees).toEqual([expect.objectContaining({ id: retained.employeeId, sessionId: 'hired-1' })]);
+      expect((await state()).hires[0]).toMatchObject({ id: retained.hireId, startup: { phase: 'not-issued', sessionGeneration: 1 } });
+      expect(activated).toEqual([]);
+      expect(stopped).toEqual([]);
+      expect(sessions.has('hired-1')).toBe(true);
+    });
+
+    it('does not substitute a same-name employee when canonical creation rejects before returning an identity', async () => {
+      const original = await company.hire({ name: 'Existing', icon: 'E', position: 'Reviewer', expertise: ['Testing'], sessionId: OTHER_AGENT, researchEnabled: false });
+      const spy = vi.spyOn(company, 'hire').mockRejectedValueOnce(new Error('Unclassified canonical creation rejection'));
+      const response = await hire('alpha');
+      spy.mockRestore();
+      expect(response.statusCode).toBe(503);
+      expect(response.json().recovery).toEqual({ kind: 'hire-retained', sessionId: 'hired-1' });
+      expect(company.view().employees.map(employee => employee.id)).toEqual([original.id]);
+      expect(stopped).toEqual([]);
+      expect(activated).toEqual([]);
+      expect(sessions.has('hired-1')).toBe(true);
+    });
+
+    it('does not publish an unverified EID from a mismatched canonical creation result', async () => {
+      sessions.get(OTHER_AGENT)!.owner = 'foreign-owner';
+      const foreign = await company.hire({ owner: 'foreign-owner', name: 'Foreign reviewer', icon: 'F', position: 'Reviewer', expertise: ['Testing'], sessionId: OTHER_AGENT, researchEnabled: false });
+      const spy = vi.spyOn(company, 'hire').mockResolvedValueOnce({ ...foreign, sessionId: 'hired-1' });
+      const response = await hire('alpha');
+      spy.mockRestore();
+      expect(response.statusCode).toBe(503);
+      expect(response.json().recovery).toEqual({ kind: 'hire-retained', sessionId: 'hired-1' });
+      expect(response.body).not.toContain(foreign.id);
+      expect(response.body).not.toContain(foreign.sessionId);
+      expect(activated).toEqual([]);
+      expect(stopped).toEqual([]);
+    });
+
+    it('awaits rejected room invitations before startup and retains the canonical identity as not-issued', async () => {
+      inviteFailsAsync = true;
+      const response = await hire('alpha');
+      expect(response.statusCode).toBe(503);
+      expect(activated).toEqual([]);
+      expect(stopped).toEqual([]);
+      expect(company.view().employees[0].id).toBe(response.json().recovery.employeeId);
+      expect((await state()).hires[0].startup.phase).toBe('not-issued');
+      expect(rooms.get(sideRoom)!.members.some(member => member.sessionId === response.json().recovery.sessionId)).toBe(false);
+    });
+
+    it('reports an unconfirmed audit without undoing a returned launch', async () => {
+      auditFails = true;
+      const response = await hire('alpha');
+      expect(response.statusCode).toBe(200);
+      expect(response.json().data.hire).toMatchObject({ audit: 'unconfirmed', notice: 'posted', startup: { phase: 'launch-returned' } });
+      expect(stopped).toEqual([]);
+      expect(company.view().employees).toHaveLength(1);
+    });
+
+    it('fences a rejected post-rename issued write, preserves its disk row, and never dispatches or overwrites it', async () => {
+      const write = companyFiles.writeCompanyStateFile;
+      const spy = vi.spyOn(companyFiles, 'writeCompanyStateFile').mockImplementation(async (path, bytes, validate) => {
+        await write(path, bytes, validate);
+        if (path === file && JSON.parse(bytes).hires.some((hire: any) => hire.startup.phase === 'issued'))
+          throw new Error('Synthetic directory fsync failure after rename');
+      });
+      const response = await hire('alpha');
+      spy.mockRestore();
+      expect(response.statusCode).toBe(503);
+      expect(activated).toEqual([]);
+      expect(stopped).toEqual([]);
+      const before = await readFile(file, 'utf8');
+      expect(JSON.parse(before).hires[0].startup.phase).toBe('issued');
+      expect((await req('GET', '/api/experts')).json().data.storageUncertain).toBe(true);
+      expect((await hire('alpha')).statusCode).toBe(503);
+      expect(launches).toHaveLength(1);
+      expect(await readFile(file, 'utf8')).toBe(before);
+      await app.close();
+      await build({ seed: false });
+      expect((await req('GET', '/api/experts')).json().data.hires[0].startup.phase).toBe('issued');
+      expect(activated).toEqual([]); // reloading is inspection, never startup replay
+    });
+
+    it('retains a live launch when its launch-returned result write is rejected after rename', async () => {
+      const write = companyFiles.writeCompanyStateFile;
+      const spy = vi.spyOn(companyFiles, 'writeCompanyStateFile').mockImplementation(async (path, bytes, validate) => {
+        await write(path, bytes, validate);
+        if (path === file && JSON.parse(bytes).hires.some((hire: any) => hire.startup.phase === 'launch-returned'))
+          throw new Error('Synthetic result fsync failure');
+      });
+      const response = await hire('alpha');
+      spy.mockRestore();
+      expect(response.statusCode).toBe(503);
+      expect(activated).toEqual(['hired-1']);
+      expect(stopped).toEqual([]);
+      expect(company.view().employees[0].id).toBe(response.json().recovery.employeeId);
+      expect(expertStore.snapshot().hires[0].startup.phase).toBe('issued');
+      expect((await state()).hires[0].startup.phase).toBe('launch-returned');
+      expect(expertStore.storageUncertain).toBe(true);
+    });
+
+    it('refuses a revoked delegate at the actual issued-file commit boundary before launch', async () => {
+      const delegate = await company.hire({ name: 'Delegate', icon: 'D', position: 'Reviewer', expertise: ['Testing'], sessionId: DELEGATE, researchEnabled: false });
+      const settings = expertStore.snapshot().settings;
+      await setSettings({ ...settings, hireDelegates: [], hireEmployeeDelegates: [delegate.id] });
+      const write = companyFiles.writeCompanyStateFile;
+      const spy = vi.spyOn(companyFiles, 'writeCompanyStateFile').mockImplementation(async (path, bytes, validate) => {
+        if (path === file && JSON.parse(bytes).hires.some((hire: any) => hire.startup.phase === 'issued'))
+          await company.rebind(delegate.id, undefined, OTHER_AGENT);
+        return write(path, bytes, validate);
+      });
+      const response = await hire('alpha', DELEGATE);
+      spy.mockRestore();
+      expect(response.statusCode).toBe(503);
+      expect(activated).toEqual([]);
+      expect(stopped).toEqual([]);
+      expect((await state()).hires[0]).toMatchObject({ startup: { phase: 'prepared' } });
+      expect(company.view().employees.some(employee => employee.id === response.json().recovery.employeeId)).toBe(true);
+      expect(expertStore.storageUncertain).toBe(false);
+      await expertStore.update(state => { state.settings.maxActive += 1; });
+      expect((await state()).settings.maxActive).toBe(settings.maxActive + 1);
+    });
+
+    it('rechecks an owner cap lowered after canonical creation without deleting the employee or launching', async () => {
+      const actualHire = company.hire.bind(company);
+      const spy = vi.spyOn(company, 'hire').mockImplementationOnce(async input => {
+        const employee = await actualHire(input);
+        await expertStore.update(state => { state.settings.maxActive = 0; });
+        return employee;
+      });
+      const response = await hire('alpha');
+      spy.mockRestore();
+      expect(response.statusCode).toBe(503);
+      expect(activated).toEqual([]);
+      expect(stopped).toEqual([]);
+      expect((await state()).hires[0].startup.phase).toBe('not-issued');
+      expect(company.view().employees[0].id).toBe(response.json().recovery.employeeId);
+      expect(expertStore.storageUncertain).toBe(false);
+    });
+
+    it('keeps the writer usable after exact authority refusal before the canonical rename', async () => {
+      const before = await readFile(file, 'utf8');
+      const maxActive = expertStore.snapshot().settings.maxActive;
+      let admitted = true;
+      const revoked = new Error('Synthetic permission revoked');
+      const write = companyFiles.writeCompanyStateFile;
+      const spy = vi.spyOn(companyFiles, 'writeCompanyStateFile').mockImplementation(async (path, bytes, validate) => {
+        if (path === file) admitted = false;
+        return write(path, bytes, validate);
+      });
+      await expect(expertStore.update(state => { state.settings.maxActive += 1; }, () => {
+        if (!admitted) throw revoked;
+      })).rejects.toBe(revoked);
+      spy.mockRestore();
+      expect(await readFile(file, 'utf8')).toBe(before);
+      expect(expertStore.snapshot().settings.maxActive).toBe(maxActive);
+      expect(expertStore.storageUncertain).toBe(false);
+      await expertStore.update(state => { state.settings.maxActive += 1; });
+      expect((await state()).settings.maxActive).toBe(maxActive + 1);
+    });
+
+    it('does not mistake a lookalike refusal payload for the private unpublished receipt', async () => {
+      const lookalike = { proof: new Error('Expert publication authority refused'), cause: new Error('Fake revocation') };
+      const spy = vi.spyOn(companyFiles, 'writeCompanyStateFile').mockRejectedValueOnce(lookalike);
+      await expect(expertStore.update(state => { state.settings.maxActive += 1; })).rejects.toBe(lookalike);
+      spy.mockRestore();
+      expect(expertStore.storageUncertain).toBe(true);
+      await expect(expertStore.update(() => {})).rejects.toThrow('unconfirmed write');
+    });
+
+    it('migrates legacy hire records without inventing launch receipts and fences the actual legacy schema', async () => {
+      await hire('alpha');
+      const current = await state();
+      expect(current.version).toBe(2);
+      expect(LegacyExpertStateSchema.safeParse(current).success).toBe(false);
+      const legacy = { ...current, version: 1, hires: current.hires.map(({ startup: _startup, notice: _notice, audit: _audit, ...hire }: any) => hire) };
+      expect(LegacyExpertStateSchema.safeParse(legacy).success).toBe(true);
+      await app.close();
+      await writeFile(file, JSON.stringify(legacy));
+      await build({ seed: false });
+      const loaded = (await req('GET', '/api/experts')).json().data.hires[0];
+      expect(loaded.employeeId).toBe(current.hires[0].employeeId);
+      expect(loaded.startup).toEqual({ phase: 'legacy' });
+      expect((await state()).version).toBe(1); // migration is read-only until a confirmed store write
+      await expertStore.update(() => {});
+      expect((await state()).version).toBe(2);
+    });
+
+    it('rejects malformed startup states, reverse transitions, binding changes, and removal of retained history', async () => {
+      expect(ExpertStartupSchema.safeParse({ phase: 'launch-returned', sessionGeneration: 1, online: true }).success).toBe(false);
+      expect(ExpertStartupSchema.safeParse({ phase: 'issued' }).success).toBe(false);
+      await hire('alpha');
+      const before = await readFile(file, 'utf8');
+      await expect(expertStore.update(state => { state.hires[0].startup = { phase: 'prepared', sessionGeneration: 1 }; })).rejects.toThrow('Invalid retained');
+      await expect(expertStore.update(state => { state.hires[0].sessionId = OTHER_AGENT; })).rejects.toThrow('Invalid retained');
+      await expect(expertStore.update(state => { state.hires[0].startup = { phase: 'launch-returned', sessionGeneration: 2 }; })).rejects.toThrow('Invalid retained');
+      await expect(expertStore.update(state => { state.hires = []; })).rejects.toThrow('history cannot be removed');
+      expect(await readFile(file, 'utf8')).toBe(before);
+      expect(expertStore.storageUncertain).toBe(false); // validation refusal happened before the writer
+    });
+
+    it('requires non-empty EID and SID on every non-legacy startup while preserving legacy decoding', async () => {
+      await hire('alpha');
+      const row = expertStore.snapshot().hires[0];
+      for (const phase of ['prepared', 'issued', 'launch-returned', 'recovery-required', 'not-issued']) {
+        for (const field of ['employeeId', 'sessionId']) {
+          for (const value of [undefined, '', '   ']) {
+            const candidate = { ...row, [field]: value, startup: { phase, sessionGeneration: 1 } };
+            expect(ExpertHireSchema.safeParse(candidate).success, `${phase}/${field}/${String(value)}`).toBe(false);
+          }
+        }
+      }
+      expect(ExpertHireSchema.safeParse({ ...row, employeeId: '', sessionId: '', startup: { phase: 'legacy' } }).success).toBe(true);
+      const before = await readFile(file, 'utf8');
+      for (const field of ['employeeId', 'sessionId'] as const) {
+        await expect(expertStore.update(state => {
+          state.hires.push({ ...row, id: 'invalid-prepared-row', [field]: '', startup: { phase: 'prepared', sessionGeneration: 1 } });
+        })).rejects.toThrow('non-empty identity');
+      }
+      expect(await readFile(file, 'utf8')).toBe(before);
+      expect(expertStore.storageUncertain).toBe(false);
     });
 
     it('refuses to hire with no notice room configured, before creating anything', async () => {
@@ -666,13 +922,42 @@ describe('experts api', () => {
         if (kind === 'missing') state.employees = state.employees.filter(employee => employee.id !== employeeId);
         else state.employees.find(employee => employee.id === employeeId)!.owner = 'foreign-owner';
       });
-      if (kind === 'foreign-ledger-scope') await expertStore.update(state => {
-        state.hires.find(hire => hire.employeeId === employeeId)!.owner = 'foreign-owner';
-      });
+      if (kind === 'foreign-ledger-scope') {
+        // Import a foreign ledger fixture through the reader; the checked writer forbids changing a retained binding.
+        const foreign = await state();
+        foreign.hires.find((hire: any) => hire.employeeId === employeeId)!.owner = 'foreign-owner';
+        await writeFile(file, JSON.stringify(foreign));
+        await app.close();
+        await build({ seed: false });
+      }
       const response = await req('POST', '/api/experts/alpha/retire', {sessionId, reason: 'Finish this hire'});
       expect([403, 404, 409]).toContain(response.statusCode);
       expect(stopped).toEqual([]);
       expect(expertStore.snapshot().hires.find(hire => hire.employeeId === employeeId)?.status).toBe('active');
+    });
+
+    it('omits foreign owner hire diagnostics from both list routes while preserving global quota accounting', async () => {
+      const hired = (await hire('alpha')).json().data;
+      const imported = await state();
+      imported.hires[0].owner = 'foreign-owner';
+      imported.hires[0].startup = { phase: 'recovery-required', sessionGeneration: 1 };
+      await app.close();
+      await writeFile(file, JSON.stringify(imported));
+      await build({ seed: false });
+      const hasSession = vi.spyOn(sessions, 'has');
+      const listed = await req('GET', '/api/experts');
+      const template = await req('GET', '/api/experts/alpha');
+      expect(listed.json().data.hires).toEqual([]);
+      expect(template.json().data.hires).toEqual([]);
+      expect(listed.json().data.limits.active).toBe(1); // instance-wide capacity remains conservative
+      for (const response of [listed, template]) {
+        expect(response.body).not.toContain(hired.employeeId);
+        expect(response.body).not.toContain(hired.sessionId);
+        expect(response.body).not.toContain(hired.hire.id);
+        expect(response.body).not.toContain('recovery-required');
+      }
+      expect(hasSession).not.toHaveBeenCalledWith(hired.sessionId);
+      hasSession.mockRestore();
     });
 
     it('refuses to delete a template with an active hire', async () => {
@@ -686,7 +971,7 @@ describe('experts api', () => {
       ['an out-of-root workingDir', { workingDir: '/' }],
       ['a workingDir that climbs out of the root', { workingDir: 'UP' }],
     ])('refuses a delegate hire that sets %s with 403 and creates nothing', async (_label, given) => {
-      const extra: Record<string, unknown> = given.workingDir === 'UP' ? { workingDir: `${dir}/..` } : given;
+      const extra: Record<string, unknown> = 'workingDir' in given && given.workingDir === 'UP' ? { workingDir: `${dir}/..` } : given;
       const before = await readFile(file, 'utf8');
       const res = await hire('alpha', DELEGATE, extra);
       expect(res.statusCode).toBe(403);
@@ -1066,7 +1351,7 @@ describe('experts api', () => {
       expect(launches).toHaveLength(2);
     });
 
-    it('re-runs every check at approval and leaves the request pending when one fails', async () => {
+    it('leaves a preflight refusal pending but holds a rejected launch and its identity against replay', async () => {
       const requestId = (await ask(DELEGATE)).json().data.request.id;
       await setSettings({
         hireDelegates: [DELEGATE],
@@ -1082,11 +1367,151 @@ describe('experts api', () => {
         maxHiresPerDay: 3,
       });
       activationFails = true;
-      expect((await decide(requestId, 'approve')).statusCode).toBe(503); // a failed start undoes the hire
+      expect((await decide(requestId, 'approve')).statusCode).toBe(503); // a rejected launch has no no-effect receipt
       activationFails = false;
+      expect(company.view().employees).toHaveLength(1);
+      expect((await state()).hireRequests[0]).toMatchObject({ id: requestId, status: 'approving', hireId: expect.any(String) });
+      expect((await decide(requestId, 'approve')).statusCode).toBe(409);
+      expect((await decide(requestId, 'decline')).statusCode).toBe(409);
+      expect(launches).toHaveLength(1);
+      expect(stopped).toEqual([]);
+    });
+
+    it.each([false, true])('holds an unreturned session creation across restart without inventing identity (effect=%s)', async afterEffect => {
+      const requestId = (await ask(DELEGATE)).json().data.request.id;
+      creationFails = !afterEffect;
+      creationFailsAfter = afterEffect;
+      const response = await decide(requestId, 'approve');
+      expect(response.statusCode).toBe(503);
+      expect(response.json().recovery).toEqual({ kind: 'hire-retained', requestId });
+      const before = await readFile(file, 'utf8');
+      const reservation = (await state()).hireRequests[0].reservation;
+      expect(reservation).toEqual({ phase: 'creation-issued', at: clock });
+      expect(sessions.has('hired-1')).toBe(afterEffect); // only the synthetic IO fixture knows whether this call took effect
       expect(company.view().employees).toEqual([]);
-      expect((await state()).hireRequests[0]).toMatchObject({ id: requestId, status: 'pending' });
+      expect((await req('GET', '/api/experts')).json().data.limits.active).toBe(1);
+      await app.close();
+      await build({ seed: false });
+      expect((await decide(requestId, 'approve')).statusCode).toBe(409);
+      expect((await decide(requestId, 'decline')).statusCode).toBe(409);
+      await expect(expertStore.update(state => { delete state.hireRequests[0].reservation; })).rejects.toThrow('cannot be cleared or replayed');
+      expect(await readFile(file, 'utf8')).toBe(before);
+      expect(launches).toHaveLength(1);
+      expect(activated).toEqual([]);
+      expect(stopped).toEqual([]);
+      expect(HireReservationSchema.safeParse({ ...reservation, sessionId: 'invented' }).success).toBe(false);
+      expect(HireReservationSchema.safeParse({ phase: 'session-bound', at: clock }).success).toBe(false);
+    });
+
+    it('retains the exact session reservation across restart when canonical creation has an unclassified outcome', async () => {
+      const requestId = (await ask(DELEGATE)).json().data.request.id;
+      const failure = vi.spyOn(company, 'hire').mockRejectedValueOnce(new Error('Unclassified identity result'));
+      const response = await decide(requestId, 'approve');
+      failure.mockRestore();
+      expect(response.statusCode).toBe(503);
+      expect(response.json().recovery).toEqual({ kind: 'hire-retained', sessionId: 'hired-1' });
+      expect((await state()).hireRequests[0]).toMatchObject({ status: 'approving', reservation: { phase: 'session-bound', sessionId: 'hired-1', at: clock } });
+      expect((await req('GET', '/api/experts')).json().data.limits.active).toBe(1);
+      await app.close();
+      await build({ seed: false });
+      expect((await decide(requestId, 'approve')).statusCode).toBe(409);
+      expect((await decide(requestId, 'decline')).statusCode).toBe(409);
+      await expect(expertStore.update(state => { state.hireRequests[0].status = 'pending'; })).rejects.toThrow('cannot be cleared or replayed');
+      await expect(expertStore.update(state => { delete state.hireRequests[0].reservation; })).rejects.toThrow('cannot be cleared or replayed');
+      await expect(expertStore.update(state => { state.hireRequests[0].reservation = { phase: 'creation-issued', at: clock }; })).rejects.toThrow('cannot be cleared or replayed');
+      await expect(expertStore.update(state => { state.hireRequests[0].reservation = { phase: 'session-bound', sessionId: 'different-session', at: clock }; })).rejects.toThrow('cannot be cleared or replayed');
+      expect(launches).toHaveLength(1);
+      expect(activated).toEqual([]);
+      expect(stopped).toEqual([]);
+    });
+
+    it('keeps a linked may-issued approval after a launch rejection and restart', async () => {
+      const requestId = (await ask(DELEGATE)).json().data.request.id;
+      activationFailsAfter = true;
+      const response = await decide(requestId, 'approve');
+      expect(response.statusCode).toBe(503);
+      const before = await readFile(file, 'utf8');
+      const retained = response.json().recovery;
+      await app.close();
+      await build({ seed: false });
+      expect((await state()).hireRequests[0]).toMatchObject({ status: 'approving', hireId: retained.hireId, reservation: { phase: 'session-bound', sessionId: retained.sessionId } });
+      expect((await decide(requestId, 'approve')).statusCode).toBe(409);
+      expect((await decide(requestId, 'decline')).statusCode).toBe(409);
+      expect(await readFile(file, 'utf8')).toBe(before);
+      expect(company.view().employees.map(employee => employee.id)).toEqual([retained.employeeId]);
+      expect(activated).toEqual(['hired-1']);
+      expect(stopped).toEqual([]);
+    });
+
+    it('rejects changes to linked approval owner, author, template and fields through the checked store', async () => {
+      const requestId = (await ask(DELEGATE)).json().data.request.id;
       expect((await decide(requestId, 'approve')).statusCode).toBe(200);
+      const before = await readFile(file, 'utf8');
+      const mutations: Array<(state: ExpertState) => void> = [
+        state => { state.hireRequests[0].owner = 'foreign-owner'; },
+        state => { state.hireRequests[0].requestedBy = `agent:${OTHER_AGENT}`; },
+        state => { state.hireRequests[0].templateId = 'beta'; },
+        state => { state.hireRequests[0].templateSha256 = 'f'.repeat(64); },
+        state => { state.hireRequests[0].fields.reason = 'Rewrite approved intent'; },
+        state => { state.hires[0].by = `agent:${OTHER_AGENT}`; },
+        state => { state.hires[0].templateId = 'beta'; },
+        state => { state.hires[0].owner = 'foreign-owner'; },
+      ];
+      for (const mutate of mutations) await expect(expertStore.update(mutate)).rejects.toThrow();
+      expect(await readFile(file, 'utf8')).toBe(before);
+      expect(expertStore.storageUncertain).toBe(false);
+    });
+
+    it('rejects a new hireId link unless its next-state hire matches the exact request reservation', async () => {
+      const requestId = (await ask(DELEGATE)).json().data.request.id;
+      await expertStore.update(state => {
+        state.hireRequests[0].status = 'approving';
+        state.hireRequests[0].reservation = { phase: 'creation-issued', at: clock };
+      });
+      const before = await readFile(file, 'utf8');
+      const mutations: Array<(state: ExpertState) => void> = [
+        state => { state.hireRequests[0].hireId = 'missing-hire'; },
+        state => { state.hires[0].requestId = 'other-request'; },
+        state => { state.hires[0].owner = 'foreign-owner'; },
+        state => { state.hires[0].sessionId = 'different-session'; },
+        state => { state.hires[0].templateId = 'beta'; },
+        state => { state.hires[0].by = `agent:${DELEGATE}`; },
+        state => { delete state.hireRequests[0].reservation; },
+      ];
+      const writer = vi.spyOn(companyFiles, 'writeCompanyStateFile');
+      for (const mismatch of mutations) {
+        await expect(expertStore.update(state => {
+          const request = state.hireRequests[0];
+          request.status = 'approving';
+          request.reservation = { phase: 'session-bound', sessionId: 'synthetic-reserved-session', at: clock };
+          request.hireId = 'synthetic-hire';
+          // Rejected metadata fixture only; no employee or native launch authority is constructed.
+          state.hires.push({ id: request.hireId, templateId: request.templateId, requestId, owner: request.owner,
+            sessionId: request.reservation.sessionId, employeeId: 'synthetic-canonical-eid', by: 'owner',
+            reason: request.fields.reason, hiredAt: clock, status: 'active', startup: { phase: 'prepared', sessionGeneration: 1 } });
+          mismatch(state);
+        })).rejects.toThrow(/new hire approval link|cannot be cleared or replayed/);
+      }
+      expect(writer).not.toHaveBeenCalled();
+      writer.mockRestore();
+      expect(await readFile(file, 'utf8')).toBe(before);
+      expect(activated).toEqual([]);
+      expect(stopped).toEqual([]);
+      expect(expertStore.storageUncertain).toBe(false);
+    });
+
+    it('refuses a foreign-scoped imported request before creating any session', async () => {
+      const requestId = (await ask(DELEGATE)).json().data.request.id;
+      const imported = await state();
+      imported.hireRequests[0].owner = 'foreign-owner';
+      await app.close();
+      await writeFile(file, JSON.stringify(imported));
+      await build({ seed: false });
+      expect((await decide(requestId, 'approve')).statusCode).toBe(403);
+      expect((await decide(requestId, 'decline')).statusCode).toBe(403);
+      expect((await req('GET', '/api/experts-hire-requests')).json().data.requests).toEqual([]);
+      expect(launches).toEqual([]);
+      expect(company.view().employees).toEqual([]);
     });
 
     it('refuses a request whose template changed since, an unknown reporting line, or a name already taken', async () => {
@@ -1102,8 +1527,8 @@ describe('experts api', () => {
       const taken = (await ask(DELEGATE, { name: 'Alpha' })).json().data.request.id;
       expect((await decide(taken, 'approve')).statusCode).toBe(409);
       expect(company.view().employees.map((e) => e.name)).toEqual(['Alpha']);
-      expect(launches).toHaveLength(2); // the one owner hire, plus the reporting-line attempt that was rolled back
-      expect(stopped).toHaveLength(1);
+      expect(launches).toHaveLength(1); // read-only reporting preflight runs before creating a session
+      expect(stopped).toHaveLength(0);
     });
 
     it('declines with a note, lets only the requester withdraw, and caps open requests per delegate', async () => {

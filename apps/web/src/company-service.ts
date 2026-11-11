@@ -160,7 +160,7 @@ const ICONS = ['🧭', '🌱', '🦉', '🚀', '🔭', '🎨', '🦊', '🌊', '
 const sameOwner = (a?: string, b?: string): boolean => a === b;
 
 /** Validate the rendered hierarchy against the transaction's current active roster. */
-function validateReportingLine(state: CompanyState, employee: CompanyEmployee): void {
+function validateReportingLine(state: CompanyState, employee: Pick<CompanyEmployee, 'id' | 'owner' | 'reportsTo'>): void {
   const employees = state.employees.filter((e) => sameOwner(e.owner, employee.owner));
   const byId = new Map(employees.map((e) => [e.id, e]));
   const coordinatorEmployeeId = state.settings.find((s) => sameOwner(s.owner, employee.owner))?.coordinatorEmployeeId;
@@ -668,7 +668,12 @@ export class CompanyService {
     return employee;
   }
 
-  async hire(input: Omit<CompanyEmployeeInput, 'id' | 'createdAt'>): Promise<CompanyEmployee> {
+  /** Read-only preflight; the actual hire repeats this check inside its canonical transaction. */
+  validateHireReportingLine(owner: string | undefined, reportsTo?: string): void {
+    validateReportingLine(this.store.snapshot(), { id: randomUUID(), owner, reportsTo });
+  }
+
+  async hire(input: Omit<CompanyEmployeeInput, 'id' | 'createdAt'>, admitted?: () => boolean): Promise<CompanyEmployee> {
     const employee = EmployeeSchema.parse({
       ...input,
       threadId: input.threadId ?? this.deps.threadOf?.(input.sessionId),
@@ -678,6 +683,11 @@ export class CompanyService {
     const session = this.deps.getSession(employee.sessionId);
     if (!session || !sameOwner(session.owner, employee.owner))
       throw new CompanyError('Bind an existing session owned by this company');
+    const assertAdmission = () => {
+      if (admitted !== undefined &&
+          (!admitted() || this.deps.getSession(employee.sessionId) !== session || !sameOwner(session.owner, employee.owner)))
+        throw new CompanyError('Hire authority or the original session changed before canonical publication', 403);
+    };
     const hired = await this.store.update((state) => {
       if (
         state.employees.some((e) => sameOwner(e.owner, employee.owner) && employeeNamesConflict(e.name, employee.name))
@@ -693,7 +703,7 @@ export class CompanyService {
       state.employees.push(employee);
       validateReportingLine(state, employee);
       return employee;
-    });
+    }, assertAdmission);
     this.deps.bindIdentity?.(hired);
     return hired;
   }

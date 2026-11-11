@@ -16,7 +16,7 @@ const ADA = { id: 'emp-ada', name: 'Ada', position: 'Builder', sessionId: 'sess-
 const BO = { id: 'emp-bo', name: 'Bo', position: 'Reviewer', sessionId: 'sess-bo' };
 const HOUR = 3_600_000;
 
-async function setup({ verified = true, experts = true } = {}) {
+async function setup({ verified = true, experts = true, retained = false, storageUncertain = false } = {}) {
   const company: any = {
     canManage: true,
     settings: { owner: 'owner', ownerName: 'Alex', timeZone: 'UTC' },
@@ -30,6 +30,7 @@ async function setup({ verified = true, experts = true } = {}) {
     requireBudgetStopForDelegates: true,
   };
   const state: any = {
+    storageUncertain,
     experts: [{ id: 'reviewer', name: 'Reviewer' }],
     hires: [
       {
@@ -42,6 +43,7 @@ async function setup({ verified = true, experts = true } = {}) {
         hiredAt: Date.now() - HOUR,
         status: 'active',
         sessionLive: true,
+        ...(retained ? { startup: { phase: 'recovery-required', sessionGeneration: 1 }, notice: 'unconfirmed' } : {}),
       },
       {
         id: 'h2',
@@ -129,6 +131,17 @@ it('shows company limits and history, and puts individual hiring permissions on 
   expect(records[0]).not.toContain('no longer exists');
   expect(records[1]).toContain('hired by you');
   expect(records[1]).toContain('The original hire session is not present. Check the employee profile');
+});
+
+it('shows retained startup separately from presence and does not offer writes after storage uncertainty', async () => {
+  const { form, submit, puts } = await setup({ retained: true, storageUncertain: true });
+  const record = form()!.querySelector('.ca-company-hire-record')!;
+  expect(record.textContent).toContain('Startup recovery-required. Identity retained.');
+  expect(record.textContent).toContain('notice or audit confirmation is unavailable');
+  expect(form()!.querySelector('[role="alert"]')!.textContent).toContain('A hiring write was not confirmed');
+  expect((form()!.querySelector('button[type="submit"]') as HTMLButtonElement).disabled).toBe(true);
+  await submit();
+  expect(puts).toEqual([]);
 });
 
 it('saves only caps with a checked baseline, keeping all hiring permissions', async () => {

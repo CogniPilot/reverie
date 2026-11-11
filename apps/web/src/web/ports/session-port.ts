@@ -15,7 +15,7 @@ export interface SessionPort {
    * puts it at the end of that group in the same layout write (ignored when the
    * group is not in the owner's layout). Resolves to the committed layout.
    */
-  addSession(session: Session, placement?: SessionPlacementHint): Promise<TabLayout>;
+  addSession(session: Session, placement?: SessionPlacementHint, admitted?: () => boolean): Promise<TabLayout>;
   cleanupSession(sessionId: string, killMux?: boolean, reason?: string): Promise<void>;
   setupSessionListeners(session: Session): Promise<void>;
   persistSessionState(session: Session): void;

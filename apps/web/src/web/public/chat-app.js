@@ -3326,7 +3326,7 @@ class ReverieChatApp {
           error.textContent = outcome.status ? (outcome.error || 'The request could not be decided.')
             : 'The outcome is unconfirmed. Reopen Company and check the roster before trying again.';
           button.textContent = verb === 'approve' ? 'Approve and hire' : 'Decline';
-          if (outcome.status) for (const control of actions.querySelectorAll('button')) control.disabled = false;
+          if (outcome.status && outcome.status < 500) for (const control of actions.querySelectorAll('button')) control.disabled = false;
           return;
         }
         this.toast(verb === 'approve' ? `Hired ${f.name || `an expert from ${request.templateId}`} on ${request.requestedBy}'s request.` : 'Hire request declined.', 'info');
@@ -3336,7 +3336,12 @@ class ReverieChatApp {
       const decline = this.button('ca-btn', `Decline request ${request.id}`, () => decide('decline', decline), { text: 'Decline' });
       if (request.status === 'approving') {
         approve.disabled = true;
-        error.textContent = 'An approval of this request did not finish. Check the roster: if the expert is there, decline to close the request.';
+        decline.disabled = !!(request.hireId || request.reservation);
+        error.textContent = request.hireId
+          ? 'This approval is linked to a retained hire. Inspect the employee profile before recovery. Approval and decline cannot replay or undo its startup.'
+          : request.reservation
+            ? 'This approval holds an unconfirmed session creation. Inspect the request and company before recovery; an empty list does not prove that creation had no effect.'
+            : 'An approval of this request did not finish. Check the roster before closing the request; closing never undoes a hire.';
       }
       actions.append(approve, decline);
       card.append(actions, error);
@@ -3629,11 +3634,17 @@ class ReverieChatApp {
         const name = employees.find((e) => e.id === h.employeeId)?.name ?? templates.get(h.templateId) ?? h.templateId;
         row.append(this.el('strong', '', name),
           this.el('p', 'ca-hint', `${templates.get(h.templateId) ?? h.templateId}, hired by ${who(h.by)} ${when(h.hiredAt)}. ${h.reason}`));
+        const phase = h.startup?.phase;
+        if (phase && phase !== 'legacy' && phase !== 'launch-returned')
+          row.append(this.el('p', 'ca-hint', `Startup ${phase}. Identity retained. Inspect the employee profile before recovery; submitting another hire does not retry this startup.`));
+        if (h.notice === 'unconfirmed' || h.audit === 'unconfirmed')
+          row.append(this.el('p', 'ca-hint', 'Hire notice or audit confirmation is unavailable. The employee was retained.'));
         // Still counted against the active cap until it is retired.
         if (h.sessionLive === false) row.append(this.el('p', 'ca-hint', 'The original hire session is not present. Check the employee profile for their current session. This hire record remains active.'));
         hires.append(row);
       }
-      save.disabled = false;
+      if (data.storageUncertain) error.textContent = 'A hiring write was not confirmed. Hiring changes are blocked until the console reloads its stored state; employees have been retained.';
+      save.disabled = !!data.storageUncertain;
     };
     const load = async () => {
       const result = await this.app._chatApi('/api/experts');

@@ -7,6 +7,7 @@ import { OWNER_COOKIE } from '../owner-auth/policy.js';
 import { OfficeAuthService } from '../owner-auth/office.js';
 import { registerOfficeRoutes } from './routes/office-routes.js';
 import { withDelegatedSessionCreate } from '../owner-auth/delegated-session-create.js';
+import { withSessionCreateAdmission } from '../owner-auth/session-create-admission.js';
 import { ownPlanRecovery } from '../agent-plan-recovery.js';
 import { agentPlanRequestExecution } from '../agent-plan-request.js';
 import { BuiltinEmbassy } from '../embassy-builtin.js';
@@ -949,8 +950,10 @@ export class WebServer extends EventEmitter {
    * the placement it asked for (`tabGroupId`) lands in the same versioned write
    * that first records it.
    */
-  private async registerSessionWithLayout(session: Session, placement?: SessionPlacementHint): Promise<TabLayout> {
+  private async registerSessionWithLayout(session: Session, placement?: SessionPlacementHint, admitted?: () => boolean): Promise<TabLayout> {
     return this.tabLayouts.sessionCreated(ownerLayoutKey(session.owner), session.id, placement, () => {
+      if (admitted && !admitted()) throw new Error('Session creation admission changed before registration');
+      if (admitted && this.sessions.has(session.id)) throw new Error('Fresh session identity is already registered');
       this.sessions.set(session.id, session);
       return () => {
         if (this.sessions.get(session.id) === session) this.sessions.delete(session.id);
@@ -2146,20 +2149,21 @@ export class WebServer extends EventEmitter {
       verifiedOwner,
       store: new ExpertStore(dataPath('experts.json'), envValue(process.env, 'EXPERTS_SEED_DIR') || undefined),
       callerSession: (req) => resolveParentSessionId(ctx, req, undefined, ownerFor(req)),
-      createSession: async (req, launch, delegate) => {
+      createSession: async (req, launch, admission) => {
         const headers: Record<string, string> = { 'content-type': 'application/json' };
         for (const name of ['cookie', 'authorization', 'origin', 'host']) {
           const value = req.headers[name];
           if (typeof value === 'string') headers[name] = value;
         }
         const payload = sessionCreateBody(launch);
-        if (delegate) {
+        const delegateSessionId = admission.delegateSessionId;
+        if (delegateSessionId) {
           // A delegate is always evaluated as an agent, even when an owner browser
           // also supplied cookies on the outer request. Basic auth still identifies
           // the same multi-user principal; no owner credential is synthesized.
           delete headers.cookie;
-          headers['x-reverie-parent-session'] = delegate.sessionId;
-          payload.parentSessionId = delegate.sessionId;
+          headers['x-reverie-parent-session'] = delegateSessionId;
+          payload.parentSessionId = delegateSessionId;
         }
         const inject = () =>
           this.app.inject({
@@ -2168,12 +2172,15 @@ export class WebServer extends EventEmitter {
             headers,
             payload,
           });
-        const res = delegate
-          ? await withDelegatedSessionCreate(
-              { sessionId: delegate.sessionId, owner: ownerFor(req), payload, authorized: delegate.authorized },
-              inject
-            )
-          : await inject();
+        const res = await withSessionCreateAdmission(
+          { owner: ownerFor(req), payload, authorized: admission.authorized },
+          () => delegateSessionId
+            ? withDelegatedSessionCreate(
+                { sessionId: delegateSessionId, owner: ownerFor(req), payload, authorized: admission.authorized },
+                inject
+              )
+            : inject()
+        );
         let json:
           | { success?: boolean; error?: string; session?: { id?: unknown }; data?: { session?: { id?: unknown } } }
           | undefined;
@@ -2184,36 +2191,30 @@ export class WebServer extends EventEmitter {
         }
         const id = json?.data?.session?.id ?? json?.session?.id;
         if (res.statusCode >= 400 || json?.success === false || typeof id !== 'string') {
-          if (typeof id === 'string') {
-            await this.cleanupSession(id, true, 'expert_hire_rollback');
-            await company.removeTemporaryAgent(ownerFor(req), id).catch(() => undefined);
-          }
+          // An error response is not proof of no creation and grants no authority to stop a returned ID.
           const status = res.statusCode >= 400 && res.statusCode < 500 ? res.statusCode : 502;
-          throw new ExpertError(`The session was not created: ${json?.error ?? `status ${res.statusCode}`}`, status);
+          throw new ExpertError(`Session creation was not confirmed: ${json?.error ?? `status ${res.statusCode}`}`, status);
         }
         return id;
       },
-      startSession: async (id) => {
+      startSession: async (id, admitted) => {
         const session = this.sessions.get(id);
         if (!session) throw new ExpertError('The newly hired runtime no longer exists', 409);
-        await session.startInteractive();
-        await company.saveRuntimeRecipe(id, expertRuntimeRecipe(session));
-        await company.setDesiredRunning(id, true);
+        await session.startInteractive(admitted);
+        if (!admitted()) throw new ExpertError('Hire authorization changed after launch; inspect the retained employee', 409);
+        await company.saveRuntimeRecipe(id, expertRuntimeRecipe(session), admitted);
+        if (!admitted()) throw new ExpertError('Hire authorization changed before running intent publication', 409);
+        await company.setDesiredRunning(id, true, admitted);
       },
       stopSession: (id) => this.cleanupSession(id, true, 'expert_retire'),
       sessionExists: (id) => this.sessions.has(id),
       employeeSession: (id, owner) => company.view(owner).employees.find((employee) => employee.id === id)?.sessionId,
+      employeeForSession: (id, owner) => company.view(owner).employees.find((employee) => employee.sessionId === id),
       employeeNames: (owner) => company.view(owner).employees.map((employee) => employee.name),
+      validateHireReportingLine: (owner, reportsTo) => company.validateHireReportingLine(owner, reportsTo),
       // Nightly research stays off: putting an expert on a schedule is a separate owner step.
-      hireEmployee: (input) => company.hire({ ...input, researchEnabled: false }),
-      inviteEmployee: (employeeId, roomId, owner) => void company.invite(employeeId, roomId, owner),
-      removeEmployee: async (employeeId) => {
-        await company.store.update((state) => {
-          state.employees = state.employees.filter((e) => e.id !== employeeId);
-        });
-      },
-      leaveRoom: (roomId, sessionId) => void this.chatroomService.removeMember(roomId, sessionId),
-      forgetSpawnProfile: (owner, sessionId) => company.removeTemporaryAgent(owner, sessionId).catch(() => undefined),
+      hireEmployee: (input, admitted) => company.hire({ ...input, researchEnabled: false }, admitted),
+      inviteEmployee: async (employeeId, roomId, owner) => { await company.invite(employeeId, roomId, owner); },
       postNotice: (roomId, text) => void this.chatroomService.post(roomId, { kind: 'system', name: 'experts' }, text),
       audit: appendAdminAudit,
       noticeRoomFallback: envValue(process.env, 'EXPERTS_NOTICE_ROOM') || undefined,
