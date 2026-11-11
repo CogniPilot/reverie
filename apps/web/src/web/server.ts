@@ -5126,6 +5126,7 @@ export class WebServer extends EventEmitter {
               // A saved input fence survives reattachment; transport proof does not.
               viewerInputHeld: savedState?.viewerInputHeld,
               providerDispatchHeld: savedState?.providerDispatchHeld,
+              terminalInputHeld: savedState?.terminalInputHeld,
               // The model the CLI last reported (statusline or its own footer), so a
               // tile header keeps naming it until the next report; an idle claude
               // session re-renders its statusline only on its next turn.

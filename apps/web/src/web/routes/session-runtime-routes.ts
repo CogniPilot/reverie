@@ -1,3 +1,4 @@
+import {TerminalInputUnconfirmedError} from '../../terminal-input-outcome.js';
 import { CompanyError, type CompanyService, type RuntimeRestartIntent } from '../../company-service.js';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { randomBytes } from 'node:crypto';
@@ -233,6 +234,7 @@ export function registerSessionRuntimeRoutes(app: FastifyInstance, ctx: SessionP
     if (!session) return reply.code(404).send({ success: false, error: 'Unknown expert runtime' });
     const fail = (status: number, error: string) => reply.code(status).send({ success: false, error });
     if (session.providerDispatchHeld) return fail(409, new ProviderDispatchUnconfirmedError().message);
+    if (session.terminalInputHeld) return fail(409, new TerminalInputUnconfirmedError().message);
     // A worker transport respawn replaces the server's terminal viewer. The
     // broker may reuse its still-running laptop and ignore the new launch line,
     // so a new viewer PID cannot confirm a runtime switch. Keep the selected

@@ -11,7 +11,7 @@
  * The routes read the process-wide `rebootRestoreRegistry` singleton, so every
  * test resets it; a leaked entry would bleed into the next one.
  */
-import { describe, it, expect, afterEach, beforeEach } from 'vitest';
+import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -85,6 +85,27 @@ function offerEntry(sessionId: string, owner?: string): RebootRestoreEntry {
 
 afterEach(() => {
   rebootRestoreRegistry.reset();
+});
+
+describe('held reboot recovery', () => {
+  it.each(['terminalInputHeld', 'providerDispatchHeld'] as const)('preserves a saved %s offer without creating, preparing or starting a successor', async marker => {
+    const entry = offerEntry('held-original');
+    const directory = mkdtempSync(join(tmpdir(), 'reboot-held-'));
+    entry.workingDir = directory; entry.state.workingDir = directory; entry.state[marker] = true;
+    rebootRestoreRegistry.set([entry]);
+    const ctx = createMockRouteContext(); const create = vi.spyOn(ctx, 'addSession');
+    const prepare = vi.spyOn(ctx, 'getClaudeModeConfig'); const listeners = vi.spyOn(ctx, 'setupSessionListeners');
+    const app = await createHarnessWithCtx(ctx);
+    try {
+      const response = await app.inject({method: 'POST', url: '/api/reboot-restore/restore', payload: {}});
+      expect(response.statusCode).toBe(200);
+      expect(response.json().data.restored).toEqual([]);
+      expect(response.json().data.skipped).toContainEqual({sessionId: entry.sessionId, reason: 'operation-unconfirmed'});
+      expect(create).not.toHaveBeenCalled(); expect(prepare).not.toHaveBeenCalled(); expect(listeners).not.toHaveBeenCalled();
+      expect((await app.inject({method: 'GET', url: '/api/reboot-restore'})).json().data.sessions.map((item: {id: string}) => item.id)).toContain(entry.sessionId);
+      expect(entry.state[marker]).toBe(true);
+    } finally {await app.close(); rmSync(directory, {recursive: true, force: true});}
+  });
 });
 
 describe('GET /api/reboot-restore', () => {

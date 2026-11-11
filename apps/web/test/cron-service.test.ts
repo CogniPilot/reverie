@@ -22,6 +22,8 @@ import {
   deliverCronPrompt,
   type CronDeps,
 } from '../src/cron/cron-service.js';
+import {Session} from '../src/session.js';
+import {TerminalInputUnconfirmedError} from '../src/terminal-input-outcome.js';
 import { CRON_PASTE_ENTER_DELAY_MS } from '../src/config/server-timing.js';
 import { CronJobSchema } from '../src/web/schemas.js';
 import { MAX_CRON_JOBS } from '../src/config/map-limits.js';
@@ -752,6 +754,8 @@ describe('deliverCronPrompt', () => {
   function fakeTarget(ok = true) {
     const calls: string[] = [];
     const target = {
+      captureInputAdmission: (caller?: () => boolean) => () => !caller || caller(),
+      holdUnconfirmedInput: () => new TerminalInputUnconfirmedError(),
       write: vi.fn((d: string) => {
         calls.push(`write:${JSON.stringify(d)}`);
         return ok;
@@ -806,10 +810,66 @@ describe('deliverCronPrompt', () => {
     expect(calls).toEqual([`mux:${JSON.stringify(`${PROMPT}\r`)}`]);
   });
 
+  it.each(['epoch', 'owner', 'pty'] as const)('paste cannot send Enter to a successor after original %s changes', async change => {
+    const session = new Session({workingDir: VALID_DIR, useMux: false, owner: 'original'});
+    const originalWrites: string[] = [], successorWrites: string[] = [];
+    const original = {pid: 999_999_982, write: (data: string) => originalWrites.push(data), kill: vi.fn()};
+    const successor = {pid: 999_999_981, write: (data: string) => successorWrites.push(data), kill: vi.fn()};
+    Object.assign(session, {ptyProcess: original, _pid: original.pid});
+    const verify = vi.spyOn(session, 'verifySubmitted');
+    try {
+      const sending = deliverCronPrompt(session, PROMPT, 'paste', async () => {
+        if (change === 'epoch') {session.setMode('shell'); session.setMode('claude');}
+        else if (change === 'owner') session.owner = 'successor';
+        else Object.assign(session, {ptyProcess: successor, _pid: successor.pid});
+      });
+      await expect(sending).rejects.toBeInstanceOf(TerminalInputUnconfirmedError); expect(originalWrites).toEqual([PROMPT]); expect(successorWrites).toEqual([]);
+      expect(verify).not.toHaveBeenCalled();
+    } finally {await session.stop(false);}
+  });
+
   it('reports a session it could not write to, instead of claiming the prompt went out', async () => {
     const { target } = fakeTarget(false);
 
     expect(await deliverCronPrompt(target, PROMPT, 'paste', noWait)).toBe(false);
     expect(target.verifySubmitted).not.toHaveBeenCalled();
+  });
+});
+
+describe('CronService original registry subject', () => {
+  it.each(['paste', 'typed', 'launch-command'] as const)('does not complete or press Enter after same-SID replacement during %s delivery', async inputMode => {
+    vi.useFakeTimers({toFake: ['setTimeout', 'clearTimeout', 'Date']});
+    const original = new Session({id: 'cron-original-subject', workingDir: VALID_DIR, mode: 'shell', useMux: false});
+    const successor = new Session({id: original.id, workingDir: VALID_DIR, mode: 'shell', useMux: false});
+    const originalWrites: string[] = [], successorWrites: string[] = [];
+    Object.assign(original, {ptyProcess: {pid: 999_999_975, write: (data: string) => originalWrites.push(data), kill: vi.fn()}});
+    Object.assign(successor, {ptyProcess: {pid: 999_999_974, write: (data: string) => successorWrites.push(data), kill: vi.fn()}});
+    let entered!: () => void, release!: (sent: boolean) => void, reject!: (cause: unknown) => void;
+    const dispatched = new Promise<void>(resolve => {entered = resolve;});
+    if (inputMode !== 'paste') {
+      const record = {sessionId: original.id, muxName: 'reverie-cron-subject', pid: 999_999_973};
+      Object.assign(original, {_mux: {getSession: () => record, sendInput: vi.fn(() => {entered(); return new Promise<boolean>((resolve, fail) => {release = resolve; reject = fail;});}), capturePaneText: () => ''},
+        _muxSession: record});
+    }
+    const local = makeService(new Map([[original.id, original]]));
+    const job = local.service.createJob(mkInput({agentType: 'shell', inputMode: inputMode === 'paste' ? 'paste' : 'typed', enabled: false, ...(inputMode === 'launch-command' ? {launchCommand: 'synthetic launch'} : {})}));
+    const run = {id: 'original-run', cronJobId: job.id, sessionId: original.id, status: 'created',
+      sessionName: 'synthetic', startedAt: Date.now(), finishedAt: null, triggerType: 'manual', createdSessionUrl: null} as CronJobRun;
+    local.store.setCronJobRun(run.id, run);
+    const send = local.service as unknown as {sendPromptWhenReady: (sid: string, prompt: string, job: CronJob, run: CronJobRun) => void};
+    try {
+      send.sendPromptWhenReady(original.id, 'original prompt', job, run);
+      await flush(); await vi.advanceTimersByTimeAsync(1_000);
+      if (inputMode !== 'paste') await dispatched; else expect(originalWrites).toEqual(['original prompt']);
+      // The predecessor object deliberately remains live and writable: SID equality is insufficient.
+      local.sessions.set(original.id, successor);
+      if (inputMode === 'launch-command') reject(new TerminalInputUnconfirmedError());
+      else if (inputMode === 'typed') release(true); else await vi.advanceTimersByTimeAsync(CRON_PASTE_ENTER_DELAY_MS);
+      await flush();
+      expect(run.status).toBe('failed'); expect(run.errorMessage).toContain('unconfirmed');
+      expect(original.terminalInputHeld).toBe(true); expect(successorWrites).toEqual([]);
+      expect(originalWrites).toEqual(inputMode === 'paste' ? ['original prompt'] : []);
+      expect(local.broadcast.mock.calls.some(([, value]) => (value as {status?: string})?.status === 'prompt_sent')).toBe(false);
+    } finally {release?.(true); await original.stop(false); await successor.stop(false); vi.useRealTimers();}
   });
 });

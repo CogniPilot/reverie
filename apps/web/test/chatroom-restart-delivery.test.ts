@@ -1,3 +1,4 @@
+import {TerminalInputAttempt} from '../src/terminal-input-outcome.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -641,6 +642,7 @@ function partialMuxFailure() {
     }).outputText,
     {
       IS_TEST_MODE: false,
+      TerminalInputAttempt,
       EXEC_TIMEOUT_MS: 1000,
       isValidMuxName: () => true,
       shellescape: (value: string) => JSON.stringify(value),

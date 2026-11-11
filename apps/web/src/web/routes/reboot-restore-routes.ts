@@ -172,6 +172,12 @@ export async function spendRebootRestore(
   const workspaceHooksEnabled = await ctx.getWorkspaceHooksEnabled();
 
   for (const entry of restore) {
+    // Saved deny-only uncertainty cannot become a fresh launch grant at reboot.
+    // Preserve the offer until the original effect has supported reconciliation.
+    if (entry.state.terminalInputHeld === true || entry.state.providerDispatchHeld === true) {
+      failures.push({sessionId: entry.sessionId, reason: 'operation-unconfirmed'});
+      continue;
+    }
     // The already-live check, re-run against the board as it is NOW. The pass
     // above decided the batch; this catches a conversation that went live while
     // an earlier entry in this same batch was starting. Spent rather than

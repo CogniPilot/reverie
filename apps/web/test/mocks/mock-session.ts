@@ -1,3 +1,4 @@
+import {issueInputAdmission} from '../../src/terminal-input-outcome.js';
 import {issueSessionProviderLease, type SessionProviderLease} from '../../src/session-provider-lease.js';
 /**
  * Shared MockSession for tests that need terminal simulation.
@@ -294,6 +295,13 @@ export class MockSession extends EventEmitter {
     return capability === 'supervised' ? 'supervised' : capability === 'always' ? 'legacy-attachment' : 'refused';
   }
 
+  private inputSubject?: {identity: () => boolean; token: object};
+  captureInputAdmission(caller?: () => boolean): () => boolean {
+    const epoch = this.providerEpoch, mode = this.mode, owner = this.owner;
+    const identity = () => this.providerEpoch === epoch && this.mode === mode && this.owner === owner;
+    if (!this.inputSubject?.identity()) this.inputSubject = {identity, token: Object.freeze({})};
+    return issueInputAdmission(this.inputSubject.token, () => (!caller || caller()) && identity());
+  }
   private providerEpoch = 0;
   captureApprovalProviderLease(currentOwner: () => boolean = () => true): SessionProviderLease {
     const epoch = this.providerEpoch;

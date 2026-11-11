@@ -104,8 +104,8 @@ const CRON_WORKING_DIR_BLOCKED_TREES: readonly string[] = [...DEFAULT_BLOCKED_TR
 /** Prompt delivery is single-line only (writeViaMux/Ink constraint). */
 const HAS_NEWLINE = /[\r\n]/;
 
-/** The three session calls prompt delivery needs, so it can be tested without a PTY. */
-type CronPromptTarget = Pick<Session, 'write' | 'writeViaMux' | 'verifySubmitted'>;
+/** The session calls prompt delivery needs, so it can be tested without a PTY. */
+type CronPromptTarget = Pick<Session, 'write' | 'writeViaMux' | 'verifySubmitted' | 'captureInputAdmission' | 'holdUnconfirmedInput'>;
 
 /**
  * Send a cron job's (single-line) prompt into its session and press Enter.
@@ -126,16 +126,20 @@ export async function deliverCronPrompt(
   target: CronPromptTarget,
   prompt: string,
   inputMode: CronJob['inputMode'],
-  wait: (ms: number) => Promise<void> = delay
+  wait: (ms: number) => Promise<void> = delay,
+  current: () => boolean = () => true
 ): Promise<boolean> {
+  const admitted = target.captureInputAdmission(current);
+  if (!admitted()) return false;
   if (inputMode !== 'paste') {
-    return target.writeViaMux(prompt.endsWith('\r') ? prompt : `${prompt}\r`, { opencodeGuard: true });
+    return target.writeViaMux(prompt.endsWith('\r') ? prompt : `${prompt}\r`, { opencodeGuard: true, admitted });
   }
   const text = prompt.replace(/[\r\n]+$/, '');
-  if (!target.write(text)) return false;
+  if (!admitted() || !target.write(text, {admitted})) return false;
   await wait(CRON_PASTE_ENTER_DELAY_MS);
-  if (!target.write('\r')) return false;
-  target.verifySubmitted(text);
+  if (!admitted()) throw target.holdUnconfirmedInput();
+  if (!target.write('\r', {admitted})) throw target.holdUnconfirmedInput();
+  target.verifySubmitted(text, undefined, admitted);
   return true;
 }
 
@@ -1036,6 +1040,8 @@ export class CronService {
   }
 
   private sendPromptWhenReady(sessionId: string, prompt: string, job: CronJob, run: CronJobRun): void {
+    const original = this.deps.sessions.get(sessionId);
+    const current = () => {this.assertRecoveryCertain(job); return !!original && this.deps.sessions.get(sessionId) === original;};
     setImmediate(() => {
       const poll = async (): Promise<void> => {
         // A shell pane is ready the moment it exists; an agent CLI has a TUI to paint
@@ -1057,8 +1063,9 @@ export class CronService {
           if (job.launchCommand) {
             this.assertRecoveryCertain(job);
             const shell = this.deps.sessions.get(sessionId);
-            if (!shell) return;
-            const sent = await shell.writeViaMux(`${job.launchCommand}\r`);
+            if (!shell || !current()) {this.failRun(job, run, 'Original session is no longer current; launch command was not issued'); return;}
+            const admitted = shell.captureInputAdmission(current);
+            const sent = await shell.writeViaMux(`${job.launchCommand}\r`, {admitted});
             if (!sent) {
               this.failRun(job, run, 'Failed to send launch command: mux write failed');
               return;
@@ -1070,11 +1077,13 @@ export class CronService {
         if (!s) return;
         try {
           this.assertRecoveryCertain(job);
+          if (!current()) {this.failRun(job, run, 'Original session is no longer current; prompt was not issued'); return;}
           const delivered = await deliverCronPrompt(s, prompt, job.inputMode, async ms => {
             await delay(ms);
             this.assertRecoveryCertain(job);
-          });
+          }, current);
           this.assertRecoveryCertain(job);
+          if (!current()) throw s.holdUnconfirmedInput();
           if (!delivered) {
             this.failRun(job, run, 'Failed to send prompt: the session could not be written to');
             return;
@@ -1088,7 +1097,7 @@ export class CronService {
           this.failRun(job, run, `Failed to send prompt: ${getErrorMessage(err)}`);
         }
       };
-      poll().catch((err) => console.error('[cron] sendPromptWhenReady error:', getErrorMessage(err)));
+      poll().catch((err) => this.failRun(job, run, `Failed to send scheduled input: ${getErrorMessage(err)}`));
     });
   }
 

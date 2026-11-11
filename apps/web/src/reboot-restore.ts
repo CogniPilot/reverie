@@ -139,6 +139,7 @@ export interface RebootRestoreRejection {
     | 'no-working-dir'
     | 'workspace-missing'
     | 'workspace-forbidden'
+    | 'operation-unconfirmed'
     | 'already-live'
     | 'capacity-reached'
     | 'rebuild-failed';

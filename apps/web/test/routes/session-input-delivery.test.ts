@@ -194,7 +194,7 @@ describe('POST /api/sessions/:id/input plain-prompt routing', () => {
     const res = await post({ input: LONG_PROMPT });
 
     expect(res.statusCode).toBe(200);
-    expect(viaMux).toHaveBeenCalledWith(LONG_PROMPT, { fromUser: true });
+    expect(viaMux).toHaveBeenCalledWith(LONG_PROMPT, { fromUser: true, admitted: expect.any(Function) });
     expect(direct).not.toHaveBeenCalled();
   });
 
@@ -209,7 +209,7 @@ describe('POST /api/sessions/:id/input plain-prompt routing', () => {
     // An agent's write also answers to a plan move's hold at the write itself (agentInput, plan-move-input-hold.test.ts).
     expect(viaMux).toHaveBeenLastCalledWith(LONG_PROMPT, expect.objectContaining({ fromUser: true, opencodeGuard: true, agentInput: true }));
     await post({ input: LONG_PROMPT });
-    expect(viaMux).toHaveBeenLastCalledWith(LONG_PROMPT, { fromUser: true });
+    expect(viaMux).toHaveBeenLastCalledWith(LONG_PROMPT, { fromUser: true, admitted: expect.any(Function) });
   });
 
   it('an agent\u2019s text for an OpenCode pane has its ! made fullwidth even on the direct-write fallback; a person\u2019s is untouched', async () => {
@@ -225,7 +225,7 @@ describe('POST /api/sessions/:id/input plain-prompt routing', () => {
     });
     expect(direct).toHaveBeenLastCalledWith(text.replace('!', '\uFF01'), expect.objectContaining({ fromUser: true, agentInput: true }));
     await post({ input: text });
-    expect(direct).toHaveBeenLastCalledWith(text, { fromUser: true });
+    expect(direct).toHaveBeenLastCalledWith(text, { fromUser: true, admitted: expect.any(Function) });
     // a Claude pane keeps its ! for everyone
     (session as unknown as { mode: string }).mode = 'claude';
     await harness.app.inject({
@@ -259,7 +259,7 @@ describe('POST /api/sessions/:id/input plain-prompt routing', () => {
 
     await post({ input: 'hello\r' });
 
-    expect(direct).toHaveBeenCalledWith('hello\r', { fromUser: true });
+    expect(direct).toHaveBeenCalledWith('hello\r', { fromUser: true, admitted: expect.any(Function) });
   });
 
   it('keeps the raw write for an explicit useMux: false', async () => {
@@ -267,7 +267,7 @@ describe('POST /api/sessions/:id/input plain-prompt routing', () => {
 
     await post({ input: LONG_PROMPT, useMux: false });
 
-    expect(direct).toHaveBeenCalledWith(LONG_PROMPT, { fromUser: true });
+    expect(direct).toHaveBeenCalledWith(LONG_PROMPT, { fromUser: true, admitted: expect.any(Function) });
     expect(viaMux).not.toHaveBeenCalled();
   });
 
@@ -284,7 +284,7 @@ describe('POST /api/sessions/:id/input plain-prompt routing', () => {
 
     await post({ input });
 
-    expect(direct).toHaveBeenCalledWith(input, { fromUser: true });
+    expect(direct).toHaveBeenCalledWith(input, { fromUser: true, admitted: expect.any(Function) });
     expect(viaMux).not.toHaveBeenCalled();
   });
 });
@@ -371,7 +371,6 @@ describe('terminal viewer delivery never establishes native worker death', () =>
 
   it('a real terminal Session reports a late idle-only refusal as busy before typing and lets its seq retry', async () => {
     await harness.app.close();
-    let session!: Session;
     let first = true;
     const wake = { hasWakeTarget: vi.fn(async () => {
       if (first) {
@@ -381,12 +380,14 @@ describe('terminal viewer delivery never establishes native worker death', () =>
       return false;
     }) };
     harness = await createEnvelopeHarness({ remoteWake: wake as never });
+    const record = {muxName: 'reverie-owned-idle', sessionId: 'test-session-1', pid: 42};
     const mux = {
+      getSession: () => record,
       capturePaneText: () => '›\n  gpt-6.1-sol high · /owned/fixture\n? for shortcuts',
       sendInput: vi.fn(async () => true),
     };
-    session = new Session({ id: 'test-session-1', workingDir: process.env.HOME!, mode: 'codex', useMux: true,
-      mux: mux as never, muxSession: { muxName: 'reverie-owned-idle', sessionId: 'test-session-1', pid: 42 } as never });
+    const session = new Session({ id: 'test-session-1', workingDir: process.env.HOME!, mode: 'codex', useMux: true,
+      mux: mux as never, muxSession: record as never });
     Object.assign(session, { _workerBacked: true, _pid: 42 });
     harness.ctx.sessions.set(session.id, session as never);
     Object.assign(harness.ctx.mux, { isPaneDead: () => false });
@@ -626,5 +627,45 @@ describe('terminal viewer delivery never establishes native worker death', () =>
     expect(raw).not.toHaveBeenCalled();
     expect(session.writeBuffer).toEqual(['known unsent text']);
     expect(session.shouldApplyInput('typed-cli', 7)).toBe(false);
+  });
+});
+
+describe('input receipt capacity and original object custody', () => {
+  it('refuses new writes at unresolved capacity, without spending their seq or discarding older attempts', async () => {
+    const {app, ctx} = await createEnvelopeHarness();
+    const session = ctx.sessions.get('test-session-1')!;
+    let settle!: (accepted: boolean) => void;
+    const pending = new Promise<boolean>(resolve => {settle = resolve;});
+    const send = vi.spyOn(session, 'writeViaMux').mockReturnValue(pending);
+    const post = (clientId: string) => app.inject({method: 'POST', url: '/api/sessions/test-session-1/input',
+      payload: {input: 'synthetic input', useMux: true, clientId, seq: 1}});
+    try {
+      for (let index = 0; index < 256; index++) expect((await post(`client-${index}`)).statusCode).toBe(200);
+      const full = await post('capacity-refused'); expect(full.statusCode).toBe(409);
+      expect(full.json().error).toContain('capacity'); expect(send).toHaveBeenCalledTimes(256);
+      expect(session.shouldApplyInput('capacity-refused', 1)).toBe(true);
+      const original = await post('client-0'); expect(original.json().error).toContain('unconfirmed');
+      expect(send).toHaveBeenCalledTimes(256);
+    } finally {settle(true); await new Promise<void>(resolve => setImmediate(resolve)); await app.close();}
+  });
+  it('does not grant a same-SID replacement the pending or confirmed predecessor request', async () => {
+    const {app, ctx} = await createEnvelopeHarness();
+    const original = ctx.sessions.get('test-session-1')!;
+    const {createMockSession} = await import('../mocks/mock-session.js');
+    const successor = createMockSession(original.id);
+    let settle!: (accepted: boolean) => void;
+    const pending = new Promise<boolean>(resolve => {settle = resolve;});
+    const send = vi.spyOn(original, 'writeViaMux').mockReturnValue(pending), next = vi.spyOn(successor, 'writeViaMux');
+    const post = (clientId: string) => app.inject({method: 'POST', url: `/api/sessions/${original.id}/input`,
+      payload: {input: 'synthetic input', useMux: true, clientId, seq: 1}});
+    try {
+      expect((await post('original-client')).statusCode).toBe(200);
+      ctx.sessions.set(original.id, successor);
+      const foreign = await post('fresh-client'); expect(foreign.statusCode).toBe(422);
+      expect(foreign.json().error).toContain('unconfirmed'); expect(next).not.toHaveBeenCalled();
+      settle(true); await new Promise<void>(resolve => setImmediate(resolve));
+      const duplicate = await post('original-client'); expect(duplicate.statusCode).toBe(422);
+      expect(duplicate.json().data).toBeUndefined(); expect(next).not.toHaveBeenCalled(); expect(send).toHaveBeenCalledTimes(1);
+    } finally {settle(true); await app.close();}
   });
 });

@@ -443,6 +443,8 @@ export class ApprovalInbox {
   /** Response-only diagnostic; it never substitutes for the private lease at dispatch. */
   answerStatus(item: ApprovalItem, session: object | undefined): {answerState: 'current'} | {answerState: 'held'; heldReason: string} {
     const dispatch = this.dispatches.get(item);
+    if (session && 'terminalInputHeld' in session && session.terminalInputHeld === true) return {answerState: 'held',
+      heldReason: 'Terminal input has an unconfirmed outcome. Do not send another answer until the original input is reconciled.'};
     if (dispatch?.state === 'unconfirmed') return {answerState: 'held',
       heldReason: 'An earlier answer attempt has an unconfirmed outcome. Do not replay it; wait for an observed resolution or a new provider generation.'};
     if (dispatch?.state === 'answered') return {answerState: 'held', heldReason: 'This approval has already been answered. Do not replay it.'};
