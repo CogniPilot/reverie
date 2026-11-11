@@ -29,6 +29,8 @@ pub use installation_request::{
 };
 mod member;
 mod member_policy;
+mod member_request;
+pub use member_request::MemberRequestRefusal;
 mod namespace;
 mod policy;
 mod predecessor;
@@ -74,6 +76,7 @@ pub enum PoolError {
     CreationBudget(reverie_contracts::creation_budget::CreationBudgetError),
     CreationDeadline,
     MemberPolicyEditInProgress,
+    MemberRequestRefused(MemberRequestRefusal),
 }
 impl fmt::Display for PoolError {
     fn fmt(&self, output: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -93,7 +96,10 @@ impl std::error::Error for PoolError {
             Self::Member(error) => Some(error.as_ref()),
             Self::Channel(error) => Some(error),
             Self::CreationBudget(error) => Some(error),
-            Self::Refused(_) | Self::CreationDeadline | Self::MemberPolicyEditInProgress => None,
+            Self::Refused(_)
+            | Self::CreationDeadline
+            | Self::MemberPolicyEditInProgress
+            | Self::MemberRequestRefused(_) => None,
         }
     }
 }
@@ -116,6 +122,7 @@ impl PoolError {
             Self::CreationBudget(error) => error.code(),
             Self::CreationDeadline => "WORKER_POOL_CREATION_BUDGET_DEADLINE",
             Self::MemberPolicyEditInProgress => "WORKER_POOL_MEMBER_EDIT_RETAINED",
+            Self::MemberRequestRefused(refusal) => refusal.code(),
         }
     }
     pub(crate) fn close_unknown(&self) -> bool {

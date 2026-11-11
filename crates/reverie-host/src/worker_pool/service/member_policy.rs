@@ -2,7 +2,7 @@ use super::{member::InspectedMember, protocol::MemberPolicyEdit, *};
 use crate::worker_pool::member::{MemberComponent, MemberProcess};
 use reverie_contracts::worker_pool::WorkerPoolMemberPolicy;
 
-fn check_candidate(
+pub(super) fn check_candidate(
     birth: &WorkerPoolPolicy,
     policies: &crate::worker_pool::member_policy::MemberPolicies,
     revision: u64,

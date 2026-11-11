@@ -22,6 +22,17 @@ struct State {
     primary: Option<PoolError>,
 }
 impl State {
+    fn record_request_error(&mut self, error: PoolError) -> Option<MemberRequestRefusal> {
+        match error {
+            PoolError::MemberRequestRefused(refusal) if self.primary_error().is_none() => {
+                Some(refusal)
+            }
+            error => {
+                self.primary.get_or_insert(error);
+                None
+            }
+        }
+    }
     fn continue_original(&mut self) -> Result<()> {
         let member = self
             .member_failure
@@ -204,23 +215,39 @@ impl<'a> ControllerServing<'a> {
                     unreachable!("employee policy replies are handled separately")
                 }
             };
-            if let Err(error) = result {
-                self.state.primary.get_or_insert(error);
-                phase = "retained";
-            }
-            let primary = self.state.primary_error();
-            Self::reply(
-                &mut self.peer,
-                &self.state,
-                &request,
-                phase,
-                primary.is_none(),
-                primary,
-            )?;
+            self.complete_request(&request, phase, result)?;
             if close {
                 return self.close_reply();
             }
         }
+    }
+    fn complete_request(
+        &mut self,
+        request: &protocol::Request,
+        mut phase: &'static str,
+        result: Result<()>,
+    ) -> Result<()> {
+        let request_error = match result {
+            Ok(()) => None,
+            Err(error) => {
+                phase = "retained";
+                self.state
+                    .record_request_error(error)
+                    .map(PoolError::MemberRequestRefused)
+            }
+        };
+        if request_error.is_some() {
+            phase = "memberRefused";
+        }
+        let primary = self.state.primary_error();
+        Self::reply(
+            &mut self.peer,
+            &self.state,
+            request,
+            phase,
+            primary.is_none(),
+            primary.or(request_error.as_ref()),
+        )
     }
     fn handle_member_policy_request(
         &mut self,

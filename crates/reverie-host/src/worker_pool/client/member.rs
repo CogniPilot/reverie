@@ -1,5 +1,6 @@
 use super::*;
 use crate::worker_laptop::CreatedPoolTarget;
+use crate::worker_pool::member_request::{MemberRequestDispatch, MemberRequestRefusalReceipt};
 use reverie_contracts::worker_pool::WorkerPoolMemberPolicy;
 pub(crate) struct MemberObservation {
     pub(crate) pid: u32,
@@ -17,8 +18,13 @@ impl ControllerState {
     ) -> Result<MemberObservation> {
         target.assert_runtime(runtime)?;
         self.assert_current(runtime, end)?;
-        self.effect_unknown = true;
-        let reply=self.exchange(serde_json::json!({"verb":"configureMember","requestId":fresh_id()?,"employee":target.employee().as_str(),"session":target.session().as_str(),"container":target.container().as_str()}),end)?;
+        let dispatch = MemberRequestDispatch::begin(fresh_id()?, &mut self.effect_unknown);
+        let reply=self.exchange(serde_json::json!({"verb":"configureMember","requestId":dispatch.request(),"employee":target.employee().as_str(),"session":target.session().as_str(),"container":target.container().as_str()}),end)?;
+        if let Some(receipt) = dispatch.refused(&reply) {
+            let current = self.assert_current_for_member_refusal(runtime, end, &receipt);
+            let refusal = receipt.settle_after_current(&mut self.effect_unknown, current)?;
+            return Err(PoolError::MemberRequestRefused(refusal));
+        }
         need(
             reply["known"] == true && reply["phase"] == "memberConfigured",
             "WORKER_POOL_MEMBER_UNCONFIRMED",
@@ -27,6 +33,27 @@ impl ControllerState {
         self.effect_unknown = false;
         self.assert_current(runtime, end)?;
         Ok(result)
+    }
+    fn assert_current_for_member_refusal(
+        &mut self,
+        runtime: &WorkerRuntime,
+        end: Instant,
+        receipt: &MemberRequestRefusalReceipt,
+    ) -> Result<()> {
+        receipt.require_original_known()?;
+        self.require_no_member_policy_edit()?;
+        // Keep this dispatch fenced while reobserving the actual original.
+        // Ordinary assert_current rejects effect_unknown before those reads.
+        need(
+            self.active
+                && self.effect_unknown
+                && !self.close_unknown
+                && self.capacity_failure.is_none(),
+            "WORKER_POOL_CONTROLLER_NOT_ACTIVE",
+        )?;
+        self.binding.assert_current(runtime, end)?;
+        self.binding.assert_original_current(end)?;
+        self.assert_controller_with_query(&self.query, end)
     }
     fn observe_member(
         &mut self,

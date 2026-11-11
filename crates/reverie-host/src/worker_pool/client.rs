@@ -143,6 +143,13 @@ impl ActivatedController {
             Err(PoolError::MemberPolicyEditInProgress) => {
                 Err(PoolError::MemberPolicyEditInProgress)
             }
+            Err(PoolError::MemberRequestRefused(refusal))
+                if !self.state().effect_unknown
+                    && !self.state().close_unknown
+                    && self.state().capacity_failure.is_none() =>
+            {
+                Err(PoolError::MemberRequestRefused(refusal))
+            }
             Err(PoolError::Member(error)) if !error.unconfirmed_native() => {
                 // Known pre-effect member refusal remains in its original
                 // workflow. Native unknowns are latched by actual record state

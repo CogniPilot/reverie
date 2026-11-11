@@ -9,6 +9,32 @@ pub(super) struct InspectedMember {
 }
 
 impl State {
+    /// Pure request validation precedes both attempted-CID admission and every
+    /// native observation. A refused request does not consume a lifetime slot.
+    fn prepare_member(
+        &self,
+        policy: &WorkerPoolPolicy,
+        employee: &str,
+        container: &str,
+        configure: bool,
+        end: Instant,
+    ) -> std::result::Result<WorkerPoolMemberPolicy, MemberRequestRefusal> {
+        if Instant::now() >= end {
+            return Err(MemberRequestRefusal::deadline());
+        }
+        if configure {
+            if self.member_attempted.iter().any(|id| id == container) {
+                return Err(MemberRequestRefusal::already_attempted());
+            }
+            if self.member_attempted.len() >= 256 {
+                return Err(MemberRequestRefusal::capacity());
+            }
+        }
+        self.member_policies
+            .effective(policy, employee)
+            .map_err(|_| MemberRequestRefusal::policy())
+    }
+
     pub(super) fn member(
         &mut self,
         policy: &ControllerPoolPolicy,
@@ -18,17 +44,13 @@ impl State {
         configure: bool,
         end: Instant,
     ) -> Result<()> {
-        check(end)?;
         need(self.member_failure.is_none(), "WORKER_POOL_MEMBER_RETAINED")?;
+        let effective = self
+            .prepare_member(policy.data(), employee, container, configure, end)
+            .map_err(PoolError::MemberRequestRefused)?;
         if configure {
-            need(
-                self.member_attempted.len() < 256
-                    && !self.member_attempted.iter().any(|id| id == container),
-                "WORKER_POOL_MEMBER_ALREADY_ATTEMPTED",
-            )?;
             self.member_attempted.push(container.to_owned());
         }
-        let effective = self.member_policies.effective(policy.data(), employee)?;
         let inspected = InspectedMember::capture(policy, employee, session, container, effective)?;
         let failure = {
             let pool = self.installed_member_pool(policy)?;
@@ -92,6 +114,9 @@ impl State {
         })
     }
 }
+
+#[cfg(test)]
+mod tests;
 
 impl InspectedMember {
     pub(super) fn capture(

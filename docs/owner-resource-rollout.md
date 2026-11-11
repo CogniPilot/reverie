@@ -182,6 +182,28 @@ preparation separate from running-source preparation. A configured policy,
 successful isolated test or closed socket cannot substitute for any of those
 ownership joins or the final pressure/recovery acceptance.
 
+Member configuration retains a maximum of 256 attempted container identities.
+Deadline, duplicate, capacity and member-policy checks run before native
+observation or admission of another identity. Their closed `memberRefused`
+reply rejects only that request; it does not retain a controller-wide primary
+failure or clear uncertainty from an earlier request. The broker accepts this
+outcome only from its original authenticated exchange with the exact request
+nonce and current controller identity. Older, malformed or unconfirmed replies
+remain fenced, as do failures after native observation or configuration begins.
+Correlating a refusal does not clear the broker's actual uncertainty flag: the
+same owner rechecks current native identity first, and a failed guard leaves
+that flag retained. The reply's closed anchor observation is data only.
+Observation and policy-edit preflight remain available when new-member capacity
+is exhausted.
+
+This isolation does not recycle the attempted identities or implement turnover.
+Retirement needs the original confirmed stopped-laptop removal, exact fresh
+container absence and known closure of every retained member component. The
+controller has no such receipt-consuming retirement operation yet. Count, age,
+desired employee state and a parsed absence DTO cannot free a slot. A positive
+native turnover/edit sequence still needs the owned controller integration
+fixture; metadata-only preflight tests do not establish that acceptance.
+
 ## Fleet reply codec compatibility
 
 The fleet Q handshake requires `replyVersion: 2` and the native
