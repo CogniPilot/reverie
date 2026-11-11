@@ -23,10 +23,12 @@ mod anchor;
 mod engine;
 mod namespace;
 mod retirement;
+mod startup;
 pub use retirement::{
     PendingPoolPredecessorRetirement, PoolPredecessorRetirementFailure,
     PoolPredecessorRetirementPhase, RenamedPoolPredecessor,
 };
+pub use startup::{RetainedPoolObservationFailure, observe_retained_pool_anchor};
 
 #[derive(Debug)]
 pub enum PoolPredecessorError {

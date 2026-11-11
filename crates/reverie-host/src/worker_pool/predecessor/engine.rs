@@ -54,6 +54,13 @@ impl Engine {
             .ok_or(PoolError::Refused("WORKER_POOL_PREDECESSOR_REQUIRED"))
     }
 
+    pub(super) fn assert_name_absent(&self, name: &str) -> Result<()> {
+        need(
+            name_owner(&self.inventory()?, name)?.is_none(),
+            "WORKER_POOL_STARTUP_CONTROLLER_NAME_OCCUPIED",
+        )
+    }
+
     pub(super) fn assert_name_pair(
         &self,
         id: &ContainerId,
@@ -238,7 +245,7 @@ pub(super) fn assert_inactive(pid: u32, start: &str, id: &ContainerId) -> Result
     )
 }
 
-fn assert_original_broker_inactive(pid: u32, original_start: &str) -> Result<()> {
+pub(super) fn assert_original_broker_inactive(pid: u32, original_start: &str) -> Result<()> {
     let path = PathBuf::from(format!("/proc/{pid}"));
     let first = observe_broker_process(&path, pid)?;
     need(

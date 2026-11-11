@@ -18,6 +18,7 @@ mod perf;
 mod pool;
 mod pool_image_inputs;
 mod service;
+mod startup;
 mod website;
 
 #[derive(Parser)]
@@ -199,21 +200,8 @@ fn serve(config: PathBuf, offer: bool) -> Result<(), Box<dyn std::error::Error>>
     let snapshot =
         load_owner_config(&source).map_err(|primary| fenced_failure(&source, primary))?;
     let runtime = WorkerRuntime::new(engine, snapshot.envelope().base());
-    let broker = InstallingBroker::new(snapshot, runtime)
-        .map_err(|primary| fenced_failure(&source, primary))?;
-    let startup = if offer {
-        broker
-            .prepare_os_pool_installation_offer(
-                std::time::Instant::now() + std::time::Duration::from_secs(300),
-            )
-            .map_err(|primary| fenced_failure(&source, primary))?
-            .prepare_service()
-            .map_err(|primary| fenced_failure(&source, primary))?
-    } else {
-        broker
-            .prepare_service()
-            .map_err(|primary| fenced_failure(&source, primary))?
-    };
+    let startup = startup::prepare(snapshot, runtime, offer)
+        .map_err(|primary| fenced_box_failure(&source, primary))?;
     let service = startup
         .bind_listener()
         .map_err(|primary| fenced_failure(&source, primary))?;
@@ -414,11 +402,14 @@ fn fenced_failure<E: std::error::Error + 'static>(
     source: &std::path::Path,
     primary: E,
 ) -> Box<dyn std::error::Error> {
+    fenced_box_failure(source, Box::new(primary))
+}
+fn fenced_box_failure(
+    source: &std::path::Path,
+    primary: Box<dyn std::error::Error>,
+) -> Box<dyn std::error::Error> {
     let fence = reverie_host::worker_service::record_service_failure(source).err();
-    Box::new(FencedFailure {
-        primary: Box::new(primary),
-        fence,
-    })
+    Box::new(FencedFailure { primary, fence })
 }
 #[derive(Debug)]
 struct FencedFailure {

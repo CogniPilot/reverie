@@ -37,7 +37,7 @@ mod predecessor;
 pub use predecessor::{
     PendingPoolPredecessorRetirement, PoolPredecessorError, PoolPredecessorFailure,
     PoolPredecessorRetirementFailure, PoolPredecessorRetirementPhase, PreparedPoolPredecessor,
-    RenamedPoolPredecessor,
+    RenamedPoolPredecessor, RetainedPoolObservationFailure, observe_retained_pool_anchor,
 };
 mod publication;
 mod service;
