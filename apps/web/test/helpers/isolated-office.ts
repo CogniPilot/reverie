@@ -21,7 +21,10 @@ function contained(root: string, file: string): boolean {
 export async function createIsolatedOffice(): Promise<IsolatedOffice> {
   if (process.env.VITEST !== 'true') throw new Error('The real-office fixture requires the isolated Vitest runner');
   const original = { ...process.env };
-  const root = await mkdtemp(join(tmpdir(), 'office-fixture-'));
+  // Chromium's singleton uses a Unix socket below TMPDIR. Nix/GitHub's
+  // inherited temporary path can already consume its entire pathname limit.
+  // Allocate an owned, short system-temp root; retain the marker/cleanup checks.
+  const root = await realpath(await mkdtemp(join(process.platform === 'win32' ? tmpdir() : '/tmp', 'rvo-')));
   const paths = Object.fromEntries(
     ['home', 'data', 'workspace', 'cases', 'research', 'runtime', 'tmp', 'attachments'].map((name) => [
       name,

@@ -62,7 +62,9 @@ describe('live plan-member avatars', () => {
       const malicious = [{ ...test.employees[0], name: '<img src=x onerror=alert(1)>', avatar: 'https://outside.test/avatar' }];
       test.respond(test.snapshot('work', malicious));
       await test.methods.refreshPlanMembers();
-      expect(test.row('work').querySelector('img')).toBeNull();
+      // An untrusted stored URL falls back to the owned avatar endpoint. It
+      // must never become an external image request or executable markup.
+      expect(test.row('work').querySelector('img')?.getAttribute('src')).toBe('/api/avatars/person-casey');
       expect(test.row('work').querySelector('button')?.getAttribute('aria-label')).toBe(malicious[0].name);
       expect(test.row('work').querySelector('[onerror]')).toBeNull();
       test.respond(test.snapshot('work'));

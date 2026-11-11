@@ -68,13 +68,13 @@ describe('temporary worker creation with company identity and channel inheritanc
   const owner = (extra = {}) =>
     app.inject({ method: 'POST', url: '/api/sessions', payload: { workingDir: directory, mode: 'claude', ...extra } });
 
-  it('gives a random human name/icon and joins the parent’s only channel', async () => {
+  it('gives a generated agent identity and joins the parent’s only channel', async () => {
     const room = rooms.create('Engineering', undefined);
     rooms.addMember(room.id, 'test-session-1');
     const response = await spawn();
     expect(response.statusCode).toBe(200);
     const { session, identity } = response.json();
-    expect(session.name).toMatch(/^[A-Za-z]+$/);
+    expect(session.name).toMatch(/^Agent [a-f0-9]{8}$/);
     expect(identity.icon).toBeTruthy();
     expect(room.members.find((m) => m.sessionId === session.id)?.icon).toBe(identity.icon);
     expect(company.view().temporaryAgents[0].name).toBe(session.name);
@@ -352,7 +352,7 @@ describe('temporary worker creation with company identity and channel inheritanc
     const { sessionId, identity } = response.json();
     expect(sessionId).toBeTruthy();
     expect(ctx.sessions.get(sessionId)?.name).toBe(identity.name);
-    expect(identity.name).toMatch(/^[A-Za-z]+$/);
+    expect(identity.name).toMatch(/^Agent [a-f0-9]{8}$/);
     expect(room.members.find((m) => m.sessionId === sessionId)?.icon).toBe(identity.icon);
     const chosen = await app.inject({
       method: 'POST',

@@ -106,7 +106,11 @@ describe('WebServer index.html <title> templating (#82)', () => {
     // installed and would have failed on a developer's box that had them. The
     // custom-model list is injected unconditionally (a plain array, possibly
     // empty), so it needs stripping on every machine, not just where non-empty.
-    const html = (await render('laptop'))
+    const rendered = await render('laptop');
+    const chatAssets = [...rendered.matchAll(/<script>window\.__REVERIE_CHAT_ASSETS__=(\{[^\n]*\});<\/script>\n/g)];
+    expect(chatAssets).toHaveLength(1);
+    expect(Object.keys(JSON.parse(chatAssets[0][1])).sort()).toEqual(['chat-app.css', 'chat-app.js']);
+    const html = rendered
       .replace(/(\.(?:js|css))\?v=[^"]*/g, '$1')
       .replace(/<script>window\.__reverieCliAvailable=\{.*?\};<\/script>\n/, '')
       .replace(/<script>window\.__reverieCliCatalog=\[.*?\];<\/script>\n/, '')
@@ -115,7 +119,9 @@ describe('WebServer index.html <title> templating (#82)', () => {
       // enabled CLI declares a gutter, so it needs stripping on every machine.
       .replace(/<script>window\.__reverieTranscriptGutter=\{.*?\};<\/script>\n/, '')
       // Likewise the page-key mode list: an array, possibly empty, always injected.
-      .replace(/<script>window\.__reverieTranscriptPageKeys=\[.*?\];<\/script>\n/, '');
+      .replace(/<script>window\.__reverieTranscriptPageKeys=\[.*?\];<\/script>\n/, '')
+      // The conversation shell's two asset versions are injected independently.
+      .replace(/<script>window\.__REVERIE_CHAT_ASSETS__=\{[^\n]*\};<\/script>\n/, '');
     const beforeTitle = rawTemplate.split('<title>Reverie</title>')[0];
     const afterTitle = rawTemplate.split('<title>Reverie</title>')[1];
     expect(html.startsWith(beforeTitle)).toBe(true);

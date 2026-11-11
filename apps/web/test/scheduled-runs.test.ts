@@ -1,30 +1,34 @@
+import { prepareHttpOwner } from './helpers/real-owner-fixture.js';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { WebServer } from '../src/web/server.js';
 
 describe('Scheduled Runs API', () => {
   let server: WebServer;
   let baseUrl: string;
+  let ownerFetch: typeof fetch;
   const createdRuns: string[] = [];
 
   beforeAll(async () => {
+    const signIn = await prepareHttpOwner();
     server = new WebServer(0, false, true);
     await server.start();
     baseUrl = `http://localhost:${server.boundPort}`;
+    ownerFetch = await signIn(baseUrl);
   });
 
   afterAll(async () => {
     // Cancel any remaining runs
     for (const runId of createdRuns) {
       try {
-        await fetch(`${baseUrl}/api/scheduled/${runId}`, { method: 'DELETE' });
-      } catch {}
+        await ownerFetch(`${baseUrl}/api/scheduled/${runId}`, { method: 'DELETE' });
+      } catch { /* The fixture server's stop below also tears down its runs. */ }
     }
     await server.stop();
   });
 
   describe('GET /api/scheduled', () => {
     it('should return empty list initially', async () => {
-      const response = await fetch(`${baseUrl}/api/scheduled`);
+      const response = await ownerFetch(`${baseUrl}/api/scheduled`);
       const data = await response.json();
 
       expect(Array.isArray(data.data)).toBe(true);
@@ -32,8 +36,21 @@ describe('Scheduled Runs API', () => {
   });
 
   describe('POST /api/scheduled', () => {
-    it('should create a scheduled run', async () => {
+    it('refuses an unverified browser before creating a run', async () => {
+      const before = await (await ownerFetch(`${baseUrl}/api/scheduled`)).json();
       const response = await fetch(`${baseUrl}/api/scheduled`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', origin: baseUrl },
+        body: JSON.stringify({ prompt: 'must not run', durationMinutes: 1 }),
+      });
+      expect(response.status).toBe(401);
+      expect((await response.json()).success).toBe(false);
+      const after = await (await ownerFetch(`${baseUrl}/api/scheduled`)).json();
+      expect(after.data).toEqual(before.data);
+    });
+
+    it('should create a scheduled run', async () => {
+      const response = await ownerFetch(`${baseUrl}/api/scheduled`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -54,13 +71,13 @@ describe('Scheduled Runs API', () => {
       createdRuns.push(data.data.run.id);
 
       // Stop the run immediately to avoid resource usage
-      await fetch(`${baseUrl}/api/scheduled/${data.data.run.id}`, { method: 'DELETE' });
+      await ownerFetch(`${baseUrl}/api/scheduled/${data.data.run.id}`, { method: 'DELETE' });
     });
 
     it('should set correct timestamps', async () => {
       const beforeCreate = Date.now();
 
-      const response = await fetch(`${baseUrl}/api/scheduled`, {
+      const response = await ownerFetch(`${baseUrl}/api/scheduled`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -77,11 +94,11 @@ describe('Scheduled Runs API', () => {
       expect(data.data.run.endAt).toBe(data.data.run.startedAt + 5 * 60 * 1000);
 
       createdRuns.push(data.data.run.id);
-      await fetch(`${baseUrl}/api/scheduled/${data.data.run.id}`, { method: 'DELETE' });
+      await ownerFetch(`${baseUrl}/api/scheduled/${data.data.run.id}`, { method: 'DELETE' });
     });
 
     it('should initialize with zero completed tasks and cost', async () => {
-      const response = await fetch(`${baseUrl}/api/scheduled`, {
+      const response = await ownerFetch(`${baseUrl}/api/scheduled`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -97,14 +114,14 @@ describe('Scheduled Runs API', () => {
       expect(data.data.run.logs.length).toBeGreaterThanOrEqual(1);
 
       createdRuns.push(data.data.run.id);
-      await fetch(`${baseUrl}/api/scheduled/${data.data.run.id}`, { method: 'DELETE' });
+      await ownerFetch(`${baseUrl}/api/scheduled/${data.data.run.id}`, { method: 'DELETE' });
     });
   });
 
   describe('GET /api/scheduled/:id', () => {
     it('should return scheduled run details', async () => {
       // Create a run first
-      const createRes = await fetch(`${baseUrl}/api/scheduled`, {
+      const createRes = await ownerFetch(`${baseUrl}/api/scheduled`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -117,17 +134,17 @@ describe('Scheduled Runs API', () => {
       createdRuns.push(runId);
 
       // Get the run
-      const response = await fetch(`${baseUrl}/api/scheduled/${runId}`);
+      const response = await ownerFetch(`${baseUrl}/api/scheduled/${runId}`);
       const data = await response.json();
 
       expect(data.data.id).toBe(runId);
       expect(data.data.prompt).toBe('test get');
 
-      await fetch(`${baseUrl}/api/scheduled/${runId}`, { method: 'DELETE' });
+      await ownerFetch(`${baseUrl}/api/scheduled/${runId}`, { method: 'DELETE' });
     });
 
     it('should return error for non-existent run', async () => {
-      const response = await fetch(`${baseUrl}/api/scheduled/non-existent-id`);
+      const response = await ownerFetch(`${baseUrl}/api/scheduled/non-existent-id`);
       const data = await response.json();
 
       expect(data.error).toBe('Scheduled run not found');
@@ -137,7 +154,7 @@ describe('Scheduled Runs API', () => {
   describe('DELETE /api/scheduled/:id', () => {
     it('should stop a scheduled run', async () => {
       // Create a run
-      const createRes = await fetch(`${baseUrl}/api/scheduled`, {
+      const createRes = await ownerFetch(`${baseUrl}/api/scheduled`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -149,7 +166,7 @@ describe('Scheduled Runs API', () => {
       const runId = createData.data.run.id;
 
       // Delete/stop the run
-      const response = await fetch(`${baseUrl}/api/scheduled/${runId}`, {
+      const response = await ownerFetch(`${baseUrl}/api/scheduled/${runId}`, {
         method: 'DELETE',
       });
       const data = await response.json();
@@ -157,13 +174,13 @@ describe('Scheduled Runs API', () => {
       expect(data.success).toBe(true);
 
       // Verify it's stopped
-      const getRes = await fetch(`${baseUrl}/api/scheduled/${runId}`);
+      const getRes = await ownerFetch(`${baseUrl}/api/scheduled/${runId}`);
       const runData = await getRes.json();
       expect(runData.data.status).toBe('stopped');
     });
 
     it('should return error for non-existent run', async () => {
-      const response = await fetch(`${baseUrl}/api/scheduled/non-existent-id`, {
+      const response = await ownerFetch(`${baseUrl}/api/scheduled/non-existent-id`, {
         method: 'DELETE',
       });
       const data = await response.json();
@@ -177,11 +194,14 @@ describe('Scheduled Runs API', () => {
 describe('Quick Run API', () => {
   let server: WebServer;
   let baseUrl: string;
+  let ownerFetch: typeof fetch;
 
   beforeAll(async () => {
+    const signIn = await prepareHttpOwner();
     server = new WebServer(0, false, true);
     await server.start();
     baseUrl = `http://localhost:${server.boundPort}`;
+    ownerFetch = await signIn(baseUrl);
   });
 
   afterAll(async () => {
@@ -192,7 +212,7 @@ describe('Quick Run API', () => {
     it('should create session and run prompt', async () => {
       // Note: This test will actually try to run Claude
       // We use a simple echo to minimize API usage
-      const response = await fetch(`${baseUrl}/api/run`, {
+      const response = await ownerFetch(`${baseUrl}/api/run`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -217,7 +237,7 @@ describe('Quick Run API', () => {
     // Skip this test - it runs real Claude CLI which is slow and flaky in CI
     // The functionality is tested via the first test which uses workingDir: '/tmp'
     it.skip('should use current directory when workingDir not provided', async () => {
-      const response = await fetch(`${baseUrl}/api/run`, {
+      const response = await ownerFetch(`${baseUrl}/api/run`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

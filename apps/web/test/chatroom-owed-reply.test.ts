@@ -26,6 +26,7 @@ describe('owed replies and visible delivery problems', () => {
 
   beforeEach(async () => {
     vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-11-11T16:00:00Z'));
     outcome = { Quinn: 'submitted', Rowan: 'submitted' };
     writes = { Quinn: 0, Rowan: 0 };
     const session = (id: string, name: string, pid: number) => ({
@@ -38,7 +39,7 @@ describe('owed replies and visible delivery problems', () => {
     });
     live = new Map([[A, session(A, 'Quinn', 1)], [B, session(B, 'Rowan', 2)]]);
     const file = join(mkdtempSync(join(tmpdir(), 'owed-')), 'chatrooms.json');
-    service = new ChatroomService({ file, getSession: (id) => live.get(id) as never, broadcast: () => {}, owedReplyMs: 60_000 });
+    service = new ChatroomService({ file, getSession: (id) => live.get(id) as never, broadcast: () => {}, owedReplyMs: 60_000, timeZone: () => 'America/Indiana/Indianapolis' });
     await service.init();
   });
   afterEach(async () => {
@@ -62,7 +63,7 @@ describe('owed replies and visible delivery problems', () => {
     await vi.advanceTimersByTimeAsync(2_000);
     const added = system(room.id).slice(before);
     expect(added).toHaveLength(1);
-    expect(added[0]).toMatch(/^Reply from Quinn unconfirmed: no reply linked to the \d{1,2}:\d\d [AP]M ET message to it after 1 min \(delivery: submitted\)$/);
+    expect(added[0]).toBe('Reply from Quinn unconfirmed: no reply linked to the Nov 11, 2026, 11:00:00 AM EST message to it after 1 min (delivery: submitted)');
     expect(added[0]).not.toMatch(/received/);
     await vi.advanceTimersByTimeAsync(10 * 60_000);
     expect(system(room.id).length).toBe(before + 1);
@@ -204,7 +205,7 @@ describe('owed replies and visible delivery problems', () => {
     service.post(room.id, USER, '@Quinn status?');
     await vi.advanceTimersByTimeAsync(30 * 60_000);
     const lines = system(room.id);
-    expect(lines.filter((t) => /^Delivery to Quinn still unconfirmed 10 min after the .+ ET message to it \(it is still working\)$/.test(t))).toHaveLength(1);
+    expect(lines.filter((t) => t === 'Delivery to Quinn still unconfirmed 10 min after the Nov 11, 2026, 11:00:00 AM EST message to it (it is still working)')).toHaveLength(1);
     expect(lines.some((t) => t.startsWith('Reply from Quinn'))).toBe(false);
   });
 });

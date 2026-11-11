@@ -5,6 +5,7 @@
  * ring, so a stale page never shows a member muted on a guess. Display only: nothing here sets a mode.
  */
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { createHarness, member, room } from './helpers/chat-app-harness.mjs';
 
 const A = '00000026-002d-4000-8000-00000000003c';
@@ -19,7 +20,7 @@ const sessions = [
 ];
 
 describe('member alert mode', () => {
-  it('shows ring, vibrate and silent with an ET end time; expired or endless reads as ring', async () => {
+  it('shows timed alert modes in the chosen company timezone; expired or endless reads as ring', async () => {
     const hour = 3600e3;
     const rooms = [
       room('r1', 'General', [
@@ -30,6 +31,9 @@ describe('member alert mode', () => {
       ], {}),
     ];
     const h = await createHarness({ sessions, rooms });
+    h.window.eval(readFileSync(new URL('../src/web/public/display-time.js', import.meta.url), 'utf8'));
+    h.window.ReverieTime.setTimeZone('America/Indiana/Indianapolis');
+    h.shell.renderMembers();
     const badge = (name: string) =>
       h.document.querySelector(`.ca-member[aria-label^="${name},"] .ca-member-alert`) as HTMLElement;
     const label = (name: string) => h.document.querySelector(`.ca-member[aria-label^="${name},"]`)!.getAttribute('aria-label');
@@ -39,10 +43,10 @@ describe('member alert mode', () => {
     expect(badge('alpha').dataset.alertMode).toBe('ring');
     expect(label('alpha')).toBe('alpha, admin, idle');
     expect(badge('bravo').querySelector('path')?.getAttribute('d')).toContain('L2 9');
-    expect(badge('bravo').title).toMatch(/^Vibrate until (\w{3} )?\d{1,2}:\d{2} [AP]M ET \(wakes on a direct @mention or the owner\)$/);
+    expect(badge('bravo').title).toMatch(/^Vibrate until (\w{3} )?\d{1,2}:\d{2} [AP]M E[DS]T \(wakes on a direct @mention or the owner\)$/);
     expect(label('bravo')).toContain(', Vibrate until ');
     expect(badge('carol').querySelector('path')?.getAttribute('d')).toBe('M3 3l18 18');
-    expect(badge('carol').title).toMatch(/^Silent until .* ET \(only an owner @mention or @everyone wakes it\)$/);
+    expect(badge('carol').title).toMatch(/^Silent until .* E[DS]T \(only an owner @mention or @everyone wakes it\)$/);
     expect(badge('delta').dataset.alertMode).toBe('ring');
     expect(label('delta')).not.toContain('Silent');
   });

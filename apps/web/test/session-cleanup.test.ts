@@ -1,3 +1,4 @@
+import { prepareHttpOwner } from './helpers/real-owner-fixture.js';
 import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest';
 import { WebServer } from '../src/web/server.js';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -15,15 +16,18 @@ const CASES_DIR = join(homedir(), 'reverie-cases');
 describe('Session Cleanup', () => {
   let server: WebServer;
   let baseUrl: string;
+  let ownerFetch: typeof fetch;
   let testWorkingDir: string;
   const createdCases: string[] = [];
   const createdSessions: string[] = [];
 
   beforeAll(async () => {
+    const signIn = await prepareHttpOwner();
     testWorkingDir = mkdtempSync(join(tmpdir(), 'reverie-cleanup-test-'));
     server = new WebServer(0, false, true);
     await server.start();
     baseUrl = `http://localhost:${server.boundPort}`;
+    ownerFetch = await signIn(baseUrl);
   });
 
   afterEach(() => {
@@ -37,8 +41,8 @@ describe('Session Cleanup', () => {
     // Cleanup all sessions
     for (const sessionId of createdSessions) {
       try {
-        await fetch(`${baseUrl}/api/sessions/${sessionId}`, { method: 'DELETE' });
-      } catch {}
+        await ownerFetch(`${baseUrl}/api/sessions/${sessionId}`, { method: 'DELETE' });
+      } catch { /* The fixture server's stop below also tears down its sessions. */ }
     }
     await server.stop();
     rmSync(testWorkingDir, { recursive: true, force: true });
@@ -46,7 +50,7 @@ describe('Session Cleanup', () => {
 
   describe('Session Deletion', () => {
     it('rejects before stopping the session when layout deletion preparation fails', async () => {
-      const createRes = await fetch(`${baseUrl}/api/sessions`, {
+      const createRes = await ownerFetch(`${baseUrl}/api/sessions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ workingDir: testWorkingDir }),
@@ -61,8 +65,8 @@ describe('Session Cleanup', () => {
         .spyOn(internals.tabLayouts, 'runSessionDeletion')
         .mockRejectedValueOnce(new Error('layout prune unavailable'));
       try {
-        const deleteRes = await fetch(`${baseUrl}/api/sessions/${id}`, { method: 'DELETE' });
-        const getRes = await fetch(`${baseUrl}/api/sessions/${id}`);
+        const deleteRes = await ownerFetch(`${baseUrl}/api/sessions/${id}`, { method: 'DELETE' });
+        const getRes = await ownerFetch(`${baseUrl}/api/sessions/${id}`);
 
         expect(deleteRes.status).toBe(500);
         expect(getRes.status).toBe(200);
@@ -76,7 +80,7 @@ describe('Session Cleanup', () => {
       createdCases.push(caseName);
 
       // Create and start interactive session
-      const quickStartRes = await fetch(`${baseUrl}/api/quick-start`, {
+      const quickStartRes = await ownerFetch(`${baseUrl}/api/quick-start`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ caseName }),
@@ -85,14 +89,14 @@ describe('Session Cleanup', () => {
       expect(quickStartData.success).toBe(true);
 
       // Delete the session
-      const deleteRes = await fetch(`${baseUrl}/api/sessions/${quickStartData.data.sessionId}`, {
+      const deleteRes = await ownerFetch(`${baseUrl}/api/sessions/${quickStartData.data.sessionId}`, {
         method: 'DELETE',
       });
       const deleteData = await deleteRes.json();
       expect(deleteData.success).toBe(true);
 
       // Verify session is gone
-      const getRes = await fetch(`${baseUrl}/api/sessions/${quickStartData.data.sessionId}`);
+      const getRes = await ownerFetch(`${baseUrl}/api/sessions/${quickStartData.data.sessionId}`);
       const getData = await getRes.json();
       expect(getData.error).toContain('not found');
     });
@@ -105,7 +109,7 @@ describe('Session Cleanup', () => {
         const caseName = `multi-cleanup-${Date.now()}-${i}`;
         createdCases.push(caseName);
 
-        const res = await fetch(`${baseUrl}/api/quick-start`, {
+        const res = await ownerFetch(`${baseUrl}/api/quick-start`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ caseName }),
@@ -117,7 +121,7 @@ describe('Session Cleanup', () => {
 
       // Delete all sessions
       for (const id of sessionIds) {
-        const deleteRes = await fetch(`${baseUrl}/api/sessions/${id}`, {
+        const deleteRes = await ownerFetch(`${baseUrl}/api/sessions/${id}`, {
           method: 'DELETE',
         });
         const deleteData = await deleteRes.json();
@@ -125,7 +129,7 @@ describe('Session Cleanup', () => {
       }
 
       // Verify all sessions are gone
-      const listRes = await fetch(`${baseUrl}/api/sessions`);
+      const listRes = await ownerFetch(`${baseUrl}/api/sessions`);
       const sessions = await listRes.json();
       for (const id of sessionIds) {
         expect(sessions.data.find((s: any) => s.id === id)).toBeUndefined();
@@ -145,7 +149,7 @@ describe('Session Cleanup', () => {
       createdCases.push(caseName);
 
       // Create session
-      const sessionRes = await fetch(`${baseUrl}/api/sessions`, {
+      const sessionRes = await ownerFetch(`${baseUrl}/api/sessions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ workingDir: '/tmp' }),
@@ -154,19 +158,19 @@ describe('Session Cleanup', () => {
       expect(sessionData.success).toBe(true);
 
       // Start interactive with respawn
-      const interactiveRes = await fetch(`${baseUrl}/api/sessions/${sessionData.data.session.id}/interactive-respawn`, {
+      const interactiveRes = await ownerFetch(`${baseUrl}/api/sessions/${sessionData.data.session.id}/interactive-respawn`, {
         method: 'POST',
       });
       const interactiveData = await interactiveRes.json();
       expect(interactiveData.success).toBe(true);
 
       // Verify respawn is running
-      const respawnRes = await fetch(`${baseUrl}/api/sessions/${sessionData.data.session.id}/respawn`);
+      const respawnRes = await ownerFetch(`${baseUrl}/api/sessions/${sessionData.data.session.id}/respawn`);
       const respawnData = await respawnRes.json();
       expect(respawnData.data.enabled).toBe(true);
 
       // Delete session
-      await fetch(`${baseUrl}/api/sessions/${sessionData.data.session.id}`, {
+      await ownerFetch(`${baseUrl}/api/sessions/${sessionData.data.session.id}`, {
         method: 'DELETE',
       });
 
@@ -174,7 +178,7 @@ describe('Session Cleanup', () => {
       await new Promise((resolve) => setTimeout(resolve, 500));
 
       // Verify respawn controller is cleaned up (enabled: false when controller doesn't exist)
-      const respawnAfterRes = await fetch(`${baseUrl}/api/sessions/${sessionData.data.session.id}/respawn`);
+      const respawnAfterRes = await ownerFetch(`${baseUrl}/api/sessions/${sessionData.data.session.id}/respawn`);
       const respawnAfterData = await respawnAfterRes.json();
       // The respawn endpoint returns enabled: false when there's no controller
       expect(respawnAfterData.data.enabled).toBe(false);
@@ -184,7 +188,7 @@ describe('Session Cleanup', () => {
   describe('Scheduled Run Cleanup', () => {
     it('should properly stop scheduled run', async () => {
       // Create a scheduled run
-      const createRes = await fetch(`${baseUrl}/api/scheduled`, {
+      const createRes = await ownerFetch(`${baseUrl}/api/scheduled`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -197,14 +201,14 @@ describe('Session Cleanup', () => {
       expect(createData.success).toBe(true);
 
       // Stop the scheduled run
-      const stopRes = await fetch(`${baseUrl}/api/scheduled/${createData.data.run.id}`, {
+      const stopRes = await ownerFetch(`${baseUrl}/api/scheduled/${createData.data.run.id}`, {
         method: 'DELETE',
       });
       const stopData = await stopRes.json();
       expect(stopData.success).toBe(true);
 
       // Verify status is stopped
-      const getRes = await fetch(`${baseUrl}/api/scheduled/${createData.data.run.id}`);
+      const getRes = await ownerFetch(`${baseUrl}/api/scheduled/${createData.data.run.id}`);
       const getData = await getRes.json();
       expect(getData.data.status).toBe('stopped');
     });
@@ -214,12 +218,15 @@ describe('Session Cleanup', () => {
 describe('Resource Management', () => {
   let server: WebServer;
   let baseUrl: string;
+  let ownerFetch: typeof fetch;
   const createdCases: string[] = [];
 
   beforeAll(async () => {
+    const signIn = await prepareHttpOwner();
     server = new WebServer(0, false, true);
     await server.start();
     baseUrl = `http://localhost:${server.boundPort}`;
+    ownerFetch = await signIn(baseUrl);
   });
 
   afterAll(async () => {
@@ -231,7 +238,7 @@ describe('Resource Management', () => {
 
   it('should handle rapid session creation and deletion', async () => {
     // Get initial session count (may have restored sessions from other tests)
-    const initialRes = await fetch(`${baseUrl}/api/sessions`);
+    const initialRes = await ownerFetch(`${baseUrl}/api/sessions`);
     const initialSessions = await initialRes.json();
     const initialCount = initialSessions.data.length;
 
@@ -243,7 +250,7 @@ describe('Resource Management', () => {
       createdCases.push(caseName);
 
       // Create
-      const createRes = await fetch(`${baseUrl}/api/quick-start`, {
+      const createRes = await ownerFetch(`${baseUrl}/api/quick-start`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ caseName }),
@@ -253,7 +260,7 @@ describe('Resource Management', () => {
       createdSessionIds.push(createData.data.sessionId);
 
       // Delete immediately
-      const deleteRes = await fetch(`${baseUrl}/api/sessions/${createData.data.sessionId}`, {
+      const deleteRes = await ownerFetch(`${baseUrl}/api/sessions/${createData.data.sessionId}`, {
         method: 'DELETE',
       });
       const deleteData = await deleteRes.json();
@@ -267,7 +274,7 @@ describe('Resource Management', () => {
     await new Promise((resolve) => setTimeout(resolve, 500));
 
     // Verify created sessions were deleted (account for restored sessions from other tests)
-    const listRes = await fetch(`${baseUrl}/api/sessions`);
+    const listRes = await ownerFetch(`${baseUrl}/api/sessions`);
     const sessions = await listRes.json();
 
     // None of the sessions we created should still exist
@@ -284,7 +291,7 @@ describe('Resource Management', () => {
     createdCases.push(caseName);
 
     // Create session
-    const createRes = await fetch(`${baseUrl}/api/quick-start`, {
+    const createRes = await ownerFetch(`${baseUrl}/api/quick-start`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ caseName }),
@@ -296,18 +303,18 @@ describe('Resource Management', () => {
     await new Promise((resolve) => setTimeout(resolve, 2000));
 
     // Get terminal buffer before stop - may or may not have content depending on timing
-    const terminalRes = await fetch(`${baseUrl}/api/sessions/${createData.data.sessionId}/terminal`);
+    const terminalRes = await ownerFetch(`${baseUrl}/api/sessions/${createData.data.sessionId}/terminal`);
     const terminalData = await terminalRes.json();
     // Just verify the property exists
     expect(terminalData.data.terminalBuffer).toBeDefined();
 
     // Delete session
-    await fetch(`${baseUrl}/api/sessions/${createData.data.sessionId}`, {
+    await ownerFetch(`${baseUrl}/api/sessions/${createData.data.sessionId}`, {
       method: 'DELETE',
     });
 
     // Session should be gone
-    const afterRes = await fetch(`${baseUrl}/api/sessions/${createData.data.sessionId}/terminal`);
+    const afterRes = await ownerFetch(`${baseUrl}/api/sessions/${createData.data.sessionId}/terminal`);
     const afterData = await afterRes.json();
     expect(afterData.error).toContain('not found');
   });
