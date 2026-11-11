@@ -302,6 +302,22 @@ for (const width of [1280, 390, 320])
       expect(await record.textContent()).toContain('The employee was retained.');
       expect(await record.textContent()).toContain('The original hire session is not present.');
       await record.scrollIntoViewIfNeeded();
+      const output = process.env.TEST_RESOURCE_SCREENSHOT_DIR;
+      if (output) {
+        await mkdir(output, { recursive: true });
+        await page.screenshot({ path: join(output, `retained-hiring-${width}.png`) });
+      }
+      const clippedText = await form.evaluate(element => {
+        const content = element.closest('.ca-company-settings-content')!.getBoundingClientRect();
+        return [...element.querySelectorAll('p,strong,summary')].flatMap(node => {
+          const range = document.createRange();
+          range.selectNodeContents(node);
+          return [...range.getClientRects()]
+            .filter(rect => rect.width > 0 && (rect.left < content.left - 1 || rect.right > content.right + 1))
+            .map(() => node.textContent);
+        });
+      });
+      expect(clippedText).toEqual([]);
       const geometry = await dialog.evaluate((element) => ({
         width: element.clientWidth,
         scrollWidth: element.scrollWidth,
@@ -313,11 +329,6 @@ for (const width of [1280, 390, 320])
       await form.dispatchEvent('submit');
       expect(await page.evaluate(() => (window as any).__writes)).toEqual([]);
       expect(errors).toEqual([]);
-      const output = process.env.TEST_RESOURCE_SCREENSHOT_DIR;
-      if (output) {
-        await mkdir(output, { recursive: true });
-        await page.screenshot({ path: join(output, `retained-hiring-${width}.png`) });
-      }
     } finally {
       await browser.close();
     }

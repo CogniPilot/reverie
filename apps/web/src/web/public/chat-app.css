@@ -589,7 +589,8 @@ html[data-skin='rose-pine-dawn'] .ca-root {
 .ca-fleet-table th { color:var(--text-muted); }
 .ca-fleet-table-scroll { max-width:100%; }
 .ca-fleet-table [data-fleet-profile] { text-align:left; }
-.ca-company-hiring { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px 12px; }
+.ca-company-hiring { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px 12px; min-width:0; }
+.ca-company-hiring > * { min-width:0; overflow-wrap:anywhere; }
 .ca-company-hiring > :not(.ca-label) { grid-column:1/-1; margin-block:0; }
 .ca-company-hiring .ca-company-hiring-active { margin-top:8px; }
 .ca-company-hire-record { border-top:1px solid var(--ca-line); padding:10px 0; }
