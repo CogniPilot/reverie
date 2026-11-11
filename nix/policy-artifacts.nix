@@ -14,6 +14,7 @@ in pkgs.rustPlatform.buildRustPackage {
     REVERIE_FIXED_BUILD_GNUTAR = "${pkgs.gnutar}/bin/tar";
     REVERIE_FIXED_BUILD_TIMEOUT = "${pkgs.coreutils}/bin/timeout";
     REVERIE_FIXED_BUILD_GZIP_PATH = "${pkgs.gzip}/bin";
+    REVERIE_TEST_CONTROLLER_PROGRAM = "${import ./controller-program-test-fixture.nix { inherit pkgs; }}/bin/reverie-worker-resource-controller";
   };
   cargoBuildFlags = [ "-p" "reverie-policy-artifacts" ];
   cargoTestFlags = [ "-p" "reverie-policy-artifacts" ];

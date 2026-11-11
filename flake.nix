@@ -531,6 +531,7 @@
             REVERIE_FIXED_BUILD_GNUTAR = "${pkgs.gnutar}/bin/tar";
             REVERIE_FIXED_BUILD_TIMEOUT = "${pkgs.coreutils}/bin/timeout";
             REVERIE_FIXED_BUILD_GZIP_PATH = "${pkgs.gzip}/bin";
+            REVERIE_TEST_CONTROLLER_PROGRAM = "${import ./nix/controller-program-test-fixture.nix { inherit pkgs; }}/bin/reverie-worker-resource-controller";
             shellHook = ''
               export PYTHONPATH="$PWD/python''${PYTHONPATH:+:$PYTHONPATH}"
               export REVERIE_LEASE_DIR="''${REVERIE_LEASE_DIR:-''${REVERIE_ROOT:-$HOME/reverie}/runtime/leases}"

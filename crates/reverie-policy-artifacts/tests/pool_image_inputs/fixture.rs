@@ -2,7 +2,7 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::{
     fs,
-    os::unix::fs::DirBuilderExt,
+    os::unix::fs::{DirBuilderExt, symlink},
     path::{Path, PathBuf},
     process::{Command, Output},
     time::{SystemTime, UNIX_EPOCH},
@@ -24,6 +24,9 @@ pub(super) struct Archive {
     payload: PathBuf,
 }
 impl Fixture {
+    pub(super) fn program(&self) -> PathBuf {
+        PathBuf::from(env!("REVERIE_TEST_CONTROLLER_PROGRAM"))
+    }
     pub(super) fn new() -> Self {
         let nonce = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -57,19 +60,27 @@ impl Fixture {
         }
     }
     pub(super) fn run(&self, swapped: bool) -> Output {
+        self.run_with_program(swapped, Some(&self.program()))
+    }
+    pub(super) fn run_with_program(&self, swapped: bool, program: Option<&Path>) -> Output {
         let (controller, anchor) = if swapped {
             (&self.anchor, &self.controller)
         } else {
             (&self.controller, &self.anchor)
         };
-        Command::new(env!("CARGO_BIN_EXE_reverie-policy-artifacts"))
+        let mut command = Command::new(env!("CARGO_BIN_EXE_reverie-policy-artifacts"));
+        command
             .args([
                 "pool-image-inputs",
                 "--system",
                 "x86_64-linux",
                 "--controller-archive",
             ])
-            .arg(&controller.path)
+            .arg(&controller.path);
+        if let Some(program) = program {
+            command.arg("--controller-program").arg(program);
+        }
+        command
             .arg("--anchor-archive")
             .arg(&anchor.path)
             .arg("--source")
@@ -93,6 +104,18 @@ impl Archive {
         let payload = parent.join(format!("{role}-payload"));
         fs::create_dir(&payload).unwrap();
         fs::write(payload.join("role"), role).unwrap();
+        if role == "controller" {
+            let program = Path::new(env!("REVERIE_TEST_CONTROLLER_PROGRAM"));
+            let packaged = payload.join(program.strip_prefix("/").unwrap());
+            fs::create_dir_all(packaged.parent().unwrap()).unwrap();
+            fs::copy(program, packaged).unwrap();
+            fs::create_dir(payload.join("bin")).unwrap();
+            symlink(
+                program,
+                payload.join("bin/reverie-worker-resource-controller"),
+            )
+            .unwrap();
+        }
         let layer_tmp = parent.join(format!("{role}-layer.tar"));
         assert!(
             Command::new("tar")

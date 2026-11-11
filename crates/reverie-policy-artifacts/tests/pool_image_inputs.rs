@@ -30,9 +30,17 @@ fn actual_two_archives_are_measured_in_their_fixed_roles_and_output_is_exclusive
     )
     .unwrap();
     let source_file = fs::read(fixture.source.join("nix/worker-pool-anchor-image.nix")).unwrap();
+    let program_path = fixture.program();
+    let program = fs::read(&program_path).unwrap();
     fixture.close();
-    assert_eq!(value["version"], 1);
-    assert_eq!(value["purpose"], "worker-pool-image-inputs-v1");
+    assert_eq!(value["version"], 2);
+    assert_eq!(value["purpose"], "worker-pool-image-inputs-v2");
+    assert_eq!(
+        value["controller"]["program"]["path"],
+        program_path.to_str().unwrap()
+    );
+    assert_eq!(value["controller"]["program"]["sha256"], hash(&program));
+    assert_eq!(value["controller"]["program"]["bytes"], program.len());
     assert_eq!(value["system"], "x86_64-linux");
     assert_eq!(value["controller"]["archive"]["sha256"], hash(&controller));
     assert_eq!(value["anchor"]["archive"]["sha256"], hash(&anchor));
@@ -104,4 +112,26 @@ fn actual_layer_or_config_changes_cannot_be_sealed_under_old_archive_metadata() 
         assert!(!result.status.success());
         assert!(!output);
     }
+}
+
+#[test]
+fn absent_or_foreign_immutable_program_cannot_seal_the_selected_image() {
+    let fixture = Fixture::new();
+    let missing = fixture.run_with_program(false, None);
+    assert!(!missing.status.success());
+    assert!(String::from_utf8_lossy(&missing.stderr).contains("--controller-program"));
+    assert!(!fixture.output.exists());
+    let program = fixture.program();
+    let foreign = program
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .join("foreign/bin/reverie-worker-resource-controller");
+    assert!(foreign.is_file());
+    let refused = fixture.run_with_program(false, Some(&foreign));
+    assert!(!refused.status.success());
+    assert!(String::from_utf8_lossy(&refused.stderr).contains("POOL_IMAGE_PROGRAM_ENTRY"));
+    assert!(!fixture.output.exists());
+    fixture.close();
 }
