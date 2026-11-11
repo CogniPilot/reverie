@@ -52,8 +52,8 @@ mod recovered;
 pub mod resource_actor;
 mod service;
 pub use service::{
-    BrokerService, BrokerServiceClosed, BrokerServiceError, BrokerServiceFailure,
-    BrokerServiceStartup, BrokerStartupCause, BrokerStartupFailure,
+    BrokerPoolRestoreError, BrokerService, BrokerServiceClosed, BrokerServiceError,
+    BrokerServiceFailure, BrokerServiceStartup, BrokerStartupCause, BrokerStartupFailure,
 };
 mod seat_stop;
 pub(crate) mod source;

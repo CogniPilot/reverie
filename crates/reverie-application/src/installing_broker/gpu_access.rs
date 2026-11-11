@@ -67,6 +67,12 @@ impl InstalledWorker {
     ) -> Result<LaptopLifecycle<'_>, GateError> {
         self.lifecycle_with_deadline(LifecycleDeadline::MemberPolicy(end))
     }
+    pub(super) fn recovery_lifecycle(
+        &self,
+        end: std::time::Instant,
+    ) -> Result<LaptopLifecycle<'_>, GateError> {
+        self.lifecycle_with_deadline(LifecycleDeadline::Recovery(end))
+    }
     pub(crate) fn pool_lifecycle(
         &self,
         proof: &crate::reservation_gate::PublishedPool,
@@ -215,27 +221,23 @@ enum ControllerPublication<'a> {
 enum LifecycleDeadline<'a> {
     Gpu(std::time::Instant),
     MemberPolicy(std::time::Instant),
+    Recovery(std::time::Instant),
     Pool(&'a crate::reservation_gate::PublishedPool),
 }
 impl LifecycleDeadline<'_> {
     fn current(&self) -> Result<std::time::Instant, GateError> {
-        match self {
-            Self::Gpu(end) => {
-                if std::time::Instant::now() >= *end {
-                    return Err(GateError::Refused("GPU_APPLY_DEADLINE"));
-                }
-                Ok(*end)
-            }
-            Self::MemberPolicy(end) => {
-                if std::time::Instant::now() >= *end {
-                    return Err(GateError::Refused("EMPLOYEE_RESOURCE_DEADLINE"));
-                }
-                Ok(*end)
-            }
+        let (end, code) = match self {
+            Self::Gpu(end) => (*end, "GPU_APPLY_DEADLINE"),
+            Self::MemberPolicy(end) => (*end, "EMPLOYEE_RESOURCE_DEADLINE"),
+            Self::Recovery(end) => (*end, "WORKER_RECOVERY_DEADLINE"),
             Self::Pool(proof) => {
                 proof.assert_live()?;
-                Ok(proof.deadline())
+                return Ok(proof.deadline());
             }
+        };
+        if std::time::Instant::now() >= end {
+            return Err(GateError::Refused(code));
         }
+        Ok(end)
     }
 }

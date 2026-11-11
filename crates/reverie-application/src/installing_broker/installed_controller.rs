@@ -1,6 +1,7 @@
 //! Custody transfer of the original activated Host owner. Installation here
 //! does not publish a fleet policy, clear a provider fence or admit a worker.
 use super::*;
+use reverie_contracts::worker_pool::WorkerPoolProvider;
 use reverie_host::worker_laptop::{ControllerMemberConfigured, CreatedLaptop, StartedContainer};
 use reverie_host::worker_pool::{ActivatedController, PoolError};
 use reverie_host::worker_reports::WorkerLaunchConnection;
@@ -88,12 +89,36 @@ impl InstallingBroker {
     /// whole App bootstrap (which would retain this broker through an Arc cycle).
     pub fn install_activated_controller(
         &self,
-        mut owner: ActivatedController,
+        owner: ActivatedController,
     ) -> Result<(), Box<ControllerInstallFailure>> {
-        if let Err(cause) = owner.assert_current(
-            &self.storage.runtime,
+        self.install_controller(
+            owner,
+            None,
             Instant::now() + std::time::Duration::from_secs(20),
-        ) {
+        )
+    }
+    pub(super) fn install_restored_controller(
+        &self,
+        owner: ActivatedController,
+        provider: &WorkerPoolProvider,
+        end: Instant,
+    ) -> Result<(), Box<ControllerInstallFailure>> {
+        self.install_controller(owner, Some(provider), end)
+    }
+    fn install_controller(
+        &self,
+        mut owner: ActivatedController,
+        provider: Option<&WorkerPoolProvider>,
+        end: Instant,
+    ) -> Result<(), Box<ControllerInstallFailure>> {
+        let checked = owner
+            .assert_current(&self.storage.runtime, end)
+            .and_then(|()| {
+                provider.map_or(Ok(()), |provider| {
+                    owner.assert_member_policy_provider(provider)
+                })
+            });
+        if let Err(cause) = checked {
             return Err(Box::new(ControllerInstallFailure { owner, cause }));
         }
         let mut slot = match self.controller.try_lock() {

@@ -163,24 +163,29 @@ impl InstallingBroker {
         resources: &EffectiveWorkerConfig,
         require_headroom: bool,
     ) -> Result<()> {
+        self.check_pool_until(
+            resources,
+            require_headroom,
+            Installed(&self.storage.runtime).end(),
+        )
+    }
+    pub(super) fn check_pool_until(
+        &self,
+        resources: &EffectiveWorkerConfig,
+        require_headroom: bool,
+        end: Instant,
+    ) -> Result<()> {
         let policy = checked_effective_policy(resources)?;
         let source = self.configuration()?;
         let provider =
             reverie_contracts::worker_pool::WorkerPoolProvider::from_config(source.configuration())
                 .map_err(|_| CreationBudgetError::Refused("WORKER_POOL_PROVIDER_INVALID"))?;
         if provider.is_some() {
-            self.borrow_controller_for_creation()?.check_pool(
-                &policy,
-                require_headroom,
-                Installed(&self.storage.runtime).end(),
-            )?;
+            self.borrow_controller_for_creation()?
+                .check_pool(&policy, require_headroom, end)?;
             return Ok(());
         }
-        Ok(CreationKernel::check_pool(
-            &policy,
-            require_headroom,
-            Installed(&self.storage.runtime).end(),
-        )?)
+        Ok(CreationKernel::check_pool(&policy, require_headroom, end)?)
     }
     /// Called only with the real retained admission and freshly resolved worker
     /// resources at the canonical producer's original pre/post-Nix phases.

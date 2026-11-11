@@ -73,7 +73,7 @@ impl InstallingBroker {
             if matches!(entry.owner, EntryOwner::Direct(_)) {
                 drop(entries);
                 drop(lifecycle);
-                return self.storage.claim_selected(selected);
+                return self.storage.claim_selected(selected, None);
             }
             if !entry.writer_checked
                 || entry.paths != paths

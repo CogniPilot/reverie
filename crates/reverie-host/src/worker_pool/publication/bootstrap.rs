@@ -45,6 +45,13 @@ impl RegisteredBirthSource {
         self.assert_committed(&configuration)
     }
 
+    pub(super) fn assert_expected_configuration(
+        &self,
+        expected: &WorkerConfigDigest,
+    ) -> Result<()> {
+        need(&self.digest == expected, "WORKER_POOL_BIRTH_SOURCE_CHANGED")
+    }
+
     fn assert_committed(&self, configuration: &EffectiveWorkerConfig) -> Result<()> {
         if matches!(self.kind, SourceKind::Restoration) {
             let config = ReservationConfiguration::capture(configuration.clone());
@@ -93,12 +100,14 @@ impl BrokerBootstrapBinding {
         &mut self,
         runtime: &WorkerRuntime,
         source: &Path,
+        expected: &WorkerConfigDigest,
         retained_anchor: Option<RetainedPoolAnchor>,
         end: Instant,
     ) -> Result<ControllerBirthPublication> {
         self.assert_registered_source(runtime, source, end)?;
         let (selection, configuration) =
             RegisteredBirthSource::capture(source, SourceKind::Restoration)?;
+        selection.assert_expected_configuration(expected)?;
         let provider = provider(&configuration)?.ok_or(PoolError::Refused(
             "WORKER_POOL_INSTALLED_PROVIDER_REQUIRED",
         ))?;

@@ -5,7 +5,7 @@ impl InstallingBroker {
         self: &Arc<Self>,
         offer: BrokerInstallationOffer,
     ) -> Result<BrokerServiceStartup, Box<BrokerStartupFailure>> {
-        self.prepare_owned_service(Some(offer))
+        self.prepare_owned_service(StartupMode::Offer(Box::new(offer)))
     }
 }
 impl StartupOwner {

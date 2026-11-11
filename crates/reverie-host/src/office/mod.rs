@@ -48,6 +48,7 @@ pub enum OfficeError {
     Io(io::Error),
     Refused,
     Closed,
+    Deadline,
     Unconfirmed,
     Server(Arc<Self>),
     Task(Arc<Self>),
@@ -63,6 +64,7 @@ impl fmt::Display for OfficeError {
             Self::Io(_) => "Office transport unavailable",
             Self::Refused => "Office request refused",
             Self::Closed => "Office is closing",
+            Self::Deadline => "Office bind deadline expired",
             Self::Unconfirmed => "Office close unconfirmed; retain its owner",
             Self::Server(_) => "Office server failed; retain its owner",
             Self::Task(_) => "Office native work failed",
@@ -78,7 +80,7 @@ impl std::error::Error for OfficeError {
             Self::Server(error) | Self::Task(error) => Some(error.as_ref()),
             Self::Backend(error) => Some(error.as_ref()),
             Self::Finalization { primary, .. } => Some(primary.as_ref()),
-            Self::Refused | Self::Closed | Self::Unconfirmed => None,
+            Self::Refused | Self::Closed | Self::Deadline | Self::Unconfirmed => None,
         }
     }
 }
@@ -216,12 +218,18 @@ impl OfficeService {
         &self,
         directory: PathBuf,
         session: ProfileSessionId,
+        inherited_end: Option<Instant>,
         construction: &mut Option<OfficeConstruction>,
     ) -> Result<OfficePhone> {
         self.require_running()?;
+        self.require_bind_deadline(inherited_end)?;
         let runtime = server::runtime()?;
-        let mut offices = self.offices.lock().map_err(|_| OfficeError::Unconfirmed)?;
+        let mut offices = match inherited_end {
+            Some(end) => lock_until(&self.offices, self.deadline(end))?,
+            None => self.offices.lock().map_err(|_| OfficeError::Unconfirmed)?,
+        };
         self.require_running()?;
+        self.require_bind_deadline(inherited_end)?;
         let closing = Arc::new(AtomicBool::new(false));
         let id = self.next.fetch_add(1, Ordering::Relaxed);
         let (listener, socket) = match socket::bind(&directory) {
@@ -270,7 +278,10 @@ impl OfficeService {
         // Acquire the fresh slot before starting a thread; no failed lock can
         // cause an already-created JoinHandle to be dropped and detached.
         let mut slot = owned.thread.lock().map_err(|_| OfficeError::Unconfirmed)?;
-        match server::spawn(&payload) {
+        let spawned = self
+            .require_bind_deadline(inherited_end)
+            .and_then(|()| server::spawn(&payload).map_err(OfficeError::from));
+        match spawned {
             Ok(thread) => *slot = Some(thread),
             Err(error) => {
                 let cleanup = server::cleanup_payload(&payload);
@@ -278,7 +289,7 @@ impl OfficeService {
                     offices.remove(&id);
                     *construction = None;
                 }
-                return finalized(Err(error.into()), cleanup);
+                return finalized(Err(error), cleanup);
             }
         }
         drop(slot);
@@ -293,12 +304,22 @@ impl OfficeService {
             session,
             endpoint,
         };
-        if let Err(error) = self.require_running() {
+        if let Err(error) = self
+            .require_running()
+            .and_then(|()| self.require_bind_deadline(inherited_end))
+        {
             phone.request_close();
             return Err(error);
         }
         *construction = None;
         Ok(phone)
+    }
+    fn require_bind_deadline(&self, inherited_end: Option<Instant>) -> Result<()> {
+        if inherited_end.is_some_and(|end| Instant::now() >= self.deadline(end)) {
+            Err(OfficeError::Deadline)
+        } else {
+            Ok(())
+        }
     }
     fn require_running(&self) -> Result<()> {
         if self.company.closing.load(Ordering::Acquire)

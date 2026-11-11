@@ -10,7 +10,10 @@ use reverie_host::{
 };
 use std::{fmt, sync::atomic::Ordering, time::Instant};
 mod installation_offer;
+mod retained_pool;
 mod running;
+pub use retained_pool::BrokerPoolRestoreError;
+use retained_pool::RetainedPoolStartup;
 pub(super) use running::ClosedBrokerResources;
 #[cfg(test)]
 mod tests;
@@ -22,6 +25,11 @@ struct StartupOwner {
     bound_listener: Option<WorkerBrokerListener>,
     installation_offer: Option<super::installation_offer::SharedInstallationOffer>,
 }
+enum StartupMode {
+    Ordinary,
+    Offer(Box<BrokerInstallationOffer>),
+    RetainedPool(RetainedPoolStartup),
+}
 #[derive(Debug)]
 pub enum BrokerStartupCause {
     AlreadyAttempted,
@@ -31,6 +39,11 @@ pub enum BrokerStartupCause {
     Pool(Box<CreationBudgetError>),
     Listener(Box<BrokerListenerFailure>),
     Recovery(Box<RecoveryError>),
+    PoolRestore(Box<BrokerPoolRestoreError>),
+    RecoveryFinalization {
+        primary: Box<Self>,
+        cleanup: Box<GateError>,
+    },
 }
 impl fmt::Display for BrokerStartupCause {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -42,6 +55,13 @@ impl fmt::Display for BrokerStartupCause {
             Self::Pool(error) => error.fmt(f),
             Self::Listener(error) => error.fmt(f),
             Self::Recovery(error) => error.fmt(f),
+            Self::PoolRestore(error) => error.fmt(f),
+            Self::RecoveryFinalization { primary, cleanup } => {
+                write!(
+                    f,
+                    "{primary} (recovery admission close failed with {cleanup})"
+                )
+            }
         }
     }
 }
@@ -55,6 +75,8 @@ impl std::error::Error for BrokerStartupCause {
             Self::Pool(error) => Some(error.as_ref()),
             Self::Listener(error) => Some(error.as_ref()),
             Self::Recovery(error) => Some(error.as_ref()),
+            Self::PoolRestore(error) => Some(error.as_ref()),
+            Self::RecoveryFinalization { primary, .. } => Some(primary.as_ref()),
         }
     }
 }
@@ -99,19 +121,28 @@ impl InstallingBroker {
     pub fn prepare_shared_service(
         self: &Arc<Self>,
     ) -> Result<BrokerServiceStartup, Box<BrokerStartupFailure>> {
-        self.prepare_owned_service(None)
+        self.prepare_owned_service(StartupMode::Ordinary)
     }
     fn prepare_owned_service(
         self: &Arc<Self>,
-        installation_offer: Option<BrokerInstallationOffer>,
+        mode: StartupMode,
     ) -> Result<BrokerServiceStartup, Box<BrokerStartupFailure>> {
+        let (installation_offer, retained_pool) = match mode {
+            StartupMode::Ordinary => (None, None),
+            StartupMode::Offer(offer) => (
+                Some(super::installation_offer::SharedInstallationOffer::retain(
+                    *offer,
+                )),
+                None,
+            ),
+            StartupMode::RetainedPool(pool) => (None, Some(pool)),
+        };
         let mut owner = StartupOwner {
             broker: Arc::clone(self),
             signals: None,
             listener: None,
             bound_listener: None,
-            installation_offer: installation_offer
-                .map(super::installation_offer::SharedInstallationOffer::retain),
+            installation_offer,
         };
         if let Err(cause) = owner.assert_installation_offer_broker() {
             return Err(Box::new(BrokerStartupFailure { owner, cause }));
@@ -126,14 +157,17 @@ impl InstallingBroker {
                 cause: BrokerStartupCause::AlreadyAttempted,
             }));
         }
-        match owner.prepare() {
+        match owner.prepare(retained_pool) {
             Ok(recovered) => Ok(BrokerServiceStartup { owner, recovered }),
             Err(cause) => Err(Box::new(BrokerStartupFailure { owner, cause })),
         }
     }
 }
 impl StartupOwner {
-    fn prepare(&mut self) -> Result<RecoverySummary, BrokerStartupCause> {
+    fn prepare(
+        &mut self,
+        retained_pool: Option<RetainedPoolStartup>,
+    ) -> Result<RecoverySummary, BrokerStartupCause> {
         self.assert_installation_offer()?;
         let runtime = &self.broker.storage.runtime;
         self.signals = Some(
@@ -145,20 +179,41 @@ impl StartupOwner {
             .broker
             .configuration()
             .map_err(|error| BrokerStartupCause::Configuration(Box::new(error)))?;
-        self.broker
-            .check_pool(snapshot.configuration(), true)
-            .map_err(|error| BrokerStartupCause::Pool(Box::new(error)))?;
-        self.listener = Some(
-            runtime
-                .prepare_broker_listener(snapshot.envelope())
-                .map_err(BrokerStartupCause::Listener)?,
-        );
+        if let Some(pool) = retained_pool {
+            return self.prepare_retained_pool(&snapshot, pool);
+        }
+        self.prepare_listener_for_recovery(&snapshot, None)?;
         let recovered = self
             .broker
             .recover_laptops()
             .map_err(|error| BrokerStartupCause::Recovery(Box::new(error)))?;
         self.assert_installation_offer()?;
         Ok(recovered)
+    }
+
+    fn prepare_listener_for_recovery(
+        &mut self,
+        snapshot: &ValidatedWorkerSnapshot,
+        end: Option<Instant>,
+    ) -> Result<(), BrokerStartupCause> {
+        let configuration = snapshot.configuration();
+        // Recovering existing laptops does not create tasks in the pool.
+        // Ordinary startup and new launches retain the headroom check.
+        let checked = match end {
+            Some(end) => self.broker.check_pool_until(configuration, false, end),
+            None => self.broker.check_pool(configuration, true),
+        };
+        checked.map_err(|error| BrokerStartupCause::Pool(Box::new(error)))?;
+        super::recovered::check_deadline(end)
+            .map_err(|error| BrokerStartupCause::Recovery(Box::new(error)))?;
+        self.listener = Some(
+            self.broker
+                .storage
+                .runtime
+                .prepare_broker_listener(snapshot.envelope())
+                .map_err(BrokerStartupCause::Listener)?,
+        );
+        Ok(())
     }
     fn close_listener_component(&mut self) -> Result<(), BrokerListenerError> {
         let prepared = self
@@ -219,11 +274,18 @@ impl BrokerStartupFailure {
     /// stale-probe close. Do not seal the Runtime ahead of recovered resources.
     pub fn close_listener_component(&mut self) -> Result<(), BrokerListenerError> {
         let current = self.owner.close_listener_component();
-        let failed = match &mut self.cause {
-            BrokerStartupCause::Listener(error) => error.close(),
-            _ => Ok(()),
-        };
+        let failed = self.cause.close_failed_listener();
         combine_listener_close(current, failed)
+    }
+}
+
+impl BrokerStartupCause {
+    fn close_failed_listener(&mut self) -> Result<(), BrokerListenerError> {
+        match self {
+            Self::Listener(error) => error.close(),
+            Self::RecoveryFinalization { primary, .. } => primary.close_failed_listener(),
+            _ => Ok(()),
+        }
     }
 }
 

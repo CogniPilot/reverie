@@ -1,4 +1,5 @@
 use super::*;
+use reverie_contracts::worker_pool::WorkerPoolProvider;
 
 impl PublicationAttempt {
     pub(super) fn publish(
@@ -10,6 +11,7 @@ impl PublicationAttempt {
         self.assert_admitted(gate, migration)?;
         let checked = migration.assert_publication_controller_current(gate, controller);
         authorize(migration, checked)?;
+        self.assert_member_settings(controller.as_ref())?;
         self.publish_files(gate, migration)?;
         let proof = PublishedPool {
             _record: Arc::clone(&self.record),
@@ -35,6 +37,17 @@ impl PublicationAttempt {
             return Err(GateError::Refused("POOL_PUBLICATION_PHASE"));
         };
         Ok(pending.terminal(self.native.as_ref().expect("checked native publication"))?)
+    }
+
+    fn assert_member_settings(&self, controller: Option<&ActivatedController>) -> Result<()> {
+        let provider = WorkerPoolProvider::from_config(self.configuration.after.configuration())
+            .map_err(|_| GateError::Refused("WORKER_POOL_PROVIDER_INVALID"))?
+            .ok_or(GateError::Refused("WORKER_POOL_PROVIDER_REQUIRED"))?;
+        let controller =
+            controller.ok_or(GateError::Refused("POOL_MIGRATION_CONTROLLER_REQUIRED"))?;
+        controller
+            .assert_member_policy_provider(&provider)
+            .map_err(|cause| GateError::Refused(cause.code()))
     }
 
     fn publish_files(

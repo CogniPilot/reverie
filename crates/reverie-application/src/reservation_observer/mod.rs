@@ -41,17 +41,28 @@ pub struct NativeObserver {
 }
 impl NativeObserver {
     /// Actual worker memory reads share its existing capture, cancellation and
-    /// first-stop ceiling. No caller token/deadline selector or new runner.
+    /// first-stop ceiling and captured engine.
     pub(crate) fn capture_worker(
         runtime: &reverie_host::worker_runtime::WorkerRuntime,
         config: EffectiveWorkerConfig,
+    ) -> ObservationContext {
+        Self::capture_worker_with_deadline(runtime, config, None)
+    }
+    pub(crate) fn capture_worker_with_deadline(
+        runtime: &reverie_host::worker_runtime::WorkerRuntime,
+        config: EffectiveWorkerConfig,
+        inherited_end: Option<Instant>,
     ) -> ObservationContext {
         let observer = Self {
             source: Arc::new(Installed::new(runtime.readonly())),
             cancellation: runtime.cancellation(),
             controller: None,
         };
-        observer.capture(config, runtime.stop_deadline())
+        let end = [runtime.stop_deadline(), inherited_end]
+            .into_iter()
+            .flatten()
+            .min();
+        observer.capture(config, end)
     }
     pub fn new(engine: ReadonlyEngine) -> Self {
         Self {

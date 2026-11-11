@@ -37,9 +37,25 @@ impl OfficeService {
         &self,
         session: ProfileSessionId,
     ) -> std::result::Result<OfficePhone, OfficeBindFailure> {
+        self.bind_worker_retained_scoped(session, None)
+    }
+    /// Bound admission and construction by the original recovery deadline.
+    pub fn bind_worker_retained_until(
+        &self,
+        session: ProfileSessionId,
+        end: Instant,
+    ) -> std::result::Result<OfficePhone, OfficeBindFailure> {
+        self.bind_worker_retained_scoped(session, Some(end))
+    }
+    fn bind_worker_retained_scoped(
+        &self,
+        session: ProfileSessionId,
+        inherited_end: Option<Instant>,
+    ) -> std::result::Result<OfficePhone, OfficeBindFailure> {
         let directory = self
             .require_running()
             .and_then(|()| {
+                self.require_bind_deadline(inherited_end)?;
                 let root = self
                     .company
                     .worker_socket_root
@@ -51,7 +67,7 @@ impl OfficeService {
                 error,
                 construction: None,
             })?;
-        self.bind_retained(directory, session)
+        self.bind_retained_scoped(directory, session, inherited_end)
     }
     /// Same original constructor sequence; the private bind owner records an
     /// actual registry insertion before any thread can start or fail.
@@ -60,8 +76,16 @@ impl OfficeService {
         directory: PathBuf,
         session: ProfileSessionId,
     ) -> std::result::Result<OfficePhone, OfficeBindFailure> {
+        self.bind_retained_scoped(directory, session, None)
+    }
+    fn bind_retained_scoped(
+        &self,
+        directory: PathBuf,
+        session: ProfileSessionId,
+        inherited_end: Option<Instant>,
+    ) -> std::result::Result<OfficePhone, OfficeBindFailure> {
         let mut construction = None;
-        self.bind_attempt(directory, session, &mut construction)
+        self.bind_attempt(directory, session, inherited_end, &mut construction)
             .map_err(|error| OfficeBindFailure {
                 error,
                 construction,

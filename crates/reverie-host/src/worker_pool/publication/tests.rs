@@ -187,7 +187,10 @@ fn restored_birth_source_refuses_a_pending_control_transition() {
         legacy.err().unwrap().code(),
         "WORKER_POOL_COMMITTED_BIRTH_REQUIRED"
     );
-    let (original, _) = RegisteredBirthSource::capture(&source, SourceKind::Restoration).unwrap();
+    let (original, configuration) =
+        RegisteredBirthSource::capture(&source, SourceKind::Restoration).unwrap();
+    let expected = reverie_contracts::worker_config::config_digest(&configuration);
+    original.assert_expected_configuration(&expected).unwrap();
     let marker = state.join("resource-reservation-control.pending");
     fs::write(&marker, b"original pending record").unwrap();
     assert_eq!(
@@ -202,4 +205,19 @@ fn restored_birth_source_refuses_a_pending_control_transition() {
     assert_eq!(fs::read(&marker).unwrap(), b"original pending record");
     fs::remove_file(marker).unwrap();
     original.assert_current().unwrap();
+
+    // Keep the image and all other inputs fixed while an installed member
+    // revision changes between the App load and the Host publication prefix.
+    let mut changed: serde_json::Value =
+        serde_json::from_slice(&fs::read(&source).unwrap()).unwrap();
+    changed["workerPoolProvider"]["memberRevision"] = 8.into();
+    fs::write(&source, serde_json::to_vec(&changed).unwrap()).unwrap();
+    let (new, _) = RegisteredBirthSource::capture(&source, SourceKind::Restoration).unwrap();
+    assert_eq!(
+        new.assert_expected_configuration(&expected)
+            .unwrap_err()
+            .code(),
+        "WORKER_POOL_BIRTH_SOURCE_CHANGED"
+    );
+    assert!(!tree.root.join("worker-pool").exists());
 }

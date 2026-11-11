@@ -195,3 +195,34 @@ fn actual_current_poison_keeps_bootstrap_and_signal_owners_without_socket_or_rec
     drop(failure);
     fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn retained_pool_start_requires_installed_policy_before_listener_or_engine_calls() {
+    if isolated("retained_pool_start_requires_installed_policy_before_listener_or_engine_calls") {
+        return;
+    }
+    let (root, broker) = setup();
+    let anchor = serde_json::from_value(serde_json::json!({
+        "containerId": "a".repeat(64), "originalBirthDigest": "b".repeat(64),
+        "bootId": "11111111-1111-4111-8111-111111111111",
+        "pid": 42, "processStart": "50", "parentIdentity": [12, 22], "leafIdentity": [12, 27],
+    }))
+    .unwrap();
+    let mut failure = broker
+        .prepare_service_with_retained_pool(
+            anchor,
+            reverie_contracts::worker_service::NativeWorkerServiceRole::Broker,
+        )
+        .err()
+        .unwrap();
+    assert!(matches!(
+        failure.cause(),
+        BrokerStartupCause::PoolRestore(error) if error.code() == "WORKER_POOL_PROVIDER_REQUIRED"
+    ));
+    assert!(failure.owner.listener.is_none());
+    assert!(!root.join("control").exists());
+    assert!(!root.join("calls.txt").exists());
+    close(&mut failure.owner);
+    drop(failure);
+    fs::remove_dir_all(root).unwrap();
+}

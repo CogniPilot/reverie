@@ -83,6 +83,7 @@ impl From<RecoveryDataError> for ContainerReadFailure {
 pub struct RecoveryCensus {
     origin: Arc<InstalledWorkerEngine>,
     names: RecoveryNames,
+    inherited_end: Option<Instant>,
 }
 impl RecoveryCensus {
     pub fn names(&self) -> &RecoveryNames {
@@ -119,17 +120,34 @@ impl RecoveryContainerInspection {
 }
 impl WorkerRuntime {
     pub fn observe_recovery_names(&self, base: &WorkerBase) -> Result<RecoveryCensus> {
+        self.observe_recovery_names_scoped(base, None)
+    }
+    /// Use one caller deadline for the census and all inspections derived
+    /// from it, including any subsequent confirmation of absence.
+    pub fn observe_recovery_names_until(
+        &self,
+        base: &WorkerBase,
+        end: Instant,
+    ) -> Result<RecoveryCensus> {
+        self.observe_recovery_names_scoped(base, Some(end))
+    }
+    fn observe_recovery_names_scoped(
+        &self,
+        base: &WorkerBase,
+        inherited_end: Option<Instant>,
+    ) -> Result<RecoveryCensus> {
         if WorkerServiceIdentity::capture(base) != *self.worker_identity() {
             return Err(WorkerRecoveryError::Namespace);
         }
         // This exact running-only query is already the creation peer owner;
         // neither a second runner nor the reservation all-CID query is used.
         let raw = self
-            .creation_peer_names(query_end(self.installed_engine()))
+            .creation_peer_names(query_end(self.installed_engine(), inherited_end))
             .map_err(WorkerRecoveryError::Census)?;
         Ok(RecoveryCensus {
             origin: self.installed_engine().clone(),
             names: RecoveryNames::decode(base, &raw)?,
+            inherited_end,
         })
     }
     pub fn inspect_recovery_laptop(
@@ -148,7 +166,12 @@ impl WorkerRuntime {
             .ok_or(WorkerRecoveryError::Namespace)?
             .0
             .clone();
-        let data = inspect_fixed_container(self.installed_engine(), name.as_str())?;
+        let data = inspect_fixed_container_with_bound(
+            self.installed_engine(),
+            name.as_str(),
+            census.inherited_end,
+        )
+        .map_err(|failure| failure.error)?;
         Ok(RecoveryContainerInspection {
             origin: self.installed_engine().clone(),
             session,
@@ -156,21 +179,30 @@ impl WorkerRuntime {
         })
     }
 }
-pub(crate) fn query_end(engine: &InstalledWorkerEngine) -> Instant {
+fn query_end(engine: &InstalledWorkerEngine, inherited_end: Option<Instant>) -> Instant {
     let end = Instant::now() + Duration::from_secs(MAX_QUERY_SECONDS);
-    engine.stop_deadline().map_or(end, |stop| stop.min(end))
-}
-pub(crate) fn inspect_fixed_container(
-    engine: &Arc<InstalledWorkerEngine>,
-    name: &str,
-) -> Result<RecoveryInspection> {
-    inspect_fixed_container_scoped(engine, name).map_err(|failure| failure.error)
+    [engine.stop_deadline(), inherited_end]
+        .into_iter()
+        .flatten()
+        .fold(end, Instant::min)
 }
 pub(crate) fn inspect_fixed_container_scoped(
     engine: &Arc<InstalledWorkerEngine>,
     name: &str,
 ) -> std::result::Result<RecoveryInspection, ContainerReadFailure> {
-    let raw = query(engine, vec!["inspect".into(), name.into()], false)?;
+    inspect_fixed_container_with_bound(engine, name, None)
+}
+fn inspect_fixed_container_with_bound(
+    engine: &Arc<InstalledWorkerEngine>,
+    name: &str,
+    inherited_end: Option<Instant>,
+) -> std::result::Result<RecoveryInspection, ContainerReadFailure> {
+    let raw = query(
+        engine,
+        vec!["inspect".into(), name.into()],
+        false,
+        inherited_end,
+    )?;
     let stdout = std::str::from_utf8(&raw.stdout).map_err(|_| WorkerRecoveryError::Encoding)?;
     let stderr = std::str::from_utf8(&raw.stderr).map_err(|_| WorkerRecoveryError::Encoding)?;
     match RecoveryInspection::inspect_data(name, stdout, stderr, raw.shell_code)? {
@@ -182,6 +214,7 @@ pub(crate) fn inspect_fixed_container_scoped(
                     .map(OsString::from)
                     .to_vec(),
                 true,
+                inherited_end,
             )?;
             let names =
                 std::str::from_utf8(&names.stdout).map_err(|_| WorkerRecoveryError::Encoding)?;
@@ -193,13 +226,14 @@ fn query(
     engine: &InstalledWorkerEngine,
     args: Vec<OsString>,
     successful_exit: bool,
+    inherited_end: Option<Instant>,
 ) -> std::result::Result<crate::captured_client::CapturedOutput, ContainerReadFailure> {
     engine
         .engine
         .client
         .run_scoped_waiting(
             args,
-            query_end(engine),
+            query_end(engine, inherited_end),
             &engine.cancellation(),
             Policy {
                 maximum: Duration::from_secs(MAX_QUERY_SECONDS),
