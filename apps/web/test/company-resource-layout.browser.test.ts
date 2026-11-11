@@ -14,7 +14,7 @@ const appStub = harness.match(/window\.eval\(`([\s\S]*?)`\);/)![1];
 const employeeId = '11111111-2222-4333-8444-555555555555';
 const sessionId = '33333333-4444-4555-8666-777777777777';
 
-async function fixture(page: Page, options: { name?: string; resourceUnavailable?: boolean } = {}) {
+async function fixture(page: Page, options: { name?: string; resourceUnavailable?: boolean; retainedHiring?: boolean } = {}) {
   // Keep the shipped document structure, but bootstrap only the conversation
   // shell fixture. Every request stays inside this intercepted synthetic origin.
   const document = new JSDOM(read('index.html'));
@@ -77,7 +77,9 @@ async function fixture(page: Page, options: { name?: string; resourceUnavailable
         revision:0,choices:{known:true,devices:[{deviceUuid:'GPU-synthetic-fixture',model:'Synthetic GPU'}]},requested:null,
         applied:{known:true,enabled:false,deviceUuid:null},active:{known:false,running:true,enabled:null,deviceUuid:null},state:'unchanged'}});
       if(path==='/api/experts')return ok({settings:{maxHiresPerDay:5,maxActive:15,hireDelegates:[]},
-        limits:{hiresLast24h:0,maxHiresPerDay:5,active:1,maxActive:15},hires:[],experts:[]});
+        storageUncertain:${JSON.stringify(options.retainedHiring === true)},
+        limits:{hiresLast24h:0,maxHiresPerDay:5,active:1,maxActive:15},
+        hires:${options.retainedHiring ? `[{id:'synthetic-retained-hire',templateId:'reviewer',employeeId:employee.id,sessionId:employee.sessionId,by:'owner',reason:'Synthetic retained startup',hiredAt:Date.now(),status:'active',sessionLive:false,startup:{phase:'recovery-required',sessionGeneration:2},notice:'unconfirmed',audit:'unconfirmed'}]` : '[]'},experts:[]});
       if(path==='/api/publication/tokens')return ok({tokens:[]});
       return original(path,opts);
     };
@@ -272,3 +274,51 @@ it('shows an unavailable-resource error and long synthetic employee name without
     await browser.close();
   }
 });
+
+for (const width of [1280, 390, 320])
+  it(`keeps retained-hire diagnostics readable and prevents uncertain hiring writes at ${width}px`, async () => {
+    const browser = await chromium.launch({
+      headless: true,
+      chromiumSandbox: true,
+      ...(process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH
+        ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH }
+        : {}),
+    });
+    try {
+      const page = await browser.newPage({ viewport: { width, height: 900 } });
+      const errors: string[] = [];
+      page.on('pageerror', (error) => errors.push(error.message));
+      await fixture(page, { retainedHiring: true, name: 'Synthetic ' + 'longname'.repeat(10) });
+      await page.evaluate(() => (window as any).reverieChat.openCompanySettings());
+      const dialog = page.getByRole('dialog', { name: 'Company settings', exact: true });
+      await dialog.getByRole('tab', { name: 'Hiring', exact: true }).click();
+      const form = dialog.getByRole('form', { name: 'Hiring', exact: true });
+      const save = form.getByRole('button', { name: 'Save hiring settings', exact: true });
+      await expect.poll(() => save.isDisabled()).toBe(true);
+      await expect.poll(() => form.locator('[role="alert"]').textContent()).toContain('A hiring write was not confirmed');
+      await form.getByText('Active hires · 1', { exact: true }).click();
+      const record = form.locator('.ca-company-hire-record');
+      expect(await record.textContent()).toContain('Startup recovery-required. Identity retained.');
+      expect(await record.textContent()).toContain('The employee was retained.');
+      expect(await record.textContent()).toContain('The original hire session is not present.');
+      await record.scrollIntoViewIfNeeded();
+      const geometry = await dialog.evaluate((element) => ({
+        width: element.clientWidth,
+        scrollWidth: element.scrollWidth,
+        closeRight: element.querySelector('[aria-label="Close company settings"]')!.getBoundingClientRect().right,
+        right: element.getBoundingClientRect().right,
+      }));
+      expect(geometry.scrollWidth).toBeLessThanOrEqual(geometry.width + 1);
+      expect(geometry.closeRight).toBeLessThanOrEqual(geometry.right + 1);
+      await form.dispatchEvent('submit');
+      expect(await page.evaluate(() => (window as any).__writes)).toEqual([]);
+      expect(errors).toEqual([]);
+      const output = process.env.TEST_RESOURCE_SCREENSHOT_DIR;
+      if (output) {
+        await mkdir(output, { recursive: true });
+        await page.screenshot({ path: join(output, `retained-hiring-${width}.png`) });
+      }
+    } finally {
+      await browser.close();
+    }
+  });
