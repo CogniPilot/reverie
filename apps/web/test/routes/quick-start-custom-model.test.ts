@@ -22,8 +22,11 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
 import fastifyCookie from '@fastify/cookie';
 import { rm, readFile } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
+import { chmodSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { spawnSync } from 'node:child_process';
+import { JSDOM } from 'jsdom';
 import { createMockRouteContext, safeRmHomeTree, type MockRouteContext } from '../mocks/index.js';
 import { installRouteErrorHandler } from '../../src/web/route-error-handler.js';
 import { registerSessionRoutes } from '../../src/web/routes/session-routes.js';
@@ -33,6 +36,12 @@ import { Session } from '../../src/session.js';
 import { writeCustomModelHosts, type CustomModelHost } from '../../src/custom-model-hosts.js';
 import { customModelConfigDir } from '../../src/custom-model-injection-apply.js';
 import { webviewFetch } from '../../src/web/webview-egress.js';
+import { registerCliRegistryRoutes } from '../../src/web/routes/cli-registry-routes.js';
+import { installResponseEnvelope } from '../../src/web/response-envelope.js';
+import { getCli } from '../../src/config/cli-registry/registry.js';
+import { invalidateCliResolverCache } from '../../src/utils/cli-resolver.js';
+import { buildSpawnCommandFromRegistry } from '../../src/session-cli-registry-bridge.js';
+import { writeRemoteCases, writeRemoteHosts } from '../../src/remote-hosts.js';
 
 vi.mock('../../src/web/webview-egress.js', async () => {
   const actual = await vi.importActual<typeof import('../../src/web/webview-egress.js')>(
@@ -41,6 +50,17 @@ vi.mock('../../src/web/webview-egress.js', async () => {
   return { ...actual, webviewFetch: vi.fn() };
 });
 const fetchMock = vi.mocked(webviewFetch);
+const fixtureAvailability = vi.hoisted(() => ({ binary: '' }));
+// Keep ambient resolution inert. Only this owned executable is advertised to
+// the real catalog route; the final process proof executes that same file.
+vi.mock('../../src/utils/cli-resolver.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../src/utils/cli-resolver.js')>();
+  return {
+    ...actual,
+    isCliAvailable: (id: string) =>
+      id === 'hands' && fixtureAvailability.binary ? existsSync(fixtureAvailability.binary) : actual.isCliAvailable(id),
+  };
+});
 
 // quick-start's own local-CLI-availability gate (resolveCliLaunchError, unrelated to the
 // custom-model injection this file tests) runs BEFORE the code under test and would
@@ -70,27 +90,131 @@ describe('POST /api/quick-start: customModel (one-shot custom-model launch)', ()
   const quickStart = (payload: Record<string, unknown>) =>
     app.inject({ method: 'POST', url: '/api/quick-start', payload });
 
+  async function server(envelope = false) {
+    const instance = Fastify({ logger: false });
+    await instance.register(fastifyCookie);
+    if (envelope) installResponseEnvelope(instance, '');
+    registerSessionRoutes(instance, ctx, { verifiedOwner: trustedFixtureOwner });
+    registerCliRegistryRoutes(instance, trustedFixtureOwner);
+    installRouteErrorHandler(instance);
+    await instance.ready();
+    return instance;
+  }
+
   beforeEach(async () => {
     vi.spyOn(Session.prototype, 'startInteractive').mockResolvedValue(undefined);
     vi.spyOn(Session.prototype, 'startShell').mockResolvedValue(undefined);
     restartSpy = vi.spyOn(Session.prototype, 'restartCli').mockResolvedValue(true);
     fetchMock.mockReset();
     fetchMock.mockResolvedValue(new Response('not found', { status: 404 })); // default: not llama-swap
-    app = Fastify({ logger: false });
-    await app.register(fastifyCookie);
     ctx = createMockRouteContext();
-    registerSessionRoutes(app, ctx, { ...({}), verifiedOwner: trustedFixtureOwner });
-    installRouteErrorHandler(app);
-    await app.ready();
+    app = await server();
     await writeCustomModelHosts(getDataDir(), [ENDPOINT]);
   });
 
   afterEach(async () => {
     await app.close();
     vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+    invalidateCliResolverCache();
+    fixtureAvailability.binary = '';
     await rm(join(getDataDir(), 'custom-model-hosts.json'), { force: true });
+    await rm(join(getDataDir(), 'remote-hosts.json'), { force: true });
+    await rm(join(getDataDir(), 'remote-cases.json'), { force: true });
     await rm(join(getDataDir(), 'custom-model-configs'), { recursive: true, force: true });
     safeRmHomeTree(CASES_DIR);
+  });
+
+  it('carries a catalog-only CLI endpoint selection through browser, real API and launched provider environment', async () => {
+    let launchedEnv: Record<string, string> | undefined;
+    // Observe the existing launch boundary, not a disk/public serializer: those
+    // deliberately remove provider credentials and must continue doing so.
+    vi.mocked(Session.prototype.startInteractive).mockImplementation(async function (this: Session) {
+      launchedEnv = { ...(this as unknown as { _envOverrides?: Record<string, string> })._envOverrides };
+    });
+    const root = mkdtempSync(join(tmpdir(), 'catalog-endpoint-'));
+    const binary = join(root, 'reverie-hands');
+    const log = join(root, 'argv.json');
+    writeFileSync(
+      binary,
+      `#!${process.execPath}\nrequire('node:fs').writeFileSync(process.env.FIXTURE_CALLS,JSON.stringify({args:process.argv.slice(2),base:process.env.REVERIE_HANDS_BASE_URL,model:process.env.REVERIE_HANDS_MODEL,key:process.env.REVERIE_HANDS_API_KEY}));`
+    );
+    chmodSync(binary, 0o700);
+    fixtureAvailability.binary = binary;
+    invalidateCliResolverCache();
+    await app.close();
+    app = await server(true);
+    const catalog = (await app.inject('/api/clis')).json().data;
+    expect(catalog.find((entry: { id: string }) => entry.id === 'hands')).toMatchObject({
+      enabled: true,
+      installed: true,
+      supportsCustomModel: true,
+    });
+    expect(JSON.stringify(catalog)).not.toMatch(/apiKey|envOverrides|customModelInjection/);
+    const dom = new JSDOM(
+      `<!doctype html><select id="quickStartCase"><option selected>cm-catalog</option></select>
+      <input id="tabCount" value="1"><button id="runBtn"></button><div id="runModeMenu"></div>`,
+      { url: 'http://localhost/', runScripts: 'dangerously' }
+    );
+    try {
+      const win = dom.window as any;
+      win.eval('window.ReverieApp = function() {};');
+      win.__reverieCliCatalog = catalog;
+      for (const name of ['constants', 'session-ui']) {
+        win.eval(readFileSync(new URL(`../../src/web/public/${name}.js`, import.meta.url), 'utf8'));
+      }
+      const browser = new win.ReverieApp();
+      Object.assign(browser, {
+        cases: [{ name: 'cm-catalog' }],
+        terminal: { focus() {} },
+        _runMinLockMs: 0,
+        loadAppSettingsFromStorage: () => ({}),
+        getCaseSettings: () => ({}),
+        buildEnvOverrides: () => ({}),
+        isCliAvailable: (id: string) =>
+          catalog.some((entry: any) => entry.id === id && entry.enabled && entry.installed),
+        _beginSessionLaunchStatus: () => 'synthetic-status',
+        _reportSessionLaunchError: (_token: unknown, message: string) => {
+          throw Error(message);
+        },
+        _ensureCreatedSessionVisible: async () => {},
+        selectSession: async () => {},
+        _nextCaseSessionStartNumber: () => 1,
+      });
+      const requests: any[] = [];
+      win.fetch = async (url: string, options: { body: string }) => {
+        expect(url).toBe('/api/quick-start');
+        const payload = JSON.parse(options.body);
+        requests.push(payload);
+        const response = await app.inject({ method: 'POST', url, payload });
+        expect(response.statusCode, response.body).toBe(200);
+        return { json: () => response.json() };
+      };
+      await browser.runCustomModelEntry('hands', ENDPOINT.id, 'synthetic-model');
+      expect(requests).toHaveLength(1);
+      expect(requests[0].customModel).toEqual({ endpointId: ENDPOINT.id, modelId: 'synthetic-model' });
+      expect(Session.prototype.startInteractive).toHaveBeenCalledTimes(1);
+      const session = [...ctx.sessions.values()].find((current) => current.mode === 'hands') as unknown as Session;
+      expect(session.customModel?.modelId).toBe('synthetic-model');
+      const command = buildSpawnCommandFromRegistry(getCli('hands')!, { mode: 'hands', sessionId: session.id });
+      expect(command).toBeTruthy();
+      const result = spawnSync('/bin/sh', ['-c', command!], {
+        encoding: 'utf8',
+        timeout: 5000,
+        env: { PATH: root, FIXTURE_CALLS: log, ...launchedEnv },
+      });
+      expect(result.status, result.stderr).toBe(0);
+      expect(JSON.parse(readFileSync(log, 'utf8'))).toEqual({
+        args: [],
+        base: ENDPOINT.baseUrl + '/v1',
+        model: 'synthetic-model',
+        key: ENDPOINT.apiKey,
+      });
+      expect(restartSpy).not.toHaveBeenCalled();
+    } finally {
+      dom.window.close();
+      await rm(root, { recursive: true, force: true });
+    }
   });
 
   it('uses the explicitly selected Claude hire model ahead of the app-wide launch default', async () => {
@@ -192,13 +316,31 @@ describe('POST /api/quick-start: customModel (one-shot custom-model launch)', ()
   });
 
   it('refuses a mode with no known custom-model mechanism (antigravity)', async () => {
+    const before = [...ctx.sessions.keys()];
     const res = await quickStart({
       caseName: 'cm-agy',
       mode: 'antigravity',
+      supportsCustomModel: true, // A forged browser capability cannot authorize the server's recipe.
       customModel: { endpointId: 'ep1', modelId: 'qwen3' },
     });
     expect(res.json().success).toBe(false);
     expect(res.json().errorCode).toBe('OPERATION_FAILED');
+    expect([...ctx.sessions.keys()]).toEqual(before);
+    expect(Session.prototype.startInteractive).not.toHaveBeenCalled();
+    expect(restartSpy).not.toHaveBeenCalled();
+  });
+
+  it('refuses a missing CLI descriptor before creating or starting a provider', async () => {
+    const before = [...ctx.sessions.keys()];
+    const response = await quickStart({
+      caseName: 'cm-unknown-cli',
+      mode: 'missing-cli',
+      customModel: { endpointId: ENDPOINT.id, modelId: 'synthetic-model' },
+    });
+    expect(response.json().success).toBe(false);
+    expect([...ctx.sessions.keys()]).toEqual(before);
+    expect(Session.prototype.startInteractive).not.toHaveBeenCalled();
+    expect(restartSpy).not.toHaveBeenCalled();
   });
 
   it('refuses a model id the CLI cannot carry on its command line, cleaning up any written config dir', async () => {
@@ -212,19 +354,23 @@ describe('POST /api/quick-start: customModel (one-shot custom-model launch)', ()
   });
 
   it('refuses customModel for a remote case', async () => {
-    // Fixture mirrors session-routes' own remote-case shape minimally: an unresolvable
-    // remote host is fine here, since the customModel check fires before the host lookup.
+    await writeRemoteHosts(getDataDir(), [{
+      id: 'synthetic-remote', label: 'Synthetic remote', host: '192.0.2.1', username: 'synthetic',
+    }]);
+    await writeRemoteCases(getDataDir(), [{
+      name: 'cm-remote', type: 'remote', hostId: 'synthetic-remote', remotePath: '/synthetic/case',
+    }]);
+    const before = [...ctx.sessions.keys()];
     const res = await quickStart({
-      caseName: 'nonexistent-remote-case',
+      caseName: 'cm-remote',
       mode: 'claude',
       customModel: { endpointId: 'ep1', modelId: 'qwen3' },
     });
-    // No matching remote/docker case fixture exists, so this actually falls through to the
-    // local branch and succeeds — this test only documents that remote/docker have their
-    // own explicit customModel rejection (see the local-fixture tests in
-    // session-routes-workspace-hooks.test.ts for the fixture-loading pattern that would be
-    // needed to exercise the remote/docker branch itself).
-    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({success: false, errorCode: 'INVALID_INPUT'});
+    expect(res.json().error).toContain('not supported for remote cases');
+    expect([...ctx.sessions.keys()]).toEqual(before);
+    expect(Session.prototype.startInteractive).not.toHaveBeenCalled();
+    expect(restartSpy).not.toHaveBeenCalled();
   });
 
   describe('llama-swap conflict check', () => {

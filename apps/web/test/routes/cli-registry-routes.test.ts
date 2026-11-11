@@ -131,6 +131,8 @@ describe('GET /api/clis', () => {
       expect(typeof cli.enabled).toBe('boolean');
       expect(typeof cli.stock).toBe('boolean');
       expect(typeof cli.installed).toBe('boolean');
+      expect(typeof cli.external).toBe('boolean');
+      expect(typeof cli.supportsCustomModel).toBe('boolean');
       expect(cli).not.toHaveProperty('launch');
       expect(cli).not.toHaveProperty('env');
       expect(cli).not.toHaveProperty('capabilities');

@@ -1,4 +1,5 @@
 import {WorkerProviderHealth,viewerHealth} from '../worker-provider-health.js';
+import { cliPublicDescriptor } from '../config/cli-registry/public-descriptor.js';
 import { displayTimeZone } from '../display-time.js';
 import { registerBrowserJobEvidence } from '../browser-job-evidence.js';
 import { restSessionMetadataFromRegistry } from '../rest-canonical-metadata.js';
@@ -3080,13 +3081,7 @@ export class WebServer extends EventEmitter {
         const enabled = entry.enabled;
         available[id] = enabled && installed;
         return {
-          id,
-          label: entry.label,
-          shortBadge: entry.shortBadge,
-          order: entry.order,
-          kind: entry.kind,
-          external: entry.capabilities.external,
-          enabled,
+          ...cliPublicDescriptor(entry),
           available: enabled && installed,
         };
       });
@@ -3105,8 +3100,8 @@ export class WebServer extends EventEmitter {
       // (never an id list here) so a CLI whose customModelInjection lands later shows
       // up in the picker with no frontend change, and one that ships `unsupported`
       // (antigravity, and `shell`'s `kind !== 'agent'`) never does.
-      const customModelClis = enabledClis()
-        .filter((entry) => entry.kind === 'agent' && entry.capabilities.customModelInjection.kind !== 'unsupported')
+      const customModelClis = cliCatalog
+        .filter((entry) => entry.enabled && entry.supportsCustomModel)
         .map((entry) => ({ id: entry.id, label: entry.label }));
       // Unlike the boolean-only __reverieCliAvailable above, this payload carries
       // `label`, a string a user's own clis.json can set (CliEntry.label, up to 60

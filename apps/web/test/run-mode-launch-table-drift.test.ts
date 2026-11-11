@@ -1,24 +1,12 @@
 /**
- * @fileoverview `RUN_MODE_LAUNCH` (session-ui.js, PR B2) restates four things
- * `stock.ts` already owns: label, an install command, whether the CLI
- * supports a custom-model launch, and the external-mode key set itself.
- * They agree today, but nothing enforced it — the dangerous drift is
- * `supportsCustomModel`: the Run menu's "CLI (endpoint)" rows come from the
- * server-injected `window.__reverieCustomModelClis` (built from
- * `capabilities.customModelInjection.kind !== 'unsupported'`), so a CLI that
- * gains a real injection recipe later would be OFFERED in that menu while
- * `_runCliMode` still drops the `customModel` field for it — the session
- * launches on the vendor's cloud while the UI claims the local endpoint.
+ * @fileoverview Every external registry CLI must have an effective browser launch
+ * descriptor, including CLIs with no legacy per-mode configuration table entry.
+ * The selected endpoint must reach the request whenever the canonical catalog
+ * advertises a custom-model recipe; a missing table entry must never drop it.
  *
- * Drives the REAL session-ui.js via JSDOM (`runScripts: 'dangerously'`, same
- * approach as test/custom-model-one-shot-launch.test.ts), extracting the
- * module-level `RUN_MODE_LAUNCH` const by appending one assignment line to
- * the SAME source string before the one `eval()` call — it is not attached
- * to `window` on its own (top-level `const` lives in the script's own
- * lexical scope, not the global object), and a SEPARATE later `eval()` call
- * cannot see an earlier call's top-level bindings either (measured: each
- * `window.eval()` invocation gets its own top-level lexical environment in
- * jsdom), so the assignment has to ride in the same evaluated string.
+ * Drives the real session-ui.js with the safe server projection of the stock
+ * registry. Legacy install hints/configuration remain checked where present,
+ * while labels and capability decisions come from that canonical catalog.
  *
  * Port: none.
  */
@@ -26,6 +14,7 @@ import { readFileSync } from 'node:fs';
 import { JSDOM } from 'jsdom';
 import { describe, expect, it } from 'vitest';
 import { STOCK_CLIS } from '../src/config/cli-registry/stock.js';
+import { cliPublicDescriptor } from '../src/config/cli-registry/public-descriptor.js';
 
 const SESSION_UI_JS = readFileSync(new URL('../src/web/public/session-ui.js', import.meta.url), 'utf-8');
 
@@ -39,23 +28,24 @@ interface RunModeLaunchEntry {
 function loadRunModeLaunch(): Record<string, RunModeLaunchEntry> {
   const dom = new JSDOM('<!doctype html><body></body>', { url: 'http://localhost/', runScripts: 'dangerously' });
   const win = dom.window as unknown as Window & typeof globalThis & { ReverieApp: new () => unknown };
+  (win as any).__reverieCliCatalog = STOCK_CLIS.map(cliPublicDescriptor);
   (win as unknown as { eval: (s: string) => void }).eval('window.ReverieApp = function ReverieApp() {};');
   // The assignment MUST be part of the same evaluated string as
   // SESSION_UI_JS — RUN_MODE_LAUNCH is a bare top-level `const`, so it only
   // exists in the lexical scope of THIS eval call.
   (win as unknown as { eval: (s: string) => void }).eval(
-    `${SESSION_UI_JS}\nwindow.__TEST_RUN_MODE_LAUNCH = RUN_MODE_LAUNCH;`
+    `${SESSION_UI_JS}\nwindow.__TEST_RUN_MODE_LAUNCH = Object.fromEntries(window.__reverieCliCatalog.filter(entry => entry.kind === 'agent' && entry.external).map(entry => [entry.id, cliRunModeLaunch(entry.id)]));`
   );
   return (win as unknown as { __TEST_RUN_MODE_LAUNCH: Record<string, RunModeLaunchEntry> }).__TEST_RUN_MODE_LAUNCH;
 }
 
-describe('RUN_MODE_LAUNCH (session-ui.js) stays in step with stock.ts', () => {
+describe('effective CLI launch settings stay in step with the public registry catalog', () => {
   const runModeLaunch = loadRunModeLaunch();
   const byId = new Map(STOCK_CLIS.map((e) => [e.id as string, e]));
 
-  it('covers exactly the non-claude, non-shell stock CLIs — no more, no fewer', () => {
-    const expectedIds = STOCK_CLIS.map((e) => e.id as string)
-      .filter((id) => id !== 'claude' && id !== 'shell')
+  it('covers exactly the external agent CLIs from the stock registry', () => {
+    const expectedIds = STOCK_CLIS.filter((entry) => entry.kind === 'agent' && entry.capabilities.external)
+      .map((entry) => entry.id as string)
       .sort();
     expect(Object.keys(runModeLaunch).sort()).toEqual(expectedIds);
   });

@@ -147,6 +147,22 @@ function registryCliById(id) {
   return registryCliCatalog().find((entry) => entry.id === id);
 }
 
+function cliRunModeLaunch(mode) {
+  const catalogEntry = registryCliById(mode);
+  const legacyEntry = RUN_MODE_LAUNCH[mode];
+  const entry = legacyEntry || (catalogEntry && {
+    label: catalogEntry.label,
+    installHint: `${catalogEntry.label} is not available on this host.`,
+    buildConfig: () => null,
+  });
+  if (!entry) return undefined;
+  return {
+    ...entry,
+    ...(catalogEntry ? { label: catalogEntry.label } : {}),
+    supportsCustomModel: catalogEntry ? catalogEntry.supportsCustomModel === true : entry.supportsCustomModel,
+  };
+}
+
 function isExternalCliRunMode(mode) {
   return EXTERNAL_CLI_MODES.has(mode) || registryCliById(mode)?.kind === 'agent';
 }
@@ -669,8 +685,13 @@ Object.assign(ReverieApp.prototype, {
       if (mode === 'shell') {
         return await this.runShell(options);
       }
-      if (mode === 'claude' || !isExternalCliRunMode(mode)) {
+      if (mode === 'claude') {
         return await this.runClaude(options);
+      }
+      if (!isExternalCliRunMode(mode)) {
+        const status = this._beginSessionLaunchStatus('Checking selected CLI...');
+        this._reportSessionLaunchError(status, `The selected CLI is no longer registered. Refresh the CLI list before trying again.`);
+        return;
       }
       return await this._runCliMode(mode, options);
     } finally {
@@ -2332,14 +2353,7 @@ Object.assign(ReverieApp.prototype, {
    * tests assert on that name directly too.
    */
   async _runCliMode(mode, options = {}) {
-    const catalogEntry = registryCliById(mode);
-    const entry = RUN_MODE_LAUNCH[mode] ||
-      (catalogEntry && {
-        label: catalogEntry.label,
-        installHint: `${catalogEntry.label} is not available on this host.`,
-        supportsCustomModel: false,
-        buildConfig: () => null,
-      });
+    const entry = cliRunModeLaunch(mode);
     if (!entry) throw new Error(`Unknown run mode: ${mode}`);
     const caseName = document.getElementById('quickStartCase').value || 'testcase';
     // Remote/docker cases run the CLI on the OTHER side — the local status
@@ -2356,6 +2370,13 @@ Object.assign(ReverieApp.prototype, {
     this.terminal.focus();
 
     try {
+      const supportsCustomModel = entry.supportsCustomModel;
+      if (this._pendingCustomModelForLaunch && (!supportsCustomModel || isRemote)) {
+        this._reportSessionLaunchError(ownsLaunchTerminal,
+          isRemote ? 'Custom model endpoints require a local case.'
+            : `${entry.label} has no verified custom-model launch capability. Refresh the CLI list before trying again.`);
+        return;
+      }
       if (!isRemote && RUN_MODE_LAUNCH[mode]) {
         const statusRes = await fetch(`/api/${mode}/status`);
         const status = (await statusRes.json()).data;
@@ -2390,7 +2411,7 @@ Object.assign(ReverieApp.prototype, {
           ...(isRemote ? {} : {
             ...(entry.buildConfig(globalSettings) || {}),
             ...(Object.keys(envOverrides).length > 0 ? { envOverrides } : {}),
-            ...(entry.supportsCustomModel && this._pendingCustomModelForLaunch
+            ...(supportsCustomModel && this._pendingCustomModelForLaunch
               ? { customModel: this._pendingCustomModelForLaunch }
               : {}),
           }),
