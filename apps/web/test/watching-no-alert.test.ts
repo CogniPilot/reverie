@@ -43,6 +43,7 @@ function itemFor(watching: string | null): ApprovalItem {
   const inbox = new ApprovalInbox();
   const item = inbox.notePrompt({ sessionId: SESSION, sessionName: 'watch-probe', kind: 'idle', watching });
   inbox.stop();
+  if (!item) throw new Error('The owned alert fixture did not create its prompt');
   return item;
 }
 
@@ -91,6 +92,9 @@ function loadFrontend(seed: ApprovalItem[] = []): FrontendApp {
   const context = vm.createContext({
     ReverieApp,
     console,
+    AbortController,
+    setTimeout,
+    clearTimeout,
     window: {},
     CSS: { escape: (s: string) => s },
     document: {
