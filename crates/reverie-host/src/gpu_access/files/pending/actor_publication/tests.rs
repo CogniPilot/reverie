@@ -1,8 +1,10 @@
 //! Actual private files and admission. Fixture actor facts are metadata only.
 use super::*;
 use crate::{
-    engine_metadata::EngineBootstrap, installed_worker_engine::InstalledWorkerEngine,
-    reservation_control::tests::Tree, resource_facts::InstalledFactsObserver,
+    engine_metadata::EngineBootstrap,
+    installed_worker_engine::InstalledWorkerEngine,
+    reservation_control::{AdmissionLockAttempt, tests::Tree},
+    resource_facts::InstalledFactsObserver,
     worker_runtime::WorkerRuntime,
 };
 use reverie_contracts::{
@@ -300,7 +302,18 @@ fn replaced_queue_and_reacquired_admission_never_enter_protected_cas() {
         .unwrap();
     assert_eq!(error.code(), "GPU_REQUEST_CHANGED");
     original.close().unwrap();
-    let mut later = AdmissionLock::acquire(&fixture.tree.config).unwrap();
+    // Another test's concurrent fork can briefly inherit the close-on-exec
+    // descriptor. Wait only for a clean contention result on this fixture.
+    let mut later = loop {
+        assert!(
+            Instant::now() < fixture.end,
+            "fresh fixture admission timed out"
+        );
+        match AdmissionLock::try_acquire(&fixture.tree.config).unwrap() {
+            AdmissionLockAttempt::Acquired(lock) => break lock,
+            AdmissionLockAttempt::Contended => std::thread::sleep(Duration::from_millis(1)),
+        }
+    };
     let input = GpuActorPublicationInput {
         configuration: configuration.stamp(),
         binding: binding.stamp(),
