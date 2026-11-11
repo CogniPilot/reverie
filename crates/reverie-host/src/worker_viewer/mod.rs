@@ -14,7 +14,7 @@ use std::{
     path::{Path, PathBuf},
     sync::{
         Arc,
-        atomic::{AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
     },
     time::{Duration, Instant},
 };
@@ -71,6 +71,7 @@ pub struct WorkerViewerService {
     source: PathBuf,
     engine: Arc<InstalledWorkerEngine>,
     active: AtomicUsize,
+    closing: AtomicBool,
     retained: std::sync::Mutex<Vec<attach::Attach>>,
 }
 struct Slot(Arc<WorkerViewerService>);
@@ -87,6 +88,7 @@ impl WorkerViewerService {
             source,
             engine: Arc::new(InstalledWorkerEngine::new(bootstrap)),
             active: AtomicUsize::new(0),
+            closing: AtomicBool::new(false),
             retained: std::sync::Mutex::new(Vec::new()),
         }))
     }
@@ -187,6 +189,7 @@ impl WorkerViewerService {
     }
 
     fn finish_connections(&self) -> Result<()> {
+        self.closing.store(true, Ordering::Release);
         let end = Instant::now() + Duration::from_secs(15);
         while self.active.load(Ordering::Acquire) != 0 {
             if Instant::now() >= end {
