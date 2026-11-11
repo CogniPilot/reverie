@@ -327,10 +327,12 @@ jobs:
           PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH="$REVERIE_BROWSER_EXECUTABLE" \
             TEST_RESOURCE_SCREENSHOT_DIR="$REVERIE_BROWSER_ARTIFACTS/resources" \
             TEST_OFFICE_SCREENSHOT_DIR="$REVERIE_BROWSER_ARTIFACTS/office" \
+            TEST_OWNER_CONTROLS_SCREENSHOT_DIR="$REVERIE_BROWSER_ARTIFACTS/owner-controls" \
             nix develop --command node apps/web/node_modules/vitest/vitest.mjs run \
               --config apps/web/config/vitest.browser.config.ts \
               apps/web/test/company-resource-layout.browser.test.ts \
               apps/web/test/office-server.browser.test.ts \
+              apps/web/test/office-owner-controls.browser.test.ts \
             2>&1 | tee acceptance/resource-layout.log
           printf 'Worker and browser acceptance completed for %s\n' "$(cat "$RUNNER_TEMP/tested-image-id")" > acceptance/PASS.txt
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
