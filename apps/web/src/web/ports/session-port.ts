@@ -1,3 +1,4 @@
+import type {TerminalInputService} from '../terminal-input-service.js';
 /**
  * @fileoverview Session port — capabilities for session lifecycle management.
  * Route modules that manage sessions depend on this port.
@@ -9,6 +10,7 @@ import type { TabLayout } from '../../tab-layout.js';
 import type { SessionPlacementHint } from '../../tab-layout-service.js';
 
 export interface SessionPort {
+  readonly terminalInput: TerminalInputService;
   readonly sessions: ReadonlyMap<string, Session>;
   /**
    * Register a created session with the owner's tab layout. `placement.tabGroupId`

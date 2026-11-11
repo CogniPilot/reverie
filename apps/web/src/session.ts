@@ -5393,9 +5393,9 @@ export class Session extends EventEmitter {
       options.onMoveHeld?.();
       return false;
     }
+    if (!this.ptyProcess) return false;
     const submittedPrompt = this._trackSubmit(data, options);
     this._recheckPaneDialogSoon();
-    if (!this.ptyProcess) return false;
     try {this.ptyProcess.write(data);} catch (cause) {throw this.holdUnconfirmedInput(cause);}
     if (!admitted()) throw this.holdUnconfirmedInput();
     this._emitSubmittedPrompt(submittedPrompt);
@@ -5494,9 +5494,15 @@ export class Session extends EventEmitter {
     return this._appliedInputSeq.get(clientId) ?? 0;
   }
 
+  /** Negative-only watermark observation; unlike lastInputSeq, unseen and spent zero differ. */
+  inputSeqSpent(clientId: string, seq: number): boolean {
+    const last = this._appliedInputSeq.get(clientId);
+    return last !== undefined && seq <= last;
+  }
+
   shouldApplyInput(clientId: string, seq: number): boolean {
     const last = this._appliedInputSeq.get(clientId);
-    if (last !== undefined && seq <= last) return false;
+    if (this.inputSeqSpent(clientId, seq)) return false;
     // Re-insert to move this client to the MRU end for fair eviction.
     if (last !== undefined) this._appliedInputSeq.delete(clientId);
     this._appliedInputSeq.set(clientId, seq);

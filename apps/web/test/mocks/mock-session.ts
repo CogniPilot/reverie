@@ -1,4 +1,4 @@
-import {issueInputAdmission} from '../../src/terminal-input-outcome.js';
+import {issueInputAdmission, TerminalInputUnconfirmedError} from '../../src/terminal-input-outcome.js';
 import {issueSessionProviderLease, type SessionProviderLease} from '../../src/session-provider-lease.js';
 /**
  * Shared MockSession for tests that need terminal simulation.
@@ -130,10 +130,12 @@ export class MockSession extends EventEmitter {
   /** Exactly-once input dedup — mirrors Session.shouldApplyInput so route tests
    *  exercising the reliable-delivery path behave like production. */
   private _appliedInputSeq = new Map<string, number>();
+  lastInputSeq(clientId: string): number {return this._appliedInputSeq.get(clientId) ?? 0;}
   forgetInputSeq(clientId: string, seq: number): void {
     if (this._appliedInputSeq.get(clientId) === seq) this._appliedInputSeq.set(clientId, seq - 1);
   }
 
+  inputSeqSpent(clientId: string, seq: number): boolean {const last = this._appliedInputSeq.get(clientId); return last !== undefined && seq <= last;}
   shouldApplyInput(clientId: string, seq: number): boolean {
     const last = this._appliedInputSeq.get(clientId);
     if (last !== undefined && seq <= last) return false;
@@ -295,12 +297,17 @@ export class MockSession extends EventEmitter {
     return capability === 'supervised' ? 'supervised' : capability === 'always' ? 'legacy-attachment' : 'refused';
   }
 
+  private terminalInputError?: TerminalInputUnconfirmedError;
+  get terminalInputHeld(): boolean {return this.terminalInputError !== undefined;}
+  holdUnconfirmedInput(cause?: unknown): TerminalInputUnconfirmedError {
+    return this.terminalInputError ??= cause instanceof TerminalInputUnconfirmedError ? cause : new TerminalInputUnconfirmedError(cause);
+  }
   private inputSubject?: {identity: () => boolean; token: object};
   captureInputAdmission(caller?: () => boolean): () => boolean {
     const epoch = this.providerEpoch, mode = this.mode, owner = this.owner;
     const identity = () => this.providerEpoch === epoch && this.mode === mode && this.owner === owner;
     if (!this.inputSubject?.identity()) this.inputSubject = {identity, token: Object.freeze({})};
-    return issueInputAdmission(this.inputSubject.token, () => (!caller || caller()) && identity());
+    return issueInputAdmission(this.inputSubject.token, () => !this.terminalInputHeld && (!caller || caller()) && identity());
   }
   private providerEpoch = 0;
   captureApprovalProviderLease(currentOwner: () => boolean = () => true): SessionProviderLease {

@@ -1,4 +1,4 @@
-import {inputAdmissionSubject, TerminalInputReceipts, TerminalInputUnconfirmedError} from '../../terminal-input-outcome.js';
+import {TerminalInputUnconfirmedError} from '../../terminal-input-outcome.js';
 import { NO_OWNER, type OwnerVerifier } from '../../owner-auth/marks.js';
 import { delegatedSessionStartAdmission } from '../../owner-auth/delegated-session-create.js';
 import { sessionCreateAdmission } from '../../owner-auth/session-create-admission.js';
@@ -971,10 +971,6 @@ export function registerSessionRoutes(
     onReplacementFailed?: (info: { employeeId?: string; replacedSessionIds: string[]; error: string }) => void;
   } = {}
 ): RemoteWakeRegistry {
-  // Positive delivery proof stays with the original opaque provider subject. Unknown
-  // effects retain a bounded deny-only SID barrier; capacity refuses new writes.
-  // This process-local owner is not a durable idempotency/reconciliation journal.
-  const terminalInputReceipts = new TerminalInputReceipts();
   /** Bug 11: an explicit restart by the VERIFIED OWNER records running intent through the same guarded transaction as the
    * runtime route (CompanyService.prepareRuntimeRestart): intent is claimed BEFORE the launch, an owner Stop or vacation
    * that lands mid-start cancels it and wins, a failed start rolls it back. Non-owner callers and every automatic path
@@ -2244,21 +2240,10 @@ export function registerSessionRoutes(
     const { id } = req.params as { id: string };
     const { input, useMux, seq, clientId, wait, waitTimeout, ifIdle } = parseBody(SessionInputWithLimitSchema, req.body);
     const session = findSessionOrFail(ctx, id, req);
-    const inputAdmission = session.captureInputAdmission(() => ctx.sessions.get(id) === session);
-    if (session.providerDispatchHeld) return createErrorResponse(ApiErrorCode.CONFLICT, new ProviderDispatchUnconfirmedError().message);
-    if (session.terminalInputHeld) return createErrorResponse(ApiErrorCode.CONFLICT, new TerminalInputUnconfirmedError().message);
-    // A cheap early refusal, before the dedup seq is spent. It is NOT the idle decision: a turn can start during any await
-    // below (the wake-target probe among them), so the session decides again at the write itself (writeViaMux requireIdle).
-    if (ifIdle && session.isWorking) {
-      return createErrorResponse(ApiErrorCode.SESSION_BUSY, 'Session is working; nothing was typed');
-    }
-    // An agent's input (send, wake: the request names its calling session) never types into a composer a plan move owns: the
-    // move's handoff goes into that composer and would be appended to it. A person's own typing stays allowed.
+    if (session.providerDispatchHeld) return {...createErrorResponse(ApiErrorCode.CONFLICT, new ProviderDispatchUnconfirmedError().message), recoveryRequired: true};
+    if (session.terminalInputHeld) return {...createErrorResponse(ApiErrorCode.CONFLICT, new TerminalInputUnconfirmedError().message), recoveryRequired: true};
     const agentCaller =
       typeof req.headers['x-reverie-parent-session'] === 'string' && req.headers['x-reverie-parent-session'] !== '';
-    if (agentCaller && session.composerHeldByMove) {
-      return createErrorResponse(ApiErrorCode.SESSION_BUSY, 'A plan move owns this session\'s composer; nothing was typed');
-    }
 
     const inputStr = String(input);
     if (inputStr.length > MAX_INPUT_LENGTH) {
@@ -2289,11 +2274,7 @@ export function registerSessionRoutes(
     // client's ACK, so a proven tagged duplicate returns 200 without a write.
     // An uncertain terminal attempt cannot be ACKed as applied or replayed.
     // Untagged requests (curl/legacy) always apply.
-    const tagged = typeof clientId === 'string' && typeof seq === 'number';
     const terminalScope = session.runtimeHealthScope === 'terminal';
-    const receiptKey = tagged ? JSON.stringify([clientId, seq]) : randomUUID();
-    const subject = inputAdmissionSubject(inputAdmission);
-    const existingReceipt = terminalInputReceipts.lookup(session.owner, id, receiptKey, subject);
     let inputPersistenceUnconfirmed = false;
     const unconfirmedInput = () => ({...createErrorResponse(
       ApiErrorCode.OPERATION_FAILED,
@@ -2306,15 +2287,26 @@ export function registerSessionRoutes(
     });
     const idleRefusal = () => createErrorResponse(ApiErrorCode.SESSION_BUSY,
       'Session is busy or has a draft in its composer; nothing was typed.');
-    if (existingReceipt === 'held' || existingReceipt === 'pending' || existingReceipt === 'unconfirmed') return unconfirmedInput();
-    if (existingReceipt === 'typed-unsent') return typedUnsentInput();
-    const receipt = existingReceipt === 'confirmed' ? undefined : terminalInputReceipts.reserve(session.owner, id, receiptKey, subject);
-    if (!existingReceipt && !receipt) return createErrorResponse(ApiErrorCode.CONFLICT,
+    const rawInput = agentCaller && session.mode === 'opencode' ? guardShellKey(inputStr) : inputStr;
+    const admission = ctx.terminalInput.begin(session, {input: inputStr, rawInput, clientId, seq, useMux, ifIdle: ifIdle ?? undefined, agentInput: agentCaller},
+      () => ctx.sessions.get(id) === session);
+    if (admission.state === 'held') return unconfirmedInput();
+    if (admission.state === 'pending') return {pending: true};
+    if (admission.state === 'typed-unsent') return typedUnsentInput();
+    if (admission.state === 'capacity') return createErrorResponse(ApiErrorCode.CONFLICT,
       'Input receipt capacity is held by unresolved operations; no new input was issued.');
-    const recordReceipt = (state: 'pending' | 'confirmed' | 'unconfirmed' | 'typed-unsent') => receipt?.record(state);
-    const duplicate = existingReceipt === 'confirmed' || (tagged && !session.shouldApplyInput(clientId as string, seq as number));
-    if (duplicate && existingReceipt !== 'confirmed') {receipt?.release(); return unconfirmedInput();}
+    const duplicate = admission.state === 'duplicate';
+    const receipt = admission.state === 'admitted' ? admission.operation : undefined;
+    const inputAdmission = receipt?.admitted ?? (() => false);
     if (duplicate && !wantsWait) return {};
+    if (!duplicate && ifIdle && session.isWorking) {
+      receipt?.refuse();
+      return createErrorResponse(ApiErrorCode.SESSION_BUSY, 'Session is working; nothing was typed');
+    }
+    if (!duplicate && agentCaller && session.composerHeldByMove) {
+      receipt?.refuse();
+      return createErrorResponse(ApiErrorCode.SESSION_BUSY, 'A plan move owns this session\'s composer; nothing was typed');
+    }
 
     // Wake-on-LAN (remote-wake.ts): a wake-enabled remote host that suspended leaves
     // the local ssh pane STALLED, and `send-keys` succeeds against it — the bytes
@@ -2337,8 +2329,8 @@ export function registerSessionRoutes(
         // recovery for.
         if (!(await remoteWake.ensureAwake(session))) {
           // Nothing was typed, so a refused wake's seq is handed back for its retry.
-          receipt?.release();
-          if (tagged) session.forgetInputSeq(clientId as string, seq as number);
+          receipt?.refuse();
+
           return createErrorResponse(
             ApiErrorCode.OPERATION_FAILED,
             `${session.remote?.label ?? 'the remote host'} did not come back after a wake-on-LAN request — nothing was sent`
@@ -2353,10 +2345,10 @@ export function registerSessionRoutes(
         // was over the wake buffer's cap and is GONE (a 200 with no field could not
         // tell delivered from buffered from dropped).
         if (outcome === 'buffered') {
-          recordReceipt('confirmed'); // The wake buffer owns this seq; a lost ACK must not enqueue it twice.
+          if (!receipt?.acceptBuffered(ctx)) return unconfirmedInput();
           return { buffered: true };
         }
-        if (outcome === 'dropped') {receipt?.release(); return { buffered: true, dropped: true };}
+        if (outcome === 'dropped') {receipt?.refuse(); return { buffered: true, dropped: true };}
       }
     }
 
@@ -2368,8 +2360,8 @@ export function registerSessionRoutes(
     if (!duplicate && terminalScope && (
       session.viewerInputHeld || session.pid == null || session.paneExit || (wantsWait && workerIsDead(ctx.mux, session))
     )) {
-      receipt?.release();
-      if (tagged) session.forgetInputSeq(clientId as string, seq as number);
+      receipt?.refuse();
+
       return createErrorResponse(ApiErrorCode.SESSION_BUSY, 'Terminal viewer unavailable; reconnect it. Nothing was typed.');
     }
     const workerDead = wantsWait && !terminalScope && workerIsDead(ctx.mux, session);
@@ -2401,8 +2393,8 @@ export function registerSessionRoutes(
           // Nothing has been written yet, but `shouldApplyInput` already consumed the
           // seq. Give it back or the caller's retry is rejected as a duplicate and the
           // input is lost by the very mechanism meant to make delivery reliable.
-          if (!duplicate) receipt?.release();
-          if (tagged && !duplicate) session.forgetInputSeq(clientId as string, seq as number);
+          if (!duplicate) receipt?.refuse();
+
           hookFence.release();
           return waitCapacityResponse(err);
         }
@@ -2426,11 +2418,10 @@ export function registerSessionRoutes(
     const undoOnFailure = () => {
       if (terminalWriteUnconfirmed || (terminalScope && !heldByMove && !idleRefused)) {
         terminalWriteUnconfirmed = true;
-        recordReceipt('unconfirmed');
+        receipt?.unconfirmed(new TerminalInputUnconfirmedError(), ctx);
         return;
       }
-      receipt?.release();
-      if (tagged) session.forgetInputSeq(clientId as string, seq as number);
+      receipt?.refuse();
     };
 
     // Whether the bytes actually reached a write path. Only meaningful on the wait
@@ -2447,21 +2438,18 @@ export function registerSessionRoutes(
     // wake-target probe, say): busy, with the seq handed back for a retry once the move is done.
     let heldByMove = false;
     const muxFailure = (cause: unknown): false => {
-      if (cause instanceof TerminalInputUnconfirmedError) {
+      if (cause instanceof TerminalInputUnconfirmedError || session.terminalInputHeld) {
+        typedUnsent = false;
         terminalWriteUnconfirmed = true;
-        recordReceipt('unconfirmed');
-        session.holdUnconfirmedInput(cause);
-        if (ctx.sessions.get(id) === session) {
-          try {ctx.persistSessionStateNow(session);} catch {inputPersistenceUnconfirmed = true;}
-          ctx.broadcast(SseEvent.SessionUpdated, {session: ctx.getSessionStateWithRespawn(session)});
-        }
-        ctx.broadcast(SseEvent.SessionError, {id, error: cause.message});
+        receipt?.unconfirmed(new TerminalInputUnconfirmedError(), ctx);
+        const reported = receipt?.unconfirmed(cause, ctx);
+        inputPersistenceUnconfirmed ||= reported?.persistenceUnconfirmed === true;
       }
       return false;
     };
 
     const writeRaw = (): boolean => {
-      try {return session.write(rawInput, rawOptions);} catch (cause) {return muxFailure(cause);}
+      try {return receipt?.writeRaw(rawOptions) ?? false;} catch (cause) {return muxFailure(cause);}
     };
 
     // A plain prompt (`<text>\r`) goes through the mux even when the caller did not
@@ -2479,108 +2467,100 @@ export function registerSessionRoutes(
       ? { fromUser: true, admitted: inputAdmission, opencodeGuard: true, ...agentHold, onTypedUnsent: () => { typedUnsent = true; } }
       : { fromUser: true, admitted: inputAdmission };
     // The direct PTY writes (a mux failure's fallback, an explicit raw write) carry the same text: an agent's goes in without "!".
-    const rawInput = agentCaller && session.mode === 'opencode' ? guardShellKey(inputStr) : inputStr;
     const rawOptions = { fromUser: true, admitted: inputAdmission, ...agentHold };
     // A terminal failure may have typed text: never replay through another write path.
     // Local fallback still respects the existing typed-unsent and move gates.
     const mayFallBack = () => !terminalWriteUnconfirmed && !terminalScope && !typedUnsent && !heldByMove;
 
-    if (!duplicate) recordReceipt('pending');
-    if (duplicate) {
+    if (workerDead && !duplicate) {
+      // An observed direct-provider dead pane is refused before any effect.
+      // Never write first and then refund a confirmed original receipt.
+      receipt?.refuse();
+    } else if (duplicate) {
       // Redelivery of an already-applied input: skip the write, but still honor the
       // wait, since the caller's question ("tell me when this settles") is unanswered.
     } else if (ifIdle) {
       // Idle-only (agent wake): through the mux with an empty composer required, and no raw fallback, so a session that
       // just started a turn or holds a draft gets nothing typed.
-      delivered = await session
-        .writeViaMux(inputStr, { ...muxOptions, requireEmptyComposer: true, requireIdle: true,
+      delivered = await receipt!
+        .writeMux({ ...muxOptions, requireEmptyComposer: true, requireIdle: true,
           onTypedUnsent: () => { typedUnsent = true; }, onIdleRefused: () => { idleRefused = true; } })
         .catch(muxFailure);
       // Typed but Enter withheld is not "nothing was typed": the text sits unsent in the composer, so the seq stays spent
       // and a retry cannot type it a second time.
       if (!delivered && !typedUnsent) undoOnFailure();
-      if (delivered) recordReceipt('confirmed');
     } else if ((useMux || autoMux) && waitPromise) {
       // The response is already staying open for the wait, so the tmux write can be
       // awaited here. This is the ONE path where a writeViaMux failure is observable.
-      const ok = await session.writeViaMux(inputStr, muxOptions).catch(muxFailure);
+      const ok = await receipt!.writeMux(muxOptions).catch(muxFailure);
       if (ok) {
         delivered = true;
-        recordReceipt('confirmed');
       } else if (mayFallBack()) {
         console.warn(`[Server] writeViaMux failed for session ${id}, falling back to direct write`);
         delivered = writeRaw();
-        if (delivered) recordReceipt('confirmed'); else undoOnFailure();
+        if (!delivered) undoOnFailure();
       } else if (!typedUnsent) undoOnFailure();
     } else if (autoMux) {
       // Awaited, unlike the explicit useMux branch below. This shape also reaches here
       // from the browser's POST fallback, which sends its frames one at a time and
       // waits for each 2xx; answering only once Enter has gone out is what keeps the
       // next keystroke from overtaking it.
-      const ok = await session.writeViaMux(inputStr, muxOptions).catch(muxFailure);
+      const ok = await receipt!.writeMux(muxOptions).catch(muxFailure);
       if (!ok && mayFallBack()) {
         console.warn(`[Server] writeViaMux failed for session ${id}, falling back to direct write`);
-        if (writeRaw()) recordReceipt('confirmed'); else undoOnFailure();
+        if (!writeRaw()) undoOnFailure();
       } else if (!ok && !typedUnsent) undoOnFailure();
-      if (ok) recordReceipt('confirmed');
     } else if (useMux) {
       // Historical fire-and-forget: a 2xx accepts a still-pending write, it does
       // not confirm delivery. Only local failures may use the raw fallback;
       // terminal receipts settle asynchronously without replaying input.
-      session
-        .writeViaMux(inputStr, muxOptions)
+      receipt!
+        .writeMux(muxOptions)
         .then((ok) => {
-          if (ok) {
-            recordReceipt('confirmed');
-            return;
-          }
+          if (ok) return;
           if (typedUnsent) {
-            recordReceipt('typed-unsent');
             return;
           }
           if (!mayFallBack()) return undoOnFailure();
           console.warn(`[Server] writeViaMux failed for session ${id}, falling back to direct write`);
-          if (writeRaw()) recordReceipt('confirmed'); else undoOnFailure();
+          if (!writeRaw()) undoOnFailure();
         })
         .catch((cause) => {
           muxFailure(cause);
-          if (mayFallBack() && writeRaw()) {recordReceipt('confirmed'); return;}
+          if (mayFallBack() && writeRaw()) return;
           if (!typedUnsent) undoOnFailure();
         });
     } else {
-      // Same rollback. NOT an error response, deliberately: a session can
-      // legitimately have no PTY yet (created but not started), and callers have
-      // always been able to write to one without a 4xx.
+      // A known missing PTY is retryable, never a delivery acknowledgement.
       delivered = writeRaw();
-      if (delivered) recordReceipt('confirmed');
-      else undoOnFailure();
+      if (!delivered) undoOnFailure();
     }
     if (typedUnsent) {
-      recordReceipt('typed-unsent');
       terminalWriteUnconfirmed ||= terminalScope;
     }
 
+    // A callback alone cannot settle an async writer: a later error still dominates.
+    if (!waitPromise && receipt?.pending) return {pending: true};
+
     // An idle-only write (agent wake) was awaited above, so its outcome is known even without a wait: a refusal (a turn
     // just started, or a draft in the composer) must not read as accepted.
+    if (receipt?.held) return {...createErrorResponse(ApiErrorCode.CONFLICT,
+      'The original input subject changed. This request is held and will not be replayed.'), held: true, recoveryRequired: true};
     if (heldByMove && !waitPromise) {
       return createErrorResponse(ApiErrorCode.SESSION_BUSY, 'A plan move owns this session\'s composer; nothing was typed');
     }
-    if (!waitPromise && terminalScope && typedUnsent) return typedUnsentInput();
+    if (!waitPromise && typedUnsent) return typedUnsentInput();
     if (!waitPromise && terminalScope && idleRefused) return idleRefusal();
     if (!waitPromise && terminalWriteUnconfirmed) return unconfirmedInput();
+    if (!waitPromise && receipt?.notIssued) return {...createErrorResponse(ApiErrorCode.SESSION_BUSY,
+      'Input was not issued because the terminal is unavailable or not accepting input; retry the same request when available.'),
+      data: {delivered: false}};
     if (!waitPromise) return ifIdle || typedUnsent ? (typedUnsent ? { delivered, typedUnsent } : { delivered }) : {};
 
       // `send-keys` SUCCEEDS against a dead pane — tmux is happy to write into a corpse
       // — so a truthful `delivered` cannot come from the write's return value alone.
       // This is the case the field exists for: "delivered, but it timed out" tells an
       // agent to wait longer when the truth is "restart the worker".
-      if (delivered && workerDead) {
-        delivered = false;
-        // The bytes went nowhere, so the seq must not be recorded as applied or the
-        // caller's retry against a restarted worker is refused as a duplicate.
-        if (!duplicate) undoOnFailure();
-      }
-
       // Nothing was written and nothing will be: no turn is coming, so blocking for the
       // full timeout would only delay the caller's real recovery by up to ten minutes.
       // Releasing the waiter also hands its slot back immediately.
@@ -2591,7 +2571,7 @@ export function registerSessionRoutes(
       if (heldByMove) {
         return createErrorResponse(ApiErrorCode.SESSION_BUSY, 'A plan move owns this session\'s composer; nothing was typed');
       }
-      if (terminalScope && typedUnsent) return typedUnsentInput();
+      if (typedUnsent) return typedUnsentInput();
       if (terminalScope && idleRefused) return idleRefusal();
       if (terminalWriteUnconfirmed || (terminalScope && !delivered && !duplicate)) return unconfirmedInput();
       if (terminalScope && (result.signal === 'exit' || result.ended)) {

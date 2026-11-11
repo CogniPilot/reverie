@@ -1915,31 +1915,33 @@ describe('terminal input effect and replay owners', () => {
   it('never transfers original pending/positive proof to another object or owner, or expires unknown', async () => {
     const {TerminalInputReceipts} = await import('../src/terminal-input-outcome.js');
     const receipts = new TerminalInputReceipts(2, 3), original = {}, successor = {};
-    const first = receipts.reserve('original', 'sid', 'request', original)!;
-    expect(receipts.lookup('original', 'sid', 'new', successor)).toBe('held');
+    const first = receipts.reserve('original', 'sid', 'request', original, 'original-intent')!;
+    expect(receipts.lookup('original', 'sid', 'new', successor, 'original-intent')).toBe('held');
     first.record('confirmed');
-    expect(receipts.lookup('original', 'sid', 'request', original)).toBe('confirmed');
-    expect(receipts.lookup('original', 'sid', 'request', successor)).toBe('held');
-    expect(receipts.lookup('successor', 'sid', 'request', original)).toBe('held');
+    expect(receipts.lookup('original', 'sid', 'request', original, 'original-intent')).toBe('confirmed');
+    expect(receipts.lookup('original', 'sid', 'request', successor, 'original-intent')).toBe('held');
+    expect(receipts.lookup('successor', 'sid', 'request', original, 'original-intent')).toBe('held');
     first.record('unconfirmed'); first.record('confirmed'); first.release();
     vi.useFakeTimers(); try {
       vi.advanceTimersByTime(365 * 24 * 60 * 60 * 1000);
-      expect(receipts.lookup('successor', 'sid', 'different', successor)).toBe('held');
+      expect(receipts.lookup('successor', 'sid', 'different', successor, 'original-intent')).toBe('held');
     } finally {vi.useRealTimers();}
-    receipts.reserve('original', 'other', 'second', {})!.record('typed-unsent');
-    expect(receipts.reserve('original', 'new', 'third', {})).toBeUndefined();
-    receipts.reserve('other-owner', 'third', 'fourth', {})!.record('unconfirmed');
-    expect(receipts.reserve('third-owner', 'fourth', 'fifth', {})).toBeUndefined();
-    expect(receipts.lookup('original', 'sid', 'request', original)).toBe('held');
+    receipts.reserve('original', 'other', 'second', {}, 'original-intent')!.record('typed-unsent');
+    expect(receipts.reserve('original', 'new', 'third', {}, 'original-intent')).toBeUndefined();
+    receipts.reserve('other-owner', 'third', 'fourth', {}, 'original-intent')!.record('unconfirmed');
+    expect(receipts.reserve('third-owner', 'fourth', 'fifth', {}, 'original-intent')).toBeUndefined();
+    expect(receipts.lookup('original', 'sid', 'request', original, 'original-intent')).toBe('held');
   });
   it('evicts only confirmed entries and stale closures cannot release a successor', async () => {
     const {TerminalInputReceipts} = await import('../src/terminal-input-outcome.js');
     const receipts = new TerminalInputReceipts(1, 1), subject = {};
-    const old = receipts.reserve('owner', 'sid', 'first', subject)!; old.record('confirmed');
-    const next = receipts.reserve('owner', 'sid', 'second', subject)!; next.record('unconfirmed');
+    const old = receipts.reserve('owner', 'sid', 'first', subject, 'original-intent')!; old.record('confirmed');
+    old.record('pending'); old.release();
+    expect(receipts.lookup('owner', 'sid', 'first', subject, 'original-intent')).toBe('confirmed');
+    const next = receipts.reserve('owner', 'sid', 'second', subject, 'original-intent')!; next.record('unconfirmed');
     old.release(); old.record('confirmed');
-    expect(receipts.lookup('owner', 'sid', 'second', subject)).toBe('held');
-    expect(receipts.reserve('owner', 'other', 'third', {})).toBeUndefined();
+    expect(receipts.lookup('owner', 'sid', 'second', subject, 'original-intent')).toBe('held');
+    expect(receipts.reserve('owner', 'other', 'third', {}, 'original-intent')).toBeUndefined();
   });
   it('restores only a deny-only input marker, separate from launch/viewer health and opaque subjects', async () => {
     const {Session} = await import('../src/session.js');

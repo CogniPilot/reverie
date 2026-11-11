@@ -21,12 +21,18 @@
  *     {"t":"o","d":"..."} — terminal output
  *     {"t":"c"}           — clear terminal
  *     {"t":"r"}           — needs refresh (reload buffer)
- *     {"t":"ia","seq":N}  — input ACK (echoes the seq of an applied/deduped input frame)
+ *     {"t":"ia","seq":N,"confirmed":true} — original accepted input or its exact confirmed receipt; drop only that frame
+ *     {"t":"ia","seq":N,"unconfirmed":true} — possible effect; hold input, never replay
+ *     {"t":"ia","seq":N,"held":true} — no new effect; original proof/barrier is unresolved
+ *     {"t":"ie","unconfirmed":true} — untagged input uncertainty (held uses the same shape)
+ *     {"t":"ir","seq":N,"retryable":true,"reason":"capacity"|"unavailable"} — known not issued; retain the exact seq and back off
+ *     {"t":"ip","seq":N} — exact original operation remains pending; no delivery ACK
+ *     {"t":"ia","seq":N,"typedUnsent":true,"delivered":false} — text retained, no replay; never a confirmed delivery
  *     {"t":"zc","c":N,"r":N} — resize confirm: the geometry the PTY now holds, which
  *                          is NOT always the one requested (see Session.resize
  *                          arbitration). Clients adopt it — issue #464.
  *   Client -> Server:
- *     {"t":"i","d":"...","seq":N,"cid":"..."} — input (keystroke or paste). seq+cid are
+ *     {"t":"i","d":"...","seq":N,"cid":"...","useMux":bool} — input (keystroke or paste). seq+cid are
  *                          optional reliable-delivery tags: the server applies each
  *                          (cid,seq) at-most-once and ACKs with {"t":"ia","seq":N}.
  *     {"t":"z","c":N,"r":N,"f":bool} — resize terminal (f=true forces SIGWINCH even if dims unchanged)
@@ -34,6 +40,7 @@
 
 import { FastifyInstance } from 'fastify';
 import type { WebSocket } from 'ws';
+import type { EventPort } from '../ports/event-port.js';
 import type { SessionPort } from '../ports/session-port.js';
 import { MAX_INPUT_LENGTH } from '../../config/terminal-limits.js';
 import { isAllowedRequestHost, isAllowedRequestOrigin, type HostPolicy } from '../network-auth-policy.js';
@@ -63,6 +70,9 @@ const DEC_2026_END = '\x1b[?2026l';
 
 /** Max concurrent WS connections per session. Prevents listener/bandwidth multiplication. */
 const MAX_WS_PER_SESSION = 5;
+/** Bound only deferred input. Ordinary raw keystrokes have no queue or await. */
+const MAX_WS_INPUT_QUEUE_SLOTS = 256;
+const MAX_WS_INPUT_QUEUE_BYTES = 1024 * 1024;
 
 /**
  * Track live WS connections per session, keyed by clientId (COD-137).
@@ -73,7 +83,7 @@ const MAX_WS_PER_SESSION = 5;
  */
 const sessionWsRegistry = new WsConnectionRegistry<WebSocket>(MAX_WS_PER_SESSION);
 
-export function registerWsRoutes(app: FastifyInstance, ctx: SessionPort, getHostPolicy: () => HostPolicy): void {
+export function registerWsRoutes(app: FastifyInstance, ctx: SessionPort & Pick<EventPort, 'broadcast'>, getHostPolicy: () => HostPolicy): void {
   app.get<{ Params: { id: string }; Querystring: { cid?: string } }>(
     '/ws/sessions/:id/terminal',
     { websocket: true },
@@ -140,7 +150,12 @@ export function registerWsRoutes(app: FastifyInstance, ctx: SessionPort, getHost
       // Eagerly free the slot on error/terminate — don't wait for the async
       // 'close' (idempotent with the 'close' handler below). This is what kills
       // the reconnect over-count: the slot is released the instant the socket dies.
+      let inputActive = true;
+      const originalOwner = session.owner;
+      const currentInput = () => inputActive && socket.readyState === 1 && ctx.sessions.get(id) === session
+        && session.owner === originalOwner && canAccessOwned(getAuthUser(req), originalOwner);
       socket.on('error', () => {
+        inputActive = false;
         sessionWsRegistry.unregister(id, socket);
       });
 
@@ -169,6 +184,9 @@ export function registerWsRoutes(app: FastifyInstance, ctx: SessionPort, getHost
       const sizingToken = Symbol('ws-desktop-sizing');
       let holdsDesktopClaim = false;
 
+      let inputTail: Promise<void> | undefined;
+      let queuedInputSlots = 0, queuedInputBytes = 0;
+
       // Attach message handler synchronously BEFORE any async work
       // (@fastify/websocket requirement to avoid dropped messages).
       socket.on('message', (raw) => {
@@ -185,54 +203,73 @@ export function registerWsRoutes(app: FastifyInstance, ctx: SessionPort, getHost
               }
               return;
             }
-            // Reliable delivery: when the frame carries a clientId + seq, apply it
-            // exactly once (skip a duplicate redelivery) but ACK it regardless so
-            // the client can drop it from its durable queue. Frames without seq
-            // (legacy/other tools) are applied as-is — no behavior change.
-            const cid = typeof msg.cid === 'string' ? msg.cid : null;
-            const seq = Number.isInteger(msg.seq) ? (msg.seq as number) : null;
-            const apply = cid && seq !== null ? session.shouldApplyInput(cid, seq) : true;
-            let delivered = true;
-            if (apply) {
-              // Typed input from a claim-holding desktop keeps the claim "hot"
-              // and re-asserts the desktop layout after a mobile override.
-              if (holdsDesktopClaim) session.noteDesktopActivity();
-              // Browser keystrokes are the user's own, so they may name the tab.
-              delivered = session.write(msg.d, { fromUser: true });
-              // A session whose PTY is gone swallows the write. ACKing anyway told
-              // the client to drop the frame from its durable queue and left the seq
-              // burnt, so the retry that reliable delivery exists for was rejected as
-              // a duplicate: the input was lost for good.
-              if (!delivered && cid && seq !== null) session.forgetInputSeq(cid, seq);
+            const cid = typeof msg.cid === 'string' && msg.cid.length <= 128 ? msg.cid : undefined;
+            const seq = Number.isSafeInteger(msg.seq) && msg.seq >= 0 ? msg.seq as number : undefined;
+            const answer = (state: 'confirmed' | 'held' | 'unconfirmed') => {
+              if (socket.readyState !== 1 || (seq === undefined && state === 'confirmed')) return;
+              try {socket.send(JSON.stringify(seq === undefined ? {t: 'ie', [state]: true}
+                : {t: 'ia', seq, [state]: true}));}
+              catch { /* Original receipt remains authoritative when its ACK is lost. */ }
+            };
+            if ((msg.cid !== undefined && cid === undefined) || (msg.seq !== undefined && seq === undefined)) {
+              answer('held'); return;
             }
-            if (seq !== null && socket.readyState === 1) {
-              if (apply) {
-                if (delivered) socket.send(`{"t":"ia","seq":${seq}}`);
-              } else {
-                // REJECTED as a duplicate. ACK it — the client must still drop it
-                // from its durable queue — but say so, and hand back our watermark.
-                //
-                // A plain ACK here is indistinguishable from "applied", which is
-                // what made a client with a rolled-back counter unrecoverable: its
-                // seqs persist to localStorage on a DEBOUNCED write, so a tab killed
-                // between a send and that write comes back with a counter BELOW this
-                // watermark, every later keystroke lands at or under it, and each one
-                // is dropped-but-ACKed. The UI stays clean, nothing is delivered, and
-                // a reload restores the same stale counter. `last` is what lets the
-                // client lift itself out.
-                // ⚠️ Defensive: the session arrives through a structural port, and an
-                // implementation without this method must not take the whole input
-                // path down with it — a throw here aborts the message handler and the
-                // frame is never ACKed at all, which strands it in the client's queue.
-                const watermark =
-                  typeof (session as { lastInputSeq?: (c: string) => number }).lastInputSeq === 'function'
-                    ? (session as { lastInputSeq: (c: string) => number }).lastInputSeq(cid as string)
-                    : seq;
-                socket.send(`{"t":"ia","seq":${seq},"dup":true,"last":${watermark}}`);
+            const typedUnsent = () => {
+              if (socket.readyState !== 1) return;
+              try {socket.send(JSON.stringify(seq === undefined ? {t: 'ie', typedUnsent: true, delivered: false}
+                : {t: 'ia', seq, typedUnsent: true, delivered: false}));} catch { /* retained text is never replayed */ }
+            };
+            const useMux = msg.useMux === undefined ? undefined : msg.useMux;
+            if (useMux !== undefined && typeof useMux !== 'boolean') {answer('held'); return;}
+            const data = msg.d as string;
+            const bytes = Buffer.byteLength(data, 'utf8');
+            const retryKnownNone = (reason: 'capacity' | 'unavailable') => {
+              if (socket.readyState !== 1) return;
+              try {socket.send(JSON.stringify({t: 'ir', ...(seq === undefined ? {} : {seq}), retryable: true, reason}));} catch { /* no input was issued */ }
+            };
+            const capacityAvailable = () => !inputTail || (queuedInputSlots < MAX_WS_INPUT_QUEUE_SLOTS && queuedInputBytes + bytes <= MAX_WS_INPUT_QUEUE_BYTES);
+            const admission = ctx.terminalInput.begin(session, {input: data, clientId: cid, seq, useMux}, currentInput, capacityAvailable,
+              () => ctx.sessions.get(id) === session && session.id === id && session.owner === originalOwner && canAccessOwned(getAuthUser(req), originalOwner));
+            if (admission.state === 'duplicate') {answer('confirmed'); return;}
+            if (admission.state === 'pending') {
+              if (socket.readyState === 1) {try {socket.send(JSON.stringify({t: 'ip', ...(seq === undefined ? {} : {seq})}));} catch { /* original receipt remains pending */ }}
+              return;
+            }
+            if (admission.state === 'capacity') {retryKnownNone('capacity'); return;}
+            if (admission.state === 'typed-unsent') {typedUnsent(); return;}
+            if (admission.state !== 'admitted') {answer('held'); return;}
+            const operation = admission.operation;
+            const disposition = (state: string) => {
+              if (state === 'typed-unsent') {typedUnsent(); return;}
+              if (state === 'confirmed' && holdsDesktopClaim && currentInput()) {
+                try {session.noteDesktopActivity();} catch {
+                  try {ctx.broadcast('session:error', {id, error: 'Desktop sizing activity could not be recorded.'});} catch { /* delivery receipt remains confirmed */ }
+                }
               }
+              if (state === 'confirmed' || state === 'held' || state === 'unconfirmed') answer(state);
+              if (state === 'refused') retryKnownNone('unavailable');
+            };
+            const deliver = (): void | Promise<void> => {
+              const outcome = operation.dispatch(ctx);
+              if (typeof outcome === 'string') return disposition(outcome);
+              return outcome.then(disposition);
+            };
+            const failed = (cause: unknown) => {
+              try {operation.unconfirmed(cause, ctx);} catch { /* the original pending/unknown receipt remains held */ }
+              answer('unconfirmed');
+            };
+            if (!inputTail && !operation.useMux) {
+              try {deliver();} catch (cause) {failed(cause);}
+            } else {
+              queuedInputSlots++; queuedInputBytes += bytes;
+              const task = (inputTail ?? Promise.resolve()).then(deliver).catch(failed).finally(() => {
+                queuedInputSlots--; queuedInputBytes -= bytes;
+              });
+              inputTail = task;
+              void task.then(() => {if (inputTail === task) inputTail = undefined;});
             }
           } else if (
-            msg.t === 'z' &&
+            currentInput() && msg.t === 'z' &&
             Number.isInteger(msg.c) &&
             Number.isInteger(msg.r) &&
             msg.c >= 1 &&
@@ -339,6 +376,7 @@ export function registerWsRoutes(app: FastifyInstance, ctx: SessionPort, getHost
       }, WS_PING_INTERVAL_MS);
 
       socket.on('close', (code: number, reason: Buffer) => {
+        inputActive = false;
         clearInterval(pingInterval);
         if (pongTimeout) clearTimeout(pongTimeout);
         if (batchTimer) clearTimeout(batchTimer);

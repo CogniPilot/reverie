@@ -148,14 +148,15 @@ describe('POST /api/sessions/:id/input rollback wiring', () => {
   });
 
   it('rolls the seq back on the non-mux path too', async () => {
-    // Still a 200: a session may legitimately have no PTY yet, and turning that
-    // into a failure status would be a contract change. Re-opening the seq is not.
+    // Known no effect is refused explicitly; the exact request remains retryable.
     const session = harness.ctx.sessions.get('test-session-1')!;
     session.failWrites = true;
 
     const res = await post({ input: 'x\r', useMux: false, clientId: 'c2', seq: 5 });
 
-    expect(res.statusCode).toBe(200);
+    expect(res.statusCode).toBe(409);
+    expect(res.json().data).toEqual({delivered: false});
+    expect(res.json().recoveryRequired).toBeUndefined();
     expect(session.shouldApplyInput('c2', 5)).toBe(true);
   });
 });
@@ -194,7 +195,7 @@ describe('POST /api/sessions/:id/input plain-prompt routing', () => {
     const res = await post({ input: LONG_PROMPT });
 
     expect(res.statusCode).toBe(200);
-    expect(viaMux).toHaveBeenCalledWith(LONG_PROMPT, { fromUser: true, admitted: expect.any(Function) });
+    expect(viaMux).toHaveBeenCalledWith(LONG_PROMPT, { fromUser: true, admitted: expect.any(Function), onTypedUnsent: expect.any(Function) });
     expect(direct).not.toHaveBeenCalled();
   });
 
@@ -209,7 +210,7 @@ describe('POST /api/sessions/:id/input plain-prompt routing', () => {
     // An agent's write also answers to a plan move's hold at the write itself (agentInput, plan-move-input-hold.test.ts).
     expect(viaMux).toHaveBeenLastCalledWith(LONG_PROMPT, expect.objectContaining({ fromUser: true, opencodeGuard: true, agentInput: true }));
     await post({ input: LONG_PROMPT });
-    expect(viaMux).toHaveBeenLastCalledWith(LONG_PROMPT, { fromUser: true, admitted: expect.any(Function) });
+    expect(viaMux).toHaveBeenLastCalledWith(LONG_PROMPT, { fromUser: true, admitted: expect.any(Function), onTypedUnsent: expect.any(Function) });
   });
 
   it('an agent\u2019s text for an OpenCode pane has its ! made fullwidth even on the direct-write fallback; a person\u2019s is untouched', async () => {
@@ -323,13 +324,33 @@ describe('POST /api/sessions/:id/input ifIdle (agent wake)', () => {
     expect(session.shouldApplyInput('w1', 1)).toBe(true);
   });
 
+  it('observes an original idle-only request after it becomes working without reclassifying its pending or confirmed receipt', async () => {
+    const session = harness.ctx.sessions.get('test-session-1')!;
+    let entered!: () => void, settle!: (sent: boolean) => void;
+    const started = new Promise<void>(resolve => {entered = resolve;});
+    const mux = vi.spyOn(session, 'writeViaMux').mockImplementation(() => {
+      entered(); return new Promise<boolean>(resolve => {settle = resolve;});
+    });
+    const body = {input: 'original wake\r', useMux: true, clientId: 'original', seq: 1, ifIdle: true};
+    const first = post(body).then(response => response); await started;
+    try {
+      session.isWorking = true;
+      const pending = await post(body); expect(pending.json().data).toEqual({pending: true});
+      settle(true); expect((await first).json().data.delivered).toBe(true);
+      expect((await post(body)).json().data).toEqual({});
+      const fresh = await post({...body, clientId: 'fresh'});
+      expect(fresh.statusCode).toBe(409); expect(fresh.json().error).toContain('nothing was typed');
+      expect(session.lastInputSeq('fresh')).toBe(0); expect(mux).toHaveBeenCalledOnce();
+    } finally {settle?.(true);}
+  });
+
   it('writes an idle session through the mux with an empty composer required and no raw fallback', async () => {
     const session = harness.ctx.sessions.get('test-session-1')!;
     const mux = vi.spyOn(session, 'writeViaMux').mockResolvedValue(false);
     const raw = vi.spyOn(session, 'write');
     const res = await post({ input: 'wake\r', useMux: true, clientId: 'w2', seq: 1, ifIdle: true });
-    expect(res.statusCode).toBe(200);
-    expect(res.json().data).toEqual({ delivered: false }); // not an empty "accepted" body
+    expect(res.statusCode).toBe(409);
+    expect(res.json().data).toEqual({ delivered: false }); // a known refusal, never an acceptance
     expect(mux).toHaveBeenCalledWith('wake\r', expect.objectContaining({ requireEmptyComposer: true }));
     expect(raw).not.toHaveBeenCalled();
     expect(session.shouldApplyInput('w2', 1)).toBe(true); // refused write leaves the seq retryable
@@ -474,8 +495,8 @@ describe('terminal viewer delivery never establishes native worker death', () =>
     const pending = post().then((res) => res);
     await started;
     const duplicate = await post();
-    expect(duplicate.json().success).toBe(false);
-    expect(duplicate.json().error).toMatch(/unconfirmed/i);
+    expect(duplicate.json().success).toBe(true);
+    expect(duplicate.json().data).toEqual({pending: true});
     finish(true);
     expect((await pending).json().data.delivered).toBe(true);
     expect((await post()).json().data.duplicate).toBe(true);
@@ -505,12 +526,12 @@ describe('terminal viewer delivery never establishes native worker death', () =>
     expect(raw).not.toHaveBeenCalled();
   });
 
-  it('a known successful older input stays distinct from a later uncertain input', async () => {
+  it('later input uncertainty holds further requests without replaying older confirmed input', async () => {
     const session = terminal();
     const mux = vi.spyOn(session, 'writeViaMux').mockResolvedValueOnce(true).mockResolvedValue(false);
     expect((await post()).json().data.delivered).toBe(true);
     expect((await post({ seq: 2 })).json().error).toMatch(/unconfirmed/i);
-    expect((await post()).json().data.duplicate).toBe(true);
+    expect((await post()).json().recoveryRequired).toBe(true);
     expect((await post({ seq: 2 })).json().error).toMatch(/unconfirmed/i);
     expect(mux).toHaveBeenCalledTimes(2);
   });
@@ -522,7 +543,7 @@ describe('terminal viewer delivery never establishes native worker death', () =>
     for (let seq = 2; seq <= 258; seq++) await post({ seq, wait: false, useMux: false });
     expect(session.writeBuffer).toHaveLength(257);
     expect((await post({ seq: 2, wait: false })).json().error).toMatch(/unconfirmed/i);
-    expect((await post({ seq: 258 })).json().data.duplicate).toBe(true);
+    expect((await post({ seq: 258, useMux: false })).json().data.duplicate).toBe(true);
     expect(session.writeBuffer).toHaveLength(257);
   });
 
@@ -644,7 +665,7 @@ describe('input receipt capacity and original object custody', () => {
       const full = await post('capacity-refused'); expect(full.statusCode).toBe(409);
       expect(full.json().error).toContain('capacity'); expect(send).toHaveBeenCalledTimes(256);
       expect(session.shouldApplyInput('capacity-refused', 1)).toBe(true);
-      const original = await post('client-0'); expect(original.json().error).toContain('unconfirmed');
+      const original = await post('client-0'); expect(original.json().data).toEqual({pending: true});
       expect(send).toHaveBeenCalledTimes(256);
     } finally {settle(true); await new Promise<void>(resolve => setImmediate(resolve)); await app.close();}
   });

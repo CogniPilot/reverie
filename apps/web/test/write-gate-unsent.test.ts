@@ -4,6 +4,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { Session } from '../src/session.js';
 import { typeAndSubmit } from '../src/submit-settle.js';
 import { registerSessionRoutes } from '../src/web/routes/session-routes.js';
+import { installResponseEnvelope } from '../src/web/response-envelope.js';
 import { installRouteErrorHandler } from '../src/web/route-error-handler.js';
 import { createMockRouteContext } from './mocks/index.js';
 import { trustedFixtureOwner } from './helpers/trusted-owner-fixture.js';
@@ -57,20 +58,26 @@ it('control: a wake whose turn starts between text and Enter is preserved, repor
   const ctx = createMockRouteContext();
   ctx.sessions.set(session.id, session as never);
   registerSessionRoutes(app, ctx as never, { verifiedOwner: trustedFixtureOwner, remoteWake: { hasWakeTarget: vi.fn(async () => false) } as never });
+  installResponseEnvelope(app, '');
   installRouteErrorHandler(app);
   await app.ready();
   cleanups.push(() => app.close());
   const wake = (seq: number) => app.inject({ method: 'POST', url: '/api/sessions/test-session-1/input', payload: { input: 'wake\r', ifIdle: true, clientId: 'review', seq } });
 
   const first = await wake(1);
-  expect(first.json()).toEqual({ delivered: false, typedUnsent: true });
+  expect(first.statusCode).toBe(409);
+  expect(first.json().data).toEqual({ delivered: false, typedUnsent: true });
+  const duplicate = await wake(1);
+  expect(duplicate.statusCode).toBe(first.statusCode);
+  expect(duplicate.json()).toEqual(first.json());
   expect(keys).toEqual(['wake']); // the text went in; Enter never did
   expect(screen.text).toContain('› wake'); // preserved, not cleared
 
   // The turn ends; the composer still holds the unsent text, so a second wake types nothing on top of it.
   Object.assign(session, { _isWorking: false, _status: 'idle' });
   const second = await wake(2);
-  expect(second.json()).toEqual({ delivered: false });
+  expect(second.statusCode).toBe(409);
+  expect(second.json().data).toEqual({ delivered: false });
   expect(keys).toEqual(['wake']);
   expect(mux.sendInput).toHaveBeenCalledOnce();
 });

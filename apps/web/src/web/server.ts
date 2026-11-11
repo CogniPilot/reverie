@@ -1,3 +1,4 @@
+import {TerminalInputService} from './terminal-input-service.js';
 import {WorkerProviderHealth,viewerHealth} from '../worker-provider-health.js';
 import { cliPublicDescriptor } from '../config/cli-registry/public-descriptor.js';
 import { displayTimeZone } from '../display-time.js';
@@ -971,11 +972,14 @@ export class WebServer extends EventEmitter {
    * Build a route context object satisfying all 5 port interfaces.
    * Single object with zero runtime cost — ISP enforced at the type level.
    */
+  private readonly terminalInput = new TerminalInputService();
+
   private createRouteContext() {
     // eslint-disable-next-line @typescript-eslint/no-this-alias
     const self = this;
     return {
       // SessionPort
+      terminalInput: this.terminalInput,
       sessions: this.sessions as ReadonlyMap<string, Session>,
       addSession: this.registerSessionWithLayout.bind(this),
       tabLayouts: this.tabLayouts,

@@ -43,7 +43,7 @@ export function inputAdmissionSubject(admission: () => boolean): object {
   return subject;
 }
 type InputReceiptState = 'pending' | 'confirmed' | 'unconfirmed' | 'typed-unsent';
-type InputReceipt = {owner: string | undefined; sid: string; key: string; subject: object; state: InputReceiptState};
+type InputReceipt = {owner: string | undefined; sid: string; key: string; subject: object; fingerprint: string; state: InputReceiptState};
 /** Bounded, process-local replay barrier. Unknown attempts are never evicted or transferred. */
 export class TerminalInputReceipts {
   #entries = new Set<InputReceipt>();
@@ -51,8 +51,9 @@ export class TerminalInputReceipts {
     if (!Number.isSafeInteger(perOwner) || !Number.isSafeInteger(total) || perOwner < 1 || total < 1)
       throw new Error('Invalid input receipt capacity');
   }
-  lookup(owner: string | undefined, sid: string, key: string, subject: object): InputReceiptState | 'held' | undefined {
+  lookup(owner: string | undefined, sid: string, key: string, subject: object, fingerprint: string): InputReceiptState | 'held' | undefined {
     const matched = [...this.#entries].find(entry => entry.sid === sid && entry.key === key);
+    if (matched && matched.fingerprint !== fingerprint) return 'held';
     if (matched?.state === 'confirmed' && matched.owner === owner && matched.subject === subject) return 'confirmed';
     for (const entry of this.#entries) {
       if (entry.sid !== sid) continue;
@@ -67,10 +68,10 @@ export class TerminalInputReceipts {
     }
     return undefined;
   }
-  reserve(owner: string | undefined, sid: string, key: string, subject: object): {
-    record: (state: InputReceiptState) => void; release: () => void;
+  reserve(owner: string | undefined, sid: string, key: string, subject: object, fingerprint: string): {
+    record: (state: InputReceiptState) => void; release: () => boolean;
   } | undefined {
-    if (this.lookup(owner, sid, key, subject) !== undefined) return undefined;
+    if (this.lookup(owner, sid, key, subject, fingerprint) !== undefined) return undefined;
     const ownerCount = () => [...this.#entries].filter(entry => entry.owner === owner).length;
     while (this.#entries.size >= this.total || ownerCount() >= this.perOwner) {
       const fullOwner = ownerCount() >= this.perOwner;
@@ -78,14 +79,15 @@ export class TerminalInputReceipts {
       if (!disposable) return undefined;
       this.#entries.delete(disposable);
     }
-    const entry: InputReceipt = {owner, sid, key, subject, state: 'pending'};
+    const entry: InputReceipt = {owner, sid, key, subject, fingerprint, state: 'pending'};
     this.#entries.add(entry);
     return {
       record: state => {
-        if (!this.#entries.has(entry) || entry.state === 'unconfirmed' || entry.state === 'typed-unsent') return;
+        if (!this.#entries.has(entry) || state === 'pending' || entry.state === 'unconfirmed' || entry.state === 'typed-unsent') return;
+        if (entry.state === 'confirmed' && state !== 'unconfirmed') return;
         entry.state = state;
       },
-      release: () => {if (entry.state === 'pending' || entry.state === 'confirmed') this.#entries.delete(entry);},
+      release: () => entry.state === 'pending' && this.#entries.delete(entry),
     };
   }
 }
