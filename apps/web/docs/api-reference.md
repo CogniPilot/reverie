@@ -472,6 +472,25 @@ Restricted, revoked and stale credentials refuse; they never become anonymous.
 Explicit no-auth compatibility mode returns `kind: "anonymous"`; clients must
 quarantine restored records rather than adopt them as an authenticated owner.
 
+### `GET /api/v1/sessions/:id/input-receipt`
+
+Read the original process-local receipt without sending input. Query parameters
+are the exact `clientId`, nonnegative safe-integer `seq`, and lowercase SHA-256
+`fingerprint` of the original intent. For human input, hash the UTF-8 encoding of
+`JSON.stringify({input, rawInput: input, useMux, ifIdle: false, agentInput: false})`
+with fields in that order; `useMux` here is `"default"` for an omitted option,
+`"mux"` for `true`, or `"raw"` for explicit `false`. Agent input uses the actual
+server-derived raw input and agent/idle flags instead.
+
+The response echoes the original tag and fingerprint plus `version: 1` and
+`state`: `confirmed`, `pending`, `typed-unsent`, `held`, or `unknown`. Only exact
+confirmation proves that receipt. `typed-unsent` means text remains in the
+composer and must not be retransmitted. `held` and `unknown` never authorize a
+retry. Missing, evicted or pre-restart receipts are `unknown`, not proof that
+nothing was sent. Inspection never reserves a tag, advances a watermark, wakes
+a worker or writes to a terminal. Existing session ownership and related-agent
+permissions apply. The reply is not cached. This is not durable crash recovery.
+
 ### `POST /api/v1/sessions/:id/input` with `wait`
 
 Two optional fields on the existing endpoint:

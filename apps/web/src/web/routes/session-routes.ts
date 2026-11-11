@@ -12,6 +12,7 @@ import { clampExternalCliBypassForOwner } from '../../session-config-clamp.js';
  */
 
 import { guardShellKey } from '../../opencode-input.js';
+import { registerInputReceiptRoutes } from './input-receipt-routes.js';
 import { prepareWorkspaceHooks, workspaceHookPolicy, type WorkspaceHookPreparation } from '../../workspace-hook-policy.js';
 import { FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
 import { z } from 'zod';
@@ -971,6 +972,7 @@ export function registerSessionRoutes(
     onReplacementFailed?: (info: { employeeId?: string; replacedSessionIds: string[]; error: string }) => void;
   } = {}
 ): RemoteWakeRegistry {
+  registerInputReceiptRoutes(app, ctx);
   /** Bug 11: an explicit restart by the VERIFIED OWNER records running intent through the same guarded transaction as the
    * runtime route (CompanyService.prepareRuntimeRestart): intent is claimed BEFORE the launch, an owner Stop or vacation
    * that lands mid-start cancels it and wins, a failed start rolls it back. Non-owner callers and every automatic path
