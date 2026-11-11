@@ -36,7 +36,10 @@ Object.assign(ReverieApp.prototype, {
    */
   async seedApprovals() {
     if (!this.approvals) this.approvals = new Map();
-    this.approvals.clear();
+    const revision = (this._approvalSeedRevision || 0) + 1;
+    this._approvalSeedRevision = revision;
+    const mutationStart = this._approvalMutationRevision || 0;
+    this._approvalReading = true;
     // ⚠ Fetch and re-arm the tab-alert state machine REGARDLESS of the inbox
     // setting. The server-side approval store runs unconditionally (only the
     // inbox SURFACES are opt-in), and the red/yellow tab alert predates the
@@ -46,9 +49,63 @@ Object.assign(ReverieApp.prototype, {
     // the live SSE event, the reloaded-elsewhere tab showed a plain green
     // dot). Only populating `this.approvals` (bell/drawer/answer strips) stays
     // behind the setting.
-    const data = await this._apiJson('/api/approvals');
+    let data;
+    const controller = new AbortController();
+    let timer;
+    let timedOut = false;
+    const deadline = new Promise(resolve => {
+      timer = setTimeout(() => {
+        timedOut = true;
+        controller.abort();
+        resolve(null);
+      }, 10000);
+    });
+    try {
+      data = await Promise.race([this._apiJson('/api/approvals', { signal: controller.signal }), deadline]);
+    } catch {
+      data = null;
+    } finally {
+      clearTimeout(timer);
+    }
+    if (revision !== this._approvalSeedRevision) return;
+    this._approvalReading = false;
+    if (!data || !Array.isArray(data.approvals)) {
+      this._approvalReadChanges?.clear();
+      this._approvalReadSessions?.clear();
+      for (const [id, item] of this.approvals) this.approvals.set(id, {
+        ...item, answerState: 'held', heldReason: timedOut
+          ? 'Approval refresh timed out. Reopen the inbox to check readiness.'
+          : 'Approval readiness could not be refreshed. Reopen the inbox to check again.',
+      });
+      this.renderApprovals();
+      this.showToast(timedOut
+        ? 'Approval refresh timed out. Answers remain held. No automatic retry was made.'
+        : 'Could not refresh approvals. Answers remain held. No automatic retry was made.', 'warning');
+      return;
+    }
+    const snapshot = new Map();
+    for (const item of data.approvals) {
+      if ((this._approvalReadChanges?.get(item.id)?.revision || 0) > mutationStart) continue;
+      const sessionChanged = (this._approvalReadSessions?.get(item.sessionId) || 0) > mutationStart;
+      snapshot.set(item.id, sessionChanged ? {
+        ...item, answerState: 'held',
+        heldReason: 'This session changed while approvals were refreshed. This item may be stale; reopen the inbox to check readiness. No answer will be replayed automatically.',
+      } : item);
+    }
+    const changes = [...(this._approvalReadChanges?.values() || [])]
+      .filter(change => change.revision > mutationStart).sort((left, right) => left.revision - right.revision);
+    for (const change of changes) {
+      if (!change.item) snapshot.delete(change.id);
+      else {
+        for (const [id, item] of snapshot) if (item.sessionId === change.item.sessionId) snapshot.delete(id);
+        snapshot.set(change.id, change.item);
+      }
+    }
+    this._approvalReadChanges?.clear();
+    this._approvalReadSessions?.clear();
+    this.approvals.clear();
     const inboxOn = this.approvalsInboxEnabled();
-    for (const item of (data && data.approvals) || []) {
+    for (const item of snapshot.values()) {
       if (inboxOn) this.approvals.set(item.id, item);
       // ⚠ Skip items a human already looked at (`acknowledgedAt`, set by
       // markIdleAlertSeen → POST .../viewed). Re-arming those is exactly the
@@ -63,12 +120,28 @@ Object.assign(ReverieApp.prototype, {
 
   // ─── SSE handlers ────────────────────────────────────────────
 
+  // Reconcile only events that overlap a list read. Resolution tombstones are
+  // per approval; a fresh prompt supersedes stale siblings in the same session.
+  _noteApprovalReadChange(item, resolved = false) {
+    const revision = (this._approvalMutationRevision || 0) + 1;
+    this._approvalMutationRevision = revision;
+    if (!this._approvalReading) return;
+    if (!this._approvalReadChanges) this._approvalReadChanges = new Map();
+    if (!this._approvalReadSessions) this._approvalReadSessions = new Map();
+    this._approvalReadChanges.set(item.id, { id: item.id, revision, item: resolved ? null : item });
+    if (!resolved) this._approvalReadSessions.set(item.sessionId, revision);
+  },
+
   _onApprovalPending(item) {
     if (!item || !item.id) return;
     if (!this.approvals) this.approvals = new Map();
+    this._noteApprovalReadChange(item);
     // One active item per session (server invariant): drop any stale sibling.
     for (const [id, existing] of this.approvals) {
-      if (existing.sessionId === item.sessionId) this.approvals.delete(id);
+      if (existing.sessionId === item.sessionId) {
+        if (id !== item.id) this._noteApprovalReadChange(existing, true);
+        this.approvals.delete(id);
+      }
     }
     this.approvals.set(item.id, item);
     this.renderApprovals();
@@ -76,19 +149,29 @@ Object.assign(ReverieApp.prototype, {
 
   _onApprovalUpdated(item) {
     if (!item || !item.id) return;
+    this._noteApprovalReadChange(item);
     // Acknowledged elsewhere (this user opened the session on another device):
     // spend the tab alert UNCONDITIONALLY, for the same reason
     // _onApprovalResolved does: with the inbox setting OFF the item was never
     // stored in `this.approvals`, yet seedApprovals armed its alert, so gating
     // this on a map hit would strand a yellow tab on every other device.
     if (item.acknowledgedAt) this.clearPendingHooks(item.sessionId, approvalKindToHook(item.kind));
-    if (!this.approvals?.has(item.id)) return;
+    if (!this.approvals?.has(item.id) && !this.approvalsInboxEnabled()) return;
+    if (!this.approvals) this.approvals = new Map();
+    for (const [id, existing] of this.approvals) {
+      if (id !== item.id && existing.sessionId === item.sessionId) {
+        this._noteApprovalReadChange(existing, true);
+        this.approvals.delete(id);
+      }
+    }
     this.approvals.set(item.id, item);
     this.renderApprovals();
   },
 
   _onApprovalResolved(info) {
     if (!info || !info.id) return;
+    this._noteApprovalReadChange(info, true);
+    this._approvalDrafts?.delete(info.id);
     // Clear the matching tab alert UNCONDITIONALLY: the inbox resolves on more
     // signals than the hook handlers do (superseded, expired, answered from
     // another device), clearPendingHooks is a no-op when nothing is set, and
@@ -119,6 +202,7 @@ Object.assign(ReverieApp.prototype, {
   },
 
   async answerApproval(id, action, option) {
+    if (this._approvalAnswerIsHeld(id)) return;
     const body = option !== undefined ? { action, option } : { action };
     const data = await this._apiJson(`/api/approvals/${encodeURIComponent(id)}/answer`, {
       method: 'POST',
@@ -128,25 +212,41 @@ Object.assign(ReverieApp.prototype, {
       this.showToast(action === 'deny' ? 'Denied' : 'Answer sent', 'success');
     } else {
       // 404/409 = resolved elsewhere or the dialog left the screen; refresh truth.
-      this.showToast('Could not answer, the prompt may already be resolved', 'warning');
-      this.seedApprovals();
+      this.showToast('Answer was not confirmed. No automatic retry was made.', 'warning');
+      await this.seedApprovals();
     }
   },
 
   /** Idle prompts: send the typed line from the card's input as a prompt. */
   async answerApprovalIdleText(id) {
+    if (this._approvalAnswerIsHeld(id)) return;
     const input = document.getElementById(`approvalText-${id}`);
     const text = input ? input.value.trim() : '';
     if (!text) return;
+    if (!this._approvalDrafts) this._approvalDrafts = new Map();
+    this._approvalDrafts.set(id, input.value);
     const data = await this._apiJson(`/api/approvals/${encodeURIComponent(id)}/answer`, {
       method: 'POST',
       body: { action: 'text', text },
     });
     if (data) this.showToast('Prompt sent', 'success');
     else {
-      this.showToast('Could not send, the session may be busy', 'warning');
-      this.seedApprovals();
+      this.showToast('Answer was not confirmed. No automatic retry was made.', 'warning');
+      await this.seedApprovals();
     }
+  },
+
+  _approvalHeldReason(item) {
+    return item?.answerState === 'held' && typeof item.heldReason === 'string' && item.heldReason.trim()
+      ? item.heldReason
+      : 'Answer readiness is not confirmed. Reopen the inbox to refresh it.';
+  },
+
+  _approvalAnswerIsHeld(id) {
+    const item = this.approvals?.get(id);
+    if (item?.answerState === 'current') return false;
+    this.showToast(this._approvalHeldReason(item), 'warning');
+    return true;
   },
 
   async dismissApproval(id) {
@@ -188,6 +288,7 @@ Object.assign(ReverieApp.prototype, {
       drawer.classList.add('open');
       document.querySelector('.btn-approvals')?.setAttribute('aria-expanded', 'true');
       this.renderApprovals();
+      this.seedApprovals();
     }
   },
 
@@ -232,11 +333,29 @@ Object.assign(ReverieApp.prototype, {
     const list = drawer.querySelector('.approvals-list');
     if (!list) return;
     const items = this.approvals ? [...this.approvals.values()].sort((a, b) => a.createdAt - b.createdAt) : [];
+    if (!this._approvalDrafts) this._approvalDrafts = new Map();
+    let focusedDraft = null;
+    for (const input of list.querySelectorAll('.approval-text-input')) {
+      const id = input.closest('[data-approval-id]')?.dataset.approvalId;
+      if (id) this._approvalDrafts.set(id, input.value);
+      if (id && input === document.activeElement) focusedDraft = {
+        id, start: input.selectionStart, end: input.selectionEnd, direction: input.selectionDirection,
+      };
+    }
+    for (const id of this._approvalDrafts.keys()) if (!this.approvals?.has(id)) this._approvalDrafts.delete(id);
     if (items.length === 0) {
       list.innerHTML = '<div class="approvals-empty">No pending approvals</div>';
       return;
     }
     list.innerHTML = items.map((item) => this._approvalCardHtml(item)).join('');
+    for (const input of list.querySelectorAll('.approval-text-input')) {
+      const id = input.closest('[data-approval-id]')?.dataset.approvalId;
+      if (id && this._approvalDrafts.has(id)) input.value = this._approvalDrafts.get(id);
+      if (id && focusedDraft?.id === id) {
+        input.focus({ preventScroll: true });
+        input.setSelectionRange(focusedDraft.start, focusedDraft.end, focusedDraft.direction);
+      }
+    }
     // The quiet reason is the only pane-derived string on a card, and it is the one
     // an agent could write itself (it prints its own footer row), so it reaches the
     // DOM as text and never as markup. The card leaves an empty span for it.
@@ -255,13 +374,15 @@ Object.assign(ReverieApp.prototype, {
       ? `${item.toolName}${item.toolSummary ? ': ' + item.toolSummary : ''}`
       : item.message || '';
     const age = this._approvalAge(item.createdAt);
+    const held = item.answerState !== 'current';
+    const disabled = held ? ' disabled aria-disabled="true"' : '';
     let actions = '';
     if (item.kind === 'idle') {
       actions =
         `<div class="approval-text-row">` +
         `<input type="text" id="approvalText-${id}" class="approval-text-input" placeholder="Send a prompt…" data-i18n-skip ` +
         `onkeydown="if(event.key==='Enter')app.answerApprovalIdleText('${id}')">` +
-        `<button class="approval-btn approval-btn-primary" onclick="app.answerApprovalIdleText('${id}')">Send</button>` +
+        `<button class="approval-btn approval-btn-primary"${disabled} onclick="app.answerApprovalIdleText('${id}')">Send</button>` +
         `</div>`;
     } else if (item.answerInTerminal) {
       // Supervised-hook CLIs (DeepSeek Harness): keystrokes are unverifiable, so
@@ -271,15 +392,15 @@ Object.assign(ReverieApp.prototype, {
       actions = item.options
         .map(
           (o) =>
-            `<button class="approval-btn ${o.n === 1 ? 'approval-btn-primary' : ''}" data-i18n-skip ` +
+            `<button class="approval-btn ${o.n === 1 ? 'approval-btn-primary' : ''}"${disabled} data-i18n-skip ` +
             `title="${escapeHtml(o.label)}" onclick="app.answerApproval('${id}','option',${o.n})">` +
             `${o.n}. ${escapeHtml(o.label.length > 42 ? o.label.slice(0, 42) + '…' : o.label)}</button>`
         )
         .join('');
     } else {
       actions =
-        `<button class="approval-btn approval-btn-primary" onclick="app.answerApproval('${id}','approve')">Approve</button>` +
-        `<button class="approval-btn approval-btn-danger" onclick="app.answerApproval('${id}','deny')">Deny (Esc)</button>`;
+        `<button class="approval-btn approval-btn-primary"${disabled} onclick="app.answerApproval('${id}','approve')">Approve</button>` +
+        `<button class="approval-btn approval-btn-danger"${disabled} onclick="app.answerApproval('${id}','deny')">Deny (Esc)</button>`;
     }
     return (
       `<div class="approval-card approval-kind-${item.kind}" data-approval-id="${id}">` +
@@ -291,6 +412,7 @@ Object.assign(ReverieApp.prototype, {
       // Filled by renderApprovalsDrawer through textContent, never here: see the note
       // there. An item a human acknowledged carries no reason and gets no line.
       (item.acknowledgedReason ? `<div class="approval-quiet" data-i18n-skip></div>` : '') +
+      (held ? `<div class="approval-summary approval-held" role="status" data-i18n-skip>Answer held: ${escapeHtml(this._approvalHeldReason(item))}</div>` : '') +
       (summary ? `<div class="approval-summary" data-i18n-skip>${escapeHtml(summary)}</div>` : '') +
       (item.context ? `<pre class="approval-context">${escapeHtml(item.context)}</pre>` : '') +
       `<div class="approval-actions">${actions}</div>` +

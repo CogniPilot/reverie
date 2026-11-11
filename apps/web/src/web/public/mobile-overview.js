@@ -953,11 +953,23 @@ Object.assign(ReverieApp.prototype, {
     const strip = document.createElement('div');
     strip.className = 'mobile-overview-approval-strip';
     strip.setAttribute('data-i18n-skip', '');
-    const addBtn = (label, cls, onTap) => {
+    const held = approval.answerState !== 'current';
+    if (held) {
+      const reason = document.createElement('span');
+      reason.className = 'approval-summary approval-held';
+      reason.setAttribute('role', 'status');
+      reason.textContent = 'Answer held: ' + this._approvalHeldReason(approval);
+      strip.appendChild(reason);
+    }
+    const addBtn = (label, cls, onTap, answer = true) => {
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'mobile-overview-approval-btn' + (cls ? ' ' + cls : '');
       btn.textContent = label;
+      if (held && answer) {
+        btn.disabled = true;
+        btn.setAttribute('aria-disabled', 'true');
+      }
       btn.addEventListener('click', (ev) => {
         ev.stopPropagation();
         onTap();
@@ -970,7 +982,7 @@ Object.assign(ReverieApp.prototype, {
       addBtn('Answer in terminal', 'primary', () => {
         if (typeof this.selectSession === 'function') this.selectSession(approval.sessionId);
         else if (typeof this.openApprovalSession === 'function') this.openApprovalSession(approval.id);
-      });
+      }, false);
       return strip;
     }
     if (approval.options && approval.options.length) {

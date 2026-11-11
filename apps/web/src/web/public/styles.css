@@ -13391,6 +13391,11 @@ kbd {
 .approval-btn:hover {
   border-color: var(--accent);
 }
+.approval-btn:disabled,
+.mobile-overview-approval-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
 .approval-btn-primary {
   background: var(--accent);
   border-color: var(--accent);
@@ -13407,6 +13412,7 @@ kbd {
 }
 .approval-text-input {
   flex: 1;
+  min-width: 0;
   background: var(--bg, rgba(0, 0, 0, 0.3));
   border: 1px solid var(--border);
   border-radius: 6px;
