@@ -12,8 +12,9 @@
  * not a copy):
  *
  *  1. The `mode ∈ a|b|c` enumeration in endpoints.md is the mode list, exactly, and the
- *     per-CLI availability probe (`GET /api/<mode>/status`) is documented for every
- *     agent mode. That second half is the narrow, family-scoped answer to "should the
+ *     canonical registry availability read (`GET /api/clis`) is documented, including
+ *     its authority boundary. Custom entries need no new per-mode route. This is the
+ *     narrow, family-scoped answer to "should the
  *     endpoint scanner also check registered-to-documented?". In general it should not:
  *     the skill documents 34 of 217 registered endpoints on purpose (it is an agent
  *     guide, not an API reference), so a blanket reverse check needs a 183-entry
@@ -125,16 +126,14 @@ describe('agent skill run-mode lists', () => {
     expect(QuickStartSchema.safeParse({ caseName: 'demo', mode: 'not-a-cli' }).success).toBe(false);
   });
 
-  it('documents the CLI availability probe for every agent mode', () => {
-    // The gap this closes: /api/pi/status shipped undocumented and only a human reading
-    // the doc noticed, because the sibling scanner (agent-skill-endpoints-doc.test.ts)
-    // only checks documented -> registered. Derived from the schema, so a seventh
-    // backend fails here until its probe is documented; the sibling test still proves
-    // the reverse, that nothing documented here is a 404.
+  it('documents canonical registry discovery and its authority boundary', () => {
+    // The endpoint scanner separately verifies documented routes are registered.
+    // Availability is a registry read, not a growing set of bespoke mode routes.
     const doc = readFileSync(join(SKILL_DIR, 'reference/endpoints.md'), 'utf-8');
-    const documented = new Set([...doc.matchAll(/\bGET\s+\/api(?:\/v1)?\/([a-z-]+)\/status\b/g)].map((m) => m[1]));
-    const probeable = MODES.filter((m) => m !== 'shell'); // shell has no CLI to probe
-    expect([...probeable].filter((m) => !documented.has(m))).toEqual([]);
+    expect(doc).toMatch(/GET\s+\/api(?:\/v1)?\/clis\b/);
+    for (const field of ['id', 'enabled', 'installed', 'supportsCustomModel']) expect(doc).toContain('`' + field + '`');
+    expect(doc).toContain('owner/admin');
+    expect(doc).toContain('compatibility endpoints');
   });
 
   it("documents exactly the accepted modes in endpoints.md's `mode ∈ …` enumeration", () => {
