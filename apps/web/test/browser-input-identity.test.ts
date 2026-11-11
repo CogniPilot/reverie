@@ -11,6 +11,9 @@ import { OWNER_COOKIE, registerOwnerPolicy } from '../src/owner-auth/policy.js';
 import { AUTH_COOKIE_NAME, registerAuthMiddleware } from '../src/web/middleware/auth.js';
 import { registerInputIdentityRoutes } from '../src/web/routes/input-identity-routes.js';
 import { registerMeRoutes } from '../src/web/routes/me-routes.js';
+import { registerSystemRoutes } from '../src/web/routes/system-routes.js';
+import { createMockRouteContext } from './mocks/index.js';
+import { TunnelManager } from '../src/tunnel-manager.js';
 import type { SessionPort } from '../src/web/ports/session-port.js';
 import {
   createUser,
@@ -40,7 +43,7 @@ afterEach(async () => {
   invalidateUsersCache();
   await rm(directory, { recursive: true, force: true });
 });
-async function start() {
+async function start(tunnel?: TunnelManager) {
   app = Fastify();
   await app.register(cookie);
   state = registerAuthMiddleware(app, false, '', service);
@@ -58,6 +61,14 @@ async function start() {
   });
   registerInputIdentityRoutes(app, service, state.authSessions !== null);
   registerMeRoutes(app, { authSessions: state.authSessions, qrAuthFailures: state.qrAuthFailures, https: false });
+  if (tunnel)
+    registerSystemRoutes(app, {
+      ...createMockRouteContext(),
+      tunnelManager: tunnel,
+      authSessions: state.authSessions,
+      qrAuthFailures: state.qrAuthFailures,
+      https: false,
+    } as never);
   await app.ready();
 }
 async function setup() {
@@ -247,6 +258,54 @@ it('binds an actual hash-upgrade login to the new committed credentials', async 
     first.json()
   );
   expect(JSON.parse(await readFile(file, 'utf8')).users[0].password.N).toBe(16384);
+});
+
+it.each(['recreate', 'reset', 'unchanged'] as const)(
+  'binds QR issuance to the actual credential incarnation across %s',
+  async (change) => {
+    vi.stubEnv('REVERIE_MULTIUSER', '1');
+    vi.stubEnv('REVERIE_DATA_DIR', directory);
+    invalidateUsersCache();
+    await createUser({ username: 'fixture-user', password, role: 'user' });
+    const tunnel = new TunnelManager();
+    Object.assign(tunnel, { url: 'https://synthetic.invalid' });
+    const minted = vi.spyOn(tunnel, 'mintUserToken');
+    await start(tunnel);
+    const issued = await app!.inject({ url: '/api/tunnel/qr', headers: basic('fixture-user') });
+    expect(issued.statusCode).toBe(200);
+    expect(minted).toHaveBeenCalledOnce();
+    const code = minted.mock.results[0].value;
+    if (change === 'recreate') {
+      await deleteUser('fixture-user');
+      await createUser({ username: 'fixture-user', password, role: 'user' });
+    } else if (change === 'reset') await setPassword('fixture-user', password);
+    const redeemed = await app!.inject('/q/' + code);
+    expect(redeemed.statusCode).toBe(change === 'unchanged' ? 302 : 401);
+    const token = redeemed.cookies.find((c) => c.name === AUTH_COOKIE_NAME)?.value;
+    if (change === 'unchanged') {
+      expect(token).toBeTruthy();
+      expect(
+        (await app!.inject({ url: '/api/input-identity', cookies: { [AUTH_COOKIE_NAME]: token! } })).statusCode
+      ).toBe(200);
+    } else expect(token).toBeUndefined();
+    expect((await app!.inject('/q/' + code)).statusCode).toBe(401);
+  }
+);
+
+it('refuses an unbound rotating QR token in multi-user mode instead of adopting a current account', async () => {
+  vi.stubEnv('REVERIE_MULTIUSER', '1');
+  vi.stubEnv('REVERIE_DATA_DIR', directory);
+  invalidateUsersCache();
+  const tunnel = new TunnelManager();
+  await start(tunnel);
+  tunnel.startTokenRotation();
+  try {
+    const response = await app!.inject('/q/' + tunnel.getCurrentShortCode());
+    expect(response.statusCode).toBe(401);
+    expect(response.cookies.find((c) => c.name === AUTH_COOKIE_NAME)).toBeUndefined();
+  } finally {
+    tunnel.stopTokenRotation();
+  }
 });
 
 it('does not invent provenance for an older multi-user cookie lacking an authentication fingerprint', async () => {

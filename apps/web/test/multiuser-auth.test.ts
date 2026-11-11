@@ -189,10 +189,11 @@ describe('multi-user auth', () => {
 describe('QR token identity (tunnel-manager)', () => {
   it('binds a minted token to a user and returns it on consume (single-use)', () => {
     const tm = new TunnelManager();
-    const code = tm.mintUserToken('alice');
+    const identity = { username: 'alice', credentialFingerprint: 'a'.repeat(64) };
+    const code = tm.mintUserToken(identity);
     expect(code).toHaveLength(6);
     const first = tm.consumeTokenWithIdentity(code);
-    expect(first).toEqual({ ok: true, username: 'alice' });
+    expect(first).toEqual({ ok: true, identity });
     // single-use
     expect(tm.consumeTokenWithIdentity(code)).toEqual({ ok: false });
   });

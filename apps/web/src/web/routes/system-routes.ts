@@ -57,7 +57,7 @@ import { getInstallInfo, checkForUpdate, startUpdate, getUpdateStatusForApi } fr
 import { getRepositoryStatus } from '../repo-status.js';
 import { spanDisplays, systemSpanHost } from '../../span-displays.js';
 import type { SessionPort, EventPort, ConfigPort, InfraPort, AuthPort, TabLayoutPort } from '../ports/index.js';
-import { AUTH_COOKIE_NAME } from '../middleware/auth.js';
+import { AUTH_COOKIE_NAME, browserAuthSession } from '../middleware/auth.js';
 import { QR_AUTH_FAILURE_MAX } from '../../config/tunnel-config.js';
 import { AUTH_SESSION_TTL_MS } from '../../config/auth-config.js';
 import { resolveTerminalHistoryConfig } from '../../config/terminal-history.js';
@@ -194,7 +194,15 @@ export function registerSystemRoutes(
       if (isMultiUserMode()) {
         // A rotating global token cannot carry identity — mint a single-use token
         // bound to the requesting user so the scanned code logs THEM in.
-        const shortCode = ctx.tunnelManager.mintUserToken(getAuthUser(req).username);
+        const record = browserAuthSession(req);
+        if (!record?.username || !record.credentialFingerprint)
+          return reply
+            .code(403)
+            .send(createErrorResponse(ApiErrorCode.FORBIDDEN, 'Current browser sign-in is required for a QR code'));
+        const shortCode = ctx.tunnelManager.mintUserToken({
+          username: record.username,
+          credentialFingerprint: record.credentialFingerprint,
+        });
         const svg = await ctx.tunnelManager.getQrSvgForCode(url, shortCode);
         return { svg, authEnabled: true };
       }
@@ -238,10 +246,10 @@ export function registerSystemRoutes(
     }
 
     // Validate and atomically consume the token (with any bound identity).
-    const consumed = shortCode ? ctx.tunnelManager.consumeTokenWithIdentity(shortCode) : { ok: false };
+    const consumed = shortCode ? ctx.tunnelManager.consumeTokenWithIdentity(shortCode) : { ok: false as const };
     // In multi-user mode a token MUST carry an identity (an identity-less rotating
     // token can't create a scoped session), so reject those too.
-    if (!consumed.ok || (multiUser && !consumed.username)) {
+    if (!consumed.ok || (multiUser && !consumed.identity)) {
       ctx.qrAuthFailures?.set(clientIp, qrFailures + 1);
       return reply.code(401).send('Invalid or expired QR code');
     }
@@ -252,9 +260,9 @@ export function registerSystemRoutes(
     let identity:
       | { username: string; role: 'admin' | 'user'; mustChangePassword: boolean; credentialFingerprint: string }
       | undefined;
-    if (multiUser && consumed.username) {
-      const user = await findUser(consumed.username);
-      if (!user || user.disabled) {
+    if (multiUser && consumed.identity) {
+      const user = await findUser(consumed.identity.username);
+      if (!user || user.disabled || userAuthenticationFingerprint(user) !== consumed.identity.credentialFingerprint) {
         ctx.qrAuthFailures?.set(clientIp, qrFailures + 1);
         return reply.code(401).send('Invalid or expired QR code');
       }
