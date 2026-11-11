@@ -303,6 +303,14 @@ jobs:
             --project integration-browser --repo "$PWD" --expect 2G --disk 1G --jobs 1 \
             -- bash -euo pipefail -c 'node .github/ci/company-office-browser.mjs; node .github/ci/laptop-power-browser.mjs' \
             2>&1 | tee acceptance/browser.log
+          # Render the real management UI at desktop and narrow phone widths.
+          # Every response comes from synthetic fixtures on an ephemeral port.
+          PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH="$REVERIE_BROWSER_EXECUTABLE" \
+            TEST_RESOURCE_SCREENSHOT_DIR="$REVERIE_BROWSER_ARTIFACTS/resources" \
+            nix develop --command node apps/web/node_modules/vitest/vitest.mjs run \
+              --config apps/web/config/vitest.browser.config.ts \
+              apps/web/test/company-resource-layout.browser.test.ts \
+            2>&1 | tee acceptance/resource-layout.log
           printf 'Worker and browser acceptance completed for %s\n' "$(cat "$RUNNER_TEMP/tested-image-id")" > acceptance/PASS.txt
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
