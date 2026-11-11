@@ -5,6 +5,63 @@ use reverie_contracts::{
 };
 use std::{fs, path::PathBuf};
 
+pub(super) struct Engine {
+    query: MetadataQueryOwner,
+    stop: WorkerStopBudget,
+    cancellation: CancellationToken,
+    end: Instant,
+}
+
+impl Engine {
+    pub(super) fn new(runtime: &WorkerRuntime, end: Instant) -> Self {
+        Self {
+            query: runtime.readonly().capture_query_owner(),
+            stop: runtime.stop_budget(),
+            cancellation: runtime.cancellation(),
+            end,
+        }
+    }
+
+    pub(super) fn deadline(&self) -> Instant {
+        self.stop
+            .deadline()
+            .map_or(self.end, |stop| stop.min(self.end))
+    }
+
+    pub(super) fn query(&self, query: EngineQuery<'_>) -> Result<String> {
+        let end = self.deadline();
+        need(Instant::now() < end, "WORKER_POOL_PREDECESSOR_DEADLINE")?;
+        self.query
+            .query(query, end, &self.cancellation)
+            .map_err(PoolError::Engine)
+    }
+
+    pub(super) fn settle(&self) -> Result<()> {
+        self.query
+            .settle_owned(self.deadline())
+            .map_err(PoolError::Engine)
+    }
+
+    pub(super) fn selected_id(&self, name: &str) -> Result<ContainerId> {
+        let invalid = |_| PoolError::Refused("WORKER_POOL_PREDECESSOR_CENSUS");
+        let ids = inventory_ids(&self.query(EngineQuery::InventoryIds)?).map_err(invalid)?;
+        let mut decoder = InventoryDecoder::new(&ids).map_err(invalid)?;
+        for batch in ids.chunks(32) {
+            decoder
+                .push(&self.query(EngineQuery::InspectBatch(batch))?)
+                .map_err(invalid)?;
+        }
+        let inventory = decoder.finish().map_err(invalid)?;
+        let name = format!("/{name}");
+        let mut rows = inventory.rows().iter().filter(|row| row.name_is(&name));
+        let row = rows
+            .next()
+            .ok_or(PoolError::Refused("WORKER_POOL_PREDECESSOR_REQUIRED"))?;
+        need(rows.next().is_none(), "WORKER_POOL_PREDECESSOR_AMBIGUOUS")?;
+        Ok(row.id().clone())
+    }
+}
+
 pub(super) struct Controller {
     pub(super) id: ContainerId,
     pub(super) digest: JournalDigest,
@@ -13,15 +70,14 @@ pub(super) struct Controller {
 }
 
 impl Controller {
-    pub(super) fn observe(
-        policy: &WorkerPoolPolicy,
-        query: impl Fn(EngineQuery<'_>) -> Result<String>,
-    ) -> Result<Self> {
-        let info = query(EngineQuery::WorkerPoolInformation)?;
+    pub(super) fn observe(policy: &WorkerPoolPolicy, engine: &Engine) -> Result<Self> {
+        let info = engine.query(EngineQuery::WorkerPoolInformation)?;
         validate_engine_information(info.as_bytes(), policy)
             .map_err(|_| PoolError::Refused("WORKER_POOL_PREDECESSOR_ENGINE"))?;
-        let id = selected_id(policy, &query)?;
-        let raw = query(EngineQuery::WorkerPoolWebsiteInspect(&id))?.into_bytes();
+        let id = engine.selected_id(&policy.controller_name())?;
+        let raw = engine
+            .query(EngineQuery::WorkerPoolWebsiteInspect(&id))?
+            .into_bytes();
         let parsed: serde_json::Value = serde_json::from_slice(&raw)
             .map_err(|_| PoolError::Refused("WORKER_POOL_PREDECESSOR_INSPECTION"))?;
         let digest = parsed["Config"]["Labels"]["reverie.pool.birth-policy"]
@@ -42,28 +98,6 @@ impl Controller {
             exit_code,
         })
     }
-}
-
-fn selected_id(
-    policy: &WorkerPoolPolicy,
-    query: &impl Fn(EngineQuery<'_>) -> Result<String>,
-) -> Result<ContainerId> {
-    let invalid = |_| PoolError::Refused("WORKER_POOL_PREDECESSOR_CENSUS");
-    let ids = inventory_ids(&query(EngineQuery::InventoryIds)?).map_err(invalid)?;
-    let mut decoder = InventoryDecoder::new(&ids).map_err(invalid)?;
-    for batch in ids.chunks(32) {
-        decoder
-            .push(&query(EngineQuery::InspectBatch(batch))?)
-            .map_err(invalid)?;
-    }
-    let inventory = decoder.finish().map_err(invalid)?;
-    let name = format!("/{}", policy.controller_name());
-    let mut rows = inventory.rows().iter().filter(|row| row.name_is(&name));
-    let row = rows
-        .next()
-        .ok_or(PoolError::Refused("WORKER_POOL_PREDECESSOR_REQUIRED"))?;
-    need(rows.next().is_none(), "WORKER_POOL_PREDECESSOR_AMBIGUOUS")?;
-    Ok(row.id().clone())
 }
 
 pub(super) fn assert_inactive(pid: u32, id: &ContainerId) -> Result<()> {

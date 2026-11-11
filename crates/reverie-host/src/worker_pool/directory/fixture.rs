@@ -130,6 +130,14 @@ impl OwnedLimitFixture {
             .unwrap();
         self.directory.close().unwrap();
         self.directory = PoolDirectory::unopened(&self.policy);
+        let discovered = self
+            .directory
+            .observe_retained(&self.policy, &anchor, self.pid, birth)
+            .unwrap();
+        assert_eq!(discovered, retained);
+        self.observe();
+        self.directory.close().unwrap();
+        self.directory = PoolDirectory::unopened(&self.policy);
         self.directory
             .acquire_retained(&self.policy, &retained)
             .unwrap();

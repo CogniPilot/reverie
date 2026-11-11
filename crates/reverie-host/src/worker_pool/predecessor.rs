@@ -13,12 +13,13 @@ use crate::{
 };
 use reverie_contracts::{
     worker_config::{self, EffectiveWorkerConfig},
-    worker_pool::{ControllerBirthV2, WorkerPoolProvider},
+    worker_pool::{ControllerServiceBirth, RetainedPoolAnchor, WorkerPoolProvider},
     worker_recovery::RecoveryInspection,
 };
 use reverie_core::{ids::ContainerId, operations::JournalDigest};
 use std::{path::Path, time::Instant};
 
+mod anchor;
 mod engine;
 mod namespace;
 
@@ -70,13 +71,11 @@ pub struct PreparedPoolPredecessor {
     locks: ImageMaintenanceLocks,
     reader: ImageControlFiles,
     source: Option<ImagePrivateSnapshot>,
-    query: MetadataQueryOwner,
-    stop: WorkerStopBudget,
-    cancellation: CancellationToken,
+    engine: engine::Engine,
     namespace: namespace::Namespace,
     immutable: ImmutableInputObserver,
     controller: Option<engine::Controller>,
-    end: Instant,
+    anchor: Option<anchor::Anchor>,
     phase: Phase,
     source_close_unknown: bool,
 }
@@ -133,16 +132,14 @@ impl PreparedPoolPredecessor {
     ) -> std::result::Result<Self, Box<PoolPredecessorFailure>> {
         let mut owner = Self {
             reader: ImageControlFiles::capture(service.source(), configuration),
-            end: end.min(service.end()).min(locks.end()),
+            engine: engine::Engine::new(runtime, end.min(service.end()).min(locks.end())),
             service,
             locks,
             source: None,
-            query: runtime.readonly().capture_query_owner(),
-            stop: runtime.stop_budget(),
-            cancellation: runtime.cancellation(),
             namespace: namespace::Namespace::default(),
             immutable: ImmutableInputObserver::default(),
             controller: None,
+            anchor: None,
             phase: Phase::Opening,
             source_close_unknown: false,
         };
@@ -177,25 +174,36 @@ impl PreparedPoolPredecessor {
             Path::new(&policy.instance_root) == home.join("reverie"),
             "WORKER_POOL_PREDECESSOR_INSTANCE_ROOT",
         )?;
-        self.controller = Some(self.observe_controller(policy)?);
-        let digest = &self
-            .controller
-            .as_ref()
-            .expect("observed controller")
-            .digest;
-        self.namespace.capture(policy, digest.as_str())?;
-        let birth = self.namespace.birth();
+        self.controller = Some(engine::Controller::observe(policy, &self.engine)?);
+        self.capture_birth_and_anchor(policy)?;
+        self.check_current()
+    }
+
+    fn capture_birth_and_anchor(&mut self, policy: &WorkerPoolPolicy) -> Result<()> {
+        let original = self.controller.as_ref().expect("observed controller");
+        self.namespace.capture(policy, original.digest.as_str())?;
+        let service_birth = self.namespace.birth();
+        let birth = service_birth.identity();
+        engine::assert_inactive(birth.broker().pid(), &original.id)?;
         bootstrap::assert_predecessor_source(birth, self.service.source())?;
-        let end = self.deadline();
         let identity = self
             .immutable
-            .observe_broker_program(birth.program(), end)
+            .observe_broker_program(birth.program(), self.engine.deadline())
             .map_err(|error| PoolError::BootstrapFacts(Box::new(error)))?;
         need(
             identity.identity() == birth.broker().executable_identity(),
             "WORKER_POOL_PREDECESSOR_BROKER_EXECUTABLE_CHANGED",
         )?;
-        self.check_current()
+        self.anchor = Some(anchor::Anchor::unopened(policy));
+        self.anchor
+            .as_mut()
+            .expect("retained original anchor owner")
+            .observe(
+                &self.engine,
+                policy,
+                &original.digest,
+                service_birth.retained_anchor(),
+            )
     }
 
     /// A failed bracket invalidates this observation. Only its checked close
@@ -216,9 +224,9 @@ impl PreparedPoolPredecessor {
         self.fences()?;
         self.assert_source_current()?;
         let original = self.controller();
-        let birth = self.namespace.birth();
+        let birth = self.namespace.birth().identity();
         engine::assert_inactive(birth.broker().pid(), &original.id)?;
-        let current = self.observe_controller(birth.policy())?;
+        let current = engine::Controller::observe(birth.policy(), &self.engine)?;
         need(
             original.id == current.id
                 && original.digest == current.digest
@@ -230,6 +238,10 @@ impl PreparedPoolPredecessor {
                 .map_err(|_| PoolError::Refused("WORKER_POOL_PREDECESSOR_INSPECTION"))?,
             "WORKER_POOL_PREDECESSOR_CONTROLLER_CHANGED",
         )?;
+        self.anchor
+            .as_ref()
+            .expect("observed anchor")
+            .assert_current(&self.engine, birth.policy())?;
         engine::assert_inactive(birth.broker().pid(), &original.id)?;
         self.namespace
             .assert_current(birth.policy(), original.digest.as_str())?;
@@ -269,15 +281,6 @@ impl PreparedPoolPredecessor {
         .map_err(Into::into)
     }
 
-    fn observe_controller(&self, policy: &WorkerPoolPolicy) -> Result<engine::Controller> {
-        engine::Controller::observe(policy, |query| {
-            self.time()?;
-            self.query
-                .query(query, self.deadline(), &self.cancellation)
-                .map_err(PoolError::Engine)
-        })
-    }
-
     fn source(&self) -> &ImagePrivateSnapshot {
         self.source.as_ref().expect("observed predecessor source")
     }
@@ -286,14 +289,9 @@ impl PreparedPoolPredecessor {
             .as_ref()
             .expect("observed predecessor controller")
     }
-    fn deadline(&self) -> Instant {
-        self.stop
-            .deadline()
-            .map_or(self.end, |stop| stop.min(self.end))
-    }
     fn time(&self) -> Result<()> {
         need(
-            Instant::now() < self.deadline(),
+            Instant::now() < self.engine.deadline(),
             "WORKER_POOL_PREDECESSOR_DEADLINE",
         )
     }
@@ -309,6 +307,9 @@ impl PreparedPoolPredecessor {
     }
     pub fn has_socket(&self) -> bool {
         self.namespace.has_socket()
+    }
+    pub fn retained_anchor(&self) -> &RetainedPoolAnchor {
+        self.anchor.as_ref().expect("observed anchor").data()
     }
 
     /// Checked metadata close. The original service fence and file locks stay
@@ -337,15 +338,16 @@ impl PreparedPoolPredecessor {
             Phase::Opening | Phase::Observed | Phase::Failed => (),
         }
         self.phase = Phase::Closing;
-        let query = self
-            .query
-            .settle_owned(self.deadline())
-            .map_err(PoolError::Engine);
+        let query = self.engine.settle();
         let immutable = self
             .immutable
             .assert_finalized()
             .map_err(|error| PoolError::BootstrapFacts(Box::new(error)));
-        let result = finalized(query, finalized(self.namespace.close(), immutable));
+        let anchor = self.anchor.as_mut().map_or(Ok(()), anchor::Anchor::close);
+        let result = finalized(
+            query,
+            finalized(anchor, finalized(self.namespace.close(), immutable)),
+        );
         let result = finalized(
             result,
             need(

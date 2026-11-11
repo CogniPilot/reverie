@@ -21,7 +21,7 @@ pub(super) struct Namespace {
     control: Option<File>,
     birth_file: Option<File>,
     birth_stamp: Option<PrivateFileStamp>,
-    birth: Option<ControllerBirthV2>,
+    birth: Option<ControllerServiceBirth>,
     socket: Option<File>,
     socket_stamp: Option<PrivateFileStamp>,
 }
@@ -75,9 +75,9 @@ impl Namespace {
         let mut raw = Vec::new();
         file.take(65_537).read_to_end(&mut raw)?;
         let invalid = |_| PoolError::Refused("WORKER_POOL_PREDECESSOR_BIRTH_DATA");
-        let birth = ControllerBirthV2::decode(&raw).map_err(invalid)?;
+        let birth = ControllerServiceBirth::decode(&raw).map_err(invalid)?;
         need(
-            birth.policy() == policy
+            birth.identity().policy() == policy
                 && raw.len() as u64 == info.len()
                 && birth.encode().map_err(invalid)? == raw
                 && format!("{:x}", Sha256::digest(&raw)) == digest,
@@ -157,7 +157,7 @@ impl Namespace {
         }
     }
 
-    pub(super) fn birth(&self) -> &ControllerBirthV2 {
+    pub(super) fn birth(&self) -> &ControllerServiceBirth {
         self.birth.as_ref().expect("qualified original birth")
     }
     pub(super) fn has_socket(&self) -> bool {

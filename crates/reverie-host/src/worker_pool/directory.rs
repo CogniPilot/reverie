@@ -63,6 +63,20 @@ impl PoolDirectory {
         self.assert_limits(policy)
     }
 
+    /// Read-only discovery for a predecessor that did not record a retained
+    /// anchor. An installed parent may already contain live laptop scopes.
+    pub(super) fn observe_retained(
+        &mut self,
+        policy: &WorkerPoolPolicy,
+        anchor: &ContainerId,
+        pid: u32,
+        birth: &JournalDigest,
+    ) -> Result<RetainedPoolAnchor> {
+        self.open_anchor(policy, anchor.as_str(), pid)?;
+        self.assert_limits(policy)?;
+        self.retained_anchor_data(anchor, pid, birth)
+    }
+
     pub(super) fn assert_retained_anchor(&self, anchor: &RetainedPoolAnchor) -> Result<()> {
         let boot = bounded_path("/proc/sys/kernel/random/boot_id", 64)?;
         need(
