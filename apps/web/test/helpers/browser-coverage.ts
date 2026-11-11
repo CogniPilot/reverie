@@ -401,7 +401,7 @@ const observationSchema = z.object({
 });
 
 /** All catalogued authored sources remain present, even with no observed execution. */
-export function readRawBaseline(
+export function readRawEvidence(
   output: string,
   required = {
     critical: ['/app.js', '/chat-app.js', '/company-resources.js', '/owner/owner.js'],
@@ -430,6 +430,7 @@ export function readRawBaseline(
     z.infer<typeof sourceMetadataSchema> & { observations: number; executed: boolean; frameKinds: string[] }
   >();
   const identities = new Map<string, z.infer<typeof sourceMetadataSchema>>();
+  const sourceCode = new Map<string, string>();
   for (const catalog of catalogs.values()) {
     const seen = new Set<string>();
     for (const source of catalog.sources) {
@@ -446,6 +447,7 @@ export function readRawBaseline(
         if (hash(snapshot) !== source.sha256) throw new Error(`Coverage source snapshot is corrupt: ${source.id}`);
         if (snapshot.length !== source.codeLength || Buffer.byteLength(snapshot) !== source.bytes)
           throw new Error(`Coverage source lengths conflict with verified snapshot: ${source.id}`);
+        sourceCode.set(source.id, snapshot);
       }
     }
   }
@@ -486,7 +488,7 @@ export function readRawBaseline(
       )
     )
       throw new Error(`Actual iframe JavaScript coverage was not collected: ${asset}`);
-  return {
+  const summary = {
     version: 2,
     revision: [...revisions][0],
     observations: observations.length,
@@ -499,6 +501,11 @@ export function readRawBaseline(
     frameGaps: observations.flatMap((item) => item.frameGaps),
     limitations: [...new Set([...catalogs.values()].flatMap((catalog) => catalog.limitations))],
   };
+  return { summary, observations, sourceCode };
+}
+
+export function readRawBaseline(output: string, required?: { critical: string[]; iframe: string[] }) {
+  return readRawEvidence(output, required).summary;
 }
 
 export function canonicalScript(
