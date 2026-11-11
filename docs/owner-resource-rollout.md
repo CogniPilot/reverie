@@ -196,6 +196,15 @@ that flag retained. The reply's closed anchor observation is data only.
 Observation and policy-edit preflight remain available when new-member capacity
 is exhausted.
 
+A known refusal is also terminal for the same original Created configuration
+attempt. Its private cleanup-only state retains the actual CID, storage and
+Office owners and the full refusal cause; it permits no configuration retry,
+memory, pane, viewer or ordinary settlement promotion. A refusal from another
+attempt, an unbound value, a diagnostic lookalike or any prior native uncertainty
+cannot enter that state. Only the original exact-CID stop/readback and every
+required native, storage and Office finalizer may return resources and release
+the failed launch's hold. Cleanup uncertainty remains retained.
+
 This isolation does not recycle the attempted identities or implement turnover.
 Retirement needs the original confirmed stopped-laptop removal, exact fresh
 container absence and known closure of every retained member component. The

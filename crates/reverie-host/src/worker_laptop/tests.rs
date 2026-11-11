@@ -99,14 +99,17 @@ fn direct_resources(
 pub(super) struct Fixture {
     pub(super) root: PathBuf,
     runtime: Option<Arc<WorkerRuntime>>,
-    office: OfficeService,
+    pub(super) office: OfficeService,
     pub(super) source: EffectiveWorkerConfig,
 }
 impl Fixture {
     pub(super) fn employee(mode: &str) -> Self {
         Self::employee_with_hooks(mode, crate::captured_client::test_hooks::Hooks::default())
     }
-    fn employee_with_hooks(mode: &str, hooks: crate::captured_client::test_hooks::Hooks) -> Self {
+    pub(super) fn employee_with_hooks(
+        mode: &str,
+        hooks: crate::captured_client::test_hooks::Hooks,
+    ) -> Self {
         let fixture = Self::new_with_hooks(mode, hooks);
         fs::write(fixture.root.join("company.json"), serde_json::to_vec(&json!({"employees":[{"id":"11111111-2222-4333-8444-555555555555","sessionId":SID,"owner":null,"name":"Owned fixture","desiredRunning":true}]})).unwrap()).unwrap();
         fixture

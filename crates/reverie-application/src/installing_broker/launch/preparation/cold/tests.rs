@@ -9,6 +9,7 @@ mod finalization;
 mod provider;
 mod service;
 mod started;
+mod started_abort;
 mod started_prefix;
 mod supervisor;
 fn broker(tree: &Tree) -> InstallingBroker {

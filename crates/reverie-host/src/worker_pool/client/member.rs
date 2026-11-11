@@ -23,7 +23,9 @@ impl ControllerState {
         if let Some(receipt) = dispatch.refused(&reply) {
             let current = self.assert_current_for_member_refusal(runtime, end, &receipt);
             let refusal = receipt.settle_after_current(&mut self.effect_unknown, current)?;
-            return Err(PoolError::MemberRequestRefused(refusal));
+            return Err(PoolError::MemberRequestRefused(
+                refusal.bind_created(target),
+            ));
         }
         need(
             reply["known"] == true && reply["phase"] == "memberConfigured",

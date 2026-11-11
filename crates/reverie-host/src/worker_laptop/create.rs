@@ -37,7 +37,7 @@ pub(super) struct Creation {
     pub(super) publication: Option<super::publication::Publication>,
     pub(super) worker_memory: Option<super::memory::Pending>,
     pub(super) worker_perf: Option<super::perf::Attempt>,
-    pub(super) controller_member_attempted: bool,
+    pub(super) controller_member_attempt: Option<MemberConfigurationAttempt>,
 }
 impl Creation {
     pub(super) fn owns_created(&self) -> bool {
@@ -101,7 +101,7 @@ impl Workflows {
             publication: None,
             worker_memory: None,
             worker_perf: None,
-            controller_member_attempted: false,
+            controller_member_attempt: None,
         });
         record.phase = Phase::Running;
         let result = run(

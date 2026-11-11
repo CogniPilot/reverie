@@ -61,6 +61,20 @@ pub use publication::{ControllerBirthPublication, PublishedControllerBirthData};
 use reverie_contracts::worker_pool::WorkerPoolPolicy;
 use std::{fmt, io};
 
+/// Controlled refusal DATA for the downstream owned-Created unit fixture. No
+/// controller, installed pool, current native observation or write grant is
+/// constructed; native exchange acceptance is tested separately.
+#[cfg(test)]
+pub(crate) fn controlled_member_refusal(
+    target: Option<&crate::worker_laptop::CreatedPoolTarget<'_>>,
+) -> PoolError {
+    let refusal = MemberRequestRefusal::capacity();
+    PoolError::MemberRequestRefused(match target {
+        Some(target) => refusal.bind_created(target),
+        None => refusal,
+    })
+}
+
 #[derive(Debug)]
 pub enum PoolError {
     Refused(&'static str),

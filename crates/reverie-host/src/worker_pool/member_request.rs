@@ -1,6 +1,7 @@
 //! Known refusal of a single member request before native observation, CID
 //! admission or cgroup effects. Construction stays within the pool owner.
 use super::{Result, need};
+use crate::worker_laptop::{CreatedPoolTarget, MemberConfigurationAttempt};
 use serde::Deserialize;
 
 #[derive(Clone, Copy, Debug, Deserialize)]
@@ -18,7 +19,10 @@ enum RefusalCode {
 /// The original controller refused this request before beginning it. This is
 /// neither a successful configuration nor permission to discard a prior owner.
 #[derive(Debug)]
-pub struct MemberRequestRefusal(RefusalCode);
+pub struct MemberRequestRefusal {
+    code: RefusalCode,
+    created: Option<MemberConfigurationAttempt>,
+}
 
 /// The first dispatch owns its nonce and previous uncertainty. Dropping this
 /// record never clears uncertainty; only its exact closed refusal can do so.
@@ -110,7 +114,7 @@ impl RefusalAnchor {
 
 impl MemberRequestRefusal {
     pub fn code(&self) -> &'static str {
-        match self.0 {
+        match self.code {
             RefusalCode::Deadline => "WORKER_POOL_ACTIVATION_DEADLINE",
             RefusalCode::Capacity => "WORKER_POOL_MEMBER_CAPACITY_EXHAUSTED",
             RefusalCode::AlreadyAttempted => "WORKER_POOL_MEMBER_ALREADY_ATTEMPTED",
@@ -118,16 +122,31 @@ impl MemberRequestRefusal {
         }
     }
     pub(super) fn deadline() -> Self {
-        Self(RefusalCode::Deadline)
+        Self::new(RefusalCode::Deadline)
     }
     pub(super) fn capacity() -> Self {
-        Self(RefusalCode::Capacity)
+        Self::new(RefusalCode::Capacity)
     }
     pub(super) fn already_attempted() -> Self {
-        Self(RefusalCode::AlreadyAttempted)
+        Self::new(RefusalCode::AlreadyAttempted)
     }
     pub(super) fn policy() -> Self {
-        Self(RefusalCode::Policy)
+        Self::new(RefusalCode::Policy)
+    }
+    fn new(code: RefusalCode) -> Self {
+        Self {
+            code,
+            created: None,
+        }
+    }
+    pub(super) fn bind_created(mut self, target: &CreatedPoolTarget<'_>) -> Self {
+        self.created = Some(target.member_attempt());
+        self
+    }
+    pub(crate) fn is_for_created(&self, attempt: &MemberConfigurationAttempt) -> bool {
+        self.created
+            .as_ref()
+            .is_some_and(|original| original.same(attempt))
     }
     /// Only the original authenticated exchange supplies these bytes. A known
     /// flag or matching diagnostic on any other phase cannot settle issuance.
@@ -138,7 +157,7 @@ impl MemberRequestRefusal {
             && reply.phase == "memberRefused"
             && reply.known
             && reply.anchor.valid())
-        .then_some(Self(reply.primary_error))
+        .then_some(Self::new(reply.primary_error))
     }
 }
 
