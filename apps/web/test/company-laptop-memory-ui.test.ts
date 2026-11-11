@@ -78,11 +78,17 @@ describe('the Laptop memory section of the owner profile', () => {
       {response: {ok: true, data: {configured: true, signedIn: true, identity: {id: 'owner', role: 'owner', primary: true}}}};
     const previous = h.app._chatApi.bind(h.app);
     const calls: Array<{ path: string; body: any }> = [];
+    const nativeReads: string[] = [];
     h.app._chatApi = async (path: string, opts: any) => {
       if (path === '/api/owner/status') return owner.response;
       if (path === '/api/company' && !opts) return { ok: true, data };
       if (path === '/api/chatrooms/phone-status') return { ok: true, data: { self: 'owner', canSetOwn: true } };
       if (path === '/api/company/hire-options') return { ok: true, data: { sources: [], harnesses: [] } };
+      // The live RAM/CPU observation panel is independent of the replacement
+      // workflow under test. Its GET is neither a preview nor an owner mutation.
+      if (path === `/api/company/resources/employees/${employeeId}`) {
+        nativeReads.push(path); return { ok: false, status: 503, error: 'Synthetic native observation unavailable' };
+      }
       if (path.startsWith('/api/company/resources/')) {
         if (!path.endsWith('/operations')) calls.push({ path, body: opts?.body });
         const reply = replies[path.slice('/api/company/resources/'.length)];
@@ -97,13 +103,14 @@ describe('the Laptop memory section of the owner profile', () => {
     const section = () => h.document.querySelector('.ca-expert-profile .ca-profile-memory') as HTMLElement | null;
     const button = (label: string) => section()!.querySelector(`[aria-label="${label}"]`) as HTMLButtonElement;
     const status = () => section()!.querySelector('[role="status"]')!.textContent;
-    return { h, calls, confirm, section, button, status, owner, employee };
+    return { h, calls, nativeReads, confirm, section, button, status, owner, employee };
   }
 
   it('is not shown when the server does not report the routes, and asks nothing', async () => {
-    const { calls, section } = await setup(false);
+    const { calls, nativeReads, section } = await setup(false);
     expect(section()).toBeNull();
     expect(calls).toHaveLength(0);
+    expect(nativeReads).toEqual([`/api/company/resources/employees/${employeeId}`]);
   });
 
   it('previews, shows what is kept, restarts once with the note, and reads the result on request', async () => {

@@ -143,6 +143,17 @@ function preview(body: FleetPreviewRequest, changes: Partial<FleetPreview> = {})
 }
 
 describe('Company Settings laptop fleet', () => {
+  it('leads with observed fleet summary and profile links while keeping disruptive workflows explicit', async () => {
+    const { section, calls } = await setup();
+    const fleet = section();
+    expect(fleet.querySelector('.ca-fleet-summary')!.textContent).toContain('Pool hard ceilingNot verified');
+    expect(fleet.querySelector('.ca-fleet-summary')!.textContent).toContain('Laptops reported running1 of 2');
+    expect(fleet.querySelector('[data-fleet-profile]')!.textContent).toBe('River');
+    expect((fleet.querySelector('.ca-fleet-maintenance') as HTMLDetailsElement).open).toBe(false);
+    expect((fleet.querySelector('.ca-fleet-rollout') as HTMLDetailsElement).open).toBe(false);
+    expect(fleet.querySelector('.ca-fleet-table')!.compareDocumentPosition(fleet.querySelector('.ca-fleet-rollout')!) & 4).toBe(4);
+    expect(calls.every(call => call.body === undefined)).toBe(true);
+  });
   it('is mounted only for the verified owner', async () => {
     const { section, calls } = await setup({ verified: false });
     expect(section()).toBeNull();

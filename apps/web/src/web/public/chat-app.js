@@ -3449,7 +3449,31 @@ class ReverieChatApp {
     const status = this.el('p', 'ca-hint', 'Loading company settings…'); status.setAttribute('role', 'status');
     const error = this.el('p', 'ca-company-error'); error.setAttribute('role', 'alert');
     const content = this.el('div', 'ca-company-settings-content');
-    dialog.append(head, status, error, content);
+    const tabs = this.el('nav', 'ca-company-settings-tabs');
+    tabs.setAttribute('role', 'tablist'); tabs.setAttribute('aria-label', 'Company settings sections');
+    const sections = [['general', 'Company'], ['runtime', 'Employees'], ['hiring', 'Hiring'], ['reports', 'Reports']].map(([key, label]) => {
+      const panel = this.el('section', 'ca-company-settings-panel'); panel.id = `ca-company-settings-${key}`;
+      const tab = this.button('ca-btn', label, () => selectTab(key), { text: label });
+      tab.id = `ca-company-settings-tab-${key}`; tab.dataset.settingsTab = key; tab.setAttribute('role', 'tab');
+      tab.setAttribute('aria-controls', panel.id); panel.setAttribute('role', 'tabpanel'); panel.setAttribute('aria-labelledby', tab.id);
+      tabs.append(tab); content.append(panel); return { key, tab, panel };
+    });
+    const selectTab = key => {
+      for (const section of sections) {
+        const active = section.key === key;
+        section.panel.hidden = !active; section.tab.setAttribute('aria-selected', String(active)); section.tab.tabIndex = active ? 0 : -1;
+      }
+      content.scrollTop = 0;
+    };
+    tabs.addEventListener('keydown', event => {
+      const available = sections.filter(section => !section.tab.hidden), index = available.findIndex(section => section.tab === event.target);
+      if (index < 0) return;
+      const next = event.key === 'ArrowRight' ? (index + 1) % available.length : event.key === 'ArrowLeft' ? (index + available.length - 1) % available.length
+        : event.key === 'Home' ? 0 : event.key === 'End' ? available.length - 1 : -1;
+      if (next < 0) return; event.preventDefault(); selectTab(available[next].key); available[next].tab.focus();
+    });
+    const [general, runtime, hiring, reportsPanel] = sections.map(section => section.panel);
+    dialog.append(head, tabs, status, error, content); selectTab('general');
     // Per-device and for everyone who can open this dialog, so it does not wait on (or depend on) the company load.
     const mobile = this.doc.defaultView?.ReverieMobile;
     if (mobile) {
@@ -3457,7 +3481,7 @@ class ReverieChatApp {
       device.append(this.el('h3', '', 'This device'),
         this.el('p', 'ca-hint', 'Install Reverie as an app on this phone or computer and turn on its notifications. This applies only to the device you are using.'),
         this.button('ca-btn', 'Install app and notifications', () => mobile.open(), { text: 'Install app and notifications' }));
-      content.append(device);
+      general.append(device);
     }
     dialog.addEventListener('close', () => dialog.remove());
     this.doc.body.append(dialog); dialog.showModal(); close.focus();
@@ -3469,10 +3493,11 @@ class ReverieChatApp {
       const manage = data.canManage === true && auth.ok && auth.data?.self === 'owner' && auth.data?.canSetOwn === true;
       status.textContent = '';
       if (manage) {
-        this.companyRecoveryFields(content, data, status);
-        this.doc.defaultView.ReverieFleetResources?.mount(this, content, dialog);
+        this.companyRecoveryFields(runtime, data, status);
+        this.doc.defaultView.ReverieFleetResources?.mount(this, runtime, dialog);
+        selectTab('runtime');
         const plugins = this.doc.defaultView?.ReverieChatPlugins;
-        if (plugins) content.append(this.button('ca-btn', 'Configure server chat plugins', () => {
+        if (plugins) general.append(this.button('ca-btn', 'Configure server chat plugins', () => {
           void plugins.openSettings().catch(failure => this.toast(failure.message || 'Plugin settings are unavailable.', 'error'));
         }, { text: 'Chat plugins' }));
         const form = this.el('form', 'ca-company-settings-form');
@@ -3501,8 +3526,8 @@ class ReverieChatApp {
           } catch (failure) { error.textContent = failure.message || 'Company settings could not be saved. Try again.'; }
           finally { saving = false; save.disabled = false; }
         });
-        content.append(form);
-        content.append(this.companyTimeZoneForm(data, status, error, onSaved));
+        general.append(form);
+        general.append(this.companyTimeZoneForm(data, status, error, onSaved));
         const coreForm = this.el('form', 'ca-company-core-form');
         const companyCore = this.coreBeliefFields(coreForm, 'Company core beliefs', data.settings?.coreBeliefs || []);
         coreForm.append(this.el('p', 'ca-hint', 'Company blocks come first for every expert; personal additions follow with exact duplicates removed. This is configured text, not proof of a running session’s loaded startup.'));
@@ -3519,9 +3544,12 @@ class ReverieChatApp {
             companyCore.markSaved(); status.textContent = 'Company core beliefs saved.'; await onSaved?.();
           } catch (failure) { error.textContent = failure.message || 'Company core beliefs could not be saved.'; }
           finally { saveCore.disabled = false; }
-        }); content.append(coreForm);
-        content.append(this.companyHiringFields(data.employees || []));
-      } else content.append(this.el('p', 'ca-hint', 'Sign in as the owner to change company settings.'));
+        }); general.append(coreForm);
+        hiring.append(this.companyHiringFields(data.employees || []));
+      } else {
+        general.append(this.el('p', 'ca-hint', 'Sign in as the owner to change company settings.'));
+        for (const section of sections.filter(section => ['runtime', 'hiring'].includes(section.key))) section.tab.hidden = true;
+      }
       const receipts = this.el('details', 'ca-company-settings-receipts');
       receipts.append(this.el('summary', '', 'Research receipts'));
       receipts.append(this.el('p', 'ca-hint', 'Existing agent reports and their evidence. Hypotheses are unverified.'));
@@ -3556,7 +3584,7 @@ class ReverieChatApp {
         } catch (failure) { error.textContent = failure.message || 'Research receipts could not be refreshed.'; }
         finally { refresh.disabled = false; }
       }, { text: 'Refresh receipts' });
-      receipts.append(reports, refresh); content.append(receipts);
+      receipts.append(reports, refresh); reportsPanel.append(receipts);
     } catch (failure) { if (dialog.isConnected) { status.textContent = ''; error.textContent = failure.message || 'Company settings are unavailable.'; } }
   }
 
@@ -3579,7 +3607,7 @@ class ReverieChatApp {
       return { wrap, input };
     };
     const perDay = number('Hires in any 24 hours', 20), active = number('Active hires at most', 50);
-    const hires = this.el('div', 'ca-company-hiring-active');
+    const hires = this.el('details', 'ca-company-hiring-active');
     const save = this.el('button', 'ca-btn is-primary', 'Save hiring settings'); save.type = 'submit'; save.disabled = true;
     const actions = this.el('div', 'ca-dialog-actions'); actions.append(save);
     form.append(this.el('h3', '', 'Hiring'), usage, perDay.wrap, active.wrap,
@@ -3596,7 +3624,7 @@ class ReverieChatApp {
       const who = (by) => by === 'owner' ? 'you' : by.startsWith('agent:')
         ? employees.find((e) => e.sessionId === by.slice(6))?.name ?? `session ${by.slice(6, 14)}` : by;
       const list = (data.hires || []).filter((h) => h.status === 'active');
-      hires.replaceChildren(this.el('h4', '', `Active hires · ${list.length}`));
+      hires.replaceChildren(this.el('summary', '', `Active hires · ${list.length}`));
       if (!list.length) hires.append(this.el('p', 'ca-hint', 'No active hires.'));
       for (const h of list) {
         const row = this.el('div', 'ca-company-hire-record');
@@ -9081,7 +9109,7 @@ class ReverieChatApp {
       saveHint.textContent = key === 'credentials'
         ? 'PATs and access checkboxes save immediately. Cancel does not undo saved PATs or access changes.'
         : key === 'permissions'
-        ? 'Permissions save immediately. RAM and CPU changes require Preview and Apply. GPU requests show their own status. Cancel does not undo saved changes or session actions.'
+        ? 'Permissions save immediately. Resource changes have separate Apply or Preview actions. Cancel does not undo saved changes or session actions.'
         : 'Profile changes are saved together. Cancel discards unsaved profile edits.';
       body.scrollTop = 0;
     };
@@ -9115,12 +9143,16 @@ class ReverieChatApp {
         if (Object.hasOwn(current, key)) employee[key] = current[key];
       management.replaceChildren(); this.employeePermissionFields(management, employee);
       this.employeeHiringFields(management, employee, dialog);
-      this.employeeGpuFields(management, employee, dialog);
-      globalThis.ReverieFleetResources?.mountEmployee(this, management, dialog, employee);
+      const resources = this.el('section', 'ca-profile-resources');
+      resources.setAttribute('aria-label', 'Laptop resources');
+      resources.append(this.el('h3', '', 'Laptop resources'), this.el('p', 'ca-hint', 'Requested policy and verified running limits are shown separately.'));
+      management.append(resources);
+      globalThis.ReverieFleetResources?.mountEmployee(this, resources, dialog, employee);
+      this.employeeGpuFields(resources, employee, dialog);
+      if (company.data?.resourceReplacement === true) this.employeeMemoryFields(resources, employee, dialog);
       credentials.replaceChildren(); this.publicationCredentialsFields(credentials, employee);
       this.employeeLifecycleFields(management, employee, onSaved, dialog);
       management.append(this.button('ca-btn', `Open ${employee.name}'s journal map`, () => this.openJournalMap(employee), { text: 'Journal map' }));
-      if (company.data?.resourceReplacement === true) this.employeeMemoryFields(management, employee, dialog);
     }).catch(() => { if (dialog.isConnected) {
       permissionStatus.textContent = 'Permissions could not be loaded. Reopen the profile to try again.';
       credentialStatus.textContent = 'PAT access could not be loaded. Reopen the profile to try again.';
@@ -9411,7 +9443,7 @@ class ReverieChatApp {
       finally { busy = false; sync(); }
     }, { text: 'Preview' });
     row.append(label, preview, check);
-    host.append(this.el('h3', '', 'Laptop memory'),
+    host.append(this.el('h4', '', 'Hard RAM ceiling (restart required)'),
       this.el('p', 'ca-hint', 'Changes this expert\'s hard memory ceiling by restarting the laptop. Task limits, CPU limits and the shared pool stay as they are. A soft memory limit controls reclaim pressure; it does not remove the hard ceiling or increase pool capacity.'),
       row, draftBox, status);
     container.append(host); status.textContent = 'Checking previous memory changes…'; sync(); void discover();

@@ -42,6 +42,18 @@ it('groups existing controls, keeps a real associated save action, and supports 
   expect(dialog.querySelector('[aria-label="View startup context for River"]').closest('[role=tabpanel]').hidden).toBe(false);
   expect(writes).toEqual([]);
 });
+
+it('places hiring delegation and the RAM, CPU and GPU controls on employee Permissions', async () => {
+  const { dialog, writes } = await setup();
+  dialog.querySelector('[data-profile-tab=permissions]').click();
+  const panel = dialog.querySelector('#ca-employee-panel-permissions');
+  const resources = panel.querySelector('[aria-label="Laptop resources"]');
+  expect(resources).not.toBeNull();
+  expect(resources.querySelector('.ca-employee-resources')).not.toBeNull();
+  expect(resources.querySelector('.ca-employee-gpu')).not.toBeNull();
+  expect(panel.querySelector('[aria-label="Hiring permission for River"]')).not.toBeNull();
+  expect(writes).toEqual([]);
+});
 it('states the save rule once, in the footer, and offers Save profile only where it saves something', async () => {
   const { h, dialog } = await setup();
   const save = dialog.querySelector('button[type=submit]');

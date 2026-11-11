@@ -89,7 +89,7 @@
       this.refresh = shell.button('ca-btn', `Refresh resource status for ${employee.name}`, () => this.load(), {
         text: 'Refresh resource status',
       });
-      this.host.append(shell.el('h3', '', 'Laptop RAM and CPU'), this.status, this.error, this.content, this.refresh);
+      this.host.append(shell.el('h4', '', 'RAM and CPU'), this.status, this.error, this.content, this.refresh);
       container.append(this.host);
       dialog.addEventListener(
         'close',
@@ -185,7 +185,7 @@
       const s = this.shell;
       const form = s.el('form', 'ca-fleet-form');
       const field = (label, name, initial, maximum) => {
-        const input = s.el('input', 'ca-input');
+        const input = s.el('input', 'ca-field');
         input.name = name;
         input.type = 'number';
         input.min = '1';
@@ -193,8 +193,9 @@
         input.step = '1';
         input.required = true;
         input.value = String(initial);
-        const caption = s.el('label', '', label);
-        caption.append(input);
+        input.setAttribute('aria-label', label);
+        const caption = s.el('label', 'ca-label');
+        caption.append(s.el('span', 'ca-label-text', label), input);
         form.append(caption);
         return input;
       };
@@ -298,7 +299,7 @@
         s.el(
           'p',
           'ca-hint',
-          'Soft RAM applies reclaim pressure without reserving RAM. CPU weight shares CPU under contention.'
+          'Soft RAM applies reclaim pressure without reserving RAM. CPU weight shares CPU under contention. The shared pool ceiling still applies when a laptop ceiling is unbounded.'
         ),
         editable
           ? this.renderEdit(value)
@@ -348,22 +349,24 @@
       this.check = shell.button('ca-btn', 'Check laptop rollout status', () => this.checkOperations(), {
         text: 'Check rollout',
       });
+      this.maintenance = shell.el('details', 'ca-fleet-maintenance');
+      this.maintenance.append(shell.el('summary', '', 'Controller setup and recovery'), this.setup, this.native);
+      const actions = shell.el('div', 'ca-company-actions ca-fleet-actions');
+      actions.append(this.refresh, this.check);
       this.host.append(
         shell.el('h3', '', 'Laptop fleet'),
         shell.el(
           'p',
           'ca-hint',
-          'Preview image and resource changes before restarting laptops. Soft RAM requests reclaim pressure; the hard ceiling remains. CPU weight shares available CPU rather than imposing a quota.'
+          'Review requested and verified limits here. Edit an employee’s RAM, CPU and GPU access from their profile’s Permissions tab.'
         ),
         this.status,
         this.error,
-        this.setup,
-        this.native,
         this.results,
         this.content,
         this.draft,
-        this.refresh,
-        this.check
+        actions,
+        this.maintenance
       );
       container.append(this.host);
       void this.load();
@@ -548,6 +551,16 @@
       this.renderBlockers(this.content, data.blockers);
       this.renderSetup();
       this.renderNative();
+      const summary = s.el('dl', 'ca-fleet-summary');
+      for (const [label, value] of [
+        ['Pool hard ceiling', data.pool.observed ? memory(data.pool.observed.memoryMaxMiB) : 'Not verified'],
+        [
+          'Laptops reported running',
+          `${data.employees.filter((employee) => employee.state === 'running').length} of ${data.employees.length}`,
+        ],
+      ])
+        summary.append(s.el('dt', '', label), s.el('dd', '', value));
+      this.content.append(summary);
       if (data.operations === null)
         this.content.append(
           s.el('p', 'ca-hint', 'Rollout history is unavailable. Existing operations have not been ruled out.')
@@ -568,6 +581,11 @@
         option.value = image.id;
         this.image.append(option);
       }
+      if (!data.images.length) {
+        const unavailable = s.el('option', '', 'No verified laptop image available');
+        unavailable.value = '';
+        this.image.append(unavailable);
+      }
       const imageLabel = s.el('label', 'ca-label');
       imageLabel.append(s.el('span', '', 'Target laptop image'), this.image);
       this.form.append(imageLabel);
@@ -581,6 +599,7 @@
       {
         const scroll = s.el('div', 'ca-fleet-table-scroll');
         const table = s.el('table', 'ca-fleet-table');
+        table.setAttribute('aria-label', 'Laptop resource summary');
         const head = s.el('thead'),
           headings = s.el('tr');
         for (const label of ['Employee', 'Status', 'Requested RAM / CPU', 'Verified RAM / CPU']) {
@@ -593,7 +612,7 @@
         for (const employee of data.employees) body.append(this.renderEmployeeSummary(employee));
         table.append(head, body);
         scroll.append(table);
-        this.form.append(scroll);
+        this.content.append(scroll);
       }
       const canaryLabel = s.el('label', 'ca-label');
       canaryLabel.append(s.el('span', '', 'Canary employee'), this.canary);
@@ -612,7 +631,13 @@
         event.preventDefault();
         void this.prepare();
       });
-      this.content.append(this.form);
+      const rollout = s.el('details', 'ca-fleet-rollout');
+      rollout.append(
+        s.el('summary', '', 'Replace laptop images and pool policy'),
+        s.el('p', 'ca-hint', 'This workflow can restart laptops. Preview the exact changes before applying them.'),
+        this.form
+      );
+      this.content.append(rollout);
     }
     nativeKey() {
       return `reverie:native-pool-migration:${this.owner}`;
@@ -1359,6 +1384,9 @@
         s.el('td', '', employee.desired ? limits(employee.desired) : 'Unavailable'),
         s.el('td', '', limits(employee.observed))
       );
+      ['Employee', 'Status', 'Requested', 'Verified'].forEach((label, index) => {
+        row.children[index].dataset.label = label;
+      });
       row.title = `Requested image: ${employee.desiredImageId || 'Unavailable'}. Running image: ${employee.observedImageId || 'Not verified'}.`;
       if (employee.desired) {
         this.rows.set(employee.employeeId, () => ({ ...employee.desired }));
