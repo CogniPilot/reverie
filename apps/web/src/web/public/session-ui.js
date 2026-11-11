@@ -5016,7 +5016,7 @@ Object.assign(ReverieApp.prototype, {
     if (!wrap) return;
     const session = this.activeSessionId ? this.sessions?.get?.(this.activeSessionId) : null;
     let bar = wrap.querySelector('.message-agent-bar');
-    if (!session || session.mode === 'shell') {
+    if (!session || registryCliById(session.mode)?.kind !== 'agent') {
       if (bar) bar.hidden = true;
       return;
     }
