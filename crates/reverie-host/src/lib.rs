@@ -61,6 +61,7 @@ pub mod worker_runtime;
 pub mod worker_source_stop;
 pub mod worker_storage;
 pub mod worker_validation;
+pub mod worker_viewer;
 
 pub use observation::{ObservationError, ObservationFault};
 

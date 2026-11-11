@@ -81,6 +81,14 @@ enum Role {
         #[arg(long)]
         config: PathBuf,
     },
+    /// Attach-only terminal endpoint, independent of worker lifecycle/resource
+    /// admission. It never starts or restarts a laptop or provider process.
+    ViewerOnly {
+        #[arg(long)]
+        config: PathBuf,
+        #[arg(long)]
+        socket: PathBuf,
+    },
     /// Offer the OS-selected worker pool, then serve for explicit owner consent.
     /// Reads ~/reverie/worker-pool/registration-request.json using the system
     /// account home. It does not accept a request path or install from JSON alone.
@@ -165,6 +173,13 @@ fn run(arguments: Arguments) -> Result<(), Box<dyn std::error::Error>> {
             role,
         ),
         Role::Broker { config } => serve(config, false),
+        Role::ViewerOnly { config, socket } => {
+            let service = reverie_host::worker_viewer::WorkerViewerService::new(
+                &config,
+                captured_engine_bootstrap()?,
+            )?;
+            Ok(service.run(&socket)?)
+        }
         Role::OfferPoolV1 { config } => serve(config, true),
     }
 }
@@ -211,11 +226,12 @@ fn serve(config: PathBuf, offer: bool) -> Result<(), Box<dyn std::error::Error>>
     Ok(())
 }
 fn captured_engine() -> Result<InstalledWorkerEngine, Box<dyn std::error::Error>> {
+    Ok(InstalledWorkerEngine::new(captured_engine_bootstrap()?))
+}
+fn captured_engine_bootstrap() -> Result<EngineBootstrap, Box<dyn std::error::Error>> {
     let program = option_env!("REVERIE_FIXED_NATIVE_WORKER_ENGINE")
         .ok_or("NATIVE_WORKER_BROKER_PACKAGED_ENGINE_REQUIRED")?;
-    Ok(InstalledWorkerEngine::new(EngineBootstrap::capture(
-        program.as_ref(),
-    )?))
+    Ok(EngineBootstrap::capture(program.as_ref())?)
 }
 
 #[cfg(test)]
