@@ -93,7 +93,8 @@ for (const file of files) {
 try {
   execFileSync(prettierBin, ['--check', ...files], { cwd: repoRoot, stdio: 'pipe' });
 } catch (err) {
-  failures.push(`Prettier public asset check failed\n${String(err.stdout || err.stderr || err.message).trim()}`);
+  const output = [err.stdout, err.stderr].filter((stream) => stream?.length).map((stream) => String(stream).trim()).join('\n');
+  failures.push(`Prettier public asset check failed\n${output || err.message}`);
 }
 
 if (failures.length > 0) {

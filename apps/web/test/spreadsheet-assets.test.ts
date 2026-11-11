@@ -41,8 +41,22 @@ describe('spreadsheet preview assets', () => {
     expect(prepare).toContain('exceljs.min.js');
     expect(prepare).toContain('fflate.min.js');
     expect(prepare).toContain('sourceMappingURL');
-    // Output lands in a gitignored dir, so the ~1 MB never gets committed.
-    expect(read('.gitignore')).toMatch(/^src\/web\/public\/vendor\/$/m);
+    // Test Git's actual rules: generated bundles are ignored while the two
+    // intentionally pinned source assets remain shareable.
+    const fixture = mkdtempSync(join(tmpdir(), 'spreadsheet-ignore-'));
+    try {
+      copyFileSync(join(root, '.gitignore'), join(fixture, '.gitignore'));
+      const initialized = spawnSync('git', ['init', '--quiet'], { cwd: fixture });
+      expect(initialized.error).toBeUndefined();
+      expect(initialized.status).toBe(0);
+      for (const asset of ['exceljs.min.js', 'fflate.min.js', 'dompurify.min.js', 'marked.min.js']) {
+        const ignored = spawnSync('git', ['check-ignore', '--no-index', '--quiet', `src/web/public/vendor/${asset}`], { cwd: fixture });
+        expect(ignored.error).toBeUndefined();
+        expect(ignored.status, asset).toBe(['exceljs.min.js', 'fflate.min.js'].includes(asset) ? 0 : 1);
+      }
+    } finally {
+      rmSync(fixture, { recursive: true, force: true });
+    }
   });
 
   it('loads only the small renderer on the page; the worker pulls the parser on demand', () => {

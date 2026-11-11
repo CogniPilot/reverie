@@ -45,7 +45,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const OUT = join(ROOT, 'src', 'web', 'public', 'vendor');
+const OUT = process.argv[2] ? resolve(process.argv[2]) : join(ROOT, 'src', 'web', 'public', 'vendor');
 const NM = join(ROOT, 'node_modules');
 
 /**
@@ -273,4 +273,10 @@ for (const asset of ASSETS) {
   built += 1;
 }
 
-console.log(`[test-vendor] ${built} built, ${skipped} up to date -> src/web/public/vendor/`);
+// The source server also serves the lazy spreadsheet worker. Use its canonical
+// pinned preparer so --ignore-scripts checkouts have the same assets as builds.
+execFileSync(process.execPath, [join(ROOT, 'scripts/prepare-spreadsheet-assets.mjs'), OUT], {
+  cwd: ROOT,
+  stdio: 'inherit',
+});
+console.log(`[test-vendor] ${built} built, ${skipped} up to date -> ${OUT}`);

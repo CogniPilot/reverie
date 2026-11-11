@@ -16,7 +16,7 @@ let
     version = manifest.version;
     src = lib.cleanSource (src + "/apps/web");
     nodejs = pkgs.nodejs_22;
-    npmDepsHash = "sha256-DGKWvITtXvL3pYAsu4vqiynelRLeTR8BkjXJmLqMNc0=";
+    npmDepsHash = "sha256-gXM3copzdgACtQaPnEYO1n12oHrAfQMPLbXBmhmK1QQ=";
     nativeBuildInputs = [ pkgs.python3 pkgs.makeWrapper ];
     npmFlags = [ "--ignore-scripts" ];
     npmRebuildFlags = [ "--ignore-scripts" ];
@@ -70,7 +70,7 @@ let
       npm test -- test/company-employee-resources-ui.test.ts test/resource-employee-data.test.ts \
         test/resource-employee-service.test.ts test/resource-fleet-operation.test.ts \
         test/resource-fleet-native-failure-client.test.ts test/resource-fleet-codec-upgrade.test.ts \
-        test/native-owner-channel.test.ts test/prepare-test-vendor.test.ts test/capture-claude-launch.test.ts \
+        test/native-owner-channel.test.ts test/prepare-test-vendor.test.ts test/spreadsheet-assets.test.ts test/capture-claude-launch.test.ts \
         test/control-behavior-inventory.test.ts
       npm test -- test/fixed-resume-message.test.ts test/recovery-authority.test.ts \
         test/recovery-transaction.test.ts test/recovery-operation-clock.test.ts test/recovery-ledger-client.test.ts \

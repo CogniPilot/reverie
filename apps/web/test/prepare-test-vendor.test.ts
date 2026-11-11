@@ -12,13 +12,14 @@ it('prepares every shipped xterm asset and repairs a predictive bundle missing i
   try {
     await mkdir(join(fixture, 'scripts'));
     await cp(join(source, 'scripts/prepare-test-vendor.mjs'), join(fixture, 'scripts/prepare-test-vendor.mjs'));
+    await cp(join(source, 'scripts/prepare-spreadsheet-assets.mjs'), join(fixture, 'scripts/prepare-spreadsheet-assets.mjs'));
     await mkdir(join(fixture, 'packages/xterm-zerolag-input'), { recursive: true });
     await cp(join(source, 'packages/xterm-zerolag-input/src'), join(fixture, 'packages/xterm-zerolag-input/src'), {
       recursive: true,
     });
     await symlink(join(source, 'node_modules'), join(fixture, 'node_modules'), 'dir');
-    const prepare = () =>
-      execFileSync(process.execPath, [join(fixture, 'scripts/prepare-test-vendor.mjs')], {
+    const prepare = (output?: string) =>
+      execFileSync(process.execPath, [join(fixture, 'scripts/prepare-test-vendor.mjs'), ...(output ? [output] : [])], {
         cwd: fixture,
         encoding: 'utf8',
         timeout: 20_000,
@@ -37,6 +38,8 @@ it('prepares every shipped xterm asset and repairs a predictive bundle missing i
     expect(references).toContain('vendor/xterm-predictive-echo.js');
     for (const asset of references)
       expect((await stat(join(fixture, 'src/web/public', asset))).size).toBeGreaterThan(100);
+    for (const asset of ['exceljs.min.js', 'fflate.min.js'])
+      expect((await stat(join(fixture, 'src/web/public/vendor', asset))).size).toBeGreaterThan(100);
     const predictive = join(fixture, 'src/web/public/vendor/xterm-predictive-echo.js');
     const context = { window: {} as Record<string, unknown> };
     runInNewContext(await readFile(predictive, 'utf8'), context);
@@ -46,6 +49,10 @@ it('prepares every shipped xterm asset and repairs a predictive bundle missing i
     await writeFile(predictive, truncated);
     expect(prepare()).toContain('1 built');
     expect(await readFile(predictive, 'utf8')).toContain('window.PredictiveEchoOverlay');
+    const alternate = join(fixture, 'fresh-vendor');
+    prepare(alternate);
+    for (const asset of ['xterm-zerolag-input.js', 'xterm-predictive-echo.js', 'exceljs.min.js', 'fflate.min.js'])
+      expect(await readFile(join(alternate, asset), 'utf8')).toBe(await readFile(join(fixture, 'src/web/public/vendor', asset), 'utf8'));
   } finally {
     await rm(fixture, { recursive: true, force: true });
   }

@@ -193,8 +193,6 @@ export const NIX_UNCHECKED_TESTS: Record<string, string> = {
     '1 of 11 fails: the pinned conversation id is undefined where the test expects null.',
   'test/session-model-recovery.test.ts':
     '6 of 12 fail: the spawn command is now a /bin/sh -c launcher, so the model flag is not found where the test looks.',
-  'test/spreadsheet-assets.test.ts':
-    '1 of 9 fails: .gitignore does not list the vendor output path the test expects.',
   'test/spreadsheet-preview-worker.test.ts':
     'Its test worker runs out of JavaScript heap (about 1 GiB on a 2 GiB machine) in the bracketed-format cases, so 9 of 43 never finish.',
   'test/statusline-cli-flag.test.ts':
