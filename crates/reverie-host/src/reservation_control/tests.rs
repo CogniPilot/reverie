@@ -14,6 +14,11 @@ use std::{
 static NEXT: AtomicU64 = AtomicU64::new(0);
 #[test]
 fn admission_checked_close_is_bound_to_the_original_acquisition() {
+    if crate::test_process::isolate_case(
+        "reservation_control::tests::admission_checked_close_is_bound_to_the_original_acquisition",
+    ) {
+        return;
+    }
     let tree = Tree::new();
     let mut first = AdmissionLock::acquire(&tree.config).unwrap();
     let original = std::sync::Arc::clone(&first.acquisition);
@@ -37,6 +42,11 @@ fn admission_checked_close_is_bound_to_the_original_acquisition() {
 }
 #[test]
 fn typed_admission_contention_requires_checked_clean_constructor_close() {
+    if crate::test_process::isolate_case(
+        "reservation_control::tests::typed_admission_contention_requires_checked_clean_constructor_close",
+    ) {
+        return;
+    }
     let tree = Tree::new();
     let mut first = AdmissionLock::acquire(&tree.config).unwrap();
     assert!(matches!(
