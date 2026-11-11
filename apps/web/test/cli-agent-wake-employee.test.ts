@@ -120,6 +120,14 @@ describe('agent wake-employee', () => {
     expect(f.out.join('')).toContain('No employee awakened');
     expect(f.calls).toHaveLength(2);
   });
+  it.each([false, true])('an issued but unconfirmed start is an error, not a known safe refusal (%s)', async json => {
+    const recovery = {awakened: [], skipped: [{employeeId: EMPLOYEE, reason: 'start-unconfirmed'}]};
+    const f = fixture([ok(company), ok({recovery})], json);
+    expect(await agentWakeEmployee(f.deps, {employeeId: EMPLOYEE})).toBe(EXIT.error);
+    expect(f.calls.filter(call => call.request.method === 'POST')).toHaveLength(1);
+    if (json) expect(JSON.parse(f.out[0])).toEqual({recovery});
+    else expect(f.out.join('')).toContain('wake outcome is unconfirmed');
+  });
 
   it.each([
     {},

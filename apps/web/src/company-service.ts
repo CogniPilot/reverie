@@ -225,6 +225,20 @@ export class CompanyService {
 
   /** A route-selected actor, not a caller-supplied identity or title. Every effect rechecks this closure. */
   officeAction(employeeId: string, owner: string | undefined, callerSessionId?: string) {
+    return this.employeeAction(employeeId, owner, callerSessionId, 'manageOffice');
+  }
+
+  /** Recovery shares attendance's exact revocable actor and target binding. */
+  recoveryAction(employeeId: string, owner: string | undefined, callerSessionId?: string) {
+    return this.employeeAction(employeeId, owner, callerSessionId, 'recoverEmployees');
+  }
+
+  private employeeAction(
+    employeeId: string,
+    owner: string | undefined,
+    callerSessionId: string | undefined,
+    permission: 'manageOffice' | 'recoverEmployees'
+  ) {
     const initial = this.store.snapshot();
     const target = initial.employees.find((e) => e.id === employeeId && sameOwner(e.owner, owner));
     if (!target) throw new CompanyError('Unknown company employee', 404);
@@ -248,9 +262,13 @@ export class CompanyService {
             !e.bindingMigration &&
             !e.onVacation &&
             e.desiredRunning !== false &&
-            e.permissions.manageOffice === true
+            e.permissions[permission] === true
         ));
-    if (!actorMatches(initial)) throw new CompanyError('Office management permission is required', 403);
+    if (!actorMatches(initial))
+      throw new CompanyError(
+        permission === 'manageOffice' ? 'Office management permission is required' : 'Employee recovery permission is required',
+        403
+      );
     const recipe = JSON.stringify(target.runtimeRecipe);
     const current = (state = this.store.snapshot()) =>
       actorMatches(state) &&
@@ -266,7 +284,13 @@ export class CompanyService {
     return {
       current,
       require: (state?: CompanyState) => {
-        if (!current(state)) throw new CompanyError('Office permission or employee binding changed', 409);
+        if (!current(state))
+          throw new CompanyError(
+            permission === 'manageOffice'
+              ? 'Office permission or employee binding changed'
+              : 'Recovery permission or employee binding changed',
+            409
+          );
       },
     };
   }
@@ -353,6 +377,7 @@ export class CompanyService {
     const employee = this.store.snapshot().employees.find((e) => e.id === employeeId && e.sessionId === sessionId);
     if (
       !employee ||
+      employee.bindingMigration ||
       employee.onVacation ||
       employee.desiredRunning === false ||
       this.runtimeRestarts.has(sessionId) ||
@@ -369,6 +394,8 @@ export class CompanyService {
           !flight.cancelled &&
           !!current &&
           sameOwner(current.owner, employee.owner) &&
+          current.sessionGeneration === employee.sessionGeneration &&
+          !current.bindingMigration &&
           !current.onVacation &&
           current.desiredRunning !== false
         );

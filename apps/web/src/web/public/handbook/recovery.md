@@ -24,6 +24,10 @@ reverie agent reconnect-viewer EMPLOYEE_ID --json
 
 Use the full employee UUID. Separate `agent wake SESSION_ID` only nudges an idle session. Ordinary wake preserves stopped/vacation intent and saved runtime; inspect `data.recovery.awakened` and `data.recovery.skipped`. Its budget is three attempts per employee in fifteen minutes, subject to office settings.
 
+For isolated laptops, automatic and manual wake use fresh provider health rather than the optional viewer's PID. A healthy provider is preserved; `native-health-unconfirmed` blocks a new start until health can be checked. Repair a disconnected viewer separately. Recovery permission and the original employee/session generation remain checked while a request waits.
+
+`start-unconfirmed` means a start may already have happened. The wake CLI exits with an error, preserves that result in JSON, and makes no automatic retry. Check the employee's current state before another recovery attempt.
+
 Viewer repair requires compatible website, broker and laptop CLI versions, authenticated native office proof, current permissions, exact session/generation and fresh provider health. Missing proof fails closed. Copied parent headers and borrowed owner cookies grant no authority.
 
 Viewer status returns `state`, `reason`, `attempts` and `retryAfterMs` under `reconnect`, distinguishing health, stale binding, move/lifecycle holds, readiness and backoff. Reading status starts nothing. Repair never restarts the provider, replays Enter or blindly clears working state. After an unconfirmed response, inspect status; never automatically repeat it.

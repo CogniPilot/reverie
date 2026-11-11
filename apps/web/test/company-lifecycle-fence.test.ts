@@ -103,6 +103,14 @@ async function fixture(running = true) {
 }
 
 describe('shared owner restart/recovery in-flight fence', () => {
+  it('a wake lease cannot survive same-session generation replacement', async () => {
+    const f = await fixture(), flight = f.service.prepareWake('employee', 'current-session')!;
+    try {
+      expect(flight.current()).toBe(true);
+      await f.store.update(state => { state.employees[0].sessionGeneration++; });
+      expect(flight.current()).toBe(false);
+    } finally { flight.finish(); }
+  });
   it('a stale guarded stop cannot cancel a recovery already waiting on its durable claim', async () => {
     const f = await fixture(), claimed = gate(), release = gate();
     f.deps.claim.mockImplementation(async (...args) => {
