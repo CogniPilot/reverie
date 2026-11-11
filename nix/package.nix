@@ -72,6 +72,7 @@ let
       npm test -- test/frontend-declarations.test.ts
       npm test -- test/workspace-hook-preparation.test.ts test/launch-reservation.test.ts
       npm test -- test/owned-process.test.ts
+      npm test -- test/operator-viewer-bridge.test.ts
       npm test -- test/native-hook-artifact-selection.test.ts
       npm test -- test/approvals-ui-held.test.ts
       npm test -- test/browser-coverage-collection.test.ts test/browser-coverage-execution.test.ts test/browser-coverage-report.test.ts test/browser-coverage-convert.test.ts test/browser-coverage-producer.test.ts
