@@ -14,7 +14,7 @@
 
 import { z } from 'zod';
 import { compileVersionRegex, countCaptureGroups, TOKEN_PATTERNS } from './patterns.js';
-import { ACCOUNT_REPLACEMENT_PROFILE_NAMES, STARTUP_ACCOUNT_PROFILE_NAMES, isKnownLauncherProfile, isKnownSetenvProfile } from './profiles.js';
+import { ACCOUNT_REPLACEMENT_PROFILE_NAMES, STARTUP_ACCOUNT_PROFILE_NAMES, THREAD_STATE_PROFILE_NAMES, THREAD_STATE_BINDINGS, isKnownLauncherProfile, isKnownSetenvProfile } from './profiles.js';
 import type { AgentSkillDir, LaunchDefaultSettingKey, McpConfigFormat, ModelConfigResolverName } from './types.js';
 
 /** `capabilities.agentSkillDir`: every value must stay a fixed, relative, `..`-free path. */
@@ -112,6 +112,7 @@ const launchSchema = z
     params: z.record(z.string(), paramSpecSchema),
     chain: z.enum(['first', 'fallback']).optional(),
     resumeSelection: z.literal('claude-transcript').optional(),
+    threadStateProfile: z.enum(THREAD_STATE_PROFILE_NAMES).optional(),
     variants: z.array(variantSchema).min(1).max(4),
     legacyConfigAliases: z.record(z.string(), z.string()).optional(),
     legacyConfigField: z.string().min(1).max(40).optional(),
@@ -124,6 +125,15 @@ const launchSchema = z
   })
   .strict()
   .superRefine((launch, ctx) => {
+    if (launch.threadStateProfile) {
+      const binding = THREAD_STATE_BINDINGS[launch.threadStateProfile];
+      const field = 'field' in binding ? binding.field : undefined;
+      if (launch.legacyConfigField !== field || launch.params[binding.param]?.type !== 'token'
+        || (launch.legacyConfigAliases?.[binding.param] ?? binding.param) !== binding.key
+        || ('forkParam' in binding && (launch.params[binding.forkParam]?.type !== 'bool'
+          || (launch.legacyConfigAliases?.[binding.forkParam] ?? binding.forkParam) !== binding.forkKey)))
+        ctx.addIssue({code:'custom',message:'Native thread profile disagrees with declared launch/config binding',path:['threadStateProfile']});
+    }
     const paramNames = new Set(Object.keys(launch.params));
     const checkValueFrom = (name: string, path: (string | number)[]) => {
       if (!paramNames.has(name)) {
@@ -301,6 +311,7 @@ const configProperty = z.string().regex(/^[A-Za-z][A-Za-z0-9_]{0,63}$/)
 
 const capabilitiesSchema = z
   .object({
+    rebootRestore: z.enum(['native-required','native-or-new','persistent-record']).optional(),
     startupAccountProfile: z.enum(STARTUP_ACCOUNT_PROFILE_NAMES).optional(),
     fullAccessDefaults: z.object({
       values: z.record(configProperty, z.union([z.boolean(), z.string().min(1).max(120)]))
@@ -695,6 +706,8 @@ export const CliEntrySchema = z
     // `legacyConfigField` the entry's params are read off the request body itself, where a
     // filled `model` would be a different field (claude's per-session one), so refuse it.
     const { launchDefaults } = entry.capabilities;
+    if (entry.capabilities.rebootRestore && entry.capabilities.rebootRestore !== 'persistent-record' && !entry.launch.threadStateProfile)
+      ctx.addIssue({code:'custom',message:'Native reboot restore requires an explicit thread profile',path:['capabilities','rebootRestore']});
     if (entry.capabilities.fullAccessDefaults && !entry.launch.legacyConfigField) {
       ctx.addIssue({code:'custom',message:'fullAccessDefaults needs launch.legacyConfigField',path:['capabilities','fullAccessDefaults']});
     }

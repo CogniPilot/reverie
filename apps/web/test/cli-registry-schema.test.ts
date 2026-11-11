@@ -352,12 +352,18 @@ describe('capabilities.launchDefaults', () => {
     expect(
       codexWith((e) => {
         delete (e.launch as Record<string, unknown>).legacyConfigField;
+        // Isolate this launch-default contract from the independent native
+        // thread binding/reboot contracts, which also require that config slot.
+        delete (e.launch as Record<string, unknown>).threadStateProfile;
+        delete (e.capabilities as Record<string, unknown>).rebootRestore;
       })
     ).toBe(false);
     // The same entry without launch defaults is fine: the refusal is about the pair.
     expect(
       codexWith((e) => {
         delete (e.launch as Record<string, unknown>).legacyConfigField;
+        delete (e.launch as Record<string, unknown>).threadStateProfile;
+        delete (e.capabilities as Record<string, unknown>).rebootRestore;
         delete (e.capabilities as Record<string, unknown>).launchDefaults;
       })
     ).toBe(true);

@@ -45,6 +45,7 @@ import {
   type RebootRestoreRejection,
 } from '../../reboot-restore.js';
 import { clampEnvOverridesForOwner } from '../../session-env-clamp.js';
+import {rebootRestoreLaunchConfig} from '../../utils/native-thread-profile.js';
 import { Session } from '../../session.js';
 import { resolveClaudeModeForUsername } from '../../user-store.js';
 import { getCli } from '../../config/cli-registry/registry.js';
@@ -221,6 +222,12 @@ export async function spendRebootRestore(
     try {
       const saved = entry.state;
       const claudeModeConfig = await ctx.getClaudeModeConfig();
+      const claudeMode = await resolveClaudeModeForUsername(claudeModeConfig.claudeMode, saved.owner);
+      const envOverrides = await clampEnvOverridesForOwner(saved.owner,
+        (saved as {__envOverrides?: Record<string,string>}).__envOverrides);
+      // Revalidate the current protocol after awaited grant/config checks and
+      // before constructing a session. The retained offer is not launch authority.
+      const launch = rebootRestoreLaunchConfig(saved, entry.resumeConversationId);
       const session = new Session({
         // The old id is reused on purpose: a pinned record, subagent parents,
         // window states and the lifecycle log all key off it, and the unpinned
@@ -241,25 +248,17 @@ export async function spendRebootRestore(
         useMux: true,
         // No `muxSession`: the reboot took the pane with it, so `startInteractive()`
         // takes its create branch and makes a fresh one.
-        claudeMode: await resolveClaudeModeForUsername(claudeModeConfig.claudeMode, saved.owner),
+        claudeMode,
         allowedTools: claudeModeConfig.allowedTools,
-        // OpenCode resumes from its own config (`--session <thread>`), never from the
-        // Claude-style resume id, which for it would name a Reverie id.
-        resumeSessionId: nativeOpenCodeThread(saved) || saved.mode === 'codex' ? undefined : entry.resumeConversationId,
-        // Kept whatever the mode, as on recovery: a session switched off OpenCode still owns its thread.
+        // Unselected public config fields remain intact; the native codec owns
+        // only the resume projection for this runtime.
         openCodeConfig: saved.openCodeConfig,
-        codexConfig:
-          saved.mode === 'codex'
-            ? { ...saved.codexConfig, resumeSessionId: nativeCodexThread(saved) }
-            : saved.codexConfig,
+        ...launch,
         // Re-resolved against the owner's CURRENT grant, never replayed from the
         // record: a grant held when the record was written may be gone now.
         subscriptionProfile: saved.subscriptionProfile,
         runtimeThreads: saved.runtimeThreads,
-        envOverrides: await clampEnvOverridesForOwner(
-          saved.owner,
-          (saved as { __envOverrides?: Record<string, string> }).__envOverrides
-        ),
+        envOverrides,
         effort: saved.effort,
         model: saved.model,
         advisorModel: saved.advisorModel,

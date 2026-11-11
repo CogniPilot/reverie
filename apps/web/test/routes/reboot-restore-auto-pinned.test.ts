@@ -5,6 +5,9 @@
  * `Session` is mocked to record its construction, as in the rebuild-failure test.
  */
 import { describe, it, expect, afterEach, vi } from 'vitest';
+import {mkdirSync,writeFileSync,rmSync} from 'node:fs';
+import {dirname} from 'node:path';
+import {registryFilePath,reloadCliRegistry} from '../../src/config/cli-registry/registry.js';
 
 const built: Array<Record<string, unknown>> = [];
 
@@ -59,11 +62,23 @@ function offer(records: SessionState[]): void {
 }
 
 afterEach(() => {
+  rmSync(registryFilePath(),{force:true});reloadCliRegistry();
   rebootRestoreRegistry.reset();
   built.length = 0;
 });
 
 describe('autoRestorePinnedSessions', () => {
+  it('revalidates changed restore policy before constructing a provider or losing its retained offer', async () => {
+    const ctx = createMockRouteContext();
+    offer([record({id:'policy-changed',mode:'codex',pinned:true,codexConfig:{resumeSessionId:'native-thread'}})]);
+    const path=registryFilePath();mkdirSync(dirname(path),{recursive:true});
+    writeFileSync(path,JSON.stringify({schemaVersion:1,clis:{codex:{capabilities:{rebootRestore:'native-required'}}}}),{mode:0o600});
+    reloadCliRegistry();
+    const result=await autoRestorePinnedSessions(ctx as never);
+    expect(result.restored).toEqual([]);expect(result.skipped).toEqual([{sessionId:'policy-changed',reason:'rebuild-failed'}]);
+    expect(built).toEqual([]);expect(ctx.addSession).not.toHaveBeenCalled();
+    expect(rebootRestoreRegistry.list(()=>true).map(entry=>entry.sessionId)).toEqual(['policy-changed']);
+  });
   it('rebuilds pinned sessions under their saved ids and leaves unpinned ones on offer', async () => {
     const ctx = createMockRouteContext();
     offer([

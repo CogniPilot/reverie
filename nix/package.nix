@@ -69,6 +69,7 @@ let
       npm test -- test/test-suite-partition.test.ts test/test-selection.test.ts
       npm test -- test/account-replacement-profile.test.ts
       npm test -- test/startup-account-profile.test.ts
+      npm test -- test/native-thread-profile.test.ts
       npm test -- test/frontend-declarations.test.ts
       npm test -- test/workspace-hook-preparation.test.ts test/launch-reservation.test.ts
       npm test -- test/owned-process.test.ts

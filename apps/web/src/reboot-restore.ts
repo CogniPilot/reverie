@@ -43,7 +43,7 @@
  */
 
 import type { SessionState } from './types.js';
-import { getCli } from './config/cli-registry/registry.js';
+import {nativeThreadProfile, rebootResumeTarget} from './utils/native-thread-profile.js';
 import { isCleanPaneExit } from './pane-exit-sweep.js';
 
 /** Session statuses a reboot restore may rebuild. `stopped` is the kill marker. */
@@ -112,11 +112,7 @@ export function looksLikeHostReboot(evidence: RebootEvidence): boolean {
  * that was itself started as a resume, and the session id is the original
  * conversation for everything else.
  */
-export function resolveResumeConversationId(state: SessionState): string {
-  const chain = state.claudeSessionChain;
-  const chainTail = Array.isArray(chain) && chain.length > 0 ? chain[chain.length - 1] : undefined;
-  return chainTail || state.resumeSessionId || state.id;
-}
+export {conversationChainTarget as resolveResumeConversationId} from './native-thread-policy.js';
 
 /**
  * Why one session was passed over. Reported for logging and shown to the user.
@@ -234,14 +230,10 @@ export function planRebootRestore(
       skipped.push({ sessionId, reason: 'remote-or-docker' });
       continue;
     }
-    // Capability, not a CLI id: this pass resumes by handing the CLI a conversation
-    // id through the top-level `resumeSessionId`, which only a CLI whose history the
-    // claude-jsonl reader understands can consume that way. Others carry their thread
-    // id in their own `<Mode>Config`, which this pass does not thread through.
-    // OpenCode keeps its native thread in `openCodeConfig.continueSession` (the CLI's
-    // `--session`), so a record that names one can be resumed without the transcript reader.
-    const nativeThread = nativeOpenCodeThread(state) ?? nativeCodexThread(state);
-    if (!nativeThread && state.mode !== 'codex' && (state.mode as string) !== 'hands' && getCli(state.mode ?? 'claude')?.capabilities.transcript !== 'claude-jsonl') {
+    // Native representation and reboot eligibility are explicit, independent
+    // registry contracts. Transcript readability grants no restoration eligibility.
+    const resumeTarget = rebootResumeTarget(state);
+    if (resumeTarget === undefined) {
       skipped.push({ sessionId, reason: 'unsupported-mode' });
       continue;
     }
@@ -259,7 +251,7 @@ export function planRebootRestore(
       workingDir: state.workingDir,
       owner: state.owner,
       mode: state.mode ?? 'claude',
-      resumeConversationId: nativeThread ?? (state.mode === 'codex' ? '' : resolveResumeConversationId(state)),
+      resumeConversationId: resumeTarget,
       state,
     });
   }
@@ -274,9 +266,8 @@ export function planRebootRestore(
  * because every restore would start yet another fork instead of the session's thread.
  */
 export function nativeOpenCodeThread(state: Pick<SessionState, 'mode' | 'openCodeConfig'>): string | undefined {
-  if (state.mode !== 'opencode' || state.openCodeConfig?.forkSession === true) return undefined;
-  const thread = state.openCodeConfig?.continueSession;
-  return typeof thread === 'string' && thread.length > 0 ? thread : undefined;
+  const profile = nativeThreadProfile(state.mode);
+  return profile?.kind === 'forkable-continue' ? profile.read(state) : undefined;
 }
 
 /**
@@ -351,7 +342,6 @@ export function newestPersistedActivity(persisted: Readonly<Record<string, Sessi
 
 /** Codex owns its rollout UUID; a Reverie session id is never a Codex resume target. */
 export function nativeCodexThread(state: Pick<SessionState, 'id' | 'mode' | 'codexConfig' | 'resumeSessionId'>): string | undefined {
-  if (state.mode !== 'codex') return undefined;
-  const thread = state.codexConfig?.resumeSessionId || state.resumeSessionId;
-  return typeof thread === 'string' && thread.trim().length > 0 ? thread : undefined;
+  const profile = nativeThreadProfile(state.mode);
+  return profile?.kind === 'nested-resume' ? profile.read(state) : undefined;
 }

@@ -11,6 +11,7 @@
  */
 
 import type { CliEntry } from './types.js';
+import {THREAD_STATE_BINDINGS} from './profiles.js';
 import { CODEX_REASONING_EFFORTS } from '../../types/session.js';
 
 const HOME_DIRS = {
@@ -132,6 +133,7 @@ const CLAUDE: CliEntry = {
   launch: {
     chain: 'fallback',
     resumeSelection: 'claude-transcript',
+    threadStateProfile: 'conversation-chain-v1',
     params: {
       claudeMode: {
         type: 'enum',
@@ -203,7 +205,7 @@ const CLAUDE: CliEntry = {
     ],
     // Claude has no `<Mode>Config` object of its own — the bridge synthesizes one from its
     // discrete top-level spawn fields, under their EXISTING field name `resumeSessionId`.
-    legacyConfigAliases: { resumeId: 'resumeSessionId' },
+    legacyConfigAliases: { resumeId: THREAD_STATE_BINDINGS['conversation-chain-v1'].key },
   },
   env: {
     // Claude asks for truecolor, like every CLI here except `shell` and `opencode`.
@@ -234,6 +236,7 @@ const CLAUDE: CliEntry = {
     external: false,
     accountReplacementProfile: 'anthropic-account-v1',
     startupAccountProfile: 'anthropic-local-account-v1',
+    rebootRestore: 'native-required',
     // Claude indents its transcript body two columns and puts its own ●/✻/❯ markers
     // in them, so a copy can drop two and paste flush. Claude and codex are the only
     // entries that declare this, because theirs are the only gutters that have been measured.
@@ -507,8 +510,9 @@ const OPENCODE: CliEntry = {
         ],
       },
     ],
-    legacyConfigAliases: { resumeId: 'continueSession' },
-    legacyConfigField: 'openCodeConfig',
+    threadStateProfile: 'forkable-continue-v1',
+    legacyConfigAliases: { resumeId: THREAD_STATE_BINDINGS['forkable-continue-v1'].key },
+    legacyConfigField: THREAD_STATE_BINDINGS['forkable-continue-v1'].field,
   },
   env: {
     exports: [],
@@ -549,6 +553,7 @@ const OPENCODE: CliEntry = {
     // closing bar), never the prompt text, so the submit verifier stands down.
     composerReadyMark: 'tab agents',
     accountReplacementRefusal: 'OpenCode thread moves require a launch-then-stop adapter and are not supported yet',
+    rebootRestore: 'native-required',
     fullAccessDefaults: {values: {autoAllowTools: true}, unlessJsonProperty: {configField: 'configContent', property: 'permission'}},
     workDetect: {
       promptGlyph: '┃',
@@ -651,8 +656,9 @@ const CODEX: CliEntry = {
         ],
       },
     ],
-    legacyConfigAliases: { bypassApprovals: 'dangerouslyBypassApprovals', resumeId: 'resumeSessionId' },
-    legacyConfigField: 'codexConfig',
+    threadStateProfile: 'nested-resume-v1',
+    legacyConfigAliases: { bypassApprovals: 'dangerouslyBypassApprovals', resumeId: THREAD_STATE_BINDINGS['nested-resume-v1'].key },
+    legacyConfigField: THREAD_STATE_BINDINGS['nested-resume-v1'].field,
     resumeAppend: { style: 'positional', token: 'resume' },
   },
   env: {
@@ -706,6 +712,7 @@ const CODEX: CliEntry = {
     composerReadyMark: '? for shortcuts',
     accountReplacementProfile: 'openai-account-v1',
     startupAccountProfile: 'openai-local-account-v1',
+    rebootRestore: 'native-or-new',
     workDetect: {
       promptGlyph: '›',
       workingLine: '[Ee]sc to interrupt',
@@ -1638,7 +1645,7 @@ const HANDS: CliEntry = {
   launch: { params: {}, variants: [{ id: 'default', args: [{ lit: 'reverie-hands' }] }] },
   env: { exports: [], unset: [], tmuxSetenvKeys: HANDS_ENV, dockerExecEnvNames: HANDS_ENV, allowedPrefixes: [], allowedKeys: HANDS_ENV },
   capabilities: {
-    ...agentDefaults(), chatDelivery: 'poll', stripInkBloat: false,
+    ...agentDefaults(), chatDelivery: 'poll', stripInkBloat: false, rebootRestore: 'persistent-record',
     model: { source: 'none' }, echo: { policy: 'buffer', anchor: { kind: 'none' } },
     customModelInjection: { kind: 'env', baseUrlVar: 'REVERIE_HANDS_BASE_URL', apiKeyVar: 'REVERIE_HANDS_API_KEY', modelVars: ['REVERIE_HANDS_MODEL'], appendV1Suffix: true },
   }, overlays: {},
