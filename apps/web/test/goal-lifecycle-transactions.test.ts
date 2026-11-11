@@ -12,8 +12,11 @@ import { goalFixture } from './helpers/goal-test-fixture.js';
 describe('Goal canonical transactions and session fences', () => {
   let f: Awaited<ReturnType<typeof goalFixture>>;
   const children: ChildProcess[] = [];
+  const runtimeSessions = new Map<string, {id: string; name: string; owner: string}>();
   beforeEach(async () => {
     f = await goalFixture();
+    runtimeSessions.clear();
+    for (const id of ['s', 's2']) runtimeSessions.set(id, {id, name: id, owner: 'a'});
   });
   afterEach(async () => {
     vi.restoreAllMocks();
@@ -177,7 +180,7 @@ describe('Goal canonical transactions and session fences', () => {
 
   function company(replaceSession: () => Promise<void>) {
     return new CompanyService(f.store, {
-      getSession: (id) => ({ id, name: id, owner: 'a' }),
+      getSession: (id) => runtimeSessions.get(id),
       chatrooms: {
         rooms: () => [],
         room: () => undefined,
@@ -199,9 +202,10 @@ describe('Goal canonical transactions and session fences', () => {
     });
   }
 
-  it('fences both old and transient new sessions during migration, never rolls back/reuses a generation, and requires explicit Goal adoption', async () => {
+  it('retains an unconfirmed migration generation and fences both sessions without replay or Goal adoption', async () => {
     const active = await f.active();
     f.principals.newWorker = { kind: 'employee', owner: 'a', employeeId: 'w', sessionId: 's2', sessionGeneration: 2 };
+    const cause = Error('synthetic migration failure');
     const migrating = company(async () => {
       expect(f.store.snapshot().employees.find((e) => e.id === 'w')?.bindingMigration).toMatchObject({
         from: 's',
@@ -212,20 +216,43 @@ describe('Goal canonical transactions and session fences', () => {
           code: 'GOAL_FORBIDDEN',
         });
       await expect(migrating.rebind('w', 'a', 's2')).rejects.toMatchObject({ status: 409 });
-      throw Error('synthetic migration failure');
+      throw cause;
     });
-    await expect(migrating.rebind('w', 'a', 's2')).rejects.toThrow('synthetic migration failure');
+    const failure = await migrating.rebind('w', 'a', 's2').then(
+      () => {throw Error('Expected an unconfirmed migration');}, error => error);
+    expect(failure).toMatchObject({status: 409, message: expect.stringContaining('publication is unconfirmed')});
+    expect(failure.cause).toBe(cause);
+    expect(migrating.replacementPublicationRecovery(failure, runtimeSessions.get('s2')!,
+      {employeeId: 'w', replacesSessionId: 's'}, 'a')).toMatchObject({employeeId: 'w', sessionId: 's2',
+      replacesSessionId: 's', sourceGeneration: 1, reason: 'binding-publication-unconfirmed'});
     expect(f.store.snapshot().employees.find((e) => e.id === 'w')).toMatchObject({
       sessionId: 's',
-      sessionGeneration: 3,
+      sessionGeneration: 2,
+      bindingMigration: {from: 's', to: 's2'},
     });
     expect((await f.goals.get(active.id, 'owner')).sessionGeneration).toBe(1);
+    const heldBytes = await fs.readFile(f.file, 'utf8');
+    await expect(migrating.rebind('w', 'a', 's2')).rejects.toMatchObject({status: 409});
+    for (const token of ['worker', 'newWorker'])
+      await expect(f.goals.transition(f.command(active, 'REVIEW'), token)).rejects.toMatchObject({code: 'GOAL_FORBIDDEN'});
+    await expect(f.goals.adopt({...f.fence(active), transitionId: 'not-a-reconciliation', nextAction: 'Still held'}, 'owner'))
+      .rejects.toMatchObject({code: 'GOAL_FORBIDDEN'});
+    expect(await fs.readFile(f.file, 'utf8')).toBe(heldBytes);
+    expect(f.store.publicationUnconfirmed).toBe(false); // Writer is healthy; the binding reservation is held.
+    expect(runtimeSessions.has('s')).toBe(true); expect(runtimeSessions.has('s2')).toBe(true);
+  });
+
+  it('requires explicit owner Goal adoption after a separately completed binding migration', async () => {
+    const active = await f.active();
     await company(async () => {}).rebind('w', 'a', 's2');
     expect(f.store.snapshot().employees.find((e) => e.id === 'w')).toMatchObject({
       sessionId: 's2',
-      sessionGeneration: 4,
+      sessionGeneration: 2,
     });
-    f.principals.newWorker = { kind: 'employee', owner: 'a', employeeId: 'w', sessionId: 's2', sessionGeneration: 4 };
+    expect(f.store.snapshot().employees.find((e) => e.id === 'w')?.bindingMigration).toBeUndefined();
+    expect((await f.goals.get(active.id, 'owner')).sessionGeneration).toBe(1);
+    f.principals.newWorker = { kind: 'employee', owner: 'a', employeeId: 'w', sessionId: 's2', sessionGeneration: 2 };
+    await expect(f.goals.transition(f.command(active, 'REVIEW'), 'worker')).rejects.toMatchObject({code: 'GOAL_FORBIDDEN'});
     await expect(f.goals.transition(f.command(active, 'REVIEW'), 'newWorker')).rejects.toMatchObject({
       code: 'GOAL_CONFLICT',
     });
@@ -233,7 +260,7 @@ describe('Goal canonical transactions and session fences', () => {
       { ...f.fence(active), transitionId: 'adoption', nextAction: 'Owner reviewed rebind' },
       'owner'
     );
-    expect(adopted.goal).toMatchObject({ generation: 2, sessionGeneration: 4, sessionId: 's2' });
+    expect(adopted.goal).toMatchObject({ generation: 2, sessionGeneration: 2, sessionId: 's2' });
     expect((await f.move(adopted.goal, 'REVIEW', 'newWorker')).state).toBe('REVIEW');
   });
   it.each(['create', 'create-replay', 'transition', 'transition-replay', 'target-rebind'])(
