@@ -1,6 +1,7 @@
 //! Independent, attach-only terminal service. It has no laptop/storage lease,
 //! reservation admission, controller, launch command or provider restart path.
 mod attach;
+mod socket;
 #[cfg(test)]
 mod tests;
 mod wire;
@@ -45,7 +46,11 @@ impl ViewerError {
 }
 impl std::fmt::Display for ViewerError {
     fn fmt(&self, out: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        out.write_str(self.code)
+        out.write_str(self.code)?;
+        if let Some(secondary) = &self.secondary {
+            write!(out, "; secondary={secondary}")?;
+        }
+        Ok(())
     }
 }
 impl std::error::Error for ViewerError {
@@ -94,13 +99,32 @@ impl WorkerViewerService {
     pub fn run(self: Arc<Self>, socket: &Path) -> Result<()> {
         let signals = crate::native::child_signals::SignalGuard::install()
             .map_err(|cause| ViewerError::caused("WORKER_VIEWER_SIGNALS", cause.cause))?;
-        broker_listener::prepare_directory(socket).map_err(listener_error)?;
-        clear_stale(socket)?;
+        let body = match self
+            .configuration()
+            .and_then(|configuration| socket::Ownership::acquire(&configuration, socket))
+        {
+            Ok(ownership) => {
+                socket::finalized(self.serve_socket(socket, &ownership), ownership.finish())
+            }
+            Err(cause) => Err(cause),
+        };
+        socket::finalized(body, signals.finish().map_err(Into::into))
+    }
+
+    fn serve_socket(self: &Arc<Self>, socket: &Path, ownership: &socket::Ownership) -> Result<()> {
+        ownership.clear_stale()?;
         let mut bound = broker_listener::BoundSocket::bind(socket).map_err(listener_error)?;
-        bound
+        let body = bound
             .listener()
-            .map_err(listener_error)?
-            .set_nonblocking(true)?;
+            .map_err(listener_error)
+            .and_then(|listener| listener.set_nonblocking(true).map_err(Into::into))
+            .and_then(|()| self.accept_connections(&bound));
+        let removed = bound.remove().map(|_| ()).map_err(listener_error);
+        let closed = self.finish_connections();
+        socket::finalized(body, socket::finalized(removed, closed))
+    }
+
+    fn accept_connections(self: &Arc<Self>, bound: &broker_listener::BoundSocket) -> Result<()> {
         while crate::native::child_signals::signal().is_none() {
             let stream = match bound.listener().map_err(listener_error)?.accept() {
                 Ok((stream, _)) => stream,
@@ -109,39 +133,60 @@ impl WorkerViewerService {
                     continue;
                 }
                 Err(cause) if cause.kind() == std::io::ErrorKind::Interrupted => continue,
-                Err(cause) => return Err(cause.into()),
+                Err(cause)
+                    if matches!(
+                        cause.raw_os_error(),
+                        Some(
+                            libc::EMFILE
+                                | libc::ENFILE
+                                | libc::ENOBUFS
+                                | libc::ENOMEM
+                                | libc::ECONNABORTED
+                                | libc::EPROTO
+                        )
+                    ) =>
+                {
+                    eprintln!("{}", ViewerError::caused("WORKER_VIEWER_ACCEPT", cause));
+                    std::thread::sleep(Duration::from_millis(100));
+                    continue;
+                }
+                Err(cause) => {
+                    return Err(ViewerError::caused("WORKER_VIEWER_LISTENER_FAILED", cause));
+                }
             };
-            stream.set_write_timeout(Some(Duration::from_secs(2)))?;
-            if broker_listener::peer_uid(&stream)? != crate::native::uid() {
-                continue;
+            if let Err(cause) = self.accept_connection(stream) {
+                eprintln!("{cause}");
             }
-            if self
-                .active
-                .fetch_update(Ordering::AcqRel, Ordering::Acquire, |count| {
-                    (count < MAX_VIEWERS).then_some(count + 1)
-                })
-                .is_err()
-            {
-                let mut stream = stream;
-                let _ = wire::send(&mut stream, b'E', b"WORKER_VIEWER_CAPACITY");
-                continue;
-            }
-            let slot = Slot(self.clone());
-            std::thread::Builder::new()
-                .name("reverie-terminal".into())
-                .spawn(move || {
-                    let mut stream = stream;
-                    let result = slot.0.handle(&mut stream);
-                    if let Err(cause) = result {
-                        let _ = wire::send(&mut stream, b'E', cause.code.as_bytes());
-                        eprintln!("{cause}");
-                        if cause.retained {
-                            std::mem::forget(slot);
-                        }
-                    }
-                })?;
         }
-        bound.remove().map_err(listener_error)?;
+        Ok(())
+    }
+
+    fn accept_connection(
+        self: &Arc<Self>,
+        mut stream: std::os::unix::net::UnixStream,
+    ) -> Result<()> {
+        stream.set_write_timeout(Some(Duration::from_secs(2)))?;
+        if broker_listener::peer_uid(&stream)? != crate::native::uid() {
+            return Ok(());
+        }
+        if self
+            .active
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |count| {
+                (count < MAX_VIEWERS).then_some(count + 1)
+            })
+            .is_err()
+        {
+            let _ = wire::send(&mut stream, b'E', b"WORKER_VIEWER_CAPACITY");
+            return Ok(());
+        }
+        let slot = Slot(self.clone());
+        std::thread::Builder::new()
+            .name("reverie-terminal".into())
+            .spawn(move || serve_connection(slot, stream))?;
+        Ok(())
+    }
+
+    fn finish_connections(&self) -> Result<()> {
         let end = Instant::now() + Duration::from_secs(15);
         while self.active.load(Ordering::Acquire) != 0 {
             if Instant::now() >= end {
@@ -152,7 +197,6 @@ impl WorkerViewerService {
         self.engine
             .close(end)
             .map_err(|cause| ViewerError::caused("WORKER_VIEWER_SERVICE_CLOSE", cause))?;
-        signals.finish()?;
         Ok(())
     }
     fn handle(&self, stream: &mut std::os::unix::net::UnixStream) -> Result<()> {
@@ -197,29 +241,12 @@ fn request(kind: u8, raw: &[u8], configuration: &EffectiveWorkerConfig) -> Resul
 fn listener_error(cause: broker_listener::ListenerError) -> ViewerError {
     ViewerError::refused(cause.message())
 }
-fn clear_stale(path: &Path) -> Result<()> {
-    use std::os::unix::fs::{FileTypeExt, MetadataExt};
-    let info = match std::fs::symlink_metadata(path) {
-        Ok(info) => info,
-        Err(cause) if cause.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-        Err(cause) => return Err(cause.into()),
-    };
-    if !info.file_type().is_socket()
-        || info.uid() != crate::native::uid()
-        || info.mode() & 0o7777 != 0o600
-    {
-        return Err(ViewerError::refused("WORKER_VIEWER_SOCKET_CUSTODY"));
-    }
-    let mut entry = crate::native::socket_entry::SocketEntry::observed(path.to_owned());
-    entry
-        .open_anchor()
-        .and_then(|()| entry.pin_identity())
-        .map_err(|_| ViewerError::refused("WORKER_VIEWER_SOCKET_CUSTODY"))?;
-    match std::os::unix::net::UnixStream::connect(path) {
-        Ok(_) => Err(ViewerError::refused("WORKER_VIEWER_ALREADY_LISTENING")),
-        Err(cause) if cause.kind() == std::io::ErrorKind::ConnectionRefused => entry
-            .remove_stale()
-            .map_err(|_| ViewerError::refused("WORKER_VIEWER_SOCKET_CUSTODY")),
-        Err(cause) => Err(cause.into()),
+fn serve_connection(slot: Slot, mut stream: std::os::unix::net::UnixStream) {
+    if let Err(cause) = slot.0.handle(&mut stream) {
+        let _ = wire::send(&mut stream, b'E', cause.code.as_bytes());
+        eprintln!("{cause}");
+        if cause.retained {
+            std::mem::forget(slot);
+        }
     }
 }

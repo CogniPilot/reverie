@@ -201,14 +201,17 @@ fn revocation_refuses_next_input_and_closes_only_owned_attach() {
 fn stale_socket_recovery_preserves_live_foreign_and_non_socket_entries() {
     let fixture = Fixture::new();
     let path = fixture.root.join("viewer.sock");
+    let owner =
+        socket::Ownership::acquire(&fixture.service.configuration().unwrap(), &path).unwrap();
     let listener = UnixListener::bind(&path).unwrap();
     fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
-    assert!(clear_stale(&path).is_err());
+    assert!(owner.clear_stale().is_err());
     assert!(path.exists());
     drop(listener);
-    clear_stale(&path).unwrap();
+    owner.clear_stale().unwrap();
     assert!(!path.exists());
     fs::write(&path, b"keep original bytes").unwrap();
-    assert!(clear_stale(&path).is_err());
+    assert!(owner.clear_stale().is_err());
     assert_eq!(fs::read(&path).unwrap(), b"keep original bytes");
+    owner.finish().unwrap();
 }

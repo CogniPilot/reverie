@@ -150,7 +150,11 @@ fn create_container() -> (Container, String) {
     container.tmux(&["set-option", "-t", "office", "remain-on-exit", "on"]);
     (container, deployment)
 }
-fn service(fixture: &Fixture, container: &Container, deployment: String) -> Arc<WorkerViewerService> {
+fn service(
+    fixture: &Fixture,
+    container: &Container,
+    deployment: String,
+) -> Arc<WorkerViewerService> {
     let source = fixture.root.join("broker.json");
     let mut config: serde_json::Value =
         serde_json::from_slice(&fs::read(&source).unwrap()).unwrap();
@@ -163,8 +167,12 @@ fn service(fixture: &Fixture, container: &Container, deployment: String) -> Arc<
     }
     WorkerViewerService::new(
         &source,
-        EngineBootstrap::from_service(container.docker.as_os_str(), environment, fixture.root.clone())
-            .unwrap(),
+        EngineBootstrap::from_service(
+            container.docker.as_os_str(),
+            environment,
+            fixture.root.clone(),
+        )
+        .unwrap(),
     )
     .unwrap()
 }
