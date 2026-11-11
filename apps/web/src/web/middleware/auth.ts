@@ -24,7 +24,13 @@ import {
 } from '../../config/auth-config.js';
 import { getHookSecret, HOOK_SECRET_HEADER } from '../../config/hook-secret.js';
 import { isMultiUserMode } from '../../config/multiuser.js';
-import { findUser, setPassword, touchLastLogin, verifyPassword } from '../../user-store.js';
+import {
+  findUser,
+  rehashAuthenticatedUser,
+  touchLastLogin,
+  userAuthenticationFingerprint,
+  verifyPassword,
+} from '../../user-store.js';
 import { webviewCapabilities } from '../../webview-capabilities.js';
 import { capabilityFromHtmlViewPath, htmlViewCapabilities } from '../../html-view-capabilities.js';
 import {
@@ -419,8 +425,14 @@ export function registerAuthMiddleware(
     // Federation endpoints validate one-time invite/proof/guest capabilities in their own handlers.
     // Match registered route patterns, never raw URL prefixes that could expose owner APIs.
     const embassyRoute = req.routeOptions?.url;
-    if (isEmbassyProtocolRoute(req.method, embassyRoute?.startsWith(basePath + '/') ? embassyRoute.slice(basePath.length) : embassyRoute)) {
-      done(); return;
+    if (
+      isEmbassyProtocolRoute(
+        req.method,
+        embassyRoute?.startsWith(basePath + '/') ? embassyRoute.slice(basePath.length) : embassyRoute
+      )
+    ) {
+      done();
+      return;
     }
 
     // The owner form is the browser's single login in enforce mode. Agent and
@@ -630,7 +642,12 @@ function registerMultiUserAuthHook(
         enforcePasswordChange(req, reply, !!record.mustChangePassword);
         return;
       }
-      if (!live || live.disabled) {
+      if (
+        !live ||
+        live.disabled ||
+        (record.credentialFingerprint !== undefined &&
+          record.credentialFingerprint !== userAuthenticationFingerprint(live))
+      ) {
         authSessions.delete(sessionToken!);
         reply.clearCookie(AUTH_COOKIE_NAME, { path: '/' });
         reply.code(401).send('Unauthorized');
@@ -639,7 +656,7 @@ function registerMultiUserAuthHook(
       // Trust the LIVE role/mustChangePassword, not the (possibly stale) cookie snapshot
       // (also defends #9/#13: a CLI demotion is reflected without a revoke).
       req.authUser = { username: live.username, role: live.role };
-      if (!live.mustChangePassword) browserAuthSessions.set(req, record);
+      if (!live.mustChangePassword && record.credentialFingerprint !== undefined) browserAuthSessions.set(req, record);
       setSessionCookie(reply, sessionToken!); // sliding re-issue
       enforcePasswordChange(req, reply, !!live.mustChangePassword);
       return;
@@ -662,8 +679,12 @@ function registerMultiUserAuthHook(
       // win and self-heal both buckets, regardless of the username-failure count.
       const result = await verifyPassword(creds.username, creds.password);
       if (result) {
-        const { user, needsRehash: rehash } = result;
-        if (rehash) void setPassword(user.username, creds.password).catch(() => {});
+        const { user: verifiedUser, needsRehash: rehash } = result;
+        const user = rehash ? await rehashAuthenticatedUser(verifiedUser, creds.password) : verifiedUser;
+        if (!user) {
+          reply.code(401).send('Sign-in credentials changed; sign in again');
+          return;
+        }
         void touchLastLogin(user.username).catch(() => {});
         authFailures.delete(clientIp);
         userFailures.delete(normUser);
@@ -676,6 +697,7 @@ function registerMultiUserAuthHook(
           createdAt: Date.now(),
           method: 'basic',
           username: user.username,
+          credentialFingerprint: userAuthenticationFingerprint(user),
           role: user.role,
           mustChangePassword: !!user.mustChangePassword,
         };

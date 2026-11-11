@@ -20,7 +20,7 @@ import { getDiskStats } from '../../disk-stats.js';
 import { ApiErrorCode, createErrorResponse, getErrorMessage, type NiceConfig } from '../../types.js';
 import { isUnauthenticatedNetworkAcknowledged } from '../network-auth-policy.js';
 import { isMultiUserMode } from '../../config/multiuser.js';
-import { findUser, canUsernameRunPrivilegedCommands } from '../../user-store.js';
+import { findUser, canUsernameRunPrivilegedCommands, userAuthenticationFingerprint } from '../../user-store.js';
 import { getAuthUser, requireAdmin, canAccessOwned } from '../route-helpers.js';
 import {
   ConfigUpdateSchema,
@@ -249,14 +249,21 @@ export function registerSystemRoutes(
     // Resolve the role for the bound user (disabled/deleted users fail closed).
     // Carry the bound user's real mustChangePassword flag out of this block so the
     // minted cookie enforces the lockbox instead of hardcoding false.
-    let identity: { username: string; role: 'admin' | 'user'; mustChangePassword: boolean } | undefined;
+    let identity:
+      | { username: string; role: 'admin' | 'user'; mustChangePassword: boolean; credentialFingerprint: string }
+      | undefined;
     if (multiUser && consumed.username) {
       const user = await findUser(consumed.username);
       if (!user || user.disabled) {
         ctx.qrAuthFailures?.set(clientIp, qrFailures + 1);
         return reply.code(401).send('Invalid or expired QR code');
       }
-      identity = { username: user.username, role: user.role, mustChangePassword: !!user.mustChangePassword };
+      identity = {
+        username: user.username,
+        role: user.role,
+        mustChangePassword: !!user.mustChangePassword,
+        credentialFingerprint: userAuthenticationFingerprint(user),
+      };
     }
 
     // Issue session cookie (same pattern as Basic Auth success path)
@@ -268,6 +275,7 @@ export function registerSystemRoutes(
       createdAt: Date.now(),
       method: 'qr',
       username: identity?.username,
+      credentialFingerprint: identity?.credentialFingerprint,
       role: identity?.role,
       mustChangePassword: !!identity?.mustChangePassword,
     });
@@ -958,7 +966,9 @@ export function registerSystemRoutes(
     // installations still using the legacy authentication mode.
     if (settings.displayName !== undefined) {
       if (!verifiedOwner(req))
-        return reply.code(403).send(createErrorResponse(ApiErrorCode.FORBIDDEN, 'Only the owner may rename the instance'));
+        return reply
+          .code(403)
+          .send(createErrorResponse(ApiErrorCode.FORBIDDEN, 'Only the owner may rename the instance'));
       if (!requireAdmin(req, reply)) return;
     }
 

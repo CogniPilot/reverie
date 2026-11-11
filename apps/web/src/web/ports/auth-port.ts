@@ -21,6 +21,8 @@ export interface AuthSessionRecord {
    * section 5.
    */
   username?: string;
+  /** Captured at actual authentication; never inferred from a later same-name account. */
+  credentialFingerprint?: string;
   role?: 'admin' | 'user';
   /** Whether this user must change their password before other actions are allowed. */
   mustChangePassword?: boolean;

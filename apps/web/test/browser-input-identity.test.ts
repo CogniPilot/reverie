@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
 import cookie from '@fastify/cookie';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { OfficeAuthService } from '../src/owner-auth/office.js';
@@ -10,8 +10,16 @@ import { OwnerAuthStore } from '../src/owner-auth/store.js';
 import { OWNER_COOKIE, registerOwnerPolicy } from '../src/owner-auth/policy.js';
 import { AUTH_COOKIE_NAME, registerAuthMiddleware } from '../src/web/middleware/auth.js';
 import { registerInputIdentityRoutes } from '../src/web/routes/input-identity-routes.js';
+import { registerMeRoutes } from '../src/web/routes/me-routes.js';
 import type { SessionPort } from '../src/web/ports/session-port.js';
-import { createUser, invalidateUsersCache, updateUser } from '../src/user-store.js';
+import {
+  createUser,
+  deleteUser,
+  hashPassword,
+  invalidateUsersCache,
+  setPassword,
+  updateUser,
+} from '../src/user-store.js';
 
 const password = 'Synthetic-input-journal-identity-42!';
 let directory: string, store: OwnerAuthStore, service: OfficeAuthService;
@@ -49,6 +57,7 @@ async function start() {
     },
   });
   registerInputIdentityRoutes(app, service, state.authSessions !== null);
+  registerMeRoutes(app, { authSessions: state.authSessions, qrAuthFailures: state.qrAuthFailures, https: false });
   await app.ready();
 }
 async function setup() {
@@ -171,6 +180,88 @@ it('supports real multi-user authentication and refuses live disabled or passwor
   expect((await probe()).statusCode).toBe(403);
   await updateUser('fixture-user', { disabled: true });
   expect((await probe()).statusCode).toBe(401);
+});
+
+it.each(['recreate', 'password'] as const)(
+  'refuses a multi-user cookie after out-of-band credential %s',
+  async (change) => {
+    vi.stubEnv('REVERIE_MULTIUSER', '1');
+    vi.stubEnv('REVERIE_DATA_DIR', directory);
+    invalidateUsersCache();
+    await createUser({ username: 'fixture-user', password, role: 'user' });
+    await start();
+    const first = await app!.inject({ url: '/api/input-identity', headers: basic('fixture-user') });
+    const token = first.cookies.find((c) => c.name === AUTH_COOKIE_NAME)!.value;
+    if (change === 'recreate') {
+      await deleteUser('fixture-user');
+      await createUser({ username: 'fixture-user', password, role: 'user' });
+    } else await setPassword('fixture-user', password);
+    const stale = await app!.inject({ url: '/api/input-identity', cookies: { [AUTH_COOKIE_NAME]: token } });
+    expect(stale.statusCode).toBe(401);
+    const fresh = await app!.inject({ url: '/api/input-identity', headers: basic('fixture-user') });
+    expect(fresh.statusCode).toBe(200);
+    expect(fresh.json().data.scopeId).not.toBe(first.json().data.scopeId);
+  }
+);
+
+it('preserves the explicitly changed-password cookie with a new journal scope and revokes its siblings', async () => {
+  vi.stubEnv('REVERIE_MULTIUSER', '1');
+  vi.stubEnv('REVERIE_DATA_DIR', directory);
+  invalidateUsersCache();
+  await createUser({ username: 'fixture-user', password, role: 'user' });
+  await start();
+  const first = await app!.inject({ url: '/api/input-identity', headers: basic('fixture-user') });
+  const sibling = await app!.inject({ url: '/api/input-identity', headers: basic('fixture-user') });
+  const token = first.cookies.find((c) => c.name === AUTH_COOKIE_NAME)!.value;
+  const changed = await app!.inject({
+    method: 'POST',
+    url: '/api/me/password',
+    cookies: { [AUTH_COOKIE_NAME]: token },
+    payload: { currentPassword: password, newPassword: password + '-changed' },
+  });
+  expect(changed.statusCode).toBe(200);
+  const current = await app!.inject({ url: '/api/input-identity', cookies: { [AUTH_COOKIE_NAME]: token } });
+  expect(current.statusCode).toBe(200);
+  expect(current.json().data.scopeId).not.toBe(first.json().data.scopeId);
+  const siblingToken = sibling.cookies.find((c) => c.name === AUTH_COOKIE_NAME)!.value;
+  expect(
+    (await app!.inject({ url: '/api/input-identity', cookies: { [AUTH_COOKIE_NAME]: siblingToken } })).statusCode
+  ).toBe(401);
+});
+
+it('binds an actual hash-upgrade login to the new committed credentials', async () => {
+  vi.stubEnv('REVERIE_MULTIUSER', '1');
+  vi.stubEnv('REVERIE_DATA_DIR', directory);
+  invalidateUsersCache();
+  await createUser({ username: 'fixture-user', password, role: 'user' });
+  const file = join(directory, 'users.json');
+  const fixture = JSON.parse(await readFile(file, 'utf8'));
+  fixture.users[0].password = await hashPassword(password, { N: 1024, r: 8, p: 1 });
+  await writeFile(file, JSON.stringify(fixture));
+  invalidateUsersCache();
+  await start();
+  const first = await app!.inject({ url: '/api/input-identity', headers: basic('fixture-user') });
+  expect(first.statusCode).toBe(200);
+  const token = first.cookies.find((c) => c.name === AUTH_COOKIE_NAME)!.value;
+  expect((await app!.inject({ url: '/api/input-identity', cookies: { [AUTH_COOKIE_NAME]: token } })).json()).toEqual(
+    first.json()
+  );
+  expect(JSON.parse(await readFile(file, 'utf8')).users[0].password.N).toBe(16384);
+});
+
+it('does not invent provenance for an older multi-user cookie lacking an authentication fingerprint', async () => {
+  vi.stubEnv('REVERIE_MULTIUSER', '1');
+  vi.stubEnv('REVERIE_DATA_DIR', directory);
+  invalidateUsersCache();
+  await createUser({ username: 'fixture-user', password, role: 'user' });
+  await start();
+  const first = await app!.inject({ url: '/api/input-identity', headers: basic('fixture-user') });
+  const token = first.cookies.find((c) => c.name === AUTH_COOKIE_NAME)!.value;
+  delete state!.authSessions!.get(token)!.credentialFingerprint;
+  expect((await app!.inject({ url: '/api/input-identity', cookies: { [AUTH_COOKIE_NAME]: token } })).statusCode).toBe(
+    403
+  );
+  expect(state!.authSessions!.get(token)!.credentialFingerprint).toBeUndefined();
 });
 
 it('labels no-auth compatibility explicitly, refusing stale credentials and agent routing hints', async () => {
