@@ -12,7 +12,7 @@
  * That stayed invisible because config/vitest.ci.config.ts excludes
  * `test/mobile/**`, so CI never ran the suite.
  *
- * ⚠️ scripts/postinstall.js:238-303 already writes these same 7 outputs (same
+ * ⚠️ scripts/postinstall.js already writes these same 8 outputs (same
  * names, same alias tail), so a plain `npm install` leaves the suite working. What
  * this script adds is FRESHNESS and independence from install time: a checkout
  * installed with `--ignore-scripts`, or one borrowing another tree's
@@ -78,6 +78,13 @@ const ASSETS = [
     // The alias tail appended below. Its absence means the output is a partial
     // write from an older version of this script, whatever its mtime says.
     mustContain: 'window.LocalEchoOverlay',
+  },
+  {
+    src: join(ROOT, 'packages/xterm-zerolag-input/src/predictive-echo-addon.ts'),
+    out: 'xterm-predictive-echo.js',
+    mode: 'bundle',
+    globalName: 'XtermPredictiveEcho',
+    mustContain: 'window.PredictiveEchoOverlay',
   },
 ];
 
@@ -232,6 +239,21 @@ for (const asset of ASSETS) {
           'window.LocalEchoOverlay=class extends XtermZerolagInput.ZerolagInputAddon{' +
           'constructor(terminal){' +
           'super({prompt:{type:"character",char:"\\u276f",offset:2}});' +
+          'this.activate(terminal);' +
+          '}' +
+          '};' +
+          '}\n'
+      );
+    }
+    if (asset.out === 'xterm-predictive-echo.js') {
+      appendFileSync(
+        tmp,
+        '\n// Global aliases for browser usage\n' +
+          'if(typeof window!=="undefined"){' +
+          'window.PredictiveEchoAddon=XtermPredictiveEcho.PredictiveEchoAddon;' +
+          'window.PredictiveEchoOverlay=class extends XtermPredictiveEcho.PredictiveEchoAddon{' +
+          'constructor(terminal){' +
+          'super({});' +
           'this.activate(terminal);' +
           '}' +
           '};' +
