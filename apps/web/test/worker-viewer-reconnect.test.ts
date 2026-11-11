@@ -6,6 +6,7 @@ import { readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { Session } from '../src/session.js';
+import type {RespawnPaneOptions} from '../src/mux-interface.js';
 import { CompanyStore } from '../src/company-store.js';
 import { CompanyService } from '../src/company-service.js';
 import type { CompanyEmployee } from '../src/company-types.js';
@@ -26,7 +27,7 @@ async function fixture() {
   let dead = true;
   const mux = { isAvailable: () => true, muxSessionExists: () => true,
     isPaneDead: vi.fn(() => dead), readPaneLiveness: vi.fn(async () => dead ? { state: 'dead' } : { state: 'live', pid: 42 }),
-    respawnPane: vi.fn(async () => { dead = false; return 42; }), clearPaneExit: vi.fn(),
+    respawnPane: vi.fn(async (_options: RespawnPaneOptions) => { dead = false; return 42; }), clearPaneExit: vi.fn(),
     capturePaneText: vi.fn(() => '›\nGPT-6.1-Sol high · /work\n? for shortcuts'), sendInput: vi.fn(), setAttached: vi.fn() };
   const session = new Session({ workingDir: dir, mode: 'codex', useMux: true, mux: mux as never,
     muxSession: { muxName: 'reverie-owned', sessionId: 'owned', pid: 41 } as never });
@@ -421,6 +422,7 @@ it('does not leave a failed viewer reconnect in attach-only mode when the owner 
   vi.spyOn(f.session as any, '_buildRespawnPaneOptionsWithResumePin').mockResolvedValue({ sessionId: f.session.id, workingDir: f.dir, mode: 'opencode' });
   // Avoid the Codex hook installer: the saved runtime is unchanged by reconnect.
   vi.spyOn(f.session, 'mode', 'get').mockReturnValue('opencode');
+  f.mux.respawnPane.mockImplementationOnce(async options => { options.onProviderDispatch?.(); return 42; });
   expect(await f.session.restartDeadCli(() => true)).toBe(true);
   expect(f.mux.respawnPane.mock.calls[1][0]).not.toHaveProperty('workerAttachOnly');
   expect(f.session.paneExit).toBeUndefined(); expect(f.session.canAcceptChatInput()).toBe(true);
