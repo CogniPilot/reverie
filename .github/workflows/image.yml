@@ -329,11 +329,13 @@ jobs:
             TEST_RESOURCE_SCREENSHOT_DIR="$REVERIE_BROWSER_ARTIFACTS/resources" \
             TEST_OFFICE_SCREENSHOT_DIR="$REVERIE_BROWSER_ARTIFACTS/office" \
             TEST_OWNER_CONTROLS_SCREENSHOT_DIR="$REVERIE_BROWSER_ARTIFACTS/owner-controls" \
+            TEST_APPROVALS_SCREENSHOT_DIR="$REVERIE_BROWSER_ARTIFACTS/approvals" \
             nix develop --command node apps/web/node_modules/vitest/vitest.mjs run \
               --config apps/web/config/vitest.browser.config.ts \
               apps/web/test/company-resource-layout.browser.test.ts \
               apps/web/test/office-server.browser.test.ts \
               apps/web/test/office-owner-controls.browser.test.ts \
+              apps/web/test/approvals-held-layout.browser.test.ts \
               apps/web/test/browser-coverage-attribution.browser.test.ts \
             2>&1 | tee acceptance/resource-layout.log
           # Validate actual execution/context/source evidence after every suite
