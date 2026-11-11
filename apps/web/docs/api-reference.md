@@ -490,6 +490,8 @@ retry. Missing, evicted or pre-restart receipts are `unknown`, not proof that
 nothing was sent. Inspection never reserves a tag, advances a watermark, wakes
 a worker or writes to a terminal. Existing session ownership and related-agent
 permissions apply. The reply is not cached. This is not durable crash recovery.
+Wake-on-LAN buffer acceptance remains held here because it does not prove a
+terminal write or provider delivery.
 
 ### `POST /api/v1/sessions/:id/input` with `wait`
 

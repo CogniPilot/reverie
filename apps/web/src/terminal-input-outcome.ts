@@ -42,7 +42,7 @@ export function inputAdmissionSubject(admission: () => boolean): object {
   if (!subject) throw new Error('Missing original input subject');
   return subject;
 }
-type InputReceiptState = 'pending' | 'confirmed' | 'unconfirmed' | 'typed-unsent';
+type InputReceiptState = 'pending' | 'buffered' | 'confirmed' | 'unconfirmed' | 'typed-unsent';
 type InputReceipt = {owner: string | undefined; sid: string; key: string; subject: object; fingerprint: string; state: InputReceiptState};
 /** Bounded, process-local replay barrier. Unknown attempts are never evicted or transferred. */
 export class TerminalInputReceipts {

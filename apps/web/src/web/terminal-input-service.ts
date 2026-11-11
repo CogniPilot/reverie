@@ -97,7 +97,7 @@ export class TerminalInputService {
       inputAdmissionSubject(admission),
       tag.fingerprint
     );
-    return state === undefined ? 'unknown' : state === 'unconfirmed' ? 'held' : state;
+    return state === undefined ? 'unknown' : state === 'unconfirmed' || state === 'buffered' ? 'held' : state;
   }
   begin(
     session: Session,
@@ -121,7 +121,7 @@ export class TerminalInputService {
     const known = this.#receipts.lookup(owner, sid, key, subject, fingerprint);
     if (known === 'confirmed') return { state: 'duplicate' };
     if (known === 'typed-unsent') return { state: 'typed-unsent' };
-    if (known === 'pending') return { state: 'pending' };
+    if (known === 'pending' || known === 'buffered') return { state: 'pending' };
     if (known !== undefined || (tagged && session.inputSeqSpent(clientId!, seq!))) return { state: 'held' };
     if (!capacityAvailable()) return { state: 'capacity' };
     const receipt = this.#receipts.reserve(owner, sid, key, subject, fingerprint);
@@ -251,7 +251,7 @@ export class TerminalInputService {
         }
         claim();
         phase = 'buffered';
-        receipt.record('confirmed');
+        receipt.record('buffered');
         return true;
       },
       refuse: () => {

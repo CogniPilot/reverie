@@ -23,6 +23,7 @@ import { createMockRouteContext } from '../mocks/index.js';
 import { httpStatusForErrorCode, type ApiErrorCode } from '../../src/types.js';
 import { sessionWaits } from '../../src/web/session-wait-registry.js';
 import { RemoteWakeRegistry, type RemoteWakeDeps } from '../../src/remote-wake.js';
+import { terminalInputFingerprint } from '../../src/web/terminal-input-service.js';
 import type { SessionRemote } from '../../src/types.js';
 
 const SESSION_ID = 'remote-wake-session';
@@ -118,7 +119,7 @@ async function harness(
   };
   const registry = new RemoteWakeRegistry(deps);
 
-  registerSessionRoutes(app, ctx as never, { ...({ remoteWake: registry }), verifiedOwner: trustedFixtureOwner });
+  registerSessionRoutes(app, ctx as never, { ...{ remoteWake: registry }, verifiedOwner: trustedFixtureOwner });
   installEnvelope(app);
   installRouteErrorHandler(app);
   await app.ready();
@@ -168,14 +169,23 @@ describe('POST /api/sessions/:id/input — wake-on-LAN', () => {
     expect(session.writeBuffer).toEqual(['h', 'a', 'llo']);
   });
 
-  it('keeps the historical fire-and-forget write when the host is reachable', async () => {
+  it('reports pending until the reachable host write settles and exposes its non-effecting receipt', async () => {
     const h = await harness({ hostUp: true });
     const session = h.ctx.sessions.get(SESSION_ID)!;
 
-    const res = await send(h.app, { input: 'hallo', useMux: true });
+    const intent = { input: 'hallo', useMux: true, clientId: 'reachable-page', seq: 1 };
+    const res = await send(h.app, intent);
 
-    expect(res.json()).toEqual({ success: true, data: {} }); // the historical bare answer, untouched
+    expect(res.json()).toEqual({ success: true, data: { pending: true } });
     await vi.waitFor(() => expect(session.writeBuffer).toEqual(['hallo']));
+    await vi.waitFor(async () => {
+      const receipt = await h.app.inject({
+        url: `/api/sessions/${SESSION_ID}/input-receipt`,
+        query: { clientId: intent.clientId, seq: intent.seq, fingerprint: terminalInputFingerprint(intent) },
+      });
+      expect(receipt.json().data.state).toBe('confirmed');
+    });
+    expect(session.writeBuffer).toEqual(['hallo']);
     expect(h.wake).not.toHaveBeenCalled();
     expect(session.reattachRemote).not.toHaveBeenCalled();
   });
@@ -383,7 +393,7 @@ async function harnessWithFailingWake(): Promise<Harness> {
     broadcast: (event) => events.push(event),
     log: () => {},
   });
-  registerSessionRoutes(app, ctx as never, { ...({ remoteWake: registry }), verifiedOwner: trustedFixtureOwner });
+  registerSessionRoutes(app, ctx as never, { ...{ remoteWake: registry }, verifiedOwner: trustedFixtureOwner });
   installEnvelope(app);
   installRouteErrorHandler(app);
   await app.ready();

@@ -126,6 +126,14 @@ it('reads typed-unsent as a negative delivery result, preserving the composer wi
   expect(write).not.toHaveBeenCalled();
 });
 
+it('never upgrades a wake buffer acceptance into physical terminal delivery', async () => {
+  register();
+  expect(begin().acceptBuffered(ctx as never)).toBe(true);
+  expect((await probe()).json().data.state).toBe('held');
+  expect(ctx.terminalInput.begin(session, input, () => true).state).toBe('pending');
+  expect(write).not.toHaveBeenCalled();
+});
+
 it('eviction and a new process receipt store both return unknown, never not-issued', async () => {
   ctx.terminalInput = new TerminalInputService(new TerminalInputReceipts(1, 1));
   register();
