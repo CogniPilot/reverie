@@ -99,6 +99,19 @@ describe('TmuxManager (unit)', () => {
     manager.destroy();
   });
 
+  it('refuses a failed private hook environment write without logging its value', () => {
+    const token = 'synthetic-private-generation';
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    mockedExecSync.mockImplementation(() => {throw new Error('setenv failed: ' + token);});
+    try {
+      const apply = manager as unknown as {applyEnvOverrides(name: string, env: Record<string, string>): void};
+      expect(() => apply.applyEnvOverrides('reverie-synthetic', {REVERIE_HOOK_GENERATION: token}))
+        .toThrow('Hook generation environment could not be installed');
+      expect(JSON.stringify(warn.mock.calls)).not.toContain(token);
+      expect(mockedExecSync.mock.calls.filter(([cmd]) => String(cmd).includes('respawn-pane'))).toHaveLength(0);
+    } finally {warn.mockRestore();}
+  });
+
   describe('backend', () => {
     it('should report tmux as backend', () => {
       expect(manager.backend).toBe('tmux');
@@ -753,6 +766,85 @@ describe('TmuxManager (unit)', () => {
       }
       return module.TmuxManager;
     }
+
+    it.each(['text', 'paste'] as const)('rechecks private admission after async %s staging and withholds remaining keys', async stage => {
+      const NonTestTmuxManager = await importWithTmuxCommandsEnabled();
+      const instance = new NonTestTmuxManager();
+      instance.registerSession({sessionId: 'admission123', muxName: 'reverie-abcd5678', pid: 12345,
+        createdAt: Date.now(), workingDir: '/tmp', mode: stage === 'paste' ? 'codex' : 'claude', attached: true});
+      const {exec: currentExec} = await import('node:child_process');
+      const previous = vi.mocked(currentExec).getMockImplementation();
+      let allowed = true;
+      const commands: string[] = [];
+      vi.mocked(currentExec).mockImplementation((cmd, optionsOrCallback, maybeCallback) => {
+        const command = String(cmd); commands.push(command);
+        const callback = typeof optionsOrCallback === 'function' ? optionsOrCallback : maybeCallback;
+        if (command.includes(stage === 'paste' ? 'load-buffer' : 'send-keys')) allowed = false;
+        if (typeof callback === 'function') setImmediate(() => callback(null, '', ''));
+        return {on: vi.fn(), kill: vi.fn(), pid: 999_999_992} as never;
+      });
+      vi.spyOn(instance, 'capturePaneText').mockReturnValue('');
+      try {
+        expect(await instance.sendInput('admission123', (stage === 'paste' ? 'x'.repeat(2000) : 'synthetic') + '\r', {admitted: () => allowed})).toBe(false);
+        expect(commands.some(cmd => /send-keys.* Enter/.test(cmd))).toBe(false);
+        expect(commands.some(cmd => cmd.includes('paste-buffer'))).toBe(false);
+        if (stage === 'paste') {
+          expect(commands.some(cmd => cmd.includes('load-buffer'))).toBe(true);
+          expect(commands.some(cmd => cmd.includes('delete-buffer'))).toBe(true);
+        } else expect(commands.filter(cmd => cmd.includes('send-keys'))).toHaveLength(1);
+      } finally {vi.mocked(currentExec).mockImplementation(previous!); instance.destroy();}
+    });
+    it.each(['held', 'epoch', 'owner'] as const)('ordinary Session input withholds later Enter when %s changes during physical text IO', async change => {
+      const NonTestTmuxManager = await importWithTmuxCommandsEnabled();
+      const instance = new NonTestTmuxManager();
+      const {Session} = await import('../src/session.js');
+      const record = {sessionId: 'ordinary-admission123', muxName: 'reverie-abcd5678', pid: 12345,
+        createdAt: Date.now(), workingDir: '/tmp', mode: 'opencode' as const, attached: true};
+      instance.registerSession(record);
+      const session = new Session({id: record.sessionId, workingDir: '/tmp', mode: 'opencode', useMux: true,
+        mux: instance, muxSession: record, owner: 'original'});
+      const {exec: currentExec} = await import('node:child_process');
+      const previous = vi.mocked(currentExec).getMockImplementation();
+      const commands: string[] = [];
+      let release: (() => void) | undefined;
+      let reached!: () => void;
+      const firstKey = new Promise<void>(resolve => {reached = resolve;});
+      vi.mocked(currentExec).mockImplementation((cmd, optionsOrCallback, maybeCallback) => {
+        const command = String(cmd); commands.push(command);
+        const callback = typeof optionsOrCallback === 'function' ? optionsOrCallback : maybeCallback;
+        if (typeof callback === 'function') {
+          if (command.includes('send-keys') && !release) {release = () => callback(null, '', ''); reached();}
+          else setImmediate(() => callback(null, '', ''));
+        }
+        return {on: vi.fn(), kill: vi.fn(), pid: 999_999_985} as never;
+      });
+      vi.spyOn(instance, 'capturePaneText').mockReturnValue('');
+      try {
+        const writing = session.writeViaMux('synthetic ordinary text\r', {admitted: () => true});
+        await firstKey;
+        if (change === 'held') {
+          vi.spyOn(instance, 'respawnPane').mockImplementation(async options => {options.onProviderDispatch?.(); return null;});
+          await expect(session.restartCli()).rejects.toMatchObject({name: 'ProviderDispatchUnconfirmedError'});
+        } else if (change === 'epoch') {session.setMode('shell'); session.setMode('opencode');}
+        else session.owner = 'successor';
+        release!(); expect(await writing).toBe(false);
+        expect(commands.filter(command => command.includes('send-keys'))).toHaveLength(1);
+        expect(commands.some(command => /send-keys.* Enter/.test(command))).toBe(false);
+      } finally {release?.(); vi.mocked(currentExec).mockImplementation(previous!); await session.stop(false); instance.destroy();}
+    });
+    it('private admission never bypasses existing menu-key writeGate restrictions', async () => {
+      const NonTestTmuxManager = await importWithTmuxCommandsEnabled();
+      const instance = new NonTestTmuxManager();
+      instance.registerSession({sessionId: 'admission123', muxName: 'reverie-abcd5678', pid: 12345,
+        createdAt: Date.now(), workingDir: '/tmp', mode: 'claude', attached: true});
+      const {withWriteGate: originalGate} = await import('../src/submit-settle.js');
+      const {exec: currentExec} = await import('node:child_process');
+      vi.mocked(currentExec).mockClear();
+      try {
+        expect((await originalGate(() => true, () => instance.sendInput('admission123', '1', {admitted: () => true}))).result).toBe(false);
+        expect(vi.mocked(currentExec).mock.calls).toHaveLength(0);
+      } finally {instance.destroy();}
+    });
 
     beforeEach(() => {
       mockedExecSync.mockImplementation((cmd: string) => {

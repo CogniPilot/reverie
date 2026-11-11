@@ -68,6 +68,8 @@ export type SessionNameSource = 'placeholder' | 'auto' | 'manual';
 
 /** Options for `Session.write()` / `Session.writeViaMux()`. */
 export interface SessionWriteOptions {
+  /** Private operation authority, rechecked at each physical key dispatch after any I/O. */
+  admitted?: () => boolean;
   /**
    * The bytes were typed by a person, or sent by an agent on their behalf
    * (browser keystrokes, `POST /api/sessions/:id/input`). Only such input can
@@ -1028,6 +1030,8 @@ export interface SessionState {
   /** Explicit diagnostic request; neither attached transport nor provider readiness is confirmed. */
   viewerInspectionRequested?: boolean;
   viewerInputHeld?: boolean;
+  /** Deny-only saved uncertainty; false/absence never clears an existing in-process hold. */
+  providerDispatchHeld?: boolean;
   /** Confirmed failure takes precedence over busy; missing evidence remains unknown. */
   runtimeHealth?: 'healthy' | 'dead' | 'disconnected' | 'unknown';
   runtimeHealthScope?: 'provider' | 'terminal';

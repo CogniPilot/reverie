@@ -44,6 +44,10 @@ async function harness(): Promise<{ app: FastifyInstance; ctx: MockRouteContext;
   const app = Fastify({ logger: false });
   await app.register(fastifyCookie);
   const ctx = createMockRouteContext({ sessionId: SESSION_ID });
+  // This transport-only route fixture models a start whose hook configuration
+  // was prepared. Actual receipt/generation ownership is tested with real Session.
+  Object.defineProperty(ctx._session, 'workspaceHookConfiguration', {get: () => 'prepared'});
+  ctx._session.setMaxListeners(25); // Same bound as the real Session; waiter cap is sixteen.
   const rawRequests: IncomingMessage[] = [];
   app.addHook('onRequest', async (req) => {
     rawRequests.push(req.raw);
@@ -139,9 +143,10 @@ describe('POST /api/sessions/:id/input with wait', () => {
     sessionWaits.notifySignal(SESSION_ID, 'stop');
     const { data } = (await pending).json();
 
-    expect(Object.keys(data).sort()).toEqual(['delivered', 'duplicate', 'limitPaused', 'status', 'wait']);
+    expect(Object.keys(data).sort()).toEqual(['delivered', 'duplicate', 'limitPaused', 'status', 'wait', 'workerDead']);
     expect(data.status).toBe('idle');
     expect(data.limitPaused).toBe(false);
+    expect(data.workerDead).toBe(false);
     expect(data.wait.aborted).toBe(false);
   });
 

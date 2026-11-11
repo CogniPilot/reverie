@@ -1,11 +1,12 @@
+import {issueSessionProviderLease, type SessionProviderLease} from '../../src/session-provider-lease.js';
 /**
  * Shared MockSession for tests that need terminal simulation.
  * Used by respawn, route, and subagent tests.
  */
 import { EventEmitter } from 'node:events';
+import {getCli} from '../../src/config/cli-registry/registry.js';
 import { vi } from 'vitest';
-import type { DeliverySession } from '../../src/chatroom-delivery.js';
-import type { PromptCacheStatus, SessionAttachmentHistoryItem, SessionStatus, SessionRemote } from '../../src/types.js';
+import type { SessionWriteOptions, PromptCacheStatus, SessionAttachmentHistoryItem, SessionStatus, SessionRemote } from '../../src/types.js';
 
 /**
  * Enhanced mock session for testing RespawnController.
@@ -100,8 +101,8 @@ export class MockSession extends EventEmitter {
   failWrites = false;
 
   /** Direct PTY write (used by session.write()). Mirrors the real boolean return. */
-  write(data: string): boolean {
-    if (this.failWrites) return false;
+  write(data: string, options?: SessionWriteOptions): boolean {
+    if (this.failWrites || (options?.admitted && !options.admitted())) return false;
     this.writeBuffer.push(data);
     return true;
   }
@@ -110,8 +111,8 @@ export class MockSession extends EventEmitter {
   submitOutcome: 'submitted' | 'stranded' | 'unverified' | 'none' = 'submitted';
 
   /** Write via mux (used by respawn controller). */
-  async writeViaMux(data: string, options?: Parameters<DeliverySession['writeViaMux']>[1]): Promise<boolean> {
-    if (this.failWrites) return false;
+  async writeViaMux(data: string, options?: SessionWriteOptions): Promise<boolean> {
+    if (this.failWrites || (options?.admitted && !options.admitted())) return false;
     this.writeBuffer.push(data);
     if (this.submitOutcome !== 'none') options?.onOutcome?.(this.submitOutcome);
     return true;
@@ -287,9 +288,23 @@ export class MockSession extends EventEmitter {
 
   /** CLI mode */
   mode: string = 'claude';
+  /** This existing-running-transport fixture has no new provider-start proof. */
+  admitHookReport(): 'refused' | 'legacy-attachment' | 'supervised' {
+    const capability = getCli(this.mode)?.capabilities.hooks;
+    return capability === 'supervised' ? 'supervised' : capability === 'always' ? 'legacy-attachment' : 'refused';
+  }
+
+  private providerEpoch = 0;
+  captureApprovalProviderLease(currentOwner: () => boolean = () => true): SessionProviderLease {
+    const epoch = this.providerEpoch;
+    const mode = this.mode;
+    const originalOwner = this.owner;
+    return issueSessionProviderLease(this, () => this.providerEpoch === epoch && this.mode === mode && this.owner === originalOwner && currentOwner(), originalOwner, epoch);
+  }
 
   /** Mirrors Session.setMode (POST /api/sessions/:id/mode). */
   setMode = vi.fn((mode: string) => {
+    this.providerEpoch++;
     this.mode = mode;
   });
 

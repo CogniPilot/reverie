@@ -1,3 +1,4 @@
+import {sessionProviderLeaseOwner, sessionProviderLeaseCurrent, sessionProviderLeaseSameEpoch, type SessionProviderLease} from '../session-provider-lease.js';
 /**
  * @fileoverview Approvals Inbox: server-side registry of prompts waiting on a human.
  *
@@ -102,6 +103,8 @@ export interface ApprovalResolvedInfo {
 }
 
 interface NotePromptArgs {
+  /** Private authority issued by the original Session; never copied to ApprovalItem. */
+  providerLease?: SessionProviderLease;
   sessionId: string;
   sessionName: string;
   kind: ApprovalKind;
@@ -225,6 +228,8 @@ export function parseDialogOptions(context: string | undefined): ApprovalOption[
 
 // ─── Registry ────────────────────────────────────────────────────────────────
 
+type ApprovalDispatch = {state: 'pending' | 'dispatching' | 'answered'} | {state: 'unconfirmed'; cause?: unknown};
+
 export class ApprovalInbox {
   /** Keyed by sessionId; the one-active-item-per-session invariant lives here. */
   private items = new Map<string, ApprovalItem>();
@@ -232,6 +237,9 @@ export class ApprovalInbox {
   private itemTimers = new Map<string, ReturnType<typeof setTimeout>[]>();
   /** Capture callbacks kept for answer-time re-verification; dropped on remove. */
   private captures = new Map<string, () => string | null>();
+  private providerLeases = new WeakMap<ApprovalItem, SessionProviderLease>();
+  private dispatches = new WeakMap<ApprovalItem, ApprovalDispatch>();
+  private answerOwners = new Map<string, ApprovalItem>();
   private seq = 0;
   private stopped = false;
 
@@ -261,8 +269,17 @@ export class ApprovalInbox {
    * normally. Only `idle` is eligible: a permission or question dialog blocks
    * the agent whatever else it started, so its alert must survive.
    */
-  notePrompt(args: NotePromptArgs): ApprovalItem {
-    this.resolveForSession(args.sessionId, 'superseded');
+  notePrompt(args: NotePromptArgs): ApprovalItem | undefined {
+    if (args.providerLease && !sessionProviderLeaseCurrent(args.providerLease)) return;
+    const original = this.answerOwners.get(args.sessionId);
+    if (original && sessionProviderLeaseSameEpoch(this.providerLeases.get(original), args.providerLease)) {
+      // A retrying producer cannot recreate consent while its first answer is
+      // dispatching or unknown, even while take() has removed the visible item.
+      if (!this.items.has(args.sessionId) && this.dispatches.get(original)?.state !== 'dispatching')
+        this.items.set(args.sessionId, original);
+      this.onUpdated?.(original);
+      return original;
+    }
     const item: ApprovalItem = {
       id: `${args.sessionId}:${++this.seq}`,
       sessionId: args.sessionId,
@@ -279,7 +296,11 @@ export class ApprovalInbox {
       item.acknowledgedAt = item.createdAt;
       item.acknowledgedReason = `watching ${args.watching}`;
     }
+    if (args.providerLease) this.providerLeases.set(item, args.providerLease);
     this.applyCapture(item, args.capture);
+    if (args.providerLease && !sessionProviderLeaseCurrent(args.providerLease)) return;
+    this.resolveForSession(args.sessionId, 'superseded');
+    this.dispatches.set(item, {state: 'pending'});
     this.items.set(args.sessionId, item);
     if (args.capture) this.captures.set(args.sessionId, args.capture);
     this.onPending?.(item);
@@ -382,11 +403,61 @@ export class ApprovalInbox {
   getForSession(sessionId: string): ApprovalItem | undefined {
     const item = this.items.get(sessionId);
     if (!item) return undefined;
-    if (this.isExpired(item)) {
+    if (this.isExpired(item) && this.dispatches.get(item)?.state !== 'unconfirmed') {
       this.resolveForSession(sessionId, 'expired');
       return undefined;
     }
     return item;
+  }
+
+  /** Only private original-account evidence can authorize visibility after SID reuse. */
+  originalOwner(item: ApprovalItem): {owner: string | undefined} | undefined {
+    return sessionProviderLeaseOwner(this.providerLeases.get(item));
+  }
+
+  /** Prompt-bearing SSE must not borrow a successor's account from its reused SID. */
+  notificationOwner(item: ApprovalItem, session: {owner?: string} | undefined): {owner: string | undefined} | undefined {
+    const original = this.originalOwner(item);
+    return original && session && original.owner === session.owner ? original : undefined;
+  }
+
+  /** Original consent is single-attempt: uncertainty cannot become retry authority. */
+  beginAnswer(item: ApprovalItem): boolean {
+    if (this.dispatches.get(item)?.state !== 'pending') return false;
+    this.dispatches.set(item, {state: 'dispatching'});
+    this.answerOwners.set(item.sessionId, item);
+    return true;
+  }
+
+  settleAnswer(item: ApprovalItem, outcome: {state: 'answered'} | {state: 'unconfirmed'; cause?: unknown}): boolean {
+    if (this.dispatches.get(item)?.state !== 'dispatching') {
+      this.dispatches.set(item, {state: 'unconfirmed', cause: new Error('Invalid approval dispatch transition')});
+      return false;
+    }
+    this.dispatches.set(item, outcome);
+    if (outcome.state === 'answered' && this.answerOwners.get(item.sessionId) === item)
+      this.answerOwners.delete(item.sessionId);
+    return true;
+  }
+
+  /** Response-only diagnostic; it never substitutes for the private lease at dispatch. */
+  answerStatus(item: ApprovalItem, session: object | undefined): {answerState: 'current'} | {answerState: 'held'; heldReason: string} {
+    const dispatch = this.dispatches.get(item);
+    if (dispatch?.state === 'unconfirmed') return {answerState: 'held',
+      heldReason: 'An earlier answer attempt has an unconfirmed outcome. Do not replay it; wait for an observed resolution or a new provider generation.'};
+    if (dispatch?.state === 'answered') return {answerState: 'held', heldReason: 'This approval has already been answered. Do not replay it.'};
+    return dispatch?.state === 'pending' && session && this.providerCurrent(item, session) ? {answerState: 'current'} : {answerState: 'held',
+      heldReason: 'This approval is not bound to the current provider. Wait for a new provider prompt; do not replay this answer.'};
+  }
+
+  /** Shared GET/SSE projection: diagnostics never become control authority. */
+  publicItem(item: ApprovalItem, session: object | undefined) {
+    return {...item, ...this.answerStatus(item, session)};
+  }
+
+  /** A restored/copied item lacks proof and stays held; it is never rebound by SID. */
+  providerCurrent(item: ApprovalItem, session: object): boolean {
+    return sessionProviderLeaseCurrent(this.providerLeases.get(item), session);
   }
 
   /** Pending item by id, TTL-checked. */
@@ -454,7 +525,7 @@ export class ApprovalInbox {
    * pending permission/question dialog.
    */
   resolveForSession(sessionId: string, resolution: ApprovalResolution, kinds?: ApprovalKind[]): void {
-    const item = this.items.get(sessionId);
+    const item = this.items.get(sessionId) ?? this.answerOwners.get(sessionId);
     if (!item) return;
     if (kinds && !kinds.includes(item.kind)) return;
     this.remove(item, resolution);
@@ -467,6 +538,7 @@ export class ApprovalInbox {
     this.itemTimers.clear();
     this.items.clear();
     this.captures.clear();
+    this.answerOwners.clear();
   }
 
   /**
@@ -516,6 +588,9 @@ export class ApprovalInbox {
   }
 
   private remove(item: ApprovalItem, resolution: ApprovalResolution): void {
+    if (resolution === 'resolved_in_terminal' || resolution === 'session_ended' || resolution === 'answered') {
+      if (this.answerOwners.get(item.sessionId) === item) this.answerOwners.delete(item.sessionId);
+    }
     this.items.delete(item.sessionId);
     this.captures.delete(item.sessionId);
     for (const timer of this.itemTimers.get(item.id) ?? []) clearTimeout(timer);

@@ -125,6 +125,9 @@ describe('bug 19: owner replacement spawns record running intent on the new sess
     expect(employee().sessionId).toBe('test-session-1');
     expect(employee().desiredRunning).toBe(false);
     expect(() => company.prepareRuntimeRestart('test-session-1', undefined)?.finish()).not.toThrow();
+    const retried = await owner({employeeId: abe.id});
+    expect(retried.statusCode, retried.body).toBe(200);
+    expect(employee().sessionId).toBe(retried.json().session.id);
   });
 
   it('a replacement of a running employee keeps it running (the thread claim stop is not the owner Stop)', async () => {

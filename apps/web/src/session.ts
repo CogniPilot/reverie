@@ -1,3 +1,5 @@
+import {issueSessionProviderLease, type SessionProviderLease} from './session-provider-lease.js';
+import {prepareWorkspaceHooks, workspaceHookPolicy, consumeWorkspaceHookPreparation, type WorkspaceHookPreparation, type WorkspaceHookConfiguration} from './workspace-hook-policy.js';
 import { applyCodexTurnSummaryHooks } from './hooks-config.js';
 import { cliConfigContent } from './cli-config-content.js';
 import { prepareSelectedClaudeProfile } from './selected-claude-profile.js';
@@ -506,6 +508,30 @@ export interface ClaudeMessage {
 /** Why a pane was not replaced: an owner stop of this agent is not settled yet. */
 const OWNER_STOP_HELD = 'An unsettled owner stop holds this expert; its pane is not replaced until the laptop settles the stop';
 
+/** A dispatched provider command may have run; no caller may replay it as a rollback. */
+export class ProviderDispatchUnconfirmedError extends Error {
+  constructor(cause?: unknown) {
+    super('Provider launch outcome is unconfirmed. Input is held. Do not replay it; inspect the terminal and confirm whether the provider ran. Same-session retry cannot clear this hold; supported reconciliation is not yet implemented.', {cause});
+    this.name = 'ProviderDispatchUnconfirmedError';
+  }
+}
+
+interface HookProviderDispatch {
+  envOverrides: Record<string, string>;
+  onProviderDispatch(): void;
+  attempted(): boolean;
+  providerAttempted(): boolean;
+  current(): boolean;
+  settle(success: boolean): boolean;
+}
+
+interface HookStartAttempt {
+  configuration: WorkspaceHookConfiguration;
+  mode: string;
+  initialEpoch: number;
+  operation?: HookProviderDispatch;
+}
+
 export class Session extends EventEmitter {
   readonly id: string;
   readonly workingDir: string;
@@ -785,6 +811,163 @@ export class Session extends EventEmitter {
   // Ephemeral env overrides (e.g., CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS). Exported by tmux
   // at spawn, preserved across respawns via persisted state. Not written to .claude/settings.local.json.
   private _envOverrides: Record<string, string> | undefined;
+  #workspaceHookPreparation?: WorkspaceHookPreparation;
+  #providerDispatchUncertainty?: ProviderDispatchUnconfirmedError;
+  get providerDispatchHeld(): boolean {return this.#providerDispatchUncertainty !== undefined;}
+  private _holdUnconfirmedProvider(cause?: unknown): ProviderDispatchUnconfirmedError {
+    return this.#providerDispatchUncertainty ??= cause instanceof ProviderDispatchUnconfirmedError ? cause : new ProviderDispatchUnconfirmedError(cause);
+  }
+  /** Canonical deny-only provider-effect admission; viewer attachment is separate. */
+  private _providerEffectsAdmitted(): boolean {return this.#providerDispatchUncertainty === undefined;}
+  private _assertProviderEffectAdmission(): void {
+    if (!this._providerEffectsAdmitted()) throw this.#providerDispatchUncertainty!;
+  }
+  #workspaceHookEvidence: {configuration: 'fenced' | 'legacy-attachment' | 'opted-out'}
+    | {configuration: 'preparing' | 'prepared'; generation: string} = {configuration: 'fenced'};
+  #workspaceHookEpoch = 0;
+  #hookStartAttempt?: HookStartAttempt;
+
+  /** Configuration evidence only; no provider-readiness or hook-emission claim. */
+  get workspaceHookConfiguration(): WorkspaceHookConfiguration {
+    const configuration = this.#workspaceHookEvidence.configuration;
+    return configuration === 'prepared' || configuration === 'opted-out' ? configuration : 'unknown';
+  }
+
+  /** Admission precedes every report effect; an unknown owned start is never a legacy attachment. */
+  admitHookReport(value: unknown): 'refused' | 'legacy-attachment' | 'preparing' | 'current' | 'supervised' {
+    if (this._isStopped || this._closing || this.#providerDispatchUncertainty) return 'refused';
+    const capability = getCli(this.mode)?.capabilities.hooks;
+    if (capability === 'supervised') return 'supervised';
+    if (capability !== 'always') return 'refused';
+    const evidence = this.#workspaceHookEvidence;
+    switch (evidence.configuration) {
+      case 'legacy-attachment': return 'legacy-attachment';
+      case 'preparing': return value === evidence.generation ? 'preparing' : 'refused';
+      case 'prepared': return value === evidence.generation ? 'current' : 'refused';
+      case 'fenced':
+      case 'opted-out': return 'refused';
+    }
+  }
+
+  /** A prompt may authorize input only to the same provider epoch and Session object. */
+  captureApprovalProviderLease(currentOwner: () => boolean = () => true): SessionProviderLease | undefined {
+    const evidence = this.#workspaceHookEvidence;
+    if (this._isStopped || this._closing || this.#providerDispatchUncertainty || (evidence.configuration !== 'prepared'
+      && evidence.configuration !== 'legacy-attachment' && getCli(this.mode)?.capabilities.hooks !== 'supervised')) return;
+    const epoch = this.#workspaceHookEpoch;
+    const mode = this.mode;
+    const originalOwner = this.owner;
+    return issueSessionProviderLease(this, () => !this._isStopped && !this._closing
+      && this.#workspaceHookEpoch === epoch && this.mode === mode && this.owner === originalOwner && currentOwner(), originalOwner, epoch);
+  }
+
+  private _invalidateWorkspaceHooks(): void {
+    this.#workspaceHookEpoch++;
+    this.#workspaceHookEvidence = {configuration: 'fenced'};
+    this.emit('workspaceHookGenerationChanged');
+  }
+
+  private _launchEnvOverrides(): Record<string, string> {
+    // The reserved value outranks caller overrides and is never stored in them.
+    return {...this._envOverrides, REVERIE_HOOK_GENERATION: 'generation' in this.#workspaceHookEvidence
+      ? this.#workspaceHookEvidence.generation : ''};
+  }
+
+  private _sealWorkspaceHooks(configuration: WorkspaceHookConfiguration, exported: boolean): void {
+    const evidence = this.#workspaceHookEvidence;
+    if (evidence.configuration === 'legacy-attachment') return;
+    this.#workspaceHookEvidence = configuration === 'prepared' && exported && evidence.configuration === 'preparing'
+      ? {configuration: 'prepared', generation: evidence.generation}
+      : {configuration: configuration === 'opted-out' ? 'opted-out' : 'fenced'};
+  }
+
+  private _hookStartCurrent(): boolean {
+    const attempt = this.#hookStartAttempt;
+    return !this._isStopped && !this._closing && (!attempt || (attempt.mode === this.mode
+      && (attempt.operation ? attempt.operation.current() : attempt.initialEpoch === this.#workspaceHookEpoch)));
+  }
+
+  /** Stage private env without revoking a provider that is still working during preparation. */
+  private _stageProviderHookDispatch(configuration: WorkspaceHookConfiguration,
+    authority: () => boolean, eligible: () => boolean = authority, viewerOnly = false): HookProviderDispatch {
+    const initialEpoch = this.#workspaceHookEpoch;
+    const mode = this.mode;
+    const generation = configuration === 'prepared' && !viewerOnly && !this._workerBacked && !this._remote && !this._docker
+      ? uuidv4() : undefined;
+    let phase: {state: 'staged'} | {state: 'dispatched' | 'refused' | 'failed' | 'succeeded'; epoch: number} = {state: 'staged'};
+    const current = () => authority() && (viewerOnly || this._providerEffectsAdmitted()) && !this._closing && !this._isStopped && mode === this.mode
+      && (phase.state === 'staged' ? initialEpoch : phase.epoch) === this.#workspaceHookEpoch;
+    return {
+      envOverrides: {...this._envOverrides, REVERIE_HOOK_GENERATION: generation ?? ''},
+      onProviderDispatch: () => {
+        if (phase.state !== 'staged') throw new Error('Session launch dispatch was already settled');
+        if (!current() || !eligible()) {phase = {state: 'refused', epoch: initialEpoch}; throw new Error('Session launch generation changed');}
+        const epoch = viewerOnly ? initialEpoch : initialEpoch + 1;
+        phase = {state: 'dispatched', epoch};
+        if (!viewerOnly) this._invalidateWorkspaceHooks();
+        if (!current()) throw new Error('Session launch generation changed');
+        if (generation) this.#workspaceHookEvidence = {configuration: 'preparing', generation};
+      },
+      attempted: () => phase.state === 'dispatched' || phase.state === 'failed' || phase.state === 'succeeded',
+      providerAttempted: () => !viewerOnly && (phase.state === 'dispatched' || phase.state === 'failed' || phase.state === 'succeeded'),
+      current,
+      settle: (success) => {
+        if (phase.state !== 'staged' && phase.state !== 'dispatched') return phase.state === 'succeeded';
+        if (phase.state === 'staged') {
+          // A known refusal made no dispatch. An adapter claiming success without
+          // this boundary supplies no proof of what actually ran.
+          if (success) this._invalidateWorkspaceHooks();
+          phase = {state: success ? 'failed' : 'refused', epoch: this.#workspaceHookEpoch};
+          return false;
+        }
+        if (!success || !current()) {
+          if (!viewerOnly && phase.epoch === this.#workspaceHookEpoch) this._invalidateWorkspaceHooks();
+          phase = {state: 'failed', epoch: this.#workspaceHookEpoch};
+          return false;
+        }
+        if (!viewerOnly) this._sealWorkspaceHooks(configuration, generation !== undefined);
+        phase = {state: 'succeeded', epoch: this.#workspaceHookEpoch};
+        return true;
+      },
+    };
+  }
+
+  private _stageStartHookDispatch(): HookProviderDispatch {
+    const attempt = this.#hookStartAttempt;
+    this._assertProviderEffectAdmission();
+    if (!attempt || !this._hookStartCurrent()) throw new Error('Session launch generation changed');
+    if (attempt.operation?.attempted()) throw new Error('A provider dispatch is already unsettled');
+    const operation = this._stageProviderHookDispatch(attempt.configuration,
+      () => this.#hookStartAttempt === attempt && this.mode === attempt.mode,
+      undefined, this._workerAttachOnly || !!(this._remote?.owned === false && this._remote.remoteSessionName));
+    attempt.operation = operation;
+    return operation;
+  }
+
+  private async _withWorkspaceHookStart(start: () => Promise<void>): Promise<void> {
+    if (this.#hookStartAttempt) throw new Error('Session launch is already in progress');
+    const preparation = this.#workspaceHookPreparation;
+    this.#workspaceHookPreparation = undefined;
+    const attempt: HookStartAttempt = {configuration: consumeWorkspaceHookPreparation(preparation, this.workingDir),
+      mode: this.mode, initialEpoch: this.#workspaceHookEpoch};
+    this.#hookStartAttempt = attempt;
+    try {
+      await start();
+      if (attempt.operation && !attempt.operation.settle(true)) {
+        if (attempt.operation.providerAttempted()) throw this._holdUnconfirmedProvider();
+        throw new Error('Terminal attachment outcome is unconfirmed');
+      }
+    } catch (error) {
+      const attempted = attempt.operation?.providerAttempted();
+      attempt.operation?.settle(false);
+      if (attempted) throw this._holdUnconfirmedProvider(error);
+      this._assertProviderEffectAdmission();
+      throw error;
+    } finally {
+      this.#hookStartAttempt = undefined;
+    }
+  }
+
   private readonly _workerAttachOnly: boolean;
   private readonly _workerResourceLaunch?: ResourceWorkerLaunch;
 
@@ -913,8 +1096,12 @@ export class Session extends EventEmitter {
       /** Extra env vars exported to the CLI at spawn time (no disk persistence) */
       envOverrides?: Record<string, string>;
       workerAttachOnly?: boolean;
+      /** Private, single-start filesystem configuration receipt; never restored from JSON. */
+      workspaceHookPreparation?: WorkspaceHookPreparation;
       /** Saved safety fence only; restored transport/provider readiness is never implied. */
       viewerInputHeld?: boolean;
+      /** Deny-only recovery fence, never positive provider/transport evidence. */
+      providerDispatchHeld?: boolean;
       /** Internal, in-process only. Normal HTTP create schemas do not admit it. */
       workerResourceLaunch?: ResourceWorkerLaunch;
       subscriptionProfile?: SessionState['subscriptionProfile'];
@@ -966,7 +1153,9 @@ export class Session extends EventEmitter {
     this._workerAttachOnly = config.workerAttachOnly === true;
     this._viewerInputHeld = this._workerBacked && config.viewerInputHeld === true;
     this._workerResourceLaunch = config.workerResourceLaunch;
+    if (config.providerDispatchHeld === true) this._holdUnconfirmedProvider();
     this.workingDir = config.workingDir;
+    this.#workspaceHookPreparation = config.workspaceHookPreparation;
     this.createdAt = config.createdAt || Date.now();
     this._mode = config.mode || 'claude';
     this.subscriptionProfile = config.subscriptionProfile;
@@ -1030,6 +1219,10 @@ export class Session extends EventEmitter {
     this._mux = config.mux || null;
     this._useMux = config.useMux ?? (this._mux !== null && this._mux.isAvailable());
     this._muxSession = config.muxSession || null;
+    // Actual restore/attach metadata, never a serialized hook-readiness claim.
+    if (config.muxSession || config.discoveredMuxSession || config.workerAttachOnly
+      || (config.remote?.owned === false && config.remote.remoteSessionName))
+      this.#workspaceHookEvidence = {configuration: 'legacy-attachment'};
 
     // Apply Nice priority configuration if provided
     if (config.niceConfig) {
@@ -1998,6 +2191,8 @@ export class Session extends EventEmitter {
    */
   setMode(mode: SessionMode): void {
     if (!getCli(mode)) throw new Error(`No CLI registry entry for mode ${mode}`);
+    this.#workspaceHookPreparation = undefined;
+    this._invalidateWorkspaceHooks();
     this._mode = mode;
     if (getCli(mode)?.launch.resumeSelection !== 'claude-transcript') this._claudeSessionIdPending = false;
     this._acceptsPrompts = getCli(mode)?.capabilities.startMode !== 'shell';
@@ -2010,6 +2205,7 @@ export class Session extends EventEmitter {
     mode: SessionMode; selection?: SessionState['subscriptionProfile']; env: Record<string, string>;
     sourceKey: string; model?: string; effort?: string; effortField?: string; preserveRecipe?: boolean;
   }): () => void {
+    this._assertProviderEffectAdmission();
     const record = this as unknown as Record<string, unknown>;
     const fields = ['_mode', '_acceptsPrompts', '_cliVersion', 'subscriptionProfile', '_envOverrides', '_customModel',
       '_model', '_effort', '_resumeSessionId', '_claudeSessionId', '_claudeSessionIdPending', '_claudeSessionIdIsFirstHand', '_claudeSessionChain', '_runtimeThreads',
@@ -2387,6 +2583,7 @@ export class Session extends EventEmitter {
       runtimeHealthScope: this.runtimeHealthScope,
       workerViewerReconnect: this.workerViewerReconnect,
       viewerInputHeld: this.viewerInputHeld,
+      ...(this.providerDispatchHeld ? {providerDispatchHeld: true} : {}),
       viewerInspectionRequested: this.viewerInspectionRequested,
       attachmentHistory: this.attachmentHistory.length > 0 ? this.attachmentHistory : undefined,
       lastSubmitAt: this._lastSubmitAt || undefined,
@@ -2528,9 +2725,13 @@ export class Session extends EventEmitter {
     admitted?: () => boolean;
   }): Promise<{ isRestored: boolean; respawnedResumeId?: string; respawnedDeadPane: boolean }> {
     const mux = this._mux!;
-    const admitted = () => !ownerStopPending(this.id) && (!options.admitted || options.admitted());
-    const assertAdmission = () => { if (options.admitted && !options.admitted()) throw new Error('Session launch authorization changed'); };
+    const admitted = () => this._hookStartCurrent() && !ownerStopPending(this.id) && (!options.admitted || options.admitted());
+    const assertAdmission = () => { if (!this._hookStartCurrent() || (options.admitted && !options.admitted())) throw new Error('Session launch authorization changed'); };
     assertAdmission();
+    // A held outcome may attach an unchanged live viewer, but must preserve the
+    // original subject when observation would otherwise discard or replace it.
+    if (!this._providerEffectsAdmitted() && (!this._muxSession || !mux.muxSessionExists(this._muxSession.muxName)
+      || mux.isPaneDead(this._muxSession.muxName))) this._assertProviderEffectAdmission();
     // An unsettled owner stop (owner-stop-journal) could still signal whatever holds this agent's pane, so until the
     // laptop settles it no new process goes there: only an existing live pane may be attached to.
     if (ownerStopPending(this.id) && (!this._muxSession || !mux.muxSessionExists(this._muxSession.muxName) || mux.isPaneDead(this._muxSession.muxName)))
@@ -2543,6 +2744,7 @@ export class Session extends EventEmitter {
     // genuinely new session starts with `_muxSession` null and never sets this.
     let muxSessionVanished = false;
     if (this._muxSession && !mux.muxSessionExists(this._muxSession.muxName)) {
+      this._assertProviderEffectAdmission();
       console.log('[Session] Stale mux session detected (tmux gone):', this._muxSession.muxName);
       this._muxSession = null;
       muxSessionVanished = true;
@@ -2554,6 +2756,7 @@ export class Session extends EventEmitter {
     let respawnedDeadPane = false;
     let respawnedResumeId: string | undefined;
     if (this._muxSession && mux.isPaneDead(this._muxSession.muxName)) {
+      this._refuseNewProviderWhileRecoveryHeld();
       console.log('[Session] Dead pane detected, respawning:', this._muxSession.muxName);
       // Confirmed dead — safe to resolve/pin now (see `_pinOmpRespawnId()`).
       // `options.respawnPaneOptions` was built eagerly before this dead-pane
@@ -2562,12 +2765,15 @@ export class Session extends EventEmitter {
       const respawnOptions = await this._buildRespawnPaneOptionsWithResumePin();
       assertAdmission();
       // The pane may have read live at the guard above and dead here: check again, now and at the tmux command.
-      this._refuseNewProcessWhileStopHeld();
-      this._beginClaudeConversationSelection();
+      this._refuseNewProviderWhileRecoveryHeld();
       assertAdmission();
+      const dispatch = this._stageStartHookDispatch();
+      Object.assign(respawnOptions, {envOverrides: dispatch.envOverrides, onProviderDispatch: () => {dispatch.onProviderDispatch(); this._beginClaudeConversationSelection();}});
       const newPid = await mux.respawnPane({ ...respawnOptions, admitted: () => admitted() && (!respawnOptions.admitted || respawnOptions.admitted()) });
       assertAdmission();
       if (!newPid) {
+        if (dispatch.attempted()) throw new Error('Provider respawn outcome is unconfirmed');
+        dispatch.settle(false);
         console.error('[Session] Failed to respawn pane, will create new session');
         needsNewSession = true;
       } else {
@@ -2620,9 +2826,10 @@ export class Session extends EventEmitter {
           this._resumeSessionId = pinned;
         }
       }
-      this._refuseNewProcessWhileStopHeld();
-      this._beginClaudeConversationSelection();
+      this._refuseNewProviderWhileRecoveryHeld();
       assertAdmission();
+      const dispatch = this._stageStartHookDispatch();
+      Object.assign(options.createSessionOptions, {envOverrides: dispatch.envOverrides, onProviderDispatch: () => {dispatch.onProviderDispatch(); this._beginClaudeConversationSelection();}});
       this._muxSession = await mux.createSession({ ...options.createSessionOptions,
         admitted: () => admitted() && (!options.createSessionOptions.admitted || options.createSessionOptions.admitted()) });
       assertAdmission();
@@ -2693,6 +2900,7 @@ export class Session extends EventEmitter {
    * @returns true if the pane was respawned (reattach issued), false otherwise.
    */
   async reattachRemote(): Promise<boolean> {
+    if (!this._providerEffectsAdmitted()) return false;
     if (!this._remote) return false; // not a remote session
     if (!this._useMux || !this._mux || !this._muxSession) return false;
     const mux = this._mux;
@@ -2707,8 +2915,15 @@ export class Session extends EventEmitter {
     if (ownerStopPending(this.id)) return false;  // an unsettled owner stop: no new process in this pane yet
     // Confirmed the mux session (and thus the pane) exists but this reattach
     // is about to respawn it — safe to resolve/pin now.
+    const originalRemote = this._remote, originalMode = this.mode, originalOwner = this.owner;
+    const originalEpoch = this.#workspaceHookEpoch;
+    const current = () => this._providerEffectsAdmitted() && !ownerStopPending(this.id) && !this._closing && !this._isStopped
+      && this._remote === originalRemote && this.mode === originalMode && this.owner === originalOwner
+      && this.#workspaceHookEpoch === originalEpoch;
+    if (!current()) return false;
     this._pinOmpRespawnId();
-    const newPid = await mux.respawnPane({ ...this._buildRespawnPaneOptions(), admitted: () => !ownerStopPending(this.id) });
+    const newPid = await mux.respawnPane({ ...this._buildRespawnPaneOptions(), admitted: current });
+    if (!current()) return false;
     if (!newPid) {
       console.error('[Session] reattachRemote: respawnPane failed for', this._muxSession.muxName);
       return false;
@@ -2740,8 +2955,8 @@ export class Session extends EventEmitter {
    * @returns true if the pane was respawned, false otherwise (no mux session, or
    *   the mux session is gone — see {@link reattachRemote} for that reasoning).
    */
-  async restartCli(): Promise<boolean> {
-    return this._withPaneLifecycle(() => this._doRestartCli());
+  async restartCli(stillCurrent: () => boolean = () => true, admitted: () => boolean = stillCurrent): Promise<boolean> {
+    return this._withPaneLifecycle(() => this._doRestartCli(false, stillCurrent, false, admitted));
   }
 
   /** An attach-only viewer is available only for a local isolated worker pane. */
@@ -2830,7 +3045,8 @@ export class Session extends EventEmitter {
   }
 
   private async _doRestartCli(onlyIfDead = false, stillCurrent: () => boolean = () => true,
-    explicitRecovery = false): Promise<boolean> {
+    explicitRecovery = false, dispatchAdmitted: () => boolean = stillCurrent): Promise<boolean> {
+    this._assertProviderEffectAdmission();
     if (!this._useMux || !this._mux || !this._muxSession) return false;
     if (ownerStopPending(this.id)) {
       console.log(`[Session ${this.id.slice(0, 8)}] restart refused: an unsettled owner stop holds this pane`);
@@ -2843,6 +3059,14 @@ export class Session extends EventEmitter {
       return false;
     }
 
+    const originalMode = this.mode;
+    const current = () => stillCurrent() && this.mode === originalMode && !this._closing && !this._isStopped;
+    if (!current() || !dispatchAdmitted()) return false;
+    const preparation = !this._workerBacked && !this._remote && !this._docker
+      ? await prepareWorkspaceHooks(this.workingDir, workspaceHookPolicy(this.mode, 'sessionCreate'), {scaffold: false})
+      : undefined;
+    // Filesystem preparation cannot authorize a stop of a replacement provider.
+    if (!current() || !dispatchAdmitted() || ownerStopPending(this.id)) return false;
     this._pinOmpRespawnId();
     await this.applyFullAccessDefault();
     await this._prepareSelectedClaudeProfile();
@@ -2852,20 +3076,34 @@ export class Session extends EventEmitter {
     }
     await this._prepareCodexHookTrust();
     const options = await this._buildRespawnPaneOptionsWithResumePin();
-    if (!stillCurrent() || (onlyIfDead && (this._closing || (this._respawnBlocked && !explicitRecovery)))) return false;
+    if (!current() || !dispatchAdmitted() || (onlyIfDead && this._respawnBlocked && !explicitRecovery)) return false;
     // Preparation above awaited: an owner stop may have been recorded meanwhile. Check now and at the tmux command.
     if (ownerStopPending(this.id)) {
       console.log(`[Session ${this.id.slice(0, 8)}] restart refused after preparation: an unsettled owner stop holds this pane`);
       return false;
     }
-    const admitted = () => !ownerStopPending(this.id) && stillCurrent();
-    this._beginClaudeConversationSelection();
-    const newPid = await mux.respawnPane(onlyIfDead ? { ...options, onlyIfDead: true, stillCurrent, admitted } : { ...options, admitted });
-    if (!newPid) {
-      console.error('[Session] restartCli: respawnPane failed for', this._muxSession.muxName);
+    const admitted = () => !ownerStopPending(this.id) && current() && dispatchAdmitted();
+    this.#workspaceHookPreparation = undefined;
+    const configuration = consumeWorkspaceHookPreparation(preparation, this.workingDir);
+    const dispatch = this._stageProviderHookDispatch(configuration, current, admitted);
+    Object.assign(options, {envOverrides: dispatch.envOverrides, onProviderDispatch: () => {
+      dispatch.onProviderDispatch();
+      this._beginClaudeConversationSelection();
+    }});
+    let newPid: number | null;
+    try {
+      newPid = await mux.respawnPane(onlyIfDead ? { ...options, onlyIfDead: true, stillCurrent, admitted } : { ...options, admitted });
+    } catch (error) {
+      const attempted = dispatch.attempted();
+      dispatch.settle(false);
+      if (attempted) throw this._holdUnconfirmedProvider(error);
+      throw error;
+    }
+    const attempted = dispatch.attempted();
+    if (!dispatch.settle(!!newPid)) {
+      if (attempted || newPid) throw this._holdUnconfirmedProvider();
       return false;
     }
-    if (!stillCurrent()) return false;
     if (explicitRecovery) this._respawnBlocked = false;
     this._pendingEnvUnsets.clear();
     // A relaunch in the same pane, so any exit observed of the previous command
@@ -2915,7 +3153,7 @@ export class Session extends EventEmitter {
       ompConfig: this._ompConfig,
       resumeSessionId: this._resumeSessionId,
       claudeResumeCandidates: this._claudeLaunchCandidates(),
-      envOverrides: this._envOverrides,
+      envOverrides: this._launchEnvOverrides(),
       unsetEnvKeys: this._pendingEnvUnsets.size > 0 ? [...this._pendingEnvUnsets] : undefined,
       effort: this._effort,
       advisorModel: this._advisorModel,
@@ -3231,7 +3469,11 @@ export class Session extends EventEmitter {
   }
 
   async startInteractive(admitted?: () => boolean): Promise<void> {
-    const assertAdmission = () => { if (admitted && !admitted()) throw new Error('Session launch authorization changed'); };
+    return this._withWorkspaceHookStart(() => this._startInteractive(admitted));
+  }
+
+  private async _startInteractive(admitted?: () => boolean): Promise<void> {
+    const assertAdmission = () => { if (!this._hookStartCurrent() || (admitted && !admitted())) throw new Error('Session launch authorization changed'); };
     assertAdmission();
     if (this._workerResourceLaunch && (!this._useMux || !this._mux || this._remote || this._docker))
       throw new Error('Resource replacement requires the normal local native worker multiplexer');
@@ -3411,7 +3653,7 @@ export class Session extends EventEmitter {
             ompConfig: this._ompConfig,
             resumeSessionId: this._resumeSessionId,
             claudeResumeCandidates: this._claudeLaunchCandidates(),
-            envOverrides: this._envOverrides,
+            envOverrides: this._launchEnvOverrides(),
             effort: this._effort,
             advisorModel: this._advisorModel,
             historyLimit: this._tmuxHistoryLimit,
@@ -3512,7 +3754,11 @@ export class Session extends EventEmitter {
         }
       } catch (err) {
         assertAdmission();
+        this._assertProviderEffectAdmission();
         if (this._workerResourceLaunch) throw err;
+        if (this.#hookStartAttempt?.operation?.attempted()) throw err;
+        if (this._muxSession && this._mux?.muxSessionExists(this._muxSession.muxName)
+          && !this._mux.isPaneDead(this._muxSession.muxName)) throw err;
         // Held by an unsettled owner stop: keep the pane as it is (no fallback process, no forgotten mux session).
         if (ownerStopPending(this.id)) throw err;
         console.error('[Session] Failed to create mux session, falling back to direct PTY:', err);
@@ -3555,17 +3801,19 @@ export class Session extends EventEmitter {
           getClaudeCliVersion(),
           this._advisorModel
         );
-        this._refuseNewProcessWhileStopHeld();
+        this._refuseNewProviderWhileRecoveryHeld();
         assertAdmission();
         this.ptyProcess = spawnPtyWithHelperRepair(() => {
           assertAdmission();
+          const dispatch = this._stageStartHookDispatch();
+          dispatch.onProviderDispatch();
           return pty.spawn(getClaudeBinaryPath(), args, {
             name: 'xterm-256color',
             cols: 120,
             rows: 40,
             cwd: this.workingDir,
             // Merge envOverrides after buildClaudeEnv so user settings shadow defaults.
-            env: { ...buildClaudeEnv(this.id), ...(this._envOverrides ?? {}) },
+            env: { ...buildClaudeEnv(this.id), ...dispatch.envOverrides },
           });
         });
         this._notePtySpawnGeometry(120, 40);
@@ -4390,6 +4638,10 @@ export class Session extends EventEmitter {
    * ```
    */
   async startShell(): Promise<void> {
+    return this._withWorkspaceHookStart(() => this._startShell());
+  }
+
+  private async _startShell(): Promise<void> {
     if (this.ptyProcess) {
       throw new Error('Session already has a running process');
     }
@@ -4416,7 +4668,7 @@ export class Session extends EventEmitter {
             workingDir: this.workingDir,
             mode: 'shell',
             niceConfig: this._niceConfig,
-            envOverrides: this._envOverrides,
+            envOverrides: this._launchEnvOverrides(),
             historyLimit: this._tmuxHistoryLimit,
             remote: this._remote,
             docker: this._docker,
@@ -4428,7 +4680,7 @@ export class Session extends EventEmitter {
             mode: 'shell',
             name: this._name,
             niceConfig: this._niceConfig,
-            envOverrides: this._envOverrides,
+            envOverrides: this._launchEnvOverrides(),
             historyLimit: this._tmuxHistoryLimit,
             remote: this._remote,
             docker: this._docker,
@@ -4441,14 +4693,18 @@ export class Session extends EventEmitter {
         // For RESTORED sessions: don't clear - we want to see the existing output
         if (!isRestored) {
           setTimeout(() => {
-            if (this.ptyProcess) {
+            if (this.ptyProcess && !this._inputHeldForRecovery() && !this._viewerInputHeld) {
               this._terminalBuffer.clear();
               this.ptyProcess.write('clear\n');
             }
           }, 100);
         }
       } catch (err) {
+        this._assertProviderEffectAdmission();
         if (ownerStopPending(this.id)) throw err;  // held by an unsettled owner stop: no fallback process
+        if (this.#hookStartAttempt?.operation?.attempted()) throw err;
+        if (this._muxSession && this._mux?.muxSessionExists(this._muxSession.muxName)
+          && !this._mux.isPaneDead(this._muxSession.muxName)) throw err;
         console.error('[Session] Failed to create mux session, falling back to direct PTY:', err);
         this._useMux = false;
         this._muxSession = null;
@@ -4461,16 +4717,18 @@ export class Session extends EventEmitter {
         throw new Error('Isolated sessions require the worker transport through tmux. Local fallback is disabled.');
       }
       try {
-        this._refuseNewProcessWhileStopHeld();
-        this.ptyProcess = spawnPtyWithHelperRepair(() =>
-          pty.spawn(shell, [], {
+        this._refuseNewProviderWhileRecoveryHeld();
+        this.ptyProcess = spawnPtyWithHelperRepair(() => {
+          const dispatch = this._stageStartHookDispatch();
+          dispatch.onProviderDispatch();
+          return pty.spawn(shell, [], {
             name: 'xterm-256color',
             cols: 120,
             rows: 40,
             cwd: this.workingDir,
-            env: buildShellEnv(this.id),
-          })
-        );
+            env: {...buildShellEnv(this.id), ...dispatch.envOverrides},
+          });
+        });
         this._notePtySpawnGeometry(120, 40);
       } catch (spawnErr) {
         console.error('[Session] Failed to spawn shell PTY:', spawnErr);
@@ -4547,6 +4805,8 @@ export class Session extends EventEmitter {
     prompt: string,
     options?: { model?: string; onProgress?: (info: { tokens?: number; status?: string }) => void }
   ): Promise<{ result: string; cost: number }> {
+    this._assertProviderEffectAdmission();
+    if (this._inputHeldForRecovery()) throw this.#providerDispatchUncertainty ?? new Error('Session input is held for recovery');
     return new Promise((resolve, reject) => {
       if (this._viewerInputHeld || this.paneLifecycleInFlight) {
         reject(new Error('The terminal viewer is reconnecting'));
@@ -4557,6 +4817,8 @@ export class Session extends EventEmitter {
         return;
       }
 
+      this.#workspaceHookPreparation = undefined;
+      this._invalidateWorkspaceHooks();
       this._resetBuffers();
       this._promptResolved = false; // Reset race condition guard
 
@@ -4576,16 +4838,16 @@ export class Session extends EventEmitter {
         const launch = workerPtyCommand(getClaudeBinaryPath(), args, this.workingDir, this.id);
 
         try {
-          this._refuseNewProcessWhileStopHeld();
+          this._refuseNewProviderWhileRecoveryHeld();
           this.ptyProcess = spawnPtyWithHelperRepair(() =>
-            pty.spawn(launch.binary, launch.args, {
+            {this._assertProviderEffectAdmission(); return pty.spawn(launch.binary, launch.args, {
               name: 'xterm-256color',
               cols: 120,
               rows: 40,
               cwd: this.workingDir,
               // Merge envOverrides after buildClaudeEnv so user settings shadow defaults.
-              env: { ...buildClaudeEnv(this.id), ...(this._envOverrides ?? {}) },
-            })
+              env: { ...buildClaudeEnv(this.id), ...this._launchEnvOverrides() },
+            });}
           );
           this._notePtySpawnGeometry(120, 40);
         } catch (spawnErr) {
@@ -5089,6 +5351,7 @@ export class Session extends EventEmitter {
    * input could disappear while the caller believed it had been delivered.
    */
   write(data: string, options: SessionWriteOptions = {}): boolean {
+    if (options.admitted && !options.admitted()) return false;
     if (this._viewerInputHeld || this._inputHeldForRecovery()) return false;
     // An agent's raw write (a mux failure's fallback, an explicit raw send) is checked here, with no await before the write.
     if (options.agentInput && this._moveHolds > 0) {
@@ -5267,7 +5530,7 @@ export class Session extends EventEmitter {
 
   /** Also while a durably recorded owner stop of this session is unsettled, whichever Session object (or process) took it. */
   private _inputHeldForRecovery(): boolean {
-    return this._recoveryHold || ownerStopPending(this.id);
+    return this._recoveryHold || this.providerDispatchHeld || ownerStopPending(this.id);
   }
 
   /**
@@ -5275,7 +5538,8 @@ export class Session extends EventEmitter {
    * Called immediately before each process creation, after any await, and also handed to the mux as `admitted`, so the
    * last check is at the tmux command itself. Attaching a viewer to a live pane is not a new process.
    */
-  private _refuseNewProcessWhileStopHeld(): void {
+  private _refuseNewProviderWhileRecoveryHeld(): void {
+    this._assertProviderEffectAdmission();
     if (ownerStopPending(this.id)) throw new Error(OWNER_STOP_HELD);
   }
 
@@ -5286,7 +5550,7 @@ export class Session extends EventEmitter {
    */
   holdInputForRecovery(): (() => void) | undefined {
     // A start, restart or attach in progress may be about to create a process: a stop must not race it.
-    if (this._inputHeldForRecovery() || this._muxWritesInFlight > 0 || this._paneLifecycleOps > 0) return undefined;
+    if (this._recoveryHold || ownerStopPending(this.id) || this._muxWritesInFlight > 0 || this._paneLifecycleOps > 0) return undefined;
     this._recoveryHold = true;
     const resume = this._capacityRetry?.pause() ?? (() => {});
     let released = false;
@@ -5359,7 +5623,7 @@ export class Session extends EventEmitter {
   }
 
   async writeViaMux(data: string, options: SessionWriteOptions = {}): Promise<boolean> {
-    if (this._viewerInputHeld || this._inputHeldForRecovery()) return false;
+    if (this._viewerInputHeld || this._inputHeldForRecovery() || (options.admitted && !options.admitted())) return false;
     // An agent's input is refused here, at the write, not only by the route's earlier look: a plan move can take the composer
     // during any await before it. From here to the first key there is no await.
     if (options.agentInput && this._moveHolds > 0) {
@@ -5394,7 +5658,10 @@ export class Session extends EventEmitter {
     if (opencode) data = guardShellKey(data, { keepLeading: guard === 'person' });
     this._recheckPaneDialogSoon();
     if (this._mux && this._muxSession) {
-      const muxOptions = { ...(opencode ? { opencode: guard === 'person' ? 'person' as const : true } : {}),
+      const epoch = this.#workspaceHookEpoch, mode = this.mode, owner = this.owner;
+      const admitted = () => (!options.admitted || options.admitted()) && !this._viewerInputHeld && !this._inputHeldForRecovery()
+        && !this._closing && !this._isStopped && this.#workspaceHookEpoch === epoch && this.mode === mode && this.owner === owner;
+      const muxOptions = {admitted, ...(opencode ? { opencode: guard === 'person' ? 'person' as const : true } : {}),
         ...(options.requireEmptyComposer || options.requireIdle ? { requireEmptyComposer: true } : {}),
         };
       const writeId = this._beginMuxWrite();
@@ -5442,6 +5709,7 @@ export class Session extends EventEmitter {
     }
     // Fallback to PTY write
     if (this.ptyProcess) {
+      if (options.admitted && !options.admitted()) return false;
       this.ptyProcess.write(data);
       this._emitSubmittedPrompt(this._trackSubmit(data, options));
       // No pane to read: nothing can say the prompt left the composer.
@@ -5762,6 +6030,8 @@ export class Session extends EventEmitter {
    * ```
    */
   async stop(killMux: boolean = true): Promise<void> {
+    this.#workspaceHookPreparation = undefined;
+    this._invalidateWorkspaceHooks();
     // Set stopped flag first to prevent new timers from being created
     this._isStopped = true;
     // A pane that is gone is watching nothing. Nothing probes a stopped session, so

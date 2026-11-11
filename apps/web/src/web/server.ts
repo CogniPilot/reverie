@@ -679,11 +679,17 @@ export class WebServer extends EventEmitter {
     // Approvals Inbox → SSE. The singleton has no server reference; these
     // callbacks are its only way out. Broadcasts carry sessionId, so the
     // multi-user SSE scoping applies to them like any session event.
+    const broadcastApproval = (event: string, item: import('./approval-inbox.js').ApprovalItem) => {
+      const session = this.sessions.get(item.sessionId);
+      const original = approvalInbox.notificationOwner(item, session);
+      this.sse.broadcast(event, approvalInbox.publicItem(item, session), isMultiUserMode()
+        ? original?.owner ? {username: original.owner, sessionScoped: true} : {adminOnly: true} : undefined);
+    };
     approvalInbox.onPending = (item) => {
-      this.broadcast(SseEvent.ApprovalPending, { ...item });
+      broadcastApproval(SseEvent.ApprovalPending, item);
       this.inputWatch?.pending(item);
     };
-    approvalInbox.onUpdated = (item) => this.broadcast(SseEvent.ApprovalUpdated, { ...item });
+    approvalInbox.onUpdated = (item) => broadcastApproval(SseEvent.ApprovalUpdated, item);
     approvalInbox.onResolved = (info) => this.broadcast(SseEvent.ApprovalResolved, { ...info });
 
     // Set up mux event listeners
@@ -5093,6 +5099,7 @@ export class WebServer extends EventEmitter {
               paneExit: savedState?.paneExit,
               // A saved input fence survives reattachment; transport proof does not.
               viewerInputHeld: savedState?.viewerInputHeld,
+              providerDispatchHeld: savedState?.providerDispatchHeld,
               // The model the CLI last reported (statusline or its own footer), so a
               // tile header keeps naming it until the next report; an idle claude
               // session re-renders its statusline only on its next turn.

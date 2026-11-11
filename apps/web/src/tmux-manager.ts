@@ -112,6 +112,7 @@ import {
 } from './utils/index.js';
 import type {
   TerminalMultiplexer,
+  MuxInputOptions,
   MuxSession,
   MuxSessionWithStats,
   CreateSessionOptions,
@@ -2122,8 +2123,10 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
           timeout: EXEC_TIMEOUT_MS,
           stdio: ['pipe', 'pipe', 'pipe'],
         });
-      } catch (err) {
-        console.warn(`[TmuxManager] Failed to set env override ${key}:`, err);
+      } catch {
+        // Never log the command: it may contain private environment values.
+        if (key === 'REVERIE_HOOK_GENERATION') throw new Error('Hook generation environment could not be installed');
+        console.warn(`[TmuxManager] Failed to set env override ${key}`);
       }
     }
   }
@@ -2295,6 +2298,8 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
 
     // TEST MODE: Create in-memory session only — no real tmux session
     if (IS_TEST_MODE) {
+      if (options.admitted && !options.admitted()) throw new Error('Session launch is no longer admitted');
+      options.onProviderDispatch?.();
       const session: MuxSession = {
         sessionId,
         muxName,
@@ -2441,6 +2446,8 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
       // Replace the shell with the actual command (no echo in terminal). Keep
       // pane launch in /tmp, then cd inside bash against the current mount table.
       const launchCmd = remote || docker ? fullCmd : `cd ${shellescape(workingDir)} && ${fullCmd}`;
+      if (options.admitted && !options.admitted()) throw new Error('Session launch is no longer admitted');
+      options.onProviderDispatch?.();
       execSync(
         buildTmuxPaneLaunchCommand(this.tmux(), muxName, launchCmd),
         {
@@ -2645,6 +2652,14 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
     const muxName = session.muxName;
 
     if (!isValidMuxName(muxName) || !isValidPath(workingDir)) return null;
+    if (IS_TEST_MODE) {
+      if ((options.stillCurrent && !options.stillCurrent()) || (options.admitted && !options.admitted())) return null;
+      options.onProviderDispatch?.();
+      session.mode = mode;
+      session.remote = remote;
+      session.docker = docker;
+      return session.pid || 99999;
+    }
 
     // Resolve CLI binary directory based on mode
     const { pathExport } = this.buildPathExport(mode);
@@ -2708,6 +2723,7 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
       // -c /tmp + cd bounce — see createSession() for rationale (stale FUSE state).
       const launchCmd = remote || docker ? fullCmd : `cd ${shellescape(workingDir)} && ${fullCmd}`;
       if ((options.stillCurrent && !options.stillCurrent()) || (options.admitted && !options.admitted())) return null;
+      options.onProviderDispatch?.();
       await execAsync(
         buildTmuxPaneLaunchCommand(this.tmux(), muxName, launchCmd, options.onlyIfDead),
         {
@@ -3810,7 +3826,13 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
    * - `Enter` key is sent as a SEPARATE tmux invocation after a small delay
    * - Ink (Claude CLI) needs text and Enter split to avoid treating Enter as a newline
    */
-  async sendInput(sessionId: string, input: string, options: { opencode?: boolean | 'person'; requireEmptyComposer?: boolean; stillIdle?: () => boolean } = {}): Promise<boolean> {
+  async sendInput(sessionId: string, input: string, options: MuxInputOptions = {}): Promise<boolean> {
+    const admitted = () => !options.admitted || options.admitted();
+    if (!admitted()) return false;
+    const dispatch = (command: string, execOptions: {timeout: number}) => {
+      if (!admitted()) throw new Error('Input provider authority changed');
+      return execAsync(command, execOptions);
+    };
     const session = this.sessions.get(sessionId);
     if (!session) {
       console.error(
@@ -3854,8 +3876,8 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
           {
             tmux: (args, stdin) =>
               stdin === undefined
-                ? execAsync(`${tmux} ${args.map(shellescape).join(' ')}`, { timeout: EXEC_TIMEOUT_MS }).then(() => undefined)
-                : execAsync(`printf %s ${shellescape(stdin)} | ${tmux} ${args.map(shellescape).join(' ')}`, {
+                ? dispatch(`${tmux} ${args.map(shellescape).join(' ')}`, { timeout: EXEC_TIMEOUT_MS }).then(() => undefined)
+                : dispatch(`printf %s ${shellescape(stdin)} | ${tmux} ${args.map(shellescape).join(' ')}`, {
                     timeout: EXEC_TIMEOUT_MS,
                   }).then(() => undefined),
             capture: () => this.capturePaneText(session.muxName),
@@ -3887,28 +3909,30 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
         // Codex holds part of a long key burst back, so long text goes to it as a real bracketed paste (pastesInsteadOfKeys).
         const io = {
           ...this.submitIo(session.muxName),
+          sendEnter: () => dispatch(`${this.tmux()} send-keys -t "${session.muxName}" Enter`, {timeout: EXEC_TIMEOUT_MS}),
           typeText: (text: string) => {
             if (!pastesInsteadOfKeys(session.mode, text)) {
-              return execAsync(`${this.tmux()} send-keys -t "${session.muxName}" -l ${shellescape(text)}`, { timeout: EXEC_TIMEOUT_MS });
+              return dispatch(`${this.tmux()} send-keys -t "${session.muxName}" -l ${shellescape(text)}`, { timeout: EXEC_TIMEOUT_MS });
             }
             const buffer = `reverie-${randomBytes(6).toString('hex')}`;
             // A gated write's gate is checked again once the buffer is staged: closed, nothing is pasted (false: not typed).
-            return execAsync(`printf %s ${shellescape(text)} | ${this.tmux()} load-buffer -b ${buffer} -`, { timeout: EXEC_TIMEOUT_MS })
-              .then<unknown>(() => writeGateOpen()
-                ? execAsync(`${this.tmux()} paste-buffer -p -d -b ${buffer} -t "${session.muxName}"`, { timeout: EXEC_TIMEOUT_MS })
+            return dispatch(`printf %s ${shellescape(text)} | ${this.tmux()} load-buffer -b ${buffer} -`, { timeout: EXEC_TIMEOUT_MS })
+              .then<unknown>(() => writeGateOpen() && admitted()
+                ? dispatch(`${this.tmux()} paste-buffer -p -d -b ${buffer} -t "${session.muxName}"`, { timeout: EXEC_TIMEOUT_MS })
                 : execAsync(`${this.tmux()} delete-buffer -b ${buffer}`, { timeout: EXEC_TIMEOUT_MS }).catch(() => undefined).then(() => false as const));
           },
         };
-        const outcome = await typeAndSubmit(io, textPart, this.turnSignals(session.mode), `[TmuxManager] ${session.muxName}`, options.requireEmptyComposer, options.stillIdle);
+        const outcome = await typeAndSubmit(io, textPart, this.turnSignals(session.mode), `[TmuxManager] ${session.muxName}`, options.requireEmptyComposer,
+          options.admitted ? () => admitted() && (!options.stillIdle || options.stillIdle()) : options.stillIdle);
         if (outcome === 'not-written') return false;
       } else if (textPart) {
         // Text only, no Enter
-        await execAsync(`${this.tmux()} send-keys -t "${session.muxName}" -l ${shellescape(textPart)}`, {
+        await dispatch(`${this.tmux()} send-keys -t "${session.muxName}" -l ${shellescape(textPart)}`, {
           timeout: EXEC_TIMEOUT_MS,
         });
       } else if (hasCarriageReturn) {
         // Enter only
-        await execAsync(`${this.tmux()} send-keys -t "${session.muxName}" Enter`, {
+        await dispatch(`${this.tmux()} send-keys -t "${session.muxName}" Enter`, {
           timeout: EXEC_TIMEOUT_MS,
         });
       }

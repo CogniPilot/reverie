@@ -23,8 +23,8 @@ import { trustedFixtureOwner } from '../helpers/trusted-owner-fixture.js';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
 import fastifyCookie from '@fastify/cookie';
-import { mkdtemp, rm, readFile, mkdir, writeFile } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
+import { mkdtemp, rm, readFile, mkdir, rename, writeFile } from 'node:fs/promises';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createMockRouteContext, safeRmHomeTree, type MockRouteContext } from '../mocks/index.js';
@@ -36,7 +36,26 @@ import { CASES_DIR } from '../../src/web/route-helpers.js';
 import { Session } from '../../src/session.js';
 import { STOCK_CLIS } from '../../src/config/cli-registry/stock.js';
 import { registryFilePath, reloadCliRegistry } from '../../src/config/cli-registry/registry.js';
-import { prepareWorkspaceHooks } from '../../src/workspace-hook-policy.js';
+import { prepareWorkspaceHooks, WorkspaceHookPreparationError } from '../../src/workspace-hook-policy.js';
+import { hooksAvailableForMode } from '../../src/web/session-wait-registry.js';
+import { JSDOM } from 'jsdom';
+import { registerCaseRoutes } from '../../src/web/routes/case-routes.js';
+import { installResponseEnvelope } from '../../src/web/response-envelope.js';
+
+const partialWrite = vi.hoisted(() => ({ target: '', cause: undefined as unknown }));
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs/promises')>();
+  return {
+    ...actual,
+    writeFile: async (...args: Parameters<typeof actual.writeFile>) => {
+      if (String(args[0]) === partialWrite.target) {
+        await actual.writeFile(args[0], 'owned partial write');
+        throw partialWrite.cause;
+      }
+      return actual.writeFile(...args);
+    },
+  };
+});
 
 // Availability is an independent boundary; every constructed session here has
 // an inert start method and all workspace writes use this file's temporary HOME.
@@ -116,6 +135,8 @@ describe('workspace hook phase policy on actual HTTP creation paths', () => {
     ctx = createMockRouteContext({ workspaceHooksEnabled: false, agentSkillEnabled: false });
     app = Fastify({ logger: false });
     await app.register(fastifyCookie);
+    installResponseEnvelope(app, '');
+    registerCaseRoutes(app, ctx);
     registerSessionRoutes(app, ctx, { verifiedOwner: trustedFixtureOwner });
     installRouteErrorHandler(app);
     await app.ready();
@@ -123,6 +144,8 @@ describe('workspace hook phase policy on actual HTTP creation paths', () => {
   afterEach(async () => {
     await app.close();
     vi.restoreAllMocks();
+    partialWrite.target = '';
+    partialWrite.cause = undefined;
     await rm(registryFilePath(), { force: true });
     await rm(join(getDataDir(), 'docker-hosts.json'), { force: true });
     await rm(join(getDataDir(), 'docker-cases.json'), { force: true });
@@ -205,6 +228,169 @@ describe('workspace hook phase policy on actual HTTP creation paths', () => {
       if (installed) expect(await readFile(file(root), 'utf8')).toContain('X-Reverie-Hook-Secret');
     }
   );
+
+  it.each(['{ broken', 'null', '[]'])('refuses an existing damaged Docker config without provider effects: %s', async bytes => {
+    await mkdir(join(root, '.claude'));
+    await writeFile(file(root), bytes);
+    ctx.getWorkspaceHooksEnabled.mockResolvedValue(true);
+    await writeFile(join(getDataDir(), 'docker-hosts.json'), JSON.stringify([
+      {id: 'synthetic-docker', label: 'Synthetic Docker', image: 'synthetic-fixture', hooksEnabled: true},
+    ]));
+    await writeFile(join(getDataDir(), 'docker-cases.json'), JSON.stringify([
+      {name: 'damaged-docker-hooks', type: 'docker', hostId: 'synthetic-docker', hostWorkspacePath: root},
+    ]));
+    const before = ctx.sessions.size;
+    const response = await app.inject({method: 'POST', url: '/api/quick-start',
+      payload: {caseName: 'damaged-docker-hooks', mode: 'claude'}});
+    expect(response.statusCode).toBe(422);
+    expect(response.json().errorCode).toBe('OPERATION_FAILED');
+    expect(response.json().error).toContain('unconfirmed');
+    expect(response.json().error).toContain('no provider was started');
+    expect(await readFile(file(root), 'utf8')).toBe(bytes);
+    expect(Session.prototype.startInteractive).not.toHaveBeenCalled();
+    expect(ctx.sessions.size).toBe(before);
+  });
+
+  it('reports a refused Docker hooks scaffold before starting the provider', async () => {
+    await writeFile(join(root, '.claude'), 'owned conflict; preserve these bytes');
+    await writeFile(
+      join(getDataDir(), 'docker-hosts.json'),
+      JSON.stringify([
+        { id: 'synthetic-docker', label: 'Synthetic Docker', image: 'synthetic-fixture', hooksEnabled: true },
+      ])
+    );
+    await writeFile(
+      join(getDataDir(), 'docker-cases.json'),
+      JSON.stringify([
+        { name: 'refused-docker-hooks', type: 'docker', hostId: 'synthetic-docker', hostWorkspacePath: root },
+      ])
+    );
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const before = ctx.sessions.size;
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/quick-start',
+      payload: {
+        caseName: 'refused-docker-hooks',
+        mode: 'claude',
+      },
+    });
+    expect(await readFile(join(root, '.claude'), 'utf8')).toBe('owned conflict; preserve these bytes');
+    const observed = {
+      apiFailure: response.json().success === false,
+      providerStarts: vi.mocked(Session.prototype.startInteractive).mock.calls.length,
+      publishedSessions: ctx.sessions.size - before,
+      hookFileExists: existsSync(file(root)),
+      logsRefusal: warn.mock.calls.some((call) => String(call[0]).includes('Refusing to write')),
+      modePromisesHooks: hooksAvailableForMode('claude'),
+    };
+    expect(observed).toEqual({
+      apiFailure: true,
+      providerStarts: 0,
+      publishedSessions: 0,
+      hookFileExists: false,
+      logsRefusal: true,
+      modePromisesHooks: true,
+    });
+    expect(response.json()).toMatchObject({ success: false, errorCode: 'OPERATION_FAILED' });
+    expect(response.json().error).toContain('Inspect and repair');
+    expect(response.json().error).toContain('no provider was started');
+
+    const dom = new JSDOM(
+      '<!doctype html><select id="quickStartCase"><option selected>refused-docker-hooks</option></select><input id="tabCount" value="1">',
+      { url: 'http://localhost/', runScripts: 'dangerously' }
+    );
+    try {
+      const win = dom.window as any;
+      win.eval('window.ReverieApp = function() {};');
+      win.eval(readFileSync(new URL('../../src/web/public/session-ui.js', import.meta.url), 'utf8'));
+      const browser = new win.ReverieApp();
+      let displayed = '';
+      Object.assign(browser, {
+        terminal: { focus() {} },
+        _beginSessionLaunchStatus: () => 'synthetic-status',
+        _reportSessionLaunchError: (_token: string, error: string) => {
+          displayed = error;
+        },
+        _nextCaseSessionStartNumber: () => 1,
+        loadAppSettingsFromStorage: () => ({}),
+        getCaseSettings: () => ({}),
+      });
+      const requested: string[] = [];
+      win.fetch = async (url: string, options?: { body?: string; method?: string }) => {
+        requested.push(url);
+        const result = await app.inject({
+          method: options?.method ?? 'GET',
+          url,
+          ...(options?.body ? { payload: JSON.parse(options.body) } : {}),
+        });
+        return { json: () => result.json() };
+      };
+      await browser.runClaude();
+      expect(displayed).toContain('Inspect and repair');
+      expect(requested).toEqual(['/api/cases/refused-docker-hooks', '/api/quick-start']);
+      expect(Session.prototype.startInteractive).not.toHaveBeenCalled();
+    } finally {
+      dom.window.close();
+    }
+
+    // A deliberate owner repair and retry succeeds without deleting the conflict.
+    await rename(join(root, '.claude'), join(root, 'saved-original-config'));
+    await start('/api/quick-start', { caseName: 'refused-docker-hooks', mode: 'claude' });
+    expect(await readFile(join(root, 'saved-original-config'), 'utf8')).toBe('owned conflict; preserve these bytes');
+    expect(await readFile(file(root), 'utf8')).toContain('X-Reverie-Hook-Secret');
+    expect(Session.prototype.startInteractive).toHaveBeenCalledTimes(1);
+  });
+
+  it('retains a partial write failure as unconfirmed with its original cause', async () => {
+    partialWrite.target = file(root);
+    partialWrite.cause = Object.assign(new Error('synthetic full disk'), { code: 'ENOSPC' });
+    let failure: unknown;
+    try {
+      await prepareWorkspaceHooks(root, 'install', { scaffold: true, enabled: async () => true });
+    } catch (error) {
+      failure = error;
+    }
+    expect(failure).toBeInstanceOf(WorkspaceHookPreparationError);
+    expect((failure as WorkspaceHookPreparationError).outcome.state).toBe('unconfirmed');
+    expect((failure as Error).cause).toBe(partialWrite.cause);
+    expect(await readFile(file(root), 'utf8')).toBe('owned partial write');
+    expect(Session.prototype.startInteractive).not.toHaveBeenCalled();
+  });
+
+  it('does not publish or start a provider after an unconfirmed Docker hooks write', async () => {
+    await writeFile(
+      join(getDataDir(), 'docker-hosts.json'),
+      JSON.stringify([
+        { id: 'synthetic-docker', label: 'Synthetic Docker', image: 'synthetic-fixture', hooksEnabled: true },
+      ])
+    );
+    await writeFile(
+      join(getDataDir(), 'docker-cases.json'),
+      JSON.stringify([
+        { name: 'partial-docker-hooks', type: 'docker', hostId: 'synthetic-docker', hostWorkspacePath: root },
+      ])
+    );
+    partialWrite.target = file(root);
+    partialWrite.cause = Object.assign(new Error('synthetic full disk'), { code: 'ENOSPC' });
+    const before = ctx.sessions.size;
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/quick-start',
+      payload: {
+        caseName: 'partial-docker-hooks',
+        mode: 'claude',
+      },
+    });
+    expect(response.json()).toMatchObject({ success: false, errorCode: 'OPERATION_FAILED' });
+    expect(response.json().error).toContain('unconfirmed');
+    expect(response.json().error).toContain('ENOSPC');
+    expect(response.json().error).not.toContain('synthetic full disk');
+    expect(response.json().error).toContain('no provider was started');
+    expect(ctx.sessions.size).toBe(before);
+    expect(Session.prototype.startInteractive).not.toHaveBeenCalled();
+    expect(await readFile(file(root), 'utf8')).toBe('owned partial write');
+  });
 });
 
 describe('POST /api/sessions workspace hooks', () => {
@@ -340,10 +526,14 @@ describe('POST /api/sessions workspace hooks', () => {
   });
 
   it('leaves a malformed settings file untouched rather than replacing it', async () => {
+    const providerStart = vi.spyOn(Session.prototype, 'startInteractive');
     await mkdir(join(workingDir, '.claude'), { recursive: true });
     await writeFile(settingsPath(), '{ not json');
 
-    expect((await createSession({ name: 'hooks-malformed', mode: 'claude', workingDir })).statusCode).toBe(200);
+    const response = await createSession({ name: 'hooks-malformed', mode: 'claude', workingDir });
+    expect(response.statusCode).toBe(500);
+    expect(response.json().error).toContain('unconfirmed');
+    expect(providerStart).not.toHaveBeenCalled();
     expect(await readFile(settingsPath(), 'utf-8')).toBe('{ not json');
   });
 

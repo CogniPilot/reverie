@@ -23,7 +23,7 @@ function deadPaneSession() {
     isAvailable: () => true,
     muxSessionExists: vi.fn(() => true),
     isPaneDead: vi.fn(() => true),
-    respawnPane: vi.fn(async () => 4242 as number | null),
+    respawnPane: vi.fn(async (options: {onProviderDispatch?: () => void}) => {options.onProviderDispatch?.(); return 4242 as number | null;}),
     clearPaneExit: vi.fn(),
   };
   const session = new Session({
@@ -87,9 +87,9 @@ async function compose(verifiedOwner: (req: unknown) => boolean = trustedFixture
 describe('bug 11: explicit owner restarts record running intent; automatic paths never do', () => {
   const owner = () => true;
   async function modeSwitch(
-    app: { inject: Function },
+    app: Awaited<ReturnType<typeof compose>>['app'],
     session: Session,
-    ctx: any,
+    ctx: Awaited<ReturnType<typeof compose>>['ctx'],
     restarted: boolean,
     during?: () => Promise<void>
   ) {

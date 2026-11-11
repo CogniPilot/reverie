@@ -63,18 +63,23 @@ function keystrokesFor(
 }
 
 export function registerApprovalRoutes(app: FastifyInstance, ctx: SessionPort): void {
+  const mayReadOriginal = (req: Parameters<typeof getAuthUser>[0], item: ApprovalItem) => {
+    const user = getAuthUser(req);
+    const original = approvalInbox.originalOwner(item);
+    return original ? canAccessOwned(user, original.owner) : user.role === 'admin';
+  };
   // List pending approvals. Items whose session is gone resolve lazily; items
   // whose session the caller cannot access are filtered (never 403-leaked),
   // matching the session-list scoping policy.
   app.get('/api/approvals', async (req) => {
     const user = getAuthUser(req);
     const approvals = approvalInbox.listPending().filter((item) => {
+      if (!mayReadOriginal(req, item)) return false;
       const session = ctx.sessions.get(item.sessionId);
-      if (!session) {
-        approvalInbox.resolveForSession(item.sessionId, 'session_ended');
-        return false;
-      }
+      if (!session) return user.role === 'admin';
       if (!canAccessOwned(user, session.owner)) return false;
+      // A successor pane cannot dismiss or refresh its predecessor's consent.
+      if (approvalInbox.answerStatus(item, session).answerState === 'held') return true;
       // Staleness sweep, on the caller's own items only. Claude Code fires no
       // "permission answered" hook, so a dialog answered IN the terminal leaves
       // its item pending until `stop`, and this list is what re-arms tab alerts
@@ -86,20 +91,31 @@ export function registerApprovalRoutes(app: FastifyInstance, ctx: SessionPort): 
       // here broadcasts `approval:resolved`, so the other devices clear too.
       return approvalInbox.verifyStillAnswerable(item.id);
     });
-    return { success: true, data: { approvals } };
+    return { success: true, data: { approvals: approvals.map(item => approvalInbox.publicItem(item, ctx.sessions.get(item.sessionId))) } };
   });
 
   app.post<{ Params: { id: string } }>('/api/approvals/:id/answer', async (req) => {
     const answer = parseBody(ApprovalAnswerSchema, req.body);
     const item = approvalInbox.getById(req.params.id);
-    if (!item) {
-      // Covers unknown, already-answered, superseded and expired ids alike.
+    if (!item || !mayReadOriginal(req, item)) {
+      // Covers unknown, unauthorized, already-answered, superseded and expired ids alike.
       return createErrorResponse(ApiErrorCode.NOT_FOUND, 'Approval not found or no longer pending');
     }
     // Throws 404 (not 403) for sessions the caller does not own, same
     // no-existence-leak rule as every other session route.
     const session = findSessionOrFail(ctx, item.sessionId, req);
-    if (!hooksAvailableForMode(session.mode, sessionHookOptions(session))) {
+    let ownership: {state: 'pending'} | {state: 'taken'; item: ApprovalItem} = {state: 'pending'};
+    const currentProvider = () => ctx.sessions.get(item.sessionId) === session
+      && mayReadOriginal(req, item) && canAccessOwned(getAuthUser(req), session.owner) && approvalInbox.providerCurrent(item, session)
+      && (approvalInbox.getForSession(item.sessionId) ?? (ownership.state === 'taken' ? ownership.item : undefined)) === item;
+    const staleProvider = () => {
+      const status = approvalInbox.answerStatus(item, session);
+      return createErrorResponse(ApiErrorCode.CONFLICT, status.answerState === 'held' ? status.heldReason
+        : 'Approval is not bound to the current provider. Wait for a new provider prompt; no answer was sent by this request.');
+    };
+    if (!currentProvider() || approvalInbox.answerStatus(item, session).answerState === 'held') return staleProvider();
+    if (session.admitHookReport(undefined) !== 'legacy-attachment'
+      && !hooksAvailableForMode(session.mode, sessionHookOptions(session))) {
       return createErrorResponse(ApiErrorCode.CONFLICT, 'Session mode cannot have pending approvals');
     }
     // Alert-only items (supervised-hook CLIs such as DeepSeek Harness): the
@@ -126,15 +142,29 @@ export function registerApprovalRoutes(app: FastifyInstance, ctx: SessionPort): 
       return createErrorResponse(ApiErrorCode.INVALID_INPUT, resolved.error);
     }
 
+    if (!currentProvider()) return staleProvider();
     const taken = approvalInbox.take(item.id);
     if (!taken) {
       return createErrorResponse(ApiErrorCode.CONFLICT, 'Approval was resolved by another actor');
     }
-    // A text answer is a person's words; the keys for approve, deny and option digits have no "!" to guard.
-    const written = await session.writeViaMux(resolved.keys, { opencodeGuard: 'person' });
-    if (!written) {
+    ownership = {state: 'taken', item: taken};
+    if (!approvalInbox.beginAnswer(taken)) {approvalInbox.restore(taken); return staleProvider();}
+    // Once I/O is attempted, false/throw is uncertain even if the epoch did not change.
+    let written = false;
+    let cause: unknown;
+    try {
+      written = await session.writeViaMux(resolved.keys, {opencodeGuard: 'person', admitted: currentProvider});
+    } catch (error) {cause = error;}
+    const providerStayedCurrent = currentProvider();
+    if (!written || !providerStayedCurrent) {
+      approvalInbox.settleAnswer(taken, {state: 'unconfirmed', cause});
       approvalInbox.restore(taken);
-      return createErrorResponse(ApiErrorCode.OPERATION_FAILED, 'Session is not accepting input');
+      return createErrorResponse(providerStayedCurrent ? ApiErrorCode.OPERATION_FAILED : ApiErrorCode.CONFLICT,
+        'Approval answer delivery is unconfirmed. Do not replay it; wait for a new provider prompt.');
+    }
+    if (!approvalInbox.settleAnswer(taken, {state: 'answered'})) {
+      approvalInbox.restore(taken);
+      return staleProvider();
     }
     return { success: true, data: { id: item.id, sessionId: item.sessionId, action: answer.action } };
   });
@@ -159,7 +189,7 @@ export function registerApprovalRoutes(app: FastifyInstance, ctx: SessionPort): 
 
   app.post<{ Params: { id: string } }>('/api/approvals/:id/dismiss', async (req) => {
     const item = approvalInbox.getById(req.params.id);
-    if (!item) {
+    if (!item || !mayReadOriginal(req, item)) {
       return createErrorResponse(ApiErrorCode.NOT_FOUND, 'Approval not found or no longer pending');
     }
     findSessionOrFail(ctx, item.sessionId, req);
