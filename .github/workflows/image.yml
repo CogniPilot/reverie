@@ -317,6 +317,7 @@ jobs:
           nix develop --command node apps/web/scripts/prepare-test-vendor.mjs
           export REVERIE_BROWSER_EXECUTABLE="$RUNNER_TEMP/browser-runtime/bin/chromium"
           export REVERIE_BROWSER_ARTIFACTS="$PWD/acceptance/browser"
+          export TEST_BROWSER_COVERAGE_DIR="$REVERIE_BROWSER_ARTIFACTS/raw-coverage"
           df -h /
           nix develop --command python3 -m reverie.buildenv \
             --project integration-browser --repo "$PWD" --expect 2G --disk 1G --jobs 1 \
@@ -333,7 +334,15 @@ jobs:
               apps/web/test/company-resource-layout.browser.test.ts \
               apps/web/test/office-server.browser.test.ts \
               apps/web/test/office-owner-controls.browser.test.ts \
+              apps/web/test/browser-coverage-attribution.browser.test.ts \
             2>&1 | tee acceptance/resource-layout.log
+          # Validate actual execution/context/source evidence after every suite
+          # settles. This raw report does not imply percentage or full-site coverage.
+          (
+            cd apps/web
+            nix develop --command node --import tsx scripts/report-browser-coverage.ts \
+              "$TEST_BROWSER_COVERAGE_DIR" "$TEST_BROWSER_COVERAGE_DIR/validated-summary.json"
+          ) 2>&1 | tee acceptance/browser-coverage.log
           printf 'Worker and browser acceptance completed for %s\n' "$(cat "$RUNNER_TEMP/tested-image-id")" > acceptance/PASS.txt
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
