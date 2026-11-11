@@ -1681,7 +1681,7 @@ button.ca-company-profile-trigger:focus-visible { outline: 2px solid var(--accen
 .ca-company-map .ca-company-person .ca-company-state.is-connected { background: var(--green, #4fbf86); }
 .ca-company .ca-company-person:is(.is-health-dead, .is-health-disconnected) { border-color: var(--red); }
 .ca-company .ca-company-person .ca-company-state:is(.is-dead, .is-disconnected) { color: var(--red); font-weight: 700; }
-.ca-company-map .ca-company-person .ca-company-state:is(.is-dead, .is-disconnected) {
+.ca-company-map .ca-company-person .ca-company-state:is(.is-dead, .is-disconnected, .is-unknown) {
   position: static; grid-column: 1 / -1; width: auto; height: auto; overflow: visible;
   font-size: 11px; line-height: 1.4; border-radius: 0; background: transparent;
 }

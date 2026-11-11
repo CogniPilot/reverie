@@ -25,6 +25,20 @@ const decl = (rules: postcss.Rule[], selector: string, prop: string): string | u
   return found;
 };
 
+it('shows unknown agent health as readable text in compact company cards', () => {
+  const rules: postcss.Rule[] = [];
+  root.walkRules((rule) => {
+    if (rule.selector.includes('.ca-company-map .ca-company-person .ca-company-state') &&
+      rule.selector.includes('.is-unknown')) rules.push(rule);
+  });
+  const values = new Map<string, string>();
+  for (const rule of rules) rule.walkDecls((entry) => { values.set(entry.prop, entry.value); });
+  expect(values.get('position')).toBe('static');
+  expect(values.get('font-size')).toBe('11px');
+  expect(values.get('overflow')).toBe('visible');
+  expect(values.get('height')).toBe('auto');
+});
+
 describe('phone drawers', () => {
   const rules = phoneRules();
   // A viewport 390px wide: the rail is 64px and the sidebar takes the rest up to 260px.

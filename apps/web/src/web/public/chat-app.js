@@ -607,6 +607,12 @@ function caEmployeeHealth(employee, session, member, viewerDisconnected = false)
   if (viewerUnavailable)
     return { state: 'viewer-unavailable', label: 'Viewer unavailable', detail: 'The optional terminal viewer is unavailable. Agent availability is unconfirmed; losing this viewer does not establish that the agent is offline.',
       viewerUnavailable: true, viewerOnly: viewerDisconnected && serverViewerConnected };
+  // A worker viewer can remain connected after its provider command exits.
+  // Saved activity and transport presence cannot establish current agent health.
+  if (scope === 'terminal')
+    return { state: 'unknown', label: 'Agent health unknown', detail: serverViewerConnected
+      ? 'The terminal viewer is connected. Current agent health has not been confirmed.'
+      : 'Current agent health and terminal viewer connectivity have not been confirmed.' };
   if (health === 'disconnected' || session?.paneExit)
     return { state: 'disconnected', label: 'Disconnected', detail: 'The terminal connection has ended. Whether the agent is still running has not been confirmed.' };
   if (employee?.available === false || member?.alive === false || session?.pid === null || session?.status === 'stopped')
@@ -651,7 +657,7 @@ function caMemberSections(members, humans = [], stateOf) {
   const people = new Set(Array.isArray(humans) ? humans : []);
   const list = [...(Array.isArray(members) ? members : []), ...people];
   const admin = (m) => people.has(m) ? m.role === 'owner' : m.role === 'coordinator';
-  const unconfirmed = m => !people.has(m) && stateOf?.(m) === 'viewer-unavailable';
+  const unconfirmed = m => !people.has(m) && ['unknown', 'viewer-unavailable'].includes(stateOf?.(m));
   const present = m => people.has(m) ? m.online === true : stateOf
     ? !['gone', 'dead', 'disconnected', 'unknown', 'viewer-unavailable'].includes(stateOf(m)) : caPresence(m) !== 'offline';
   const byName = (a, b) => String(a.name || '').localeCompare(String(b.name || ''), undefined, { sensitivity: 'base' })
@@ -7328,7 +7334,7 @@ class ReverieChatApp {
 
   memberRow(m) {
     const state = this.presenceOf(m);
-    const presence = state === 'viewer-unavailable' ? 'unknown' : ['gone', 'dead', 'disconnected', 'unknown'].includes(state) ? 'offline' : 'online';
+    const presence = ['unknown', 'viewer-unavailable'].includes(state) ? 'unknown' : ['gone', 'dead', 'disconnected'].includes(state) ? 'offline' : 'online';
     const b = this.el('button', `ca-member is-${presence} is-state-${state}`);
     b.type = 'button';
     b.dataset.key = `member:${m.sessionId}`;
@@ -7364,6 +7370,7 @@ class ReverieChatApp {
     if (sub) text.append(this.el('span', 'ca-member-sub', sub));
     const employee = this.company?.employees?.find(e => e.sessionId === m.sessionId);
     const health = this.employeeHealth(employee || { sessionId: m.sessionId }, m);
+    if (state === 'unknown') b.title = `${b.title || m.name} · ${health.detail}`;
     if (health.providerConfirmedHealthy && health.viewerUnavailable) {
       const warning = this.el('span', 'ca-viewer-warning', 'Viewer unavailable');
       warning.title = 'The agent runtime is running. Its optional terminal viewer is unavailable; automatic terminal input may wait for Reconnect.'; text.append(warning);

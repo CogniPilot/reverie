@@ -54,19 +54,33 @@ it('does not call a worker transport exit provider death or claim that an unknow
  expect(badge.title).toContain('unconfirmed');expect(badge.classList.contains('is-dead')).toBe(false);
  session.runtimeHealth='unknown';delete(session as any).paneExit;employee.runtimeHealth='unknown';
  h.shell.syncSessionPresence(SID);await h.flush();
- expect(badge.textContent).toBe('Connected');expect(badge.title).toContain('Agent health has not been confirmed');
- expect(h.document.querySelector('.ca-member').classList.contains('is-state-working')).toBe(true);
+ expect(badge.textContent).toBe('Agent health unknown');expect(badge.title).toContain('terminal viewer is connected');
+ expect(h.document.querySelector('.ca-member').classList.contains('is-state-unknown')).toBe(true);
 });
 
-it.each([true,false])('keeps known transport presence and existing activity when provider health is unknown (working=%s)',async working=>{
+it.each([true,false])('keeps connected worker transport separate from unknown provider health despite saved activity (working=%s)',async working=>{
  const{h,employee,session,posts}=await fixture({health:'unknown',scope:'terminal',working});await h.shell.openCompany();
  const card=h.document.querySelector('[data-employee-id="expert"]');
  const badge=card.querySelector('.ca-company-state');
- expect(badge.textContent).toBe('Connected');expect(badge.title).toContain('Agent health has not been confirmed');
- expect(h.shell.presenceOf(member(SID,'Alex',{working}))).toBe(working?'working':'idle');
- expect(h.document.querySelector('.ca-member').classList.contains(`is-state-${working?'working':'idle'}`)).toBe(true);
- expect(card.textContent).not.toContain('Health unknown');expect(card.querySelector('.ca-dead-pane-restart')).toBeNull();
+ expect(badge.textContent).toBe('Agent health unknown');expect(badge.title).toContain('terminal viewer is connected');
+ expect(badge.classList.contains('is-connected')).toBe(false);expect(card.classList.contains('is-health-unknown')).toBe(true);
+ expect(h.shell.presenceOf(member(SID,'Alex',{working}))).toBe('unknown');
+ const row=h.document.querySelector('.ca-member');expect(row.classList.contains('is-state-unknown')).toBe(true);
+ expect(row.classList.contains('is-online')).toBe(false);expect(row.classList.contains('is-offline')).toBe(false);
+ expect(row.textContent).not.toContain('Working…');expect(row.title).toContain('terminal viewer is connected');
+ expect(h.document.querySelector('.ca-members').textContent).toContain('Availability unknown — 1');
+ expect(h.document.querySelector('.ca-head-members').title).toContain('0 online');
+ expect(card.querySelector('.ca-dead-pane-restart')).toBeNull();
+ h.document.querySelector('[aria-label="Edit profile for Alex"]').click();await h.flush();
+ expect(h.document.querySelector('.ca-expert-profile .ca-runtime-health.is-unknown').textContent).toBe('Agent health unknown');
  expect(employee.runtimeHealth).toBe('unknown');expect(session.runtimeHealth).toBe('unknown');expect(posts).toHaveLength(0);
+});
+
+it.each([true,false])('preserves local provider-scoped transport and activity behavior (working=%s)',async working=>{
+ const{h}=await fixture({health:'unknown',scope:'provider',working});await h.shell.openCompany();
+ expect(h.document.querySelector('.ca-company-state').textContent).toBe('Connected');
+ expect(h.shell.presenceOf(member(SID,'Alex',{working}))).toBe(working?'working':'idle');
+ expect(h.document.querySelector('.ca-members').textContent).toContain('Online — 1');
 });
 
 it('retains the unknown diagnostic when neither session nor member nor company reports transport presence',async()=>{
@@ -259,6 +273,27 @@ function nativeProof(employee:any,state='healthy',extra={}){
  return {binding:JSON.stringify([employee.id,employee.owner,employee.sessionId,employee.sessionGeneration??1,employee.desiredRunning,employee.onVacation,employee.bindingMigration,employee.runtimeRecipe,employee.permissions],(_key,value)=>value&&typeof value==='object'&&!Array.isArray(value)?Object.fromEntries(Object.keys(value).sort().map(key=>[key,value[key]])):value),employeeId:employee.id,sessionId:employee.sessionId,sessionGeneration:employee.sessionGeneration??1,
   state,observedAtEpochMs:Date.now(),reason:state==='healthy'?'LIVE_NATIVE_COMMAND':'COMMAND_EXITED',...extra};
 }
+it('clears stale saved Working and green presence when connected worker proof expires',async()=>{
+ const{h,employee,session,posts}=await fixture({health:'unknown',scope:'terminal'});
+ let epoch=100000,mono=0;vi.spyOn(h.window.Date,'now').mockImplementation(()=>epoch);vi.spyOn(h.window.performance,'now').mockImplementation(()=>mono);
+ Object.assign(employee,{sessionGeneration:1,providerHealth:nativeProof(employee,'healthy',{observedAtEpochMs:epoch})});
+ Object.assign(session,{providerHealth:employee.providerHealth,viewerHealth:'connected'});
+ await h.shell.openCompany();h.shell.renderMembers();
+ h.shell._presenceSig=h.shell.presenceSignature();
+ const card=h.document.querySelector('[data-employee-id="expert"]');
+ expect(card.querySelector('.ca-company-state').textContent).toBe('Online');
+ expect(h.document.querySelector('.ca-member').classList.contains('is-state-working')).toBe(true);
+ epoch+=25001;mono+=25001;h.shell.schedulePresence();await h.flush(60);
+ expect(h.document.querySelector('[data-employee-id="expert"]')).toBe(card);
+ expect(card.querySelector('.ca-company-state').textContent).toBe('Agent health unknown');
+ expect(card.querySelector('.ca-company-state').classList.contains('is-connected')).toBe(false);
+ expect(h.document.querySelector('.ca-member').classList.contains('is-state-unknown')).toBe(true);
+ expect(h.document.querySelector('.ca-member').textContent).not.toContain('Working…');
+ expect(h.document.querySelector('.ca-members').textContent).toContain('Availability unknown — 1');
+ expect(h.document.querySelector('.ca-head-members').title).toContain('0 online');
+ expect(session.status).toBe('busy');expect(session.isWorking).toBe(true);
+ expect(h.shell.room.members[0].working).toBe(true);expect(posts).toHaveLength(0);
+});
 it('keeps a native-confirmed agent Online when its optional viewer is unavailable, without clearing the viewer or input hold',async()=>{
  const{h,employee,session,posts}=await fixture({health:'disconnected',scope:'terminal',working:false});
  Object.assign(employee,{sessionGeneration:1,workerViewerReconnect:true,providerHealth:nativeProof(employee)});
