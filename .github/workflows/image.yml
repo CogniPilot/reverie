@@ -348,6 +348,60 @@ jobs:
               "$TEST_BROWSER_COVERAGE_DIR" "$TEST_BROWSER_COVERAGE_DIR/validated-summary.json"
           ) 2>&1 | tee acceptance/browser-coverage.log
           printf 'Worker and browser acceptance completed for %s\n' "$(cat "$RUNNER_TEMP/tested-image-id")" > acceptance/PASS.txt
+      - name: Qualify private native hook generations through the actual guest and Office
+        env:
+          CARGO_TARGET_DIR: ${{ runner.temp }}/reverie-viewer-target
+          CARGO_BUILD_JOBS: '2'
+        run: |
+          set -euo pipefail
+          # This factory matches the runner's ordinary UID/GID. The website
+          # image above has no worker-child manifest; perf tags are unrelated.
+          export REVERIE_HOOK_UID="$(id -u)" REVERIE_HOOK_GID="$(id -g)"
+          archive="$RUNNER_TEMP/native-hook-worker-image"
+          test ! -e "$archive" && test ! -L "$archive"
+          nix build --impure --expr '
+            let f = builtins.getFlake (builtins.getEnv "GITHUB_WORKSPACE");
+            in f.lib.workerDockerImage {
+              system = builtins.currentSystem;
+              uid = builtins.fromJSON (builtins.getEnv "REVERIE_HOOK_UID");
+              gid = builtins.fromJSON (builtins.getEnv "REVERIE_HOOK_GID");
+            }' --out-link "$archive" --print-build-logs --no-write-lock-file --max-jobs 2 --cores 2
+          client="$RUNNER_TEMP/native-hook-client"
+          test ! -e "$client" && test ! -L "$client"
+          nix build .#workerNativeClient --out-link "$client" --print-build-logs --no-write-lock-file --max-jobs 2 --cores 2
+          tag="reverie-native-hook-ci:$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          images=$(docker --host unix:///var/run/docker.sock image ls --quiet --filter "reference=$tag")
+          test -z "$images"
+          # Claim this initially absent destination before import, including a
+          # possible partial publication. Never remove another tag or force/prune.
+          cleanup() {
+            result=$?
+            trap - EXIT
+            if ! docker --host unix:///var/run/docker.sock image rm "$tag"; then result=1; fi
+            exit "$result"
+          }
+          trap cleanup EXIT
+          nix run --no-write-lock-file .#workerPerfImageTransport -- \
+            --insecure-policy copy --dest-daemon-host unix:///var/run/docker.sock \
+            "docker-archive:$(readlink -f "$archive")" "docker-daemon:$tag"
+          docker --host unix:///var/run/docker.sock image inspect --format '{{.Id}}' "$tag" > acceptance/native-hook-image-id
+          # Only a fresh, successful Cargo JSON stream selects the ELF. Cached
+          # files that Cargo did not select never become executable authority.
+          nix develop --command cargo test --locked -p reverie-host --lib --no-run --message-format=json \
+            > acceptance/native-hook-cargo.jsonl
+          export DOCKER_HOST=unix:///var/run/docker.sock
+          nix develop --command bash -euo pipefail -c '
+            cd apps/web
+            host_test=$(node --import tsx scripts/select-native-hook-host-test.ts \
+              "$GITHUB_WORKSPACE" "$CARGO_TARGET_DIR" "$GITHUB_WORKSPACE/acceptance/native-hook-cargo.jsonl")
+            node --import tsx scripts/test-native-worker-hooks.ts \
+              --image "$(cat "$GITHUB_WORKSPACE/acceptance/native-hook-image-id")" \
+              --worker-exec "$RUNNER_TEMP/native-hook-client/bin/reverie-worker-exec" \
+              --host-tests "$host_test" --docker "$(command -v docker)" --tmux "$(command -v tmux)" \
+              --output "$GITHUB_WORKSPACE/acceptance/native-hooks.json"
+          ' 2>&1 | tee acceptance/native-hooks.log
+          # Private retained rnh directories and native requests are not artifacts.
+          # This qualifies hook transport components, not ordinary broker admission.
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:
