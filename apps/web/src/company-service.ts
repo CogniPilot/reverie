@@ -481,10 +481,27 @@ export class CompanyService {
   }
 
   /** A durable, bounded automatic-start claim. No identity or title confers a grant. */
-  async claimWake(employeeId: string, sessionId: string, now: number, automatic = true): Promise<boolean> {
+  async claimWake(
+    employeeId: string,
+    sessionId: string,
+    now: number,
+    automatic = true,
+    stillCurrent: () => boolean = () => true
+  ): Promise<boolean> {
+    const original = this.store.snapshot().employees.find((e) => e.id === employeeId && e.sessionId === sessionId);
+    if (!original) return false;
+    const matches = (employee: CompanyEmployee | undefined) =>
+      !!employee &&
+      employee.owner === original.owner &&
+      employee.sessionId === sessionId &&
+      employee.sessionGeneration === original.sessionGeneration &&
+      !employee.bindingMigration &&
+      !employee.onVacation &&
+      employee.desiredRunning !== false;
+    let claimed = false;
     return this.store.update((state) => {
       const employee = state.employees.find((e) => e.id === employeeId && e.sessionId === sessionId);
-      if (!employee || employee.onVacation || employee.desiredRunning === false || this.runtimeRestarts.has(sessionId))
+      if (!employee || !matches(employee) || !stillCurrent() || this.runtimeRestarts.has(sessionId))
         return false;
       const settings = state.settings.find((s) => s.owner === employee.owner);
       if (automatic && settings?.autoWakeEnabled === false) return false;
@@ -492,7 +509,15 @@ export class CompanyService {
       if (attempts.length >= 3) return false;
       employee.wakeAttempts = [...attempts, now];
       employee.desiredRunning = true;
+      claimed = true;
       return true;
+    }, () => {
+      if (
+        claimed &&
+        (!stillCurrent() || this.runtimeRestarts.has(sessionId) ||
+          !matches(this.store.snapshot().employees.find((e) => e.id === employeeId)))
+      )
+        throw new CompanyError('Recovery authority or employee binding changed before claim commit', 409);
     });
   }
 

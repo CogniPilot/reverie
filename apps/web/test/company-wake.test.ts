@@ -133,7 +133,7 @@ describe('company crash recovery selection', () => {
     const recovery = new CompanyWake(f.deps);
     expect((await recovery.wakeOne(f.report.id)).awakened).toEqual([]);
     expect((await recovery.wakeOne(f.report.id, { explicitStart: true })).awakened).toEqual([f.report.id]);
-    expect(f.deps.claim).toHaveBeenCalledWith(f.report.id, f.report.sessionId, expect.any(Number), false);
+    expect(f.deps.claim).toHaveBeenCalledWith(f.report.id, f.report.sessionId, expect.any(Number), false, expect.any(Function));
     expect(f.deps.wake).toHaveBeenCalledWith(expect.objectContaining({
       sessionId: f.report.sessionId, mode,
       state: expect.objectContaining({ status: 'idle', respawnBlocked: false }),

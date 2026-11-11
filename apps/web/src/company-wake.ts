@@ -12,7 +12,7 @@ export interface CompanyWakeDeps {
   closing(sessionId: string): boolean;
   noteRunning(sessionId: string): Promise<void>;
   begin(employeeId: string, sessionId: string): { current(): boolean; finish(): void } | undefined;
-  claim(employeeId: string, sessionId: string, now: number, automatic: boolean): Promise<boolean>;
+  claim(employeeId: string, sessionId: string, now: number, automatic: boolean, stillCurrent?: () => boolean): Promise<boolean>;
   wake(entry: RebootRestoreEntry, allowed: () => boolean): Promise<boolean>;
   now?(): number;
   kickoff?(employee: CompanyEmployee, allowed: () => boolean): Promise<void>;
@@ -194,8 +194,8 @@ export class CompanyWake {
       // outcome is unknown: never reported as "did not start", which would invite a second start.
       let attempted = false;
       try {
-        if (!(await this.deps.claim(employee.id, employee.sessionId, (this.deps.now ?? Date.now)(), !manualId))) {
-          skip('disabled-or-retry-limited');
+        if (!(await this.deps.claim(employee.id, employee.sessionId, (this.deps.now ?? Date.now)(), !manualId, allowed))) {
+          skip(allowed() ? 'disabled-or-retry-limited' : 'changed-or-stopping');
           continue;
         }
         if (!allowed()) {

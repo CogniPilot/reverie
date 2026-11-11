@@ -1733,8 +1733,8 @@ export class WebServer extends EventEmitter {
       closing: (id) => !this.companyWakeReady || this.cleaningUp.has(id),
       noteRunning: (id) => this.companyService.recordObservedRunning(id, () => !this.cleaningUp.has(id)),
       begin: (employeeId, sessionId) => this.companyService.prepareWake(employeeId, sessionId),
-      claim: (employeeId, sessionId, now, automatic) =>
-        this.companyService.claimWake(employeeId, sessionId, now, automatic),
+      claim: (employeeId, sessionId, now, automatic, stillCurrent) =>
+        this.companyService.claimWake(employeeId, sessionId, now, automatic, stillCurrent),
       wake: async (entry, allowed) => {
         if (!allowed() || !rebootRestoreRegistry.beginSpending(entry.owner)) return false;
         const parked = rebootRestoreRegistry.take((owner) => owner === entry.owner, [entry.sessionId], entry.owner);
