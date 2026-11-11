@@ -15,7 +15,7 @@ import { CompanyStore } from '../src/company-store.js';
 import * as companyFiles from '../src/company-store.js';
 import { CompanyService } from '../src/company-service.js';
 import { ChatroomStore } from '../src/chatroom-store.js';
-import { ExpertStore, sessionCreateBody, type SessionLaunch } from '../src/experts.js';
+import { DAY_MS, ExpertStore, sessionCreateBody, type SessionLaunch } from '../src/experts.js';
 import {
   registerExpertRoutes,
   type ExpertAuditEntry,
@@ -648,6 +648,33 @@ describe('experts api', () => {
       ).toBeUndefined();
     });
 
+    it.each([false, true])('retiring a moved employee never stops an original session reused by another identity (%s)', async reused => {
+      const {sessionId, employeeId} = (await hire('alpha')).json().data;
+      await company.rebind(employeeId, undefined, OTHER_AGENT);
+      if (reused) await company.hire({name: 'Unrelated worker', sessionId, icon: 'X', position: 'Reviewer', expertise: ['systems']});
+      const before = expertStore.snapshot();
+      const response = await req('POST', '/api/experts/alpha/retire', {sessionId, reason: 'Finish this hire'});
+      expect(response.statusCode).toBe(409);
+      expect(stopped).toEqual([]);
+      expect(expertStore.snapshot()).toEqual(before);
+      expect(company.view().employees.find(employee => employee.id === employeeId)?.sessionId).toBe(OTHER_AGENT);
+    });
+
+    it.each(['foreign', 'foreign-ledger-scope', 'missing'])('retirement refuses a hire whose employee binding is %s', async kind => {
+      const {sessionId, employeeId} = (await hire('alpha')).json().data;
+      await company.store.update(state => {
+        if (kind === 'missing') state.employees = state.employees.filter(employee => employee.id !== employeeId);
+        else state.employees.find(employee => employee.id === employeeId)!.owner = 'foreign-owner';
+      });
+      if (kind === 'foreign-ledger-scope') await expertStore.update(state => {
+        state.hires.find(hire => hire.employeeId === employeeId)!.owner = 'foreign-owner';
+      });
+      const response = await req('POST', '/api/experts/alpha/retire', {sessionId, reason: 'Finish this hire'});
+      expect([403, 404, 409]).toContain(response.statusCode);
+      expect(stopped).toEqual([]);
+      expect(expertStore.snapshot().hires.find(hire => hire.employeeId === employeeId)?.status).toBe('active');
+    });
+
     it('refuses to delete a template with an active hire', async () => {
       await hire('alpha');
       expect((await req('DELETE', '/api/experts/alpha')).statusCode).toBe(409);
@@ -725,6 +752,32 @@ describe('experts api', () => {
       return res.json().data as { sessionId: string; hire: { id: string } };
     };
     const record = async (id: string) => (await state()).hires.find((h: { id: string }) => h.id === id);
+
+    it('a moved hire with a reused original SID receives neither a checkpoint nor a stop', async () => {
+      const hired = await hireWithStop();
+      const employee = company.view().employees.find(employee => employee.sessionId === hired.sessionId)!;
+      await company.rebind(employee.id, undefined, OTHER_AGENT);
+      await company.hire({name: 'Unrelated worker', sessionId: hired.sessionId, icon: 'X', position: 'Reviewer', expertise: ['systems']});
+      setWeekly(90);
+      const result = await routes.checkBudgetStops(clock);
+      expect(result.unchecked).toContain(hired.hire.id);
+      expect(result.triggered).toEqual([]); expect(result.retired).toEqual([]);
+      expect(checkpoints(hired.sessionId)).toEqual([]); expect(stopped).toEqual([]);
+      expect((await record(hired.hire.id)).status).toBe('active');
+    });
+
+    it('a move after a budget checkpoint retains active quota and never stops the reused original SID', async () => {
+      const hired = await hireWithStop(); setWeekly(90);
+      expect((await routes.checkBudgetStops(clock)).triggered).toEqual([hired.hire.id]);
+      const employee = company.view().employees.find(employee => employee.sessionId === hired.sessionId)!;
+      await company.rebind(employee.id, undefined, OTHER_AGENT);
+      await company.hire({name: 'Unrelated worker', sessionId: hired.sessionId, icon: 'X', position: 'Reviewer', expertise: ['systems']});
+      clock += DAY_MS;
+      const result = await routes.checkBudgetStops(clock);
+      expect(result.failed).toContain(hired.hire.id);
+      expect(result.retired).toEqual([]); expect(stopped).toEqual([]);
+      expect((await record(hired.hire.id)).status).toBe('active');
+    });
 
     beforeEach(async () => {
       await setSettings({ hireDelegates: [DELEGATE], noticeRoomId: noticeRoom, delegateWorkingRoot: dir });

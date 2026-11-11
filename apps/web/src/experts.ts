@@ -173,6 +173,8 @@ export const ExpertHireSchema = z.object({
   templateId: z.string(),
   sessionId: z.string(),
   employeeId: z.string(),
+  /** Canonical company scope at hire time. Missing legacy values stay unscoped. */
+  owner: z.string().optional(),
   /** 'owner' or 'agent:<session id>'. */
   by: z.string(),
   reason: z.string(),
@@ -352,13 +354,14 @@ export class ExpertStore {
   }
 
   /** Apply `mutate` to a copy, validate, write it whole, then publish it. A throw changes nothing. */
-  async update<T>(mutate: (state: ExpertState) => T): Promise<T> {
+  async update<T>(mutate: (state: ExpertState) => T, validateAuthority: () => void = () => {}): Promise<T> {
     await this.load();
     const run = this.chain.then(async () => {
+      validateAuthority();
       const next = structuredClone(this.state!);
       const result = mutate(next);
       ExpertStateSchema.parse(next);
-      await writeCompanyStateFile(this.file, JSON.stringify(next, null, 2));
+      await writeCompanyStateFile(this.file, JSON.stringify(next, null, 2), validateAuthority);
       this.state = next;
       return structuredClone(result);
     });

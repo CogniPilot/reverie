@@ -542,6 +542,7 @@ export function registerExpertRoutes(app: FastifyInstance, deps: ExpertRouteDeps
             templateId: template.id,
             sessionId,
             employeeId: employee.id,
+            ...(owner !== undefined ? {owner} : {}),
             by: actor.kind === 'owner' ? 'owner' : actor.label,
             reason: body.reason,
             hiredAt: at,
@@ -749,13 +750,24 @@ export function registerExpertRoutes(app: FastifyInstance, deps: ExpertRouteDeps
    * the gate. Cleanup removes the session's console row, process and paste uploads; the hire and
    * employee records, the working directory, the memory and the transcripts stay.
    */
-  const retireHire = async (hire: ExpertHire, by: string, reason: string, admin: string, ip?: string) => {
+  const requireOriginalHireBinding = (hire: ExpertHire, owner: string | undefined) => {
+    if ((hire.owner !== undefined && hire.owner !== owner) ||
+        deps.employeeSession?.(hire.employeeId, owner) !== hire.sessionId)
+      throw new ExpertError('The current employee binding cannot be verified against this historical hire. No historical session will be stopped; check the employee profile.', 409);
+  };
+  const retireHire = async (hire: ExpertHire, by: string, reason: string, admin: string, ip?: string, owner?: string) => {
+    requireOriginalHireBinding(hire, owner);
     if (deps.sessionExists(hire.sessionId)) await deps.stopSession(hire.sessionId);
+    const validate = () => {
+      try { requireOriginalHireBinding(hire, owner); }
+      catch { throw new ExpertError('Retirement could not be confirmed against the current employee binding. The hire remains active; inspect the employee before another action.', 503); }
+    };
     const retired = await deps.store.update((s) => {
+      validate();
       const saved = s.hires.find((h) => h.id === hire.id)!;
       Object.assign(saved, { status: 'retired', retiredAt: now(), retiredBy: by, retireReason: reason });
       return saved;
-    });
+    }, validate);
     await deps.audit({
       admin,
       action: 'expert_retire',
@@ -794,7 +806,7 @@ export function registerExpertRoutes(app: FastifyInstance, deps: ExpertRouteDeps
         const hire = state.hires.find((h) => h.templateId === id && h.sessionId === body.sessionId && h.status === 'active');
         if (!hire) throw new ExpertError('No active hire of this template with that session', 404);
         const by = actor.kind === 'owner' ? 'owner' : actor.label;
-        return retireHire(hire, by, body.reason, actor.label, req.ip);
+        return retireHire(hire, by, body.reason, actor.label, req.ip, ownerFor(req));
       });
     })
   );
@@ -862,7 +874,9 @@ export function registerExpertRoutes(app: FastifyInstance, deps: ExpertRouteDeps
             hire,
             'budget-stop',
             `Budget stop: plan ${stop.planId} reached the ${stop.weeklyPercent}% weekly limit`,
-            'budget-stop'
+            'budget-stop',
+            undefined,
+            hire.owner
           );
           result.retired.push(hire.id);
         } catch (error) {
@@ -912,7 +926,11 @@ export function registerExpertRoutes(app: FastifyInstance, deps: ExpertRouteDeps
         const stop = hire.budgetStop!;
         const row = plans?.find((p) => p.id === stop.planId);
         const weekly = row?.weeklyPercent;
-        const problem = !plans
+        let bindingVerified = true;
+        try { requireOriginalHireBinding(hire, hire.owner); } catch { bindingVerified = false; }
+        const problem = !bindingVerified
+          ? 'the current employee binding cannot be verified; no historical session will be contacted'
+          : !plans
           ? 'the plans cannot be read'
           : !row
             ? 'the plan is not listed'
@@ -947,6 +965,7 @@ export function registerExpertRoutes(app: FastifyInstance, deps: ExpertRouteDeps
         try {
           if (!room) throw new Error('no notice room');
           if (!deps.sendToSession) throw new Error('no channel to the session');
+          requireOriginalHireBinding(hire, hire.owner);
           await deps.sendToSession(
             room,
             hire.sessionId,
