@@ -2459,6 +2459,7 @@ class ReverieApp {
   }
 
   _onSessionCreated(data) {
+    this._observeInputRecovery(data);
     // A session this tab is closing stays closed until the server answers.
     if (this._closingSessions?.has(data.id)) return;
     if (data.retired) {
@@ -2492,6 +2493,8 @@ class ReverieApp {
 
   _onSessionUpdated(data) {
     const session = data.session || data;
+    this._observeInputRecovery(this.sessions.get(session.id));
+    this._observeInputRecovery(session);
     // A session this tab is closing stays closed until the server answers
     // (closeSession() puts it back if the delete is refused).
     if (this._closingSessions?.has(session.id)) return;
@@ -2508,6 +2511,7 @@ class ReverieApp {
     const oldSession = this.sessions.get(session.id);
     const claudeSessionIdJustSet = session.claudeSessionId && (!oldSession || !oldSession.claudeSessionId);
     this.sessions.set(session.id, session);
+    this._renderInputRecoveryBanner();
     this.renderSessionTabs();
     this.updateCost();
     // Update tokens display if this is the active session
@@ -2554,6 +2558,7 @@ class ReverieApp {
     this.renderProjectInsightsPanel();  // Update project insights panel after session deleted
     // Stop stats polling when no sessions remain
     if (this.sessions.size === 0) this.stopSystemStatsPolling();
+    this._renderInputRecoveryBanner();
   }
 
   // SSE wrappers — skip terminal events while WebSocket owns active terminal I/O.
@@ -3879,6 +3884,10 @@ class ReverieApp {
           // Input ACK — the server applied (or deduped) this seq; drop it from
           // the durable queue so it can never be re-delivered/lost.
           this._onWsInputAck(msg.seq, msg, sessionId);
+        } else if (msg.t === 'ie' && (msg.unconfirmed === true || msg.held === true)) {
+          this._holdInputRecovery(sessionId);
+        } else if (msg.t === 'ir') {
+          this._onWsInputRefusal(msg.seq, msg, sessionId);
         } else if (msg.t === 'zc') {
           // Resize confirm — the geometry the PTY actually holds, which is not
           // always the one this client asked for (issue #464).
@@ -4036,8 +4045,100 @@ class ReverieApp {
    * @param {string} input
    * @param {{useMux?: boolean}} [opts] - useMux only affects the POST fallback.
    */
+  _sessionInputHeld(sessionId) {
+    const session = this.sessions?.get?.(sessionId);
+    return this._inputRecoveryHolds?.has(sessionId) === true || session?.terminalInputHeld === true ||
+      session?.providerDispatchHeld === true;
+  }
+
+  _holdInputRecovery(sessionId) {
+    this._rememberInputRecovery(sessionId);
+    this._renderInputRecoveryBanner();
+  }
+
+  _rememberInputRecovery(sessionId) {
+    if (typeof sessionId !== 'string' || !sessionId) return;
+    this._inputRecoveryHolds ||= new Set();
+    if (this._inputRecoveryHolds.has(sessionId)) return;
+    this._inputRecoveryHolds.add(sessionId);
+    this._persistReliableNow();
+  }
+
+  _observeInputRecovery(session) {
+    if (session?.id && (session.terminalInputHeld === true || session.providerDispatchHeld === true))
+      this._rememberInputRecovery(session.id);
+  }
+
+  _renderInputRecoveryBanner() {
+    const banner = document.getElementById?.('inputRecoveryBar');
+    if (!banner) return;
+    const id = this.activeSessionId;
+    this._observeInputRecovery(this.sessions?.get?.(id));
+    if (!id || !this._sessionInputHeld(id)) {
+      banner.hidden = true;
+      delete banner.dataset.recoveryKey;
+      return;
+    }
+    const startup = this.sessions?.get?.(id)?.providerDispatchHeld === true;
+    const key = id;
+    if (banner.dataset.recoveryKey === key && !banner.hidden) return;
+    banner.dataset.recoveryKey = key;
+    banner.replaceChildren();
+    const text = document.createElement('div');
+    text.className = 'input-recovery-message';
+    const title = document.createElement('strong');
+    title.textContent = 'Input held — terminal is read-only';
+    const reason = document.createElement('span');
+    reason.textContent = startup
+      ? 'Employee startup is unconfirmed. Input is held to avoid repeating the startup. Terminal output remains available.'
+      : 'An earlier operation has an unknown outcome. Input is held to prevent a repeat. Terminal output remains available.';
+    const status = document.createElement('span');
+    status.className = 'input-recovery-status';
+    status.setAttribute('aria-live', 'polite');
+    text.append(title, reason, status);
+    const refresh = document.createElement('button');
+    refresh.type = 'button';
+    refresh.className = 'btn-secondary';
+    refresh.textContent = 'Refresh input status';
+    refresh.onclick = () => this._refreshInputRecovery(id, refresh, status);
+    banner.append(text, refresh);
+    banner.hidden = false;
+  }
+
+  async _refreshInputRecovery(id, button, status) {
+    if (button.disabled) return;
+    const wasFocused = document.activeElement === button;
+    button.disabled = true;
+    status.textContent = 'Checking status…';
+    try {
+      const response = await fetch(`/api/sessions/${encodeURIComponent(id)}`, { signal: AbortSignal.timeout(10000) });
+      const payload = await response.json();
+      if (!response.ok || payload?.success !== true || payload.data?.id !== id)
+        throw new Error('Session status could not be verified');
+      const session = payload.data;
+      if (['terminalInputHeld', 'providerDispatchHeld'].some((field) => session[field] !== undefined && typeof session[field] !== 'boolean'))
+        throw new Error('Session status could not be verified');
+      // A read never clears local uncertainty or replays queued text. A future
+      // reconciliation API must provide its own exact operation outcome.
+      this._observeInputRecovery(session);
+      this._renderInputRecoveryBanner();
+      status.textContent = 'Status checked. Input still needs recovery before sending can continue.';
+    } catch {
+      status.textContent = 'Could not refresh status. Input remains held. Try checking status again when connected.';
+    } finally {
+      button.disabled = false;
+      if (wasFocused && button.isConnected && this.activeSessionId === id && document.activeElement === document.body)
+        button.focus({preventScroll: true});
+    }
+  }
+
   _sendInputAsync(sessionId, input, opts) {
-    if (!sessionId || !input) return;
+    if (!sessionId || !input) return false;
+    if (this._sessionInputHeld(sessionId)) {
+      this._renderInputRecoveryBanner();
+      this.showToast?.('Input is held. Inspect the terminal and refresh its status before continuing.', 'warning');
+      return false;
+    }
     const useMux = opts?.useMux === true;
     // Both transports refuse a frame over the server's limit (issue #484), and a
     // refused frame used to sit at the head of the durable queue for good. So an
@@ -4052,12 +4153,11 @@ class ReverieApp {
           `Input too large (${Math.ceil(input.length / 1024)} KB, limit ${Math.floor(max / 1024)} KB); not sent`,
           'error'
         );
-        return;
+        return false;
       }
-      for (const frame of limit.split(input)) this._reliableSend(sessionId, frame, false);
-      return;
+      return this._queueInputFrames(sessionId, limit.split(input), false);
     }
-    this._reliableSend(sessionId, input, useMux);
+    return this._reliableSend(sessionId, input, useMux);
   }
 
   /**
@@ -4114,6 +4214,7 @@ class ReverieApp {
    */
   _sendInputEphemeral(sessionId, input) {
     if (!sessionId || !input) return;
+    if (this._sessionInputHeld(sessionId)) return;
     const sock = this._inputSocketFor(sessionId);
     if (sock) {
       try {
@@ -4139,14 +4240,20 @@ class ReverieApp {
 
   /** Record one input frame and kick delivery. The record lives until ACKed. */
   _reliableSend(sessionId, data, useMux) {
-    const seq = this._nextSeq(sessionId);
-    const rec = { seq, data, useMux: !!useMux, ts: Date.now(), tries: 0, sentAt: 0 };
+    return this._queueInputFrames(sessionId, [data], useMux);
+  }
+
+  /** Queue a split draft as one synchronous local decision, before any drain. */
+  _queueInputFrames(sessionId, frames, useMux) {
+    if (this._sessionInputHeld(sessionId)) return false;
+    const records = frames.map(data => ({seq: this._nextSeq(sessionId), data,
+      useMux: !!useMux, ts: Date.now(), tries: 0, sentAt: 0}));
     let list = this._pendingDeliveries.get(sessionId);
     if (!list) {
       list = [];
       this._pendingDeliveries.set(sessionId, list);
     }
-    list.push(rec);
+    list.push(...records);
     // ⚠️ SYNCHRONOUS, not the debounced writer: the seq counter is precisely the
     // thing that must survive a crash, and a debounce puts it on the path most
     // likely to be lost. A counter that comes back BELOW the server's watermark
@@ -4154,6 +4261,7 @@ class ReverieApp {
     this._persistReliableNow();
     this._updateConnectionIndicator();
     this._drainSession(sessionId);
+    return true;
   }
 
   _nextSeq(sessionId) {
@@ -4164,6 +4272,8 @@ class ReverieApp {
 
   /** Deliver all unacked records for a session, in seq order. */
   _drainSession(sessionId) {
+    if (this._sessionInputHeld(sessionId)) return;
+    if ((this._inputRetryAt?.get(sessionId) || 0) > Date.now()) return;
     const list = this._pendingDeliveries.get(sessionId);
     if (!list || list.length === 0) return;
 
@@ -4176,7 +4286,8 @@ class ReverieApp {
       for (const rec of list) {
         if (rec.sentAt !== 0) continue;
         try {
-          sock.ws.send(JSON.stringify({ t: 'i', d: rec.data, seq: rec.seq, cid: this._clientId }));
+          sock.ws.send(JSON.stringify({ t: 'i', d: rec.data, seq: rec.seq, cid: this._clientId,
+            ...(rec.useMux ? {useMux: true} : {}) }));
           rec.sentAt = Date.now();
           rec.tries++;
         } catch {
@@ -4193,6 +4304,7 @@ class ReverieApp {
     (async () => {
       try {
         for (;;) {
+          if (this._sessionInputHeld(sessionId)) break;
           const cur = this._pendingDeliveries.get(sessionId);
           if (!cur || cur.length === 0) break;
           // If the WebSocket came back mid-drain, yield to it (the acked stream)
@@ -4221,19 +4333,22 @@ class ReverieApp {
           } else if (resp && (resp.status === 404 || resp.status === 410)) {
             // Session no longer exists — the input can never land. Drop it
             // rather than retry forever (not a "lost" prompt: the target is gone).
-            this._ackDelivery(sessionId, rec.seq);
+            this._ackDelivery(sessionId, rec.seq, false);
           } else if (resp && resp.status === 422) {
             // This input's outcome is final but may be unknown. Re-POSTing its
             // spent seq cannot resolve it and would wedge every later frame.
             this._dropUnconfirmedInput(sessionId, rec);
           } else if (resp && resp.status === 409) {
             let typedUnsent = false;
+            let recoveryRequired = false;
             try {
               const body = await resp.json();
+              recoveryRequired = body?.recoveryRequired === true;
               typedUnsent = body?.success === false && body.errorCode === 'SESSION_BUSY' &&
                 body.data?.typedUnsent === true && body.data?.delivered === false;
             } catch { /* Unknown/busy refusals stay queued for a later retry. */ }
-            if (typedUnsent) this._dropUnconfirmedInput(sessionId, rec, true);
+            if (recoveryRequired) this._dropUnconfirmedInput(sessionId, rec);
+            else if (typedUnsent) this._dropUnconfirmedInput(sessionId, rec, true);
             else break;
           } else if (resp && (resp.status === 400 || resp.status === 413)) {
             // The frame itself was refused, so a retry gets the same answer. Kept
@@ -4253,13 +4368,14 @@ class ReverieApp {
 
   /** Drop a frame the server refused for good, and say so once. */
   _dropRejectedInput(sessionId, rec) {
-    this._ackDelivery(sessionId, rec.seq);
+    this._ackDelivery(sessionId, rec.seq, false);
     this.showToast?.(`Input refused by the server (${Math.ceil(rec.data.length / 1024)} KB); not sent`, 'error');
   }
 
   /** Finalize this queue entry without claiming its input was delivered. */
   _dropUnconfirmedInput(sessionId, rec, typedUnsent = false) {
-    this._ackDelivery(sessionId, rec.seq);
+    if (!typedUnsent) this._holdInputRecovery(sessionId);
+    this._ackDelivery(sessionId, rec.seq, false);
     // Persist even while later frames remain: a reload must not replay the
     // uncertain/unsent frame during the normal debounce window.
     this._persistReliableNow();
@@ -4269,11 +4385,13 @@ class ReverieApp {
   }
 
   /** Drop an ACKed record (by exact seq) and persist. */
-  _ackDelivery(sessionId, seq) {
+  _ackDelivery(sessionId, seq, delivered = true) {
+    let matched = false;
     const list = this._pendingDeliveries.get(sessionId);
     if (list) {
       const idx = list.findIndex((r) => r.seq === seq);
       if (idx !== -1) {
+        matched = true;
         list.splice(idx, 1);
         if (list.length === 0) this._pendingDeliveries.delete(sessionId);
         // When nothing is left pending anywhere, flush durable state immediately
@@ -4291,7 +4409,7 @@ class ReverieApp {
     // not one of their options, so the dialog is still up and still needs you.
     // Clearing action alerts here hid a LIVE alert on this device alone (the
     // other devices stayed red and a reload re-seeded it straight back).
-    this.markIdleAlertSeen?.(sessionId);
+    if (delivered && matched) this.markIdleAlertSeen?.(sessionId);
   }
 
   /**
@@ -4309,16 +4427,36 @@ class ReverieApp {
    * called a duplicate is the mechanism working as designed — the original did
    * land — and re-sending it would type the same thing twice.
    */
+  _onWsInputRefusal(seq, msg, sessionId) {
+    if (msg?.retryable !== true || msg.reason !== 'capacity' || !Number.isInteger(seq) || this._sessionInputHeld(sessionId)) return;
+    const rec = this._pendingDeliveries.get(sessionId)?.find(record => record.seq === seq);
+    if (!rec) return;
+    rec.sentAt = 0;
+    this._inputRetryAt ||= new Map();
+    this._inputRetryAt.set(sessionId, Date.now() + 1000);
+  }
+
   _onWsInputAck(seq, msg, sessionId = this._wsSessionId) {
     // `sessionId` is the session of the socket the ACK arrived on: `{t:'ia'}`
     // frames carry none, and with a second terminal's socket in play
     // `this._wsSessionId` is no longer the only candidate.
     if (!sessionId || !Number.isInteger(seq)) return;
+    if (msg?.unconfirmed === true || msg?.held === true) {
+      this._holdInputRecovery(sessionId);
+      const rec = (this._pendingDeliveries.get(sessionId) || []).find((r) => r.seq === seq);
+      if (rec && msg.unconfirmed === true) this._dropUnconfirmedInput(sessionId, rec);
+      return;
+    }
+    if (msg?.confirmed === true) {
+      this._ackDelivery(sessionId, seq);
+      return;
+    }
+    if (this._sessionInputHeld(sessionId)) return;
     if (msg && msg.err) {
       // Refused for good (e.g. over the size limit): retrying cannot help.
       const rec = (this._pendingDeliveries.get(sessionId) || []).find((r) => r.seq === seq);
       if (rec) this._dropRejectedInput(sessionId, rec);
-      else this._ackDelivery(sessionId, seq);
+      else this._ackDelivery(sessionId, seq, false);
       return;
     }
     if (msg && msg.dup) {
@@ -4355,6 +4493,8 @@ class ReverieApp {
   _redeliverSweep() {
     if (this._pendingDeliveries.size === 0) return;
     for (const sessionId of [...this._pendingDeliveries.keys()]) {
+      if (this._sessionInputHeld(sessionId)) continue;
+      if ((this._inputRetryAt?.get(sessionId) || 0) > Date.now()) continue;
       const list = this._pendingDeliveries.get(sessionId);
       if (!list || list.length === 0) continue;
       const sock = this._inputSocketFor(sessionId);
@@ -4427,6 +4567,9 @@ class ReverieApp {
       const raw = localStorage.getItem('reverie:pendingInput');
       if (!raw) return;
       const saved = JSON.parse(raw);
+      if (Array.isArray(saved?.heldSessions)) {
+        this._inputRecoveryHolds = new Set(saved.heldSessions.filter((id) => typeof id === 'string'));
+      }
       if (saved && saved.seqs) {
         for (const [s, n] of Object.entries(saved.seqs)) {
           if (Number.isFinite(n)) this._seqCounters.set(s, n);
@@ -4492,8 +4635,9 @@ class ReverieApp {
       // Bound the persisted backlog. On extreme overflow keep the seq counters
       // (so future input stays monotonic and dedup-safe) but skip the payloads —
       // the in-memory queue still delivers; only cross-reload durability is lost.
+      const heldSessions = [...(this._inputRecoveryHolds || [])];
       const payload =
-        bytes > this._reliableMaxBytes ? { seqs } : { seqs, pending };
+        bytes > this._reliableMaxBytes ? { seqs, heldSessions } : { seqs, pending, heldSessions };
       localStorage.setItem('reverie:pendingInput', JSON.stringify(payload));
     } catch {
       /* QuotaExceeded or disabled storage — in-memory delivery is unaffected */
@@ -4995,6 +5139,7 @@ class ReverieApp {
 
     this._resetAllAppState(keepTerminal);
 
+    for (const s of data.sessions) this._observeInputRecovery(s);
     for (const s of data.sessions.filter((x) => x.retired)) (this._retiredHidden ||= new Set()).add(s.id);
     data.sessions = data.sessions.filter((s) => !s.retired);
     data.sessions.forEach(s => {
@@ -5007,6 +5152,7 @@ class ReverieApp {
         });
       }
     });
+    this._renderInputRecoveryBanner();
 
     // Server is source of truth for open sessions — don't resurrect stale tabs
     // from localStorage (would show phantom "ended" tabs when a session was closed
@@ -9663,6 +9809,7 @@ class ReverieApp {
 
     this._cleanupPreviousSession(sessionId);
     this.activeSessionId = sessionId;
+    this._renderInputRecoveryBanner();
     this._activateFileBrowserSession?.(sessionId);
     // Repaint the partial-history banner for the tab being switched TO. The
     // replay paths refresh it when their fetch lands; without this the previous
@@ -10431,6 +10578,7 @@ class ReverieApp {
 
   // Shared cleanup for all session data — called from both closeSession() and session:deleted handler
   _cleanupSessionData(sessionId) {
+    this._inputRetryAt?.delete(sessionId);
     this.closeTabRailActionMenu?.();
     // A dead session has no buffer to reconcile; leaving the marker set would
     // make a later socket for a REUSED id reconcile against nothing.

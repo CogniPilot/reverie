@@ -63,7 +63,7 @@ function makeTextarea(): FakeTextarea {
 const ANDROID_UA = 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0';
 const IOS_UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko)';
 
-function loadCjkHarness({ ua = ANDROID_UA }: { ua?: string } = {}) {
+function loadCjkHarness({ ua = ANDROID_UA, accept }: { ua?: string; accept?: (text: string) => boolean } = {}) {
   const textarea = makeTextarea();
   const sent: string[] = [];
   const windowObj: Record<string, unknown> = {};
@@ -88,10 +88,13 @@ function loadCjkHarness({ ua = ANDROID_UA }: { ua?: string } = {}) {
   vm.runInContext(src, context, { filename: 'input-cjk.js' });
   const CjkInput = vm.runInContext('CjkInput', context);
 
-  CjkInput.init({ send: (text: string) => sent.push(text) });
+  CjkInput.init({ send: (text: string) => {
+    if (accept?.(text) === false) return false;
+    sent.push(text); return true;
+  }});
   textarea.fire('focus');
 
-  return { CjkInput, textarea, sent, windowObj, documentObj };
+  return { CjkInput, textarea, sent, windowObj, documentObj, context };
 }
 
 describe('CJK input module', () => {
@@ -101,6 +104,46 @@ describe('CJK input module', () => {
 
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  it.each(['debounce', 'composition', 'Enter'] as const)('keeps a known-never-queued draft after %s refusal without automatic retry', path => {
+    let held = true;
+    const attempts: string[] = [];
+    const {textarea, sent} = loadCjkHarness({accept: text => {attempts.push(text); return !held;}});
+    const draft = '保留 pending draft';
+    if (path === 'composition') textarea.fire('compositionstart');
+    textarea.value = PHANTOM + draft;
+    if (path === 'Enter') textarea.fire('keydown', {key: 'Enter'});
+    else if (path === 'composition') textarea.fire('compositionend');
+    else textarea.fire('input', {isComposing: false, inputType: 'insertText'});
+    vi.advanceTimersByTime(2_000);
+    expect(attempts).toEqual([draft + (path === 'Enter' ? '\r' : '')]);
+    expect(sent).toEqual([]); expect(textarea.value).toBe(PHANTOM + draft);
+    held = false;
+    vi.advanceTimersByTime(10_000);
+    expect(attempts).toHaveLength(1); expect(sent).toEqual([]);
+    // Only a new explicit user submit retries this never-queued text.
+    textarea.fire('keydown', {key: 'Enter'});
+    expect(sent).toEqual([draft + '\r']); expect(textarea.value).toBe(PHANTOM);
+  });
+
+  it('forwards the canonical terminal handler queue refusal to the actual CJK flush', () => {
+    const {context, CjkInput, textarea} = loadCjkHarness();
+    vm.runInContext('class ReverieApp {}; const _crashDiag = {log() {}};', context);
+    vm.runInContext(readFileSync(resolve(import.meta.dirname, '../src/web/public/terminal-ui.js'), 'utf8'), context);
+    const app = vm.runInContext('Object.create(ReverieApp.prototype)', context);
+    app.activeSessionId = 'original-session';
+    const queue = vi.fn(() => false); app._sendInputAsync = queue;
+    CjkInput.init({send: (text: string) => app._handleCjkInput(text)});
+    textarea.value = PHANTOM + 'keep committed text';
+    textarea.fire('input', {isComposing: false, inputType: 'insertText'});
+    vi.advanceTimersByTime(2_000);
+    expect(queue).toHaveBeenCalledExactlyOnceWith('original-session', 'keep committed text');
+    expect(textarea.value).toBe(PHANTOM + 'keep committed text');
+    expect(app._handleCjkInput('known-held')).toBe(false);
+    app.activeSessionId = null;
+    expect(app._handleCjkInput('no-target')).toBe(false);
+    expect(queue).toHaveBeenCalledTimes(2);
   });
 
   it('sends committed text after a normal composition cycle', () => {

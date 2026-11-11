@@ -513,6 +513,24 @@ describe('one-shot Ctrl through the CJK input field', () => {
     expect(bar.isCtrlArmed()).toBe(false);
   });
 
+  it('preserves Ctrl and prediction intent on a known hold until an explicit accepted user retry', () => {
+    const {app, bar} = cjkApp();
+    const clearPredictions = vi.fn();
+    const sessions = new Map([['cjk-session', {id: 'cjk-session', terminalInputHeld: true}]]);
+    Object.assign(app, {sessions, _localEchoPolicy: 'predict', _predictiveEcho: {clearPredictions}});
+    app._sendInputAsync.mockReturnValue(true); // Local queue acceptance, not provider delivery.
+    bar.toggleCtrl();
+    expect(app._handleCjkInput('c')).toBe(false);
+    expect(app._sendInputAsync).not.toHaveBeenCalled();
+    expect(bar.isCtrlArmed()).toBe(true); expect(clearPredictions).not.toHaveBeenCalled();
+    // This component fixture changes its denial predicate, then the user retries;
+    // no timer, status read or reconciliation grant is inferred here.
+    sessions.set('cjk-session', {id: 'cjk-session', terminalInputHeld: false});
+    expect(app._handleCjkInput('c')).toBe(true);
+    expect(app._sendInputAsync).toHaveBeenCalledExactlyOnceWith('cjk-session', '\x03');
+    expect(bar.isCtrlArmed()).toBe(false); expect(clearPredictions).toHaveBeenCalledOnce();
+  });
+
   it('leaves ordinary CJK input untouched when nothing is armed', () => {
     const { app } = cjkApp();
     app._handleCjkInput('你好');
@@ -734,8 +752,8 @@ describe('Codex shift-arrow keys are gated on the active session', () => {
   });
 
   it('is wired at init and on every session switch, like the 🧠 key', () => {
-    const initBody = keyboardSource.match(/\n  init\(\) \{([\s\S]*?)\n  \},/)?.[1] ?? '';
-    const refreshBody = keyboardSource.match(/\n  refreshForActiveSession\(\) \{([\s\S]*?)\n  \},/)?.[1] ?? '';
+    const initBody = keyboardSource.match(/\n {2}init\(\) \{([\s\S]*?)\n {2}\},/)?.[1] ?? '';
+    const refreshBody = keyboardSource.match(/\n {2}refreshForActiveSession\(\) \{([\s\S]*?)\n {2}\},/)?.[1] ?? '';
     expect(initBody).toContain('this.syncCodexKeys();');
     expect(refreshBody).toContain('this.syncCodexKeys();');
   });

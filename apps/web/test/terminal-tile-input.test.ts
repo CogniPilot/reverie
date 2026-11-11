@@ -74,6 +74,8 @@ function loadContext() {
       getDeviceType: () => 'desktop',
     },
   });
+  // Queue deadlines and their timer callbacks must share the test's clock.
+  Object.defineProperty(context, 'Date', {get: () => globalThis.Date});
   vm.runInContext(
     `${read('constants.js')}\n${read('terminal-keycode229-recovery.js')}\n${read('app.js')}\n` +
       `${read('terminal-ui.js')}\n${read('terminal-tile.js')}\n` +
@@ -172,6 +174,106 @@ describe('TerminalTile socket identity', () => {
 });
 
 describe('TerminalTile input through the exactly-once queue', () => {
+  it('carries the same mux selection in a queued WebSocket frame as its HTTP fallback', async () => {
+    const app = makeApp() as App & {_sendInputAsync: (id: string, text: string, options: {useMux: boolean}) => boolean};
+    const {ws} = await connectTile(app);
+    ws.open();
+    expect(app._sendInputAsync('s-tile', 'one prompt\r', {useMux: true})).toBe(true);
+    expect(ws.inputFrames()).toEqual([{t: 'i', d: 'one prompt\r', seq: 1, cid: 'c-test', useMux: true}]);
+  });
+
+  it('backs off a known-never-issued capacity refusal and retries the same frame and sequence', async () => {
+    const app = makeApp() as App & {_redeliverSweep: () => void; _onWsReady: (id: string) => void};
+    const {ws, term} = await connectTile(app);
+    ws.open();
+    vi.useFakeTimers();
+    try {
+      term.type('retained frame');
+      ws.receive({t: 'ir', seq: 1, retryable: true, reason: 'capacity'});
+      term.type('later frame');
+      app._onWsReady('s-tile'); app._redeliverSweep();
+      expect(ws.inputFrames()).toHaveLength(1);
+      expect(app._pendingDeliveries.get('s-tile')).toHaveLength(2);
+      expect(app.markIdleAlertSeen).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(1001); app._redeliverSweep();
+      expect(ws.inputFrames().map(frame => [frame.seq, frame.d])).toEqual([
+        [1, 'retained frame'], [1, 'retained frame'], [2, 'later frame'],
+      ]);
+    } finally {vi.useRealTimers();}
+  });
+
+  it('stages every split draft frame before its first transport dispatch', async () => {
+    const app = makeApp() as App & {_sendInputAsync: (id: string, text: string) => boolean};
+    const {ws} = await connectTile(app);
+    ws.open();
+    const oldLimit = windowStub.ReverieInputLimit;
+    const observed: number[] = [];
+    const send = ws.send.bind(ws);
+    ws.send = data => {observed.push(app._pendingDeliveries.get('s-tile')?.length ?? 0); return send(data);};
+    windowStub.ReverieInputLimit = {FRAME_MAX_CHARS: 3, PASTE_MAX_CHARS: 12, split: () => ['abc', 'def']};
+    try {
+      expect(app._sendInputAsync('s-tile', 'abcdef')).toBe(true);
+      expect(observed).toEqual([2, 2]);
+      expect(ws.inputFrames().map(frame => [frame.seq, frame.d])).toEqual([[1, 'abc'], [2, 'def']]);
+    } finally {windowStub.ReverieInputLimit = oldLimit;}
+  });
+
+  it.each([404, 410])('does not acknowledge an idle alert for a refused HTTP frame (%s)', async status => {
+    const app = makeApp();
+    const {term} = await connectTile(app);
+    fetchMock.mockImplementation(async () => ({ok: false, status, json: async () => ({})}));
+    term.type('refused input');
+    await vi.waitFor(() => expect(app._pendingDeliveries.size).toBe(0));
+    expect(app.markIdleAlertSeen).not.toHaveBeenCalled();
+  });
+
+  it('does not acknowledge a new idle alert from an unmatched or rejected old ACK', async () => {
+    const app = makeApp();
+    const {ws} = await connectTile(app);
+    ws.open();
+    ws.receive({t: 'ia', seq: 99, confirmed: true});
+    ws.receive({t: 'ia', seq: 99, err: 'too_large'});
+    expect(app.markIdleAlertSeen).not.toHaveBeenCalled();
+  });
+
+  it('holds later input after an unconfirmed ACK without reissuing the first frame', async () => {
+    const app = makeApp();
+    const {ws, term} = await connectTile(app);
+    ws.open();
+    term.type('first');
+    ws.receive({t: 'ia', seq: 1, unconfirmed: true});
+    term.type('later');
+    ws.receive({t: 'ia', seq: 1, dup: true, last: 1, held: true});
+    expect(ws.inputFrames().map(frame => frame.d)).toEqual(['first']);
+    expect(app._pendingDeliveries.get('s-tile')).toBeUndefined();
+    expect(app.markIdleAlertSeen).not.toHaveBeenCalled();
+    expect(fetchMock.mock.calls.filter(([url]) => String(url).endsWith('/input'))).toHaveLength(0);
+  });
+
+  it('retains a refused pending frame while a held ACK prevents redelivery', async () => {
+    const app = makeApp();
+    const {ws, term} = await connectTile(app);
+    ws.open();
+    term.type('keep this pending');
+    ws.receive({t: 'ia', seq: 1, held: true});
+    ws.receive({t: 'ia', seq: 1, held: true});
+    expect(app._pendingDeliveries.get('s-tile')?.map(frame => frame.data)).toEqual(['keep this pending']);
+    term.type('blocked');
+    expect(ws.inputFrames().map(frame => frame.d)).toEqual(['keep this pending']);
+  });
+
+  it('drops an original confirmed duplicate without minting a new sequence', async () => {
+    const app = makeApp();
+    const {ws, term} = await connectTile(app);
+    ws.open();
+    term.type('one original input');
+    ws.receive({t: 'ia', seq: 1, confirmed: true});
+    expect(ws.inputFrames()).toHaveLength(1);
+    expect(app._pendingDeliveries.get('s-tile')).toBeUndefined();
+    term.type('next input');
+    expect(ws.inputFrames().map(frame => frame.seq)).toEqual([1, 2]);
+  });
+
   it('sends typed input as seq-tagged frames with the bare clientId once the socket opens', async () => {
     const app = makeApp();
     const { ws, term } = await connectTile(app);

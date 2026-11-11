@@ -4271,6 +4271,63 @@ html[data-tab-logos='off'] .home-sessions-harness {
   display: none;
 }
 
+.input-recovery-bar {
+  position: absolute;
+  inset: 0 0 auto;
+  z-index: 8;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px;
+  color: var(--text-primary);
+  background: var(--bg-card);
+  border: 1px solid var(--warning, #dca54c);
+  box-shadow: 0 2px 8px rgb(0 0 0 / 22%);
+}
+
+.input-recovery-bar[hidden] {
+  display: none;
+}
+
+.input-recovery-message {
+  display: grid;
+  gap: 5px;
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.input-recovery-bar button {
+  min-height: 36px;
+  flex-shrink: 0;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-primary);
+  background: var(--bg-medium, #252d38);
+  font: inherit;
+  cursor: pointer;
+}
+
+.input-recovery-bar button:focus-visible {
+  outline: 2px solid var(--accent-primary, #62c8ff);
+  outline-offset: 2px;
+}
+
+.input-recovery-bar button:disabled {
+  cursor: wait;
+  opacity: 0.7;
+}
+
+@media (max-width: 480px) {
+  .input-recovery-bar {
+    flex-direction: column;
+    gap: 8px;
+  }
+}
+
 .history-trunc-text {
   flex: 1;
   min-width: 0;

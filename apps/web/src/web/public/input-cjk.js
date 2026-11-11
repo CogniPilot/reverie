@@ -191,10 +191,11 @@ const CjkInput = (() => {
     }
     const val = _strip(_textarea.value);
     _t(`flush ${val ? 'send len=' + val.length : 'empty'}`);
-    if (val) {
-      _send(val);
-    }
+    // Explicit false means this draft was never accepted into the input queue.
+    // Keep it locally; the completed timer must not retry it automatically.
+    if (val && _send(val) === false) return false;
     _resetToPhantom();
+    return true;
   }
 
   /** Cancel any pending debounced flush */
@@ -226,6 +227,8 @@ const CjkInput = (() => {
   }
 
   return {
+    /** `send` may return false only when the text was not accepted into the queue.
+     * That preserves the draft without a timer retry; acceptance is not delivery. */
     init({ send }) {
       if (_initialized) this.destroy();
 
@@ -320,11 +323,7 @@ const CjkInput = (() => {
           _composing = false;
           _cancelDebouncedFlush();
           const val = _strip(_textarea.value);
-          if (val) {
-            _send(val + '\r');
-          } else {
-            _send('\r');
-          }
+          if (_send(val ? val + '\r' : '\r') === false) return;
           _resetToPhantom();
           return;
         }

@@ -45,6 +45,7 @@ export const BROWSER_TEST_GLOBS = [
   'test/office-server.browser.test.ts',
   'test/office-owner-controls.browser.test.ts',
   'test/approvals-held-layout.browser.test.ts',
+  'test/terminal-input-recovery.browser.test.ts',
   'test/browser-coverage-attribution.browser.test.ts',
   'test/office-power.browser.test.ts',
   'test/workspace-gutter-navigation.browser.test.ts',

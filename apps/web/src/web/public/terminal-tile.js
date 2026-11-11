@@ -480,6 +480,10 @@
           } else if (msg.t === 'ia') {
             // Input ACK. The frame names no session, so it is this pane's.
             global.app?._onWsInputAck?.(msg.seq, msg, this.sessionId);
+          } else if (msg.t === 'ie' && (msg.unconfirmed === true || msg.held === true)) {
+            global.app?._holdInputRecovery?.(this.sessionId);
+          } else if (msg.t === 'ir') {
+            global.app?._onWsInputRefusal?.(msg.seq, msg, this.sessionId);
           } else if (msg.t === 'zc') {
             this._onPtyGeometryReport(msg.c, msg.r);
           }
