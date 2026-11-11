@@ -171,7 +171,9 @@ impl Attach {
         let mut pending = Vec::new();
         let mut checked = Instant::now();
         loop {
-            if crate::native::child_signals::signal().is_some() {
+            if service.closing.load(Ordering::Acquire)
+                || crate::native::child_signals::signal().is_some()
+            {
                 return Ok(());
             }
             if checked.elapsed() >= Duration::from_secs(2) {
