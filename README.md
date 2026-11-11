@@ -29,6 +29,9 @@ updating. Use `--port 3001` or `--name another-office` for a different port or n
 For private registry access, custom host mounts or an existing deployment, see the
 [manual](docs/manual.md#published-image-installation).
 
+Existing isolated-worker deployments can use a separate persistent terminal
+viewer service. See [viewer configuration](docs/runtime-configuration.md#isolated-worker-terminal-viewers).
+
 ## Automatic startup
 
 For Docker on a systemd Linux host, enable the engine at boot:

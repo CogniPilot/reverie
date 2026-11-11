@@ -103,6 +103,37 @@ automatic room replies rather than falling back to a local guess.
 `scripts/reverie-restore` requires `--rescue DIR` or `REVERIE_RESCUE_DIR`
 (default empty), pointing at the owner-selected recovery snapshot.
 
+## Isolated worker terminal viewers
+
+An isolated-worker deployment can select a packaged viewer-only service for
+terminal reconnection. The service checks the current session and attaches to
+its existing laptop terminal. The employee's provider keeps running while a
+viewer is replaced. The existing **Reconnect** action and API retain their
+owner or explicit **Recover employees** permission checks, current session
+binding, provider-health check and readiness verification.
+
+For a host-managed Docker deployment with that service installed, set the
+optional `workerViewerSocket` field in the private `deployment.json`:
+
+```json
+{"workerViewerSocket": "/run/reverie-workers/viewer.sock"}
+```
+
+This is the absolute socket path visible inside the website container. Its
+private socket directory must already be shared with the viewer service.
+`reverie-start` validates this durable selection and passes it as
+`REVERIE_WORKER_VIEWER_SOCKET` when creating the website. Native website services
+can set the same variable in their persistent environment. Apply changes through
+the reviewed website replacement workflow; editing the file does not change a
+running container. The normal Docker restart policy retains the selected
+environment across subsequent container starts.
+
+Only attach-only viewer commands select this endpoint. Normal employee launches,
+protected resource launches and office control continue through
+`REVERIE_WORKER_SOCKET`. Leaving the optional viewer setting unset preserves
+the existing connection path. The published-image Docker installer and its
+one-command default setup are unchanged.
+
 ## Training any expert
 
 Training and adapter serving are shared tools for any expert, regardless of

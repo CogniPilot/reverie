@@ -329,7 +329,7 @@ it('requires a verified owner and exact current binding; accepts no commands or 
   expect((await app.inject({ method: 'POST', url, headers, payload: f.expected })).statusCode).toBe(200);
 });
 
-it.each(['idle','busy'] as const)('carries a real repaired %s Session through persistence, SSE JSON and the actual browser handler into the member list', async status => {
+it.each(['idle','busy'] as const)('carries a repaired %s viewer through persistence and SSE without claiming unproven provider health', async status => {
   const f = await fixture(); Object.assign(f.session,{_status:status}); const web = new WebServer(0, false, true) as any;
   cleanups.push(() => web.stop()); web.sessions.set(f.session.id, f.session);
   const h = await createHarness({ loadShell: false, sessions: [f.session.toState()],
@@ -361,7 +361,12 @@ it.each(['idle','busy'] as const)('carries a real repaired %s Session through pe
   h.app._onSessionUpdated(data); await h.flush();
   expect(h.app.sessions.get(f.session.id).paneExit).toBeUndefined();
   expect(memberRow().textContent).not.toContain('Disconnected');
-  expect(memberRow().className, JSON.stringify({row:memberRow().outerHTML,session:h.app.sessions.get(f.session.id),members:shell.room.members})).toContain(`is-state-${status==='busy'?'working':'idle'}`);
+  expect(memberRow().className).toContain('is-state-unknown');
+  expect(memberRow().className).not.toContain('is-online');
+  expect(memberRow().title).toContain('terminal viewer is connected');
+  expect(memberRow().textContent).not.toContain('Working…');
+  expect(h.app.sessions.get(f.session.id).status).toBe(status);
+  expect(h.document.querySelector('.ca-members')!.textContent).toContain('Availability unknown — 1');
   expect(shell.company.employees[0].runtimeHealth).toBe('disconnected'); // cached company facts cannot override fresh session state
 });
 
