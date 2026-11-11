@@ -2343,6 +2343,8 @@ export class WebServer extends EventEmitter {
       session: id => this.sessions.get(id),
       ready: () => this.companyWakeReady,
       providerHealthy: employee => this.workerProviderHealth?.read(employee)?.state === 'healthy',
+      diagnosticViewer: () => !!process.env.REVERIE_WORKER_VIEWER_SOCKET,
+      diagnosticMoveGuard: (id, owner) => planMoves.viewerInspectionGuard(id, owner),
       moveGuard: id => {
         const employee = this.companyService.registeredEmployees().find(row => row.id === id);
         return planMoves.viewerReconnectGuard(id, employee ? { owner: employee.owner, sessionId: employee.sessionId,
@@ -5093,6 +5095,8 @@ export class WebServer extends EventEmitter {
               // pane-exit watcher's own tick replaces it with a first-hand
               // reading (not the stats collector — see `startPaneExitWatcher`).
               paneExit: savedState?.paneExit,
+              // A saved input fence survives reattachment; transport proof does not.
+              viewerInputHeld: savedState?.viewerInputHeld,
               // The model the CLI last reported (statusline or its own footer), so a
               // tile header keeps naming it until the next report; an idle claude
               // session re-renders its statusline only on its next turn.

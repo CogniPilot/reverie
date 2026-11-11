@@ -11,7 +11,7 @@ import { RECOVERY_HEADER } from './worker-recovery-auth.js';
 import type { PlanViewerReconnectLease } from './plan-move.js';
 
 const BACKOFF = [2_000, 5_000, 15_000, 30_000, 60_000] as const;
-export type ViewerReconnectResult = 'connected' | 'unavailable' | 'busy' | 'changed';
+export type ViewerReconnectResult = 'connected' | 'inspection-requested' | 'unavailable' | 'busy' | 'changed';
 export interface ViewerReconnectStatus {
   state: 'idle' | 'connecting' | 'connected' | 'blocked';
   reason: string;
@@ -27,6 +27,9 @@ export interface ViewerReconnectDeps {
   /** Fresh, bound native command observation; no provider launch authority. */
   providerHealthy(employee: CompanyEmployee): boolean;
   moveGuard(employeeId: string): Promise<(() => boolean) & Partial<Pick<PlanViewerReconnectLease, 'close' | 'revalidate'>>>;
+  /** Trusted dedicated attach-only endpoint; never selected by automatic repair. */
+  diagnosticViewer?(): boolean;
+  diagnosticMoveGuard?(employeeId: string, owner?: string): Promise<PlanViewerReconnectLease>;
   pause(id: string): () => void;
   publish(session: Session): void;
   now?(): number;
@@ -60,6 +63,8 @@ export class WorkerViewerReconnect {
     const session = d.session(employee.sessionId), key = bindingKey(employee);
     const previous = this.attempts.get(employeeId), outcome = this.outcomes.get(employeeId);
     if (session?.owner !== owner || !session) return result('viewer-unavailable');
+    if (session.viewerInspectionRequested && outcome?.key === key)
+      return result('diagnostic-requested-readiness-unconfirmed-input-held');
     if (session.runtimeHealth !== 'disconnected') return result(outcome?.key === key && outcome.connected ? 'connected' : 'viewer-not-disconnected',
       outcome?.key === key && outcome.connected ? 'connected' : 'idle');
     const attempts = previous?.key === key ? previous.count : 0;
@@ -75,7 +80,8 @@ export class WorkerViewerReconnect {
     if (status.state !== 'blocked' || ['stale-binding','server-not-ready','binding-migration','not-running','viewer-unavailable'].includes(status.reason)) return status;
     let current: Awaited<ReturnType<ViewerReconnectDeps['moveGuard']>> | undefined;
     try {
-      current = await this.deps.moveGuard(employeeId);
+      current = this.deps.diagnosticViewer?.() && this.deps.diagnosticMoveGuard
+        ? await this.deps.diagnosticMoveGuard(employeeId, owner) : await this.deps.moveGuard(employeeId);
       const fresh = this.status(employeeId, expected, owner);
       return !current() && fresh.state === 'blocked' ? { ...fresh, reason: 'move-in-progress' } : fresh;
     } catch { return { ...this.status(employeeId, expected, owner), state: 'blocked', reason: 'admission-unavailable' }; }
@@ -90,9 +96,13 @@ export class WorkerViewerReconnect {
       original.sessionGeneration !== expected.sessionGeneration || original.desiredRunning !== true ||
       original.onVacation || original.bindingMigration) return 'changed';
     const session = d.session(original.sessionId);
-    if (!session?.workerViewerReconnect || session.owner !== owner || session.runtimeHealth !== 'disconnected')
+    if (!session?.workerViewerReconnect || session.owner !== owner ||
+      (automatic && session.viewerInspectionRequested) ||
+      (session.runtimeHealth !== 'disconnected' && (automatic || !session.viewerInputHeld)))
       return 'unavailable';
-    if (!d.providerHealthy(original)) return 'unavailable';
+    const manualDiagnostic = !automatic && d.diagnosticViewer?.() === true && !!d.diagnosticMoveGuard;
+    let diagnostic = !d.providerHealthy(original);
+    if (diagnostic && !manualDiagnostic) return 'unavailable';
     if (this.flights.has(employeeId)) return 'busy';
     const fingerprint = bindingKey;
     const runtime = JSON.stringify(expertRuntimeRecipe(session));
@@ -114,24 +124,33 @@ export class WorkerViewerReconnect {
     let moveCurrent: Awaited<ReturnType<ViewerReconnectDeps['moveGuard']>> | undefined;
     let claim: ReturnType<CompanyService['prepareWake']>;
     try {
-      try { moveCurrent = await d.moveGuard(employeeId); }
+      try {
+        if (!diagnostic) moveCurrent = await d.moveGuard(employeeId);
+        if (manualDiagnostic && (diagnostic || !moveCurrent?.())) {
+          moveCurrent?.close?.();
+          diagnostic = true;
+          moveCurrent = await d.diagnosticMoveGuard!(employeeId, owner);
+        }
+      }
       catch (error) { outcome('admission-unavailable', 'unavailable'); throw error; }
       const current = () => {
         const employee = d.company.registeredEmployees().find(e => e.id === employeeId);
         return authorized() && d.ready() && !!moveCurrent?.() && !!employee && fingerprint(employee) === key &&
-          d.providerHealthy(employee) && d.session(original.sessionId) === session &&
+          (diagnostic ? manualDiagnostic && d.diagnosticViewer?.() === true : d.providerHealthy(employee)) &&
+          d.session(original.sessionId) === session &&
           JSON.stringify(expertRuntimeRecipe(session)) === runtime && (!claim || claim.current());
       };
-      if (!current()) return outcome(!authorized() ? 'authority-changed' : !moveCurrent() ? 'move-in-progress' : 'binding-or-health-changed', 'changed');
+      if (!current()) return outcome(!authorized() ? 'authority-changed' : !moveCurrent?.() ? 'move-in-progress' : 'binding-or-health-changed', 'changed');
       claim = d.company.prepareWake(employeeId, original.sessionId);
       if (!claim || !current()) return outcome('lifecycle-in-progress', 'busy');
       release = d.pause(original.sessionId);
-      if (!await session.reconnectWorkerViewer(current, moveCurrent.revalidate?.bind(moveCurrent))) return outcome(!authorized() ? 'authority-changed' :
+      if (!await session.reconnectWorkerViewer(current, moveCurrent!.revalidate?.bind(moveCurrent), diagnostic)) return outcome(!authorized() ? 'authority-changed' :
         session.workerViewerReconnectBlocker ?? 'readiness-unconfirmed', current() ? 'unavailable' : 'changed');
       if (!current()) return outcome('binding-or-authority-changed', 'changed');
       d.publish(session);
       this.attempts.delete(employeeId);
-      return outcome('connected', 'connected');
+      return diagnostic ? outcome('diagnostic-requested-readiness-unconfirmed-input-held', 'inspection-requested')
+        : outcome('connected', 'connected');
     } finally {
       // Releasing this pause never acknowledges/replays durable unknown deliveries.
       release?.(); claim?.finish(); moveCurrent?.close?.(); this.flights.delete(employeeId);
@@ -186,10 +205,10 @@ export function registerWorkerViewerReconnect(app: FastifyInstance, controller: 
       const state = await controller.reconnect(id, expected, ownerFor(req), false, authorized);
       if (!authorized()) return reply.code(403).send({ success: false, error: 'Recovery authority changed during repair' });
       const reconnect = controller.status(id, expected, ownerFor(req));
-      if (state !== 'connected') return reply.code(409).send({ success: false, reconnect,
+      if (state !== 'connected' && state !== 'inspection-requested') return reply.code(409).send({ success: false, reconnect,
         error: state === 'busy' ? 'A reconnect or session action is already in progress' :
           'The viewer connection was not confirmed. Check the current expert status; no replacement was started.' });
-      return { success: true, data: { state: 'viewer-connected', reconnect } };
+      return { success: true, data: { state: state === 'connected' ? 'viewer-connected' : 'viewer-inspection-requested', reconnect } };
     } catch {
       return reply.code(503).send({ success: false, error: 'The viewer connection could not be confirmed. No replacement was started.' });
     }

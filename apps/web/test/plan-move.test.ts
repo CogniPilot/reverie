@@ -68,6 +68,38 @@ describe('retained move destination viewer lease', () => {
   });
 });
 
+describe('read-only diagnostic viewer lease', () => {
+  const held = (): PlanMoveRecord => ({ id: 'historical', employeeId: 'casey', name: 'Casey', oldSession: 'old',
+    fromAccount: 'first', toAccount: 'second', phase: 'recovery-required', at: 1 });
+  it('keeps an unrelated historical destination held and excludes any concurrent recovery', async () => {
+    const h = harness([held()]), before = await h.moves.get('historical');
+    const lease = await h.moves.viewerInspectionGuard('casey');
+    expect(lease()).toBe(true); expect(await lease.revalidate()).toBe(true);
+    const concurrent = await h.moves.viewerInspectionGuard('casey'); expect(concurrent()).toBe(false); concurrent.close();
+    await expect(h.moves.resolve('historical', { oldSession: 'old', toAccount: 'second' }))
+      .rejects.toThrow('still active');
+    lease.close(); expect(lease()).toBe(false); expect(await h.moves.get('historical')).toEqual(before);
+    expect(h.port.save).not.toHaveBeenCalled(); expect(h.port.stop).not.toHaveBeenCalled(); expect(h.port.start).not.toHaveBeenCalled();
+    await expect(h.moves.assertAvailable('casey')).rejects.toThrow('already has a move');
+  });
+  it.each(['foreign', 'ambiguous', 'active'] as const)('refuses %s journal ownership or activity', async reason => {
+    const record = held(); if (reason === 'foreign') record.owner = 'foreign';
+    const h = harness(reason === 'ambiguous' ? [record, { ...record, id: 'second' }] : [record]);
+    const active = reason === 'active' ? await h.moves.viewerInspectionGuard('casey') : undefined;
+    const lease = await h.moves.viewerInspectionGuard('casey');
+    expect(lease()).toBe(false); lease.close(); active?.close(); expect(h.port.save).not.toHaveBeenCalled();
+  });
+  it('expires its inspection authority without clearing the original move hold', async () => {
+    const h = harness([held()]); let now = 0; vi.spyOn(performance, 'now').mockImplementation(() => now);
+    try {
+      const lease = await h.moves.viewerInspectionGuard('casey'); expect(lease()).toBe(true);
+      now = 10_000; expect(lease()).toBe(false); expect(await lease.revalidate()).toBe(false); lease.close();
+      await expect(h.moves.assertAvailable('casey')).rejects.toThrow('already has a move');
+      expect(h.port.save).not.toHaveBeenCalled();
+    } finally { vi.restoreAllMocks(); }
+  });
+});
+
 function harness(initial: PlanMoveRecord[] = []) {
   const sessions = new Set(['old']);
   let binding = 'old';

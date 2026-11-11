@@ -591,9 +591,11 @@ function caEmployeeHealth(employee, session, member, viewerDisconnected = false)
   const health = session?.runtimeHealth ?? employee?.runtimeHealth;
   const scope = session?.runtimeHealthScope ?? employee?.runtimeHealthScope;
   const provider = caProviderHealth(employee, session, member);
+  const inspectionRequested = session?.viewerInspectionRequested === true && session?.viewerInputHeld === true;
+  const diagnosticDetail = inspectionRequested ? ' A diagnostic viewer was requested. Readiness is unconfirmed; automated input is held.' : '';
   if (provider?.state === 'dead' || (health === 'dead' && scope === 'provider')) {
     const exit = typeof session?.paneExit?.signal === 'number' ? ` (signal ${session.paneExit.signal})` : typeof session?.paneExit?.status === 'number' ? ` (exit ${session.paneExit.status})` : '';
-    return { state: 'dead', label: provider?.state === 'dead' ? 'Agent runtime stopped' : 'Dead pane', detail: `${provider?.state === 'dead' ? 'The agent runtime' : 'The agent'} has exited${exit}. Restart the session to resume its saved conversation.` };
+    return { state: 'dead', label: provider?.state === 'dead' ? 'Agent runtime stopped' : 'Dead pane', detail: `${provider?.state === 'dead' ? 'The agent runtime' : 'The agent'} has exited${exit}. Restart the session to resume its saved conversation.${diagnosticDetail}` };
   }
   const serverViewerUnavailable = session?.viewerInputHeld === true || session?.viewerHealth === 'disconnected' || employee?.viewerHealth === 'disconnected' ||
     member?.viewerHealth === 'disconnected' || (scope === 'terminal' && (health === 'disconnected' || health === 'dead' || session?.paneExit || session?.pid === null));
@@ -602,10 +604,10 @@ function caEmployeeHealth(employee, session, member, viewerDisconnected = false)
     employee?.viewerHealth === 'connected' || member?.viewerHealth === 'connected' ||
     (typeof session?.pid === 'number' && session.pid > 0 && !session?.paneExit));
   if (provider?.state === 'healthy')
-    return { state: 'idle', label: 'Online', detail: 'The current native command runtime was recently confirmed running. Model or API readiness is not implied.',
+    return { state: 'idle', label: 'Online', detail: 'The current native command runtime was recently confirmed running. Model or API readiness is not implied.' + diagnosticDetail,
       providerConfirmedHealthy: true, viewerUnavailable, viewerOnly: viewerDisconnected && serverViewerConnected };
   if (viewerUnavailable)
-    return { state: 'viewer-unavailable', label: 'Viewer unavailable', detail: 'The optional terminal viewer is unavailable. Agent availability is unconfirmed; losing this viewer does not establish that the agent is offline.',
+    return { state: 'viewer-unavailable', label: 'Viewer unavailable', detail: 'The optional terminal viewer is unavailable. Agent availability is unconfirmed; losing this viewer does not establish that the agent is offline.' + diagnosticDetail,
       viewerUnavailable: true, viewerOnly: viewerDisconnected && serverViewerConnected };
   // A worker viewer can remain connected after its provider command exits.
   // Saved activity and transport presence cannot establish current agent health.
@@ -6538,7 +6540,8 @@ class ReverieChatApp {
     return this.canManageOffice() && employee?.desiredRunning === true && !employee?.onVacation && !employee?.bindingMigration &&
       Number.isInteger(employee?.sessionGeneration) &&
       (session?.workerViewerReconnect === true || employee?.workerViewerReconnect === true) &&
-      (this.employeeHealth(employee).state === 'disconnected' || this.employeeHealth(employee).viewerUnavailable === true);
+      (session?.viewerInputHeld === true || session?.runtimeHealth === 'disconnected' ||
+        this.employeeHealth(employee).state === 'disconnected' || this.employeeHealth(employee).viewerUnavailable === true);
   }
 
   viewerReconnectStatus(employee, value) {
@@ -6618,13 +6621,15 @@ class ReverieChatApp {
       if (!current || current.sessionId !== employee.sessionId || current.sessionGeneration !== employee.sessionGeneration) return;
       const status = this.viewerReconnectStatus(employee, result.data?.reconnect ?? result.reconnect);
       if (status) this.schedulePresence();
-      if (!result.ok || result.data?.state !== 'viewer-connected') {
+      if (!result.ok || !['viewer-connected', 'viewer-inspection-requested'].includes(result.data?.state)) {
         this.toast(status ? `Connection not confirmed: ${this.viewerReconnectDescription(status)}.` :
           (result.error || 'Connection not confirmed. Check this expert’s status before trying again.'), 'error');
         return;
       }
-      // The canonical state event clears the viewer warning and input hold.
-      this.toast(`Terminal reconnected for ${employee.name}.`, 'info');
+      // The canonical state event describes transport separately from input readiness.
+      this.toast(result.data.state === 'viewer-inspection-requested'
+        ? `Diagnostic viewer requested for ${employee.name}. Readiness is unconfirmed; automated input remains held.`
+        : `Terminal reconnected for ${employee.name}.`, 'info');
     } catch { this.toast('Connection not confirmed. Check this expert’s status before trying again.', 'error'); }
     finally { this._reconnectingEmployees.delete(employee.id); }
   }

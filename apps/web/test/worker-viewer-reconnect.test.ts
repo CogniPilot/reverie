@@ -71,6 +71,116 @@ it('repairs only the saved viewer with an atomic attach-only respawn and fresh l
   expect(f.deps.publish).toHaveBeenCalledOnce(); expect(f.release).toHaveBeenCalledOnce();
 });
 
+function diagnosticEndpoint(f: Awaited<ReturnType<typeof fixture>>, inspect = vi.fn(async () =>
+  Object.assign(() => true, { close: vi.fn(), revalidate: async () => true }))) {
+  Object.assign(f.deps, { diagnosticViewer: () => true, diagnosticMoveGuard: inspect });
+  return inspect;
+}
+
+it('opens only an explicit diagnostic viewer without provider health and keeps every input path fenced', async () => {
+  const f = await fixture(); f.health(false);
+  const inspect = diagnosticEndpoint(f);
+  f.mux.capturePaneText.mockReturnValue('The provider is stopped. Inspect its existing terminal.');
+  await f.controller.tick();
+  expect(inspect).not.toHaveBeenCalled(); expect(f.mux.respawnPane).not.toHaveBeenCalled();
+  expect(await f.controller.reconnect(f.employee.id, f.expected, undefined)).toBe('inspection-requested');
+  expect(f.deps.moveGuard).not.toHaveBeenCalled();
+  expect(inspect).toHaveBeenCalledExactlyOnceWith(f.employee.id, undefined);
+  expect(f.mux.respawnPane).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ workerAttachOnly: true, onlyIfDead: true }));
+  expect(f.session.toState()).toMatchObject({ viewerInspectionRequested: true, viewerInputHeld: true, runtimeHealth: 'disconnected' });
+  expect(f.session.paneExit).toBeDefined(); expect(f.session.write('untrusted input\r')).toBe(false);
+  expect(await f.session.writeViaMux('automated input')).toBe(false); expect(f.session.canAcceptChatInput()).toBe(false);
+  expect(f.mux.sendInput).not.toHaveBeenCalled();
+  expect(f.controller.status(f.employee.id, f.expected)).toMatchObject({ state: 'blocked', reason: 'diagnostic-requested-readiness-unconfirmed-input-held' });
+});
+
+it('upgrades a diagnostic viewer only after independent healthy-provider and ordinary move checks', async () => {
+  const f = await fixture(); f.health(false); diagnosticEndpoint(f);
+  expect(await f.controller.reconnect(f.employee.id, f.expected, undefined)).toBe('inspection-requested');
+  f.health(true);
+  expect(await f.controller.reconnect(f.employee.id, f.expected, undefined, true)).toBe('unavailable');
+  expect(f.session.viewerInputHeld).toBe(true);
+  expect(await f.controller.reconnect(f.employee.id, f.expected, undefined)).toBe('connected');
+  expect(f.deps.moveGuard).toHaveBeenCalledOnce(); expect(f.mux.respawnPane).toHaveBeenCalledOnce();
+  expect(f.session.viewerInspectionRequested).toBe(false); expect(f.session.viewerInputHeld).toBe(false);
+});
+
+it('inspects a historical move without source cleanup proof, altering its journal, or releasing its hold', async () => {
+  const f = await fixture();
+  const record: PlanMoveRecord = { id: 'historical', employeeId: f.employee.id, name: 'Synthetic expert',
+    oldSession: 'historical-source', newSession: 'historical-destination', fromAccount: 'before', toAccount: 'after',
+    phase: 'recovery-required', at: 1 };
+  const save = vi.fn(), moves = new PlanMoves({ load: async () => [{ ...record }], save } as unknown as PlanMovePort);
+  const before = await moves.get(record.id);
+  f.deps.moveGuard = vi.fn(async () => moves.viewerReconnectGuard(f.employee.id));
+  diagnosticEndpoint(f, vi.fn(async () => moves.viewerInspectionGuard(f.employee.id)));
+  const respawn = f.mux.respawnPane.getMockImplementation()!;
+  f.mux.respawnPane.mockImplementation(async (...args) => {
+    await expect(moves.resolve(record.id, { oldSession: record.oldSession, newSession: record.newSession!, toAccount: record.toAccount }))
+      .rejects.toThrow('still active');
+    return respawn(...args);
+  });
+  expect(await f.controller.reconnect(f.employee.id, f.expected, undefined)).toBe('inspection-requested');
+  expect(f.session.viewerInputHeld).toBe(true); expect(f.session.viewerInspectionRequested).toBe(true);
+  expect(await moves.get(record.id)).toEqual(before); expect(save).not.toHaveBeenCalled();
+  await expect(moves.assertAvailable(f.employee.id)).rejects.toThrow('already has a move');
+});
+
+it.each(['authority', 'generation', 'migration', 'endpoint', 'move'] as const)(
+  'rechecks %s after diagnostic admission before any terminal effect', async change => {
+    const f = await fixture(); f.health(false); let authorized = true, configured = true;
+    diagnosticEndpoint(f, vi.fn(async () => {
+      if (change === 'authority') authorized = false;
+      if (change === 'endpoint') configured = false;
+      if (change === 'generation' || change === 'migration') await f.store.update(s => {
+        if (change === 'generation') s.employees[0].sessionGeneration++;
+        else s.employees[0].bindingMigration = { id: 'moving', from: f.session.id, to: 'moving' };
+      });
+      return Object.assign(() => change !== 'move', { close: vi.fn(), revalidate: async () => true });
+    }));
+    Object.assign(f.deps, { diagnosticViewer: () => configured });
+    expect(await f.controller.reconnect(f.employee.id, f.expected, undefined, false, () => authorized)).toBe('changed');
+    expect(f.mux.respawnPane).not.toHaveBeenCalled(); expect(f.deps.pause).not.toHaveBeenCalled();
+  });
+
+it.each(['Reverie worker unavailable: VIEWER_REFUSED', 'Reverie worker: RESERVATION_ADMISSION_LOCK_BUSY'])(
+  'reports a dedicated helper refusal before its outer pane exits: %s', async refusal => {
+  const f = await fixture(); f.health(false); diagnosticEndpoint(f);
+  f.mux.capturePaneText.mockReturnValue(refusal);
+  expect(await f.controller.reconnect(f.employee.id, f.expected, undefined)).toBe('unavailable');
+  expect(f.session.viewerInputHeld).toBe(true);
+  expect(f.session.viewerInspectionRequested).toBe(false); expect(f.session.paneExit).toBeDefined();
+  expect(f.deps.publish).not.toHaveBeenCalled(); expect(f.mux.sendInput).not.toHaveBeenCalled();
+});
+
+it.each(['', '›\nGPT-6.1-Sol high · /work\n? for shortcuts'])(
+  'never calls a fresh diagnostic attachment ready from blank or saved output: %j', async text => {
+    const f = await fixture(); f.health(false); diagnosticEndpoint(f); f.mux.capturePaneText.mockReturnValue(text);
+    expect(await f.controller.reconnect(f.employee.id, f.expected, undefined)).toBe('inspection-requested');
+    expect(f.controller.status(f.employee.id, f.expected).state).toBe('blocked');
+    expect(f.session.runtimeHealth).toBe('disconnected'); expect(f.session.viewerInputHeld).toBe(true);
+    expect(f.mux.sendInput).not.toHaveBeenCalled();
+  });
+
+it('refuses a diagnostic request whose actual attachment step exceeds its original bound', async () => {
+  const f = await fixture(); f.health(false); diagnosticEndpoint(f); let now = 0;
+  vi.spyOn(performance, 'now').mockImplementation(() => now);
+  const respawn = f.mux.respawnPane.getMockImplementation()!;
+  f.mux.respawnPane.mockImplementation(async (...args) => { now = 10_000; return respawn(...args); });
+  expect(await f.controller.reconnect(f.employee.id, f.expected, undefined)).toBe('unavailable');
+  expect(f.session.viewerInspectionRequested).toBe(false); expect(f.session.viewerInputHeld).toBe(true);
+});
+
+it('restores only the saved input fence, never diagnostic transport or provider readiness', async () => {
+  const f = await fixture(); f.health(false); diagnosticEndpoint(f);
+  expect(await f.controller.reconnect(f.employee.id, f.expected, undefined)).toBe('inspection-requested');
+  const restored = new Session({ ...f.session.toState(), workingDir: f.dir, mux: f.mux as never, useMux: true });
+  try {
+    expect(restored.viewerInputHeld).toBe(true); expect(restored.viewerInspectionRequested).toBe(false);
+    expect(restored.write('must remain fenced')).toBe(false);
+  } finally { await restored.stop(false); }
+});
+
 it.each(['success', 'account-drift', 'proof-expiry', 'readiness-failure'] as const)(
   'retained ordinary destination repair: %s never unlocks or completes its journal', async failure => {
     const f = await fixture();
@@ -324,9 +434,23 @@ it('requires a verified owner and exact current binding; accepts no commands or 
   const headers = { 'x-fixture-owner': 'yes' };
   expect((await app.inject({ method: 'POST', url, headers: { ...headers, 'x-reverie-parent-session': f.session.id }, payload: f.expected })).statusCode).toBe(403);
   expect((await app.inject({ method: 'POST', url, headers, payload: { ...f.expected, owner: true } })).statusCode).toBe(400);
+  expect((await app.inject({ method: 'POST', url, headers, payload: { ...f.expected, diagnostic: true } })).statusCode).toBe(400);
+  expect((await app.inject({ method: 'POST', url, headers, payload: { ...f.expected, socket: '/untrusted/viewer.sock' } })).statusCode).toBe(400);
   expect((await app.inject({ method: 'POST', url, headers, payload: { ...f.expected, sessionGeneration: 99 } })).statusCode).toBe(409);
   expect(f.mux.respawnPane).not.toHaveBeenCalled();
   expect((await app.inject({ method: 'POST', url, headers, payload: f.expected })).statusCode).toBe(200);
+});
+
+it('returns a distinct requested response without claiming diagnostic readiness over the owner API', async () => {
+  const f = await fixture(), app = Fastify(); cleanups.push(() => app.close()); f.health(false); diagnosticEndpoint(f);
+  registerWorkerViewerReconnect(app, f.controller, req => req.headers['x-fixture-owner'] === 'yes'); await app.ready();
+  const url = `/api/company/employees/${f.employee.id}/reconnect`, headers = { 'x-fixture-owner': 'yes' };
+  const response = await app.inject({ method: 'POST', url, headers, payload: f.expected });
+  expect(response.statusCode).toBe(200);
+  expect(response.json().data).toMatchObject({ state: 'viewer-inspection-requested',
+    reconnect: { state: 'blocked', reason: 'diagnostic-requested-readiness-unconfirmed-input-held' } });
+  expect(f.session.viewerInputHeld).toBe(true); expect(f.session.paneExit).toBeDefined();
+  expect(f.mux.sendInput).not.toHaveBeenCalled();
 });
 
 it.each(['idle','busy'] as const)('carries a repaired %s viewer through persistence and SSE without claiming unproven provider health', async status => {

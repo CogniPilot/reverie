@@ -706,6 +706,7 @@ export class Session extends EventEmitter {
    */
   private _paneExit: PaneExit | null = null;
   private _viewerInputHeld = false;
+  private _viewerInspectionRequested = false;
   private _viewerClientLost = false;
   private _muxWritesInFlight = 0;
   /** One id per mux write in flight (the counter above is always its size): a gated write's gate counts only the OTHER
@@ -912,6 +913,8 @@ export class Session extends EventEmitter {
       /** Extra env vars exported to the CLI at spawn time (no disk persistence) */
       envOverrides?: Record<string, string>;
       workerAttachOnly?: boolean;
+      /** Saved safety fence only; restored transport/provider readiness is never implied. */
+      viewerInputHeld?: boolean;
       /** Internal, in-process only. Normal HTTP create schemas do not admit it. */
       workerResourceLaunch?: ResourceWorkerLaunch;
       subscriptionProfile?: SessionState['subscriptionProfile'];
@@ -961,6 +964,7 @@ export class Session extends EventEmitter {
 
     this.id = config.id || uuidv4();
     this._workerAttachOnly = config.workerAttachOnly === true;
+    this._viewerInputHeld = this._workerBacked && config.viewerInputHeld === true;
     this._workerResourceLaunch = config.workerResourceLaunch;
     this.workingDir = config.workingDir;
     this.createdAt = config.createdAt || Date.now();
@@ -1432,8 +1436,12 @@ export class Session extends EventEmitter {
     return this._paneExit ?? undefined;
   }
 
-  /** Read-only presentation of the existing gate; never persistence or authority. */
+  /** Safety fence; restoring it grants no input or provider authority. */
   get viewerInputHeld(): boolean { return this._viewerInputHeld; }
+  /** An explicit inspection request, never attached transport or provider proof. */
+  get viewerInspectionRequested(): boolean {
+    return this._viewerInspectionRequested && this._viewerInputHeld;
+  }
 
   /** A worker pane observes terminal transport, not the provider inside its laptop. */
   get runtimeHealthScope(): 'provider' | 'terminal' {
@@ -1511,10 +1519,12 @@ export class Session extends EventEmitter {
    * session stays quiet. `/interactive` and `/shell` did exactly that until
    * Ark0N/Codeman#446 review; both now persist on their success path.
    */
-  private clearPaneExitForNewPane(): void {
+  private clearPaneExitForNewPane(holdInput = false): void {
     this._viewerInputHeld = false;
+    this._viewerInspectionRequested = false;
     this._viewerClientLost = false;
     this.setPaneExit(undefined);
+    this._viewerInputHeld = holdInput;
     if (this._muxSession) this._mux?.clearPaneExit?.(this._muxSession.muxName);
   }
 
@@ -2376,6 +2386,8 @@ export class Session extends EventEmitter {
       runtimeHealth: this.runtimeHealth,
       runtimeHealthScope: this.runtimeHealthScope,
       workerViewerReconnect: this.workerViewerReconnect,
+      viewerInputHeld: this.viewerInputHeld,
+      viewerInspectionRequested: this.viewerInspectionRequested,
       attachmentHistory: this.attachmentHistory.length > 0 ? this.attachmentHistory : undefined,
       lastSubmitAt: this._lastSubmitAt || undefined,
       // Only a chain the CLI's own hooks vouched for is persisted, and only when
@@ -2574,7 +2586,8 @@ export class Session extends EventEmitter {
     // recovery and an explicit start, NOT a click on an exited tab — the browser
     // re-attaches only on a null pid, and the premise of Ark0N/Codeman#446 is
     // that an exited pane keeps its pid. `restartCli()` clears separately.
-    this.clearPaneExitForNewPane();
+    // Restoring a readable terminal must not release a persisted input fence.
+    this.clearPaneExitForNewPane(this._viewerInputHeld);
 
     // Check if we already have a mux session (restored session)
     const isRestored = this._muxSession !== null && !needsNewSession;
@@ -2745,15 +2758,17 @@ export class Session extends EventEmitter {
     return undefined;
   }
 
-  async reconnectWorkerViewer(stillCurrent: () => boolean, revalidateMove?: () => Promise<boolean>): Promise<boolean> {
+  async reconnectWorkerViewer(stillCurrent: () => boolean, revalidateMove?: () => Promise<boolean>, diagnostic = false): Promise<boolean> {
+    const diagnosticEnd = performance.now() + 10_000;
     if (!this.workerViewerReconnect || !stillCurrent() || this._closing || this.paneLifecycleInFlight || this._muxWritesInFlight > 0) return false;
     if (!this._viewerInputHeld && !this._viewerClientLost && !this.hasDeadPane()) return false;
     return this._withPaneLifecycle(async () => {
       const mux = this._mux!, name = this._muxSession!.muxName;
       const options = this._buildRespawnPaneOptions();
       const mark = getCli(this.mode)?.capabilities.composerReadyMark;
-      if ((!mark && getCli(this.mode)?.capabilities.workDetect) || !stillCurrent() || this._closing) return false;
+      if ((!diagnostic && !mark && getCli(this.mode)?.capabilities.workDetect) || !stillCurrent() || this._closing) return false;
       this._viewerInputHeld = true;
+      this._viewerInspectionRequested = false;
       // Previous unknown submissions belong to the old viewer; never retry their Enter here.
       this._submitVerifier?.cancel();
       this._submitVerifier = null;
@@ -2769,6 +2784,20 @@ export class Session extends EventEmitter {
       }
       const client = this.ptyProcess;
       if (!client || this._pid === null) return false;
+      if (diagnostic) {
+        const pane = await mux.readPaneLiveness!(name);
+        if (!stillCurrent() || performance.now() >= diagnosticEnd || pane.state !== 'live' || pane.pid !== pid) return false;
+        // Error output is not readiness. Even ordinary-looking scrollback cannot
+        // prove a fresh native attachment, so this path only reports a request.
+        if (/^Reverie worker(?: unavailable)?:\s*\S/m.test(mux.capturePaneText?.(name) ?? '')) return false;
+        if (revalidateMove && !await revalidateMove()) return false;
+        const final = await mux.readPaneLiveness!(name);
+        if (!stillCurrent() || performance.now() >= diagnosticEnd || final.state !== 'live' || final.pid !== pid ||
+          this.ptyProcess !== client || this._pid === null) return false;
+        this._viewerInspectionRequested = true;
+        this.emit('needsRefresh');
+        return true;
+      }
       const deadline = performance.now() + 10_000;
       do {
         if (!stillCurrent() || this._closing) return false;

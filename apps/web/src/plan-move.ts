@@ -247,6 +247,30 @@ export class PlanMoves {
     } });
   }
 
+  /** Read-only terminal inspection excludes move effects without resolving a held journal. */
+  async viewerInspectionGuard(employeeId: string, owner?: string): Promise<PlanViewerReconnectLease> {
+    const end = performance.now() + 10_000;
+    await this.init();
+    let closed = false;
+    const simple = (check: () => boolean) => Object.assign(() => !closed && performance.now() < end && check(), {
+      revalidate: async () => !closed && performance.now() < end && check(), close: () => { closed = true; },
+    });
+    if (!this.locked.has(employeeId)) return simple(() => !this.locked.has(employeeId));
+    const unresolved = () => [...this.records.values()].filter(record => record.employeeId === employeeId &&
+      !['completed', 'failed'].includes(record.phase));
+    const records = unresolved(), record = records[0];
+    if (records.length !== 1 || !record || record.owner !== owner || record.phase !== 'recovery-required' ||
+      this.intents.has(record.id) || this.aborts.has(record.id) || performance.now() >= end) return simple(() => false);
+    const fingerprint = JSON.stringify(record), id = record.id;
+    this.intents.add(id);
+    const current = () => !closed && performance.now() < end && this.intents.has(id) && !this.aborts.has(id) &&
+      this.locked.has(employeeId) && this.records.get(id) === record && JSON.stringify(record) === fingerprint &&
+      unresolved().length === 1;
+    return Object.assign(current, { revalidate: async () => current(), close: () => {
+      if (!closed) { closed = true; this.intents.delete(id); }
+    } });
+  }
+
   async get(id: string, owner?: string): Promise<PlanMoveRecord | undefined> {
     await this.init();
     const record = this.records.get(id);

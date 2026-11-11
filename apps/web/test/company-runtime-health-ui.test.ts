@@ -400,3 +400,35 @@ it('reconnects only the browser when the server viewer is connected even without
  expect(h.app._connectWs).toHaveBeenCalledExactlyOnceWith(SID);expect(posts).toHaveLength(0);
  expect(h.server.calls.filter((call:any)=>call.path.endsWith('/reconnect'))).toHaveLength(0);
 });
+
+it('reports diagnostic request readiness unconfirmed and input held instead of green saved working',async()=>{
+ const {h,employee,session}=await fixture({health:'unknown',scope:'terminal',working:true});
+ Object.assign(employee,{sessionGeneration:1,workerViewerReconnect:true});
+ Object.assign(session,{viewerHealth:'disconnected',viewerInspectionRequested:true,viewerInputHeld:true,workerViewerReconnect:true});
+ await h.shell.openCompany();
+ const badge=h.document.querySelector('.ca-company-state');expect(badge.textContent).toBe('Viewer unavailable');
+ expect(badge.title).toContain('Readiness is unconfirmed; automated input is held');
+ const row=h.document.querySelector('.ca-member');expect(row.classList.contains('is-state-working')).toBe(false);
+ expect(row.textContent).not.toContain('Working…');expect(h.shell.canReconnectEmployee(employee)).toBe(true);
+ expect(h.document.querySelector('.ca-company-person .ca-reconnect-viewer')).not.toBeNull();
+});
+
+it('keeps independently confirmed provider death visible after a diagnostic viewer request',async()=>{
+ const {h,employee,session}=await fixture({health:'unknown',scope:'terminal',working:true});
+ Object.assign(employee,{sessionGeneration:1,workerViewerReconnect:true,providerHealth:nativeProof(employee,'dead')});
+ Object.assign(session,{viewerHealth:'disconnected',viewerInspectionRequested:true,viewerInputHeld:true,workerViewerReconnect:true,providerHealth:employee.providerHealth});
+ expect(h.shell.employeeHealth(employee)).toMatchObject({state:'dead',label:'Agent runtime stopped'});
+ expect(h.shell.employeeHealth(employee).detail).toContain('diagnostic viewer was requested');
+ expect(h.shell.canReconnectEmployee(employee)).toBe(true);
+});
+
+it('announces a diagnostic request as unconfirmed without a terminal-reconnected success toast',async()=>{
+ const {h,employee,session}=await fixture({health:'disconnected',scope:'terminal',working:true});
+ Object.assign(employee,{sessionGeneration:1,workerViewerReconnect:true});Object.assign(session,{workerViewerReconnect:true});
+ const calls:any[]=[];h.app._chatApi=async(path:string,options:any)=>{calls.push({path,...options});return{ok:true,data:{
+  state:'viewer-inspection-requested',reconnect:{state:'blocked',reason:'diagnostic-requested-readiness-unconfirmed-input-held',attempts:0,retryAfterMs:0}}};};
+ await h.shell.reconnectEmployeeViewer(employee);
+ expect(calls).toEqual([{path:'/api/company/employees/expert/reconnect',method:'POST',body:{sessionId:SID,sessionGeneration:1}}]);
+ expect(h.app.toasts.some((toast:any)=>toast.text==='Diagnostic viewer requested for Alex. Readiness is unconfirmed; automated input remains held.')).toBe(true);
+ expect(h.app.toasts.some((toast:any)=>toast.text==='Terminal reconnected for Alex.')).toBe(false);
+});

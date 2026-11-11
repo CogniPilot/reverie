@@ -110,7 +110,16 @@ terminal reconnection. The service checks the current session and attaches to
 its existing laptop terminal. The employee's provider keeps running while a
 viewer is replaced. The existing **Reconnect** action and API retain their
 owner or explicit **Recover employees** permission checks, current session
-binding, provider-health check and readiness verification.
+binding and readiness verification. Automatic reconnect still requires fresh
+provider health and the ordinary move guard. With this dedicated endpoint,
+an explicit manual **Reconnect** may instead request a diagnostic viewer while
+provider health is unconfirmed or a historical move remains held. It checks the
+current binding and excludes active move effects without completing that move.
+The response and UI report that diagnostic readiness remains unconfirmed;
+saved terminal output is not proof of a fresh connection. Automated input stays
+held across website reattachment, and the UI reports provider health independently.
+A later reconnect releases input only after the ordinary health and move checks
+succeed. Requesting a diagnostic viewer never starts or restarts a provider.
 
 For a host-managed Docker deployment with that service installed, set the
 optional `workerViewerSocket` field in the private `deployment.json`:
