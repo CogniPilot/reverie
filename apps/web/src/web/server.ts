@@ -6,6 +6,7 @@ import { registerBrowserJobEvidence } from '../browser-job-evidence.js';
 import { restSessionMetadataFromRegistry } from '../rest-canonical-metadata.js';
 import { OWNER_COOKIE } from '../owner-auth/policy.js';
 import { OfficeAuthService } from '../owner-auth/office.js';
+import { registerInputIdentityRoutes } from './routes/input-identity-routes.js';
 import { registerOfficeRoutes } from './routes/office-routes.js';
 import { withDelegatedSessionCreate } from '../owner-auth/delegated-session-create.js';
 import { withSessionCreateAdmission } from '../owner-auth/session-create-admission.js';
@@ -1146,6 +1147,7 @@ export class WebServer extends EventEmitter {
       basePath: this.basePath,
     });
     registerOwnerRoutes(this.app, ownerAuth, this.https);
+    registerInputIdentityRoutes(this.app, ownerAuth, authState.authSessions !== null);
     registerResourceHistoryRoutes(this.app, req => callerOf(req, { service: ownerAuth, ctx }).kind === 'owner');
     // Marks user chat posts a signed-in owner made (whatever the policy); see owner-auth/marks.ts.
     const verifiedOwner = ownerVerifier({

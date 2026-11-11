@@ -48,6 +48,13 @@ declare module 'fastify' {
 // Auth session cookie name
 export const AUTH_COOKIE_NAME = 'reverie_session';
 
+// Only the authentication hook can attest a Basic/QR session for this request.
+// Never infer authentication from a caller-supplied header or a synthetic admin.
+const browserAuthSessions = new WeakMap<FastifyRequest, AuthSessionRecord>();
+export function browserAuthSession(req: FastifyRequest): AuthSessionRecord | undefined {
+  return browserAuthSessions.get(req);
+}
+
 /** State returned from registerAuthMiddleware for cleanup in server stop() */
 interface AuthState {
   authSessions: StaleExpirationMap<string, AuthSessionRecord> | null;
@@ -460,7 +467,9 @@ export function registerAuthMiddleware(
     // Check session cookie first (avoids re-sending credentials on every request)
     // Use get() instead of has() so refreshOnGet extends the TTL on active sessions
     const sessionToken = req.cookies[AUTH_COOKIE_NAME];
-    if (sessionToken && authSessions.get(sessionToken) !== undefined) {
+    const authenticatedRecord = sessionToken ? authSessions.get(sessionToken) : undefined;
+    if (sessionToken && authenticatedRecord) {
+      browserAuthSessions.set(req, authenticatedRecord);
       // Sliding cookie: re-issue on every authenticated request so the browser
       // cookie lifetime tracks the server-side sliding TTL (refreshOnGet above).
       reply.setCookie(AUTH_COOKIE_NAME, sessionToken, {
@@ -488,12 +497,14 @@ export function registerAuthMiddleware(
         if (oldestKey !== undefined) authSessions.delete(oldestKey);
       }
 
-      authSessions.set(token, {
+      const record: AuthSessionRecord = {
         ip: clientIp,
         ua: req.headers['user-agent'] ?? '',
         createdAt: Date.now(),
         method: 'basic',
-      });
+      };
+      authSessions.set(token, record);
+      browserAuthSessions.set(req, record);
 
       // Reset failure count on successful auth
       authFailures.delete(clientIp);
@@ -628,6 +639,7 @@ function registerMultiUserAuthHook(
       // Trust the LIVE role/mustChangePassword, not the (possibly stale) cookie snapshot
       // (also defends #9/#13: a CLI demotion is reflected without a revoke).
       req.authUser = { username: live.username, role: live.role };
+      if (!live.mustChangePassword) browserAuthSessions.set(req, record);
       setSessionCookie(reply, sessionToken!); // sliding re-issue
       enforcePasswordChange(req, reply, !!live.mustChangePassword);
       return;
@@ -658,7 +670,7 @@ function registerMultiUserAuthHook(
 
         const token = randomBytes(32).toString('hex');
         if (authSessions.size >= MAX_AUTH_SESSIONS) evictForCapacity(user.username);
-        authSessions.set(token, {
+        const record: AuthSessionRecord = {
           ip: clientIp,
           ua: req.headers['user-agent'] ?? '',
           createdAt: Date.now(),
@@ -666,7 +678,9 @@ function registerMultiUserAuthHook(
           username: user.username,
           role: user.role,
           mustChangePassword: !!user.mustChangePassword,
-        });
+        };
+        authSessions.set(token, record);
+        if (!user.mustChangePassword) browserAuthSessions.set(req, record);
         req.authUser = { username: user.username, role: user.role };
         setSessionCookie(reply, token);
         enforcePasswordChange(req, reply, !!user.mustChangePassword);

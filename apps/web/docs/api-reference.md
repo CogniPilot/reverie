@@ -461,6 +461,17 @@ curl -sG "$API/api/v1/sessions/$SID/wait-output" \
 Build the query with `-G --data-urlencode` rather than by hand: a `+` in a
 hand-written query string decodes to a space.
 
+### `GET /api/v1/input-identity`
+
+Read-only browser input journal partition. Returns `data: {version: 1, kind,
+scopeId, epoch}` with `Cache-Control: no-store`. An authenticated account uses
+its actual incarnation and office-person identity. A legacy account without an
+incarnation and a Basic/QR login use an opaque scope bound to the actual sign-in.
+Reading this endpoint never enrolls an account or grants terminal access.
+Restricted, revoked and stale credentials refuse; they never become anonymous.
+Explicit no-auth compatibility mode returns `kind: "anonymous"`; clients must
+quarantine restored records rather than adopt them as an authenticated owner.
+
 ### `POST /api/v1/sessions/:id/input` with `wait`
 
 Two optional fields on the existing endpoint:
