@@ -171,6 +171,33 @@ fn malformed_running_status_never_grants_attach() {
     assert!(trace.lines().all(|line| line.starts_with("inspect\0")));
 }
 #[test]
+fn revocation_refuses_next_input_and_closes_only_owned_attach() {
+    if crate::test_process::isolate_case(
+        "worker_viewer::tests::revocation_refuses_next_input_and_closes_only_owned_attach",
+    ) {
+        return;
+    }
+    let mut fixture = Fixture::new();
+    let (mut client, mut server) = UnixStream::pair().unwrap();
+    client
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .unwrap();
+    let service = fixture.service.clone();
+    let task = std::thread::spawn(move || service.handle(&mut server));
+    broker_listener::write_frame(&mut client, b'J', &fixture.raw(true, SID)).unwrap();
+    until(&mut client, "READY › ──".as_bytes());
+    let company = fixture.root.join("company.json");
+    let mut value: serde_json::Value =
+        serde_json::from_slice(&fs::read(&company).unwrap()).unwrap();
+    value["employees"][0]["desiredRunning"] = false.into();
+    fs::write(company, serde_json::to_vec(&value).unwrap()).unwrap();
+    broker_listener::write_frame(&mut client, b'I', b"MUST NOT REACH REVOKED AGENT").unwrap();
+    let error = task.join().unwrap().unwrap_err();
+    assert_eq!(error.code, "WORKER_VIEWER_TARGET_CHANGED");
+    assert!(fixture.model_running());
+    assert!(fixture.service.retained.lock().unwrap().is_empty());
+}
+#[test]
 fn stale_socket_recovery_preserves_live_foreign_and_non_socket_entries() {
     let fixture = Fixture::new();
     let path = fixture.root.join("viewer.sock");

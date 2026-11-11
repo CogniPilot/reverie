@@ -73,7 +73,9 @@ fn docker_tmux_disconnect_and_service_termination_preserve_exact_pane() {
         );
         return;
     }
-    let fixture = Fixture::new();
+    exercise();
+}
+fn create_container() -> (Container, String) {
     let docker = std::env::split_paths(&std::env::var_os("PATH").unwrap())
         .map(|path| path.join("docker"))
         .find(|path| path.is_file())
@@ -146,9 +148,9 @@ fn docker_tmux_disconnect_and_service_termination_preserve_exact_pane() {
     ]);
     container.tmux(&["set-option", "-t", "office", "status", "off"]);
     container.tmux(&["set-option", "-t", "office", "remain-on-exit", "on"]);
-    let original_pane = container.pane();
-    assert!(original_pane.ends_with(":0"));
-    let started = container.output(&["inspect", "--format", "{{.State.StartedAt}}", &container.id]);
+    (container, deployment)
+}
+fn service(fixture: &Fixture, container: &Container, deployment: String) -> Arc<WorkerViewerService> {
     let source = fixture.root.join("broker.json");
     let mut config: serde_json::Value =
         serde_json::from_slice(&fs::read(&source).unwrap()).unwrap();
@@ -159,12 +161,20 @@ fn docker_tmux_disconnect_and_service_termination_preserve_exact_pane() {
     if let Some(host) = std::env::var_os("DOCKER_HOST") {
         environment.insert("DOCKER_HOST".into(), host);
     }
-    let service = WorkerViewerService::new(
+    WorkerViewerService::new(
         &source,
-        EngineBootstrap::from_service(docker.as_os_str(), environment, fixture.root.clone())
+        EngineBootstrap::from_service(container.docker.as_os_str(), environment, fixture.root.clone())
             .unwrap(),
     )
-    .unwrap();
+    .unwrap()
+}
+fn exercise() {
+    let fixture = Fixture::new();
+    let (container, deployment) = create_container();
+    let service = service(&fixture, &container, deployment);
+    let original_pane = container.pane();
+    assert!(original_pane.ends_with(":0"));
+    let started = container.output(&["inspect", "--format", "{{.State.StartedAt}}", &container.id]);
     let socket = fixture.root.join("viewer.sock");
     let runner = service.clone();
     let socket_run = socket.clone();

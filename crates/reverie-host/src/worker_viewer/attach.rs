@@ -175,16 +175,7 @@ impl Attach {
                 return Ok(());
             }
             if checked.elapsed() >= Duration::from_secs(2) {
-                let current = service.configuration()?;
-                let actual = Target::observe(
-                    service,
-                    &current,
-                    request.session(),
-                    Instant::now() + Duration::from_secs(5),
-                )?;
-                if actual.container != target.container || actual.binding != target.binding {
-                    return Err(ViewerError::refused("WORKER_VIEWER_TARGET_CHANGED"));
-                }
+                check_target(service, request, target)?;
                 checked = Instant::now();
             }
             let frame = if pending.is_empty() {
@@ -193,13 +184,7 @@ impl Attach {
                 None
             };
             if let Some((kind, raw)) = frame {
-                let current = service.configuration()?;
-                let binding =
-                    crate::worker_intent::read_current_viewer_binding(&current, request.session())
-                        .map_err(|cause| ViewerError::caused("WORKER_VIEWER_INTENT", cause))?;
-                if binding.as_ref() != Some(&target.binding) {
-                    return Err(ViewerError::refused("WORKER_VIEWER_TARGET_CHANGED"));
-                }
+                check_binding(service, request, target)?;
                 match kind {
                     b'I' if pending.is_empty() => pending = raw,
                     b'R' => resize(pty, process, &raw)?,
@@ -207,14 +192,7 @@ impl Attach {
                 }
             }
             if !pending.is_empty() {
-                match pty.try_write(&pending) {
-                    Ok(0) => return Err(ViewerError::refused("WORKER_VIEWER_INPUT_CLOSED")),
-                    Ok(count) => {
-                        pending.drain(..count);
-                    }
-                    Err(cause) if retry(&cause) => {}
-                    Err(cause) => return Err(cause.into()),
-                }
+                write_pending(pty, &mut pending)?;
             }
             let mut raw = [0; 65_536];
             match pty.try_read(&mut raw) {
@@ -267,6 +245,47 @@ impl Drop for Attach {
             std::mem::forget((self.process.take(), self.pty.take()));
         }
     }
+}
+fn check_target(
+    service: &WorkerViewerService,
+    request: &WorkerRequest,
+    target: &Target,
+) -> Result<()> {
+    let current = service.configuration()?;
+    let actual = Target::observe(
+        service,
+        &current,
+        request.session(),
+        Instant::now() + Duration::from_secs(5),
+    )?;
+    if actual.container != target.container || actual.binding != target.binding {
+        return Err(ViewerError::refused("WORKER_VIEWER_TARGET_CHANGED"));
+    }
+    Ok(())
+}
+fn check_binding(
+    service: &WorkerViewerService,
+    request: &WorkerRequest,
+    target: &Target,
+) -> Result<()> {
+    let current = service.configuration()?;
+    let binding = crate::worker_intent::read_current_viewer_binding(&current, request.session())
+        .map_err(|cause| ViewerError::caused("WORKER_VIEWER_INTENT", cause))?;
+    if binding.as_ref() != Some(&target.binding) {
+        return Err(ViewerError::refused("WORKER_VIEWER_TARGET_CHANGED"));
+    }
+    Ok(())
+}
+fn write_pending(pty: &OwnedPty, pending: &mut Vec<u8>) -> Result<()> {
+    match pty.try_write(pending) {
+        Ok(0) => return Err(ViewerError::refused("WORKER_VIEWER_INPUT_CLOSED")),
+        Ok(count) => {
+            pending.drain(..count);
+        }
+        Err(cause) if retry(&cause) => {}
+        Err(cause) => return Err(cause.into()),
+    }
+    Ok(())
 }
 fn resize(pty: &OwnedPty, process: &ViewerProcess, raw: &[u8]) -> Result<()> {
     let [cols, rows] = serde_json::from_slice::<[u16; 2]>(raw)
