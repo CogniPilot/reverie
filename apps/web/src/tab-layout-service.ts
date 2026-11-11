@@ -615,7 +615,8 @@ export class TabLayoutService {
    * All failure-prone normalization happens before `action`; the prepared layout
    * commits only after the resource cleanup finishes.
    */
-  async runSessionDeletion<T>(removed: readonly RemovedTabLayoutSession[], action: () => Promise<T>): Promise<T> {
+  async runSessionDeletion<T>(removed: readonly RemovedTabLayoutSession[], action: () => Promise<T>,
+    beforePublish: () => void = () => {}): Promise<T> {
     // A failed restoration must not lock the user out of explicitly closing a
     // tab for the rest of the process lifetime: degrade to best-effort deletion
     // without layout coordination. Only the AUTOMATED stale sweep stays
@@ -636,6 +637,7 @@ export class TabLayoutService {
       const next = materializeOrphans(prepared.authoritative, ids, prepared.metadata);
       const stored = current && !sameLayout(current, next) ? this.prepareCommit(current, next) : null;
       const result = await action();
+      beforePublish();
       this.publish(stored ? { [owner]: stored } : {}, [
         {
           owner,

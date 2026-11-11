@@ -16,7 +16,9 @@ export interface SessionPort {
    * group is not in the owner's layout). Resolves to the committed layout.
    */
   addSession(session: Session, placement?: SessionPlacementHint, admitted?: () => boolean): Promise<TabLayout>;
-  cleanupSession(sessionId: string, killMux?: boolean, reason?: string): Promise<void>;
+  /** Expected candidate is process-local identity, never a wire cleanup grant. */
+  cleanupSession(sessionId: string, killMux?: boolean, reason?: string,
+    expected?: {session: Session; owner: string | undefined}): Promise<void>;
   setupSessionListeners(session: Session): Promise<void>;
   persistSessionState(session: Session): void;
   persistSessionStateNow(session: Session): void;

@@ -4,7 +4,7 @@ import type { PlanService } from './plan-accounts.js';
 import type { ChatroomService } from './chatroom-service.js';
 import type { SessionPort } from './web/ports/session-port.js';
 import type { TerminalMultiplexer } from './mux-interface.js';
-import { PlanMoveError, PlanMoveComposerNotReady, type PlanMoveExecutor, type PlanMoveInput, type PlanMoveRecord } from './plan-move.js';
+import { PlanMoveError, PlanMoveUnconfirmed, PlanMoveComposerNotReady, type PlanMoveExecutor, type PlanMoveInput, type PlanMoveRecord } from './plan-move.js';
 import { planMoveHarness, planMoveLaunch, runtimeRefreshDigest } from './plan-move-launch.js';
 import { composerReadyMark } from './cli-agent.js';
 import { claudeComposerIsReady } from './plan-move-composer.js';
@@ -53,6 +53,16 @@ export interface PlanMoveRuntime {
   resourceReplacement?: PlanMoveResourceRuntime;
   capture?: typeof capturePlanProcesses;
   survivors?: typeof survivingPlanProcesses;
+}
+
+/** Shared normal-API boundary. Recovery telemetry may only add a hold, never supply forward/cleanup authority. */
+export function planMoveSessionResponse(status: number, body: unknown): unknown {
+  const response = body && typeof body === 'object' && !Array.isArray(body) ? body as Record<string, unknown> : undefined;
+  if (response?.recoveryRequired === true)
+    throw new PlanMoveUnconfirmed('The normal session operation requires recovery. Do not replay or clean up its candidate.');
+  if (status >= 400 || response?.success === false)
+    throw new PlanMoveError(typeof response?.error === 'string' ? response.error : 'The normal session launch path refused the move', status >= 400 ? status : 409);
+  return body;
 }
 
 /** Preserve the configured marker; add only the strict native composer shape. */

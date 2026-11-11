@@ -105,8 +105,48 @@ draft and disable answer buttons; API clients must inspect the conflict and
 wait for a genuinely current prompt. Refreshing an inbox cannot certify an
 unconfirmed answer as safe to repeat.
 
+## Unconfirmed canonical replacement publication
+
+Candidate cleanup on a failed replacement carries the original in-process
+Session, owner, local transport record and PID identity through storage waits,
+the owner layout lock, and process termination. Losing that identity refuses
+cleanup; it does not authorize stopping a successor with the same session ID.
+An unproved native/remote/container stop also refuses before changing running
+intent. The API reports `candidate-cleanup-unconfirmed`, retains the original
+replacement claim and intent, and requires recovery rather than replay.
+Guarded cleanup preserves optional workspace/upload/subagent artifacts instead
+of deleting them by session ID. It signals only the original verified local
+process identities, requires observed pane death or absence, and preserves any
+dead tmux pane rather than killing a potentially reused name. Live or unknown
+readback requires recovery. This does not add native stop/reconciliation
+authority or qualify the older unguarded cleanup paths.
+
+Canonical employee replacement distinguishes a refusal before its current
+rename was issued from an uncertain rename or later publication failure. The
+current writer is held after uncertainty; it cannot overwrite the stored
+binding from its previous cache. A known authority refusal before rename does
+not poison that writer. This fence belongs to one process and is not a
+cross-process exclusion or durable reconciliation journal.
+
+Once a binding reservation has been published, a later room, validation,
+publication or identity-notification error cannot authorize deletion of the
+replacement Session, restoration of an older binding or rollback of running
+intent. The API returns a conflict with `recoveryRequired: true`,
+`reason: binding-publication-unconfirmed` and the original employee/session
+identifiers. These are diagnostics: only the actual private service attempt
+and original Session can produce the retained outcome. An obsolete attempt
+never overwrites a newer Session or owner while persisting diagnostics.
+
+A plan move receiving this conflict stays `recovery-required`, even when
+creation did not return a candidate SID. It does not invent that SID, stop a
+candidate, restore an old binding or offer another move. Human and headless
+clients must preserve the operation and inspect the existing state. Supported
+canonical binding reconciliation is not implemented. A restart, a fresh cache
+or a readable row is not proof that an uncertain operation may be replayed;
+coordinated old-writer exclusion and durable reconciliation remain required.
+
 Fresh native-worker generation/configuration transport is not qualified by the
 local process adapter tests or by Office header-forwarding tests. Native
-enrollment, durable launch reconciliation and uncertain canonical replacement
-publication remain release blockers. Do not deploy this partial qualification
+enrollment, durable launch and canonical binding reconciliation remain release
+blockers. Do not deploy this partial qualification
 as proof of complete native employee recovery.

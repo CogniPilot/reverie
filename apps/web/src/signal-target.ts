@@ -276,12 +276,16 @@ export interface PtyChild {
  */
 export async function stopPtyChild(
   pty: PtyChild,
-  deps: SignalDeps & { wait: (pids: number[]) => Promise<unknown>; warn?: (msg: string) => void }
+  deps: SignalDeps & { wait: (pids: number[]) => Promise<unknown>; warn?: (msg: string) => void },
+  admitted: () => void = () => {},
+  expectedStartTime?: number
 ): Promise<'unverified' | 'stopped'> {
   const pid = pty.pid;
   const ok = Number.isInteger(pid) && pid > 1 && pid !== deps.selfPid && pid !== deps.selfPgid;
   const first = ok ? deps.stat(pid) : null;
   const own = first !== null && first.ppid === deps.selfPid ? first : null;
+  if (expectedStartTime !== undefined && own?.startTime !== expectedStartTime)
+    throw new Error('Candidate cleanup required: original PTY identity changed');
   if (!own) {
     deps.warn?.(`PTY pid ${pid} is not a verified child of this console; not signalling it`);
     return 'unverified';
@@ -290,12 +294,14 @@ export async function stopPtyChild(
     const now = deps.stat(pid);
     return now !== null && now.startTime === own.startTime && now.ppid === deps.selfPid;
   };
+  admitted();
   try {
     if (still()) pty.kill('SIGTERM');
   } catch {
     // Already gone
   }
   await deps.wait([pid]);
+  admitted();
   try {
     if (still()) {
       if (own.pgid === pid) deps.kill(-pid, 'SIGKILL');

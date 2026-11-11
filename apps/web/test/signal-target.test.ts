@@ -209,6 +209,25 @@ describe('signalDescendants', () => {
 
 describe('stopPtyChild', () => {
   const ptyStat: ProcStat = { ppid: SELF, pgid: 6001, startTime: 50 };
+  it('refuses a reused original PTY identity before its first signal', async () => {
+    const signals: string[] = [];
+    await expect(stopPtyChild({pid: 6001, kill: sig => {signals.push(String(sig));}}, {
+      selfPid: SELF, selfPgid: SELF_PGID, stat: () => ({...ptyStat, startTime: 51}),
+      kill: (_pid, sig) => {signals.push(sig);}, wait: async () => {},
+    }, () => {}, 50)).rejects.toThrow(/original PTY identity changed/);
+    expect(signals).toEqual([]);
+  });
+
+  it('withholds SIGKILL and reports cleanup-required if original admission changes during the TERM wait', async () => {
+    const signals: string[] = [];
+    let current = true;
+    const admitted = () => {if (!current) throw new Error('Candidate cleanup required');};
+    await expect(stopPtyChild({pid: 6001, kill: sig => {signals.push(String(sig));}}, {
+      selfPid: SELF, selfPgid: SELF_PGID, stat: () => ptyStat,
+      kill: (_pid, sig) => {signals.push(sig);}, wait: async () => {current = false;},
+    }, admitted, 50)).rejects.toThrow(/cleanup required/);
+    expect(signals).toEqual(['SIGTERM']);
+  });
   function run(pid: number, table: Record<number, ProcStat>, afterTerm?: (t: Record<number, ProcStat>) => void) {
     const p = fakeProc(table);
     const ptyKills: string[] = [];

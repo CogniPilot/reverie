@@ -6029,7 +6029,48 @@ export class Session extends EventEmitter {
    * await session.stop(false);
    * ```
    */
-  async stop(killMux: boolean = true): Promise<void> {
+  /** Capture original local transport before an asynchronous candidate cleanup starts. */
+  captureCleanupStop(stillCurrent: () => boolean): {require: () => void; stop: () => Promise<void>} {
+    const mux = this._mux, record = mux?.getSession(this.id), pty = this.ptyProcess;
+    const owner = this.owner, mode = this.mode, epoch = this.#workspaceHookEpoch;
+    const ptyStat = pty && readProcStat(pty.pid);
+    const fields = record && {sessionId: record.sessionId, muxName: record.muxName, pid: record.pid,
+      createdAt: record.createdAt, owner: record.owner, remote: record.remote, docker: record.docker};
+    const original = () => stillCurrent() && this.owner === owner && this.mode === mode && this._mux === mux
+      && mux?.getSession(this.id) === record && (!record || (Object.entries(fields!).every(([key, value]) =>
+        record[key as keyof MuxSession] === value)));
+    // A console wrapper does not prove ownership of the native job behind it.
+    // Preserve that attempt for supported native reconciliation; never stop by SID.
+    if (!this._providerEffectsAdmitted()
+      || (this._muxSession !== null && this._muxSession !== record)
+      || (record && (record !== this._muxSession || record.sessionId !== this.id || record.owner !== owner))
+      || (this._pid !== null && !record && !pty)
+      || this._workerBacked || this._remote || this._docker
+      || (record && !mux?.killSessionIfCurrent))
+      throw new Error('Candidate cleanup required: original provider stop authority is unavailable');
+    if (pty && (!ptyStat || ptyStat.ppid !== process.pid))
+      throw new Error('Candidate cleanup required: original PTY identity was not verified');
+    if (!original()) throw new Error('Candidate cleanup required: original session changed');
+    const require = () => {
+      if (this.#workspaceHookEpoch !== epoch || this.ptyProcess !== pty || !original()
+        || (pty && readProcStat(pty.pid)?.startTime !== ptyStat?.startTime))
+        throw new Error('Candidate cleanup required: original provider generation or transport changed');
+    };
+    return {require, stop: () => { require(); return this.stop(true, {admitted: stillCurrent, transportCurrent: original,
+      pty, ptyStartTime: ptyStat?.startTime, record}); }};
+  }
+
+  async stop(killMux: boolean = true, expected?: {admitted: () => boolean; transportCurrent: () => boolean;
+    pty: pty.IPty | null; ptyStartTime: number | undefined; record: MuxSession | undefined}): Promise<void> {
+    const assertCurrent = () => {
+      if (expected && !expected.admitted()) throw new Error('Candidate cleanup required: original session changed');
+    };
+    const assertTransport = () => {
+      assertCurrent();
+      if (expected && (!expected.transportCurrent() || this.ptyProcess !== expected.pty))
+        throw new Error('Candidate cleanup required: original transport changed');
+    };
+    assertTransport();
     this.#workspaceHookPreparation = undefined;
     this._invalidateWorkspaceHooks();
     // Set stopped flag first to prevent new timers from being created
@@ -6065,19 +6106,27 @@ export class Session extends EventEmitter {
         // stopPtyChild): node-pty's kill() is a bare process.kill(pid), so a zero,
         // reused or foreign pid must never reach it. Unverified: no signal here; the
         // mux teardown below still runs.
-        await stopPtyChild(this.ptyProcess, {
+        const stopped = await stopPtyChild(this.ptyProcess, {
           stat: readProcStat,
-          kill: (p, sig) => process.kill(p, sig),
+          kill: (p, sig) => { assertTransport(); return process.kill(p, sig); },
           selfPid: process.pid,
           selfPgid: readProcStat(process.pid)?.pgid ?? null,
-          wait: (pids) => waitForProcessesExit(pids, { timeoutMs: GRACEFUL_SHUTDOWN_DELAY_MS }),
+          wait: async (pids) => { await waitForProcessesExit(pids, { timeoutMs: GRACEFUL_SHUTDOWN_DELAY_MS }); assertTransport(); },
           warn: (msg) => console.warn(`[Session] ${msg}`),
-        });
+        }, assertTransport, expected?.ptyStartTime);
+        if (expected) {
+          if (stopped !== 'stopped') throw new Error('Candidate cleanup required: original PTY stop was not verified');
+          await waitForProcessesExit([this.ptyProcess.pid], {timeoutMs: GRACEFUL_SHUTDOWN_DELAY_MS});
+          assertTransport();
+          if (readProcStat(this.ptyProcess.pid)?.startTime === expected.ptyStartTime)
+            throw new Error('Candidate cleanup required: original PTY exit was not confirmed');
+        }
       } else {
         // Server shutdown: just detach — the process lives on inside tmux
         console.log('[Session] Detaching from PTY (server shutdown) — mux session preserved');
       }
 
+      assertTransport();
       this.ptyProcess = null;
     }
     this._pid = null;
@@ -6092,13 +6141,23 @@ export class Session extends EventEmitter {
     if (killMux && this._mux) {
       // Try to kill mux session even if _muxSession is not set (e.g., restored sessions)
       try {
-        const killed = await this._mux.killSession(this.id);
+        assertCurrent();
+        const killed = expected
+          ? expected.record ? await this._mux.killSessionIfCurrent!(this.id, expected.record,
+              () => expected.admitted() && expected.transportCurrent()) : false
+          : await this._mux.killSession(this.id);
+        assertCurrent();
+        if (expected && expected.record && !killed) throw new Error('Candidate cleanup required: original mux stop was not confirmed');
+        if (expected && this._mux.getSession(this.id))
+          throw new Error('Candidate cleanup required: a mux record remains after the original stop');
         if (killed) {
           console.log('[Session] Killed mux session for:', this.id);
         }
       } catch (err) {
+        if (expected) throw err;
         console.error('[Session] Failed to kill mux session:', err);
       }
+      assertCurrent();
       this._muxSession = null;
     } else if (this._muxSession && !killMux) {
       console.log('[Session] Keeping mux session alive:', this._muxSession.muxName);

@@ -151,6 +151,9 @@ export class PlanMoveError extends Error {
   }
 }
 
+/** Deny-only: an uncertain operation never authorizes rollback, cleanup or another launch. */
+export class PlanMoveUnconfirmed extends PlanMoveError {}
+
 /** Only a supported, currently observed composer that is not yet ready is retryable.
  * Unknown capability, account, binding and source-cleanup failures remain ordinary refusals.
  */
@@ -599,9 +602,10 @@ export class PlanMoves {
       }
     } catch (error) {
       record.error = error instanceof Error ? error.message : 'Move failed';
-      let recovered = !record.newSession && executor.binding(record.employeeId, record.owner) === record.oldSession;
+      const unconfirmed = error instanceof PlanMoveUnconfirmed;
+      let recovered = !unconfirmed && !record.newSession && executor.binding(record.employeeId, record.owner) === record.oldSession;
       if (
-        !record.resourceIntent && !stopping &&
+        !unconfirmed && !record.resourceIntent && !stopping &&
         record.newSession &&
         executor.exists(record.oldSession) &&
         executor.binding(record.employeeId, record.owner) === record.newSession
@@ -613,7 +617,7 @@ export class PlanMoves {
           record.error += `; rollback requires inspection: ${rollbackError instanceof Error ? rollbackError.message : 'failed'}`;
         }
       }
-      if (stopping && record.newSession) {
+      if (!unconfirmed && stopping && record.newSession) {
         // Once the old stop began, its process and transport may be gone. Clean only
         // this move's candidate and retain recovery-required; never revive an old SID
         // or restore a stale copy of the employee's persistent data.

@@ -767,6 +767,66 @@ describe('TmuxManager (unit)', () => {
       return module.TmuxManager;
     }
 
+    // Initial process witness and exit reader are component fixtures here;
+    // the actual non-test kill coordinator must never issue a later name kill.
+    it.each(['live-successor', 'unreadable', 'dead-original'] as const)('guarded cleanup readback %s never kills a pane by reusable name', async state => {
+      const NonTestTmuxManager = await importWithTmuxCommandsEnabled();
+      const signal = await import('../src/signal-target.js');
+      const instance = new NonTestTmuxManager();
+      instance.registerSession({sessionId: 'readback123', muxName: 'reverie-abcd5678', pid: 12345,
+        createdAt: Date.now(), workingDir: '/synthetic', mode: 'claude', attached: true});
+      const tracked = instance.getSession('readback123')!;
+      const witness = vi.spyOn(signal, 'resolveLivePaneTarget').mockResolvedValue({
+        target: {pid: 12345, startTime: 1, ownGroup: false}, pane: {state: 'live', pid: 12345}});
+      const internal = instance as unknown as {getServerPidAsync(): Promise<number>;
+        listPanesAsync(): Promise<string | null>; getChildPidsFresh(pid: number): Promise<number[]>;
+        verifyProcessesDead(pids: number[], timeout: number): Promise<boolean>};
+      vi.spyOn(internal, 'getServerPidAsync').mockResolvedValue(6001);
+      vi.spyOn(internal, 'getChildPidsFresh').mockResolvedValue([]);
+      vi.spyOn(internal, 'verifyProcessesDead').mockResolvedValue(true);
+      vi.spyOn(internal, 'listPanesAsync').mockResolvedValue(state === 'unreadable' ? null
+        : state === 'live-successor' ? '0 23456 reverie-abcd5678' : '1 12345 reverie-abcd5678');
+      const signals = vi.spyOn(process, 'kill').mockImplementation(() => true);
+      const count = vi.mocked(exec).mock.calls.length;
+      try {
+        const stopped = instance.killSessionIfCurrent('readback123', tracked, () => true);
+        if (state === 'dead-original') {expect(await stopped).toBe(true); expect(instance.getSession('readback123')).toBeUndefined();}
+        else {await expect(stopped).rejects.toThrow(/cleanup.*required/i); expect(instance.getSession('readback123')).toBe(tracked);}
+        expect(vi.mocked(exec).mock.calls.slice(count).filter(([command]) => /kill-session/.test(String(command)))).toEqual([]);
+        expect(signals).not.toHaveBeenCalled();
+      } finally {signals.mockRestore(); witness.mockRestore(); instance.destroy();}
+    });
+
+    it.each(['owner', 'record', 'pid'] as const)('refuses guarded cleanup changed %s during local pane probes', async change => {
+      const NonTestTmuxManager = await importWithTmuxCommandsEnabled();
+      const instance = new NonTestTmuxManager();
+      const original: MuxSession = {sessionId: 'cleanup123', muxName: 'reverie-abcd5678', pid: 12345,
+        createdAt: Date.now(), workingDir: '/synthetic', mode: 'claude', attached: true};
+      instance.registerSession(original);
+      const tracked = instance.getSession(original.sessionId)!;
+      let entered!: () => void, release!: () => void;
+      const waiting = new Promise<void>(resolve => {entered = resolve;});
+      const held = new Promise<void>(resolve => {release = resolve;});
+      const internals = instance as unknown as {getServerPidAsync(): Promise<number>; listPanesAsync(): Promise<string>};
+      vi.spyOn(internals, 'getServerPidAsync').mockImplementation(async () => {entered(); await held; return 6001;});
+      vi.spyOn(internals, 'listPanesAsync').mockResolvedValue('');
+      const signals = vi.spyOn(process, 'kill').mockImplementation(() => true);
+      const commandCount = vi.mocked(exec).mock.calls.length;
+      let allowed = true;
+      try {
+        const stopping = instance.killSessionIfCurrent(original.sessionId, tracked, () => allowed);
+        await waiting;
+        if (change === 'owner') allowed = false;
+        else if (change === 'pid') tracked.pid++;
+        else instance.registerSession({...tracked, pid: tracked.pid + 1});
+        release();
+        await expect(stopping).rejects.toThrow(/cleanup.*required/i);
+        expect(signals).not.toHaveBeenCalled();
+        expect(vi.mocked(exec).mock.calls.slice(commandCount).filter(([command]) => /kill-session/.test(String(command)))).toEqual([]);
+        expect(instance.getSession(original.sessionId)).toBeDefined();
+      } finally {release(); signals.mockRestore(); instance.destroy();}
+    });
+
     it.each(['text', 'paste'] as const)('rechecks private admission after async %s staging and withholds remaining keys', async stage => {
       const NonTestTmuxManager = await importWithTmuxCommandsEnabled();
       const instance = new NonTestTmuxManager();

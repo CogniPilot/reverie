@@ -311,6 +311,8 @@ export interface TerminalMultiplexer extends EventEmitter {
    * Uses a multi-strategy approach (children → process group → mux kill → SIGKILL).
    */
   killSession(sessionId: string): Promise<boolean>;
+  /** Optional exact-record cleanup capability. Implementations must recheck admission at every effect boundary. */
+  killSessionIfCurrent?(sessionId: string, original: MuxSession, admitted: () => boolean): Promise<boolean>;
 
   /** Clean up resources (stop stats collection, etc.) */
   destroy(): void;

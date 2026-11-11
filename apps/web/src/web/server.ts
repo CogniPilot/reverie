@@ -349,7 +349,7 @@ import { PlanRequestStore } from '../plan-request-store.js';
 import { PlanRequestCapabilities } from '../plan-request-capability.js';
 import { deliverPlanRequest } from '../plan-request-prompt.js';
 import { registerPlanRequestRoutes } from './routes/plan-request-routes.js';
-import { planMoveExecutor, type PlanMoveRuntime } from '../plan-move-runtime.js';
+import { planMoveExecutor, planMoveSessionResponse, type PlanMoveRuntime } from '../plan-move-runtime.js';
 import {ResourceReplacementController, registerResourceReplacementRoutes} from '../resource-replacement-controller.js';
 import { FleetResourcesService, registerFleetResourceRoutes } from '../resource-fleet-service.js';
 import { EmployeeResourcesService, registerEmployeeResourceRoutes } from '../resource-employee-service.js';
@@ -2388,13 +2388,7 @@ export class WebServer extends EventEmitter {
               },
               ...(payload === undefined ? {} : { payload: JSON.stringify(payload) }),
             });
-            const body = result.json();
-            if (result.statusCode >= 400 || body?.success === false)
-              throw new PlanMoveError(
-                body?.error ?? 'The normal session launch path refused the move',
-                result.statusCode >= 400 ? result.statusCode : 409
-              );
-            return body;
+            return planMoveSessionResponse(result.statusCode, result.json());
           },
         },
         ownerFor(request)
@@ -2708,9 +2702,24 @@ export class WebServer extends EventEmitter {
    */
   private killingSessions: Set<string> = new Set();
 
-  private async cleanupSession(sessionId: string, killMux: boolean = true, reason?: string): Promise<void> {
+  private async cleanupSession(sessionId: string, killMux: boolean = true, reason?: string,
+    expected?: {session: Session; owner: string | undefined}): Promise<void> {
+    const assertCurrent = () => {
+      if (expected && (this.sessions.get(sessionId) !== expected.session || expected.session.id !== sessionId
+        || expected.session.owner !== expected.owner))
+        throw new Error('Candidate cleanup required: original session is no longer current');
+    };
+    assertCurrent();
+    // Capture local transport before intent changes or any await. Native jobs
+    // without original-attempt stop authority are retained, never stopped by SID.
+    const stopOriginal = expected && expected.session.captureCleanupStop(() => {
+      assertCurrent(); return true;
+    });
     // Guard against concurrent cleanup of the same session
-    if (this.cleaningUp.has(sessionId)) return;
+    if (this.cleaningUp.has(sessionId)) {
+      if (expected) throw new Error('Candidate cleanup required: another cleanup is in progress');
+      return;
+    }
     this.cleaningUp.add(sessionId);
     if (killMux) this.killingSessions.add(sessionId);
     // Refuse a start or attach from here on (Ark0N/Codeman#446): a start that
@@ -2720,8 +2729,13 @@ export class WebServer extends EventEmitter {
     session?.markClosing(true);
 
     try {
-      if (killMux) await this.companyService?.setDesiredRunning(sessionId, false);
-      await this._doCleanupSession(sessionId, killMux, reason);
+      if (killMux) {
+        if (expected) await this.companyService?.setDesiredRunning(sessionId, false, () => { stopOriginal!.require(); return true; });
+        else await this.companyService?.setDesiredRunning(sessionId, false);
+      }
+      assertCurrent();
+      if (expected) await this._doCleanupSession(sessionId, killMux, reason, true, {assertCurrent, stop: stopOriginal!.stop});
+      else await this._doCleanupSession(sessionId, killMux, reason);
     } finally {
       this.cleaningUp.delete(sessionId);
       this.killingSessions.delete(sessionId);
@@ -2735,14 +2749,25 @@ export class WebServer extends EventEmitter {
     sessionId: string,
     killMux: boolean,
     reason?: string,
-    coordinateLayout = true
+    coordinateLayout = true,
+    expected?: {assertCurrent: () => void; stop: () => Promise<void>}
   ): Promise<void> {
+    expected?.assertCurrent();
     const session = this.sessions.get(sessionId);
     const pinned = session?.pinned === true || this.store.getSession(sessionId)?.pinned === true;
     if (coordinateLayout && session && killMux && !pinned) {
       return this.tabLayouts.runSessionDeletion([{ id: sessionId, owner: session.owner }], () =>
-        this._doCleanupSession(sessionId, killMux, reason, false)
-      );
+        this._doCleanupSession(sessionId, killMux, reason, false, expected), () => {
+          if (expected && this.sessions.has(sessionId))
+            throw new Error('Candidate cleanup required: a successor appeared before layout publication');
+        });
+    }
+    // Guarded candidate cleanup stops the original transport before touching any
+    // SID-keyed observer state. A stale/unknown stop leaves those records intact.
+    if (expected) {
+      expected.assertCurrent();
+      await expected.stop();
+      expected.assertCurrent();
     }
     const lifecycleLog = getLifecycleLog();
     lifecycleLog.log({
@@ -2763,7 +2788,7 @@ export class WebServer extends EventEmitter {
     this._customModelDisplacedNotified.delete(sessionId);
 
     // Kill all subagents spawned by this session (scoped to sessionId to avoid cross-session kills)
-    if (session && killMux) {
+    if (session && killMux && !expected) {
       try {
         await subagentWatcher.killSubagentsForSession(session.workingDir, sessionId);
       } catch (err) {
@@ -2884,7 +2909,7 @@ export class WebServer extends EventEmitter {
       // working directory rather than the session, so it stays while another live
       // session in the same case still uses it (Ark0N/Codeman#446).
       if (
-        killMux &&
+        killMux && !expected &&
         session.workingDir &&
         !pasteImageDirInUseByOtherSession({
           live: this.sessions.values(),
@@ -2913,13 +2938,14 @@ export class WebServer extends EventEmitter {
       // Drop the agent skill's preamble cache for this session (seeded at create).
       // killMux only: a detach leaves the session recoverable, and its agent would
       // come back to a loader whose file we deleted.
-      if (killMux) {
+      if (killMux && !expected) {
         void removeAgentSessionPreamble(sessionId);
         // The per-session custom-model config dir carries the endpoint's API key (pi and
         // omp embed it literally); it must not outlive the session it was written for.
         removeConfigDir(customModelConfigDir(sessionId));
       }
-      await session.stop(killMux);
+      if (!expected) await session.stop(killMux);
+      expected?.assertCurrent();
       this.sessions.delete(sessionId);
       // Only remove from state.json if we're also killing the mux session.
       // When killMux=false (server shutdown), preserve state for recovery.

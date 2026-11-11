@@ -2877,11 +2877,27 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
    * Uses a 4-strategy approach (children → process group → tmux kill → SIGKILL).
    * In test mode: removes from memory only (no real kill).
    */
-  async killSession(sessionId: string): Promise<boolean> {
+  async killSessionIfCurrent(sessionId: string, original: MuxSession, admitted: () => boolean): Promise<boolean> {
+    const fields = {sessionId: original.sessionId, muxName: original.muxName, pid: original.pid,
+      createdAt: original.createdAt, owner: original.owner, mode: original.mode,
+      remote: original.remote, docker: original.docker, discovered: original.discovered};
+    return this.killSession(sessionId, () => admitted() && original.sessionId === sessionId
+      && Object.entries(fields).every(([key, value]) => original[key as keyof MuxSession] === value), original);
+  }
+
+  async killSession(sessionId: string, admitted?: () => boolean, original?: MuxSession): Promise<boolean> {
     const session = this.sessions.get(sessionId);
     if (!session) {
       return false;
     }
+
+    const assertCurrent = () => {
+      if (admitted && (!admitted() || this.sessions.get(sessionId) !== original || session !== original))
+        throw new Error('Candidate cleanup required: original mux record changed');
+    };
+    assertCurrent();
+    if (admitted && (session.remote || session.docker || session.discovered))
+      throw new Error('Candidate cleanup required: original local mux authority is unavailable');
 
     // COD-108: an intentional kill/detach must NEVER be auto-revived by the
     // remote-reconnect watcher. Guard BEFORE any teardown so a tick that fires
@@ -2954,6 +2970,9 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
           stat: readProcStat,
         })
       : { target: null, pane: { state: 'unreadable' as const } };
+    assertCurrent();
+    if (admitted && (!target || target.pid !== session.pid))
+      throw new Error('Candidate cleanup required: original live pane identity was not verified');
     const currentPid = target?.pid ?? null;
 
     console.log(
@@ -2966,8 +2985,9 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
     // its identity under the verified pane, and that identity and its whole parent
     // chain are re-checked right before every signal (see signalDescendants): a pid
     // that has since exited, been reparented or reused is skipped, never signalled.
-    const deps = { stat: readProcStat, kill: (p: number, sig: NodeJS.Signals) => process.kill(p, sig), selfPid: process.pid, selfPgid };
+    const deps = { stat: readProcStat, kill: (p: number, sig: NodeJS.Signals) => { assertCurrent(); return process.kill(p, sig); }, selfPid: process.pid, selfPgid };
     let childPids = target ? await this.getChildPidsFresh(target.pid) : [];
+    assertCurrent();
     if (target && childPids.length > 0) {
       const term = signalDescendants(target, childPids, 'SIGTERM', deps);
       console.log(`[TmuxManager] Found ${childPids.length} child processes, ${term.bound.length} verified, to kill`);
@@ -2978,6 +2998,7 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
       await waitForProcessesExit(term.bound, { timeoutMs: TMUX_KILL_WAIT_MS });
 
       childPids = isSameProcess(target, readProcStat) ? await this.getChildPidsFresh(target.pid) : [];
+      assertCurrent();
       const kill = signalDescendants(target, childPids, 'SIGKILL', deps);
       const skipped = term.skipped + kill.skipped;
       if (skipped > 0) {
@@ -2985,11 +3006,13 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
       }
     }
 
+    assertCurrent();
     // Strategy 2: Kill the entire process group — only one the pane itself leads
     if (target?.ownGroup && isSameProcess(target, readProcStat)) {
       try {
         process.kill(-target.pid, 'SIGTERM');
         await waitForProcessesExit([target.pid], { timeoutMs: GRACEFUL_SHUTDOWN_WAIT_MS });
+        assertCurrent();
         if (isSameProcess(target, readProcStat)) {
           process.kill(-target.pid, 'SIGKILL');
         }
@@ -2998,10 +3021,11 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
       }
     }
 
+    assertCurrent();
     // Strategy 3: Kill tmux session by name (guard the name before it reaches the shell).
     // Async: tmux takes tens of ms to tear a session down, and execSync held the
     // whole server for that long on every close.
-    if (isValidMuxName(session.muxName)) {
+    if (!admitted && isValidMuxName(session.muxName)) {
       try {
         await execAsync(`${this.tmux()} kill-session -t "=${session.muxName}" 2>/dev/null`, {
           timeout: EXEC_TIMEOUT_MS,
@@ -3011,12 +3035,13 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
       }
     }
 
+    assertCurrent();
     // Strategy 3b: Remote sessions run a DURABLE tmux server on the remote host
     // (survives ssh drops), so killing only the local ssh wrapper above would
     // orphan the remote agent forever. Fire a best-effort `ssh … tmux kill-session`
     // — fire-and-forget so it NEVER blocks or throws the local kill (bounded by the
     // shared ConnectTimeout on an unreachable host).
-    if (session.remote) {
+    if (!admitted && session.remote) {
       try {
         const remoteKillCmd = buildRemoteKillCommand({ remote: session.remote, sessionId });
         exec(remoteKillCmd, { timeout: EXEC_TIMEOUT_MS }, () => {});
@@ -3029,7 +3054,7 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
     // ONLY this session's in-container tmux session (best-effort). The container is
     // PER-CASE and shared by the case's other sessions, so we deliberately do NOT
     // `docker stop` it here — stopping/removing is an explicit teardown/case-delete.
-    if (session.docker && !IS_TEST_MODE) {
+    if (!admitted && session.docker && !IS_TEST_MODE) {
       try {
         exec(buildDockerKillCommand({ docker: session.docker, sessionId }), { timeout: EXEC_TIMEOUT_MS }, () => {});
       } catch {
@@ -3037,6 +3062,7 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
       }
     }
 
+    assertCurrent();
     // Strategy 4: Direct kill by PID as final fallback (same verified process only)
     if (target && isSameProcess(target, readProcStat)) {
       try {
@@ -3048,8 +3074,19 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
 
     // Verify all processes are dead
     const allDead = await this.verifyProcessesDead(allPids, KILL_VERIFY_TIMEOUT_MS);
+    assertCurrent();
+    if (admitted && !allDead) throw new Error('Candidate cleanup required: original process exit was not confirmed');
     if (!allDead) {
       console.error(`[TmuxManager] Warning: Some processes may still be alive for session ${session.muxName}`);
+    }
+
+    if (admitted) {
+      // Signals above remain bound to the original process/startTime. Never
+      // follow them with a name-based kill that could destroy a respawned pane.
+      const observed = parseLivePane(await this.listPanesAsync(), session.muxName);
+      assertCurrent();
+      if (observed.state !== 'dead' && observed.state !== 'missing')
+        throw new Error('Candidate cleanup required: no authoritative pane death or absence was observed');
     }
 
     this.lastPaneCount.delete(session.muxName);

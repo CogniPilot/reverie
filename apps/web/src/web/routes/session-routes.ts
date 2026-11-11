@@ -1034,19 +1034,53 @@ export function registerSessionRoutes(
     console.error('[replacement_failed]', JSON.stringify(info));
     options.onReplacementFailed?.(info);
   };
+  class CandidateCleanupUnconfirmed extends Error {
+    #session: Session; #owner: string | undefined;
+    constructor(session: Session, owner: string | undefined, cause: unknown) {
+      super('Candidate cleanup required: ' + getErrorMessage(cause), {cause});
+      this.#session = session; this.#owner = owner;
+    }
+    static matches(error: unknown, session: Session, owner: string | undefined): error is CandidateCleanupUnconfirmed {
+      return error instanceof CandidateCleanupUnconfirmed && #session in error
+        && error.#session === session && error.#owner === owner;
+    }
+  }
   const retainUnconfirmedLaunch = (error: unknown, session: Session | undefined, claim: ThreadClaim,
-    identity?: {employeeId?: string; replacesSessionId?: string}) => {
-    if (!(error instanceof ProviderDispatchUnconfirmedError) || !session?.providerDispatchHeld) return undefined;
+    identity?: {employeeId?: string; replacesSessionId?: string}, owner?: string) => {
+    if (!session) return undefined;
+    const binding = options.company?.replacementPublicationRecovery(error, session, identity, owner);
+    const provider = error instanceof ProviderDispatchUnconfirmedError && session.providerDispatchHeld;
+    const cleanup = CandidateCleanupUnconfirmed.matches(error, session, owner);
+    if (!binding && !provider && !cleanup) return undefined;
     const replacementClaim = claim.retainUnconfirmed();
-    if (ctx.sessions.get(session.id) === session) ctx.persistSessionStateNow(session);
-    return {...createErrorResponse(ApiErrorCode.CONFLICT, error.message),
-      recoveryRequired: true, sessionId: session.id, replacementClaim,
+    const current = ctx.sessions.get(session.id) === session && session.owner === owner;
+    let persistenceUnconfirmed = false;
+    if (current) {
+      try { ctx.persistSessionStateNow(session); } catch { persistenceUnconfirmed = true; }
+    }
+    return {...createErrorResponse(ApiErrorCode.CONFLICT, binding
+      ? 'Employee binding publication is unconfirmed. Preserve this session and identity; do not replay the replacement.'
+      : (error as Error).message),
+      recoveryRequired: true, sessionId: binding?.sessionId ?? session.id, replacementClaim,
+      ...(binding ? { reason: binding.reason, sourceGeneration: binding.sourceGeneration } : cleanup ? {reason: 'candidate-cleanup-unconfirmed'} : {}),
+      ...(!current ? { retainedSession: 'ownership-lost' } : {}),
+      ...(persistenceUnconfirmed ? { sessionPersistence: 'unconfirmed' } : {}),
       ...(identity?.employeeId ? {employeeId: identity.employeeId} : {}),
       ...(identity?.replacesSessionId ? {replacesSessionId: identity.replacesSessionId} : {}),
       reconciliation: (replacementClaim === 'held' ? 'The original replacement claim is held in this process. '
         : replacementClaim === 'ownership-lost' ? 'Original replacement claim ownership is no longer current; newer claims were not changed. '
         : 'This launch has no employee or conversation claim. ')
-        + 'Persisted launch reconciliation after restart is not implemented; do not replay this launch.'};
+        + (cleanup ? 'Original candidate cleanup is not confirmed; preserve the original attempt and do not replay this replacement.'
+          : binding ? 'Canonical binding reconciliation is not implemented; do not replay this replacement.'
+          : 'Persisted launch reconciliation after restart is not implemented; do not replay this launch.')};
+  };
+  const cleanupOwnedCandidate = async (session: Session, owner: string | undefined, reason: string) => {
+    // A known refusal cannot authorize stopping a successor that reused this SID.
+    try {
+      if (ctx.sessions.get(session.id) !== session || session.owner !== owner)
+        throw new Error('original session identity changed');
+      await ctx.cleanupSession(session.id, true, reason, {session, owner});
+    } catch (cause) { throw new CandidateCleanupUnconfirmed(session, owner, cause); }
   };
   // A coordinator may continue a GONE agent's conversation in a room it coordinates (REVERIE_RESUME_TAKEOVER=owner turns
   // this off). Every conversation let through that way is written to the audit log before the session is created.
@@ -1601,10 +1635,11 @@ export function registerSessionRoutes(
             replacementIntent?.token
           );
         } catch (error) {
-          const retained = retainUnconfirmedLaunch(error, session, claim, spawnIdentity);
+          const retained = retainUnconfirmedLaunch(error, session, claim, spawnIdentity, ownerFor(req));
           if (retained) return retained;
           // The session is already running; without its rooms and record it would be an orphan under the employee's name.
-          await ctx.cleanupSession(session.id, true, 'spawn_failed').catch(() => {});
+          try { await cleanupOwnedCandidate(session, ownerFor(req), 'spawn_failed'); }
+          catch (cleanup) { return retainUnconfirmedLaunch(cleanup, session, claim, spawnIdentity, ownerFor(req)); }
           await replacementIntent?.rollback().catch(() => {});
           replacementFailed(spawnIdentity, claim, error);
           claim.release();
@@ -1635,7 +1670,7 @@ export function registerSessionRoutes(
         ...(resumeWarnings.length ? { warnings: resumeWarnings } : {}),
       };
     } catch (error) {
-      const retained = retainUnconfirmedLaunch(error, createdSession, claim, spawnIdentity);
+      const retained = retainUnconfirmedLaunch(error, createdSession, claim, spawnIdentity, ownerFor(req));
       if (retained) return retained;
       await replacementIntent?.rollback().catch(() => {});
       replacementFailed(spawnIdentity, claim, error);
@@ -5005,7 +5040,8 @@ export function registerSessionRoutes(
       await qsReplacementIntent?.claim();
     } catch (error) {
       qsReplacementIntent?.finish();
-      await ctx.cleanupSession(session.id, true, 'quick_start_error').catch(() => {});
+      try { await cleanupOwnedCandidate(session, ownerFor(req), 'quick_start_error'); }
+      catch (cleanup) { return retainUnconfirmedLaunch(cleanup, session, qsClaim, qsSpawnIdentity, ownerFor(req)); }
       replacementFailed(qsSpawnIdentity, qsClaim, error);
       qsClaim.release();
       return createErrorResponse(spawnRefusalCode(error), getErrorMessage(error));
@@ -5082,10 +5118,11 @@ export function registerSessionRoutes(
         ...(tabGroupId ? { tabLayout } : {}),
       };
     } catch (err) {
-      const retained = retainUnconfirmedLaunch(err, session, qsClaim, qsSpawnIdentity);
+      const retained = retainUnconfirmedLaunch(err, session, qsClaim, qsSpawnIdentity, ownerFor(req));
       if (retained) return retained;
       // Clean up session on error to prevent orphaned resources
-      await ctx.cleanupSession(session.id, true, 'quick_start_error');
+      try { await cleanupOwnedCandidate(session, ownerFor(req), 'quick_start_error'); }
+      catch (cleanup) { return retainUnconfirmedLaunch(cleanup, session, qsClaim, qsSpawnIdentity, ownerFor(req)); }
       await qsReplacementIntent?.rollback().catch(() => {});
       replacementFailed(qsSpawnIdentity, qsClaim, err);
       return createErrorResponse(
