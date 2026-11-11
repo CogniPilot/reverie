@@ -1,4 +1,5 @@
 use super::*;
+use crate::private_pending::{PendingError, PendingFile};
 use native::{PrivateFileStamp, private_goal};
 use sha2::{Digest, Sha256};
 use std::{
@@ -13,6 +14,7 @@ use std::{
 };
 
 const SOCKET: &str = "controller.sock";
+const RETIREMENT_PENDING: &str = "controller-retirement.pending";
 
 #[derive(Default)]
 pub(super) struct Namespace {
@@ -27,6 +29,18 @@ pub(super) struct Namespace {
 }
 
 impl Namespace {
+    pub(super) fn publish_retirement_pending(
+        &self,
+        policy: &WorkerPoolPolicy,
+        bytes: &[u8],
+    ) -> std::result::Result<PendingFile, PendingError> {
+        let root = self.root().try_clone()?;
+        let path = Path::new(&policy.instance_root)
+            .join("worker-pool")
+            .join(RETIREMENT_PENDING);
+        PendingFile::create(root, path, bytes, policy.broker_uid)
+    }
+
     pub(super) fn capture(&mut self, policy: &WorkerPoolPolicy, digest: &str) -> Result<()> {
         let root = Path::new(&policy.instance_root).join("worker-pool");
         reverie_store::storage_identity::canonical(&root)

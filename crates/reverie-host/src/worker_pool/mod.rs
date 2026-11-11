@@ -32,7 +32,11 @@ mod member_policy;
 mod namespace;
 mod policy;
 mod predecessor;
-pub use predecessor::{PoolPredecessorError, PoolPredecessorFailure, PreparedPoolPredecessor};
+pub use predecessor::{
+    PendingPoolPredecessorRetirement, PoolPredecessorError, PoolPredecessorFailure,
+    PoolPredecessorRetirementFailure, PoolPredecessorRetirementPhase, PreparedPoolPredecessor,
+    RenamedPoolPredecessor,
+};
 mod publication;
 mod service;
 mod target_observation;

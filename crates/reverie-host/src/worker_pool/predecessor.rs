@@ -22,6 +22,11 @@ use std::{path::Path, time::Instant};
 mod anchor;
 mod engine;
 mod namespace;
+mod retirement;
+pub use retirement::{
+    PendingPoolPredecessorRetirement, PoolPredecessorRetirementFailure,
+    PoolPredecessorRetirementPhase, RenamedPoolPredecessor,
+};
 
 #[derive(Debug)]
 pub enum PoolPredecessorError {
@@ -184,7 +189,7 @@ impl PreparedPoolPredecessor {
         self.namespace.capture(policy, original.digest.as_str())?;
         let service_birth = self.namespace.birth();
         let birth = service_birth.identity();
-        engine::assert_inactive(birth.broker().pid(), &original.id)?;
+        engine::assert_inactive(birth.broker().pid(), birth.broker().start(), &original.id)?;
         bootstrap::assert_predecessor_source(birth, self.service.source())?;
         let identity = self
             .immutable
@@ -221,33 +226,46 @@ impl PreparedPoolPredecessor {
     }
 
     fn check_current(&mut self) -> Checked<()> {
+        self.check_current_name(None)
+    }
+
+    fn check_current_name(&mut self, retired: Option<&str>) -> Checked<()> {
         self.fences()?;
         self.assert_source_current()?;
         let original = self.controller();
         let birth = self.namespace.birth().identity();
-        engine::assert_inactive(birth.broker().pid(), &original.id)?;
-        let current = engine::Controller::observe(birth.policy(), &self.engine)?;
-        need(
-            original.id == current.id
-                && original.digest == current.digest
-                && RecoveryInspection::same_container_object_inspection(
-                    original.id.as_str(),
-                    &original.raw,
-                    &current.raw,
-                )
-                .map_err(|_| PoolError::Refused("WORKER_POOL_PREDECESSOR_INSPECTION"))?,
-            "WORKER_POOL_PREDECESSOR_CONTROLLER_CHANGED",
-        )?;
+        engine::assert_inactive(birth.broker().pid(), birth.broker().start(), &original.id)?;
+        if let Some(retired) = retired {
+            original.assert_renamed(&self.engine, &birth.policy().controller_name(), retired)?;
+        } else {
+            self.assert_original_controller(birth.policy())?;
+        }
         self.anchor
             .as_ref()
             .expect("observed anchor")
             .assert_current(&self.engine, birth.policy())?;
-        engine::assert_inactive(birth.broker().pid(), &original.id)?;
+        engine::assert_inactive(birth.broker().pid(), birth.broker().start(), &original.id)?;
         self.namespace
             .assert_current(birth.policy(), original.digest.as_str())?;
         self.fences()?;
         self.assert_source_current()?;
         self.time().map_err(Into::into)
+    }
+
+    fn assert_original_controller(&self, policy: &WorkerPoolPolicy) -> Result<()> {
+        let original = self.controller();
+        let current = engine::Controller::observe(policy, &self.engine)?;
+        need(
+            original.id == current.id && original.digest == current.digest,
+            "WORKER_POOL_PREDECESSOR_CONTROLLER_CHANGED",
+        )?;
+        let same = RecoveryInspection::same_container_object_inspection(
+            original.id.as_str(),
+            &original.raw,
+            &current.raw,
+        )
+        .map_err(|_| PoolError::Refused("WORKER_POOL_PREDECESSOR_INSPECTION"))?;
+        need(same, "WORKER_POOL_PREDECESSOR_CONTROLLER_CHANGED")
     }
 
     fn fences(&mut self) -> Checked<()> {
