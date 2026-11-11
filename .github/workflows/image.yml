@@ -252,7 +252,7 @@ jobs:
   worker-browser:
     needs: image
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 60
     permissions:
       contents: read
     steps:
@@ -291,11 +291,30 @@ jobs:
             --project integration-workers --repo "$PWD" --expect 2G --disk 1G --jobs 1 \
             -- python3 .github/ci/worker-isolation-smoke.py --image "$(cat "$RUNNER_TEMP/tested-image-id")" \
             2>&1 | tee acceptance/worker-smoke.log
+      - name: Qualify the actual packaged native viewer without restarting a provider
+        env:
+          CARGO_TARGET_DIR: ${{ runner.temp }}/reverie-viewer-target
+        run: |
+          set -euo pipefail
+          nix build .#nativeWorkerViewerImage --out-link "$RUNNER_TEMP/native-viewer-image" --print-build-logs
+          docker load --input "$RUNNER_TEMP/native-viewer-image"
+          viewer_image=$(docker image inspect --format '{{.Id}}' reverie-worker-viewer:native-v1)
+          # The test rejects mutable tags and verifies both loaded image IDs.
+          # All workers, mounts and engine mutations belong to its fresh fixture.
+          nix develop --command env \
+            REVERIE_VIEWER_DOCKER_FIXTURE=1 \
+            REVERIE_VIEWER_TEST_WORKER_IMAGE="$(cat "$RUNNER_TEMP/tested-image-id")" \
+            REVERIE_VIEWER_TEST_SERVICE_IMAGE="$viewer_image" \
+            cargo test -p reverie-host worker_viewer::tests::docker \
+              -- --ignored --nocapture --test-threads=1 \
+            2>&1 | tee acceptance/native-viewer.log
       - name: Build the sandboxed browser and exercise synthetic office controls
         run: |
           set -euo pipefail
           nix build .#browserRuntime --out-link "$RUNNER_TEMP/browser-runtime" --print-build-logs
           nix develop --command npm ci --prefix apps/web --ignore-scripts
+          nix develop --command node apps/web/scripts/fix-node-pty.mjs
+          nix develop --command node apps/web/scripts/prepare-test-vendor.mjs
           export REVERIE_BROWSER_EXECUTABLE="$RUNNER_TEMP/browser-runtime/bin/chromium"
           export REVERIE_BROWSER_ARTIFACTS="$PWD/acceptance/browser"
           df -h /
@@ -307,9 +326,11 @@ jobs:
           # Every response comes from synthetic fixtures on an ephemeral port.
           PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH="$REVERIE_BROWSER_EXECUTABLE" \
             TEST_RESOURCE_SCREENSHOT_DIR="$REVERIE_BROWSER_ARTIFACTS/resources" \
+            TEST_OFFICE_SCREENSHOT_DIR="$REVERIE_BROWSER_ARTIFACTS/office" \
             nix develop --command node apps/web/node_modules/vitest/vitest.mjs run \
               --config apps/web/config/vitest.browser.config.ts \
               apps/web/test/company-resource-layout.browser.test.ts \
+              apps/web/test/office-server.browser.test.ts \
             2>&1 | tee acceptance/resource-layout.log
           printf 'Worker and browser acceptance completed for %s\n' "$(cat "$RUNNER_TEMP/tested-image-id")" > acceptance/PASS.txt
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

@@ -67,6 +67,11 @@ let
       export NIX_TEST_FILE_WORKERS=2
       # Refuse missing or duplicate registrations before the longer test batches.
       npm test -- test/test-suite-partition.test.ts
+      npm test -- test/company-employee-resources-ui.test.ts test/resource-employee-data.test.ts \
+        test/resource-employee-service.test.ts test/resource-fleet-operation.test.ts \
+        test/resource-fleet-native-failure-client.test.ts test/resource-fleet-codec-upgrade.test.ts \
+        test/native-owner-channel.test.ts test/prepare-test-vendor.test.ts test/capture-claude-launch.test.ts \
+        test/control-behavior-inventory.test.ts
       npm test -- test/fixed-resume-message.test.ts test/recovery-authority.test.ts \
         test/recovery-transaction.test.ts test/recovery-operation-clock.test.ts test/recovery-ledger-client.test.ts \
         test/rest-canonical-metadata.test.ts \

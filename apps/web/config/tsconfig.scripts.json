@@ -7,5 +7,5 @@
     "declarationMap": false,
     "sourceMap": false
   },
-  "include": ["../scripts/test-local-llm-harnesses.ts"]
+  "include": ["../scripts/test-local-llm-harnesses.ts", "../scripts/control-behavior-inventory.ts"]
 }
