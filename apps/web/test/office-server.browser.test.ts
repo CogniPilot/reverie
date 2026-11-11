@@ -5,6 +5,7 @@ import { randomBytes } from 'node:crypto';
 import { expect, it } from 'vitest';
 import { chromium, type Browser, type BrowserContext, type Page } from 'playwright';
 import { createIsolatedOffice } from './helpers/isolated-office.js';
+import { contextFor, signedIn, json, claimOwner, observeOffice, paint } from './helpers/office-browser.js';
 
 const artifacts = process.env.TEST_OFFICE_SCREENSHOT_DIR;
 const executablePath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH;
@@ -24,32 +25,6 @@ type Control = {
 type Screen = { page: string; state: string; viewport: string; controls: Control[]; overflow: boolean };
 const keyFor = (page: string, state: string, viewport: string, role: string, label: string) =>
   JSON.stringify([page, state, viewport, 'main', role, label]);
-const forbidden = (method: string, path: string) =>
-  method !== 'GET' &&
-  method !== 'HEAD' &&
-  (/^\/api\/(?:sessions|model-endpoints|subscription-profiles|worker|system\/(?:shutdown|stop|restart))/.test(path) ||
-    /^\/api\/company\/employees(?:\/[^/]+\/(?:wake|vacation|restart|retire|restore|session|invite|reconnect))?$/.test(
-      path
-    ) ||
-    /^\/api\/company\/(?:hire|resources)/.test(path));
-
-async function contextFor(context: BrowserContext, origin: string, blocked: string[]) {
-  await context.routeWebSocket('**/*', (socket) => {
-    blocked.push(`WEBSOCKET ${new URL(socket.url()).pathname}`);
-    socket.close({ code: 1008, reason: 'This no-worker fixture permits no runtime sockets' });
-  });
-  await context.route('**/*', async (route) => {
-    const request = route.request(),
-      url = new URL(request.url());
-    if (url.protocol === 'data:' || url.protocol === 'blob:') return route.continue();
-    if (url.origin !== origin || forbidden(request.method(), url.pathname)) {
-      blocked.push(`${request.method()} ${url.origin === origin ? url.pathname : 'external-origin'}`);
-      return route.abort('blockedbyclient');
-    }
-    return route.continue();
-  });
-}
-
 async function record(
   page: Page,
   screen: string,
@@ -137,19 +112,10 @@ async function record(
   inventory.push({ page: screen, state, viewport, controls, overflow });
   if (artifacts) {
     await mkdir(artifacts, { recursive: true });
+    await paint(page);
     await page.screenshot({ path: join(artifacts, `${viewport}-${screen}-${state}.png`) });
   }
   expect(overflow, `${screen}/${state}/${viewport} horizontal overflow`).toBe(false);
-}
-
-async function signedIn(page: Page, origin: string, username: string, password: string, inspect: () => Promise<void>) {
-  await page.goto(origin + '/owner/login');
-  expect((await page.request.get(origin + '/api/status')).status()).toBe(401);
-  await inspect();
-  await page.getByLabel('Username', { exact: true }).fill(username);
-  await page.getByLabel('Password', { exact: true }).fill(password);
-  await page.getByRole('button', { name: 'Sign in', exact: true }).click();
-  await page.waitForFunction(() => !!(window as any).reverieChat?.built);
 }
 
 async function openPrimary(page: Page, kind: string) {
@@ -172,21 +138,6 @@ async function openPrimary(page: Page, kind: string) {
       await page.frameLocator(selector).locator('body').waitFor();
     }
   }
-}
-
-async function json(page: Page, path: string, method = 'GET', body?: unknown): Promise<any> {
-  return page.evaluate(
-    async ({ path, method, body }) => {
-      const response = await fetch(path, {
-        method,
-        ...(body === undefined ? {} : { headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }),
-      });
-      const parsed = await response.json();
-      if (!response.ok) throw new Error(`Fixture API request failed: ${method} ${path} (${response.status})`);
-      return parsed?.success === true ? parsed.data : parsed;
-    },
-    { path, method, body }
-  );
 }
 
 it('inventories real owner screens and converges GUI/API state without starting an employee', async () => {
@@ -224,21 +175,12 @@ it('inventories real owner screens and converges GUI/API state without starting 
     await contextFor(setup, origin, blocked);
     const page = await setup.newPage();
     observe(page);
-    await page.goto(origin + '/owner/setup');
-    await record(page, 'owner', 'first-run', 'desktop', inventory, exercised);
-    await page.getByLabel('Username', { exact: true }).fill(username);
-    await page.getByLabel('Password', { exact: true }).fill(password);
-    await page.getByLabel('Confirm password', { exact: true }).fill(password);
-    await page.getByRole('button', { name: 'Create account', exact: true }).click();
+    await observeOffice(page);
+    await claimOwner(page, origin, username, password, (stage) =>
+      record(page, 'owner', stage, 'desktop', inventory, exercised)
+    );
     mark('owner', 'first-run', 'desktop', 'button', 'Create account');
-    await page.waitForFunction(() => !!(window as any).reverieChat?.built);
-    const namePrompt = page.getByRole('dialog', { name: 'Your name', exact: true });
-    await namePrompt.waitFor();
-    await record(page, 'owner', 'display-name', 'desktop', inventory, exercised);
-    await namePrompt.getByLabel('Your name', { exact: true }).fill('Synthetic owner');
-    await namePrompt.getByRole('button', { name: 'Save', exact: true }).click();
     mark('owner', 'display-name', 'desktop', 'button', 'Save');
-    await namePrompt.waitFor({ state: 'hidden' });
     expect(await json(page, '/api/sessions')).toEqual([]);
     await page.evaluate(() => (window as any).reverieChat.openCompany('people'));
     await record(page, 'company', 'empty-people', 'desktop', inventory, exercised);
@@ -260,6 +202,7 @@ it('inventories real owner screens and converges GUI/API state without starting 
       await contextFor(context, origin, blocked);
       const p = await context.newPage();
       observe(p);
+      await observeOffice(p);
       await signedIn(p, origin, username, password, () =>
         record(p, 'owner', 'login', viewport.name, inventory, exercised)
       );
@@ -333,7 +276,7 @@ it('inventories real owner screens and converges GUI/API state without starting 
         await expect
           .poll(
             async () =>
-              (await json(p, '/api/company')).employees.find((entry: { id: string }) => entry.id === employee.id)
+              (await json(p, '/api/company')).employees.find((entry: { id: string }) => entry.id === employee.id)!
                 .permissions.recoverEmployees
           )
           .toBe(false);
