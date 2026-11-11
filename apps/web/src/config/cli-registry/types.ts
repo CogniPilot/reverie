@@ -11,7 +11,12 @@
  */
 
 import type { TokenPattern } from './patterns.js';
-import type { AccountReplacementProfileName, StartupAccountProfileName, ThreadStateProfileName } from './profiles.js';
+import type {
+  AccountReplacementProfileName,
+  LaunchEffortInputName,
+  StartupAccountProfileName,
+  ThreadStateProfileName,
+} from './profiles.js';
 
 /**
  * A CLI identifier. Branded so an arbitrary string cannot be passed where a validated id is
@@ -135,6 +140,8 @@ export interface CliLaunch {
   resumeSelection?: 'claude-transcript';
   /** Native identifier/config representation, independent of restore eligibility. */
   threadStateProfile?: ThreadStateProfileName;
+  /** Session-level effort codec; requires the shipped engine binding, never inferred from an id. */
+  effortInput?: LaunchEffortInputName;
   variants: CliVariant[];
   /**
    * Maps a declared param name to the field name it arrives under on the legacy
@@ -361,6 +368,8 @@ export interface FullAccessDefaults {
 }
 
 export interface CliCapabilities {
+  /** Presentation preference among enabled harnesses with supported local-model injection. */
+  localModelPreference?: 'preferred';
   /** Explicit reboot offer policy; never inferred from a transcript reader or resume argument. */
   rebootRestore?: 'native-required' | 'native-or-new' | 'persistent-record';
   /** Shipped local account config codec; requires actual resolved stock protocol provenance. */

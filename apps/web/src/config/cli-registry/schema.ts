@@ -14,7 +14,15 @@
 
 import { z } from 'zod';
 import { compileVersionRegex, countCaptureGroups, TOKEN_PATTERNS } from './patterns.js';
-import { ACCOUNT_REPLACEMENT_PROFILE_NAMES, STARTUP_ACCOUNT_PROFILE_NAMES, THREAD_STATE_PROFILE_NAMES, THREAD_STATE_BINDINGS, isKnownLauncherProfile, isKnownSetenvProfile } from './profiles.js';
+import {
+  ACCOUNT_REPLACEMENT_PROFILE_NAMES,
+  LAUNCH_EFFORT_INPUT_NAMES,
+  STARTUP_ACCOUNT_PROFILE_NAMES,
+  THREAD_STATE_PROFILE_NAMES,
+  THREAD_STATE_BINDINGS,
+  isKnownLauncherProfile,
+  isKnownSetenvProfile,
+} from './profiles.js';
 import type { AgentSkillDir, LaunchDefaultSettingKey, McpConfigFormat, ModelConfigResolverName } from './types.js';
 
 /** `capabilities.agentSkillDir`: every value must stay a fixed, relative, `..`-free path. */
@@ -113,6 +121,7 @@ const launchSchema = z
     chain: z.enum(['first', 'fallback']).optional(),
     resumeSelection: z.literal('claude-transcript').optional(),
     threadStateProfile: z.enum(THREAD_STATE_PROFILE_NAMES).optional(),
+    effortInput: z.enum(LAUNCH_EFFORT_INPUT_NAMES).optional(),
     variants: z.array(variantSchema).min(1).max(4),
     legacyConfigAliases: z.record(z.string(), z.string()).optional(),
     legacyConfigField: z.string().min(1).max(40).optional(),
@@ -125,6 +134,20 @@ const launchSchema = z
   })
   .strict()
   .superRefine((launch, ctx) => {
+    if (
+      launch.effortInput &&
+      (launch.legacyConfigField !== undefined ||
+        launch.params.effortLevel?.type !== 'engine' ||
+        launch.params.effortLevel.source !== 'effortLevel' ||
+        launch.params.effortJson?.type !== 'engine' ||
+        launch.params.effortJson.source !== 'effortSettingsJson')
+    ) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'Session effort codec disagrees with declared engine/config binding',
+        path: ['effortInput'],
+      });
+    }
     if (launch.threadStateProfile) {
       const binding = THREAD_STATE_BINDINGS[launch.threadStateProfile];
       const field = 'field' in binding ? binding.field : undefined;
@@ -351,6 +374,7 @@ const capabilitiesSchema = z
     ralph: z.boolean(),
     respawn: z.boolean(),
     effort: z.boolean(),
+    localModelPreference: z.literal('preferred').optional(),
     agentSkillInjection: z.boolean(),
     // A closed list on purpose: it decides where the server WRITES, and this file is
     // user-editable, so it can never be a free path (`..`, absolute).

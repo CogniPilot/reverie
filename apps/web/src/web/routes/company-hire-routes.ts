@@ -7,7 +7,7 @@ import { employeeCaseName, employeeNamesConflict } from '../../company-names.js'
 import { EmployeeSchema } from '../../company-types.js';
 import { COMPANY_ROLE_TEMPLATES } from '../../company-role-templates.js';
 import { getCli, listClis } from '../../config/cli-registry/registry.js';
-import { EFFORT_LEVELS } from '../../types/session.js';
+import { hireEffortInput, preferredLocalModelHarness } from '../../utils/hire-launch-selection.js';
 import { ModelIdSchema, sessionCreateBody } from '../../experts.js';
 import { subscriptionBinding, type SubscriptionProfile } from '../../subscription-profiles.js';
 import type { CustomModelHost } from '../../custom-model-hosts.js';
@@ -41,13 +41,7 @@ const HireSchema = EmployeeSchema.pick({
   .strict();
 
 export function hireEffort(mode: string): { values: readonly string[]; field?: string } {
-  const entry = getCli(mode);
-  if (mode === 'claude') return { values: EFFORT_LEVELS };
-  for (const name of ['reasoningEffort', 'thinking', 'effort']) {
-    const param = entry?.launch.params?.[name];
-    if (param?.type === 'enum') return { values: param.values, field: name };
-  }
-  return { values: [] };
+  return hireEffortInput(mode);
 }
 
 export interface CompanyHireDeps {
@@ -84,8 +78,7 @@ export function registerCompanyHireRoutes(app: FastifyInstance, deps: CompanyHir
       const harnesses = listClis().filter((c) => c.enabled && c.kind === 'agent');
       const [profiles, endpoints] = await Promise.all([deps.profiles(), deps.endpoints()]);
       const localHarnesses = harnesses.filter((c) => c.capabilities.customModelInjection.kind !== 'unsupported');
-      const localDefault =
-        localHarnesses.find((c) => c.id === 'opencode') ?? localHarnesses.find((c) => !c.stock) ?? localHarnesses[0];
+      const localDefault = preferredLocalModelHarness(localHarnesses);
       return {
         roles: COMPANY_ROLE_TEMPLATES,
         harnesses: harnesses.map((c) => ({ id: c.id, label: c.label, efforts: hireEffort(c.id).values })),

@@ -134,6 +134,7 @@ const CLAUDE: CliEntry = {
     chain: 'fallback',
     resumeSelection: 'claude-transcript',
     threadStateProfile: 'conversation-chain-v1',
+    effortInput: 'session-effort-v1',
     params: {
       claudeMode: {
         type: 'enum',
@@ -586,6 +587,7 @@ const OPENCODE: CliEntry = {
     // own `env.configContentVar` already declares — the builder in custom-model-injection.ts
     // must merge into whatever opencode config Reverie would otherwise send, not clobber it.
     customModelInjection: { kind: 'configContentEnv', envVar: 'OPENCODE_CONFIG_CONTENT', template: 'opencode-json' },
+    localModelPreference: 'preferred',
     // OPENCODE_CONFIG_CONTENT already matches the OPENCODE_ allowedPrefix above, so it was
     // ALREADY reachable via plain envOverrides before this feature existed — it replaces
     // opencode's whole config, provider api keys included, so a non-granted multi-user owner
