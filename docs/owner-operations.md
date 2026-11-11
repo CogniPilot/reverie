@@ -75,3 +75,38 @@ Template hires recheck the same admission predicate, original Session object and
 owner inside the canonical company-store lock and again before employee-record
 publication. Room invitations are awaited and any failure is observed before
 startup; they do not trigger deletion of the published identity.
+
+## Unconfirmed provider dispatch and held approvals
+
+Mandatory workspace-hook preparation must finish before a provider launch. A
+successful file write is configuration evidence, not provider readiness. The
+local process adapter reports a separate dispatch boundary; a positive PID
+without that boundary does not prove a successful launch. If dispatch may have
+occurred but completion cannot be confirmed, the Session retains its attempted
+configuration and exposes `providerDispatchHeld: true` in its state. That field
+is a persisted denial, not a capability: omitting it or sending `false` cannot
+clear the private hold on an existing Session. Automatic retries and ordinary
+input are refused. Read-only viewer attachment remains separate.
+
+The original employee/conversation launch reservation becomes nonexpiring while
+dispatch is in progress or unconfirmed. A predecessor cannot release a newer
+reservation. These reservations currently live in the console process; durable
+before-dispatch journaling and crash reconciliation are still required. Inspect
+the existing terminal and preserve the original Session identity. There is no
+supported same-Session API to clear this hold. Restarting the console is not
+proof that the original provider stopped and does not authorize replay.
+
+`GET /api/approvals` and approval SSE events project `answerState: current` or
+`answerState: held`, with a diagnostic `heldReason`. The server binds answer
+authority to the original Session, provider epoch and owner account; the GUI
+does not grant that authority. An answer that may have reached the terminal
+stays held rather than being automatically resent. Human clients retain their
+draft and disable answer buttons; API clients must inspect the conflict and
+wait for a genuinely current prompt. Refreshing an inbox cannot certify an
+unconfirmed answer as safe to repeat.
+
+Fresh native-worker generation/configuration transport is not qualified by the
+local process adapter tests or by Office header-forwarding tests. Native
+enrollment, durable launch reconciliation and uncertain canonical replacement
+publication remain release blockers. Do not deploy this partial qualification
+as proof of complete native employee recovery.
