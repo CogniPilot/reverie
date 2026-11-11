@@ -30,6 +30,9 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { basename } from 'node:path';
 import { getCli } from './config/cli-registry/registry.js';
+import {startupAccountProfile,stockFullAccessDefaults} from './utils/startup-account-profile.js';
+import {fullAccessConfigDefaults} from './cli-startup-policy.js';
+export {SELECTED_ACCOUNT_BYPASS_FLAG as CLAUDE_BYPASS_FLAG} from './cli-startup-policy.js';
 import type { ClaudeMode } from './types/session.js';
 import { canUsernameRunPrivilegedCommands } from './user-store.js';
 import { envValue } from './config/reverie-env.js';
@@ -49,22 +52,6 @@ export function fullAccessKeys(mode: string): string[] {
     .map(({ param }) => aliases[param] ?? param);
 }
 
-/** Bypass switches kept outside `privilegedParams`, by mode (see the file comment). */
-const EXTRA_FULL_ACCESS_KEYS: Record<string, string[]> = { opencode: ['autoAllowTools'] };
-const EXTRA_FULL_ACCESS_VALUES: Record<string, Record<string, string>> = { deepseek: { permissionMode: 'danger-full-access' } };
-
-/** An opencode `configContent` that sets its own `permission`: the owner chose a policy, so it is not replaced. */
-function ownsPermission(config: Record<string, unknown> | undefined): boolean {
-  const content = config?.configContent;
-  if (typeof content !== 'string') return false;
-  try {
-    const parsed = JSON.parse(content) as unknown;
-    return typeof parsed === 'object' && parsed !== null && 'permission' in parsed;
-  } catch {
-    return false;
-  }
-}
-
 /**
  * `config` with every unset bypass switch of `mode` turned on, or `undefined` when nothing
  * changes (not in the container, the owner is not granted, the CLI has no switch, or every
@@ -78,16 +65,12 @@ export async function withFullAccessDefault<T extends object>(
 ): Promise<T | undefined> {
   if (!fullAccessByDefault(env)) return undefined;
   const values = config as Record<string, unknown> | undefined;
-  const extra = ownsPermission(values) ? [] : (EXTRA_FULL_ACCESS_KEYS[mode] ?? []);
-  const keys = [...fullAccessKeys(mode), ...extra].filter((key) => values?.[key] === undefined);
-  const enumDefaults = Object.fromEntries(Object.entries(EXTRA_FULL_ACCESS_VALUES[mode] ?? {}).filter(([key]) => values?.[key] === undefined));
-  if (keys.length === 0 && Object.keys(enumDefaults).length === 0) return undefined;
+  const extraDefaults = fullAccessConfigDefaults(stockFullAccessDefaults(mode), values);
+  const keys = fullAccessKeys(mode).filter((key) => values?.[key] === undefined);
+  if (keys.length === 0 && Object.keys(extraDefaults).length === 0) return undefined;
   if (!(await canUsernameRunPrivilegedCommands(owner))) return undefined;
-  return { ...(config ?? {}), ...Object.fromEntries(keys.map((key) => [key, true])), ...enumDefaults } as T;
+  return { ...(config ?? {}), ...Object.fromEntries(keys.map((key) => [key, true])), ...extraDefaults } as T;
 }
-
-/** claude's bypass flag, which tmux-manager builds from `claudeMode` rather than the registry. */
-export const CLAUDE_BYPASS_FLAG = '--dangerously-skip-permissions';
 
 /**
  * The registry flags that must appear on the launched command line for `mode`'s bypass switches.
@@ -95,7 +78,8 @@ export const CLAUDE_BYPASS_FLAG = '--dangerously-skip-permissions';
  * (the session's resolved mode) expects the bypass flag only when it is the bypass mode.
  */
 export function fullAccessFlags(mode: string, config?: object, claudeMode?: ClaudeMode): string[] {
-  if (mode === 'claude') return claudeMode === 'dangerously-skip-permissions' ? [CLAUDE_BYPASS_FLAG] : [];
+  const expected = startupAccountProfile(mode)?.bypassFlags;
+  if (expected) return expected(claudeMode);
   const entry = getCli(mode);
   if (!entry) return [];
   const aliases = entry.launch.legacyConfigAliases ?? {};

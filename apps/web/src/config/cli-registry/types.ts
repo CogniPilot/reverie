@@ -11,7 +11,7 @@
  */
 
 import type { TokenPattern } from './patterns.js';
-import type { AccountReplacementProfileName } from './profiles.js';
+import type { AccountReplacementProfileName, StartupAccountProfileName } from './profiles.js';
 
 /**
  * A CLI identifier. Branded so an arbitrary string cannot be passed where a validated id is
@@ -352,7 +352,17 @@ export type WorkspaceHookPolicy = 'install' | 'refresh-only' | 'none';
 export type WorkspaceHookPhase = 'sessionCreate' | 'freshCase' | 'existingCase';
 export type WorkspaceHookProfile = Record<WorkspaceHookPhase, WorkspaceHookPolicy>;
 
+export interface FullAccessDefaults {
+  values: Record<string, boolean | string>;
+  /** An explicit owner policy in this JSON config field suppresses these defaults. */
+  unlessJsonProperty?: {configField: string; property: string};
+}
+
 export interface CliCapabilities {
+  /** Shipped local account config codec; requires actual resolved stock protocol provenance. */
+  startupAccountProfile?: StartupAccountProfileName;
+  /** Extra stock config defaults not represented by a boolean privileged launch param. */
+  fullAccessDefaults?: FullAccessDefaults;
   /** A shipped protocol implementation, usable only with canonical resolved stock provenance. */
   accountReplacementProfile?: AccountReplacementProfileName;
   /** Stock explanation when an account replacement adapter is unavailable. */

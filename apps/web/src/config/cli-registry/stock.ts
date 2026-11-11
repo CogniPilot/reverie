@@ -233,6 +233,7 @@ const CLAUDE: CliEntry = {
   capabilities: {
     external: false,
     accountReplacementProfile: 'anthropic-account-v1',
+    startupAccountProfile: 'anthropic-local-account-v1',
     // Claude indents its transcript body two columns and puts its own ●/✻/❯ markers
     // in them, so a copy can drop two and paste flush. Claude and codex are the only
     // entries that declare this, because theirs are the only gutters that have been measured.
@@ -548,6 +549,7 @@ const OPENCODE: CliEntry = {
     // closing bar), never the prompt text, so the submit verifier stands down.
     composerReadyMark: 'tab agents',
     accountReplacementRefusal: 'OpenCode thread moves require a launch-then-stop adapter and are not supported yet',
+    fullAccessDefaults: {values: {autoAllowTools: true}, unlessJsonProperty: {configField: 'configContent', property: 'permission'}},
     workDetect: {
       promptGlyph: '┃',
       workingLine: '[⬝■]{8}',
@@ -703,6 +705,7 @@ const CODEX: CliEntry = {
     // match until codex pins one.
     composerReadyMark: '? for shortcuts',
     accountReplacementProfile: 'openai-account-v1',
+    startupAccountProfile: 'openai-local-account-v1',
     workDetect: {
       promptGlyph: '›',
       workingLine: '[Ee]sc to interrupt',
@@ -1441,6 +1444,7 @@ const DEEPSEEK: CliEntry = {
     // launcher's own default, `workspace-write`, which already asks. Clamping to
     // `read-only` instead would break the workspace rather than protect it.
     privilegedParams: [{ param: 'permissionMode', clampTo: 'workspace-write' }],
+    fullAccessDefaults: {values: {permissionMode: 'danger-full-access'}},
     // The half no other CLI needs. `DSH_*` is an allowlisted envOverrides prefix and
     // applyEnvOverrides() runs LAST, so without this a non-granted owner could send
     // DSH_PERMISSION_MODE on the same request and land after the config clamp.

@@ -14,7 +14,7 @@
 
 import { z } from 'zod';
 import { compileVersionRegex, countCaptureGroups, TOKEN_PATTERNS } from './patterns.js';
-import { ACCOUNT_REPLACEMENT_PROFILE_NAMES, isKnownLauncherProfile, isKnownSetenvProfile } from './profiles.js';
+import { ACCOUNT_REPLACEMENT_PROFILE_NAMES, STARTUP_ACCOUNT_PROFILE_NAMES, isKnownLauncherProfile, isKnownSetenvProfile } from './profiles.js';
 import type { AgentSkillDir, LaunchDefaultSettingKey, McpConfigFormat, ModelConfigResolverName } from './types.js';
 
 /** `capabilities.agentSkillDir`: every value must stay a fixed, relative, `..`-free path. */
@@ -296,9 +296,17 @@ const launchModelTemplate = z
   .optional();
 
 const workspaceHookPolicySchema = z.enum(['install', 'refresh-only', 'none']);
+const configProperty = z.string().regex(/^[A-Za-z][A-Za-z0-9_]{0,63}$/)
+  .refine(value => !['constructor', 'prototype'].includes(value), 'Unsafe config property');
 
 const capabilitiesSchema = z
   .object({
+    startupAccountProfile: z.enum(STARTUP_ACCOUNT_PROFILE_NAMES).optional(),
+    fullAccessDefaults: z.object({
+      values: z.record(configProperty, z.union([z.boolean(), z.string().min(1).max(120)]))
+        .refine(value => Object.keys(value).length >= 1 && Object.keys(value).length <= 8, 'Expected 1 to 8 defaults'),
+      unlessJsonProperty: z.object({configField: configProperty, property: configProperty}).strict().optional(),
+    }).strict().optional(),
     accountReplacementProfile: z.enum(ACCOUNT_REPLACEMENT_PROFILE_NAMES).optional(),
     accountReplacementRefusal: z.string().min(1).max(240).optional(),
     chatDelivery: z.literal('poll').optional(),
@@ -687,6 +695,9 @@ export const CliEntrySchema = z
     // `legacyConfigField` the entry's params are read off the request body itself, where a
     // filled `model` would be a different field (claude's per-session one), so refuse it.
     const { launchDefaults } = entry.capabilities;
+    if (entry.capabilities.fullAccessDefaults && !entry.launch.legacyConfigField) {
+      ctx.addIssue({code:'custom',message:'fullAccessDefaults needs launch.legacyConfigField',path:['capabilities','fullAccessDefaults']});
+    }
     if (launchDefaults !== undefined) {
       if (entry.launch.legacyConfigField === undefined) {
         ctx.addIssue({

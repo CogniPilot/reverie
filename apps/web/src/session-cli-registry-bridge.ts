@@ -25,7 +25,7 @@ import { compareVersions } from './utils/dependency-checker.js';
 import { getClaudeCliVersion } from './utils/claude-cli-resolver.js';
 import { launcherDefaultTarget } from './utils/cli-launcher.js';
 import { getCli } from './config/cli-registry/registry.js';
-import { codexTrustArgument } from './managed-codex-trust.js';
+import {startupAccountProfileForEntry} from './utils/startup-account-profile.js';
 import type {
   AntigravityConfig,
   ClaudeMode,
@@ -237,8 +237,9 @@ export function buildSpawnCommandFromRegistry(entry: CliEntry, options: SpawnBri
   );
 
   const command = renderLaunch(entry.launch, params, engineValues, gatesPassed);
-  return entry.id === 'codex' && options.codexTrustWorkspace
-    ? `${command} --config ${codexTrustArgument(options.codexTrustWorkspace)}` +
+  const trust = options.codexTrustWorkspace && startupAccountProfileForEntry(entry)?.workspaceTrustArgument;
+  return trust
+    ? `${command} --config ${trust(options.codexTrustWorkspace!)}` +
       (options.codexHookTrust ? ` --config ${options.codexHookTrust}` : '')
     : command;
 }

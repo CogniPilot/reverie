@@ -81,6 +81,10 @@ export type SetenvProfileName = (typeof SETENV_PROFILE_NAMES)[number];
 export const ACCOUNT_REPLACEMENT_PROFILE_NAMES = ['anthropic-account-v1', 'openai-account-v1'] as const;
 export type AccountReplacementProfileName = (typeof ACCOUNT_REPLACEMENT_PROFILE_NAMES)[number];
 
+/** Local selected-account file/argument protocols, independent of transcript and replacement support. */
+export const STARTUP_ACCOUNT_PROFILE_NAMES = ['anthropic-local-account-v1', 'openai-local-account-v1'] as const;
+export type StartupAccountProfileName = (typeof STARTUP_ACCOUNT_PROFILE_NAMES)[number];
+
 /**
  * Transcript readers, selected via `capabilities.transcript`. Unlike the profile registries
  * above this one is closed over the schema enum itself rather than an open string, since
