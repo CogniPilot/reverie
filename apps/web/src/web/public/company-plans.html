@@ -431,7 +431,7 @@ async function inspectBlockedPlanMove(dialog, employee, error, view) {
     if (!view.current()) return true;
     if (!move || move.employeeId !== employee.id || error.blocker && move.id !== error.blocker.id)
       throw new Error('The current move changed; refresh before recovery.');
-    showPlanMoveProgress(dialog, move, employee.name);
+    showPlanMoveProgress(dialog, move, employee.name, true);
   } catch (failure) {
     if (view.current()) message.textContent = `${failure.message} No request was retried. Choose Inspect existing moves to check the retained journal.`;
   }
@@ -507,10 +507,16 @@ async function openPlanMove(employeeId, destination) {
   } catch (error) { if (view.current()) dialog.querySelector('.status').textContent = error.message; }
 }
 
-function showPlanMoveProgress(dialog, initial, name) {
-  dialog.innerHTML = `<h3>Plan move: ${esc(name)}</h3><p class="status" role="status"></p><p class="hint"></p><button type="button" class="btn" data-cancel>Cancel waiting move</button> <button type="button" class="btn" data-resolve hidden>Adopt existing destination</button> <button type="button" class="btn" data-refresh>Refresh status</button><p class="hint" data-recovery-info></p> <button type="button" class="btn" data-close>Hide progress</button>`;
+function showPlanMoveProgress(dialog, initial, name, blockedRequest = false) {
+  dialog.innerHTML = `<h3>${blockedRequest ? 'Existing plan move' : 'Plan move'}: ${esc(name)}</h3><p class="status" role="status"></p><p class="hint" data-move-context hidden></p><p class="hint" data-move-sessions></p><button type="button" class="btn" data-cancel>Cancel waiting move</button> <button type="button" class="btn" data-resolve hidden>Adopt existing destination</button> <button type="button" class="btn" data-refresh>Refresh status</button><p class="hint" data-recovery-info></p> <button type="button" class="btn" data-close>Hide progress</button>`;
   const cancel = dialog.querySelector('[data-cancel]'), resolve = dialog.querySelector('[data-resolve]');
   const refresh = dialog.querySelector('[data-refresh]'), status = dialog.querySelector('.status');
+  const context = dialog.querySelector('[data-move-context]');
+  const started = Number.isFinite(initial.at) && Number.isFinite(new Date(initial.at).getTime())
+    ? `Move started ${fmt(initial.at, {month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short'})}.`
+    : '';
+  context.textContent = [blockedRequest ? 'The existing move blocked your new request.' : '', started].filter(Boolean).join(' ');
+  context.hidden = !context.textContent;
   let record = initial, stopped = false, busy = false, unconfirmed = false, feedback = '', statusGeneration = 0, timer;
   const view = planDialogView(dialog), current = view.current;
   const stop = () => { stopped = true; clearTimeout(timer); view.stop(); };
@@ -528,7 +534,7 @@ function showPlanMoveProgress(dialog, initial, name) {
   const deadline = Date.now() + 12 * 60e3;
   const paint = () => {
     status.textContent = `${record.phase}${record.error ? ': ' + record.error : ''}${feedback ? ' · ' + feedback : ''}`;
-    dialog.querySelector('.hint').textContent = `Old session: ${record.oldSession || record.sessionId || 'not recorded'}; new session: ${record.newSession || 'not created yet'}`;
+    dialog.querySelector('[data-move-sessions]').textContent = `Old session: ${record.oldSession || record.sessionId || 'not recorded'}; new session: ${record.newSession || 'not created yet'}`;
     cancel.hidden = record.phase !== 'waiting'; cancel.disabled = busy;
     resolve.hidden = record.phase !== 'recovery-required' || !record.newSession || !!record.resourceIntent;
     resolve.disabled = busy || unconfirmed || !eligible(); refresh.disabled = busy;
