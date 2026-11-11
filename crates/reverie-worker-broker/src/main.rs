@@ -174,6 +174,8 @@ fn run(arguments: Arguments) -> Result<(), Box<dyn std::error::Error>> {
         ),
         Role::Broker { config } => serve(config, false),
         Role::ViewerOnly { config, socket } => {
+            // Standalone role, before any helper threads or socket creation.
+            nix::sys::stat::umask(nix::sys::stat::Mode::from_bits_truncate(0o077));
             let service = reverie_host::worker_viewer::WorkerViewerService::new(
                 &config,
                 captured_engine_bootstrap()?,
