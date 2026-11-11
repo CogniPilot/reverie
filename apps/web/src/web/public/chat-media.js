@@ -255,7 +255,8 @@ const CHAT_LINK_STOP =
   '\\s<>"\'`\\p{Cc}\\p{Cf}\\p{Zl}\\p{Zp}\\u00a0\\u034f\\u1680\\u115f\\u1160\\u17b4\\u17b5\\u180b-\\u180f\\u2000-\\u200a\\u202f\\u205f\\u2800\\u3000\\u3164\\uffa0' +
   '\\ufe00-\\ufe0f\\u{e0100}-\\u{e01ef}\\u201c-\\u201f\\uff02\\u2033\\u301d-\\u301f';
 /** Sentence punctuation (ASCII, curly, ellipsis, CJK) that belongs after a link, not in it. */
-const CHAT_LINK_TRAIL = /[.,;:!?*_~\u2018\u2019\u201a\u201b\u2026\u00bb\u203a\u3001\u3002\uff0c\uff0e\uff01\uff1f\uff1b\uff1a]/;
+const CHAT_LINK_TRAIL =
+  /[.,;:!?*_~\u2018\u2019\u201a\u201b\u2026\u00bb\u203a\u3001\u3002\uff0c\uff0e\uff01\uff1f\uff1b\uff1a]/;
 /** A link longer than this is left as text; at most this many links are made in one message. */
 const CHAT_LINK_MAX_LENGTH = 2000;
 const CHAT_LINK_MAX_COUNT = 50;
@@ -274,16 +275,26 @@ function chatLinkHref(raw) {
   try {
     const url = new URL(raw);
     const written = chatLinkTextHost(raw);
-    return /^https?:$/.test(url.protocol) && !url.username && !url.password && url.hostname &&
-      /^(?:[a-z0-9-]+(?:\.[a-z0-9-]+)*\.?|\[[0-9a-f:.]+\])$/.test(written) && !written.includes('xn--') &&
-      url.hostname.replace(/\.$/, '') === written.replace(/\.$/, '') ? url.href : null;
-  } catch { return null; }
+    return /^https?:$/.test(url.protocol) &&
+      !url.username &&
+      !url.password &&
+      url.hostname &&
+      /^(?:[a-z0-9-]+(?:\.[a-z0-9-]+)*\.?|\[[0-9a-f:.]+\])$/.test(written) &&
+      !written.includes('xn--') &&
+      url.hostname.replace(/\.$/, '') === written.replace(/\.$/, '')
+      ? url.href
+      : null;
+  } catch {
+    return null;
+  }
 }
 
 /** Bounded named links; all other Markdown/HTML remains ordinary text. Never parses code spans. */
 function chatMarkdownLinkSegments(text) {
   const out = [];
-  let last = 0, cursor = 0, count = 0;
+  let last = 0,
+    cursor = 0,
+    count = 0;
   while (cursor < text.length && count < CHAT_LINK_MAX_COUNT) {
     const start = text.indexOf('[', cursor);
     if (start < 0) break;
@@ -291,35 +302,56 @@ function chatMarkdownLinkSegments(text) {
     if (text[start - 1] === '\\' || text[start - 1] === '!') continue;
     let end = cursor;
     while (end < text.length && end - cursor <= 512 && text[end] !== '\n' && text[end] !== '[') {
-      if (text[end] === '\\' && end + 1 < text.length) { end += 2; continue; }
+      if (text[end] === '\\' && end + 1 < text.length) {
+        end += 2;
+        continue;
+      }
       if (text[end] === ']') break;
       end++;
     }
     if (end === cursor || end - cursor > 512 || text[end] !== ']' || text[end + 1] !== '(') continue;
     const targetStart = end + 2;
-    let targetEnd = targetStart, depth = 1, angle = text[targetStart] === '<';
+    let targetEnd = targetStart,
+      depth = 1,
+      angle = text[targetStart] === '<';
     if (angle) targetEnd++;
     while (targetEnd < text.length && targetEnd - targetStart <= CHAT_LINK_MAX_LENGTH && text[targetEnd] !== '\n') {
       const ch = text[targetEnd];
-      if (ch === '\\' && targetEnd + 1 < text.length) { targetEnd += 2; continue; }
+      if (ch === '\\' && targetEnd + 1 < text.length) {
+        targetEnd += 2;
+        continue;
+      }
       if (angle ? ch === '>' : ch === ')' && --depth === 0) break;
       if (!angle && ch === '(') depth++;
       targetEnd++;
     }
-    if (targetEnd - targetStart > CHAT_LINK_MAX_LENGTH ||
-      (angle ? text[targetEnd] !== '>' || text[targetEnd + 1] !== ')' : text[targetEnd] !== ')' || depth !== 0)) continue;
+    if (
+      targetEnd - targetStart > CHAT_LINK_MAX_LENGTH ||
+      (angle ? text[targetEnd] !== '>' || text[targetEnd + 1] !== ')' : text[targetEnd] !== ')' || depth !== 0)
+    )
+      continue;
     const finish = targetEnd + (angle ? 2 : 1);
-    const unescape = value => value.replace(/\\([\\\[\]()<>])/g, '$1');
+    const unescape = (value) => value.replace(/\\([\\\[\]()<>])/g, '$1');
     const label = unescape(text.slice(cursor, end));
     const target = unescape(text.slice(targetStart + (angle ? 1 : 0), targetEnd));
     let path = null;
-    if (!label.trim() || /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u.test(label)) { cursor = finish; continue; }
+    if (!label.trim() || /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u.test(label)) {
+      cursor = finish;
+      continue;
+    }
     if (target.startsWith('/') && !target.startsWith('//')) {
-      try { path = decodeURIComponent(target); } catch { /* malformed escapes stay text */ }
+      try {
+        path = decodeURIComponent(target);
+      } catch {
+        /* malformed escapes stay text */
+      }
       if (path && (/[\\\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u.test(path) || path.startsWith('//'))) path = null;
     }
     const href = path ? null : chatLinkHref(target);
-    if (!path && !href) { cursor = finish; continue; }
+    if (!path && !href) {
+      cursor = finish;
+      continue;
+    }
     if (start > last) out.push({ text: text.slice(last, start) });
     out.push({ text: label, ...(path ? { path } : { href }), source: text.slice(start, finish) });
     last = cursor = finish;
@@ -510,7 +542,14 @@ Object.assign(ReverieApp.prototype, {
    */
   async _linkChatFile(path) {
     if (!this._chatRoomId || !path) return 'Choose a room and a file first.';
-    const item = { name: String(path).split('/').pop() || 'file', size: 0, type: '', id: null, state: 'uploading', linked: true };
+    const item = {
+      name: String(path).split('/').pop() || 'file',
+      size: 0,
+      type: '',
+      id: null,
+      state: 'uploading',
+      linked: true,
+    };
     this._chatPending.push(item);
     this._renderChatTray();
     try {
@@ -521,7 +560,13 @@ Object.assign(ReverieApp.prototype, {
       });
       const body = await res.json().catch(() => null);
       if (!res.ok || !body?.success) throw new Error(body?.error?.message || body?.error || `HTTP ${res.status}`);
-      Object.assign(item, { id: body.data.file.id, name: body.data.file.name, size: body.data.file.size, type: body.data.file.type, state: 'ready' });
+      Object.assign(item, {
+        id: body.data.file.id,
+        name: body.data.file.name,
+        size: body.data.file.size,
+        type: body.data.file.type,
+        state: 'ready',
+      });
       this._renderChatTray();
       return '';
     } catch (err) {
@@ -543,7 +588,13 @@ Object.assign(ReverieApp.prototype, {
           this._chatEl(
             'span',
             'chatroom-tray-size',
-            item.state === 'uploading' ? (item.linked ? 'linking…' : 'uploading…') : item.linked ? 'linked' : chatFileSize(item.size)
+            item.state === 'uploading'
+              ? item.linked
+                ? 'linking…'
+                : 'uploading…'
+              : item.linked
+                ? 'linked'
+                : chatFileSize(item.size)
           )
         );
         const x = this._chatEl('button', 'chatroom-link', '×');
@@ -581,9 +632,19 @@ Object.assign(ReverieApp.prototype, {
         img.src = url;
         img.alt = a.name;
         img.loading = 'lazy';
-        img.tabIndex = 0; img.setAttribute('role', 'button');
-        img.onclick = () => this.openReadOnlyFilePreview({ kind: 'room-attachment', roomId: m.roomId, attachmentId: a.id, name: a.name }, img);
-        img.onkeydown = event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); img.click(); } };
+        img.tabIndex = 0;
+        img.setAttribute('role', 'button');
+        img.onclick = () =>
+          this.openReadOnlyFilePreview(
+            { kind: 'room-attachment', roomId: m.roomId, attachmentId: a.id, name: a.name },
+            img
+          );
+        img.onkeydown = (event) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            img.click();
+          }
+        };
         wrap.append(img);
       } else if (/^video\/(mp4|x-m4v|quicktime|webm|ogg)$/.test(a.type)) {
         // Movies play in place, Discord-style: the first frame with a play button. The server serves the
@@ -611,20 +672,25 @@ Object.assign(ReverieApp.prototype, {
     const card = this._chatEl('a', 'chatroom-file');
     card.href = a.linked ? this._chatUrl('/workspace?file=' + encodeURIComponent(a.path)) : url;
     card.setAttribute('aria-label', a.linked ? `Open ${a.name} in Drive` : `Preview ${a.name}`);
-    card.onclick = event => {
+    card.onclick = (event) => {
       if (event.button || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
       event.preventDefault();
       if (a.linked) {
         void this.openWorkspaceFileInDrive(a.path);
         return;
       }
-      void this.openReadOnlyFilePreview({ kind: 'room-attachment', roomId: m.roomId, attachmentId: a.id, name: a.name }, card);
+      void this.openReadOnlyFilePreview(
+        { kind: 'room-attachment', roomId: m.roomId, attachmentId: a.id, name: a.name },
+        card
+      );
     };
     // A linked file is read live from the shared drive: its size is whatever the file is now, so it is not shown.
     card.append(
       this._chatEl('span', 'chatroom-file-icon', a.linked ? '\u{1F517}' : '\u{1F4C4}'),
       this._chatEl('span', 'chatroom-file-name', a.name),
-      a.linked ? this._chatEl('span', 'chatroom-file-size chatroom-file-linked', 'Linked file') : this._chatEl('span', 'chatroom-file-size', chatFileSize(a.size))
+      a.linked
+        ? this._chatEl('span', 'chatroom-file-size chatroom-file-linked', 'Linked file')
+        : this._chatEl('span', 'chatroom-file-size', chatFileSize(a.size))
     );
     if (a.linked) card.title = `Linked file on the shared drive: ${a.path || a.name}`;
     return card;
@@ -713,7 +779,8 @@ Object.assign(ReverieApp.prototype, {
     };
     const pre = this._chatEl('pre', 'chatroom-code');
     const source = globalThis.ReverieChatCode?.highlight(code, language) || this._chatEl('code', '', code);
-    if (typeof language === 'string' && /^[a-z0-9_+-]{1,40}$/.test(language)) source.classList.add(`language-${language}`);
+    if (typeof language === 'string' && /^[a-z0-9_+-]{1,40}$/.test(language))
+      source.classList.add(`language-${language}`);
     pre.append(source);
     wrap.append(copy, pre);
     return wrap;
@@ -752,12 +819,16 @@ Object.assign(ReverieApp.prototype, {
           const a = this._chatEl('a', 'chatroom-link', link.text);
           a.title = link.path ? 'Open in Drive: ' + link.path : link.href;
           a.href = link.path ? this._chatUrl('/workspace?file=' + encodeURIComponent(link.path)) : link.href;
-          if (link.path) a.onclick = event => {
-            if (event.button || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-            event.preventDefault();
-            void this.openWorkspaceFileInDrive(link.path);
-          };
-          else { a.target = '_blank'; a.rel = 'noopener noreferrer nofollow'; }
+          if (link.path)
+            a.onclick = (event) => {
+              if (event.button || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+              event.preventDefault();
+              void this.openWorkspaceFileInDrive(link.path);
+            };
+          else {
+            a.target = '_blank';
+            a.rel = 'noopener noreferrer nofollow';
+          }
           el.append(a);
           continue;
         }

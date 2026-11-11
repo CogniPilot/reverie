@@ -26,7 +26,11 @@ function chatPhoneComposer(nav) {
 /** A random id for one spoken turn (crypto.randomUUID needs a secure context, which the microphone needs too). */
 function chatVoiceTurnId() {
   if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
-  return Array.from({ length: 4 }, () => Math.floor(Math.random() * 0x100000000).toString(16).padStart(8, '0')).join('-');
+  return Array.from({ length: 4 }, () =>
+    Math.floor(Math.random() * 0x100000000)
+      .toString(16)
+      .padStart(8, '0')
+  ).join('-');
 }
 
 const CHAT_MIN_WIDTH = 320;
@@ -85,8 +89,13 @@ Object.assign(ReverieApp.prototype, {
       /* non-JSON error page */
     }
     if (res.ok && body?.success !== false) return { ok: true, data: body?.data ?? body };
-    return { ok: false, status: res.status, errorCode: body?.errorCode, error: body?.error || `HTTP ${res.status}`,
-      ...(body?.reconnect ? { reconnect: body.reconnect } : {}) };
+    return {
+      ok: false,
+      status: res.status,
+      errorCode: body?.errorCode,
+      error: body?.error || `HTTP ${res.status}`,
+      ...(body?.reconnect ? { reconnect: body.reconnect } : {}),
+    };
   },
 
   _chatEl(tag, className, text) {
@@ -108,7 +117,11 @@ Object.assign(ReverieApp.prototype, {
   /** Employees share their profile hue; unbound sessions retain the server's FNV-1a accent. */
   _chatAccent(sessionId) {
     const employees = this._chatApp?.company?.employees;
-    const matches = Array.isArray(employees) ? employees.filter(employee => employee?.sessionId === sessionId && typeof employee.id === 'string' && employee.id) : [];
+    const matches = Array.isArray(employees)
+      ? employees.filter(
+          (employee) => employee?.sessionId === sessionId && typeof employee.id === 'string' && employee.id
+        )
+      : [];
     if (matches.length === 1) return this._chatHue(matches[0].id);
     let h = 2166136261;
     for (let i = 0; i < sessionId.length; i++) {
@@ -165,21 +178,42 @@ Object.assign(ReverieApp.prototype, {
     if (source === 'preference') title = `${label}, set by the owner${effect}`;
     else if (source === 'default' && mode !== 'ring') title = `${label} by default${effect}`;
     if (live) {
-      const et = (opts) => new Intl.DateTimeFormat('en-US', { timeZone: globalThis.ReverieTime?.timeZone || 'UTC', ...opts });
+      const et = (opts) =>
+        new Intl.DateTimeFormat('en-US', { timeZone: globalThis.ReverieTime?.timeZone || 'UTC', ...opts });
       const day = (t) => et({ year: 'numeric', month: '2-digit', day: '2-digit' }).format(t);
       const time = et({ hour: 'numeric', minute: '2-digit', timeZoneName: 'short' }).format(until);
       const when = day(until) === day(Date.now()) ? time : `${et({ weekday: 'short' }).format(until)} ${time}`;
       title = `${label} until ${when}${effect}`;
     }
     const badge = this._chatEl('span', className);
-    badge.style.cssText = 'display:inline-flex;vertical-align:middle;margin-left:4px;color:var(--text-muted,#919aa6);width:16px;height:16px;flex-shrink:0';
+    badge.style.cssText =
+      'display:inline-flex;vertical-align:middle;margin-left:4px;color:var(--text-muted,#919aa6);width:16px;height:16px;flex-shrink:0';
     const ns = 'http://www.w3.org/2000/svg';
     const svg = document.createElementNS(ns, 'svg');
-    for (const [key, value] of Object.entries({ viewBox: '0 0 24 24', width: '16', height: '16', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.6', 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'aria-hidden': 'true' })) svg.setAttribute(key, value);
+    for (const [key, value] of Object.entries({
+      viewBox: '0 0 24 24',
+      width: '16',
+      height: '16',
+      fill: 'none',
+      stroke: 'currentColor',
+      'stroke-width': '1.6',
+      'stroke-linecap': 'round',
+      'stroke-linejoin': 'round',
+      'aria-hidden': 'true',
+    }))
+      svg.setAttribute(key, value);
     const phone = document.createElementNS(ns, 'rect');
-    for (const [key, value] of Object.entries({ x: '8', y: '4', width: '8', height: '16', rx: '2' })) phone.setAttribute(key, value);
+    for (const [key, value] of Object.entries({ x: '8', y: '4', width: '8', height: '16', rx: '2' }))
+      phone.setAttribute(key, value);
     const detail = document.createElementNS(ns, 'path');
-    detail.setAttribute('d', mode === 'silent' ? 'M3 3l18 18' : mode === 'vibrate' ? 'M4 6L2 9l2 3-2 3 2 3M20 6l2 3-2 3 2 3-2 3' : 'M4 7a9 9 0 0 0 0 10M20 7a9 9 0 0 1 0 10');
+    detail.setAttribute(
+      'd',
+      mode === 'silent'
+        ? 'M3 3l18 18'
+        : mode === 'vibrate'
+          ? 'M4 6L2 9l2 3-2 3 2 3M20 6l2 3-2 3 2 3-2 3'
+          : 'M4 7a9 9 0 0 0 0 10M20 7a9 9 0 0 1 0 10'
+    );
     svg.append(phone, detail);
     badge.append(svg);
     badge.title = title;
@@ -615,7 +649,7 @@ Object.assign(ReverieApp.prototype, {
       this.showToast?.(`Chat: ${res.error}`, 'error');
       return;
     }
-    this._chatRooms = (res.data.rooms || []).map(room => this._chatFilterHistory(room));
+    this._chatRooms = (res.data.rooms || []).map((room) => this._chatFilterHistory(room));
     this._chatSelf = res.data.self || null;
     // What the server can do (unread counts, direct messages): the conversation shell shows only that.
     this._chatFeatures = res.data.features || {};
@@ -654,7 +688,10 @@ Object.assign(ReverieApp.prototype, {
     const seq = quiet ? this._chatLoadSeq : (this._chatLoadSeq = (this._chatLoadSeq || 0) + 1);
     // Coming back to a room: draw what was last seen at once, then bring it up to date behind it.
     // An owner's DM must revalidate before displaying a cached view: another device may have cleared it.
-    const cached = switching && !quiet && !this._chatRooms?.find(room => room.id === id)?.canClearHistory ? this._chatCache?.get(id) : undefined;
+    const cached =
+      switching && !quiet && !this._chatRooms?.find((room) => room.id === id)?.canClearHistory
+        ? this._chatCache?.get(id)
+        : undefined;
     if (cached) {
       this._chatEmotes = this._chatEmoteCache?.get(id) || [];
       await this._applyChatRoom(id, cached, { quiet: false, switched: true });
@@ -673,7 +710,9 @@ Object.assign(ReverieApp.prototype, {
     if (seq !== this._chatLoadSeq || (quiet && this._chatRoomId !== id)) return false;
     res.data = this._chatFilterHistory(res.data);
     // Older messages the reader already scrolled back to stay; the fresh window only replaces the tail.
-    const held = (this._chatRoomId === id ? this._chatRoom?.messages || [] : []).filter(message => message.at > (res.data.historyAfter ?? -1));
+    const held = (this._chatRoomId === id ? this._chatRoom?.messages || [] : []).filter(
+      (message) => message.at > (res.data.historyAfter ?? -1)
+    );
     const fresh = res.data.messages || [];
     // They stay only if the fresh window holds the last message proved complete (`_chatSyncedFrom`): everything held
     // up to it has no gap, so joining at the first held message the window also holds leaves none. A join at any other
@@ -708,12 +747,18 @@ Object.assign(ReverieApp.prototype, {
   /** `synced`: the fresh room tail this data was built from, which moves the proved-complete point (`_chatSyncedFrom`). */
   async _applyChatRoom(id, data, { quiet, switched, synced = null, redraw = false }) {
     data = this._chatFilterHistory(data);
-    if (synced) synced = synced.filter(message => message.at > (data.historyAfter ?? -1));
-    if (data.canClearHistory && (data.historyAfter ?? -1) > (this._chatRoomId === id ? this._chatRoom?.historyAfter ?? -1 : -1)) {
+    if (synced) synced = synced.filter((message) => message.at > (data.historyAfter ?? -1));
+    if (
+      data.canClearHistory &&
+      (data.historyAfter ?? -1) > (this._chatRoomId === id ? (this._chatRoom?.historyAfter ?? -1) : -1)
+    ) {
       this._readAloud?.clear();
       if (this._chatApp?.replyTo?.roomId === id) this._chatApp.cancelReplySilently();
       const pins = this._chatApp?.doc.querySelector('.ca-dialog.ca-pins');
-      if (pins?.dataset.roomId === id) { pins.close(); pins.remove(); }
+      if (pins?.dataset.roomId === id) {
+        pins.close();
+        pins.remove();
+      }
     }
     // A message gone from the loaded window (deleted) needs the feed redrawn, which a quiet refresh skips.
     const before = this._chatRoom?.messages || [];
@@ -725,7 +770,8 @@ Object.assign(ReverieApp.prototype, {
     // A message gone, deleted or restored (another tab did it) redraws the feed; so does one the live stream missed.
     const removed =
       !switched &&
-      (before.some((m) => m.at <= (data.historyAfter ?? -1)) || before.some((m) => m.at >= firstAt && !kept.has(m.id)) ||
+      (before.some((m) => m.at <= (data.historyAfter ?? -1)) ||
+        before.some((m) => m.at >= firstAt && !kept.has(m.id)) ||
         now.some((m) => wasDeleted.has(m.id) && wasDeleted.get(m.id) !== !!m.deleted) ||
         now.some((m) => !known.has(m.id)));
     // What another room's read-aloud queued is not said here.
@@ -775,7 +821,12 @@ Object.assign(ReverieApp.prototype, {
       res.data = this._chatFilterHistory(res.data);
       // A clear on another device also changes this room's projection and count.
       if ((res.data.historyAfter ?? -1) > (room.historyAfter ?? -1)) {
-        await this._applyChatRoom(id, res.data, { quiet: true, switched: false, redraw: true, synced: res.data.messages || [] });
+        await this._applyChatRoom(id, res.data, {
+          quiet: true,
+          switched: false,
+          redraw: true,
+          synced: res.data.messages || [],
+        });
         return;
       }
       const feed = this._chatEls.feed;
@@ -942,7 +993,10 @@ Object.assign(ReverieApp.prototype, {
 
   /** Splits members into those listed and the gone ones replaced by a live member of the same name. */
   _foldGoneMembers(members) {
-    const key = (m) => String(m.name || '').trim().toLowerCase();
+    const key = (m) =>
+      String(m.name || '')
+        .trim()
+        .toLowerCase();
     const live = new Set(members.filter((m) => m.alive && key(m)).map(key));
     const shown = [];
     const folded = [];
@@ -955,7 +1009,11 @@ Object.assign(ReverieApp.prototype, {
     details.append(this._chatEl('summary', 'chatroom-section-label', `Earlier sessions (${folded.length})`));
     for (const m of folded) {
       const row = this._chatEl('div', 'chatroom-member chatroom-member-folded');
-      const label = this._chatEl('span', 'chatroom-member-name', `${m.name} \u00B7 ${m.sessionId.slice(0, 8)} \u00B7 offline`);
+      const label = this._chatEl(
+        'span',
+        'chatroom-member-name',
+        `${m.name} \u00B7 ${m.sessionId.slice(0, 8)} \u00B7 offline`
+      );
       const remove = this._chatEl('button', 'chatroom-link', 'Remove');
       remove.type = 'button';
       remove.title = 'Remove this offline session from the room (owner only)';
@@ -991,11 +1049,20 @@ Object.assign(ReverieApp.prototype, {
       // The server's fixed reason when it knows why the lines are not typed yet; never pane or message text.
       const wait = m.deliveryWait;
       // Elapsed time, not a clock: the browser's zone may differ from the office's.
-      const minutes = wait && Number.isFinite(wait.since) ? Math.max(0, Math.round((Date.now() - wait.since) / 60000)) : -1;
-      const elapsed = minutes < 0 ? '' : minutes < 1 ? ' for under a minute' : minutes < 120 ? ` for ${minutes} min` : ` for ${Math.round(minutes / 60)} h`;
-      q.title = wait && typeof wait.text === 'string'
-        ? `Not typed${elapsed}: ${wait.text}`
-        : 'Messages waiting to be typed into this session';
+      const minutes =
+        wait && Number.isFinite(wait.since) ? Math.max(0, Math.round((Date.now() - wait.since) / 60000)) : -1;
+      const elapsed =
+        minutes < 0
+          ? ''
+          : minutes < 1
+            ? ' for under a minute'
+            : minutes < 120
+              ? ` for ${minutes} min`
+              : ` for ${Math.round(minutes / 60)} h`;
+      q.title =
+        wait && typeof wait.text === 'string'
+          ? `Not typed${elapsed}: ${wait.text}`
+          : 'Messages waiting to be typed into this session';
       if (wait && wait.reason !== 'working') q.classList.add('chatroom-queued-stuck');
       top.append(q);
     }
@@ -1020,9 +1087,14 @@ Object.assign(ReverieApp.prototype, {
     card.append(top);
     const goal = this._chatEl('div', 'chatroom-synopsis');
     // A goal the member set itself wins; without one, its first 'doing' Board card (read from the Board, never stored) stands in.
-    const cards = Array.isArray(m.focus) ? m.focus.filter((c) => c && typeof c.id === 'string' && typeof c.title === 'string') : [];
+    const cards = Array.isArray(m.focus)
+      ? m.focus.filter((c) => c && typeof c.id === 'string' && typeof c.title === 'string')
+      : [];
     const fromBoard = !m.goal && cards.length ? `${cards[0].id} ${cards[0].title} (from the Board)` : '';
-    goal.append(this._chatEl('span', 'chatroom-synopsis-key', 'Goal'), this._chatEl('span', '', m.goal || fromBoard || '–'));
+    goal.append(
+      this._chatEl('span', 'chatroom-synopsis-key', 'Goal'),
+      this._chatEl('span', '', m.goal || fromBoard || '–')
+    );
     const doing = this._chatEl('div', 'chatroom-synopsis');
     if (cards.length) {
       const more = Number.isInteger(m.focusMore) && m.focusMore > 0 ? ` · +${m.focusMore} more` : '';
@@ -1283,7 +1355,12 @@ Object.assign(ReverieApp.prototype, {
       this._releaseChatMic();
       this._setChatRecording(false);
       const blob = new Blob(chunks, { type: recorder.mimeType || type || 'audio/webm' });
-      if (turnId) this._diag('voice:capture-end', { turnId, captureMs: Math.round(performance.now() - capturing), bytes: blob.size });
+      if (turnId)
+        this._diag('voice:capture-end', {
+          turnId,
+          captureMs: Math.round(performance.now() - capturing),
+          bytes: blob.size,
+        });
       if (blob.size < 1000) {
         this._chatVoiceStatus('Too short: hold the mic while you speak', 'error');
         return;
@@ -1350,7 +1427,10 @@ Object.assign(ReverieApp.prototype, {
     try {
       res = await fetch(this._chatUrl(`/api/voice/turn?${q}`), {
         method: 'POST',
-        headers: { 'Content-Type': blob.type.split(';')[0] || 'audio/webm', ...(turnId ? { 'X-Reverie-Voice-Turn': turnId } : {}) },
+        headers: {
+          'Content-Type': blob.type.split(';')[0] || 'audio/webm',
+          ...(turnId ? { 'X-Reverie-Voice-Turn': turnId } : {}),
+        },
         body: blob,
         signal: stop.signal,
       });
@@ -1361,10 +1441,22 @@ Object.assign(ReverieApp.prototype, {
         /* non-JSON error page */
       }
       // The server's own stage times (speech to text, the member's answer, text to speech) under the same id.
-      if (turnId) this._diag('voice:turn-answered', { turnId, status: res.status, roundTripMs: Math.round(performance.now() - sent),
-        messageId: body?.data?.messages?.[0]?.id, answerId: body?.data?.messages?.[1]?.id, timing: body?.data?.timing });
+      if (turnId)
+        this._diag('voice:turn-answered', {
+          turnId,
+          status: res.status,
+          roundTripMs: Math.round(performance.now() - sent),
+          messageId: body?.data?.messages?.[0]?.id,
+          answerId: body?.data?.messages?.[1]?.id,
+          timing: body?.data?.timing,
+        });
     } catch {
-      if (turnId) this._diag('voice:turn-failed', { turnId, aborted: stop.signal.aborted, roundTripMs: Math.round(performance.now() - sent) });
+      if (turnId)
+        this._diag('voice:turn-failed', {
+          turnId,
+          aborted: stop.signal.aborted,
+          roundTripMs: Math.round(performance.now() - sent),
+        });
       if (stop.signal.aborted) {
         this._chatVoiceStatus('');
         if (car()) this._renderCarState?.('paused', `Stopped waiting; ${target.name}'s answer will show in the room`);
@@ -1446,7 +1538,8 @@ Object.assign(ReverieApp.prototype, {
 
   _offerChatAudioRetry(url) {
     const { voiceStatus, mic } = this._chatEls;
-    const from = this._chatAudioFrom, turnId = this._chatAudioTurn?.id ?? null;
+    const from = this._chatAudioFrom,
+      turnId = this._chatAudioTurn?.id ?? null;
     this._chatVoiceStatus('');
     voiceStatus.hidden = false;
     voiceStatus.className = 'chatroom-voice-status';
@@ -1508,7 +1601,9 @@ Object.assign(ReverieApp.prototype, {
         m.from.sessionId || this._chatRoom?.members.find((x) => m.text.startsWith(`${x.name} joined`))?.sessionId;
       if (subject) el.append(this._chatAvatar(subject, this._chatNameOf(subject), { size: 'xs' }));
       el.append(this._chatEl('span', '', m.text));
-      el.title = (globalThis.ReverieTime?.format(m.at) ?? new Date(m.at).toLocaleString('en-US', { timeZone: 'UTC', timeZoneName: 'short' }));
+      el.title =
+        globalThis.ReverieTime?.format(m.at) ??
+        new Date(m.at).toLocaleString('en-US', { timeZone: 'UTC', timeZoneName: 'short' });
       return el;
     }
     const mine = m.from.kind === 'user';
@@ -1536,7 +1631,8 @@ Object.assign(ReverieApp.prototype, {
     const time = this._chatEl(
       'time',
       'chatroom-msg-time',
-      (globalThis.ReverieTime?.format(m.at) ?? new Date(m.at).toLocaleString('en-US', { timeZone: 'UTC', timeZoneName: 'short' }))
+      globalThis.ReverieTime?.format(m.at) ??
+        new Date(m.at).toLocaleString('en-US', { timeZone: 'UTC', timeZoneName: 'short' })
     );
     time.dateTime = new Date(m.at).toISOString();
     meta.append(from, to, time);
@@ -1572,7 +1668,9 @@ Object.assign(ReverieApp.prototype, {
     const owner = this._chatRoom?.owner;
     // A send whose answer was lost may be stored already. Sending the same words again is only ever the
     // explicit "Send again" on its row, never a plain Enter.
-    const unsure = !again && (this._chatOwnSends || []).find((p) => p.state === 'unconfirmed' && p.roomId === roomId && p.text === text);
+    const unsure =
+      !again &&
+      (this._chatOwnSends || []).find((p) => p.state === 'unconfirmed' && p.roomId === roomId && p.text === text);
     if (unsure) {
       unsure.held = true;
       this._chatPendingDraw();
@@ -1621,7 +1719,8 @@ Object.assign(ReverieApp.prototype, {
       // Only a documented refusal says it was not stored. No answer, a timeout, a server error or an answer this page
       // does not recognise may come after the message was stored, and nothing here can tell which (room posts carry
       // no send id), so it stays "Not confirmed" with the text kept, and the room catches up to show what is there.
-      const refused = !res.ok && CHAT_SEND_REFUSALS[res.status] !== undefined && CHAT_SEND_REFUSALS[res.status] === res.errorCode;
+      const refused =
+        !res.ok && CHAT_SEND_REFUSALS[res.status] !== undefined && CHAT_SEND_REFUSALS[res.status] === res.errorCode;
       const error = res.ok ? 'the answer did not carry the message' : res.error;
       this._chatPendingSet(own, refused ? 'failed' : 'unconfirmed', error);
       this.showToast?.(`Chat: ${refused ? '' : 'not confirmed: '}${error}`, 'error');
@@ -1632,7 +1731,10 @@ Object.assign(ReverieApp.prototype, {
     // and owner, and the same draft (words, reply target and every file in the tray). A reader who moved on (another
     // room, other words, another reply, a file added or removed) keeps what they have; the send settles either way.
     const here =
-      roomId === this._chatRoomId && seq === this._chatLoadSeq && this._chatRoom?.owner === owner && this._chatSameDraft(draft);
+      roomId === this._chatRoomId &&
+      seq === this._chatLoadSeq &&
+      this._chatRoom?.owner === owner &&
+      this._chatSameDraft(draft);
     // Only the files this send carried leave the tray, every time: anything else in it is not sent yet.
     if (attachments.length && Array.isArray(this._chatPending)) {
       this._chatPending = this._chatPending.filter((p) => !attachments.includes(p.id));
@@ -1676,7 +1778,10 @@ Object.assign(ReverieApp.prototype, {
   _chatPendingShow(roomId, text, files = 0) {
     this._chatOwnSendKey = (this._chatOwnSendKey || 0) + 1;
     const own = { key: this._chatOwnSendKey, roomId, text, files, state: 'sending', error: null };
-    this._chatOwnSends = [...(this._chatOwnSends || []).filter((p) => !(p.roomId === roomId && p.state === 'failed')), own];
+    this._chatOwnSends = [
+      ...(this._chatOwnSends || []).filter((p) => !(p.roomId === roomId && p.state === 'failed')),
+      own,
+    ];
     this._chatPendingDraw();
     return own;
   },
@@ -1706,7 +1811,9 @@ Object.assign(ReverieApp.prototype, {
   _chatPendingRow(p) {
     const row = this._chatEl('div', `chatroom-pending is-${p.state}${p.state === 'sending' ? '' : ' is-failed'}`);
     row.setAttribute('role', 'status');
-    row.style.cssText = 'padding:4px 16px;white-space:pre-wrap;word-break:break-word;' + (p.state === 'sending' ? 'opacity:.6;' : 'color:var(--danger,#e5534b);');
+    row.style.cssText =
+      'padding:4px 16px;white-space:pre-wrap;word-break:break-word;' +
+      (p.state === 'sending' ? 'opacity:.6;' : 'color:var(--danger,#e5534b);');
     const files = p.files ? `${p.text ? '\n' : ''}(${p.files} file${p.files === 1 ? '' : 's'})` : '';
     row.append(this._chatEl('div', 'chatroom-pending-text', `${p.text}${files}`));
     const words = {
@@ -1752,7 +1859,9 @@ Object.assign(ReverieApp.prototype, {
     const row = this._chatEl('div', 'chatroom-recovery');
     row.setAttribute('role', 'status');
     row.style.cssText = 'padding:4px 16px;font-size:12px;color:var(--danger,#e5534b);';
-    row.append(`Catching up did not finish (${gap.reason}): messages from while the connection was down may be missing here. `);
+    row.append(
+      `Catching up did not finish (${gap.reason}): messages from while the connection was down may be missing here. `
+    );
     const reload = this._chatEl('button', 'chatroom-recovery-reload', 'Reload room');
     reload.type = 'button';
     reload.onclick = () => this._chatReloadFresh(gap.roomId);
@@ -1798,19 +1907,29 @@ Object.assign(ReverieApp.prototype, {
     const gen = (this._chatBackfillGen = (this._chatBackfillGen || 0) + 1);
     const seq = this._chatLoadSeq;
     const owner = room.owner;
-    const current = () => gen === this._chatBackfillGen && seq === this._chatLoadSeq && id === this._chatRoomId && this._chatRoom?.owner === owner;
+    const current = () =>
+      gen === this._chatBackfillGen &&
+      seq === this._chatLoadSeq &&
+      id === this._chatRoomId &&
+      this._chatRoom?.owner === owner;
     const fromStart = anchor.id === null;
     for (let round = 0, limit = CHAT_BACKFILL_LIMIT; round < CHAT_BACKFILL_ROUNDS; round++, limit *= 4) {
       // `since` is exclusive and in ms: one ms back so the anchor (and any message sharing its ms) comes back too.
       const since = fromStart ? 0 : anchor.at - 1;
       const res = await this._chatApi(`/api/chatrooms/${encodeURIComponent(id)}?since=${since}&limit=${limit}`);
       if (!current()) return false;
-      if (!res.ok || !Array.isArray(res.data?.messages)) return this._chatRecoveryFail(id, res.ok ? 'unrecognised answer' : res.error);
+      if (!res.ok || !Array.isArray(res.data?.messages))
+        return this._chatRecoveryFail(id, res.ok ? 'unrecognised answer' : res.error);
       res.data = this._chatFilterHistory(res.data);
       // A cleared anchor is intentionally no longer visible. Rebase on this owner's new start, rather than retain it
       // behind a recovery warning or join the visible tail to messages the owner cleared on another device.
       if ((res.data.historyAfter ?? -1) > (room.historyAfter ?? -1)) {
-        return this._applyChatRoom(id, res.data, { quiet: true, switched: false, redraw: true, synced: res.data.messages });
+        return this._applyChatRoom(id, res.data, {
+          quiet: true,
+          switched: false,
+          redraw: true,
+          synced: res.data.messages,
+        });
       }
       const fresh = res.data.messages;
       // The page is the newest `limit`. It joins the proved history if it holds the anchor (by id), or, from the
@@ -1824,7 +1943,8 @@ Object.assign(ReverieApp.prototype, {
       if (!joined) return this._chatRecoveryFail(id, 'the last message held is no longer in the room');
       const held = this._chatRoom.messages || [];
       const upTo = fromStart ? -1 : held.findIndex((m) => m.id === anchor.id);
-      if (!fromStart && upTo < 0) return this._chatRecoveryFail(id, 'the last message proved complete is no longer shown');
+      if (!fromStart && upTo < 0)
+        return this._chatRecoveryFail(id, 'the last message proved complete is no longer shown');
       const byId = new Map(fresh.map((m) => [m.id, m]));
       const heldIds = new Set(held.map((m) => m.id));
       // Held before the anchor (with any newer copy); the page up to the anchor, which adds any missed message sharing
@@ -1836,7 +1956,11 @@ Object.assign(ReverieApp.prototype, {
         ...fresh.slice(from + 1),
         ...held.slice(upTo + 1).filter((m) => !byId.has(m.id)),
       ];
-      return this._applyChatRoom(id, { ...res.data, messages }, { quiet: true, switched: false, synced: fresh.length ? fresh : null });
+      return this._applyChatRoom(
+        id,
+        { ...res.data, messages },
+        { quiet: true, switched: false, synced: fresh.length ? fresh : null }
+      );
     }
     // Still not joined at the widest page: the work bound.
     return current() ? this._chatRecoveryFail(id, 'too many messages to fetch') : false;
@@ -1936,15 +2060,20 @@ Object.assign(ReverieApp.prototype, {
     const after = Math.max(this._chatHistoryAfter.get(key) ?? -1, room.historyAfter ?? -1);
     this._chatHistoryAfter.set(key, after);
     const filtered = { ...room, historyAfter: after };
-    if (room.messages) filtered.messages = room.messages.filter(message => message.at > after);
+    if (room.messages) filtered.messages = room.messages.filter((message) => message.at > after);
     if (room.lastMessage && room.lastMessage.at <= after) filtered.lastMessage = null;
-    if ((room.lastMessageAt || 0) <= after) { filtered.lastMessageAt = undefined; filtered.unread = 0; filtered.mentions = 0; filtered.messageCount = 0; }
+    if ((room.lastMessageAt || 0) <= after) {
+      filtered.lastMessageAt = undefined;
+      filtered.unread = 0;
+      filtered.mentions = 0;
+      filtered.messageCount = 0;
+    }
     return filtered;
   },
 
   _chatHistoryChanged(data) {
     if (data?.action !== 'history-cleared') return;
-    const room = this._chatRooms?.find(room => room.id === data.roomId);
+    const room = this._chatRooms?.find((room) => room.id === data.roomId);
     if (data.viewerId !== (room?.historyViewerId || this._chatApp?.humanSelf?.id || 'owner')) return;
     if (!room?.canClearHistory || !Number.isSafeInteger(data.historyAfter) || data.historyAfter < -1) return;
     const key = this._chatHistoryKey(room);
@@ -1955,7 +2084,10 @@ Object.assign(ReverieApp.prototype, {
     this._chatSynced?.delete(room.id);
     Object.assign(room, this._chatFilterHistory(room));
     const pins = this._chatApp?.doc.querySelector('.ca-dialog.ca-pins');
-    if (pins?.dataset.roomId === room.id) { pins.close(); pins.remove(); }
+    if (pins?.dataset.roomId === room.id) {
+      pins.close();
+      pins.remove();
+    }
     if (this._chatRoomId === room.id && this._chatRoom) {
       this._chatRoom = this._chatFilterHistory(this._chatRoom);
       this._readAloud?.clear();
@@ -1965,8 +2097,12 @@ Object.assign(ReverieApp.prototype, {
   },
 
   _chatMessageHidden(data) {
-    const room = this._chatRooms?.find(room => room.id === data?.roomId);
-    return !!room?.canClearHistory && data.message?.at <= Math.max(room.historyAfter ?? -1, this._chatHistoryAfter?.get(this._chatHistoryKey(room)) ?? -1);
+    const room = this._chatRooms?.find((room) => room.id === data?.roomId);
+    return (
+      !!room?.canClearHistory &&
+      data.message?.at <=
+        Math.max(room.historyAfter ?? -1, this._chatHistoryAfter?.get(this._chatHistoryKey(room)) ?? -1)
+    );
   },
 
   _onChatroomMessage(data) {

@@ -1,228 +1,410 @@
 <!doctype html>
 <html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Company · Plans and burn rate</title>
-<script id="company-plans-bootstrap">
-// Resolve embedding and the initial palette before the first body content can paint.
-(function () {
-  const root = document.documentElement;
-  let theme;
-  try {
-    const frame = window.frameElement;
-    if (frame?.classList?.contains('ca-company-plans-frame')) {
-      root.dataset.companyPlansEmbedded = 'true';
-      const skin = frame.ownerDocument.documentElement.dataset.skin;
-      if (['paper-gray', 'solarized-light', 'catppuccin-latte', 'rose-pine-dawn'].includes(skin)) theme = 'light';
-      else if (['og', 'daylight-blue', 'daylight-green'].includes(skin)) theme = 'dark';
-    }
-  } catch (e) { /* A foreign embedding cannot supply the Company skin. */ }
-  try {
-    const saved = localStorage.getItem('board-theme');
-    if (saved === 'dark' || saved === 'light') theme = saved;
-  } catch (e) { /* Storage may be disabled; no preference is written. */ }
-  if (!theme) {
-    try { theme = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'; }
-    catch (e) { theme = 'light'; }
-  }
-  root.dataset.theme = theme;
-})();
-</script>
-<style>
-html[data-theme="dark"]{color-scheme:dark;background:#0f1115}
-html[data-theme="light"]{color-scheme:light;background:#f4f3ef}
-</style>
-<link rel="stylesheet" href="/company-board.css">
-</head>
-<body>
-<div class="wrap">
-  <header>
-    <div>
-      <h1><span id="co"></span> Plans <span>· Company burn rate</span></h1>
-      <div class="meta"><span class="clock" id="clock"></span><span id="built"></span></div>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Company · Plans and burn rate</title>
+    <script id="company-plans-bootstrap">
+      // Resolve embedding and the initial palette before the first body content can paint.
+      (function () {
+        const root = document.documentElement;
+        let theme;
+        try {
+          const frame = window.frameElement;
+          if (frame?.classList?.contains('ca-company-plans-frame')) {
+            root.dataset.companyPlansEmbedded = 'true';
+            const skin = frame.ownerDocument.documentElement.dataset.skin;
+            if (['paper-gray', 'solarized-light', 'catppuccin-latte', 'rose-pine-dawn'].includes(skin)) theme = 'light';
+            else if (['og', 'daylight-blue', 'daylight-green'].includes(skin)) theme = 'dark';
+          }
+        } catch (e) {
+          /* A foreign embedding cannot supply the Company skin. */
+        }
+        try {
+          const saved = localStorage.getItem('board-theme');
+          if (saved === 'dark' || saved === 'light') theme = saved;
+        } catch (e) {
+          /* Storage may be disabled; no preference is written. */
+        }
+        if (!theme) {
+          try {
+            theme = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+          } catch (e) {
+            theme = 'light';
+          }
+        }
+        root.dataset.theme = theme;
+      })();
+    </script>
+    <style>
+      html[data-theme='dark'] {
+        color-scheme: dark;
+        background: #0f1115;
+      }
+      html[data-theme='light'] {
+        color-scheme: light;
+        background: #f4f3ef;
+      }
+    </style>
+    <link rel="stylesheet" href="/company-board.css" />
+  </head>
+  <body>
+    <div class="wrap">
+      <header>
+        <div>
+          <h1><span id="co"></span> Plans <span>· Company burn rate</span></h1>
+          <div class="meta"><span class="clock" id="clock"></span><span id="built"></span></div>
+        </div>
+      </header>
+      <div class="banner" id="banner" hidden></div>
+      <section class="panel" id="sec-burn">
+        <div class="phead">
+          <h2>Burn rate · this week per plan</h2>
+          <details class="plan-help">
+            <summary>How usage is projected</summary>
+            <p class="hint">
+              Grey edges = week start and stop point. The stop is the earlier of the next banked-reset expiry and weekly
+              reset; a later weekly reset stays as a thin reference. Dashed grey line = even pace to the stop point
+              (above it = burning faster). Dotted line = current-rate projection, ending at 100% if the budget runs out
+              before the stop point. The blue outline spans five hours ending at the reported reset, with a 100% cap; it
+              is clipped to the plotted week. The weekly line and current 5-hour point each show a percentage of their
+              own window’s limit, not interchangeable quantities. The outline is a time window, not reconstructed 5-hour
+              usage history.
+            </p>
+          </details>
+          <div class="tools plan-header-actions" aria-label="Plan controls">
+            <button type="button" class="btn" id="refresh">Refresh</button
+            ><button type="button" class="btn" id="theme">Theme</button
+            ><button type="button" class="btn" id="planMoveHistory" hidden>Recent plan moves</button
+            ><button type="button" class="btn" id="addAcct" hidden>Add account</button>
+          </div>
+        </div>
+        <div class="grid2" id="plans"></div>
+      </section>
+
+      <div class="foot">Company plans. Usage refreshes every minute; member icons update every five seconds.</div>
     </div>
-  </header>
-  <div class="banner" id="banner" hidden></div>
-  <section class="panel" id="sec-burn">
-    <div class="phead"><h2>Burn rate · this week per plan</h2><details class="plan-help"><summary>How usage is projected</summary><p class="hint">Grey edges = week start and stop point. The stop is the earlier of the next banked-reset expiry and weekly reset; a later weekly reset stays as a thin reference. Dashed grey line = even pace to the stop point (above it = burning faster). Dotted line = current-rate projection, ending at 100% if the budget runs out before the stop point. The blue outline spans five hours ending at the reported reset, with a 100% cap; it is clipped to the plotted week. The weekly line and current 5-hour point each show a percentage of their own window’s limit, not interchangeable quantities. The outline is a time window, not reconstructed 5-hour usage history.</p></details><div class="tools plan-header-actions" aria-label="Plan controls"><button type="button" class="btn" id="refresh">Refresh</button><button type="button" class="btn" id="theme">Theme</button><button type="button" class="btn" id="planMoveHistory" hidden>Recent plan moves</button><button type="button" class="btn" id="addAcct" hidden>Add account</button></div></div>
-    <div class="grid2" id="plans"></div>
-  </section>
+    <dialog id="addDlg" aria-label="Add subscription account"></dialog>
+    <dialog id="signDlg" aria-label="Sign in"></dialog>
+    <dialog id="removeDlg" aria-label="Remove account"></dialog>
+    <dialog id="moveDlg" aria-label="Move employee to another plan"></dialog>
+    <script>
+      if (window.frameElement?.classList?.contains('ca-company-plans-frame')) {
+        document.documentElement.dataset.companyPlansEmbedded = 'true';
+        const reportHeight = () =>
+          parent.postMessage(
+            {
+              type: 'company-plans-height',
+              height: Math.ceil(document.querySelector('.wrap').getBoundingClientRect().height),
+            },
+            location.origin
+          );
+        if (typeof ResizeObserver !== 'undefined')
+          new ResizeObserver(reportHeight).observe(document.querySelector('.wrap'));
+        reportHeight();
+      }
+      // Once, after the first load settles (data or error): the Company page holds People back until then so they are not painted
+      // first and pushed down when the burn rate arrives.
+      let plansReadySent = false;
+      function reportPlansReady() {
+        if (plansReadySent || !window.frameElement?.classList?.contains('ca-company-plans-frame')) return;
+        plansReadySent = true;
+        parent.postMessage(
+          {
+            type: 'company-plans-ready',
+            height: Math.ceil(document.querySelector('.wrap').getBoundingClientRect().height),
+          },
+          location.origin
+        );
+      }
+      const H = 3600e3,
+        D = 24 * H;
+      const css = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+      const esc = (s) =>
+        String(s == null ? '' : s).replace(
+          /[&<>"']/g,
+          (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]
+        );
+      let B = null,
+        TZ = 'America/New_York';
+      let planAllocations = null,
+        planMembersBusy = false,
+        planMembersError = false;
+      let pendingPlanRequests = [];
+      let localPlans = [],
+        localGpu = null,
+        localSessions = [],
+        localEmployees = [];
+      async function refreshLocalPlans() {
+        if (!B?.planBurn) return;
+        const controller = new AbortController(),
+          timer = setTimeout(() => controller.abort(), 8000);
+        const read = async (path) => {
+          const response = await fetch(path, {
+            credentials: 'same-origin',
+            cache: 'no-store',
+            signal: controller.signal,
+          });
+          if (!response.ok) throw new Error('HTTP ' + response.status);
+          const body = await response.json();
+          if (body?.success === false) throw new Error(body.error || 'Refused');
+          return body?.data ?? body;
+        };
+        try {
+          const results = await Promise.allSettled(
+            ['/api/model-endpoints', '/api/system/gpu', '/api/sessions', '/api/company'].map(read)
+          );
+          if (results[0].status === 'fulfilled') localPlans = Array.isArray(results[0].value) ? results[0].value : [];
+          localGpu = results[1].status === 'fulfilled' ? results[1].value : null;
+          if (results[2].status === 'fulfilled')
+            localSessions = Array.isArray(results[2].value) ? results[2].value : [];
+          if (results[3].status === 'fulfilled') localEmployees = results[3].value.employees || [];
+        } finally {
+          clearTimeout(timer);
+        }
+      }
 
-  <div class="foot">Company plans. Usage refreshes every minute; member icons update every five seconds.</div>
-</div>
-<dialog id="addDlg" aria-label="Add subscription account"></dialog>
-<dialog id="signDlg" aria-label="Sign in"></dialog>
-<dialog id="removeDlg" aria-label="Remove account"></dialog>
-<dialog id="moveDlg" aria-label="Move employee to another plan"></dialog>
-<script>
-if (window.frameElement?.classList?.contains('ca-company-plans-frame')) {
-  document.documentElement.dataset.companyPlansEmbedded = 'true';
-  const reportHeight = () => parent.postMessage({ type: 'company-plans-height', height: Math.ceil(document.querySelector('.wrap').getBoundingClientRect().height) }, location.origin);
-  if (typeof ResizeObserver !== 'undefined') new ResizeObserver(reportHeight).observe(document.querySelector('.wrap'));
-  reportHeight();
-}
-// Once, after the first load settles (data or error): the Company page holds People back until then so they are not painted
-// first and pushed down when the burn rate arrives.
-let plansReadySent = false;
-function reportPlansReady() {
-  if (plansReadySent || !window.frameElement?.classList?.contains('ca-company-plans-frame')) return;
-  plansReadySent = true;
-  parent.postMessage({ type: 'company-plans-ready', height: Math.ceil(document.querySelector('.wrap').getBoundingClientRect().height) }, location.origin);
-}
-const H = 3600e3, D = 24 * H;
-const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
-const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-let B = null, TZ = 'America/New_York';
-let planAllocations = null, planMembersBusy = false, planMembersError = false;
-let pendingPlanRequests = [];
-let localPlans = [], localGpu = null, localSessions = [], localEmployees = [];
-async function refreshLocalPlans() {
-  if (!B?.planBurn) return;
-  const controller = new AbortController(), timer = setTimeout(() => controller.abort(), 8000);
-  const read = async path => {
-    const response = await fetch(path, {credentials: 'same-origin', cache: 'no-store', signal: controller.signal});
-    if (!response.ok) throw new Error('HTTP ' + response.status);
-    const body = await response.json();
-    if (body?.success === false) throw new Error(body.error || 'Refused');
-    return body?.data ?? body;
-  };
-  try {
-    const results = await Promise.allSettled(['/api/model-endpoints', '/api/system/gpu', '/api/sessions', '/api/company'].map(read));
-    if (results[0].status === 'fulfilled') localPlans = Array.isArray(results[0].value) ? results[0].value : [];
-    localGpu = results[1].status === 'fulfilled' ? results[1].value : null;
-    if (results[2].status === 'fulfilled') localSessions = Array.isArray(results[2].value) ? results[2].value : [];
-    if (results[3].status === 'fulfilled') localEmployees = results[3].value.employees || [];
-  } finally { clearTimeout(timer); }
-}
-
-function localPlanCards() {
-  return localPlans.map(plan => {
-    const ids = new Set(localSessions.filter(session => session.customModel?.endpointId === plan.id).map(session => session.id));
-    const people = localEmployees.filter(person => ids.has(person.sessionId));
-    const local = /^https?:\/\/(?:127\.0\.0\.1|localhost|\[::1\])(?::|\/|$)/i.test(plan.baseUrl || '');
-    const gpu = local && localGpu?.available ? localGpu : null;
-    const number = value => Number.isFinite(value) ? value : null;
-    const utilization = number(gpu?.utilization);
-    const used = number(gpu?.memoryUsedMb), total = number(gpu?.memoryTotalMb);
-    return `<div class="plan plan-local" data-local-plan="${esc(plan.id)}"><h3>${esc(plan.label)}<span class="badge mute">${local ? 'Local model' : 'Model endpoint'}</span></h3>
+      function localPlanCards() {
+        return localPlans
+          .map((plan) => {
+            const ids = new Set(
+              localSessions
+                .filter((session) => session.customModel?.endpointId === plan.id)
+                .map((session) => session.id)
+            );
+            const people = localEmployees.filter((person) => ids.has(person.sessionId));
+            const local = /^https?:\/\/(?:127\.0\.0\.1|localhost|\[::1\])(?::|\/|$)/i.test(plan.baseUrl || '');
+            const gpu = local && localGpu?.available ? localGpu : null;
+            const number = (value) => (Number.isFinite(value) ? value : null);
+            const utilization = number(gpu?.utilization);
+            const used = number(gpu?.memoryUsedMb),
+              total = number(gpu?.memoryTotalMb);
+            return `<div class="plan plan-local" data-local-plan="${esc(plan.id)}"><h3>${esc(plan.label)}<span class="badge mute">${local ? 'Local model' : 'Model endpoint'}</span></h3>
       <div class="who">${esc(plan.defaultModelId || plan.models?.[0] || 'No model selected')}</div>
       <div class="plan-members" data-local-members="${esc(plan.id)}" aria-label="${esc('People allocated to ' + plan.label)}">${people.length ? people.map(planAvatarHtml).join('') : '<span class="plan-member-state">No employees allocated</span>'}</div>
       <div class="stats"><div><b>${utilization == null ? '–' : Math.round(utilization) + '%'}</b>GPU utilization</div><div><b>${used == null || total == null ? '–' : (used / 1024).toFixed(1) + ' / ' + (total / 1024).toFixed(1) + ' GiB'}</b>shared GPU memory</div></div>
       <p class="hint">${local ? 'Runs on your hardware. No subscription quota or weekly reset. GPU capacity is shared.' : 'Uses your configured model endpoint.'}</p>
       <p class="hint">Choose this plan in an expert’s Runtime settings.</p></div>`;
-  }).join('');
-}
+          })
+          .join('');
+      }
 
-/* ---------- time in the company zone ---------- */
-const fmt = (t, o) => new Intl.DateTimeFormat('en-US', Object.assign({timeZone: TZ}, o)).format(new Date(t));
-const hm = t => fmt(t, {hour: '2-digit', minute: '2-digit', hourCycle: 'h23'});
-const dayLbl = t => fmt(t, {weekday: 'short', day: 'numeric', month: 'short'});
-const parts = t => { const o = {}; new Intl.DateTimeFormat('en-US', {timeZone: TZ, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit',
-  hour: '2-digit', minute: '2-digit', second: '2-digit', weekday: 'short'}).formatToParts(new Date(t)).forEach(p => o[p.type] = p.value); return o; };
-const startOfDay = t => { const p = parts(t); return t - ((+p.hour * 60 + +p.minute) * 60 + +p.second) * 1000; };
-const zoneShort = () => { try { return (new Intl.DateTimeFormat('en-US', {timeZone: TZ, timeZoneName: 'short'}).formatToParts(new Date()).find(p => p.type === 'timeZoneName') || {}).value || 'ET'; } catch (e) { return 'ET'; } };
-(function theme() {
-  let saved = null; try { saved = localStorage.getItem('board-theme'); } catch (e) {}
-  if (saved === 'dark' || saved === 'light') document.documentElement.dataset.theme = saved;
-  document.getElementById('theme').onclick = () => {
-    const cur = document.documentElement.dataset.theme || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
-    const nx = cur === 'dark' ? 'light' : 'dark';
-    document.documentElement.dataset.theme = nx;
-    try { localStorage.setItem('board-theme', nx); } catch (e) {}
-    if (B) renderPlansPage();
-  };
-})();
+      /* ---------- time in the company zone ---------- */
+      const fmt = (t, o) => new Intl.DateTimeFormat('en-US', Object.assign({ timeZone: TZ }, o)).format(new Date(t));
+      const hm = (t) => fmt(t, { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
+      const dayLbl = (t) => fmt(t, { weekday: 'short', day: 'numeric', month: 'short' });
+      const parts = (t) => {
+        const o = {};
+        new Intl.DateTimeFormat('en-US', {
+          timeZone: TZ,
+          hourCycle: 'h23',
+          year: 'numeric',
+          month: '2-digit',
+          day: '2-digit',
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit',
+          weekday: 'short',
+        })
+          .formatToParts(new Date(t))
+          .forEach((p) => (o[p.type] = p.value));
+        return o;
+      };
+      const startOfDay = (t) => {
+        const p = parts(t);
+        return t - ((+p.hour * 60 + +p.minute) * 60 + +p.second) * 1000;
+      };
+      const zoneShort = () => {
+        try {
+          return (
+            (
+              new Intl.DateTimeFormat('en-US', { timeZone: TZ, timeZoneName: 'short' })
+                .formatToParts(new Date())
+                .find((p) => p.type === 'timeZoneName') || {}
+            ).value || 'ET'
+          );
+        } catch (e) {
+          return 'ET';
+        }
+      };
+      (function theme() {
+        let saved = null;
+        try {
+          saved = localStorage.getItem('board-theme');
+        } catch (e) {}
+        if (saved === 'dark' || saved === 'light') document.documentElement.dataset.theme = saved;
+        document.getElementById('theme').onclick = () => {
+          const cur =
+            document.documentElement.dataset.theme ||
+            (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+          const nx = cur === 'dark' ? 'light' : 'dark';
+          document.documentElement.dataset.theme = nx;
+          try {
+            localStorage.setItem('board-theme', nx);
+          } catch (e) {}
+          if (B) renderPlansPage();
+        };
+      })();
 
-function tick() {
-  document.getElementById('clock').textContent = fmt(Date.now(), {weekday: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23'}) + ' ' + zoneShort();
-}
-let failures = 0;
-async function load() {
-  if (B && (document.hidden || (window.frameElement && !window.frameElement.getClientRects().length))) return;
-  const banner = document.getElementById('banner');
-  try {
-    const r = await fetch('/api/board', {cache: 'no-store', credentials: 'same-origin', headers: {accept: 'application/json'}});
-    if (r.status === 401 || r.status === 403) {
-      // The login expired: reload once so the console can ask again; never loop.
-      let tried = null; try { tried = sessionStorage.getItem('board-reloaded'); } catch (e) {}
-      if (!tried || Date.now() - +tried > 60e3) { try { sessionStorage.setItem('board-reloaded', String(Date.now())); } catch (e) {} location.reload(); return; }
-      throw new Error('Sign in to the console, then reload (HTTP ' + r.status + ')');
-    }
-    if (!r.ok) throw new Error('HTTP ' + r.status);
-    // The API wraps replies as {success, data}; a bare view is accepted too.
-    const j = await r.json();
-    if (j && j.success === false) throw new Error(j.error || 'refused');
-    const next = j && j.data ? j.data : j;
-    if (!next || !Array.isArray(next.issues)) throw new Error('unexpected reply');
-    B = next; TZ = B.timeZone || TZ; failures = 0; banner.hidden = true;
-    await refreshLocalPlans();
-    renderPlansPage();
-    void refreshPlanMembers();
-  } catch (e) {
-    failures++;
-    banner.hidden = false;
-    banner.textContent = (B ? 'Could not refresh Company plans (' : 'Could not load Company plans (') + e.message + '). ' + (B ? 'Showing the last data; ' : '') + 'trying again in a minute.';
-  } finally {
-    reportPlansReady();
-  }
-}
+      function tick() {
+        document.getElementById('clock').textContent =
+          fmt(Date.now(), { weekday: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }) +
+          ' ' +
+          zoneShort();
+      }
+      let failures = 0;
+      async function load() {
+        if (B && (document.hidden || (window.frameElement && !window.frameElement.getClientRects().length))) return;
+        const banner = document.getElementById('banner');
+        try {
+          const r = await fetch('/api/board', {
+            cache: 'no-store',
+            credentials: 'same-origin',
+            headers: { accept: 'application/json' },
+          });
+          if (r.status === 401 || r.status === 403) {
+            // The login expired: reload once so the console can ask again; never loop.
+            let tried = null;
+            try {
+              tried = sessionStorage.getItem('board-reloaded');
+            } catch (e) {}
+            if (!tried || Date.now() - +tried > 60e3) {
+              try {
+                sessionStorage.setItem('board-reloaded', String(Date.now()));
+              } catch (e) {}
+              location.reload();
+              return;
+            }
+            throw new Error('Sign in to the console, then reload (HTTP ' + r.status + ')');
+          }
+          if (!r.ok) throw new Error('HTTP ' + r.status);
+          // The API wraps replies as {success, data}; a bare view is accepted too.
+          const j = await r.json();
+          if (j && j.success === false) throw new Error(j.error || 'refused');
+          const next = j && j.data ? j.data : j;
+          if (!next || !Array.isArray(next.issues)) throw new Error('unexpected reply');
+          B = next;
+          TZ = B.timeZone || TZ;
+          failures = 0;
+          banner.hidden = true;
+          await refreshLocalPlans();
+          renderPlansPage();
+          void refreshPlanMembers();
+        } catch (e) {
+          failures++;
+          banner.hidden = false;
+          banner.textContent =
+            (B ? 'Could not refresh Company plans (' : 'Could not load Company plans (') +
+            e.message +
+            '). ' +
+            (B ? 'Showing the last data; ' : '') +
+            'trying again in a minute.';
+        } finally {
+          reportPlansReady();
+        }
+      }
 
-function renderPlansPage() {
-  document.getElementById('co').textContent = B.company?.name || '';
-  document.title = (B.company?.name ? B.company.name + ' · ' : '') + 'Company plans';
-  document.getElementById('built').textContent = 'Data built ' + dayLbl(B.built) + ' ' + hm(B.built) + ' ' + zoneShort();
-  plans(); tick();
-}
-const num = (v, d) => v == null ? '–' : (d == null ? v : Math.round(v * 10 ** d) / 10 ** d);
-function planLanding(p) {
-  const rate = Number.isFinite(p.rate) && p.rate >= 0 ? p.rate : null;
-  const periodHours = Number.isFinite(p.reset) && Number.isFinite(p.weekStart) && p.reset > p.weekStart ? (p.reset - p.weekStart) / H : null;
-  const periodUnit = periodHours >= 167 && periodHours <= 169 ? '%/week' : '%/period';
-  const periodFirst = Number.isFinite(p.hoursToReset) && p.hoursToReset > 24 && periodHours != null;
-  const converted = rate != null && periodHours != null ? rate * periodHours : null;
-  const periodRate = Number.isFinite(converted) ? converted : null;
-  const primary = periodFirst ? periodRate : rate, unit = periodFirst ? periodUnit : '%/hr';
-  const other = periodFirst ? rate : periodRate, otherUnit = periodFirst ? '%/hr' : periodUnit;
-  const sustainable = Number.isFinite(p.sustainablePctPerHour) && p.sustainablePctPerHour > 0 ? p.sustainablePctPerHour : null;
-  const ratio = rate != null && sustainable != null ? rate / sustainable : null;
-  const multiple = Number.isFinite(ratio) ? ratio : null;
-  return {
-    rateLabel: primary == null ? '–' : num(primary, 1) + unit,
-    rateTooltip: other == null ? 'No alternate-period rate available' : num(other, 1) + otherUnit + '; same current rate, different time unit',
-    multipleLabel: multiple == null ? '–' : multiple.toFixed(1) + '×',
-    multipleTooltip: sustainable == null ? 'Landing pace unavailable or no budget remains' : '1.0× uses the remaining budget by the stop point; landing pace ' + num(sustainable, 2) + '%/hr',
-    tone: multiple == null ? 'muted' : multiple > 1 ? 'bad' : 'good',
-  };
-}
-function planRisk(p) {
-  if (p.runsOut && p.reset && p.runsOut < p.reset) return 'bad';
-  if (p.proj != null && p.proj >= 85) return 'warn';
-  return 'good';
-}
-function planAuthLabel(p) {
-  if (typeof sign !== 'undefined' && sign && sign.accountId === p.id && sign.view && !SETTLED.includes(sign.view.state)) return 'Sign-in pending';
-  return ({'signed-in': 'Signed in', 'signed-out': 'Signed out', unavailable: 'Installing or unavailable', error: 'Sign-in status error'})[p.authState] || (p.signedIn ? 'Signed in' : 'Signed out');
-}
+      function renderPlansPage() {
+        document.getElementById('co').textContent = B.company?.name || '';
+        document.title = (B.company?.name ? B.company.name + ' · ' : '') + 'Company plans';
+        document.getElementById('built').textContent =
+          'Data built ' + dayLbl(B.built) + ' ' + hm(B.built) + ' ' + zoneShort();
+        plans();
+        tick();
+      }
+      const num = (v, d) => (v == null ? '–' : d == null ? v : Math.round(v * 10 ** d) / 10 ** d);
+      function planLanding(p) {
+        const rate = Number.isFinite(p.rate) && p.rate >= 0 ? p.rate : null;
+        const periodHours =
+          Number.isFinite(p.reset) && Number.isFinite(p.weekStart) && p.reset > p.weekStart
+            ? (p.reset - p.weekStart) / H
+            : null;
+        const periodUnit = periodHours >= 167 && periodHours <= 169 ? '%/week' : '%/period';
+        const periodFirst = Number.isFinite(p.hoursToReset) && p.hoursToReset > 24 && periodHours != null;
+        const converted = rate != null && periodHours != null ? rate * periodHours : null;
+        const periodRate = Number.isFinite(converted) ? converted : null;
+        const primary = periodFirst ? periodRate : rate,
+          unit = periodFirst ? periodUnit : '%/hr';
+        const other = periodFirst ? rate : periodRate,
+          otherUnit = periodFirst ? '%/hr' : periodUnit;
+        const sustainable =
+          Number.isFinite(p.sustainablePctPerHour) && p.sustainablePctPerHour > 0 ? p.sustainablePctPerHour : null;
+        const ratio = rate != null && sustainable != null ? rate / sustainable : null;
+        const multiple = Number.isFinite(ratio) ? ratio : null;
+        return {
+          rateLabel: primary == null ? '–' : num(primary, 1) + unit,
+          rateTooltip:
+            other == null
+              ? 'No alternate-period rate available'
+              : num(other, 1) + otherUnit + '; same current rate, different time unit',
+          multipleLabel: multiple == null ? '–' : multiple.toFixed(1) + '×',
+          multipleTooltip:
+            sustainable == null
+              ? 'Landing pace unavailable or no budget remains'
+              : '1.0× uses the remaining budget by the stop point; landing pace ' + num(sustainable, 2) + '%/hr',
+          tone: multiple == null ? 'muted' : multiple > 1 ? 'bad' : 'good',
+        };
+      }
+      function planRisk(p) {
+        if (p.runsOut && p.reset && p.runsOut < p.reset) return 'bad';
+        if (p.proj != null && p.proj >= 85) return 'warn';
+        return 'good';
+      }
+      function planAuthLabel(p) {
+        if (
+          typeof sign !== 'undefined' &&
+          sign &&
+          sign.accountId === p.id &&
+          sign.view &&
+          !SETTLED.includes(sign.view.state)
+        )
+          return 'Sign-in pending';
+        return (
+          {
+            'signed-in': 'Signed in',
+            'signed-out': 'Signed out',
+            unavailable: 'Installing or unavailable',
+            error: 'Sign-in status error',
+          }[p.authState] || (p.signedIn ? 'Signed in' : 'Signed out')
+        );
+      }
 
-function plans() {
-  const sec = document.getElementById('sec-burn'), el = document.getElementById('plans');
-  document.getElementById('addAcct').hidden = !B.planBurn;
-  document.getElementById('planMoveHistory').hidden = !B.planBurn;
-  if (!B.planBurn) { el.innerHTML = '<div class="empty">Plan burn is shown to the console owner only.</div>'; return; }
-  if (!B.planBurn.length && !localPlans.length) { el.innerHTML = '<div class="empty">No accounts yet. Add an account to choose a provider and sign in.</div>'; return; }
-  // Leave an open rename alone on the minute refresh, so a half-typed name survives.
-  if (planEdit && el.querySelector('[data-rename-form]') && B.planBurn.some(p => p.profileId === planEdit)) return;
-  if (planEdit && !B.planBurn.some(p => p.profileId === planEdit)) planEdit = null;
-  // Show the plan cards sorted by next reset time, soonest first;
-  // accounts with no known reset time sort last.
-  B.planBurn.sort((a, b) =>
-    (Number.isFinite(a.reset) ? a.reset : Infinity) - (Number.isFinite(b.reset) ? b.reset : Infinity));
-  el.innerHTML = B.planBurn.map((p, i) => {
-    const risk = planRisk(p);
-    const landing = planLanding(p);
-    const badge = risk === 'bad' ? `runs out ${dayLbl(p.runsOut).split(',')[0]} ${hm(p.runsOut)}` : risk === 'warn' ? 'tight' : p.used == null ? 'no data' : 'on track';
-    return `<div class="plan" data-has-usage="${p.used != null || p.proj != null}"><h3>${esc(p.name)}<span class="badge ${p.used == null ? 'mute' : risk}">${esc(badge)}</span></h3>
+      function plans() {
+        const sec = document.getElementById('sec-burn'),
+          el = document.getElementById('plans');
+        document.getElementById('addAcct').hidden = !B.planBurn;
+        document.getElementById('planMoveHistory').hidden = !B.planBurn;
+        if (!B.planBurn) {
+          el.innerHTML = '<div class="empty">Plan burn is shown to the console owner only.</div>';
+          return;
+        }
+        if (!B.planBurn.length && !localPlans.length) {
+          el.innerHTML = '<div class="empty">No accounts yet. Add an account to choose a provider and sign in.</div>';
+          return;
+        }
+        // Leave an open rename alone on the minute refresh, so a half-typed name survives.
+        if (planEdit && el.querySelector('[data-rename-form]') && B.planBurn.some((p) => p.profileId === planEdit))
+          return;
+        if (planEdit && !B.planBurn.some((p) => p.profileId === planEdit)) planEdit = null;
+        // Show the plan cards sorted by next reset time, soonest first;
+        // accounts with no known reset time sort last.
+        B.planBurn.sort(
+          (a, b) => (Number.isFinite(a.reset) ? a.reset : Infinity) - (Number.isFinite(b.reset) ? b.reset : Infinity)
+        );
+        el.innerHTML =
+          B.planBurn
+            .map((p, i) => {
+              const risk = planRisk(p);
+              const landing = planLanding(p);
+              const badge =
+                risk === 'bad'
+                  ? `runs out ${dayLbl(p.runsOut).split(',')[0]} ${hm(p.runsOut)}`
+                  : risk === 'warn'
+                    ? 'tight'
+                    : p.used == null
+                      ? 'no data'
+                      : 'on track';
+              return `<div class="plan" data-has-usage="${p.used != null || p.proj != null}"><h3>${esc(p.name)}<span class="badge ${p.used == null ? 'mute' : risk}">${esc(badge)}</span></h3>
       <div class="who" data-auth-state="${esc(p.authState || '')}">${esc(planAuthLabel(p))}</div>
       ${p.usageError ? `<div class="hint" data-usage-error role="status">${esc(p.usageError)}</div>` : ''}
       <div class="who">${p.reset ? 'Resets ' + dayLbl(p.reset) + ' ' + hm(p.reset) + ' ' + esc(zoneShort()) : ''}</div>
@@ -231,824 +413,1375 @@ function plans() {
       ${agentBurnBlock(p)}
       <div class="plan-usage-plot"><div class="plan-plot-legend" aria-label="Usage plot legend"><span><i class="weekly-key" style="border-color:${css('--' + risk)}"></i>Weekly usage</span><span><i class="five-hour-key"></i><span class="five-hour-label">5h window</span></span></div><svg id="burn${i}" role="img" viewBox="0 0 320 120"></svg><div class="plan-five-hour-status hint" role="status"></div></div>
       ${planActions(p)}</div>`;
-  }).join('') + localPlanCards();
-  B.planBurn.forEach((p, i) => { const svg = document.getElementById('burn' + i); if (svg) burnChart(svg, p); });
-  wirePlanActions(el);
-  renderPlanMembers();
-}
+            })
+            .join('') + localPlanCards();
+        B.planBurn.forEach((p, i) => {
+          const svg = document.getElementById('burn' + i);
+          if (svg) burnChart(svg, p);
+        });
+        wirePlanActions(el);
+        renderPlanMembers();
+      }
 
-function planMemberHtml(plan) {
-  if (!planAllocations) return `<span class="plan-member-state">${planMembersError ? 'Members unavailable' : 'Loading members…'}</span>`;
-  const sessions = new Set((planAllocations.accounts.find(account => account.id === plan.id) || {}).sessionIds || []);
-  const seen = new Set();
-  const members = planAllocations.employees.filter(member => {
-    if (!sessions.has(member.sessionId) || seen.has(member.id)) return false;
-    seen.add(member.id); return true;
-  });
-  const icons = members.map(planAvatarHtml).join('');
-  const ghosts = pendingPlanRequests.filter(request => request.toAccount === plan.id && ['pending', 'reauthorize-required', 'executing', 'recovery-required'].includes(request.phase) && !members.some(member => member.id === request.employeeId)).map(request => {
-    const member = planAllocations.employees.find(employee => employee.id === request.employeeId);
-    const avatar = typeof member?.avatar === 'string' && /^\/api\/avatars\/[a-zA-Z0-9-]+(?:\?v=\d+)?$/.test(member.avatar) ? member.avatar : null;
-    return `<button type="button" class="plan-member plan-member-pending" data-plan-request="${esc(request.id)}" title="${esc(request.name)}: ${esc(planRequestStatus(request))}" aria-label="${esc(request.name)}: ${esc(planRequestStatus(request))}"><span class="plan-member-face" aria-hidden="true">${esc(Array.from(request.name || '?')[0])}</span>${avatar ? `<img src="${esc(avatar)}" alt="" loading="lazy">` : ''}<span class="plan-member-name" aria-hidden="true">${esc(request.name)} · ${esc(planRequestStatus(request))}</span></button>`;
-  }).join('');
-  return (icons + ghosts || '<span class="plan-member-state">No employees allocated</span>') + (planMembersError ? '<span class="plan-member-state">Updates paused</span>' : '');
-}
+      function planMemberHtml(plan) {
+        if (!planAllocations)
+          return `<span class="plan-member-state">${planMembersError ? 'Members unavailable' : 'Loading members…'}</span>`;
+        const sessions = new Set(
+          (planAllocations.accounts.find((account) => account.id === plan.id) || {}).sessionIds || []
+        );
+        const seen = new Set();
+        const members = planAllocations.employees.filter((member) => {
+          if (!sessions.has(member.sessionId) || seen.has(member.id)) return false;
+          seen.add(member.id);
+          return true;
+        });
+        const icons = members.map(planAvatarHtml).join('');
+        const ghosts = pendingPlanRequests
+          .filter(
+            (request) =>
+              request.toAccount === plan.id &&
+              ['pending', 'reauthorize-required', 'executing', 'recovery-required'].includes(request.phase) &&
+              !members.some((member) => member.id === request.employeeId)
+          )
+          .map((request) => {
+            const member = planAllocations.employees.find((employee) => employee.id === request.employeeId);
+            const avatar =
+              typeof member?.avatar === 'string' && /^\/api\/avatars\/[a-zA-Z0-9-]+(?:\?v=\d+)?$/.test(member.avatar)
+                ? member.avatar
+                : null;
+            return `<button type="button" class="plan-member plan-member-pending" data-plan-request="${esc(request.id)}" title="${esc(request.name)}: ${esc(planRequestStatus(request))}" aria-label="${esc(request.name)}: ${esc(planRequestStatus(request))}"><span class="plan-member-face" aria-hidden="true">${esc(Array.from(request.name || '?')[0])}</span>${avatar ? `<img src="${esc(avatar)}" alt="" loading="lazy">` : ''}<span class="plan-member-name" aria-hidden="true">${esc(request.name)} · ${esc(planRequestStatus(request))}</span></button>`;
+          })
+          .join('');
+        return (
+          (icons + ghosts || '<span class="plan-member-state">No employees allocated</span>') +
+          (planMembersError ? '<span class="plan-member-state">Updates paused</span>' : '')
+        );
+      }
 
-function planRequestStatus(record, now = Date.now()) {
-  const waiting = record.phase === 'pending' || record.phase === 'reauthorize-required';
-  const seconds = Number.isFinite(record.expiresAt) ? Math.max(0, Math.ceil((record.expiresAt - now) / 1000)) : null;
-  const phase = record.phase === 'pending'
-    ? (record.notified ? 'Awaiting the expert’s handoff and approval' : 'Waiting for idle · queued message')
-    : record.phase;
-  if (!waiting) return phase;
-  if (seconds === null) return phase + ' · expiry unavailable';
-  if (!seconds) return 'Expired · waiting for server confirmation';
-  return phase + ` · ${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')} left`;
-}
+      function planRequestStatus(record, now = Date.now()) {
+        const waiting = record.phase === 'pending' || record.phase === 'reauthorize-required';
+        const seconds = Number.isFinite(record.expiresAt)
+          ? Math.max(0, Math.ceil((record.expiresAt - now) / 1000))
+          : null;
+        const phase =
+          record.phase === 'pending'
+            ? record.notified
+              ? 'Awaiting the expert’s handoff and approval'
+              : 'Waiting for idle · queued message'
+            : record.phase;
+        if (!waiting) return phase;
+        if (seconds === null) return phase + ' · expiry unavailable';
+        if (!seconds) return 'Expired · waiting for server confirmation';
+        return phase + ` · ${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')} left`;
+      }
 
-function renderPlanMembers() {
-  document.querySelectorAll('[data-plan-members]').forEach(row => {
-    const plan = (B.planBurn || []).find(account => account.id === row.dataset.planMembers);
-    if (!plan) return;
-    const html = planMemberHtml(plan);
-    if (row.dataset.snapshot === html) return;
-    const focused = row.contains(document.activeElement) ? document.activeElement.dataset.member : null;
-    row.innerHTML = html; row.dataset.snapshot = html;
-    row.querySelectorAll('img').forEach(image => image.addEventListener('error', () => image.remove(), {once: true}));
-    row.querySelectorAll('.plan-member').forEach(member => member.addEventListener('click', () => member.focus()));
-    wirePlanMoves(row);
-    if (focused) [...row.querySelectorAll('[data-member]')].find(member => member.dataset.member === focused)?.focus();
-  });
-  document.querySelectorAll('[data-local-members]').forEach(row => {
-    if (typeof localSessions === 'undefined' || typeof localEmployees === 'undefined') return;
-    const ids = new Set(localSessions.filter(session => session.customModel?.endpointId === row.dataset.localMembers).map(session => session.id));
-    const html = localEmployees.filter(person => ids.has(person.sessionId)).map(planAvatarHtml).join('') || '<span class="plan-member-state">No employees allocated</span>';
-    if (row.dataset.snapshot === html) return;
-    row.innerHTML = html; row.dataset.snapshot = html;
-    row.querySelectorAll('img').forEach(image => image.addEventListener('error', () => image.remove(), {once: true}));
-    wirePlanMoves(row);
-  });
-}
+      function renderPlanMembers() {
+        document.querySelectorAll('[data-plan-members]').forEach((row) => {
+          const plan = (B.planBurn || []).find((account) => account.id === row.dataset.planMembers);
+          if (!plan) return;
+          const html = planMemberHtml(plan);
+          if (row.dataset.snapshot === html) return;
+          const focused = row.contains(document.activeElement) ? document.activeElement.dataset.member : null;
+          row.innerHTML = html;
+          row.dataset.snapshot = html;
+          row
+            .querySelectorAll('img')
+            .forEach((image) => image.addEventListener('error', () => image.remove(), { once: true }));
+          row
+            .querySelectorAll('.plan-member')
+            .forEach((member) => member.addEventListener('click', () => member.focus()));
+          wirePlanMoves(row);
+          if (focused)
+            [...row.querySelectorAll('[data-member]')].find((member) => member.dataset.member === focused)?.focus();
+        });
+        document.querySelectorAll('[data-local-members]').forEach((row) => {
+          if (typeof localSessions === 'undefined' || typeof localEmployees === 'undefined') return;
+          const ids = new Set(
+            localSessions
+              .filter((session) => session.customModel?.endpointId === row.dataset.localMembers)
+              .map((session) => session.id)
+          );
+          const html =
+            localEmployees
+              .filter((person) => ids.has(person.sessionId))
+              .map(planAvatarHtml)
+              .join('') || '<span class="plan-member-state">No employees allocated</span>';
+          if (row.dataset.snapshot === html) return;
+          row.innerHTML = html;
+          row.dataset.snapshot = html;
+          row
+            .querySelectorAll('img')
+            .forEach((image) => image.addEventListener('error', () => image.remove(), { once: true }));
+          wirePlanMoves(row);
+        });
+      }
 
-function planAvatarHtml(person) {
-  const member = planAllocations?.employees.find(item => item.id === person.id) || person;
-  const avatar = typeof member.avatar === 'string' && /^\/api\/avatars\/[a-zA-Z0-9-]+(?:\?v=\d+)?$/.test(member.avatar)
-    ? member.avatar : member.avatar && /^[a-zA-Z0-9-]+$/.test(member.id) ? '/api/avatars/' + member.id : null;
-  return `<button type="button" class="plan-member" draggable="true" data-member="${esc(member.id)}" title="${esc(member.name)}" aria-label="${esc(member.name)}"><span class="plan-member-face" aria-hidden="true">${esc(member.icon || Array.from(member.name || '?')[0])}</span>${avatar ? `<img src="${esc(avatar)}" alt="" loading="lazy">` : ''}<span class="plan-member-name" aria-hidden="true">${esc(member.name)}</span></button>`;
-}
+      function planAvatarHtml(person) {
+        const member = planAllocations?.employees.find((item) => item.id === person.id) || person;
+        const avatar =
+          typeof member.avatar === 'string' && /^\/api\/avatars\/[a-zA-Z0-9-]+(?:\?v=\d+)?$/.test(member.avatar)
+            ? member.avatar
+            : member.avatar && /^[a-zA-Z0-9-]+$/.test(member.id)
+              ? '/api/avatars/' + member.id
+              : null;
+        return `<button type="button" class="plan-member" draggable="true" data-member="${esc(member.id)}" title="${esc(member.name)}" aria-label="${esc(member.name)}"><span class="plan-member-face" aria-hidden="true">${esc(member.icon || Array.from(member.name || '?')[0])}</span>${avatar ? `<img src="${esc(avatar)}" alt="" loading="lazy">` : ''}<span class="plan-member-name" aria-hidden="true">${esc(member.name)}</span></button>`;
+      }
 
-async function refreshPlanMembers() {
-  if (planMembersBusy || !B?.planBurn?.length || document.hidden) return;
-  if (window.frameElement && !window.frameElement.getClientRects().length) return;
-  planMembersBusy = true;
-  const controller = new AbortController(), timeout = setTimeout(() => controller.abort(), 8e3);
-  try {
-    const response = await fetch('/api/plans/allocations', {cache: 'no-store', credentials: 'same-origin', headers: {accept: 'application/json'}, signal: controller.signal});
-    if (response.status === 401 || response.status === 403) { planAllocations = null; pendingPlanRequests = []; }
-    if (!response.ok) throw new Error('Members unavailable');
-    const reply = await response.json();
-    if (!reply.success || !Array.isArray(reply.data?.accounts) || !Array.isArray(reply.data?.employees)) throw new Error('Invalid membership data');
-    planAllocations = reply.data; planMembersError = false;
-    try {
-      const requests = await planMoveRequest('/api/plans/requests/recent');
-      pendingPlanRequests = Array.isArray(requests) ? requests : [];
-    } catch { pendingPlanRequests = []; }
-  } catch {
-    planMembersError = true;
-  } finally {
-    clearTimeout(timeout); planMembersBusy = false; renderPlanMembers();
-  }
-}
+      async function refreshPlanMembers() {
+        if (planMembersBusy || !B?.planBurn?.length || document.hidden) return;
+        if (window.frameElement && !window.frameElement.getClientRects().length) return;
+        planMembersBusy = true;
+        const controller = new AbortController(),
+          timeout = setTimeout(() => controller.abort(), 8e3);
+        try {
+          const response = await fetch('/api/plans/allocations', {
+            cache: 'no-store',
+            credentials: 'same-origin',
+            headers: { accept: 'application/json' },
+            signal: controller.signal,
+          });
+          if (response.status === 401 || response.status === 403) {
+            planAllocations = null;
+            pendingPlanRequests = [];
+          }
+          if (!response.ok) throw new Error('Members unavailable');
+          const reply = await response.json();
+          if (!reply.success || !Array.isArray(reply.data?.accounts) || !Array.isArray(reply.data?.employees))
+            throw new Error('Invalid membership data');
+          planAllocations = reply.data;
+          planMembersError = false;
+          try {
+            const requests = await planMoveRequest('/api/plans/requests/recent');
+            pendingPlanRequests = Array.isArray(requests) ? requests : [];
+          } catch {
+            pendingPlanRequests = [];
+          }
+        } catch {
+          planMembersError = true;
+        } finally {
+          clearTimeout(timeout);
+          planMembersBusy = false;
+          renderPlanMembers();
+        }
+      }
 
-async function planMoveRequest(path, payload) {
-  const controller = new AbortController(), timeout = setTimeout(() => controller.abort(), 12e3);
-  try {
-    const response = await fetch(path, {method: 'POST', credentials: 'same-origin', cache: 'no-store', headers: {'content-type': 'application/json'}, body: JSON.stringify(payload || {}), signal: controller.signal});
-    const result = await response.json();
-    if (!response.ok || !result.success) {
-      const error = new Error(result.error || 'Plan move request failed');
-      error.status = response.status;
-      const blocker = result.blocker;
-      if (blocker?.action === 'inspect-existing' && typeof blocker.id === 'string' && /^[a-zA-Z0-9_-]{1,100}$/.test(blocker.id))
-        error.blocker = {id: blocker.id, action: blocker.action};
-      throw error;
-    }
-    return result.data;
-  } finally { clearTimeout(timeout); }
-}
+      async function planMoveRequest(path, payload) {
+        const controller = new AbortController(),
+          timeout = setTimeout(() => controller.abort(), 12e3);
+        try {
+          const response = await fetch(path, {
+            method: 'POST',
+            credentials: 'same-origin',
+            cache: 'no-store',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify(payload || {}),
+            signal: controller.signal,
+          });
+          const result = await response.json();
+          if (!response.ok || !result.success) {
+            const error = new Error(result.error || 'Plan move request failed');
+            error.status = response.status;
+            const blocker = result.blocker;
+            if (
+              blocker?.action === 'inspect-existing' &&
+              typeof blocker.id === 'string' &&
+              /^[a-zA-Z0-9_-]{1,100}$/.test(blocker.id)
+            )
+              error.blocker = { id: blocker.id, action: blocker.action };
+            throw error;
+          }
+          return result.data;
+        } finally {
+          clearTimeout(timeout);
+        }
+      }
 
-function wirePlanMoves(row) {
-  if (!row.dataset.moveWired) {
-    row.dataset.moveWired = 'true';
-    row.addEventListener('dragover', event => {
-      if (!event.dataTransfer?.types.includes('application/x-reverie-plan-member')) return;
-      event.preventDefault(); row.dataset.dropActive = 'true'; event.dataTransfer.dropEffect = 'move';
-    });
-    row.addEventListener('dragleave', () => { delete row.dataset.dropActive; });
-    row.addEventListener('drop', event => {
-      delete row.dataset.dropActive;
-      const id = event.dataTransfer?.getData('application/x-reverie-plan-member');
-      if (!id) return;
-      event.preventDefault(); void openPlanMove(id, row.dataset.planMembers);
-    });
-  }
-  row.querySelectorAll('[data-plan-request]').forEach(button => {
-    button.onclick = () => {
-      const request = pendingPlanRequests.find(record => record.id === button.dataset.planRequest);
-      const dialog = document.getElementById('moveDlg');
-      if (request && dialog && !dialog.open) { dialog.showModal(); showPlanRequestProgress(dialog, request); }
-    };
-  });
-  row.querySelectorAll('.plan-member[data-member]').forEach(button => {
-    button.addEventListener('dragstart', event => {
-      event.dataTransfer.setData('application/x-reverie-plan-member', button.dataset.member);
-      event.dataTransfer.effectAllowed = 'move';
-    });
-    button.addEventListener('click', () => { void openPlanMove(button.dataset.member); });
-  });
-}
+      function wirePlanMoves(row) {
+        if (!row.dataset.moveWired) {
+          row.dataset.moveWired = 'true';
+          row.addEventListener('dragover', (event) => {
+            if (!event.dataTransfer?.types.includes('application/x-reverie-plan-member')) return;
+            event.preventDefault();
+            row.dataset.dropActive = 'true';
+            event.dataTransfer.dropEffect = 'move';
+          });
+          row.addEventListener('dragleave', () => {
+            delete row.dataset.dropActive;
+          });
+          row.addEventListener('drop', (event) => {
+            delete row.dataset.dropActive;
+            const id = event.dataTransfer?.getData('application/x-reverie-plan-member');
+            if (!id) return;
+            event.preventDefault();
+            void openPlanMove(id, row.dataset.planMembers);
+          });
+        }
+        row.querySelectorAll('[data-plan-request]').forEach((button) => {
+          button.onclick = () => {
+            const request = pendingPlanRequests.find((record) => record.id === button.dataset.planRequest);
+            const dialog = document.getElementById('moveDlg');
+            if (request && dialog && !dialog.open) {
+              dialog.showModal();
+              showPlanRequestProgress(dialog, request);
+            }
+          };
+        });
+        row.querySelectorAll('.plan-member[data-member]').forEach((button) => {
+          button.addEventListener('dragstart', (event) => {
+            event.dataTransfer.setData('application/x-reverie-plan-member', button.dataset.member);
+            event.dataTransfer.effectAllowed = 'move';
+          });
+          button.addEventListener('click', () => {
+            void openPlanMove(button.dataset.member);
+          });
+        });
+      }
 
-function planDialogView(dialog) {
-  const marker = {root: dialog.firstElementChild};
-  dialog._planProgress = marker;
-  return {
-    current: () => dialog.open && dialog._planProgress === marker && dialog.firstElementChild === marker.root,
-    stop: () => { if (dialog._planProgress === marker) dialog._planProgress = null; }
-  };
-}
+      function planDialogView(dialog) {
+        const marker = { root: dialog.firstElementChild };
+        dialog._planProgress = marker;
+        return {
+          current: () => dialog.open && dialog._planProgress === marker && dialog.firstElementChild === marker.root,
+          stop: () => {
+            if (dialog._planProgress === marker) dialog._planProgress = null;
+          },
+        };
+      }
 
-// The move-impact estimate for a destination (GET /api/plans/move-impact; see docs/plan-burn-per-agent.md): both plans'
-// projected weekly use at their stop point, now and with this session's last 30 minutes of work moved, with the joining
-// plan's band. Advisory only: it never throws, and a slow or failed estimate never blocks the move.
-async function moveImpactText(sessionId, toAccount) {
-  if (!sessionId || !toAccount) return '';
-  const pct = v => (v == null ? '–' : Math.round(v) + '%');
-  const controller = new AbortController(), timeout = setTimeout(() => controller.abort(), 4e3);
-  try {
-    const response = await fetch(`/api/plans/move-impact?session=${encodeURIComponent(sessionId)}&to=${encodeURIComponent(toAccount)}`, {cache: 'no-store', credentials: 'same-origin', headers: {accept: 'application/json'}, signal: controller.signal});
-    if (response.status === 404) return 'No impact estimate yet: this session has no recent work rate.';
-    const result = await response.json();
-    if (!response.ok || !result.success) return 'Impact estimate unavailable.';
-    const m = result.data;
-    const band = m.to.endAfterLow != null && m.to.endAfterHigh != null && Math.round(m.to.endAfterLow) !== Math.round(m.to.endAfterHigh) ? ` (${pct(m.to.endAfterLow)}–${pct(m.to.endAfterHigh)})` : '';
-    const basis = m.to.conversion?.basis === 'prior' ? '; the destination has no readings yet, so its conversion is a prior guess' : '';
-    return `Estimated at each plan's stop, from this session's last 30 minutes (${Math.round(m.usdPerHour * 100) / 100} work units/h): ${m.from.label} ${pct(m.from.endNow)} → ${pct(m.from.endAfter)}; ${m.to.label} ${pct(m.to.endNow)} → ${pct(m.to.endAfter)}${band}${basis}.`;
-  } catch {
-    return 'Impact estimate unavailable.';
-  } finally { clearTimeout(timeout); }
-}
+      // The move-impact estimate for a destination (GET /api/plans/move-impact; see docs/plan-burn-per-agent.md): both plans'
+      // projected weekly use at their stop point, now and with this session's last 30 minutes of work moved, with the joining
+      // plan's band. Advisory only: it never throws, and a slow or failed estimate never blocks the move.
+      async function moveImpactText(sessionId, toAccount) {
+        if (!sessionId || !toAccount) return '';
+        const pct = (v) => (v == null ? '–' : Math.round(v) + '%');
+        const controller = new AbortController(),
+          timeout = setTimeout(() => controller.abort(), 4e3);
+        try {
+          const response = await fetch(
+            `/api/plans/move-impact?session=${encodeURIComponent(sessionId)}&to=${encodeURIComponent(toAccount)}`,
+            {
+              cache: 'no-store',
+              credentials: 'same-origin',
+              headers: { accept: 'application/json' },
+              signal: controller.signal,
+            }
+          );
+          if (response.status === 404) return 'No impact estimate yet: this session has no recent work rate.';
+          const result = await response.json();
+          if (!response.ok || !result.success) return 'Impact estimate unavailable.';
+          const m = result.data;
+          const band =
+            m.to.endAfterLow != null &&
+            m.to.endAfterHigh != null &&
+            Math.round(m.to.endAfterLow) !== Math.round(m.to.endAfterHigh)
+              ? ` (${pct(m.to.endAfterLow)}–${pct(m.to.endAfterHigh)})`
+              : '';
+          const basis =
+            m.to.conversion?.basis === 'prior'
+              ? '; the destination has no readings yet, so its conversion is a prior guess'
+              : '';
+          return `Estimated at each plan's stop, from this session's last 30 minutes (${Math.round(m.usdPerHour * 100) / 100} work units/h): ${m.from.label} ${pct(m.from.endNow)} → ${pct(m.from.endAfter)}; ${m.to.label} ${pct(m.to.endNow)} → ${pct(m.to.endAfter)}${band}${basis}.`;
+        } catch {
+          return 'Impact estimate unavailable.';
+        } finally {
+          clearTimeout(timeout);
+        }
+      }
 
-// After the destination changes: refresh the estimate. Each request takes a new generation, so only the newest answer for
-// this form and session is shown; an older one (even for the same destination, after A → B → A) is dropped.
-let moveImpactGeneration = 0;
-async function showMoveImpact(dialog, sessionId, toAccount) {
-  const box = dialog.querySelector('[data-move-impact]');
-  if (!box) return;
-  const generation = String(++moveImpactGeneration);
-  Object.assign(box.dataset, {gen: generation, for: toAccount, session: sessionId});
-  box.textContent = 'Estimating the impact on both plans…';
-  const text = await moveImpactText(sessionId, toAccount);
-  if (box.isConnected && box.dataset.gen === generation && box.dataset.session === sessionId && box.dataset.for === toAccount) box.textContent = text;
-}
+      // After the destination changes: refresh the estimate. Each request takes a new generation, so only the newest answer for
+      // this form and session is shown; an older one (even for the same destination, after A → B → A) is dropped.
+      let moveImpactGeneration = 0;
+      async function showMoveImpact(dialog, sessionId, toAccount) {
+        const box = dialog.querySelector('[data-move-impact]');
+        if (!box) return;
+        const generation = String(++moveImpactGeneration);
+        Object.assign(box.dataset, { gen: generation, for: toAccount, session: sessionId });
+        box.textContent = 'Estimating the impact on both plans…';
+        const text = await moveImpactText(sessionId, toAccount);
+        if (
+          box.isConnected &&
+          box.dataset.gen === generation &&
+          box.dataset.session === sessionId &&
+          box.dataset.for === toAccount
+        )
+          box.textContent = text;
+      }
 
-// A held move is inspected in this employee's existing dialog, never retried as a new request.
-async function inspectBlockedPlanMove(dialog, employee, error, view) {
-  if (!error.blocker && !/move in progress|requiring recovery|awaiting recovery/i.test(error.message)) return false;
-  dialog.querySelectorAll('[type=submit], [data-force]').forEach(button => { button.disabled = true; });
-  const message = dialog.querySelector('.err') || dialog.querySelector('.status');
-  message.textContent = 'Checking the existing move. No new move will be submitted.';
-  try {
-    let move;
-    if (error.blocker) move = await planMoveRequest(`/api/plans/moves/${encodeURIComponent(error.blocker.id)}/status`);
-    else {
-      const recent = await planMoveRequest('/api/plans/moves/recent');
-      if (!view.current()) return true;
-      const unresolved = recent.filter(record => record.employeeId === employee.id && !['completed', 'failed'].includes(record.phase));
-      if (unresolved.length !== 1) throw new Error('The current move is ambiguous or unavailable. Inspect existing moves; the hold is retained.');
-      move = await planMoveRequest(`/api/plans/moves/${encodeURIComponent(unresolved[0].id)}/status`);
-      if (move.id !== unresolved[0].id) throw new Error('The current move changed; refresh before recovery.');
-    }
-    if (!view.current()) return true;
-    if (!move || move.employeeId !== employee.id || error.blocker && move.id !== error.blocker.id)
-      throw new Error('The current move changed; refresh before recovery.');
-    showPlanMoveProgress(dialog, move, employee.name, true);
-  } catch (failure) {
-    if (view.current()) message.textContent = `${failure.message} No request was retried. Choose Inspect existing moves to check the retained journal.`;
-  }
-  return true;
-}
+      // A held move is inspected in this employee's existing dialog, never retried as a new request.
+      async function inspectBlockedPlanMove(dialog, employee, error, view) {
+        if (!error.blocker && !/move in progress|requiring recovery|awaiting recovery/i.test(error.message))
+          return false;
+        dialog.querySelectorAll('[type=submit], [data-force]').forEach((button) => {
+          button.disabled = true;
+        });
+        const message = dialog.querySelector('.err') || dialog.querySelector('.status');
+        message.textContent = 'Checking the existing move. No new move will be submitted.';
+        try {
+          let move;
+          if (error.blocker)
+            move = await planMoveRequest(`/api/plans/moves/${encodeURIComponent(error.blocker.id)}/status`);
+          else {
+            const recent = await planMoveRequest('/api/plans/moves/recent');
+            if (!view.current()) return true;
+            const unresolved = recent.filter(
+              (record) => record.employeeId === employee.id && !['completed', 'failed'].includes(record.phase)
+            );
+            if (unresolved.length !== 1)
+              throw new Error(
+                'The current move is ambiguous or unavailable. Inspect existing moves; the hold is retained.'
+              );
+            move = await planMoveRequest(`/api/plans/moves/${encodeURIComponent(unresolved[0].id)}/status`);
+            if (move.id !== unresolved[0].id) throw new Error('The current move changed; refresh before recovery.');
+          }
+          if (!view.current()) return true;
+          if (!move || move.employeeId !== employee.id || (error.blocker && move.id !== error.blocker.id))
+            throw new Error('The current move changed; refresh before recovery.');
+          showPlanMoveProgress(dialog, move, employee.name, true);
+        } catch (failure) {
+          if (view.current())
+            message.textContent = `${failure.message} No request was retried. Choose Inspect existing moves to check the retained journal.`;
+        }
+        return true;
+      }
 
-async function openPlanMove(employeeId, destination) {
-  const dialog = document.getElementById('moveDlg');
-  if (!dialog || dialog.open) return;
-  const employee = planAllocations?.employees.find(member => member.id === employeeId);
-  if (!employee) return;
-  if (typeof localSessions !== 'undefined' && localSessions.some(session => session.id === employee.sessionId && session.customModel)) {
-    if (window.parent !== window) window.parent.postMessage({type: 'company-open-runtime', employeeId}, window.location.origin);
-    else window.location.assign('/#company');
-    return;
-  }
-  dialog.innerHTML = `<h3>${esc(employee.name)}</h3><p class="status">Checking the current session…</p><button type="button" class="btn" data-close>Close</button>`;
-  dialog.querySelector('[data-close]').onclick = () => dialog.close();
-  dialog.showModal();
-  let view = planDialogView(dialog);
-  try {
-    const preview = await planMoveRequest('/api/plans/moves/preview', {employeeId, sessionId: employee.sessionId});
-    if (!view.current()) return;
-    const source = B.planBurn.find(account => account.id === preview.account);
-    const targets = B.planBurn.filter(account => account.id !== preview.account && ['openai', 'anthropic'].includes(account.provider));
-    if (!targets.length) throw new Error('No other plan is available.');
-    if (destination === preview.account) { dialog.close(); return; }
-    if (destination && !targets.some(account => account.id === destination)) throw new Error('Choose an available destination plan.');
-    // The first estimate is part of the form as it opens, so the open form does not change under the user.
-    const firstTarget = destination || targets[0].id;
-    const impact = await moveImpactText(preview.sessionId, firstTarget);
-    if (!view.current()) return;
-    dialog.innerHTML = `<h3>Request move: ${esc(employee.name)}</h3><p class="status">From ${esc(source?.name || preview.account)}. The expert keeps working here until it prepares a handoff and approves the request. A grey avatar marks the requested destination. After approval, the old session stops before the replacement starts; saved files stay with the employee.</p><form>
-      <label>Destination plan<select name="target">${targets.map(account => `<option value="${esc(account.id)}"${account.id === destination ? ' selected' : ''}>${esc(account.name)}</option>`).join('')}</select></label>
+      async function openPlanMove(employeeId, destination) {
+        const dialog = document.getElementById('moveDlg');
+        if (!dialog || dialog.open) return;
+        const employee = planAllocations?.employees.find((member) => member.id === employeeId);
+        if (!employee) return;
+        if (
+          typeof localSessions !== 'undefined' &&
+          localSessions.some((session) => session.id === employee.sessionId && session.customModel)
+        ) {
+          if (window.parent !== window)
+            window.parent.postMessage({ type: 'company-open-runtime', employeeId }, window.location.origin);
+          else window.location.assign('/#company');
+          return;
+        }
+        dialog.innerHTML = `<h3>${esc(employee.name)}</h3><p class="status">Checking the current session…</p><button type="button" class="btn" data-close>Close</button>`;
+        dialog.querySelector('[data-close]').onclick = () => dialog.close();
+        dialog.showModal();
+        let view = planDialogView(dialog);
+        try {
+          const preview = await planMoveRequest('/api/plans/moves/preview', {
+            employeeId,
+            sessionId: employee.sessionId,
+          });
+          if (!view.current()) return;
+          const source = B.planBurn.find((account) => account.id === preview.account);
+          const targets = B.planBurn.filter(
+            (account) => account.id !== preview.account && ['openai', 'anthropic'].includes(account.provider)
+          );
+          if (!targets.length) throw new Error('No other plan is available.');
+          if (destination === preview.account) {
+            dialog.close();
+            return;
+          }
+          if (destination && !targets.some((account) => account.id === destination))
+            throw new Error('Choose an available destination plan.');
+          // The first estimate is part of the form as it opens, so the open form does not change under the user.
+          const firstTarget = destination || targets[0].id;
+          const impact = await moveImpactText(preview.sessionId, firstTarget);
+          if (!view.current()) return;
+          dialog.innerHTML = `<h3>Request move: ${esc(employee.name)}</h3><p class="status">From ${esc(source?.name || preview.account)}. The expert keeps working here until it prepares a handoff and approves the request. A grey avatar marks the requested destination. After approval, the old session stops before the replacement starts; saved files stay with the employee.</p><form>
+      <label>Destination plan<select name="target">${targets.map((account) => `<option value="${esc(account.id)}"${account.id === destination ? ' selected' : ''}>${esc(account.name)}</option>`).join('')}</select></label>
       <p class="hint" data-target-harness role="status"></p>
       <p class="hint" data-move-impact data-for="${esc(firstTarget)}" data-session="${esc(preview.sessionId)}" role="status">${esc(impact)}</p>
       <p class="err" role="alert"></p><div><button type="submit" class="btn">Request move</button> <button type="button" class="btn" data-force>Force move now</button> <button type="button" class="btn" data-inspect>Inspect existing moves</button> <button type="button" class="btn" data-close>Cancel</button></div></form>`;
-    view = planDialogView(dialog);
-    dialog.querySelector('[data-close]').onclick = () => dialog.close();
-    const target = dialog.querySelector('[name=target]');
-    const explainHarness = () => {
-      const account = targets.find(account => account.id === target.value);
-      const mode = account?.provider === 'openai' ? 'codex' : 'claude';
-      dialog.querySelector('[data-target-harness]').textContent = `Harness: ${mode === 'codex' ? 'Codex' : 'Claude'}. ${mode === preview.mode ? 'Your model and effort stay the same.' : 'The destination provider’s model and effort defaults apply.'}`;
-    };
-    target.onchange = () => { explainHarness(); void showMoveImpact(dialog, preview.sessionId, target.value); };
-    explainHarness();
-    dialog.querySelector('[data-force]').onclick = () => { void forcePlanMove(dialog, employee, target.value); };
-    dialog.querySelector('[data-inspect]').onclick = () => { void openPlanMoveHistory(employeeId); };
-    let submitting = false;
-    dialog.querySelector('form').onsubmit = async event => {
-      event.preventDefault();
-      if (submitting) return;
-      submitting = true;
-      const form = event.currentTarget, submit = form.querySelector('[type=submit]'); submit.disabled = true;
-      form.querySelector('[data-force]').disabled = true;
-      form.querySelector('.err').textContent = '';
-      const id = Array.from(crypto.getRandomValues(new Uint8Array(16)), byte => byte.toString(16).padStart(2, '0')).join('');
-      try {
-        const record = await planMoveRequest('/api/plans/requests', {id, employeeId, sessionId: preview.sessionId, toAccount: form.elements.target.value});
-        pendingPlanRequests = [record, ...pendingPlanRequests.filter(previous => previous.id !== record.id)];
-        renderPlanMembers();
-        if (view.current()) showPlanRequestProgress(dialog, record);
-      } catch (error) {
-        if (!view.current()) return;
-        if (await inspectBlockedPlanMove(dialog, employee, error, view)) return;
-        if (!view.current()) return;
-        form.querySelector('.err').textContent = error.status ? error.message
-          : 'The request outcome is unconfirmed. Inspect existing moves before another request; no retry was sent.';
-        if (error.status) { submitting = false; submit.disabled = false; form.querySelector('[data-force]').disabled = false; }
+          view = planDialogView(dialog);
+          dialog.querySelector('[data-close]').onclick = () => dialog.close();
+          const target = dialog.querySelector('[name=target]');
+          const explainHarness = () => {
+            const account = targets.find((account) => account.id === target.value);
+            const mode = account?.provider === 'openai' ? 'codex' : 'claude';
+            dialog.querySelector('[data-target-harness]').textContent =
+              `Harness: ${mode === 'codex' ? 'Codex' : 'Claude'}. ${mode === preview.mode ? 'Your model and effort stay the same.' : 'The destination provider’s model and effort defaults apply.'}`;
+          };
+          target.onchange = () => {
+            explainHarness();
+            void showMoveImpact(dialog, preview.sessionId, target.value);
+          };
+          explainHarness();
+          dialog.querySelector('[data-force]').onclick = () => {
+            void forcePlanMove(dialog, employee, target.value);
+          };
+          dialog.querySelector('[data-inspect]').onclick = () => {
+            void openPlanMoveHistory(employeeId);
+          };
+          let submitting = false;
+          dialog.querySelector('form').onsubmit = async (event) => {
+            event.preventDefault();
+            if (submitting) return;
+            submitting = true;
+            const form = event.currentTarget,
+              submit = form.querySelector('[type=submit]');
+            submit.disabled = true;
+            form.querySelector('[data-force]').disabled = true;
+            form.querySelector('.err').textContent = '';
+            const id = Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) =>
+              byte.toString(16).padStart(2, '0')
+            ).join('');
+            try {
+              const record = await planMoveRequest('/api/plans/requests', {
+                id,
+                employeeId,
+                sessionId: preview.sessionId,
+                toAccount: form.elements.target.value,
+              });
+              pendingPlanRequests = [record, ...pendingPlanRequests.filter((previous) => previous.id !== record.id)];
+              renderPlanMembers();
+              if (view.current()) showPlanRequestProgress(dialog, record);
+            } catch (error) {
+              if (!view.current()) return;
+              if (await inspectBlockedPlanMove(dialog, employee, error, view)) return;
+              if (!view.current()) return;
+              form.querySelector('.err').textContent = error.status
+                ? error.message
+                : 'The request outcome is unconfirmed. Inspect existing moves before another request; no retry was sent.';
+              if (error.status) {
+                submitting = false;
+                submit.disabled = false;
+                form.querySelector('[data-force]').disabled = false;
+              }
+            }
+          };
+        } catch (error) {
+          if (view.current()) dialog.querySelector('.status').textContent = error.message;
+        }
       }
-    };
-  } catch (error) { if (view.current()) dialog.querySelector('.status').textContent = error.message; }
-}
 
-function showPlanMoveProgress(dialog, initial, name, blockedRequest = false) {
-  dialog.innerHTML = `<h3>${blockedRequest ? 'Existing plan move' : 'Plan move'}: ${esc(name)}</h3><p class="status" role="status"></p><p class="hint" data-move-context hidden></p><p class="hint" data-move-sessions></p><button type="button" class="btn" data-cancel>Cancel waiting move</button> <button type="button" class="btn" data-resolve hidden>Adopt existing destination</button> <button type="button" class="btn" data-refresh>Refresh status</button><p class="hint" data-recovery-info></p> <button type="button" class="btn" data-close>Hide progress</button>`;
-  const cancel = dialog.querySelector('[data-cancel]'), resolve = dialog.querySelector('[data-resolve]');
-  const refresh = dialog.querySelector('[data-refresh]'), status = dialog.querySelector('.status');
-  const context = dialog.querySelector('[data-move-context]');
-  const started = Number.isFinite(initial.at) && Number.isFinite(new Date(initial.at).getTime())
-    ? `Move started ${fmt(initial.at, {month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short'})}.`
-    : '';
-  context.textContent = [blockedRequest ? 'The existing move blocked your new request.' : '', started].filter(Boolean).join(' ');
-  context.hidden = !context.textContent;
-  let record = initial, stopped = false, busy = false, unconfirmed = false, feedback = '', statusGeneration = 0, timer;
-  const view = planDialogView(dialog), current = view.current;
-  const stop = () => { stopped = true; clearTimeout(timer); view.stop(); };
-  dialog.querySelector('[data-close]').onclick = () => { stop(); dialog.close(); };
-  const eligible = () => record.phase === 'recovery-required' && !!record.newSession && !record.resourceIntent && record.sourceCleanupVerified === true;
-  const readStatus = async expected => {
-    const generation = ++statusGeneration;
-    const next = await planMoveRequest(`/api/plans/moves/${encodeURIComponent(expected.id)}/status`);
-    if (!current() || generation !== statusGeneration) return false;
-    if (!next || next.id !== expected.id || ['employeeId', 'oldSession', 'toAccount', 'newSession'].some(key => expected[key] !== undefined && next[key] !== expected[key]))
-      throw new Error('The recovery target changed; inspect the current move before recovery.');
-    record = next;
-    return true;
-  };
-  const deadline = Date.now() + 12 * 60e3;
-  const paint = () => {
-    status.textContent = `${record.phase}${record.error ? ': ' + record.error : ''}${feedback ? ' · ' + feedback : ''}`;
-    dialog.querySelector('[data-move-sessions]').textContent = `Old session: ${record.oldSession || record.sessionId || 'not recorded'}; new session: ${record.newSession || 'not created yet'}`;
-    cancel.hidden = record.phase !== 'waiting'; cancel.disabled = busy;
-    resolve.hidden = record.phase !== 'recovery-required' || !record.newSession || !!record.resourceIntent;
-    resolve.disabled = busy || unconfirmed || !eligible(); refresh.disabled = busy;
-    dialog.querySelector('[data-recovery-info]').textContent = unconfirmed
-      ? 'The recovery response is unconfirmed. Refresh status; do not replay recovery or start another move. The journal is retained.'
-      : record.phase !== 'recovery-required' ? '' : record.resourceIntent
-      ? 'This resource change requires protected native recovery before another move can begin. The journal is retained.'
-      : !record.newSession ? 'No destination session was recorded. Both sessions and the move journal need inspection before another move; Force move cannot bypass this hold.'
-      : record.sourceCleanupVerified !== true ? 'Source cleanup was not durably verified. Refresh status or inspect both sessions; the journal is retained and Force move cannot bypass this hold.'
-      : 'Adopt existing destination verifies the stopped source and current destination. It does not start or stop sessions or replay the handoff. This must finish before a new move.';
-    resolve.title = resolve.disabled ? 'Recovery requires confirmed current status and durable source-cleanup proof.' : 'Validate and adopt the already-running destination without launching or replaying its handoff.';
-    if (['completed', 'failed', 'recovery-required'].includes(record.phase)) {
-      stopped = true;
-      if (record.phase === 'completed') { stop(); dialog.close(); }
-      void refreshPlanMembers();
-      return true;
-    }
-    if (Date.now() >= deadline) { stopped = true; status.textContent = 'Status polling ended. Refresh status before another move.'; return true; }
-    return false;
-  };
-  refresh.onclick = async () => {
-    if (busy || !current()) return;
-    busy = true; clearTimeout(timer); paint();
-    try {
-      if (await readStatus(record)) {
-        // Still held after a lost response: no recovery completed and none is in flight (an in-flight one reads as
-        // checking), so adoption may be offered again; the server refuses an overlapping attempt.
-        if (unconfirmed && record.phase === 'recovery-required') {
-          unconfirmed = false;
-          feedback = 'Status shows the recovery did not take effect; the move is still held, so Adopt existing destination is available again.';
-        } else feedback = unconfirmed ? 'Status checked; the unconfirmed recovery is retained.' : '';
+      function showPlanMoveProgress(dialog, initial, name, blockedRequest = false) {
+        dialog.innerHTML = `<h3>${blockedRequest ? 'Existing plan move' : 'Plan move'}: ${esc(name)}</h3><p class="status" role="status"></p><p class="hint" data-move-context hidden></p><p class="hint" data-move-sessions></p><button type="button" class="btn" data-cancel>Cancel waiting move</button> <button type="button" class="btn" data-resolve hidden>Adopt existing destination</button> <button type="button" class="btn" data-refresh>Refresh status</button><p class="hint" data-recovery-info></p> <button type="button" class="btn" data-close>Hide progress</button>`;
+        const cancel = dialog.querySelector('[data-cancel]'),
+          resolve = dialog.querySelector('[data-resolve]');
+        const refresh = dialog.querySelector('[data-refresh]'),
+          status = dialog.querySelector('.status');
+        const context = dialog.querySelector('[data-move-context]');
+        const started =
+          Number.isFinite(initial.at) && Number.isFinite(new Date(initial.at).getTime())
+            ? `Move started ${fmt(initial.at, { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' })}.`
+            : '';
+        context.textContent = [blockedRequest ? 'The existing move blocked your new request.' : '', started]
+          .filter(Boolean)
+          .join(' ');
+        context.hidden = !context.textContent;
+        let record = initial,
+          stopped = false,
+          busy = false,
+          unconfirmed = false,
+          feedback = '',
+          statusGeneration = 0,
+          timer;
+        const view = planDialogView(dialog),
+          current = view.current;
+        const stop = () => {
+          stopped = true;
+          clearTimeout(timer);
+          view.stop();
+        };
+        dialog.querySelector('[data-close]').onclick = () => {
+          stop();
+          dialog.close();
+        };
+        const eligible = () =>
+          record.phase === 'recovery-required' &&
+          !!record.newSession &&
+          !record.resourceIntent &&
+          record.sourceCleanupVerified === true;
+        const readStatus = async (expected) => {
+          const generation = ++statusGeneration;
+          const next = await planMoveRequest(`/api/plans/moves/${encodeURIComponent(expected.id)}/status`);
+          if (!current() || generation !== statusGeneration) return false;
+          if (
+            !next ||
+            next.id !== expected.id ||
+            ['employeeId', 'oldSession', 'toAccount', 'newSession'].some(
+              (key) => expected[key] !== undefined && next[key] !== expected[key]
+            )
+          )
+            throw new Error('The recovery target changed; inspect the current move before recovery.');
+          record = next;
+          return true;
+        };
+        const deadline = Date.now() + 12 * 60e3;
+        const paint = () => {
+          status.textContent = `${record.phase}${record.error ? ': ' + record.error : ''}${feedback ? ' · ' + feedback : ''}`;
+          dialog.querySelector('[data-move-sessions]').textContent =
+            `Old session: ${record.oldSession || record.sessionId || 'not recorded'}; new session: ${record.newSession || 'not created yet'}`;
+          cancel.hidden = record.phase !== 'waiting';
+          cancel.disabled = busy;
+          resolve.hidden = record.phase !== 'recovery-required' || !record.newSession || !!record.resourceIntent;
+          resolve.disabled = busy || unconfirmed || !eligible();
+          refresh.disabled = busy;
+          dialog.querySelector('[data-recovery-info]').textContent = unconfirmed
+            ? 'The recovery response is unconfirmed. Refresh status; do not replay recovery or start another move. The journal is retained.'
+            : record.phase !== 'recovery-required'
+              ? ''
+              : record.resourceIntent
+                ? 'This resource change requires protected native recovery before another move can begin. The journal is retained.'
+                : !record.newSession
+                  ? 'No destination session was recorded. Both sessions and the move journal need inspection before another move; Force move cannot bypass this hold.'
+                  : record.sourceCleanupVerified !== true
+                    ? 'Source cleanup was not durably verified. Refresh status or inspect both sessions; the journal is retained and Force move cannot bypass this hold.'
+                    : 'Adopt existing destination verifies the stopped source and current destination. It does not start or stop sessions or replay the handoff. This must finish before a new move.';
+          resolve.title = resolve.disabled
+            ? 'Recovery requires confirmed current status and durable source-cleanup proof.'
+            : 'Validate and adopt the already-running destination without launching or replaying its handoff.';
+          if (['completed', 'failed', 'recovery-required'].includes(record.phase)) {
+            stopped = true;
+            if (record.phase === 'completed') {
+              stop();
+              dialog.close();
+            }
+            void refreshPlanMembers();
+            return true;
+          }
+          if (Date.now() >= deadline) {
+            stopped = true;
+            status.textContent = 'Status polling ended. Refresh status before another move.';
+            return true;
+          }
+          return false;
+        };
+        refresh.onclick = async () => {
+          if (busy || !current()) return;
+          busy = true;
+          clearTimeout(timer);
+          paint();
+          try {
+            if (await readStatus(record)) {
+              // Still held after a lost response: no recovery completed and none is in flight (an in-flight one reads as
+              // checking), so adoption may be offered again; the server refuses an overlapping attempt.
+              if (unconfirmed && record.phase === 'recovery-required') {
+                unconfirmed = false;
+                feedback =
+                  'Status shows the recovery did not take effect; the move is still held, so Adopt existing destination is available again.';
+              } else feedback = unconfirmed ? 'Status checked; the unconfirmed recovery is retained.' : '';
+            }
+          } catch (error) {
+            if (current()) feedback = `Status unavailable: ${error.message}. The hold is retained.`;
+          } finally {
+            busy = false;
+            if (current()) {
+              stopped = false;
+              if (!paint()) timer = setTimeout(poll, 1000);
+            }
+          }
+        };
+        cancel.onclick = async () => {
+          if (busy || !current() || record.phase !== 'waiting') return;
+          busy = true;
+          clearTimeout(timer);
+          paint();
+          try {
+            await planMoveRequest(`/api/plans/moves/${encodeURIComponent(record.id)}/cancel`);
+            await readStatus(record);
+          } catch (error) {
+            if (current()) feedback = error.message;
+          } finally {
+            busy = false;
+            if (current()) {
+              stopped = false;
+              if (!paint()) timer = setTimeout(poll, 1000);
+            }
+          }
+        };
+        resolve.onclick = async () => {
+          if (busy || unconfirmed || !current() || !eligible()) return;
+          busy = true;
+          clearTimeout(timer);
+          feedback = 'Checking the current move; no session will be started or stopped.';
+          paint();
+          let dispatched = false;
+          try {
+            if (!(await readStatus(record))) return;
+            paint();
+            if (!current() || record.phase === 'completed') return;
+            if (!eligible()) throw new Error('Recovery is not available for the current move; the hold is retained.');
+            dispatched = true;
+            const next = await planMoveRequest(`/api/plans/moves/${encodeURIComponent(record.id)}/resolve`, {
+              action: 'adopt-existing',
+              oldSession: record.oldSession,
+              newSession: record.newSession,
+              toAccount: record.toAccount,
+            });
+            if (!current()) return;
+            if (
+              !next ||
+              next.id !== record.id ||
+              ['employeeId', 'oldSession', 'newSession', 'toAccount'].some(
+                (key) => record[key] !== undefined && next[key] !== record[key]
+              )
+            )
+              throw new Error('The recovery result changed; refresh status.');
+            record = next;
+            feedback = '';
+          } catch (error) {
+            if (!current()) return;
+            // A server answer (error.status) is a definite refusal: the move was rolled back to its held state. Only a lost
+            // or unreadable response leaves the outcome unknown.
+            unconfirmed = dispatched && !error.status;
+            feedback = unconfirmed
+              ? `${error.message} · Recovery outcome unconfirmed; refresh status without replaying.`
+              : `${dispatched ? 'Recovery refused: ' : ''}${error.message} · The move journal is retained.`;
+          } finally {
+            busy = false;
+            if (current()) paint();
+          }
+        };
+        const poll = async () => {
+          if (stopped || busy || !current() || paint()) return;
+          try {
+            if (!(await readStatus(record))) return;
+            if (paint()) return;
+          } catch (error) {
+            if (current())
+              status.textContent = `Status unavailable: ${error.message}. Do not start another move until checked.`;
+          }
+          if (current()) timer = setTimeout(poll, 1000);
+        };
+        void poll();
       }
-    }
-    catch (error) { if (current()) feedback = `Status unavailable: ${error.message}. The hold is retained.`; }
-    finally { busy = false; if (current()) { stopped = false; if (!paint()) timer = setTimeout(poll, 1000); } }
-  };
-  cancel.onclick = async () => {
-    if (busy || !current() || record.phase !== 'waiting') return;
-    busy = true; clearTimeout(timer); paint();
-    try { await planMoveRequest(`/api/plans/moves/${encodeURIComponent(record.id)}/cancel`); await readStatus(record); }
-    catch (error) { if (current()) feedback = error.message; }
-    finally { busy = false; if (current()) { stopped = false; if (!paint()) timer = setTimeout(poll, 1000); } }
-  };
-  resolve.onclick = async () => {
-    if (busy || unconfirmed || !current() || !eligible()) return;
-    busy = true; clearTimeout(timer); feedback = 'Checking the current move; no session will be started or stopped.'; paint();
-    let dispatched = false;
-    try {
-      if (!await readStatus(record)) return;
-      paint();
-      if (!current() || record.phase === 'completed') return;
-      if (!eligible()) throw new Error('Recovery is not available for the current move; the hold is retained.');
-      dispatched = true;
-      const next = await planMoveRequest(`/api/plans/moves/${encodeURIComponent(record.id)}/resolve`, {
-        action: 'adopt-existing', oldSession: record.oldSession, newSession: record.newSession, toAccount: record.toAccount });
-      if (!current()) return;
-      if (!next || next.id !== record.id || ['employeeId', 'oldSession', 'newSession', 'toAccount'].some(key => record[key] !== undefined && next[key] !== record[key]))
-        throw new Error('The recovery result changed; refresh status.');
-      record = next; feedback = '';
-    } catch (error) {
-      if (!current()) return;
-      // A server answer (error.status) is a definite refusal: the move was rolled back to its held state. Only a lost
-      // or unreadable response leaves the outcome unknown.
-      unconfirmed = dispatched && !error.status;
-      feedback = unconfirmed
-        ? `${error.message} · Recovery outcome unconfirmed; refresh status without replaying.`
-        : `${dispatched ? 'Recovery refused: ' : ''}${error.message} · The move journal is retained.`;
-    } finally { busy = false; if (current()) paint(); }
-  };
-  const poll = async () => {
-    if (stopped || busy || !current() || paint()) return;
-    try { if (!await readStatus(record)) return; if (paint()) return; }
-    catch (error) { if (current()) status.textContent = `Status unavailable: ${error.message}. Do not start another move until checked.`; }
-    if (current()) timer = setTimeout(poll, 1000);
-  };
-  void poll();
-}
-function showPlanRequestProgress(dialog, initial) {
-  dialog.innerHTML = `<h3>Move request: ${esc(initial.name)}</h3><p class="status" role="status"></p><p class="hint">The expert prepares its handoff and decides this request. An owner can force a move without waiting for the expert.</p><p class="err" role="alert"></p><button type="button" class="btn" data-reauthorize>Reauthorize request</button> <button type="button" class="btn" data-force>Force move now</button> <button type="button" class="btn" data-cancel>Cancel request</button> <button type="button" class="btn" data-inspect>Inspect existing moves</button> <button type="button" class="btn" data-close>Close</button>`;
-  const cancel = dialog.querySelector('[data-cancel]'), reauthorize = dialog.querySelector('[data-reauthorize]');
-  const force = dialog.querySelector('[data-force]'), status = dialog.querySelector('.status');
-  dialog.querySelector('[data-inspect]').onclick = () => { void openPlanMoveHistory(initial.employeeId); };
-  let record = initial, busy = false, timer;
-  const view = planDialogView(dialog), current = view.current;
-  const stop = () => { clearTimeout(timer); view.stop(); };
-  dialog.querySelector('[data-close]').onclick = () => { stop(); dialog.close(); };
-  const paint = () => {
-    status.textContent = `${planRequestStatus(record)}${record.movePhase ? ' · ' + record.movePhase : ''}${record.error ? ': ' + record.error : ''}`;
-    cancel.hidden = !(['pending', 'reauthorize-required'].includes(record.phase) || record.phase === 'executing' && record.movePhase === 'waiting');
-    reauthorize.hidden = record.phase !== 'reauthorize-required';
-    force.hidden = !['pending', 'reauthorize-required'].includes(record.phase);
-    force.disabled = busy;
-    cancel.disabled = reauthorize.disabled = busy;
-  };
-  const terminal = () => {
-    if (['pending', 'reauthorize-required', 'executing'].includes(record.phase)) return false;
-    if (record.phase === 'completed') { stop(); dialog.close(); }
-    void refreshPlanMembers();
-    return true;
-  };
-  const act = async action => {
-    if (busy || !current()) return; busy = true; paint();
-    try {
-      const next = await planMoveRequest(`/api/plans/requests/${encodeURIComponent(record.id)}/${action}`);
-      if (!current()) return;
-      record = next;
-      pendingPlanRequests = [record, ...pendingPlanRequests.filter(previous => previous.id !== record.id)]; renderPlanMembers();
-    } catch (error) { if (current()) dialog.querySelector('.err').textContent = error.message; }
-    finally { busy = false; if (current()) { paint(); terminal(); } }
-  };
-  cancel.onclick = () => { void act('cancel'); };
-  reauthorize.onclick = () => { void act('reauthorize'); };
-  force.onclick = () => {
-    const employee = planAllocations?.employees.find(item => item.id === record.employeeId);
-    if (employee) void forcePlanMove(dialog, employee, record.toAccount, record.id);
-  };
-  const poll = async () => {
-    if (!current()) return;
-    paint();
-    if (terminal()) return;
-    try {
-      const next = await planMoveRequest(`/api/plans/requests/${encodeURIComponent(record.id)}/status`);
-      if (!current()) return;
-      record = next;
-      paint();
-      if (terminal()) return;
-    } catch (error) { if (current()) dialog.querySelector('.err').textContent = `Status unavailable: ${error.message}`; }
-    if (current()) timer = setTimeout(poll, 1500);
-  };
-  void poll();
-}
-async function forcePlanMove(dialog, employee, target, requestId) {
-  if (!window.confirm(`Force ${employee.name} to move now? This skips their handoff approval. Unfinished work may be interrupted after the replacement is ready.`)) return;
-  const view = planDialogView(dialog);
-  dialog.querySelectorAll('button').forEach(button => { button.disabled = true; });
-  try {
-    const id = 'force-' + Array.from(crypto.getRandomValues(new Uint8Array(16)), byte => byte.toString(16).padStart(2, '0')).join('');
-    const record = await planMoveRequest('/api/plans/moves/force', {id, employeeId: employee.id, sessionId: employee.sessionId, toAccount: target,
-      handoff: 'The owner forced this plan move without waiting for a fresh handoff. Continue as the same employee using your existing identity, workspace and memory. Inspect saved checkpoints and recent owner messages before resuming; do not repeat uncertain side effects.'});
-    if (requestId) {
-      try { await planMoveRequest(`/api/plans/requests/${encodeURIComponent(requestId)}/cancel`); }
-      catch { /* A completed binding change already invalidates the old approval. */ }
-    }
-    if (view.current()) showPlanMoveProgress(dialog, record, employee.name);
-  } catch (error) {
-    if (!view.current()) return;
-    if (await inspectBlockedPlanMove(dialog, employee, error, view)) return;
-    if (!view.current()) return;
-    dialog.querySelector('.err').textContent = error.status ? error.message
-      : 'The force-move outcome is unconfirmed. Inspect existing moves; no retry was sent.';
-    dialog.querySelectorAll('[data-close], [data-inspect]').forEach(button => { button.disabled = false; });
-    if (error.status) dialog.querySelectorAll('button').forEach(button => { button.disabled = false; });
-  }
-}
-async function openPlanMoveHistory(employeeId) {
-  const dialog = document.getElementById('moveDlg');
-  if (!dialog) return;
-  dialog.innerHTML = '<h3>Recent plan moves</h3><p class="status">Loading…</p><div data-moves></div><button type="button" class="btn" data-close>Close</button>';
-  dialog.querySelector('[data-close]').onclick = () => dialog.close();
-  if (!dialog.open) dialog.showModal();
-  const view = planDialogView(dialog);
-  try {
-    const requests = await planMoveRequest('/api/plans/requests/recent');
-    if (!view.current()) return;
-    const moves = await planMoveRequest('/api/plans/moves/recent');
-    if (!view.current()) return;
-    // An approved request shares its id with its canonical move. Keep the move's
-    // cleanup facts and recovery action instead of shadowing it with request status.
-    const moveIds = new Set(moves.map(record => record.id));
-    const held = moves.filter(record => record.employeeId === employeeId && !['completed', 'failed'].includes(record.phase));
-    if (employeeId && held.length === 1) {
-      const record = await planMoveRequest(`/api/plans/moves/${encodeURIComponent(held[0].id)}/status`);
-      if (!view.current()) return;
-      if (!record || record.id !== held[0].id || record.employeeId !== employeeId)
-        throw new Error('The current move changed; refresh before recovery.');
-      showPlanMoveProgress(dialog, record, record.name);
-      return;
-    }
-    const records = [...moves, ...requests.filter(record => !moveIds.has(record.id))]
-      .filter(record => !employeeId || record.employeeId === employeeId);
-    dialog.querySelector('.status').textContent = held.length > 1 ? 'Multiple unresolved moves require inspection; no recovery was selected.'
-      : records.length ? 'Select a request or move to inspect its status.' : 'No recorded requests or moves.';
-    const list = dialog.querySelector('[data-moves]');
-    records.forEach(record => {
-      const button = document.createElement('button'); button.type = 'button'; button.className = 'btn';
-      button.textContent = `${record.name}: ${record.phase}`;
-      button.onclick = () => moveIds.has(record.id) ? showPlanMoveProgress(dialog, record, record.name) : showPlanRequestProgress(dialog, record);
-      list.appendChild(button);
-    });
-  } catch (error) { if (view.current()) dialog.querySelector('.status').textContent = error.message; }
-}
-document.getElementById('planMoveHistory')?.addEventListener('click', () => { void openPlanMoveHistory(); });
-// Codex banked resets: a fresh week on demand. Claude plans have none, so they show nothing.
-function bankedStat(p) {
-  const b = p.banked;
-  if (!b) return '';
-  const exp = b.count && b.expiresAt ? `expires ${dayLbl(b.expiresAt)} ${hm(b.expiresAt)}` : '';
-  return `<div class="banked"><b>${b.count}</b>banked reset${b.count === 1 ? '' : 's'}${exp ? `<small>${esc(exp)}</small>` : ''}</div>`;
-}
-/* ---------- Plan accounts (rename, sign in, add, remove; was the /plans page) ---------- */
-const SETTLED = ['signed_in', 'failed', 'timeout', 'cancelled'];
-const providerName = p => p === 'anthropic' ? 'Claude' : 'Codex';
-// The rename open on a tile (profile id), and the last error per profile id, kept across the minute refresh.
-let planEdit = null;
-const planErr = {};
-function mk(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; }
-function mkBtn(text, cls, fn) { const b = mk('button', cls, text); b.type = 'button'; if (fn) b.onclick = fn; return b; }
-function notifyPlansChanged() {
-  if (parent !== window) parent.postMessage({ type: 'company-plans-changed' }, location.origin);
-}
-async function acctApi(path, opts) {
-  opts = opts || {};
-  try {
-    const r = await fetch(path, {method: opts.method || 'GET', cache: 'no-store', credentials: 'same-origin',
-      headers: opts.body ? {'content-type': 'application/json', accept: 'application/json'} : {accept: 'application/json'},
-      body: opts.body ? JSON.stringify(opts.body) : undefined});
-    const j = await r.json().catch(() => null);
-    // A refused login shows as an error here; it never reloads the page (load() owns that).
-    if (r.status === 401) return {ok: false, error: 'Signed out of the console (HTTP 401); sign in and try again'};
-    if (!r.ok || !j || j.success === false) return {ok: false, error: (j && (j.error || j.message)) || 'HTTP ' + r.status};
-    if (opts.method && opts.method !== 'GET') notifyPlansChanged();
-    return {ok: true, data: j.data};
-  } catch (e) { return {ok: false, error: 'Network error'}; }
-}
-function planActions(p) {
-  if (planEdit && planEdit === p.profileId)
-    return `<form class="pact" data-rename-form="${esc(p.profileId)}"><input name="label" maxlength="64" value="${esc(p.label)}" aria-label="Plan name" autocomplete="off">
+      function showPlanRequestProgress(dialog, initial) {
+        dialog.innerHTML = `<h3>Move request: ${esc(initial.name)}</h3><p class="status" role="status"></p><p class="hint">The expert prepares its handoff and decides this request. An owner can force a move without waiting for the expert.</p><p class="err" role="alert"></p><button type="button" class="btn" data-reauthorize>Reauthorize request</button> <button type="button" class="btn" data-force>Force move now</button> <button type="button" class="btn" data-cancel>Cancel request</button> <button type="button" class="btn" data-inspect>Inspect existing moves</button> <button type="button" class="btn" data-close>Close</button>`;
+        const cancel = dialog.querySelector('[data-cancel]'),
+          reauthorize = dialog.querySelector('[data-reauthorize]');
+        const force = dialog.querySelector('[data-force]'),
+          status = dialog.querySelector('.status');
+        dialog.querySelector('[data-inspect]').onclick = () => {
+          void openPlanMoveHistory(initial.employeeId);
+        };
+        let record = initial,
+          busy = false,
+          timer;
+        const view = planDialogView(dialog),
+          current = view.current;
+        const stop = () => {
+          clearTimeout(timer);
+          view.stop();
+        };
+        dialog.querySelector('[data-close]').onclick = () => {
+          stop();
+          dialog.close();
+        };
+        const paint = () => {
+          status.textContent = `${planRequestStatus(record)}${record.movePhase ? ' · ' + record.movePhase : ''}${record.error ? ': ' + record.error : ''}`;
+          cancel.hidden = !(
+            ['pending', 'reauthorize-required'].includes(record.phase) ||
+            (record.phase === 'executing' && record.movePhase === 'waiting')
+          );
+          reauthorize.hidden = record.phase !== 'reauthorize-required';
+          force.hidden = !['pending', 'reauthorize-required'].includes(record.phase);
+          force.disabled = busy;
+          cancel.disabled = reauthorize.disabled = busy;
+        };
+        const terminal = () => {
+          if (['pending', 'reauthorize-required', 'executing'].includes(record.phase)) return false;
+          if (record.phase === 'completed') {
+            stop();
+            dialog.close();
+          }
+          void refreshPlanMembers();
+          return true;
+        };
+        const act = async (action) => {
+          if (busy || !current()) return;
+          busy = true;
+          paint();
+          try {
+            const next = await planMoveRequest(`/api/plans/requests/${encodeURIComponent(record.id)}/${action}`);
+            if (!current()) return;
+            record = next;
+            pendingPlanRequests = [record, ...pendingPlanRequests.filter((previous) => previous.id !== record.id)];
+            renderPlanMembers();
+          } catch (error) {
+            if (current()) dialog.querySelector('.err').textContent = error.message;
+          } finally {
+            busy = false;
+            if (current()) {
+              paint();
+              terminal();
+            }
+          }
+        };
+        cancel.onclick = () => {
+          void act('cancel');
+        };
+        reauthorize.onclick = () => {
+          void act('reauthorize');
+        };
+        force.onclick = () => {
+          const employee = planAllocations?.employees.find((item) => item.id === record.employeeId);
+          if (employee) void forcePlanMove(dialog, employee, record.toAccount, record.id);
+        };
+        const poll = async () => {
+          if (!current()) return;
+          paint();
+          if (terminal()) return;
+          try {
+            const next = await planMoveRequest(`/api/plans/requests/${encodeURIComponent(record.id)}/status`);
+            if (!current()) return;
+            record = next;
+            paint();
+            if (terminal()) return;
+          } catch (error) {
+            if (current()) dialog.querySelector('.err').textContent = `Status unavailable: ${error.message}`;
+          }
+          if (current()) timer = setTimeout(poll, 1500);
+        };
+        void poll();
+      }
+      async function forcePlanMove(dialog, employee, target, requestId) {
+        if (
+          !window.confirm(
+            `Force ${employee.name} to move now? This skips their handoff approval. Unfinished work may be interrupted after the replacement is ready.`
+          )
+        )
+          return;
+        const view = planDialogView(dialog);
+        dialog.querySelectorAll('button').forEach((button) => {
+          button.disabled = true;
+        });
+        try {
+          const id =
+            'force-' +
+            Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) => byte.toString(16).padStart(2, '0')).join(
+              ''
+            );
+          const record = await planMoveRequest('/api/plans/moves/force', {
+            id,
+            employeeId: employee.id,
+            sessionId: employee.sessionId,
+            toAccount: target,
+            handoff:
+              'The owner forced this plan move without waiting for a fresh handoff. Continue as the same employee using your existing identity, workspace and memory. Inspect saved checkpoints and recent owner messages before resuming; do not repeat uncertain side effects.',
+          });
+          if (requestId) {
+            try {
+              await planMoveRequest(`/api/plans/requests/${encodeURIComponent(requestId)}/cancel`);
+            } catch {
+              /* A completed binding change already invalidates the old approval. */
+            }
+          }
+          if (view.current()) showPlanMoveProgress(dialog, record, employee.name);
+        } catch (error) {
+          if (!view.current()) return;
+          if (await inspectBlockedPlanMove(dialog, employee, error, view)) return;
+          if (!view.current()) return;
+          dialog.querySelector('.err').textContent = error.status
+            ? error.message
+            : 'The force-move outcome is unconfirmed. Inspect existing moves; no retry was sent.';
+          dialog.querySelectorAll('[data-close], [data-inspect]').forEach((button) => {
+            button.disabled = false;
+          });
+          if (error.status)
+            dialog.querySelectorAll('button').forEach((button) => {
+              button.disabled = false;
+            });
+        }
+      }
+      async function openPlanMoveHistory(employeeId) {
+        const dialog = document.getElementById('moveDlg');
+        if (!dialog) return;
+        dialog.innerHTML =
+          '<h3>Recent plan moves</h3><p class="status">Loading…</p><div data-moves></div><button type="button" class="btn" data-close>Close</button>';
+        dialog.querySelector('[data-close]').onclick = () => dialog.close();
+        if (!dialog.open) dialog.showModal();
+        const view = planDialogView(dialog);
+        try {
+          const requests = await planMoveRequest('/api/plans/requests/recent');
+          if (!view.current()) return;
+          const moves = await planMoveRequest('/api/plans/moves/recent');
+          if (!view.current()) return;
+          // An approved request shares its id with its canonical move. Keep the move's
+          // cleanup facts and recovery action instead of shadowing it with request status.
+          const moveIds = new Set(moves.map((record) => record.id));
+          const held = moves.filter(
+            (record) => record.employeeId === employeeId && !['completed', 'failed'].includes(record.phase)
+          );
+          if (employeeId && held.length === 1) {
+            const record = await planMoveRequest(`/api/plans/moves/${encodeURIComponent(held[0].id)}/status`);
+            if (!view.current()) return;
+            if (!record || record.id !== held[0].id || record.employeeId !== employeeId)
+              throw new Error('The current move changed; refresh before recovery.');
+            showPlanMoveProgress(dialog, record, record.name);
+            return;
+          }
+          const records = [...moves, ...requests.filter((record) => !moveIds.has(record.id))].filter(
+            (record) => !employeeId || record.employeeId === employeeId
+          );
+          dialog.querySelector('.status').textContent =
+            held.length > 1
+              ? 'Multiple unresolved moves require inspection; no recovery was selected.'
+              : records.length
+                ? 'Select a request or move to inspect its status.'
+                : 'No recorded requests or moves.';
+          const list = dialog.querySelector('[data-moves]');
+          records.forEach((record) => {
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'btn';
+            button.textContent = `${record.name}: ${record.phase}`;
+            button.onclick = () =>
+              moveIds.has(record.id)
+                ? showPlanMoveProgress(dialog, record, record.name)
+                : showPlanRequestProgress(dialog, record);
+            list.appendChild(button);
+          });
+        } catch (error) {
+          if (view.current()) dialog.querySelector('.status').textContent = error.message;
+        }
+      }
+      document.getElementById('planMoveHistory')?.addEventListener('click', () => {
+        void openPlanMoveHistory();
+      });
+      // Codex banked resets: a fresh week on demand. Claude plans have none, so they show nothing.
+      function bankedStat(p) {
+        const b = p.banked;
+        if (!b) return '';
+        const exp = b.count && b.expiresAt ? `expires ${dayLbl(b.expiresAt)} ${hm(b.expiresAt)}` : '';
+        return `<div class="banked"><b>${b.count}</b>banked reset${b.count === 1 ? '' : 's'}${exp ? `<small>${esc(exp)}</small>` : ''}</div>`;
+      }
+      /* ---------- Plan accounts (rename, sign in, add, remove; was the /plans page) ---------- */
+      const SETTLED = ['signed_in', 'failed', 'timeout', 'cancelled'];
+      const providerName = (p) => (p === 'anthropic' ? 'Claude' : 'Codex');
+      // The rename open on a tile (profile id), and the last error per profile id, kept across the minute refresh.
+      let planEdit = null;
+      const planErr = {};
+      function mk(tag, cls, text) {
+        const e = document.createElement(tag);
+        if (cls) e.className = cls;
+        if (text !== undefined) e.textContent = text;
+        return e;
+      }
+      function mkBtn(text, cls, fn) {
+        const b = mk('button', cls, text);
+        b.type = 'button';
+        if (fn) b.onclick = fn;
+        return b;
+      }
+      function notifyPlansChanged() {
+        if (parent !== window) parent.postMessage({ type: 'company-plans-changed' }, location.origin);
+      }
+      async function acctApi(path, opts) {
+        opts = opts || {};
+        try {
+          const r = await fetch(path, {
+            method: opts.method || 'GET',
+            cache: 'no-store',
+            credentials: 'same-origin',
+            headers: opts.body
+              ? { 'content-type': 'application/json', accept: 'application/json' }
+              : { accept: 'application/json' },
+            body: opts.body ? JSON.stringify(opts.body) : undefined,
+          });
+          const j = await r.json().catch(() => null);
+          // A refused login shows as an error here; it never reloads the page (load() owns that).
+          if (r.status === 401)
+            return { ok: false, error: 'Signed out of the console (HTTP 401); sign in and try again' };
+          if (!r.ok || !j || j.success === false)
+            return { ok: false, error: (j && (j.error || j.message)) || 'HTTP ' + r.status };
+          if (opts.method && opts.method !== 'GET') notifyPlansChanged();
+          return { ok: true, data: j.data };
+        } catch (e) {
+          return { ok: false, error: 'Network error' };
+        }
+      }
+      function planActions(p) {
+        if (planEdit && planEdit === p.profileId)
+          return `<form class="pact" data-rename-form="${esc(p.profileId)}"><input name="label" maxlength="64" value="${esc(p.label)}" aria-label="Plan name" autocomplete="off">
       <button type="submit" class="btn">Save</button><button type="button" class="btn" data-rename-cancel>Cancel</button></form>
       <div class="hint">The 'who' line under the name is kept under the old name, so it is blank after a rename until it is set again.</div>
       <div data-rename-err class="err" role="alert">${esc(planErr[p.profileId] || '')}</div>`;
-  const why = p.profileId ? '' : `<div class="hint">No rename or remove: this account is only a login folder, with no account entry to change.</div>`;
-  return `<div class="pact">${p.profileId ? `<button type="button" class="btn" data-rename="${esc(p.profileId)}">Rename</button>` : ''}
+        const why = p.profileId
+          ? ''
+          : `<div class="hint">No rename or remove: this account is only a login folder, with no account entry to change.</div>`;
+        return `<div class="pact">${p.profileId ? `<button type="button" class="btn" data-rename="${esc(p.profileId)}">Rename</button>` : ''}
     <button type="button" class="btn" data-signin="${esc(p.id)}">${p.signedIn ? 'Sign in again' : 'Sign in'}</button>
     ${p.profileId ? `<button type="button" class="btn" data-remove="${esc(p.profileId)}">Remove</button>` : ''}</div>
     ${why}${p.profileId && planErr[p.profileId] ? `<div class="err" role="alert">${esc(planErr[p.profileId])}</div>` : ''}`;
-}
-function wirePlanActions(el) {
-  const byProfile = id => (B.planBurn || []).find(p => p.profileId === id);
-  el.querySelectorAll('[data-rename]').forEach(b => b.onclick = () => {
-    planEdit = b.dataset.rename; delete planErr[planEdit]; plans();
-    const i = el.querySelector('[data-rename-form] input'); if (i) { i.focus(); i.select(); }
-  });
-  el.querySelectorAll('[data-rename-cancel]').forEach(b => b.onclick = () => { delete planErr[planEdit]; planEdit = null; plans(); });
-  el.querySelectorAll('[data-rename-form]').forEach(f => f.onsubmit = async e => {
-    e.preventDefault();
-    const id = f.dataset.renameForm, label = f.elements.label.value.trim(), out = f.parentElement.querySelector('[data-rename-err]');
-    if (!label) { out.textContent = planErr[id] = 'The name cannot be empty'; return; }
-    f.querySelectorAll('button,input').forEach(x => x.disabled = true);
-    const r = await acctApi('/api/subscription-profiles/' + encodeURIComponent(id), {method: 'PATCH', body: {label}});
-    if (!r.ok) { f.querySelectorAll('button,input').forEach(x => x.disabled = false); out.textContent = planErr[id] = 'Not renamed: ' + r.error; return; }
-    delete planErr[id]; planEdit = null;
-    await load();
-  });
-  el.querySelectorAll('[data-signin]').forEach(b => b.onclick = () => {
-    const p = (B.planBurn || []).find(x => x.id === b.dataset.signin);
-    if (p) startSignIn(p.id, providerName(p.provider) + ' · ' + p.label);
-  });
-  el.querySelectorAll('[data-remove]').forEach(b => b.onclick = () => { const p = byProfile(b.dataset.remove); if (p) confirmRemove(p); });
-}
-function openAdd() {
-  const dlg = document.getElementById('addDlg'), form = mk('form'), input = mk('input');
-  input.required = true; input.maxLength = 64; input.placeholder = 'Account name, e.g. Work'; input.setAttribute('aria-label', 'Account name');
-  const provider = mk('select'); provider.setAttribute('aria-label', 'Provider');
-  provider.append(new Option('Claude', 'anthropic'), new Option('ChatGPT / Codex', 'openai'));
-  const add = mk('button', 'btn', 'Add account'); add.type = 'submit';
-  const error = mk('p', 'err'); error.setAttribute('role', 'alert');
-  const row = mk('div', 'pact'); row.append(add, mkBtn('Cancel', 'btn', () => dlg.close()));
-  form.append(input, provider, row, error);
-  form.onsubmit = async e => {
-    e.preventDefault();
-    add.disabled = true;
-    const r = await acctApi('/api/subscription-profiles', {method: 'POST', body: {label: input.value, provider: provider.value}});
-    if (!r.ok) { add.disabled = false; error.textContent = 'Not added: ' + r.error; return; }
-    const profile = r.data.profile;
-    dlg.close();
-    await load();
-    startSignIn(profile.id, providerName(profile.provider) + ' · ' + profile.label);
-  };
-  dlg.replaceChildren(mk('h3', '', 'Add subscription account'), form);
-  dlg.showModal();
-  input.focus();
-}
-function confirmRemove(p) {
-  const dlg = document.getElementById('removeDlg'), error = mk('p', 'err'); error.setAttribute('role', 'alert');
-  const go = mkBtn('Remove account', 'btn');
-  go.onclick = async () => {
-    go.disabled = true;
-    const r = await acctApi('/api/subscription-profiles/' + encodeURIComponent(p.profileId), {method: 'DELETE'});
-    if (!r.ok) { go.disabled = false; error.textContent = 'Not removed: ' + r.error; return; }
-    dlg.close();
-    load();
-  };
-  const row = mk('div', 'pact'); row.append(go, mkBtn('Cancel', 'btn', () => dlg.close()));
-  dlg.replaceChildren(mk('h3', '', 'Remove ' + providerName(p.provider) + ' · ' + p.label + '?'),
-    mk('p', 'hint', 'It is taken off this list. Its login stays on disk, nothing is deleted, and you can add it again later. Not possible while agents are running on it.'),
-    row, error);
-  dlg.showModal();
-}
-let sign = null;
-function copyBtn(text, label) {
-  const b = mkBtn(label, 'btn');
-  b.onclick = async () => {
-    try { await navigator.clipboard.writeText(text); b.textContent = 'Copied'; } catch (e) { b.textContent = 'Copy failed: select it by hand'; }
-    setTimeout(() => { b.textContent = label; }, 2000);
-  };
-  return b;
-}
-async function startSignIn(accountId, title) {
-  // A retry replaces the old login inside the open dialog; closing and reopening would let the old close event cancel the new login.
-  stopSignIn();
-  const dlg = document.getElementById('signDlg'), status = mk('p', 'status', 'Starting sign-in…'), body = mk('div');
-  status.setAttribute('role', 'status');
-  dlg.replaceChildren(mk('h3', '', 'Sign in · ' + title), status, body);
-  const s = sign = {accountId, title, status, body, view: null, rendered: null, timer: null};
-  dlg.onclose = () => { if (sign === s && !dlg.open) closeSignIn(); };
-  if (!dlg.open) dlg.showModal();
-  const r = await acctApi('/api/plans/accounts/' + encodeURIComponent(accountId) + '/login', {method: 'POST'});
-  if (sign !== s) return;
-  if (!r.ok) { status.textContent = r.error; status.className = 'status failed'; body.replaceChildren(mkBtn('Close', 'btn', closeSignIn)); return; }
-  signRender(r.data);
-  s.timer = setInterval(signPoll, 1500);
-}
-async function signPoll() {
-  const s = sign;
-  if (!s || !s.view) return;
-  const r = await acctApi('/api/plans/logins/' + encodeURIComponent(s.view.id));
-  if (sign !== s) return;
-  signRender(r.ok ? r.data : Object.assign({}, s.view, {state: 'failed', message: 'Sign-in helper stopped.'}));
-}
-function signRender(v) {
-  const s = sign;
-  if (!s) return;
-  const previousState = s.view?.state;
-  s.view = v.id ? v : Object.assign({}, s.view, v);
-  if (v.state === 'signed_in' && previousState !== 'signed_in') notifyPlansChanged();
-  s.status.textContent = v.message || '';
-  s.status.className = 'status ' + v.state;
-  const settled = SETTLED.includes(v.state);
-  if (B?.planBurn) plans();
-  if (settled && s.timer) { clearInterval(s.timer); s.timer = null; if (v.state === 'signed_in') load(); }
-  const key = JSON.stringify([v.state, v.url, v.code, v.needsCode]);
-  if (key === s.rendered) return; // a half-typed code survives each poll
-  s.rendered = key;
-  const parts = [];
-  if (settled) {
-    const row = mk('div', 'pact');
-    if (v.state === 'signed_in') row.append(mkBtn('Done', 'btn', closeSignIn), mkBtn('Wrong account? Sign in again', 'btn', () => startSignIn(s.accountId, s.title)));
-    else row.append(mkBtn('Try again', 'btn', () => startSignIn(s.accountId, s.title)), mkBtn('Close', 'btn', closeSignIn));
-    s.body.replaceChildren(row);
-    row.querySelector('button').focus();
-    return;
-  }
-  if (v.url) {
-    const step = mk('div', 'step'), open = mk('a', 'btn', 'Open the sign-in page'), r = mk('div', 'pact');
-    open.href = v.url; open.target = '_blank'; open.rel = 'noopener noreferrer';
-    r.append(open, copyBtn(v.url, 'Copy link'));
-    step.append(mk('b', '', '1. Sign in'), r);
-    if (v.qrSvg) {
-      const det = mk('details'), qr = mk('div', 'qr');
-      qr.innerHTML = v.qrSvg; // rendered by the server's qrcode library from the URL
-      det.append(mk('summary', '', 'On another device? Scan this'), qr);
-      step.append(det);
-    }
-    parts.push(step);
-  }
-  if (v.code) {
-    const st = mk('div', 'step'), rr = mk('div', 'pact');
-    rr.append(mk('code', 'code', v.code), copyBtn(v.code, 'Copy code'));
-    st.append(mk('b', '', '2. Enter this code on that page'), rr, mk('p', 'hint', 'It expires in 15 minutes.'));
-    parts.push(st);
-  }
-  if (v.needsCode) {
-    const f = mk('form', 'step'), input = mk('input'), send = mk('button', 'btn', 'Sign in');
-    input.placeholder = 'Paste the code from the sign-in page'; input.autocomplete = 'off'; input.spellcheck = false;
-    input.setAttribute('autocapitalize', 'off'); input.setAttribute('aria-label', 'Sign-in code');
-    send.type = 'submit';
-    f.append(mk('b', '', '2. Paste the code it shows you'), input, send);
-    f.onsubmit = async e => {
-      e.preventDefault();
-      const code = input.value.trim();
-      if (!code || !s.view) return;
-      send.disabled = true;
-      const r = await acctApi('/api/plans/logins/' + encodeURIComponent(s.view.id) + '/code', {method: 'POST', body: {code}});
-      send.disabled = false;
-      if (sign !== s) return;
-      if (!r.ok) { s.status.textContent = r.error; s.status.className = 'status failed'; return; }
-      signRender(r.data);
-    };
-    parts.push(f);
-  }
-  if (!parts.length) parts.push(mk('p', 'hint', 'Waiting for the sign-in page…'));
-  parts.push(mkBtn('Cancel sign-in', 'btn', closeSignIn));
-  s.body.replaceChildren(...parts);
-}
-function stopSignIn() {
-  const s = sign;
-  if (!s) return;
-  sign = null;
-  clearInterval(s.timer);
-  if (s.view && s.view.id && !SETTLED.includes(s.view.state)) acctApi('/api/plans/logins/' + encodeURIComponent(s.view.id), {method: 'DELETE'});
-}
-function closeSignIn() {
-  stopSignIn();
-  const dlg = document.getElementById('signDlg');
-  dlg.onclose = null;
-  if (dlg.open) dlg.close();
-}
-document.getElementById('addAcct').onclick = openAdd;
-// Realtime rate and per-agent burn from each session's status-line cost (Claude Code plans); see docs/plan-burn-per-agent.md.
-// The conversion from work units (USD of API-equivalent cost) to this plan's weekly percent starts from a provider/tier
-// guess and is learned from the plan's own readings; the band is about one sigma.
-function agentBurnBlock(p) {
-  const a = p.agentBurn;
-  if (!a) return '';
-  const c = a.conversion;
-  const basis = c.basis === 'learned' ? 'learned from this plan' : 'prior guess' + (c.tier ? ' for ' + c.tier : ', tier unknown');
-  const fit = a.fit ? `; fit ±${num(a.fit.maePerHour, 2)} %/h over ${a.fit.n} h` : '';
-  const conv = `${num(c.pctPerUsd, 3)} %/work unit (${num(c.low, 3)}–${num(c.high, 3)}, ${basis}${fit})`;
-  const rows = a.agents.map(g => `<li data-agent-burn="${esc(g.sessionId)}"><span>${esc(g.name)}</span> <b>${g.pctPerHour == null ? '–' : num(g.pctPerHour, 2) + ' %/h'}</b> <span class="hint">${g.usdPerHour == null ? 'too new to rate' : num(g.usdPerHour, 2) + ' units/h' + (g.share == null ? '' : ', ' + Math.round(g.share * 100) + '%')}</span></li>`).join('');
-  return `<div class="plan-agent-burn" data-plan-agent-burn="${esc(p.id)}"><div><b>${num(a.realtimePerHour, 2)} %/h</b> burn last 30 min <span class="hint">(${num(a.realtimeLow, 2)}–${num(a.realtimeHigh, 2)})</span></div><div class="hint" title="Work unit = USD of API-equivalent cost from each session's status line">${esc(conv)}</div>${rows ? `<ul class="plan-agent-list">${rows}</ul>` : '<div class="hint">No session on this plan reported cost in the last 30 minutes.</div>'}</div>`;
-}
+      }
+      function wirePlanActions(el) {
+        const byProfile = (id) => (B.planBurn || []).find((p) => p.profileId === id);
+        el.querySelectorAll('[data-rename]').forEach(
+          (b) =>
+            (b.onclick = () => {
+              planEdit = b.dataset.rename;
+              delete planErr[planEdit];
+              plans();
+              const i = el.querySelector('[data-rename-form] input');
+              if (i) {
+                i.focus();
+                i.select();
+              }
+            })
+        );
+        el.querySelectorAll('[data-rename-cancel]').forEach(
+          (b) =>
+            (b.onclick = () => {
+              delete planErr[planEdit];
+              planEdit = null;
+              plans();
+            })
+        );
+        el.querySelectorAll('[data-rename-form]').forEach(
+          (f) =>
+            (f.onsubmit = async (e) => {
+              e.preventDefault();
+              const id = f.dataset.renameForm,
+                label = f.elements.label.value.trim(),
+                out = f.parentElement.querySelector('[data-rename-err]');
+              if (!label) {
+                out.textContent = planErr[id] = 'The name cannot be empty';
+                return;
+              }
+              f.querySelectorAll('button,input').forEach((x) => (x.disabled = true));
+              const r = await acctApi('/api/subscription-profiles/' + encodeURIComponent(id), {
+                method: 'PATCH',
+                body: { label },
+              });
+              if (!r.ok) {
+                f.querySelectorAll('button,input').forEach((x) => (x.disabled = false));
+                out.textContent = planErr[id] = 'Not renamed: ' + r.error;
+                return;
+              }
+              delete planErr[id];
+              planEdit = null;
+              await load();
+            })
+        );
+        el.querySelectorAll('[data-signin]').forEach(
+          (b) =>
+            (b.onclick = () => {
+              const p = (B.planBurn || []).find((x) => x.id === b.dataset.signin);
+              if (p) startSignIn(p.id, providerName(p.provider) + ' · ' + p.label);
+            })
+        );
+        el.querySelectorAll('[data-remove]').forEach(
+          (b) =>
+            (b.onclick = () => {
+              const p = byProfile(b.dataset.remove);
+              if (p) confirmRemove(p);
+            })
+        );
+      }
+      function openAdd() {
+        const dlg = document.getElementById('addDlg'),
+          form = mk('form'),
+          input = mk('input');
+        input.required = true;
+        input.maxLength = 64;
+        input.placeholder = 'Account name, e.g. Work';
+        input.setAttribute('aria-label', 'Account name');
+        const provider = mk('select');
+        provider.setAttribute('aria-label', 'Provider');
+        provider.append(new Option('Claude', 'anthropic'), new Option('ChatGPT / Codex', 'openai'));
+        const add = mk('button', 'btn', 'Add account');
+        add.type = 'submit';
+        const error = mk('p', 'err');
+        error.setAttribute('role', 'alert');
+        const row = mk('div', 'pact');
+        row.append(
+          add,
+          mkBtn('Cancel', 'btn', () => dlg.close())
+        );
+        form.append(input, provider, row, error);
+        form.onsubmit = async (e) => {
+          e.preventDefault();
+          add.disabled = true;
+          const r = await acctApi('/api/subscription-profiles', {
+            method: 'POST',
+            body: { label: input.value, provider: provider.value },
+          });
+          if (!r.ok) {
+            add.disabled = false;
+            error.textContent = 'Not added: ' + r.error;
+            return;
+          }
+          const profile = r.data.profile;
+          dlg.close();
+          await load();
+          startSignIn(profile.id, providerName(profile.provider) + ' · ' + profile.label);
+        };
+        dlg.replaceChildren(mk('h3', '', 'Add subscription account'), form);
+        dlg.showModal();
+        input.focus();
+      }
+      function confirmRemove(p) {
+        const dlg = document.getElementById('removeDlg'),
+          error = mk('p', 'err');
+        error.setAttribute('role', 'alert');
+        const go = mkBtn('Remove account', 'btn');
+        go.onclick = async () => {
+          go.disabled = true;
+          const r = await acctApi('/api/subscription-profiles/' + encodeURIComponent(p.profileId), {
+            method: 'DELETE',
+          });
+          if (!r.ok) {
+            go.disabled = false;
+            error.textContent = 'Not removed: ' + r.error;
+            return;
+          }
+          dlg.close();
+          load();
+        };
+        const row = mk('div', 'pact');
+        row.append(
+          go,
+          mkBtn('Cancel', 'btn', () => dlg.close())
+        );
+        dlg.replaceChildren(
+          mk('h3', '', 'Remove ' + providerName(p.provider) + ' · ' + p.label + '?'),
+          mk(
+            'p',
+            'hint',
+            'It is taken off this list. Its login stays on disk, nothing is deleted, and you can add it again later. Not possible while agents are running on it.'
+          ),
+          row,
+          error
+        );
+        dlg.showModal();
+      }
+      let sign = null;
+      function copyBtn(text, label) {
+        const b = mkBtn(label, 'btn');
+        b.onclick = async () => {
+          try {
+            await navigator.clipboard.writeText(text);
+            b.textContent = 'Copied';
+          } catch (e) {
+            b.textContent = 'Copy failed: select it by hand';
+          }
+          setTimeout(() => {
+            b.textContent = label;
+          }, 2000);
+        };
+        return b;
+      }
+      async function startSignIn(accountId, title) {
+        // A retry replaces the old login inside the open dialog; closing and reopening would let the old close event cancel the new login.
+        stopSignIn();
+        const dlg = document.getElementById('signDlg'),
+          status = mk('p', 'status', 'Starting sign-in…'),
+          body = mk('div');
+        status.setAttribute('role', 'status');
+        dlg.replaceChildren(mk('h3', '', 'Sign in · ' + title), status, body);
+        const s = (sign = { accountId, title, status, body, view: null, rendered: null, timer: null });
+        dlg.onclose = () => {
+          if (sign === s && !dlg.open) closeSignIn();
+        };
+        if (!dlg.open) dlg.showModal();
+        const r = await acctApi('/api/plans/accounts/' + encodeURIComponent(accountId) + '/login', { method: 'POST' });
+        if (sign !== s) return;
+        if (!r.ok) {
+          status.textContent = r.error;
+          status.className = 'status failed';
+          body.replaceChildren(mkBtn('Close', 'btn', closeSignIn));
+          return;
+        }
+        signRender(r.data);
+        s.timer = setInterval(signPoll, 1500);
+      }
+      async function signPoll() {
+        const s = sign;
+        if (!s || !s.view) return;
+        const r = await acctApi('/api/plans/logins/' + encodeURIComponent(s.view.id));
+        if (sign !== s) return;
+        signRender(r.ok ? r.data : Object.assign({}, s.view, { state: 'failed', message: 'Sign-in helper stopped.' }));
+      }
+      function signRender(v) {
+        const s = sign;
+        if (!s) return;
+        const previousState = s.view?.state;
+        s.view = v.id ? v : Object.assign({}, s.view, v);
+        if (v.state === 'signed_in' && previousState !== 'signed_in') notifyPlansChanged();
+        s.status.textContent = v.message || '';
+        s.status.className = 'status ' + v.state;
+        const settled = SETTLED.includes(v.state);
+        if (B?.planBurn) plans();
+        if (settled && s.timer) {
+          clearInterval(s.timer);
+          s.timer = null;
+          if (v.state === 'signed_in') load();
+        }
+        const key = JSON.stringify([v.state, v.url, v.code, v.needsCode]);
+        if (key === s.rendered) return; // a half-typed code survives each poll
+        s.rendered = key;
+        const parts = [];
+        if (settled) {
+          const row = mk('div', 'pact');
+          if (v.state === 'signed_in')
+            row.append(
+              mkBtn('Done', 'btn', closeSignIn),
+              mkBtn('Wrong account? Sign in again', 'btn', () => startSignIn(s.accountId, s.title))
+            );
+          else
+            row.append(
+              mkBtn('Try again', 'btn', () => startSignIn(s.accountId, s.title)),
+              mkBtn('Close', 'btn', closeSignIn)
+            );
+          s.body.replaceChildren(row);
+          row.querySelector('button').focus();
+          return;
+        }
+        if (v.url) {
+          const step = mk('div', 'step'),
+            open = mk('a', 'btn', 'Open the sign-in page'),
+            r = mk('div', 'pact');
+          open.href = v.url;
+          open.target = '_blank';
+          open.rel = 'noopener noreferrer';
+          r.append(open, copyBtn(v.url, 'Copy link'));
+          step.append(mk('b', '', '1. Sign in'), r);
+          if (v.qrSvg) {
+            const det = mk('details'),
+              qr = mk('div', 'qr');
+            qr.innerHTML = v.qrSvg; // rendered by the server's qrcode library from the URL
+            det.append(mk('summary', '', 'On another device? Scan this'), qr);
+            step.append(det);
+          }
+          parts.push(step);
+        }
+        if (v.code) {
+          const st = mk('div', 'step'),
+            rr = mk('div', 'pact');
+          rr.append(mk('code', 'code', v.code), copyBtn(v.code, 'Copy code'));
+          st.append(mk('b', '', '2. Enter this code on that page'), rr, mk('p', 'hint', 'It expires in 15 minutes.'));
+          parts.push(st);
+        }
+        if (v.needsCode) {
+          const f = mk('form', 'step'),
+            input = mk('input'),
+            send = mk('button', 'btn', 'Sign in');
+          input.placeholder = 'Paste the code from the sign-in page';
+          input.autocomplete = 'off';
+          input.spellcheck = false;
+          input.setAttribute('autocapitalize', 'off');
+          input.setAttribute('aria-label', 'Sign-in code');
+          send.type = 'submit';
+          f.append(mk('b', '', '2. Paste the code it shows you'), input, send);
+          f.onsubmit = async (e) => {
+            e.preventDefault();
+            const code = input.value.trim();
+            if (!code || !s.view) return;
+            send.disabled = true;
+            const r = await acctApi('/api/plans/logins/' + encodeURIComponent(s.view.id) + '/code', {
+              method: 'POST',
+              body: { code },
+            });
+            send.disabled = false;
+            if (sign !== s) return;
+            if (!r.ok) {
+              s.status.textContent = r.error;
+              s.status.className = 'status failed';
+              return;
+            }
+            signRender(r.data);
+          };
+          parts.push(f);
+        }
+        if (!parts.length) parts.push(mk('p', 'hint', 'Waiting for the sign-in page…'));
+        parts.push(mkBtn('Cancel sign-in', 'btn', closeSignIn));
+        s.body.replaceChildren(...parts);
+      }
+      function stopSignIn() {
+        const s = sign;
+        if (!s) return;
+        sign = null;
+        clearInterval(s.timer);
+        if (s.view && s.view.id && !SETTLED.includes(s.view.state))
+          acctApi('/api/plans/logins/' + encodeURIComponent(s.view.id), { method: 'DELETE' });
+      }
+      function closeSignIn() {
+        stopSignIn();
+        const dlg = document.getElementById('signDlg');
+        dlg.onclose = null;
+        if (dlg.open) dlg.close();
+      }
+      document.getElementById('addAcct').onclick = openAdd;
+      // Realtime rate and per-agent burn from each session's status-line cost (Claude Code plans); see docs/plan-burn-per-agent.md.
+      // The conversion from work units (USD of API-equivalent cost) to this plan's weekly percent starts from a provider/tier
+      // guess and is learned from the plan's own readings; the band is about one sigma.
+      function agentBurnBlock(p) {
+        const a = p.agentBurn;
+        if (!a) return '';
+        const c = a.conversion;
+        const basis =
+          c.basis === 'learned'
+            ? 'learned from this plan'
+            : 'prior guess' + (c.tier ? ' for ' + c.tier : ', tier unknown');
+        const fit = a.fit ? `; fit ±${num(a.fit.maePerHour, 2)} %/h over ${a.fit.n} h` : '';
+        const conv = `${num(c.pctPerUsd, 3)} %/work unit (${num(c.low, 3)}–${num(c.high, 3)}, ${basis}${fit})`;
+        const rows = a.agents
+          .map(
+            (g) =>
+              `<li data-agent-burn="${esc(g.sessionId)}"><span>${esc(g.name)}</span> <b>${g.pctPerHour == null ? '–' : num(g.pctPerHour, 2) + ' %/h'}</b> <span class="hint">${g.usdPerHour == null ? 'too new to rate' : num(g.usdPerHour, 2) + ' units/h' + (g.share == null ? '' : ', ' + Math.round(g.share * 100) + '%')}</span></li>`
+          )
+          .join('');
+        return `<div class="plan-agent-burn" data-plan-agent-burn="${esc(p.id)}"><div><b>${num(a.realtimePerHour, 2)} %/h</b> burn last 30 min <span class="hint">(${num(a.realtimeLow, 2)}–${num(a.realtimeHigh, 2)})</span></div><div class="hint" title="Work unit = USD of API-equivalent cost from each session's status line">${esc(conv)}</div>${rows ? `<ul class="plan-agent-list">${rows}</ul>` : '<div class="hint">No session on this plan reported cost in the last 30 minutes.</div>'}</div>`;
+      }
 
-function burnChart(svg, p) {
-  const W = 320, Hh = 120, L = 28, R = 8, T = 8, Bm = 18, pts0 = p.points || [];
-  // One real 5h snapshot on the same axes; never derive a 5h history or convert quotas.
-  const reading = p.fiveHour;
-  const used5h = typeof reading?.used === 'number' && Number.isFinite(reading.used) && reading.used >= 0 && reading.used <= 100 ? reading.used : null;
-  const timestamp5h = value => typeof value === 'number' && Number.isFinite(value) && value > 0 && value <= 8.64e15 ? value : null;
-  const reset5h = timestamp5h(reading?.reset), asOf5h = timestamp5h(reading?.asOf);
-  const stale5h = reading?.stale === true || (reset5h !== null && reset5h <= Date.now());
-  const stamp5h = timestamp => fmt(timestamp, {month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short'});
-  const weeklyRange = Number.isFinite(p.weekStart) && Number.isFinite(p.reset) && p.reset > p.weekStart;
-  const outside5h = reset5h !== null && weeklyRange && (reset5h < p.weekStart || reset5h > p.reset);
-  const resetLabel5h = reset5h === null ? 'Reset time unavailable' : 'Reset ' + stamp5h(reset5h) + (outside5h ? ' (outside plotted week)' : '');
-  const summary5h = '5h: ' + (used5h === null ? 'usage unavailable' : used5h + '% used · ' + Math.round((100 - used5h) * 10) / 10 + '% remaining · 100% cap') + '. ' + resetLabel5h + '. ' + (stale5h ? 'Last reported; refresh required. ' : '') + (asOf5h === null ? 'Reading time unavailable.' : 'As of ' + stamp5h(asOf5h) + '.');
-  const explanation5h = 'Weekly usage and the 5h snapshot are percentages of their own window limits; no quota conversion or five-hour usage history is shown.';
-  const legend5h = svg.parentElement?.querySelector('.five-hour-label');
-  if (legend5h) {
-    legend5h.textContent = '5h window · ' + (used5h === null ? 'usage unavailable' : used5h + '% / 100% max') + (stale5h ? ' · last reported' : '');
-    legend5h.title = summary5h;
-  }
-  // When the reading, cap and reset are all drawn, the legend says what they are; the words stay in the hover titles
-  // and the label. Text under the plot appears only for what the lines cannot show: unavailable, stale or out of view.
-  const drawn5h = weeklyRange && used5h !== null && reset5h !== null && !outside5h && !stale5h
-    && asOf5h !== null && asOf5h >= p.weekStart && asOf5h <= p.reset;
-  const status = svg.parentElement?.querySelector('.plan-five-hour-status');
-  if (status) { status.textContent = drawn5h ? '' : summary5h; status.hidden = drawn5h; }
-  svg.setAttribute?.('aria-label', 'Weekly usage with 5-hour cap and reset. ' + summary5h + ' ' + explanation5h);
-  if (!weeklyRange) { svg.innerHTML = `<title>${esc(summary5h + ' ' + explanation5h)}</title><text x="28" y="60" fill="${css('--muted')}" font-size="11">Weekly time range unavailable</text>`; return; }
-  const s = p.weekStart;
-  const bankedStop = p.banked?.count > 0 && Number.isFinite(p.banked.expiresAt) && p.banked.expiresAt > Date.now() && p.banked.expiresAt < p.reset;
-  const stop = bankedStop ? Math.min(p.banked.expiresAt, p.reset) : p.reset, e = p.reset;
-  const last = pts0[pts0.length - 1] || {t: p.at, used: p.used};
-  const projected = last.used + (p.rate || 0) * Math.max(0, stop - last.t) / H;
-  const ymax = 110;
-  const X = t => L + (t - s) / (e - s) * (W - L - R), Y = v => T + (1 - Math.max(0, Math.min(100, v)) / ymax) * (Hh - T - Bm);
-  const stamp = timestamp => fmt(timestamp, {weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short'});
-  let g = `<title>${esc(bankedStop ? 'Stop at banked-reset expiry ' + stamp(stop) + '; weekly reset ' + stamp(p.reset) + ' is a reference.' : 'Stop at weekly reset ' + stamp(stop) + '.')}</title>`;
-  [0, 50, 100].forEach(v => {
-    g += `<line x1="${L}" x2="${W - R}" y1="${Y(v)}" y2="${Y(v)}" stroke="${css(v === 100 ? '--bad' : '--grid')}" ${v === 100 ? 'stroke-dasharray="4 3"' : ''}/>`;
-    g += `<text x="${L - 4}" y="${Y(v) + 3}" font-size="9" text-anchor="end" fill="${css('--faint')}">${v}%</text>`;
-  });
-  for (let d = startOfDay(s) + D; d < e; d += D) g += `<text x="${X(d + 12 * H)}" y="${Hh - 5}" font-size="9" text-anchor="middle" fill="${css('--faint')}">${esc(fmt(d + H, {weekday: 'narrow'}))}</text>`;
-  if (bankedStop && p.reset !== stop && p.reset > s) {
-    g += `<line class="weekly-reset" x1="${X(p.reset)}" x2="${X(p.reset)}" y1="${T}" y2="${Hh - Bm}" stroke="${css('--muted')}" stroke-width=".7" opacity=".65"/>`;
-  }
-  [s, stop].forEach(t => {
-    g += `<line class="edge" x1="${X(t)}" x2="${X(t)}" y1="${T}" y2="${Hh - Bm}" stroke="${css('--muted')}" stroke-width="1.2"/>`;
-  });
-  g += `<line class="nominal" x1="${X(s)}" y1="${Y(0)}" x2="${X(stop)}" y2="${Y(100)}" stroke="${css('--muted')}" stroke-width="1.2" stroke-dasharray="6 3" opacity=".8"/>`;
-  const now = Date.now();
-  if (now > s && now < e) g += `<line x1="${X(now)}" x2="${X(now)}" y1="${T}" y2="${Hh - Bm}" stroke="${css('--now-line')}" opacity=".6"/>`;
-  const pts = pts0.map(q => `${X(q.t).toFixed(1)},${Y(q.used).toFixed(1)}`).join(' ');
-  const runsOut = p.rate > 0 && last.used < 100 && projected >= 100
-    ? last.t + (100 - last.used) / p.rate * H : null;
-  const projectionStop = runsOut ?? stop;
-  const projEnd = Math.min(100, projected);
-  const area = pts0.length ? `${X(pts0[0].t)},${Y(0)} ${pts} ${X(last.t)},${Y(0)}` : '';
-  const c = css('--' + planRisk(p));
-  g += `<polygon points="${area}" fill="${c}" opacity=".12"/><polyline points="${pts}" fill="none" stroke="${c}" stroke-width="2"/>`;
-  g += `<line class="projection" x1="${X(last.t)}" y1="${Y(last.used)}" x2="${X(projectionStop)}" y2="${Y(projEnd)}" stroke="${c}" stroke-width="1.6" stroke-dasharray="2 4"/>`;
-  if (runsOut !== null && runsOut <= stop) g += `<circle class="runout" cx="${X(runsOut)}" cy="${Y(100)}" r="4" fill="${css('--bad')}"><title>Budget reaches 100% ${esc(stamp(runsOut))}</title></circle>`;
-  g += `<circle cx="${X(last.t)}" cy="${Y(last.used)}" r="3.2" fill="${c}"/>`;
-  if (used5h !== null || reset5h !== null) {
-    const c5h = css('--accent'), opacity5h = stale5h ? '.5' : '.9';
-    g += `<g class="five-hour-markers" opacity="${opacity5h}"><title>${esc(summary5h + ' ' + explanation5h)}</title>`;
-    if (reset5h !== null) {
-      // Only the duration and reported reset define this outline; no usage is interpolated.
-      const start5h = reset5h - 5 * H, left5h = Math.max(s, start5h), right5h = Math.min(e, reset5h);
-      if (right5h > left5h) g += `<rect class="five-hour-window" x="${X(left5h)}" y="${Y(100)}" width="${X(right5h) - X(left5h)}" height="${Y(0) - Y(100)}" data-window-start="${start5h}" data-window-reset="${reset5h}" fill="none" stroke="${c5h}" stroke-opacity=".45" stroke-dasharray="3 3"><title>${esc('Five-hour span ending at reported reset: ' + stamp5h(start5h) + ' – ' + stamp5h(reset5h) + '. 100% maximum; not usage history.')}</title></rect>`;
-    }
-    g += `<line class="five-hour-cap" x1="${L}" x2="${W - R}" y1="${Y(100)}" y2="${Y(100)}" stroke="${c5h}" stroke-width="1.5" stroke-dasharray="8 3 2 3"/>`;
-    if (reset5h !== null && !outside5h) {
-      const rx = X(reset5h);
-      g += `<line class="five-hour-reset" x1="${rx}" x2="${rx}" y1="${T}" y2="${Hh - Bm}" stroke="${c5h}" stroke-width="1.5" stroke-dasharray="3 3"><title>${esc(resetLabel5h)}</title></line>`;
-    }
-    if (used5h !== null && asOf5h !== null && asOf5h >= s && asOf5h <= e) g += `<circle class="five-hour-reading" cx="${X(asOf5h)}" cy="${Y(used5h)}" r="4" fill="${css('--panel')}" stroke="${c5h}" stroke-width="2"><title>${esc(summary5h)}</title></circle>`;
-    g += '</g>';
-  }
-  svg.innerHTML = g;
-}
+      function burnChart(svg, p) {
+        const W = 320,
+          Hh = 120,
+          L = 28,
+          R = 8,
+          T = 8,
+          Bm = 18,
+          pts0 = p.points || [];
+        // One real 5h snapshot on the same axes; never derive a 5h history or convert quotas.
+        const reading = p.fiveHour;
+        const used5h =
+          typeof reading?.used === 'number' && Number.isFinite(reading.used) && reading.used >= 0 && reading.used <= 100
+            ? reading.used
+            : null;
+        const timestamp5h = (value) =>
+          typeof value === 'number' && Number.isFinite(value) && value > 0 && value <= 8.64e15 ? value : null;
+        const reset5h = timestamp5h(reading?.reset),
+          asOf5h = timestamp5h(reading?.asOf);
+        const stale5h = reading?.stale === true || (reset5h !== null && reset5h <= Date.now());
+        const stamp5h = (timestamp) =>
+          fmt(timestamp, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' });
+        const weeklyRange = Number.isFinite(p.weekStart) && Number.isFinite(p.reset) && p.reset > p.weekStart;
+        const outside5h = reset5h !== null && weeklyRange && (reset5h < p.weekStart || reset5h > p.reset);
+        const resetLabel5h =
+          reset5h === null
+            ? 'Reset time unavailable'
+            : 'Reset ' + stamp5h(reset5h) + (outside5h ? ' (outside plotted week)' : '');
+        const summary5h =
+          '5h: ' +
+          (used5h === null
+            ? 'usage unavailable'
+            : used5h + '% used · ' + Math.round((100 - used5h) * 10) / 10 + '% remaining · 100% cap') +
+          '. ' +
+          resetLabel5h +
+          '. ' +
+          (stale5h ? 'Last reported; refresh required. ' : '') +
+          (asOf5h === null ? 'Reading time unavailable.' : 'As of ' + stamp5h(asOf5h) + '.');
+        const explanation5h =
+          'Weekly usage and the 5h snapshot are percentages of their own window limits; no quota conversion or five-hour usage history is shown.';
+        const legend5h = svg.parentElement?.querySelector('.five-hour-label');
+        if (legend5h) {
+          legend5h.textContent =
+            '5h window · ' +
+            (used5h === null ? 'usage unavailable' : used5h + '% / 100% max') +
+            (stale5h ? ' · last reported' : '');
+          legend5h.title = summary5h;
+        }
+        // When the reading, cap and reset are all drawn, the legend says what they are; the words stay in the hover titles
+        // and the label. Text under the plot appears only for what the lines cannot show: unavailable, stale or out of view.
+        const drawn5h =
+          weeklyRange &&
+          used5h !== null &&
+          reset5h !== null &&
+          !outside5h &&
+          !stale5h &&
+          asOf5h !== null &&
+          asOf5h >= p.weekStart &&
+          asOf5h <= p.reset;
+        const status = svg.parentElement?.querySelector('.plan-five-hour-status');
+        if (status) {
+          status.textContent = drawn5h ? '' : summary5h;
+          status.hidden = drawn5h;
+        }
+        svg.setAttribute?.('aria-label', 'Weekly usage with 5-hour cap and reset. ' + summary5h + ' ' + explanation5h);
+        if (!weeklyRange) {
+          svg.innerHTML = `<title>${esc(summary5h + ' ' + explanation5h)}</title><text x="28" y="60" fill="${css('--muted')}" font-size="11">Weekly time range unavailable</text>`;
+          return;
+        }
+        const s = p.weekStart;
+        const bankedStop =
+          p.banked?.count > 0 &&
+          Number.isFinite(p.banked.expiresAt) &&
+          p.banked.expiresAt > Date.now() &&
+          p.banked.expiresAt < p.reset;
+        const stop = bankedStop ? Math.min(p.banked.expiresAt, p.reset) : p.reset,
+          e = p.reset;
+        const last = pts0[pts0.length - 1] || { t: p.at, used: p.used };
+        const projected = last.used + ((p.rate || 0) * Math.max(0, stop - last.t)) / H;
+        const ymax = 110;
+        const X = (t) => L + ((t - s) / (e - s)) * (W - L - R),
+          Y = (v) => T + (1 - Math.max(0, Math.min(100, v)) / ymax) * (Hh - T - Bm);
+        const stamp = (timestamp) =>
+          fmt(timestamp, {
+            weekday: 'short',
+            month: 'short',
+            day: 'numeric',
+            hour: 'numeric',
+            minute: '2-digit',
+            timeZoneName: 'short',
+          });
+        let g = `<title>${esc(bankedStop ? 'Stop at banked-reset expiry ' + stamp(stop) + '; weekly reset ' + stamp(p.reset) + ' is a reference.' : 'Stop at weekly reset ' + stamp(stop) + '.')}</title>`;
+        [0, 50, 100].forEach((v) => {
+          g += `<line x1="${L}" x2="${W - R}" y1="${Y(v)}" y2="${Y(v)}" stroke="${css(v === 100 ? '--bad' : '--grid')}" ${v === 100 ? 'stroke-dasharray="4 3"' : ''}/>`;
+          g += `<text x="${L - 4}" y="${Y(v) + 3}" font-size="9" text-anchor="end" fill="${css('--faint')}">${v}%</text>`;
+        });
+        for (let d = startOfDay(s) + D; d < e; d += D)
+          g += `<text x="${X(d + 12 * H)}" y="${Hh - 5}" font-size="9" text-anchor="middle" fill="${css('--faint')}">${esc(fmt(d + H, { weekday: 'narrow' }))}</text>`;
+        if (bankedStop && p.reset !== stop && p.reset > s) {
+          g += `<line class="weekly-reset" x1="${X(p.reset)}" x2="${X(p.reset)}" y1="${T}" y2="${Hh - Bm}" stroke="${css('--muted')}" stroke-width=".7" opacity=".65"/>`;
+        }
+        [s, stop].forEach((t) => {
+          g += `<line class="edge" x1="${X(t)}" x2="${X(t)}" y1="${T}" y2="${Hh - Bm}" stroke="${css('--muted')}" stroke-width="1.2"/>`;
+        });
+        g += `<line class="nominal" x1="${X(s)}" y1="${Y(0)}" x2="${X(stop)}" y2="${Y(100)}" stroke="${css('--muted')}" stroke-width="1.2" stroke-dasharray="6 3" opacity=".8"/>`;
+        const now = Date.now();
+        if (now > s && now < e)
+          g += `<line x1="${X(now)}" x2="${X(now)}" y1="${T}" y2="${Hh - Bm}" stroke="${css('--now-line')}" opacity=".6"/>`;
+        const pts = pts0.map((q) => `${X(q.t).toFixed(1)},${Y(q.used).toFixed(1)}`).join(' ');
+        const runsOut =
+          p.rate > 0 && last.used < 100 && projected >= 100 ? last.t + ((100 - last.used) / p.rate) * H : null;
+        const projectionStop = runsOut ?? stop;
+        const projEnd = Math.min(100, projected);
+        const area = pts0.length ? `${X(pts0[0].t)},${Y(0)} ${pts} ${X(last.t)},${Y(0)}` : '';
+        const c = css('--' + planRisk(p));
+        g += `<polygon points="${area}" fill="${c}" opacity=".12"/><polyline points="${pts}" fill="none" stroke="${c}" stroke-width="2"/>`;
+        g += `<line class="projection" x1="${X(last.t)}" y1="${Y(last.used)}" x2="${X(projectionStop)}" y2="${Y(projEnd)}" stroke="${c}" stroke-width="1.6" stroke-dasharray="2 4"/>`;
+        if (runsOut !== null && runsOut <= stop)
+          g += `<circle class="runout" cx="${X(runsOut)}" cy="${Y(100)}" r="4" fill="${css('--bad')}"><title>Budget reaches 100% ${esc(stamp(runsOut))}</title></circle>`;
+        g += `<circle cx="${X(last.t)}" cy="${Y(last.used)}" r="3.2" fill="${c}"/>`;
+        if (used5h !== null || reset5h !== null) {
+          const c5h = css('--accent'),
+            opacity5h = stale5h ? '.5' : '.9';
+          g += `<g class="five-hour-markers" opacity="${opacity5h}"><title>${esc(summary5h + ' ' + explanation5h)}</title>`;
+          if (reset5h !== null) {
+            // Only the duration and reported reset define this outline; no usage is interpolated.
+            const start5h = reset5h - 5 * H,
+              left5h = Math.max(s, start5h),
+              right5h = Math.min(e, reset5h);
+            if (right5h > left5h)
+              g += `<rect class="five-hour-window" x="${X(left5h)}" y="${Y(100)}" width="${X(right5h) - X(left5h)}" height="${Y(0) - Y(100)}" data-window-start="${start5h}" data-window-reset="${reset5h}" fill="none" stroke="${c5h}" stroke-opacity=".45" stroke-dasharray="3 3"><title>${esc('Five-hour span ending at reported reset: ' + stamp5h(start5h) + ' – ' + stamp5h(reset5h) + '. 100% maximum; not usage history.')}</title></rect>`;
+          }
+          g += `<line class="five-hour-cap" x1="${L}" x2="${W - R}" y1="${Y(100)}" y2="${Y(100)}" stroke="${c5h}" stroke-width="1.5" stroke-dasharray="8 3 2 3"/>`;
+          if (reset5h !== null && !outside5h) {
+            const rx = X(reset5h);
+            g += `<line class="five-hour-reset" x1="${rx}" x2="${rx}" y1="${T}" y2="${Hh - Bm}" stroke="${c5h}" stroke-width="1.5" stroke-dasharray="3 3"><title>${esc(resetLabel5h)}</title></line>`;
+          }
+          if (used5h !== null && asOf5h !== null && asOf5h >= s && asOf5h <= e)
+            g += `<circle class="five-hour-reading" cx="${X(asOf5h)}" cy="${Y(used5h)}" r="4" fill="${css('--panel')}" stroke="${c5h}" stroke-width="2"><title>${esc(summary5h)}</title></circle>`;
+          g += '</g>';
+        }
+        svg.innerHTML = g;
+      }
 
-
-document.getElementById('refresh').onclick = () => load();
-setInterval(load, 60e3);
-setInterval(refreshPlanMembers, 5e3);
-document.addEventListener('visibilitychange', () => { if (!document.hidden) void refreshPlanMembers(); });
-window.addEventListener('message', event => {
-  if (event.source === parent && event.origin === location.origin && event.data?.type === 'company-plans-visible') {
-    void load(); void refreshPlanMembers();
-  }
-});
-setInterval(tick, 30e3);
-load().then(tick);
-</script>
-</body>
+      document.getElementById('refresh').onclick = () => load();
+      setInterval(load, 60e3);
+      setInterval(refreshPlanMembers, 5e3);
+      document.addEventListener('visibilitychange', () => {
+        if (!document.hidden) void refreshPlanMembers();
+      });
+      window.addEventListener('message', (event) => {
+        if (
+          event.source === parent &&
+          event.origin === location.origin &&
+          event.data?.type === 'company-plans-visible'
+        ) {
+          void load();
+          void refreshPlanMembers();
+        }
+      });
+      setInterval(tick, 30e3);
+      load().then(tick);
+    </script>
+  </body>
 </html>

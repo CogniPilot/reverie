@@ -979,10 +979,15 @@ Object.assign(ReverieApp.prototype, {
     // Alert-only (DeepSeek Harness / supervised hooks): open the session instead
     // of Approve/Deny that the answer route would refuse.
     if (approval.answerInTerminal) {
-      addBtn('Answer in terminal', 'primary', () => {
-        if (typeof this.selectSession === 'function') this.selectSession(approval.sessionId);
-        else if (typeof this.openApprovalSession === 'function') this.openApprovalSession(approval.id);
-      }, false);
+      addBtn(
+        'Answer in terminal',
+        'primary',
+        () => {
+          if (typeof this.selectSession === 'function') this.selectSession(approval.sessionId);
+          else if (typeof this.openApprovalSession === 'function') this.openApprovalSession(approval.id);
+        },
+        false
+      );
       return strip;
     }
     if (approval.options && approval.options.length) {

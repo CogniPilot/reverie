@@ -177,8 +177,8 @@ describe('phones and touch screens', () => {
   it('uses the visible-viewport positioner for phone sheets and keeps big rows', () => {
     const phone = inMedia(/max-width:\s*767px/);
     expect(decl(phone, '.ca-popmenu', 'bottom')).toBe('auto');
-    expect(decl(phone, '.ca-popmenu', 'left')).toBe('var(--ca-menu-sheet-left,8px)');
-    expect(decl(phone, '.ca-popmenu', 'top')).toBe('var(--ca-menu-sheet-top,8px)');
+    expect(decl(phone, '.ca-popmenu', 'left')).toMatch(/^var\(--ca-menu-sheet-left,\s*8px\)$/);
+    expect(decl(phone, '.ca-popmenu', 'top')).toMatch(/^var\(--ca-menu-sheet-top,\s*8px\)$/);
     expect(decl(phone, '.ca-popmenu', 'max-height')).toContain('--ca-menu-max-height');
     expect(decl(phone, '.ca-popmenu button', 'min-height')).toBe('48px');
   });
@@ -340,8 +340,14 @@ describe('Add people is visible', () => {
     expect(rules('.ca-root .ca-head-invite').every((d) => d.display !== 'none')).toBe(true);
   });
   it('keeps a real tap target on a touch screen', () => {
-    expect(css).toMatch(/\.ca-root \.ca-icon-btn \{ min-width: 44px; min-height: 44px; \}/);
-    expect(css).toMatch(/\.ca-item-act \{ width: 36px; height: 36px; \}/);
+    const coarse: postcss.Rule[] = [];
+    root.walkAtRules('media', (at) => {
+      if (/pointer:\s*coarse/.test(at.params)) at.walkRules((rule) => { coarse.push(rule); });
+    });
+    expect(decl(coarse, '.ca-root .ca-icon-btn', 'min-width')).toBe('44px');
+    expect(decl(coarse, '.ca-root .ca-icon-btn', 'min-height')).toBe('44px');
+    expect(decl(coarse, '.ca-item-act', 'width')).toBe('36px');
+    expect(decl(coarse, '.ca-item-act', 'height')).toBe('36px');
   });
 });
 

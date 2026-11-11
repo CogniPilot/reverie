@@ -53,7 +53,7 @@ Object.assign(ReverieApp.prototype, {
     const controller = new AbortController();
     let timer;
     let timedOut = false;
-    const deadline = new Promise(resolve => {
+    const deadline = new Promise((resolve) => {
       timer = setTimeout(() => {
         timedOut = true;
         controller.abort();
@@ -72,28 +72,42 @@ Object.assign(ReverieApp.prototype, {
     if (!data || !Array.isArray(data.approvals)) {
       this._approvalReadChanges?.clear();
       this._approvalReadSessions?.clear();
-      for (const [id, item] of this.approvals) this.approvals.set(id, {
-        ...item, answerState: 'held', heldReason: timedOut
-          ? 'Approval refresh timed out. Reopen the inbox to check readiness.'
-          : 'Approval readiness could not be refreshed. Reopen the inbox to check again.',
-      });
+      for (const [id, item] of this.approvals)
+        this.approvals.set(id, {
+          ...item,
+          answerState: 'held',
+          heldReason: timedOut
+            ? 'Approval refresh timed out. Reopen the inbox to check readiness.'
+            : 'Approval readiness could not be refreshed. Reopen the inbox to check again.',
+        });
       this.renderApprovals();
-      this.showToast(timedOut
-        ? 'Approval refresh timed out. Answers remain held. No automatic retry was made.'
-        : 'Could not refresh approvals. Answers remain held. No automatic retry was made.', 'warning');
+      this.showToast(
+        timedOut
+          ? 'Approval refresh timed out. Answers remain held. No automatic retry was made.'
+          : 'Could not refresh approvals. Answers remain held. No automatic retry was made.',
+        'warning'
+      );
       return;
     }
     const snapshot = new Map();
     for (const item of data.approvals) {
       if ((this._approvalReadChanges?.get(item.id)?.revision || 0) > mutationStart) continue;
       const sessionChanged = (this._approvalReadSessions?.get(item.sessionId) || 0) > mutationStart;
-      snapshot.set(item.id, sessionChanged ? {
-        ...item, answerState: 'held',
-        heldReason: 'This session changed while approvals were refreshed. This item may be stale; reopen the inbox to check readiness. No answer will be replayed automatically.',
-      } : item);
+      snapshot.set(
+        item.id,
+        sessionChanged
+          ? {
+              ...item,
+              answerState: 'held',
+              heldReason:
+                'This session changed while approvals were refreshed. This item may be stale; reopen the inbox to check readiness. No answer will be replayed automatically.',
+            }
+          : item
+      );
     }
     const changes = [...(this._approvalReadChanges?.values() || [])]
-      .filter(change => change.revision > mutationStart).sort((left, right) => left.revision - right.revision);
+      .filter((change) => change.revision > mutationStart)
+      .sort((left, right) => left.revision - right.revision);
     for (const change of changes) {
       if (!change.item) snapshot.delete(change.id);
       else {
@@ -338,9 +352,13 @@ Object.assign(ReverieApp.prototype, {
     for (const input of list.querySelectorAll('.approval-text-input')) {
       const id = input.closest('[data-approval-id]')?.dataset.approvalId;
       if (id) this._approvalDrafts.set(id, input.value);
-      if (id && input === document.activeElement) focusedDraft = {
-        id, start: input.selectionStart, end: input.selectionEnd, direction: input.selectionDirection,
-      };
+      if (id && input === document.activeElement)
+        focusedDraft = {
+          id,
+          start: input.selectionStart,
+          end: input.selectionEnd,
+          direction: input.selectionDirection,
+        };
     }
     for (const id of this._approvalDrafts.keys()) if (!this.approvals?.has(id)) this._approvalDrafts.delete(id);
     if (items.length === 0) {
@@ -412,7 +430,9 @@ Object.assign(ReverieApp.prototype, {
       // Filled by renderApprovalsDrawer through textContent, never here: see the note
       // there. An item a human acknowledged carries no reason and gets no line.
       (item.acknowledgedReason ? `<div class="approval-quiet" data-i18n-skip></div>` : '') +
-      (held ? `<div class="approval-summary approval-held" role="status" data-i18n-skip>Answer held: ${escapeHtml(this._approvalHeldReason(item))}</div>` : '') +
+      (held
+        ? `<div class="approval-summary approval-held" role="status" data-i18n-skip>Answer held: ${escapeHtml(this._approvalHeldReason(item))}</div>`
+        : '') +
       (summary ? `<div class="approval-summary" data-i18n-skip>${escapeHtml(summary)}</div>` : '') +
       (item.context ? `<pre class="approval-context">${escapeHtml(item.context)}</pre>` : '') +
       `<div class="approval-actions">${actions}</div>` +

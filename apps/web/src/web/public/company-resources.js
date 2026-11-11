@@ -1034,8 +1034,11 @@
         throw new Error('Employee recovery result is unavailable');
       if (
         value.state === 'not-issued' &&
-        (value.phase !== 'not-issued' || value.blocksFurtherChanges || value.native !== null ||
-          value.nativeFailure != null || value.restore.length)
+        (value.phase !== 'not-issued' ||
+          value.blocksFurtherChanges ||
+          value.native !== null ||
+          value.nativeFailure != null ||
+          value.restore.length)
       )
         throw new Error('Never-issued preview result could not be verified');
       this.results.replaceChildren(this.shell.el('h4', '', 'Original shared-pool migration'));
@@ -1063,9 +1066,13 @@
         )
       );
       if (value.failure) {
-        this.results.append(this.shell.el(
-          'p', value.state === 'not-issued' ? 'ca-hint' : 'ca-company-error', `${value.failure.code}: ${value.failure.message}`
-        ));
+        this.results.append(
+          this.shell.el(
+            'p',
+            value.state === 'not-issued' ? 'ca-hint' : 'ca-company-error',
+            `${value.failure.code}: ${value.failure.message}`
+          )
+        );
       }
       if (value.nativeFailure) {
         this.results.append(

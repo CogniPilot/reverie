@@ -56,7 +56,9 @@ function chatSpeechJoin(previous, next) {
 
 /** Rebuild from the current result snapshot; resultIndex is an update offset, not an append instruction. */
 function chatSpeechSnapshot(results) {
-  const finals = [], interims = [], all = [];
+  const finals = [],
+    interims = [],
+    all = [];
   const append = (parts, raw) => {
     const text = String(raw || '').trim();
     if (!text) return;
@@ -79,11 +81,14 @@ function chatReadAloudAddressed(message, ownerNames, messages) {
   if (Array.isArray(message.to) && message.to.includes('user')) return true;
   if (message.to !== 'all') return false;
   const names = ['user', 'owner', ...(Array.isArray(ownerNames) ? ownerNames : [])];
-  if (names.some((name) => {
-    if (typeof name !== 'string' || !name.trim()) return false;
-    const escaped = name.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    return new RegExp(`(^|[^\\p{L}\\p{N}_])@${escaped}(?![\\p{L}\\p{N}_-])`, 'iu').test(message.text || '');
-  })) return true;
+  if (
+    names.some((name) => {
+      if (typeof name !== 'string' || !name.trim()) return false;
+      const escaped = name.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      return new RegExp(`(^|[^\\p{L}\\p{N}_])@${escaped}(?![\\p{L}\\p{N}_-])`, 'iu').test(message.text || '');
+    })
+  )
+    return true;
   const original = (messages || []).find((m) => m.id === message.replyTo);
   return original?.from?.kind === 'user';
 }
@@ -123,13 +128,20 @@ function readAloudText(name, text, maxWords = READ_ALOUD_MAX_WORDS) {
 function readAloudClean(text, names = [], emojis = true) {
   let spoken = String(text || '');
   const known = [...new Set(['user', 'owner', 'everyone', 'all', 'here', ...names])]
-    .filter(name => typeof name === 'string' && name.trim())
+    .filter((name) => typeof name === 'string' && name.trim())
     .sort((first, second) => second.length - first.length);
   for (const name of known) {
     const escaped = name.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    spoken = spoken.replace(new RegExp(`(^|[^\\p{L}\\p{N}_.@])@(${escaped})(?![\\p{L}\\p{N}_@-]|\\.[\\p{L}\\p{N}])`, 'giu'), '$1$2');
+    spoken = spoken.replace(
+      new RegExp(`(^|[^\\p{L}\\p{N}_.@])@(${escaped})(?![\\p{L}\\p{N}_@-]|\\.[\\p{L}\\p{N}])`, 'giu'),
+      '$1$2'
+    );
   }
-  if (!emojis) spoken = spoken.replace(/[#*0-9]\uFE0F?\u20E3|[\u{1F1E6}-\u{1F1FF}]{2}|\p{Extended_Pictographic}(?:[\uFE0E\uFE0F]|\p{Emoji_Modifier})*(?:\u200D\p{Extended_Pictographic}(?:[\uFE0E\uFE0F]|\p{Emoji_Modifier})*)*(?:[\u{E0020}-\u{E007E}]+\u{E007F})?/gu, '');
+  if (!emojis)
+    spoken = spoken.replace(
+      /[#*0-9]\uFE0F?\u20E3|[\u{1F1E6}-\u{1F1FF}]{2}|\p{Extended_Pictographic}(?:[\uFE0E\uFE0F]|\p{Emoji_Modifier})*(?:\u200D\p{Extended_Pictographic}(?:[\uFE0E\uFE0F]|\p{Emoji_Modifier})*)*(?:[\u{E0020}-\u{E007E}]+\u{E007F})?/gu,
+      ''
+    );
   return spoken.replace(/[ \t]+/g, ' ').trim();
 }
 
@@ -138,8 +150,16 @@ function readAloudSeconds(text) {
 }
 
 function readAloudSentences(text) {
-  if (typeof Intl?.Segmenter === 'function') return [...new Intl.Segmenter(undefined, { granularity: 'sentence' }).segment(text)].map(part => part.segment.trim()).filter(Boolean);
-  return String(text).match(/[^.!?。！？]+(?:[.!?。！？]+["'”’)]*|$)/gu)?.map(part => part.trim()).filter(Boolean) || [];
+  if (typeof Intl?.Segmenter === 'function')
+    return [...new Intl.Segmenter(undefined, { granularity: 'sentence' }).segment(text)]
+      .map((part) => part.segment.trim())
+      .filter(Boolean);
+  return (
+    String(text)
+      .match(/[^.!?。！？]+(?:[.!?。！？]+["'”’)]*|$)/gu)
+      ?.map((part) => part.trim())
+      .filter(Boolean) || []
+  );
 }
 
 function readAloudLimit(text, seconds) {
@@ -149,11 +169,12 @@ function readAloudLimit(text, seconds) {
     const next = kept ? `${kept} ${sentence}` : sentence;
     if (readAloudSeconds(next) <= seconds) kept = next;
     else {
-      if (!kept) for (const word of sentence.split(/\s+/)) {
-        const partial = kept ? `${kept} ${word}` : word;
-        if (readAloudSeconds(partial) > seconds) break;
-        kept = partial;
-      }
+      if (!kept)
+        for (const word of sentence.split(/\s+/)) {
+          const partial = kept ? `${kept} ${word}` : word;
+          if (readAloudSeconds(partial) > seconds) break;
+          kept = partial;
+        }
       break;
     }
   }
@@ -165,7 +186,7 @@ function readAloudChunks(text, maximum = 600) {
   let remaining = String(text).trim();
   while (remaining.length > maximum) {
     const prefix = remaining.slice(0, maximum);
-    const sentences = readAloudSentences(remaining).filter(sentence => sentence.length <= maximum);
+    const sentences = readAloudSentences(remaining).filter((sentence) => sentence.length <= maximum);
     let split = sentences[0] && prefix.startsWith(sentences[0]) ? sentences[0].length : prefix.lastIndexOf(' ');
     if (split <= 0) split = /[\uD800-\uDBFF]$/.test(prefix) ? maximum - 1 : maximum;
     chunks.push(remaining.slice(0, split).trim());
@@ -258,7 +279,8 @@ class ReadAloudQueue {
   _next() {
     if (this.muted || this.current || !this.items.length) return;
     const item = this.items.shift();
-    const prefix = item.meta?.text && item.text.endsWith(item.meta.text) ? item.text.slice(0, -item.meta.text.length) : '';
+    const prefix =
+      item.meta?.text && item.text.endsWith(item.meta.text) ? item.text.slice(0, -item.meta.text.length) : '';
     const token = { item, prefix, chunks: item.chunks || readAloudChunks(item.text), index: 0, u: null };
     this.current = token;
     this._speakChunk(token);
@@ -267,9 +289,16 @@ class ReadAloudQueue {
   _speakChunk(token) {
     const text = token.chunks[token.index];
     const original = token.item.meta;
-    const meta = original && typeof original.text === 'string'
-      ? { ...original, text: token.index === 0 && token.prefix && text.startsWith(token.prefix) ? text.slice(token.prefix.length) : text }
-      : original;
+    const meta =
+      original && typeof original.text === 'string'
+        ? {
+            ...original,
+            text:
+              token.index === 0 && token.prefix && text.startsWith(token.prefix)
+                ? text.slice(token.prefix.length)
+                : text,
+          }
+        : original;
     const u = this.deps.createUtterance(text, meta);
     const voice = this.deps.voice?.();
     if (voice) {
@@ -288,7 +317,10 @@ class ReadAloudQueue {
     u.onerror = () => done('error');
     // A stuck "speaking" flag or a lost onend must not stall the queue for good.
     const slack = this.deps.slackMs ?? READ_ALOUD_SLACK_MS;
-    this.guard = this.deps.setTimeout(() => done('timeout'), Math.min(READ_ALOUD_ITEM_CAP_MS, (text.length / 12) * 1000 + slack));
+    this.guard = this.deps.setTimeout(
+      () => done('timeout'),
+      Math.min(READ_ALOUD_ITEM_CAP_MS, (text.length / 12) * 1000 + slack)
+    );
     this.deps.synth.speak(u);
   }
 
@@ -363,7 +395,9 @@ Object.assign(ReverieApp.prototype, {
 
   _readAloudOptions(roomId) {
     let saved;
-    try { saved = JSON.parse(localStorage.getItem(`reverie:readAloudOptions:${roomId}`) || '{}'); } catch {}
+    try {
+      saved = JSON.parse(localStorage.getItem(`reverie:readAloudOptions:${roomId}`) || '{}');
+    } catch {}
     return {
       seconds: [0, 5, 10, 20, 30].includes(saved?.seconds) ? saved.seconds : null,
       emojis: saved?.emojis !== false,
@@ -375,7 +409,9 @@ Object.assign(ReverieApp.prototype, {
     const options = { ...this._readAloudOptions(roomId), ...change };
     options.seconds = [0, 5, 10, 20, 30].includes(options.seconds) ? options.seconds : null;
     options.emojis = options.emojis !== false;
-    try { localStorage.setItem(`reverie:readAloudOptions:${roomId}`, JSON.stringify(options)); } catch {}
+    try {
+      localStorage.setItem(`reverie:readAloudOptions:${roomId}`, JSON.stringify(options));
+    } catch {}
     if (roomId === this._chatRoomId) this._readAloud?.clear();
   },
 
@@ -605,7 +641,8 @@ Object.assign(ReverieApp.prototype, {
         ? { room: data.roomId, id: m.id }
         : null;
     if (mode === 'off') {
-      if (notice) this._chatPlaybackNotice(notice.room, notice.id, 'not-played', here ? 'read-aloud-off' : 'other-room');
+      if (notice)
+        this._chatPlaybackNotice(notice.room, notice.id, 'not-played', here ? 'read-aloud-off' : 'other-room');
       return;
     }
     // "Replies to me": in a room, only what is addressed to the user; "Everyone" reads every post.
@@ -636,16 +673,29 @@ Object.assign(ReverieApp.prototype, {
     // Spoken as car mode would say it (car-mode.js): no markdown stars, code and paths as stand-ins.
     const options = this._readAloudOptions(roomId);
     const name = readAloudClean(m.from.name.split(': ').pop(), [], options.emojis) || 'Agent';
-    const names = [...(this._chatOwnerNames || []), ...(this._chatRoom?.members || []).flatMap(member => [member.name, member.name?.split(': ').pop()])];
+    const names = [
+      ...(this._chatOwnerNames || []),
+      ...(this._chatRoom?.members || []).flatMap((member) => [member.name, member.name?.split(': ').pop()]),
+    ];
     const cleaned = readAloudClean(m.text, names, options.emojis);
     const text = typeof carModeSpeakable === 'function' ? carModeSpeakable(cleaned) : cleaned;
-    const said = text ? readAloudText(name, text, whole || options.seconds !== null ? Infinity : READ_ALOUD_MAX_WORDS) : '';
+    const said = text
+      ? readAloudText(name, text, whole || options.seconds !== null ? Infinity : READ_ALOUD_MAX_WORDS)
+      : '';
     const complete = phrase ? (said ? `${said}, and ${phrase}.` : `${name} ${phrase}.`) : said;
     const line = whole ? complete : readAloudLimit(complete, options.seconds);
     if (!line) return null;
     // Their own voice says who it is, so the server line drops "Name says:"; the phone voice (the backup) keeps it.
     const prefix = `${name} says: `;
-    return { line, meta: { room: roomId, member: m.from.sessionId, messageId: m.id, text: line.startsWith(prefix) ? line.slice(prefix.length) : line } };
+    return {
+      line,
+      meta: {
+        room: roomId,
+        member: m.from.sessionId,
+        messageId: m.id,
+        text: line.startsWith(prefix) ? line.slice(prefix.length) : line,
+      },
+    };
   },
 
   /** "Read aloud" / "Speak again" on one agent message: said now, in full, in its author's voice. False when it cannot be. */

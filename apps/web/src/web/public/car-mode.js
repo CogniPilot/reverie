@@ -82,30 +82,37 @@ function carModeUtterances(text, max = CAR_MAX_UTTERANCE_CHARS) {
  */
 function carModeSpeakable(text) {
   const plain = String(text || '')
-      .replace(/```[\s\S]*?(```|$)/g, ' (code in chat) ')
-      .replace(/`([^`\n]*)`/g, (_, inner) => (inner.length <= 24 && !/[/\\]/.test(inner) ? inner : ' (see chat) '));
+    .replace(/```[\s\S]*?(```|$)/g, ' (code in chat) ')
+    .replace(/`([^`\n]*)`/g, (_, inner) => (inner.length <= 24 && !/[/\\]/.test(inner) ? inner : ' (see chat) '));
   const links = typeof chatMarkdownLinkSegments === 'function' ? chatMarkdownLinkSegments(plain) : [{ text: plain }];
-  return links.map(part => part.href || part.path ? part.text.replace(/\*+|__/g, '') : part.text
-      .replace(/\b(?:https?|wss?):\/\/\S+/gi, ' a link ')
-      // A path starts a word: /etc, ~/x, ./y, ../z (one segment is enough). "and/or" and "1/2" do not start one.
-      .replace(/(^|[\s("'])(?:~|\.{1,2})?\/[^\s"')]+?(?=[.,;:!?]*(?:[\s"')]|$))/g, (_, pre) =>
-        /\S/.test(pre) ? `${pre}a file path ` : `${pre} a file path `
-      )
-      // "Node.js" is a name, "chat-app.js" a file: a .js/.ts name counts only with a dash, underscore or digit.
-      .replace(
-        /\b([\w-]+)\.(sh|js|mjs|ts|py|json|md|txt|log|patch|gz|tar|html|css|yaml|yml|toml)\b/gi,
-        (m, name, ext) => (/^(?:js|ts)$/i.test(ext) && !/[-_\d]/.test(name) ? m : ' a file ')
-      )
-      .replace(/\b[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\b/gi, ' an id ')
-      .replace(/\b(?:[a-z]{1,3}-)?(?=[0-9a-f]*\d)(?=[0-9a-f]*[a-f])[0-9a-f]{8,}\b/gi, ' an id ')
-      .replace(/^\s*(?:#{1,6}\s+|[-*+]\s+|>\s*)/gm, '')
-      // Kokoro has no stress markup and reads a lone star as "asterisk": every star goes, **x** and *x* alike.
-      .replace(/\*+|__/g, '')
-      // A run of stand-ins with only spaces between them is said once; a list ("x, y and z") keeps each one.
-      .replace(/( (?:a file path|a file|an id|a link|\(see chat\)|\(code in chat\)) )(?:[ \t]*\1)+/g, '$1')
-      // Only punctuation that ends a word loses the space before it: " ./y" keeps its space.
-      .replace(/ ([,.;:!?)"'])(?=[\s,.;:!?)"']|$)/g, '$1')
-  ).join('').replace(/[ \t]+/g, ' ').trim();
+  return links
+    .map((part) =>
+      part.href || part.path
+        ? part.text.replace(/\*+|__/g, '')
+        : part.text
+            .replace(/\b(?:https?|wss?):\/\/\S+/gi, ' a link ')
+            // A path starts a word: /etc, ~/x, ./y, ../z (one segment is enough). "and/or" and "1/2" do not start one.
+            .replace(/(^|[\s("'])(?:~|\.{1,2})?\/[^\s"')]+?(?=[.,;:!?]*(?:[\s"')]|$))/g, (_, pre) =>
+              /\S/.test(pre) ? `${pre}a file path ` : `${pre} a file path `
+            )
+            // "Node.js" is a name, "chat-app.js" a file: a .js/.ts name counts only with a dash, underscore or digit.
+            .replace(
+              /\b([\w-]+)\.(sh|js|mjs|ts|py|json|md|txt|log|patch|gz|tar|html|css|yaml|yml|toml)\b/gi,
+              (m, name, ext) => (/^(?:js|ts)$/i.test(ext) && !/[-_\d]/.test(name) ? m : ' a file ')
+            )
+            .replace(/\b[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\b/gi, ' an id ')
+            .replace(/\b(?:[a-z]{1,3}-)?(?=[0-9a-f]*\d)(?=[0-9a-f]*[a-f])[0-9a-f]{8,}\b/gi, ' an id ')
+            .replace(/^\s*(?:#{1,6}\s+|[-*+]\s+|>\s*)/gm, '')
+            // Kokoro has no stress markup and reads a lone star as "asterisk": every star goes, **x** and *x* alike.
+            .replace(/\*+|__/g, '')
+            // A run of stand-ins with only spaces between them is said once; a list ("x, y and z") keeps each one.
+            .replace(/( (?:a file path|a file|an id|a link|\(see chat\)|\(code in chat\)) )(?:[ \t]*\1)+/g, '$1')
+            // Only punctuation that ends a word loses the space before it: " ./y" keeps its space.
+            .replace(/ ([,.;:!?)"'])(?=[\s,.;:!?)"']|$)/g, '$1')
+    )
+    .join('')
+    .replace(/[ \t]+/g, ' ')
+    .trim();
 }
 
 /** Pure: a stable 32-bit FNV-1a hash, so a member keeps the same default voice. */
@@ -362,15 +369,18 @@ class CarServerSynth {
   }
   speakReply(utterances) {
     const phoneVoice = this.deps.phoneVoice ? this.deps.phoneVoice() : utterances[0]?.voice;
-    const gen = this.gen, requestOwner = {};
+    const gen = this.gen,
+      requestOwner = {};
     const items = utterances.map((u, utteranceIndex) => {
       const link = { turnId: u.turnId, messageId: u.replyMessageId, utteranceIndex };
       return {
         u,
         link,
         audio: this.requests.run(
-          remaining => this.deps.fetchAudio(u.text, u, remaining), requestOwner,
-          () => gen === this.gen, info => this.deps.onSynthesis?.({ ...info, ...link })
+          (remaining) => this.deps.fetchAudio(u.text, u, remaining),
+          requestOwner,
+          () => gen === this.gen,
+          (info) => this.deps.onSynthesis?.({ ...info, ...link })
         ),
       };
     });
@@ -414,7 +424,11 @@ class CarServerSynth {
       voiceKey = key;
       try {
         attempted = true;
-        await this._within(Promise.resolve(this.deps.play(url, batch.items[batch.index].link)), CAR_TEAM_PLAY_MS, new Error('playback stalled'));
+        await this._within(
+          Promise.resolve(this.deps.play(url, batch.items[batch.index].link)),
+          CAR_TEAM_PLAY_MS,
+          new Error('playback stalled')
+        );
       } catch {
         reason = 'playback-interrupted';
       }
@@ -619,7 +633,11 @@ class CarModeController {
    */
   _listen({ restart = false } = {}) {
     this._set('listening');
-    if (!restart) { this.finalText = ''; this.interim = ''; this.utteranceAt = 0; }
+    if (!restart) {
+      this.finalText = '';
+      this.interim = '';
+      this.utteranceAt = 0;
+    }
     if (!restart || !this.listenTimer) this._armListenTimer();
     if (this.recognition) return;
     const priorFinal = this.finalText;
@@ -722,7 +740,7 @@ class CarModeController {
     this._set('thinking', text);
     this.sentAt = Date.now();
     try {
-      if (await this.deps.send(text) === false) return;
+      if ((await this.deps.send(text)) === false) return;
     } catch (err) {
       if (generation !== this.speakGen || this.state !== 'thinking') return;
       this._set('paused', `${err?.unconfirmed ? 'Not confirmed' : 'Not sent'}: ${err?.message || err}`);
@@ -945,9 +963,16 @@ Object.assign(ReverieApp.prototype, {
   },
 
   async _openCarMode() {
-    const roomId = this._chatRoomId, generation = this._carOpenGeneration;
+    const roomId = this._chatRoomId,
+      generation = this._carOpenGeneration;
     if (!this.isChatroomOpen?.()) await this.openChatroom?.();
-    if (roomId !== this._chatRoomId || generation !== this._carOpenGeneration || this._chatApp?.embassy?.selected || document.hidden) return;
+    if (
+      roomId !== this._chatRoomId ||
+      generation !== this._carOpenGeneration ||
+      this._chatApp?.embassy?.selected ||
+      document.hidden
+    )
+      return;
     const member = this._carVoiceMember();
     if (!member) {
       this.showToast?.('Mark a member as Voice in the chat panel first', 'info');
@@ -965,14 +990,32 @@ Object.assign(ReverieApp.prototype, {
       }
     }
     // A probe may resolve after Off, a room switch or an external view was selected.
-    if (generation !== this._carOpenGeneration || revision !== this._voiceModeRevision || roomId !== this._chatRoomId || this._roomVoiceMode?.() !== 'car' || !this.isChatroomOpen?.() || this._chatApp?.embassy?.selected || document.hidden) return;
+    if (
+      generation !== this._carOpenGeneration ||
+      revision !== this._voiceModeRevision ||
+      roomId !== this._chatRoomId ||
+      this._roomVoiceMode?.() !== 'car' ||
+      !this.isChatroomOpen?.() ||
+      this._chatApp?.embassy?.selected ||
+      document.hidden
+    )
+      return;
     this._carRoomId = roomId;
     this._buildCarMode(member);
     this._carEngine = engine;
     const diagButton = this._carScreen?.querySelector('.car-diag');
     const engineInfo = this._voiceEngineInfo?.();
     if (diagButton) diagButton.title = `Engine: ${engine}. ${engineInfo?.reason || ''}`;
-    this._diag?.('voice:engine', this._voiceEngineInfo?.() || { engine, reason: engine === 'speech' ? 'Browser SpeechRecognition and synthesis are available' : 'Browser speech API unavailable; server selected' });
+    this._diag?.(
+      'voice:engine',
+      this._voiceEngineInfo?.() || {
+        engine,
+        reason:
+          engine === 'speech'
+            ? 'Browser SpeechRecognition and synthesis are available'
+            : 'Browser speech API unavailable; server selected',
+      }
+    );
     this._carScreen.hidden = false;
     document.documentElement.classList.add('car-mode-open');
     clearInterval(this._carSpeakerTimer);
@@ -1101,30 +1144,58 @@ Object.assign(ReverieApp.prototype, {
 
   _carTurnCurrent(turn) {
     const mode = this._roomVoiceMode?.();
-    return !!turn && this._carTurn === turn && this._car === turn.controller &&
-      this._car?.state === 'thinking' && this._car.speakGen === turn.generation &&
-      this._chatRoomId === turn.roomId && this._carVoiceMember()?.sessionId === turn.memberId &&
-      this._carOpenGeneration === turn.openGeneration && !this._carScreen?.hidden &&
-      !this._chatApp?.embassy?.selected && (mode === undefined || mode === 'car');
+    return (
+      !!turn &&
+      this._carTurn === turn &&
+      this._car === turn.controller &&
+      this._car?.state === 'thinking' &&
+      this._car.speakGen === turn.generation &&
+      this._chatRoomId === turn.roomId &&
+      this._carVoiceMember()?.sessionId === turn.memberId &&
+      this._carOpenGeneration === turn.openGeneration &&
+      !this._carScreen?.hidden &&
+      !this._chatApp?.embassy?.selected &&
+      (mode === undefined || mode === 'car')
+    );
   },
 
   async _carSend(text) {
     if (typeof text !== 'string' || !text.trim()) throw new Error('No speech was recognized; nothing was posted');
     const member = this._carVoiceMember();
     if (!member) throw new Error('no voice member');
-    const turn = { roomId: this._chatRoomId, memberId: member.sessionId,
-      controller: this._car, generation: this._car?.speakGen, openGeneration: this._carOpenGeneration,
-      started: globalThis.performance?.now?.() ?? Date.now(), id: null, early: [], overflow: false, answered: false };
+    const turn = {
+      roomId: this._chatRoomId,
+      memberId: member.sessionId,
+      controller: this._car,
+      generation: this._car?.speakGen,
+      openGeneration: this._carOpenGeneration,
+      started: globalThis.performance?.now?.() ?? Date.now(),
+      id: null,
+      early: [],
+      overflow: false,
+      answered: false,
+    };
     this._carTurn = turn;
-    if (!this._carTurnCurrent(turn)) { this._carTurn = null; throw new Error('Car conversation is no longer active'); }
-    this._diag?.('voice:post-start', { roomId: turn.roomId, memberId: turn.memberId, generation: turn.generation, openGeneration: turn.openGeneration, chars: text.length });
+    if (!this._carTurnCurrent(turn)) {
+      this._carTurn = null;
+      throw new Error('Car conversation is no longer active');
+    }
+    this._diag?.('voice:post-start', {
+      roomId: turn.roomId,
+      memberId: turn.memberId,
+      generation: turn.generation,
+      openGeneration: turn.openGeneration,
+      chars: text.length,
+    });
     const unconfirmed = (message) => Object.assign(new Error(message), { unconfirmed: true });
     const abort = typeof AbortController === 'function' ? new AbortController() : null;
     let res, confirmationTimer;
     try {
       res = await Promise.race([
         this._chatApi(`/api/chatrooms/${encodeURIComponent(turn.roomId)}/messages`, {
-          method: 'POST', body: { text, to: [turn.memberId], spoken: true }, signal: abort?.signal,
+          method: 'POST',
+          body: { text, to: [turn.memberId], spoken: true },
+          signal: abort?.signal,
         }),
         new Promise((_, reject) => {
           confirmationTimer = setTimeout(() => {
@@ -1149,15 +1220,28 @@ Object.assign(ReverieApp.prototype, {
       throw unconfirmed('Message confirmation was lost. Check the room before trying again.');
     }
     const posted = res.data?.message;
-    if (typeof posted?.id !== 'string' || !posted.id || posted.roomId !== turn.roomId ||
-        posted.from?.kind !== 'user' || posted.spoken !== true || !Array.isArray(posted.to) || !posted.to.includes(turn.memberId)) {
+    if (
+      typeof posted?.id !== 'string' ||
+      !posted.id ||
+      posted.roomId !== turn.roomId ||
+      posted.from?.kind !== 'user' ||
+      posted.spoken !== true ||
+      !Array.isArray(posted.to) ||
+      !posted.to.includes(turn.memberId)
+    ) {
       this._carTurn = null;
       throw unconfirmed('No matching message confirmation. Check the room before trying again.');
     }
     turn.id = posted.id;
-    this._diag?.('voice:post-confirmed', { roomId: turn.roomId, memberId: turn.memberId, messageId: turn.id, generation: turn.generation, openGeneration: turn.openGeneration,
-      elapsedMs: Math.max(0, (globalThis.performance?.now?.() ?? Date.now()) - turn.started) });
-    const early = turn.early.find(message => message.replyTo === turn.id);
+    this._diag?.('voice:post-confirmed', {
+      roomId: turn.roomId,
+      memberId: turn.memberId,
+      messageId: turn.id,
+      generation: turn.generation,
+      openGeneration: turn.openGeneration,
+      elapsedMs: Math.max(0, (globalThis.performance?.now?.() ?? Date.now()) - turn.started),
+    });
+    const early = turn.early.find((message) => message.replyTo === turn.id);
     turn.early = [];
     if (early) this._carModeOnMessage({ roomId: turn.roomId, message: early });
     else if (turn.overflow) {
@@ -1169,13 +1253,23 @@ Object.assign(ReverieApp.prototype, {
   /** Car conversations read only an exact answer to their acknowledged spoken turn. */
   _carModeOnMessage(data) {
     if (!this._car || this._carScreen?.hidden) return;
-    const m = data?.message, turn = this._carTurn;
-    if (!m || typeof m.id !== 'string' || !m.id || !this._carTurnCurrent(turn) || turn.answered || m.deleted || data.roomId !== turn.roomId) return;
+    const m = data?.message,
+      turn = this._carTurn;
+    if (
+      !m ||
+      typeof m.id !== 'string' ||
+      !m.id ||
+      !this._carTurnCurrent(turn) ||
+      turn.answered ||
+      m.deleted ||
+      data.roomId !== turn.roomId
+    )
+      return;
     if (m.from?.kind !== 'agent' || m.from.sessionId !== turn.memberId || m.voice) return;
     if (m.to !== 'all' && (!Array.isArray(m.to) || !m.to.includes('user'))) return;
     if (typeof m.replyTo !== 'string' || !m.replyTo) return;
     if (!turn.id) {
-      if (turn.early.some(message => message.id === m.id)) return;
+      if (turn.early.some((message) => message.id === m.id)) return;
       if (turn.early.length < 32) turn.early.push(m);
       else turn.overflow = true;
       return;
@@ -1184,8 +1278,13 @@ Object.assign(ReverieApp.prototype, {
     const phrase = typeof chatAttachmentPhrase === 'function' ? chatAttachmentPhrase(m.attachments) : '';
     const spokenText = [m.text, phrase ? `${m.from.name.split(': ').pop()} ${phrase}.` : ''].filter(Boolean).join(' ');
     turn.answered = true;
-    this._diag?.('voice:linked-reply', { roomId: turn.roomId, memberId: turn.memberId, messageId: m.id, replyTo: turn.id,
-      elapsedMs: Math.max(0, (globalThis.performance?.now?.() ?? Date.now()) - turn.started) });
+    this._diag?.('voice:linked-reply', {
+      roomId: turn.roomId,
+      memberId: turn.memberId,
+      messageId: m.id,
+      replyTo: turn.id,
+      elapsedMs: Math.max(0, (globalThis.performance?.now?.() ?? Date.now()) - turn.started),
+    });
     this._car.reply(spokenText, { turnId: turn.id, messageId: m.id });
   },
 
@@ -1204,10 +1303,17 @@ Object.assign(ReverieApp.prototype, {
     this._carSynthesisQueue ||= new CarSynthesisQueue();
     return new CarServerSynth({
       requests: this._carSynthesisQueue,
-      onSynthesis: info => diag('team:synthesis', info),
-      phoneVoice: () => carModeFallbackVoice(synth.getVoices?.() || [], this._carSavedVoice(this._carVoiceMember()?.sessionId)),
-      resolvePhoneVoice: (choice, fallback) => (choice?.provider === 'browser' ? synth.getVoices?.().find(voice => voice.voiceURI === choice.id || voice.name === choice.id) : null) || fallback,
-      onVoice: info => { diag('team:voice', info); this._carVoiceNotice(info); },
+      onSynthesis: (info) => diag('team:synthesis', info),
+      phoneVoice: () =>
+        carModeFallbackVoice(synth.getVoices?.() || [], this._carSavedVoice(this._carVoiceMember()?.sessionId)),
+      resolvePhoneVoice: (choice, fallback) =>
+        (choice?.provider === 'browser'
+          ? synth.getVoices?.().find((voice) => voice.voiceURI === choice.id || voice.name === choice.id)
+          : null) || fallback,
+      onVoice: (info) => {
+        diag('team:voice', info);
+        this._carVoiceNotice(info);
+      },
       fetchAudio: async (text, utterance, remaining = CAR_TEAM_FETCH_MS) => {
         const member = this._carVoiceMember();
         if (!member) return null;
@@ -1219,11 +1325,19 @@ Object.assign(ReverieApp.prototype, {
           body: { room: this._chatRoomId, member: member.sessionId, text },
           signal: AbortSignal.timeout?.(Math.max(1, Math.ceil(remaining))),
         });
-        diag('team:speak', { ...link, ok: res.ok, engine: res.data?.engine, voice: res.data?.voice?.id,
-          chars: text.length, audioUrl: res.data?.audioUrl,
-          elapsedMs: Math.max(0, (globalThis.performance?.now?.() ?? Date.now()) - started) });
+        diag('team:speak', {
+          ...link,
+          ok: res.ok,
+          engine: res.data?.engine,
+          voice: res.data?.voice?.id,
+          chars: text.length,
+          audioUrl: res.data?.audioUrl,
+          elapsedMs: Math.max(0, (globalThis.performance?.now?.() ?? Date.now()) - started),
+        });
         if (res.ok && res.data?.voice?.provider === 'browser' && utterance) utterance.employeeVoice = res.data.voice;
-        return res.ok && typeof res.data?.audioUrl === 'string' ? { url: res.data.audioUrl, engine: res.data.engine, voice: res.data.voice } : null;
+        return res.ok && typeof res.data?.audioUrl === 'string'
+          ? { url: res.data.audioUrl, engine: res.data.engine, voice: res.data.voice }
+          : null;
       },
       play: (url, link = {}) =>
         new Promise((resolve, reject) => {
@@ -1232,7 +1346,8 @@ Object.assign(ReverieApp.prototype, {
           let playingSeen = false;
           // A stream that stops arriving fires 'stalled' or 'waiting', then nothing: give it
           // CAR_TEAM_STALL_MS of no progress before the phone voice takes the line.
-          let stallTimer = null, finished = false;
+          let stallTimer = null,
+            finished = false;
           const clearStall = () => {
             if (stallTimer) clearTimeout(stallTimer);
             stallTimer = null;
@@ -1241,7 +1356,10 @@ Object.assign(ReverieApp.prototype, {
             clearStall();
             const position = audio.currentTime;
             stallTimer = setTimeout(() => {
-              if (audio.currentTime > position) { onStall(); return; }
+              if (audio.currentTime > position) {
+                onStall();
+                return;
+              }
               diag('team:stalled', {});
               audio.pause();
               done(new Error('audio stalled'));
@@ -1261,14 +1379,21 @@ Object.assign(ReverieApp.prototype, {
             if (err) reject(err);
             else resolve();
           };
-          const onEnd = () => done(Number.isFinite(audio.duration) && audio.duration - audio.currentTime > 0.5 ? new Error('audio ended early') : null);
+          const onEnd = () =>
+            done(
+              Number.isFinite(audio.duration) && audio.duration - audio.currentTime > 0.5
+                ? new Error('audio ended early')
+                : null
+            );
           const onError = () => done(new Error('audio error'));
           const onPlaying = () => {
             clearStall();
             if (playingSeen) return;
             playingSeen = true;
-            diag('team:playing', { ...link,
-              elapsedMs: Math.max(0, (globalThis.performance?.now?.() ?? Date.now()) - started) });
+            diag('team:playing', {
+              ...link,
+              elapsedMs: Math.max(0, (globalThis.performance?.now?.() ?? Date.now()) - started),
+            });
           };
           settle = () => done(null);
           audio.addEventListener('ended', onEnd);
@@ -1299,7 +1424,10 @@ Object.assign(ReverieApp.prototype, {
         new Promise((resolve, reject) => {
           const p = new SpeechSynthesisUtterance(u.text);
           const voice = fixed.voice;
-          if (!voice) { reject(new Error('No matching device voice is available')); return; }
+          if (!voice) {
+            reject(new Error('No matching device voice is available'));
+            return;
+          }
           if (voice) {
             p.voice = voice;
             p.lang = voice.lang;
@@ -1318,9 +1446,18 @@ Object.assign(ReverieApp.prototype, {
     const notice = this._carScreen?.querySelector?.('.car-voice-notice');
     if (!notice) return;
     const voice = info.voice ? ` (${info.voice}${info.language ? `, ${info.language}` : ''})` : '';
-    const text = info.engine === 'server' ? 'Team voice' : info.engine === 'interrupted' ? 'Reply interrupted: device audio could not finish. The reply remains in chat.' :
-      info.reason === 'selected' ? `Device voice${voice}` : info.restarted ? `Team audio interrupted. Replaying this reply from the start in device voice${voice}.` : `Using device voice${voice}: team audio unavailable.`;
-    notice.hidden = false; notice.dataset.engine = info.engine;
+    const text =
+      info.engine === 'server'
+        ? 'Team voice'
+        : info.engine === 'interrupted'
+          ? 'Reply interrupted: device audio could not finish. The reply remains in chat.'
+          : info.reason === 'selected'
+            ? `Device voice${voice}`
+            : info.restarted
+              ? `Team audio interrupted. Replaying this reply from the start in device voice${voice}.`
+              : `Using device voice${voice}: team audio unavailable.`;
+    notice.hidden = false;
+    notice.dataset.engine = info.engine;
     if (notice.textContent !== text) notice.textContent = text;
   },
 
@@ -1422,8 +1559,10 @@ Object.assign(ReverieApp.prototype, {
       };
       awake.append(awakeText, retryAwake);
       const voiceNotice = document.createElement('div');
-      voiceNotice.className = 'car-voice-notice'; voiceNotice.hidden = true;
-      voiceNotice.setAttribute('role', 'status'); voiceNotice.setAttribute('aria-live', 'polite');
+      voiceNotice.className = 'car-voice-notice';
+      voiceNotice.hidden = true;
+      voiceNotice.setAttribute('role', 'status');
+      voiceNotice.setAttribute('aria-live', 'polite');
       voiceNotice.style.cssText = 'padding:4px 14px;color:#ddd;font-size:14px;';
       screen.append(bar, awake, voiceNotice, pad);
       document.body.append(screen);
@@ -1434,7 +1573,10 @@ Object.assign(ReverieApp.prototype, {
     this._carScreen.querySelector('.car-who').textContent = `${member.icon ? `${member.icon} ` : ''}${member.name}`;
     this._carScreen.querySelector('.car-build').textContent = (this._pageBuildId || '').slice(0, 8);
     const voiceNotice = this._carScreen.querySelector('.car-voice-notice');
-    if (voiceNotice) { voiceNotice.hidden = true; voiceNotice.textContent = ''; }
+    if (voiceNotice) {
+      voiceNotice.hidden = true;
+      voiceNotice.textContent = '';
+    }
     this._fillCarVoices();
   },
 

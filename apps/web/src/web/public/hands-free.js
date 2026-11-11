@@ -175,13 +175,17 @@ Object.assign(ReverieApp.prototype, {
     try {
       const mode = localStorage.getItem(`reverie:voiceMode:${this._chatRoomId || ''}`);
       if (['off', 'panel', 'car'].includes(mode)) return mode;
-    } catch { /* per-device convenience only */ }
+    } catch {
+      /* per-device convenience only */
+    }
     return this._voiceSetting('handsFreeOff') || this._voiceTouch() ? 'off' : 'panel';
   },
 
   _setRoomVoiceMode(mode) {
     this._voiceModeRevision = (this._voiceModeRevision || 0) + 1;
-    try { localStorage.setItem(`reverie:voiceMode:${this._chatRoomId || ''}`, mode); } catch {}
+    try {
+      localStorage.setItem(`reverie:voiceMode:${this._chatRoomId || ''}`, mode);
+    } catch {}
   },
 
   _voiceTouch() {
@@ -191,12 +195,19 @@ Object.assign(ReverieApp.prototype, {
   _voiceEngineInfo() {
     const recognition = !!(window.SpeechRecognition || window.webkitSpeechRecognition);
     const mode = this._roomVoiceMode();
-    const browser = !!this._chatDictation || (mode === 'car' ? typeof carModeEngine === 'function' && carModeEngine(window) === 'speech' : mode !== 'panel' && recognition && this._chatMicRoute?.() === 'local');
+    const browser =
+      !!this._chatDictation ||
+      (mode === 'car'
+        ? typeof carModeEngine === 'function' && carModeEngine(window) === 'speech'
+        : mode !== 'panel' && recognition && this._chatMicRoute?.() === 'local');
     return {
-      mode, engine: browser ? 'speech' : 'server', recognition,
+      mode,
+      engine: browser ? 'speech' : 'server',
+      recognition,
       server: this._hfService?.state || 'unchecked',
-      reason: browser ? 'Browser SpeechRecognition is available and selected' :
-        `${recognition ? mode === 'panel' ? 'Panel hands-free uses recorded audio' : 'Spoken turns to a voice member use server speech' : 'Browser SpeechRecognition is unavailable'}; ${this._hfService?.message || 'speech service has not been checked'}`,
+      reason: browser
+        ? 'Browser SpeechRecognition is available and selected'
+        : `${recognition ? (mode === 'panel' ? 'Panel hands-free uses recorded audio' : 'Spoken turns to a voice member use server speech') : 'Browser SpeechRecognition is unavailable'}; ${this._hfService?.message || 'speech service has not been checked'}`,
     };
   },
 
@@ -210,9 +221,16 @@ Object.assign(ReverieApp.prototype, {
         const response = await this._chatApi('/api/voice/status', { signal: stop.signal });
         const data = response?.data;
         if (!response?.ok || typeof data?.available !== 'boolean') throw new Error('probe failed');
-        this._hfService = { state: data.available ? 'ready' : 'unavailable', service: data.service || 'Whisper/Piper speech service', message: data.message || 'Whisper/Piper speech service is unavailable' };
+        this._hfService = {
+          state: data.available ? 'ready' : 'unavailable',
+          service: data.service || 'Whisper/Piper speech service',
+          message: data.message || 'Whisper/Piper speech service is unavailable',
+        };
       } catch {
-        this._hfService = { state: 'unavailable', message: 'Cannot check the Whisper/Piper speech service. Retry when the console is reachable.' };
+        this._hfService = {
+          state: 'unavailable',
+          message: 'Cannot check the Whisper/Piper speech service. Retry when the console is reachable.',
+        };
       } finally {
         clearTimeout(timer);
         this._hfProbePending = null;
@@ -226,7 +244,11 @@ Object.assign(ReverieApp.prototype, {
 
   _hfServiceFailed(message) {
     const service = this._hfService?.service || 'Whisper/Piper speech service';
-    this._hfService = { state: 'unavailable', service, message: message ? `${service}: ${message}` : `${service} failed. Retry before listening again.` };
+    this._hfService = {
+      state: 'unavailable',
+      service,
+      message: message ? `${service}: ${message}` : `${service} failed. Retry before listening again.`,
+    };
     if (this._hfStream) this._hfClose('service-unavailable');
     this._chatVoiceStatus(this._hfService.message, 'error');
     this._hfRender('unavailable');
@@ -250,12 +272,14 @@ Object.assign(ReverieApp.prototype, {
     if (this._chatApp?.embassy?.selected || !this.isChatroomOpen?.()) return 'closed';
     if (this._roomVoiceMode() === 'off') return 'off';
     if (this._carScreen && !this._carScreen.hidden) {
-      if (this._roomVoiceMode() !== 'car' || (this._carRoomId !== undefined && this._carRoomId !== this._chatRoomId)) return 'closed';
+      if (this._roomVoiceMode() !== 'car' || (this._carRoomId !== undefined && this._carRoomId !== this._chatRoomId))
+        return 'closed';
       return this._carHfOff();
     }
     if (!this._handsFreeOn()) return 'off';
     if (this._hfBlocked) return 'blocked';
-    if (this._chatApp?.embassy?.selected || !this.isChatroomOpen?.() || !this._chatEls || !this._chatMicRoute?.()) return 'closed';
+    if (this._chatApp?.embassy?.selected || !this.isChatroomOpen?.() || !this._chatEls || !this._chatMicRoute?.())
+      return 'closed';
     if (document.hidden) return 'hidden';
     if (typeof MediaRecorder === 'undefined' || !navigator.mediaDevices?.getUserMedia) return 'closed';
     return '';
@@ -277,7 +301,9 @@ Object.assign(ReverieApp.prototype, {
 
   /** Car mode is listening on its own: a tap pauses it rather than recording. */
   _carHandsFree() {
-    return !!this._hfButton && this._carEngine === 'server' && !this._hfBlocked && this._carVoiceMember?.()?.voice === true;
+    return (
+      !!this._hfButton && this._carEngine === 'server' && !this._hfBlocked && this._carVoiceMember?.()?.voice === true
+    );
   },
 
   /** Why listening holds now (the stream stays open), or ''. */
@@ -296,11 +322,24 @@ Object.assign(ReverieApp.prototype, {
   _hfTick() {
     if (!this._hfButton) return;
     const active = this.isChatroomOpen?.() && !this._chatApp?.embassy?.selected && !document.hidden;
-    if (this._carScreen && !this._carScreen.hidden && (!active || this._roomVoiceMode() !== 'car' || (this._carRoomId !== undefined && this._carRoomId !== this._chatRoomId))) this.closeCarMode?.({ preserveMode: true });
-    if (this._hfStream && (this._hfStreamRoomId !== this._chatRoomId || this._hfStreamMode !== this._roomVoiceMode())) this._hfClose('room-mode-changed');
-    if (!this._hfService && this.isChatroomOpen?.() && !this._chatApp?.embassy?.selected && !document.hidden) this._hfProbeService();
+    if (
+      this._carScreen &&
+      !this._carScreen.hidden &&
+      (!active ||
+        this._roomVoiceMode() !== 'car' ||
+        (this._carRoomId !== undefined && this._carRoomId !== this._chatRoomId))
+    )
+      this.closeCarMode?.({ preserveMode: true });
+    if (this._hfStream && (this._hfStreamRoomId !== this._chatRoomId || this._hfStreamMode !== this._roomVoiceMode()))
+      this._hfClose('room-mode-changed');
+    if (!this._hfService && this.isChatroomOpen?.() && !this._chatApp?.embassy?.selected && !document.hidden)
+      this._hfProbeService();
     if (this._roomVoiceMode() === 'car' && active && (!this._carScreen || this._carScreen.hidden)) {
-      if ((typeof carModeEngine === 'function' && carModeEngine(window) === 'speech') || this._hfService?.state === 'ready') this.openCarMode?.();
+      if (
+        (typeof carModeEngine === 'function' && carModeEngine(window) === 'speech') ||
+        this._hfService?.state === 'ready'
+      )
+        this.openCarMode?.();
     }
     const off = this._hfOff();
     if (off) {
@@ -333,7 +372,8 @@ Object.assign(ReverieApp.prototype, {
   },
 
   async _hfOpen() {
-    const roomId = this._chatRoomId, revision = this._voiceModeRevision;
+    const roomId = this._chatRoomId,
+      revision = this._voiceModeRevision;
     this._hfOpening = true;
     let stream;
     try {
@@ -390,7 +430,8 @@ Object.assign(ReverieApp.prototype, {
     const type = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4'].find((t) => MediaRecorder.isTypeSupported?.(t));
     const rec = new MediaRecorder(this._hfStream, type ? { mimeType: type } : undefined);
     const r = { rec, at: now, chunks: [], send: false, type };
-    const roomId = this._chatRoomId, revision = this._voiceModeRevision;
+    const roomId = this._chatRoomId,
+      revision = this._voiceModeRevision;
     rec.ondataavailable = (e) => e.data.size && r.chunks.push(e.data);
     rec.onstop = () => {
       if (!r.send || this._hfOff() || roomId !== this._chatRoomId || revision !== this._voiceModeRevision) return;
@@ -476,7 +517,11 @@ Object.assign(ReverieApp.prototype, {
       const route = car ? 'turn' : this._chatMicRoute?.();
       const target = car || (route === 'turn' ? this._chatVoiceTarget() : null);
       this._diag?.('handsfree:send', { size: blob.size, route: route || null });
-      const success = target ? await this._sendChatVoice(blob, target) : route ? await this._transcribeOnServer?.(blob) : false;
+      const success = target
+        ? await this._sendChatVoice(blob, target)
+        : route
+          ? await this._transcribeOnServer?.(blob)
+          : false;
       if (success === false) this._hfServiceFailed(this._chatEls.voiceStatus.textContent);
     } catch {
       this._hfServiceFailed();
@@ -496,7 +541,11 @@ Object.assign(ReverieApp.prototype, {
     const service = this._hfService;
     const ready = service?.state === 'ready';
     const mode = this._roomVoiceMode();
-    const active = state !== 'blocked' && (mode === 'panel' ? ready && !['unavailable', 'checking'].includes(state) : mode === 'car' && this._carScreen && !this._carScreen.hidden);
+    const active =
+      state !== 'blocked' &&
+      (mode === 'panel'
+        ? ready && !['unavailable', 'checking'].includes(state)
+        : mode === 'car' && this._carScreen && !this._carScreen.hidden);
     const current = active ? mode : 'off';
     const key = `${state}|${hidden}|${mode}|${ready}|${recognition}|${!!member}|${this._voiceTouch()}`;
     if (this._hfShown !== key) {
@@ -510,7 +559,13 @@ Object.assign(ReverieApp.prototype, {
       };
       option('off', 'Voice: Off');
       option('panel', 'Hands-free in panel', !recorder || service?.state === 'unavailable');
-      if (member && (this._voiceTouch() || mode === 'car')) option('car', 'Car screen', !(typeof carModeEngine === 'function' && carModeEngine(window) === 'speech') && service?.state === 'unavailable');
+      if (member && (this._voiceTouch() || mode === 'car'))
+        option(
+          'car',
+          'Car screen',
+          !(typeof carModeEngine === 'function' && carModeEngine(window) === 'speech') &&
+            service?.state === 'unavailable'
+        );
       if (recognition) option('dictate', 'Browser dictation');
       if (service?.state === 'unavailable') option('retry', 'Retry speech service');
       btn.value = current;
@@ -526,7 +581,6 @@ Object.assign(ReverieApp.prototype, {
     if (mic) mic.title = `${mic.dataset.voiceBaseTitle || 'Push to talk'}. ${status}`;
     const diag = this._chatroomPanel?.querySelector('.chatroom-diag');
     if (diag) diag.title = `Engine: ${info.engine}. ${info.reason}`;
-
   },
 
   /**
@@ -539,7 +593,8 @@ Object.assign(ReverieApp.prototype, {
     if (was === state) return;
     this._carHfShown = state;
     const detail = this._carScreen.querySelector('.car-detail')?.textContent || '';
-    if (state === 'hearing') this._renderCarState('listening', `Hearing you\u2026 pause to send to ${this._hfTargetLabel()}`);
+    if (state === 'hearing')
+      this._renderCarState('listening', `Hearing you\u2026 pause to send to ${this._hfTargetLabel()}`);
     else if (state === 'listening') this._renderCarState('listening', was === 'hearing' ? '' : detail);
     else if (state === 'paused') this._renderCarState('paused', detail);
     else if (state === 'needs-click') this._renderCarState('paused', 'Tap anywhere to start listening');

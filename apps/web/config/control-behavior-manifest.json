@@ -1411,7 +1411,7 @@
       "reason": "No reviewed declaration-to-scenario behavioral contract; screenshot or test-file existence does not qualify this control."
     },
     {
-      "declaration": "src/web/public/chat-app.js::ReverieChatApp.tombstoneEl::restore::button:Restore the deleted message at ${(globalThis.ReverieTime?.format(m.at) ?? new Date(m.at).toLocaleString('en-US', { timeZone: 'UTC', timeZoneName: 'short' }))} (agents are not sent it again)",
+      "declaration": "src/web/public/chat-app.js::ReverieChatApp.tombstoneEl::restore::button:Restore the deleted message at ${globalThis.ReverieTime?.format(m.at) ?? new Date(m.at).toLocaleString('en-US', { timeZone: 'UTC', timeZoneName: 'short' })} (agents are not sent it again)",
       "reason": "No reviewed declaration-to-scenario behavioral contract; screenshot or test-file existence does not qualify this control."
     },
     {
@@ -1547,7 +1547,7 @@
       "reason": "No reviewed declaration-to-scenario behavioral contract; screenshot or test-file existence does not qualify this control."
     },
     {
-      "declaration": "src/web/public/chat-app.js::ReverieEmbassyPairingView.hostAddress::save::button:[dynamic label:7802fe234af6]",
+      "declaration": "src/web/public/chat-app.js::ReverieEmbassyPairingView.hostAddress::save::button:[dynamic label:2e8d0868f0f3]",
       "reason": "Detection gap: button:[dynamic label:7802fe234af6]"
     },
     {
@@ -1563,11 +1563,11 @@
       "reason": "No reviewed declaration-to-scenario behavioral contract; screenshot or test-file existence does not qualify this control."
     },
     {
-      "declaration": "src/web/public/chat-app.js::ReverieEmbassyPairingView.hostRoom::save::button:[dynamic label:155be95e6b87]",
+      "declaration": "src/web/public/chat-app.js::ReverieEmbassyPairingView.hostRoom::save::button:[dynamic label:8eac6e073633]",
       "reason": "Detection gap: button:[dynamic label:155be95e6b87]"
     },
     {
-      "declaration": "src/web/public/chat-app.js::ReverieEmbassyPairingView.invites::inline::button:[dynamic label:5b52f7c10206]",
+      "declaration": "src/web/public/chat-app.js::ReverieEmbassyPairingView.invites::inline::button:[dynamic label:e1737bfc4882]",
       "reason": "Detection gap: button:[dynamic label:5b52f7c10206]"
     },
     {
@@ -1715,7 +1715,7 @@
       "reason": "Detection gap: button:[dynamic label:611496f412ca]"
     },
     {
-      "declaration": "src/web/public/chat-app.js::ReverieEmbassyView.joinDialog::confirm::button:[dynamic label:239ec208f9e0]",
+      "declaration": "src/web/public/chat-app.js::ReverieEmbassyView.joinDialog::confirm::button:[dynamic label:26bb24c54911]",
       "reason": "Detection gap: button:[dynamic label:239ec208f9e0]"
     },
     {
@@ -1747,11 +1747,11 @@
       "reason": "No reviewed declaration-to-scenario behavioral contract; screenshot or test-file existence does not qualify this control."
     },
     {
-      "declaration": "src/web/public/chat-app.js::ReverieEmbassyView.joinDialog::showQR::button:[dynamic label:95ac0cbbc514]",
+      "declaration": "src/web/public/chat-app.js::ReverieEmbassyView.joinDialog::showQR::button:[dynamic label:094634997159]",
       "reason": "Detection gap: button:[dynamic label:95ac0cbbc514]"
     },
     {
-      "declaration": "src/web/public/chat-app.js::ReverieEmbassyView.joinDialog::startCamera::button:[dynamic label:44e01d9fe1dc]",
+      "declaration": "src/web/public/chat-app.js::ReverieEmbassyView.joinDialog::startCamera::button:[dynamic label:9849fd9185ce]",
       "reason": "Detection gap: button:[dynamic label:44e01d9fe1dc]"
     },
     {
@@ -4643,7 +4643,7 @@
       "reason": "No reviewed declaration-to-scenario behavioral contract; screenshot or test-file existence does not qualify this control."
     },
     {
-      "declaration": "src/web/public/board.html::html::a:a7120b795f31::1",
+      "declaration": "src/web/public/board.html::html::a:b326bf9f140b::1",
       "reason": "No reviewed declaration-to-scenario behavioral contract; screenshot or test-file existence does not qualify this control."
     },
     {
@@ -4699,11 +4699,11 @@
       "reason": "No reviewed declaration-to-scenario behavioral contract; screenshot or test-file existence does not qualify this control."
     },
     {
-      "declaration": "src/web/public/board.html#inline-1::cards::inline::embedded-control-markup:8ca0957eedcd",
+      "declaration": "src/web/public/board.html#inline-1::cards::inline::embedded-control-markup:6ac8d603930a",
       "reason": "Detection gap: embedded-control-markup:8ca0957eedcd"
     },
     {
-      "declaration": "src/web/public/board.html#inline-1::decisionCard::inline::embedded-control-markup:0fa856530a8a",
+      "declaration": "src/web/public/board.html#inline-1::decisionCard::inline::embedded-control-markup:765710d3ec0c",
       "reason": "Detection gap: embedded-control-markup:0fa856530a8a"
     },
     {
@@ -4715,7 +4715,7 @@
       "reason": "Detection gap: embedded-control-markup:7db9b979df2e"
     },
     {
-      "declaration": "src/web/public/board.html#inline-1::decisionCard::inline::embedded-control-markup:cd74335d8daf",
+      "declaration": "src/web/public/board.html#inline-1::decisionCard::inline::embedded-control-markup:ffa0ebcfb253",
       "reason": "Detection gap: embedded-control-markup:cd74335d8daf"
     },
     {
@@ -4815,7 +4815,7 @@
       "reason": "Detection gap: dynamic-constructor:9332ac7d5042"
     },
     {
-      "declaration": "src/web/public/company-plans.html#inline-2::openPlanMove::inline::embedded-control-markup:633cb62b937b",
+      "declaration": "src/web/public/company-plans.html#inline-2::openPlanMove::inline::embedded-control-markup:1d3c499ff8fd",
       "reason": "Detection gap: embedded-control-markup:633cb62b937b"
     },
     {

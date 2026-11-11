@@ -99,7 +99,7 @@ Object.assign(ReverieApp.prototype, {
       return;
     }
     this._notePlanAccounts(res.data.accounts);
-    updated.textContent = `updated ${(globalThis.ReverieTime?.format(res.data.generatedAt) ?? new Date(res.data.generatedAt).toLocaleString('en-US', { timeZone: 'UTC', timeZoneName: 'short' }))}`;
+    updated.textContent = `updated ${globalThis.ReverieTime?.format(res.data.generatedAt) ?? new Date(res.data.generatedAt).toLocaleString('en-US', { timeZone: 'UTC', timeZoneName: 'short' })}`;
     const cards = res.data.accounts.map((a) => this._planCard(a));
     cards.push(this._gpuCard(res.data.gpu));
     grid.replaceChildren(...cards);
@@ -123,8 +123,9 @@ Object.assign(ReverieApp.prototype, {
 
   _planCard(a) {
     const { el } = this._plansEls;
-    const time = value => globalThis.ReverieTime?.format(value)
-      ?? new Date(value).toLocaleString('en-US', { timeZone: 'UTC', timeZoneName: 'short' });
+    const time = (value) =>
+      globalThis.ReverieTime?.format(value) ??
+      new Date(value).toLocaleString('en-US', { timeZone: 'UTC', timeZoneName: 'short' });
     const p = a.pace;
     const rec = PLAN_RECOMMENDATION[p.recommendation] || PLAN_RECOMMENDATION.unknown;
     const card = el('article', `plans-card plans-card--${p.recommendation}`);
@@ -216,7 +217,8 @@ Object.assign(ReverieApp.prototype, {
     const p = a.pace;
     const et = (ms) =>
       ms
-        ? (globalThis.ReverieTime?.format(ms) ?? new Date(ms).toLocaleString('en-US', { timeZone: 'UTC', timeZoneName: 'short' }))
+        ? (globalThis.ReverieTime?.format(ms) ??
+          new Date(ms).toLocaleString('en-US', { timeZone: 'UTC', timeZoneName: 'short' }))
         : '-';
     const pct = (n) => (n === null || n === undefined ? '-' : `${Math.round(n)}%`);
     const box = el('div', 'plans-resets');

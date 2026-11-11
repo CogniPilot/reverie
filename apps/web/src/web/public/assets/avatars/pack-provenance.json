@@ -1022,11 +1022,7 @@
       "method": "built-in imagegen",
       "transparent_background": true,
       "sha256": "5973ae519e9367db86a9573a2dc25c1342ec89d8bf3f5fbc9168c667449774b0",
-      "reference_assets": [
-        "pack-01.png",
-        "pack-06.png",
-        "pack-11.png"
-      ]
+      "reference_assets": ["pack-01.png", "pack-06.png", "pack-11.png"]
     },
     {
       "id": "pack-103",
@@ -1035,11 +1031,7 @@
       "method": "built-in imagegen",
       "transparent_background": true,
       "sha256": "90377303666e963ccf79907bb145cba72f52a232f0a1d85e9d63310744089a00",
-      "reference_assets": [
-        "pack-01.png",
-        "pack-06.png",
-        "pack-11.png"
-      ]
+      "reference_assets": ["pack-01.png", "pack-06.png", "pack-11.png"]
     },
     {
       "id": "pack-104",
@@ -1048,11 +1040,7 @@
       "method": "built-in imagegen",
       "transparent_background": true,
       "sha256": "4d377364444ef5cd698d1c5fb64dffd0f72edb3d46297edc16be2627d4b00037",
-      "reference_assets": [
-        "pack-01.png",
-        "pack-06.png",
-        "pack-11.png"
-      ]
+      "reference_assets": ["pack-01.png", "pack-06.png", "pack-11.png"]
     },
     {
       "id": "pack-105",
@@ -1061,11 +1049,7 @@
       "method": "built-in imagegen",
       "transparent_background": true,
       "sha256": "df4574ac9ceff7326afcd295a5af95447f75f33edcbbec18205786a545e1390d",
-      "reference_assets": [
-        "pack-01.png",
-        "pack-06.png",
-        "pack-11.png"
-      ]
+      "reference_assets": ["pack-01.png", "pack-06.png", "pack-11.png"]
     },
     {
       "id": "pack-106",
@@ -1074,11 +1058,7 @@
       "method": "built-in imagegen",
       "transparent_background": true,
       "sha256": "68c54c1380b5dca5913e112e8af1661c9406a916284b5e36b1084706bc07c4b0",
-      "reference_assets": [
-        "pack-01.png",
-        "pack-06.png",
-        "pack-11.png"
-      ]
+      "reference_assets": ["pack-01.png", "pack-06.png", "pack-11.png"]
     },
     {
       "id": "pack-107",
@@ -1087,11 +1067,7 @@
       "method": "built-in imagegen",
       "transparent_background": true,
       "sha256": "74d95f490c4578809c497b0514fa996e18dac442020fae611b2e471120ca5d41",
-      "reference_assets": [
-        "pack-01.png",
-        "pack-06.png",
-        "pack-11.png"
-      ]
+      "reference_assets": ["pack-01.png", "pack-06.png", "pack-11.png"]
     },
     {
       "id": "pack-108",
@@ -1100,11 +1076,7 @@
       "method": "built-in imagegen",
       "transparent_background": true,
       "sha256": "1dd42a421973fa4b4199da5859e20066118ebae003004344c6deb9493197a61c",
-      "reference_assets": [
-        "pack-01.png",
-        "pack-06.png",
-        "pack-11.png"
-      ]
+      "reference_assets": ["pack-01.png", "pack-06.png", "pack-11.png"]
     },
     {
       "id": "pack-109",
@@ -1113,11 +1085,7 @@
       "method": "built-in imagegen",
       "transparent_background": true,
       "sha256": "6e53a73f88a09f290cbde5dabcad35895d0a56f5fdb7eae829f3bb96698c963c",
-      "reference_assets": [
-        "pack-01.png",
-        "pack-06.png",
-        "pack-11.png"
-      ]
+      "reference_assets": ["pack-01.png", "pack-06.png", "pack-11.png"]
     },
     {
       "id": "pack-110",
@@ -1126,11 +1094,7 @@
       "method": "built-in imagegen",
       "transparent_background": true,
       "sha256": "06deab80c28e7fc372fc2a55c3f9846574b2deba5af061d1e8b6900b7150ce46",
-      "reference_assets": [
-        "pack-01.png",
-        "pack-06.png",
-        "pack-11.png"
-      ]
+      "reference_assets": ["pack-01.png", "pack-06.png", "pack-11.png"]
     },
     {
       "id": "pack-111",
@@ -1139,11 +1103,7 @@
       "method": "built-in imagegen",
       "transparent_background": true,
       "sha256": "2181319233d3665140a881fa16af57417bcdf30b6f0c77581ca48eee1d76de94",
-      "reference_assets": [
-        "pack-01.png",
-        "pack-06.png",
-        "pack-11.png"
-      ]
+      "reference_assets": ["pack-01.png", "pack-06.png", "pack-11.png"]
     },
     {
       "id": "pack-112",
@@ -1152,11 +1112,7 @@
       "method": "built-in imagegen",
       "transparent_background": true,
       "sha256": "b9b3c31afe6dc01ee086f92bd9415ef1dd51530ae70ac7b4740283f98ff6d59f",
-      "reference_assets": [
-        "pack-01.png",
-        "pack-06.png",
-        "pack-11.png"
-      ]
+      "reference_assets": ["pack-01.png", "pack-06.png", "pack-11.png"]
     },
     {
       "id": "pack-113",
@@ -1165,11 +1121,7 @@
       "method": "built-in imagegen",
       "transparent_background": true,
       "sha256": "6950195721edebdd50312a91aecabc13cced30a26ec169cceaac9ae7a79025d3",
-      "reference_assets": [
-        "pack-01.png",
-        "pack-06.png",
-        "pack-11.png"
-      ]
+      "reference_assets": ["pack-01.png", "pack-06.png", "pack-11.png"]
     },
     {
       "id": "pack-114",
@@ -1178,11 +1130,7 @@
       "method": "built-in imagegen",
       "transparent_background": true,
       "sha256": "051cd21eac01667e41114830c13238d35d60d2fa09e91f781b6f744cd19edb16",
-      "reference_assets": [
-        "pack-01.png",
-        "pack-06.png",
-        "pack-11.png"
-      ]
+      "reference_assets": ["pack-01.png", "pack-06.png", "pack-11.png"]
     },
     {
       "id": "pack-115",
@@ -1191,11 +1139,7 @@
       "method": "built-in imagegen",
       "transparent_background": true,
       "sha256": "03cba93f2643b51c878dd36a161abe73147e0fcc52e4cf0d553bca0fc3f8f0e4",
-      "reference_assets": [
-        "pack-01.png",
-        "pack-06.png",
-        "pack-11.png"
-      ]
+      "reference_assets": ["pack-01.png", "pack-06.png", "pack-11.png"]
     },
     {
       "id": "pack-116",
@@ -1204,11 +1148,7 @@
       "method": "built-in imagegen",
       "transparent_background": true,
       "sha256": "19fe652fc270aecad71ff1cafe027d280c20e75808adbd5dfeb30520b093a514",
-      "reference_assets": [
-        "pack-01.png",
-        "pack-06.png",
-        "pack-11.png"
-      ]
+      "reference_assets": ["pack-01.png", "pack-06.png", "pack-11.png"]
     },
     {
       "id": "pack-117",
@@ -1217,11 +1157,7 @@
       "method": "built-in imagegen",
       "transparent_background": true,
       "sha256": "ac2697b24d244769cec05dcc89a7c854e815ee286cf5a3489b966fce82740d23",
-      "reference_assets": [
-        "pack-01.png",
-        "pack-06.png",
-        "pack-11.png"
-      ]
+      "reference_assets": ["pack-01.png", "pack-06.png", "pack-11.png"]
     },
     {
       "id": "pack-118",
@@ -1230,11 +1166,7 @@
       "method": "built-in imagegen",
       "transparent_background": true,
       "sha256": "aab66b622a72cad4d3b0f178a8695f49ed857701a10373d3fdbe881b285ac3f9",
-      "reference_assets": [
-        "pack-01.png",
-        "pack-06.png",
-        "pack-11.png"
-      ]
+      "reference_assets": ["pack-01.png", "pack-06.png", "pack-11.png"]
     },
     {
       "id": "pack-119",
@@ -1243,11 +1175,7 @@
       "method": "built-in imagegen",
       "transparent_background": true,
       "sha256": "740f0adf7043f2caf6c37f12a33d29c7b1368ad71a8e3f4be4aa0f55c62cf106",
-      "reference_assets": [
-        "pack-01.png",
-        "pack-06.png",
-        "pack-11.png"
-      ]
+      "reference_assets": ["pack-01.png", "pack-06.png", "pack-11.png"]
     },
     {
       "id": "pack-120",
@@ -1256,11 +1184,7 @@
       "method": "built-in imagegen",
       "transparent_background": true,
       "sha256": "d7a28a0f2e8e01e74df95ad450395a1b5eb4a7ef7e50fcd48feee700b5e87dfd",
-      "reference_assets": [
-        "pack-01.png",
-        "pack-06.png",
-        "pack-11.png"
-      ]
+      "reference_assets": ["pack-01.png", "pack-06.png", "pack-11.png"]
     },
     {
       "id": "pack-121",
@@ -1269,11 +1193,7 @@
       "method": "built-in imagegen",
       "transparent_background": true,
       "sha256": "c54d69173fc15204aa4c9e4f3e90a0697719a60ff5bef73e12bc31a7fbe15fc5",
-      "reference_assets": [
-        "pack-01.png",
-        "pack-06.png",
-        "pack-11.png"
-      ]
+      "reference_assets": ["pack-01.png", "pack-06.png", "pack-11.png"]
     },
     {
       "id": "pack-122",
@@ -1282,11 +1202,7 @@
       "method": "built-in imagegen",
       "transparent_background": true,
       "sha256": "af3574ac214292d01f5168512855a27db9c5376fcca6d2b98e097e7c273e2f13",
-      "reference_assets": [
-        "pack-01.png",
-        "pack-06.png",
-        "pack-11.png"
-      ]
+      "reference_assets": ["pack-01.png", "pack-06.png", "pack-11.png"]
     },
     {
       "id": "pack-123",
@@ -1295,11 +1211,7 @@
       "method": "built-in imagegen",
       "transparent_background": true,
       "sha256": "a23334faa0a5cb9f20b64f09d13e50d89eb9767fc5fad6e0192f70115f2b0c5c",
-      "reference_assets": [
-        "pack-01.png",
-        "pack-06.png",
-        "pack-11.png"
-      ]
+      "reference_assets": ["pack-01.png", "pack-06.png", "pack-11.png"]
     },
     {
       "id": "pack-124",
@@ -1308,11 +1220,7 @@
       "method": "built-in imagegen",
       "transparent_background": true,
       "sha256": "53552e7981b29f0c0877a4a7e53c71ecba85cdcd8126dadabb0b762c731873b7",
-      "reference_assets": [
-        "pack-01.png",
-        "pack-06.png",
-        "pack-11.png"
-      ]
+      "reference_assets": ["pack-01.png", "pack-06.png", "pack-11.png"]
     },
     {
       "id": "pack-125",
@@ -1321,11 +1229,7 @@
       "method": "built-in imagegen",
       "transparent_background": true,
       "sha256": "91a3a3754a72c513b3604ef340cec5d3c03fcb3ec1a4c52edd7175a60319bbba",
-      "reference_assets": [
-        "pack-01.png",
-        "pack-06.png",
-        "pack-11.png"
-      ]
+      "reference_assets": ["pack-01.png", "pack-06.png", "pack-11.png"]
     },
     {
       "id": "pack-126",
@@ -1334,11 +1238,7 @@
       "method": "built-in imagegen",
       "transparent_background": true,
       "sha256": "89fa9c873e51328acd0faf3e831d8785d4916019789565f32fefde9ced3723de",
-      "reference_assets": [
-        "pack-01.png",
-        "pack-06.png",
-        "pack-11.png"
-      ]
+      "reference_assets": ["pack-01.png", "pack-06.png", "pack-11.png"]
     },
     {
       "id": "pack-127",
@@ -1347,11 +1247,7 @@
       "method": "built-in imagegen",
       "transparent_background": true,
       "sha256": "a55d32e435e1cdb91698ccb4d3bcbfa6b2c97d4367e10cd436b1ca8a40db3e74",
-      "reference_assets": [
-        "pack-01.png",
-        "pack-06.png",
-        "pack-11.png"
-      ]
+      "reference_assets": ["pack-01.png", "pack-06.png", "pack-11.png"]
     },
     {
       "id": "pack-128",
@@ -1360,11 +1256,7 @@
       "method": "built-in imagegen",
       "transparent_background": true,
       "sha256": "a37520f272d7fe6924ae1e4d2907c5b9772f81c183bf852b38df2faa8e60bfab",
-      "reference_assets": [
-        "pack-01.png",
-        "pack-06.png",
-        "pack-11.png"
-      ]
+      "reference_assets": ["pack-01.png", "pack-06.png", "pack-11.png"]
     },
     {
       "id": "pack-129",
@@ -1373,11 +1265,7 @@
       "method": "built-in imagegen",
       "transparent_background": true,
       "sha256": "21a7f103620e45d81ba471a3994fa73a2a8c73f62a4e2007d6d272fbee24f4fb",
-      "reference_assets": [
-        "pack-01.png",
-        "pack-06.png",
-        "pack-11.png"
-      ]
+      "reference_assets": ["pack-01.png", "pack-06.png", "pack-11.png"]
     },
     {
       "id": "pack-130",
@@ -1386,11 +1274,7 @@
       "method": "built-in imagegen",
       "transparent_background": true,
       "sha256": "c6551aec3a017b4b4cad73463bfe8e3e3463d67d90e9c07ca8a948984a07098f",
-      "reference_assets": [
-        "pack-01.png",
-        "pack-06.png",
-        "pack-11.png"
-      ]
+      "reference_assets": ["pack-01.png", "pack-06.png", "pack-11.png"]
     },
     {
       "id": "pack-131",
@@ -1399,11 +1283,7 @@
       "method": "built-in imagegen",
       "transparent_background": true,
       "sha256": "4b65dfdd2c005b6cd24c0597309afdc4354018f79c81b4ca36f4d1f2d12db77a",
-      "reference_assets": [
-        "pack-01.png",
-        "pack-06.png",
-        "pack-11.png"
-      ]
+      "reference_assets": ["pack-01.png", "pack-06.png", "pack-11.png"]
     },
     {
       "id": "pack-132",
@@ -1412,11 +1292,7 @@
       "method": "built-in imagegen",
       "transparent_background": true,
       "sha256": "c53b7a17df50735084d973656005075f9cdb16b3bfc8a1cb3cf4fe04b32f7d9c",
-      "reference_assets": [
-        "pack-01.png",
-        "pack-06.png",
-        "pack-11.png"
-      ]
+      "reference_assets": ["pack-01.png", "pack-06.png", "pack-11.png"]
     },
     {
       "id": "pack-133",
@@ -1425,11 +1301,7 @@
       "method": "built-in imagegen",
       "transparent_background": true,
       "sha256": "03b127da425643c263ee5d32d901df7eb0aabefc9c81856b8378288ad1b66973",
-      "reference_assets": [
-        "pack-01.png",
-        "pack-06.png",
-        "pack-11.png"
-      ]
+      "reference_assets": ["pack-01.png", "pack-06.png", "pack-11.png"]
     },
     {
       "id": "pack-134",
@@ -1438,11 +1310,7 @@
       "method": "built-in imagegen",
       "transparent_background": true,
       "sha256": "68ceb1de04e57fd49ad2dd59a1a4037755a196e0eb993970286b14628f535d10",
-      "reference_assets": [
-        "pack-01.png",
-        "pack-06.png",
-        "pack-11.png"
-      ]
+      "reference_assets": ["pack-01.png", "pack-06.png", "pack-11.png"]
     },
     {
       "id": "pack-135",
@@ -1451,11 +1319,7 @@
       "method": "built-in imagegen",
       "transparent_background": true,
       "sha256": "89f34f2b9e80446c214be4c88db9d998878a723019a4d41069176e0ee3625b55",
-      "reference_assets": [
-        "pack-01.png",
-        "pack-06.png",
-        "pack-11.png"
-      ]
+      "reference_assets": ["pack-01.png", "pack-06.png", "pack-11.png"]
     },
     {
       "id": "pack-136",
@@ -1464,11 +1328,7 @@
       "method": "built-in imagegen",
       "transparent_background": true,
       "sha256": "399270a2fe8474c9ac5e175d18289425d7aaa3c2b62529f73d910cac91b82b66",
-      "reference_assets": [
-        "pack-01.png",
-        "pack-06.png",
-        "pack-11.png"
-      ]
+      "reference_assets": ["pack-01.png", "pack-06.png", "pack-11.png"]
     },
     {
       "id": "pack-137",
@@ -1477,11 +1337,7 @@
       "method": "built-in imagegen",
       "transparent_background": true,
       "sha256": "bb09b3261496cb58e62170a6568fd334b1da656d80a510f62211b14e04c606a6",
-      "reference_assets": [
-        "pack-01.png",
-        "pack-06.png",
-        "pack-11.png"
-      ]
+      "reference_assets": ["pack-01.png", "pack-06.png", "pack-11.png"]
     },
     {
       "id": "pack-138",
@@ -1490,11 +1346,7 @@
       "method": "built-in imagegen",
       "transparent_background": true,
       "sha256": "6690f644193f3b97aa7f36803c914c423b030d02789969412c8143046228132b",
-      "reference_assets": [
-        "pack-01.png",
-        "pack-06.png",
-        "pack-11.png"
-      ]
+      "reference_assets": ["pack-01.png", "pack-06.png", "pack-11.png"]
     },
     {
       "id": "pack-139",
@@ -1503,11 +1355,7 @@
       "method": "built-in imagegen",
       "transparent_background": true,
       "sha256": "a050ae5d842072f366da34eed90a0346002256ea048517e51b3104f8ecd3e37a",
-      "reference_assets": [
-        "pack-01.png",
-        "pack-06.png",
-        "pack-11.png"
-      ]
+      "reference_assets": ["pack-01.png", "pack-06.png", "pack-11.png"]
     },
     {
       "id": "pack-140",
@@ -1516,11 +1364,7 @@
       "method": "built-in imagegen",
       "transparent_background": true,
       "sha256": "dbdd2720715372ad151397b62ed30fd319f6e7c6ce1cd8274d6e215dee023046",
-      "reference_assets": [
-        "pack-01.png",
-        "pack-06.png",
-        "pack-11.png"
-      ]
+      "reference_assets": ["pack-01.png", "pack-06.png", "pack-11.png"]
     },
     {
       "id": "pack-141",
@@ -1529,11 +1373,7 @@
       "method": "built-in imagegen",
       "transparent_background": true,
       "sha256": "48c0c0b4f7b07e3df8c2aa09730001987da4e75d9758fd4e025239a49f3c141b",
-      "reference_assets": [
-        "pack-01.png",
-        "pack-06.png",
-        "pack-11.png"
-      ]
+      "reference_assets": ["pack-01.png", "pack-06.png", "pack-11.png"]
     },
     {
       "id": "pack-142",
@@ -1542,11 +1382,7 @@
       "method": "built-in imagegen",
       "transparent_background": true,
       "sha256": "44ec5a0fbb6cdf403280e28ef52075b992b7b12a38386bad0b2af00ef5724924",
-      "reference_assets": [
-        "pack-01.png",
-        "pack-06.png",
-        "pack-11.png"
-      ]
+      "reference_assets": ["pack-01.png", "pack-06.png", "pack-11.png"]
     },
     {
       "id": "pack-143",
@@ -1555,11 +1391,7 @@
       "method": "built-in imagegen",
       "transparent_background": true,
       "sha256": "aef097fbec955206f651e1dc60831b0d3c5d1cff05efcbdba5db50fc05179ce2",
-      "reference_assets": [
-        "pack-01.png",
-        "pack-06.png",
-        "pack-11.png"
-      ]
+      "reference_assets": ["pack-01.png", "pack-06.png", "pack-11.png"]
     },
     {
       "id": "pack-144",
@@ -1568,11 +1400,7 @@
       "method": "built-in imagegen",
       "transparent_background": true,
       "sha256": "913da6c8ea103bf717d320a0f9e7bc0df0f78c22d6f33d36bd841783b29db3b5",
-      "reference_assets": [
-        "pack-01.png",
-        "pack-06.png",
-        "pack-11.png"
-      ]
+      "reference_assets": ["pack-01.png", "pack-06.png", "pack-11.png"]
     },
     {
       "id": "pack-145",
@@ -1581,11 +1409,7 @@
       "method": "built-in imagegen",
       "transparent_background": true,
       "sha256": "ab0afe37a7739143a74ab87da102dab5ee8302c2e7c69cc64646407449f0499c",
-      "reference_assets": [
-        "pack-01.png",
-        "pack-06.png",
-        "pack-11.png"
-      ]
+      "reference_assets": ["pack-01.png", "pack-06.png", "pack-11.png"]
     },
     {
       "id": "pack-146",
@@ -1594,11 +1418,7 @@
       "method": "built-in imagegen",
       "transparent_background": true,
       "sha256": "f7f99e27c24c05bef9a7dc7170f3af794801aee8b590e2599deee33f8c10b8e9",
-      "reference_assets": [
-        "pack-01.png",
-        "pack-06.png",
-        "pack-11.png"
-      ]
+      "reference_assets": ["pack-01.png", "pack-06.png", "pack-11.png"]
     },
     {
       "id": "pack-147",
@@ -1607,11 +1427,7 @@
       "method": "built-in imagegen",
       "transparent_background": true,
       "sha256": "c829192ee865d6d46452ea0a8137656bdc81682210ad58b9e63b3993bd7b7afe",
-      "reference_assets": [
-        "pack-01.png",
-        "pack-06.png",
-        "pack-11.png"
-      ]
+      "reference_assets": ["pack-01.png", "pack-06.png", "pack-11.png"]
     },
     {
       "id": "pack-148",
@@ -1620,11 +1436,7 @@
       "method": "built-in imagegen",
       "transparent_background": true,
       "sha256": "38d71c904094ad4417a717724a3a020e43c610d64baa0905ef81818426669ae7",
-      "reference_assets": [
-        "pack-01.png",
-        "pack-06.png",
-        "pack-11.png"
-      ]
+      "reference_assets": ["pack-01.png", "pack-06.png", "pack-11.png"]
     },
     {
       "id": "pack-149",
@@ -1633,11 +1445,7 @@
       "method": "built-in imagegen",
       "transparent_background": true,
       "sha256": "7c56a3e668d7d8ee92cec27b91234513e847c02f4a5a9ad926a0d91d4ba61dfa",
-      "reference_assets": [
-        "pack-01.png",
-        "pack-06.png",
-        "pack-11.png"
-      ]
+      "reference_assets": ["pack-01.png", "pack-06.png", "pack-11.png"]
     },
     {
       "id": "pack-150",
@@ -1646,11 +1454,7 @@
       "method": "built-in imagegen",
       "transparent_background": true,
       "sha256": "59115b30147c4f61be096f1e683d84ec0511ac9b896dda501f6883f133fb6ba6",
-      "reference_assets": [
-        "pack-01.png",
-        "pack-06.png",
-        "pack-11.png"
-      ]
+      "reference_assets": ["pack-01.png", "pack-06.png", "pack-11.png"]
     },
     {
       "id": "pack-151",
@@ -1659,11 +1463,7 @@
       "method": "built-in imagegen",
       "transparent_background": true,
       "sha256": "7bf5d24a4da8af35c96f42209c63fde7c1b6eaa0b0ede8bc82471d5bf74319da",
-      "reference_assets": [
-        "pack-01.png",
-        "pack-06.png",
-        "pack-11.png"
-      ]
+      "reference_assets": ["pack-01.png", "pack-06.png", "pack-11.png"]
     }
   ]
 }

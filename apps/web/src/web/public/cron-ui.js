@@ -139,7 +139,11 @@ Object.assign(ReverieApp.prototype, {
       if (saved) sel.value = saved;
     };
     fill('schBotId', botList, job && job.botId);
-    fill('schRoomId', roomList.filter((r) => !r.dm), job && job.roomId);
+    fill(
+      'schRoomId',
+      roomList.filter((r) => !r.dm),
+      job && job.roomId
+    );
   },
 
   onCronActionChange() {
@@ -152,7 +156,14 @@ Object.assign(ReverieApp.prototype, {
 
   _CRON_SOURCE_FIELDS: {
     'plans-pace': {
-      numeric: ['accounts', 'maxWeekly', 'maxProjected', 'minHoursToRunOut', 'bankedAvailable', 'bankedSoonestExpiryHours'],
+      numeric: [
+        'accounts',
+        'maxWeekly',
+        'maxProjected',
+        'minHoursToRunOut',
+        'bankedAvailable',
+        'bankedSoonestExpiryHours',
+      ],
       text: ['worst', 'summary'],
     },
     'host-load': { numeric: ['load1', 'load5', 'load15', 'cpus', 'load15PerCpu'], text: [] },
@@ -167,7 +178,9 @@ Object.assign(ReverieApp.prototype, {
     document.getElementById('schWhenField').innerHTML = fields.numeric
       .map((f) => `<option value="${f}">${f}</option>`)
       .join('');
-    document.getElementById('schFieldHint').textContent = [...fields.numeric, ...fields.text].map((f) => `{${f}}`).join(' ');
+    document.getElementById('schFieldHint').textContent = [...fields.numeric, ...fields.text]
+      .map((f) => `{${f}}`)
+      .join(' ');
     const when = job && job.postWhen;
     if (when) {
       document.getElementById('schWhenField').value = when.field;
