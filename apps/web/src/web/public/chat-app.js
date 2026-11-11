@@ -498,11 +498,9 @@ function chatStaleRoomIds(rooms, seenAt) {
 
 const CA_GROUP_GAP_MS = 7 * 60 * 1000;
 
-/** `YYYY-MM-DD` in local time: the key a day divider is drawn for. */
+/** Company day, matching the timezone used by the visible divider label. */
 function caDayKey(ms) {
-  const d = new Date(ms);
-  const pad = (n) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  return globalThis.ReverieTime?.day(ms) ?? new Date(ms).toISOString().slice(0, 10);
 }
 
 /** "October 11, 2026" for a day divider. */
