@@ -8,7 +8,12 @@ import type { FastifyRequest } from 'fastify';
 import { OwnerAuthService } from './owner-auth/service.js';
 import { OWNER_COOKIE, SERVICE_HEADER, sameOrigin } from './owner-auth/policy.js';
 import { ownerFor } from './web/route-helpers.js';
-import { EmployeeGpuIntentData, type EmployeeGpuIntent } from './employee-gpu-data.js';
+import {
+  EmployeeGpuIntentData,
+  EmployeeGpuApplyData,
+  type EmployeeGpuIntent,
+  type EmployeeGpuApply,
+} from './employee-gpu-data.js';
 import { EmployeePolicyEditApproval } from './resource-employee-data.js';
 
 const PURPOSE = 'resource-replacement-v1';
@@ -85,10 +90,19 @@ export interface RamGpuStatusContext extends ResourceContext<typeof RAM_PURPOSE>
   readonly sessionId: string;
   readonly principal: Readonly<ResourceOwnerPrincipal>;
 }
+export interface RamGpuApplyStatusContext extends Omit<RamGpuStatusContext, 'stage'> {
+  readonly stage: 'gpu-apply-status';
+}
 export interface RamGpuRequestContext extends ResourceContext<typeof RAM_PURPOSE> {
   readonly stage: 'gpu-request';
   readonly employeeId: string;
   readonly approval: Readonly<EmployeeGpuIntent>;
+  readonly principal: Readonly<ResourceOwnerPrincipal>;
+}
+export interface RamGpuApplyContext extends ResourceContext<typeof RAM_PURPOSE> {
+  readonly stage: 'gpu-apply';
+  readonly employeeId: string;
+  readonly approval: Readonly<EmployeeGpuApply>;
   readonly principal: Readonly<ResourceOwnerPrincipal>;
 }
 export interface RamEmployeePolicyEditContext extends ResourceContext<typeof RAM_PURPOSE> {
@@ -182,7 +196,9 @@ export type AnyResourceContext =
   | RamResourcePreviewContext
   | RamResourceStatusContext
   | RamGpuStatusContext
+  | RamGpuApplyStatusContext
   | RamGpuRequestContext
+  | RamGpuApplyContext
   | RamEmployeePolicyEditContext;
 type AuthorityContext =
   | AnyResourceContext
@@ -440,6 +456,17 @@ export class ResourceOwnerAuthority {
       Date.now() + 35_000
     );
   }
+  captureRamGpuApplyStatus(request: FastifyRequest, original: RamGpuStatusContext): RamGpuApplyStatusContext {
+    this.assertContext(original);
+    need(original.stage === 'gpu-status');
+    return this.#capture(
+      request,
+      { stage: 'gpu-apply-status' as const, employeeId: original.employeeId, sessionId: original.sessionId },
+      RAM_PURPOSE,
+      original.expiresAtEpochMs,
+      original
+    );
+  }
   captureRamGpuRequest(request: FastifyRequest, employeeId: string, value: EmployeeGpuIntent): RamGpuRequestContext {
     need(UUID.test(employeeId) && employeeId !== NIL_UUID);
     const selected = EmployeeGpuIntentData.parse(value);
@@ -447,6 +474,16 @@ export class ResourceOwnerAuthority {
     return this.#capture(
       request,
       { stage: 'gpu-request' as const, employeeId, approval },
+      RAM_PURPOSE,
+      Date.now() + 35_000
+    );
+  }
+  captureRamGpuApply(request: FastifyRequest, employeeId: string, value: EmployeeGpuApply): RamGpuApplyContext {
+    need(UUID.test(employeeId) && employeeId !== NIL_UUID);
+    const approval = Object.freeze(EmployeeGpuApplyData.parse(value));
+    return this.#capture(
+      request,
+      { stage: 'gpu-apply' as const, employeeId, approval },
       RAM_PURPOSE,
       Date.now() + 35_000
     );
@@ -665,8 +702,9 @@ export class ResourceOwnerAuthority {
       | { stage: 'apply'; approval: Readonly<ResourceApproval> }
       | { stage: 'preview'; employeeId: string }
       | { stage: 'status'; employeeId: string }
-      | { stage: 'gpu-status'; employeeId: string; sessionId: string }
+      | { stage: 'gpu-status' | 'gpu-apply-status'; employeeId: string; sessionId: string }
       | { stage: 'gpu-request'; employeeId: string; approval: Readonly<EmployeeGpuIntent> }
+      | { stage: 'gpu-apply'; employeeId: string; approval: Readonly<EmployeeGpuApply> }
       | { stage: 'employee-policy-edit'; employeeId: string; approval: EmployeePolicyEditApproval }
       | { stage: 'viewer' | 'fleet-viewer'; requestId: string }
       | (PoolInstallationSelection & ({ stage: 'offer' } | { stage: 'consent'; consent: true }))
@@ -687,7 +725,10 @@ export class ResourceOwnerAuthority {
   ): Readonly<ResourceContext<P> & T> & PrincipalFor<P> {
     const token = request.cookies?.[OWNER_COOKIE];
     need(typeof token === 'string' && token.length > 0 && token.length <= 4096);
-    const access = selected.stage === 'status' || selected.stage === 'gpu-status' ? 'employee-status' : 'operation';
+    const access =
+      selected.stage === 'status' || selected.stage === 'gpu-status' || selected.stage === 'gpu-apply-status'
+        ? 'employee-status'
+        : 'operation';
     const identity = this.#identity(request, token, purpose, access),
       owner = ownerFor(request);
     if (origin) {

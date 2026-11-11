@@ -6,27 +6,28 @@ mod current;
 mod preflight;
 pub use preflight::{preflight_binding, preflight_configuration, preflight_process};
 mod files;
-pub(crate) use files::WorkerProtectedStores;
 #[cfg(test)]
 pub(crate) use files::image_path_swap_before_cas_fixture_fault;
 #[cfg(test)]
 pub(crate) use files::image_pending_swap_before_cas_fixture_fault;
 pub(crate) use files::open_parent as open_control_parent;
+pub(crate) use files::{GpuRenameFence, WorkerProtectedStores};
 #[cfg(test)]
 pub(crate) use files::{clear_image_fixture_faults, image_after_rename_fixture_fault};
 pub(crate) use files::{replace_image_configuration, replace_pool_configuration};
 mod hardware;
 mod stamp;
 pub use active::observe_active_device;
-pub use consumers::installed_consumers;
+pub use consumers::{installed_consumers, installed_terminal};
 pub use current::current_employee;
 mod cdi;
 use crate::{ObservationError, native};
 pub use cdi::{CdiObservation, PreflightCdiObservation};
 pub use files::{
     ActorSetupControlError, ActorSetupControlFiles, ActorSetupPending, ActorSetupTerminal,
-    GpuControlFiles, GpuParentGuard, GpuPendingFile, GpuPrivateSnapshot, GpuProtectedStores,
-    GpuTerminalSnapshot, PerfControlFiles, PerfPending, PerfProtectedStores, PerfTerminal,
+    GpuActorPublication, GpuActorPublicationInput, GpuControlFiles, GpuParentGuard, GpuPendingFile,
+    GpuPrivateSnapshot, GpuProtectedStores, GpuTerminalSnapshot, PerfControlFiles, PerfPending,
+    PerfProtectedStores, PerfTerminal,
 };
 pub use hardware::GpuHardware;
 use reverie_contracts::{gpu_access::GpuDataError, reservation_engine::EngineDataError};
@@ -45,6 +46,7 @@ pub enum GpuHostError {
     Physical(reverie_core::gpu_access::GpuAccessError),
     Engine(crate::engine_metadata::EngineError),
     ImageFence(Box<crate::worker_image::ImageFileError>),
+    ActorRebind(Box<crate::resource_facts::ResourceFactsError>),
     PoolFence(Box<crate::reservation_control::ControlHostError>),
     AdmissionFence(Box<crate::reservation_control::ControlHostError>),
     Finalized {
@@ -54,6 +56,9 @@ pub enum GpuHostError {
     PublicationUnknown(Box<Self>),
 }
 impl GpuHostError {
+    pub(crate) fn actor_rebind(error: crate::resource_facts::ResourceFactsError) -> Self {
+        Self::ActorRebind(Box::new(error))
+    }
     pub fn code(&self) -> &'static str {
         match self {
             Self::Refused(code) => code,
@@ -66,6 +71,7 @@ impl GpuHostError {
             Self::Physical(error) => error.code(),
             Self::Engine(error) => error.code(),
             Self::ImageFence(error) => error.code(),
+            Self::ActorRebind(error) => error.code(),
             Self::PoolFence(error) | Self::AdmissionFence(error) => error.code(),
             Self::Finalized { primary, .. } => primary.code(),
             Self::PublicationUnknown(_) => "GPU_PUBLICATION_UNCONFIRMED",
@@ -88,6 +94,7 @@ impl GpuHostError {
             Self::Native(error) => error.has_unconfirmed_close(),
             Self::Metadata(error) => error.has_unconfirmed_close(),
             Self::ImageFence(error) => error.has_unconfirmed_close(),
+            Self::ActorRebind(error) => error.has_unconfirmed_close(),
             Self::PoolFence(error) | Self::AdmissionFence(error) => error.has_unconfirmed_close(),
             Self::Finalized { primary, secondary } => {
                 primary.has_unconfirmed_close() || secondary.has_unconfirmed_close()

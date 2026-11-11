@@ -57,12 +57,12 @@ fn typed_admission_contention_requires_checked_clean_constructor_close() {
         AdmissionLockAttempt::Contended => panic!("original lock has checked-close"),
     }
 }
-struct Tree {
-    root: PathBuf,
-    config: ReservationConfiguration,
+pub(crate) struct Tree {
+    pub(crate) root: PathBuf,
+    pub(crate) config: ReservationConfiguration,
 }
 impl Tree {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         let root = std::env::temp_dir().join(format!(
             "reverie-control-{}-{}",
             std::process::id(),
@@ -97,7 +97,7 @@ impl Tree {
         tree.marker(&[".", "profiles", "operations"]);
         tree
     }
-    fn write(&self, name: &str, raw: &[u8]) {
+    pub(crate) fn write(&self, name: &str, raw: &[u8]) {
         let path = self.root.join(name);
         fs::write(&path, raw).unwrap();
         fs::set_permissions(path, fs::Permissions::from_mode(0o600)).unwrap();
@@ -106,7 +106,7 @@ impl Tree {
         let info = fs::symlink_metadata(self.root.join(name)).unwrap();
         format!("[{},{}]", info.dev(), info.ino())
     }
-    fn marker(&self, order: &[&str]) {
+    pub(crate) fn marker(&self, order: &[&str]) {
         let mut directories = Vec::new();
         for name in order {
             let path = if *name == "." {
@@ -135,7 +135,7 @@ impl Tree {
         );
         self.write("state/resource-reservation-control.json", raw.as_bytes());
     }
-    fn binding(&self) -> ControlBinding {
+    pub(crate) fn binding(&self) -> ControlBinding {
         ControlBinding::from_metadata(
             &read_marker(&self.config).unwrap(),
             self.config.configuration(),

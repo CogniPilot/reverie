@@ -8583,8 +8583,11 @@ class ReverieChatApp {
     const error = this.el('p', 'ca-company-error'); error.setAttribute('role', 'alert');
     const save = this.button('ca-btn', `Save GPU request for ${employee.name}`, () => void submit(), { text: 'Save GPU request' });
     const refresh = this.button('ca-btn', `Refresh GPU status for ${employee.name}`, () => void load(), { text: 'Refresh status' });
+    const apply = this.button('ca-btn', `Apply saved GPU request for ${employee.name}`, () => void applySaved(), { text: 'Apply saved request' });
+    apply.hidden = true;
+    apply.disabled = true;
     save.disabled = true;
-    const actions = this.el('div', 'ca-company-actions'); actions.append(save, refresh);
+    const actions = this.el('div', 'ca-company-actions'); actions.append(save, apply, refresh);
     group.append(wrap, devices, facts, state, error, actions,
       this.el('p', 'ca-hint', 'GPU access is shared; it does not reserve GPU memory. Saving a request never stops current work or restarts a laptop.'));
     container.append(group);
@@ -8596,6 +8599,9 @@ class ReverieChatApp {
       devices.disabled = busy || !report || !enabled.checked || report.choices.known !== true;
       save.disabled = busy || !report || enabled.indeterminate || (enabled.checked && (report.choices.known !== true ||
         !report.choices.devices.some(item => item.deviceUuid === devices.value)));
+      apply.hidden = report?.canApply !== true;
+      apply.disabled = busy || apply.hidden || !report?.requested || report.active.running !== false ||
+        enabled.checked !== report.requested.enabled || (enabled.checked && devices.value !== report.requested.deviceUuid);
       refresh.disabled = busy;
     };
     const paint = value => {
@@ -8627,7 +8633,13 @@ class ReverieChatApp {
       state.textContent = report.state === 'reconciliation-required'
         ? 'Host reconciliation is required. Current work has not been restarted; an owner operator must inspect the pending policy.'
         : report.state === 'pending'
-          ? 'Request saved; host policy is pending. Current work keeps running. A coordinated host update is required before the next normal laptop recreation.'
+          ? report.canApply === true
+            ? 'Request saved; host policy is pending. Apply the saved request while this laptop is stopped.'
+            : report.active.running === true
+              ? 'Request saved; host policy is pending. Current work keeps running.'
+              : report.canApply === false
+                ? 'Request saved; host policy is pending. Applying this request is currently unavailable.'
+                : 'Request saved; host policy is pending. Refresh status to check whether it can be applied.'
           : report.requested && report.applied.known && report.requested.enabled === report.applied.enabled
             ? report.active.running === false
               ? 'Host policy applied. Start the laptop normally when ready; no startup was requested.'
@@ -8664,6 +8676,32 @@ class ReverieChatApp {
       } catch (failure) {
         if (live() && token === sequence) {
           report = null; error.textContent = failure.message; state.textContent = 'Request not confirmed. Refresh before trying again; it was not retried automatically.';
+        }
+      } finally { if (live() && token === sequence) { busy = false; controls(); } }
+    };
+    const applySaved = async () => {
+      if (!live() || busy || apply.disabled || report?.canApply !== true) return;
+      const selected = report;
+      const confirmed = await this.confirmCompanyAction(
+        'Laptop GPU access',
+        `Apply the saved GPU policy for ${employee.name}? The laptop stays stopped until you start it normally.`,
+        'Apply saved GPU request'
+      );
+      if (!confirmed || !live() || busy || report !== selected || apply.disabled) return;
+      const token = ++sequence;
+      busy = true; controls(); error.textContent = '';
+      state.textContent = 'Applying the saved GPU policy…';
+      try {
+        const reply = await this.app._chatApi(`/api/company/employees/${encodeURIComponent(employee.id)}/gpu-access/apply`, {
+          method: 'POST', body: { ...selected.current, revision: selected.revision, deviceUuid: selected.requested.deviceUuid },
+        });
+        if (!live() || token !== sequence) return;
+        if (!reply.ok) throw new Error(reply.error || 'Applying the saved GPU policy is unconfirmed.');
+        paint(reply.data?.gpuAccess);
+      } catch (failure) {
+        if (live() && token === sequence) {
+          report = null; enabled.indeterminate = true; facts.replaceChildren(); error.textContent = failure.message;
+          state.textContent = 'GPU policy outcome is unconfirmed. Refresh status before trying again.';
         }
       } finally { if (live() && token === sequence) { busy = false; controls(); } }
     };

@@ -106,14 +106,14 @@ impl InstalledWorker {
         if !lifecycle.belongs_to(self) {
             return Err(GateError::Refused("GPU_LIFECYCLE_CHANGED"));
         }
-        let (before, after, binding) = proof.into_parts();
+        let (before, after, binding) = proof.parts();
         self.publish_configuration_tuple(
-            &before,
-            &after,
-            &binding,
+            before,
+            after,
+            binding,
             context,
             slot,
-            ControllerPublication::Unchanged,
+            ControllerPublication::Gpu(&proof),
         )
     }
     pub(crate) fn publish_pool(
@@ -171,7 +171,10 @@ impl InstalledWorker {
         let next = CurrentInstalled::capture(Arc::clone(after));
         let next_binding = binding.clone();
         let mut install = match controller {
-            ControllerPublication::Unchanged => None,
+            ControllerPublication::Gpu(proof) => {
+                proof.assert_live()?;
+                None
+            }
             ControllerPublication::Member(proof) => {
                 proof.assert_current()?;
                 None
@@ -201,7 +204,7 @@ impl InstalledWorker {
     }
 }
 enum ControllerPublication<'a> {
-    Unchanged,
+    Gpu(&'a crate::reservation_gate::PublishedGpu),
     Member(&'a MemberPolicyPublication<'a>),
     Install {
         slot: &'a installed_controller::InstalledControllerSlot,

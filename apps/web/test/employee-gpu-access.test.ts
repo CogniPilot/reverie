@@ -420,6 +420,126 @@ describe('owner GPU HTTP and protected Q boundary', () => {
     expect(requests).toHaveLength(1);
     expect(replies).toHaveLength(1);
   });
+  it('applies the exact saved revision through its own owner challenge without sending a startup command', async () => {
+    const approval = { ...native.current, revision: 5, deviceUuid: null };
+    native = {
+      ...native,
+      current: { ...native.current, bindingDigest: 'c'.repeat(64) },
+      revision: 5,
+      requested: { enabled: false, deviceUuid: null, revision: 5 },
+      applied: { known: true, enabled: false, deviceUuid: null, source: 'employee' },
+      active: { known: true, running: false, enabled: false, deviceUuid: null },
+      state: 'applied',
+    };
+    const response = await app.inject({
+      method: 'POST',
+      url: url(eid) + '/apply',
+      cookies: { [OWNER_COOKIE]: token },
+      headers: { origin: 'http://localhost' },
+      payload: approval,
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json().data.gpuAccess).toEqual(native);
+    expect(requests).toEqual([
+      { kind: 'resource-operation', requestId: expect.any(String), verb: 'gpu-apply', employeeId: eid, approval },
+    ]);
+    expect(replies).toEqual([expect.objectContaining({ stage: 'gpu-apply', approval })]);
+  });
+  it('preserves older native reads and only exposes readiness from the current exact employee', async () => {
+    native = {
+      ...native,
+      revision: 5,
+      requested: { enabled: false, deviceUuid: null, revision: 5 },
+      active: { known: true, running: false, enabled: false, deviceUuid: null },
+      state: 'pending',
+    };
+    const read = () => app.inject({ url: url(eid), cookies: { [OWNER_COOKIE]: token } });
+    const currentChallenge = challenge;
+    // The older broker closes before it can issue an owner challenge for the new verb.
+    challenge = (command, socket) => {
+      if (command.verb === 'gpu-apply-status') return void socket.end();
+      currentChallenge(command, socket);
+    };
+    const fallback = await read();
+    expect(fallback.statusCode).toBe(200);
+    expect(fallback.json().data.gpuAccess).toEqual(native);
+    expect(requests.map(({ verb }) => verb)).toEqual(['gpu-status', 'gpu-apply-status']);
+    expect(replies).toHaveLength(1);
+
+    challenge = currentChallenge;
+    let selectedEmployee = OTHER;
+    handler = (command, socket) =>
+      socket.end(
+        result(
+          command,
+          command.verb === 'gpu-apply-status' ? { ...native, employeeId: selectedEmployee, canApply: true } : native
+        )
+      );
+    const foreign = await read();
+    expect(foreign.statusCode).toBe(200);
+    expect(foreign.json().data.gpuAccess).toEqual(native);
+    selectedEmployee = eid;
+    const current = await read();
+    expect(current.statusCode).toBe(200);
+    expect(current.json().data.gpuAccess.canApply).toBe(true);
+    expect(replies.at(-1)).toMatchObject({
+      stage: 'gpu-apply-status',
+      ownerScopeDigest: replies.at(-2)?.ownerScopeDigest,
+      expiresAtEpochMs: replies.at(-2)?.expiresAtEpochMs,
+    });
+    expect(requests.map(({ verb }) => verb)).toEqual([
+      'gpu-status',
+      'gpu-apply-status',
+      'gpu-status',
+      'gpu-apply-status',
+      'gpu-status',
+      'gpu-apply-status',
+    ]);
+  });
+  it('keeps original status private if the owner is revoked during the optional readiness read', async () => {
+    native = {
+      ...native,
+      revision: 5,
+      requested: { enabled: false, deviceUuid: null, revision: 5 },
+      active: { known: true, running: false, enabled: false, deviceUuid: null },
+      state: 'pending',
+    };
+    handler = (command, socket) => {
+      if (command.verb !== 'gpu-apply-status') return void socket.end(result(command, native));
+      void app
+        .inject({
+          method: 'POST',
+          url: '/api/owner/logout',
+          cookies: { [OWNER_COOKIE]: token },
+          headers: { origin: 'http://localhost' },
+        })
+        .then(() => socket.end());
+    };
+    const response = await app.inject({ url: url(eid), cookies: { [OWNER_COOKIE]: token } });
+    expect(response.statusCode).toBe(403);
+    expect(response.json()).not.toHaveProperty('data');
+    expect(requests.map(({ verb }) => verb)).toEqual(['gpu-status', 'gpu-apply-status']);
+  });
+  it('rejects a stale Apply binding before Q and never repeats an unconfirmed Apply', async () => {
+    const approval = { ...native.current, revision: 5, deviceUuid: DEVICE };
+    const apply = (payload: unknown) =>
+      app.inject({
+        method: 'POST',
+        url: url(eid) + '/apply',
+        cookies: { [OWNER_COOKIE]: token },
+        headers: { origin: 'http://localhost' },
+        payload: payload as object,
+      });
+    expect((await apply({ ...approval, sessionId: OTHER })).statusCode).toBe(409);
+    expect((await apply({ ...approval, revision: 0 })).statusCode).toBe(400);
+    expect(requests).toEqual([]);
+    handler = (_command, socket) => socket.end();
+    const response = await apply(approval);
+    expect(response.statusCode).toBe(503);
+    expect(response.json().error).toContain('not confirmed');
+    expect(requests).toEqual([expect.objectContaining({ verb: 'gpu-apply', approval })]);
+    expect(replies).toHaveLength(1);
+  });
   it('rejects malformed native data and never leaks private socket or refusal text', async () => {
     for (const kind of ['oversized', 'extra', 'schema', 'refusal']) {
       handler = (command, socket) => {

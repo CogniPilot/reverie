@@ -3,7 +3,7 @@
 mod fixed_reference;
 mod rebind;
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 pub use fixed_reference::compiled_actor_image_provenance_reference;
 mod setup;
 use crate::{

@@ -145,7 +145,9 @@ fn dispatch(operation: &mut AuthenticatedResourceOperation<'_>) -> Result<()> {
         ResourceRequestSelection::EmployeeStatus { .. } => operation.employee_status_reply(),
         ResourceRequestSelection::EmployeePolicyEdit { .. } => operation.employee_policy_reply(),
         ResourceRequestSelection::GpuStatus { .. }
-        | ResourceRequestSelection::GpuRequest { .. } => operation.gpu_reply(),
+        | ResourceRequestSelection::GpuApplyStatus { .. }
+        | ResourceRequestSelection::GpuRequest { .. }
+        | ResourceRequestSelection::GpuApply { .. } => operation.gpu_reply(),
         ResourceRequestSelection::Preview { .. } => operation.preview_reply(),
         ResourceRequestSelection::Apply { .. } => {
             operation.assert_current()?;

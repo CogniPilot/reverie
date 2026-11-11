@@ -16,6 +16,11 @@ export const EmployeeGpuIntentData = z
   .object({ expected: Expected, enabled: z.boolean(), deviceUuid: Device.optional() })
   .strict()
   .refine((value) => (value.enabled ? value.deviceUuid !== undefined : value.deviceUuid === undefined));
+export const EmployeeGpuApplyData = Current.extend({
+  revision: Revision.refine((value) => value > 0),
+  deviceUuid: Device.nullable(),
+}).strict();
+export type EmployeeGpuApply = z.infer<typeof EmployeeGpuApplyData>;
 export const EmployeeGpuStatus = z
   .object({
     version: z.literal(1),
@@ -49,10 +54,16 @@ export const EmployeeGpuStatus = z
       })
       .strict(),
     state: z.enum(['unchanged', 'pending', 'applied', 'reconciliation-required']),
+    canApply: z.boolean().optional(),
   })
   .strict()
   .refine(
     (value) => new Set(value.choices.devices.map((device) => device.deviceUuid)).size === value.choices.devices.length
+  )
+  .refine(
+    (value) =>
+      value.canApply !== true ||
+      (value.state === 'pending' && value.active.running === false && value.requested?.revision === value.revision)
   );
 export type EmployeeGpuStatusValue = z.infer<typeof EmployeeGpuStatus>;
 

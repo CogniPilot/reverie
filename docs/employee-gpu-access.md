@@ -15,19 +15,22 @@ profile** never submits a GPU change. Access is shared and reserves no VRAM.
 Saving never stops or restarts a provider, wakes an employee, changes a plan,
 or runs GPU computation. Applied grants follow the stable employee ID across
 approved session replacements; pending requests still require the current
-binding CAS, so refresh after a binding change. Running laptops keep their current policy while the
-request is pending. Only the fixed host handler may apply a stopped, idle,
-currently bound employee request; the next authorized normal recreation uses
-the verified policy. Legacy overrides, retained work, missing native facts or
-an installed protected consumer needing a config rebind can require coordinated
-operator maintenance. They are not bypassed by the GUI.
+binding CAS, so refresh after a binding change. Running laptops keep their
+current policy while the request is pending. When status offers **Apply saved
+request**, the owner can apply the selected revision while that laptop is
+stopped. The protected broker checks the saved request, current binding and host
+state, then updates the configuration and its actor binding. Start the laptop
+normally when ready. Legacy overrides, unsettled work, missing native facts or
+an installed protected terminal may require operator maintenance.
 
-The standard server selects its existing `REVERIE_WORKER_SOCKET`. The installed website resource channel verifies the current owner and employee binding
-for bounded status and request replies. No Docker socket
-or host configuration path is exposed to the browser. A missing or older host
-backend reports unavailable; the GUI does not claim that access is off, applied,
-or active. An unconfirmed request is never retried automatically: refresh the
-native status before making another request.
+The standard server selects its existing `REVERIE_WORKER_SOCKET`. The installed
+website resource channel verifies the current owner and employee binding for
+status, saving a request, and applying that saved revision. No Docker socket
+or host configuration path is exposed to the browser. An older broker that
+supports GPU status and requests can still show and save those facts. Apply
+appears only after the separate, current native readiness read. Refresh status
+after saving to check availability. Refresh also lets you inspect an unconfirmed
+request before deciding whether to act again.
 
 This source feature requires the matching reviewed broker generation and GUI
 build. Source/unit checks do not install the backend or prove native device

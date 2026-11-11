@@ -168,6 +168,10 @@ impl AuthenticatedResourceOperation<'_> {
     pub fn assert_live(&self) -> Result<()> {
         let frame = &self.website.frame;
         frame.assert_metadata(frame.deadline)?;
+        self.assert_owner_channel_live()
+    }
+    fn assert_owner_channel_live(&self) -> Result<()> {
+        let frame = &self.website.frame;
         expiry(self.owner.as_ref().ok_or(ResourceActorError::Refused(
             "RESOURCE_ACTOR_OWNER_CONTEXT_REQUIRED",
         ))?)?;

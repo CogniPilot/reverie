@@ -50,7 +50,7 @@ impl Drop for Tree {
         fs::remove_dir_all(&self.path).unwrap();
     }
 }
-fn document(domain: &str, uid: u32, gid: u32) -> Value {
+pub(crate) fn document(domain: &str, uid: u32, gid: u32) -> Value {
     let sha = "a".repeat(64);
     let program = "/nix/store/synthetic/bin/program";
     json!({"version":2,"purpose":"resource-replacement-v1","configurationDigest":domain,

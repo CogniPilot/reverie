@@ -117,6 +117,18 @@ impl ActorRebindPlan {
         .map_err(|error| ResourceFactsError::Writer(Box::new(error)))?;
         self.rebound(stamp, stop, end)
     }
+    pub(crate) fn publish_gpu(
+        &self,
+        fence: &mut crate::gpu_access::GpuRenameFence<'_>,
+    ) -> Result<ActorRebound> {
+        let stop = fence.stop().clone();
+        let end = fence.original_end().min(self.before.end);
+        self.assert_current()?;
+        let stamp = fence
+            .replace_actor(&self.before.path, &self.raw, &self.stamp, self.group)
+            .map_err(|error| ResourceFactsError::Writer(Box::new(error)))?;
+        self.rebound(stamp, &stop, end)
+    }
     fn rebound(
         &self,
         stamp: GpuFileStamp,

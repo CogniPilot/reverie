@@ -169,7 +169,7 @@ impl Frame<'_> {
         self.guard_peer_observations(end)?;
         self.assert_metadata(end)
     }
-    fn guard_peer_observations(&mut self, end: Instant) -> Result<()> {
+    pub(super) fn guard_peer_observations(&mut self, end: Instant) -> Result<()> {
         let bindings = self
             .bindings
             .as_ref()

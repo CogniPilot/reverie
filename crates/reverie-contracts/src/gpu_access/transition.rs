@@ -3,7 +3,10 @@ use crate::{
     reservation_control::{self, ControlBinding},
     worker_config::EffectiveWorkerConfig,
 };
-use reverie_core::{gpu_access::GpuQueuedRequest, operations::JournalId};
+use reverie_core::{
+    gpu_access::{GpuQueuedRequest, GpuRequestDocument},
+    operations::JournalId,
+};
 
 /// Complete finite GPU-only publication DATA. This does not prove that either
 /// file was written and cannot be supplied to the installing RAM publisher as
@@ -13,6 +16,8 @@ pub struct GpuTransitionIntent {
     after: EffectiveWorkerConfig,
     before_binding: ControlBinding,
     after_binding: ControlBinding,
+    employee: JournalId,
+    request: GpuQueuedRequest,
     bytes: Vec<u8>,
     value: Value,
 }
@@ -50,6 +55,8 @@ impl GpuTransitionIntent {
             after: candidate.after().clone(),
             before_binding: binding.clone(),
             after_binding: next,
+            employee: employee.clone(),
+            request: request.clone(),
             bytes,
             value,
         })
@@ -72,8 +79,11 @@ impl GpuTransitionIntent {
     pub fn matches_metadata(&self, metadata: &crate::storage_identity::OrderedMetadata) -> bool {
         self.value.python_eq(metadata.as_value())
     }
+    pub fn matches_requests(&self, document: &GpuRequestDocument) -> bool {
+        document.requests().get(&self.employee) == Some(&self.request)
+    }
     pub fn configuration_bytes(&self) -> Vec<u8> {
-        crate::worker_config::compact_data(self.after.as_value())
+        crate::worker_config::publication_bytes(&self.after)
     }
     pub fn binding_bytes(&self) -> Vec<u8> {
         crate::worker_config::compact_data(&self.after_binding.configuration_data())

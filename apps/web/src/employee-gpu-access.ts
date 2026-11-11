@@ -6,9 +6,18 @@ import { NO_OWNER, type OwnerVerifier } from './owner-auth/marks.js';
 import { OwnerAuthService } from './owner-auth/service.js';
 import { ownerFor } from './web/route-helpers.js';
 import { ResourceNativeClient } from './resource-native-client.js';
-import { ResourceOwnerAuthority, ResourceOwnerAuthorizationError } from './resource-owner-authority.js';
+import {
+  ResourceOwnerAuthority,
+  ResourceOwnerAuthorizationError,
+  type RamGpuStatusContext,
+  type RamGpuApplyStatusContext,
+  type RamGpuRequestContext,
+  type RamGpuApplyContext,
+} from './resource-owner-authority.js';
 import {
   EmployeeGpuId,
+  EmployeeGpuApplyData,
+  type EmployeeGpuApply,
   EmployeeGpuIntentData,
   EmployeeGpuStatus,
   type EmployeeGpuIntent,
@@ -25,6 +34,11 @@ class GpuAccessError extends Error {
     super(message);
   }
 }
+type Selection =
+  | { action: 'status' }
+  | { action: 'request'; intent: EmployeeGpuIntent }
+  | { action: 'apply'; approval: EmployeeGpuApply };
+type GpuContext = RamGpuStatusContext | RamGpuApplyStatusContext | RamGpuRequestContext | RamGpuApplyContext;
 let activeCalls = 0;
 export class EmployeeGpuClient {
   readonly #authority: ResourceOwnerAuthority;
@@ -41,32 +55,77 @@ export class EmployeeGpuClient {
     request: FastifyRequest,
     employeeId: string,
     sessionId: string,
-    change?: EmployeeGpuIntent
+    selection: Selection
   ): Promise<EmployeeGpuStatusValue> {
-    const context = change
-      ? this.#authority.captureRamGpuRequest(request, employeeId, change)
-      : this.#authority.captureRamGpuStatus(request, employeeId, sessionId);
+    const context =
+      selection.action === 'request'
+        ? this.#authority.captureRamGpuRequest(request, employeeId, selection.intent)
+        : selection.action === 'apply'
+          ? this.#authority.captureRamGpuApply(request, employeeId, selection.approval)
+          : this.#authority.captureRamGpuStatus(request, employeeId, sessionId);
     if (!this.socketPath) throw new GpuAccessError(503, 'GPU host controls are unavailable.');
     if (activeCalls >= 4)
       throw new GpuAccessError(503, 'GPU host controls are busy. Refresh the status before trying again.');
     activeCalls++;
-    let client: ResourceNativeClient | undefined;
     try {
-      client = await ResourceNativeClient.openRam(this.socketPath, this.#authority, context);
-      const status =
-        context.stage === 'gpu-request'
-          ? await client.request('gpu-request', { employeeId, approval: context.approval })
-          : await client.request('gpu-status', { employeeId, sessionId });
-      this.#authority.assertContext(context);
-      return EmployeeGpuStatus.parse(status);
+      const status = await this.#query(this.socketPath, context);
+      if (
+        context.stage === 'gpu-status' &&
+        status.employeeId === context.employeeId &&
+        status.current.sessionId === context.sessionId &&
+        status.state === 'pending' &&
+        status.active.running === false
+      )
+        return await this.#readiness(this.socketPath, request, context, status);
+      return status;
     } catch (error) {
       this.#authority.assertContext(context);
       if (error instanceof ResourceOwnerAuthorizationError) throw error;
       throw new GpuAccessError(503, 'GPU request or status was not confirmed. Refresh status before trying again.');
     } finally {
-      client?.close();
       activeCalls--;
     }
+  }
+  async #query(path: string, context: GpuContext): Promise<EmployeeGpuStatusValue> {
+    const client = await ResourceNativeClient.openRam(path, this.#authority, context);
+    try {
+      const { employeeId, stage } = context;
+      const fields =
+        stage === 'gpu-request' || stage === 'gpu-apply'
+          ? { employeeId, approval: context.approval }
+          : { employeeId, sessionId: context.sessionId };
+      const status = EmployeeGpuStatus.parse(await client.request(stage, fields));
+      this.#authority.assertContext(context);
+      if ((stage === 'gpu-apply-status') !== (typeof status.canApply === 'boolean'))
+        throw new GpuAccessError(503, 'GPU status did not match its native request.');
+      return status;
+    } finally {
+      client.close();
+    }
+  }
+  async #readiness(
+    path: string,
+    request: FastifyRequest,
+    original: RamGpuStatusContext,
+    status: EmployeeGpuStatusValue
+  ): Promise<EmployeeGpuStatusValue> {
+    const context = this.#authority.captureRamGpuApplyStatus(request, original);
+    try {
+      const fresh = await this.#query(path, context);
+      this.#authority.assertContext(original);
+      if (
+        fresh.employeeId === status.employeeId &&
+        fresh.current.sessionId === status.current.sessionId &&
+        fresh.current.sessionGeneration === status.current.sessionGeneration
+      )
+        return fresh;
+    } catch (error) {
+      if (error instanceof ResourceOwnerAuthorizationError) throw error;
+    }
+    // Older peers can close the optional read before sending a refusal. The
+    // original status remains usable only under its still-current owner.
+    this.#authority.assertContext(original);
+    return status;
   }
 }
 
@@ -82,16 +141,23 @@ export function registerEmployeeGpuRoutes(
     if (employees.length !== 1) throw new GpuAccessError(404, 'Unknown company employee.');
     return { sessionId: employees[0].sessionId, sessionGeneration: employees[0].sessionGeneration };
   };
-  const run = async (request: FastifyRequest, update: boolean) => {
+  const run = async (request: FastifyRequest, action: Selection['action']) => {
     const id = EmployeeGpuId.parse((request.params as { id: string }).id),
       before = binding(request, id);
-    const change = update ? EmployeeGpuIntentData.parse(request.body) : undefined;
+    const change = action === 'request' ? EmployeeGpuIntentData.parse(request.body) : undefined;
+    const approval = action === 'apply' ? EmployeeGpuApplyData.parse(request.body) : undefined;
+    const expected = change?.expected ?? approval;
     if (
-      change &&
-      (change.expected.sessionId !== before.sessionId || change.expected.sessionGeneration !== before.sessionGeneration)
+      expected &&
+      (expected.sessionId !== before.sessionId || expected.sessionGeneration !== before.sessionGeneration)
     )
       throw new GpuAccessError(409, 'This laptop binding changed. Refresh GPU status before requesting a change.');
-    const status = await client.exchange(request, id, before.sessionId, change);
+    const selection: Selection = change
+      ? { action: 'request', intent: change }
+      : approval
+        ? { action: 'apply', approval }
+        : { action: 'status' };
+    const status = await client.exchange(request, id, before.sessionId, selection);
     const after = binding(request, id);
     if (
       status.employeeId !== id ||
@@ -114,16 +180,34 @@ export function registerEmployeeGpuRoutes(
         status.requested.revision !== status.revision)
     )
       throw new GpuAccessError(503, 'The GPU request was not confirmed. Refresh status before trying again.');
+    if (
+      approval &&
+      (status.state !== 'applied' ||
+        status.revision !== approval.revision ||
+        status.requested?.revision !== approval.revision ||
+        status.requested?.deviceUuid !== approval.deviceUuid ||
+        status.applied.known !== true ||
+        status.applied.deviceUuid !== approval.deviceUuid ||
+        status.active.running !== false)
+    )
+      throw new GpuAccessError(
+        503,
+        'Applying the saved GPU policy is unconfirmed. Refresh status before trying again.'
+      );
     return { success: true, data: { gpuAccess: status } };
   };
-  for (const method of ['GET', 'POST'] as const)
+  for (const [method, action, url] of [
+    ['GET', 'status', '/api/company/employees/:id/gpu-access'],
+    ['POST', 'request', '/api/company/employees/:id/gpu-access'],
+    ['POST', 'apply', '/api/company/employees/:id/gpu-access/apply'],
+  ] as const)
     app.route({
       method,
-      url: '/api/company/employees/:id/gpu-access',
+      url,
       handler: async (request, reply) => {
         reply.header('Cache-Control', 'no-store');
         try {
-          return await run(request, method === 'POST');
+          return await run(request, action);
         } catch (error) {
           const code =
             error instanceof GpuAccessError

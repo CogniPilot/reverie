@@ -12,7 +12,8 @@ mod tests;
 pub use actor_setup::{
     ActorSetupControlError, ActorSetupControlFiles, ActorSetupPending, ActorSetupTerminal,
 };
-pub use pending::GpuPendingFile;
+pub(crate) use pending::GpuRenameFence;
+pub use pending::{GpuActorPublication, GpuActorPublicationInput, GpuPendingFile};
 pub use perf::{PerfControlFiles, PerfPending, PerfProtectedStores, PerfTerminal};
 use reverie_contracts::{
     gpu_access::{GpuTransitionIntent, MAX_BYTES, REQUEST_FILE, encode_requests},
@@ -290,14 +291,17 @@ fn replace_mode(
             if let Some(fence) = fence.as_mut() {
                 fence.assert_current()?;
             }
-            // Actor facts include native waits. Recheck the same actual target,
+            // Publication guards may perform native reads. Recheck the same target,
             // prepared inode and parent AFTER those waits, adjacent to rename.
             if fence
                 .as_ref()
-                .is_some_and(ConfigurationRenameFence::is_actor_setup)
+                .is_some_and(ConfigurationRenameFence::rechecks_target)
             {
-                assert_actor_target(&directory, parent, leaf, expected, &temporary)?;
+                assert_prepared_target(&directory, parent, leaf, expected, &temporary)?;
                 image_current(image)?;
+            }
+            if let Some(fence) = &fence {
+                fence.assert_before_rename()?;
             }
             attempted = true;
             rename_prepared(&directory, &temporary.name, leaf, fence.as_ref())?;
@@ -332,7 +336,7 @@ fn replace_mode(
         result
     }
 }
-fn assert_actor_target(
+fn assert_prepared_target(
     directory: &File,
     parent: &Path,
     leaf: &OsStr,

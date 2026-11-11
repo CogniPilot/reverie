@@ -1,9 +1,9 @@
 use super::*;
-use reverie_core::gpu_access::{GpuActiveData, GpuApplied, GpuChoicesData};
+use reverie_core::gpu_access::{GpuActiveData, GpuApplied, GpuChoicesData, GpuStatusState};
 impl<P: Platform> Service<'_, P> {
     pub(super) fn status(&self, employee: Employee, end: Instant) -> Result<GpuStatusData> {
         let admission = self.gate.inner.admit(Self::bounds(end))?;
-        let result = self.status_body(employee, end, None);
+        let result = self.status_body(employee, end, None).map(|(data, _)| data);
         admission.conclude(result)
     }
     pub(super) fn status_body(
@@ -11,7 +11,7 @@ impl<P: Platform> Service<'_, P> {
         employee: Employee,
         end: Instant,
         website: Option<&WebsiteGpu<'_, '_>>,
-    ) -> Result<GpuStatusData> {
+    ) -> Result<(GpuStatusData, bool)> {
         let config = self.gate.inner.config()?;
         let config = config.configuration();
         let files = self.files(config)?;
@@ -39,6 +39,23 @@ impl<P: Platform> Service<'_, P> {
             Err(_) => GpuChoicesData::unknown(),
         };
         let native = self.gate.inner.native_context()?;
+        let status = GpuStatusData::new(
+            employee.clone(),
+            binding.clone(),
+            request,
+            choices,
+            applied,
+            active,
+        )
+        .map_err(gpu_access::GpuDataError::from)?;
+        let can_apply = website.is_some_and(WebsiteGpu::observes_apply_readiness)
+            && status.state() == GpuStatusState::Pending
+            && matches!(status.active(), GpuActiveData::Stopped)
+            && status
+                .requested()
+                .is_some_and(|queued| queued.matches_binding(status.current()))
+            && reverie_host::gpu_access::installed_terminal().is_ok_and(|installed| !installed)
+            && website::stopped_target(selected.as_ref(), &native, end)?;
         need(
             native.inventory(Some(end))?.equivalent(&rows),
             "GPU_NATIVE_CHANGED",
@@ -52,10 +69,7 @@ impl<P: Platform> Service<'_, P> {
             "GPU_STATUS_CHANGED",
         )?;
         WebsiteGpu::require_current(website, self.gate, &latest)?;
-        Ok(
-            GpuStatusData::new(employee, binding, request, choices, applied, active)
-                .map_err(gpu_access::GpuDataError::from)?,
-        )
+        Ok((status, can_apply))
     }
     fn active(
         &self,

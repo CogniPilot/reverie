@@ -9,7 +9,7 @@ mod pool_transition;
 mod private_record;
 mod publication;
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 use crate::{ObservationError, native};
 pub use draft::{publish_draft, read_draft};
 pub use history::{
@@ -182,12 +182,12 @@ pub struct AdmissionLock {
     close_attempted: bool,
 }
 
-struct AdmissionAcquisition {
+pub(crate) struct AdmissionAcquisition {
     checked_closed: std::sync::atomic::AtomicBool,
 }
 
 impl AdmissionAcquisition {
-    fn assert_closed(&self) -> Result<()> {
+    pub(crate) fn assert_closed(&self) -> Result<()> {
         need(
             self.checked_closed
                 .load(std::sync::atomic::Ordering::Acquire),
@@ -202,6 +202,9 @@ pub enum AdmissionLockAttempt {
     Contended,
 }
 impl AdmissionLock {
+    pub(crate) fn acquisition(&self) -> &std::sync::Arc<AdmissionAcquisition> {
+        &self.acquisition
+    }
     pub fn try_acquire(config: &ReservationConfiguration) -> Result<AdmissionLockAttempt> {
         match native::open_admission(config.control_paths()?.root()) {
             Ok(native) => Ok(AdmissionLockAttempt::Acquired(Self {

@@ -1,5 +1,8 @@
 use super::*;
 impl ActorRebound {
+    pub(crate) fn deadline(&self) -> Instant {
+        self.0.deadline()
+    }
     pub(crate) fn assert_current(&self) -> Result<()> {
         let proof = &self.0;
         check(proof.deadline())?;

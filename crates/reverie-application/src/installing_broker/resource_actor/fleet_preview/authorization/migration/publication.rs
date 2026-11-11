@@ -228,38 +228,9 @@ impl DrainedPoolMigration<'_> {
         let owner = self.fleet.owner.as_mut().expect("original fleet");
         let (before, after, _) = proof.parts();
         let frame = owner.authorization.owner.frame.as_mut().expect("same Q");
-        let body = (|| {
-            if !frame
-                .snapshot
-                .as_ref()
-                .is_some_and(|snapshot| Arc::ptr_eq(snapshot, before))
-                || !Arc::ptr_eq(after, &frame.broker.configuration()?)
-                || before.source_path() != after.source_path()
-            {
-                return Err(Cause::Refused("POOL_MIGRATION_PUBLICATION_CHANGED"));
-            }
-            let context = frame
-                .context
-                .as_ref()
-                .ok_or(Cause::Refused("RESOURCE_ACTOR_NOT_BOUND"))?
-                .with_applied_configuration(after.configuration().clone());
-            let bindings = frame
-                .bindings
-                .as_mut()
-                .ok_or(Cause::Refused("RESOURCE_ACTOR_NOT_BOUND"))?;
-            let installed = frame
-                .private
-                .accept_configuration_rebind(actor)
-                .map_err(ResourceActorError::from)?;
-            // Retain the actual newly accepted document before any subsequent
-            // validation can fail; the original observer retains its receipt.
-            bindings.installed = installed;
-            ResourceActorSettings::capture(after.configuration())?
-                .require_document(&bindings.installed)?;
-            frame.context = Some(context);
-            frame.snapshot = Some(Arc::clone(after));
-            Ok(())
-        })();
+        let body = frame
+            .accept_actor_rebind(before, after, actor)
+            .map_err(Cause::from);
         owner.authorization.owner.retain_check(body)
     }
 }

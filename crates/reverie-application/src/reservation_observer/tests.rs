@@ -106,6 +106,9 @@ impl Fixture {
             );
         }
     }
+    pub(crate) fn stopped_inspection(&self, row: &Value) {
+        self.0.lock().unwrap().outputs.push_back(row.to_string());
+    }
     pub(crate) fn replace_inventory(&self, rows: &[Value]) {
         self.0.lock().unwrap().outputs.clear();
         for _ in 0..500 {

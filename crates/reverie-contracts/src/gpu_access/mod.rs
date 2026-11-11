@@ -22,6 +22,7 @@ pub use current::{GpuCurrentEmployee, current_binding, current_session};
 pub use engine::{GpuEngineInformation, PreflightEndpoint, PreflightEngineData};
 pub use native_row::{policy_label_matches, selected_container};
 pub use peers::GpuPeerSessions;
+pub(crate) use queue::decode_row as decode_queued_approval;
 pub use queue::{decode_requests, encode_requests};
 use reverie_core::{gpu_access::GpuAccessError, operations::OperationError};
 pub use status::encode_status;

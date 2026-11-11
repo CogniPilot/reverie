@@ -3,7 +3,7 @@
 use super::*;
 use crate::human_protocol::HumanFrame;
 use reverie_core::{
-    gpu_access::GpuIntent,
+    gpu_access::{GpuIntent, GpuQueuedRequest},
     ids::{ProfileEmployeeId, ProfileSessionId},
     operations::JournalId,
     revision::ProfileVersion,
@@ -54,6 +54,14 @@ pub enum ResourceRequestSelection {
     GpuStatus {
         employee_id: ProfileEmployeeId,
         session_id: ProfileSessionId,
+    },
+    GpuApplyStatus {
+        employee_id: ProfileEmployeeId,
+        session_id: ProfileSessionId,
+    },
+    GpuApply {
+        employee_id: ProfileEmployeeId,
+        queued: GpuQueuedRequest,
     },
     GpuRequest {
         employee_id: ProfileEmployeeId,
@@ -116,7 +124,9 @@ impl ResourceOperationRequest {
                 )
             }
             "gpu-status" => (gpu::status(value)?, None),
+            "gpu-apply-status" => (gpu::apply_status(value)?, None),
             "gpu-request" => gpu::request(value)?,
+            "gpu-apply" => gpu::apply(value)?,
             "employee-policy-edit" => member_policy::request(value)?,
             "draft" => {
                 closed(
@@ -168,7 +178,9 @@ impl ResourceOperationRequest {
             | ResourceRequestSelection::EmployeeStatus { employee_id, .. }
             | ResourceRequestSelection::EmployeePolicyEdit { employee_id, .. }
             | ResourceRequestSelection::GpuStatus { employee_id, .. }
+            | ResourceRequestSelection::GpuApplyStatus { employee_id, .. }
             | ResourceRequestSelection::GpuRequest { employee_id, .. }
+            | ResourceRequestSelection::GpuApply { employee_id, .. }
             | ResourceRequestSelection::Apply { employee_id, .. } => employee_id,
         }
     }
@@ -190,7 +202,9 @@ impl ResourceOperationRequest {
             ResourceRequestSelection::EmployeeStatus { .. } => "status",
             ResourceRequestSelection::EmployeePolicyEdit { .. } => "employee-policy-edit",
             ResourceRequestSelection::GpuStatus { .. } => "gpu-status",
+            ResourceRequestSelection::GpuApplyStatus { .. } => "gpu-apply-status",
             ResourceRequestSelection::GpuRequest { .. } => "gpu-request",
+            ResourceRequestSelection::GpuApply { .. } => "gpu-apply",
             ResourceRequestSelection::Apply { .. } => "apply",
             ResourceRequestSelection::Preview { .. } => "preview",
         }
