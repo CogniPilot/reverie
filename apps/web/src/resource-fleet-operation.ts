@@ -17,6 +17,7 @@ export const FleetOperationPhase = z.enum([
   'restoring',
   'completed',
   'unknown',
+  'not-issued',
 ]);
 const Report = z
   .object({
@@ -40,6 +41,8 @@ const FailureCode = z.enum([
   'OPERATION_STORE_UNCONFIRMED',
   'WEB_PROCESS_RESTARTED',
   'ORIGINAL_PREVIEW_UNAVAILABLE',
+  'PREVIEW_ENDED_BEFORE_ISSUE',
+  'WEB_PROCESS_ENDED_BEFORE_ISSUE',
 ]);
 export type FleetOperationFailureCode = z.infer<typeof FailureCode>;
 const messages: Record<FleetOperationFailureCode, string> = {
@@ -50,6 +53,10 @@ const messages: Record<FleetOperationFailureCode, string> = {
   WEB_PROCESS_RESTARTED:
     'The original web process ended before a complete outcome was recorded. No effect is replayed.',
   ORIGINAL_PREVIEW_UNAVAILABLE: 'The original preview connection is unavailable. No new consent was reconstructed.',
+  PREVIEW_ENDED_BEFORE_ISSUE:
+    'This preview ended before migration consent was dispatched. Review a new preview to continue.',
+  WEB_PROCESS_ENDED_BEFORE_ISSUE:
+    'The web process ended while this was only a preview. Migration consent was never dispatched. Review a new preview to continue.',
 };
 const Failure = z
   .object({ code: FailureCode, message: z.string().min(1).max(256) })
@@ -57,8 +64,8 @@ const Failure = z
   .refine((value) => value.message === messages[value.code], 'Unsafe fleet failure message');
 export const FleetOperationData = z
   .object({
-    version: z.literal(1),
-    purpose: z.literal('fleet-migration-operation-v1'),
+    version: z.union([z.literal(1), z.literal(2)]),
+    purpose: z.enum(['fleet-migration-operation-v1', 'fleet-migration-operation-v2']),
     operationId: NativeOwnerId,
     ownerScopeDigest: Digest,
     principal: NativeOwnerPrincipal,
@@ -88,6 +95,19 @@ export const FleetOperationData = z
   .strict()
   .superRefine((value, context) => {
     const reject = (message: string) => context.addIssue({ code: z.ZodIssueCode.custom, message });
+    if (
+      (value.version === 2) !== (value.phase === 'not-issued') ||
+      value.purpose !== `fleet-migration-operation-v${value.version}`
+    )
+      reject('Unsupported fleet operation format or terminal state');
+    const notIssuedCode =
+      value.failure?.code === 'PREVIEW_ENDED_BEFORE_ISSUE' || value.failure?.code === 'WEB_PROCESS_ENDED_BEFORE_ISSUE';
+    if ((value.phase === 'not-issued') !== notIssuedCode) reject('Never-issued reason changed');
+    if (
+      value.phase === 'not-issued' &&
+      (value.sequence !== 1 || value.native !== null || value.nativeFailure !== null || value.restore.length)
+    )
+      reject('Never-issued operation cannot contain effect evidence');
     if (value.operationId !== value.preview.approval.operationId || value.updatedAtEpochMs < value.createdAtEpochMs)
       reject('Operation correlation changed');
     if ((value.phase === 'prepared') !== (value.sequence === 0)) reject('Original operation sequence changed');
@@ -124,7 +144,8 @@ export const FleetOperationData = z
     if (['native-confirmed', 'restoring', 'completed'].includes(value.phase) && value.native === null)
       reject('Known native result required');
     if (value.phase === 'native-confirmed' && value.restore.length) reject('Restoration not started');
-    if ((value.phase === 'unknown') !== (value.failure !== null)) reject('Failure phase changed');
+    if ((value.phase === 'unknown' || value.phase === 'not-issued') !== (value.failure !== null))
+      reject('Failure phase changed');
     if (value.restore.filter((row) => row.state === 'pending').length > 1) reject('Concurrent recovery intents');
     for (const row of value.restore) {
       if (
@@ -147,12 +168,13 @@ export type FleetOperation = z.infer<typeof FleetOperationData>;
 
 export const fleetOperationFailure = (code: FleetOperationFailureCode) => ({ code, message: messages[code] });
 const legal: Record<FleetOperation['phase'], readonly FleetOperation['phase'][]> = {
-  prepared: ['issued', 'unknown'],
+  prepared: ['issued', 'unknown', 'not-issued'],
   issued: ['native-confirmed', 'unknown'],
   'native-confirmed': ['restoring', 'unknown'],
   restoring: ['restoring', 'completed', 'unknown'],
   completed: [],
   unknown: ['unknown'],
+  'not-issued': [],
 };
 export function advanceFleetOperation(
   previous: FleetOperation,
@@ -164,6 +186,7 @@ export function advanceFleetOperation(
   const next = FleetOperationData.parse({
     ...previous,
     ...patch,
+    ...(phase === 'not-issued' ? { version: 2, purpose: 'fleet-migration-operation-v2' } : {}),
     phase,
     sequence: previous.sequence + 1,
     updatedAtEpochMs: Math.max(Date.now(), previous.updatedAtEpochMs),
@@ -178,9 +201,18 @@ export function assertFleetOperationSuccessor(previous: FleetOperation, next: Fl
     next.updatedAtEpochMs < previous.updatedAtEpochMs
   )
     throw new Error('Illegal fleet operation transition');
+  const upgrade =
+    previous.version === 1 &&
+    previous.purpose === 'fleet-migration-operation-v1' &&
+    previous.phase === 'prepared' &&
+    previous.sequence === 0 &&
+    next.version === 2 &&
+    next.purpose === 'fleet-migration-operation-v2' &&
+    next.phase === 'not-issued' &&
+    next.sequence === 1;
+  if (!upgrade && (next.version !== previous.version || next.purpose !== previous.purpose))
+    throw new Error('Unsupported fleet operation format transition');
   for (const key of [
-    'version',
-    'purpose',
     'operationId',
     'ownerScopeDigest',
     'principal',
@@ -224,5 +256,5 @@ export function assertFleetOperationSuccessor(previous: FleetOperation, next: Fl
     throw new Error('Original failure changed');
 }
 export function fleetOperationBlocks(value: FleetOperation): boolean {
-  return value.reconciledAsUnconfirmed === null && value.phase !== 'completed';
+  return value.reconciledAsUnconfirmed === null && !['completed', 'not-issued'].includes(value.phase);
 }

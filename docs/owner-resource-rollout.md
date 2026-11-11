@@ -131,6 +131,33 @@ it is not permission to launch or evidence of applied kernel limits. Created,
 started, ready and settled are separate native outcomes. Lost replies or
 unconfirmed effects retain the original operation and forbid automatic replay.
 
+## Never-issued preview history
+
+An original version-one `prepared` operation at sequence zero proves that native
+migration consent was never dispatched: the writer must durably commit `issued`
+before invoking the native migration client. When that preview expires or loses
+its connection, its current enrolled owner may end it and request a new review.
+After a web-process restart, the same prepared record can be ended from its
+durable no-dispatch evidence. These transitions use the private store's checked
+compare-and-swap and current authorization; uncertain writes still block changes.
+
+The terminal record explicitly uses version two, purpose
+`fleet-migration-operation-v2`, phase `not-issued` and sequence one. It preserves
+the original preview, principal, owner scope and cohort, contains no native
+result, native failure, employee restoration or pool-absence receipt, and has no
+outgoing transitions. The reader supports unchanged version-one history and
+this one version-two terminal state. Existing version-one records are not
+silently normalized. Older writers cannot read the version-two state; rolling
+back requires a compatible reader rather than rewriting or deleting history.
+
+This state proves no migration dispatch. It does not prove that the broker
+released the old preview hold, that the pool is installed or absent, or that any
+employee is running. A new review may still report a host-side pending preview
+until its original hold is released or expires. Issued or already unknown
+operations remain unknown and fenced; they cannot use this transition even when
+they have no recorded native response. Recovery of an unknown operation while
+the pool remains installed is a separate unresolved workflow.
+
 ## Native integration work
 
 The [native integration map](rust-overhaul.md#native-integration-map) names the

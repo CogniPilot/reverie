@@ -1,6 +1,6 @@
 /** Isolated real private-file ownership; native/wake calls are counted fixtures. */
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -17,7 +17,8 @@ import { CompanyService } from '../src/company-service.js';
 import { FleetNativeService, type FleetEmployeeRecovery } from '../src/resource-fleet-native-service.js';
 import { FleetNativeClient, NativeFleetMigrationFailureError } from '../src/resource-fleet-native-client.js';
 import { FleetOperationStore } from '../src/resource-fleet-operation-store.js';
-import { FleetOperationData, advanceFleetOperation } from '../src/resource-fleet-operation.js';
+import { FleetOperationData, advanceFleetOperation, fleetOperationFailure } from '../src/resource-fleet-operation.js';
+import { FleetRecoveryHistory } from '../src/resource-fleet-recovery.js';
 import type { NativeFleetPreview, NativeFleetMigration } from '../src/resource-fleet-native-data.js';
 import type { ProviderHealth } from '../src/types/provider-health.js';
 
@@ -42,6 +43,13 @@ const apply = () =>
     })
   );
 const result = () => service.result(request({ operationId: preview.approval.operationId }));
+const nextPreview = () => {
+  preview = {
+    ...preview,
+    expiresAtEpochMs: Date.now() + 60_000,
+    approval: { ...preview.approval, operationId: randomUUID(), previewId: randomUUID() },
+  };
+};
 const restart = () => {
   service.close();
   service = new FleetNativeService(
@@ -191,6 +199,259 @@ afterEach(async () => {
   await rm(directory, { recursive: true, force: true });
 });
 
+it.each(['expired', 'disconnected'] as const)(
+  'ends an %s never-issued preview and permits a fresh review without native effects',
+  async (reason) => {
+    await service.preview(request({}));
+    const original = (await rows())[0];
+    const client = await open.mock.results[0].value;
+    if (reason === 'expired') vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 301_000);
+    else
+      vi.spyOn(client, 'assertViewing').mockImplementation(() => {
+        throw new Error('original socket disconnected');
+      });
+    nextPreview();
+    const fresh = await service.preview(request({}));
+    expect(fresh.approval.operationId).not.toBe(original.operationId);
+    const saved = (await rows())[0];
+    expect(saved).toMatchObject({
+      version: 2,
+      purpose: 'fleet-migration-operation-v2',
+      phase: 'not-issued',
+      sequence: 1,
+      native: null,
+      nativeFailure: null,
+      restore: [],
+      reconciledAsUnconfirmed: null,
+      failure: { code: 'PREVIEW_ENDED_BEFORE_ISSUE' },
+    });
+    expect(saved.preview).toEqual(original.preview);
+    expect(saved.originalBindings).toEqual(original.originalBindings);
+    expect(await service.result(request({ operationId: original.operationId }))).toMatchObject({
+      state: 'not-issued',
+      blocksFurtherChanges: false,
+    });
+    expect(client.close).toHaveBeenCalledTimes(1);
+    expect(open).toHaveBeenCalledTimes(2);
+    expect(migrate).not.toHaveBeenCalled();
+    expect(wake).not.toHaveBeenCalled();
+  }
+);
+it('blocks concurrent review and Apply until the never-issued terminal CAS is known', async () => {
+  await service.preview(request({}));
+  const client = await open.mock.results[0].value;
+  vi.spyOn(client, 'assertViewing').mockImplementation(() => {
+    throw new Error('preview disconnected');
+  });
+  let entered!: () => void, release!: () => void;
+  const started = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const original = companyFiles.writeCompanyStateFile;
+  vi.spyOn(companyFiles, 'writeCompanyStateFile').mockImplementation(async (path, text, guard) => {
+    if (path === file && JSON.parse(text)[0].phase === 'not-issued') {
+      entered();
+      await gate;
+    }
+    await original(path, text, guard);
+  });
+  nextPreview();
+  const fresh = service.preview(request({}));
+  await started;
+  expect(await service.operationHistory(request({}))).toMatchObject({
+    available: true,
+    blocksFurtherChanges: true,
+    operations: [{ phase: 'prepared', blocksFurtherChanges: true }],
+  });
+  await expect(service.preview(request({}))).rejects.toThrow('pending or unconfirmed');
+  await expect(apply()).rejects.toThrow('recovery is in progress');
+  expect(open).toHaveBeenCalledTimes(1);
+  release();
+  await fresh;
+  expect((await rows()).map((row: { phase: string }) => row.phase)).toEqual(['not-issued', 'prepared']);
+  expect(open).toHaveBeenCalledTimes(2);
+  expect(migrate).not.toHaveBeenCalled();
+  expect(wake).not.toHaveBeenCalled();
+});
+it('records a legacy prepared preview as never issued after restart and permits another review', async () => {
+  await service.preview(request({}));
+  const original = (await rows())[0];
+  expect(original).toMatchObject({ version: 1, phase: 'prepared', sequence: 0 });
+  restart();
+  nextPreview();
+  await service.preview(request({}));
+  expect((await rows())[0]).toMatchObject({
+    version: 2,
+    purpose: 'fleet-migration-operation-v2',
+    phase: 'not-issued',
+    sequence: 1,
+    native: null,
+    nativeFailure: null,
+    restore: [],
+    failure: { code: 'WEB_PROCESS_ENDED_BEFORE_ISSUE' },
+  });
+  expect((await rows())[1]).toMatchObject({
+    version: 1,
+    purpose: 'fleet-migration-operation-v1',
+    phase: 'prepared',
+    sequence: 0,
+  });
+  expect(open).toHaveBeenCalledTimes(2);
+  expect(migrate).not.toHaveBeenCalled();
+  expect(wake).not.toHaveBeenCalled();
+});
+it('reports expired Apply as never issued without consuming native consent', async () => {
+  await service.preview(request({}));
+  const client = await open.mock.results[0].value;
+  vi.spyOn(client, 'assertViewing').mockImplementation(() => {
+    throw new Error('preview expired');
+  });
+  expect(await apply()).toMatchObject({
+    state: 'not-issued',
+    phase: 'not-issued',
+    blocksFurtherChanges: false,
+    native: null,
+    restore: [],
+  });
+  expect(migrate).not.toHaveBeenCalled();
+  expect(wake).not.toHaveBeenCalled();
+});
+it('does not claim native preview closure when actual client cleanup reports failure', async () => {
+  await service.preview(request({}));
+  const client = await open.mock.results[0].value;
+  vi.spyOn(client, 'assertViewing').mockImplementation(() => {
+    throw new Error('preview disconnected');
+  });
+  vi.spyOn(client, 'close').mockImplementationOnce(() => {
+    throw new Error('preview cleanup unconfirmed');
+  });
+  await expect(service.preview(request({}))).rejects.toThrow('preview cleanup unconfirmed');
+  expect(await result()).toMatchObject({ phase: 'not-issued', native: null, blocksFurtherChanges: false });
+  expect(open).toHaveBeenCalledTimes(1);
+  expect(migrate).not.toHaveBeenCalled();
+  expect(wake).not.toHaveBeenCalled();
+});
+it('keeps abandonment unavailable if owner authorization is revoked before its durable CAS', async () => {
+  await service.preview(request({}));
+  const client = await open.mock.results[0].value;
+  vi.spyOn(client, 'assertViewing').mockImplementation(() => {
+    throw new Error('preview disconnected');
+  });
+  const original = companyFiles.writeCompanyStateFile;
+  vi.spyOn(companyFiles, 'writeCompanyStateFile').mockImplementation(async (path, text, guard) => {
+    if (path === file && JSON.parse(text)[0].phase === 'not-issued') auth.logout(token);
+    await original(path, text, guard);
+  });
+  await expect(service.preview(request({}))).rejects.toThrow();
+  expect((await rows())[0]).toMatchObject({ version: 1, phase: 'prepared', sequence: 0 });
+  expect(open).toHaveBeenCalledTimes(1);
+  expect(migrate).not.toHaveBeenCalled();
+  expect(wake).not.toHaveBeenCalled();
+});
+it('refuses a competing issued CAS while settling a preview and preserves that uncertain operation after restart', async () => {
+  await service.preview(request({}));
+  const client = await open.mock.results[0].value;
+  vi.spyOn(client, 'assertViewing').mockImplementation(() => {
+    throw new Error('preview disconnected');
+  });
+  const prepared = FleetOperationData.parse((await rows())[0]);
+  const original = companyFiles.writeCompanyStateFile;
+  vi.spyOn(companyFiles, 'writeCompanyStateFile').mockImplementation(async (path, text, guard) => {
+    if (path === file && JSON.parse(text)[0].phase === 'not-issued')
+      await writeFile(file, JSON.stringify([advanceFleetOperation(prepared, 'issued')]));
+    await original(path, text, guard);
+  });
+  await expect(service.preview(request({}))).rejects.toThrow('changed before commit');
+  expect((await rows())[0]).toMatchObject({ version: 1, phase: 'issued', sequence: 1 });
+  expect((await service.operationHistory(request({}))).blocksFurtherChanges).toBe(true);
+  vi.restoreAllMocks();
+  restart();
+  expect(await result()).toMatchObject({ phase: 'unknown', blocksFurtherChanges: true });
+  await expect(service.preview(request({}))).rejects.toThrow();
+  expect(migrate).not.toHaveBeenCalled();
+  expect(wake).not.toHaveBeenCalled();
+});
+it('restricts the new persisted version to one original never-issued terminal transition', async () => {
+  await service.preview(request({}));
+  const prepared = FleetOperationData.parse((await rows())[0]);
+  const ended = advanceFleetOperation(prepared, 'not-issued', {
+    failure: fleetOperationFailure('PREVIEW_ENDED_BEFORE_ISSUE'),
+  });
+  expect(FleetOperationData.parse(ended)).toEqual(ended);
+  for (const phase of ['prepared', 'issued', 'native-confirmed', 'restoring', 'completed', 'unknown'])
+    expect(FleetOperationData.safeParse({ ...ended, phase }).success).toBe(false);
+  expect(() => advanceFleetOperation(ended, 'issued')).toThrow();
+  const issued = advanceFleetOperation(prepared, 'issued');
+  expect(() =>
+    advanceFleetOperation(issued, 'not-issued', { failure: fleetOperationFailure('PREVIEW_ENDED_BEFORE_ISSUE') })
+  ).toThrow();
+  const unknown = advanceFleetOperation(issued, 'unknown', {
+    failure: fleetOperationFailure('NATIVE_OUTCOME_UNCONFIRMED'),
+  });
+  expect(() =>
+    advanceFleetOperation(unknown, 'not-issued', { failure: fleetOperationFailure('PREVIEW_ENDED_BEFORE_ISSUE') })
+  ).toThrow();
+});
+it('keeps issued uncertainty blocked unless fresh authoritative pool absence is recorded', async () => {
+  await service.preview(request({}));
+  migrate.mockRejectedValueOnce(new Error('lost original native reply'));
+  await expect(apply()).rejects.toThrow();
+  const { accountId, personId, sessionEpoch } = auth.registrationIdentity(token);
+  const evidence = {
+    version: 1,
+    purpose: 'worker-pool-uninstalled-observation-v1',
+    nonce: randomUUID(),
+    observedAtEpochMs: Date.now(),
+    expiresAtEpochMs: Date.now() + 5000,
+    nominationDigest: 'a'.repeat(64),
+    configurationDigest: 'b'.repeat(64),
+    brokerPid: 2,
+    brokerStart: '1',
+    brokerProgramDigest: 'c'.repeat(64),
+    lifecycleGeneration: '0',
+    principal: { accountId, personId, sessionEpoch },
+    websiteContainerId: 'd'.repeat(64),
+    uninstalled: false,
+    oldOperationOutcome: 'unconfirmed',
+    startsAuthorized: false,
+    activationAuthorized: false,
+  };
+  evidence.expiresAtEpochMs = evidence.observedAtEpochMs + 5000;
+  recovery.observeUninstalledPool = vi.fn(async () => evidence);
+  service.close();
+  service = new FleetNativeService(
+    company,
+    auth,
+    '/unused-native-fixture',
+    recovery,
+    new FleetRecoveryHistory(join(directory, 'recovery.json')),
+    new FleetOperationStore(file)
+  );
+  const reconcile = () =>
+    service.reconcile(request({ operationId: preview.approval.operationId, preserveUnconfirmedHistory: true }));
+  await expect(reconcile()).rejects.toThrow();
+  expect(await result()).toMatchObject({ phase: 'unknown', blocksFurtherChanges: true });
+  await expect(service.preview(request({}))).rejects.toThrow();
+  evidence.uninstalled = true;
+  expect(await reconcile()).toMatchObject({
+    priorOutcome: 'unconfirmed',
+    currentState: 'pool-uninstalled',
+    activationAuthorized: false,
+    startsAuthorized: false,
+  });
+  expect(await result()).toMatchObject({ phase: 'unknown', blocksFurtherChanges: false, native: null });
+  expect((await rows())[0]).toMatchObject({
+    version: 1,
+    phase: 'unknown',
+    failure: { code: 'NATIVE_OUTCOME_UNCONFIRMED' },
+  });
+  expect(migrate).toHaveBeenCalledTimes(1);
+  expect(wake).not.toHaveBeenCalled();
+  expect(open).toHaveBeenCalledTimes(1);
+});
 it('persists native dispatch and each original wake before effect, then reads completion after restart without replay', async () => {
   await service.preview(request({}));
   const answer = await apply();
@@ -258,6 +519,7 @@ it('persists revocation as unknown and starts nobody after owner authorization e
 });
 it('refuses a different enrolled owner and never treats recorded metadata as migration authority', async () => {
   await service.preview(request({}));
+  const original = (await rows())[0];
   service.close();
   const other = new OwnerAuthService({
     store: new OwnerAuthStore(join(directory, 'other', 'owner.json')),
@@ -277,6 +539,22 @@ it('refuses a different enrolled owner and never treats recorded metadata as mig
   expect(migrate).not.toHaveBeenCalled();
   expect(wake).not.toHaveBeenCalled();
   expect((await service.operationHistory(request({}))).operations).toEqual([]);
+  expect((await service.operationHistory(request({}))).blocksFurtherChanges).toBe(true);
+  await expect(service.preview(request({}))).rejects.toThrow('pending or unconfirmed');
+  expect((await rows())[0]).toEqual(original);
+});
+it('cannot terminalize a recovered prepared record belonging to another Office person', async () => {
+  await service.preview(request({}));
+  const original = (await rows())[0];
+  original.principal.personId = randomUUID();
+  await writeFile(file, JSON.stringify([original]));
+  restart();
+  await expect(service.preview(request({}))).rejects.toThrow('pending or unconfirmed');
+  expect((await rows())[0]).toEqual(original);
+  expect((await service.operationHistory(request({}))).operations).toEqual([]);
+  expect(open).toHaveBeenCalledTimes(1);
+  expect(migrate).not.toHaveBeenCalled();
+  expect(wake).not.toHaveBeenCalled();
 });
 it('retains the exact authenticated native failure code without recording a completed native result', async () => {
   await service.preview(request({}));
@@ -311,7 +589,7 @@ it('allows a fresh epoch to inspect history without reviving original consent or
   const login = await auth.login('FixtureOwner', 'synthetic-Operation!7', '127.0.0.1');
   token = login.session!;
   expect(auth.registrationIdentity(token).sessionEpoch).toBeGreaterThan(before.principal.sessionEpoch);
-  expect((await result()).phase).toBe('unknown');
+  expect((await result()).phase).toBe('not-issued');
   expect((await rows())[0].ownerScopeDigest).toBe(before.ownerScopeDigest);
   await expect(apply()).rejects.toThrow();
   expect(migrate).not.toHaveBeenCalled();

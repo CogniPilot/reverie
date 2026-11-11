@@ -151,8 +151,10 @@ describe('Company Settings laptop fleet', () => {
     expect(fleet.querySelector('[data-fleet-profile]')!.textContent).toBe('River');
     expect((fleet.querySelector('.ca-fleet-maintenance') as HTMLDetailsElement).open).toBe(false);
     expect((fleet.querySelector('.ca-fleet-rollout') as HTMLDetailsElement).open).toBe(false);
-    expect(fleet.querySelector('.ca-fleet-table')!.compareDocumentPosition(fleet.querySelector('.ca-fleet-rollout')!) & 4).toBe(4);
-    expect(calls.every(call => call.body === undefined)).toBe(true);
+    expect(
+      fleet.querySelector('.ca-fleet-table')!.compareDocumentPosition(fleet.querySelector('.ca-fleet-rollout')!) & 4
+    ).toBe(4);
+    expect(calls.every((call) => call.body === undefined)).toBe(true);
   });
   it('is mounted only for the verified owner', async () => {
     const { section, calls } = await setup({ verified: false });
@@ -462,6 +464,38 @@ describe('Failed native shared pool setup recovery', () => {
     expect(h.document.activeElement).toBe(message);
     expect(h.window.localStorage.getItem(key)).toBe(original);
     expect(section().querySelector('.ca-fleet-results')?.nextElementSibling?.className).toBe('ca-fleet-content');
+    expect(calls.some((row) => /native-(apply|preview)$/.test(row.path))).toBe(false);
+  });
+  it('shows never-issued history and permits a new review without claiming activation or dispatching it', async () => {
+    const { h, button, section, calls } = await setup({
+      saved: { [key]: JSON.stringify({ operationId }) },
+      replies: {
+        '/native-result': () => ({
+          ok: true,
+          data: {
+            operationId,
+            state: 'not-issued',
+            phase: 'not-issued',
+            blocksFurtherChanges: false,
+            native: null,
+            nativeFailure: null,
+            restore: [],
+            failure: {
+              code: 'PREVIEW_ENDED_BEFORE_ISSUE',
+              message: 'Preview ended before migration consent was dispatched.',
+            },
+          },
+        }),
+      },
+    });
+    button('Check original shared-pool migration').click();
+    await h.flush();
+    expect(section().querySelector('.ca-fleet-native [role="status"]')?.textContent).toContain(
+      'before activation consent was dispatched'
+    );
+    expect(h.window.localStorage.getItem(key)).toBeNull();
+    expect(button('Review host-selected migration')).not.toBeNull();
+    expect(section().querySelector('.ca-fleet-native [role="alert"]')).toBeNull();
     expect(calls.some((row) => /native-(apply|preview)$/.test(row.path))).toBe(false);
   });
   it('announces a pending check immediately and displays its lost reply locally', async () => {

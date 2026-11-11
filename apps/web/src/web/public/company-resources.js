@@ -892,7 +892,7 @@
             (row) =>
               !id(row.operationId) ||
               typeof row.blocksFurtherChanges !== 'boolean' ||
-              !['previewed', 'pending', 'pool-configured', 'unknown'].includes(row.state)
+              !['previewed', 'pending', 'pool-configured', 'unknown', 'not-issued'].includes(row.state)
           )
         )
           throw new Error('Saved migration history could not be verified.');
@@ -997,7 +997,7 @@
       if (
         !value ||
         value.operationId !== operationId ||
-        !['previewed', 'pending', 'pool-configured', 'unknown'].includes(value.state) ||
+        !['previewed', 'pending', 'pool-configured', 'unknown', 'not-issued'].includes(value.state) ||
         typeof value.blocksFurtherChanges !== 'boolean' ||
         !Array.isArray(value.restore)
       )
@@ -1032,28 +1032,40 @@
         )
       )
         throw new Error('Employee recovery result is unavailable');
+      if (
+        value.state === 'not-issued' &&
+        (value.phase !== 'not-issued' || value.blocksFurtherChanges || value.native !== null ||
+          value.nativeFailure != null || value.restore.length)
+      )
+        throw new Error('Never-issued preview result could not be verified');
       this.results.replaceChildren(this.shell.el('h4', '', 'Original shared-pool migration'));
       this.reportNative(
-        value.native
-          ? value.state === 'unknown'
-            ? 'The original activation was confirmed; employee startup is unconfirmed. Check the recovery results below.'
-            : 'The original shared-pool activation was confirmed. Employee startup results are below.'
-          : value.state === 'unknown'
-            ? 'The original shared-pool activation is unconfirmed. Check this migration before taking another action.'
-            : 'Shared-pool activation is pending. Check this migration for its result.',
+        value.state === 'not-issued'
+          ? 'This preview ended before activation consent was dispatched. Review a new shared-pool preview to continue.'
+          : value.native
+            ? value.state === 'unknown'
+              ? 'The original activation was confirmed; employee startup is unconfirmed. Check the recovery results below.'
+              : 'The original shared-pool activation was confirmed. Employee startup results are below.'
+            : value.state === 'unknown'
+              ? 'The original shared-pool activation is unconfirmed. Check this migration before taking another action.'
+              : 'Shared-pool activation is pending. Check this migration for its result.',
         value.state === 'unknown'
       );
       this.results.append(
         this.shell.el(
           'p',
           'ca-hint',
-          value.native
-            ? 'The native host confirmed this activation. Employee recovery is listed separately; this historical result does not verify the current running pool.'
-            : 'Shared-pool activation is pending or unconfirmed. No consent will be replayed.'
+          value.state === 'not-issued'
+            ? 'No migration was dispatched. This history does not verify current host state or closure of the old preview connection.'
+            : value.native
+              ? 'The native host confirmed this activation. Employee recovery is listed separately; this historical result does not verify the current running pool.'
+              : 'Shared-pool activation is pending or unconfirmed. No consent will be replayed.'
         )
       );
       if (value.failure) {
-        this.results.append(this.shell.el('p', 'ca-company-error', `${value.failure.code}: ${value.failure.message}`));
+        this.results.append(this.shell.el(
+          'p', value.state === 'not-issued' ? 'ca-hint' : 'ca-company-error', `${value.failure.code}: ${value.failure.message}`
+        ));
       }
       if (value.nativeFailure) {
         this.results.append(
@@ -1077,8 +1089,7 @@
       }
       if (
         !value.blocksFurtherChanges &&
-        value.state === 'pool-configured' &&
-        value.native !== null &&
+        ((value.state === 'pool-configured' && value.native !== null) || value.state === 'not-issued') &&
         this.readNativePending()?.operationId === operationId
       )
         this.shell.doc.defaultView.localStorage.removeItem(this.nativeKey());

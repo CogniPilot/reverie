@@ -23,7 +23,11 @@ import type { CompanyEmployee } from './company-types.js';
 import type { ProviderHealth } from './types/provider-health.js';
 import { OwnerAuthService } from './owner-auth/service.js';
 import { ownerFor } from './web/route-helpers.js';
-import { ResourceOwnerAuthority, ResourceOwnerAuthorizationError } from './resource-owner-authority.js';
+import {
+  ResourceOwnerAuthority,
+  ResourceOwnerAuthorizationError,
+  type FleetViewerContext,
+} from './resource-owner-authority.js';
 import { FleetNativeClient, NativeFleetMigrationFailureError } from './resource-fleet-native-client.js';
 import {
   NativeFleetPreviewRequest,
@@ -52,8 +56,10 @@ export class FleetNativeService {
   readonly #entries = new Map<string, Entry>();
   readonly #records = new Map<string, FleetOperation>();
   #loading?: Promise<void>;
+  #preparedSettlements: Promise<void> = Promise.resolve();
   #loadFailure?: unknown;
   #opening = false;
+  #settlingPreview = false;
   #reconciling = false;
   #closed = false;
   constructor(
@@ -66,14 +72,17 @@ export class FleetNativeService {
   ) {
     this.#authority = new ResourceOwnerAuthority(auth);
   }
-  async #load(): Promise<void> {
+  async #load(request: FastifyRequest): Promise<void> {
     if (!this.operations) throw new Error('Durable native fleet operation storage is unavailable');
+    const viewer = this.#authority.captureFleetViewer(request);
     this.#loading ??= (async () => {
       const rows = await this.operations!.list();
       for (const row of rows) this.#records.set(row.operationId, row);
       for (const row of rows) {
         if (
+          row.phase === 'prepared' ||
           row.phase === 'completed' ||
+          row.phase === 'not-issued' ||
           (row.phase === 'unknown' && !row.restore.some((item) => item.state === 'pending'))
         )
           continue;
@@ -83,24 +92,49 @@ export class FleetNativeService {
             item.state === 'pending' ? { ...item, state: 'unknown' as const } : item
           ),
         });
-        // This records loss of the original process, not renewed consent or a
-        // launch permission. No stored data is ever used to reopen native Q.
-        this.#records.set(row.operationId, next);
-        await this.operations!.advance(row, next, () => {});
+        // Lost issued owners remain unknown. No stored DATA reopens native Q.
+        const saved = await this.operations!.advance(row, next, () => this.#authority.assertContext(viewer));
+        this.#records.set(row.operationId, saved);
       }
     })().catch((error) => {
       this.#loadFailure = error;
       throw error;
     });
-    return this.#loading;
+    await this.#loading;
+    // A previous request may have belonged to another owner. Revisit only
+    // recovered prepared rows, under this request's current original owner,
+    // without racing a second reader or touching live preview entries.
+    const settlement = this.#preparedSettlements.then(async () => {
+      this.#assertEffectsAvailable();
+      this.#authority.assertContext(viewer);
+      for (const row of this.#records.values()) {
+        if (row.phase !== 'prepared' || this.#entries.has(row.operationId) || !this.#ownsRecord(viewer, row)) continue;
+        const next = advanceFleetOperation(row, 'not-issued', {
+          failure: fleetOperationFailure('WEB_PROCESS_ENDED_BEFORE_ISSUE'),
+        });
+        const saved = await this.operations!.advance(row, next, () => {
+          this.#assertEffectsAvailable();
+          this.#authority.assertContext(viewer);
+          this.#assertRecord(request, row);
+        });
+        this.#records.set(row.operationId, saved);
+      }
+    });
+    this.#preparedSettlements = settlement.catch((error) => {
+      this.#loadFailure ??= error;
+    });
+    return settlement;
+  }
+  #ownsRecord(viewer: FleetViewerContext, operation: FleetOperation): boolean {
+    return (
+      viewer.owner === (operation.owner ?? undefined) &&
+      viewer.principal.accountId === operation.principal.accountId &&
+      viewer.principal.personId === operation.principal.personId
+    );
   }
   #assertRecord(request: FastifyRequest, operation: FleetOperation): void {
     const viewer = this.#authority.captureFleetViewer(request);
-    if (
-      viewer.owner !== (operation.owner ?? undefined) ||
-      viewer.principal.accountId !== operation.principal.accountId ||
-      viewer.principal.personId !== operation.principal.personId
-    )
+    if (!this.#ownsRecord(viewer, operation))
       throw new ResourceOwnerAuthorizationError('Original fleet operation belongs to another owner scope');
     this.#authority.assertContext(viewer);
   }
@@ -111,21 +145,20 @@ export class FleetNativeService {
   async preview(request: FastifyRequest): Promise<NativeFleetPreview> {
     this.#authority.captureFleetViewer(request);
     NativeFleetPreviewRequest.parse(request.body);
-    await this.#load();
+    await this.#load(request);
     this.#assertEffectsAvailable();
     if (!this.socket || !this.recovery)
       throw new Error('The native migration service and ordinary employee recovery must be configured');
-    if (this.#reconciling || this.#opening)
+    if (this.#reconciling || this.#opening || this.#settlingPreview)
       throw new Error('An original fleet migration is pending or unconfirmed; inspect its result');
     for (const entry of this.#entries.values()) {
       if (entry.operation.phase !== 'prepared') continue;
-      entry.client.assertSession(request);
+      this.#assertRecord(request, entry.operation);
       try {
         entry.client.assertViewing(request);
         return entry.operation.preview;
-      } catch (error) {
-        await this.#unknown(entry, 'ORIGINAL_PREVIEW_UNAVAILABLE', error);
-        entry.client.close();
+      } catch {
+        await this.#notIssued(entry, request);
       }
     }
     if ([...this.#records.values()].some(fleetOperationBlocks))
@@ -199,10 +232,13 @@ export class FleetNativeService {
   }
   async #commit(entry: Entry, next: FleetOperation, current: () => void = () => {}): Promise<void> {
     const previous = entry.operation;
-    // Claim the next one-shot phase synchronously before persistence yields.
-    // No native/wake call may use it until the exact commit returns known.
-    entry.operation = next;
-    this.#records.set(next.operationId, next);
+    // Effect intents claim synchronously before persistence yields. A terminal
+    // never-issued result stays invisible until its CAS is known; its separate
+    // settling gate denies concurrent review/Apply throughout that wait.
+    if (next.phase !== 'not-issued') {
+      entry.operation = next;
+      this.#records.set(next.operationId, next);
+    }
     try {
       const saved = await this.operations!.advance(previous, next, current);
       entry.operation = saved;
@@ -228,22 +264,51 @@ export class FleetNativeService {
     });
     await this.#commit(entry, next);
   }
+  async #notIssued(entry: Entry, request: FastifyRequest): Promise<void> {
+    this.#assertEffectsAvailable();
+    this.#assertRecord(request, entry.operation);
+    if (entry.operation.phase !== 'prepared' || entry.operation.sequence !== 0 || this.#settlingPreview)
+      throw new Error('Only the original never-issued preview can end without reconciliation');
+    this.#settlingPreview = true;
+    try {
+      await this.#commit(
+        entry,
+        advanceFleetOperation(entry.operation, 'not-issued', {
+          failure: fleetOperationFailure('PREVIEW_ENDED_BEFORE_ISSUE'),
+        }),
+        () => {
+          this.#assertEffectsAvailable();
+          this.#assertRecord(request, entry.operation);
+        }
+      );
+      // This closes only the actual preview client. The metadata proves no
+      // dispatch, not successful native hold finalization or pool absence.
+      entry.client.close();
+    } finally {
+      this.#settlingPreview = false;
+    }
+  }
   async apply(request: FastifyRequest) {
     this.#authority.captureFleetViewer(request);
     const selected = NativeFleetApplyRequest.parse(request.body);
-    await this.#load();
+    await this.#load(request);
     this.#assertEffectsAvailable();
-    if (this.#reconciling) throw new Error('Fleet recovery is in progress');
+    if (this.#reconciling || this.#settlingPreview) throw new Error('Fleet recovery is in progress');
     const entry = [...this.#entries.values()].find(
       (value) => value.operation.preview.approval.previewId === selected.previewId
     );
     if (!entry) throw new Error('Original native preview is unavailable; no consent was reconstructed');
-    entry.client.assertViewing(request);
     if (
       entry.operation.phase !== 'prepared' ||
       selected.expectedRevision !== entry.operation.preview.approval.revisionDigest
     )
       throw new Error('Migration consent was already attempted or its revision changed');
+    try {
+      entry.client.assertViewing(request);
+    } catch {
+      await this.#notIssued(entry, request);
+      return this.#result(entry.operation);
+    }
     try {
       await this.#commit(entry, advanceFleetOperation(entry.operation, 'issued'), () => {
         this.#assertEffectsAvailable();
@@ -270,7 +335,7 @@ export class FleetNativeService {
     this.#authority.captureFleetViewer(request);
     const selected = NativeFleetResultRequest.parse(request.body);
     try {
-      await this.#load();
+      await this.#load(request);
     } catch {
       /* Existing original metadata may still explain the uncertainty. */
     }
@@ -278,11 +343,14 @@ export class FleetNativeService {
     if (!operation) throw new Error('Original migration result is unavailable; absence never proves completion');
     this.#assertRecord(request, operation);
     const entry = this.#entries.get(operation.operationId);
-    if (entry && !['completed', 'unknown'].includes(entry.operation.phase)) {
+    if (entry?.operation.phase === 'prepared' && this.#settlingPreview) return this.#result(operation);
+    if (entry && !['completed', 'unknown', 'not-issued'].includes(entry.operation.phase)) {
       try {
-        entry.client.assertOwnerCurrent();
+        if (entry.operation.phase === 'prepared') entry.client.assertViewing(request);
+        else entry.client.assertOwnerCurrent();
       } catch (error) {
-        await this.#unknown(entry, 'OWNER_AUTHORIZATION_CHANGED', error);
+        if (entry.operation.phase === 'prepared') await this.#notIssued(entry, request);
+        else await this.#unknown(entry, 'OWNER_AUTHORIZATION_CHANGED', error);
         operation = entry.operation;
       }
     }
@@ -292,7 +360,7 @@ export class FleetNativeService {
     const viewer = this.#authority.captureFleetViewer(request);
     NativeFleetPreviewRequest.parse(request.body);
     try {
-      await this.#load();
+      await this.#load(request);
     } catch {
       /* Never turn unavailable history into an empty-success claim. */
     }
@@ -306,7 +374,7 @@ export class FleetNativeService {
     const available = !!this.operations && this.#loadFailure === undefined && !this.operations.failed();
     return {
       available,
-      blocksFurtherChanges: !available || records.some(fleetOperationBlocks),
+      blocksFurtherChanges: !available || [...this.#records.values()].some(fleetOperationBlocks),
       operations: records.map((row) => this.#result(row)),
     };
   }
@@ -316,9 +384,11 @@ export class FleetNativeService {
         ? 'previewed'
         : operation.phase === 'completed'
           ? 'pool-configured'
-          : operation.phase === 'unknown'
-            ? 'unknown'
-            : 'pending';
+          : operation.phase === 'not-issued'
+            ? 'not-issued'
+            : operation.phase === 'unknown'
+              ? 'unknown'
+              : 'pending';
     return structuredClone({
       operationId: operation.operationId,
       state,
@@ -333,8 +403,15 @@ export class FleetNativeService {
   async reconcile(request: FastifyRequest) {
     const viewer = this.#authority.captureFleetViewer(request);
     const selected = FleetRecoveryRequest.parse(request.body);
-    if (this.operations) await this.#load();
-    if (this.#closed || this.#opening || this.#reconciling || !this.recovery?.observeUninstalledPool || !this.history)
+    if (this.operations) await this.#load(request);
+    if (
+      this.#closed ||
+      this.#opening ||
+      this.#settlingPreview ||
+      this.#reconciling ||
+      !this.recovery?.observeUninstalledPool ||
+      !this.history
+    )
       throw new Error('Failed setup recovery is unavailable or already in progress');
     if (
       [...this.#entries.values()].some((entry) =>
