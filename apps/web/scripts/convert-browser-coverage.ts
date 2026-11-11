@@ -60,6 +60,9 @@ export function producerProvenance() {
   return {
     adapterSha256: digest(readFileSync(fileURLToPath(import.meta.url), 'utf8')),
     rawEvidenceSha256: digest(readFileSync(new URL('../test/helpers/browser-coverage.ts', import.meta.url), 'utf8')),
+    rawProducerSha256: digest(
+      readFileSync(new URL('../test/helpers/browser-coverage-producer.ts', import.meta.url), 'utf8')
+    ),
     lockSha256: digest(lockText),
     node: process.version,
     dependencies,
@@ -122,7 +125,127 @@ type FileCoverage = z.infer<typeof fileSchema>;
 const bcoe: unknown = require('@bcoe/v8-coverage');
 const istanbul: unknown = require('istanbul-lib-coverage');
 
+function rawRecord(value: unknown): Record<string, unknown> {
+  if (
+    !value ||
+    typeof value !== 'object' ||
+    Array.isArray(value) ||
+    (Object.getPrototypeOf(value) !== Object.prototype && Object.getPrototypeOf(value) !== null)
+  )
+    throw new Error('Unsupported raw coverage record prototype');
+  for (const key of Reflect.ownKeys(value)) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, key)!;
+    if (typeof key !== 'string' || key === '__proto__' || !descriptor.enumerable || !Object.hasOwn(descriptor, 'value'))
+      throw new Error('Unsupported raw coverage record key or descriptor');
+  }
+  return value as Record<string, unknown>;
+}
+function rawArray(value: unknown): unknown[] {
+  if (!Array.isArray(value) || Object.getPrototypeOf(value) !== Array.prototype)
+    throw new Error('Unsupported raw coverage counter/location array');
+  const keys = Reflect.ownKeys(value);
+  for (const key of keys) {
+    if (key === 'length') continue;
+    const descriptor = Object.getOwnPropertyDescriptor(value, key)!;
+    if (
+      typeof key !== 'string' ||
+      !/^(?:0|[1-9][0-9]*)$/.test(key) ||
+      Number(key) >= value.length ||
+      !descriptor.enumerable ||
+      !Object.hasOwn(descriptor, 'value')
+    )
+      throw new Error('Unsupported raw coverage array key or descriptor');
+  }
+  if (keys.length !== value.length + 1) throw new Error('Unsupported raw coverage sparse array');
+  return value;
+}
+/** Snapshot the entire adapter result using data descriptors, with no inherited field authority. */
+function ownCoverageTree(value: unknown, ancestors = new Set<object>()): unknown {
+  if (value === null || value === undefined || ['string', 'number', 'boolean'].includes(typeof value)) return value;
+  if (typeof value !== 'object') throw new Error('Unsupported raw coverage value');
+  if (ancestors.has(value)) throw new Error('Unsupported raw coverage cycle');
+  ancestors.add(value);
+  try {
+    if (Array.isArray(value)) {
+      rawArray(value);
+      const result: unknown[] = new Array(value.length);
+      for (let index = 0; index < value.length; index++)
+        Object.defineProperty(result, index, {
+          value: ownCoverageTree(Object.getOwnPropertyDescriptor(value, String(index))!.value, ancestors),
+          enumerable: true,
+          writable: true,
+          configurable: true,
+        });
+      return result;
+    }
+    const input = rawRecord(value),
+      result: Record<string, unknown> = Object.create(null);
+    for (const key of Object.keys(input))
+      Object.defineProperty(result, key, {
+        value: ownCoverageTree(Object.getOwnPropertyDescriptor(input, key)!.value, ancestors),
+        enumerable: true,
+        writable: true,
+        configurable: true,
+      });
+    return result;
+  } finally {
+    ancestors.delete(value);
+  }
+}
+
+function requireSameKeys(mapping: Record<string, unknown>, counters: Record<string, unknown>): void {
+  const keys = Object.keys(mapping);
+  if (keys.length !== Object.keys(counters).length || keys.some((key) => !Object.hasOwn(counters, key)))
+    throw new Error('Converter maps and counters must have exactly matching own keys');
+}
+/** Validate the raw dependency boundary before a schema parser can normalize unsupported keys away. */
+export function parseConvertedCoverage(converted: unknown, expected: string): FileCoverage {
+  const outer = rawRecord(ownCoverageTree(converted));
+  if (Object.keys(outer).length !== 1 || !Object.hasOwn(outer, expected))
+    throw new Error('Converter remapped canonical source to an unexpected file');
+  const raw = rawRecord(outer[expected]);
+  if (!Object.hasOwn(raw, 'path') || raw.path !== expected)
+    throw new Error('Converter remapped canonical source to an unexpected file');
+  for (const [mapName, countName] of [
+    ['statementMap', 's'],
+    ['fnMap', 'f'],
+    ['branchMap', 'b'],
+  ] as const) {
+    if (!Object.hasOwn(raw, mapName) || !Object.hasOwn(raw, countName))
+      throw new Error('Converter produced incomplete raw counters');
+    const mapping = rawRecord(raw[mapName]),
+      counters = rawRecord(raw[countName]);
+    requireSameKeys(mapping, counters);
+    if (mapName === 'branchMap')
+      for (const key of Object.keys(mapping)) {
+        const branch = rawRecord(mapping[key]);
+        if (!Object.hasOwn(branch, 'locations') || rawArray(branch.locations).length !== rawArray(counters[key]).length)
+          throw new Error('Converter branch locations and counters must have exactly matching arity');
+      }
+  }
+  const parsed = fileSchema.parse(raw);
+  for (const name of ['statementMap', 's', 'fnMap', 'f', 'branchMap', 'b'] as const)
+    requireSameKeys(rawRecord(raw[name]), parsed[name]);
+  // Zod reconstructs ordinary objects; keep absent optional/synthetic fields
+  // free of inherited values during the later normalization and summary steps.
+  return ownCoverageTree(parsed) as FileCoverage;
+}
+
+/** Each authored map entry owns exactly one counter; neither side may invent a denominator. */
+export function validateCounterMaps(file: FileCoverage): void {
+  for (const [mapping, counters] of [
+    [file.statementMap, file.s],
+    [file.fnMap, file.f],
+    [file.branchMap, file.b],
+  ] as const) {
+    requireSameKeys(mapping, counters);
+  }
+  if (Object.entries(file.branchMap).some(([key, branch]) => file.b[key].length !== branch.locations.length))
+    throw new Error('Converter branch locations and counters must have exactly matching arity');
+}
+
 export function validateDerivedBranches(file: FileCoverage) {
+  validateCounterMaps(file);
   const diagnostics: Array<{
     branch: string;
     index: number;
@@ -181,11 +304,7 @@ export async function convertOwnedSource(code: string, url: string, observations
     ast: parseAstAsync(code),
     coverage: { url, functions: merged.functions },
   });
-  const map = z.record(z.string(), fileSchema).parse(converted);
-  const expected = fileURLToPath(url);
-  if (Object.keys(map).length !== 1 || !map[expected] || map[expected].path !== expected)
-    throw new Error('Converter remapped canonical source to an unexpected file');
-  const file = map[expected];
+  const file = parseConvertedCoverage(converted, fileURLToPath(url));
   const lines = code.split('\n');
   const normalize = (loc: z.infer<typeof location>) => {
     for (const side of ['start', 'end'] as const) {
@@ -211,12 +330,6 @@ export async function convertOwnedSource(code: string, url: string, observations
       else syntheticLocations++;
     }
   }
-  if (
-    Object.keys(file.statementMap).some((key) => !(key in file.s)) ||
-    Object.keys(file.fnMap).some((key) => !(key in file.f)) ||
-    Object.entries(file.branchMap).some(([key, branch]) => file.b[key]?.length !== branch.locations.length)
-  )
-    throw new Error('Converter produced incomplete counters');
   const diagnostics = validateDerivedBranches(file);
   return { file, summary: summarize([file]), syntheticLocations, diagnostics };
 }
@@ -258,6 +371,8 @@ export async function convertBrowserBaseline(
     version: 1,
     revision: raw.revision,
     producer,
+    browserProducer: raw.producer,
+    browserProducerQualification: raw.producerQualification,
     observations: raw.observations,
     percentageFloorStatus: modules.some((module) => module.diagnostics.length)
       ? 'unqualified-synthetic-else-counters'
@@ -276,6 +391,7 @@ export async function convertBrowserBaseline(
     limitations: [
       ...raw.limitations,
       'Prototype AST conversion of source-bound owned JavaScript only; no coverage floor or complete-site claim.',
+      'Recorded Chromium/CDP/V8 and Playwright versions identify the runtime producer; they do not establish semantic qualification of those versions.',
       'Mixed, third-party and unknown sources are excluded from owned metrics and listed explicitly.',
       'Negative absent-source synthetic else counts are conservatively zero with original diagnostics and denominator retained; any such diagnostic prevents percentage-floor qualification.',
     ],

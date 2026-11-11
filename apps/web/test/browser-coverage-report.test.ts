@@ -1,3 +1,5 @@
+import { SYNTHETIC_BROWSER_PRODUCER } from './helpers/browser-coverage-fixtures.js';
+import { RAW_BROWSER_OBSERVATION_VERSION } from './helpers/browser-coverage-producer.js';
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs';
@@ -44,7 +46,8 @@ function fixture() {
   );
   writeFileSync(join(root, 'sources', sha256 + '.js'), code);
   const observation = {
-    version: 2,
+    version: RAW_BROWSER_OBSERVATION_VERSION,
+    producer: structuredClone(SYNTHETIC_BROWSER_PRODUCER),
     catalogId,
     fixture: 'synthetic report fixture',
     fixtureSources: { 'fixture.ts': 'b'.repeat(64) },

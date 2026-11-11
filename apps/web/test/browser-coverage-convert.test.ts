@@ -2,6 +2,8 @@ import { expect, it } from 'vitest';
 import {
   convertOwnedSource,
   validateDerivedBranches,
+  validateCounterMaps,
+  parseConvertedCoverage,
   requirePinnedVersion,
   producerProvenance,
 } from '../scripts/convert-browser-coverage.js';
@@ -150,6 +152,7 @@ it('records exact adapter/raw-helper bytes and actual installed parser/dependenc
   const result = producerProvenance();
   expect(result.adapterSha256).toMatch(/^[a-f0-9]{64}$/);
   expect(result.rawEvidenceSha256).toMatch(/^[a-f0-9]{64}$/);
+  expect(result.rawProducerSha256).toMatch(/^[a-f0-9]{64}$/);
   expect(result.lockSha256).toMatch(/^[a-f0-9]{64}$/);
   expect(result.node).toBe(process.version);
   expect(result.dependencies).toMatchObject({
@@ -158,4 +161,169 @@ it('records exact adapter/raw-helper bytes and actual installed parser/dependenc
     'istanbul-lib-coverage': '3.2.2',
   });
   expect(result.dependencies.rolldown).toBeTruthy();
+});
+
+it.each(['s', 'f', 'b'] as const)('requires a bijection between own %s counters and source-map keys', async (group) => {
+  const { file: original } = await convertOwnedSource(code, url, [observed('else')]);
+  for (const defect of ['orphan', 'missing', 'substituted', 'inherited'] as const) {
+    const file = structuredClone(original),
+      counters = file[group];
+    const key = Object.keys(counters)[0],
+      value = counters[key];
+    if (defect !== 'orphan') delete counters[key];
+    if (defect === 'orphan' || defect === 'substituted') Reflect.set(counters, 'orphan-counter', value);
+    if (defect === 'inherited') Object.setPrototypeOf(counters, { [key]: value });
+    expect(() => validateCounterMaps(file), `${group}:${defect}`).toThrow('exactly matching own keys');
+    expect(() => validateDerivedBranches(file), `${group}:${defect}`).toThrow('exactly matching own keys');
+  }
+  expect(() => validateCounterMaps(original)).not.toThrow();
+});
+it.each(['short', 'long'] as const)(
+  'refuses %s branch counter arrays without losing their locations',
+  async (defect) => {
+    const { file } = await convertOwnedSource(code, url, []);
+    const key = Object.keys(file.b)[0],
+      locations = structuredClone(file.branchMap[key].locations);
+    if (defect === 'short') file.b[key].pop();
+    else file.b[key].push(0);
+    expect(() => validateCounterMaps(file)).toThrow('exactly matching arity');
+    expect(file.branchMap[key].locations).toEqual(locations);
+  }
+);
+
+it.each(['s', 'f', 'b', 'statementMap', 'fnMap', 'branchMap'] as const)(
+  'refuses raw %s descriptor/prototype normalization before schema parsing',
+  async (group) => {
+    const { file: original } = await convertOwnedSource(code, url, []);
+    for (const defect of ['special', 'hidden', 'symbol', 'inherited', 'accessor'] as const) {
+      const file = structuredClone(original),
+        record = file[group];
+      if (defect === 'special') Object.defineProperty(record, '__proto__', { enumerable: true, value: 99 });
+      if (defect === 'hidden') Object.defineProperty(record, 'hidden-orphan', { enumerable: false, value: 99 });
+      if (defect === 'symbol') Reflect.set(record, Symbol('orphan'), 99);
+      if (defect === 'inherited') Object.setPrototypeOf(record, { 'inherited-orphan': 99 });
+      const getter = () => {
+        throw new Error('getter must not run');
+      };
+      if (defect === 'accessor') Object.defineProperty(record, 'getter', { enumerable: true, get: getter });
+      expect(() => parseConvertedCoverage({ [file.path]: file }, file.path), `${group}:${defect}`).toThrow(
+        'Unsupported raw coverage'
+      );
+    }
+  }
+);
+it('refuses raw outer-map orphan keys that a record parser would remove', async () => {
+  const { file } = await convertOwnedSource(code, url, []);
+  const raw = { [file.path]: file };
+  Object.defineProperty(raw, '__proto__', { enumerable: true, value: file });
+  expect(() => parseConvertedCoverage(raw, file.path)).toThrow('Unsupported raw coverage');
+  expect(parseConvertedCoverage({ [file.path]: file }, file.path)).toEqual(file);
+});
+it('refuses malformed raw branch arity and unsupported array keys before derived counter mutation', async () => {
+  const { file: original } = await convertOwnedSource(code, url, []);
+  const key = Object.keys(original.b)[0];
+  for (const defect of ['arity', 'hidden', 'symbol'] as const) {
+    const file = structuredClone(original);
+    if (defect === 'arity') file.b[key].push(0);
+    if (defect === 'hidden') Object.defineProperty(file.b[key], 'orphan', { value: 99 });
+    if (defect === 'symbol') Reflect.set(file.b[key], Symbol('orphan'), 99);
+    expect(() => parseConvertedCoverage({ [file.path]: file }, file.path)).toThrow(
+      defect === 'arity' ? 'exactly matching arity' : 'Unsupported raw coverage array'
+    );
+  }
+});
+
+it.each(['counter', 'location'] as const)(
+  'refuses a sparse raw branch %s instead of promoting an inherited value',
+  async (target) => {
+    const { file } = await convertOwnedSource(code, url, []),
+      key = Object.keys(file.b)[0];
+    const array = target === 'counter' ? file.b[key] : file.branchMap[key].locations;
+    const index = array.length - 1,
+      value = array[index];
+    delete array[index];
+    const original = Object.getOwnPropertyDescriptor(Array.prototype, String(index));
+    try {
+      Object.defineProperty(Array.prototype, String(index), { value, writable: true, configurable: true });
+      expect(() => parseConvertedCoverage({ [file.path]: file }, file.path)).toThrow(
+        'Unsupported raw coverage sparse array'
+      );
+      expect(Object.hasOwn(array, index)).toBe(false);
+    } finally {
+      if (original) Object.defineProperty(Array.prototype, String(index), original);
+      else Reflect.deleteProperty(Array.prototype, String(index));
+    }
+  }
+);
+
+it.each(['statement-line', 'function-name', 'function-location', 'branch-location'] as const)(
+  'never borrows inherited required nested %s metadata',
+  async (target) => {
+    const { file } = await convertOwnedSource(code, url, []);
+    const statement = file.statementMap[Object.keys(file.statementMap)[0]],
+      fn = file.fnMap[Object.keys(file.fnMap)[0]],
+      branch = file.branchMap[Object.keys(file.branchMap)[0]];
+    const object = target === 'statement-line' ? statement.start : target.startsWith('function') ? fn : branch;
+    const property = target === 'statement-line' ? 'line' : target === 'function-name' ? 'name' : 'loc';
+    const value = Reflect.get(object, property);
+    Reflect.deleteProperty(object, property);
+    const original = Object.getOwnPropertyDescriptor(Object.prototype, property);
+    try {
+      Object.defineProperty(Object.prototype, property, { value, configurable: true, writable: true });
+      expect(() => parseConvertedCoverage({ [file.path]: file }, file.path)).toThrow();
+    } finally {
+      if (original) Object.defineProperty(Object.prototype, property, original);
+      else Reflect.deleteProperty(Object.prototype, property);
+    }
+  }
+);
+it.each(['cycle', 'accessor', 'symbol', 'hidden', 'prototype', 'function'] as const)(
+  'rejects unsupported %s values anywhere in nested adapter metadata',
+  async (defect) => {
+    const { file } = await convertOwnedSource(code, url, []);
+    const fn = file.fnMap[Object.keys(file.fnMap)[0]],
+      getter = () => {
+        throw new Error('nested getter must not run');
+      };
+    if (defect === 'cycle') Reflect.set(fn, 'extra', file);
+    if (defect === 'accessor') Object.defineProperty(fn.loc.start, 'extra', { enumerable: true, get: getter });
+    if (defect === 'symbol') Reflect.set(fn.loc.start, 'extra', Symbol('unsupported'));
+    if (defect === 'hidden') Object.defineProperty(fn.loc.start, 'extra', { value: 1 });
+    if (defect === 'prototype') Object.setPrototypeOf(fn.loc.start, { line: fn.loc.start.line });
+    if (defect === 'function') Reflect.set(fn, 'extra', () => 1);
+    expect(() => parseConvertedCoverage({ [file.path]: file }, file.path)).toThrow('Unsupported raw coverage');
+  }
+);
+it('supports null-prototype records, shared metadata, undefined synthetic points and Infinity sentinels', async () => {
+  const { file } = await convertOwnedSource(code, url, []);
+  const statement = file.statementMap[Object.keys(file.statementMap)[0]],
+    fn = file.fnMap[Object.keys(file.fnMap)[0]];
+  statement.end.column = Infinity;
+  fn.decl = statement;
+  Object.setPrototypeOf(statement.start, null);
+  Reflect.set(fn, 'syntheticMetadata', { line: undefined, column: undefined });
+  expect(
+    parseConvertedCoverage({ [file.path]: file }, file.path).statementMap[Object.keys(file.statementMap)[0]].end.column
+  ).toBe(Infinity);
+});
+
+it('keeps parsed synthetic and optional metadata free of inherited values after Zod reconstruction', async () => {
+  const { file } = await convertOwnedSource('function maybe(value) {\n  if(value) return 1;\n}\nmaybe(true);', url, []);
+  const original = Object.getOwnPropertyDescriptor(Object.prototype, 'line');
+  try {
+    Object.defineProperty(Object.prototype, 'line', { value: 7, configurable: true, writable: true });
+    const parsed = parseConvertedCoverage({ [file.path]: file }, file.path);
+    const fn = parsed.fnMap[Object.keys(parsed.fnMap)[0]];
+    expect(Object.getPrototypeOf(fn)).toBeNull();
+    if (!Object.hasOwn(fn, 'line')) expect(fn.line).toBeUndefined();
+    const synthetic = Object.values(parsed.branchMap)
+      .flatMap((branch) => branch.locations)
+      .find((loc) => Reflect.get(loc.start, 'line') === undefined);
+    expect(synthetic).toBeDefined();
+    expect(Object.getPrototypeOf(synthetic!.start)).toBeNull();
+    expect(Reflect.get(synthetic!.start, 'line')).toBeUndefined();
+  } finally {
+    if (original) Object.defineProperty(Object.prototype, 'line', original);
+    else Reflect.deleteProperty(Object.prototype, 'line');
+  }
 });

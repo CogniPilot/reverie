@@ -61,6 +61,13 @@ it('binds real script execution to main even when a nested frame preloads the id
     expect(fetched.request().resourceType()).toBe('script');
     await collection.finish(page);
     const report = readRawBaseline(output, { critical: ['/workspace-files.js'], iframe: [] });
+    expect(report.producer.browserVersion).toBe(browser.version());
+    expect(report.producer.chromium.product.split('/')[1]).toBe(browser.version());
+    expect(report.producer.chromium.protocolVersion).toMatch(/^\d+\.\d+$/);
+    expect(report.producer.chromium.jsVersion).toBeTruthy();
+    expect(report.producer.playwright.version).toBe(report.producer.playwright.coreVersion);
+    expect(report.producer.node).toBe(process.version);
+    expect(report.producerQualification).toBe('runtime-recorded-not-semantically-qualified');
     const module = report.sources.find((source) => source.asset === '/workspace-files.js');
     expect(module?.executed).toBe(true);
     expect(module?.frameKinds).toEqual(['main']);

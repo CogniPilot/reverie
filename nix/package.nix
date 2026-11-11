@@ -70,7 +70,7 @@ let
       npm test -- test/account-replacement-profile.test.ts
       npm test -- test/workspace-hook-preparation.test.ts test/launch-reservation.test.ts
       npm test -- test/approvals-ui-held.test.ts
-      npm test -- test/browser-coverage-collection.test.ts test/browser-coverage-execution.test.ts test/browser-coverage-report.test.ts test/browser-coverage-convert.test.ts
+      npm test -- test/browser-coverage-collection.test.ts test/browser-coverage-execution.test.ts test/browser-coverage-report.test.ts test/browser-coverage-convert.test.ts test/browser-coverage-producer.test.ts
       npm test -- test/company-employee-resources-ui.test.ts test/resource-employee-data.test.ts \
         test/resource-employee-service.test.ts test/resource-fleet-operation.test.ts \
         test/resource-fleet-native-failure-client.test.ts test/resource-fleet-codec-upgrade.test.ts \

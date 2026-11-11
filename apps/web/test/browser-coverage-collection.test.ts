@@ -1,3 +1,5 @@
+import { SYNTHETIC_BROWSER_PRODUCER } from './helpers/browser-coverage-fixtures.js';
+import { RAW_BROWSER_OBSERVATION_VERSION } from './helpers/browser-coverage-producer.js';
 import { createHash } from 'node:crypto';
 import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -227,7 +229,8 @@ function baselineFixture() {
   writeFileSync(join(root, 'catalogs', id + '.json'), JSON.stringify(catalog));
   writeFileSync(join(root, 'sources', source.sha256 + '.js'), text);
   const observation = {
-    version: 2,
+    version: RAW_BROWSER_OBSERVATION_VERSION,
+    producer: structuredClone(SYNTHETIC_BROWSER_PRODUCER),
     catalogId: id,
     fixture: 'synthetic unit',
     fixtureSources: { 'fixture.ts': 'b'.repeat(64) },
@@ -355,4 +358,29 @@ it('refuses duplicate source IDs and conflicting metadata even when the source S
   catalog.sources.push({ ...catalog.sources[0] });
   writeFileSync(join(root, 'catalogs', catalogIdentity(catalog.sources) + '.json'), JSON.stringify(catalog));
   expect(() => readRawBaseline(root, { critical: [], iframe: [] })).toThrow('Duplicate source ID');
+});
+
+it('refuses unversioned legacy producer evidence rather than fabricating a browser identity', () => {
+  const { root, observation, save } = baselineFixture();
+  Reflect.set(observation, 'version', 2);
+  save();
+  expect(() => readRawBaseline(root, { critical: [], iframe: [] })).toThrow();
+  Reflect.set(observation, 'version', RAW_BROWSER_OBSERVATION_VERSION);
+  Reflect.deleteProperty(observation, 'producer');
+  save();
+  expect(() => readRawBaseline(root, { critical: [], iframe: [] })).toThrow();
+});
+it('refuses mixed runtime producers even with matching source and fixture identities', () => {
+  const { root, observation, save } = baselineFixture();
+  save();
+  observation.producer.chromium.jsVersion = 'different-v8';
+  save('two.json');
+  expect(() => readRawBaseline(root, { critical: [], iframe: [] })).toThrow('mixes runtime producer identities');
+});
+it('retains recorded producer metadata while explicitly declining semantic qualification', () => {
+  const { root, save } = baselineFixture();
+  save();
+  const summary = readRawBaseline(root, { critical: [], iframe: [] });
+  expect(summary.producer).toEqual(SYNTHETIC_BROWSER_PRODUCER);
+  expect(summary.producerQualification).toBe('runtime-recorded-not-semantically-qualified');
 });

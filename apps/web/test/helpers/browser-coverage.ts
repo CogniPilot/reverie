@@ -19,6 +19,14 @@ import ts from 'typescript';
 import type { Browser, BrowserContext, Page } from 'playwright';
 import { OWNER_SCRIPT } from '../../src/owner-auth/pages.js';
 import { ExecutionTracker, executionSchema, type Execution } from './browser-coverage-execution.js';
+import {
+  observeBrowserProducer,
+  sameBrowserProducer,
+  browserProducerSchema,
+  RAW_BROWSER_OBSERVATION_VERSION,
+  BROWSER_PRODUCER_QUALIFICATION,
+  type BrowserProducer,
+} from './browser-coverage-producer.js';
 
 export type Provenance = 'raw-authored' | 'generated-first-party' | 'mixed' | 'third-party' | 'unknown';
 export type Source = {
@@ -369,7 +377,8 @@ const catalogSchema = z.object({
   limitations: z.array(z.string()),
 });
 const observationSchema = z.object({
-  version: z.literal(2),
+  version: z.literal(RAW_BROWSER_OBSERVATION_VERSION),
+  producer: browserProducerSchema,
   catalogId: digestSchema,
   fixture: z.string().min(1),
   fixtureSources: z
@@ -419,6 +428,8 @@ export function readRawEvidence(
     .filter((file) => file.endsWith('.json'))
     .map((file) => observationSchema.parse(JSON.parse(readFileSync(join(output, 'observations', file), 'utf8'))));
   if (!observations.length) throw new Error('Browser coverage contains no observations');
+  if (observations.some((item) => !sameBrowserProducer(observations[0].producer, item.producer)))
+    throw new Error('Browser coverage mixes runtime producer identities');
   const revisions = new Set(
     [...catalogs.values()].flatMap((catalog) => catalog.sources.map((source) => source.revision))
   );
@@ -492,6 +503,8 @@ export function readRawEvidence(
     version: 2,
     revision: [...revisions][0],
     observations: observations.length,
+    producer: observations[0].producer,
+    producerQualification: BROWSER_PRODUCER_QUALIFICATION,
     fixtures: [...new Set(observations.map((item) => item.fixture))],
     sources: [...sources.values()],
     unvisitedOwned: [...sources.values()]
@@ -564,7 +577,10 @@ function writeOnce(path: string, content: string) {
 
 export class BrowserCoverageCollection {
   private readonly catalog: Source[];
-  private readonly pages = new WeakMap<Page, { origin: string; label: string; tracker: ExecutionTracker }>();
+  private readonly pages = new WeakMap<
+    Page,
+    { origin: string; label: string; tracker: ExecutionTracker; producer: BrowserProducer }
+  >();
   private readonly starting = new WeakSet<Page>();
   private readonly runId = randomUUID();
   private count = 0;
@@ -580,6 +596,7 @@ export class BrowserCoverageCollection {
       [
         'test/helpers/browser-coverage.ts',
         'test/helpers/browser-coverage-execution.ts',
+        'test/helpers/browser-coverage-producer.ts',
         'test/helpers/office-browser.ts',
         'test/helpers/isolated-office.ts',
         'test/office-server.browser.test.ts',
@@ -621,9 +638,10 @@ export class BrowserCoverageCollection {
     this.starting.add(page);
     let tracker: ExecutionTracker | undefined;
     try {
+      const producer = await observeBrowserProducer(page);
       tracker = await ExecutionTracker.attach(page, origin);
       await page.coverage.startJSCoverage({ resetOnNavigation: false, reportAnonymousScripts: false });
-      this.pages.set(page, { origin, label, tracker });
+      this.pages.set(page, { origin, label, tracker, producer });
     } catch (error) {
       if (tracker) await tracker.seal();
       throw error;
@@ -639,6 +657,8 @@ export class BrowserCoverageCollection {
       omitted: Array<{ omitted: string; path: string }> = [];
     try {
       const rawEntries = await page.coverage.stopJSCoverage();
+      if (!sameBrowserProducer(state.producer, await observeBrowserProducer(page)))
+        throw new Error('Browser coverage runtime producer changed during collection');
       const execution = await state.tracker.seal();
       for (const raw of rawEntries) {
         const entry = canonicalScript(raw, state.origin, this.catalog);
@@ -656,7 +676,8 @@ export class BrowserCoverageCollection {
         join(this.output, 'observations', `${this.runId}-${++this.count}.json`),
         JSON.stringify(
           {
-            version: 2,
+            version: RAW_BROWSER_OBSERVATION_VERSION,
+            producer: state.producer,
             catalogId: this.catalogId,
             fixture: state.label,
             fixtureSources: this.fixtures,
