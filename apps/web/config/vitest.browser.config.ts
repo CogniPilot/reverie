@@ -1,8 +1,11 @@
+import { assertExplicitTestSelection } from './test-selection';
 import { resolve } from 'node:path';
-import { defineConfig } from 'vitest/config';
+import { defineConfig, configDefaults } from 'vitest/config';
 import { BROWSER_TEST_GLOBS } from './test-suites';
 
 const root = resolve(import.meta.dirname, '..');
+const selection = { root, suite: 'browser', include: BROWSER_TEST_GLOBS, exclude: configDefaults.exclude };
+assertExplicitTestSelection(selection);
 
 /**
  * The Playwright-driven suite `npm test` skips — `npm run test:browser`.
@@ -25,7 +28,8 @@ export default defineConfig({
     root,
     globals: true,
     environment: 'node',
-    include: BROWSER_TEST_GLOBS,
+    include: selection.include,
+    exclude: selection.exclude,
     setupFiles: ['./test/setup.ts'],
     fileParallelism: false,
     testTimeout: 60000,
