@@ -1,6 +1,7 @@
 import { resolve } from 'node:path';
 import { defineConfig, configDefaults } from 'vitest/config';
 import { NON_CI_TEST_GLOBS } from './test-suites';
+import { webCoverage } from './coverage-policy';
 
 const root = resolve(import.meta.dirname, '..');
 // The Nix check sets this to run test files side by side; unset, files run one at a time as before.
@@ -27,6 +28,7 @@ export default defineConfig({
     setupFiles: ['./test/setup.ts'],
     fileParallelism: fileWorkers > 1,
     maxWorkers: fileWorkers,
+    coverage: { ...webCoverage, reporter: [...webCoverage.reporter] },
     testTimeout: 30000,
     teardownTimeout: 60000,
   },
