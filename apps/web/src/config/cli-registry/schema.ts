@@ -295,12 +295,24 @@ const launchModelTemplate = z
   .regex(/^[a-zA-Z0-9._\-/:{}]+$/)
   .optional();
 
+const workspaceHookPolicySchema = z.enum(['install', 'refresh-only', 'none']);
+
 const capabilitiesSchema = z
   .object({
     chatDelivery: z.literal('poll').optional(),
     external: z.boolean(),
     requiresMux: z.boolean(),
     hooks: z.enum(['none', 'always', 'supervised']),
+    // Stock identity is resolved/merged before this schema. Missing profiles on
+    // old custom entries grant no new workspace writes.
+    workspaceHooks: z
+      .object({
+        sessionCreate: workspaceHookPolicySchema.default('none'),
+        freshCase: workspaceHookPolicySchema.default('none'),
+        existingCase: workspaceHookPolicySchema.default('none'),
+      })
+      .strict()
+      .default({ sessionCreate: 'none', freshCase: 'none', existingCase: 'none' }),
     transcript: z.enum(['claude-jsonl', 'codex-rollout', 'deepseek-zstd', 'omp-jsonl', 'none']),
     altScreen: z.enum(['strip-full', 'strip-mux-only', 'strip-mux-and-mouse', 'preserve']),
     echo: echoSchema,

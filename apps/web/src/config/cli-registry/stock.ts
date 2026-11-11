@@ -36,6 +36,7 @@ function agentDefaults(): Pick<
   | 'external'
   | 'requiresMux'
   | 'hooks'
+  | 'workspaceHooks'
   | 'transcript'
   | 'altScreen'
   | 'wheelForward'
@@ -57,6 +58,7 @@ function agentDefaults(): Pick<
     external: true,
     requiresMux: true,
     hooks: 'none',
+    workspaceHooks: { sessionCreate: 'none', freshCase: 'none', existingCase: 'refresh-only' },
     transcript: 'none',
     altScreen: 'strip-mux-only',
     wheelForward: { mode: 'never' },
@@ -280,6 +282,7 @@ const CLAUDE: CliEntry = {
     // Claude installs Reverie's own hooks block into every workspace it runs in, so its
     // stop/idle signals are unconditional — no per-session veto, unlike deepseek's bridge.
     hooks: 'always',
+    workspaceHooks: { sessionCreate: 'install', freshCase: 'install', existingCase: 'install' },
     transcript: 'claude-jsonl',
     altScreen: 'strip-full',
     echo: { policy: 'buffer', anchor: { kind: 'glyph', glyph: '❯', offset: 2 } },
@@ -420,6 +423,7 @@ const SHELL: CliEntry = {
     // has no hooks but is not an "external CLI", so a predicate derived from `external`
     // once accepted `until=stop` on a shell session and hung for the full timeout.
     hooks: 'none',
+    workspaceHooks: { sessionCreate: 'none', freshCase: 'install', existingCase: 'refresh-only' },
     transcript: 'none',
     altScreen: 'preserve',
     echo: { policy: 'off', anchor: { kind: 'none' } },
@@ -515,6 +519,7 @@ const OPENCODE: CliEntry = {
   },
   capabilities: {
     ...agentDefaults(),
+    workspaceHooks: { sessionCreate: 'none', freshCase: 'none', existingCase: 'none' },
     ...AGENTS_DIR_SKILL,
     altScreen: 'strip-mux-and-mouse',
     echo: { policy: 'buffer', anchor: { kind: 'cursor' }, predictProfile: undefined },

@@ -347,7 +347,13 @@ export interface CliEnv {
  * `!isExternalCliMode()` wrongly accepted `until=stop` on it and hung for the full timeout.
  * Keeping them as separate fields makes that invariant structural rather than commented.
  */
+export type WorkspaceHookPolicy = 'install' | 'refresh-only' | 'none';
+export type WorkspaceHookPhase = 'sessionCreate' | 'freshCase' | 'existingCase';
+export type WorkspaceHookProfile = Record<WorkspaceHookPhase, WorkspaceHookPolicy>;
+
 export interface CliCapabilities {
+  /** Workspace file authoring, independent from runtime lifecycle hook support. */
+  workspaceHooks: WorkspaceHookProfile;
   /** Positive opt-in: reads its server-authorized rooms through the API; never type into its pane. */
   chatDelivery?: 'poll';
   /**

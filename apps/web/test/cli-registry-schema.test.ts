@@ -56,6 +56,28 @@ describe('customModelInjection.launchModel', () => {
 });
 
 describe('the shipped catalog', () => {
+  it('defaults a missing workspace profile to no file authoring without inferring from a claimed stock id', () => {
+    const entry = baseEntry('claude');
+    delete (entry.capabilities as Record<string, unknown>).workspaceHooks;
+    expect(CliEntrySchema.parse(entry).capabilities.workspaceHooks).toEqual({
+      sessionCreate: 'none',
+      freshCase: 'none',
+      existingCase: 'none',
+    });
+  });
+
+  it.each([
+    { sessionCreate: 'always' },
+    { freshCase: true },
+    { existingCase: 'install', extraPhase: 'install' },
+    { freshcase: 'install' },
+    'install',
+    null,
+  ])('rejects an invalid workspace profile at decode time: %j', (profile) => {
+    const entry = baseEntry();
+    (entry.capabilities as Record<string, unknown>).workspaceHooks = profile;
+    expect(CliEntrySchema.safeParse(entry).success).toBe(false);
+  });
   it('validates every stock entry exactly as shipped', () => {
     // If this fails, the catalog cannot load at all — every other test here is downstream.
     for (const entry of STOCK_CLIS) {

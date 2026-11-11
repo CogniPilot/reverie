@@ -20,7 +20,7 @@ import { trustedFixtureOwner } from '../helpers/trusted-owner-fixture.js';
  * including the sweep's deleted-workspace guard.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
 import fastifyCookie from '@fastify/cookie';
 import { mkdtemp, rm, readFile, mkdir, writeFile } from 'node:fs/promises';
@@ -34,6 +34,16 @@ import { generateHooksConfig, applyWorkspaceHooks } from '../../src/hooks-config
 import { getDataDir } from '../../src/config/instance.js';
 import { CASES_DIR } from '../../src/web/route-helpers.js';
 import { Session } from '../../src/session.js';
+import { STOCK_CLIS } from '../../src/config/cli-registry/stock.js';
+import { registryFilePath, reloadCliRegistry } from '../../src/config/cli-registry/registry.js';
+import { prepareWorkspaceHooks } from '../../src/workspace-hook-policy.js';
+
+// Availability is an independent boundary; every constructed session here has
+// an inert start method and all workspace writes use this file's temporary HOME.
+vi.mock('../../src/utils/cli-launcher.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../src/utils/cli-launcher.js')>()),
+  resolveCliLaunchError: vi.fn().mockResolvedValue(null),
+}));
 
 interface HooksFile {
   hooks?: Record<string, Array<{ matcher?: string; hooks?: Array<{ command?: string }> }>>;
@@ -67,6 +77,136 @@ function staleReverieHooks() {
   };
 }
 
+describe('workspace hook phase policy on actual HTTP creation paths', () => {
+  const modes = ['claude', 'shell', 'opencode', 'codex', 'deepseek', 'hands', 'synthetic-custom'];
+  let app: FastifyInstance;
+  let ctx: MockRouteContext;
+  let root: string;
+  const file = (workspace: string) => join(workspace, '.claude', 'settings.local.json');
+  async function stale(workspace: string) {
+    await mkdir(join(workspace, '.claude'), { recursive: true });
+    const bytes = JSON.stringify({
+      model: 'synthetic-model',
+      permissions: { allow: ['synthetic-rule'] },
+      hooks: staleReverieHooks(),
+    });
+    await writeFile(file(workspace), bytes);
+    return bytes;
+  }
+  async function start(url: string, payload: Record<string, unknown>) {
+    const before = ctx.sessions.size;
+    const response = await app.inject({ method: 'POST', url, payload });
+    expect(response.statusCode, response.body).toBe(200);
+    expect(response.json().success, response.body).not.toBe(false);
+    expect(ctx.sessions.size).toBe(before + 1);
+  }
+  beforeEach(async () => {
+    vi.spyOn(Session.prototype, 'startInteractive').mockResolvedValue(undefined);
+    vi.spyOn(Session.prototype, 'startShell').mockResolvedValue(undefined);
+    root = await mkdtemp(join(tmpdir(), 'workspace-policy-'));
+    const custom = JSON.parse(JSON.stringify(STOCK_CLIS.find((entry) => entry.id === 'claude')!));
+    delete custom.capabilities.workspaceHooks;
+    custom.id = 'claude';
+    custom.stock = true;
+    custom.order = 999;
+    await writeFile(registryFilePath(), JSON.stringify({ schemaVersion: 1, clis: { 'synthetic-custom': custom } }), {
+      mode: 0o600,
+    });
+    reloadCliRegistry();
+    ctx = createMockRouteContext({ workspaceHooksEnabled: false, agentSkillEnabled: false });
+    app = Fastify({ logger: false });
+    await app.register(fastifyCookie);
+    registerSessionRoutes(app, ctx, { verifiedOwner: trustedFixtureOwner });
+    installRouteErrorHandler(app);
+    await app.ready();
+  });
+  afterEach(async () => {
+    await app.close();
+    vi.restoreAllMocks();
+    await rm(registryFilePath(), { force: true });
+    await rm(join(getDataDir(), 'docker-hosts.json'), { force: true });
+    await rm(join(getDataDir(), 'docker-cases.json'), { force: true });
+    reloadCliRegistry();
+    await rm(root, { recursive: true, force: true });
+    safeRmHomeTree(CASES_DIR);
+  });
+
+  it.each([undefined, null, 'unknown-policy', { install: true }])(
+    'refuses an unknown runtime policy before any workspace effect: %j',
+    async (policy) => {
+      const enabled = vi.fn(async () => true);
+      await expect(prepareWorkspaceHooks(root, policy as never, { scaffold: true, enabled })).rejects.toThrow(
+        'Unsupported workspace hook policy'
+      );
+      expect(enabled).not.toHaveBeenCalled();
+      expect(existsSync(join(root, '.claude'))).toBe(false);
+    }
+  );
+
+  it.each(modes)(
+    'session create %s preserves every unrelated settings byte and uses only its declared policy',
+    async (mode) => {
+      const before = await stale(root);
+      await start('/api/sessions', { name: 'synthetic-session', mode, workingDir: root });
+      const after = await readFile(file(root), 'utf8');
+      if (mode === 'claude') {
+        expect(after).toContain('X-Reverie-Hook-Secret');
+        expect(JSON.parse(after)).toMatchObject({
+          model: 'synthetic-model',
+          permissions: { allow: ['synthetic-rule'] },
+        });
+      } else expect(after).toBe(before);
+    }
+  );
+
+  it.each(modes)('fresh case %s authors hooks only for the declared local scaffold profile', async (mode) => {
+    const caseName = 'policy-fresh-' + mode;
+    await start('/api/quick-start', { caseName, mode });
+    const target = file(join(CASES_DIR, caseName));
+    expect(existsSync(target)).toBe(mode === 'claude' || mode === 'shell');
+    if (existsSync(target)) expect(await readFile(target, 'utf8')).toContain('X-Reverie-Hook-Secret');
+  });
+
+  it.each(modes)('existing case %s refreshes only opted-in hooks and retains custom settings', async (mode) => {
+    const caseName = 'policy-existing-' + mode;
+    const workspace = join(CASES_DIR, caseName);
+    const before = await stale(workspace);
+    await start('/api/quick-start', { caseName, mode });
+    const after = await readFile(file(workspace), 'utf8');
+    if (mode === 'opencode' || mode === 'synthetic-custom') expect(after).toBe(before);
+    else {
+      expect(after).toContain('X-Reverie-Hook-Secret');
+      expect(JSON.parse(after)).toMatchObject({ model: 'synthetic-model', permissions: { allow: ['synthetic-rule'] } });
+    }
+  });
+
+  it.each([
+    ['claude', true, true],
+    ['claude', false, false],
+    ['shell', true, false],
+    ['deepseek', true, false],
+    ['hands', true, false],
+    ['synthetic-custom', true, false],
+  ] as const)(
+    'Docker %s with hooksEnabled=%s separately enforces the declared session policy',
+    async (mode, enabled, installed) => {
+      await writeFile(
+        join(getDataDir(), 'docker-hosts.json'),
+        JSON.stringify([
+          { id: 'synthetic-docker', label: 'Synthetic Docker', image: 'synthetic-fixture', hooksEnabled: enabled },
+        ])
+      );
+      await writeFile(
+        join(getDataDir(), 'docker-cases.json'),
+        JSON.stringify([{ name: 'policy-docker', type: 'docker', hostId: 'synthetic-docker', hostWorkspacePath: root }])
+      );
+      await start('/api/quick-start', { caseName: 'policy-docker', mode });
+      expect(existsSync(file(root))).toBe(installed);
+      if (installed) expect(await readFile(file(root), 'utf8')).toContain('X-Reverie-Hook-Secret');
+    }
+  );
+});
+
 describe('POST /api/sessions workspace hooks', () => {
   let app: FastifyInstance;
   let workingDir: string;
@@ -82,7 +222,10 @@ describe('POST /api/sessions workspace hooks', () => {
     await app?.close();
     app = Fastify({ logger: false });
     await app.register(fastifyCookie);
-    registerSessionRoutes(app, createMockRouteContext({ workspaceHooksEnabled }), { ...({}), verifiedOwner: trustedFixtureOwner });
+    registerSessionRoutes(app, createMockRouteContext({ workspaceHooksEnabled }), {
+      ...{},
+      verifiedOwner: trustedFixtureOwner,
+    });
     installRouteErrorHandler(app);
     await app.ready();
   };
@@ -91,7 +234,7 @@ describe('POST /api/sessions workspace hooks', () => {
     workingDir = await mkdtemp(join(tmpdir(), 'reverie-workspace-hooks-'));
     app = Fastify({ logger: false });
     await app.register(fastifyCookie);
-    registerSessionRoutes(app, createMockRouteContext(), { ...({}), verifiedOwner: trustedFixtureOwner });
+    registerSessionRoutes(app, createMockRouteContext(), { ...{}, verifiedOwner: trustedFixtureOwner });
     installRouteErrorHandler(app);
     await app.ready();
   });
@@ -249,7 +392,7 @@ describe('POST /api/quick-start workspace hooks', () => {
     app = Fastify({ logger: false });
     await app.register(fastifyCookie);
     ctx = createMockRouteContext();
-    registerSessionRoutes(app, ctx, { ...({}), verifiedOwner: trustedFixtureOwner });
+    registerSessionRoutes(app, ctx, { ...{}, verifiedOwner: trustedFixtureOwner });
     installRouteErrorHandler(app);
     await app.ready();
   });

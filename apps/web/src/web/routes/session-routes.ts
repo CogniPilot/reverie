@@ -9,6 +9,7 @@ import { clampExternalCliBypassForOwner } from '../../session-config-clamp.js';
  */
 
 import { guardShellKey } from '../../opencode-input.js';
+import { prepareWorkspaceHooks, workspaceHookPolicy } from '../../workspace-hook-policy.js';
 import { FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { join, dirname, extname, basename } from 'node:path';
@@ -141,7 +142,6 @@ import { legacyConfigForMode } from '../../session-cli-registry-bridge.js';
 import { isMultiUserMode } from '../../config/multiuser.js';
 import { AUTH_COOKIE_NAME } from '../middleware/auth.js';
 import {
-  writeHooksConfig,
   updateCaseModel,
   stripCaseEnvKeys,
   agentSkillDir,
@@ -149,8 +149,6 @@ import {
   applyAgentSkill,
   refreshUserAgentSkill,
   seedAgentSessionPreamble,
-  applyWorkspaceHooks,
-  refreshStaleReverieHooks,
 } from '../../hooks-config.js';
 import { generateClaudeMd } from '../../templates/claude-md.js';
 import { imageWatcher } from '../../image-watcher.js';
@@ -868,12 +866,9 @@ async function injectAgentSkill(casePath: string, dir: AgentSkillDir): Promise<v
   }
 }
 
-// Workspace hooks: the install-vs-refresh decision core moved to
-// `applyWorkspaceHooks` in hooks-config.ts (imported above) so the non-route
-// claude create paths — cron fires, legacy scheduled runs, the plan-orchestrator
-// one-shots, the boot recovery sweep — share the SAME decision instead of
-// bypassing the `workspaceHooksEnabled` setting. Route handlers here resolve the
-// setting through the ConfigPort (tests stub it) and pass it as the second arg.
+// Registry workspace profiles choose authoring by creation phase. Their install
+// policy delegates to hooks-config's shared setting/refresh core, also used by
+// non-route creation paths. A runtime's lifecycle hook support grants no writes.
 
 /**
  * A "Resume"/"continue" request for a NEW omp-mode session (the frontend's
@@ -1356,8 +1351,10 @@ export function registerSessionRoutes(
     // as a junk local dir), and only when the caller named a workingDir: the
     // process-cwd fallback is $HOME under installer-created services, and hooks
     // materializing in ~/.claude/settings.local.json was never asked for.
-    if (!remote && body.workingDir && (body.mode ?? 'claude') === 'claude') {
-      await applyWorkspaceHooks(workingDir, await ctx.getWorkspaceHooksEnabled());
+    if (!remote && body.workingDir) {
+      await prepareWorkspaceHooks(workingDir, workspaceHookPolicy(body.mode ?? 'claude', 'sessionCreate'), {
+        scaffold: false, enabled: () => ctx.getWorkspaceHooksEnabled(),
+      });
     }
 
     // Refuse up front if the requested CLI cannot start, rather than spawning a pane that
@@ -4532,19 +4529,9 @@ export function registerSessionRoutes(
         const claudeMd = generateClaudeMd(caseName, '', templatePath);
         writeFileSync(join(resolvedCasePath, 'CLAUDE.md'), claudeMd);
 
-        // Write .claude/settings.local.json with hooks for desktop notifications
-        // (Claude-specific — OpenCode, Codex, Gemini, Antigravity, Pi, Grok, DeepSeek and OMP use their own systems)
-        if (
-          mode !== 'opencode' &&
-          mode !== 'codex' &&
-          mode !== 'gemini' &&
-          mode !== 'antigravity' &&
-          mode !== 'pi' &&
-          mode !== 'grok' &&
-          mode !== 'omp'
-        ) {
-          await writeHooksConfig(resolvedCasePath);
-        }
+        await prepareWorkspaceHooks(resolvedCasePath, workspaceHookPolicy(mode, 'freshCase'), {
+          scaffold: true, enabled: () => ctx.getWorkspaceHooksEnabled(),
+        });
 
         // Label a directory an AGENT asked us to create, so the scratch workspaces a
         // long orchestration leaves behind can be told apart from the user's real
@@ -4570,18 +4557,16 @@ export function registerSessionRoutes(
       } catch (err) {
         return createErrorResponse(ApiErrorCode.OPERATION_FAILED, `Failed to create case: ${getErrorMessage(err)}`);
       }
-    } else if (!remote && !docker && mode !== 'opencode') {
+    } else if (!remote && !docker) {
       // EXISTING case directory (a linked case, a cloned repo, anything Reverie did
       // not scaffold): install-or-refresh per the setting (see applyWorkspaceHooks).
       // Other modes keep the narrower COD-91 self-heal unconditionally: only claude
       // reads `.claude` hooks, so a shell/codex quick-start should not author a block
       // of its own. Skipped for remote cases — resolvedCasePath is a REMOTE path that
       // doesn't exist on the local filesystem.
-      if (getCli(mode)?.capabilities.hooks === 'always') {
-        await applyWorkspaceHooks(resolvedCasePath, await ctx.getWorkspaceHooksEnabled());
-      } else {
-        await refreshStaleReverieHooks(resolvedCasePath).catch(() => {});
-      }
+      await prepareWorkspaceHooks(resolvedCasePath, workspaceHookPolicy(mode, 'existingCase'), {
+        scaffold: false, enabled: () => ctx.getWorkspaceHooksEnabled(),
+      });
     }
 
     // Agent skill injection (docs/agent-control-plan.md §2): ADD-ONLY on create,
@@ -4598,24 +4583,20 @@ export function registerSessionRoutes(
     // Docker cases: the workspace is a REAL host dir bind-mounted into the container.
     // Scaffold hooks (+ a CLAUDE.md) if MISSING so in-container permission prompts and
     // hook-idle detection fire (decision: wire hooks now). Never clobbers an existing
-    // configured project. Claude mode ONLY — only claude reads `.claude` hooks, so a
-    // shell or external-CLI quick-start must not author a block of its own (the same
-    // rule the existing-case branch above states; this branch used to exclude just
-    // the five external CLIs and let `shell` through).
-    if (docker && docker.hooksEnabled && getCli(mode)?.capabilities.hooks === 'always') {
+    // configured project. Docker opt-in and the CLI's session-create policy are
+    // separate requirements; a local fresh-case scaffold never grants Docker access.
+    const dockerHooksPolicy = workspaceHookPolicy(mode, 'sessionCreate');
+    if (docker && docker.hooksEnabled && dockerHooksPolicy !== 'none') {
+      const policy = dockerHooksPolicy;
       try {
-        if (!existsSync(join(resolvedCasePath, 'CLAUDE.md'))) {
+        if (policy === 'install' && !existsSync(join(resolvedCasePath, 'CLAUDE.md'))) {
           const templatePath = await ctx.getDefaultClaudeMdPath();
           writeFileSync(join(resolvedCasePath, 'CLAUDE.md'), generateClaudeMd(caseName, '', templatePath));
         }
-        if (!existsSync(join(resolvedCasePath, '.claude', 'settings.local.json'))) {
-          await writeHooksConfig(resolvedCasePath);
-        } else {
-          // A settings file with no hooks in it is the same dead-surface case as a
-          // linked case. This branch is already gated on `docker.hooksEnabled`, and
-          // applyWorkspaceHooks adds the user-level gate on top.
-          await applyWorkspaceHooks(resolvedCasePath, await ctx.getWorkspaceHooksEnabled());
-        }
+        await prepareWorkspaceHooks(resolvedCasePath, policy, {
+          scaffold: !existsSync(join(resolvedCasePath, '.claude', 'settings.local.json')),
+          enabled: () => ctx.getWorkspaceHooksEnabled(),
+        });
       } catch {
         /* non-fatal — the session still runs, hooks may be degraded */
       }
