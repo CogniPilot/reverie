@@ -649,6 +649,12 @@ function partialMuxFailure() {
       writeGateOpen,
       pastesInsteadOfKeys,
       execAsync: async (command: string) => {
+        if (command === 'mock-tmux send-keys -t "fixture-alice" Enter') {
+          if (failEnter) throw new Error('Enter failed after text was typed');
+          return;
+        }
+        if (!command.includes(' send-keys ') || !command.includes(' -l '))
+          throw new Error('Unexpected owned mux command: ' + command);
         textWrites.push(command);
       },
       console: { log() {}, warn() {}, error() {} },
@@ -661,9 +667,6 @@ function partialMuxFailure() {
     submitIo: () => ({
       capture: () => null,
       sleep: async () => {},
-      sendEnter: async () => {
-        if (failEnter) throw new Error('Enter failed after text was typed');
-      },
     }),
   };
   return {
