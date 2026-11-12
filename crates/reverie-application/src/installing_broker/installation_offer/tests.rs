@@ -1,6 +1,22 @@
 //! Real installing broker/runtime; a past original deadline must refuse before
 //! native origin, nonce or publication. No successful native offer is forged.
 use super::*;
+pub(in crate::installing_broker) fn unopened_shared_fixture() -> (
+    std::path::PathBuf,
+    Arc<InstallingBroker>,
+    SharedInstallationOffer,
+) {
+    let (root, broker) =
+        super::super::recovered::tests::Tree::bootstrap_parts("", "admission", 512, 4096);
+    let mut owner = BrokerInstallationOffer::unopened(
+        broker,
+        request(),
+        Instant::now() + Duration::from_secs(30),
+    );
+    owner.snapshot = Some(owner.broker.configuration().unwrap());
+    let broker = Arc::clone(&owner.broker);
+    (root, broker, SharedInstallationOffer::retain(owner))
+}
 pub(in crate::installing_broker) fn request() -> PoolInstallationRequestData {
     let data = serde_json::json!({"purpose":"host-pool-installation-request-v1","version":1,
         "principal":{"accountId":"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",

@@ -263,7 +263,7 @@ describe('counts while a message arrives', () => {
 
 describe('feed grouping', () => {
   const MIN = 60_000;
-  const day = (d: number, h = 12) => new Date(2026, 9, d, h, 0, 0).getTime();
+  const day = (d: number, h = 12) => Date.UTC(2026, 9, d, h, 0, 0);
   const m = (id: string, at: number, who = 'alpha', kind = 'agent', to: string | string[] = 'all'): Msg => ({
     id,
     at,
@@ -299,6 +299,31 @@ describe('feed grouping', () => {
     expect(items[2].label).toBe('October 11, 2026');
     expect((items[3] as { head: boolean }).head).toBe(true);
     expect((items[4] as { head: boolean }).head).toBe(false);
+  });
+
+  it('uses the actual company timezone for both grouping and labels across midnight and DST', () => {
+    const zoned = vm.createContext({});
+    vm.runInContext(readFileSync(resolve(import.meta.dirname, '../src/web/public/chat-app.js'), 'utf8'), zoned);
+    vm.runInContext(`
+      globalThis.window = globalThis;
+      globalThis.document = { addEventListener() {} };
+      globalThis.addEventListener = () => {};
+      globalThis.dispatchEvent = () => {};
+      globalThis.CustomEvent = class { constructor(name, options) { this.detail = options.detail; } };
+    `, zoned);
+    vm.runInContext(readFileSync(resolve(import.meta.dirname, '../src/web/public/display-time.js'), 'utf8'), zoned);
+    for (const [zone, first, second, days] of [
+      ['America/New_York', '2026-10-11T03:59:00Z', '2026-10-11T04:01:00Z', ['October 10, 2026', 'October 11, 2026']],
+      ['America/New_York', '2026-11-01T05:59:00Z', '2026-11-01T06:01:00Z', ['November 1, 2026']],
+      ['America/New_York', '2026-11-02T04:59:00Z', '2026-11-02T05:01:00Z', ['November 1, 2026', 'November 2, 2026']],
+      ['Asia/Tokyo', '2026-10-10T14:59:00Z', '2026-10-10T15:01:00Z', ['October 10, 2026', 'October 11, 2026']],
+    ] as const) {
+      vm.runInContext(`ReverieTime.setTimeZone(${JSON.stringify(zone)})`, zoned);
+      const feed = vm.runInContext('caFeedItems', zoned) as typeof caFeedItems;
+      const items = feed([m('1', Date.parse(first)), m('2', Date.parse(second))]);
+      expect(items.filter(item => item.type === 'day').map(item => item.label)).toEqual(days);
+      expect(items.filter(item => item.type === 'message').map(item => item.head)).toEqual([true, days.length > 1]);
+    }
   });
 
   it('puts a NEW divider before the first unread agent message only', () => {

@@ -31,6 +31,7 @@ fn allowed(key: &str) -> bool {
         "REVERIE_PARENT_SESSION_ID",
         "REVERIE_API_URL",
         "REVERIE_HOOK_SECRET_FILE",
+        "REVERIE_HOOK_GENERATION",
         "DISABLE_AUTOUPDATER",
         "DISABLE_UPDATES",
     ];

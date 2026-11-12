@@ -2,6 +2,7 @@ import { afterEach, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 import { JSDOM } from 'jsdom';
+import {frontendDeclarations} from './helpers/frontend-declarations.js';
 
 const windows: JSDOM[] = [];
 afterEach(() => { for (const dom of windows.splice(0)) dom.window.close(); });
@@ -9,13 +10,11 @@ afterEach(() => { for (const dom of windows.splice(0)) dom.window.close(); });
 function render(blockers: object[]) {
   const html = readFileSync(new URL('../src/web/public/board.html', import.meta.url), 'utf8');
   const script = /<script>([\s\S]*)<\/script>/.exec(html)![1];
-  const start = script.indexOf('/* ---------- Lists ---------- */');
-  const end = script.indexOf('/* ---------- Waiting on you');
   const dom = new JSDOM('<ul id="wins"></ul><ul id="blockers"></ul><ul id="pins"></ul>');
   windows.push(dom);
   const context = vm.createContext({ document: dom.window.document, B: { wins: [], blockers, pins: [] },
     startOfDay: () => 0, hm: () => '09:00', dayLbl: () => 'Mon, 1 Jan', nameOf: (who: string) => who, css: (name: string) => `var(${name})` });
-  new vm.Script(`${/const esc = .*/.exec(script)![0]}\n${script.slice(start, end)}\nlists();`).runInContext(context);
+  new vm.Script(`${frontendDeclarations(script, ['esc', 'when', 'lists'])}\nlists();`).runInContext(context);
   return dom.window.document;
 }
 

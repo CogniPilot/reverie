@@ -23,3 +23,130 @@ Docker's [container commit](https://docs.docker.com/reference/cli/docker/contain
 pauses the selected container and excludes mounted-volume data, so an image
 commit cannot provide this shared-data backup. Coordinated shared-writer
 quiescence remains a product workflow requirement.
+
+## Retained expert startup
+
+The template-hiring API keeps employment (`active` or `retired`) separate from its
+startup journal. New hires move from `prepared` to a durably recorded `issued`
+before launch. `launch-returned` means the launch adapter returned; it is not
+evidence that an employee is online or ready. A rejected launch keeps the same
+employee, session, generation, rooms and hire record as `recovery-required`.
+An identity-binding or pre-launch refusal can leave `not-issued`; it does not
+authorize another launch. Notice and audit confirmations are reported separately
+and never cause a launched employee to be deleted or stopped.
+
+Owner-approved requests retain a closed creation reservation before invoking
+session creation. `creation-issued` carries no SID and makes no claim that a
+session exists; only `session-bound` carries the actual returned SID before
+canonical employee creation. An unresolved reservation counts against
+capacity. A linked approval cannot be approved again or declined to reset its
+startup. Inspect `GET /api/experts` and the employee profile; use only existing
+explicitly authorized recovery workflows. This journal neither enrolls a new
+employee into an already-installed native pool nor grants resource authority.
+
+The experts store reads version 1 records as `legacy` without inventing a launch
+receipt. The next confirmed write uses version 2. The previous version-1 reader
+rejects version 2 on a fresh load, but a previously loaded old process can cache
+version 1: migration requires a single stopped old writer and one new writer.
+Do not run an older console concurrently or downgrade it over the version-2
+store. There is no cross-process CAS in this store.
+
+A write rejection may occur after rename. An exact private authority refusal
+from the canonical writer's pre-rename callback proves that publication did not
+occur and leaves the writer usable. Other write failures remain ambiguous. The current process blocks further
+hiring writes and session creation rather than overwriting disk with its older
+cache. A fresh process reads the stored journal without replaying startup.
+Cross-store creation is not atomic: session creation without a returned SID,
+or canonical creation before its first hire-record write, can still require
+supported reconciliation or idempotent creation. An empty current list cannot
+clear or replay an uncertain creation. No SID, missing record or reservation
+is treated as absence proof, launch permission or native enrollment authority.
+Hire diagnostics and requests are filtered by exact owner scope, including the
+template detail route. Missing legacy owner values remain unscoped; they are not
+assigned to a named owner. Templates, settings and capacity limits remain
+instance-wide, so global quota counts can exceed the caller's visible hire rows.
+Both owner and delegate template hires carry a private, revocable creation fence
+through the ordinary authenticated session API. The exact request, payload and
+owner remain bound across preparation and the layout lock; owner credentials
+are not replaced with delegate credentials. A refused, unregistered Session
+disposes local trackers without provider or mux signals. An error response never
+authorizes destructive cleanup of a returned session ID.
+Template hires recheck the same admission predicate, original Session object and
+owner inside the canonical company-store lock and again before employee-record
+publication. Room invitations are awaited and any failure is observed before
+startup; they do not trigger deletion of the published identity.
+
+## Unconfirmed provider dispatch and held approvals
+
+Mandatory workspace-hook preparation must finish before a provider launch. A
+successful file write is configuration evidence, not provider readiness. The
+local process adapter reports a separate dispatch boundary; a positive PID
+without that boundary does not prove a successful launch. If dispatch may have
+occurred but completion cannot be confirmed, the Session retains its attempted
+configuration and exposes `providerDispatchHeld: true` in its state. That field
+is a persisted denial, not a capability: omitting it or sending `false` cannot
+clear the private hold on an existing Session. Automatic retries and ordinary
+input are refused. Read-only viewer attachment remains separate.
+
+The original employee/conversation launch reservation becomes nonexpiring while
+dispatch is in progress or unconfirmed. A predecessor cannot release a newer
+reservation. These reservations currently live in the console process; durable
+before-dispatch journaling and crash reconciliation are still required. Inspect
+the existing terminal and preserve the original Session identity. There is no
+supported same-Session API to clear this hold. Restarting the console is not
+proof that the original provider stopped and does not authorize replay.
+
+`GET /api/approvals` and approval SSE events project `answerState: current` or
+`answerState: held`, with a diagnostic `heldReason`. The server binds answer
+authority to the original Session, provider epoch and owner account; the GUI
+does not grant that authority. An answer that may have reached the terminal
+stays held rather than being automatically resent. Human clients retain their
+draft and disable answer buttons; API clients must inspect the conflict and
+wait for a genuinely current prompt. Refreshing an inbox cannot certify an
+unconfirmed answer as safe to repeat.
+
+## Unconfirmed canonical replacement publication
+
+Candidate cleanup on a failed replacement carries the original in-process
+Session, owner, local transport record and PID identity through storage waits,
+the owner layout lock, and process termination. Losing that identity refuses
+cleanup; it does not authorize stopping a successor with the same session ID.
+An unproved native/remote/container stop also refuses before changing running
+intent. The API reports `candidate-cleanup-unconfirmed`, retains the original
+replacement claim and intent, and requires recovery rather than replay.
+Guarded cleanup preserves optional workspace/upload/subagent artifacts instead
+of deleting them by session ID. It signals only the original verified local
+process identities, requires observed pane death or absence, and preserves any
+dead tmux pane rather than killing a potentially reused name. Live or unknown
+readback requires recovery. This does not add native stop/reconciliation
+authority or qualify the older unguarded cleanup paths.
+
+Canonical employee replacement distinguishes a refusal before its current
+rename was issued from an uncertain rename or later publication failure. The
+current writer is held after uncertainty; it cannot overwrite the stored
+binding from its previous cache. A known authority refusal before rename does
+not poison that writer. This fence belongs to one process and is not a
+cross-process exclusion or durable reconciliation journal.
+
+Once a binding reservation has been published, a later room, validation,
+publication or identity-notification error cannot authorize deletion of the
+replacement Session, restoration of an older binding or rollback of running
+intent. The API returns a conflict with `recoveryRequired: true`,
+`reason: binding-publication-unconfirmed` and the original employee/session
+identifiers. These are diagnostics: only the actual private service attempt
+and original Session can produce the retained outcome. An obsolete attempt
+never overwrites a newer Session or owner while persisting diagnostics.
+
+A plan move receiving this conflict stays `recovery-required`, even when
+creation did not return a candidate SID. It does not invent that SID, stop a
+candidate, restore an old binding or offer another move. Human and headless
+clients must preserve the operation and inspect the existing state. Supported
+canonical binding reconciliation is not implemented. A restart, a fresh cache
+or a readable row is not proof that an uncertain operation may be replayed;
+coordinated old-writer exclusion and durable reconciliation remain required.
+
+Fresh native-worker generation/configuration transport is not qualified by the
+local process adapter tests or by Office header-forwarding tests. Native
+enrollment, durable launch and canonical binding reconciliation remain release
+blockers. Do not deploy this partial qualification
+as proof of complete native employee recovery.

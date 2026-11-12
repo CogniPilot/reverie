@@ -1,3 +1,4 @@
+import { registerMuxFixture } from './helpers/registered-mux-fixture.js';
 import {afterEach, expect, it, vi} from 'vitest';
 import {Session} from '../src/session.js';
 const FOOTER='  gpt-6.1-sol high · /owned/fixture';
@@ -16,6 +17,7 @@ it('a delayed gated Enter cannot spend the claim of a different ordinary write s
  })};
  session=new Session({id:'test-session-1',workingDir:'/owned/fixture',mode:'codex',useMux:true,mux:mux as never,
   muxSession:{muxName:'reverie-owned-writer',sessionId:'test-session-1',pid:42}as never});
+ registerMuxFixture(session);
  expect(await session.writeViaMux('wake\r',{requireIdle:true,requireEmptyComposer:true})).toBe(true);
  pending=session.writeViaMux('ordinary\r');
  await Promise.resolve();

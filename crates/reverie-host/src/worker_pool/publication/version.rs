@@ -67,7 +67,7 @@ impl ControllerBirthPublication {
     }
     fn verify_file(&self, file: &File, mode: u32) -> Result<native::Stamp> {
         let before = file.metadata()?;
-        let ids = self.birth.broker().ids();
+        let ids = self.birth_data().broker().ids();
         need(
             before.is_file()
                 && before.nlink() == 1

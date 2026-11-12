@@ -1,3 +1,4 @@
+import {TerminalInputAttempt} from './terminal-input-outcome.js';
 import { cliConfigContent } from './cli-config-content.js';
 /**
  * @fileoverview tmux session manager for persistent Claude sessions.
@@ -24,7 +25,7 @@ import { cliConfigContent } from './cli-config-content.js';
 
 import { randomBytes } from 'node:crypto';
 import { pasteDeliveryEnabled, typeIntoOpencode } from './opencode-input.js';
-import { pastesInsteadOfKeys, typeAndSubmit, writeGateActive, writeGateOpen, type SubmitSettleIo, type TurnSignals } from './submit-settle.js';
+import { pastesInsteadOfKeys, typeAndSubmit, writeGateActive, writeGateOpen, writeGateTypedUnsent, type SubmitSettleIo, type TurnSignals } from './submit-settle.js';
 import { EventEmitter } from 'node:events';
 import { collectDescendants } from './proc-tree.js';
 import { isSameProcess, parseLivePane, PANE_LIVENESS_FORMAT, readProcStat, resolveLivePaneTarget, signalDescendants } from './signal-target.js';
@@ -112,6 +113,7 @@ import {
 } from './utils/index.js';
 import type {
   TerminalMultiplexer,
+  MuxInputOptions,
   MuxSession,
   MuxSessionWithStats,
   CreateSessionOptions,
@@ -2122,8 +2124,10 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
           timeout: EXEC_TIMEOUT_MS,
           stdio: ['pipe', 'pipe', 'pipe'],
         });
-      } catch (err) {
-        console.warn(`[TmuxManager] Failed to set env override ${key}:`, err);
+      } catch {
+        // Never log the command: it may contain private environment values.
+        if (key === 'REVERIE_HOOK_GENERATION') throw new Error('Hook generation environment could not be installed');
+        console.warn(`[TmuxManager] Failed to set env override ${key}`);
       }
     }
   }
@@ -2295,6 +2299,8 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
 
     // TEST MODE: Create in-memory session only — no real tmux session
     if (IS_TEST_MODE) {
+      if (options.admitted && !options.admitted()) throw new Error('Session launch is no longer admitted');
+      options.onProviderDispatch?.();
       const session: MuxSession = {
         sessionId,
         muxName,
@@ -2441,6 +2447,8 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
       // Replace the shell with the actual command (no echo in terminal). Keep
       // pane launch in /tmp, then cd inside bash against the current mount table.
       const launchCmd = remote || docker ? fullCmd : `cd ${shellescape(workingDir)} && ${fullCmd}`;
+      if (options.admitted && !options.admitted()) throw new Error('Session launch is no longer admitted');
+      options.onProviderDispatch?.();
       execSync(
         buildTmuxPaneLaunchCommand(this.tmux(), muxName, launchCmd),
         {
@@ -2645,6 +2653,14 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
     const muxName = session.muxName;
 
     if (!isValidMuxName(muxName) || !isValidPath(workingDir)) return null;
+    if (IS_TEST_MODE) {
+      if ((options.stillCurrent && !options.stillCurrent()) || (options.admitted && !options.admitted())) return null;
+      options.onProviderDispatch?.();
+      session.mode = mode;
+      session.remote = remote;
+      session.docker = docker;
+      return session.pid || 99999;
+    }
 
     // Resolve CLI binary directory based on mode
     const { pathExport } = this.buildPathExport(mode);
@@ -2708,6 +2724,7 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
       // -c /tmp + cd bounce — see createSession() for rationale (stale FUSE state).
       const launchCmd = remote || docker ? fullCmd : `cd ${shellescape(workingDir)} && ${fullCmd}`;
       if ((options.stillCurrent && !options.stillCurrent()) || (options.admitted && !options.admitted())) return null;
+      options.onProviderDispatch?.();
       await execAsync(
         buildTmuxPaneLaunchCommand(this.tmux(), muxName, launchCmd, options.onlyIfDead),
         {
@@ -2861,11 +2878,27 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
    * Uses a 4-strategy approach (children → process group → tmux kill → SIGKILL).
    * In test mode: removes from memory only (no real kill).
    */
-  async killSession(sessionId: string): Promise<boolean> {
+  async killSessionIfCurrent(sessionId: string, original: MuxSession, admitted: () => boolean): Promise<boolean> {
+    const fields = {sessionId: original.sessionId, muxName: original.muxName, pid: original.pid,
+      createdAt: original.createdAt, owner: original.owner, mode: original.mode,
+      remote: original.remote, docker: original.docker, discovered: original.discovered};
+    return this.killSession(sessionId, () => admitted() && original.sessionId === sessionId
+      && Object.entries(fields).every(([key, value]) => original[key as keyof MuxSession] === value), original);
+  }
+
+  async killSession(sessionId: string, admitted?: () => boolean, original?: MuxSession): Promise<boolean> {
     const session = this.sessions.get(sessionId);
     if (!session) {
       return false;
     }
+
+    const assertCurrent = () => {
+      if (admitted && (!admitted() || this.sessions.get(sessionId) !== original || session !== original))
+        throw new Error('Candidate cleanup required: original mux record changed');
+    };
+    assertCurrent();
+    if (admitted && (session.remote || session.docker || session.discovered))
+      throw new Error('Candidate cleanup required: original local mux authority is unavailable');
 
     // COD-108: an intentional kill/detach must NEVER be auto-revived by the
     // remote-reconnect watcher. Guard BEFORE any teardown so a tick that fires
@@ -2938,6 +2971,9 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
           stat: readProcStat,
         })
       : { target: null, pane: { state: 'unreadable' as const } };
+    assertCurrent();
+    if (admitted && (!target || target.pid !== session.pid))
+      throw new Error('Candidate cleanup required: original live pane identity was not verified');
     const currentPid = target?.pid ?? null;
 
     console.log(
@@ -2950,8 +2986,9 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
     // its identity under the verified pane, and that identity and its whole parent
     // chain are re-checked right before every signal (see signalDescendants): a pid
     // that has since exited, been reparented or reused is skipped, never signalled.
-    const deps = { stat: readProcStat, kill: (p: number, sig: NodeJS.Signals) => process.kill(p, sig), selfPid: process.pid, selfPgid };
+    const deps = { stat: readProcStat, kill: (p: number, sig: NodeJS.Signals) => { assertCurrent(); return process.kill(p, sig); }, selfPid: process.pid, selfPgid };
     let childPids = target ? await this.getChildPidsFresh(target.pid) : [];
+    assertCurrent();
     if (target && childPids.length > 0) {
       const term = signalDescendants(target, childPids, 'SIGTERM', deps);
       console.log(`[TmuxManager] Found ${childPids.length} child processes, ${term.bound.length} verified, to kill`);
@@ -2962,6 +2999,7 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
       await waitForProcessesExit(term.bound, { timeoutMs: TMUX_KILL_WAIT_MS });
 
       childPids = isSameProcess(target, readProcStat) ? await this.getChildPidsFresh(target.pid) : [];
+      assertCurrent();
       const kill = signalDescendants(target, childPids, 'SIGKILL', deps);
       const skipped = term.skipped + kill.skipped;
       if (skipped > 0) {
@@ -2969,11 +3007,13 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
       }
     }
 
+    assertCurrent();
     // Strategy 2: Kill the entire process group — only one the pane itself leads
     if (target?.ownGroup && isSameProcess(target, readProcStat)) {
       try {
         process.kill(-target.pid, 'SIGTERM');
         await waitForProcessesExit([target.pid], { timeoutMs: GRACEFUL_SHUTDOWN_WAIT_MS });
+        assertCurrent();
         if (isSameProcess(target, readProcStat)) {
           process.kill(-target.pid, 'SIGKILL');
         }
@@ -2982,10 +3022,11 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
       }
     }
 
+    assertCurrent();
     // Strategy 3: Kill tmux session by name (guard the name before it reaches the shell).
     // Async: tmux takes tens of ms to tear a session down, and execSync held the
     // whole server for that long on every close.
-    if (isValidMuxName(session.muxName)) {
+    if (!admitted && isValidMuxName(session.muxName)) {
       try {
         await execAsync(`${this.tmux()} kill-session -t "=${session.muxName}" 2>/dev/null`, {
           timeout: EXEC_TIMEOUT_MS,
@@ -2995,12 +3036,13 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
       }
     }
 
+    assertCurrent();
     // Strategy 3b: Remote sessions run a DURABLE tmux server on the remote host
     // (survives ssh drops), so killing only the local ssh wrapper above would
     // orphan the remote agent forever. Fire a best-effort `ssh … tmux kill-session`
     // — fire-and-forget so it NEVER blocks or throws the local kill (bounded by the
     // shared ConnectTimeout on an unreachable host).
-    if (session.remote) {
+    if (!admitted && session.remote) {
       try {
         const remoteKillCmd = buildRemoteKillCommand({ remote: session.remote, sessionId });
         exec(remoteKillCmd, { timeout: EXEC_TIMEOUT_MS }, () => {});
@@ -3013,7 +3055,7 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
     // ONLY this session's in-container tmux session (best-effort). The container is
     // PER-CASE and shared by the case's other sessions, so we deliberately do NOT
     // `docker stop` it here — stopping/removing is an explicit teardown/case-delete.
-    if (session.docker && !IS_TEST_MODE) {
+    if (!admitted && session.docker && !IS_TEST_MODE) {
       try {
         exec(buildDockerKillCommand({ docker: session.docker, sessionId }), { timeout: EXEC_TIMEOUT_MS }, () => {});
       } catch {
@@ -3021,6 +3063,7 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
       }
     }
 
+    assertCurrent();
     // Strategy 4: Direct kill by PID as final fallback (same verified process only)
     if (target && isSameProcess(target, readProcStat)) {
       try {
@@ -3032,8 +3075,19 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
 
     // Verify all processes are dead
     const allDead = await this.verifyProcessesDead(allPids, KILL_VERIFY_TIMEOUT_MS);
+    assertCurrent();
+    if (admitted && !allDead) throw new Error('Candidate cleanup required: original process exit was not confirmed');
     if (!allDead) {
       console.error(`[TmuxManager] Warning: Some processes may still be alive for session ${session.muxName}`);
+    }
+
+    if (admitted) {
+      // Signals above remain bound to the original process/startTime. Never
+      // follow them with a name-based kill that could destroy a respawned pane.
+      const observed = parseLivePane(await this.listPanesAsync(), session.muxName);
+      assertCurrent();
+      if (observed.state !== 'dead' && observed.state !== 'missing')
+        throw new Error('Candidate cleanup required: no authoritative pane death or absence was observed');
     }
 
     this.lastPaneCount.delete(session.muxName);
@@ -3810,8 +3864,19 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
    * - `Enter` key is sent as a SEPARATE tmux invocation after a small delay
    * - Ink (Claude CLI) needs text and Enter split to avoid treating Enter as a newline
    */
-  async sendInput(sessionId: string, input: string, options: { opencode?: boolean | 'person'; requireEmptyComposer?: boolean; stillIdle?: () => boolean } = {}): Promise<boolean> {
+  async sendInput(sessionId: string, input: string, options: MuxInputOptions = {}): Promise<boolean> {
+    const attempt = new TerminalInputAttempt();
     const session = this.sessions.get(sessionId);
+    const originalName = session?.muxName, originalPid = session?.pid;
+    const admitted = () => attempt.continuing() && this.sessions.get(sessionId) === session
+      && session?.muxName === originalName && session?.pid === originalPid && (!options.admitted || options.admitted());
+    if (!admitted()) return false;
+    const dispatch = async (command: string, execOptions: {timeout: number}, terminalEffect = true) => {
+      if (!admitted()) throw attempt.fail(new Error('Input provider authority changed')) ?? new Error('Input provider authority changed');
+      if (terminalEffect) attempt.beforeEffect();
+      try {return await execAsync(command, execOptions);}
+      catch (cause) {throw attempt.fail(cause) ?? cause;}
+    };
     if (!session) {
       console.error(
         `[TmuxManager] sendInput failed: no session found for ${sessionId}. Known: ${Array.from(this.sessions.keys()).join(', ')}`
@@ -3854,10 +3919,10 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
           {
             tmux: (args, stdin) =>
               stdin === undefined
-                ? execAsync(`${tmux} ${args.map(shellescape).join(' ')}`, { timeout: EXEC_TIMEOUT_MS }).then(() => undefined)
-                : execAsync(`printf %s ${shellescape(stdin)} | ${tmux} ${args.map(shellescape).join(' ')}`, {
+                ? dispatch(`${tmux} ${args.map(shellescape).join(' ')}`, { timeout: EXEC_TIMEOUT_MS }, args[0] !== 'load-buffer' && args[0] !== 'delete-buffer').then(() => undefined)
+                : dispatch(`printf %s ${shellescape(stdin)} | ${tmux} ${args.map(shellescape).join(' ')}`, {
                     timeout: EXEC_TIMEOUT_MS,
-                  }).then(() => undefined),
+                  }, args[0] !== 'load-buffer' && args[0] !== 'delete-buffer').then(() => undefined),
             capture: () => this.capturePaneText(session.muxName),
             sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
             log: (m) => console.log(m),
@@ -3875,7 +3940,7 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
         if (outcome === 'blocked') {
           console.warn(`[TmuxManager] ${session.muxName} stayed in OpenCode shell mode after Escape: text left unsent, Enter withheld`);
         }
-        return outcome !== 'not-written';
+        return attempt.finish(outcome !== 'not-written' || writeGateTypedUnsent(), admitted());
       }
 
       if (textPart && hasCarriageReturn) {
@@ -3887,34 +3952,41 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
         // Codex holds part of a long key burst back, so long text goes to it as a real bracketed paste (pastesInsteadOfKeys).
         const io = {
           ...this.submitIo(session.muxName),
+          sendEnter: () => dispatch(`${this.tmux()} send-keys -t "${session.muxName}" Enter`, {timeout: EXEC_TIMEOUT_MS}),
           typeText: (text: string) => {
             if (!pastesInsteadOfKeys(session.mode, text)) {
-              return execAsync(`${this.tmux()} send-keys -t "${session.muxName}" -l ${shellescape(text)}`, { timeout: EXEC_TIMEOUT_MS });
+              return dispatch(`${this.tmux()} send-keys -t "${session.muxName}" -l ${shellescape(text)}`, { timeout: EXEC_TIMEOUT_MS });
             }
             const buffer = `reverie-${randomBytes(6).toString('hex')}`;
             // A gated write's gate is checked again once the buffer is staged: closed, nothing is pasted (false: not typed).
-            return execAsync(`printf %s ${shellescape(text)} | ${this.tmux()} load-buffer -b ${buffer} -`, { timeout: EXEC_TIMEOUT_MS })
-              .then<unknown>(() => writeGateOpen()
-                ? execAsync(`${this.tmux()} paste-buffer -p -d -b ${buffer} -t "${session.muxName}"`, { timeout: EXEC_TIMEOUT_MS })
+            return dispatch(`printf %s ${shellescape(text)} | ${this.tmux()} load-buffer -b ${buffer} -`, { timeout: EXEC_TIMEOUT_MS }, false)
+              .then<unknown>(() => writeGateOpen() && admitted()
+                ? dispatch(`${this.tmux()} paste-buffer -p -d -b ${buffer} -t "${session.muxName}"`, { timeout: EXEC_TIMEOUT_MS })
                 : execAsync(`${this.tmux()} delete-buffer -b ${buffer}`, { timeout: EXEC_TIMEOUT_MS }).catch(() => undefined).then(() => false as const));
           },
         };
-        const outcome = await typeAndSubmit(io, textPart, this.turnSignals(session.mode), `[TmuxManager] ${session.muxName}`, options.requireEmptyComposer, options.stillIdle);
-        if (outcome === 'not-written') return false;
+        const outcome = await typeAndSubmit(io, textPart, this.turnSignals(session.mode), `[TmuxManager] ${session.muxName}`, options.requireEmptyComposer,
+          options.admitted ? () => admitted() && (!options.stillIdle || options.stillIdle()) : options.stillIdle);
+        // A positively completed text write with Enter deliberately withheld is
+        // known, not an RPC failure. The enclosing gate records typed-unsent;
+        // changed provider authority still fails closed here.
+        if (outcome === 'not-written') return attempt.finish(writeGateTypedUnsent(), admitted());
       } else if (textPart) {
         // Text only, no Enter
-        await execAsync(`${this.tmux()} send-keys -t "${session.muxName}" -l ${shellescape(textPart)}`, {
+        await dispatch(`${this.tmux()} send-keys -t "${session.muxName}" -l ${shellescape(textPart)}`, {
           timeout: EXEC_TIMEOUT_MS,
         });
       } else if (hasCarriageReturn) {
         // Enter only
-        await execAsync(`${this.tmux()} send-keys -t "${session.muxName}" Enter`, {
+        await dispatch(`${this.tmux()} send-keys -t "${session.muxName}" Enter`, {
           timeout: EXEC_TIMEOUT_MS,
         });
       }
 
-      return true;
+      return attempt.finish(true, admitted());
     } catch (err) {
+      const unconfirmed = attempt.fail(err);
+      if (unconfirmed) throw unconfirmed;
       console.error('[TmuxManager] Failed to send input:', err);
       return false;
     }

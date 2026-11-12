@@ -167,7 +167,7 @@ describe('workspace helpers while other mounts are unreachable', () => {
     const within = <T>(work: Promise<T>) =>
       Promise.race([work, new Promise<'hung'>((resolve) => setTimeout(() => resolve('hung'), 2_000))]);
 
-    expect(await within(applyWorkspaceHooks('/mnt/dead-nas-c/project', true))).toBeUndefined();
+    expect(await within(applyWorkspaceHooks('/mnt/dead-nas-c/project', true))).toMatchObject({state: 'unconfirmed'});
     expect(await within(resolveStatusLineCliCommand('/mnt/dead-nas-d/project', true))).toBeUndefined();
     expect(existsSync('/mnt/dead-nas-c/project')).toBe(false);
   });

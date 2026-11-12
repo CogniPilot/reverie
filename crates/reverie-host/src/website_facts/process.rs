@@ -2,8 +2,10 @@
 mod ancestry;
 mod provider;
 mod read;
+mod setup;
 pub use ancestry::PeerInitSnapshot;
 pub use provider::ProviderProcessObservation;
+pub use setup::{SetupNodeObservation, SetupNodeSelection};
 #[cfg(test)]
 pub(crate) mod tests;
 use super::{

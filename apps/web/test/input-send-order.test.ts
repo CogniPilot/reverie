@@ -170,7 +170,7 @@ describe('durable input delivery — send ordering', () => {
 });
 
 describe('definitive input outcomes never wedge or replay the durable POST queue', () => {
-  it.each([422, 409])('removes definitive %s durably, warns truthfully, then delivers later input once', async (status) => {
+  it.each([422, 409])('settles definitive %s without replay, holding later input when delivery is unknown', async (status) => {
     const storage = new Map<string, string>([['reverie:clientId', 'c-test']]);
     const AppClass = loadReverieAppClass(storage);
     const app = makeApp(AppClass);
@@ -195,6 +195,23 @@ describe('definitive input outcomes never wedge or replay the durable POST queue
     try {
       app._sendInputAsync('session-1', 'first\r');
       app._sendInputAsync('session-1', 'second\r');
+      if (status === 422) {
+        await waitForCalls(calls, 1);
+        await new Promise(resolve => setTimeout(resolve, 0));
+        expect(calls.map(body => body.seq)).toEqual([1]);
+        expect(app._pendingDeliveries.get('session-1')?.map(rec => rec.seq)).toEqual([2]);
+        const saved = JSON.parse(storage.get('reverie:pendingInput')!);
+        expect(saved.heldSessions).toContain('session-1');
+        expect(saved.pending['session-1'].map((rec: {seq: number}) => rec.seq)).toEqual([2]);
+        const reload = makeApp(AppClass);
+        prototype._loadReliableState.call(reload);
+        reload._drainSession('session-1');
+        await new Promise(resolve => setTimeout(resolve, 0));
+        expect(calls.map(body => body.seq)).toEqual([1]);
+        expect(toast).toHaveBeenCalledOnce();
+        expect(toast.mock.calls[0][0]).toMatch(/unconfirmed/i);
+        return;
+      }
       await waitForCalls(calls, 2);
       expect(calls.map((body) => body.seq)).toEqual([1, 2]);
       expect(app._pendingDeliveries.get('session-1')?.map((rec) => rec.data)).toEqual(['second\r']);

@@ -36,13 +36,19 @@ interface TunnelStatus {
   url: string | null;
 }
 
+export interface QrIdentityBinding {
+  readonly username: string;
+  readonly credentialFingerprint: string;
+}
+type QrTokenConsumption = { ok: false } | { ok: true; identity: Readonly<QrIdentityBinding> | undefined };
+
 interface QrTokenRecord {
   token: string; // 64 hex chars (256 bits)
   shortCode: string; // 6 chars base62 (for URL path)
   createdAt: number; // Date.now()
   consumed: boolean; // single-use flag
   /** Multi-user: the user this token logs in when redeemed (absent = rotating global token). */
-  username?: string;
+  identity?: Readonly<QrIdentityBinding>;
 }
 
 /** Rejection-sampled base62 short code — no modulo bias */
@@ -369,12 +375,12 @@ export class TunnelManager extends EventEmitter {
   }
 
   /**
-   * Like consumeToken, but also returns the bound username for multi-user tokens
+   * Like consumeToken, but also returns the issuance-time credential binding for multi-user tokens
    * (undefined for the rotating global token). Only the identity-less rotating
    * token triggers an immediate re-rotation (desktop gets a fresh QR); per-user
    * tokens are on-demand and self-expire.
    */
-  consumeTokenWithIdentity(shortCode: string): { ok: boolean; username?: string } {
+  consumeTokenWithIdentity(shortCode: string): QrTokenConsumption {
     // Global rate limit (across all IPs)
     if (this.qrAttemptCount >= QR_RATE_LIMIT_MAX) return { ok: false };
     this.qrAttemptCount++;
@@ -388,22 +394,24 @@ export class TunnelManager extends EventEmitter {
 
     // Atomic consume (single-threaded JS = no race)
     record.consumed = true;
-    const username = record.username;
-    if (!username) {
+    const identity = record.identity;
+    if (!identity) {
       // Rotating global token — immediately rotate so desktop gets a fresh QR.
       this.rotateToken();
       this.emit('qrTokenRegenerated');
     } else {
       this.qrTokensByCode.delete(shortCode);
     }
-    return { ok: true, username };
+    return { ok: true, identity };
   }
 
   /**
    * Multi-user: mint a single-use token bound to a specific user (on-demand, no
    * rotation). Evicts expired/consumed tokens first. Returns the short code.
    */
-  mintUserToken(username: string): string {
+  mintUserToken(identity: QrIdentityBinding): string {
+    if (!identity.username || !/^[a-f0-9]{64}$/.test(identity.credentialFingerprint))
+      throw new Error('Current QR authentication binding required');
     const now = Date.now();
     for (const [code, rec] of this.qrTokensByCode) {
       if (now - rec.createdAt > QR_TOKEN_GRACE_MS || rec.consumed) this.qrTokensByCode.delete(code);
@@ -413,7 +421,7 @@ export class TunnelManager extends EventEmitter {
       shortCode: generateShortCode(),
       createdAt: Date.now(),
       consumed: false,
-      username,
+      identity: Object.freeze({ username: identity.username, credentialFingerprint: identity.credentialFingerprint }),
     };
     this.qrTokensByCode.set(record.shortCode, record);
     return record.shortCode;

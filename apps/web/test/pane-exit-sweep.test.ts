@@ -263,15 +263,19 @@ describe('a session the server is closing', () => {
       workingDir: '/tmp',
       mode: 'shell',
       useMux: true,
-      mux: { isAvailable: () => true } as unknown as TerminalMultiplexer,
+      mux: { isAvailable: () => true, createSession: vi.fn(), respawnPane: vi.fn() } as unknown as TerminalMultiplexer,
       muxSession: { muxName: 'reverie-aaaa', sessionId: 'aaaa' } as unknown as MuxSession,
     });
 
   it('refuses to start, so a racing start cannot orphan a tmux session', async () => {
     const s = session();
     s.markClosing(true);
-    await expect(s.startInteractive()).rejects.toThrow('Session is being closed');
+    await expect(s.startInteractive()).rejects.toThrow('Session launch authorization changed');
     await expect(s.startShell()).rejects.toThrow('Session is being closed');
+    const mux = (s as unknown as {_mux: TerminalMultiplexer})._mux;
+    expect(mux.createSession).not.toHaveBeenCalled();
+    expect(mux.respawnPane).not.toHaveBeenCalled();
+    expect(s.pid).toBeNull();
   });
 
   it('is cleared again when the server gives the close up', async () => {
@@ -303,7 +307,6 @@ describe('a session the server is closing', () => {
 describe('the pane lifecycle mark on Session', () => {
   it('is raised for the whole of restartCli and lowered afterwards, even on failure', async () => {
     let seenDuring: boolean | null = null;
-    let session: Session;
     const mux = {
       isAvailable: () => true,
       muxSessionExists: () => true,
@@ -313,7 +316,7 @@ describe('the pane lifecycle mark on Session', () => {
       },
       clearPaneExit: () => {},
     } as unknown as TerminalMultiplexer;
-    session = new Session({
+    const session = new Session({
       workingDir: '/tmp',
       mode: 'claude',
       useMux: true,

@@ -17,7 +17,9 @@ pub enum Action {
     Status,
     ProviderHealth,
     StorageStatus,
+    PoolRecoveryStatus,
     StopLaptops,
+    QuiesceForDeployment,
 }
 impl Action {
     pub(crate) fn name(self) -> &'static str {
@@ -25,7 +27,9 @@ impl Action {
             Self::Status => "status",
             Self::ProviderHealth => "provider-health",
             Self::StorageStatus => "storage-status",
+            Self::PoolRecoveryStatus => "pool-recovery-status",
             Self::StopLaptops => "stop-laptops",
+            Self::QuiesceForDeployment => "quiesce-for-deployment",
         }
     }
 }
@@ -53,8 +57,30 @@ pub fn call(
         return Err(Error::new("Private worker deadline exceeded"));
     }
     let mut connection = Connection::at(endpoint, Some(deadline.min(now + LIMIT)))?;
-    let result = exchange(&mut connection, json!({"action": action.name()}));
+    let result = if matches!(action, Action::QuiesceForDeployment) {
+        exchange_quiesce(&mut connection)
+    } else {
+        exchange(&mut connection, json!({"action": action.name()}))
+    };
     connection.finish(result).map(|bytes| Reply { bytes })
+}
+/// A successful reply is only the original drained handoff, not stopped-unit,
+/// native global closure or deployment permission. Never resend after failure.
+pub(crate) fn exchange_quiesce(connection: &mut Connection) -> crate::Result<Vec<u8>> {
+    connection.send(b'C', br#"{"action":"quiesce-for-deployment"}"#)?;
+    let reply = connection.receive(MAX_FRAME)?;
+    let value: Value = serde_json::from_slice(&reply.payload)?;
+    if reply.kind != b'J'
+        || !value.as_object().is_some_and(|fields| {
+            fields.len() == 2
+                && fields.get("action").and_then(Value::as_str) == Some("quiesce-for-deployment")
+                && fields.get("success").and_then(Value::as_bool) == Some(true)
+        })
+    {
+        return Err(Error::new("Deployment quiescence was not acknowledged"));
+    }
+    connection.validate_quiesced()?;
+    Ok(reply.payload)
 }
 pub(crate) fn exchange(connection: &mut Connection, request: Value) -> crate::Result<Vec<u8>> {
     connection.send(b'C', &serde_json::to_vec(&request)?)?;

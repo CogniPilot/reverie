@@ -282,7 +282,7 @@ describe('GET /api/sessions/:id/wait-output', () => {
       pendings.push(app.inject({ method: 'GET', url: `${URL}?match=never${i}` }));
     }
     for (let i = 0; i < 8; i++) {
-      pendings.push(app.inject({ method: 'GET', url: `/api/sessions/${SESSION_ID}/wait?until=stop` }));
+      pendings.push(app.inject({ method: 'GET', url: `/api/sessions/${SESSION_ID}/wait?until=exit` }));
     }
     await new Promise((resolve) => setTimeout(resolve, 40));
     expect(sessionWaits.waiterCount(SESSION_ID)).toBe(16);
@@ -307,7 +307,7 @@ describe('GET /api/sessions/:id/wait-output', () => {
 
     const pendings = [];
     for (let i = 0; i < 16; i++) {
-      pendings.push(app.inject({ method: 'GET', url: `/api/sessions/${SESSION_ID}/wait?until=stop` }));
+      pendings.push(app.inject({ method: 'GET', url: `/api/sessions/${SESSION_ID}/wait?until=exit` }));
     }
     await new Promise((resolve) => setTimeout(resolve, 40));
     expect(sessionWaits.waiterCount(SESSION_ID)).toBe(16);

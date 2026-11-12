@@ -40,7 +40,7 @@ pub fn decode_requests(metadata: &OrderedMetadata) -> Result<GpuRequestDocument>
     }
     Ok(GpuRequestDocument::try_new(requests)?)
 }
-fn decode_row(value: &Value) -> Result<GpuQueuedRequest> {
+pub(crate) fn decode_row(value: &Value) -> Result<GpuQueuedRequest> {
     let error = || GpuDataError::Core(GpuAccessError::RequestStore);
     let fields = object(value)
         .filter(|fields| {

@@ -41,6 +41,15 @@ const observations: any[] = [];
 const ctx = createMockRouteContext();
 ctx.sessions.clear();
 const expertLoad = vi.fn(async () => {});
+// This fixture isolates HTTP principal classification. Its stable synthetic
+// target has no concurrent lifecycle changes; the real CompanyService action
+// fence is exercised by the company and wake transaction suites.
+const requireRecovery = vi.fn();
+const recoveryAction = vi.fn((employeeId: string, _owner: string | undefined, callerSessionId?: string) => {
+  expect(employeeId).toBe('employee');
+  expect(callerSessionId).toBeUndefined();
+  return { require: requireRecovery, current: () => true };
+});
 const headers = () => ({ [SERVICE_HEADER]: token });
 beforeAll(async () => {
   dir = await mkdtemp(join(tmpdir(), 'owner-principal-synthetic-'));
@@ -74,6 +83,7 @@ beforeAll(async () => {
     ctx,
     {
       view: () => ({ employees: [{ id: 'employee', name: 'Synthetic', onVacation: false, permissions: {} }], settings: {} }),
+      recoveryAction,
       rebind: async () => {
         rebindCalls++;
         return { id: 'employee' };
@@ -186,6 +196,7 @@ it('refuses headerless service reaching company owner capability and wake branch
   });
   expect(r.statusCode, r.body).toBe(403);
   expect(wakeCalls).toBe(0);
+  expect(recoveryAction).not.toHaveBeenCalled();
   observations.push({
     route: 'POST /api/company/employees/:id/wake',
     status: r.statusCode,
@@ -318,6 +329,8 @@ it('full owner retains the six operations with real same-origin owner authentica
     expect(r.statusCode, r.body).toBe(200);
   }
   expect([wakeCalls, rebindCalls, placementCalls, powerCalls]).toEqual([1, 1, 1, 1]);
+  expect(recoveryAction).toHaveBeenCalledTimes(1);
+  expect(requireRecovery).toHaveBeenCalledTimes(1);
 });
 it('other credentials and mixed service/agent headers cannot enter owner branches or mutate anything', async () => {
   const requests = [

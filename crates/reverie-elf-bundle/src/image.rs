@@ -6,24 +6,29 @@ use std::{fs, path::Path};
 pub enum ImageLayout {
     Memory,
     Perf,
+    Idmap,
 }
 impl ImageLayout {
     pub const fn prefix(self) -> &'static str {
         match self {
             Self::Memory => "/opt/reverie/memory",
             Self::Perf => "/opt/reverie/perf",
+            Self::Idmap => "/opt/reverie-idmap",
         }
     }
     pub const fn absent_fallback(self) -> &'static str {
         match self {
             Self::Memory => "/opt/rvmem/",
             Self::Perf => "/opt/rvprf/",
+            Self::Idmap => "/opt/idmap/",
         }
     }
     pub const fn absent_preload(self) -> &'static str {
         match self {
             Self::Memory => "/opt/rvmem/preload.off",
             Self::Perf => "/opt/rvprf/preload.off",
+            // Preserve the existing ID-map builder's system-preload behavior.
+            Self::Idmap => "/etc/ld-nix.so.preload",
         }
     }
     pub fn install_libraries(
@@ -60,7 +65,10 @@ impl ImageLayout {
             let origin = tools
                 .patch(&["--print-rpath"], path)?
                 .split(':')
-                .filter(|value| value.starts_with("$ORIGIN") || value.starts_with("${ORIGIN}"))
+                .filter(|value| {
+                    !matches!(self, Self::Idmap)
+                        && (value.starts_with("$ORIGIN") || value.starts_with("${ORIGIN}"))
+                })
                 .map(str::to_owned)
                 .collect::<Vec<_>>();
             let rpath = std::iter::once(format!("{}/lib", self.prefix()))

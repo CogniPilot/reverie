@@ -44,6 +44,10 @@ async function harness(): Promise<{ app: FastifyInstance; ctx: MockRouteContext;
   const app = Fastify({ logger: false });
   await app.register(fastifyCookie);
   const ctx = createMockRouteContext({ sessionId: SESSION_ID });
+  // This transport-only route fixture models a start whose hook configuration
+  // was prepared. Actual receipt/generation ownership is tested with real Session.
+  Object.defineProperty(ctx._session, 'workspaceHookConfiguration', {get: () => 'prepared'});
+  ctx._session.setMaxListeners(25); // Same bound as the real Session; waiter cap is sixteen.
   const rawRequests: IncomingMessage[] = [];
   app.addHook('onRequest', async (req) => {
     rawRequests.push(req.raw);
@@ -67,13 +71,13 @@ async function harness(): Promise<{ app: FastifyInstance; ctx: MockRouteContext;
 const send = (app: FastifyInstance, payload: Record<string, unknown>) =>
   app.inject({ method: 'POST', url: URL, payload });
 
-describe('POST /api/sessions/:id/input without wait (unchanged behavior)', () => {
-  it('returns the historical bare body and registers no waiter', async () => {
+describe('POST /api/sessions/:id/input without a completion wait', () => {
+  it('returns explicit pending mux acceptance and registers no completion waiter', async () => {
     const { app } = await harness();
     const res = await send(app, { input: 'hello', useMux: true });
 
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toEqual({});
+    expect(res.json()).toEqual({pending: true});
     expect(sessionWaits.totalWaiterCount()).toBe(0);
   });
 
@@ -86,7 +90,7 @@ describe('POST /api/sessions/:id/input without wait (unchanged behavior)', () =>
     session.writeViaMux = () => new Promise<boolean>((resolve) => (resolveWrite = resolve));
 
     const res = await send(app, { input: 'hello', useMux: true });
-    expect(res.json()).toEqual({});
+    expect(res.json()).toEqual({pending: true});
     resolveWrite(true);
   });
 
@@ -99,15 +103,17 @@ describe('POST /api/sessions/:id/input without wait (unchanged behavior)', () =>
     expect(sessionWaits.totalWaiterCount()).toBe(0);
   });
 
-  it('a failed direct write is still not an error response', async () => {
-    // A session can legitimately have no PTY yet, and callers have always been able
-    // to write to one without a 4xx. Only the `wait` path reports delivery.
+  it('a known failed direct write is an explicit retryable refusal, never a delivery ACK', async () => {
     const { app, ctx } = await harness();
     ctx.sessions.get(SESSION_ID)!.failWrites = true;
 
-    const res = await send(app, { input: 'x' });
-    expect(res.statusCode).toBe(200);
-    expect(res.json()).toEqual({});
+    const res = await send(app, { input: 'x', clientId: 'known-none', seq: 1 });
+    expect(res.statusCode).toBe(409);
+    expect(res.json()).toMatchObject({success: false, errorCode: 'SESSION_BUSY', data: {delivered: false}});
+    expect(res.json().recoveryRequired).toBeUndefined();
+    expect(ctx.sessions.get(SESSION_ID)!.writeBuffer).toEqual([]);
+    expect(ctx.sessions.get(SESSION_ID)!.inputSeqSpent('known-none', 1)).toBe(false);
+    expect(sessionWaits.totalWaiterCount()).toBe(0);
   });
 });
 
@@ -139,9 +145,10 @@ describe('POST /api/sessions/:id/input with wait', () => {
     sessionWaits.notifySignal(SESSION_ID, 'stop');
     const { data } = (await pending).json();
 
-    expect(Object.keys(data).sort()).toEqual(['delivered', 'duplicate', 'limitPaused', 'status', 'wait']);
+    expect(Object.keys(data).sort()).toEqual(['delivered', 'duplicate', 'limitPaused', 'status', 'wait', 'workerDead']);
     expect(data.status).toBe('idle');
     expect(data.limitPaused).toBe(false);
+    expect(data.workerDead).toBe(false);
     expect(data.wait.aborted).toBe(false);
   });
 
@@ -553,7 +560,7 @@ describe('POST /api/sessions/:id/input: the pane is dead', () => {
     (ctx.mux as unknown as { isPaneDead: (n: string) => boolean }).isPaneDead = () => dead;
   }
 
-  it('reports delivered:false even though the mux write "succeeded"', async () => {
+  it('refuses an already observed dead pane before issuing any input', async () => {
     const { app, ctx } = await harness();
     const session = ctx.sessions.get(SESSION_ID)!;
     setPaneDead(ctx, true);
@@ -561,8 +568,8 @@ describe('POST /api/sessions/:id/input: the pane is dead', () => {
     const res = await send(app, { input: 'run the tests', useMux: true, wait: 'stop', waitTimeout: 600_000 });
     const body = res.json();
 
-    // The write itself did not fail — that is the whole trap.
-    expect(session.writeBuffer.join('')).toContain('run the tests');
+    // Refusal precedes the write, so its original tag can remain safely retryable.
+    expect(session.writeBuffer).toEqual([]);
     expect(body.data.delivered).toBe(false);
     expect(body.data.duplicate).toBe(false);
   });

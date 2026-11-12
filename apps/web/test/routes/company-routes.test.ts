@@ -334,8 +334,14 @@ describe('company HTTP ownership and expert invites', () => {
     expect(selfGrant.statusCode).toBe(403);
     await service.update(lead.id, undefined, { position: 'Engineer', permissions: { recoverEmployees: true } });
     expect((await app.inject(request)).statusCode).toBe(200);
-    expect(wake).toHaveBeenCalledWith(target.id);
+    expect(wake).toHaveBeenCalledWith(target.id, { stillCurrent: expect.any(Function) });
     expect((await app.inject({ method: 'POST', url: request.url })).statusCode).toBe(200);
+  });
+  it('rejects unsupported wake options instead of silently implying a forced start', async () => {
+    const target = await service.hire(hireBody);
+    const result = await app.inject({method: 'POST', url: `/api/company/employees/${target.id}/wake`, payload: {force: true}});
+    expect(result.statusCode).toBe(400);
+    expect(wake).not.toHaveBeenCalled();
   });
 
   it('allows owner hiring, discovery and assignment while blocking agent configuration', async () => {

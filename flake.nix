@@ -310,24 +310,30 @@
           inherit pkgs serviceAuthConfig; src = source;
           packages = import ./nix/package.nix { inherit pkgs; src = source; };
         };
-      lib.workerDockerImage = { system, uid, gid, subuidStart ? 100000, subgidStart ? 100000, subidCount ? 65536, browser ? false }:
-        let pkgs = pkgsFor system; packages = packagesFor system;
+      lib.workerRuntimePackages = { system, runtimeSource ? source, runtimePkgs ? pkgsFor system, runChecks ? true }:
+        import ./nix/worker-runtime-packages.nix {
+          pkgs = runtimePkgs; src = runtimeSource; artifactSource = source; inherit runChecks;
+        };
+      lib.workerDockerImage = { system, uid, gid, subuidStart ? 100000, subgidStart ? 100000, subidCount ? 65536, browser ? false, runtimePackages ? packagesFor system, perfGuestCapsule ? runtimePackages.nativePerfGuestCapsule }:
+        let pkgs = pkgsFor system; packages = runtimePackages;
         in assert builtins.isBool browser; import ./nix/image.nix {
-          inherit pkgs; src = source;
+          inherit pkgs runtimePackages; src = source;
           inherit (packages) reverie console memory runtime;
           worker = true;
+          inherit perfGuestCapsule;
           rootlessDocker = { inherit uid gid subuidStart subgidStart subidCount; };
           browserRuntime = if browser then packages.browserRuntime else null;
         };
-      lib.workerDockerImageProvenance = { system, uid, gid, subuidStart ? 100000, subgidStart ? 100000, subidCount ? 65536, browser ? false }:
+      lib.workerDockerImageProvenance = { system, uid, gid, subuidStart ? 100000, subgidStart ? 100000, subidCount ? 65536, browser ? false, runtimePackages ? packagesFor system, perfGuestCapsule ? runtimePackages.nativePerfGuestCapsule }:
         let
           pkgs = pkgsFor system;
           arguments = { inherit system uid gid subuidStart subgidStart subidCount browser; };
         in import ./nix/worker-image-provenance.nix {
           inherit pkgs; src = source;
-          image = self.lib.workerDockerImage arguments;
-          toolkit = self.packages.${system}.humanTerminalToolkit;
-          workerChild = self.packages.${system}.workerChild;
+          image = self.lib.workerDockerImage (arguments // { inherit perfGuestCapsule runtimePackages; });
+          toolkit = runtimePackages.humanTerminalToolkit;
+          workerChild = runtimePackages.workerChild;
+          artifacts = runtimePackages.policyArtifacts;
           factory = { name = "lib.workerDockerImage"; } // arguments;
         };
       lib.workerChildImageAnnex = { system, baseProvenance }:
@@ -522,6 +528,10 @@
               # getfattr and getfacl: deployment snapshot tests read extended attributes and ACLs.
               pkgs.gnutar pkgs.attr pkgs.acl (pkgs.lib.getBin pkgs.util-linux)
             ] ++ pkgs.lib.optionals pkgs.stdenv.isLinux [ pkgs.iproute2 ];
+            REVERIE_FIXED_BUILD_GNUTAR = "${pkgs.gnutar}/bin/tar";
+            REVERIE_FIXED_BUILD_TIMEOUT = "${pkgs.coreutils}/bin/timeout";
+            REVERIE_FIXED_BUILD_GZIP_PATH = "${pkgs.gzip}/bin";
+            REVERIE_TEST_CONTROLLER_PROGRAM = "${import ./nix/controller-program-test-fixture.nix { inherit pkgs; }}/bin/reverie-worker-resource-controller";
             shellHook = ''
               export PYTHONPATH="$PWD/python''${PYTHONPATH:+:$PYTHONPATH}"
               export REVERIE_LEASE_DIR="''${REVERIE_LEASE_DIR:-''${REVERIE_ROOT:-$HOME/reverie}/runtime/leases}"

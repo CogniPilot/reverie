@@ -20,6 +20,16 @@ pub(super) fn check(item: &Value, mounts: &Value) -> Result<()> {
     mounts::require_unmasked(mounts)?;
     environment(required(item, "Config")?)
 }
+
+/// Pure candidate settings only: no container, process or owner is qualified.
+pub(super) fn settings(raw: &[u8]) -> Result<()> {
+    need(raw.len() <= MAX_ENGINE_BODY, "ENGINE_METADATA_UNAVAILABLE")?;
+    let value = legacy_json::decode_strict_bytes(raw)
+        .map_err(|_| ResourceActorDataError("ENGINE_METADATA_UNAVAILABLE"))?;
+    closed(&value, &["Config", "HostConfig", "Mounts"])?;
+    let mounts = mounts::normalize(required(&value, "Mounts")?)?;
+    check(&value, &mounts)
+}
 fn cap_drop(value: Option<&Value>) -> bool {
     matches!(value, Some(Value(Node::Array(values))) if values.len() == 1 && matches_text(&values[0], "ALL"))
 }

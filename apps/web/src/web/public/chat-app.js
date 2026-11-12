@@ -24,9 +24,21 @@
 let caEmbassyIncomingInvite = typeof window !== 'undefined' ? caEmbassyTakeFragment(window) : null;
 
 const caBoardPermissionFields = [
-  ['editBoardIssues', 'Update own board work', 'File cards into triage, update your own cards, and record your own wins and focus.'],
-  ['manageBoard', 'Manage company board', 'Edit and reassign all cards, manage milestones and blockers, and import schedules. Includes updating own board work.'],
-  ['manageDecisions', 'Prepare decision cards', 'Prepare, annotate and dismiss decision cards and poll notes. Only the owner can choose an answer. Creating choices also requires the site’s decision-write setting.'],
+  [
+    'editBoardIssues',
+    'Update own board work',
+    'File cards into triage, update your own cards, and record your own wins and focus.',
+  ],
+  [
+    'manageBoard',
+    'Manage company board',
+    'Edit and reassign all cards, manage milestones and blockers, and import schedules. Includes updating own board work.',
+  ],
+  [
+    'manageDecisions',
+    'Prepare decision cards',
+    'Prepare, annotate and dismiss decision cards and poll notes. Only the owner can choose an answer. Creating choices also requires the site’s decision-write setting.',
+  ],
 ];
 
 /** Badge text for a count; large counts stop growing. */
@@ -51,12 +63,13 @@ const CA_WAKE_SKIPS = {
   'lifecycle-in-progress': 'a restart or office change is in progress for them',
   'changed-or-stopping': 'they changed or are stopping',
   'not-desired': 'they are out of office',
-  'disabled-or-retry-limited': 'a restart is running for them, or their wake limit (three in fifteen minutes) is reached',
+  'disabled-or-retry-limited':
+    'a restart is running for them, or their wake limit (three in fifteen minutes) is reached',
   'intentionally-ended': 'their session was ended on purpose. Use Restart session to resume it',
   'no-owned-session-record': 'there is no saved session to start',
   'not-previously-running': 'they were not running before',
   'wake-failed': 'their agent did not start. Check Runtime settings, or use Restart session',
-  'ineligible': 'their saved session cannot be started this way. Use Restart session',
+  ineligible: 'their saved session cannot be started this way. Use Restart session',
   'no-persisted-record': 'there is no saved session to start',
   'not-running': 'they were not running before. Use Restart session to start them',
   'agent-exited': 'their agent was ended on purpose. Use Restart session to resume it',
@@ -102,7 +115,14 @@ function caProfileIcons(company) {
   const out = new Map();
   const add = (list) => {
     for (const r of Array.isArray(list) ? list : []) {
-      if (r && typeof r.sessionId === 'string' && r.sessionId && typeof r.icon === 'string' && r.icon.trim() && !out.has(r.sessionId)) {
+      if (
+        r &&
+        typeof r.sessionId === 'string' &&
+        r.sessionId &&
+        typeof r.icon === 'string' &&
+        r.icon.trim() &&
+        !out.has(r.sessionId)
+      ) {
         out.set(r.sessionId, r.icon.trim());
       }
     }
@@ -117,7 +137,8 @@ function caProfileAvatars(company) {
   const out = new Map();
   const add = (list) => {
     for (const r of Array.isArray(list) ? list : []) {
-      if (r && typeof r.sessionId === 'string' && r.sessionId && caIconImage(r.avatar) && !out.has(r.sessionId)) out.set(r.sessionId, String(r.avatar).trim());
+      if (r && typeof r.sessionId === 'string' && r.sessionId && caIconImage(r.avatar) && !out.has(r.sessionId))
+        out.set(r.sessionId, String(r.avatar).trim());
     }
   };
   add(company?.employees);
@@ -138,7 +159,8 @@ function caIsDm(room) {
 function caEmployeeBySession(company) {
   const out = new Map();
   for (const e of Array.isArray(company?.employees) ? company.employees : []) {
-    if (e && typeof e.sessionId === 'string' && e.sessionId && typeof e.id === 'string' && e.id) out.set(e.sessionId, e.id);
+    if (e && typeof e.sessionId === 'string' && e.sessionId && typeof e.id === 'string' && e.id)
+      out.set(e.sessionId, e.id);
   }
   return out;
 }
@@ -146,7 +168,10 @@ function caEmployeeBySession(company) {
 function caEmployeeForSender(company, from) {
   if (from?.kind !== 'agent') return undefined;
   const employees = Array.isArray(company?.employees) ? company.employees : [];
-  const matches = employees.filter((employee) => employee && (from.employeeId ? employee.id === from.employeeId : employee.sessionId === from.sessionId));
+  const matches = employees.filter(
+    (employee) =>
+      employee && (from.employeeId ? employee.id === from.employeeId : employee.sessionId === from.sessionId)
+  );
   return matches.length === 1 ? matches[0] : undefined;
 }
 
@@ -167,17 +192,20 @@ function caPronounsProblem(text) {
 function caProfilePronouns(company) {
   const out = new Map();
   for (const e of Array.isArray(company?.employees) ? company.employees : []) {
-    if (e && typeof e.sessionId === 'string' && e.sessionId && typeof e.pronouns === 'string' && e.pronouns.trim()) out.set(e.sessionId, e.pronouns.trim());
+    if (e && typeof e.sessionId === 'string' && e.sessionId && typeof e.pronouns === 'string' && e.pronouns.trim())
+      out.set(e.sessionId, e.pronouns.trim());
   }
   return out;
 }
 
 /** A member's 'doing' Board cards (`focus`, read from the Board by the server) as one line, or ''. */
 function caFocusLine(m) {
-  const cards = Array.isArray(m?.focus) ? m.focus.filter(c => c && typeof c.id === 'string' && typeof c.title === 'string') : [];
+  const cards = Array.isArray(m?.focus)
+    ? m.focus.filter((c) => c && typeof c.id === 'string' && typeof c.title === 'string')
+    : [];
   if (!cards.length) return '';
   const more = Number.isInteger(m.focusMore) && m.focusMore > 0 ? ` · +${m.focusMore} more` : '';
-  return `${cards.map(c => `${c.id} ${c.title}`).join(' · ')}${more}`;
+  return `${cards.map((c) => `${c.id} ${c.title}`).join(' · ')}${more}`;
 }
 
 /**
@@ -188,7 +216,14 @@ function caPronounsProposal(messages, sessionId) {
   const list = Array.isArray(messages) ? messages : [];
   for (let i = list.length - 1; i >= 0; i--) {
     const msg = list[i];
-    if (!msg || msg.deleted || msg.from?.kind !== 'agent' || msg.from.sessionId !== sessionId || typeof msg.text !== 'string') continue;
+    if (
+      !msg ||
+      msg.deleted ||
+      msg.from?.kind !== 'agent' ||
+      msg.from.sessionId !== sessionId ||
+      typeof msg.text !== 'string'
+    )
+      continue;
     const at = msg.text.indexOf(CA_PRONOUNS_PROPOSAL);
     if (at < 1 || !msg.text.endsWith(CA_PRONOUNS_PROPOSAL_END)) continue;
     const rest = msg.text.slice(at + CA_PRONOUNS_PROPOSAL.length);
@@ -222,11 +257,15 @@ function caRoomGlyph(room) {
  * The drawn marks, in a 20x20 box, filled or stroked with currentColor so every skin colours them. The lock is the same
  * small badge in the lower right of both. Fixed constants of this file, never user input.
  */
-const CA_LOCK_BADGE = '<rect x="11.6" y="11.4" width="7" height="6" rx="1.2" fill="currentColor" stroke="none"/><path d="M13.2 11.4V9.9a1.9 1.9 0 0 1 3.8 0v1.5" fill="none"/>';
+const CA_LOCK_BADGE =
+  '<rect x="11.6" y="11.4" width="7" height="6" rx="1.2" fill="currentColor" stroke="none"/><path d="M13.2 11.4V9.9a1.9 1.9 0 0 1 3.8 0v1.5" fill="none"/>';
 const CA_GLYPHS = {
   private: '<path d="M7.4 3 5.6 15.5M12.4 3 11.6 7.6M2.8 6.6h9.6M2.2 11.4h8"/>' + CA_LOCK_BADGE,
-  voice: '<path d="M3 7.6h3.2l4.3-3.6v12l-4.3-3.6H3z" fill="currentColor" stroke-linejoin="round"/><path d="M13.6 7.2a4 4 0 0 1 0 5.6M15.8 5a7 7 0 0 1 0 10" fill="none"/>',
-  'voice-private': '<path d="M2.4 6.6h3l4-3.4v11.6l-4-3.4h-3z" fill="currentColor" stroke-linejoin="round"/><path d="M12 5.2a5.2 5.2 0 0 1 .4 3" fill="none"/>' + CA_LOCK_BADGE,
+  voice:
+    '<path d="M3 7.6h3.2l4.3-3.6v12l-4.3-3.6H3z" fill="currentColor" stroke-linejoin="round"/><path d="M13.6 7.2a4 4 0 0 1 0 5.6M15.8 5a7 7 0 0 1 0 10" fill="none"/>',
+  'voice-private':
+    '<path d="M2.4 6.6h3l4-3.4v11.6l-4-3.4h-3z" fill="currentColor" stroke-linejoin="round"/><path d="M12 5.2a5.2 5.2 0 0 1 .4 3" fill="none"/>' +
+    CA_LOCK_BADGE,
 };
 
 function caRoomLabel(room) {
@@ -281,9 +320,7 @@ function caChannelItems(rooms, workspace, collapsed, activeId) {
   const fold = collapsed || {};
   const wsKey = workspace || '';
   const out = [];
-  const mine = (Array.isArray(rooms) ? rooms : []).filter(
-    (r) => r && !caIsDm(r) && (r.workspace || '') === wsKey
-  );
+  const mine = (Array.isArray(rooms) ? rooms : []).filter((r) => r && !caIsDm(r) && (r.workspace || '') === wsKey);
   const live = caByPosition(mine.filter((r) => !r.archivedAt));
   const row = (r, depth) => ({
     type: 'room',
@@ -307,9 +344,7 @@ function caChannelItems(rooms, workspace, collapsed, activeId) {
   for (const cat of categories) {
     const key = `cat:${wsKey}/${cat.name}`;
     const folded = !!cat.name && !!fold[key];
-    const rows = cat.rooms
-      .map((r) => row(r, cat.name ? 1 : 0))
-      .filter((r) => !folded || r.unread > 0 || r.active);
+    const rows = cat.rooms.map((r) => row(r, cat.name ? 1 : 0)).filter((r) => !folded || r.unread > 0 || r.active);
     if (cat.name) {
       const totals = cat.rooms.reduce(
         (t, r) => {
@@ -378,7 +413,8 @@ function caDmItems(rooms, activeId, closed = {}, employeeOf = new Map()) {
       active: r.id === activeId,
     }));
   const name = (i) => (i.pair && i.peer?.name ? String(i.peer.name).trim().toLowerCase() : '');
-  const same = (a, b) => (a.employeeId && b.employeeId ? a.employeeId === b.employeeId : !!name(a) && name(a) === name(b));
+  const same = (a, b) =>
+    a.employeeId && b.employeeId ? a.employeeId === b.employeeId : !!name(a) && name(a) === name(b);
   // The main chat of a person: the first live one in list order, else the first.
   const mains = [];
   for (const i of items) {
@@ -416,13 +452,15 @@ function caFoldedUnreadIds(rooms, openId, closed, employeeOf) {
  */
 function caWorkspaceItems(rooms, defaultName) {
   const list = Array.isArray(rooms) ? rooms : [];
-  const home = list.filter((r) => r && caIsDm(r)).reduce(
-    (t, r) => {
-      const c = caCounts(r);
-      return { unread: t.unread + c.unread, mentions: t.mentions + c.mentions };
-    },
-    { unread: 0, mentions: 0 }
-  );
+  const home = list
+    .filter((r) => r && caIsDm(r))
+    .reduce(
+      (t, r) => {
+        const c = caCounts(r);
+        return { unread: t.unread + c.unread, mentions: t.mentions + c.mentions };
+      },
+      { unread: 0, mentions: 0 }
+    );
   const spaces = [];
   for (const r of list) {
     if (!r || caIsDm(r)) continue;
@@ -462,8 +500,12 @@ function caTotals(rooms) {
 /** Does the text `@name` the owner (`@user`, `@owner`, their own name) or the whole room (`@everyone`)? Same rule as the server's. */
 function caMentionsOwner(text, ownerNames) {
   if (typeof text !== 'string' || !text) return false;
-  const names = ['user', 'owner', 'everyone', ...(Array.isArray(ownerNames) ? ownerNames : [])].filter((n) => typeof n === 'string' && n.trim());
-  return names.some((n) => new RegExp(`(^|[^\\w@])@${n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\w-])`, 'i').test(text));
+  const names = ['user', 'owner', 'everyone', ...(Array.isArray(ownerNames) ? ownerNames : [])].filter(
+    (n) => typeof n === 'string' && n.trim()
+  );
+  return names.some((n) =>
+    new RegExp(`(^|[^\\w@])@${n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\w-])`, 'i').test(text)
+  );
 }
 
 /**
@@ -474,13 +516,17 @@ function caMentionsOwner(text, ownerNames) {
 function chatCountsAfterMessage(room, message, ownerNames, humanId = 'owner') {
   const unread = Number(room?.unread) || 0;
   const mentions = Number(room?.mentions) || 0;
-  const otherHuman = (message?.from?.kind === 'user' || message?.from?.kind === 'human') && (message.from.humanId || 'owner') !== humanId;
+  const otherHuman =
+    (message?.from?.kind === 'user' || message?.from?.kind === 'human') &&
+    (message.from.humanId || 'owner') !== humanId;
   if (!room || room.archivedAt || (message?.from?.kind !== 'agent' && !otherHuman)) return { unread, mentions };
   if (room.kind === 'dm') {
     return room.dm?.includes('user') ? { unread: unread + 1, mentions: mentions + 1 } : { unread, mentions };
   }
   // A mention of the owner: a message addressed to them (older rooms), or one that @names them or the whole room.
-  const addressed = (Array.isArray(message.to) && message.to.includes('user')) || (message.to === 'all' && caMentionsOwner(message.text, ownerNames));
+  const addressed =
+    (Array.isArray(message.to) && message.to.includes('user')) ||
+    (message.to === 'all' && caMentionsOwner(message.text, ownerNames));
   return { unread: unread + 1, mentions: mentions + (addressed ? 1 : 0) };
 }
 
@@ -498,16 +544,19 @@ function chatStaleRoomIds(rooms, seenAt) {
 
 const CA_GROUP_GAP_MS = 7 * 60 * 1000;
 
-/** `YYYY-MM-DD` in local time: the key a day divider is drawn for. */
+/** Company day, matching the timezone used by the visible divider label. */
 function caDayKey(ms) {
-  const d = new Date(ms);
-  const pad = (n) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  return globalThis.ReverieTime?.day(ms) ?? new Date(ms).toISOString().slice(0, 10);
 }
 
 /** "October 11, 2026" for a day divider. */
 function caDayLabel(ms) {
-  return new Date(ms).toLocaleDateString('en-US', { timeZone: globalThis.ReverieTime?.timeZone || 'UTC', year: 'numeric', month: 'long', day: 'numeric' });
+  return new Date(ms).toLocaleDateString('en-US', {
+    timeZone: globalThis.ReverieTime?.timeZone || 'UTC',
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+  });
 }
 
 /** Same sender and addressing, close in time, no day change between: a continuation line. */
@@ -516,8 +565,13 @@ function caContinues(prev, m) {
   if (prev.from.kind === 'system' || m.from.kind === 'system') return false;
   if (prev.from.kind !== m.from.kind) return false;
   if (m.from.kind === 'user' || m.from.kind === 'human') {
-    if ((prev.from.humanId || 'owner') !== (m.from.humanId || 'owner') || prev.from.access !== m.from.access) return false;
-  } else if ((prev.from.employeeId || prev.from.sessionId || prev.from.name) !== (m.from.employeeId || m.from.sessionId || m.from.name)) return false;
+    if ((prev.from.humanId || 'owner') !== (m.from.humanId || 'owner') || prev.from.access !== m.from.access)
+      return false;
+  } else if (
+    (prev.from.employeeId || prev.from.sessionId || prev.from.name) !==
+    (m.from.employeeId || m.from.sessionId || m.from.name)
+  )
+    return false;
   if (m.replyTo) return false;
   if (JSON.stringify(prev.to) !== JSON.stringify(m.to)) return false;
   if (caDayKey(prev.at) !== caDayKey(m.at)) return false;
@@ -533,7 +587,8 @@ function caFeedItems(messages, readAt) {
   let prev;
   let newShown = false;
   for (const m of Array.isArray(messages) ? messages : []) {
-    if (!prev || caDayKey(prev.at) !== caDayKey(m.at)) out.push({ type: 'day', key: caDayKey(m.at), label: caDayLabel(m.at) });
+    if (!prev || caDayKey(prev.at) !== caDayKey(m.at))
+      out.push({ type: 'day', key: caDayKey(m.at), label: caDayLabel(m.at) });
     let startsGroup = false;
     if (!newShown && readAt && m.at > readAt && m.from.kind === 'agent') {
       out.push({ type: 'new' });
@@ -553,10 +608,27 @@ function caFeedItems(messages, readAt) {
  * idle. A member whose session is gone is gone. `hooks` is the set of pending hook types for the session.
  */
 function caProviderBinding(employee) {
-  return JSON.stringify([employee.id, employee.owner, employee.sessionId, employee.sessionGeneration,
-    employee.desiredRunning, employee.onVacation, employee.bindingMigration, employee.runtimeRecipe, employee.permissions],
-    (_key, value) => value && typeof value === 'object' && !Array.isArray(value)
-      ? Object.fromEntries(Object.keys(value).sort().map(key => [key, value[key]])) : value);
+  return JSON.stringify(
+    [
+      employee.id,
+      employee.owner,
+      employee.sessionId,
+      employee.sessionGeneration,
+      employee.desiredRunning,
+      employee.onVacation,
+      employee.bindingMigration,
+      employee.runtimeRecipe,
+      employee.permissions,
+    ],
+    (_key, value) =>
+      value && typeof value === 'object' && !Array.isArray(value)
+        ? Object.fromEntries(
+            Object.keys(value)
+              .sort()
+              .map((key) => [key, value[key]])
+          )
+        : value
+  );
 }
 // Retain the first receipt deadline across repeated snapshots and wall-clock rollback.
 const CA_PROVIDER_RECEIPTS = new Map();
@@ -564,11 +636,13 @@ function caProviderFresh(value, now) {
   const mono = globalThis.performance?.now?.() ?? now;
   const prior = CA_PROVIDER_RECEIPTS.get(value.employeeId);
   if (prior && value.observedAtEpochMs < prior.epoch) return false;
-  if (prior && value.observedAtEpochMs === prior.epoch)
-    return value.binding === prior.binding && mono <= prior.until;
+  if (prior && value.observedAtEpochMs === prior.epoch) return value.binding === prior.binding && mono <= prior.until;
   if (!prior && CA_PROVIDER_RECEIPTS.size >= 4096) return false;
-  CA_PROVIDER_RECEIPTS.set(value.employeeId, { binding: value.binding, epoch: value.observedAtEpochMs,
-    until: mono + 25000 - (now - value.observedAtEpochMs) });
+  CA_PROVIDER_RECEIPTS.set(value.employeeId, {
+    binding: value.binding,
+    epoch: value.observedAtEpochMs,
+    until: mono + 25000 - (now - value.observedAtEpochMs),
+  });
   return true;
 }
 function caProviderHealth(employee, session, member) {
@@ -576,43 +650,123 @@ function caProviderHealth(employee, session, member) {
   const sid = employee?.sessionId || session?.id || member?.sessionId;
   const now = Date.now();
   return [session?.providerHealth, employee?.providerHealth, member?.providerHealth]
-    .filter(value => value && value.binding === caProviderBinding(employee) && value.sessionId === sid && (!employee?.id || value.employeeId === employee.id) &&
-      (!Number.isInteger(employee?.sessionGeneration) || value.sessionGeneration === employee.sessionGeneration) &&
-      ['healthy', 'dead', 'unknown'].includes(value.state) && Number.isSafeInteger(value.observedAtEpochMs) &&
-      now >= value.observedAtEpochMs && now - value.observedAtEpochMs <= 25000 && caProviderFresh(value, now))
+    .filter(
+      (value) =>
+        value &&
+        value.binding === caProviderBinding(employee) &&
+        value.sessionId === sid &&
+        (!employee?.id || value.employeeId === employee.id) &&
+        (!Number.isInteger(employee?.sessionGeneration) || value.sessionGeneration === employee.sessionGeneration) &&
+        ['healthy', 'dead', 'unknown'].includes(value.state) &&
+        Number.isSafeInteger(value.observedAtEpochMs) &&
+        now >= value.observedAtEpochMs &&
+        now - value.observedAtEpochMs <= 25000 &&
+        caProviderFresh(value, now)
+    )
     .sort((a, b) => b.observedAtEpochMs - a.observedAtEpochMs)[0];
 }
 
 function caEmployeeHealth(employee, session, member, viewerDisconnected = false) {
   if (employee?.onVacation === true || employee?.desiredRunning === false)
-    return { state: 'gone', label: employee.onVacation ? 'Out of office' : 'Stopped', detail: 'Stopped by owner choice. Enter the office to start this expert.' };
+    return {
+      state: 'gone',
+      label: employee.onVacation ? 'Out of office' : 'Stopped',
+      detail: 'Stopped by owner choice. Enter the office to start this expert.',
+    };
   if (employee?.bindingMigration)
-    return { state: 'unknown', label: 'Moving', detail: 'An account or runtime move is in progress. Current agent availability is unconfirmed.' };
+    return {
+      state: 'unknown',
+      label: 'Moving',
+      detail: 'An account or runtime move is in progress. Current agent availability is unconfirmed.',
+    };
   const health = session?.runtimeHealth ?? employee?.runtimeHealth;
   const scope = session?.runtimeHealthScope ?? employee?.runtimeHealthScope;
   const provider = caProviderHealth(employee, session, member);
+  const inspectionRequested = session?.viewerInspectionRequested === true && session?.viewerInputHeld === true;
+  const diagnosticDetail = inspectionRequested
+    ? ' A diagnostic viewer was requested. Readiness is unconfirmed; automated input is held.'
+    : '';
   if (provider?.state === 'dead' || (health === 'dead' && scope === 'provider')) {
-    const exit = typeof session?.paneExit?.signal === 'number' ? ` (signal ${session.paneExit.signal})` : typeof session?.paneExit?.status === 'number' ? ` (exit ${session.paneExit.status})` : '';
-    return { state: 'dead', label: provider?.state === 'dead' ? 'Agent runtime stopped' : 'Dead pane', detail: `${provider?.state === 'dead' ? 'The agent runtime' : 'The agent'} has exited${exit}. Restart the session to resume its saved conversation.` };
+    const exit =
+      typeof session?.paneExit?.signal === 'number'
+        ? ` (signal ${session.paneExit.signal})`
+        : typeof session?.paneExit?.status === 'number'
+          ? ` (exit ${session.paneExit.status})`
+          : '';
+    return {
+      state: 'dead',
+      label: provider?.state === 'dead' ? 'Agent runtime stopped' : 'Dead pane',
+      detail: `${provider?.state === 'dead' ? 'The agent runtime' : 'The agent'} has exited${exit}. Restart the session to resume its saved conversation.${diagnosticDetail}`,
+    };
   }
-  const serverViewerUnavailable = session?.viewerInputHeld === true || session?.viewerHealth === 'disconnected' || employee?.viewerHealth === 'disconnected' ||
-    member?.viewerHealth === 'disconnected' || (scope === 'terminal' && (health === 'disconnected' || health === 'dead' || session?.paneExit || session?.pid === null));
+  const serverViewerUnavailable =
+    session?.viewerInputHeld === true ||
+    session?.viewerHealth === 'disconnected' ||
+    employee?.viewerHealth === 'disconnected' ||
+    member?.viewerHealth === 'disconnected' ||
+    (scope === 'terminal' &&
+      (health === 'disconnected' || health === 'dead' || session?.paneExit || session?.pid === null));
   const viewerUnavailable = viewerDisconnected || serverViewerUnavailable;
-  const serverViewerConnected = !serverViewerUnavailable && (session?.viewerHealth === 'connected' ||
-    employee?.viewerHealth === 'connected' || member?.viewerHealth === 'connected' ||
-    (typeof session?.pid === 'number' && session.pid > 0 && !session?.paneExit));
+  const serverViewerConnected =
+    !serverViewerUnavailable &&
+    (session?.viewerHealth === 'connected' ||
+      employee?.viewerHealth === 'connected' ||
+      member?.viewerHealth === 'connected' ||
+      (typeof session?.pid === 'number' && session.pid > 0 && !session?.paneExit));
   if (provider?.state === 'healthy')
-    return { state: 'idle', label: 'Online', detail: 'The current native command runtime was recently confirmed running. Model or API readiness is not implied.',
-      providerConfirmedHealthy: true, viewerUnavailable, viewerOnly: viewerDisconnected && serverViewerConnected };
+    return {
+      state: 'idle',
+      label: 'Online',
+      detail:
+        'The current native command runtime was recently confirmed running. Model or API readiness is not implied.' +
+        diagnosticDetail,
+      providerConfirmedHealthy: true,
+      viewerUnavailable,
+      viewerOnly: viewerDisconnected && serverViewerConnected,
+    };
   if (viewerUnavailable)
-    return { state: 'viewer-unavailable', label: 'Viewer unavailable', detail: 'The optional terminal viewer is unavailable. Agent availability is unconfirmed; losing this viewer does not establish that the agent is offline.',
-      viewerUnavailable: true, viewerOnly: viewerDisconnected && serverViewerConnected };
+    return {
+      state: 'viewer-unavailable',
+      label: 'Viewer unavailable',
+      detail:
+        'The optional terminal viewer is unavailable. Agent availability is unconfirmed; losing this viewer does not establish that the agent is offline.' +
+        diagnosticDetail,
+      viewerUnavailable: true,
+      viewerOnly: viewerDisconnected && serverViewerConnected,
+    };
+  // A worker viewer can remain connected after its provider command exits.
+  // Saved activity and transport presence cannot establish current agent health.
+  if (scope === 'terminal')
+    return {
+      state: 'unknown',
+      label: 'Agent health unknown',
+      detail: serverViewerConnected
+        ? 'The terminal viewer is connected. Current agent health has not been confirmed.'
+        : 'Current agent health and terminal viewer connectivity have not been confirmed.',
+    };
   if (health === 'disconnected' || session?.paneExit)
-    return { state: 'disconnected', label: 'Disconnected', detail: 'The terminal connection has ended. Whether the agent is still running has not been confirmed.' };
-  if (employee?.available === false || member?.alive === false || session?.pid === null || session?.status === 'stopped')
-    return { state: 'gone', label: 'Offline', detail: 'No connected session is available. Agent health has not been confirmed.' };
+    return {
+      state: 'disconnected',
+      label: 'Disconnected',
+      detail: 'The terminal connection has ended. Whether the agent is still running has not been confirmed.',
+    };
+  if (
+    employee?.available === false ||
+    member?.alive === false ||
+    session?.pid === null ||
+    session?.status === 'stopped'
+  )
+    return {
+      state: 'gone',
+      label: 'Offline',
+      detail: 'No connected session is available. Agent health has not been confirmed.',
+    };
   if (employee?.available === true || member?.alive === true || (typeof session?.pid === 'number' && session.pid > 0))
-    return { state: 'idle', label: 'Connected', detail: 'The terminal session is connected. Agent health has not been confirmed.' };
+    return {
+      state: 'idle',
+      label: 'Connected',
+      detail: 'The terminal session is connected. Agent health has not been confirmed.',
+    };
   return { state: 'unknown', label: 'Health unknown', detail: 'Current agent health has not been confirmed.' };
 }
 
@@ -650,13 +804,18 @@ function caPresence(member) {
 function caMemberSections(members, humans = [], stateOf) {
   const people = new Set(Array.isArray(humans) ? humans : []);
   const list = [...(Array.isArray(members) ? members : []), ...people];
-  const admin = (m) => people.has(m) ? m.role === 'owner' : m.role === 'coordinator';
-  const unconfirmed = m => !people.has(m) && stateOf?.(m) === 'viewer-unavailable';
-  const present = m => people.has(m) ? m.online === true : stateOf
-    ? !['gone', 'dead', 'disconnected', 'unknown', 'viewer-unavailable'].includes(stateOf(m)) : caPresence(m) !== 'offline';
-  const byName = (a, b) => String(a.name || '').localeCompare(String(b.name || ''), undefined, { sensitivity: 'base' })
-    || String(a.name || '').localeCompare(String(b.name || ''))
-    || String(a.sessionId || a.id || '').localeCompare(String(b.sessionId || b.id || ''));
+  const admin = (m) => (people.has(m) ? m.role === 'owner' : m.role === 'coordinator');
+  const unconfirmed = (m) => !people.has(m) && ['unknown', 'viewer-unavailable'].includes(stateOf?.(m));
+  const present = (m) =>
+    people.has(m)
+      ? m.online === true
+      : stateOf
+        ? !['gone', 'dead', 'disconnected', 'unknown', 'viewer-unavailable'].includes(stateOf(m))
+        : caPresence(m) !== 'offline';
+  const byName = (a, b) =>
+    String(a.name || '').localeCompare(String(b.name || ''), undefined, { sensitivity: 'base' }) ||
+    String(a.name || '').localeCompare(String(b.name || '')) ||
+    String(a.sessionId || a.id || '').localeCompare(String(b.sessionId || b.id || ''));
   const coordinator = list.filter(admin).sort(byName);
   const rest = list.filter((m) => !admin(m));
   const online = rest.filter(present).sort(byName);
@@ -672,7 +831,9 @@ function caMemberSections(members, humans = [], stateOf) {
 
 /** Quick-switcher results: rooms, direct messages and agents matching the query (case-insensitive). */
 function caSwitcherResults(rooms, agents, query, limit = 20) {
-  const q = String(query || '').trim().toLowerCase();
+  const q = String(query || '')
+    .trim()
+    .toLowerCase();
   const match = (label) => !q || label.toLowerCase().includes(q);
   const out = [];
   const list = Array.isArray(rooms) ? rooms : [];
@@ -681,9 +842,7 @@ function caSwitcherResults(rooms, agents, query, limit = 20) {
     const label = caRoomLabel(r);
     if (match(label)) out.push({ type: caIsDm(r) ? 'dm' : 'room', id: r.id, label, archived: !!r.archivedAt });
   }
-  const haveDm = new Set(
-    list.filter((r) => caIsDm(r)).flatMap((r) => (r.members || []).map((m) => m.sessionId))
-  );
+  const haveDm = new Set(list.filter((r) => caIsDm(r)).flatMap((r) => (r.members || []).map((m) => m.sessionId)));
   for (const a of Array.isArray(agents) ? agents : []) {
     if (!a || haveDm.has(a.id)) continue;
     if (match(a.name || '')) out.push({ type: 'agent', id: a.id, label: a.name || a.id.slice(0, 8) });
@@ -789,16 +948,33 @@ function caMentionCandidates(members, query, limit = 8, humans = []) {
     return n.startsWith(q) ? 0 : n.includes(q) ? 1 : 2;
   };
   const seen = new Set();
-  const people = (Array.isArray(humans) ? humans : []).filter(person => {
+  const people = (Array.isArray(humans) ? humans : []).filter((person) => {
     if (!person?.id || !person.name || seen.has(person.id)) return false;
-    seen.add(person.id); return String(person.name).trim().toLowerCase() !== 'everyone';
+    seen.add(person.id);
+    return String(person.name).trim().toLowerCase() !== 'everyone';
   });
-  const hasOwner = people.some(person => person.id === 'owner' || person.primary === true);
-  const items = people.filter(person => rank(person.name) < 2)
+  const hasOwner = people.some((person) => person.id === 'owner' || person.primary === true);
+  const items = people
+    .filter((person) => rank(person.name) < 2)
     .map((human, i) => ({ kind: 'human', human, insert: human.name, rank: rank(human.name), i }));
-  items.push(...(Array.isArray(members) ? members : [])
-    .filter(m => m && m.name && !(hasOwner && m.sessionId === 'user') && String(m.name).trim().toLowerCase() !== 'everyone' && rank(m.name) < 2)
-    .map((member, i) => ({ kind: 'member', member, insert: member.name, rank: rank(member.name), i: people.length + i })));
+  items.push(
+    ...(Array.isArray(members) ? members : [])
+      .filter(
+        (m) =>
+          m &&
+          m.name &&
+          !(hasOwner && m.sessionId === 'user') &&
+          String(m.name).trim().toLowerCase() !== 'everyone' &&
+          rank(m.name) < 2
+      )
+      .map((member, i) => ({
+        kind: 'member',
+        member,
+        insert: member.name,
+        rank: rank(member.name),
+        i: people.length + i,
+      }))
+  );
   const everyone = { kind: 'everyone', insert: 'everyone', rank: q ? ('everyone'.startsWith(q) ? 0 : 2) : 3, i: -1 };
   if (everyone.rank < 2 || !q) items.push(everyone);
   items.sort((a, b) => a.rank - b.rank || a.i - b.i);
@@ -828,7 +1004,13 @@ function caPollView(poll, now = Date.now(), me = 'user') {
   });
   const top = Math.max(0, ...rows.map((r) => r.count));
   for (const r of rows) r.leading = top > 0 && r.count === top;
-  return { open, total: voters.length, rows, multi: !!poll?.multi, closesAt: Number.isFinite(poll?.closesAt) ? poll.closesAt : 0 };
+  return {
+    open,
+    total: voters.length,
+    rows,
+    multi: !!poll?.multi,
+    closesAt: Number.isFinite(poll?.closesAt) ? poll.closesAt : 0,
+  };
 }
 
 const CA_QUICK_REACTIONS = ['\u{1F44D}', '\u{1F602}'];
@@ -836,13 +1018,23 @@ const CA_SHEET_REACTIONS = ['\u{1F44D}', '\u2764\uFE0F', '\u{1F602}', '\u{1F389}
 
 /** One short line of a message, for quotes. */
 function caSnippet(text, max = 90) {
-  const flat = String(text ?? '').replace(/\s+/g, ' ').trim();
+  const flat = String(text ?? '')
+    .replace(/\s+/g, ' ')
+    .trim();
   return flat.length > max ? `${flat.slice(0, max - 1)}\u2026` : flat || '(attachment)';
 }
 
 const CA_BACKENDS = {
-  claude: 'Claude', codex: 'Codex', opencode: 'OpenCode', gemini: 'Gemini', antigravity: 'Antigravity',
-  pi: 'Pi', grok: 'Grok', deepseek: 'DeepSeek', omp: 'OMP', shell: 'Shell',
+  claude: 'Claude',
+  codex: 'Codex',
+  opencode: 'OpenCode',
+  gemini: 'Gemini',
+  antigravity: 'Antigravity',
+  pi: 'Pi',
+  grok: 'Grok',
+  deepseek: 'DeepSeek',
+  omp: 'OMP',
+  shell: 'Shell',
 };
 
 function caCount(n) {
@@ -858,12 +1050,27 @@ function caCount(n) {
 function caAgentFacts(session) {
   if (!session || typeof session !== 'object') return { headline: [], runtime: [], usage: [] };
   const mode = session.mode || 'claude';
-  const cfg = session.codexConfig || session.openCodeConfig || session.geminiConfig || session.antigravityConfig
-    || session.piConfig || session.grokConfig || session.deepSeekConfig || {};
-  const text = (v) => (typeof v === 'string' ? v.replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 64) : '');
+  const cfg =
+    session.codexConfig ||
+    session.openCodeConfig ||
+    session.geminiConfig ||
+    session.antigravityConfig ||
+    session.piConfig ||
+    session.grokConfig ||
+    session.deepSeekConfig ||
+    {};
+  const text = (v) =>
+    typeof v === 'string'
+      ? v
+          .replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ')
+          .replace(/\s+/g, ' ')
+          .trim()
+          .slice(0, 64)
+      : '';
   // The model it is running: what the CLI itself reported (its status line or screen) first; otherwise what it was launched with.
   const shown = session.displayModel && typeof session.displayModel === 'object' ? session.displayModel : null;
-  const reported = shown && (shown.source === 'statusline' || shown.source === 'screen' || shown.source === 'custom-endpoint');
+  const reported =
+    shown && (shown.source === 'statusline' || shown.source === 'screen' || shown.source === 'custom-endpoint');
   const launched = text(session.cliModel) || text(cfg.model) || text(session.model);
   const shownName = text(shown?.model);
   // A launch setting is what was asked for, not a report from the running CLI, so it says so.
@@ -874,9 +1081,12 @@ function caAgentFacts(session) {
   // reported to the console, so a Claude session without a launch effort says "default".
   const effortSet = text(cfg.reasoningEffort) || text(session.effort) || text(session.effortLevel);
   const effort = effortSet || (mode === 'claude' ? 'default' : '');
-  const headline = [['Model', model], ['Effort', effort]].filter(([, v]) => v);
+  const headline = [
+    ['Model', model],
+    ['Effort', effort],
+  ].filter(([, v]) => v);
   const runtime = [
-    ['Backend', (Object.hasOwn(CA_BACKENDS, mode) ? CA_BACKENDS[mode] : String(mode))],
+    ['Backend', Object.hasOwn(CA_BACKENDS, mode) ? CA_BACKENDS[mode] : String(mode)],
     ['CLI version', session.cliVersion || ''],
     ['Account', session.subscriptionProfile?.label || session.cliAccountType || ''],
     ['Directory', session.workingDir || ''],
@@ -897,9 +1107,11 @@ function caAgentFacts(session) {
  * itself); a temporary with no known parent -> under the CTO, else the owner. Cycles fall back to the owner.
  */
 function caConnectedSessionIds(sessions) {
-  return new Set([...(sessions?.values?.() ?? [])]
-    .filter((session) => Number.isInteger(session.pid) && session.pid > 1 && !session.retired)
-    .map((session) => session.id));
+  return new Set(
+    [...(sessions?.values?.() ?? [])]
+      .filter((session) => Number.isInteger(session.pid) && session.pid > 1 && !session.retired)
+      .map((session) => session.id)
+  );
 }
 
 function caOrgTree(company, liveIds) {
@@ -920,7 +1132,8 @@ function caOrgTree(company, liveIds) {
   for (const e of employees) {
     nodes.set(e.id, {
       key: `employee:${e.id}`,
-      avatar: e.avatar, avatarBackground: e.avatarBackground,
+      avatar: e.avatar,
+      avatarBackground: e.avatarBackground,
       name: e.name,
       title: e.position || '',
       icon: e.icon || '',
@@ -945,7 +1158,8 @@ function caOrgTree(company, liveIds) {
     parents.set(child, parent);
     parent.children.push(child);
   };
-  for (const e of employees) attach(nodes.get(e.id), e.reportsTo ?? (e.id === coordinatorEmployeeId ? 'owner' : undefined));
+  for (const e of employees)
+    attach(nodes.get(e.id), e.reportsTo ?? (e.id === coordinatorEmployeeId ? 'owner' : undefined));
   const bySession = new Map([...nodes.values()].filter((n) => n.sessionId).map((n) => [n.sessionId, n]));
   // Only connected temporary workers belong in the chart. This never changes stored profiles or sessions.
   // A session that is also an employee's is drawn once, as the employee (its temporary record is just the profile it had before).
@@ -978,14 +1192,24 @@ function caAgentProfile(data) {
   const when = (v) => {
     const n = Number(v);
     if (!Number.isFinite(n) || n <= 0) return '';
-    return (globalThis.ReverieTime?.format(n < 1e12 ? n * 1000 : n) ?? new Date(n < 1e12 ? n * 1000 : n).toLocaleString('en-US', { timeZone: 'UTC', timeZoneName: 'short' }));
+    return (
+      globalThis.ReverieTime?.format(n < 1e12 ? n * 1000 : n) ??
+      new Date(n < 1e12 ? n * 1000 : n).toLocaleString('en-US', { timeZone: 'UTC', timeZoneName: 'short' })
+    );
   };
   const num = (v) => caCount(v);
   const out = { persona: null, personaError: '', sections: [], switchInfo: null };
   const p = d.persona;
   if (p && typeof p === 'object') {
     if (p.error) out.personaError = String(p.error);
-    else out.persona = { name: p.agent_name || '', role: p.role || '', kind: p.kind || '', text: String(p.persona || ''), source: p.source || '' };
+    else
+      out.persona = {
+        name: p.agent_name || '',
+        role: p.role || '',
+        kind: p.kind || '',
+        text: String(p.persona || ''),
+        source: p.source || '',
+      };
   }
   const add = (title, rows) => {
     const kept = rows.filter(([, v]) => v !== '' && v !== undefined && v !== null);
@@ -1005,7 +1229,12 @@ function caAgentProfile(data) {
     // The card's headline (Model, Effort) is what the page knows: the model the CLI reports and the effort it was started with. These are
     // what the reverie runtime measured, labelled as such so the two can never read as a contradiction.
     ['Runtime model', b.display_model || b.model || ''],
-    ['Last turn effort', effort.observed?.level ? `${effort.observed.level}${effort.observed.at ? ` (${when(effort.observed.at)})` : ''}` : ''],
+    [
+      'Last turn effort',
+      effort.observed?.level
+        ? `${effort.observed.level}${effort.observed.at ? ` (${when(effort.observed.at)})` : ''}`
+        : '',
+    ],
     ['Configured effort', effort.configured || ''],
     ['Phase', d.runtime?.phase || ''],
   ]);
@@ -1027,16 +1256,24 @@ function caAgentProfile(data) {
     ['Directory', s.working_dir || ''],
   ]);
   if (Array.isArray(d.rooms) && d.rooms.length) {
-    add('Channels', d.rooms.map((r) => [r.name || r.id, r.role || '']));
+    add(
+      'Channels',
+      d.rooms.map((r) => [r.name || r.id, r.role || ''])
+    );
   }
   const sw = d.runtime?.switch;
   const backends = Array.isArray(d.runtime?.backends) ? d.runtime.backends : [];
   if (sw || backends.length) {
     out.switchInfo = {
       available: !!sw?.available,
-      reason: String(sw?.reason || 'Switching an agent\'s backend is not available yet.'),
+      reason: String(sw?.reason || "Switching an agent's backend is not available yet."),
       current: d.runtime?.backend || b.mode || '',
-      backends: backends.map((x) => ({ name: String(x.name || ''), mode: String(x.mode || ''), model: String(x.model || ''), enabled: x.enabled !== false })),
+      backends: backends.map((x) => ({
+        name: String(x.name || ''),
+        mode: String(x.mode || ''),
+        model: String(x.model || ''),
+        enabled: x.enabled !== false,
+      })),
     };
   }
   return out;
@@ -1050,20 +1287,28 @@ const CA_IMAGE_DATA = /^data:image\/(?:png|jpeg|webp|gif);base64,[A-Za-z0-9+/]+=
  */
 function caIconImage(icon, urlFn) {
   const s = typeof icon === 'string' ? icon.trim() : '';
-  if (/^\/assets\/avatars\/pack-(?:0[1-9]|[1-9][0-9]|1[0-4][0-9]|15[01])\.png(?:\?v=[a-f0-9]{64})?$/.test(s)) return typeof urlFn === 'function' ? urlFn(s) : s;
+  if (/^\/assets\/avatars\/pack-(?:0[1-9]|[1-9][0-9]|1[0-4][0-9]|15[01])\.png(?:\?v=[a-f0-9]{64})?$/.test(s))
+    return typeof urlFn === 'function' ? urlFn(s) : s;
   if (!s) return '';
   if (s.length <= 160000 && CA_IMAGE_DATA.test(s)) return s;
   // An avatar the server stores for an agent: /api/avatars/<id> with an optional version, so a new picture is fetched afresh.
-  if (/^\/api\/(?:v1\/)?avatars\/[A-Za-z0-9._~-]+(?:\?v=[0-9]{1,16})?$/.test(s) && !s.includes('..')) return urlFn ? urlFn(s) : s;
+  if (/^\/api\/(?:v1\/)?avatars\/[A-Za-z0-9._~-]+(?:\?v=[0-9]{1,16})?$/.test(s) && !s.includes('..'))
+    return urlFn ? urlFn(s) : s;
   // A workspace's picture, kept on the server: /api/workspace-icons/<32 hex>?v=<ms>.
   if (/^\/api\/(?:v1\/)?workspace-icons\/[0-9a-f]{32}(?:\?v=[0-9]{1,16})?$/.test(s)) return urlFn ? urlFn(s) : s;
   // The owner's picture, kept on the server: /api/owner-avatar/<32 hex>?v=<ms>.
   if (/^\/api\/(?:v1\/)?owner-avatar\/[0-9a-f]{32}(?:\?v=[0-9]{1,16})?$/.test(s)) return urlFn ? urlFn(s) : s;
   // The picture the hosting owner set for an embassy guest: /api/embassy-host/guests/<request id>/avatar?v=<ms>.
-  if (/^\/api\/embassy-host\/guests\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/avatar\?v=[0-9]{1,16}$/.test(s)) return urlFn ? urlFn(s) : s;
+  if (
+    /^\/api\/embassy-host\/guests\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/avatar\?v=[0-9]{1,16}$/.test(
+      s
+    )
+  )
+    return urlFn ? urlFn(s) : s;
   if (s.startsWith('img:')) {
     const path = s.slice(4);
-    if (/^\/api\/[A-Za-z0-9._~/-]+$/.test(path) && !path.includes('..') && !path.includes('//')) return urlFn ? urlFn(path) : path;
+    if (/^\/api\/[A-Za-z0-9._~/-]+$/.test(path) && !path.includes('..') && !path.includes('//'))
+      return urlFn ? urlFn(path) : path;
   }
   return '';
 }
@@ -1075,15 +1320,20 @@ function caGuestAvatars(map) {
   if (!map || typeof map !== 'object' || Array.isArray(map)) return out;
   for (const [id, url] of Object.entries(map).slice(0, 1000)) {
     if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(id) || typeof url !== 'string') continue;
-    if (new RegExp(`^/api/embassy-host/guests/${id}/avatar\\?v=[0-9]{1,16}$`).test(url) && caIconImage(url)) out[id] = url;
+    if (new RegExp(`^/api/embassy-host/guests/${id}/avatar\\?v=[0-9]{1,16}$`).test(url) && caIconImage(url))
+      out[id] = url;
   }
   return out;
 }
 
 function caDiskBytes(value) {
   const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB', 'PiB'];
-  let size = Number(value), unit = 0;
-  while (size >= 1024 && unit < units.length - 1) { size /= 1024; unit++; }
+  let size = Number(value),
+    unit = 0;
+  while (size >= 1024 && unit < units.length - 1) {
+    size /= 1024;
+    unit++;
+  }
   return `${size.toFixed(unit ? 1 : 0)} ${units[unit]}`;
 }
 
@@ -1100,12 +1350,23 @@ const CA_GPU_HISTORY_MAX = 720;
  * null with fewer than two readings. Gaps are not invented: readings are placed by their own times.
  */
 function caGpuHistoryShape(samples, width, height) {
-  const valid = (Array.isArray(samples) ? samples : []).filter(s => s && Number.isFinite(s.t) && Number.isFinite(s.u) && s.u >= 0 && s.u <= 100);
+  const valid = (Array.isArray(samples) ? samples : []).filter(
+    (s) => s && Number.isFinite(s.t) && Number.isFinite(s.u) && s.u >= 0 && s.u <= 100
+  );
   if (valid.length < 2) return null;
-  const t0 = valid[0].t, span = Math.max(1, valid[valid.length - 1].t - t0);
-  const points = valid.map(s => `${((s.t - t0) / span * width).toFixed(1)},${(height - s.u / 100 * height).toFixed(1)}`).join(' ');
+  const t0 = valid[0].t,
+    span = Math.max(1, valid[valid.length - 1].t - t0);
+  const points = valid
+    .map((s) => `${(((s.t - t0) / span) * width).toFixed(1)},${(height - (s.u / 100) * height).toFixed(1)}`)
+    .join(' ');
   const avg = Math.round(valid.reduce((n, s) => n + s.u, 0) / valid.length);
-  return { points, avg, peak: Math.max(...valid.map(s => s.u)), minutes: Math.round(span / 60000), count: valid.length };
+  return {
+    points,
+    avg,
+    peak: Math.max(...valid.map((s) => s.u)),
+    minutes: Math.round(span / 60000),
+    count: valid.length,
+  };
 }
 
 /**
@@ -1114,10 +1375,14 @@ function caGpuHistoryShape(samples, width, height) {
  */
 function caRecordedGpuShape(history, width, height) {
   const points = Array.isArray(history?.points) ? history.points : [];
-  const start = Number(history?.start), end = Number(history?.end);
+  const start = Number(history?.start),
+    end = Number(history?.end);
   if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return null;
   const segments = [];
-  let current = [], sum = 0, count = 0, peak = 0;
+  let current = [],
+    sum = 0,
+    count = 0,
+    peak = 0;
   for (const p of points) {
     const avg = p?.gpu_pct?.avg;
     if (p?.status === 'missing' || !Number.isFinite(avg) || avg < 0 || avg > 100 || !Number.isFinite(p?.t)) {
@@ -1126,15 +1391,23 @@ function caRecordedGpuShape(history, width, height) {
       continue;
     }
     const x = ((p.t + (Number(p.end) - p.t) / 2 - start) / (end - start)) * width;
-    current.push(`${Math.max(0, Math.min(width, x)).toFixed(1)},${(height - avg / 100 * height).toFixed(1)}`);
+    current.push(`${Math.max(0, Math.min(width, x)).toFixed(1)},${(height - (avg / 100) * height).toFixed(1)}`);
     // A bucket's max counts only when it is a real percentage at or above its own average; otherwise its average stands.
     const max = p.gpu_pct.max;
-    sum += avg; count += 1; peak = Math.max(peak, Number.isFinite(max) && max >= avg && max <= 100 ? max : avg);
+    sum += avg;
+    count += 1;
+    peak = Math.max(peak, Number.isFinite(max) && max >= avg && max <= 100 ? max : avg);
   }
   if (current.length) segments.push(current);
   if (!count) return null;
-  return { segments: segments.map(points => points.length === 1 ? [points[0], points[0]] : points).map(points => points.join(' ')),
-    avg: Math.round(sum / count), peak: Math.round(peak), count };
+  return {
+    segments: segments
+      .map((points) => (points.length === 1 ? [points[0], points[0]] : points))
+      .map((points) => points.join(' ')),
+    avg: Math.round(sum / count),
+    peak: Math.round(peak),
+    count,
+  };
 }
 
 function caStatsView(stats) {
@@ -1153,22 +1426,57 @@ function caStatsView(stats) {
   }
   const gpu = s.gpu && s.gpu.available ? pct(s.gpu.utilization) : null;
   if (gpu !== null) {
-    const vram = Number(s.gpu.memoryTotalMb) > 0 ? `, memory ${gb(s.gpu.memoryUsedMb)} of ${gb(s.gpu.memoryTotalMb)}` : '';
+    const vram =
+      Number(s.gpu.memoryTotalMb) > 0 ? `, memory ${gb(s.gpu.memoryUsedMb)} of ${gb(s.gpu.memoryTotalMb)}` : '';
     out.push({ key: 'gpu', label: 'GPU', value: gpu, title: `GPU ${gpu}%${vram}`, level: level(gpu) });
   }
-  const filesystems = s.disks?.available === true && Array.isArray(s.disks.filesystems) ? s.disks.filesystems.slice(0, 8).filter(fs =>
-    fs && Number.isFinite(fs.totalBytes) && fs.totalBytes > 0 && Number.isFinite(fs.availableBytes) && fs.availableBytes >= 0 && fs.availableBytes <= fs.totalBytes && Array.isArray(fs.labels) && fs.labels.some(label => typeof label === 'string' && label.trim())
-  ).map(fs => ({ ...fs, labels: fs.labels.filter(label => typeof label === 'string' && label.trim()).map(label => label.slice(0, 60)), usedBytes: fs.totalBytes - fs.availableBytes, percentUsed: Math.round(100 * (fs.totalBytes - fs.availableBytes) / fs.totalBytes) })) : [];
+  const filesystems =
+    s.disks?.available === true && Array.isArray(s.disks.filesystems)
+      ? s.disks.filesystems
+          .slice(0, 8)
+          .filter(
+            (fs) =>
+              fs &&
+              Number.isFinite(fs.totalBytes) &&
+              fs.totalBytes > 0 &&
+              Number.isFinite(fs.availableBytes) &&
+              fs.availableBytes >= 0 &&
+              fs.availableBytes <= fs.totalBytes &&
+              Array.isArray(fs.labels) &&
+              fs.labels.some((label) => typeof label === 'string' && label.trim())
+          )
+          .map((fs) => ({
+            ...fs,
+            labels: fs.labels
+              .filter((label) => typeof label === 'string' && label.trim())
+              .map((label) => label.slice(0, 60)),
+            usedBytes: fs.totalBytes - fs.availableBytes,
+            percentUsed: Math.round((100 * (fs.totalBytes - fs.availableBytes)) / fs.totalBytes),
+          }))
+      : [];
   if (filesystems.length) {
-    const value = Math.max(...filesystems.map(fs => fs.percentUsed));
-    const details = filesystems.map(fs => `${fs.labels.join(' · ')}: ${caDiskBytes(fs.usedBytes)} used, ${caDiskBytes(fs.availableBytes)} available, ${caDiskBytes(fs.totalBytes)} capacity`).join('\n');
-    out.push({ key: 'disk', label: 'DISK', value, title: `Disk ${value}% · highest filesystem usage\n${details}`, level: level(value), filesystems });
+    const value = Math.max(...filesystems.map((fs) => fs.percentUsed));
+    const details = filesystems
+      .map(
+        (fs) =>
+          `${fs.labels.join(' · ')}: ${caDiskBytes(fs.usedBytes)} used, ${caDiskBytes(fs.availableBytes)} available, ${caDiskBytes(fs.totalBytes)} capacity`
+      )
+      .join('\n');
+    out.push({
+      key: 'disk',
+      label: 'DISK',
+      value,
+      title: `Disk ${value}% · highest filesystem usage\n${details}`,
+      level: level(value),
+      filesystems,
+    });
   }
   return out;
 }
 
 const CA_PROFILE_HUES = [200, 160, 120, 45, 15, 335, 285, 245];
-const caAvatarBackground = value => typeof value === 'string' && (value === 'transparent' || /^#[0-9a-f]{6}$/i.test(value)) ? value : '';
+const caAvatarBackground = (value) =>
+  typeof value === 'string' && (value === 'transparent' || /^#[0-9a-f]{6}$/i.test(value)) ? value : '';
 
 /** A stored profile, cleaned: every field optional, trimmed and capped. */
 function caProfile(raw) {
@@ -1181,10 +1489,25 @@ function caProfile(raw) {
     }
   }
   if (!o || typeof o !== 'object') o = {};
-  const text = (v, max) => (typeof v === 'string' ? Array.from(v.replace(/[\u0000-\u001f\u007f]/g, ' ').trim()).slice(0, max).join('') : '');
+  const text = (v, max) =>
+    typeof v === 'string'
+      ? Array.from(v.replace(/[\u0000-\u001f\u007f]/g, ' ').trim())
+          .slice(0, max)
+          .join('')
+      : '';
   const hue = Number.isFinite(o.hue) && CA_PROFILE_HUES.includes(o.hue) ? o.hue : null;
-  const image = typeof o.image === 'string' && caIconImage(o.image) === o.image.trim() && o.image.startsWith('data:') ? o.image.trim() : '';
-  return { name: text(o.name, 32), pronouns: text(o.pronouns, 24), status: text(o.status, 60), icon: text(o.icon, 2), image, hue };
+  const image =
+    typeof o.image === 'string' && caIconImage(o.image) === o.image.trim() && o.image.startsWith('data:')
+      ? o.image.trim()
+      : '';
+  return {
+    name: text(o.name, 32),
+    pronouns: text(o.pronouns, 24),
+    status: text(o.status, 60),
+    icon: text(o.icon, 2),
+    image,
+    hue,
+  };
 }
 
 /** Which view to open with: a popped-out terminal window or a session link is a terminal on purpose. */
@@ -1225,7 +1548,8 @@ const CA_ICONS = {
   pin: '<path d="M12 17v5"/><path d="M9 3h6l-1 6 3 3v2H7v-2l3-3z"/>',
   chat: '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>',
   plus: '<path d="M12 5v14M5 12h14"/>',
-  members: '<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/>',
+  members:
+    '<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/>',
   menu: '<path d="M3 6h18M3 12h18M3 18h18"/>',
   more: '<circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/>',
   terminal: '<path d="m4 17 6-6-6-6M12 19h8"/>',
@@ -1238,8 +1562,10 @@ const CA_ICONS = {
   folder: '<path d="M3 7V5a2 2 0 0 1 2-2h5l2 3h7a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z"/>',
   book: '<path d="M12 6v15M3 3h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5v16h-5a4 4 0 0 0-4 2 4 4 0 0 0-4-2H3z"/>',
   org: '<rect x="9" y="2" width="6" height="5" rx="1"/><rect x="2" y="17" width="6" height="5" rx="1"/><rect x="16" y="17" width="6" height="5" rx="1"/><path d="M12 7v5M5 17v-5h14v5"/>',
-  invite: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M19 8v6M22 11h-6"/>',
-  gearsmall: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h0a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h0a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>',
+  invite:
+    '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M19 8v6M22 11h-6"/>',
+  gearsmall:
+    '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h0a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h0a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>',
   chevron: '<path d="m6 9 6 6 6-6"/>',
   embassy: '<path d="M3 10h18L12 4 3 10ZM5 10v10m5-10v10m4-10v10m5-10v10M2 20h20"/>',
   calendar: '<rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/>',
@@ -1275,8 +1601,10 @@ function caPageFromHash(hash) {
  * plain http included, keeps its new tab. The page runs sandboxed: it can script itself, use forms and open its own new tabs,
  * but never navigate this page, and it gets no referrer.
  */
-const CA_WEB_SANDBOX = 'allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox allow-downloads';
-const CA_WEB_NOTE = 'If the page stays blank, that site does not allow being shown inside Reverie. Use Open in new tab.';
+const CA_WEB_SANDBOX =
+  'allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox allow-downloads';
+const CA_WEB_NOTE =
+  'If the page stays blank, that site does not allow being shown inside Reverie. Use Open in new tab.';
 
 /** The address to show beside the chat for a link, or null when the link keeps its new tab. */
 function caWebPaneUrl(href, origin) {
@@ -1369,7 +1697,11 @@ class ReverieChatApp {
 
   /** The channel mark for a glyph from caRoomGlyph: the text `#`, or the drawn lock/speaker marks (monochrome, themed by colour). */
   glyphNode(glyph, extraClass = '') {
-    const node = this.el('span', `ca-hash${extraClass ? ` ${extraClass}` : ''}${glyph.label ? ' is-private' : ''}`, glyph.text);
+    const node = this.el(
+      'span',
+      `ca-hash${extraClass ? ` ${extraClass}` : ''}${glyph.label ? ' is-private' : ''}`,
+      glyph.text
+    );
     node.dataset.glyph = glyph.kind;
     if (glyph.kind !== 'text') {
       node.classList.add('is-drawn');
@@ -1408,7 +1740,22 @@ class ReverieChatApp {
   /** The server sends unread counts and direct messages (the new part); an older one does not. */
   get serverFeatures() {
     const f = this.app._chatFeatures || {};
-    return { search: !!f.search, pollingModes: Array.isArray(f.pollingModes) ? f.pollingModes.filter(mode => typeof mode === 'string') : [], unread: !!f.unread, dms: !!f.dms, placement: !!f.placement, replies: !!f.replies, deletes: !!f.deletes, reports: !!f.reports, topics: !!f.topics, edits: !!f.edits, pins: !!f.pins, order: !!f.order, notify: !!f.notify, replace: !!f.replace };
+    return {
+      search: !!f.search,
+      pollingModes: Array.isArray(f.pollingModes) ? f.pollingModes.filter((mode) => typeof mode === 'string') : [],
+      unread: !!f.unread,
+      dms: !!f.dms,
+      placement: !!f.placement,
+      replies: !!f.replies,
+      deletes: !!f.deletes,
+      reports: !!f.reports,
+      topics: !!f.topics,
+      edits: !!f.edits,
+      pins: !!f.pins,
+      order: !!f.order,
+      notify: !!f.notify,
+      replace: !!f.replace,
+    };
   }
 
   get active() {
@@ -1509,16 +1856,22 @@ class ReverieChatApp {
         const chip = this.el(clickable ? 'button' : 'span', `ca-stat is-${item.level}`);
         chip.title = item.title;
         if (item.key === 'disk') {
-          chip.type = 'button'; chip.dataset.stat = 'disk';
+          chip.type = 'button';
+          chip.dataset.stat = 'disk';
           chip.addEventListener('click', () => this.openDiskDetails(item.filesystems));
         } else if (item.key === 'gpu') {
-          chip.type = 'button'; chip.dataset.stat = 'gpu';
+          chip.type = 'button';
+          chip.dataset.stat = 'gpu';
           chip.addEventListener('click', () => this.openGpuHistory());
         } else chip.setAttribute('role', 'img');
         chip.setAttribute('aria-label', item.title);
         const bar = this.el('span', 'ca-stat-bar');
         bar.style.setProperty('--v', `${item.value}%`);
-        chip.append(this.el('span', 'ca-stat-label', item.label), this.el('span', 'ca-stat-value', `${item.value}%`), bar);
+        chip.append(
+          this.el('span', 'ca-stat-label', item.label),
+          this.el('span', 'ca-stat-value', `${item.value}%`),
+          bar
+        );
         box.append(chip);
       }
     }
@@ -1526,23 +1879,51 @@ class ReverieChatApp {
 
   openDiskDetails(filesystems) {
     this.doc.querySelector('.ca-disk-dialog')?.close();
-    const dialog = this.el('dialog', 'ca-dialog ca-disk-dialog'); dialog.setAttribute('aria-label', 'Disk usage');
-    dialog.append(this.el('h2', '', 'Disk usage'), this.el('p', 'ca-dialog-note', 'Whole filesystem capacity for the locations Reverie uses. Locations sharing a filesystem appear together. Used includes reserved space.'));
+    const dialog = this.el('dialog', 'ca-dialog ca-disk-dialog');
+    dialog.setAttribute('aria-label', 'Disk usage');
+    dialog.append(
+      this.el('h2', '', 'Disk usage'),
+      this.el(
+        'p',
+        'ca-dialog-note',
+        'Whole filesystem capacity for the locations Reverie uses. Locations sharing a filesystem appear together. Used includes reserved space.'
+      )
+    );
     const list = this.el('dl', 'ca-disk-filesystems');
     for (const fs of filesystems) {
       const row = this.el('div');
       row.append(this.literalText('dt', '', fs.labels.join(' · ')));
       const detail = this.el('dd');
-      const meter = this.el('progress'); meter.max = 100; meter.value = fs.percentUsed; meter.setAttribute('aria-label', `${fs.labels.join(', ')} ${fs.percentUsed}% used`);
+      const meter = this.el('progress');
+      meter.max = 100;
+      meter.value = fs.percentUsed;
+      meter.setAttribute('aria-label', `${fs.labels.join(', ')} ${fs.percentUsed}% used`);
       meter.dataset.level = fs.percentUsed >= 90 ? 'high' : fs.percentUsed >= 70 ? 'warn' : 'ok';
-      detail.append(this.el('strong', '', `${fs.percentUsed}% used`), meter, this.el('span', '', `${caDiskBytes(fs.usedBytes)} used · ${caDiskBytes(fs.availableBytes)} available · ${caDiskBytes(fs.totalBytes)} capacity`));
-      row.append(detail); list.append(row);
+      detail.append(
+        this.el('strong', '', `${fs.percentUsed}% used`),
+        meter,
+        this.el(
+          'span',
+          '',
+          `${caDiskBytes(fs.usedBytes)} used · ${caDiskBytes(fs.availableBytes)} available · ${caDiskBytes(fs.totalBytes)} capacity`
+        )
+      );
+      row.append(detail);
+      list.append(row);
     }
     const close = this.button('ca-btn', 'Close disk usage', () => dialog.close(), { text: 'Close' });
     dialog.append(list, close);
-    dialog.addEventListener('cancel', event => { event.preventDefault(); dialog.close(); });
-    dialog.addEventListener('close', () => { dialog.remove(); this.els.stats?.querySelector('[data-stat="disk"]')?.focus(); });
-    this.doc.body.append(dialog); dialog.showModal(); close.focus();
+    dialog.addEventListener('cancel', (event) => {
+      event.preventDefault();
+      dialog.close();
+    });
+    dialog.addEventListener('close', () => {
+      dialog.remove();
+      this.els.stats?.querySelector('[data-stat="disk"]')?.focus();
+    });
+    this.doc.body.append(dialog);
+    dialog.showModal();
+    close.focus();
   }
 
   /**
@@ -1552,24 +1933,34 @@ class ReverieChatApp {
   companyGpuHistory() {
     const host = this.el('section', 'ca-company-gpu-history');
     host.setAttribute('aria-label', 'GPU history');
-    const ns = 'http://www.w3.org/2000/svg', W = 480, H = 120;
+    const ns = 'http://www.w3.org/2000/svg',
+      W = 480,
+      H = 120;
     const svg = this.doc.createElementNS(ns, 'svg');
-    svg.setAttribute('viewBox', `0 0 ${W} ${H}`); svg.setAttribute('class', 'ca-gpu-graph'); svg.setAttribute('role', 'img');
+    svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+    svg.setAttribute('class', 'ca-gpu-graph');
+    svg.setAttribute('role', 'img');
     svg.setAttribute('preserveAspectRatio', 'none');
-    const note = this.el('p', 'ca-hint'); note.setAttribute('role', 'status');
+    const note = this.el('p', 'ca-hint');
+    note.setAttribute('role', 'status');
     const ranges = this.el('div', 'ca-company-actions');
     let epoch = 0;
     const load = async (days) => {
       const turn = ++epoch;
       this._gpuHistoryDays = days; // a repaint of the Company page (after a hire, say) keeps the chosen range
-      for (const b of ranges.querySelectorAll('button')) b.setAttribute('aria-pressed', String(b.dataset.days === String(days)));
+      for (const b of ranges.querySelectorAll('button'))
+        b.setAttribute('aria-pressed', String(b.dataset.days === String(days)));
       note.textContent = 'Loading GPU history…';
-      const end = Math.floor(Date.now() / 1000), start = end - days * 86400;
-      const read = () => this.app._chatApi(`/api/resource-history?start=${start}&end=${end}&resolution=${days > 1 ? 'hour' : 'five-minute'}`);
+      const end = Math.floor(Date.now() / 1000),
+        start = end - days * 86400;
+      const read = () =>
+        this.app._chatApi(
+          `/api/resource-history?start=${start}&end=${end}&resolution=${days > 1 ? 'hour' : 'five-minute'}`
+        );
       let result = await read();
       // The route serves one read at a time, and a Company repaint can land while the last section's read is in flight.
       if (!result.ok && result.status === 429) {
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        await new Promise((resolve) => setTimeout(resolve, 1000));
         if (turn !== epoch || !host.isConnected) return;
         result = await read();
       }
@@ -1577,13 +1968,19 @@ class ReverieChatApp {
       svg.replaceChildren();
       for (const y of [0, H / 2, H]) {
         const grid = this.doc.createElementNS(ns, 'line');
-        grid.setAttribute('x1', '0'); grid.setAttribute('x2', String(W)); grid.setAttribute('y1', String(y)); grid.setAttribute('y2', String(y));
-        grid.setAttribute('class', 'ca-gpu-grid'); svg.append(grid);
+        grid.setAttribute('x1', '0');
+        grid.setAttribute('x2', String(W));
+        grid.setAttribute('y1', String(y));
+        grid.setAttribute('y2', String(y));
+        grid.setAttribute('class', 'ca-gpu-grid');
+        svg.append(grid);
       }
       const history = result.ok ? result.data : null;
       if (!result.ok) {
-        note.textContent = result.status === 503 ? 'GPU history is not recorded on this host. The live GPU meter still works.'
-          : result.error || 'GPU history could not be read.';
+        note.textContent =
+          result.status === 503
+            ? 'GPU history is not recorded on this host. The live GPU meter still works.'
+            : result.error || 'GPU history could not be read.';
         svg.setAttribute('aria-label', 'No GPU history');
         return;
       }
@@ -1595,15 +1992,32 @@ class ReverieChatApp {
       }
       for (const points of shape.segments) {
         const line = this.doc.createElementNS(ns, 'polyline');
-        line.setAttribute('points', points); line.setAttribute('class', 'ca-gpu-line'); svg.append(line);
+        line.setAttribute('points', points);
+        line.setAttribute('class', 'ca-gpu-line');
+        svg.append(line);
       }
-      const freshness = history.freshness === 'fresh' ? '' : history.freshness === 'stale' ? ' The newest reading is stale.' : ' The newest reading is unavailable.';
+      const freshness =
+        history.freshness === 'fresh'
+          ? ''
+          : history.freshness === 'stale'
+            ? ' The newest reading is stale.'
+            : ' The newest reading is unavailable.';
       const span = days > 1 ? `the last ${days} days` : 'the last day';
       note.textContent = `GPU use over ${span} (whole host): average ${shape.avg}%, peak ${shape.peak}%. Top line is 100%; gaps are times with no reading.${freshness}`;
       svg.setAttribute('aria-label', `GPU utilization over ${span}, average ${shape.avg}%, peak ${shape.peak}%`);
     };
-    for (const [days, label] of [[1, 'Day'], [7, 'Week']]) {
-      const b = this.button('ca-btn', `GPU history for the last ${days > 1 ? `${days} days` : 'day'}`, () => { void load(days); }, { text: label });
+    for (const [days, label] of [
+      [1, 'Day'],
+      [7, 'Week'],
+    ]) {
+      const b = this.button(
+        'ca-btn',
+        `GPU history for the last ${days > 1 ? `${days} days` : 'day'}`,
+        () => {
+          void load(days);
+        },
+        { text: label }
+      );
       b.dataset.days = String(days);
       ranges.append(b);
     }
@@ -1615,18 +2029,27 @@ class ReverieChatApp {
   /** GPU utilization over the readings this page has taken (every 5 s, up to an hour), redrawn as new ones arrive. */
   openGpuHistory() {
     this.doc.querySelector('.ca-gpu-dialog')?.close();
-    const dialog = this.el('dialog', 'ca-dialog ca-gpu-dialog'); dialog.setAttribute('aria-label', 'GPU usage history');
+    const dialog = this.el('dialog', 'ca-dialog ca-gpu-dialog');
+    dialog.setAttribute('aria-label', 'GPU usage history');
     const note = this.el('p', 'ca-dialog-note');
-    const ns = 'http://www.w3.org/2000/svg', W = 320, H = 120;
+    const ns = 'http://www.w3.org/2000/svg',
+      W = 320,
+      H = 120;
     const svg = this.doc.createElementNS(ns, 'svg');
-    svg.setAttribute('viewBox', `0 0 ${W} ${H}`); svg.setAttribute('class', 'ca-gpu-graph'); svg.setAttribute('role', 'img');
+    svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+    svg.setAttribute('class', 'ca-gpu-graph');
+    svg.setAttribute('role', 'img');
     const draw = () => {
       const shape = caGpuHistoryShape(this.gpuHistory, W, H);
       svg.replaceChildren();
       for (const y of [0, H / 2, H]) {
         const grid = this.doc.createElementNS(ns, 'line');
-        grid.setAttribute('x1', '0'); grid.setAttribute('x2', String(W)); grid.setAttribute('y1', String(y)); grid.setAttribute('y2', String(y));
-        grid.setAttribute('class', 'ca-gpu-grid'); svg.append(grid);
+        grid.setAttribute('x1', '0');
+        grid.setAttribute('x2', String(W));
+        grid.setAttribute('y1', String(y));
+        grid.setAttribute('y2', String(y));
+        grid.setAttribute('class', 'ca-gpu-grid');
+        svg.append(grid);
       }
       if (!shape) {
         note.textContent = 'Collecting GPU readings every 5 seconds; the graph appears after the next one.';
@@ -1634,29 +2057,45 @@ class ReverieChatApp {
         return;
       }
       const line = this.doc.createElementNS(ns, 'polyline');
-      line.setAttribute('points', shape.points); line.setAttribute('class', 'ca-gpu-line'); svg.append(line);
+      line.setAttribute('points', shape.points);
+      line.setAttribute('class', 'ca-gpu-line');
+      svg.append(line);
       note.textContent = `Last ${shape.minutes || '<1'} min while this page was open: average ${shape.avg}%, peak ${shape.peak}%. Top line is 100%.`;
-      svg.setAttribute('aria-label', `GPU utilization over ${shape.count} readings, average ${shape.avg}%, peak ${shape.peak}%`);
+      svg.setAttribute(
+        'aria-label',
+        `GPU utilization over ${shape.count} readings, average ${shape.avg}%, peak ${shape.peak}%`
+      );
     };
     draw();
     dialog.addEventListener('reverie:gpu', draw);
     const close = this.button('ca-btn', 'Close GPU history', () => dialog.close(), { text: 'Close' });
     dialog.append(this.el('h2', '', 'GPU usage'), svg, note, close);
-    dialog.addEventListener('cancel', event => { event.preventDefault(); dialog.close(); });
-    dialog.addEventListener('close', () => { dialog.remove(); this.els.stats?.querySelector('[data-stat="gpu"]')?.focus(); });
-    this.doc.body.append(dialog); dialog.showModal(); close.focus();
+    dialog.addEventListener('cancel', (event) => {
+      event.preventDefault();
+      dialog.close();
+    });
+    dialog.addEventListener('close', () => {
+      dialog.remove();
+      this.els.stats?.querySelector('[data-stat="gpu"]')?.focus();
+    });
+    this.doc.body.append(dialog);
+    dialog.showModal();
+    close.focus();
   }
 
   /** The instance's configured owner name (company settings), the default for how you are called. */
   async loadOwner() {
     const res = await this.app._chatApi('/api/company');
-    if (!res.ok) { this.discardBoardFrame(); return; }
-    const prior = new Map((this.company?.employees || []).map(e => [e.sessionId, caProviderBinding(e)]));
+    if (!res.ok) {
+      this.discardBoardFrame();
+      return;
+    }
+    const prior = new Map((this.company?.employees || []).map((e) => [e.sessionId, caProviderBinding(e)]));
     this.company = res.data;
     // A delayed session/member event cannot keep native proof from an earlier
     // owner, recipe or generation after the canonical company binding changes.
     for (const [sid, binding] of prior) {
-      const current = this.company?.employees?.find(e => e.sessionId === sid);
+      const current = this.company?.employees?.find((e) => e.sessionId === sid);
       if (current && caProviderBinding(current) === binding) continue;
       const session = this.app.sessions?.get?.(sid);
       if (session) delete session.providerHealth;
@@ -1666,18 +2105,36 @@ class ReverieChatApp {
     this.schedulePresence();
     globalThis.ReverieTime?.setTimeZone(res.data?.settings?.timeZone);
     await this.loadPhoneStatus();
-    if (this.canManageOffice()) this.scheduleBoardWarm(); else this.discardBoardFrame();
+    if (this.canManageOffice()) this.scheduleBoardWarm();
+    else this.discardBoardFrame();
     this.ownerName = String(res.data?.settings?.ownerName || '').trim();
     // An agent's own profile icon (the company record: an employee, else a temporary agent) is the one icon it wears everywhere.
     const before = this.profileSig;
     this.profileIcons = caProfileIcons(res.data);
     this.profileAvatars = caProfileAvatars(res.data);
-    this.profileBackgrounds = new Map((res.data?.employees || []).filter(employee => caAvatarBackground(employee.avatarBackground)).map(employee => [employee.sessionId, employee.avatarBackground]));
+    this.profileBackgrounds = new Map(
+      (res.data?.employees || [])
+        .filter((employee) => caAvatarBackground(employee.avatarBackground))
+        .map((employee) => [employee.sessionId, employee.avatarBackground])
+    );
     this.profilePronouns = caProfilePronouns(res.data);
     await this.loadWsIcons();
     const ownerAvatar = typeof res.data?.settings?.ownerAvatar === 'string' ? res.data.settings.ownerAvatar : '';
     this.ownerAvatar = caIconImage(ownerAvatar) ? ownerAvatar : '';
-    this.profileSig = JSON.stringify([[...this.profileIcons], [...this.profileAvatars], [...this.profilePronouns], (res.data?.employees || []).map((employee) => [employee.id, employee.name, employee.icon, employee.avatar, employee.avatarBackground]), this.wsIcons, this.ownerAvatar]);
+    this.profileSig = JSON.stringify([
+      [...this.profileIcons],
+      [...this.profileAvatars],
+      [...this.profilePronouns],
+      (res.data?.employees || []).map((employee) => [
+        employee.id,
+        employee.name,
+        employee.icon,
+        employee.avatar,
+        employee.avatarBackground,
+      ]),
+      this.wsIcons,
+      this.ownerAvatar,
+    ]);
     this.renderUser();
     if (this.view === 'chat') {
       // Avatars are drawn into the sidebar, the member list and the feed: redraw all of them when an icon changed.
@@ -1686,12 +2143,18 @@ class ReverieChatApp {
       this.renderFeed({ keepScroll: true });
     }
     this.maybePromptOwnerName();
-    if (!this._humanStarted && this.built) { this._humanStarted = true; void this.startHumanPresence(); }
+    if (!this._humanStarted && this.built) {
+      this._humanStarted = true;
+      void this.startHumanPresence();
+    }
   }
 
   async startHumanPresence() {
     const me = await this.app._chatApi('/api/office/me').catch(() => null);
-    if (!me?.ok || !me.data?.person) { this.discardBoardFrame(); return; }
+    if (!me?.ok || !me.data?.person) {
+      this.discardBoardFrame();
+      return;
+    }
     this.humanSelf = me.data.person;
     this.checkBoardIdentity(this.humanSelf);
     const pulse = async () => {
@@ -1699,29 +2162,56 @@ class ReverieChatApp {
       this._humanPending = true;
       try {
         const fresh = await this.app._chatApi('/api/office/me');
-        if (!fresh.ok || !fresh.data?.person) { this.discardBoardFrame(); return; }
+        if (!fresh.ok || !fresh.data?.person) {
+          this.discardBoardFrame();
+          return;
+        }
         this.humanSelf = fresh.data.person;
         this.checkBoardIdentity(this.humanSelf);
         await this.app._chatApi('/api/office/presence', { method: 'POST', body: {} });
         const id = this.roomId;
         if (id && !caIsDm(this.room)) {
           const result = await this.app._chatApi('/api/office/presence?roomId=' + encodeURIComponent(id));
-          if (result.ok && this.roomId === id) { this.humans = result.data.people || []; this.humanRoomId = id; }
-        } else { this.humans = []; this.humanRoomId = null; }
+          if (result.ok && this.roomId === id) {
+            this.humans = result.data.people || [];
+            this.humanRoomId = id;
+          }
+        } else {
+          this.humans = [];
+          this.humanRoomId = null;
+        }
         this.renderUser();
-        if (this.view === 'chat') { this.renderHeader(); this.renderMembers(); this.renderFeed({ keepScroll: true }); this.updateMentions(); }
-      } catch { /* Ordinary reconnect refreshes presence; never infer online from a failed request. */ }
-      finally { this._humanPending = false; }
+        if (this.view === 'chat') {
+          this.renderHeader();
+          this.renderMembers();
+          this.renderFeed({ keepScroll: true });
+          this.updateMentions();
+        }
+      } catch {
+        /* Ordinary reconnect refreshes presence; never infer online from a failed request. */
+      } finally {
+        this._humanPending = false;
+      }
     };
     this._humanPulse = pulse;
     await pulse();
-    this._humanTimer = this.doc.defaultView.setInterval(() => { void pulse(); }, 15_000);
-    this.doc.addEventListener('visibilitychange', () => { if (!this.doc.hidden) void pulse(); });
+    this._humanTimer = this.doc.defaultView.setInterval(() => {
+      void pulse();
+    }, 15_000);
+    this.doc.addEventListener('visibilitychange', () => {
+      if (!this.doc.hidden) void pulse();
+    });
   }
 
-  channelHumans() { return this.humanRoomId === this.roomId && !caIsDm(this.room) ? this.humans || [] : []; }
+  channelHumans() {
+    return this.humanRoomId === this.roomId && !caIsDm(this.room) ? this.humans || [] : [];
+  }
 
-  isHumanMessageMine(from) { return (from.kind === 'user' || from.kind === 'human') && (from.humanId || 'owner') === (this.humanSelf?.id || 'owner'); }
+  isHumanMessageMine(from) {
+    return (
+      (from.kind === 'user' || from.kind === 'human') && (from.humanId || 'owner') === (this.humanSelf?.id || 'owner')
+    );
+  }
 
   humanAvatar(person, size = 'md', state) {
     const el = this.el('span', `chatroom-avatar chatroom-avatar--${size}`);
@@ -1734,7 +2224,13 @@ class ReverieChatApp {
 
   /** Offer a display name once per tab session, only after verified owner sign-in. */
   maybePromptOwnerName() {
-    if (this.ownerName || this.company?.canManage !== true || this.phoneStatus?.self !== 'owner' || this.phoneStatus?.canSetOwn !== true) return;
+    if (
+      this.ownerName ||
+      this.company?.canManage !== true ||
+      this.phoneStatus?.self !== 'owner' ||
+      this.phoneStatus?.canSetOwn !== true
+    )
+      return;
     const key = `reverie:owner-name-prompted:${this.company.settings?.owner || 'owner'}`;
     this._ownerNamePrompts ||= new Set();
     if (this._ownerNamePrompts.has(key) || caRead('session', key, '') || this.doc.querySelector('dialog[open]')) return;
@@ -1774,12 +2270,16 @@ class ReverieChatApp {
 
   /** The picture an agent set for itself (the company record's avatar, else the one on its room membership), or ''. */
   profileAvatar(sessionId, member) {
-    return (sessionId && this.profileAvatars?.get(sessionId)) || (member && caIconImage(member.avatar) ? member.avatar : '') || '';
+    return (
+      (sessionId && this.profileAvatars?.get(sessionId)) ||
+      (member && caIconImage(member.avatar) ? member.avatar : '') ||
+      ''
+    );
   }
 
   /** The profile icon of an agent session, if it has one. */
   profileIcon(sessionId) {
-    return sessionId && this.profileIcons?.get(sessionId) || '';
+    return (sessionId && this.profileIcons?.get(sessionId)) || '';
   }
 
   async loadRooms(preferId) {
@@ -1836,9 +2336,11 @@ class ReverieChatApp {
   /** Revalidate missed channel changes on return while keeping the visible conversation and draft. */
   refreshAfterReturn() {
     if (this._returnRefresh) return this._returnRefresh;
-    const flight = this.refreshRooms({ keepRoom: true }).catch(() => {}).finally(() => {
-      if (this._returnRefresh === flight) this._returnRefresh = null;
-    });
+    const flight = this.refreshRooms({ keepRoom: true })
+      .catch(() => {})
+      .finally(() => {
+        if (this._returnRefresh === flight) this._returnRefresh = null;
+      });
     this._returnRefresh = flight;
     return flight;
   }
@@ -1884,33 +2386,59 @@ class ReverieChatApp {
 
     const main = this.el('main', 'ca-main');
     const head = this.el('header', 'ca-head');
-    const navBtn = this.button('ca-icon-btn ca-only-narrow', 'Open channels', () => this.toggleDrawer('channels'), { icon: 'menu' });
+    const navBtn = this.button('ca-icon-btn ca-only-narrow', 'Open channels', () => this.toggleDrawer('channels'), {
+      icon: 'menu',
+    });
     const headTitle = this.el('h1', 'ca-head-title');
     const headTopic = this.el('p', 'ca-head-topic');
     const spacer = this.el('span', 'ca-spacer');
-    const membersBtn = this.button('ca-icon-btn ca-head-members', 'Show member list', () => this.toggleMembers(), { icon: 'members' });
+    const membersBtn = this.button('ca-icon-btn ca-head-members', 'Show member list', () => this.toggleMembers(), {
+      icon: 'members',
+    });
     membersBtn.setAttribute('aria-controls', 'ca-members-list');
     const membersDot = this.el('span', 'ca-members-chip-dot');
     const membersCount = this.el('span', 'ca-members-chip-count');
     membersDot.setAttribute('aria-hidden', 'true');
     membersCount.setAttribute('aria-hidden', 'true');
     membersBtn.append(membersDot, membersCount);
-    const inviteBtn = this.button('ca-icon-btn ca-head-invite', 'Add people to this channel', () => this.room && this.openInviteDialog(this.room.id), { icon: 'invite' });
+    const inviteBtn = this.button(
+      'ca-icon-btn ca-head-invite',
+      'Add people to this channel',
+      () => this.room && this.openInviteDialog(this.room.id),
+      { icon: 'invite' }
+    );
     inviteBtn.title = 'Add people to this channel';
     inviteBtn.hidden = true;
-    const pinsBtn = this.button('ca-icon-btn ca-head-pins', 'Pinned messages', () => this.room && this.openPinsDialog(this.room.id), { icon: 'pin' });
+    const pinsBtn = this.button(
+      'ca-icon-btn ca-head-pins',
+      'Pinned messages',
+      () => this.room && this.openPinsDialog(this.room.id),
+      { icon: 'pin' }
+    );
     pinsBtn.hidden = true;
-    const searchBtn = this.button('ca-icon-btn ca-head-search', 'Search channel messages', () => this.openMessageSearch(), { icon: 'search' });
+    const searchBtn = this.button(
+      'ca-icon-btn ca-head-search',
+      'Search channel messages',
+      () => this.openMessageSearch(),
+      { icon: 'search' }
+    );
     searchBtn.append(this.el('span', 'ca-search-label', 'Search messages'));
     searchBtn.hidden = true;
     searchBtn.setAttribute('aria-expanded', 'false');
     searchBtn.setAttribute('aria-controls', 'ca-message-search');
     // Device setup lives in Company settings; this detached action only backs the phone header's More menu.
-    const phoneBtn = this.button('ca-icon-btn ca-head-phone', 'Install app and notifications', () => window.ReverieMobile?.open(), { icon: 'phone' });
+    const phoneBtn = this.button(
+      'ca-icon-btn ca-head-phone',
+      'Install app and notifications',
+      () => window.ReverieMobile?.open(),
+      { icon: 'phone' }
+    );
     const mutedBadge = this.el('span', 'ca-muted-badge', 'Muted');
     mutedBadge.hidden = true;
     mutedBadge.title = 'Channel notifications are muted';
-    const moreBtn = this.button('ca-icon-btn ca-head-more', 'More actions', () => this.openHeaderMenu(moreBtn), { text: '⋯' });
+    const moreBtn = this.button('ca-icon-btn ca-head-more', 'More actions', () => this.openHeaderMenu(moreBtn), {
+      text: '⋯',
+    });
     moreBtn.title = 'More actions';
     moreBtn.setAttribute('aria-haspopup', 'menu');
     head.append(navBtn, headTitle, mutedBadge, inviteBtn, headTopic, spacer, pinsBtn, searchBtn, membersBtn, moreBtn);
@@ -1930,8 +2458,32 @@ class ReverieChatApp {
     this.doc.body.append(root);
 
     Object.assign(this.els, {
-      rail, side, sideHead, sideTitle, sideScroll, user, main, head, headTitle, headTopic,
-      membersBtn, membersDot, membersCount, mutedBadge, navBtn, inviteBtn, pinsBtn, searchBtn, phoneBtn, moreBtn, chat, members, scrim, stats, machineBar, body,
+      rail,
+      side,
+      sideHead,
+      sideTitle,
+      sideScroll,
+      user,
+      main,
+      head,
+      headTitle,
+      headTopic,
+      membersBtn,
+      membersDot,
+      membersCount,
+      mutedBadge,
+      navBtn,
+      inviteBtn,
+      pinsBtn,
+      searchBtn,
+      phoneBtn,
+      moreBtn,
+      chat,
+      members,
+      scrim,
+      stats,
+      machineBar,
+      body,
     });
 
     // Reuse the chat panel's feed, composer, mic, attachments and create form: it becomes the
@@ -1958,8 +2510,16 @@ class ReverieChatApp {
     this.app._chatEls.feed.addEventListener('scroll', () => this.markReadSoon(), { passive: true });
     this.renderAll();
     this.renderUser();
-    this.doc.defaultView?.addEventListener('message', event => {
-      if (!((this.embed === 'workspace' && event.data?.type === 'workspace-back-to-chat') || (this.embed === 'people' && event.data?.type === 'office-back-to-chat')) || event.origin !== this.doc.defaultView.location.origin || event.source !== this.els.page?.querySelector('iframe')?.contentWindow) return;
+    this.doc.defaultView?.addEventListener('message', (event) => {
+      if (
+        !(
+          (this.embed === 'workspace' && event.data?.type === 'workspace-back-to-chat') ||
+          (this.embed === 'people' && event.data?.type === 'office-back-to-chat')
+        ) ||
+        event.origin !== this.doc.defaultView.location.origin ||
+        event.source !== this.els.page?.querySelector('iframe')?.contentWindow
+      )
+        return;
       void this.returnToCompanyTools();
     });
     // Back and forward move between the conversation and Board; a #board link opens it.
@@ -1968,22 +2528,34 @@ class ReverieChatApp {
       if (kind) this.openPage(kind, { push: false });
       else {
         this.closePage({ history: false });
-        const target = this.doc.defaultView.ReverieUrlSession?.sessionIdFromFragment?.(this.doc.defaultView.location.hash);
+        const target = this.doc.defaultView.ReverieUrlSession?.sessionIdFromFragment?.(
+          this.doc.defaultView.location.hash
+        );
         if (target) this.showDebug(target);
         else this.showChat();
       }
     });
     this.doc.defaultView?.addEventListener('resize', () => this.renderOfficePane());
-    this.doc.defaultView?.addEventListener('message', event => {
+    this.doc.defaultView?.addEventListener('message', (event) => {
       const cache = this._boardCache;
-      if (cache && event.origin === this.doc.defaultView.location.origin && event.source === cache.frame.contentWindow && event.data?.type === 'board-auth-lost') this.discardBoardFrame();
+      if (
+        cache &&
+        event.origin === this.doc.defaultView.location.origin &&
+        event.source === cache.frame.contentWindow &&
+        event.data?.type === 'board-auth-lost'
+      )
+        this.discardBoardFrame();
     });
     this.doc.addEventListener('visibilitychange', () => {
       if (this.doc.hidden) this.suspendBoardFrame();
-      else if (this._boardCache && this.embed === 'board' && this.view === 'chat') void this.openWarmBoard({ push: false });
+      else if (this._boardCache && this.embed === 'board' && this.view === 'chat')
+        void this.openWarmBoard({ push: false });
     });
-    this.doc.defaultView?.addEventListener('pageshow', event => {
-      if (event.persisted && this.active) { this.renderAll(); this.refreshAfterReturn(); }
+    this.doc.defaultView?.addEventListener('pageshow', (event) => {
+      if (event.persisted && this.active) {
+        this.renderAll();
+        this.refreshAfterReturn();
+      }
     });
     const first = caPageFromHash(this.doc.defaultView?.location.hash);
     if (first) this.openPage(first, { push: false });
@@ -1993,7 +2565,9 @@ class ReverieChatApp {
   trapTab(root) {
     root.addEventListener('keydown', (e) => {
       if (e.key !== 'Tab') return;
-      const items = [...root.querySelectorAll('button:not(:disabled), input, textarea, select')].filter((x) => !x.hidden && !x.closest('[hidden]'));
+      const items = [...root.querySelectorAll('button:not(:disabled), input, textarea, select')].filter(
+        (x) => !x.hidden && !x.closest('[hidden]')
+      );
       if (!items.length) return;
       const first = items[0];
       const last = items.at(-1);
@@ -2034,11 +2608,26 @@ class ReverieChatApp {
     const main = this.el('div', 'ca-settings-main');
     const body = this.el('div', 'ca-settings-body');
     body.append(this.el('h2', 'ca-settings-h', 'Workspace profile'));
-    body.append(this.el('p', 'ca-hint', 'A workspace groups channels, like a server or an organisation. Its picture is kept on the server, so it shows on every device you sign in on; its emoji and colour show in the left bar on this device.'));
+    body.append(
+      this.el(
+        'p',
+        'ca-hint',
+        'A workspace groups channels, like a server or an organisation. Its picture is kept on the server, so it shows on every device you sign in on; its emoji and colour show in the left bar on this device.'
+      )
+    );
     const meta = Object.hasOwn(this.wsMeta, key) ? this.wsMeta[key] : {};
-    const draft = { name: label, icon: meta.icon || '', image: this.iconImage(meta.image) ? meta.image : '', hue: Number.isFinite(meta.hue) ? meta.hue : null };
+    const draft = {
+      name: label,
+      icon: meta.icon || '',
+      image: this.iconImage(meta.image) ? meta.image : '',
+      hue: Number.isFinite(meta.hue) ? meta.hue : null,
+    };
     const state = { ...draft };
-    const dirty = () => draft.name.trim() !== state.name || draft.icon !== state.icon || draft.image !== state.image || draft.hue !== state.hue;
+    const dirty = () =>
+      draft.name.trim() !== state.name ||
+      draft.icon !== state.icon ||
+      draft.image !== state.image ||
+      draft.hue !== state.hue;
     const bar = this.el('div', 'ca-savebar');
     bar.hidden = true;
     const sync = () => {
@@ -2071,7 +2660,8 @@ class ReverieChatApp {
     swatches.setAttribute('role', 'radiogroup');
     swatches.setAttribute('aria-label', 'Workspace colour');
     const paint = () => {
-      for (const b of swatches.children) b.setAttribute('aria-checked', String((b.dataset.hue === '' ? null : Number(b.dataset.hue)) === draft.hue));
+      for (const b of swatches.children)
+        b.setAttribute('aria-checked', String((b.dataset.hue === '' ? null : Number(b.dataset.hue)) === draft.hue));
     };
     for (const h of [null, ...CA_PROFILE_HUES]) {
       const b = this.el('button', 'ca-swatch');
@@ -2096,7 +2686,13 @@ class ReverieChatApp {
     });
     body.append(nameWrap, iconWrap, pic.wrap, colour);
     const members = new Set(rooms.flatMap((r) => (r.members || []).map((m) => m.sessionId)));
-    body.append(this.el('p', 'ca-hint', `${rooms.length} channel${rooms.length === 1 ? '' : 's'} \u00B7 ${members.size} agent${members.size === 1 ? '' : 's'}`));
+    body.append(
+      this.el(
+        'p',
+        'ca-hint',
+        `${rooms.length} channel${rooms.length === 1 ? '' : 's'} \u00B7 ${members.size} agent${members.size === 1 ? '' : 's'}`
+      )
+    );
     main.append(body);
     const close = this.button('ca-settings-close', 'Close settings (Esc)', () => finish(), { text: '\u2715' });
     const row = this.el('div', 'ca-savebar-row');
@@ -2116,14 +2712,21 @@ class ReverieChatApp {
       if (pic.pending()) return;
       const next = draft.name.trim();
       if (isDefault && next !== state.name) {
-        const clash = next.toLowerCase() === 'home' || this.rooms.some(r => !caIsDm(r) && r.workspace && r.workspace.toLowerCase() === next.toLowerCase());
-        if (!next || next.length > 40 || /[\u0000-\u001f\u007f]/.test(next) || clash) return this.toast('Pick a name of up to 40 characters that is not Home or another workspace.', 'error');
+        const clash =
+          next.toLowerCase() === 'home' ||
+          this.rooms.some((r) => !caIsDm(r) && r.workspace && r.workspace.toLowerCase() === next.toLowerCase());
+        if (!next || next.length > 40 || /[\u0000-\u001f\u007f]/.test(next) || clash)
+          return this.toast('Pick a name of up to 40 characters that is not Home or another workspace.', 'error');
         save.disabled = true;
         try {
           // The default workspace keeps its empty placement key. Its one canonical
           // name is the instance display name, shared with Settings and all devices.
           const saved = await this.app._chatApi('/api/settings', { method: 'PUT', body: { displayName: next } });
-          if (!saved.ok) return this.toast(`Workspace name could not be saved: ${saved.error || 'Owner sign-in is required.'}`, 'error');
+          if (!saved.ok)
+            return this.toast(
+              `Workspace name could not be saved: ${saved.error || 'Owner sign-in is required.'}`,
+              'error'
+            );
           const settings = this.app.loadAppSettingsFromStorage?.() || {};
           this.app.saveAppSettingsToStorage?.({ ...settings, displayName: next });
           this.doc.defaultView?.ReverieI18n?.configure({ displayName: next });
@@ -2134,14 +2737,25 @@ class ReverieChatApp {
           this.renderAll();
         } catch {
           return this.toast('Workspace name could not be saved. Try again.', 'error');
-        } finally { save.disabled = false; }
+        } finally {
+          save.disabled = false;
+        }
       }
       if (!isDefault && next !== state.name) {
-        const clash = next.toLowerCase() === 'home' || next.toLowerCase() === this.defaultWorkspaceName().toLowerCase() || this.rooms.some((r) => !caIsDm(r) && r.workspace && r.workspace !== key && r.workspace.toLowerCase() === next.toLowerCase());
-        if (!next || clash) return this.toast('Pick a name that is not Home, the default workspace or another workspace.', 'error');
+        const clash =
+          next.toLowerCase() === 'home' ||
+          next.toLowerCase() === this.defaultWorkspaceName().toLowerCase() ||
+          this.rooms.some(
+            (r) => !caIsDm(r) && r.workspace && r.workspace !== key && r.workspace.toLowerCase() === next.toLowerCase()
+          );
+        if (!next || clash)
+          return this.toast('Pick a name that is not Home, the default workspace or another workspace.', 'error');
         save.disabled = true;
         for (const r of rooms) {
-          const res = await this.app._chatApi(`/api/chatrooms/${encodeURIComponent(r.id)}/placement`, { method: 'PUT', body: { workspace: next, category: r.category || '' } });
+          const res = await this.app._chatApi(`/api/chatrooms/${encodeURIComponent(r.id)}/placement`, {
+            method: 'PUT',
+            body: { workspace: next, category: r.category || '' },
+          });
           if (!res.ok) {
             save.disabled = false;
             return this.toast(`Chat: ${res.error} (some channels may already be in "${next}")`, 'error');
@@ -2149,8 +2763,15 @@ class ReverieChatApp {
         }
         // Its picture on the server follows the name.
         if (Object.keys(this.wsIcons || {}).some((n) => n.toLowerCase() === key.toLowerCase())) {
-          const moved = await this.app._chatApi('/api/workspace-icons/rename', { method: 'POST', body: { from: key, to: next } });
-          if (!moved.ok) this.toast(`Renamed, but its picture could not be moved on the server (${moved.error}). Choose it again under the new name.`, 'error');
+          const moved = await this.app._chatApi('/api/workspace-icons/rename', {
+            method: 'POST',
+            body: { from: key, to: next },
+          });
+          if (!moved.ok)
+            this.toast(
+              `Renamed, but its picture could not be moved on the server (${moved.error}). Choose it again under the new name.`,
+              'error'
+            );
           await this.loadWsIcons();
         }
         // The look follows the name.
@@ -2178,7 +2799,8 @@ class ReverieChatApp {
       if (draft.image !== state.image && (draft.image || onServer)) {
         const stored = await this.saveWsPicture(finalKey, draft.image);
         if (stored) image = '';
-        else if (draft.image) this.toast('The picture could not be saved on the server; it is kept on this device only.', 'info');
+        else if (draft.image)
+          this.toast('The picture could not be saved on the server; it is kept on this device only.', 'info');
         else this.toast('The picture could not be removed on the server, so it is still shown.', 'error');
       }
       if (image.startsWith('/api/')) image = '';
@@ -2267,7 +2889,12 @@ class ReverieChatApp {
     this.doc.body.append(root);
     this.els.settings = root;
 
-    const state = { name: room.name, topic: room.topic || '', workspace: room.workspace || '', category: room.category || '' };
+    const state = {
+      name: room.name,
+      topic: room.topic || '',
+      workspace: room.workspace || '',
+      category: room.category || '',
+    };
     const draft = { ...state };
     const dirty = () => Object.keys(state).some((k) => state[k] !== draft[k]);
     const showBar = () => {
@@ -2292,7 +2919,9 @@ class ReverieChatApp {
     this.els.root.inert = true;
     const trap = (e) => {
       if (e.key !== 'Tab') return;
-      const items = [...root.querySelectorAll('button:not(:disabled), input, textarea, select')].filter((x) => !x.hidden && x.offsetParent !== null || x === this.doc.activeElement);
+      const items = [...root.querySelectorAll('button:not(:disabled), input, textarea, select')].filter(
+        (x) => (!x.hidden && x.offsetParent !== null) || x === this.doc.activeElement
+      );
       if (!items.length) return;
       const first = items[0];
       const last = items.at(-1);
@@ -2324,7 +2953,10 @@ class ReverieChatApp {
     this.refreshSettings = () => {
       if (this._settingsKey === 'members' && this.els.settings) show('members');
     };
-    for (const [key, label] of [['overview', 'Overview'], ['members', 'Members']]) {
+    for (const [key, label] of [
+      ['overview', 'Overview'],
+      ['members', 'Members'],
+    ]) {
       const b = this.el('button', 'ca-settings-tab', label);
       b.type = 'button';
       b.addEventListener('click', () => show(key));
@@ -2369,7 +3001,10 @@ class ReverieChatApp {
       if (draft.name.trim() !== state.name) change.name = draft.name.trim();
       if (this.serverFeatures.topics && draft.topic !== state.topic) change.topic = draft.topic;
       if (Object.keys(change).length) {
-        const res = await this.app._chatApi(`/api/chatrooms/${encodeURIComponent(room.id)}`, { method: 'PUT', body: change });
+        const res = await this.app._chatApi(`/api/chatrooms/${encodeURIComponent(room.id)}`, {
+          method: 'PUT',
+          body: change,
+        });
         if (!res.ok) {
           save.disabled = false;
           return this.toast(`Chat: ${res.error}`, 'error');
@@ -2386,7 +3021,12 @@ class ReverieChatApp {
         }
       }
       save.disabled = false;
-      Object.assign(state, { name: draft.name.trim(), topic: draft.topic, workspace: draft.workspace.trim(), category: draft.category.trim() });
+      Object.assign(state, {
+        name: draft.name.trim(),
+        topic: draft.topic,
+        workspace: draft.workspace.trim(),
+        category: draft.category.trim(),
+      });
       draft.name = state.name;
       nav.querySelector('.ca-settings-title').textContent = `# ${state.name}`;
       showBar();
@@ -2432,29 +3072,60 @@ class ReverieChatApp {
     };
     if (key === 'members') {
       const out = [this.el('h2', 'ca-settings-h', 'Members')];
-      const invite = this.button('ca-btn is-primary', 'Invite agents', () => this.openInviteDialog(room.id), { text: 'Invite agents' });
+      const invite = this.button('ca-btn is-primary', 'Invite agents', () => this.openInviteDialog(room.id), {
+        text: 'Invite agents',
+      });
       out.push(invite);
       if (room.members.some((m) => m.role === 'coordinator')) {
-        out.push(this.button('ca-btn', 'Clear the admin', () => this.app._appointChatCoordinator(null), { text: 'Clear admin' }));
+        out.push(
+          this.button('ca-btn', 'Clear the admin', () => this.app._appointChatCoordinator(null), {
+            text: 'Clear admin',
+          })
+        );
       }
       const list = this.el('ul', 'ca-invite-list');
       for (const m of room.members) {
         const li = this.el('li', 'ca-invite-row');
         li.append(this.app._chatAvatar(m.sessionId, m.name, { size: 'md' }));
         const text = this.el('div', 'ca-invite-text');
-        text.append(this.el('strong', '', m.name), this.el('span', 'ca-invite-sub', m.role === 'coordinator' ? 'Admin' : caPresence(m)));
+        text.append(
+          this.el('strong', '', m.name),
+          this.el('span', 'ca-invite-sub', m.role === 'coordinator' ? 'Admin' : caPresence(m))
+        );
         li.append(text);
         if (m.role !== 'coordinator') {
-          li.append(this.button('ca-btn', `Make ${m.name} admin`, () => this.app._appointChatCoordinator(m.sessionId), { text: 'Make admin' }));
+          li.append(
+            this.button('ca-btn', `Make ${m.name} admin`, () => this.app._appointChatCoordinator(m.sessionId), {
+              text: 'Make admin',
+            })
+          );
         }
-        li.append(this.button('ca-btn', `Remove ${m.name} from this channel`, () => this.app._removeChatMember(m), { text: 'Remove' }));
+        li.append(
+          this.button('ca-btn', `Remove ${m.name} from this channel`, () => this.app._removeChatMember(m), {
+            text: 'Remove',
+          })
+        );
         list.append(li);
       }
       out.push(list);
       return out;
     }
-    const spaces = [...new Set(this.rooms.filter((r) => !caIsDm(r)).map((r) => r.workspace).filter(Boolean))];
-    const cats = [...new Set(this.rooms.filter((r) => !caIsDm(r)).map((r) => r.category).filter(Boolean))];
+    const spaces = [
+      ...new Set(
+        this.rooms
+          .filter((r) => !caIsDm(r))
+          .map((r) => r.workspace)
+          .filter(Boolean)
+      ),
+    ];
+    const cats = [
+      ...new Set(
+        this.rooms
+          .filter((r) => !caIsDm(r))
+          .map((r) => r.category)
+          .filter(Boolean)
+      ),
+    ];
     const out = [this.el('h2', 'ca-settings-h', 'Overview'), field('Channel name', 'name', 80)];
     if (this.serverFeatures.topics) {
       out.push(field('Channel topic', 'topic', 500, { textarea: true, hint: 'Shown under the channel name.' }));
@@ -2481,31 +3152,58 @@ class ReverieChatApp {
     dlg.setAttribute('aria-label', `Move ${m.name} to a new session`);
     const head = this.el('div', 'ca-invite-head');
     const titles = this.el('div');
-    titles.append(this.el('h2', '', `Move ${m.name} to a new session`), this.el('p', 'ca-dialog-note', 'Its place in every room (role, goal, settings) moves to the session you pick. Earlier messages keep the old name.'));
-    head.append(titles, this.button('ca-icon-btn', 'Close', () => dlg.close(), { text: '\u2715' }));
+    titles.append(
+      this.el('h2', '', `Move ${m.name} to a new session`),
+      this.el(
+        'p',
+        'ca-dialog-note',
+        'Its place in every room (role, goal, settings) moves to the session you pick. Earlier messages keep the old name.'
+      )
+    );
+    head.append(
+      titles,
+      this.button('ca-icon-btn', 'Close', () => dlg.close(), { text: '\u2715' })
+    );
     const inRoom = new Set((room?.members || []).map((x) => x.sessionId));
-    const same = (s) => s.name.trim().toLowerCase() === String(m.name || '').trim().toLowerCase();
-    const candidates = (this.app._chatCandidateSessions?.(inRoom) || []).filter((s) => s.mode !== 'shell').sort((a, b) => Number(same(b)) - Number(same(a)));
+    const same = (s) =>
+      s.name.trim().toLowerCase() ===
+      String(m.name || '')
+        .trim()
+        .toLowerCase();
+    const candidates = (this.app._chatCandidateSessions?.(inRoom) || [])
+      .filter((s) => s.mode !== 'shell')
+      .sort((a, b) => Number(same(b)) - Number(same(a)));
     const list = this.el('ul', 'ca-invite-list');
     if (!candidates.length) list.append(this.el('li', 'ca-invite-empty', 'No other agent session is open.'));
     for (const s of candidates) {
       const li = this.el('li', 'ca-invite-row');
       li.append(this.app._chatAvatar(s.id, s.name, { size: 'md' }));
       const text = this.el('div', 'ca-invite-text');
-      text.append(this.el('strong', '', s.name), this.el('span', 'ca-invite-sub', same(s) ? 'Same name' : String(s.mode || '')));
+      text.append(
+        this.el('strong', '', s.name),
+        this.el('span', 'ca-invite-sub', same(s) ? 'Same name' : String(s.mode || ''))
+      );
       li.append(text);
-      const b = this.button('ca-btn', `Move ${m.name} to ${s.name}`, async () => {
-        b.disabled = true;
-        const res = await this.app._chatApi('/api/chatrooms/members/replace', { method: 'POST', body: { from: m.sessionId, to: s.id } });
-        if (!res.ok) {
-          b.disabled = false;
-          return this.toast(`Chat: ${res.error}`, 'error');
-        }
-        const n = res.data?.rooms?.length || 0;
-        this.toast(`${m.name} moved to the new session in ${n} room${n === 1 ? '' : 's'}`, 'info');
-        dlg.close();
-        await this.app._loadChatRooms?.(this.roomId);
-      }, { text: 'Move' });
+      const b = this.button(
+        'ca-btn',
+        `Move ${m.name} to ${s.name}`,
+        async () => {
+          b.disabled = true;
+          const res = await this.app._chatApi('/api/chatrooms/members/replace', {
+            method: 'POST',
+            body: { from: m.sessionId, to: s.id },
+          });
+          if (!res.ok) {
+            b.disabled = false;
+            return this.toast(`Chat: ${res.error}`, 'error');
+          }
+          const n = res.data?.rooms?.length || 0;
+          this.toast(`${m.name} moved to the new session in ${n} room${n === 1 ? '' : 's'}`, 'info');
+          dlg.close();
+          await this.app._loadChatRooms?.(this.roomId);
+        },
+        { text: 'Move' }
+      );
       li.append(b);
       list.append(li);
     }
@@ -2525,8 +3223,18 @@ class ReverieChatApp {
     dlg.setAttribute('aria-label', 'Retired sessions');
     const head = this.el('div', 'ca-invite-head');
     const titles = this.el('div');
-    titles.append(this.el('h2', '', 'Retired sessions'), this.el('p', 'ca-dialog-note', 'Old sessions replaced after a plan switch. They are in no room and hidden everywhere; Restore moves their places back.'));
-    head.append(titles, this.button('ca-icon-btn', 'Close', () => dlg.close(), { text: '\u2715' }));
+    titles.append(
+      this.el('h2', '', 'Retired sessions'),
+      this.el(
+        'p',
+        'ca-dialog-note',
+        'Old sessions replaced after a plan switch. They are in no room and hidden everywhere; Restore moves their places back.'
+      )
+    );
+    head.append(
+      titles,
+      this.button('ca-icon-btn', 'Close', () => dlg.close(), { text: '\u2715' })
+    );
     const list = this.el('ul', 'ca-invite-list');
     const paint = async () => {
       const res = await this.app._chatApi('/api/chatrooms/retired');
@@ -2538,25 +3246,60 @@ class ReverieChatApp {
         const li = this.el('li', 'ca-invite-row');
         const text = this.el('div', 'ca-invite-text');
         const successor = this.app.sessions?.get?.(r.successorId)?.name || r.successorId.slice(0, 8);
-        text.append(this.el('strong', '', r.name), this.el('span', 'ca-invite-sub', `Replaced by ${successor}, ${(globalThis.ReverieTime?.format(r.at) ?? new Date(r.at).toLocaleString('en-US', { timeZone: 'UTC', timeZoneName: 'short' }))}`), this.el('span', 'ca-hint', r.rooms.length ? `Was in ${r.rooms.map((x) => x.name).join(', ')}` : 'Was in no room'));
+        text.append(
+          this.el('strong', '', r.name),
+          this.el(
+            'span',
+            'ca-invite-sub',
+            `Replaced by ${successor}, ${globalThis.ReverieTime?.format(r.at) ?? new Date(r.at).toLocaleString('en-US', { timeZone: 'UTC', timeZoneName: 'short' })}`
+          ),
+          this.el(
+            'span',
+            'ca-hint',
+            r.rooms.length ? `Was in ${r.rooms.map((x) => x.name).join(', ')}` : 'Was in no room'
+          )
+        );
         li.append(text);
-        const restore = this.button('ca-btn', `Restore ${r.name}`, async () => {
-          if (!this.doc.defaultView?.confirm(`Move ${r.name}'s places back? ${successor} will be retired in its stead.`)) return;
-          const out = await this.app._chatApi(`/api/chatrooms/retired/${encodeURIComponent(r.sessionId)}/restore`, { method: 'POST', body: {} });
-          if (!out.ok) return this.toast(`Chat: ${out.error}`, 'error');
-          this.toast(`${r.name} is back in ${out.data?.rooms?.length || 0} room(s)`, 'info');
-          await this.app._loadChatRooms?.(this.roomId);
-          await paint();
-        }, { text: 'Restore' });
+        const restore = this.button(
+          'ca-btn',
+          `Restore ${r.name}`,
+          async () => {
+            if (
+              !this.doc.defaultView?.confirm(`Move ${r.name}'s places back? ${successor} will be retired in its stead.`)
+            )
+              return;
+            const out = await this.app._chatApi(`/api/chatrooms/retired/${encodeURIComponent(r.sessionId)}/restore`, {
+              method: 'POST',
+              body: {},
+            });
+            if (!out.ok) return this.toast(`Chat: ${out.error}`, 'error');
+            this.toast(`${r.name} is back in ${out.data?.rooms?.length || 0} room(s)`, 'info');
+            await this.app._loadChatRooms?.(this.roomId);
+            await paint();
+          },
+          { text: 'Restore' }
+        );
         restore.disabled = !r.restorable;
         if (!r.restorable) restore.title = 'That session is gone, so there is nothing to restore';
-        const forget = this.button('ca-btn', `Delete ${r.name}`, async () => {
-          if (!this.doc.defaultView?.confirm(`Delete ${r.name}? Its terminal is closed and the session removed (its transcript stays on disk). It stops being a rollback.`)) return;
-          const out = await this.app._chatApi(`/api/chatrooms/retired/${encodeURIComponent(r.sessionId)}`, { method: 'DELETE' });
-          if (!out.ok) return this.toast(`Chat: ${out.error}`, 'error');
-          await this.app._loadChatRooms?.(this.roomId);
-          await paint();
-        }, { text: 'Delete' });
+        const forget = this.button(
+          'ca-btn',
+          `Delete ${r.name}`,
+          async () => {
+            if (
+              !this.doc.defaultView?.confirm(
+                `Delete ${r.name}? Its terminal is closed and the session removed (its transcript stays on disk). It stops being a rollback.`
+              )
+            )
+              return;
+            const out = await this.app._chatApi(`/api/chatrooms/retired/${encodeURIComponent(r.sessionId)}`, {
+              method: 'DELETE',
+            });
+            if (!out.ok) return this.toast(`Chat: ${out.error}`, 'error');
+            await this.app._loadChatRooms?.(this.roomId);
+            await paint();
+          },
+          { text: 'Delete' }
+        );
         li.append(restore, forget);
         list.append(li);
       }
@@ -2570,10 +3313,18 @@ class ReverieChatApp {
 
   /** Override one agent's notification choice (it can set it itself with `reverie agent chat notify`). */
   async setMemberNotify(m, mode) {
-    const res = await this.app._chatApi(`/api/chatrooms/${encodeURIComponent(this.roomId)}/members/${encodeURIComponent(m.sessionId)}/notify`, { method: 'PUT', body: { mode } });
+    const res = await this.app._chatApi(
+      `/api/chatrooms/${encodeURIComponent(this.roomId)}/members/${encodeURIComponent(m.sessionId)}/notify`,
+      { method: 'PUT', body: { mode } }
+    );
     if (!res.ok) return this.toast(`Chat: ${res.error}`, 'error');
     await this.app._loadChatRoom(this.roomId, { quiet: true });
-    this.toast(mode === 'mentions' ? `${m.name} is now woken only by @mentions, replies and you` : `${m.name} is woken as the room says`, 'info');
+    this.toast(
+      mode === 'mentions'
+        ? `${m.name} is now woken only by @mentions, replies and you`
+        : `${m.name} is woken as the room says`,
+      'info'
+    );
   }
 
   /** What a message to the whole channel wakes: everyone, only those it names (plus replies and the coordinator), or the console's default. */
@@ -2582,15 +3333,20 @@ class ReverieChatApp {
     wrap.append(this.el('legend', 'ca-label-text', 'Who a message wakes'));
     const note = this.el('span', 'ca-hint', '');
     const notes = {
-      default: 'The console\'s default (set by whoever runs it).',
+      default: "The console's default (set by whoever runs it).",
       all: 'Every agent in the channel is woken by every message: each costs every agent a turn.',
-      mentions: 'Only the agents a message @names, the author it replies to and the coordinator are woken. The others still read it with their next prompt, and you always wake someone.',
+      mentions:
+        'Only the agents a message @names, the author it replies to and the coordinator are woken. The others still read it with their next prompt, and you always wake someone.',
     };
     const current = room.wake === 'all' || room.wake === 'mentions' ? room.wake : 'default';
     const sync = (v) => {
       note.textContent = notes[v];
     };
-    for (const [value, label] of [['default', 'Console default'], ['all', 'Everyone (every message wakes every agent)'], ['mentions', 'Only those named (@mention), replies and the coordinator']]) {
+    for (const [value, label] of [
+      ['default', 'Console default'],
+      ['all', 'Everyone (every message wakes every agent)'],
+      ['mentions', 'Only those named (@mention), replies and the coordinator'],
+    ]) {
       const row = this.el('label', 'ca-radio');
       const input = this.el('input');
       input.type = 'radio';
@@ -2599,7 +3355,10 @@ class ReverieChatApp {
       input.checked = value === current;
       input.addEventListener('change', async () => {
         if (!input.checked) return;
-        const res = await this.app._chatApi(`/api/chatrooms/${encodeURIComponent(room.id)}/wake`, { method: 'PUT', body: { mode: value } });
+        const res = await this.app._chatApi(`/api/chatrooms/${encodeURIComponent(room.id)}/wake`, {
+          method: 'PUT',
+          body: { mode: value },
+        });
         if (!res.ok) {
           this.toast(`Chat: ${res.error}`, 'error');
           for (const r of wrap.querySelectorAll('input')) r.checked = r.value === current;
@@ -2621,10 +3380,16 @@ class ReverieChatApp {
     wrap.append(this.el('legend', 'ca-label-text', 'Who can find and join this channel'));
     const note = this.el('span', 'ca-hint', '');
     const sync = (v) => {
-      note.textContent = v === 'public' ? 'Public: every agent can list this channel and join it.' : 'Private: only members. It is not listed for anyone else, and an agent has to be added.';
+      note.textContent =
+        v === 'public'
+          ? 'Public: every agent can list this channel and join it.'
+          : 'Private: only members. It is not listed for anyone else, and an agent has to be added.';
     };
     const current = room.visibility === 'public' ? 'public' : 'private';
-    for (const [value, label] of [['private', 'Private (members only)'], ['public', 'Public (any agent can join)']]) {
+    for (const [value, label] of [
+      ['private', 'Private (members only)'],
+      ['public', 'Public (any agent can join)'],
+    ]) {
       const row = this.el('label', 'ca-radio');
       const input = this.el('input');
       input.type = 'radio';
@@ -2633,7 +3398,10 @@ class ReverieChatApp {
       input.checked = value === current;
       input.addEventListener('change', async () => {
         if (!input.checked) return;
-        const res = await this.app._chatApi(`/api/chatrooms/${encodeURIComponent(room.id)}/visibility`, { method: 'PUT', body: { visibility: value } });
+        const res = await this.app._chatApi(`/api/chatrooms/${encodeURIComponent(room.id)}/visibility`, {
+          method: 'PUT',
+          body: { visibility: value },
+        });
         if (!res.ok) {
           this.toast(`Chat: ${res.error}`, 'error');
           for (const r of wrap.querySelectorAll('input')) r.checked = r.value === current;
@@ -2660,8 +3428,14 @@ class ReverieChatApp {
     dlg.setAttribute('aria-label', `Invite agents to ${room.name}`);
     const head = this.el('div', 'ca-invite-head');
     const titles = this.el('div');
-    titles.append(this.el('h2', '', `Invite agents to #${room.name}`), this.el('p', 'ca-dialog-note', 'They join this channel and are briefed on it.'));
-    head.append(titles, this.button('ca-icon-btn', 'Close', () => dlg.close(), { text: '\u2715' }));
+    titles.append(
+      this.el('h2', '', `Invite agents to #${room.name}`),
+      this.el('p', 'ca-dialog-note', 'They join this channel and are briefed on it.')
+    );
+    head.append(
+      titles,
+      this.button('ca-icon-btn', 'Close', () => dlg.close(), { text: '\u2715' })
+    );
     const search = this.el('input', 'ca-field');
     search.type = 'search';
     search.placeholder = 'Search for agents';
@@ -2671,27 +3445,45 @@ class ReverieChatApp {
     const inRoom = new Set((room.members || []).map((m) => m.sessionId));
     const paint = () => {
       const q = search.value.trim().toLowerCase();
-      const candidates = (this.app._chatCandidateSessions?.(inRoom) || []).filter((s) => s.mode !== 'shell' && (!q || s.name.toLowerCase().includes(q)));
+      const candidates = (this.app._chatCandidateSessions?.(inRoom) || []).filter(
+        (s) => s.mode !== 'shell' && (!q || s.name.toLowerCase().includes(q))
+      );
       list.replaceChildren();
-      if (!candidates.length) list.append(this.el('li', 'ca-invite-empty', q ? 'No agent matches.' : 'Every open agent is already here.'));
+      if (!candidates.length)
+        list.append(this.el('li', 'ca-invite-empty', q ? 'No agent matches.' : 'Every open agent is already here.'));
       for (const s of candidates) {
         const li = this.el('li', 'ca-invite-row');
         li.append(this.app._chatAvatar(s.id, s.name, { size: 'md' }));
         const text = this.el('div', 'ca-invite-text');
-        text.append(this.el('strong', '', s.name), this.el('span', 'ca-invite-sub', (Object.hasOwn(CA_BACKENDS, s.mode) ? CA_BACKENDS[s.mode] : String(s.mode || ''))));
+        text.append(
+          this.el('strong', '', s.name),
+          this.el(
+            'span',
+            'ca-invite-sub',
+            Object.hasOwn(CA_BACKENDS, s.mode) ? CA_BACKENDS[s.mode] : String(s.mode || '')
+          )
+        );
         li.append(text);
         const done = invited.has(s.id);
-        const b = this.button('ca-btn', done ? `${s.name} invited` : `Invite ${s.name}`, async () => {
-          b.disabled = true;
-          const res = await this.app._chatApi(`/api/chatrooms/${encodeURIComponent(roomId)}/members`, { method: 'POST', body: { sessionId: s.id } });
-          if (!res.ok) {
-            b.disabled = false;
-            return this.toast(`Chat: ${res.error}`, 'error');
-          }
-          invited.add(s.id);
-          inRoom.add(s.id);
-          paint();
-        }, { text: done ? 'Invited' : 'Invite' });
+        const b = this.button(
+          'ca-btn',
+          done ? `${s.name} invited` : `Invite ${s.name}`,
+          async () => {
+            b.disabled = true;
+            const res = await this.app._chatApi(`/api/chatrooms/${encodeURIComponent(roomId)}/members`, {
+              method: 'POST',
+              body: { sessionId: s.id },
+            });
+            if (!res.ok) {
+              b.disabled = false;
+              return this.toast(`Chat: ${res.error}`, 'error');
+            }
+            invited.add(s.id);
+            inRoom.add(s.id);
+            paint();
+          },
+          { text: done ? 'Invited' : 'Invite' }
+        );
         b.disabled = done;
         li.append(b);
         list.append(li);
@@ -2709,89 +3501,174 @@ class ReverieChatApp {
   /** Position real person nodes as a top-down tree; SVG draws only their connecting lines. */
   companyTreeViewport(root) {
     const box = this.el('div', 'ca-company-tree ca-company-map');
-    const tools = this.el('div', 'ca-company-map-tools'); tools.setAttribute('aria-label', 'Reporting chart view');
-    const viewport = this.el('div', 'ca-company-map-viewport'); viewport.tabIndex = 0;
-    viewport.setAttribute('aria-label', 'Reporting tree. Scroll normally; use zoom controls or middle-drag blank space to inspect people.');
+    const tools = this.el('div', 'ca-company-map-tools');
+    tools.setAttribute('aria-label', 'Reporting chart view');
+    const viewport = this.el('div', 'ca-company-map-viewport');
+    viewport.tabIndex = 0;
+    viewport.setAttribute(
+      'aria-label',
+      'Reporting tree. Scroll normally; use zoom controls or middle-drag blank space to inspect people.'
+    );
     const stage = this.el('div', 'ca-company-map-stage');
     const canvas = this.el('div', 'ca-company-map-canvas');
     const svg = this.doc.createElementNS('http://www.w3.org/2000/svg', 'svg');
-    svg.setAttribute('class', 'ca-company-map-links'); svg.setAttribute('aria-hidden', 'true');
-    canvas.append(svg); stage.append(canvas); viewport.append(stage);
-    const width = 144, gap = 12, margin = 12;
-    const height = 144, level = height + 24;
+    svg.setAttribute('class', 'ca-company-map-links');
+    svg.setAttribute('aria-hidden', 'true');
+    canvas.append(svg);
+    stage.append(canvas);
+    viewport.append(stage);
+    const width = 144,
+      gap = 12,
+      margin = 12;
+    const height = 144,
+      level = height + 24;
     const nodes = [];
-    const measure = node => {
-      node.span = Math.max(width, node.children.reduce((sum, child) => sum + measure(child), 0) + Math.max(0, node.children.length - 1) * gap);
+    const measure = (node) => {
+      node.span = Math.max(
+        width,
+        node.children.reduce((sum, child) => sum + measure(child), 0) + Math.max(0, node.children.length - 1) * gap
+      );
       return node.span;
     };
     measure(root);
     const position = (node, left, depth, parent) => {
-      node.x = left + (node.span - width) / 2 + margin; node.y = depth * level + margin;
+      node.x = left + (node.span - width) / 2 + margin;
+      node.y = depth * level + margin;
       node.element.classList.add('ca-company-map-node');
-      node.element.style.left = `${node.x}px`; node.element.style.top = `${node.y}px`;
-      node.element.dataset.depth = String(depth); node.element.dataset.parentId = parent?.id || '';
-      canvas.append(node.element); nodes.push(node);
+      node.element.style.left = `${node.x}px`;
+      node.element.style.top = `${node.y}px`;
+      node.element.dataset.depth = String(depth);
+      node.element.dataset.parentId = parent?.id || '';
+      canvas.append(node.element);
+      nodes.push(node);
       if (parent) {
-        const fromX = parent.x + width / 2, fromY = parent.y + height, toX = node.x + width / 2;
+        const fromX = parent.x + width / 2,
+          fromY = parent.y + height,
+          toX = node.x + width / 2;
         const bend = (fromY + node.y) / 2;
         const path = this.doc.createElementNS('http://www.w3.org/2000/svg', 'path');
         path.setAttribute('d', `M ${fromX} ${fromY} V ${bend} H ${toX} V ${node.y}`);
-        path.dataset.parentId = parent.id; path.dataset.childId = node.id; svg.append(path);
+        path.dataset.parentId = parent.id;
+        path.dataset.childId = node.id;
+        svg.append(path);
       }
       let cursor = left;
-      for (const child of node.children) { position(child, cursor, depth + 1, node); cursor += child.span + gap; }
+      for (const child of node.children) {
+        position(child, cursor, depth + 1, node);
+        cursor += child.span + gap;
+      }
     };
     position(root, 0, 0, null);
     const logicalWidth = root.span + margin * 2;
-    const logicalHeight = Math.max(...nodes.map(node => node.y)) + height + margin;
-    canvas.style.width = `${logicalWidth}px`; canvas.style.height = `${logicalHeight}px`;
-    svg.setAttribute('width', String(logicalWidth)); svg.setAttribute('height', String(logicalHeight));
+    const logicalHeight = Math.max(...nodes.map((node) => node.y)) + height + margin;
+    canvas.style.width = `${logicalWidth}px`;
+    canvas.style.height = `${logicalHeight}px`;
+    svg.setAttribute('width', String(logicalWidth));
+    svg.setAttribute('height', String(logicalHeight));
     svg.setAttribute('viewBox', `0 0 ${logicalWidth} ${logicalHeight}`);
-    const value = this.el('output', 'ca-company-map-zoom'); value.setAttribute('aria-label', 'Reporting chart zoom');
-    let scale = 1, fitMode = 'width';
-    const apply = next => {
+    const value = this.el('output', 'ca-company-map-zoom');
+    value.setAttribute('aria-label', 'Reporting chart zoom');
+    let scale = 1,
+      fitMode = 'width';
+    const apply = (next) => {
       const center = (viewport.scrollLeft + viewport.clientWidth / 2) / scale;
-      scale = Math.max(.1, Math.min(2, next));
+      scale = Math.max(0.1, Math.min(2, next));
       canvas.style.transform = `scale(${scale})`;
-      stage.style.width = `${logicalWidth * scale}px`; stage.style.height = `${logicalHeight * scale}px`;
-      value.textContent = `${Math.round(scale * 100)}%`; viewport.dataset.scale = String(scale);
-      if (viewport.isConnected && viewport.clientWidth) viewport.scrollLeft = Math.max(0, center * scale - viewport.clientWidth / 2);
+      stage.style.width = `${logicalWidth * scale}px`;
+      stage.style.height = `${logicalHeight * scale}px`;
+      value.textContent = `${Math.round(scale * 100)}%`;
+      viewport.dataset.scale = String(scale);
+      if (viewport.isConnected && viewport.clientWidth)
+        viewport.scrollLeft = Math.max(0, center * scale - viewport.clientWidth / 2);
     };
-    const fit = whole => {
+    const fit = (whole) => {
       if (!viewport.isConnected || !viewport.clientWidth) return;
       const horizontal = Math.max(1, viewport.clientWidth - 16) / logicalWidth;
       const readable = 12 / 14;
-      apply(Math.max(readable, whole ? Math.min(1, horizontal, Math.max(1, viewport.clientHeight - 16) / logicalHeight) : Math.min(1, horizontal)));
-      viewport.scrollLeft = Math.max(0, (logicalWidth * scale - viewport.clientWidth) / 2); viewport.scrollTop = 0;
+      apply(
+        Math.max(
+          readable,
+          whole
+            ? Math.min(1, horizontal, Math.max(1, viewport.clientHeight - 16) / logicalHeight)
+            : Math.min(1, horizontal)
+        )
+      );
+      viewport.scrollLeft = Math.max(0, (logicalWidth * scale - viewport.clientWidth) / 2);
+      viewport.scrollTop = 0;
     };
-    const zoom = factor => { fitMode = ''; apply(scale * factor); };
-    tools.append(this.button('ca-btn', 'Zoom out reporting chart', () => zoom(1 / 1.25), { text: '−' }),
-      value, this.button('ca-btn', 'Zoom in reporting chart', () => zoom(1.25), { text: '+' }),
-      this.button('ca-btn', 'Show reporting chart at 100%', () => { fitMode = ''; apply(1); }, { text: '100%' }),
-      this.button('ca-btn', 'Fit company at readable zoom', () => { fitMode = 'company'; fit(true); }, { text: 'Fit company' }));
-    tools.title = 'Open a profile to edit reporting. Drag a person onto a manager to reparent. Scroll normally; middle-drag blank space to pan.';
+    const zoom = (factor) => {
+      fitMode = '';
+      apply(scale * factor);
+    };
+    tools.append(
+      this.button('ca-btn', 'Zoom out reporting chart', () => zoom(1 / 1.25), { text: '−' }),
+      value,
+      this.button('ca-btn', 'Zoom in reporting chart', () => zoom(1.25), { text: '+' }),
+      this.button(
+        'ca-btn',
+        'Show reporting chart at 100%',
+        () => {
+          fitMode = '';
+          apply(1);
+        },
+        { text: '100%' }
+      ),
+      this.button(
+        'ca-btn',
+        'Fit company at readable zoom',
+        () => {
+          fitMode = 'company';
+          fit(true);
+        },
+        { text: 'Fit company' }
+      )
+    );
+    tools.title =
+      'Open a profile to edit reporting. Drag a person onto a manager to reparent. Scroll normally; middle-drag blank space to pan.';
     box.append(tools, viewport);
     let pan;
-    viewport.addEventListener('pointerdown', event => {
-      if (event.button !== 1 || event.pointerType !== 'mouse' || event.target.closest('.ca-company-map-node, button, select')) return;
+    viewport.addEventListener('pointerdown', (event) => {
+      if (
+        event.button !== 1 ||
+        event.pointerType !== 'mouse' ||
+        event.target.closest('.ca-company-map-node, button, select')
+      )
+        return;
       pan = { x: event.clientX, y: event.clientY, left: viewport.scrollLeft, top: viewport.scrollTop };
-      viewport.setPointerCapture?.(event.pointerId); viewport.classList.add('is-panning'); event.preventDefault();
+      viewport.setPointerCapture?.(event.pointerId);
+      viewport.classList.add('is-panning');
+      event.preventDefault();
     });
-    viewport.addEventListener('pointermove', event => {
+    viewport.addEventListener('pointermove', (event) => {
       if (!pan) return;
-      viewport.scrollLeft = pan.left - event.clientX + pan.x; viewport.scrollTop = pan.top - event.clientY + pan.y;
+      viewport.scrollLeft = pan.left - event.clientX + pan.x;
+      viewport.scrollTop = pan.top - event.clientY + pan.y;
     });
-    const endPan = () => { pan = null; viewport.classList.remove('is-panning'); };
-    viewport.addEventListener('pointerup', endPan); viewport.addEventListener('pointercancel', endPan);
+    const endPan = () => {
+      pan = null;
+      viewport.classList.remove('is-panning');
+    };
+    viewport.addEventListener('pointerup', endPan);
+    viewport.addEventListener('pointercancel', endPan);
     this._companyChartResize && this.doc.defaultView.removeEventListener('resize', this._companyChartResize);
-    this._companyChartResize = () => { if (fitMode) fit(fitMode === 'company'); };
+    this._companyChartResize = () => {
+      if (fitMode) fit(fitMode === 'company');
+    };
     this.doc.defaultView.addEventListener('resize', this._companyChartResize);
     apply(1);
     // People can still be hidden here (waiting for the burn rate above them), with no width to fit to: fit once it has one.
-    const fitOnce = () => { if (!viewport.isConnected || !viewport.clientWidth) return false; fit(true); return true; };
+    const fitOnce = () => {
+      if (!viewport.isConnected || !viewport.clientWidth) return false;
+      fit(true);
+      return true;
+    };
     const Observer = this.doc.defaultView?.ResizeObserver;
-    if (Observer) { const shown = new Observer(() => { if (fitOnce() || !viewport.isConnected) shown.disconnect(); }); shown.observe(viewport); }
-    else this.doc.defaultView.requestAnimationFrame?.(fitOnce);
+    if (Observer) {
+      const shown = new Observer(() => {
+        if (fitOnce() || !viewport.isConnected) shown.disconnect();
+      });
+      shown.observe(viewport);
+    } else this.doc.defaultView.requestAnimationFrame?.(fitOnce);
     return box;
   }
 
@@ -2822,7 +3699,18 @@ class ReverieChatApp {
     this.els.chat.inert = true;
     this.els.members.inert = true;
     const head = this.el('header', 'ca-company-head');
-    head.append(this.el('span', 'ca-spacer'), this.button('ca-btn', 'Back to chat', () => { this.closePage(); this.els.rail.querySelector('.ca-office-gear')?.focus(); }, { text: 'Back to chat' }));
+    head.append(
+      this.el('span', 'ca-spacer'),
+      this.button(
+        'ca-btn',
+        'Back to chat',
+        () => {
+          this.closePage();
+          this.els.rail.querySelector('.ca-office-gear')?.focus();
+        },
+        { text: 'Back to chat' }
+      )
+    );
     const content = this.el('div', 'ca-company-content');
     content.id = 'ca-company-people';
     content.setAttribute('aria-label', 'Company people');
@@ -2834,7 +3722,9 @@ class ReverieChatApp {
       if (updateHistory) {
         const win = this.doc.defaultView;
         if (caPageFromHash(win.location.hash) !== this.embed) {
-          try { win.history.pushState({ reveriePage: this.embed }, '', `#${this.embed}`); } catch {}
+          try {
+            win.history.pushState({ reveriePage: this.embed }, '', `#${this.embed}`);
+          } catch {}
         }
       }
       let frame = plans.querySelector('iframe');
@@ -2863,21 +3753,26 @@ class ReverieChatApp {
     };
     revealTimer = this.doc.defaultView.setTimeout(revealPeople, 4000);
     let refreshHireOptions = async () => {};
-    this._companyResize = event => {
+    this._companyResize = (event) => {
       const frame = plans.querySelector('iframe');
-      if (this.companyPage !== dlg || !dlg.isConnected || event.origin !== this.doc.defaultView.location.origin || !frame || event.source !== frame.contentWindow) return;
+      if (
+        this.companyPage !== dlg ||
+        !dlg.isConnected ||
+        event.origin !== this.doc.defaultView.location.origin ||
+        !frame ||
+        event.source !== frame.contentWindow
+      )
+        return;
       if (event.data?.type === 'company-plans-changed') void refreshHireOptions();
       else if (event.data?.type === 'company-open-runtime' && typeof event.data.employeeId === 'string') {
-        void this.app._chatApi('/api/company').then(result => {
-          const employee = result.ok && result.data?.employees?.find(item => item.id === event.data.employeeId);
+        void this.app._chatApi('/api/company').then((result) => {
+          const employee = result.ok && result.data?.employees?.find((item) => item.id === event.data.employeeId);
           if (employee) void this.openRuntimeSettings(employee);
         });
-      }
-      else if (event.data?.type === 'company-plans-height' && Number.isFinite(event.data.height)) {
+      } else if (event.data?.type === 'company-plans-height' && Number.isFinite(event.data.height)) {
         this._companyPlansHeight = Math.max(120, Math.min(10000, event.data.height));
         plans.style.height = `${this._companyPlansHeight}px`;
-      }
-      else if (event.data?.type === 'company-plans-ready') {
+      } else if (event.data?.type === 'company-plans-ready') {
         if (Number.isFinite(event.data.height)) {
           this._companyPlansHeight = Math.max(120, Math.min(10000, event.data.height));
           plans.style.height = `${this._companyPlansHeight}px`;
@@ -2889,41 +3784,67 @@ class ReverieChatApp {
     dlg.append(head, plans, content, status);
     selectSection(section, push);
     const paint = async () => {
-      const [res, auth] = await Promise.all([this.app._chatApi('/api/company'), this.app._chatApi('/api/chatrooms/phone-status')]);
+      const [res, auth] = await Promise.all([
+        this.app._chatApi('/api/company'),
+        this.app._chatApi('/api/chatrooms/phone-status'),
+      ]);
       if (this.companyPage !== dlg || !dlg.isConnected) return;
       content.replaceChildren();
       head.querySelector('[aria-controls="ca-company-hire"]')?.remove();
       head.querySelector('.ca-company-settings-button')?.remove();
       head.querySelector('.ca-company-tools-button')?.remove();
-      if (!res.ok) { status.textContent = `Could not load company: ${res.error}`; return; }
+      if (!res.ok) {
+        status.textContent = `Could not load company: ${res.error}`;
+        return;
+      }
       const data = res.data || {};
       const employees = data.employees || [];
-      const reportingParent = employee => employee.reportsTo ??
-        (employee.id === data.settings?.coordinatorEmployeeId ? 'owner' : data.settings?.coordinatorEmployeeId || 'owner');
+      const reportingParent = (employee) =>
+        employee.reportsTo ??
+        (employee.id === data.settings?.coordinatorEmployeeId
+          ? 'owner'
+          : data.settings?.coordinatorEmployeeId || 'owner');
       const manage = data.canManage === true && auth.ok && auth.data?.self === 'owner' && auth.data?.canSetOwn === true;
       status.textContent = '';
       const cards = new Map();
       const workDetails = this.el('details', 'ca-company-work-list');
       workDetails.append(this.el('summary', '', 'Work status'));
       let draggedEmployee = null;
-      const moveReporting = parentId => {
+      const moveReporting = (parentId) => {
         if (!manage || !draggedEmployee || draggedEmployee === parentId) return;
         const select = cards.get(draggedEmployee)?.querySelector('.ca-company-reporting select');
-        if (!select || select.disabled || select.value === parentId || ![...select.options].some(option => option.value === parentId && !option.disabled)) return;
+        if (
+          !select ||
+          select.disabled ||
+          select.value === parentId ||
+          ![...select.options].some((option) => option.value === parentId && !option.disabled)
+        )
+          return;
         select.value = parentId;
         select.dispatchEvent(new this.doc.defaultView.Event('change'));
       };
       const reportingDropTarget = (node, parentId) => {
-        node.addEventListener('dragover', event => {
+        node.addEventListener('dragover', (event) => {
           const select = draggedEmployee && cards.get(draggedEmployee)?.querySelector('.ca-company-reporting select');
-          if (!manage || !select || select.disabled || ![...select.options].some(option => option.value === parentId && !option.disabled)) return;
-          event.preventDefault(); event.stopPropagation(); node.classList.add('is-reporting-target');
+          if (
+            !manage ||
+            !select ||
+            select.disabled ||
+            ![...select.options].some((option) => option.value === parentId && !option.disabled)
+          )
+            return;
+          event.preventDefault();
+          event.stopPropagation();
+          node.classList.add('is-reporting-target');
           if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
         });
         node.addEventListener('dragleave', () => node.classList.remove('is-reporting-target'));
-        node.addEventListener('drop', event => {
-          event.preventDefault(); event.stopPropagation(); node.classList.remove('is-reporting-target');
-          moveReporting(parentId); draggedEmployee = null;
+        node.addEventListener('drop', (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          node.classList.remove('is-reporting-target');
+          moveReporting(parentId);
+          draggedEmployee = null;
         });
       };
       for (const employee of employees) {
@@ -2934,17 +3855,27 @@ class ReverieChatApp {
         card.classList.add(`is-health-${health.state}`);
         const title = this.el(manage ? 'button' : 'div', 'ca-company-person-title ca-company-profile-trigger');
         if (manage) {
-          title.type = 'button'; title.setAttribute('aria-label', `Edit profile for ${employee.name}`);
+          title.type = 'button';
+          title.setAttribute('aria-label', `Edit profile for ${employee.name}`);
           title.addEventListener('click', () => this.openEmployeeProfile(employee, paint));
-          card.addEventListener('click', event => { if (!event.target.closest('button, select, input, label, a')) this.openEmployeeProfile(employee, paint); });
+          card.addEventListener('click', (event) => {
+            if (!event.target.closest('button, select, input, label, a')) this.openEmployeeProfile(employee, paint);
+          });
           card.draggable = true;
-          card.addEventListener('dragstart', event => {
-            if (event.target.closest('select, input')) { event.preventDefault(); return; }
+          card.addEventListener('dragstart', (event) => {
+            if (event.target.closest('select, input')) {
+              event.preventDefault();
+              return;
+            }
             draggedEmployee = employee.id;
             event.dataTransfer?.setData('text/plain', employee.id);
             if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move';
           });
-          card.addEventListener('dragend', () => { draggedEmployee = null; for (const node of chart.querySelectorAll('.is-reporting-target')) node.classList.remove('is-reporting-target'); });
+          card.addEventListener('dragend', () => {
+            draggedEmployee = null;
+            for (const node of chart.querySelectorAll('.is-reporting-target'))
+              node.classList.remove('is-reporting-target');
+          });
           reportingDropTarget(card, employee.id);
         }
         const avatar = this.el('span', 'chatroom-avatar chatroom-avatar--md ca-company-icon');
@@ -2953,11 +3884,20 @@ class ReverieChatApp {
         if (employee.avatar) this.fillAvatar(avatar, employee.avatar);
         title.append(avatar, this.literalText('strong', '', employee.name));
         const parentId = reportingParent(employee);
-        const parent = parentId !== 'owner' ? employees.find(e => e.id === parentId)?.name : data.settings?.ownerName || 'Owner';
+        const parent =
+          parentId !== 'owner' ? employees.find((e) => e.id === parentId)?.name : data.settings?.ownerName || 'Owner';
         card.dataset.healthTitle = `${employee.name} · ${employee.position || ''} · Reports to ${parent || 'Unassigned'}`;
         card.title = `${card.dataset.healthTitle} · ${health.detail}`;
-        card.append(title, this.literalText('span', 'ca-company-role', employee.position || ''), parent ? this.literalText('span', 'ca-company-parent', parent) : this.el('span', 'ca-company-parent', 'Unassigned'), this.employeeHealthBadge(employee, 'ca-company-state'));
-        this._healthCards ||= new WeakMap(); this._healthCards.set(card, { manage, employee, onSaved: paint });
+        card.append(
+          title,
+          this.literalText('span', 'ca-company-role', employee.position || ''),
+          parent
+            ? this.literalText('span', 'ca-company-parent', parent)
+            : this.el('span', 'ca-company-parent', 'Unassigned'),
+          this.employeeHealthBadge(employee, 'ca-company-state')
+        );
+        this._healthCards ||= new WeakMap();
+        this._healthCards.set(card, { manage, employee, onSaved: paint });
         this.paintEmployeeHealth(card.querySelector('[data-employee-health]'));
         if (manage) {
           const reporting = this.el('label', 'ca-company-reporting');
@@ -2965,7 +3905,9 @@ class ReverieChatApp {
           const manager = this.el('select', 'ca-field');
           manager.setAttribute('aria-label', `Reports to for ${employee.name}`);
           const addManager = (id, name) => {
-            const option = this.literalText('option', '', name); option.value = id; manager.append(option);
+            const option = this.literalText('option', '', name);
+            option.value = id;
+            manager.append(option);
           };
           if (!employee.reportsTo) addManager('', `Company default (${parent || 'Unassigned'})`);
           addManager('owner', data.settings?.ownerName || 'Owner');
@@ -2976,7 +3918,7 @@ class ReverieChatApp {
             const seen = new Set();
             while (next && next !== 'owner' && next !== employee.id && !seen.has(next)) {
               seen.add(next);
-              const node = employees.find(e => e.id === next);
+              const node = employees.find((e) => e.id === next);
               next = node ? reportingParent(node) : undefined;
             }
             if (next !== employee.id) addManager(candidate.id, candidate.name);
@@ -2995,7 +3937,9 @@ class ReverieChatApp {
             const timeout = setTimeout(() => controller.abort(), 8000);
             try {
               const result = await this.app._chatApi(`/api/company/employees/${encodeURIComponent(employee.id)}`, {
-                method: 'PUT', body: { reportsTo: selected }, signal: controller.signal,
+                method: 'PUT',
+                body: { reportsTo: selected },
+                signal: controller.signal,
               });
               if (!result.ok) throw new Error(result.error || 'Request refused');
               if (result.data?.employee?.id !== employee.id || result.data.employee.reportsTo !== selected)
@@ -3006,7 +3950,7 @@ class ReverieChatApp {
             } catch (error) {
               manager.value = previous;
               reportingStatus.textContent = `Could not save reporting line: ${error.message}`;
-            status.textContent = reportingStatus.textContent;
+              status.textContent = reportingStatus.textContent;
             } finally {
               clearTimeout(timeout);
               manager.disabled = false;
@@ -3016,29 +3960,52 @@ class ReverieChatApp {
           // Keep the guarded change handler for drag/drop; normal editing lives in the profile.
           reporting.hidden = true;
           card.querySelector('.ca-company-parent').replaceWith(reporting);
-
         }
         const work = this.el('div', 'ca-company-work');
         work.dataset.employeeId = employee.id;
         work.append(this.el('p', 'ca-hint', 'Loading work status…'));
-        const workEntry = this.el('section'); workEntry.append(this.literalText('h4', '', employee.name), work); workDetails.append(workEntry);
+        const workEntry = this.el('section');
+        workEntry.append(this.literalText('h4', '', employee.name), work);
+        workDetails.append(workEntry);
         cards.set(employee.id, card);
       }
       const chart = this.el('section', 'ca-company-chart');
       chart.setAttribute('aria-label', 'Reporting structure');
-      const ownerNode = this.el('article', 'ca-company-owner'); ownerNode.dataset.employeeId = 'owner'; reportingDropTarget(ownerNode, 'owner');
+      const ownerNode = this.el('article', 'ca-company-owner');
+      ownerNode.dataset.employeeId = 'owner';
+      reportingDropTarget(ownerNode, 'owner');
       const ownerName = data.settings?.ownerName || 'Owner';
       const ownerTitle = this.el(manage ? 'button' : 'div', 'ca-company-owner-title ca-company-profile-trigger');
-      if (manage) { ownerTitle.type = 'button'; ownerTitle.setAttribute('aria-label', 'Edit company owner profile'); ownerTitle.addEventListener('click', () => this.openCompanySettings(paint)); }
-      const ownerAvatar = this.el('span', 'chatroom-avatar ca-company-icon'); ownerAvatar.append(this.literalText('span', 'chatroom-avatar-glyph', ownerName.slice(0, 1)));
-      if (data.settings?.ownerAvatar || this.ownerAvatar) this.fillAvatar(ownerAvatar, data.settings?.ownerAvatar || this.ownerAvatar);
-      ownerTitle.append(ownerAvatar, this.literalText('strong', '', ownerName)); ownerNode.append(ownerTitle, this.literalText('span', 'ca-company-owner-role', data.settings?.ownerTitle || 'Owner'));
+      if (manage) {
+        ownerTitle.type = 'button';
+        ownerTitle.setAttribute('aria-label', 'Edit company owner profile');
+        ownerTitle.addEventListener('click', () => this.openCompanySettings(paint));
+      }
+      const ownerAvatar = this.el('span', 'chatroom-avatar ca-company-icon');
+      ownerAvatar.append(this.literalText('span', 'chatroom-avatar-glyph', ownerName.slice(0, 1)));
+      if (data.settings?.ownerAvatar || this.ownerAvatar)
+        this.fillAvatar(ownerAvatar, data.settings?.ownerAvatar || this.ownerAvatar);
+      ownerTitle.append(ownerAvatar, this.literalText('strong', '', ownerName));
+      ownerNode.append(
+        ownerTitle,
+        this.literalText('span', 'ca-company-owner-role', data.settings?.ownerTitle || 'Owner')
+      );
       const visited = new Set();
-      const build = employee => {
+      const build = (employee) => {
         visited.add(employee.id);
-        return { id: employee.id, element: cards.get(employee.id), children: employees.filter(child => reportingParent(child) === employee.id && !visited.has(child.id)).map(build) };
+        return {
+          id: employee.id,
+          element: cards.get(employee.id),
+          children: employees
+            .filter((child) => reportingParent(child) === employee.id && !visited.has(child.id))
+            .map(build),
+        };
       };
-      const root = { id: 'owner', element: ownerNode, children: employees.filter(employee => reportingParent(employee) === 'owner').map(build) };
+      const root = {
+        id: 'owner',
+        element: ownerNode,
+        children: employees.filter((employee) => reportingParent(employee) === 'owner').map(build),
+      };
       // Keep malformed/orphaned records visible without rewriting their stored reporting choice.
       for (const employee of employees) if (!visited.has(employee.id)) root.children.push(build(employee));
       const tree = this.companyTreeViewport(root);
@@ -3058,58 +4025,142 @@ class ReverieChatApp {
           const board = await this.app._chatApi('/api/board');
           if (this.companyPage !== dlg || !dlg.isConnected) return;
           for (const employee of employees) {
-            const work = [...content.querySelectorAll('.ca-company-work')].find(node => node.dataset.employeeId === employee.id);
+            const work = [...content.querySelectorAll('.ca-company-work')].find(
+              (node) => node.dataset.employeeId === employee.id
+            );
             if (work) work.replaceChildren(this.companyWorkEl(employee, board.ok ? board.data : null));
           }
         } catch {
-          if (this.companyPage === dlg) for (const work of content.querySelectorAll('.ca-company-work')) work.replaceChildren(this.el('p', 'ca-hint', 'Work status unavailable. Retrying in a minute.'));
-        } finally { workLoading = false; }
+          if (this.companyPage === dlg)
+            for (const work of content.querySelectorAll('.ca-company-work'))
+              work.replaceChildren(this.el('p', 'ca-hint', 'Work status unavailable. Retrying in a minute.'));
+        } finally {
+          workLoading = false;
+        }
       };
       void this._companyRefresh();
       if (!manage) {
         const note = this.el('p', 'ca-hint', 'Sign in as the owner to hire and manage your team.');
-        const signIn = this.el('a', 'ca-company-signin', 'Owner sign-in'); signIn.href = '/owner/account';
-        content.append(note, signIn); return;
+        const signIn = this.el('a', 'ca-company-signin', 'Owner sign-in');
+        signIn.href = '/owner/account';
+        content.append(note, signIn);
+        return;
       }
       void this.companyHireRequests(content, employees, paint);
       const section = this.el('section', 'ca-company-hire');
-      section.hidden = true; section.id = 'ca-company-hire';
-      const hire = this.button('ca-btn ca-company-add', 'Hire', () => { section.hidden = !section.hidden; hire.setAttribute('aria-expanded', String(!section.hidden)); if (!section.hidden) { section.scrollIntoView({ block: 'nearest' }); pages[step].querySelector('input, select, textarea, button')?.focus(); } }, { text: '+' });
-      hire.title = 'Hire a person'; hire.setAttribute('aria-expanded', 'false'); hire.setAttribute('aria-controls', section.id); peopleHeading.append(hire);
-      section.append(this.el('h3', '', 'Hire a person'), this.el('p', 'ca-hint', 'A few questions about their role, personality and work. Review everything before hiring.'));
+      section.hidden = true;
+      section.id = 'ca-company-hire';
+      const hire = this.button(
+        'ca-btn ca-company-add',
+        'Hire',
+        () => {
+          section.hidden = !section.hidden;
+          hire.setAttribute('aria-expanded', String(!section.hidden));
+          if (!section.hidden) {
+            section.scrollIntoView({ block: 'nearest' });
+            pages[step].querySelector('input, select, textarea, button')?.focus();
+          }
+        },
+        { text: '+' }
+      );
+      hire.title = 'Hire a person';
+      hire.setAttribute('aria-expanded', 'false');
+      hire.setAttribute('aria-controls', section.id);
+      peopleHeading.append(hire);
+      section.append(
+        this.el('h3', '', 'Hire a person'),
+        this.el(
+          'p',
+          'ca-hint',
+          'A few questions about their role, personality and work. Review everything before hiring.'
+        )
+      );
       const form = this.el('form', 'ca-company-form');
       form.noValidate = true;
-      const progress = this.el('p', 'ca-hire-progress'); progress.setAttribute('role', 'status'); progress.setAttribute('aria-live', 'polite');
-      const pages = ['What should they help with?', 'Who are they?', 'How will they work?', 'Ready to welcome them?'].map((title, index) => {
-        const page = this.el('fieldset', 'ca-hire-step'); page.dataset.step = String(index); page.append(this.el('legend', '', title)); form.append(page); return page;
+      const progress = this.el('p', 'ca-hire-progress');
+      progress.setAttribute('role', 'status');
+      progress.setAttribute('aria-live', 'polite');
+      const pages = [
+        'What should they help with?',
+        'Who are they?',
+        'How will they work?',
+        'Ready to welcome them?',
+      ].map((title, index) => {
+        const page = this.el('fieldset', 'ca-hire-step');
+        page.dataset.step = String(index);
+        page.append(this.el('legend', '', title));
+        form.append(page);
+        return page;
       });
       let step = 0;
       form.prepend(progress);
       const field = (name, label, tag = 'input', container = pages[0]) => {
-        const wrap = this.el('label', 'ca-label'); wrap.append(this.el('span', 'ca-label-text', label));
-        const input = this.el(tag, 'ca-field'); input.name = name; input.setAttribute('aria-label', label); wrap.append(input); container.append(wrap); return input;
+        const wrap = this.el('label', 'ca-label');
+        wrap.append(this.el('span', 'ca-label-text', label));
+        const input = this.el(tag, 'ca-field');
+        input.name = name;
+        input.setAttribute('aria-label', label);
+        wrap.append(input);
+        container.append(wrap);
+        return input;
       };
       const options = await this.app._chatApi('/api/company/hire-options');
       if (this.companyPage !== dlg || !dlg.isConnected) return;
       let sources = options.ok && Array.isArray(options.data?.sources) ? options.data.sources : [];
       let harnesses = options.ok && Array.isArray(options.data?.harnesses) ? options.data.harnesses : [];
-      const templates = Array.isArray(options.data?.roles) && options.data.roles.length ? options.data.roles : [{ id: 'custom', label: 'Custom role', position: 'Specialist', expertise: [], responsibilities: [], personality: '' }];
-      const role = field('roleTemplate', 'Role starting point', 'select'); role.required = true;
-      const rolePlaceholder = this.el('option', '', 'Choose a role'); rolePlaceholder.value = ''; role.append(rolePlaceholder);
-      for (const template of templates) { const option = this.el('option', '', template.label); option.value = template.id; role.append(option); }
-      const position = field('position', 'Role title'); position.required = true; position.maxLength = 100;
-      const expertise = field('expertise', 'Skills and expertise'); expertise.required = true; expertise.placeholder = 'Code review, Security, Flight systems';
-      const responsibilities = field('responsibilities', 'Responsibilities (one per line)', 'textarea'); responsibilities.rows = 4; responsibilities.maxLength = 10000;
-      pages[0].append(this.el('p', 'ca-hint', 'These are editable starting points. Titles grant no hiring, scheduling or account permissions. Claims and completed work must be supported by evidence.'));
+      const templates =
+        Array.isArray(options.data?.roles) && options.data.roles.length
+          ? options.data.roles
+          : [
+              {
+                id: 'custom',
+                label: 'Custom role',
+                position: 'Specialist',
+                expertise: [],
+                responsibilities: [],
+                personality: '',
+              },
+            ];
+      const role = field('roleTemplate', 'Role starting point', 'select');
+      role.required = true;
+      const rolePlaceholder = this.el('option', '', 'Choose a role');
+      rolePlaceholder.value = '';
+      role.append(rolePlaceholder);
+      for (const template of templates) {
+        const option = this.el('option', '', template.label);
+        option.value = template.id;
+        role.append(option);
+      }
+      const position = field('position', 'Role title');
+      position.required = true;
+      position.maxLength = 100;
+      const expertise = field('expertise', 'Skills and expertise');
+      expertise.required = true;
+      expertise.placeholder = 'Code review, Security, Flight systems';
+      const responsibilities = field('responsibilities', 'Responsibilities (one per line)', 'textarea');
+      responsibilities.rows = 4;
+      responsibilities.maxLength = 10000;
+      pages[0].append(
+        this.el(
+          'p',
+          'ca-hint',
+          'These are editable starting points. Titles grant no hiring, scheduling or account permissions. Claims and completed work must be supported by evidence.'
+        )
+      );
       const plan = field('plan', 'Plan or local model', 'select', pages[2]);
-      const placeholder = this.el('option', '', 'Choose a plan or local model'); placeholder.value = ''; plan.append(placeholder); plan.required = true;
+      const placeholder = this.el('option', '', 'Choose a plan or local model');
+      placeholder.value = '';
+      plan.append(placeholder);
+      plan.required = true;
       for (const source of sources) {
         const option = this.el('option', '', `${source.label}${source.kind === 'local' ? ' · Local model' : ''}`);
-        option.value = `${source.kind}:${source.id}`; option.disabled = !source.modes?.length;
+        option.value = `${source.kind}:${source.id}`;
+        option.disabled = !source.modes?.length;
         plan.append(option);
       }
-      plan.disabled = !sources.some(source => source.modes?.length);
-      const harness = field('mode', 'Harness', 'select', pages[2]); harness.required = true;
+      plan.disabled = !sources.some((source) => source.modes?.length);
+      const harness = field('mode', 'Harness', 'select', pages[2]);
+      harness.required = true;
       const selectedSource = () => sources.find((source) => `${source.kind}:${source.id}` === plan.value);
       const updatePlan = (preserve = false) => {
         const source = selectedSource();
@@ -3122,99 +4173,312 @@ class ReverieChatApp {
         for (const id of source?.modes || []) {
           const entry = harnesses.find((h) => h.id === id);
           if (!entry) continue;
-          const option = this.el('option', '', entry.label); option.value = id; harness.append(option);
+          const option = this.el('option', '', entry.label);
+          option.value = id;
+          harness.append(option);
         }
         if ([...harness.options].some((option) => option.value === previous)) harness.value = previous;
         harness.disabled = !harness.options.length;
       };
-      plan.addEventListener('change', () => updatePlan(false)); updatePlan();
-      const name = field('name', 'Name', 'input', pages[1]); name.required = true; name.maxLength = 100;
+      plan.addEventListener('change', () => updatePlan(false));
+      updatePlan();
+      const name = field('name', 'Name', 'input', pages[1]);
+      name.required = true;
+      name.maxLength = 100;
       const suggestName = () => {
-        const names = ['Alex', 'Riley', 'Ellis', 'Rowan', 'Morgan', 'Sage', 'Quinn', 'Casey', 'Avery', 'Jordan', 'Robin', 'Remy'];
+        const names = [
+          'Alex',
+          'Riley',
+          'Ellis',
+          'Rowan',
+          'Morgan',
+          'Sage',
+          'Quinn',
+          'Casey',
+          'Avery',
+          'Jordan',
+          'Robin',
+          'Remy',
+        ];
         const base = names[Math.floor(Math.random() * names.length)];
-        const taken = new Set(employees.map(e => e.name.normalize('NFKC').toLowerCase()));
-        let candidate = base, suffix = 2; while (taken.has(candidate.toLowerCase())) candidate = `${base} ${suffix++}`;
-        name.value = candidate; name.dispatchEvent(new this.doc.defaultView.Event('input'));
+        const taken = new Set(employees.map((e) => e.name.normalize('NFKC').toLowerCase()));
+        let candidate = base,
+          suffix = 2;
+        while (taken.has(candidate.toLowerCase())) candidate = `${base} ${suffix++}`;
+        name.value = candidate;
+        name.dispatchEvent(new this.doc.defaultView.Event('input'));
       };
-      suggestName(); pages[1].append(this.button('ca-btn', 'Suggest another name', suggestName, { text: 'Another name' }));
-      const personality = field('personality', 'Personality and working style', 'textarea', pages[1]); personality.rows = 3; personality.maxLength = 1000;
-      const suggestStyle = () => { const styles = ['Curious and practical. Ask clear questions, explain tradeoffs, and verify claims.', 'Calm and methodical. Keep commitments visible, check assumptions, and report uncertainty.', 'Warm and direct. Make complex work understandable and support conclusions with evidence.']; personality.value = styles[Math.floor(Math.random() * styles.length)]; };
-      pages[1].append(this.button('ca-btn', 'Suggest another personality', suggestStyle, { text: 'Another personality' }));
-      const pronouns = field('pronouns', 'Pronouns (optional)', 'input', pages[1]); pronouns.maxLength = 24; pronouns.placeholder = 'e.g. they/them';
+      suggestName();
+      pages[1].append(this.button('ca-btn', 'Suggest another name', suggestName, { text: 'Another name' }));
+      const personality = field('personality', 'Personality and working style', 'textarea', pages[1]);
+      personality.rows = 3;
+      personality.maxLength = 1000;
+      const suggestStyle = () => {
+        const styles = [
+          'Curious and practical. Ask clear questions, explain tradeoffs, and verify claims.',
+          'Calm and methodical. Keep commitments visible, check assumptions, and report uncertainty.',
+          'Warm and direct. Make complex work understandable and support conclusions with evidence.',
+        ];
+        personality.value = styles[Math.floor(Math.random() * styles.length)];
+      };
+      pages[1].append(
+        this.button('ca-btn', 'Suggest another personality', suggestStyle, { text: 'Another personality' })
+      );
+      const pronouns = field('pronouns', 'Pronouns (optional)', 'input', pages[1]);
+      pronouns.maxLength = 24;
+      pronouns.placeholder = 'e.g. they/them';
       const voice = this.expertVoiceFields(pages[1], pronouns, name);
-      const appearance = this.expertAppearanceFields(pages[1], '', { name, random: true, avoidPhotos: employees.map(e => e.avatar).filter(Boolean) });
+      const appearance = this.expertAppearanceFields(pages[1], '', {
+        name,
+        random: true,
+        avoidPhotos: employees.map((e) => e.avatar).filter(Boolean),
+      });
       const rest = this.expertRestFields(pages[2]);
       const recoveryWrap = this.el('label', 'ca-label');
-      const recover = this.el('input'); recover.type = 'checkbox'; recover.name = 'recoverEmployees'; recoveryWrap.append(recover, this.el('span', '', 'May wake reporting experts after a crash')); pages[2].append(recoveryWrap, this.el('p', 'ca-hint', 'An explicit recovery permission only. It grants no ability to hire, manage plans or schedule work.'));
+      const recover = this.el('input');
+      recover.type = 'checkbox';
+      recover.name = 'recoverEmployees';
+      recoveryWrap.append(recover, this.el('span', '', 'May wake reporting experts after a crash'));
+      pages[2].append(
+        recoveryWrap,
+        this.el(
+          'p',
+          'ca-hint',
+          'An explicit recovery permission only. It grants no ability to hire, manage plans or schedule work.'
+        )
+      );
       const officeWrap = this.el('label', 'ca-hint', ' Manage office attendance and restarts');
-      const manageOffice = this.el('input'); manageOffice.type = 'checkbox'; manageOffice.name = 'manageOffice';
+      const manageOffice = this.el('input');
+      manageOffice.type = 'checkbox';
+      manageOffice.name = 'manageOffice';
       officeWrap.prepend(manageOffice);
-      pages[2].append(officeWrap, this.el('p', 'ca-hint', 'May explicitly bring employees into the office, send them out and restart their current saved runtime. Does not grant hiring, retirement, settings or permission changes.'));
+      pages[2].append(
+        officeWrap,
+        this.el(
+          'p',
+          'ca-hint',
+          'May explicitly bring employees into the office, send them out and restart their current saved runtime. Does not grant hiring, retirement, settings or permission changes.'
+        )
+      );
       const planPermissions = {};
-      for (const [key, text] of [['moveOwnPlan', 'Move own plan'], ['managePlans', 'Manage team plans']]) {
+      for (const [key, text] of [
+        ['moveOwnPlan', 'Move own plan'],
+        ['managePlans', 'Manage team plans'],
+      ]) {
         const wrap = this.el('label', 'ca-label');
-        const input = this.el('input'); input.type = 'checkbox'; input.name = key;
-        wrap.append(input, this.el('span', '', text)); pages[2].append(wrap); planPermissions[key] = input;
+        const input = this.el('input');
+        input.type = 'checkbox';
+        input.name = key;
+        wrap.append(input, this.el('span', '', text));
+        pages[2].append(wrap);
+        planPermissions[key] = input;
       }
-      pages[2].append(this.el('p', 'ca-hint', 'Ordinary plan requests require the expert’s approval. These grants also permit explicit forced transfers and guarded journal recovery through an authenticated native office connection, within the selected self/team scope. A forced transfer can interrupt work and requires the caller’s handoff.'));
+      pages[2].append(
+        this.el(
+          'p',
+          'ca-hint',
+          'Ordinary plan requests require the expert’s approval. These grants also permit explicit forced transfers and guarded journal recovery through an authenticated native office connection, within the selected self/team scope. A forced transfer can interrupt work and requires the caller’s handoff.'
+        )
+      );
       const goalWrap = this.el('label', 'ca-label');
-      const manageGoals = this.el('input'); manageGoals.type = 'checkbox'; manageGoals.name = 'manageGoals';
+      const manageGoals = this.el('input');
+      manageGoals.type = 'checkbox';
+      manageGoals.name = 'manageGoals';
       goalWrap.append(manageGoals, this.el('span', '', 'Manage team goals'));
-      pages[2].append(goalWrap, this.el('p', 'ca-hint', 'Read, create and update this company’s operational goals before review. Verification, closing, cancellation, adoption and grants remain separate. Requires the authenticated Goal broker.'));
+      pages[2].append(
+        goalWrap,
+        this.el(
+          'p',
+          'ca-hint',
+          'Read, create and update this company’s operational goals before review. Verification, closing, cancellation, adoption and grants remain separate. Requires the authenticated Goal broker.'
+        )
+      );
       const boardPermissions = {};
-      const boardFields = this.el('fieldset'); boardFields.append(this.el('legend', '', 'Board permissions'));
+      const boardFields = this.el('fieldset');
+      boardFields.append(this.el('legend', '', 'Board permissions'));
       for (const [key, text, detail] of caBoardPermissionFields) {
-        const wrap = this.el('label', 'ca-label'); const input = this.el('input');
-        input.type = 'checkbox'; input.name = key; input.checked = key === 'editBoardIssues';
-        wrap.title = detail; wrap.append(input, this.el('span', '', text), this.el('p', 'ca-hint', detail)); boardFields.append(wrap);
+        const wrap = this.el('label', 'ca-label');
+        const input = this.el('input');
+        input.type = 'checkbox';
+        input.name = key;
+        input.checked = key === 'editBoardIssues';
+        wrap.title = detail;
+        wrap.append(input, this.el('span', '', text), this.el('p', 'ca-hint', detail));
+        boardFields.append(wrap);
         boardPermissions[key] = input;
       }
       let basicBoardChoice = true;
-      boardPermissions.editBoardIssues.addEventListener('change', () => { basicBoardChoice = boardPermissions.editBoardIssues.checked; });
+      boardPermissions.editBoardIssues.addEventListener('change', () => {
+        basicBoardChoice = boardPermissions.editBoardIssues.checked;
+      });
       boardPermissions.manageBoard.addEventListener('change', () => {
         boardPermissions.editBoardIssues.checked = boardPermissions.manageBoard.checked || basicBoardChoice;
         boardPermissions.editBoardIssues.disabled = boardPermissions.manageBoard.checked;
       });
-      boardFields.append(this.el('p', 'ca-hint', 'Board managers include updating own work. Decision cards never grant permission to choose the owner’s answer.'));
+      boardFields.append(
+        this.el(
+          'p',
+          'ca-hint',
+          'Board managers include updating own work. Decision cards never grant permission to choose the owner’s answer.'
+        )
+      );
       pages[2].append(boardFields);
       const parent = field('reportsTo', 'Reports to', 'select', pages[2]);
-      const owner = this.el('option', '', data.settings?.ownerName || 'Owner'); owner.value = 'owner'; parent.append(owner);
-      for (const e of employees) { const option = this.el('option', '', e.name); option.value = e.id; parent.append(option); }
-      const error = this.el('p', 'ca-company-error'); error.setAttribute('role', 'alert');
-      const submit = this.el('button', 'ca-btn is-primary', 'Hire agent'); submit.type = 'submit';
+      const owner = this.el('option', '', data.settings?.ownerName || 'Owner');
+      owner.value = 'owner';
+      parent.append(owner);
+      for (const e of employees) {
+        const option = this.el('option', '', e.name);
+        option.value = e.id;
+        parent.append(option);
+      }
+      const error = this.el('p', 'ca-company-error');
+      error.setAttribute('role', 'alert');
+      const submit = this.el('button', 'ca-btn is-primary', 'Hire agent');
+      submit.type = 'submit';
       submit.disabled = plan.disabled;
       const back = this.button('ca-btn', 'Back', () => showStep(step - 1), { text: 'Back' });
-      const next = this.button('ca-btn is-primary', 'Next', () => { if (validateStep()) showStep(step + 1); }, { text: 'Next' });
-      const cancel = this.button('ca-btn', 'Cancel hire', () => { section.hidden = true; hire.setAttribute('aria-expanded', 'false'); hire.focus(); }, { text: 'Cancel' });
-      const actions = this.el('div', 'ca-company-actions'); actions.append(back, next, submit, cancel);
-      const sourceHint = this.el('p', 'ca-hint', options.error || 'Add a subscription plan or local model profile in Settings first.');
-      sourceHint.hidden = sources.some(source => source.modes?.length); actions.append(sourceHint);
+      const next = this.button(
+        'ca-btn is-primary',
+        'Next',
+        () => {
+          if (validateStep()) showStep(step + 1);
+        },
+        { text: 'Next' }
+      );
+      const cancel = this.button(
+        'ca-btn',
+        'Cancel hire',
+        () => {
+          section.hidden = true;
+          hire.setAttribute('aria-expanded', 'false');
+          hire.focus();
+        },
+        { text: 'Cancel' }
+      );
+      const actions = this.el('div', 'ca-company-actions');
+      actions.append(back, next, submit, cancel);
+      const sourceHint = this.el(
+        'p',
+        'ca-hint',
+        options.error || 'Add a subscription plan or local model profile in Settings first.'
+      );
+      sourceHint.hidden = sources.some((source) => source.modes?.length);
+      actions.append(sourceHint);
       form.append(error, actions);
-      const lines = () => responsibilities.value.split('\n').map(s => s.trim()).filter(Boolean);
+      const lines = () =>
+        responsibilities.value
+          .split('\n')
+          .map((s) => s.trim())
+          .filter(Boolean);
       const validateStep = () => {
         error.textContent = '';
-        for (const input of pages[step].querySelectorAll('input, select, textarea')) if (!input.reportValidity()) return false;
-        if (step === 0 && (expertise.value.split(',').filter(s => s.trim()).length > 20 || expertise.value.split(',').some(s => s.trim().length > 100) || lines().length > 20 || lines().some(s => s.length > 500))) { error.textContent = 'Use up to 20 skills (100 characters each) and 20 responsibilities (500 characters each).'; return false; }
-        if (step === 1 && employees.some(e => e.name.normalize('NFKC').toLowerCase() === name.value.trim().normalize('NFKC').toLowerCase())) { error.textContent = 'That name is already used in this company. Choose a distinct name.'; name.focus(); return false; }
+        for (const input of pages[step].querySelectorAll('input, select, textarea'))
+          if (!input.reportValidity()) return false;
+        if (
+          step === 0 &&
+          (expertise.value.split(',').filter((s) => s.trim()).length > 20 ||
+            expertise.value.split(',').some((s) => s.trim().length > 100) ||
+            lines().length > 20 ||
+            lines().some((s) => s.length > 500))
+        ) {
+          error.textContent =
+            'Use up to 20 skills (100 characters each) and 20 responsibilities (500 characters each).';
+          return false;
+        }
+        if (
+          step === 1 &&
+          employees.some(
+            (e) => e.name.normalize('NFKC').toLowerCase() === name.value.trim().normalize('NFKC').toLowerCase()
+          )
+        ) {
+          error.textContent = 'That name is already used in this company. Choose a distinct name.';
+          name.focus();
+          return false;
+        }
         return true;
       };
       const review = () => {
         pages[3].replaceChildren(this.el('legend', '', 'Ready to welcome them?'));
-        const photo = appearance.picture.value(); if (photo) { const image = this.el('img', 'ca-hire-review-photo'); image.src = photo; image.alt = ''; pages[3].append(image); }
+        const photo = appearance.picture.value();
+        if (photo) {
+          const image = this.el('img', 'ca-hire-review-photo');
+          image.src = photo;
+          image.alt = '';
+          pages[3].append(image);
+        }
         const list = this.el('dl', 'ca-hire-review');
-        for (const [label, value] of [['Name', name.value.trim()], ['Role', position.value.trim()], ['Skills', expertise.value], ['Responsibilities', lines().join('\n') || 'None specified'], ['Personality', personality.value || 'None specified'], ['Pronouns', pronouns.value || 'Unspecified'], ['Voice', voice.value()?.id || 'Automatic'], ['Plan', selectedSource()?.label || 'Choose a plan'], ['Harness', harness.selectedOptions[0]?.textContent || 'Choose a harness'], ['Reports to', parent.selectedOptions[0]?.textContent || 'Owner'], ['Recovery permission', recover.checked ? 'May wake reporting experts' : 'Not granted'], ['Office management', manageOffice.checked ? 'May manage office attendance and restarts' : 'Not granted'], ['Plan permissions', planPermissions.managePlans.checked ? 'Manage team plans' : planPermissions.moveOwnPlan.checked ? 'Move own plan' : 'Not granted'], ['Goal management', manageGoals.checked ? 'Manage team goals before review' : 'Not granted'], ['Sleep / Dream', `${rest.sleep.checked ? 'Sleep allowed' : 'Sleep off'} · ${rest.dream.checked ? 'Dream allowed' : 'Dream off'}`]]) list.append(this.el('dt', '', label), this.literalText('dd', '', value));
-        list.append(this.el('dt', '', 'Board permissions'), this.literalText('dd', '', caBoardPermissionFields.filter(([key]) => boardPermissions[key].checked).map(([, text]) => text).join('; ') || 'Not granted'));
-        pages[3].append(list, this.el('p', 'ca-hint', 'Hiring creates this person and starts their runtime. Plans and harnesses supply the runtime defaults. Sleep and Dream are preferences, not schedules.'));
+        for (const [label, value] of [
+          ['Name', name.value.trim()],
+          ['Role', position.value.trim()],
+          ['Skills', expertise.value],
+          ['Responsibilities', lines().join('\n') || 'None specified'],
+          ['Personality', personality.value || 'None specified'],
+          ['Pronouns', pronouns.value || 'Unspecified'],
+          ['Voice', voice.value()?.id || 'Automatic'],
+          ['Plan', selectedSource()?.label || 'Choose a plan'],
+          ['Harness', harness.selectedOptions[0]?.textContent || 'Choose a harness'],
+          ['Reports to', parent.selectedOptions[0]?.textContent || 'Owner'],
+          ['Recovery permission', recover.checked ? 'May wake reporting experts' : 'Not granted'],
+          ['Office management', manageOffice.checked ? 'May manage office attendance and restarts' : 'Not granted'],
+          [
+            'Plan permissions',
+            planPermissions.managePlans.checked
+              ? 'Manage team plans'
+              : planPermissions.moveOwnPlan.checked
+                ? 'Move own plan'
+                : 'Not granted',
+          ],
+          ['Goal management', manageGoals.checked ? 'Manage team goals before review' : 'Not granted'],
+          [
+            'Sleep / Dream',
+            `${rest.sleep.checked ? 'Sleep allowed' : 'Sleep off'} · ${rest.dream.checked ? 'Dream allowed' : 'Dream off'}`,
+          ],
+        ])
+          list.append(this.el('dt', '', label), this.literalText('dd', '', value));
+        list.append(
+          this.el('dt', '', 'Board permissions'),
+          this.literalText(
+            'dd',
+            '',
+            caBoardPermissionFields
+              .filter(([key]) => boardPermissions[key].checked)
+              .map(([, text]) => text)
+              .join('; ') || 'Not granted'
+          )
+        );
+        pages[3].append(
+          list,
+          this.el(
+            'p',
+            'ca-hint',
+            'Hiring creates this person and starts their runtime. Plans and harnesses supply the runtime defaults. Sleep and Dream are preferences, not schedules.'
+          )
+        );
       };
-      const showStep = index => {
+      const showStep = (index) => {
         step = Math.max(0, Math.min(3, index));
-        pages.forEach((page, i) => { page.hidden = i !== step; });
+        pages.forEach((page, i) => {
+          page.hidden = i !== step;
+        });
         progress.textContent = `Step ${step + 1} of 4 · ${['Role', 'Person', 'Plan and work', 'Review'][step]}`;
-        back.hidden = step === 0; next.hidden = step === 3; submit.hidden = step !== 3;
+        back.hidden = step === 0;
+        next.hidden = step === 3;
+        submit.hidden = step !== 3;
         if (step === 3) review();
         if (!section.hidden) pages[step].querySelector('input, select, textarea')?.focus();
       };
-      role.addEventListener('change', () => { const template = templates.find(t => t.id === role.value); if (!template) return; position.value = template.position || ''; expertise.value = (template.expertise || []).join(', '); responsibilities.value = (template.responsibilities || []).join('\n'); const tones = ['Quietly curious', 'Calm and collaborative', 'Warm and concise', 'Direct and reflective']; personality.value = template.personality ? `${tones[Math.floor(Math.random() * tones.length)]}. ${template.personality}` : ''; });
+      role.addEventListener('change', () => {
+        const template = templates.find((t) => t.id === role.value);
+        if (!template) return;
+        position.value = template.position || '';
+        expertise.value = (template.expertise || []).join(', ');
+        responsibilities.value = (template.responsibilities || []).join('\n');
+        const tones = ['Quietly curious', 'Calm and collaborative', 'Warm and concise', 'Direct and reflective'];
+        personality.value = template.personality
+          ? `${tones[Math.floor(Math.random() * tones.length)]}. ${template.personality}`
+          : '';
+      });
       showStep(0);
       let saving = false;
       let optionsGeneration = 0;
@@ -3222,61 +4486,149 @@ class ReverieChatApp {
         const generation = ++optionsGeneration;
         try {
           const refreshed = await this.app._chatApi('/api/company/hire-options');
-          if (!refreshed.ok || generation !== optionsGeneration || this.companyPage !== dlg || !form.isConnected) return;
+          if (!refreshed.ok || generation !== optionsGeneration || this.companyPage !== dlg || !form.isConnected)
+            return;
           const previous = plan.value;
           sources = Array.isArray(refreshed.data?.sources) ? refreshed.data.sources : [];
           harnesses = Array.isArray(refreshed.data?.harnesses) ? refreshed.data.harnesses : [];
           plan.replaceChildren(placeholder);
           for (const source of sources) {
             const option = this.el('option', '', `${source.label}${source.kind === 'local' ? ' · Local model' : ''}`);
-            option.value = `${source.kind}:${source.id}`; option.disabled = !source.modes?.length;
+            option.value = `${source.kind}:${source.id}`;
+            option.disabled = !source.modes?.length;
             plan.append(option);
           }
-          plan.value = sources.some(source => `${source.kind}:${source.id}` === previous) ? previous : '';
-          plan.disabled = !sources.some(source => source.modes?.length);
+          plan.value = sources.some((source) => `${source.kind}:${source.id}` === previous) ? previous : '';
+          plan.disabled = !sources.some((source) => source.modes?.length);
           submit.disabled = saving || plan.disabled;
           sourceHint.hidden = !plan.disabled;
           updatePlan(true);
-        } catch { /* Keep the current draft if the catalog refresh is unavailable. */ }
+        } catch {
+          /* Keep the current draft if the catalog refresh is unavailable. */
+        }
       };
-      plan.addEventListener('focus', () => { void refreshHireOptions(); });
-      form.addEventListener('submit', async ev => {
-        ev.preventDefault(); if (saving) return;
-        if (step !== 3) { if (validateStep()) showStep(step + 1); return; }
-        for (const page of pages.slice(0, 3)) { const invalid = [...page.querySelectorAll('input, select, textarea')].find(input => !input.checkValidity()); if (invalid) { showStep(pages.indexOf(page)); invalid.reportValidity(); return; } }
-        if (employees.some(e => e.name.normalize('NFKC').toLowerCase() === name.value.trim().normalize('NFKC').toLowerCase())) { showStep(1); error.textContent = 'That name is already used in this company. Choose a distinct name.'; return; }
-        if (appearance.pending()) { error.textContent = 'Wait for the photo to finish loading.'; return; }
-        const skills = expertise.value.split(',').map(s => s.trim()).filter(Boolean);
-        if (!skills.length) { error.textContent = 'Add at least one area of expertise.'; return; }
-        saving = true; submit.disabled = true; error.textContent = '';
+      plan.addEventListener('focus', () => {
+        void refreshHireOptions();
+      });
+      form.addEventListener('submit', async (ev) => {
+        ev.preventDefault();
+        if (saving) return;
+        if (step !== 3) {
+          if (validateStep()) showStep(step + 1);
+          return;
+        }
+        for (const page of pages.slice(0, 3)) {
+          const invalid = [...page.querySelectorAll('input, select, textarea')].find((input) => !input.checkValidity());
+          if (invalid) {
+            showStep(pages.indexOf(page));
+            invalid.reportValidity();
+            return;
+          }
+        }
+        if (
+          employees.some(
+            (e) => e.name.normalize('NFKC').toLowerCase() === name.value.trim().normalize('NFKC').toLowerCase()
+          )
+        ) {
+          showStep(1);
+          error.textContent = 'That name is already used in this company. Choose a distinct name.';
+          return;
+        }
+        if (appearance.pending()) {
+          error.textContent = 'Wait for the photo to finish loading.';
+          return;
+        }
+        const skills = expertise.value
+          .split(',')
+          .map((s) => s.trim())
+          .filter(Boolean);
+        if (!skills.length) {
+          error.textContent = 'Add at least one area of expertise.';
+          return;
+        }
+        saving = true;
+        submit.disabled = true;
+        error.textContent = '';
         const source = selectedSource();
-        if (!source || !harness.value) { saving = false; submit.disabled = false; error.textContent = 'Choose a plan and a compatible harness.'; return; }
-        const payload = { responsibilities: lines(), personality: personality.value.trim(), permissions: { recoverEmployees: recover.checked, manageOffice: manageOffice.checked, moveOwnPlan: planPermissions.moveOwnPlan.checked, managePlans: planPermissions.managePlans.checked, manageGoals: manageGoals.checked, editBoardIssues: basicBoardChoice, manageBoard: boardPermissions.manageBoard.checked, manageDecisions: boardPermissions.manageDecisions.checked }, sleepEnabled: rest.sleep.checked, dreamEnabled: rest.dream.checked, source: source.kind === 'local' ? { kind: 'local', endpointId: source.id } : { kind: 'subscription', profileId: source.id }, mode: harness.value, name: name.value.trim(), icon: this.expertInitial(name.value), ...(pronouns.value.trim() ? { pronouns: pronouns.value.trim() } : {}), ...(voice.value() ? { voice: voice.value() } : {}), position: position.value.trim(), expertise: skills, reportsTo: parent.value };
+        if (!source || !harness.value) {
+          saving = false;
+          submit.disabled = false;
+          error.textContent = 'Choose a plan and a compatible harness.';
+          return;
+        }
+        const payload = {
+          responsibilities: lines(),
+          personality: personality.value.trim(),
+          permissions: {
+            recoverEmployees: recover.checked,
+            manageOffice: manageOffice.checked,
+            moveOwnPlan: planPermissions.moveOwnPlan.checked,
+            managePlans: planPermissions.managePlans.checked,
+            manageGoals: manageGoals.checked,
+            editBoardIssues: basicBoardChoice,
+            manageBoard: boardPermissions.manageBoard.checked,
+            manageDecisions: boardPermissions.manageDecisions.checked,
+          },
+          sleepEnabled: rest.sleep.checked,
+          dreamEnabled: rest.dream.checked,
+          source:
+            source.kind === 'local'
+              ? { kind: 'local', endpointId: source.id }
+              : { kind: 'subscription', profileId: source.id },
+          mode: harness.value,
+          name: name.value.trim(),
+          icon: this.expertInitial(name.value),
+          ...(pronouns.value.trim() ? { pronouns: pronouns.value.trim() } : {}),
+          ...(voice.value() ? { voice: voice.value() } : {}),
+          position: position.value.trim(),
+          expertise: skills,
+          reportsTo: parent.value,
+        };
         try {
           const result = await this.app._chatApi('/api/company/hire', { method: 'POST', body: payload });
-          if (!result.ok) { error.textContent = result.error || 'Could not hire this agent.'; return; }
+          if (!result.ok) {
+            error.textContent = result.error || 'Could not hire this agent.';
+            return;
+          }
           const sessionId = result.data?.sessionId || result.data?.employee?.sessionId;
           const photo = appearance.picture.value();
-          const photoSaved = !photo || (typeof sessionId === 'string' && await this.saveEmployeePicture(sessionId, photo));
+          const photoSaved =
+            !photo || (typeof sessionId === 'string' && (await this.saveEmployeePicture(sessionId, photo)));
           await this.loadOwner();
           await paint();
           status.textContent = `Hired ${payload.name}.${photoSaved ? '' : ' The photo could not be saved. Use Edit profile to try again; the expert is already hired.'}`;
-        } catch { error.textContent = 'Could not save. Check the company roster before trying again.'; }
-        finally { saving = false; submit.disabled = false; }
+        } catch {
+          error.textContent = 'Could not save. Check the company roster before trying again.';
+        } finally {
+          saving = false;
+          submit.disabled = false;
+        }
       });
-      section.append(form); content.append(section);
+      section.append(form);
+      content.append(section);
       content.append(this.companyGpuHistory());
       head.querySelector('.ca-company-settings-button')?.remove();
       head.querySelector('.ca-company-tools-button')?.remove();
-      head.insertBefore(this.button('ca-btn ca-company-settings-button', 'Company settings', () => this.openCompanySettings(paint), { text: 'Company settings' }), head.lastElementChild);
-      const tools = this.button('ca-btn ca-company-tools-button', 'Company tools', () => this.openCompanyTools(tools), { text: 'Tools' });
+      head.insertBefore(
+        this.button('ca-btn ca-company-settings-button', 'Company settings', () => this.openCompanySettings(paint), {
+          text: 'Company settings',
+        }),
+        head.lastElementChild
+      );
+      const tools = this.button('ca-btn ca-company-tools-button', 'Company tools', () => this.openCompanyTools(tools), {
+        text: 'Tools',
+      });
       head.insertBefore(tools, head.lastElementChild);
     };
     try {
       await paint();
       if (this.companyPage !== dlg) return;
-      this._companyTimer = this.doc.defaultView.setInterval(() => { void this._companyRefresh?.(); }, 60000);
-    } catch { if (this.companyPage === dlg) status.textContent = 'Could not load company. Please reopen it to try again.'; }
+      this._companyTimer = this.doc.defaultView.setInterval(() => {
+        void this._companyRefresh?.();
+      }, 60000);
+    } catch {
+      if (this.companyPage === dlg) status.textContent = 'Could not load company. Please reopen it to try again.';
+    }
   }
 
   /**
@@ -3285,52 +4637,101 @@ class ReverieChatApp {
    */
   async companyHireRequests(content, employees, repaint) {
     const result = await this.app._chatApi('/api/experts-hire-requests');
-    const open = result.ok && Array.isArray(result.data?.requests) ? result.data.requests.filter(r => r.status === 'pending' || r.status === 'approving') : [];
+    const open =
+      result.ok && Array.isArray(result.data?.requests)
+        ? result.data.requests.filter((r) => r.status === 'pending' || r.status === 'approving')
+        : [];
     if (!open.length || !content.isConnected) return;
     const host = this.el('section', 'ca-company-hire-requests');
     host.setAttribute('aria-label', 'Hire requests');
-    host.append(this.el('h3', '', `Hire requests (${open.length})`),
-      this.el('p', 'ca-hint', 'A delegate asked for these hires. Nothing is hired until you approve; approval runs the hire as you, with every limit checked again.'));
-    const nameOf = id => employees.find(e => e.id === id)?.name ?? id;
+    host.append(
+      this.el('h3', '', `Hire requests (${open.length})`),
+      this.el(
+        'p',
+        'ca-hint',
+        'A delegate asked for these hires. Nothing is hired until you approve; approval runs the hire as you, with every limit checked again.'
+      )
+    );
+    const nameOf = (id) => employees.find((e) => e.id === id)?.name ?? id;
     for (const request of open) {
       const f = request.fields || {};
       const card = this.el('article', 'ca-company-hire-request');
       card.dataset.requestId = request.id;
-      card.append(this.literalText('h4', '', `${f.name || `From template ${request.templateId}`}${f.position ? ` · ${f.position}` : ''}`));
+      card.append(
+        this.literalText(
+          'h4',
+          '',
+          `${f.name || `From template ${request.templateId}`}${f.position ? ` · ${f.position}` : ''}`
+        )
+      );
       const facts = this.el('dl', 'ca-company-hire-request-facts');
-      for (const [label, value] of [['Template', request.templateId], ['Asked by', request.requestedBy],
+      for (const [label, value] of [
+        ['Template', request.templateId],
+        ['Asked by', request.requestedBy],
         ['Asked', globalThis.ReverieTime?.format(request.requestedAt) ?? new Date(request.requestedAt).toISOString()],
-        ['Reports to', f.reportsTo ? nameOf(f.reportsTo) : ''], ['Harness', [f.mode, f.model, f.effort].filter(Boolean).join(' · ')],
-        ['Plan', f.accountProfileId || ''], ['Rooms', (f.rooms || []).join(', ')], ['Working directory', f.workingDir],
-        ['Budget stop', f.budgetStop ? `${f.budgetStop.planId} at ${f.budgetStop.weeklyPercent}% weekly` : ''], ['Reason', f.reason]]) {
+        ['Reports to', f.reportsTo ? nameOf(f.reportsTo) : ''],
+        ['Harness', [f.mode, f.model, f.effort].filter(Boolean).join(' · ')],
+        ['Plan', f.accountProfileId || ''],
+        ['Rooms', (f.rooms || []).join(', ')],
+        ['Working directory', f.workingDir],
+        ['Budget stop', f.budgetStop ? `${f.budgetStop.planId} at ${f.budgetStop.weeklyPercent}% weekly` : ''],
+        ['Reason', f.reason],
+      ]) {
         if (!value) continue;
         facts.append(this.literalText('dt', '', label), this.literalText('dd', '', String(value)));
       }
       card.append(facts);
-      const error = this.el('p', 'ca-company-error'); error.setAttribute('role', 'alert');
+      const error = this.el('p', 'ca-company-error');
+      error.setAttribute('role', 'alert');
       const actions = this.el('div', 'ca-company-actions');
       const decide = async (verb, button) => {
         for (const control of actions.querySelectorAll('button')) control.disabled = true;
-        error.textContent = ''; button.textContent = verb === 'approve' ? 'Hiring…' : 'Declining…';
+        error.textContent = '';
+        button.textContent = verb === 'approve' ? 'Hiring…' : 'Declining…';
         let outcome;
-        try { outcome = await this.app._chatApi(`/api/experts-hire-requests/${encodeURIComponent(request.id)}/${verb}`, { method: 'POST', body: {} }); }
-        catch { outcome = { ok: false }; }
+        try {
+          outcome = await this.app._chatApi(`/api/experts-hire-requests/${encodeURIComponent(request.id)}/${verb}`, {
+            method: 'POST',
+            body: {},
+          });
+        } catch {
+          outcome = { ok: false };
+        }
         if (!outcome.ok) {
           // No answer cannot tell whether the hire ran: say so instead of offering the same click again.
-          error.textContent = outcome.status ? (outcome.error || 'The request could not be decided.')
+          error.textContent = outcome.status
+            ? outcome.error || 'The request could not be decided.'
             : 'The outcome is unconfirmed. Reopen Company and check the roster before trying again.';
           button.textContent = verb === 'approve' ? 'Approve and hire' : 'Decline';
-          if (outcome.status) for (const control of actions.querySelectorAll('button')) control.disabled = false;
+          if (outcome.status && outcome.status < 500)
+            for (const control of actions.querySelectorAll('button')) control.disabled = false;
           return;
         }
-        this.toast(verb === 'approve' ? `Hired ${f.name || `an expert from ${request.templateId}`} on ${request.requestedBy}'s request.` : 'Hire request declined.', 'info');
+        this.toast(
+          verb === 'approve'
+            ? `Hired ${f.name || `an expert from ${request.templateId}`} on ${request.requestedBy}'s request.`
+            : 'Hire request declined.',
+          'info'
+        );
         await repaint?.();
       };
-      const approve = this.button('ca-btn is-primary', `Approve and hire for request ${request.id}`, () => decide('approve', approve), { text: 'Approve and hire' });
-      const decline = this.button('ca-btn', `Decline request ${request.id}`, () => decide('decline', decline), { text: 'Decline' });
+      const approve = this.button(
+        'ca-btn is-primary',
+        `Approve and hire for request ${request.id}`,
+        () => decide('approve', approve),
+        { text: 'Approve and hire' }
+      );
+      const decline = this.button('ca-btn', `Decline request ${request.id}`, () => decide('decline', decline), {
+        text: 'Decline',
+      });
       if (request.status === 'approving') {
         approve.disabled = true;
-        error.textContent = 'An approval of this request did not finish. Check the roster: if the expert is there, decline to close the request.';
+        decline.disabled = !!(request.hireId || request.reservation);
+        error.textContent = request.hireId
+          ? 'This approval is linked to a retained hire. Inspect the employee profile before recovery. Approval and decline cannot replay or undo its startup.'
+          : request.reservation
+            ? 'This approval holds an unconfirmed session creation. Inspect the request and company before recovery; an empty list does not prove that creation had no effect.'
+            : 'An approval of this request did not finish. Check the roster before closing the request; closing never undoes a hire.';
       }
       actions.append(approve, decline);
       card.append(actions, error);
@@ -3344,7 +4745,8 @@ class ReverieChatApp {
     const recovery = this.el('form', 'ca-company-form ca-company-recovery');
     recovery.append(this.el('h3', '', 'Crash recovery'));
     const enabledLabel = this.el('label', 'ca-label');
-    const enabled = this.el('input', ''); enabled.type = 'checkbox';
+    const enabled = this.el('input', '');
+    enabled.type = 'checkbox';
     enabled.checked = data.settings?.autoWakeEnabled !== false;
     enabled.setAttribute('aria-label', 'Automatic recovery');
     enabledLabel.append(enabled, this.el('span', '', 'Automatic recovery'));
@@ -3353,40 +4755,64 @@ class ReverieChatApp {
     const expert = this.el('select', 'ca-field');
     expert.setAttribute('aria-label', 'Wake after a crash');
     const coordinator = data.settings?.coordinatorEmployeeId;
-    const recoveryEmployees = employees.filter(employee => !employee.onVacation);
-    const roots = recoveryEmployees.filter(employee => {
+    const recoveryEmployees = employees.filter((employee) => !employee.onVacation);
+    const roots = recoveryEmployees.filter((employee) => {
       const parent = employee.reportsTo ?? (employee.id === coordinator ? 'owner' : coordinator);
       return !parent || parent === 'owner';
     });
-    const automatic = this.literalText('option', '', roots.length === 1 ? `Automatic: ${roots[0].name}` : 'Choose an expert');
-    automatic.value = ''; expert.append(automatic);
+    const automatic = this.literalText(
+      'option',
+      '',
+      roots.length === 1 ? `Automatic: ${roots[0].name}` : 'Choose an expert'
+    );
+    automatic.value = '';
+    expert.append(automatic);
     for (const employee of recoveryEmployees) {
       const option = this.literalText('option', '', employee.name);
-      option.value = employee.id; expert.append(option);
+      option.value = employee.id;
+      expert.append(option);
     }
-    const selected = employees.some(employee => employee.id === data.settings?.crashWakeEmployeeId && employee.onVacation) ? '' : data.settings?.crashWakeEmployeeId || '';
-    if (selected && !employees.some(employee => employee.id === selected)) {
-      const missing = this.el('option', '', 'Unavailable expert'); missing.value = selected;
+    const selected = employees.some(
+      (employee) => employee.id === data.settings?.crashWakeEmployeeId && employee.onVacation
+    )
+      ? ''
+      : data.settings?.crashWakeEmployeeId || '';
+    if (selected && !employees.some((employee) => employee.id === selected)) {
+      const missing = this.el('option', '', 'Unavailable expert');
+      missing.value = selected;
       expert.append(missing);
     }
     expert.value = selected;
     expert.disabled = !enabled.checked;
-    enabled.addEventListener('change', () => { expert.disabled = !enabled.checked; });
+    enabled.addEventListener('change', () => {
+      expert.disabled = !enabled.checked;
+    });
     expertLabel.append(expert);
-    const save = this.el('button', 'ca-btn', 'Save recovery'); save.type = 'submit';
-    recovery.append(enabledLabel, expertLabel, this.el('p', 'ca-hint', 'Only this expert wakes automatically. They can wake reports with permission.'), save);
-    recovery.addEventListener('submit', async event => {
-      event.preventDefault(); save.disabled = true;
+    const save = this.el('button', 'ca-btn', 'Save recovery');
+    save.type = 'submit';
+    recovery.append(
+      enabledLabel,
+      expertLabel,
+      this.el('p', 'ca-hint', 'Only this expert wakes automatically. They can wake reports with permission.'),
+      save
+    );
+    recovery.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      save.disabled = true;
       const changes = { ...data.settings, autoWakeEnabled: enabled.checked };
       if (expert.value) changes.crashWakeEmployeeId = expert.value;
       else delete changes.crashWakeEmployeeId;
       try {
         const result = await this.app._chatApi('/api/company/settings', { method: 'PUT', body: changes });
-        status.textContent = result.ok ? 'Recovery settings saved.' : `Could not save recovery settings: ${result.error || 'request failed'}`;
+        status.textContent = result.ok
+          ? 'Recovery settings saved.'
+          : `Could not save recovery settings: ${result.error || 'request failed'}`;
         if (result.ok) data.settings = result.data?.settings || changes;
       } catch {
         status.textContent = 'Could not save recovery settings. Try again.';
-      } finally { save.disabled = false; }
+      } finally {
+        save.disabled = false;
+      }
     });
     container.append(recovery);
   }
@@ -3400,137 +4826,307 @@ class ReverieChatApp {
     form.append(this.el('h3', '', 'Time zone'));
     const wrap = this.el('label', 'ca-label');
     const input = this.el('input', 'ca-field');
-    input.value = data.settings?.timeZone || 'UTC'; input.maxLength = 100; input.required = true;
-    input.placeholder = 'America/New_York'; input.setAttribute('aria-label', 'Company time zone'); input.spellcheck = false;
+    input.value = data.settings?.timeZone || 'UTC';
+    input.maxLength = 100;
+    input.required = true;
+    input.placeholder = 'America/New_York';
+    input.setAttribute('aria-label', 'Company time zone');
+    input.spellcheck = false;
     const zones = typeof Intl.supportedValuesOf === 'function' ? Intl.supportedValuesOf('timeZone') : [];
     if (zones.length) {
-      const list = this.el('datalist'); list.id = 'ca-company-time-zones';
-      for (const zone of zones) { const option = this.el('option'); option.value = zone; list.append(option); }
-      input.setAttribute('list', list.id); form.append(list);
+      const list = this.el('datalist');
+      list.id = 'ca-company-time-zones';
+      for (const zone of zones) {
+        const option = this.el('option');
+        option.value = zone;
+        list.append(option);
+      }
+      input.setAttribute('list', list.id);
+      form.append(list);
     }
     wrap.append(this.el('span', 'ca-label-text', 'Company time zone'), input);
-    const save = this.el('button', 'ca-btn is-primary', 'Save time zone'); save.type = 'submit';
-    const actions = this.el('div', 'ca-dialog-actions'); actions.append(save);
-    form.append(wrap, this.el('p', 'ca-hint', 'Used for chat times, agent briefs, deadlines and plan resets. Daylight saving changes are automatic.'), actions);
-    form.addEventListener('submit', async event => {
-      event.preventDefault(); if (save.disabled) return;
+    const save = this.el('button', 'ca-btn is-primary', 'Save time zone');
+    save.type = 'submit';
+    const actions = this.el('div', 'ca-dialog-actions');
+    actions.append(save);
+    form.append(
+      wrap,
+      this.el(
+        'p',
+        'ca-hint',
+        'Used for chat times, agent briefs, deadlines and plan resets. Daylight saving changes are automatic.'
+      ),
+      actions
+    );
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      if (save.disabled) return;
       const timeZone = input.value.trim();
-      try { new Intl.DateTimeFormat('en-US', { timeZone }); }
-      catch { error.textContent = `"${timeZone}" is not a time zone this browser knows. Use a name like America/New_York.`; return; }
-      save.disabled = true; error.textContent = ''; status.textContent = '';
+      try {
+        new Intl.DateTimeFormat('en-US', { timeZone });
+      } catch {
+        error.textContent = `"${timeZone}" is not a time zone this browser knows. Use a name like America/New_York.`;
+        return;
+      }
+      save.disabled = true;
+      error.textContent = '';
+      status.textContent = '';
       try {
         const result = await this.app._chatApi('/api/company/settings', { method: 'PUT', body: { timeZone } });
         if (!result.ok) throw new Error(result.error || 'The time zone could not be saved.');
-        if (result.data?.settings?.timeZone !== timeZone) throw new Error('Save not confirmed. Reopen Company settings to check the time zone.');
+        if (result.data?.settings?.timeZone !== timeZone)
+          throw new Error('Save not confirmed. Reopen Company settings to check the time zone.');
         globalThis.ReverieTime?.setTimeZone(timeZone);
-        status.textContent = `Company time zone saved: ${timeZone}.`; await onSaved?.();
-      } catch (failure) { error.textContent = failure.message || 'The time zone could not be saved.'; }
-      finally { save.disabled = false; }
+        status.textContent = `Company time zone saved: ${timeZone}.`;
+        await onSaved?.();
+      } catch (failure) {
+        error.textContent = failure.message || 'The time zone could not be saved.';
+      } finally {
+        save.disabled = false;
+      }
     });
     return form;
   }
 
   async openCompanySettings(onSaved) {
     const existing = this.doc.querySelector('.ca-company-settings');
-    if (existing) { existing.querySelector('button')?.focus(); return; }
+    if (existing) {
+      existing.querySelector('button')?.focus();
+      return;
+    }
     const dialog = this.el('dialog', 'ca-dialog ca-company-settings');
     dialog.setAttribute('aria-label', 'Company settings');
     const head = this.el('header', 'ca-company-settings-head');
     const close = this.button('ca-btn', 'Close company settings', () => dialog.close(), { text: 'Close' });
     head.append(this.el('h2', '', 'Company settings'), close);
-    const status = this.el('p', 'ca-hint', 'Loading company settings…'); status.setAttribute('role', 'status');
-    const error = this.el('p', 'ca-company-error'); error.setAttribute('role', 'alert');
+    const status = this.el('p', 'ca-hint', 'Loading company settings…');
+    status.setAttribute('role', 'status');
+    const error = this.el('p', 'ca-company-error');
+    error.setAttribute('role', 'alert');
     const content = this.el('div', 'ca-company-settings-content');
-    dialog.append(head, status, error, content);
+    const tabs = this.el('nav', 'ca-company-settings-tabs');
+    tabs.setAttribute('role', 'tablist');
+    tabs.setAttribute('aria-label', 'Company settings sections');
+    const sections = [
+      ['general', 'Company'],
+      ['runtime', 'Employees'],
+      ['hiring', 'Hiring'],
+      ['reports', 'Reports'],
+    ].map(([key, label]) => {
+      const panel = this.el('section', 'ca-company-settings-panel');
+      panel.id = `ca-company-settings-${key}`;
+      const tab = this.button('ca-btn', label, () => selectTab(key), { text: label });
+      tab.id = `ca-company-settings-tab-${key}`;
+      tab.dataset.settingsTab = key;
+      tab.setAttribute('role', 'tab');
+      tab.setAttribute('aria-controls', panel.id);
+      panel.setAttribute('role', 'tabpanel');
+      panel.setAttribute('aria-labelledby', tab.id);
+      tabs.append(tab);
+      content.append(panel);
+      return { key, tab, panel };
+    });
+    const selectTab = (key) => {
+      for (const section of sections) {
+        const active = section.key === key;
+        section.panel.hidden = !active;
+        section.tab.setAttribute('aria-selected', String(active));
+        section.tab.tabIndex = active ? 0 : -1;
+      }
+      content.scrollTop = 0;
+    };
+    tabs.addEventListener('keydown', (event) => {
+      const available = sections.filter((section) => !section.tab.hidden),
+        index = available.findIndex((section) => section.tab === event.target);
+      if (index < 0) return;
+      const next =
+        event.key === 'ArrowRight'
+          ? (index + 1) % available.length
+          : event.key === 'ArrowLeft'
+            ? (index + available.length - 1) % available.length
+            : event.key === 'Home'
+              ? 0
+              : event.key === 'End'
+                ? available.length - 1
+                : -1;
+      if (next < 0) return;
+      event.preventDefault();
+      selectTab(available[next].key);
+      available[next].tab.focus();
+    });
+    const [general, runtime, hiring, reportsPanel] = sections.map((section) => section.panel);
+    dialog.append(head, tabs, status, error, content);
+    selectTab('general');
     // Per-device and for everyone who can open this dialog, so it does not wait on (or depend on) the company load.
     const mobile = this.doc.defaultView?.ReverieMobile;
     if (mobile) {
       const device = this.el('section', 'ca-company-device');
-      device.append(this.el('h3', '', 'This device'),
-        this.el('p', 'ca-hint', 'Install Reverie as an app on this phone or computer and turn on its notifications. This applies only to the device you are using.'),
-        this.button('ca-btn', 'Install app and notifications', () => mobile.open(), { text: 'Install app and notifications' }));
-      content.append(device);
+      device.append(
+        this.el('h3', '', 'This device'),
+        this.el(
+          'p',
+          'ca-hint',
+          'Install Reverie as an app on this phone or computer and turn on its notifications. This applies only to the device you are using.'
+        ),
+        this.button('ca-btn', 'Install app and notifications', () => mobile.open(), {
+          text: 'Install app and notifications',
+        })
+      );
+      general.append(device);
     }
     dialog.addEventListener('close', () => dialog.remove());
-    this.doc.body.append(dialog); dialog.showModal(); close.focus();
+    this.doc.body.append(dialog);
+    dialog.showModal();
+    close.focus();
     try {
-      const [response, auth] = await Promise.all([this.app._chatApi('/api/company'), this.app._chatApi('/api/chatrooms/phone-status')]);
+      const [response, auth] = await Promise.all([
+        this.app._chatApi('/api/company'),
+        this.app._chatApi('/api/chatrooms/phone-status'),
+      ]);
       if (!dialog.isConnected) return;
       if (!response.ok) throw new Error(response.error || 'Company settings are unavailable.');
       const data = response.data || {};
       const manage = data.canManage === true && auth.ok && auth.data?.self === 'owner' && auth.data?.canSetOwn === true;
       status.textContent = '';
       if (manage) {
-        this.companyRecoveryFields(content, data, status);
-        this.doc.defaultView.ReverieFleetResources?.mount(this, content, dialog);
+        this.companyRecoveryFields(runtime, data, status);
+        this.doc.defaultView.ReverieFleetResources?.mount(this, runtime, dialog);
+        selectTab('runtime');
         const plugins = this.doc.defaultView?.ReverieChatPlugins;
-        if (plugins) content.append(this.button('ca-btn', 'Configure server chat plugins', () => {
-          void plugins.openSettings().catch(failure => this.toast(failure.message || 'Plugin settings are unavailable.', 'error'));
-        }, { text: 'Chat plugins' }));
+        if (plugins)
+          general.append(
+            this.button(
+              'ca-btn',
+              'Configure server chat plugins',
+              () => {
+                void plugins
+                  .openSettings()
+                  .catch((failure) => this.toast(failure.message || 'Plugin settings are unavailable.', 'error'));
+              },
+              { text: 'Chat plugins' }
+            )
+          );
         const form = this.el('form', 'ca-company-settings-form');
         form.append(this.el('h3', '', 'Owner details'));
         const field = (label, value) => {
           const wrap = this.el('label', 'ca-label');
-          const input = this.el('input', 'ca-field'); input.value = value || ''; input.maxLength = 100; input.setAttribute('aria-label', label);
-          wrap.append(this.el('span', 'ca-label-text', label), input); form.append(wrap); return input;
+          const input = this.el('input', 'ca-field');
+          input.value = value || '';
+          input.maxLength = 100;
+          input.setAttribute('aria-label', label);
+          wrap.append(this.el('span', 'ca-label-text', label), input);
+          form.append(wrap);
+          return input;
         };
         const name = field('Owner display name', data.settings?.ownerName);
         const title = field('Owner title', data.settings?.ownerTitle);
-        const save = this.el('button', 'ca-btn is-primary', 'Save owner details'); save.type = 'submit';
-        const actions = this.el('div', 'ca-dialog-actions'); actions.append(save); form.append(actions);
+        const save = this.el('button', 'ca-btn is-primary', 'Save owner details');
+        save.type = 'submit';
+        const actions = this.el('div', 'ca-dialog-actions');
+        actions.append(save);
+        form.append(actions);
         let saving = false;
-        form.addEventListener('submit', async event => {
-          event.preventDefault(); if (saving) return;
-          saving = true; save.disabled = true; error.textContent = ''; status.textContent = '';
+        form.addEventListener('submit', async (event) => {
+          event.preventDefault();
+          if (saving) return;
+          saving = true;
+          save.disabled = true;
+          error.textContent = '';
+          status.textContent = '';
           try {
             const fresh = await this.app._chatApi('/api/company');
-            if (!fresh.ok || fresh.data?.canManage !== true || !fresh.data?.settings) throw new Error(fresh.error || 'Owner sign-in is required to save company settings.');
+            if (!fresh.ok || fresh.data?.canManage !== true || !fresh.data?.settings)
+              throw new Error(fresh.error || 'Owner sign-in is required to save company settings.');
             const { owner: _owner, ownerAvatar: _avatar, ...settings } = fresh.data.settings;
-            const saved = await this.app._chatApi('/api/company/settings', { method: 'PUT', body: { ...settings, ownerName: name.value.trim(), ownerTitle: title.value.trim() } });
+            const saved = await this.app._chatApi('/api/company/settings', {
+              method: 'PUT',
+              body: { ...settings, ownerName: name.value.trim(), ownerTitle: title.value.trim() },
+            });
             if (!saved.ok) throw new Error(saved.error || 'Company settings could not be saved.');
             status.textContent = 'Owner details saved.';
-            await this.loadOwner(); await onSaved?.();
-          } catch (failure) { error.textContent = failure.message || 'Company settings could not be saved. Try again.'; }
-          finally { saving = false; save.disabled = false; }
+            await this.loadOwner();
+            await onSaved?.();
+          } catch (failure) {
+            error.textContent = failure.message || 'Company settings could not be saved. Try again.';
+          } finally {
+            saving = false;
+            save.disabled = false;
+          }
         });
-        content.append(form);
-        content.append(this.companyTimeZoneForm(data, status, error, onSaved));
+        general.append(form);
+        general.append(this.companyTimeZoneForm(data, status, error, onSaved));
         const coreForm = this.el('form', 'ca-company-core-form');
         const companyCore = this.coreBeliefFields(coreForm, 'Company core beliefs', data.settings?.coreBeliefs || []);
-        coreForm.append(this.el('p', 'ca-hint', 'Company blocks come first for every expert; personal additions follow with exact duplicates removed. This is configured text, not proof of a running session’s loaded startup.'));
-        const saveCore = this.el('button', 'ca-btn is-primary', 'Save company core beliefs'); saveCore.type = 'submit'; coreForm.append(saveCore);
-        coreForm.addEventListener('submit', async event => {
-          event.preventDefault(); if (saveCore.disabled) return;
-          if (!companyCore.changed()) { status.textContent = 'Company core beliefs unchanged.'; return; }
-          saveCore.disabled = true; error.textContent = '';
+        coreForm.append(
+          this.el(
+            'p',
+            'ca-hint',
+            'Company blocks come first for every expert; personal additions follow with exact duplicates removed. This is configured text, not proof of a running session’s loaded startup.'
+          )
+        );
+        const saveCore = this.el('button', 'ca-btn is-primary', 'Save company core beliefs');
+        saveCore.type = 'submit';
+        coreForm.append(saveCore);
+        coreForm.addEventListener('submit', async (event) => {
+          event.preventDefault();
+          if (saveCore.disabled) return;
+          if (!companyCore.changed()) {
+            status.textContent = 'Company core beliefs unchanged.';
+            return;
+          }
+          saveCore.disabled = true;
+          error.textContent = '';
           try {
             const coreBeliefs = companyCore.values();
             const result = await this.app._chatApi('/api/company/settings', { method: 'PUT', body: { coreBeliefs } });
             if (!result.ok) throw new Error(result.error || 'Company core beliefs could not be saved.');
-            if (JSON.stringify(result.data?.settings?.coreBeliefs) !== JSON.stringify(coreBeliefs)) throw new Error('Save not confirmed. Reopen Company settings to check the current beliefs.');
-            companyCore.markSaved(); status.textContent = 'Company core beliefs saved.'; await onSaved?.();
-          } catch (failure) { error.textContent = failure.message || 'Company core beliefs could not be saved.'; }
-          finally { saveCore.disabled = false; }
-        }); content.append(coreForm);
-        content.append(this.companyHiringFields(data.employees || []));
-      } else content.append(this.el('p', 'ca-hint', 'Sign in as the owner to change company settings.'));
+            if (JSON.stringify(result.data?.settings?.coreBeliefs) !== JSON.stringify(coreBeliefs))
+              throw new Error('Save not confirmed. Reopen Company settings to check the current beliefs.');
+            companyCore.markSaved();
+            status.textContent = 'Company core beliefs saved.';
+            await onSaved?.();
+          } catch (failure) {
+            error.textContent = failure.message || 'Company core beliefs could not be saved.';
+          } finally {
+            saveCore.disabled = false;
+          }
+        });
+        general.append(coreForm);
+        hiring.append(this.companyHiringFields(data.employees || []));
+      } else {
+        general.append(this.el('p', 'ca-hint', 'Sign in as the owner to change company settings.'));
+        for (const section of sections.filter((section) => ['runtime', 'hiring'].includes(section.key)))
+          section.tab.hidden = true;
+      }
       const receipts = this.el('details', 'ca-company-settings-receipts');
       receipts.append(this.el('summary', '', 'Research receipts'));
       receipts.append(this.el('p', 'ca-hint', 'Existing agent reports and their evidence. Hypotheses are unverified.'));
       const reports = this.el('div', 'ca-company-settings-reports');
-      const renderReports = company => {
+      const renderReports = (company) => {
         reports.replaceChildren();
         const cycles = Array.isArray(company.cycles) ? company.cycles : [];
         if (!cycles.length) reports.append(this.el('p', 'ca-hint', 'No research receipts yet.'));
         for (const cycle of [...cycles].reverse().slice(0, 50)) {
           const report = this.el('details');
-          const employee = company.employees?.find(person => person.id === cycle.employeeId);
-          report.append(this.literalText('summary', '', `${cycle.date || ''} · ${employee?.name || 'Expert'} · ${cycle.kind || 'Report'} · ${cycle.state || ''}`));
+          const employee = company.employees?.find((person) => person.id === cycle.employeeId);
+          report.append(
+            this.literalText(
+              'summary',
+              '',
+              `${cycle.date || ''} · ${employee?.name || 'Expert'} · ${cycle.kind || 'Report'} · ${cycle.state || ''}`
+            )
+          );
           if (cycle.error) report.append(this.literalText('p', '', cycle.error));
           if (cycle.result) {
             report.append(this.literalText('p', '', cycle.result.summary));
             for (const finding of cycle.result.findings || []) {
-              report.append(this.literalText('p', '', `${finding.status === 'observed' ? 'Observed (agent reported)' : 'Hypothesis'}: ${finding.text}`));
+              report.append(
+                this.literalText(
+                  'p',
+                  '',
+                  `${finding.status === 'observed' ? 'Observed (agent reported)' : 'Hypothesis'}: ${finding.text}`
+                )
+              );
               for (const evidence of finding.evidence || []) report.append(this.literalText('pre', '', evidence));
             }
           }
@@ -3538,104 +5134,179 @@ class ReverieChatApp {
         }
       };
       renderReports(data);
-      const refresh = this.button('ca-btn', 'Refresh research receipts', async () => {
-        if (refresh.disabled) return;
-        refresh.disabled = true; error.textContent = '';
-        try {
-          const result = await this.app._chatApi('/api/company');
-          if (!result.ok) throw new Error(result.error || 'Research receipts could not be refreshed.');
-          renderReports(result.data || {}); status.textContent = 'Research receipts refreshed.';
-        } catch (failure) { error.textContent = failure.message || 'Research receipts could not be refreshed.'; }
-        finally { refresh.disabled = false; }
-      }, { text: 'Refresh receipts' });
-      receipts.append(reports, refresh); content.append(receipts);
-    } catch (failure) { if (dialog.isConnected) { status.textContent = ''; error.textContent = failure.message || 'Company settings are unavailable.'; } }
+      const refresh = this.button(
+        'ca-btn',
+        'Refresh research receipts',
+        async () => {
+          if (refresh.disabled) return;
+          refresh.disabled = true;
+          error.textContent = '';
+          try {
+            const result = await this.app._chatApi('/api/company');
+            if (!result.ok) throw new Error(result.error || 'Research receipts could not be refreshed.');
+            renderReports(result.data || {});
+            status.textContent = 'Research receipts refreshed.';
+          } catch (failure) {
+            error.textContent = failure.message || 'Research receipts could not be refreshed.';
+          } finally {
+            refresh.disabled = false;
+          }
+        },
+        { text: 'Refresh receipts' }
+      );
+      receipts.append(reports, refresh);
+      reportsPanel.append(receipts);
+    } catch (failure) {
+      if (dialog.isConnected) {
+        status.textContent = '';
+        error.textContent = failure.message || 'Company settings are unavailable.';
+      }
+    }
   }
 
   /**
-   * Owner-only hiring settings: who may hire for the owner, the two hire caps with their current use, and the active hires,
-   * flagging any whose session is gone. PUT /api/experts-settings replaces the whole settings object, so each save starts
-   * from a fresh read and changes only these fields.
+   * Owner-only hiring limits with their current use and active hire history.
+   * Historical session absence is separate from current employee availability.
+   * Limit changes use the existing settings store with an atomic checked baseline.
    */
   companyHiringFields(employees) {
     const form = this.el('form', 'ca-company-hiring');
     form.setAttribute('aria-label', 'Hiring');
     const usage = this.el('p', 'ca-hint');
-    const status = this.el('p', 'ca-hint'); status.setAttribute('role', 'status');
-    const error = this.el('p', 'ca-company-error'); error.setAttribute('role', 'alert');
+    const status = this.el('p', 'ca-hint');
+    status.setAttribute('role', 'status');
+    const error = this.el('p', 'ca-company-error');
+    error.setAttribute('role', 'alert');
     const number = (label, max) => {
       const wrap = this.el('label', 'ca-label');
       const input = this.el('input', 'ca-field');
-      input.type = 'number'; input.min = '0'; input.max = String(max); input.step = '1'; input.required = true; input.setAttribute('aria-label', label);
+      input.type = 'number';
+      input.min = '0';
+      input.max = String(max);
+      input.step = '1';
+      input.required = true;
+      input.setAttribute('aria-label', label);
       wrap.append(this.el('span', 'ca-label-text', label), input);
       return { wrap, input };
     };
-    const perDay = number('Hires in any 24 hours', 20), active = number('Active hires at most', 50);
-    const delegates = this.el('fieldset', 'ca-company-hiring-delegates');
-    const hires = this.el('div', 'ca-company-hiring-active');
-    const save = this.el('button', 'ca-btn is-primary', 'Save hiring settings'); save.type = 'submit'; save.disabled = true;
-    const actions = this.el('div', 'ca-dialog-actions'); actions.append(save);
-    form.append(this.el('h3', '', 'Hiring'), usage, perDay.wrap, active.wrap, delegates, actions, status, error, hires);
-    const when = (ms) => globalThis.ReverieTime?.format(ms) ?? new Date(ms).toLocaleString('en-US', { timeZone: 'UTC', timeZoneName: 'short' });
-    let shown = null; // the delegates and caps this section last showed, to notice a change made elsewhere before a save
-    const hiring = (settings) => JSON.stringify([[...(settings.hireDelegates || [])].sort(), settings.maxHiresPerDay, settings.maxActive]);
+    const perDay = number('Hires in any 24 hours', 20),
+      active = number('Active hires at most', 50);
+    const hires = this.el('details', 'ca-company-hiring-active');
+    const save = this.el('button', 'ca-btn is-primary', 'Save hiring settings');
+    save.type = 'submit';
+    save.disabled = true;
+    const actions = this.el('div', 'ca-dialog-actions');
+    actions.append(save);
+    form.append(
+      this.el('h3', '', 'Hiring'),
+      usage,
+      perDay.wrap,
+      active.wrap,
+      this.el('p', 'ca-hint', 'Set who may hire and retire employees on their profile’s Permissions tab.'),
+      actions,
+      status,
+      error,
+      hires
+    );
+    const when = (ms) =>
+      globalThis.ReverieTime?.format(ms) ??
+      new Date(ms).toLocaleString('en-US', { timeZone: 'UTC', timeZoneName: 'short' });
+    let shown = null;
+    const hiring = (settings) => JSON.stringify([settings.maxHiresPerDay, settings.maxActive]);
     const render = (data) => {
-      const settings = data.settings || {}, limits = data.limits || {};
+      const settings = data.settings || {},
+        limits = data.limits || {};
       shown = hiring(settings);
       usage.textContent = `In the last 24 hours: ${limits.hiresLast24h} of ${limits.maxHiresPerDay} hires. Active now: ${limits.active} of ${limits.maxActive}.`;
-      perDay.input.value = String(settings.maxHiresPerDay); active.input.value = String(settings.maxActive);
-      // Delegates are session ids: pick from the roster, and keep showing a listed one that no current expert holds.
-      const chosen = new Set(settings.hireDelegates || []);
-      const rows = employees.filter((e) => e.sessionId).map((e) => [e.sessionId, e.position ? `${e.name} · ${e.position}` : e.name]);
-      for (const id of chosen) if (!rows.some(([sid]) => sid === id)) rows.push([id, `Session ${id.slice(0, 8)} (no current expert)`]);
-      delegates.replaceChildren(this.el('legend', '', 'Who may hire for you'),
-        this.el('p', 'ca-hint', 'A delegate may hire and retire experts within these limits, without asking you each time.'));
-      for (const [sid, text] of rows) {
-        const wrap = this.el('label', 'ca-label'); const box = this.el('input');
-        box.type = 'checkbox'; box.name = 'hireDelegate'; box.value = sid; box.checked = chosen.has(sid);
-        wrap.append(box, this.el('span', '', text)); delegates.append(wrap);
-      }
+      perDay.input.value = String(settings.maxHiresPerDay);
+      active.input.value = String(settings.maxActive);
       const templates = new Map((data.experts || []).map((t) => [t.id, t.name]));
-      const who = (by) => by === 'owner' ? 'you' : by.startsWith('agent:')
-        ? employees.find((e) => e.sessionId === by.slice(6))?.name ?? `session ${by.slice(6, 14)}` : by;
+      const who = (by) =>
+        by === 'owner'
+          ? 'you'
+          : by.startsWith('agent:')
+            ? (employees.find((e) => e.sessionId === by.slice(6))?.name ?? `session ${by.slice(6, 14)}`)
+            : by;
       const list = (data.hires || []).filter((h) => h.status === 'active');
-      hires.replaceChildren(this.el('h4', '', `Active hires · ${list.length}`));
+      hires.replaceChildren(this.el('summary', '', `Active hires · ${list.length}`));
       if (!list.length) hires.append(this.el('p', 'ca-hint', 'No active hires.'));
       for (const h of list) {
         const row = this.el('div', 'ca-company-hire-record');
         const name = employees.find((e) => e.id === h.employeeId)?.name ?? templates.get(h.templateId) ?? h.templateId;
-        row.append(this.el('strong', '', name),
-          this.el('p', 'ca-hint', `${templates.get(h.templateId) ?? h.templateId}, hired by ${who(h.by)} ${when(h.hiredAt)}. ${h.reason}`));
+        row.append(
+          this.el('strong', '', name),
+          this.el(
+            'p',
+            'ca-hint',
+            `${templates.get(h.templateId) ?? h.templateId}, hired by ${who(h.by)} ${when(h.hiredAt)}. ${h.reason}`
+          )
+        );
+        const phase = h.startup?.phase;
+        if (phase && phase !== 'legacy' && phase !== 'launch-returned')
+          row.append(
+            this.el(
+              'p',
+              'ca-hint',
+              `Startup ${phase}. Identity retained. Inspect the employee profile before recovery; submitting another hire does not retry this startup.`
+            )
+          );
+        if (h.notice === 'unconfirmed' || h.audit === 'unconfirmed')
+          row.append(
+            this.el('p', 'ca-hint', 'Hire notice or audit confirmation is unavailable. The employee was retained.')
+          );
         // Still counted against the active cap until it is retired.
-        if (h.sessionLive === false) row.append(this.el('p', 'ca-company-error', 'Its session no longer exists. It still counts as active until it is retired.'));
+        if (h.sessionLive === false)
+          row.append(
+            this.el(
+              'p',
+              'ca-hint',
+              'The original hire session is not present. Check the employee profile for their current session. This hire record remains active.'
+            )
+          );
         hires.append(row);
       }
-      save.disabled = false;
+      if (data.storageUncertain)
+        error.textContent =
+          'A hiring write was not confirmed. Hiring changes are blocked until the console reloads its stored state; employees have been retained.';
+      save.disabled = !!data.storageUncertain;
     };
     const load = async () => {
       const result = await this.app._chatApi('/api/experts');
-      if (!result.ok || !result.data?.settings) { error.textContent = 'Hiring settings could not be loaded. Reopen Company settings to try again.'; return; }
+      if (!result.ok || !result.data?.settings) {
+        error.textContent = 'Hiring settings could not be loaded. Reopen Company settings to try again.';
+        return;
+      }
       render(result.data);
     };
     form.addEventListener('submit', async (event) => {
-      event.preventDefault(); if (save.disabled || !form.reportValidity()) return;
-      const hireDelegates = [...delegates.querySelectorAll('input[name="hireDelegate"]:checked')].map((box) => box.value);
-      if (hireDelegates.length > 20) { error.textContent = 'Choose at most 20 delegates.'; return; }
-      save.disabled = true; error.textContent = ''; status.textContent = '';
+      event.preventDefault();
+      if (save.disabled || !form.reportValidity()) return;
+      save.disabled = true;
+      error.textContent = '';
+      status.textContent = '';
       try {
         const fresh = await this.app._chatApi('/api/experts');
-        if (!fresh.ok || !fresh.data?.settings) throw new Error(fresh.error || 'Hiring settings could not be read before saving. Nothing was changed.');
+        if (!fresh.ok || !fresh.data?.settings)
+          throw new Error(fresh.error || 'Hiring settings could not be read before saving. Nothing was changed.');
         if (hiring(fresh.data.settings) !== shown) {
           render(fresh.data);
-          throw new Error('Hiring settings were changed elsewhere since this page loaded. They are shown again; review them and save once more.');
+          throw new Error(
+            'Hiring settings were changed elsewhere since this page loaded. They are shown again; review them and save once more.'
+          );
         }
-        const body = { ...fresh.data.settings, hireDelegates, maxHiresPerDay: Number(perDay.input.value), maxActive: Number(active.input.value) };
-        const saved = await this.app._chatApi('/api/experts-settings', { method: 'PUT', body });
+        const body = {
+          expected: { maxHiresPerDay: fresh.data.settings.maxHiresPerDay, maxActive: fresh.data.settings.maxActive },
+          limits: { maxHiresPerDay: Number(perDay.input.value), maxActive: Number(active.input.value) },
+        };
+        const saved = await this.app._chatApi('/api/experts-settings/hiring-limits', { method: 'PATCH', body });
         if (!saved.ok) throw new Error(saved.error || 'Hiring settings could not be saved.');
         status.textContent = 'Hiring settings saved.';
         await load();
-      } catch (failure) { error.textContent = failure.message || 'Hiring settings could not be saved.'; }
-      finally { save.disabled = false; }
+      } catch (failure) {
+        error.textContent = failure.message || 'Hiring settings could not be saved.';
+      } finally {
+        save.disabled = false;
+      }
     });
     void load();
     return form;
@@ -3643,14 +5314,14 @@ class ReverieChatApp {
 
   confirmCompanyAction(name, message, confirmLabel) {
     if (this._companyConfirm) return Promise.resolve(false);
-    return new Promise(resolve => {
+    return new Promise((resolve) => {
       const dialog = this.el('dialog', 'ca-dialog ca-company-confirm');
       dialog.setAttribute('aria-label', `${confirmLabel}: ${name}`);
       dialog.append(this.literalText('h2', '', `${confirmLabel}?`), this.literalText('p', 'ca-dialog-note', message));
       const actions = this.el('div', 'ca-dialog-actions');
       const previousFocus = this.doc.activeElement;
       let settled = false;
-      const finish = accepted => {
+      const finish = (accepted) => {
         if (settled) return;
         settled = true;
         if (this._companyConfirm === finish) this._companyConfirm = null;
@@ -3662,14 +5333,24 @@ class ReverieChatApp {
       const cancel = this.button('ca-btn', 'Cancel', () => finish(false), { text: 'Cancel' });
       cancel.autofocus = true;
       const danger = ['Leave office', 'Retire'].includes(confirmLabel);
-      const confirm = this.button(`ca-btn is-primary${danger ? ' is-danger' : ''}`, confirmLabel, () => finish(true), { text: confirmLabel });
+      const confirm = this.button(`ca-btn is-primary${danger ? ' is-danger' : ''}`, confirmLabel, () => finish(true), {
+        text: confirmLabel,
+      });
       actions.append(cancel, confirm);
       dialog.append(actions);
-      dialog.addEventListener('cancel', event => { event.preventDefault(); finish(false); });
+      dialog.addEventListener('cancel', (event) => {
+        event.preventDefault();
+        finish(false);
+      });
       dialog.addEventListener('close', () => finish(false));
       this._companyConfirm = finish;
       this.doc.body.append(dialog);
-      try { dialog.showModal(); cancel.focus(); } catch { finish(false); }
+      try {
+        dialog.showModal();
+        cancel.focus();
+      } catch {
+        finish(false);
+      }
     });
   }
 
@@ -3680,21 +5361,44 @@ class ReverieChatApp {
       work.append(this.el('p', 'ca-hint', 'Work status unavailable. Retrying in a minute.'));
       return work;
     }
-    const person = board.roster.find(person => person.id === employee.id);
-    const state = person?.state === 'running' ? 'Working' : person?.state === 'idle' ? 'Idle' : person?.state === 'gone' ? 'Down' : 'Unknown';
+    const person = board.roster.find((person) => person.id === employee.id);
+    const state =
+      person?.state === 'running'
+        ? 'Working'
+        : person?.state === 'idle'
+          ? 'Idle'
+          : person?.state === 'gone'
+            ? 'Down'
+            : 'Unknown';
     const note = board.agents?.[employee.id];
     const pace = board.pace?.owners?.[employee.id];
     let timeZone = board.timeZone || 'UTC';
     let dateFormat;
-    try { dateFormat = new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }); }
-    catch { timeZone = 'UTC'; dateFormat = new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }); }
+    try {
+      dateFormat = new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' });
+    } catch {
+      timeZone = 'UTC';
+      dateFormat = new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' });
+    }
     const now = Date.now();
-    const clock = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone, hourCycle: 'h23', hour: '2-digit', minute: '2-digit', second: '2-digit' }).formatToParts(now).map(part => [part.type, part.value]));
+    const clock = Object.fromEntries(
+      new Intl.DateTimeFormat('en-US', {
+        timeZone,
+        hourCycle: 'h23',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+      })
+        .formatToParts(now)
+        .map((part) => [part.type, part.value])
+    );
     const dayStart = now - ((Number(clock.hour) * 60 + Number(clock.minute)) * 60 + Number(clock.second)) * 1000;
-    const issues = (board.issues || []).filter(issue => issue.owner === employee.id && issue.status !== 'wontdo' && Number.isFinite(issue.end));
-    const today = issues.filter(issue => dateFormat.format(issue.end) === dateFormat.format(now));
-    const completed = today.filter(issue => issue.status === 'done').length;
-    const upcoming = issues.filter(issue => issue.end >= dayStart - 86400000 && issue.end < dayStart + 14 * 86400000);
+    const issues = (board.issues || []).filter(
+      (issue) => issue.owner === employee.id && issue.status !== 'wontdo' && Number.isFinite(issue.end)
+    );
+    const today = issues.filter((issue) => dateFormat.format(issue.end) === dateFormat.format(now));
+    const completed = today.filter((issue) => issue.status === 'done').length;
+    const upcoming = issues.filter((issue) => issue.end >= dayStart - 86400000 && issue.end < dayStart + 14 * 86400000);
     if (!issues.length && !note?.focus && !note?.receipts?.length) {
       work.append(this.el('span', 'ca-company-live-state', state), this.el('span', 'ca-hint', 'No active work.'));
       return work;
@@ -3702,12 +5406,25 @@ class ReverieChatApp {
     const ring = this.el('div', 'ca-company-ring', today.length ? `${completed}/${today.length}` : '–');
     ring.setAttribute('role', 'img');
     ring.setAttribute('aria-label', `Today: ${completed} of ${today.length} planned issues done`);
-    ring.style.setProperty('--company-done', String(today.length ? completed / today.length * 100 : 0));
+    ring.style.setProperty('--company-done', String(today.length ? (completed / today.length) * 100 : 0));
     const detail = this.el('div', 'ca-company-work-summary');
     detail.append(this.el('span', 'ca-company-live-state', state));
-    if (pace) detail.append(this.el('span', 'ca-company-pace', ({ ahead: 'Ahead', 'on-track': 'On track', behind: 'Behind' })[pace.verdict] || 'Pace unavailable'));
+    if (pace)
+      detail.append(
+        this.el(
+          'span',
+          'ca-company-pace',
+          { ahead: 'Ahead', 'on-track': 'On track', behind: 'Behind' }[pace.verdict] || 'Pace unavailable'
+        )
+      );
     detail.append(this.literalText('p', 'ca-company-focus', note?.focus || 'No current focus recorded.'));
-    detail.append(this.el('p', 'ca-company-counts', `${pace ? pace.overdue : '–'} overdue${pace?.overdue ? ` (${Math.round(pace.overdueHours)}h)` : ''} · ${pace ? pace.early : '–'} early · ${upcoming.filter(issue => issue.status === 'done').length}/${upcoming.length} 2-wk items`));
+    detail.append(
+      this.el(
+        'p',
+        'ca-company-counts',
+        `${pace ? pace.overdue : '–'} overdue${pace?.overdue ? ` (${Math.round(pace.overdueHours)}h)` : ''} · ${pace ? pace.early : '–'} early · ${upcoming.filter((issue) => issue.status === 'done').length}/${upcoming.length} 2-wk items`
+      )
+    );
     if (Array.isArray(note?.receipts) && note.receipts.length) {
       const receipts = this.el('ul', 'ca-company-receipts');
       for (const receipt of note.receipts) receipts.append(this.literalText('li', '', receipt));
@@ -3718,7 +5435,8 @@ class ReverieChatApp {
   }
 
   disposeCompanyPage() {
-    for (const dialog of this.doc.querySelectorAll('.ca-expert-profile, .ca-publication-tokens, .ca-startup-context')) if (dialog._companyOrigin) dialog.close();
+    for (const dialog of this.doc.querySelectorAll('.ca-expert-profile, .ca-publication-tokens, .ca-startup-context'))
+      if (dialog._companyOrigin) dialog.close();
     this._companyConfirm?.(false);
     if (this._companyTimer) this.doc.defaultView.clearInterval(this._companyTimer);
     if (this._companyResize) this.doc.defaultView.removeEventListener('message', this._companyResize);
@@ -3745,7 +5463,11 @@ class ReverieChatApp {
       panel.setAttribute('role', 'dialog');
       panel.setAttribute('aria-label', 'Org chart');
       const head = this.el('header', 'ca-org-head');
-      head.append(this.el('h2', '', 'Org chart'), this.el('span', 'ca-spacer'), this.button('ca-icon-btn ca-org-close', 'Close org chart', () => this.closeOrg(), { text: '\u2715' }));
+      head.append(
+        this.el('h2', '', 'Org chart'),
+        this.el('span', 'ca-spacer'),
+        this.button('ca-icon-btn ca-org-close', 'Close org chart', () => this.closeOrg(), { text: '\u2715' })
+      );
       panel.append(head, this.el('div', 'ca-org-body'));
       panel.addEventListener('keydown', (e) => {
         if (e.key === 'Escape') {
@@ -3773,13 +5495,19 @@ class ReverieChatApp {
 
   /** Remove the profiles of agents that are gone (asks first), then draw the chart again. */
   async pruneFormerWorkers(count) {
-    if (!this.doc.defaultView?.confirm(`Remove up to ${count} old profile${count === 1 ? '' : 's'} of agents that are gone? Running agents and pinned (paused) agents are not touched.`)) return;
+    if (
+      !this.doc.defaultView?.confirm(
+        `Remove up to ${count} old profile${count === 1 ? '' : 's'} of agents that are gone? Running agents and pinned (paused) agents are not touched.`
+      )
+    )
+      return;
     const res = await this.app._chatApi('/api/company/temporary/prune', { method: 'POST', body: {} });
     if (!res.ok) return this.toast(`Chat: ${res.error}`, 'error');
     this.toast(`Removed ${res.data?.removed ?? 0} old profile${res.data?.removed === 1 ? '' : 's'}`, 'info');
     const fresh = await this.app._chatApi('/api/company');
     const body = this.els.org?.querySelector('.ca-org-body');
-    if (fresh.ok && body && this.orgOpen) body.replaceChildren(this.orgTreeEl(caOrgTree(fresh.data, caConnectedSessionIds(this.app.sessions))));
+    if (fresh.ok && body && this.orgOpen)
+      body.replaceChildren(this.orgTreeEl(caOrgTree(fresh.data, caConnectedSessionIds(this.app.sessions))));
   }
 
   closeOrg() {
@@ -3797,7 +5525,10 @@ class ReverieChatApp {
   }
 
   async verifyOfficeOwner() {
-    const [company, auth] = await Promise.all([this.app._chatApi('/api/company'), this.app._chatApi('/api/chatrooms/phone-status')]);
+    const [company, auth] = await Promise.all([
+      this.app._chatApi('/api/company'),
+      this.app._chatApi('/api/chatrooms/phone-status'),
+    ]);
     return company.ok && auth.ok && this.canManageOffice(company.data, auth.data);
   }
 
@@ -3808,17 +5539,26 @@ class ReverieChatApp {
   async readBoardOwnerKey() {
     if (this.app._chatSelf) return null;
     try {
-      const [company, auth] = await Promise.all([this.app._chatApi('/api/company'), this.app._chatApi('/api/chatrooms/phone-status')]);
+      const [company, auth] = await Promise.all([
+        this.app._chatApi('/api/company'),
+        this.app._chatApi('/api/chatrooms/phone-status'),
+      ]);
       const me = await this.app._chatApi('/api/office/me');
-      const owner = company.ok && auth.ok && me.ok && this.canManageOffice(company.data, auth.data) ? this.boardIdentity(me.data?.person) : null;
+      const owner =
+        company.ok && auth.ok && me.ok && this.canManageOffice(company.data, auth.data)
+          ? this.boardIdentity(me.data?.person)
+          : null;
       return owner && (!this._boardKnownIdentity || owner === this._boardKnownIdentity) ? owner : null;
-    } catch { return null; }
+    } catch {
+      return null;
+    }
   }
 
   checkBoardIdentity(person) {
     const owner = this.boardIdentity(person);
     if (owner !== this._boardKnownIdentity || (this._boardCache && owner !== this._boardCache.owner)) {
-      this._boardKnownIdentity = owner; this.discardBoardFrame();
+      this._boardKnownIdentity = owner;
+      this.discardBoardFrame();
       if (owner && this.canManageOffice()) this.scheduleBoardWarm();
     }
   }
@@ -3826,8 +5566,13 @@ class ReverieChatApp {
   discardBoardFrame() {
     this._boardEpoch = (this._boardEpoch || 0) + 1;
     this._boardWarmAttempted = false;
-    const cache = this._boardCache; this._boardCache = null;
-    if (cache) { cache.frame.src = 'about:blank'; cache.panel.remove(); if (this.embed === 'board') this.closePage(); }
+    const cache = this._boardCache;
+    this._boardCache = null;
+    if (cache) {
+      cache.frame.src = 'about:blank';
+      cache.panel.remove();
+      if (this.embed === 'board') this.closePage();
+    }
   }
 
   notifyBoard(active) {
@@ -3840,7 +5585,10 @@ class ReverieChatApp {
 
   suspendBoardFrame() {
     this._boardOpen = (this._boardOpen || 0) + 1;
-    if (this._boardCache) { this._boardCache.panel.hidden = true; this.notifyBoard(false); }
+    if (this._boardCache) {
+      this._boardCache.panel.hidden = true;
+      this.notifyBoard(false);
+    }
   }
 
   scheduleBoardWarm() {
@@ -3851,37 +5599,71 @@ class ReverieChatApp {
       if (this.doc.hidden || this.embed === 'board') return;
       const owner = await this.readBoardOwnerKey();
       if (!owner || epoch !== (this._boardEpoch || 0) || this._boardCache || this.embed === 'board') return;
-      const panel = this.el('section', 'ca-board-page'); panel.hidden = true;
-      const frame = this.el('iframe', 'ca-board-frame'); frame.title = 'Board';
-      frame.dataset.boardManaged = 'true'; frame.dataset.boardActive = 'false'; frame.loading = 'eager';
+      const panel = this.el('section', 'ca-board-page');
+      panel.hidden = true;
+      const frame = this.el('iframe', 'ca-board-frame');
+      frame.title = 'Board';
+      frame.dataset.boardManaged = 'true';
+      frame.dataset.boardActive = 'false';
+      frame.loading = 'eager';
       this._boardCache = { owner, panel, frame };
-      frame.onload = () => { if (this._boardCache?.frame === frame && this.embed === 'board' && this.view === 'chat' && !panel.hidden) this.notifyBoard(true); };
-      panel.append(frame); this.els.body.append(panel); frame.src = CA_PAGES.board.path;
+      frame.onload = () => {
+        if (this._boardCache?.frame === frame && this.embed === 'board' && this.view === 'chat' && !panel.hidden)
+          this.notifyBoard(true);
+      };
+      panel.append(frame);
+      this.els.body.append(panel);
+      frame.src = CA_PAGES.board.path;
     };
-    if (this.doc.defaultView.requestIdleCallback) this.doc.defaultView.requestIdleCallback(() => { void warm(); }, { timeout: 1500 });
-    else this.doc.defaultView.setTimeout(() => { void warm(); }, 200);
+    if (this.doc.defaultView.requestIdleCallback)
+      this.doc.defaultView.requestIdleCallback(
+        () => {
+          void warm();
+        },
+        { timeout: 1500 }
+      );
+    else
+      this.doc.defaultView.setTimeout(() => {
+        void warm();
+      }, 200);
   }
 
   async openWarmBoard({ push = true } = {}) {
-    const cache = this._boardCache, attempt = this._boardOpen = (this._boardOpen || 0) + 1;
+    const cache = this._boardCache,
+      attempt = (this._boardOpen = (this._boardOpen || 0) + 1);
     if (!cache) return;
     const owner = await this.readBoardOwnerKey();
     if (attempt !== this._boardOpen || cache !== this._boardCache || this.view !== 'chat' || this.doc.hidden) return;
-    if (!owner || owner !== cache.owner) { this.discardBoardFrame(); this.openPage('board', { push }); return; }
-    this.disposeCompanyPage(); this.embassy?.close(); if (this.orgOpen) this.closeOrg(); this.toggleDrawer(null);
+    if (!owner || owner !== cache.owner) {
+      this.discardBoardFrame();
+      this.openPage('board', { push });
+      return;
+    }
+    this.disposeCompanyPage();
+    this.embassy?.close();
+    if (this.orgOpen) this.closeOrg();
+    this.toggleDrawer(null);
     if (this.els.page) this.els.page.hidden = true;
-    this.embed = 'board'; this._embedRoom = this.roomId; cache.panel.hidden = false;
-    this.els.root.classList.add('is-page'); this.els.chat.inert = true; this.els.members.inert = true;
+    this.embed = 'board';
+    this._embedRoom = this.roomId;
+    cache.panel.hidden = false;
+    this.els.root.classList.add('is-page');
+    this.els.chat.inert = true;
+    this.els.members.inert = true;
     this.notifyBoard(true);
     const win = this.doc.defaultView;
-    if (push && caPageFromHash(win.location.hash) !== 'board') win.history.pushState({ reveriePage: 'board' }, '', '#board');
-    this.renderSidebar(); this.renderHeader();
+    if (push && caPageFromHash(win.location.hash) !== 'board')
+      win.history.pushState({ reveriePage: 'board' }, '', '#board');
+    this.renderSidebar();
+    this.renderHeader();
   }
 
   officeToolEntries() {
     return [
       { label: 'Org chart', run: () => this.openOrg() },
-      ...(this.serverFeatures.replace && (this.app._chatRetired || []).length ? [{ label: 'Retired sessions', run: () => this.openRetiredDialog() }] : []),
+      ...(this.serverFeatures.replace && (this.app._chatRetired || []).length
+        ? [{ label: 'Retired sessions', run: () => this.openRetiredDialog() }]
+        : []),
       { label: 'Custom emotes', run: () => this.app._openEmoteManager?.() },
       { label: 'Send diagnostics', run: () => this.app.sendChatDiagnostics?.() },
     ];
@@ -3893,10 +5675,14 @@ class ReverieChatApp {
     const focusedLink = [...pane.querySelectorAll('button')].indexOf(this.doc.activeElement);
     const expanded = caRead('local', 'reverie:office-expanded', 'false') !== 'false';
     pane.hidden = !expanded;
-    const rail = this.els.rail, anchor = this.els.machineBar, launcher = this.els.officeLauncher;
+    const rail = this.els.rail,
+      anchor = this.els.machineBar,
+      launcher = this.els.officeLauncher;
     const position = () => {
       if (!anchor?.isConnected || !pane.isConnected || !launcher?.isConnected) return;
-      const meter = anchor.getBoundingClientRect(), root = this.els.root.getBoundingClientRect(), gutter = rail.getBoundingClientRect();
+      const meter = anchor.getBoundingClientRect(),
+        root = this.els.root.getBoundingClientRect(),
+        gutter = rail.getBoundingClientRect();
       if (!meter.width) return;
       pane.style.left = `${meter.left - root.left}px`;
       pane.style.width = `${meter.width}px`;
@@ -3909,26 +5695,51 @@ class ReverieChatApp {
       this._officeFooterObserver?.disconnect();
       this._officeFooterRail?.removeEventListener('scroll', this._officeFooterPosition);
       this._officeFooterRail?.removeEventListener('transitionend', this._officeFooterPosition);
-      this._officeFooterPane = pane; this._officeFooterAnchor = anchor; this._officeFooterRail = rail; this._officeFooterPosition = position;
+      this._officeFooterPane = pane;
+      this._officeFooterAnchor = anchor;
+      this._officeFooterRail = rail;
+      this._officeFooterPosition = position;
       rail.addEventListener('scroll', position, { passive: true });
       rail.addEventListener('transitionend', position);
       const Observer = this.doc.defaultView?.ResizeObserver;
-      if (Observer && anchor) { this._officeFooterObserver = new Observer(position); this._officeFooterObserver.observe(anchor); this._officeFooterObserver.observe(rail); }
+      if (Observer && anchor) {
+        this._officeFooterObserver = new Observer(position);
+        this._officeFooterObserver.observe(anchor);
+        this._officeFooterObserver.observe(rail);
+      }
     }
     this.els.rail.querySelector('.ca-office-gear')?.setAttribute('aria-expanded', String(expanded));
     pane.replaceChildren();
     const entries = owner
-      // Workspace sits beside Company and Board as a quick link.
-      ? ['company', 'board', 'workspace'].map(kind => ({ label: CA_PAGES[kind].label, run: () => this.openPage(kind) }))
+      ? // Workspace sits beside Company and Board as a quick link.
+        ['company', 'board', 'workspace'].map((kind) => ({
+          label: CA_PAGES[kind].label,
+          run: () => this.openPage(kind),
+        }))
       : [{ label: 'Terminal settings', run: () => this.app.openAppSettings?.() }];
-    for (const entry of entries) pane.append(this.button('ca-btn ca-office-pane-link', entry.label, async () => {
-      if (owner) {
-        try { if (!await this.verifyOfficeOwner()) { this.renderOfficePane(false); return this.toast('Sign in as the owner to use company tools.', 'error'); } }
-        catch { return this.toast('Could not verify company access.', 'error'); }
-      }
-      entry.run();
-    }, { text: entry.label }));
-    if (expanded && focusedLink >= 0) pane.querySelectorAll('button')[Math.min(focusedLink, pane.children.length - 1)]?.focus({ preventScroll: true });
+    for (const entry of entries)
+      pane.append(
+        this.button(
+          'ca-btn ca-office-pane-link',
+          entry.label,
+          async () => {
+            if (owner) {
+              try {
+                if (!(await this.verifyOfficeOwner())) {
+                  this.renderOfficePane(false);
+                  return this.toast('Sign in as the owner to use company tools.', 'error');
+                }
+              } catch {
+                return this.toast('Could not verify company access.', 'error');
+              }
+            }
+            entry.run();
+          },
+          { text: entry.label }
+        )
+      );
+    if (expanded && focusedLink >= 0)
+      pane.querySelectorAll('button')[Math.min(focusedLink, pane.children.length - 1)]?.focus({ preventScroll: true });
   }
 
   async openOfficeMenu(anchor) {
@@ -3938,15 +5749,21 @@ class ReverieChatApp {
     this.els.officePane?.classList.toggle('ca-office-pane-opening', expanded);
     this.renderOfficePane();
     if (!expanded) return;
-    try { this.renderOfficePane(await this.verifyOfficeOwner()); }
-    catch { this.renderOfficePane(false); }
+    try {
+      this.renderOfficePane(await this.verifyOfficeOwner());
+    } catch {
+      this.renderOfficePane(false);
+    }
     this.els.officePane?.querySelector('button')?.focus();
   }
 
   async returnToCompanyTools() {
     await this.openCompany('plans');
     const anchor = this.companyPage?.querySelector('.ca-company-tools-button');
-    if (anchor?.isConnected) { anchor.focus(); await this.openCompanyTools(anchor); }
+    if (anchor?.isConnected) {
+      anchor.focus();
+      await this.openCompanyTools(anchor);
+    }
   }
 
   configureCompanyToolsBack(frame) {
@@ -3955,29 +5772,54 @@ class ReverieChatApp {
     try {
       if (frame.contentWindow.location.origin !== this.doc.defaultView.location.origin) return;
       for (const link of frame.contentDocument.querySelectorAll('a')) {
-        if (link.textContent.trim() !== 'Back to chat' && !(this.embed === 'failures' && link.hasAttribute('data-company-tools-back'))) continue;
-        link.textContent = 'Back to Company / tools'; link.setAttribute('href', '#company');
+        if (
+          link.textContent.trim() !== 'Back to chat' &&
+          !(this.embed === 'failures' && link.hasAttribute('data-company-tools-back'))
+        )
+          continue;
+        link.textContent = 'Back to Company / tools';
+        link.setAttribute('href', '#company');
         link.removeAttribute('target');
-        link.addEventListener('click', event => { event.preventDefault(); event.stopImmediatePropagation(); void this.returnToCompanyTools(); }, { capture: true });
+        link.addEventListener(
+          'click',
+          (event) => {
+            event.preventDefault();
+            event.stopImmediatePropagation();
+            void this.returnToCompanyTools();
+          },
+          { capture: true }
+        );
       }
-    } catch { /* The shell header remains a working return path while the frame loads. */ }
+    } catch {
+      /* The shell header remains a working return path while the frame loads. */
+    }
   }
 
   async openCompanyTools(anchor) {
     try {
-      if (!await this.verifyOfficeOwner()) return this.toast('Sign in as the owner to use company tools.', 'error');
-    } catch { return this.toast('Could not verify company access.', 'error'); }
+      if (!(await this.verifyOfficeOwner())) return this.toast('Sign in as the owner to use company tools.', 'error');
+    } catch {
+      return this.toast('Could not verify company access.', 'error');
+    }
     if (!anchor.isConnected) return;
-    const entries = ['handbook', 'workspace', 'bots', 'people', 'previews', 'failures'].map(kind => ({ label: CA_PAGES[kind].label, run: () => this.openPage(kind) }));
-    entries.push({ sep: true }, ...this.officeToolEntries(), { sep: true },
+    const entries = ['handbook', 'workspace', 'bots', 'people', 'previews', 'failures'].map((kind) => ({
+      label: CA_PAGES[kind].label,
+      run: () => this.openPage(kind),
+    }));
+    entries.push(
+      { sep: true },
+      ...this.officeToolEntries(),
+      { sep: true },
       { label: 'Terminal settings', run: () => this.app.openAppSettings?.() },
-      { label: 'Office overview', run: () => this.openPage('office') });
+      { label: 'Office overview', run: () => this.openPage('office') }
+    );
     this.openMenu(entries, { at: anchor, focus: anchor, label: 'Company tools' });
   }
 
   async runOfficePower(action) {
     if (this.app._officePowerPending) return;
-    if (typeof this.app.officePower !== 'function') return this.toast('Office power controls are unavailable.', 'error');
+    if (typeof this.app.officePower !== 'function')
+      return this.toast('Office power controls are unavailable.', 'error');
     const output = this.el('p');
     await this.app.officePower(action, output);
     if (output.textContent) this.toast(output.textContent, 'info');
@@ -3985,16 +5827,22 @@ class ReverieChatApp {
 
   async openOfficePowerMenu(anchor) {
     try {
-      if (!await this.verifyOfficeOwner()) return this.toast('Sign in as the owner to use office power controls.', 'error');
-    } catch { return this.toast('Could not verify office power access.', 'error'); }
+      if (!(await this.verifyOfficeOwner()))
+        return this.toast('Sign in as the owner to use office power controls.', 'error');
+    } catch {
+      return this.toast('Could not verify office power access.', 'error');
+    }
     const target = anchor.isConnected ? anchor : this.els.user?.querySelector('.ca-office-power-button');
     if (!target) return;
-    this.openMenu([
-      { label: 'Stop all agents', danger: true, run: () => this.runOfficePower('stop-laptops') },
-      { label: 'Restart website', run: () => this.runOfficePower('restart-website') },
-      { sep: true },
-      { label: 'Shut down Reverie', danger: true, run: () => this.runOfficePower('shutdown') },
-    ], { at: target, focus: target, above: true, label: 'Office power', className: 'ca-power-menu' });
+    this.openMenu(
+      [
+        { label: 'Stop all agents', danger: true, run: () => this.runOfficePower('stop-laptops') },
+        { label: 'Restart website', run: () => this.runOfficePower('restart-website') },
+        { sep: true },
+        { label: 'Shut down Reverie', danger: true, run: () => this.runOfficePower('shutdown') },
+      ],
+      { at: target, focus: target, above: true, label: 'Office power', className: 'ca-power-menu' }
+    );
   }
 
   updateOfficeNavigation() {
@@ -4007,44 +5855,104 @@ class ReverieChatApp {
   }
 
   officePageEl() {
-    const root = this.el('section', 'ca-office-page'); root.setAttribute('aria-label', 'Office settings');
+    const root = this.el('section', 'ca-office-page');
+    root.setAttribute('aria-label', 'Office settings');
     const head = this.el('header', 'ca-office-head');
-    head.append(this.el('h1', '', 'Office'), this.button('ca-btn', 'Back to Company / tools', () => void this.returnToCompanyTools(), { text: 'Back to Company / tools' }));
-    const nav = this.el('nav', 'ca-office-sections'); nav.setAttribute('aria-label', 'Office pages');
+    head.append(
+      this.el('h1', '', 'Office'),
+      this.button('ca-btn', 'Back to Company / tools', () => void this.returnToCompanyTools(), {
+        text: 'Back to Company / tools',
+      })
+    );
+    const nav = this.el('nav', 'ca-office-sections');
+    nav.setAttribute('aria-label', 'Office pages');
     const terminal = this.el('section', 'ca-office-terminal');
-    terminal.append(this.el('h2', '', 'Terminal settings'), this.el('p', 'ca-hint', 'Terminal appearance, CLI preferences and advanced console settings.'),
-      this.button('ca-btn', 'Open terminal settings', () => this.app.openAppSettings?.(), { text: 'Open terminal settings' }));
-    const status = this.el('p', 'ca-hint'); status.setAttribute('role', 'status');
+    terminal.append(
+      this.el('h2', '', 'Terminal settings'),
+      this.el('p', 'ca-hint', 'Terminal appearance, CLI preferences and advanced console settings.'),
+      this.button('ca-btn', 'Open terminal settings', () => this.app.openAppSettings?.(), {
+        text: 'Open terminal settings',
+      })
+    );
+    const status = this.el('p', 'ca-hint');
+    status.setAttribute('role', 'status');
     root.append(head, nav, terminal, status);
     // Loading the page only reads access. Every power action still requires its
     // own explicit confirmation and the existing authenticated host workflow.
-    void Promise.all([this.app._chatApi('/api/company'), this.app._chatApi('/api/chatrooms/phone-status')]).then(([company, auth]) => {
-      if (!root.isConnected || this.embed !== 'office' || this.app._chatSelf || !company.ok || company.data?.canManage !== true || !auth.ok || auth.data?.self !== 'owner' || auth.data?.canSetOwn !== true) return;
-      for (const kind of ['company', 'board', 'handbook', 'workspace', 'bots', 'people', 'previews', 'failures']) {
-        const page = CA_PAGES[kind];
-        const link = this.button(`ca-btn ca-office-link${kind === 'company' ? ' ca-company-nav' : ''}`, page.label, () => this.openPage(kind));
-        link.dataset.key = `page:${kind}`;
-        link.append(this.icon(page.icon), this.el('span', '', page.label)); nav.append(link);
-      }
-      const tools = this.el('section', 'ca-office-tools'); tools.append(this.el('h2', '', 'Company tools'));
-      const toolButtons = this.el('div', 'ca-office-power-actions');
-      for (const entry of this.officeToolEntries()) toolButtons.append(this.button('ca-btn', entry.label, entry.run, { text: entry.label }));
-      tools.append(toolButtons); root.insertBefore(tools, terminal);
-      const power = this.el('section', 'ca-office-power'); power.setAttribute('aria-label', 'Office power');
-      power.append(this.el('h2', '', 'Power'), this.el('p', 'ca-hint', 'Stopping agents interrupts current work without a fresh handoff. Saved conversations, memory and files remain.'));
-      const actions = this.el('div', 'ca-office-power-actions');
-      for (const [action, label, danger] of [['stop-laptops', 'Stop all agents', true], ['restart-website', 'Restart website', false], ['shutdown', 'Shut down Reverie', true]]) {
-        actions.append(this.button(`ca-btn${danger ? ' is-danger' : ''}`, label, async () => {
-          if (this.app._officePowerPending) return;
-          for (const button of actions.querySelectorAll('button')) button.disabled = true;
-          try {
-            if (typeof this.app.officePower !== 'function') { status.textContent = 'Office power controls are unavailable.'; return; }
-            await this.app.officePower(action, status);
-          } finally { for (const button of actions.querySelectorAll('button')) button.disabled = false; }
-        }, { text: label }));
-      }
-      power.append(actions); root.insertBefore(power, status);
-    }).catch(() => { if (root.isConnected) status.textContent = 'Could not load office controls. Reopen Office to retry.'; });
+    void Promise.all([this.app._chatApi('/api/company'), this.app._chatApi('/api/chatrooms/phone-status')])
+      .then(([company, auth]) => {
+        if (
+          !root.isConnected ||
+          this.embed !== 'office' ||
+          this.app._chatSelf ||
+          !company.ok ||
+          company.data?.canManage !== true ||
+          !auth.ok ||
+          auth.data?.self !== 'owner' ||
+          auth.data?.canSetOwn !== true
+        )
+          return;
+        for (const kind of ['company', 'board', 'handbook', 'workspace', 'bots', 'people', 'previews', 'failures']) {
+          const page = CA_PAGES[kind];
+          const link = this.button(
+            `ca-btn ca-office-link${kind === 'company' ? ' ca-company-nav' : ''}`,
+            page.label,
+            () => this.openPage(kind)
+          );
+          link.dataset.key = `page:${kind}`;
+          link.append(this.icon(page.icon), this.el('span', '', page.label));
+          nav.append(link);
+        }
+        const tools = this.el('section', 'ca-office-tools');
+        tools.append(this.el('h2', '', 'Company tools'));
+        const toolButtons = this.el('div', 'ca-office-power-actions');
+        for (const entry of this.officeToolEntries())
+          toolButtons.append(this.button('ca-btn', entry.label, entry.run, { text: entry.label }));
+        tools.append(toolButtons);
+        root.insertBefore(tools, terminal);
+        const power = this.el('section', 'ca-office-power');
+        power.setAttribute('aria-label', 'Office power');
+        power.append(
+          this.el('h2', '', 'Power'),
+          this.el(
+            'p',
+            'ca-hint',
+            'Stopping agents interrupts current work without a fresh handoff. Saved conversations, memory and files remain.'
+          )
+        );
+        const actions = this.el('div', 'ca-office-power-actions');
+        for (const [action, label, danger] of [
+          ['stop-laptops', 'Stop all agents', true],
+          ['restart-website', 'Restart website', false],
+          ['shutdown', 'Shut down Reverie', true],
+        ]) {
+          actions.append(
+            this.button(
+              `ca-btn${danger ? ' is-danger' : ''}`,
+              label,
+              async () => {
+                if (this.app._officePowerPending) return;
+                for (const button of actions.querySelectorAll('button')) button.disabled = true;
+                try {
+                  if (typeof this.app.officePower !== 'function') {
+                    status.textContent = 'Office power controls are unavailable.';
+                    return;
+                  }
+                  await this.app.officePower(action, status);
+                } finally {
+                  for (const button of actions.querySelectorAll('button')) button.disabled = false;
+                }
+              },
+              { text: label }
+            )
+          );
+        }
+        power.append(actions);
+        root.insertBefore(power, status);
+      })
+      .catch(() => {
+        if (root.isConnected) status.textContent = 'Could not load office controls. Reopen Office to retry.';
+      });
     return root;
   }
 
@@ -4052,7 +5960,10 @@ class ReverieChatApp {
   openPage(kind, { push = true } = {}) {
     const page = CA_PAGES[kind];
     if (!page) return;
-    if (kind === 'board' && this._boardCache) { void this.openWarmBoard({ push }); return; }
+    if (kind === 'board' && this._boardCache) {
+      void this.openWarmBoard({ push });
+      return;
+    }
     this.suspendBoardFrame();
     if (kind === 'company' || kind === 'company-plans' || kind === 'company-people') {
       void this.openCompany(kind === 'company-people' ? 'people' : 'plans', { push });
@@ -4080,37 +5991,47 @@ class ReverieChatApp {
       panel.replaceChildren(this.embassy.directoryEl());
       panel.dataset.kind = kind;
     } else {
-    if (!frame) { frame = this.el('iframe', 'ca-page-frame'); panel.replaceChildren(frame); }
-    frame.title = page.label;
-    let framePath = ['workspace', 'bots', 'previews', 'failures'].includes(kind) ? (this.doc.defaultView.__REVERIE_BASE__ || '') + page.path : page.path;
-    if (kind === 'previews') {
-      const location = this.doc.defaultView.location;
-      const query = new URLSearchParams(location.search);
-      const fragment = /^#previews\?(.*)$/.exec(location.hash);
-      const hash = new URLSearchParams(fragment ? fragment[1] : '');
-      const fields = new URLSearchParams();
-      for (const name of ['sessionId', 'port', 'path']) {
-        const value = query.has(name) ? query.get(name) : hash.get(name);
-        if (value !== null) fields.set(name, value);
+      if (!frame) {
+        frame = this.el('iframe', 'ca-page-frame');
+        panel.replaceChildren(frame);
       }
-      const encoded = fields.toString();
-      if (encoded) framePath += '?' + encoded;
-    }
-    if (panel.dataset.kind !== kind || frame.getAttribute('src') !== framePath) {
-      panel.dataset.kind = kind;
-      frame.src = framePath;
-    } else if (again) {
-      try {
-        frame.contentWindow.location.reload();
-      } catch {
-        /* a frame that is not loaded yet has nothing to reload */
+      frame.title = page.label;
+      let framePath = ['workspace', 'bots', 'previews', 'failures'].includes(kind)
+        ? (this.doc.defaultView.__REVERIE_BASE__ || '') + page.path
+        : page.path;
+      if (kind === 'previews') {
+        const location = this.doc.defaultView.location;
+        const query = new URLSearchParams(location.search);
+        const fragment = /^#previews\?(.*)$/.exec(location.hash);
+        const hash = new URLSearchParams(fragment ? fragment[1] : '');
+        const fields = new URLSearchParams();
+        for (const name of ['sessionId', 'port', 'path']) {
+          const value = query.has(name) ? query.get(name) : hash.get(name);
+          if (value !== null) fields.set(name, value);
+        }
+        const encoded = fields.toString();
+        if (encoded) framePath += '?' + encoded;
       }
-    }
+      if (panel.dataset.kind !== kind || frame.getAttribute('src') !== framePath) {
+        panel.dataset.kind = kind;
+        frame.src = framePath;
+      } else if (again) {
+        try {
+          frame.contentWindow.location.reload();
+        } catch {
+          /* a frame that is not loaded yet has nothing to reload */
+        }
+      }
     }
     panel.querySelector('.ca-tool-page-head')?.remove();
     if (['handbook', 'workspace', 'bots', 'people', 'previews', 'failures'].includes(kind)) {
       const back = this.el('header', 'ca-tool-page-head');
-      back.append(this.button('ca-btn', 'Back to Company / tools', () => void this.returnToCompanyTools(), { icon: 'back', text: 'Back to Company / tools' }));
+      back.append(
+        this.button('ca-btn', 'Back to Company / tools', () => void this.returnToCompanyTools(), {
+          icon: 'back',
+          text: 'Back to Company / tools',
+        })
+      );
       panel.prepend(back);
       frame.onload = () => this.configureCompanyToolsBack(frame);
       this.configureCompanyToolsBack(frame);
@@ -4135,7 +6056,8 @@ class ReverieChatApp {
   /** Back to the conversation. `history: 'replace'` also takes #board out of the address bar. */
   closePage({ history = 'replace' } = {}) {
     if (!this.embed) return;
-    const wasBoard = this.embed === 'board'; this.suspendBoardFrame();
+    const wasBoard = this.embed === 'board';
+    this.suspendBoardFrame();
     this.disposeCompanyPage();
     this.embed = null;
     this._embedRoom = null;
@@ -4143,7 +6065,8 @@ class ReverieChatApp {
     if (panel) {
       panel.hidden = true;
       delete panel.dataset.kind;
-      const frame = panel.querySelector('iframe'); if (frame) frame.src = 'about:blank';
+      const frame = panel.querySelector('iframe');
+      if (frame) frame.src = 'about:blank';
     }
     this.els.root.classList.remove('is-page');
     this.els.chat.inert = false;
@@ -4158,19 +6081,26 @@ class ReverieChatApp {
     }
     this.renderSidebar();
     this.renderHeader();
-    if (wasBoard && !this._boardCache) { this._boardWarmAttempted = false; this.scheduleBoardWarm(); }
+    if (wasBoard && !this._boardCache) {
+      this._boardWarmAttempted = false;
+      this.scheduleBoardWarm();
+    }
   }
 
   orgTreeEl(tree) {
     const former = [];
-    const walk = node => {
+    const walk = (node) => {
       const item = this.el('article', `ca-org-item ca-org-item--${node.kind}`);
       item.dataset.orgKey = node.key;
       const message = this.serverFeatures.dms && node.sessionId && this.app.sessions?.has?.(node.sessionId);
       const label = this.el(message ? 'button' : 'div', 'ca-org-node');
       if (message) {
-        label.type = 'button'; label.title = `Message ${node.name}`;
-        label.addEventListener('click', () => { this.closeOrg(); this.startDm(node.sessionId); });
+        label.type = 'button';
+        label.title = `Message ${node.name}`;
+        label.addEventListener('click', () => {
+          this.closeOrg();
+          this.startDm(node.sessionId);
+        });
       }
       const avatar = this.el('span', 'chatroom-avatar ca-company-icon');
       if (caAvatarBackground(node.avatarBackground)) avatar.style.backgroundColor = node.avatarBackground;
@@ -4178,7 +6108,8 @@ class ReverieChatApp {
       if (node.avatar) this.fillAvatar(avatar, node.avatar);
       label.append(avatar, this.literalText('strong', '', node.name));
       if (node.title) label.append(this.literalText('span', 'ca-org-title', node.title));
-      if (node.kind !== 'owner' && node.available === false) label.append(this.el('span', 'ca-org-title', 'disconnected'));
+      if (node.kind !== 'owner' && node.available === false)
+        label.append(this.el('span', 'ca-org-title', 'disconnected'));
       item.append(label);
       const children = [];
       for (const child of node.children) {
@@ -4187,11 +6118,19 @@ class ReverieChatApp {
       }
       return { id: node.key, element: item, children };
     };
-    const map = this.companyTreeViewport(walk(tree)); map.setAttribute('aria-label', 'Organization');
+    const map = this.companyTreeViewport(walk(tree));
+    map.setAttribute('aria-label', 'Organization');
     for (const group of former) {
       const details = this.el('details', 'ca-org-former');
       details.append(this.el('summary', '', `Former workers (${group.children.length})`));
-      details.append(this.button('ca-btn ca-org-clean', `Remove ${group.children.length} old profiles`, () => this.pruneFormerWorkers(group.children.length), { text: `Remove ${group.children.length} old profiles` }));
+      details.append(
+        this.button(
+          'ca-btn ca-org-clean',
+          `Remove ${group.children.length} old profiles`,
+          () => this.pruneFormerWorkers(group.children.length),
+          { text: `Remove ${group.children.length} old profiles` }
+        )
+      );
       for (const node of group.children) details.append(this.literalText('p', '', node.name));
       map.append(details);
     }
@@ -4203,7 +6142,11 @@ class ReverieChatApp {
   composerPlaceholder() {
     if (this.embassy?.selected) return `Message #${this.embassy.connection()?.roomName || 'shared room'}`;
     const room = this.room;
-    return !room || this.app._chatCreating ? 'Message' : caIsDm(room) ? `Message @${caRoomLabel(room)}` : `Message #${room.name}`;
+    return !room || this.app._chatCreating
+      ? 'Message'
+      : caIsDm(room)
+        ? `Message @${caRoomLabel(room)}`
+        : `Message #${room.name}`;
   }
 
   /**
@@ -4229,7 +6172,8 @@ class ReverieChatApp {
     to.value = '';
     this.installVoice(els);
     // The send button shows once there is something to send (always on a touch screen, which has no Enter key).
-    const sync = () => send.classList.toggle('has-text', input.value.trim() !== '' || (this.app._chatPending?.length ?? 0) > 0);
+    const sync = () =>
+      send.classList.toggle('has-text', input.value.trim() !== '' || (this.app._chatPending?.length ?? 0) > 0);
     input.addEventListener('input', sync);
     send.setAttribute('aria-label', 'Send message');
     this.syncComposer = () => {
@@ -4246,7 +6190,12 @@ class ReverieChatApp {
    */
   installVoice(els) {
     const { send, mic } = els;
-    const voice = this.button('ca-voice-btn', 'Voice', () => (this.els.voicePanel ? this.closeVoicePanel() : this.openVoicePanel()), { text: 'Voice' });
+    const voice = this.button(
+      'ca-voice-btn',
+      'Voice',
+      () => (this.els.voicePanel ? this.closeVoicePanel() : this.openVoicePanel()),
+      { text: 'Voice' }
+    );
     voice.prepend(this.el('span', 'ca-voice-dot'));
     voice.setAttribute('aria-haspopup', 'dialog');
     voice.setAttribute('aria-expanded', 'false');
@@ -4293,10 +6242,13 @@ class ReverieChatApp {
       this.openVoicePanel({ focus: false });
       return;
     }
-    panel.querySelector('.ca-voice-state').textContent = { off: 'Off', listening: 'Listening…', speaking: 'Speaking…' }[state];
+    panel.querySelector('.ca-voice-state').textContent = { off: 'Off', listening: 'Listening…', speaking: 'Speaking…' }[
+      state
+    ];
     panel.querySelector('.ca-voice-stop').hidden = state === 'off';
     const mode = this.app._speakRepliesMode?.(room?.id) || 'off';
-    for (const b of panel.querySelectorAll('[data-speak-mode]')) b.setAttribute('aria-pressed', String(b.dataset.speakMode === mode));
+    for (const b of panel.querySelectorAll('[data-speak-mode]'))
+      b.setAttribute('aria-pressed', String(b.dataset.speakMode === mode));
     const talk = panel.querySelector('.ca-voice-talk');
     if (talk) talk.hidden = !this.app._chatEls?.mic || this.app._chatEls.mic.hidden;
     const listen = panel.querySelector('.ca-voice-listen');
@@ -4308,7 +6260,7 @@ class ReverieChatApp {
     // Hands-free would reopen its microphone on the next tick, so Stop chooses Off through its own control.
     const hf = this.app._hfButton;
     // A pending open counts too: choosing Off invalidates it, so a stream that arrives later is released.
-    if ((this.app._hfStream || this.app._hfOpening) && hf && [...hf.options].some(o => o.value === 'off')) {
+    if ((this.app._hfStream || this.app._hfOpening) && hf && [...hf.options].some((o) => o.value === 'off')) {
       hf.value = 'off';
       hf.dispatchEvent(new this.doc.defaultView.Event('change', { bubbles: true }));
     }
@@ -4329,14 +6281,20 @@ class ReverieChatApp {
     const head = this.el('div', 'ca-voice-head');
     const state = this.el('span', 'ca-voice-state');
     state.setAttribute('role', 'status');
-    const stop = this.button('ca-btn ca-voice-stop', 'Stop listening or speaking', () => this.stopVoice(), { text: 'Stop' });
+    const stop = this.button('ca-btn ca-voice-stop', 'Stop listening or speaking', () => this.stopVoice(), {
+      text: 'Stop',
+    });
     head.append(this.el('strong', '', 'Voice'), state, stop);
     panel.append(head);
     // Talk: the same push-to-talk, offered exactly where it was before (a voice member, not phone dictation).
     const mic = this.app._chatEls?.mic;
     if (mic) {
       const talk = this.el('div', 'ca-voice-talk');
-      talk.append(this.el('span', 'ca-voice-label', 'Talk'), mic, this.el('span', 'ca-hint', 'Hold to talk, or tap to start and tap again to send.'));
+      talk.append(
+        this.el('span', 'ca-voice-label', 'Talk'),
+        mic,
+        this.el('span', 'ca-hint', 'Hold to talk, or tap to start and tap again to send.')
+      );
       panel.append(talk);
     }
     const hf = this.app._hfButton;
@@ -4352,12 +6310,17 @@ class ReverieChatApp {
       replies.append(this.el('span', 'ca-voice-label', 'Spoken replies'));
       const choices = this.el('div', 'ca-voice-choices');
       for (const [mode, label, said] of CA_READ_ALOUD_MODES) {
-        const b = this.button('ca-btn', `Spoken replies: ${label}`, () => {
-          if (this.room?.id !== room.id) return this.closeVoicePanel();
-          this.app._setSpeakReplies(room.id, mode);
-          this.toast(said, 'info');
-          this.syncVoice();
-        }, { text: label });
+        const b = this.button(
+          'ca-btn',
+          `Spoken replies: ${label}`,
+          () => {
+            if (this.room?.id !== room.id) return this.closeVoicePanel();
+            this.app._setSpeakReplies(room.id, mode);
+            this.toast(said, 'info');
+            this.syncVoice();
+          },
+          { text: label }
+        );
         b.dataset.speakMode = mode;
         choices.append(b);
       }
@@ -4365,13 +6328,30 @@ class ReverieChatApp {
       panel.append(replies);
     }
     if (caSpeaks(room) && this.app.openCarMode)
-      panel.append(this.button('ca-btn ca-voice-car', 'Car mode', () => { this.closeVoicePanel(); this.app.openCarMode(); }, { text: 'Car mode' }));
+      panel.append(
+        this.button(
+          'ca-btn ca-voice-car',
+          'Car mode',
+          () => {
+            this.closeVoicePanel();
+            this.app.openCarMode();
+          },
+          { text: 'Car mode' }
+        )
+      );
     else panel.append(this.el('p', 'ca-hint', 'Car mode and Talk need a voice member in this channel.'));
     this.app._chatEls.composer.append(panel);
     this.els.voicePanel = panel;
     this.els.voiceBtn.setAttribute('aria-expanded', 'true');
-    this._voiceDismiss = (ev) => { if (!panel.contains(ev.target) && !this.els.voiceBtn.contains(ev.target)) this.closeVoicePanel(); };
-    this._voiceKey = (ev) => { if (ev.key === 'Escape') { this.closeVoicePanel(); this.els.voiceBtn.focus(); } };
+    this._voiceDismiss = (ev) => {
+      if (!panel.contains(ev.target) && !this.els.voiceBtn.contains(ev.target)) this.closeVoicePanel();
+    };
+    this._voiceKey = (ev) => {
+      if (ev.key === 'Escape') {
+        this.closeVoicePanel();
+        this.els.voiceBtn.focus();
+      }
+    };
     this.doc.addEventListener('pointerdown', this._voiceDismiss, true);
     this.doc.addEventListener('keydown', this._voiceKey, true);
     this.syncVoice();
@@ -4423,8 +6403,17 @@ class ReverieChatApp {
     const room = this.room;
     const react = this.app._toggleChatReaction ? (emoji) => this.app._toggleChatReaction(m, emoji, true) : null;
     if (sheet && react) {
-      out.push({ row: CA_SHEET_REACTIONS.map((emoji) => ({ label: `React with ${emoji}`, glyph: emoji, run: () => react(emoji) })) });
-      out.push({ label: 'Add reaction', run: () => this.app._openEmojiPicker?.(this.els.composerInput?.() || this.doc.body, (pick) => react(pick)) });
+      out.push({
+        row: CA_SHEET_REACTIONS.map((emoji) => ({
+          label: `React with ${emoji}`,
+          glyph: emoji,
+          run: () => react(emoji),
+        })),
+      });
+      out.push({
+        label: 'Add reaction',
+        run: () => this.app._openEmojiPicker?.(this.els.composerInput?.() || this.doc.body, (pick) => react(pick)),
+      });
     }
     out.push({ label: 'Reply', run: () => this.startReply(m) });
     if (m.text) {
@@ -4456,7 +6445,10 @@ class ReverieChatApp {
     const reportable = lead && m.from.kind === 'agent' && m.from.sessionId !== lead.sessionId && !caIsDm(room);
     if (this.serverFeatures.deletes || reportable) out.push({ sep: true });
     if (this.serverFeatures.deletes) {
-      out.push({ label: this.deleteSelection?.has(m.id) ? 'Unselect' : 'Select for deleting', run: () => this.toggleDeleteSelection(m) });
+      out.push({
+        label: this.deleteSelection?.has(m.id) ? 'Unselect' : 'Select for deleting',
+        run: () => this.toggleDeleteSelection(m),
+      });
       out.push({ label: 'Delete message', danger: true, run: () => this.deleteMessage(m) });
     }
     if (reportable) out.push({ label: 'Report message', danger: true, run: () => this.openReportDialog(m, lead) });
@@ -4469,7 +6461,14 @@ class ReverieChatApp {
    */
   readAloudEntry(m) {
     const app = this.app;
-    if (m.from.kind !== 'agent' || !m.text || m.deleted || typeof app._readAloudMessage !== 'function' || !this.doc.defaultView?.speechSynthesis) return null;
+    if (
+      m.from.kind !== 'agent' ||
+      !m.text ||
+      m.deleted ||
+      typeof app._readAloudMessage !== 'function' ||
+      !this.doc.defaultView?.speechSynthesis
+    )
+      return null;
     if (app._readAloud?.playingMessageId === m.id) return { label: 'Stop reading', run: () => this.stopReading(m.id) };
     const roomId = this.roomId;
     return {
@@ -4499,7 +6498,9 @@ class ReverieChatApp {
     const el = id ? this.msgEl(id) : null;
     if (!el || el.querySelector('.ca-reading-stop')) return;
     el.classList.add('is-reading');
-    const stop = this.button('ca-btn ca-reading-stop', 'Stop reading this message aloud', () => this.stopReading(id), { text: 'Reading aloud · Stop' });
+    const stop = this.button('ca-btn ca-reading-stop', 'Stop reading this message aloud', () => this.stopReading(id), {
+      text: 'Reading aloud · Stop',
+    });
     (el.querySelector('.ca-msg-body') || el).append(stop);
   }
 
@@ -4521,7 +6522,13 @@ class ReverieChatApp {
       if (ev.target?.closest?.('a, button, input, textarea')) return;
       if (el.classList.contains('is-selectable')) return;
       ev.preventDefault();
-      this.openMessageMenu(m, el, { at: { x: ev.clientX || el.getBoundingClientRect().left + 24, y: ev.clientY || el.getBoundingClientRect().top + 24 }, sheet: true });
+      this.openMessageMenu(m, el, {
+        at: {
+          x: ev.clientX || el.getBoundingClientRect().left + 24,
+          y: ev.clientY || el.getBoundingClientRect().top + 24,
+        },
+        sheet: true,
+      });
     });
     let timer = 0;
     let start = null;
@@ -4529,21 +6536,29 @@ class ReverieChatApp {
       this.doc.defaultView?.clearTimeout(timer);
       timer = 0;
     };
-    el.addEventListener('touchstart', (ev) => {
-      if (ev.target?.closest?.('a, button, input, textarea')) return;
-      // In select mode the long press belongs to the native selection handles, not the sheet.
-      if (el.classList.contains('is-selectable')) return;
-      const t = ev.touches?.[0];
-      start = t ? { x: t.clientX, y: t.clientY } : null;
-      timer = this.doc.defaultView?.setTimeout(() => {
-        timer = 0;
-        this.openMessageMenu(m, el, { at: { x: start?.x || 24, y: start?.y || 24 }, sheet: true });
-      }, 450);
-    }, { passive: true });
-    el.addEventListener('touchmove', (ev) => {
-      const t = ev.touches?.[0];
-      if (start && t && Math.hypot(t.clientX - start.x, t.clientY - start.y) > 10) stop();
-    }, { passive: true });
+    el.addEventListener(
+      'touchstart',
+      (ev) => {
+        if (ev.target?.closest?.('a, button, input, textarea')) return;
+        // In select mode the long press belongs to the native selection handles, not the sheet.
+        if (el.classList.contains('is-selectable')) return;
+        const t = ev.touches?.[0];
+        start = t ? { x: t.clientX, y: t.clientY } : null;
+        timer = this.doc.defaultView?.setTimeout(() => {
+          timer = 0;
+          this.openMessageMenu(m, el, { at: { x: start?.x || 24, y: start?.y || 24 }, sheet: true });
+        }, 450);
+      },
+      { passive: true }
+    );
+    el.addEventListener(
+      'touchmove',
+      (ev) => {
+        const t = ev.touches?.[0];
+        if (start && t && Math.hypot(t.clientX - start.x, t.clientY - start.y) > 10) stop();
+      },
+      { passive: true }
+    );
     for (const name of ['touchend', 'touchcancel']) el.addEventListener(name, stop, { passive: true });
   }
 
@@ -4566,7 +6581,12 @@ class ReverieChatApp {
     this.openMenu(
       [
         { label: 'Upload a File', glyph: '\u2B06', run: () => picker?.click() },
-        { label: 'Link a File', glyph: '\u{1F517}', disabled: !room || !!room.archivedAt, run: () => this.openLinkFileDialog() },
+        {
+          label: 'Link a File',
+          glyph: '\u{1F517}',
+          disabled: !room || !!room.archivedAt,
+          run: () => this.openLinkFileDialog(),
+        },
         { label: 'Create Thread', glyph: '\u2630', disabled: true, hint: 'Soon' },
         { label: 'Create Poll', glyph: '\u2261', disabled: !canPoll, run: () => this.openPollDialog() },
         { label: 'Use Apps', glyph: '\u2726', disabled: true, hint: 'Soon' },
@@ -4595,7 +6615,11 @@ class ReverieChatApp {
     path.autocomplete = 'off';
     path.placeholder = '/shared/drive/folder/file.pdf';
     wrap.append(path);
-    const hint = this.el('p', 'ca-hint', 'The file is not copied: everyone in the room opens it as it is now, with no size limit.');
+    const hint = this.el(
+      'p',
+      'ca-hint',
+      'The file is not copied: everyone in the room opens it as it is now, with no size limit.'
+    );
     const error = this.el('p', 'ca-form-error');
     error.setAttribute('role', 'alert');
     const row = this.el('div', 'ca-dialog-actions');
@@ -4609,7 +6633,8 @@ class ReverieChatApp {
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
       const value = path.value.trim();
-      if (!value.startsWith('/')) return void (error.textContent = 'Use the absolute path of a file on the shared drive.');
+      if (!value.startsWith('/'))
+        return void (error.textContent = 'Use the absolute path of a file on the shared drive.');
       go.disabled = true;
       const refused = await this.app._linkChatFile?.(value);
       go.disabled = false;
@@ -4720,7 +6745,15 @@ class ReverieChatApp {
     const durWrap = this.el('label', 'ca-label');
     durWrap.append(this.el('span', '', 'Duration'));
     const duration = this.el('select', 'ca-field ca-poll-duration');
-    for (const [label, hours] of [['1 hour', 1], ['4 hours', 4], ['8 hours', 8], ['24 hours', 24], ['3 days', 72], ['1 week', 168], ['No limit', 0]]) {
+    for (const [label, hours] of [
+      ['1 hour', 1],
+      ['4 hours', 4],
+      ['8 hours', 8],
+      ['24 hours', 24],
+      ['3 days', 72],
+      ['1 week', 168],
+      ['No limit', 0],
+    ]) {
       const o = this.el('option', '', label);
       o.value = String(hours);
       duration.append(o);
@@ -4743,12 +6776,19 @@ class ReverieChatApp {
       const labels = inputs.map((x) => x.input.value.trim().replace(/\s+/g, ' ')).filter(Boolean);
       if (!q) return void (error.textContent = 'Write a question.');
       if (labels.length < 2) return void (error.textContent = 'Give at least two options.');
-      if (new Set(labels.map((l) => l.toLowerCase())).size !== labels.length) return void (error.textContent = 'Two options are the same.');
+      if (new Set(labels.map((l) => l.toLowerCase())).size !== labels.length)
+        return void (error.textContent = 'Two options are the same.');
       const hours = Number(duration.value);
       go.disabled = true;
       const res = await this.app._chatApi(`/api/chatrooms/${encodeURIComponent(roomId)}/polls`, {
         method: 'POST',
-        body: { question: q, options: labels, ...(recSelect.value ? { recommended: recSelect.value } : {}), ...(multi.checked ? { multi: true } : {}), ...(hours ? { closesAt: Date.now() + hours * 3600_000 } : {}) },
+        body: {
+          question: q,
+          options: labels,
+          ...(recSelect.value ? { recommended: recSelect.value } : {}),
+          ...(multi.checked ? { multi: true } : {}),
+          ...(hours ? { closesAt: Date.now() + hours * 3600_000 } : {}),
+        },
       });
       go.disabled = false;
       if (!res.ok) {
@@ -4806,7 +6846,8 @@ class ReverieChatApp {
     const entry = { roomId: data.roomId, sessionId: data.sessionId, at: Date.now(), busy: false, timers: [] };
     const view = this.doc.defaultView;
     // Safety nets, not polling: one check when it should have started, one when it should long be over.
-    for (const ms of [CA_TURN_START_MS, CA_TURN_MAX_MS]) entry.timers.push(view.setTimeout(() => this.syncTurns(), ms + 50));
+    for (const ms of [CA_TURN_START_MS, CA_TURN_MAX_MS])
+      entry.timers.push(view.setTimeout(() => this.syncTurns(), ms + 50));
     this.turns.set(key, entry);
     this.syncTurns();
     this.renderTyping();
@@ -4829,7 +6870,11 @@ class ReverieChatApp {
       const member = this.rooms.find((r) => r.id === t.roomId)?.members?.find((m) => m.sessionId === t.sessionId);
       const state = member ? this.presenceOf(member) : 'gone';
       if (state === 'working') t.busy = true;
-      const over = ['gone', 'dead', 'disconnected'].includes(state) || (t.busy && state !== 'working') || now - t.at > CA_TURN_MAX_MS || (!t.busy && now - t.at > CA_TURN_START_MS);
+      const over =
+        ['gone', 'dead', 'disconnected'].includes(state) ||
+        (t.busy && state !== 'working') ||
+        now - t.at > CA_TURN_MAX_MS ||
+        (!t.busy && now - t.at > CA_TURN_START_MS);
       if (over) changed = this.dropTurn(key) || changed;
     }
     if (changed) this.renderTyping();
@@ -4878,7 +6923,11 @@ class ReverieChatApp {
   }
 
   authorOf(from) {
-    if ((from.kind === 'user' || from.kind === 'human') && (from.humanId || this.humanSelf)) return this.channelHumans().find(p => p.id === (from.humanId || 'owner'))?.name || (from.humanId && from.humanId !== 'owner' ? from.name : this.company?.settings?.ownerName || from.name);
+    if ((from.kind === 'user' || from.kind === 'human') && (from.humanId || this.humanSelf))
+      return (
+        this.channelHumans().find((p) => p.id === (from.humanId || 'owner'))?.name ||
+        (from.humanId && from.humanId !== 'owner' ? from.name : this.company?.settings?.ownerName || from.name)
+      );
     return from.kind === 'user' ? this.userName() : caEmployeeForSender(this.company, from)?.name || from.name;
   }
 
@@ -4920,7 +6969,8 @@ class ReverieChatApp {
    * store and send. Rejects anything that is not a png, jpeg, webp or gif, or is over 8 MB.
    */
   async imageToIcon(file) {
-    if (!file || !/^image\/(png|jpeg|webp|gif)$/.test(file.type)) throw new Error('Pick a png, jpeg, webp or gif picture');
+    if (!file || !/^image\/(png|jpeg|webp|gif)$/.test(file.type))
+      throw new Error('Pick a png, jpeg, webp or gif picture');
     if (file.size > 8 * 1024 * 1024) throw new Error('That picture is over 8 MB');
     const w = this.doc.defaultView;
     const bitmap = await w.createImageBitmap(file);
@@ -4969,7 +7019,10 @@ class ReverieChatApp {
       if (caAvatarBackground(employee.avatarBackground)) el.style.backgroundColor = employee.avatarBackground;
       const member = employee.sessionId ? this.app._chatMember?.(employee.sessionId) : undefined;
       const profileIcon = typeof employee.icon === 'string' ? employee.icon.trim() : '';
-      const icon = profileIcon && (caIconImage(profileIcon) || Array.from(profileIcon).length <= 4) ? profileIcon : member?.icon || '';
+      const icon =
+        profileIcon && (caIconImage(profileIcon) || Array.from(profileIcon).length <= 4)
+          ? profileIcon
+          : member?.icon || '';
       const glyph = el.querySelector('.chatroom-avatar-glyph');
       if (icon && Array.from(icon).length <= 4 && glyph) {
         el.classList.add('has-icon');
@@ -4982,12 +7035,20 @@ class ReverieChatApp {
     if (from.kind === 'bot') {
       const el = this.app._chatAvatar(undefined, name, opts);
       // A bot has no session to look an icon up by: its own icon, when it has one, stands in for the initial.
-      if (from.icon && !this.fillAvatar(el, from.icon)) el.querySelector('.chatroom-avatar-glyph')?.replaceChildren(from.icon);
+      if (from.icon && !this.fillAvatar(el, from.icon))
+        el.querySelector('.chatroom-avatar-glyph')?.replaceChildren(from.icon);
       return el;
     }
     if ((from.kind === 'user' || from.kind === 'human') && (from.humanId || this.humanSelf)) {
       const id = from.humanId || 'owner';
-      return this.humanAvatar(this.channelHumans().find(p => p.id === id) || { id, name, avatar: id === 'owner' ? this.ownerAvatar : undefined }, opts?.size);
+      return this.humanAvatar(
+        this.channelHumans().find((p) => p.id === id) || {
+          id,
+          name,
+          avatar: id === 'owner' ? this.ownerAvatar : undefined,
+        },
+        opts?.size
+      );
     }
     if (from.kind === 'external' && from.avatar) {
       // An embassy guest the hosting owner gave a picture; a URL caIconImage does not accept keeps the initial.
@@ -4995,11 +7056,14 @@ class ReverieChatApp {
       this.fillAvatar(el, from.avatar);
       return el;
     }
-    return from.kind === 'user' ? this.userAvatar(opts?.size, opts?.state) : this.app._chatAvatar(from.sessionId, name, opts);
+    return from.kind === 'user'
+      ? this.userAvatar(opts?.size, opts?.state)
+      : this.app._chatAvatar(from.sessionId, name, opts);
   }
 
   authorHue(from, name) {
-    if (from.kind === 'user' || from.kind === 'human') return from.humanId ? this.app._chatHue(from.humanId) : this.profile.hue ?? this.app._chatHue(name);
+    if (from.kind === 'user' || from.kind === 'human')
+      return from.humanId ? this.app._chatHue(from.humanId) : (this.profile.hue ?? this.app._chatHue(name));
     const employee = caEmployeeForSender(this.company, from);
     if (employee) return this.app._chatHue(employee.id);
     return from.sessionId ? this.app._chatAccent(from.sessionId) : this.app._chatHue(name);
@@ -5064,7 +7128,13 @@ class ReverieChatApp {
     this.deleteSelection = new Set();
     this.deleteSelectionRoom = null;
     this.doc.addEventListener('keydown', (e) => {
-      if (e.key !== 'Escape' || !this.deleteSelection.size || e.defaultPrevented || this.doc.querySelector('dialog[open]')) return;
+      if (
+        e.key !== 'Escape' ||
+        !this.deleteSelection.size ||
+        e.defaultPrevented ||
+        this.doc.querySelector('dialog[open]')
+      )
+        return;
       e.preventDefault();
       this.clearDeleteSelection();
     });
@@ -5076,7 +7146,8 @@ class ReverieChatApp {
       this.deleteSelectionRoom = this.roomId;
     }
     if (this.deleteSelection.has(m.id)) this.deleteSelection.delete(m.id);
-    else if (this.deleteSelection.size >= CA_DELETE_SELECTION_MAX) return this.toast(`Select at most ${CA_DELETE_SELECTION_MAX} messages at a time.`, 'info');
+    else if (this.deleteSelection.size >= CA_DELETE_SELECTION_MAX)
+      return this.toast(`Select at most ${CA_DELETE_SELECTION_MAX} messages at a time.`, 'info');
     else this.deleteSelection.add(m.id);
     this.renderSelectBar();
   }
@@ -5105,9 +7176,14 @@ class ReverieChatApp {
     bar.replaceChildren();
     if (!n) return;
     const plural = n === 1 ? 'message' : 'messages';
-    bar.append(this.el('span', 'ca-select-count', `${n} ${plural} selected`), this.el('span', 'ca-spacer'),
-      this.button('ca-btn is-danger', `Delete ${n} selected ${plural}`, () => this.deleteSelected(), { text: 'Delete selected' }),
-      this.button('ca-btn', 'Clear the selection', () => this.clearDeleteSelection(), { text: 'Clear' }));
+    bar.append(
+      this.el('span', 'ca-select-count', `${n} ${plural} selected`),
+      this.el('span', 'ca-spacer'),
+      this.button('ca-btn is-danger', `Delete ${n} selected ${plural}`, () => this.deleteSelected(), {
+        text: 'Delete selected',
+      }),
+      this.button('ca-btn', 'Clear the selection', () => this.clearDeleteSelection(), { text: 'Clear' })
+    );
   }
 
   /** One confirmation, then each picked message through the same delete as one at a time: its own permission check and audit record. */
@@ -5115,34 +7191,53 @@ class ReverieChatApp {
     const ids = [...this.deleteSelection];
     if (!ids.length || this._deletingSelection) return;
     const many = ids.length === 1 ? 'this message' : `these ${ids.length} messages`;
-    if (!this.doc.defaultView?.confirm(`Delete ${many}? They are hidden for everyone in the channel and kept in an audit log, where each can be restored. Agents that already received them still have them.`)) return;
+    if (
+      !this.doc.defaultView?.confirm(
+        `Delete ${many}? They are hidden for everyone in the channel and kept in an audit log, where each can be restored. Agents that already received them still have them.`
+      )
+    )
+      return;
     this._deletingSelection = true;
     const roomId = this.roomId;
     const failed = [];
     let deleted = 0;
     try {
       for (const id of ids) {
-        const res = await this.app._chatApi(`/api/chatrooms/${encodeURIComponent(roomId)}/messages/${encodeURIComponent(id)}`, { method: 'DELETE' });
+        const res = await this.app._chatApi(
+          `/api/chatrooms/${encodeURIComponent(roomId)}/messages/${encodeURIComponent(id)}`,
+          { method: 'DELETE' }
+        );
         if (res.ok) {
           deleted++;
           this.deleteSelection.delete(id);
           if (this.replyTo?.id === id) this.cancelReplySilently();
         } else failed.push(res.error || 'refused');
       }
-    } finally { this._deletingSelection = false; }
+    } finally {
+      this._deletingSelection = false;
+    }
     if (this.roomId === roomId) {
       await this.app._loadChatRoom(roomId, { quiet: true });
       this.renderAll();
       this.renderFeed();
     }
     // What could not be deleted stays selected, so it can be tried again or cleared.
-    if (failed.length) this.toast(`Deleted ${deleted} of ${ids.length}. ${failed.length} could not be deleted: ${failed[0]}`, 'error');
+    if (failed.length)
+      this.toast(`Deleted ${deleted} of ${ids.length}. ${failed.length} could not be deleted: ${failed[0]}`, 'error');
     else this.toast(`Deleted ${deleted} ${deleted === 1 ? 'message' : 'messages'}.`, 'info');
   }
 
   async deleteMessage(m) {
-    if (!this.doc.defaultView?.confirm(`Delete this message from ${this.authorOf(m.from)}? It is hidden for everyone in the channel and kept in an audit log, where you can restore it. Agents that already received it still have it.`)) return;
-    const res = await this.app._chatApi(`/api/chatrooms/${encodeURIComponent(this.roomId)}/messages/${encodeURIComponent(m.id)}`, { method: 'DELETE' });
+    if (
+      !this.doc.defaultView?.confirm(
+        `Delete this message from ${this.authorOf(m.from)}? It is hidden for everyone in the channel and kept in an audit log, where you can restore it. Agents that already received it still have it.`
+      )
+    )
+      return;
+    const res = await this.app._chatApi(
+      `/api/chatrooms/${encodeURIComponent(this.roomId)}/messages/${encodeURIComponent(m.id)}`,
+      { method: 'DELETE' }
+    );
     if (!res.ok) return this.toast(`Chat: ${res.error}`, 'error');
     if (this.replyTo?.id === m.id) this.cancelReplySilently();
     await this.app._loadChatRoom(this.roomId, { quiet: true });
@@ -5157,7 +7252,15 @@ class ReverieChatApp {
     dlg.setAttribute('aria-label', 'Report message');
     dlg.append(this.el('h2', '', 'Report message'));
     dlg.append(this.el('p', 'ca-dialog-note', `${this.authorOf(m.from)}: ${caSnippet(m.text, 140)}`));
-    dlg.append(this.el('p', 'ca-dialog-note', this.serverFeatures.reports ? `This goes to ${lead.name}, the admin of this room, in your direct message with them, and is kept in an audit log. Other members do not see it.` : `This is posted in this room, addressed to ${lead.name}, the coordinator. Every member of the room can read it.`));
+    dlg.append(
+      this.el(
+        'p',
+        'ca-dialog-note',
+        this.serverFeatures.reports
+          ? `This goes to ${lead.name}, the admin of this room, in your direct message with them, and is kept in an audit log. Other members do not see it.`
+          : `This is posted in this room, addressed to ${lead.name}, the coordinator. Every member of the room can read it.`
+      )
+    );
     const form = this.el('form', 'ca-form');
     const wrap = this.el('label', 'ca-label');
     wrap.append(this.el('span', '', 'What is wrong? (optional)'));
@@ -5177,17 +7280,22 @@ class ReverieChatApp {
       e.preventDefault();
       send.disabled = true;
       if (this.serverFeatures.reports) {
-        const out = await this.app._chatApi(`/api/chatrooms/${encodeURIComponent(this.roomId)}/messages/${encodeURIComponent(m.id)}/report`, {
-          method: 'POST',
-          body: { reason: reason.value.trim() },
-        });
+        const out = await this.app._chatApi(
+          `/api/chatrooms/${encodeURIComponent(this.roomId)}/messages/${encodeURIComponent(m.id)}/report`,
+          {
+            method: 'POST',
+            body: { reason: reason.value.trim() },
+          }
+        );
         send.disabled = false;
         if (!out.ok) return this.toast(`Chat: ${out.error}`, 'error');
         dlg.close();
         this.toast(`Reported to ${lead.name} in your direct message`, 'info');
         return;
       }
-      const when = (globalThis.ReverieTime?.format(m.at) ?? new Date(m.at).toLocaleString('en-US', { timeZone: 'UTC', timeZoneName: 'short' }));
+      const when =
+        globalThis.ReverieTime?.format(m.at) ??
+        new Date(m.at).toLocaleString('en-US', { timeZone: 'UTC', timeZoneName: 'short' });
       const why = reason.value.trim();
       const text = `REPORT from the user: a message by ${this.authorOf(m.from)} (${when}): "${caSnippet(m.text, 200)}"${why ? ` Reason: ${why}` : ''} Please look into it and tell the user what you find.`;
       const res = await this.app._chatApi(`/api/chatrooms/${encodeURIComponent(this.roomId)}/messages`, {
@@ -5211,7 +7319,7 @@ class ReverieChatApp {
     const by = m.pinned.kind === 'agent' ? `${m.pinned.by} (coordinator)` : 'you';
     const el = this.el('div', 'ca-pin-mark');
     el.append(this.icon('pin'), this.el('span', '', `Pinned by ${by}`));
-    el.title = `Pinned ${(globalThis.ReverieTime?.format(m.pinned.at) ?? new Date(m.pinned.at).toLocaleString('en-US', { timeZone: 'UTC', timeZoneName: 'short' }))}`;
+    el.title = `Pinned ${globalThis.ReverieTime?.format(m.pinned.at) ?? new Date(m.pinned.at).toLocaleString('en-US', { timeZone: 'UTC', timeZoneName: 'short' })}`;
     return el;
   }
 
@@ -5252,7 +7360,11 @@ class ReverieChatApp {
         save.click();
       }
     });
-    box.append(input, this.el('div', 'ca-edit-actions', ''), this.el('span', 'ca-hint', 'Enter saves, Esc cancels. Agents that already got the message are sent the new text.'));
+    box.append(
+      input,
+      this.el('div', 'ca-edit-actions', ''),
+      this.el('span', 'ca-hint', 'Enter saves, Esc cancels. Agents that already got the message are sent the new text.')
+    );
     box.querySelector('.ca-edit-actions').append(cancel, save);
     return box;
   }
@@ -5261,7 +7373,10 @@ class ReverieChatApp {
     const next = String(text).trim();
     if (!next) return this.toast('A message cannot be empty', 'error');
     if (next === m.text) return this.cancelEdit();
-    const res = await this.app._chatApi(`/api/chatrooms/${encodeURIComponent(this.roomId)}/messages/${encodeURIComponent(m.id)}`, { method: 'PUT', body: { text: next } });
+    const res = await this.app._chatApi(
+      `/api/chatrooms/${encodeURIComponent(this.roomId)}/messages/${encodeURIComponent(m.id)}`,
+      { method: 'PUT', body: { text: next } }
+    );
     if (!res.ok) return this.toast(`Chat: ${res.error}`, 'error');
     this._editing = null;
     await this.app._loadChatRoom(this.roomId, { quiet: true });
@@ -5269,7 +7384,10 @@ class ReverieChatApp {
   }
 
   async setPinned(m, on) {
-    const res = await this.app._chatApi(`/api/chatrooms/${encodeURIComponent(this.roomId)}/messages/${encodeURIComponent(m.id)}/pin`, { method: on ? 'POST' : 'DELETE', body: {} });
+    const res = await this.app._chatApi(
+      `/api/chatrooms/${encodeURIComponent(this.roomId)}/messages/${encodeURIComponent(m.id)}/pin`,
+      { method: on ? 'POST' : 'DELETE', body: {} }
+    );
     if (!res.ok) return this.toast(`Chat: ${res.error}`, 'error');
     await this.app._loadChatRoom(this.roomId, { quiet: true });
     this.renderFeed();
@@ -5283,23 +7401,46 @@ class ReverieChatApp {
     dlg.dataset.roomId = roomId;
     dlg.setAttribute('aria-label', 'Pinned messages');
     const head = this.el('div', 'ca-invite-head');
-    head.append(this.el('h2', '', 'Pinned messages'), this.button('ca-icon-btn', 'Close', () => dlg.close(), { text: '\u2715' }));
+    head.append(
+      this.el('h2', '', 'Pinned messages'),
+      this.button('ca-icon-btn', 'Close', () => dlg.close(), { text: '\u2715' })
+    );
     const list = this.el('ul', 'ca-pins-list');
     const paint = async () => {
       const res = await this.app._chatApi(`/api/chatrooms/${encodeURIComponent(roomId)}/pins`);
       list.replaceChildren();
       if (!res.ok) return list.append(this.el('li', 'ca-invite-empty', `Could not load pins: ${res.error}`));
       const pins = res.data?.pins || [];
-      if (!pins.length) list.append(this.el('li', 'ca-invite-empty', 'Nothing is pinned. Pin a message from its menu to keep it here and in every agent\'s briefing.'));
+      if (!pins.length)
+        list.append(
+          this.el(
+            'li',
+            'ca-invite-empty',
+            "Nothing is pinned. Pin a message from its menu to keep it here and in every agent's briefing."
+          )
+        );
       for (const p of pins) {
         const li = this.el('li', 'ca-pins-row');
         const text = this.el('div', 'ca-pins-text');
         const by = p.pinned.kind === 'agent' ? `${p.pinned.by} (coordinator)` : 'you';
-        text.append(this.el('strong', '', `${this.authorOf(p.from)}`), this.el('span', 'ca-pins-snippet', caSnippet(p.text, 200)), this.el('span', 'ca-hint', `Pinned by ${by}, ${(globalThis.ReverieTime?.format(p.pinned.at) ?? new Date(p.pinned.at).toLocaleString('en-US', { timeZone: 'UTC', timeZoneName: 'short' }))}`));
-        const jump = this.button('ca-btn', 'Show in channel', () => {
-          dlg.close();
-          this.msgEl(p.id)?.scrollIntoView?.({ block: 'center' });
-        }, { text: 'Show' });
+        text.append(
+          this.el('strong', '', `${this.authorOf(p.from)}`),
+          this.el('span', 'ca-pins-snippet', caSnippet(p.text, 200)),
+          this.el(
+            'span',
+            'ca-hint',
+            `Pinned by ${by}, ${globalThis.ReverieTime?.format(p.pinned.at) ?? new Date(p.pinned.at).toLocaleString('en-US', { timeZone: 'UTC', timeZoneName: 'short' })}`
+          )
+        );
+        const jump = this.button(
+          'ca-btn',
+          'Show in channel',
+          () => {
+            dlg.close();
+            this.msgEl(p.id)?.scrollIntoView?.({ block: 'center' });
+          },
+          { text: 'Show' }
+        );
         const unpin = this.button('ca-btn', 'Unpin', () => this.setPinned(p, false), { text: 'Unpin' });
         li.append(text, jump, unpin);
         list.append(li);
@@ -5322,7 +7463,12 @@ class ReverieChatApp {
     const who = this.isHumanMessageMine(m.from) ? 'a message from you' : `a message from ${this.authorOf(m.from)}`;
     body.append(this.el('span', 'ca-deleted-text', `This ${who} was deleted.`));
     if (this.serverFeatures.deletes) {
-      const restore = this.button('ca-btn ca-restore', `Restore the deleted message at ${(globalThis.ReverieTime?.format(m.at) ?? new Date(m.at).toLocaleString('en-US', { timeZone: 'UTC', timeZoneName: 'short' }))} (agents are not sent it again)`, () => this.restoreMessage(m), { text: 'Restore' });
+      const restore = this.button(
+        'ca-btn ca-restore',
+        `Restore the deleted message at ${globalThis.ReverieTime?.format(m.at) ?? new Date(m.at).toLocaleString('en-US', { timeZone: 'UTC', timeZoneName: 'short' })} (agents are not sent it again)`,
+        () => this.restoreMessage(m),
+        { text: 'Restore' }
+      );
       body.append(restore);
     }
     el.append(body);
@@ -5330,7 +7476,10 @@ class ReverieChatApp {
   }
 
   async restoreMessage(m) {
-    const res = await this.app._chatApi(`/api/chatrooms/${encodeURIComponent(this.roomId)}/messages/${encodeURIComponent(m.id)}/restore`, { method: 'POST', body: {} });
+    const res = await this.app._chatApi(
+      `/api/chatrooms/${encodeURIComponent(this.roomId)}/messages/${encodeURIComponent(m.id)}/restore`,
+      { method: 'POST', body: {} }
+    );
     if (!res.ok) return this.toast(`Chat: ${res.error}`, 'error');
     await this.app._loadChatRoom(this.roomId, { quiet: true });
     this.renderFeed();
@@ -5350,7 +7499,13 @@ class ReverieChatApp {
       from.style.setProperty('--chat-hue', String(this.authorHue(original.from, name)));
       b.append(from, this.el('span', 'ca-reply-snippet', caSnippet(original.text)));
     } else {
-      b.append(this.el('span', 'ca-reply-snippet', found?.deleted ? 'Original message was deleted' : 'Original message is no longer available'));
+      b.append(
+        this.el(
+          'span',
+          'ca-reply-snippet',
+          found?.deleted ? 'Original message was deleted' : 'Original message is no longer available'
+        )
+      );
     }
     b.addEventListener('click', () => this.jumpTo(m.replyTo));
     return b;
@@ -5369,35 +7524,69 @@ class ReverieChatApp {
 
   openMessageSearch() {
     if (!this.serverFeatures.search) return;
-    if (this.messageSearch) { this.messageSearch.input.focus(); return; }
+    if (this.messageSearch) {
+      this.messageSearch.input.focus();
+      return;
+    }
     const pane = this.el('aside', 'ca-message-search');
     pane.id = 'ca-message-search';
     pane.setAttribute('aria-label', 'Channel message search');
     const head = this.el('div', 'ca-search-head');
-    head.append(this.el('h2', '', 'Search messages'), this.button('ca-icon-btn', 'Close search', () => this.closeMessageSearch(), { text: '×' }));
+    head.append(
+      this.el('h2', '', 'Search messages'),
+      this.button('ca-icon-btn', 'Close search', () => this.closeMessageSearch(), { text: '×' })
+    );
     const form = this.el('form', 'ca-search-form');
     const input = this.el('input', 'ca-field');
-    input.type = 'search'; input.maxLength = 160; input.required = true;
-    input.placeholder = 'Search words'; input.setAttribute('aria-label', 'Search message words');
-    const scope = this.el('select', 'ca-field'); scope.setAttribute('aria-label', 'Search channel');
-    const all = this.el('option', '', 'All accessible channels'); all.value = ''; scope.append(all);
-    for (const room of this.rooms.filter(room => !caIsDm(room))) {
-      const option = this.el('option', '', `# ${room.name}`); option.value = room.id; scope.append(option);
+    input.type = 'search';
+    input.maxLength = 160;
+    input.required = true;
+    input.placeholder = 'Search words';
+    input.setAttribute('aria-label', 'Search message words');
+    const scope = this.el('select', 'ca-field');
+    scope.setAttribute('aria-label', 'Search channel');
+    const all = this.el('option', '', 'All accessible channels');
+    all.value = '';
+    scope.append(all);
+    for (const room of this.rooms.filter((room) => !caIsDm(room))) {
+      const option = this.el('option', '', `# ${room.name}`);
+      option.value = room.id;
+      scope.append(option);
     }
-    const submit = this.el('button', 'ca-btn', 'Search'); submit.type = 'submit';
+    const submit = this.el('button', 'ca-btn', 'Search');
+    submit.type = 'submit';
     form.append(input, scope, submit);
     const status = this.el('p', 'ca-hint', 'Search words or word beginnings in full channel history, newest first.');
     status.setAttribute('role', 'status');
     const results = this.el('div', 'ca-search-results');
-    const more = this.button('ca-btn', 'Load older results', () => this.runMessageSearch(true), { text: 'Load older results' }); more.hidden = true;
+    const more = this.button('ca-btn', 'Load older results', () => this.runMessageSearch(true), {
+      text: 'Load older results',
+    });
+    more.hidden = true;
     pane.append(head, form, status, results, more);
     const state = { pane, input, scope, status, results, more, request: 0, abort: null, next: null, query: null };
     this.messageSearch = state;
-    form.addEventListener('submit', event => { event.preventDefault(); this.runMessageSearch(); });
+    form.addEventListener('submit', (event) => {
+      event.preventDefault();
+      this.runMessageSearch();
+    });
     // Changing either control invalidates requests immediately; a slow previous response cannot repaint it.
-    const invalidate = () => { state.request++; state.abort?.abort(); state.next = null; more.hidden = true; results.replaceChildren(); status.textContent = 'Press Search to find messages.'; };
-    input.addEventListener('input', invalidate); scope.addEventListener('change', invalidate);
-    pane.addEventListener('keydown', event => { if (event.key === 'Escape') { event.preventDefault(); this.closeMessageSearch(); } });
+    const invalidate = () => {
+      state.request++;
+      state.abort?.abort();
+      state.next = null;
+      more.hidden = true;
+      results.replaceChildren();
+      status.textContent = 'Press Search to find messages.';
+    };
+    input.addEventListener('input', invalidate);
+    scope.addEventListener('change', invalidate);
+    pane.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        this.closeMessageSearch();
+      }
+    });
     this.els.body.append(pane);
     this.els.searchBtn?.setAttribute('aria-expanded', 'true');
     input.focus();
@@ -5406,43 +7595,76 @@ class ReverieChatApp {
   async runMessageSearch(older = false) {
     const state = this.messageSearch;
     if (!state) return;
-    const q = state.input.value.trim(), roomId = state.scope.value;
-    if (!q) { state.status.textContent = 'Enter search words.'; return; }
+    const q = state.input.value.trim(),
+      roomId = state.scope.value;
+    if (!q) {
+      state.status.textContent = 'Enter search words.';
+      return;
+    }
     if (older && (!state.next || state.query !== JSON.stringify([q, roomId]))) return;
     const before = older ? state.next : null;
     const request = ++state.request;
-    state.abort?.abort(); state.abort = new AbortController(); state.more.hidden = true;
+    state.abort?.abort();
+    state.abort = new AbortController();
+    state.more.hidden = true;
     if (!older) state.results.replaceChildren();
     state.status.textContent = 'Searching…';
     const params = new URLSearchParams({ q });
     if (roomId) params.set('roomId', roomId);
     if (before) params.set('before', JSON.stringify(before));
     let response;
-    try { response = await this.app._chatApi(`/api/chatrooms/search?${params}`, { signal: state.abort.signal }); }
-    catch (error) { response = { ok: false, error: error?.name === 'AbortError' ? 'Search cancelled.' : 'Search unavailable. Try again.' }; }
+    try {
+      response = await this.app._chatApi(`/api/chatrooms/search?${params}`, { signal: state.abort.signal });
+    } catch (error) {
+      response = {
+        ok: false,
+        error: error?.name === 'AbortError' ? 'Search cancelled.' : 'Search unavailable. Try again.',
+      };
+    }
     if (this.messageSearch !== state || state.request !== request) return;
     if (!response.ok) {
-      state.results.replaceChildren(); state.next = null; state.status.textContent = response.error || 'Search unavailable.'; return;
+      state.results.replaceChildren();
+      state.next = null;
+      state.status.textContent = response.error || 'Search unavailable.';
+      return;
     }
-    state.query = JSON.stringify([q, roomId]); state.next = response.data.next; state.timeZone = response.data.timeZone || 'UTC';
+    state.query = JSON.stringify([q, roomId]);
+    state.next = response.data.next;
+    state.timeZone = response.data.timeZone || 'UTC';
     for (const hit of response.data.hits) {
       const item = this.el('article', 'ca-search-hit');
-      item.append(this.el('strong', '', `# ${hit.roomName}`), this.el('div', 'ca-hint', `${hit.sender} · ${this.searchMessageTime(hit.at)}`), this.searchExcerpt(hit.text, q));
-      item.append(this.button('ca-btn', 'Show this message in the chat', async () => {
-        await this.jumpTo(hit.id, hit.roomId);
-        // On a narrow screen the results cover the chat they just moved.
-        if (this.doc.defaultView?.matchMedia?.('(max-width: 900px)').matches) this.closeMessageSearch(false);
-      }, { text: 'Jump' }));
+      item.append(
+        this.el('strong', '', `# ${hit.roomName}`),
+        this.el('div', 'ca-hint', `${hit.sender} · ${this.searchMessageTime(hit.at)}`),
+        this.searchExcerpt(hit.text, q)
+      );
+      item.append(
+        this.button(
+          'ca-btn',
+          'Show this message in the chat',
+          async () => {
+            await this.jumpTo(hit.id, hit.roomId);
+            // On a narrow screen the results cover the chat they just moved.
+            if (this.doc.defaultView?.matchMedia?.('(max-width: 900px)').matches) this.closeMessageSearch(false);
+          },
+          { text: 'Jump' }
+        )
+      );
       state.results.append(item);
     }
-    state.status.textContent = state.results.children.length ? `${state.results.children.length} results shown · newest first${state.next ? ' · more available' : ''}` : 'No matching messages.';
+    state.status.textContent = state.results.children.length
+      ? `${state.results.children.length} results shown · newest first${state.next ? ' · more available' : ''}`
+      : 'No matching messages.';
     state.more.hidden = !state.next;
   }
 
   searchExcerpt(text, query) {
     const node = this.el('p', 'ca-search-excerpt');
     const terms = (query.match(/[\p{L}\p{N}_]+/gu) || []).slice(0, 12);
-    if (!terms.length) { node.textContent = text; return node; }
+    if (!terms.length) {
+      node.textContent = text;
+      return node;
+    }
     const pattern = new RegExp(terms.join('|'), 'giu');
     let from = 0;
     for (const match of text.matchAll(pattern)) {
@@ -5454,9 +7676,21 @@ class ReverieChatApp {
   }
 
   searchMessageTime(at) {
-    const options = { year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' };
-    try { return new Intl.DateTimeFormat('en-US', { ...options, timeZone: this.messageSearch?.timeZone || 'UTC' }).format(at); }
-    catch { return new Intl.DateTimeFormat('en-US', { ...options, timeZone: 'UTC' }).format(at); }
+    const options = {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+      timeZoneName: 'short',
+    };
+    try {
+      return new Intl.DateTimeFormat('en-US', { ...options, timeZone: this.messageSearch?.timeZone || 'UTC' }).format(
+        at
+      );
+    } catch {
+      return new Intl.DateTimeFormat('en-US', { ...options, timeZone: 'UTC' }).format(at);
+    }
   }
 
   /**
@@ -5468,7 +7702,8 @@ class ReverieChatApp {
     if (roomId !== this.roomId) await this.selectRoom(roomId);
     if (roomId !== this.roomId || navigation !== this.navigation || this.flashMessage(id)) return;
     // History is served for channels by a server that searches; elsewhere an undrawn message stays out of reach.
-    if (!this.serverFeatures.search || caIsDm(this.room)) return this.toast('That message is no longer available', 'info');
+    if (!this.serverFeatures.search || caIsDm(this.room))
+      return this.toast('That message is no longer available', 'info');
     // A later jump, a return to the present or another opening of a room (even this one) makes this answer stale. A
     // reload of the room while it was on its way (a delete or edit here or in another tab) means asking again.
     const load = this.app._chatLoadSeq;
@@ -5480,8 +7715,15 @@ class ReverieChatApp {
       if (reloads === this.roomReloads) break;
       if (attempt === CA_HISTORY_RETRIES) return this.toast('The chat changed while loading. Try again.', 'info');
     }
-    if (!page.messages.some((m) => m.id === id && !m.deleted)) return this.toast('That message is no longer available', 'info');
-    this.history = { roomId, messages: page.messages, olderMore: page.olderMore, newerMore: page.newerMore, busy: false };
+    if (!page.messages.some((m) => m.id === id && !m.deleted))
+      return this.toast('That message is no longer available', 'info');
+    this.history = {
+      roomId,
+      messages: page.messages,
+      olderMore: page.olderMore,
+      newerMore: page.newerMore,
+      busy: false,
+    };
     this.renderFeed();
     // At once, not smoothly: the feed must not pass through its newest end, where scrolling pages on.
     this.flashMessage(id, 'auto');
@@ -5503,7 +7745,9 @@ class ReverieChatApp {
 
   /** One page of a room's history `around`, `older` or `newer` than a message; null once the reader is told why not. */
   async historyPage(roomId, id, page) {
-    const res = await this.app._chatApi(`/api/chatrooms/${encodeURIComponent(roomId)}/history/${encodeURIComponent(id)}?page=${page}`);
+    const res = await this.app._chatApi(
+      `/api/chatrooms/${encodeURIComponent(roomId)}/history/${encodeURIComponent(id)}?page=${page}`
+    );
     if (res.ok) return res.data;
     this.toast(res.error || 'That message is no longer available', 'info');
     return null;
@@ -5532,11 +7776,13 @@ class ReverieChatApp {
     // A reload while the page was on its way reloads the rewind itself; this page may predate it.
     if (!page || this.history !== history || reloads !== this.roomReloads) return;
     history.messages = newer ? [...history.messages, ...page.messages] : [...page.messages, ...history.messages];
-    if (newer) history.newerMore = page.newerMore; else history.olderMore = page.olderMore;
+    if (newer) history.newerMore = page.newerMore;
+    else history.olderMore = page.olderMore;
     // A long read keeps a bounded window; what falls off the far end loads again on the way back.
     if (history.messages.length > CA_HISTORY_KEEP) {
       history.messages = newer ? history.messages.slice(-CA_HISTORY_KEEP) : history.messages.slice(0, CA_HISTORY_KEEP);
-      if (newer) history.olderMore = true; else history.newerMore = true;
+      if (newer) history.olderMore = true;
+      else history.newerMore = true;
     }
     this.redrawKeeping(edge.id);
   }
@@ -5550,10 +7796,25 @@ class ReverieChatApp {
     const history = this.historyView();
     if (!history) return;
     const anchor = this.readerMessageId(history);
-    const refresh = ++this.historyRefreshes, navigation = this.navigation, load = this.app._chatLoadSeq;
+    const refresh = ++this.historyRefreshes,
+      navigation = this.navigation,
+      load = this.app._chatLoadSeq;
     const page = await this.historyPage(history.roomId, anchor, 'around');
-    if (!page || refresh !== this.historyRefreshes || navigation !== this.navigation || load !== this.app._chatLoadSeq || !this.historyView()) return;
-    this.history = { roomId: history.roomId, messages: page.messages, olderMore: page.olderMore, newerMore: page.newerMore, busy: false };
+    if (
+      !page ||
+      refresh !== this.historyRefreshes ||
+      navigation !== this.navigation ||
+      load !== this.app._chatLoadSeq ||
+      !this.historyView()
+    )
+      return;
+    this.history = {
+      roomId: history.roomId,
+      messages: page.messages,
+      olderMore: page.olderMore,
+      newerMore: page.newerMore,
+      busy: false,
+    };
     this.redrawKeeping(anchor);
   }
 
@@ -5569,13 +7830,17 @@ class ReverieChatApp {
   leaveHistory(keep) {
     this.navigation++;
     this.history = null;
-    if (keep) this.redrawKeeping(keep); else this.renderFeed();
+    if (keep) this.redrawKeeping(keep);
+    else this.renderFeed();
   }
 
   /** Redraw the feed leaving message `id` where it was on screen; the bottom when the feed no longer draws it. */
   redrawKeeping(id) {
     const feed = this.app._chatEls.feed;
-    const offset = () => { const el = this.feedMessage(id); return el ? el.getBoundingClientRect().top - feed.getBoundingClientRect().top : undefined; };
+    const offset = () => {
+      const el = this.feedMessage(id);
+      return el ? el.getBoundingClientRect().top - feed.getBoundingClientRect().top : undefined;
+    };
     const before = offset();
     this.renderFeed({ keepScroll: true });
     const after = offset();
@@ -5590,7 +7855,10 @@ class ReverieChatApp {
     let bar = this.els.jumpBar;
     if (!bar) {
       bar = this.els.jumpBar = this.el('div', 'ca-jump-bar');
-      bar.append(this.el('span', '', "You're viewing older messages"), this.button('ca-btn', 'Jump to the newest messages', () => this.leaveHistory(), { text: 'Jump to present' }));
+      bar.append(
+        this.el('span', '', "You're viewing older messages"),
+        this.button('ca-btn', 'Jump to the newest messages', () => this.leaveHistory(), { text: 'Jump to present' })
+      );
       feed.after(bar);
     }
     const away = feed.scrollHeight - feed.scrollTop - feed.clientHeight > feed.clientHeight;
@@ -5646,34 +7914,40 @@ class ReverieChatApp {
     const nodes = [];
     s.items.forEach((it, i) => {
       if (i === 0 && it.kind !== 'everyone') nodes.push(this.el('div', 'ca-mention-head', 'Members'));
-      if (it.kind === 'everyone') nodes.push(i > 0 ? this.el('hr', 'ca-mention-sep') : this.el('div', 'ca-mention-head', 'Notify'));
+      if (it.kind === 'everyone')
+        nodes.push(i > 0 ? this.el('hr', 'ca-mention-sep') : this.el('div', 'ca-mention-head', 'Notify'));
       nodes.push(
         (() => {
-        const b = this.el('button', `chatroom-suggest-item ca-mention-item${i === s.index ? ' is-active' : ''}`);
-        b.type = 'button';
-        b.id = `caMention${i}`;
-        b.tabIndex = -1;
-        b.setAttribute('role', 'option');
-        b.setAttribute('aria-selected', String(i === s.index));
-        if (it.kind === 'everyone') {
-          b.append(this.el('span', 'ca-mention-name', '@everyone'), this.el('span', 'ca-mention-sub', 'Everyone in this channel'));
-        } else if (it.kind === 'human') {
-          b.append(this.humanAvatar(it.human, 'sm', it.human.online ? 'idle' : 'gone'),
-            this.literalText('span', 'ca-mention-name', it.human.name),
-            this.el('span', 'ca-mention-sub', `Person · ${caHumanBadgeLabel(it.human.role)}`));
-        } else {
-          b.append(
-            this.app._chatAvatar(it.member.sessionId, it.member.name, { size: 'sm' }),
-            this.el('span', 'ca-mention-name', it.member.name),
-            this.el('span', 'ca-mention-sub', it.member.role === 'coordinator' ? 'Admin' : caPresence(it.member))
-          );
-        }
-        b.addEventListener('mousedown', (e) => {
-          e.preventDefault();
-          s.index = i;
-          this.acceptMention();
-        });
-        return b;
+          const b = this.el('button', `chatroom-suggest-item ca-mention-item${i === s.index ? ' is-active' : ''}`);
+          b.type = 'button';
+          b.id = `caMention${i}`;
+          b.tabIndex = -1;
+          b.setAttribute('role', 'option');
+          b.setAttribute('aria-selected', String(i === s.index));
+          if (it.kind === 'everyone') {
+            b.append(
+              this.el('span', 'ca-mention-name', '@everyone'),
+              this.el('span', 'ca-mention-sub', 'Everyone in this channel')
+            );
+          } else if (it.kind === 'human') {
+            b.append(
+              this.humanAvatar(it.human, 'sm', it.human.online ? 'idle' : 'gone'),
+              this.literalText('span', 'ca-mention-name', it.human.name),
+              this.el('span', 'ca-mention-sub', `Person · ${caHumanBadgeLabel(it.human.role)}`)
+            );
+          } else {
+            b.append(
+              this.app._chatAvatar(it.member.sessionId, it.member.name, { size: 'sm' }),
+              this.el('span', 'ca-mention-name', it.member.name),
+              this.el('span', 'ca-mention-sub', it.member.role === 'coordinator' ? 'Admin' : caPresence(it.member))
+            );
+          }
+          b.addEventListener('mousedown', (e) => {
+            e.preventDefault();
+            s.index = i;
+            this.acceptMention();
+          });
+          return b;
         })()
       );
     });
@@ -5742,7 +8016,9 @@ class ReverieChatApp {
     pane.hidden = true;
     pane.setAttribute('aria-label', 'Web page');
     const head = this.el('header', 'ca-web-head');
-    const close = this.button('ca-icon-btn ca-web-close', 'Close web page', () => this.closeWebPane(), { icon: 'back' });
+    const close = this.button('ca-icon-btn ca-web-close', 'Close web page', () => this.closeWebPane(), {
+      icon: 'back',
+    });
     const host = this.literalText('span', 'ca-web-host');
     const external = this.el('a', 'ca-btn ca-web-external', 'Open in new tab');
     external.target = '_blank';
@@ -5754,7 +8030,8 @@ class ReverieChatApp {
     Object.assign(this.els, { web: pane, webHost: host, webExternal: external, webNote: note });
     const feed = this.app._chatEls.feed;
     feed.addEventListener('click', (event) => {
-      if (event.defaultPrevented || event.button || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      if (event.defaultPrevented || event.button || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey)
+        return;
       const link = event.target?.closest?.('a.chatroom-link[href]');
       if (!link || !feed.contains(link) || link.classList.contains('ca-workspace-download')) return;
       const url = caWebPaneUrl(link.href, this.doc.defaultView?.location.origin);
@@ -5797,7 +8074,8 @@ class ReverieChatApp {
         }
         if (!href || href === 'about:blank') return;
         frame.src = 'about:blank';
-        webNote.textContent = 'That page tried to open a Reverie page inside the pane, so it was stopped. Use Open in new tab.';
+        webNote.textContent =
+          'That page tried to open a Reverie page inside the pane, so it was stopped. Use Open in new tab.';
       });
       web.append(frame);
     }
@@ -5887,7 +8165,15 @@ class ReverieChatApp {
 
   /** Mark `@name` / `@everyone` in a rendered message as plain highlighted text, not a link (text nodes only, never code or links; an address like a@b is left alone). */
   decorateMentions(el) {
-    const names = [...new Set(['everyone', ...(this.room?.members || []).map(m => m.name), ...this.channelHumans().map(p => p.name)].filter(Boolean))];
+    const names = [
+      ...new Set(
+        [
+          'everyone',
+          ...(this.room?.members || []).map((m) => m.name),
+          ...this.channelHumans().map((p) => p.name),
+        ].filter(Boolean)
+      ),
+    ];
     names.sort((a, b) => b.length - a.length);
     const escaped = names.map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
     const re = new RegExp(`(^|[^\\p{L}\\p{N}_@])(@(?:${escaped.join('|')}))(?![\\p{L}\\p{N}_-])`, 'giu');
@@ -5913,39 +8199,55 @@ class ReverieChatApp {
 
   /** Only known, unambiguous channel names and canonical assignment IDs become read-only links. */
   decorateChatReferences(root) {
-    const channels = this.rooms.filter(room => !caIsDm(room) && !room.archivedAt && room.name);
-    const names = [...new Set(channels.map(room => room.name))].sort((a, b) => b.length - a.length);
-    const escaped = names.map(name => name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+    const channels = this.rooms.filter((room) => !caIsDm(room) && !room.archivedAt && room.name);
+    const names = [...new Set(channels.map((room) => room.name))].sort((a, b) => b.length - a.length);
+    const escaped = names.map((name) => name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
     const channelPattern = escaped.length ? `#(?:${escaped.join('|')})|` : '';
     const re = new RegExp(`(^|[^\\p{L}\\p{N}_@#/.:-])(${channelPattern}i-[a-f0-9]{8})(?![\\p{L}\\p{N}_-])`, 'giu');
-    const walker = this.doc.createTreeWalker(root, 4), nodes = [];
-    while (walker.nextNode()) if (!walker.currentNode.parentElement?.closest('code,pre,a,button,script,style,.ca-mention-tag')) nodes.push(walker.currentNode);
+    const walker = this.doc.createTreeWalker(root, 4),
+      nodes = [];
+    while (walker.nextNode())
+      if (!walker.currentNode.parentElement?.closest('code,pre,a,button,script,style,.ca-mention-tag'))
+        nodes.push(walker.currentNode);
     for (const node of nodes) {
-      const text = node.nodeValue, parts = []; let last = 0;
+      const text = node.nodeValue,
+        parts = [];
+      let last = 0;
       for (const match of text.matchAll(re)) {
-        const value = match[2], at = match.index + match[1].length;
-        const rooms = value.startsWith('#') ? channels.filter(room => room.name.toLowerCase() === value.slice(1).toLowerCase()) : [];
+        const value = match[2],
+          at = match.index + match[1].length;
+        const rooms = value.startsWith('#')
+          ? channels.filter((room) => room.name.toLowerCase() === value.slice(1).toLowerCase())
+          : [];
         if (value.startsWith('#') && rooms.length !== 1) continue;
-        const button = this.el('button', 'ca-chat-reference', value); button.type = 'button';
+        const button = this.el('button', 'ca-chat-reference', value);
+        button.type = 'button';
         if (rooms.length) {
-          const id = rooms[0].id, roomId = this.roomId;
+          const id = rooms[0].id,
+            roomId = this.roomId;
           button.title = `Open ${value}`;
-          button.addEventListener('click', event => {
+          button.addEventListener('click', (event) => {
             event.stopPropagation();
-            const current = this.rooms.filter(room => !caIsDm(room) && !room.archivedAt && room.name?.toLowerCase() === value.slice(1).toLowerCase());
+            const current = this.rooms.filter(
+              (room) => !caIsDm(room) && !room.archivedAt && room.name?.toLowerCase() === value.slice(1).toLowerCase()
+            );
             if (this.roomId === roomId && current.length === 1 && current[0].id === id) void this.selectRoom(id);
           });
         } else {
           const roomId = this.roomId;
           button.title = `View assignment ${value}`;
-          button.addEventListener('click', event => {
+          button.addEventListener('click', (event) => {
             event.stopPropagation();
             if (button.isConnected && this.roomId === roomId) void this.openAssignment(value, button);
           });
         }
-        parts.push(text.slice(last, at), button); last = at + value.length;
+        parts.push(text.slice(last, at), button);
+        last = at + value.length;
       }
-      if (parts.length) { parts.push(text.slice(last)); node.replaceWith(...parts); }
+      if (parts.length) {
+        parts.push(text.slice(last));
+        node.replaceWith(...parts);
+      }
     }
   }
 
@@ -5953,28 +8255,71 @@ class ReverieChatApp {
     if (!/^i-[a-f0-9]{8}$/i.test(id)) return;
     id = id.toLowerCase();
     this.doc.querySelector('.ca-assignment-dialog')?.close();
-    const dialog = this.el('dialog', 'ca-dialog ca-assignment-dialog'); dialog.setAttribute('aria-label', `Assignment ${id}`);
-    const heading = this.literalText('h2', '', `Assignment ${id}`), body = this.el('div', 'ca-assignment-body');
-    body.setAttribute('aria-live', 'polite'); body.append(this.el('p', '', 'Loading assignment…'));
-    const controller = new AbortController(), roomId = this.roomId, actor = this.app._chatSelf, human = this.humanSelf?.id;
+    const dialog = this.el('dialog', 'ca-dialog ca-assignment-dialog');
+    dialog.setAttribute('aria-label', `Assignment ${id}`);
+    const heading = this.literalText('h2', '', `Assignment ${id}`),
+      body = this.el('div', 'ca-assignment-body');
+    body.setAttribute('aria-live', 'polite');
+    body.append(this.el('p', '', 'Loading assignment…'));
+    const controller = new AbortController(),
+      roomId = this.roomId,
+      actor = this.app._chatSelf,
+      human = this.humanSelf?.id;
     const close = this.button('ca-btn', 'Close assignment', () => dialog.close(), { text: 'Close' });
     dialog.append(heading, body, close);
-    dialog.addEventListener('cancel', event => { event.preventDefault(); dialog.close(); });
-    dialog.addEventListener('close', () => { controller.abort(); dialog.remove(); if (anchor?.isConnected) anchor.focus(); }, { once: true });
-    this.doc.body.append(dialog); dialog.showModal(); close.focus();
+    dialog.addEventListener('cancel', (event) => {
+      event.preventDefault();
+      dialog.close();
+    });
+    dialog.addEventListener(
+      'close',
+      () => {
+        controller.abort();
+        dialog.remove();
+        if (anchor?.isConnected) anchor.focus();
+      },
+      { once: true }
+    );
+    this.doc.body.append(dialog);
+    dialog.showModal();
+    close.focus();
     try {
       const result = await this.app._chatApi('/api/board', { signal: controller.signal });
       if (!dialog.isConnected || !dialog.open || controller.signal.aborted) return;
-      if (this.roomId !== roomId || this.app._chatSelf !== actor || this.humanSelf?.id !== human) { dialog.close(); return; }
-      const issue = result.ok && Array.isArray(result.data?.issues) ? result.data.issues.find(issue => issue.id === id) : null;
-      if (!issue) { body.replaceChildren(this.el('p', '', result.ok ? 'Assignment unavailable or no longer present.' : 'Assignment unavailable. Check your access and try again.')); return; }
+      if (this.roomId !== roomId || this.app._chatSelf !== actor || this.humanSelf?.id !== human) {
+        dialog.close();
+        return;
+      }
+      const issue =
+        result.ok && Array.isArray(result.data?.issues) ? result.data.issues.find((issue) => issue.id === id) : null;
+      if (!issue) {
+        body.replaceChildren(
+          this.el(
+            'p',
+            '',
+            result.ok
+              ? 'Assignment unavailable or no longer present.'
+              : 'Assignment unavailable. Check your access and try again.'
+          )
+        );
+        return;
+      }
       heading.textContent = issue.title;
       const facts = this.el('p', 'ca-dialog-note');
-      const owner = result.data.roster?.find(person => person.id === issue.owner)?.name || issue.owner || 'Unassigned';
+      const owner =
+        result.data.roster?.find((person) => person.id === issue.owner)?.name || issue.owner || 'Unassigned';
       facts.textContent = `${id} · ${issue.status || 'Unknown status'} · ${owner}`;
-      body.replaceChildren(facts, this.literalText('p', 'ca-assignment-description', issue.reason || 'No additional description has been provided.'));
+      body.replaceChildren(
+        facts,
+        this.literalText(
+          'p',
+          'ca-assignment-description',
+          issue.reason || 'No additional description has been provided.'
+        )
+      );
     } catch {
-      if (dialog.isConnected && dialog.open && !controller.signal.aborted) body.replaceChildren(this.el('p', '', 'Could not load assignment. Close and try again.'));
+      if (dialog.isConnected && dialog.open && !controller.signal.aborted)
+        body.replaceChildren(this.el('p', '', 'Could not load assignment. Close and try again.'));
     }
   }
 
@@ -6051,7 +8396,8 @@ class ReverieChatApp {
       // A keyboard opening, closing or resizing keeps the newest message in view, but only for a reader who was at the
       // bottom: `_feedStick` comes from the feed's own scroll events, so the resize itself cannot change it.
       const feed = this.app._chatEls?.feed;
-      if (feed && this._feedStick !== false) this.doc.defaultView.requestAnimationFrame(() => (feed.scrollTop = feed.scrollHeight));
+      if (feed && this._feedStick !== false)
+        this.doc.defaultView.requestAnimationFrame(() => (feed.scrollTop = feed.scrollHeight));
     };
     vv.addEventListener('resize', fit);
     vv.addEventListener('scroll', fit);
@@ -6064,7 +8410,8 @@ class ReverieChatApp {
     if (!this.built) return;
     // Another room opened (a click, a link, a notification): leave the page for the conversation.
     if (this.embed) {
-      if (this._embedRoom == null) this._embedRoom = this.roomId; // a page opened by a link before any room had loaded
+      if (this._embedRoom == null)
+        this._embedRoom = this.roomId; // a page opened by a link before any room had loaded
       else if (this.roomId !== this._embedRoom) this.closePage();
     }
     if (!this.app._chatCreating) this._pendingPlacement = null;
@@ -6129,7 +8476,9 @@ class ReverieChatApp {
   /** The workspace's live channels in the order the sidebar shows them. */
   liveChannelIds() {
     const ws = this.workspace === 'home' ? '' : this.workspace || '';
-    return caByPosition(this.viewRooms.filter((r) => r && !caIsDm(r) && !r.archivedAt && (r.workspace || '') === ws)).map((r) => r.id);
+    return caByPosition(
+      this.viewRooms.filter((r) => r && !caIsDm(r) && !r.archivedAt && (r.workspace || '') === ws)
+    ).map((r) => r.id);
   }
 
   categoryOf(id) {
@@ -6252,7 +8601,10 @@ class ReverieChatApp {
           img.src = this.iconImage(meta.image);
           b.classList.add('has-image');
           b.append(img);
-        } else b.append(this.el('span', 'ca-rail-letter', meta.icon || (w.label.match(/[\p{L}\p{N}]/u)?.[0] || '?').toUpperCase()));
+        } else
+          b.append(
+            this.el('span', 'ca-rail-letter', meta.icon || (w.label.match(/[\p{L}\p{N}]/u)?.[0] || '?').toUpperCase())
+          );
         if (Number.isFinite(meta.hue)) {
           b.classList.add('has-hue');
           b.style.setProperty('--ws-hue', String(meta.hue));
@@ -6267,7 +8619,9 @@ class ReverieChatApp {
       }
       // A workspace exists once a room is placed in it, so creating one needs the placement routes.
       if (this.serverFeatures.placement) {
-        const add = this.button('ca-rail-btn ca-rail-add', 'Create a workspace', () => this.openWorkspaceDialog(), { icon: 'plus' });
+        const add = this.button('ca-rail-btn ca-rail-add', 'Create a workspace', () => this.openWorkspaceDialog(), {
+          icon: 'plus',
+        });
         add.dataset.key = 'add';
         group.append(add);
       }
@@ -6293,7 +8647,8 @@ class ReverieChatApp {
     nameBtn.setAttribute('aria-label', `${label} menu`);
     const nameText = this.el('h2', 'ca-side-name', label);
     nameBtn.append(nameText, this.icon('chevron'));
-    const hue = !home && Object.hasOwn(this.wsMeta, this.workspace || '') ? this.wsMeta[this.workspace || ''].hue : undefined;
+    const hue =
+      !home && Object.hasOwn(this.wsMeta, this.workspace || '') ? this.wsMeta[this.workspace || ''].hue : undefined;
     sideTitle.classList.toggle('has-hue', Number.isFinite(hue));
     if (Number.isFinite(hue)) sideTitle.style.setProperty('--ws-hue', String(hue));
     else sideTitle.style.removeProperty('--ws-hue');
@@ -6301,7 +8656,11 @@ class ReverieChatApp {
     sideTitle.append(nameBtn);
     if (home) {
       if (this.serverFeatures.dms) {
-        sideTitle.append(this.button('ca-icon-btn', 'Start a direct message', () => this.openSwitcher({ agents: true }), { icon: 'plus' }));
+        sideTitle.append(
+          this.button('ca-icon-btn', 'Start a direct message', () => this.openSwitcher({ agents: true }), {
+            icon: 'plus',
+          })
+        );
       }
     } else if (this._order) {
       sideTitle.append(
@@ -6309,7 +8668,10 @@ class ReverieChatApp {
         this.button('ca-btn ca-order-done', 'Save the channel order', () => this.finishOrder(), { text: 'Done' })
       );
     } else {
-      if (this.serverFeatures.order) sideTitle.append(this.button('ca-icon-btn ca-order-edit', 'Edit channel order', () => this.startOrder(), { icon: 'reorder' }));
+      if (this.serverFeatures.order)
+        sideTitle.append(
+          this.button('ca-icon-btn ca-order-edit', 'Edit channel order', () => this.startOrder(), { icon: 'reorder' })
+        );
       sideTitle.append(this.button('ca-icon-btn', 'New channel', () => this.newRoom(), { icon: 'plus' }));
     }
     this.keepFocus(sideScroll, () => {
@@ -6324,20 +8686,28 @@ class ReverieChatApp {
   wireRailMenu(b, key) {
     b.addEventListener('contextmenu', (ev) => {
       ev.preventDefault();
-      this.openRailMenu(key, { x: ev.clientX || b.getBoundingClientRect().right, y: ev.clientY || b.getBoundingClientRect().top }, b);
+      this.openRailMenu(
+        key,
+        { x: ev.clientX || b.getBoundingClientRect().right, y: ev.clientY || b.getBoundingClientRect().top },
+        b
+      );
     });
     let timer = 0;
     const stop = () => {
       this.doc.defaultView?.clearTimeout(timer);
       timer = 0;
     };
-    b.addEventListener('touchstart', (ev) => {
-      const t = ev.touches?.[0];
-      timer = this.doc.defaultView?.setTimeout(() => {
-        timer = 0;
-        this.openRailMenu(key, { x: t?.clientX || 24, y: t?.clientY || 24 }, b);
-      }, 500);
-    }, { passive: true });
+    b.addEventListener(
+      'touchstart',
+      (ev) => {
+        const t = ev.touches?.[0];
+        timer = this.doc.defaultView?.setTimeout(() => {
+          timer = 0;
+          this.openRailMenu(key, { x: t?.clientX || 24, y: t?.clientY || 24 }, b);
+        }, 500);
+      },
+      { passive: true }
+    );
     for (const name of ['touchend', 'touchmove', 'touchcancel']) b.addEventListener(name, stop, { passive: true });
   }
 
@@ -6346,16 +8716,24 @@ class ReverieChatApp {
   }
 
   roomRow(item, kind) {
-    const b = this.el('button', `ca-item ca-item--${kind}${item.muted ? ' is-muted' : ''}${item.active ? ' is-active' : ''}${item.unread > 0 && this.serverFeatures.unread ? ' is-unread' : ''}`);
+    const b = this.el(
+      'button',
+      `ca-item ca-item--${kind}${item.muted ? ' is-muted' : ''}${item.active ? ' is-active' : ''}${item.unread > 0 && this.serverFeatures.unread ? ' is-unread' : ''}`
+    );
     b.type = 'button';
     b.dataset.key = item.key;
     b.style.setProperty('--ca-depth', String(item.depth || 0));
     if (item.active) b.setAttribute('aria-current', 'true');
     const dmState = kind === 'dm' && item.peer ? this.presenceOf(item.peer) : '';
     const isPrivate = kind !== 'dm' && this.rooms.find((r) => r.id === item.id)?.visibility === 'private';
-    b.setAttribute('aria-label', `${kind === 'dm' ? 'Direct message with ' : 'Channel '}${item.label}${item.muted ? ', notifications muted' : ''}${isPrivate ? ', private' : ''}${dmState ? `, ${CA_STATE_LABEL[dmState]}` : ''}${this.unreadNote(item)}`);
+    b.setAttribute(
+      'aria-label',
+      `${kind === 'dm' ? 'Direct message with ' : 'Channel '}${item.label}${item.muted ? ', notifications muted' : ''}${isPrivate ? ', private' : ''}${dmState ? `, ${CA_STATE_LABEL[dmState]}` : ''}${this.unreadNote(item)}`
+    );
     if (kind === 'dm') {
-      b.append(this.app._chatAvatar(item.peer?.sessionId || item.id, item.label, { size: 'md', state: dmState || undefined }));
+      b.append(
+        this.app._chatAvatar(item.peer?.sessionId || item.id, item.label, { size: 'md', state: dmState || undefined })
+      );
     } else {
       const itemRoom = this.rooms.find((r) => r.id === item.id);
       const hash = this.glyphNode(caRoomGlyph(itemRoom));
@@ -6384,26 +8762,39 @@ class ReverieChatApp {
     const wire = (el) => {
       el.addEventListener('contextmenu', (ev) => {
         ev.preventDefault();
-        this.openChannelMenu(item.id, { x: ev.clientX || el.getBoundingClientRect().left + 24, y: ev.clientY || el.getBoundingClientRect().bottom }, b);
+        this.openChannelMenu(
+          item.id,
+          { x: ev.clientX || el.getBoundingClientRect().left + 24, y: ev.clientY || el.getBoundingClientRect().bottom },
+          b
+        );
       });
       let timer = 0;
       const stop = () => {
         clearTimeout(timer);
         timer = 0;
       };
-      el.addEventListener('touchstart', (ev) => {
-        const t = ev.touches?.[0];
-        timer = this.doc.defaultView?.setTimeout(() => {
-          timer = 0;
-          this.openChannelMenu(item.id, { x: t?.clientX || 24, y: t?.clientY || 24 }, b);
-        }, 550);
-      }, { passive: true });
+      el.addEventListener(
+        'touchstart',
+        (ev) => {
+          const t = ev.touches?.[0];
+          timer = this.doc.defaultView?.setTimeout(() => {
+            timer = 0;
+            this.openChannelMenu(item.id, { x: t?.clientX || 24, y: t?.clientY || 24 }, b);
+          }, 550);
+        },
+        { passive: true }
+      );
       for (const name of ['touchend', 'touchmove', 'touchcancel']) el.addEventListener(name, stop, { passive: true });
     };
     if (target) {
       const dmWrap = this.el('div', 'ca-item-wrap');
       dmWrap.append(b);
-      const close = this.button('ca-item-act ca-item-close', `Close DM with ${item.label}`, () => this.closeDm(item.id), { text: '\u2715' });
+      const close = this.button(
+        'ca-item-act ca-item-close',
+        `Close DM with ${item.label}`,
+        () => this.closeDm(item.id),
+        { text: '\u2715' }
+      );
       close.title = 'Close DM';
       close.dataset.key = `close:${item.id}`;
       dmWrap.append(close);
@@ -6418,8 +8809,16 @@ class ReverieChatApp {
       handle.setAttribute('aria-hidden', 'true');
       wrap.append(handle, b);
       const moved = (step) => caMoveWithin(this._order, item.id, step, (x) => this.categoryOf(x));
-      for (const [step, label, glyph, key] of [[-1, 'up', '\u25B2', 'up'], [1, 'down', '\u25BC', 'down']]) {
-        const btn = this.button('ca-item-act ca-order-btn', `Move ${item.label} ${label}`, () => this.moveChannel(item.id, step), { text: glyph });
+      for (const [step, label, glyph, key] of [
+        [-1, 'up', '\u25B2', 'up'],
+        [1, 'down', '\u25BC', 'down'],
+      ]) {
+        const btn = this.button(
+          'ca-item-act ca-order-btn',
+          `Move ${item.label} ${label}`,
+          () => this.moveChannel(item.id, step),
+          { text: glyph }
+        );
         btn.dataset.key = `${key}:${item.id}`;
         btn.disabled = moved(step) === this._order;
         wrap.append(btn);
@@ -6429,7 +8828,12 @@ class ReverieChatApp {
     }
     this.wireOrderDrag(wrap, item.id);
     wrap.append(b);
-    const edit = this.button('ca-item-act ca-item-edit', `Edit channel ${item.label}`, () => this.openChannelSettings(item.id), { icon: 'gearsmall' });
+    const edit = this.button(
+      'ca-item-act ca-item-edit',
+      `Edit channel ${item.label}`,
+      () => this.openChannelSettings(item.id),
+      { icon: 'gearsmall' }
+    );
     edit.title = 'Edit channel';
     edit.dataset.key = `edit:${item.id}`;
     wrap.append(edit);
@@ -6442,14 +8846,18 @@ class ReverieChatApp {
     const id = member?.sessionId;
     const session = id ? this.app.sessions?.get?.(id) : undefined;
     const hooks = id ? this.app.pendingHooks?.get?.(id) : undefined;
-    const employee = this.company?.employees?.find(e => e.sessionId === id);
+    const employee = this.company?.employees?.find((e) => e.sessionId === id);
     const health = this.employeeHealth(employee || { sessionId: id }, member);
     if (health.providerConfirmedHealthy) {
       if (hooks && (hooks.has('permission_prompt') || hooks.has('elicitation_dialog'))) return 'needs';
       if (hooks?.has('idle_prompt')) return 'waiting';
       return member?.working || session?.status === 'busy' ? 'working' : 'idle';
     }
-    if ((employee || session?.runtimeHealth || session?.paneExit) && ['dead', 'disconnected', 'viewer-unavailable', 'gone', 'unknown'].includes(health.state)) return health.state;
+    if (
+      (employee || session?.runtimeHealth || session?.paneExit) &&
+      ['dead', 'disconnected', 'viewer-unavailable', 'gone', 'unknown'].includes(health.state)
+    )
+      return health.state;
     if (!member || !member.alive) return 'gone';
     // The terminal UI's own classifier decides, so the chat can never rank a state differently from the tab rail and the phone
     // overview; caMemberState is the same ranking for a page that does not have it.
@@ -6464,72 +8872,101 @@ class ReverieChatApp {
 
   /** What the state dots show right now, as one string: a redraw is only worth it when this changes. */
   presenceSignature() {
-    const people = [...(this.room?.members || []), ...caDmItems(this.viewRooms, this.roomId, this.closedDms, caEmployeeBySession(this.company)).map((i) => i.peer).filter(Boolean)];
-    return people.map((m) => {
-      const employee = this.company?.employees?.find(e => e.sessionId === m.sessionId);
-      const health = this.employeeHealth(employee || { sessionId: m.sessionId }, m);
-      return `${m.sessionId}:${this.presenceOf(m)}:${!!health.viewerUnavailable}:${!!health.viewerOnly}:${!!employee && this.canReconnectEmployee(employee)}`;
-    }).join('|');
+    const people = [
+      ...(this.room?.members || []),
+      ...caDmItems(this.viewRooms, this.roomId, this.closedDms, caEmployeeBySession(this.company))
+        .map((i) => i.peer)
+        .filter(Boolean),
+    ];
+    return people
+      .map((m) => {
+        const employee = this.company?.employees?.find((e) => e.sessionId === m.sessionId);
+        const health = this.employeeHealth(employee || { sessionId: m.sessionId }, m);
+        return `${m.sessionId}:${this.presenceOf(m)}:${!!health.viewerUnavailable}:${!!health.viewerOnly}:${!!employee && this.canReconnectEmployee(employee)}`;
+      })
+      .join('|');
   }
 
   syncSessionPresence(id, deleted = false) {
     const session = this.app.sessions?.get?.(id);
     if (!id || (!deleted && !session)) return;
-    const members = [this.room, ...(this.viewRooms || [])].flatMap(room => room?.members || []);
+    const members = [this.room, ...(this.viewRooms || [])].flatMap((room) => room?.members || []);
     for (const member of members) {
       if (member.sessionId !== id) continue;
       if (deleted || session?.status === 'stopped' || session?.paneExit || session?.pid === null) member.alive = false;
       else if (session?.pid !== undefined) member.alive = true;
-      if (session?.status) member.working = !session.paneExit && (session.status === 'busy' || session.isWorking === true);
+      if (session?.status)
+        member.working = !session.paneExit && (session.status === 'busy' || session.isWorking === true);
     }
     this.schedulePresence();
   }
 
   employeeHealth(employee, member) {
     const session = this.app.sessions?.get?.(employee?.sessionId);
-    const viewerDisconnected = this.app._wsSessionId === employee?.sessionId &&
+    const viewerDisconnected =
+      this.app._wsSessionId === employee?.sessionId &&
       ['disconnected', 'fallback', 'reconnecting'].includes(this.app._wsState);
-    const current = this.company?.employees?.find(e => e.id === employee?.id && e.sessionId === employee?.sessionId);
+    const current = this.company?.employees?.find((e) => e.id === employee?.id && e.sessionId === employee?.sessionId);
     return caEmployeeHealth(current || { sessionId: employee?.sessionId }, session, member, viewerDisconnected);
   }
 
   employeeHealthBadge(employee, className = 'ca-runtime-health') {
     const node = this.el('span', className);
     node.dataset.employeeHealth = employee.id || employee.sessionId;
-    this._healthNodes ||= new WeakMap(); this._healthNodes.set(node, { employee, className });
-    this.paintEmployeeHealth(node); return node;
+    this._healthNodes ||= new WeakMap();
+    this._healthNodes.set(node, { employee, className });
+    this.paintEmployeeHealth(node);
+    return node;
   }
 
   paintEmployeeHealth(node) {
-    const record = this._healthNodes?.get(node); if (!record) return;
-    const employee = this.company?.employees?.find(e => e.id === record.employee.id) || record.employee;
+    const record = this._healthNodes?.get(node);
+    if (!record) return;
+    const employee = this.company?.employees?.find((e) => e.id === record.employee.id) || record.employee;
     const health = this.employeeHealth(employee);
     node.className = `${record.className} is-${health.state}${health.state === 'idle' ? ' is-connected' : ''}`;
     node.textContent = health.label;
     if (health.viewerUnavailable && health.state !== 'viewer-unavailable') {
       const warning = this.el('span', 'ca-viewer-warning', 'Viewer unavailable');
-      warning.title = 'The optional terminal viewer is unavailable. Automatic terminal input may wait for Reconnect; uncertain deliveries are not replayed.';
+      warning.title =
+        'The optional terminal viewer is unavailable. Automatic terminal input may wait for Reconnect; uncertain deliveries are not replayed.';
       node.append(' ', warning);
     }
-    node.title = health.detail; node.setAttribute('role', node.dataset.healthRole || 'status');
+    node.title = health.detail;
+    node.setAttribute('role', node.dataset.healthRole || 'status');
     const recovery = this.viewerReconnectStatus(employee);
     if (recovery && health.viewerUnavailable) {
       node.append(this.el('span', 'ca-viewer-reconnect-status', ` · ${this.viewerReconnectDescription(recovery)}`));
     }
     node.setAttribute('aria-label', `${employee.name || 'Expert'}: ${health.detail}`);
     const card = node.closest('.ca-company-person');
-    if (card) for (const state of ['dead', 'disconnected', 'viewer-unavailable', 'unknown', 'gone']) card.classList.toggle(`is-health-${state}`, health.state === state);
+    if (card)
+      for (const state of ['dead', 'disconnected', 'viewer-unavailable', 'unknown', 'gone'])
+        card.classList.toggle(`is-health-${state}`, health.state === state);
     card?.classList.toggle('is-offline', health.state === 'gone');
     if (card) card.title = `${card.dataset.healthTitle} · ${health.detail}`;
     if (card) {
       const controls = this._healthCards?.get(card);
       const wanted = controls?.manage && ['dead', 'disconnected'].includes(health.state) && !health.viewerOnly;
       const restart = card.querySelector('.ca-dead-pane-restart');
-      if (wanted && !restart) card.append(this.button('ca-btn is-danger ca-dead-pane-restart', `Restart session for ${employee.name}`, () => this.openEmployeeRestart(employee, controls.onSaved), { text: 'Restart' }));
+      if (wanted && !restart)
+        card.append(
+          this.button(
+            'ca-btn is-danger ca-dead-pane-restart',
+            `Restart session for ${employee.name}`,
+            () => this.openEmployeeRestart(employee, controls.onSaved),
+            { text: 'Restart' }
+          )
+        );
       else if (!wanted) restart?.remove();
       const reconnect = card.querySelector('.ca-reconnect-viewer');
       const canReconnect = health.viewerOnly || this.canReconnectEmployee(employee);
-      if (canReconnect && !reconnect) card.append(this.button('ca-icon-btn ca-reconnect-viewer', 'Reconnect', () => this.reconnectEmployeeViewer(employee), { icon: 'reconnect' }));
+      if (canReconnect && !reconnect)
+        card.append(
+          this.button('ca-icon-btn ca-reconnect-viewer', 'Reconnect', () => this.reconnectEmployeeViewer(employee), {
+            icon: 'reconnect',
+          })
+        );
       else if (!canReconnect) reconnect?.remove();
       const status = card.querySelector('.ca-viewer-status');
       if (this.canReconnectEmployee(employee) && !status) card.append(this.viewerStatusButton(employee));
@@ -6541,67 +8978,136 @@ class ReverieChatApp {
     const session = this.app.sessions?.get?.(employee?.sessionId);
     // Browser controls use the signed-in owner. Delegates use their native
     // office CLI/API proof; company JSON and parent headers cannot authenticate it.
-    return this.canManageOffice() && employee?.desiredRunning === true && !employee?.onVacation && !employee?.bindingMigration &&
+    return (
+      this.canManageOffice() &&
+      employee?.desiredRunning === true &&
+      !employee?.onVacation &&
+      !employee?.bindingMigration &&
       Number.isInteger(employee?.sessionGeneration) &&
       (session?.workerViewerReconnect === true || employee?.workerViewerReconnect === true) &&
-      (this.employeeHealth(employee).state === 'disconnected' || this.employeeHealth(employee).viewerUnavailable === true);
+      (session?.viewerInputHeld === true ||
+        session?.runtimeHealth === 'disconnected' ||
+        this.employeeHealth(employee).state === 'disconnected' ||
+        this.employeeHealth(employee).viewerUnavailable === true)
+    );
   }
 
   viewerReconnectStatus(employee, value) {
     const key = `${employee?.id}:${employee?.sessionId}:${employee?.sessionGeneration}`;
     if (arguments.length === 1) return this._viewerReconnectStatuses?.get(key);
-    if (!value || !['idle', 'connecting', 'connected', 'blocked'].includes(value.state) ||
-      typeof value.reason !== 'string' || !/^[A-Za-z0-9_-]{1,96}$/.test(value.reason) ||
-      !Number.isSafeInteger(value.attempts) || value.attempts < 0 || value.attempts > 1000 ||
-      !Number.isSafeInteger(value.retryAfterMs) || value.retryAfterMs < 0 || value.retryAfterMs > 60000) return null;
-    const status = { state: value.state, reason: value.reason, attempts: value.attempts, retryAfterMs: value.retryAfterMs };
+    if (
+      !value ||
+      !['idle', 'connecting', 'connected', 'blocked'].includes(value.state) ||
+      typeof value.reason !== 'string' ||
+      !/^[A-Za-z0-9_-]{1,96}$/.test(value.reason) ||
+      !Number.isSafeInteger(value.attempts) ||
+      value.attempts < 0 ||
+      value.attempts > 1000 ||
+      !Number.isSafeInteger(value.retryAfterMs) ||
+      value.retryAfterMs < 0 ||
+      value.retryAfterMs > 60000
+    )
+      return null;
+    const status = {
+      state: value.state,
+      reason: value.reason,
+      attempts: value.attempts,
+      retryAfterMs: value.retryAfterMs,
+    };
     this._viewerReconnectStatuses ||= new Map();
     if (this._viewerReconnectStatuses.size > 128) this._viewerReconnectStatuses.clear();
-    this._viewerReconnectStatuses.set(key, status); return status;
+    this._viewerReconnectStatuses.set(key, status);
+    return status;
   }
 
   viewerReconnectDescription(status) {
-    return `${status.state}: ${status.reason.replace(/[-_]/g, ' ')} · attempts ${status.attempts}` +
-      (status.retryAfterMs ? ` · retry in ${Math.ceil(status.retryAfterMs / 1000)}s` : '');
+    return (
+      `${status.state}: ${status.reason.replace(/[-_]/g, ' ')} · attempts ${status.attempts}` +
+      (status.retryAfterMs ? ` · retry in ${Math.ceil(status.retryAfterMs / 1000)}s` : '')
+    );
   }
 
   viewerStatusButton(employee) {
-    return this.button('ca-btn ca-viewer-status', 'Terminal reconnect status', () => this.showEmployeeViewerStatus(employee), { text: 'Status' });
+    return this.button(
+      'ca-btn ca-viewer-status',
+      'Terminal reconnect status',
+      () => this.showEmployeeViewerStatus(employee),
+      { text: 'Status' }
+    );
   }
 
   async showEmployeeViewerStatus(employee) {
     if (!this.canReconnectEmployee(employee)) return;
     const dialog = this.el('dialog', 'ca-viewer-status-dialog');
     const report = this.el('p', 'ca-viewer-status-report', 'Reading terminal status…');
-    report.setAttribute('role', 'status'); report.setAttribute('aria-live', 'polite');
-    const refresh = this.button('ca-btn', 'Refresh terminal status', () => { void load(); }, { text: 'Refresh status' });
+    report.setAttribute('role', 'status');
+    report.setAttribute('aria-live', 'polite');
+    const refresh = this.button(
+      'ca-btn',
+      'Refresh terminal status',
+      () => {
+        void load();
+      },
+      { text: 'Refresh status' }
+    );
     const close = this.button('ca-btn', 'Close terminal status', () => dialog.close(), { text: 'Close' });
     let pending = false;
-    const current = () => this.company?.employees?.some(e => e.id === employee.id && e.sessionId === employee.sessionId && e.sessionGeneration === employee.sessionGeneration);
+    const current = () =>
+      this.company?.employees?.some(
+        (e) =>
+          e.id === employee.id &&
+          e.sessionId === employee.sessionId &&
+          e.sessionGeneration === employee.sessionGeneration
+      );
     const load = async () => {
       if (pending || !dialog.isConnected) return;
       if (!current() || !this.canManageOffice()) {
-        report.textContent = 'The current binding or recovery permission changed. Refresh Company.'; return;
+        report.textContent = 'The current binding or recovery permission changed. Refresh Company.';
+        return;
       }
-      pending = true; refresh.disabled = true;
+      pending = true;
+      refresh.disabled = true;
       try {
-        const result = await this.app._chatApi(`/api/company/employees/${encodeURIComponent(employee.id)}/reconnect/status`, {
-          method: 'POST', body: { sessionId: employee.sessionId, sessionGeneration: employee.sessionGeneration },
-        });
+        const result = await this.app._chatApi(
+          `/api/company/employees/${encodeURIComponent(employee.id)}/reconnect/status`,
+          {
+            method: 'POST',
+            body: { sessionId: employee.sessionId, sessionGeneration: employee.sessionGeneration },
+          }
+        );
         if (!dialog.isConnected) return;
         if (!current() || !this.canManageOffice()) {
-          report.textContent = 'The employee binding or recovery permission changed. Refresh Company.'; return;
+          report.textContent = 'The employee binding or recovery permission changed. Refresh Company.';
+          return;
         }
         const status = this.viewerReconnectStatus(employee, result.data?.reconnect ?? result.reconnect);
-        report.textContent = status ? this.viewerReconnectDescription(status) : (result.error || 'Terminal recovery status is unconfirmed.');
+        report.textContent = status
+          ? this.viewerReconnectDescription(status)
+          : result.error || 'Terminal recovery status is unconfirmed.';
         this.schedulePresence();
-      } catch { if (dialog.isConnected) report.textContent = 'Terminal recovery status is unavailable. Nothing was started.'; }
-      finally { pending = false; refresh.disabled = false; }
+      } catch {
+        if (dialog.isConnected) report.textContent = 'Terminal recovery status is unavailable. Nothing was started.';
+      } finally {
+        pending = false;
+        refresh.disabled = false;
+      }
     };
-    dialog.append(this.el('h2', '', `Terminal status for ${employee.name}`), report,
-      this.el('p', 'ca-hint', 'This status concerns the server terminal viewer. Provider health, browser terminal connection and chat acceptance remain separate. Unknown input and stop holds are preserved.'), refresh, close);
+    dialog.append(
+      this.el('h2', '', `Terminal status for ${employee.name}`),
+      report,
+      this.el(
+        'p',
+        'ca-hint',
+        'This status concerns the server terminal viewer. Provider health, browser terminal connection and chat acceptance remain separate. Unknown input and stop holds are preserved.'
+      ),
+      refresh,
+      close
+    );
     dialog.addEventListener('close', () => dialog.remove(), { once: true });
-    this.doc.body.append(dialog); dialog.showModal(); close.focus(); void load();
+    this.doc.body.append(dialog);
+    dialog.showModal();
+    close.focus();
+    void load();
   }
 
   async reconnectEmployeeViewer(employee) {
@@ -6618,21 +9124,39 @@ class ReverieChatApp {
     this._reconnectingEmployees.add(employee.id);
     try {
       const result = await this.app._chatApi(`/api/company/employees/${encodeURIComponent(employee.id)}/reconnect`, {
-        method: 'POST', body: { sessionId: employee.sessionId, sessionGeneration: employee.sessionGeneration },
+        method: 'POST',
+        body: { sessionId: employee.sessionId, sessionGeneration: employee.sessionGeneration },
       });
-      const current = this.company?.employees?.find(e => e.id === employee.id);
-      if (!current || current.sessionId !== employee.sessionId || current.sessionGeneration !== employee.sessionGeneration) return;
+      const current = this.company?.employees?.find((e) => e.id === employee.id);
+      if (
+        !current ||
+        current.sessionId !== employee.sessionId ||
+        current.sessionGeneration !== employee.sessionGeneration
+      )
+        return;
       const status = this.viewerReconnectStatus(employee, result.data?.reconnect ?? result.reconnect);
       if (status) this.schedulePresence();
-      if (!result.ok || result.data?.state !== 'viewer-connected') {
-        this.toast(status ? `Connection not confirmed: ${this.viewerReconnectDescription(status)}.` :
-          (result.error || 'Connection not confirmed. Check this expert’s status before trying again.'), 'error');
+      if (!result.ok || !['viewer-connected', 'viewer-inspection-requested'].includes(result.data?.state)) {
+        this.toast(
+          status
+            ? `Connection not confirmed: ${this.viewerReconnectDescription(status)}.`
+            : result.error || 'Connection not confirmed. Check this expert’s status before trying again.',
+          'error'
+        );
         return;
       }
-      // The canonical state event clears the viewer warning and input hold.
-      this.toast(`Terminal reconnected for ${employee.name}.`, 'info');
-    } catch { this.toast('Connection not confirmed. Check this expert’s status before trying again.', 'error'); }
-    finally { this._reconnectingEmployees.delete(employee.id); }
+      // The canonical state event describes transport separately from input readiness.
+      this.toast(
+        result.data.state === 'viewer-inspection-requested'
+          ? `Diagnostic viewer requested for ${employee.name}. Readiness is unconfirmed; automated input remains held.`
+          : `Terminal reconnected for ${employee.name}.`,
+        'info'
+      );
+    } catch {
+      this.toast('Connection not confirmed. Check this expert’s status before trying again.', 'error');
+    } finally {
+      this._reconnectingEmployees.delete(employee.id);
+    }
   }
 
   /** Redraw what shows a member's state (the member list and the direct-message dots), at most once a frame. */
@@ -6655,11 +9179,22 @@ class ReverieChatApp {
   }
 
   renderDmList(into) {
-    const items = caDmItems(this.viewRooms, this.embed ? null : this.roomId, this.closedDms, caEmployeeBySession(this.company));
+    const items = caDmItems(
+      this.viewRooms,
+      this.embed ? null : this.roomId,
+      this.closedDms,
+      caEmployeeBySession(this.company)
+    );
     if (!items.length) {
-      into.append(this.el('p', 'ca-empty-note', this.serverFeatures.dms
-        ? 'No direct messages yet. Start one with the + above, or open an agent in the member list.'
-        : 'Direct messages arrive with the next server update.'));
+      into.append(
+        this.el(
+          'p',
+          'ca-empty-note',
+          this.serverFeatures.dms
+            ? 'No direct messages yet. Start one with the + above, or open an agent in the member list.'
+            : 'Direct messages arrive with the next server update.'
+        )
+      );
       return;
     }
     const list = this.el('div', 'ca-list');
@@ -6667,7 +9202,8 @@ class ReverieChatApp {
       list.append(this.roomRow(item, 'dm'));
       // The earlier chats with the same person are listed while one of the person's chats is open.
       if (item.earlier && (item.active || item.earlier.some((e) => e.active))) {
-        for (const e of item.earlier) list.append(this.roomRow({ ...e, depth: 1, label: `${e.label} (earlier)` }, 'dm'));
+        for (const e of item.earlier)
+          list.append(this.roomRow({ ...e, depth: 1, label: `${e.label} (earlier)` }, 'dm'));
       }
     }
     into.append(list);
@@ -6677,8 +9213,15 @@ class ReverieChatApp {
     const hide = this.hideMuted;
     const shown = this.viewRooms.filter((r) => !(hide && r.muted && r.id !== this.roomId));
     const draft = this._order;
-    const source = draft ? shown.map((r) => (draft.includes(r.id) ? { ...r, position: draft.indexOf(r.id) + 1 } : r)) : shown;
-    const items = caChannelItems(source, this.workspace === 'home' ? '' : this.workspace, this.collapsed, this.embed || this.embassy?.selected ? null : this.roomId);
+    const source = draft
+      ? shown.map((r) => (draft.includes(r.id) ? { ...r, position: draft.indexOf(r.id) + 1 } : r))
+      : shown;
+    const items = caChannelItems(
+      source,
+      this.workspace === 'home' ? '' : this.workspace,
+      this.collapsed,
+      this.embed || this.embassy?.selected ? null : this.roomId
+    );
     if (!items.length) {
       into.append(this.el('p', 'ca-empty-note', 'No channels here yet. Use + to create one.'));
       return;
@@ -6707,7 +9250,12 @@ class ReverieChatApp {
       }
       const wrap = this.el('div', 'ca-item-wrap ca-cat-wrap');
       wrap.append(b);
-      const add = this.button('ca-item-act ca-cat-add', `Create channel in ${item.label}`, () => this.newRoom({ category: item.name }), { icon: 'plus' });
+      const add = this.button(
+        'ca-item-act ca-cat-add',
+        `Create channel in ${item.label}`,
+        () => this.newRoom({ category: item.name }),
+        { icon: 'plus' }
+      );
       add.title = 'Create channel';
       add.dataset.key = `cat-add:${item.key}`;
       wrap.append(add);
@@ -6763,7 +9311,9 @@ class ReverieChatApp {
 
   /** The display name of the employee bound to a session, else the session's own name. */
   sessionDisplayName(session) {
-    const employee = (Array.isArray(this.company?.employees) ? this.company.employees : []).find((e) => e?.sessionId === session.id);
+    const employee = (Array.isArray(this.company?.employees) ? this.company.employees : []).find(
+      (e) => e?.sessionId === session.id
+    );
     const name = typeof employee?.name === 'string' ? employee.name.trim() : '';
     return name || session.name;
   }
@@ -6777,7 +9327,10 @@ class ReverieChatApp {
     const titles = this.el('div');
     const where = place.category ? `in ${place.category}` : place.workspace ? `in ${place.workspace}` : '';
     titles.append(this.el('h2', '', 'Create channel'), this.el('p', 'ca-dialog-note', title || where));
-    head.append(titles, this.button('ca-icon-btn', 'Close', () => dlg.close(), { text: '\u2715' }));
+    head.append(
+      titles,
+      this.button('ca-icon-btn', 'Close', () => dlg.close(), { text: '\u2715' })
+    );
     const form = this.el('form', 'ca-form');
 
     // Type
@@ -6787,8 +9340,18 @@ class ReverieChatApp {
     let type = 'text';
     const voiceNote = this.el('p', 'ca-hint');
     const types = [
-      ['text', { kind: 'text', text: '#', label: '' }, 'Text', 'Everyone in the channel reads and writes messages, images and files.'],
-      ['voice', { kind: 'voice', text: '', label: '' }, 'Voice', 'One agent answers when you speak (phone and car mode), and its replies can be read aloud.'],
+      [
+        'text',
+        { kind: 'text', text: '#', label: '' },
+        'Text',
+        'Everyone in the channel reads and writes messages, images and files.',
+      ],
+      [
+        'voice',
+        { kind: 'voice', text: '', label: '' },
+        'Voice',
+        'One agent answers when you speak (phone and car mode), and its replies can be read aloud.',
+      ],
     ];
     const radios = {};
     for (const [key, glyph, label, text] of types) {
@@ -6820,7 +9383,14 @@ class ReverieChatApp {
     name.placeholder = 'new-channel';
     name.required = true;
     nameWrap.append(name);
-    const cats = [...new Set(this.rooms.filter((r) => !caIsDm(r) && (r.workspace || '') === (place.workspace || '')).map((r) => r.category).filter(Boolean))];
+    const cats = [
+      ...new Set(
+        this.rooms
+          .filter((r) => !caIsDm(r) && (r.workspace || '') === (place.workspace || ''))
+          .map((r) => r.category)
+          .filter(Boolean)
+      ),
+    ];
     const catWrap = this.el('label', 'ca-label');
     catWrap.append(this.el('span', 'ca-label-text', 'Category (optional)'));
     const category = this.el('input', 'ca-field');
@@ -6833,7 +9403,8 @@ class ReverieChatApp {
     catWrap.append(category, catList);
 
     // Members, coordinator, voice agent
-    const sessions = (this.app._chatCandidateSessions?.(new Set()) || []).filter((s) => s.mode !== 'shell')
+    const sessions = (this.app._chatCandidateSessions?.(new Set()) || [])
+      .filter((s) => s.mode !== 'shell')
       .map((s) => ({ ...s, label: this.sessionDisplayName(s) }));
     const membersBox = this.el('div', 'ca-create-members');
     const checks = new Map();
@@ -6847,10 +9418,16 @@ class ReverieChatApp {
       const backend = Object.hasOwn(CA_BACKENDS, s.mode) ? CA_BACKENDS[s.mode] : String(s.mode || '');
       // The session name stays visible beside an employee's display name, so two sessions never look alike.
       const sub = s.label === s.name ? backend : [s.name, backend].filter(Boolean).join(' · ');
-      row.append(box, this.app._chatAvatar(s.id, s.label, { size: 'sm' }), this.el('span', 'ca-name', s.label), this.el('span', 'ca-invite-sub', sub));
+      row.append(
+        box,
+        this.app._chatAvatar(s.id, s.label, { size: 'sm' }),
+        this.el('span', 'ca-name', s.label),
+        this.el('span', 'ca-invite-sub', sub)
+      );
       membersBox.append(row);
     }
-    if (!sessions.length) membersBox.append(this.el('p', 'ca-hint', 'No agents are open yet. You can invite them later.'));
+    if (!sessions.length)
+      membersBox.append(this.el('p', 'ca-hint', 'No agents are open yet. You can invite them later.'));
     const select = (label, empty) => {
       const wrap = this.el('label', 'ca-label');
       wrap.append(this.el('span', 'ca-label-text', label));
@@ -6866,7 +9443,9 @@ class ReverieChatApp {
     function syncMembers() {
       for (const sel of [coord.sel, voice.sel]) {
         const keep = sel.value;
-        sel.replaceChildren(new Option(sel === coord.sel ? 'No admin (I direct them)' : 'Choose the agent that answers you', ''));
+        sel.replaceChildren(
+          new Option(sel === coord.sel ? 'No admin (I direct them)' : 'Choose the agent that answers you', '')
+        );
         for (const s of sessions) if (checks.get(s.id)?.checked) sel.append(new Option(s.label, s.id));
         sel.value = [...sel.options].some((o) => o.value === keep) ? keep : '';
       }
@@ -6881,8 +9460,17 @@ class ReverieChatApp {
     create.type = 'submit';
     row.append(cancel, create);
     form.append(
-      this.el('span', 'ca-label-text', 'Channel type'), typeBox, voiceNote, nameWrap, catWrap,
-      this.el('span', 'ca-label-text', 'Members'), membersBox, coord.wrap, voiceRow, error, row
+      this.el('span', 'ca-label-text', 'Channel type'),
+      typeBox,
+      voiceNote,
+      nameWrap,
+      catWrap,
+      this.el('span', 'ca-label-text', 'Members'),
+      membersBox,
+      coord.wrap,
+      voiceRow,
+      error,
+      row
     );
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
@@ -6894,7 +9482,10 @@ class ReverieChatApp {
           return;
         }
       }
-      const members = picked.map((id) => ({ sessionId: id, ...(type === 'voice' && id === voice.sel.value ? { voice: true } : {}) }));
+      const members = picked.map((id) => ({
+        sessionId: id,
+        ...(type === 'voice' && id === voice.sel.value ? { voice: true } : {}),
+      }));
       const chosenCoordinator = coord.sel.value;
       create.disabled = true;
       const res = await this.app._chatApi('/api/chatrooms', {
@@ -6912,14 +9503,18 @@ class ReverieChatApp {
       }
       const placement = { workspace: place.workspace || '', category: category.value.trim() };
       if (placement.workspace || placement.category) {
-        const put = await this.app._chatApi(`/api/chatrooms/${encodeURIComponent(res.data.id)}/placement`, { method: 'PUT', body: placement });
+        const put = await this.app._chatApi(`/api/chatrooms/${encodeURIComponent(res.data.id)}/placement`, {
+          method: 'PUT',
+          body: placement,
+        });
         if (!put.ok) this.toast(`Chat: created, but not placed (${put.error})`, 'error');
       }
       dlg.close();
       this._wsPinned = false;
       await this.app._loadChatRooms(res.data.id);
       // A voice agent who is also the coordinator joins as the coordinator, so the flag is set once the room is open.
-      if (type === 'voice' && voice.sel.value === chosenCoordinator) await this.app._setChatMemberVoice?.(chosenCoordinator, true);
+      if (type === 'voice' && voice.sel.value === chosenCoordinator)
+        await this.app._setChatMemberVoice?.(chosenCoordinator, true);
       this.renderAll();
     });
     dlg.append(head, form);
@@ -6935,7 +9530,13 @@ class ReverieChatApp {
     const dlg = this.el('dialog', 'ca-dialog ca-workspace');
     dlg.setAttribute('aria-label', 'Create a workspace');
     dlg.append(this.el('h2', '', 'Create a workspace'));
-    dlg.append(this.el('p', 'ca-dialog-note', 'A workspace groups channels, like a server or an organisation. You will create its first channel next.'));
+    dlg.append(
+      this.el(
+        'p',
+        'ca-dialog-note',
+        'A workspace groups channels, like a server or an organisation. You will create its first channel next.'
+      )
+    );
     const form = this.el('form', 'ca-form');
     const wrap = this.el('label', 'ca-label');
     wrap.append(this.el('span', '', 'Workspace name'));
@@ -6971,7 +9572,7 @@ class ReverieChatApp {
       }
       if (logo.value()) {
         go.disabled = true;
-        if (!await this.saveWsPicture(name, logo.value())) {
+        if (!(await this.saveWsPicture(name, logo.value()))) {
           go.disabled = false;
           error.textContent = 'The logo could not be saved. Try again or remove it to use the first letter.';
           return;
@@ -7001,12 +9602,13 @@ class ReverieChatApp {
     if (this._phonePending.has(target)) return;
     const previous = member ? member.alertMode : this.phoneStatus?.alertMode;
     const mode = this.app._chatEffectiveAlert?.(previous)?.mode || 'ring';
-    const next = ({ ring: 'vibrate', vibrate: 'silent', silent: 'ring' })[mode] || 'ring';
-    const update = lease => {
+    const next = { ring: 'vibrate', vibrate: 'silent', silent: 'ring' }[mode] || 'ring';
+    const update = (lease) => {
       if (member) member.alertMode = lease;
-      for (const room of [...this.rooms, this.room].filter(Boolean)) for (const m of room.members || []) {
-        if (m.sessionId === target) m.alertMode = lease;
-      }
+      for (const room of [...this.rooms, this.room].filter(Boolean))
+        for (const m of room.members || []) {
+          if (m.sessionId === target) m.alertMode = lease;
+        }
       if (this.phoneStatus?.self === target) this.phoneStatus.alertMode = lease;
       this.renderUser();
       this.renderMembers();
@@ -7015,7 +9617,10 @@ class ReverieChatApp {
     // Shown at once; the server's answer replaces it (a lasting choice when the owner sets an employee).
     update({ mode: next, source: 'lease', until: Date.now() + 28800000 });
     try {
-      const res = await this.app._chatApi(`/api/chatrooms/phone-status/${encodeURIComponent(target)}`, { method: 'PUT', body: { mode: next } });
+      const res = await this.app._chatApi(`/api/chatrooms/phone-status/${encodeURIComponent(target)}`, {
+        method: 'PUT',
+        body: { mode: next },
+      });
       if (!res.ok) throw new Error('Phone status refused');
       update(res.data?.alertMode ?? null);
     } catch {
@@ -7023,7 +9628,8 @@ class ReverieChatApp {
       this.toast('Phone status could not be saved', 'error');
     } finally {
       this._phonePending.delete(target);
-      this.renderUser(); this.renderMembers();
+      this.renderUser();
+      this.renderMembers();
     }
   }
 
@@ -7047,37 +9653,64 @@ class ReverieChatApp {
     who.append(av, text);
     who.addEventListener('click', () => this.openMyProfile(who));
     user.append(who);
-    const phone = this.button('ca-icon-btn ca-phone-status', 'Cycle your phone mode', () => this.cyclePhoneStatus(this.phoneStatus?.self || 'owner'));
+    const phone = this.button('ca-icon-btn ca-phone-status', 'Cycle your phone mode', () =>
+      this.cyclePhoneStatus(this.phoneStatus?.self || 'owner')
+    );
     const badge = this.app._chatAlertBadge?.({ alertMode: this.phoneStatus?.alertMode }, 'ca-own-alert');
-    if (badge) { phone.append(badge); phone.setAttribute('aria-label', `${badge.title}; cycle your phone mode`); }
+    if (badge) {
+      phone.append(badge);
+      phone.setAttribute('aria-label', `${badge.title}; cycle your phone mode`);
+    }
     phone.disabled = !this.phoneStatus?.canSetOwn || !!this._phonePending?.has(this.phoneStatus?.self || 'owner');
     user.append(phone);
     // Approvals waiting on the user: shown only while there are some (and the inbox is on).
-    const approvals = this.button('ca-icon-btn ca-approvals', 'Approvals waiting on you', () => this.app.toggleApprovalsInbox?.(), { icon: 'bell' });
+    const approvals = this.button(
+      'ca-icon-btn ca-approvals',
+      'Approvals waiting on you',
+      () => this.app.toggleApprovalsInbox?.(),
+      { icon: 'bell' }
+    );
     approvals.hidden = true;
     approvals.append(this.el('span', 'ca-count ca-approvals-count', '0'));
     this.els.approvals = approvals;
     user.append(approvals);
-    const gear = this.button('ca-icon-btn ca-office-gear', 'Office settings', () => this.openOfficeMenu(gear), { icon: 'gear' });
+    const gear = this.button('ca-icon-btn ca-office-gear', 'Office settings', () => this.openOfficeMenu(gear), {
+      icon: 'gear',
+    });
     gear.setAttribute('aria-controls', 'ca-office-pane');
     const launcher = this.el('div', 'ca-office-launcher');
-    const pane = this.el('nav', 'ca-office-pane'); pane.id = 'ca-office-pane'; pane.setAttribute('aria-label', 'Company and board');
-    pane.addEventListener('animationend', event => {
-      if (event.target === pane && event.animationName === 'ca-office-slide-up') pane.classList.remove('ca-office-pane-opening');
+    const pane = this.el('nav', 'ca-office-pane');
+    pane.id = 'ca-office-pane';
+    pane.setAttribute('aria-label', 'Company and board');
+    pane.addEventListener('animationend', (event) => {
+      if (event.target === pane && event.animationName === 'ca-office-slide-up')
+        pane.classList.remove('ca-office-pane-opening');
     });
-    pane.addEventListener('keydown', event => {
+    pane.addEventListener('keydown', (event) => {
       if (event.key !== 'Escape') return;
-      event.preventDefault(); event.stopPropagation();
-      caWrite('local', 'reverie:office-expanded', 'false'); this.renderOfficePane();
+      event.preventDefault();
+      event.stopPropagation();
+      caWrite('local', 'reverie:office-expanded', 'false');
+      this.renderOfficePane();
       this.els.rail.querySelector('.ca-office-gear')?.focus();
     });
-    this.els.officeLauncher?.remove(); this.els.officePane?.remove();
-    launcher.append(gear); this.els.rail.append(launcher); this.els.root.append(pane);
-    this.els.officeLauncher = launcher; this.els.officePane = pane;
+    this.els.officeLauncher?.remove();
+    this.els.officePane?.remove();
+    launcher.append(gear);
+    this.els.rail.append(launcher);
+    this.els.root.append(pane);
+    this.els.officeLauncher = launcher;
+    this.els.officePane = pane;
     this.renderOfficePane();
     if (this.canManageOffice()) {
-      const power = this.button('ca-icon-btn ca-office-power-button', 'Office power', () => this.openOfficePowerMenu(power), { icon: 'power' });
-      power.setAttribute('aria-haspopup', 'menu'); user.append(power);
+      const power = this.button(
+        'ca-icon-btn ca-office-power-button',
+        'Office power',
+        () => this.openOfficePowerMenu(power),
+        { icon: 'power' }
+      );
+      power.setAttribute('aria-haspopup', 'menu');
+      user.append(power);
     }
     this.updateOfficeNavigation();
     this.renderConnection();
@@ -7091,7 +9724,10 @@ class ReverieChatApp {
     const n = enabled ? this.app.pendingApprovalsCount?.() || 0 : 0;
     btn.hidden = !n;
     btn.querySelector('.ca-approvals-count').textContent = n > 99 ? '99+' : String(n);
-    btn.setAttribute('aria-label', n ? `${n} approval${n === 1 ? '' : 's'} waiting on you` : 'Approvals waiting on you');
+    btn.setAttribute(
+      'aria-label',
+      n ? `${n} approval${n === 1 ? '' : 's'} waiting on you` : 'Approvals waiting on you'
+    );
   }
 
   /** On a narrow screen the closed drawers are off-screen: keep them out of the Tab order too. */
@@ -7121,21 +9757,29 @@ class ReverieChatApp {
   openHeaderMenu(anchor) {
     const { inviteBtn, pinsBtn, phoneBtn, bellBtn } = this.els;
     const entries = [inviteBtn, pinsBtn, phoneBtn, bellBtn]
-      .filter(button => button && !button.hidden && (!(this.embed || this.app._chatCreating) || button === phoneBtn))
-      .filter(button => button !== bellBtn || !!this.room)
-      .map(button => ({
+      .filter((button) => button && !button.hidden && (!(this.embed || this.app._chatCreating) || button === phoneBtn))
+      .filter((button) => button !== bellBtn || !!this.room)
+      .map((button) => ({
         label: button.getAttribute('aria-label') || button.title,
-        run: () => button === bellBtn ? this.openNotifyMenu(anchor) : button.click(),
+        run: () => (button === bellBtn ? this.openNotifyMenu(anchor) : button.click()),
       }));
     // Shared chat plugins (math, code languages) are owner settings: they live in Company settings only.
-    this.openMenu(entries, { at: anchor, focus: anchor, right: true, label: 'More actions', className: 'ca-head-menu' });
+    this.openMenu(entries, {
+      at: anchor,
+      focus: anchor,
+      right: true,
+      label: 'More actions',
+      className: 'ca-head-menu',
+    });
   }
 
   renderHeader() {
     const { headTitle, headTopic } = this.els;
     const room = this.room;
     this.renderMemberChip();
-    if (this.els.searchBtn) this.els.searchBtn.hidden = !this.serverFeatures.search || !!this.embed || !!this.embassy?.selected || !!this.app._chatCreating;
+    if (this.els.searchBtn)
+      this.els.searchBtn.hidden =
+        !this.serverFeatures.search || !!this.embed || !!this.embassy?.selected || !!this.app._chatCreating;
     if (!this.serverFeatures.search || this.embed || this.embassy?.selected) this.closeMessageSearch(false);
     const voiceControls = !!room && caSpeaks(room) && !this.embed && !this.embassy?.selected && !this.app._chatCreating;
     this.els.head?.classList.toggle('has-voice-controls', voiceControls);
@@ -7144,9 +9788,13 @@ class ReverieChatApp {
     headTopic.textContent = '';
     this.els.mutedBadge.hidden = true;
     if (this.embassy?.selected) {
-      headTitle.append(this.el('span', 'ca-hash', '#'), this.el('span', 'ca-head-name', this.embassy.connection()?.roomName || 'Shared room'));
+      headTitle.append(
+        this.el('span', 'ca-hash', '#'),
+        this.el('span', 'ca-head-name', this.embassy.connection()?.roomName || 'Shared room')
+      );
       headTopic.textContent = 'Embassy · UNTRUSTED EXTERNAL';
-      this.els.pinsBtn.hidden = true; this.els.inviteBtn.hidden = true;
+      this.els.pinsBtn.hidden = true;
+      this.els.inviteBtn.hidden = true;
       return;
     }
     if (this.embed) {
@@ -7172,39 +9820,57 @@ class ReverieChatApp {
       if (canInvite) this.els.inviteBtn.setAttribute('aria-label', `Add people to ${room.name}`);
     }
     if (!room || this.app._chatCreating) {
-      headTitle.append(this.el('span', 'ca-hash', '#'), this.el('span', '', this.app._chatCreating ? 'New channel' : 'Reverie'));
+      headTitle.append(
+        this.el('span', 'ca-hash', '#'),
+        this.el('span', '', this.app._chatCreating ? 'New channel' : 'Reverie')
+      );
       return;
     }
     const dm = caIsDm(room);
-    const mutedNow = this.viewRooms.find(entry => entry.id === room.id)?.muted === true;
+    const mutedNow = this.viewRooms.find((entry) => entry.id === room.id)?.muted === true;
     this.els.mutedBadge.hidden = !mutedNow;
     const headGlyph = dm ? { kind: 'text', text: '@', label: '' } : caRoomGlyph(room);
     const headHash = this.glyphNode(headGlyph);
     if (headGlyph.label) {
       headHash.setAttribute('role', 'img');
-      headHash.setAttribute('aria-label', headGlyph.kind === 'voice-private' ? 'Private voice channel' : 'Private channel');
+      headHash.setAttribute(
+        'aria-label',
+        headGlyph.kind === 'voice-private' ? 'Private voice channel' : 'Private channel'
+      );
       headHash.title = 'Private channel: members only';
     }
     headTitle.append(headHash, this.el('span', 'ca-head-name', caRoomLabel(room)));
     if (dm) {
       const peer = caDmPeer(room);
       const state = peer ? this.presenceOf(peer) : 'gone';
-      headTopic.textContent = peer ? `${CA_STATE_LABEL[state] || 'Health unknown'}${peer.goal ? ` · ${peer.goal}` : ''}` : '';
+      headTopic.textContent = peer
+        ? `${CA_STATE_LABEL[state] || 'Health unknown'}${peer.goal ? ` · ${peer.goal}` : ''}`
+        : '';
       headTopic.classList.toggle('ca-runtime-health', !!peer);
       for (const kind of ['dead', 'disconnected']) headTopic.classList.toggle(`is-${kind}`, state === kind);
     } else {
       const coord = room.members.find((m) => m.role === 'coordinator');
       const memberCount = room.members.length + this.channelHumans().length;
-      headTopic.textContent = room.topic ? room.topic : `${memberCount} member${memberCount === 1 ? '' : 's'}${coord ? ` · admin ${coord.name}` : ''}`;
+      headTopic.textContent = room.topic
+        ? room.topic
+        : `${memberCount} member${memberCount === 1 ? '' : 's'}${coord ? ` · admin ${coord.name}` : ''}`;
     }
   }
 
   /* ── members ── */
 
   mentionHuman(id) {
-    const person = this.channelHumans().find(p => p.id === id);
+    const person = this.channelHumans().find((p) => p.id === id);
     const input = this.app._chatEls?.input;
-    if (!person?.name || String(person.name).trim().toLowerCase() === 'everyone' || !input || input.disabled || input.readOnly || this.app._chatCreating) return;
+    if (
+      !person?.name ||
+      String(person.name).trim().toLowerCase() === 'everyone' ||
+      !input ||
+      input.disabled ||
+      input.readOnly ||
+      this.app._chatCreating
+    )
+      return;
     // Preserve all draft text, including a selected range; this is an insertion,
     // never a recipient change or an invitation to another room.
     input.value += `${input.value && !/\s$/.test(input.value) ? ' ' : ''}@${person.name} `;
@@ -7218,7 +9884,10 @@ class ReverieChatApp {
     if (!button) return;
     const humans = this.channelHumans();
     const members = [...(this.room?.members || []), ...humans];
-    const online = (this.room?.members || []).filter(member => !['gone', 'dead', 'disconnected', 'unknown', 'viewer-unavailable'].includes(this.presenceOf(member))).length + humans.filter(p => p.online).length;
+    const online =
+      (this.room?.members || []).filter(
+        (member) => !['gone', 'dead', 'disconnected', 'unknown', 'viewer-unavailable'].includes(this.presenceOf(member))
+      ).length + humans.filter((p) => p.online).length;
     const compact = !!this.doc.defaultView?.matchMedia?.('(max-width: 899px)')?.matches;
     const expanded = compact ? this.drawer === 'members' : this.membersOpen;
     button.hidden = !this.room || !!this.embed || !!this.embassy?.selected || !!this.app._chatCreating;
@@ -7232,29 +9901,42 @@ class ReverieChatApp {
   }
 
   renderMembers() {
-    if (this._humanPulse && !caIsDm(this.room) && this.humanRoomId !== this.roomId && !this._humanPending) void this._humanPulse();
+    if (this._humanPulse && !caIsDm(this.room) && this.humanRoomId !== this.roomId && !this._humanPending)
+      void this._humanPulse();
     this.renderMemberChip();
     this.refreshSettings?.();
     const box = this.els.members;
     this.keepFocus(box, () => {
       box.replaceChildren();
       if (this.embassy?.selected) {
-        box.append(this.el('h3', 'ca-members-head', 'Shared with other companies'), this.el('p', 'ca-hint', 'External identities are labels, not local employees.'));
+        box.append(
+          this.el('h3', 'ca-members-head', 'Shared with other companies'),
+          this.el('p', 'ca-hint', 'External identities are labels, not local employees.')
+        );
         return;
       }
       const room = this.room;
       if (!room || this.app._chatCreating) return;
       const humans = this.channelHumans();
       const people = new Set(humans);
-      for (const section of caMemberSections(room.members, humans, member => this.presenceOf(member))) {
+      for (const section of caMemberSections(room.members, humans, (member) => this.presenceOf(member))) {
         const h = this.el('h3', 'ca-members-head', `${section.label} — ${section.members.length}`);
         box.append(h);
         for (const m of section.members) {
           const row = people.has(m) ? this.humanMemberRow(m) : this.memberRow(m);
-          const employee = this.company?.employees?.find(e => e.sessionId === m.sessionId);
+          const employee = this.company?.employees?.find((e) => e.sessionId === m.sessionId);
           if (!people.has(m) && employee && this.canReconnectEmployee(employee)) {
             const group = this.el('div', 'ca-member-with-actions');
-            group.append(row, this.button('ca-icon-btn ca-reconnect-viewer', 'Reconnect', () => this.reconnectEmployeeViewer(employee), { icon: 'reconnect' }), this.viewerStatusButton(employee));
+            group.append(
+              row,
+              this.button(
+                'ca-icon-btn ca-reconnect-viewer',
+                'Reconnect',
+                () => this.reconnectEmployeeViewer(employee),
+                { icon: 'reconnect' }
+              ),
+              this.viewerStatusButton(employee)
+            );
             box.append(group);
           } else box.append(row);
         }
@@ -7264,7 +9946,10 @@ class ReverieChatApp {
   }
 
   humanMemberRow(person) {
-    const row = this.el('button', `ca-member is-${person.online ? 'online' : 'offline'} is-state-${person.online ? 'idle' : 'gone'}`);
+    const row = this.el(
+      'button',
+      `ca-member is-${person.online ? 'online' : 'offline'} is-state-${person.online ? 'idle' : 'gone'}`
+    );
     row.type = 'button';
     row.dataset.humanId = person.id;
     row.dataset.key = `human:${person.id}`;
@@ -7281,11 +9966,17 @@ class ReverieChatApp {
       ev.preventDefault();
       this.openPersonMenu(person, row);
     });
-    row.setAttribute('aria-label', `${person.name}, ${caHumanBadgeLabel(person.role)}, ${person.online ? 'online' : 'offline'}`);
+    row.setAttribute(
+      'aria-label',
+      `${person.name}, ${caHumanBadgeLabel(person.role)}, ${person.online ? 'online' : 'offline'}`
+    );
     row.append(this.humanAvatar(person, 'md', person.online ? 'idle' : 'gone'));
     const text = this.el('span', 'ca-member-text');
     // The account badge sits beside the name like an agent's Admin tag; "You" stays in the subtext.
-    text.append(this.literalText('span', 'ca-member-name', person.name), this.el('span', 'ca-tag ca-tag--person', caHumanBadgeLabel(person.role)));
+    text.append(
+      this.literalText('span', 'ca-member-name', person.name),
+      this.el('span', 'ca-tag ca-tag--person', caHumanBadgeLabel(person.role))
+    );
     if (person.id === this.humanSelf?.id) text.append(this.el('span', 'ca-member-sub', 'You'));
     row.append(text);
     return row;
@@ -7297,25 +9988,56 @@ class ReverieChatApp {
    */
   personActions(person) {
     const own = !!this.humanSelf?.id && person.id === this.humanSelf.id;
-    const verifiedOwner = this.humanSelf?.role === 'owner' && this.phoneStatus?.self === 'owner' && this.phoneStatus?.canSetOwn === true;
+    const verifiedOwner =
+      this.humanSelf?.role === 'owner' && this.phoneStatus?.self === 'owner' && this.phoneStatus?.canSetOwn === true;
     const entries = [];
     if (String(person.name).trim().toLowerCase() !== 'everyone')
-      entries.push({ label: 'Mention', run: () => { this.closeProfile(); this.mentionHuman(person.id); } });
-    entries.push({ label: 'Copy name', run: async () => {
-      try {
-        await this.doc.defaultView.navigator.clipboard.writeText(String(person.name));
-        this.toast('Name copied', 'info');
-      } catch { this.toast('Could not copy the name', 'error'); }
-    } });
+      entries.push({
+        label: 'Mention',
+        run: () => {
+          this.closeProfile();
+          this.mentionHuman(person.id);
+        },
+      });
+    entries.push({
+      label: 'Copy name',
+      run: async () => {
+        try {
+          await this.doc.defaultView.navigator.clipboard.writeText(String(person.name));
+          this.toast('Name copied', 'info');
+        } catch {
+          this.toast('Could not copy the name', 'error');
+        }
+      },
+    });
     // The original owner's details live in Company settings; every other account edits its profile on Accounts.
-    if (own) entries.push({ label: 'Edit my profile', run: () => { this.closeProfile(); person.id === 'owner' ? void this.openCompanySettings() : this.openPage('people'); } });
-    else if (verifiedOwner && person.role !== 'owner') entries.push({ label: 'Manage account', run: () => { this.closeProfile(); this.openPage('people'); } });
+    if (own)
+      entries.push({
+        label: 'Edit my profile',
+        run: () => {
+          this.closeProfile();
+          person.id === 'owner' ? void this.openCompanySettings() : this.openPage('people');
+        },
+      });
+    else if (verifiedOwner && person.role !== 'owner')
+      entries.push({
+        label: 'Manage account',
+        run: () => {
+          this.closeProfile();
+          this.openPage('people');
+        },
+      });
     return entries;
   }
 
   openPersonMenu(person, anchor, at = anchor) {
     this.closeProfile();
-    this.openMenu(this.personActions(person), { at, focus: anchor, label: `${person.name} actions`, className: 'ca-member-menu' });
+    this.openMenu(this.personActions(person), {
+      at,
+      focus: anchor,
+      label: `${person.name} actions`,
+      className: 'ca-member-menu',
+    });
   }
 
   openPersonCard(person, anchor) {
@@ -7329,18 +10051,32 @@ class ReverieChatApp {
     const names = this.el('div', 'ca-profile-names');
     names.append(this.literalText('strong', '', person.name));
     const own = !!this.humanSelf?.id && person.id === this.humanSelf.id;
-    names.append(this.el('span', 'ca-profile-sub', [caHumanBadgeLabel(person.role), person.online ? 'Online' : 'Offline', own ? 'You' : ''].filter(Boolean).join(' · ')));
+    names.append(
+      this.el(
+        'span',
+        'ca-profile-sub',
+        [caHumanBadgeLabel(person.role), person.online ? 'Online' : 'Offline', own ? 'You' : '']
+          .filter(Boolean)
+          .join(' · ')
+      )
+    );
     top.append(names);
     const actions = this.el('div', 'ca-profile-actions');
     for (const [i, entry] of this.personActions(person).entries())
-      actions.append(this.button(i === 0 ? 'ca-btn is-primary' : 'ca-btn', entry.label, () => entry.run(), { text: entry.label }));
+      actions.append(
+        this.button(i === 0 ? 'ca-btn is-primary' : 'ca-btn', entry.label, () => entry.run(), { text: entry.label })
+      );
     card.append(top, actions);
     this.presentCard(card, anchor);
   }
 
   memberRow(m) {
     const state = this.presenceOf(m);
-    const presence = state === 'viewer-unavailable' ? 'unknown' : ['gone', 'dead', 'disconnected', 'unknown'].includes(state) ? 'offline' : 'online';
+    const presence = ['unknown', 'viewer-unavailable'].includes(state)
+      ? 'unknown'
+      : ['gone', 'dead', 'disconnected'].includes(state)
+        ? 'offline'
+        : 'online';
     const b = this.el('button', `ca-member is-${presence} is-state-${state}`);
     b.type = 'button';
     b.dataset.key = `member:${m.sessionId}`;
@@ -7349,7 +10085,8 @@ class ReverieChatApp {
     const pronouns = this.pronounsOf(m);
     b.setAttribute('aria-label', `${m.name}${pronouns ? ` (${pronouns})` : ''}, ${role}, ${CA_STATE_LABEL[state]}`);
     if (pronouns) b.title = `${m.name} (${pronouns})`;
-    if (state === 'dead' || state === 'disconnected' || state === 'viewer-unavailable') b.title = `${b.title || m.name} · ${CA_STATE_LABEL[state]}`;
+    if (state === 'dead' || state === 'disconnected' || state === 'viewer-unavailable')
+      b.title = `${b.title || m.name} · ${CA_STATE_LABEL[state]}`;
     b.append(this.app._chatAvatar(m.sessionId, m.name, { size: 'md', state: this.presenceOf(m) }));
     const text = this.el('span', 'ca-member-text');
     const line = this.el('span', 'ca-member-name', m.name);
@@ -7358,27 +10095,57 @@ class ReverieChatApp {
     if (alert) {
       line.append(' ', alert);
       if (this.phoneStatus?.canSetAgents || this.phoneStatus?.self === m.sessionId) {
-        alert.setAttribute('role', 'button'); alert.tabIndex = 0;
+        alert.setAttribute('role', 'button');
+        alert.tabIndex = 0;
         alert.setAttribute('aria-label', `${m.name}: ${alert.title}; cycle phone mode`);
         alert.style.cursor = 'pointer';
-        alert.addEventListener('click', ev => { ev.preventDefault(); ev.stopPropagation(); this.cyclePhoneStatus(m.sessionId, m); });
-        alert.addEventListener('keydown', ev => {
-          if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); ev.stopPropagation(); this.cyclePhoneStatus(m.sessionId, m); }
+        alert.addEventListener('click', (ev) => {
+          ev.preventDefault();
+          ev.stopPropagation();
+          this.cyclePhoneStatus(m.sessionId, m);
+        });
+        alert.addEventListener('keydown', (ev) => {
+          if (ev.key === 'Enter' || ev.key === ' ') {
+            ev.preventDefault();
+            ev.stopPropagation();
+            this.cyclePhoneStatus(m.sessionId, m);
+          }
         });
       }
       // Ring is everyone's default: only a held mode is worth saying aloud.
-      if (alert.dataset.alertMode !== 'ring') b.setAttribute('aria-label', `${b.getAttribute('aria-label')}, ${alert.title}`);
+      if (alert.dataset.alertMode !== 'ring')
+        b.setAttribute('aria-label', `${b.getAttribute('aria-label')}, ${alert.title}`);
     }
     if (m.role === 'coordinator') text.append(this.el('span', 'ca-tag', 'Admin'));
     if (m.voice) text.append(this.el('span', 'ca-tag', 'Voice'));
     // A member that needs you says so in words as well as colour.
-    const sub = state === 'viewer-unavailable' ? 'Viewer unavailable · agent availability unknown' : state === 'dead' ? 'Dead pane · restart needed' : state === 'disconnected' ? 'Disconnected · health unknown' : state === 'unknown' ? 'Health unknown' : state === 'needs' ? 'Needs your approval' : state === 'error' ? 'Error' : state === 'waiting' ? 'Waiting for input' : state === 'working' ? 'Working…' : m.progress || m.goal || (caFocusLine(m) && `${caFocusLine(m)} (from the Board)`);
+    const sub =
+      state === 'viewer-unavailable'
+        ? 'Viewer unavailable · agent availability unknown'
+        : state === 'dead'
+          ? 'Dead pane · restart needed'
+          : state === 'disconnected'
+            ? 'Disconnected · health unknown'
+            : state === 'unknown'
+              ? 'Health unknown'
+              : state === 'needs'
+                ? 'Needs your approval'
+                : state === 'error'
+                  ? 'Error'
+                  : state === 'waiting'
+                    ? 'Waiting for input'
+                    : state === 'working'
+                      ? 'Working…'
+                      : m.progress || m.goal || (caFocusLine(m) && `${caFocusLine(m)} (from the Board)`);
     if (sub) text.append(this.el('span', 'ca-member-sub', sub));
-    const employee = this.company?.employees?.find(e => e.sessionId === m.sessionId);
+    const employee = this.company?.employees?.find((e) => e.sessionId === m.sessionId);
     const health = this.employeeHealth(employee || { sessionId: m.sessionId }, m);
+    if (state === 'unknown') b.title = `${b.title || m.name} · ${health.detail}`;
     if (health.providerConfirmedHealthy && health.viewerUnavailable) {
       const warning = this.el('span', 'ca-viewer-warning', 'Viewer unavailable');
-      warning.title = 'The agent runtime is running. Its optional terminal viewer is unavailable; automatic terminal input may wait for Reconnect.'; text.append(warning);
+      warning.title =
+        'The agent runtime is running. Its optional terminal viewer is unavailable; automatic terminal input may wait for Reconnect.';
+      text.append(warning);
     }
     b.append(text);
     b.addEventListener('click', () => this.openProfile(m, b));
@@ -7401,34 +10168,80 @@ class ReverieChatApp {
     const appoint = this.canAppointLead(this.room);
     const own = this.app._chatSelf === m.sessionId;
     const remove = manage || own;
-    const entries = [
-      { label: 'Profile', run: () => this.openProfile(m, anchor) },
-    ];
+    const entries = [{ label: 'Profile', run: () => this.openProfile(m, anchor) }];
     if (this.serverFeatures.dms && !caIsDm(this.room)) {
       entries.push({ label: 'Message', run: () => this.startDm(m.sessionId) });
     }
-    const employee = this.company?.employees?.find(entry => entry.sessionId === m.sessionId);
-    if (!this.app._chatSelf && employee && this.company?.canManage === true && this.phoneStatus?.self === 'owner' && this.phoneStatus?.canSetOwn === true) {
-      entries.push({ label: 'Runtime settings', run: () => this.openRuntimeSettings(employee) },
-        { label: 'Edit profile', run: () => this.openEmployeeProfile(employee, () => { this._profilesAt = 0; this.refreshProfiles(); }) });
-      entries.push({ label: 'Wake', disabled: employee.onVacation === true || employee.desiredRunning === false, reason: employee.onVacation || employee.desiredRunning === false ? 'Bring this expert into the office before waking them' : '', tip: 'Start this expert if their agent is not running; a running agent is not interrupted', run: () => this.wakeEmployee(employee) });
-      entries.push({ label: 'Restart session', danger: true, disabled: employee.onVacation === true || employee.desiredRunning === false, reason: employee.onVacation || employee.desiredRunning === false ? 'Bring this expert into the office before restarting' : '', run: () => this.openEmployeeRestart(employee) });
+    const employee = this.company?.employees?.find((entry) => entry.sessionId === m.sessionId);
+    if (
+      !this.app._chatSelf &&
+      employee &&
+      this.company?.canManage === true &&
+      this.phoneStatus?.self === 'owner' &&
+      this.phoneStatus?.canSetOwn === true
+    ) {
+      entries.push(
+        { label: 'Runtime settings', run: () => this.openRuntimeSettings(employee) },
+        {
+          label: 'Edit profile',
+          run: () =>
+            this.openEmployeeProfile(employee, () => {
+              this._profilesAt = 0;
+              this.refreshProfiles();
+            }),
+        }
+      );
+      entries.push({
+        label: 'Wake',
+        disabled: employee.onVacation === true || employee.desiredRunning === false,
+        reason:
+          employee.onVacation || employee.desiredRunning === false
+            ? 'Bring this expert into the office before waking them'
+            : '',
+        tip: 'Start this expert if their agent is not running; a running agent is not interrupted',
+        run: () => this.wakeEmployee(employee),
+      });
+      entries.push({
+        label: 'Restart session',
+        danger: true,
+        disabled: employee.onVacation === true || employee.desiredRunning === false,
+        reason:
+          employee.onVacation || employee.desiredRunning === false
+            ? 'Bring this expert into the office before restarting'
+            : '',
+        run: () => this.openEmployeeRestart(employee),
+      });
       const returning = employee.onVacation === true;
-      entries.push({ label: returning ? 'Enter office' : 'Leave office', success: returning, danger: !returning, run: () => returning ? this.enterEmployeeOffice(employee) : this.leaveEmployeeOffice(employee) });
+      entries.push({
+        label: returning ? 'Enter office' : 'Leave office',
+        success: returning,
+        danger: !returning,
+        run: () => (returning ? this.enterEmployeeOffice(employee) : this.leaveEmployeeOffice(employee)),
+      });
     }
     if (!this.app._chatSelf && employee && this.humanSelf?.role === 'owner')
       entries.push({ label: 'Laptop terminal', run: () => this.openHumanTerminal(employee) });
     if (!caIsDm(this.room)) {
       entries.push(
         { sep: true },
-        { label: m.role === 'coordinator' ? 'Remove lead' : 'Make lead', disabled: !appoint,
+        {
+          label: m.role === 'coordinator' ? 'Remove lead' : 'Make lead',
+          disabled: !appoint,
           tip: appoint ? 'Change the room coordinator seat' : '',
           reason: !appoint ? 'Only the owner or a server Admin can change the channel lead' : '',
-          run: () => this.app._appointChatCoordinator(m.role === 'coordinator' ? null : m.sessionId) },
-        { label: m.voice ? 'Remove voice' : 'Make voice', run: () => this.app._setChatMemberVoice(m.sessionId, !m.voice) },
-        { label: 'Remove from channel', danger: true, disabled: !remove,
+          run: () => this.app._appointChatCoordinator(m.role === 'coordinator' ? null : m.sessionId),
+        },
+        {
+          label: m.voice ? 'Remove voice' : 'Make voice',
+          run: () => this.app._setChatMemberVoice(m.sessionId, !m.voice),
+        },
+        {
+          label: 'Remove from channel',
+          danger: true,
+          disabled: !remove,
           reason: !remove ? 'Only the user or channel lead can remove another member' : '',
-          run: () => this.app._removeChatMember(m) },
+          run: () => this.app._removeChatMember(m),
+        }
       );
     }
     if (!caIsDm(this.room) && this.serverFeatures.replace && !m.postOnly && m.alive === false)
@@ -7437,14 +10250,20 @@ class ReverieChatApp {
     if (this.app.sessions?.has?.(m.sessionId)) {
       entries.push({ label: 'Debug terminal', run: () => this.showDebug(m.sessionId) });
     }
-    entries.push({ sep: true }, { label: 'Copy session id', run: async () => {
-      try {
-        await this.doc.defaultView.navigator.clipboard.writeText(m.sessionId);
-        this.toast('Session id copied', 'info');
-      } catch {
-        this.toast('Could not copy session id', 'error');
+    entries.push(
+      { sep: true },
+      {
+        label: 'Copy session id',
+        run: async () => {
+          try {
+            await this.doc.defaultView.navigator.clipboard.writeText(m.sessionId);
+            this.toast('Session id copied', 'info');
+          } catch {
+            this.toast('Could not copy session id', 'error');
+          }
+        },
       }
-    } });
+    );
     this.openMenu(entries, { at, focus: anchor, label: `${m.name} actions`, className: 'ca-member-menu' });
   }
 
@@ -7461,7 +10280,9 @@ class ReverieChatApp {
   addMemberRow() {
     const wrap = this.el('div', 'ca-add');
     if (!this.canManageMembers()) return wrap;
-    const add = this.button('ca-icon-btn ca-add-button', 'Add an agent', () => this.openMemberPicker(add), { icon: 'plus' });
+    const add = this.button('ca-icon-btn ca-add-button', 'Add an agent', () => this.openMemberPicker(add), {
+      icon: 'plus',
+    });
     add.setAttribute('aria-haspopup', 'menu');
     wrap.append(add);
     return wrap;
@@ -7472,17 +10293,26 @@ class ReverieChatApp {
     this.closeProfile();
     const roomId = this.roomId;
     const inRoom = new Set(this.room.members.map((m) => m.sessionId));
-    const postOnly = new Set((this.rooms || []).flatMap((r) => r.members || []).filter((m) => m.postOnly).map((m) => m.sessionId));
-    const candidates = (this.app._chatCandidateSessions?.(inRoom) || [])
-      .filter((s) => s.mode !== 'shell' && (
-        (Array.isArray(this.serverFeatures.pollingModes) && this.serverFeatures.pollingModes.includes(s.mode)) ||
-        (!postOnly.has(s.id) && !this.app.sessions?.get(s.id)?.postOnly)
-      ));
+    const postOnly = new Set(
+      (this.rooms || [])
+        .flatMap((r) => r.members || [])
+        .filter((m) => m.postOnly)
+        .map((m) => m.sessionId)
+    );
+    const candidates = (this.app._chatCandidateSessions?.(inRoom) || []).filter(
+      (s) =>
+        s.mode !== 'shell' &&
+        ((Array.isArray(this.serverFeatures.pollingModes) && this.serverFeatures.pollingModes.includes(s.mode)) ||
+          (!postOnly.has(s.id) && !this.app.sessions?.get(s.id)?.postOnly))
+    );
     const entries = candidates.map((s) => ({
-      label: s.name, hint: s.mode || '', avatar: s,
+      label: s.name,
+      hint: s.mode || '',
+      avatar: s,
       run: async () => {
         const res = await this.app._chatApi(`/api/chatrooms/${encodeURIComponent(roomId)}/members`, {
-          method: 'POST', body: { sessionId: s.id },
+          method: 'POST',
+          body: { sessionId: s.id },
         });
         if (!res.ok) return this.toast(`Chat: ${res.error}`, 'error');
         if (this.roomId === roomId) {
@@ -7492,7 +10322,11 @@ class ReverieChatApp {
       },
     }));
     const menu = this.openMenu(entries, {
-      at: anchor, focus: anchor, label: 'Add an agent', className: 'ca-member-picker', restoreFocus: true,
+      at: anchor,
+      focus: anchor,
+      label: 'Add an agent',
+      className: 'ca-member-picker',
+      restoreFocus: true,
     });
     const empty = this.el('p', 'ca-hint ca-member-empty', 'No other agents to add');
     empty.setAttribute('role', 'status');
@@ -7506,7 +10340,9 @@ class ReverieChatApp {
       search.addEventListener('input', () => {
         const query = search.value.trim().toLowerCase();
         const rows = [...menu.querySelectorAll('button')];
-        rows.forEach((b, i) => { b.hidden = !`${candidates[i].name} ${candidates[i].mode || ''}`.toLowerCase().includes(query); });
+        rows.forEach((b, i) => {
+          b.hidden = !`${candidates[i].name} ${candidates[i].mode || ''}`.toLowerCase().includes(query);
+        });
         empty.hidden = rows.some((b) => !b.hidden);
         empty.textContent = 'No agents match';
       });
@@ -7517,7 +10353,10 @@ class ReverieChatApp {
   }
 
   fitMemberMenu(menu) {
-    if (menu.classList.contains('ca-popmenu') && this._openMenuRefit) { this._openMenuRefit(); return; }
+    if (menu.classList.contains('ca-popmenu') && this._openMenuRefit) {
+      this._openMenuRefit();
+      return;
+    }
     const w = this.doc.defaultView?.innerWidth || 1024;
     const h = this.doc.defaultView?.innerHeight || 768;
     const r = menu.getBoundingClientRect();
@@ -7551,7 +10390,10 @@ class ReverieChatApp {
 
   /** The owner's employee edit (PUT /api/company/employees/:id); null clears the field. */
   async setPronouns(employeeId, m, pronouns) {
-    const res = await this.app._chatApi(`/api/company/employees/${encodeURIComponent(employeeId)}`, { method: 'PUT', body: { pronouns } });
+    const res = await this.app._chatApi(`/api/company/employees/${encodeURIComponent(employeeId)}`, {
+      method: 'PUT',
+      body: { pronouns },
+    });
     if (!res.ok) return this.toast(`Pronouns: ${res.error}`, 'error');
     this.toast(pronouns ? `${m.name}'s pronouns are now ${pronouns}` : `${m.name}'s pronouns were cleared`, 'info');
     this._profilesAt = 0;
@@ -7562,7 +10404,9 @@ class ReverieChatApp {
     avatar.classList.add('ca-profile-avatar');
     const image = avatar.querySelector('img');
     if (!image) return avatar;
-    const button = this.button('ca-profile-picture', `View ${name}'s picture`, () => this.openProfilePicture(image, name, button));
+    const button = this.button('ca-profile-picture', `View ${name}'s picture`, () =>
+      this.openProfilePicture(image, name, button)
+    );
     button.append(avatar);
     image.addEventListener('error', () => button.replaceWith(avatar));
     return button;
@@ -7575,23 +10419,36 @@ class ReverieChatApp {
     const dialog = this.el('dialog', 'ca-dialog ca-profile-image-view');
     dialog.setAttribute('aria-label', `${name}'s picture`);
     const full = this.el('img', 'ca-profile-full-image');
-    full.src = src; full.alt = `${name}'s picture`; full.referrerPolicy = 'no-referrer';
+    full.src = src;
+    full.alt = `${name}'s picture`;
+    full.referrerPolicy = 'no-referrer';
     const close = this.button('ca-btn', 'Close picture', () => dialog.close(), { text: 'Close' });
     dialog.append(full, close);
     // The profile card's document-level focus trap must not pull focus out of this modal.
-    const profile = this.els.profile, key = this._profileKey, dismiss = this._profileDismiss;
+    const profile = this.els.profile,
+      key = this._profileKey,
+      dismiss = this._profileDismiss;
     if (key) this.doc.removeEventListener('keydown', key, true);
     if (dismiss) this.doc.removeEventListener('pointerdown', dismiss, true);
-    dialog.addEventListener('cancel', event => { event.preventDefault(); dialog.close(); });
-    dialog.addEventListener('close', () => {
-      dialog.remove();
-      if (profile?.isConnected && this.els.profile === profile) {
-        if (key) this.doc.addEventListener('keydown', key, true);
-        if (dismiss) this.doc.addEventListener('pointerdown', dismiss, true);
-      }
-      if (anchor?.isConnected) anchor.focus();
-    }, { once: true });
-    this.doc.body.append(dialog); dialog.showModal(); close.focus();
+    dialog.addEventListener('cancel', (event) => {
+      event.preventDefault();
+      dialog.close();
+    });
+    dialog.addEventListener(
+      'close',
+      () => {
+        dialog.remove();
+        if (profile?.isConnected && this.els.profile === profile) {
+          if (key) this.doc.addEventListener('keydown', key, true);
+          if (dismiss) this.doc.addEventListener('pointerdown', dismiss, true);
+        }
+        if (anchor?.isConnected) anchor.focus();
+      },
+      { once: true }
+    );
+    this.doc.body.append(dialog);
+    dialog.showModal();
+    close.focus();
   }
 
   openProfile(m, anchor) {
@@ -7602,12 +10459,21 @@ class ReverieChatApp {
     card.setAttribute('aria-label', `${m.name} profile`);
     card.style.setProperty('--chat-hue', String(this.app._chatAccent(m.sessionId)));
     const top = this.el('div', 'ca-profile-top');
-    top.append(this.profilePortrait(this.app._chatAvatar(m.sessionId, m.name, { size: 'md', state: this.presenceOf(m) }), m.name));
+    top.append(
+      this.profilePortrait(this.app._chatAvatar(m.sessionId, m.name, { size: 'md', state: this.presenceOf(m) }), m.name)
+    );
     const names = this.el('div', 'ca-profile-names');
     names.append(this.literalText('strong', '', m.name));
-    const employee = (Array.isArray(this.company?.employees) ? this.company.employees : []).find((e) => e?.sessionId === m.sessionId);
+    const employee = (Array.isArray(this.company?.employees) ? this.company.employees : []).find(
+      (e) => e?.sessionId === m.sessionId
+    );
     if (employee) names.append(this.employeeHealthBadge(employee));
-    const tags = [m.role === 'coordinator' ? 'Admin' : 'Member', employee?.onVacation === true ? 'Out of office' : CA_STATE_LABEL[this.presenceOf(m)]].filter(Boolean).join(' · ');
+    const tags = [
+      m.role === 'coordinator' ? 'Admin' : 'Member',
+      employee?.onVacation === true ? 'Out of office' : CA_STATE_LABEL[this.presenceOf(m)],
+    ]
+      .filter(Boolean)
+      .join(' · ');
     names.append(this.el('span', 'ca-profile-sub', tags));
     // Who they are in the company: position and the owner-set pronouns, from the employee record.
     const pronouns = this.pronounsOf(m);
@@ -7617,7 +10483,7 @@ class ReverieChatApp {
     card.append(top);
     const technical = this.profileSection('Technical details');
     technical.classList.add('ca-profile-technical');
-    const diagnosticLabel = label => label === 'Backend' ? 'Harness' : label === 'Account' ? 'Plan' : label;
+    const diagnosticLabel = (label) => (label === 'Backend' ? 'Harness' : label === 'Account' ? 'Plan' : label);
     const kv = (k, v, target = card) => {
       if (!v) return;
       const row = this.el('div', 'ca-kv');
@@ -7629,8 +10495,13 @@ class ReverieChatApp {
     for (const [k, v] of facts.headline) kv(k, v, technical);
     kv('Goal', m.goal, technical);
     kv('Doing', caFocusLine(m), technical);
-    kv('Progress', m.progress ? `${m.progress}${m.updatedAt ? ` · ${this.app._chatAgo(m.updatedAt)}` : ''}` : '', technical);
-    if (this.serverFeatures.notify && !caIsDm(this.room)) kv('Wakes on', m.notify === 'mentions' ? 'Only @mentions, replies and you' : 'What the room says', technical);
+    kv(
+      'Progress',
+      m.progress ? `${m.progress}${m.updatedAt ? ` · ${this.app._chatAgo(m.updatedAt)}` : ''}` : '',
+      technical
+    );
+    if (this.serverFeatures.notify && !caIsDm(this.room))
+      kv('Wakes on', m.notify === 'mentions' ? 'Only @mentions, replies and you' : 'What the room says', technical);
     // What the page already knows is shown at once; the runtime's fuller profile replaces it when it arrives.
     const local = this.el('div', 'ca-profile-local');
     const full = this.el('div', 'ca-profile-full');
@@ -7650,26 +10521,84 @@ class ReverieChatApp {
     section('Usage', facts.usage);
     if (session?.createdAt) {
       section('Session', [
-        ['Started', (globalThis.ReverieTime?.format(session.createdAt) ?? new Date(session.createdAt).toLocaleString('en-US', { timeZone: 'UTC', timeZoneName: 'short' }))],
+        [
+          'Started',
+          globalThis.ReverieTime?.format(session.createdAt) ??
+            new Date(session.createdAt).toLocaleString('en-US', { timeZone: 'UTC', timeZoneName: 'short' }),
+        ],
         ...(session.lastActivityAt ? [['Last active', this.app._chatAgo(session.lastActivityAt)]] : []),
       ]);
     }
     const actions = this.el('div', 'ca-profile-actions');
     if (this.serverFeatures.dms && !caIsDm(this.room))
-      actions.append(this.button('ca-btn is-primary', 'Message', () => { this.closeProfile(); this.startDm(m.sessionId); }, { text: 'Message' }));
-    if (!this.app._chatSelf && employee && this.company?.canManage === true && this.phoneStatus?.self === 'owner' && this.phoneStatus?.canSetOwn === true)
-      actions.append(this.button('ca-btn ca-profile-edit-link', 'Edit profile', () => {
-        this.closeProfile();
-        this.openEmployeeProfile(employee, () => { this._profilesAt = 0; this.refreshProfiles(); });
-      }, { text: 'Edit profile' }));
-    if (!this.app._chatSelf && employee && this.company?.canManage === true && this.humanSelf?.role === 'owner' && ['dead', 'disconnected'].includes(this.employeeHealth(employee).state) && !this.employeeHealth(employee).viewerOnly)
-      actions.append(this.button('ca-btn', `Wake ${employee.name}`, () => { this.closeProfile(); void this.wakeEmployee(employee); }, { text: 'Wake' }),
-        this.button('ca-btn is-danger', `Restart session for ${employee.name}`, () => this.openEmployeeRestart(employee), { text: 'Restart session' }));
+      actions.append(
+        this.button(
+          'ca-btn is-primary',
+          'Message',
+          () => {
+            this.closeProfile();
+            this.startDm(m.sessionId);
+          },
+          { text: 'Message' }
+        )
+      );
+    if (
+      !this.app._chatSelf &&
+      employee &&
+      this.company?.canManage === true &&
+      this.phoneStatus?.self === 'owner' &&
+      this.phoneStatus?.canSetOwn === true
+    )
+      actions.append(
+        this.button(
+          'ca-btn ca-profile-edit-link',
+          'Edit profile',
+          () => {
+            this.closeProfile();
+            this.openEmployeeProfile(employee, () => {
+              this._profilesAt = 0;
+              this.refreshProfiles();
+            });
+          },
+          { text: 'Edit profile' }
+        )
+      );
+    if (
+      !this.app._chatSelf &&
+      employee &&
+      this.company?.canManage === true &&
+      this.humanSelf?.role === 'owner' &&
+      ['dead', 'disconnected'].includes(this.employeeHealth(employee).state) &&
+      !this.employeeHealth(employee).viewerOnly
+    )
+      actions.append(
+        this.button(
+          'ca-btn',
+          `Wake ${employee.name}`,
+          () => {
+            this.closeProfile();
+            void this.wakeEmployee(employee);
+          },
+          { text: 'Wake' }
+        ),
+        this.button(
+          'ca-btn is-danger',
+          `Restart session for ${employee.name}`,
+          () => this.openEmployeeRestart(employee),
+          { text: 'Restart session' }
+        )
+      );
     if (employee && (this.employeeHealth(employee).viewerOnly || this.canReconnectEmployee(employee)))
-      actions.append(this.button('ca-icon-btn ca-reconnect-viewer', 'Reconnect', () => this.reconnectEmployeeViewer(employee), { icon: 'reconnect' }));
+      actions.append(
+        this.button('ca-icon-btn ca-reconnect-viewer', 'Reconnect', () => this.reconnectEmployeeViewer(employee), {
+          icon: 'reconnect',
+        })
+      );
     if (employee && this.canReconnectEmployee(employee)) actions.append(this.viewerStatusButton(employee));
     if (!this.app._chatSelf && employee && this.humanSelf?.role === 'owner')
-      actions.append(this.button('ca-btn', 'Laptop terminal', () => this.openHumanTerminal(employee), { text: 'Laptop terminal' }));
+      actions.append(
+        this.button('ca-btn', 'Laptop terminal', () => this.openHumanTerminal(employee), { text: 'Laptop terminal' })
+      );
     card.append(actions, technical);
     this.presentCard(card, anchor);
     this.loadAgentProfile(m, card, local, full);
@@ -7680,7 +10609,9 @@ class ReverieChatApp {
     try {
       if (!this.doc.defaultView.ReverieOwnerTerminal) throw new Error('Terminal display unavailable');
       await this.doc.defaultView.ReverieOwnerTerminal.open(this.app, employee.id, employee.name);
-    } catch { this.toast('Laptop terminal is unavailable', 'error'); }
+    } catch {
+      this.toast('Laptop terminal is unavailable', 'error');
+    }
   }
 
   /**
@@ -7708,7 +10639,10 @@ class ReverieChatApp {
     const res = await this.app._chatApi(`/api/agents/${encodeURIComponent(m.sessionId)}/profile`);
     if (!card.isConnected) return;
     if (!res.ok) {
-      if (this.company?.employees?.some(employee => employee.sessionId === m.sessionId)) { full.replaceChildren(); return; }
+      if (this.company?.employees?.some((employee) => employee.sessionId === m.sessionId)) {
+        full.replaceChildren();
+        return;
+      }
       full.replaceChildren(this.el('p', 'ca-hint', 'The technical profile is unavailable.'));
       return;
     }
@@ -7720,19 +10654,31 @@ class ReverieChatApp {
       if (head) about.append(this.el('p', 'ca-persona-head', head));
       if (profile.persona.text) about.append(this.el('p', 'ca-persona', profile.persona.text));
       full.append(about);
-    } else if (profile.personaError && !this.company?.employees?.some(employee => employee.sessionId === m.sessionId)) {
+    } else if (
+      profile.personaError &&
+      !this.company?.employees?.some((employee) => employee.sessionId === m.sessionId)
+    ) {
       full.append(this.el('p', 'ca-hint', 'Personality details are unavailable.'));
     }
     for (const sec of profile.sections) {
-      const group = this.profileSection(sec.title === 'Channels' ? `Channels · in ${sec.rows.length} channels` : sec.title);
+      const group = this.profileSection(
+        sec.title === 'Channels' ? `Channels · in ${sec.rows.length} channels` : sec.title
+      );
       for (const [k, v] of sec.rows) {
         const row = this.el('div', 'ca-kv');
-        row.append(this.el('span', 'ca-k', k === 'Backend' ? 'Harness' : k === 'Account' ? 'Plan' : k), sec.title === 'Role' ? this.literalText('span', 'ca-v', v) : this.el('span', 'ca-v', v));
+        row.append(
+          this.el('span', 'ca-k', k === 'Backend' ? 'Harness' : k === 'Account' ? 'Plan' : k),
+          sec.title === 'Role' ? this.literalText('span', 'ca-v', v) : this.el('span', 'ca-v', v)
+        );
         group.append(row);
       }
       full.append(group);
     }
-    if (profile.switchInfo && !this.app._chatSelf && !this.company?.employees?.some(employee => employee.sessionId === m.sessionId)) {
+    if (
+      profile.switchInfo &&
+      !this.app._chatSelf &&
+      !this.company?.employees?.some((employee) => employee.sessionId === m.sessionId)
+    ) {
       const group = this.profileSection('Harness switch');
       group.append(this.switchEl(profile.switchInfo));
       full.append(group);
@@ -7798,8 +10744,9 @@ class ReverieChatApp {
       }
       if (e.key !== 'Tab') return;
       // The card is modal in spirit: Tab and Shift+Tab stay inside it until it is closed.
-      const items = [...card.querySelectorAll('button, summary, select, input:not([type="hidden"]), textarea, a[href]')]
-        .filter((b) => !b.disabled && !b.hidden && !b.closest('details:not([open]) > :not(summary)'));
+      const items = [
+        ...card.querySelectorAll('button, summary, select, input:not([type="hidden"]), textarea, a[href]'),
+      ].filter((b) => !b.disabled && !b.hidden && !b.closest('details:not([open]) > :not(summary)'));
       if (!items.length) return;
       const first = items[0];
       const last = items[items.length - 1];
@@ -7861,11 +10808,17 @@ class ReverieChatApp {
     // Read the settings again now: the server replaces them as a whole, so the copy from startup could be stale.
     const fresh = await this.app._chatApi('/api/company');
     const current = fresh.ok ? fresh.data?.settings : null;
-    if (!current) { if (!quiet) this.toast('Could not read the instance settings, so only this browser has the name', 'error'); return false; }
+    if (!current) {
+      if (!quiet) this.toast('Could not read the instance settings, so only this browser has the name', 'error');
+      return false;
+    }
     this.company = fresh.data;
     const { owner: _owner, ...rest } = current;
     const res = await this.app._chatApi('/api/company/settings', { method: 'PUT', body: { ...rest, ownerName } });
-    if (!res.ok) { if (!quiet) this.toast(`Chat: ${res.error} (the name is saved in this browser only)`, 'error'); return false; }
+    if (!res.ok) {
+      if (!quiet) this.toast(`Chat: ${res.error} (the name is saved in this browser only)`, 'error');
+      return false;
+    }
     this.company = { ...this.company, settings: { ...current, ownerName } };
     this.ownerName = ownerName;
     this.renderUser();
@@ -7877,84 +10830,160 @@ class ReverieChatApp {
    */
   expertVoiceFields(form, pronouns, name, current) {
     const win = this.doc.defaultView;
-    const wrap = this.el('label', 'ca-label'); wrap.append(this.el('span', 'ca-label-text', 'Voice'));
-    const select = this.el('select', 'ca-field'); select.name = 'voice'; select.setAttribute('aria-label', 'Voice');
-    const play = this.el('button', 'ca-btn', 'Play sample'); play.type = 'button';
-    const note = this.el('span', 'ca-hint'); note.setAttribute('role', 'status');
-    wrap.append(select, play, note); form.append(wrap);
-    let serverVoices = [], stop = null;
-    const key = voice => voice ? JSON.stringify({ provider: voice.provider, id: voice.id }) : '';
+    const wrap = this.el('label', 'ca-label');
+    wrap.append(this.el('span', 'ca-label-text', 'Voice'));
+    const select = this.el('select', 'ca-field');
+    select.name = 'voice';
+    select.setAttribute('aria-label', 'Voice');
+    const play = this.el('button', 'ca-btn', 'Play sample');
+    play.type = 'button';
+    const note = this.el('span', 'ca-hint');
+    note.setAttribute('role', 'status');
+    wrap.append(select, play, note);
+    form.append(wrap);
+    let serverVoices = [],
+      stop = null;
+    const key = (voice) => (voice ? JSON.stringify({ provider: voice.provider, id: voice.id }) : '');
     const populate = () => {
       const previous = select.options.length ? select.value : key(current);
-      const automatic = this.el('option', '', 'Automatic (based on profile)'); automatic.value = '';
+      const automatic = this.el('option', '', 'Automatic (based on profile)');
+      automatic.value = '';
       select.replaceChildren(automatic);
-      const browser = (win.speechSynthesis?.getVoices?.() || []).map(voice => ({ provider: 'browser', id: voice.voiceURI || voice.name, label: voice.name, language: voice.lang }));
-      const options = new Map([...serverVoices, ...browser].map(voice => [key(voice), voice]));
+      const browser = (win.speechSynthesis?.getVoices?.() || []).map((voice) => ({
+        provider: 'browser',
+        id: voice.voiceURI || voice.name,
+        label: voice.name,
+        language: voice.lang,
+      }));
+      const options = new Map([...serverVoices, ...browser].map((voice) => [key(voice), voice]));
       if (previous && !options.has(previous)) {
-        try { const voice = JSON.parse(previous); options.set(previous, { ...voice, label: `${voice.id} (saved voice)` }); } catch { /* Invalid saved data stays automatic. */ }
+        try {
+          const voice = JSON.parse(previous);
+          options.set(previous, { ...voice, label: `${voice.id} (saved voice)` });
+        } catch {
+          /* Invalid saved data stays automatic. */
+        }
       }
       for (const [id, voice] of options) {
-        const option = this.el('option', '', `${voice.label}${voice.language ? ` · ${voice.language}` : ''} (${voice.provider === 'browser' ? 'this device' : voice.provider})`);
-        option.value = id; select.append(option);
+        const option = this.el(
+          'option',
+          '',
+          `${voice.label}${voice.language ? ` · ${voice.language}` : ''} (${voice.provider === 'browser' ? 'this device' : voice.provider})`
+        );
+        option.value = id;
+        select.append(option);
       }
       select.value = previous;
-      note.textContent = options.size ? 'Pronouns may suggest a default. Your selected voice takes precedence.' : 'No voices available yet. Connect a voice service or enable speech voices on this device.';
+      note.textContent = options.size
+        ? 'Pronouns may suggest a default. Your selected voice takes precedence.'
+        : 'No voices available yet. Connect a voice service or enable speech voices on this device.';
     };
-    const value = () => { try { return select.value ? JSON.parse(select.value) : null; } catch { return null; } };
-    const done = () => { stop = null; play.textContent = 'Play sample'; };
+    const value = () => {
+      try {
+        return select.value ? JSON.parse(select.value) : null;
+      } catch {
+        return null;
+      }
+    };
+    const done = () => {
+      stop = null;
+      play.textContent = 'Play sample';
+    };
     select.addEventListener('focus', populate);
     play.addEventListener('click', async () => {
-      if (stop) { stop(); done(); return; }
+      if (stop) {
+        stop();
+        done();
+        return;
+      }
       note.textContent = '';
       const selected = value();
       try {
         if (!selected || selected.provider === 'browser') {
           const synth = win.speechSynthesis;
-          if (!synth || !win.SpeechSynthesisUtterance) throw new Error('Speech voices are not available on this device.');
+          if (!synth || !win.SpeechSynthesisUtterance)
+            throw new Error('Speech voices are not available on this device.');
           const voices = synth.getVoices();
-          const voice = selected ? voices.find(voice => (voice.voiceURI || voice.name) === selected.id) : win.carModePickVoice?.(voices, '', name.value || 'expert', pronouns.value);
-          if (selected && !voice) throw new Error('This saved voice is not installed on this device. Choose another voice.');
-          const utterance = new win.SpeechSynthesisUtterance('Hello! I am ready to help. This is a sample of my voice.');
+          const voice = selected
+            ? voices.find((voice) => (voice.voiceURI || voice.name) === selected.id)
+            : win.carModePickVoice?.(voices, '', name.value || 'expert', pronouns.value);
+          if (selected && !voice)
+            throw new Error('This saved voice is not installed on this device. Choose another voice.');
+          const utterance = new win.SpeechSynthesisUtterance(
+            'Hello! I am ready to help. This is a sample of my voice.'
+          );
           if (voice) utterance.voice = voice;
-          utterance.onend = done; utterance.onerror = () => { done(); note.textContent = 'The sample could not be played.'; };
-          stop = () => synth.cancel(); play.textContent = 'Stop sample'; synth.speak(utterance);
+          utterance.onend = done;
+          utterance.onerror = () => {
+            done();
+            note.textContent = 'The sample could not be played.';
+          };
+          stop = () => synth.cancel();
+          play.textContent = 'Stop sample';
+          synth.speak(utterance);
         } else {
           play.disabled = true;
           const result = await this.app._chatApi('/api/voice/preview', { method: 'POST', body: { voice: selected } });
           if (!result.ok || !result.data?.audioUrl) throw new Error(result.error || 'The voice sample is unavailable.');
           const audio = new win.Audio(result.data.audioUrl);
-          audio.onended = done; audio.onerror = () => { done(); note.textContent = 'The sample could not be played.'; };
-          stop = () => audio.pause(); play.textContent = 'Stop sample'; await audio.play();
+          audio.onended = done;
+          audio.onerror = () => {
+            done();
+            note.textContent = 'The sample could not be played.';
+          };
+          stop = () => audio.pause();
+          play.textContent = 'Stop sample';
+          await audio.play();
         }
-      } catch (error) { done(); note.textContent = error.message || 'The sample could not be played.'; }
-      finally { play.disabled = false; }
+      } catch (error) {
+        done();
+        note.textContent = error.message || 'The sample could not be played.';
+      } finally {
+        play.disabled = false;
+      }
     });
     populate();
-    void this.app._chatApi('/api/voice/options').then(result => {
-      if (result.ok && Array.isArray(result.data?.voices)) serverVoices = result.data.voices;
-      populate();
-    }).catch(() => {});
+    void this.app
+      ._chatApi('/api/voice/options')
+      .then((result) => {
+        if (result.ok && Array.isArray(result.data?.voices)) serverVoices = result.data.voices;
+        populate();
+      })
+      .catch(() => {});
     return { value };
   }
 
   expertInitial(name) {
-    return Array.from((name || '').trim())[0]?.toUpperCase().slice(0, 2) || '?';
+    return (
+      Array.from((name || '').trim())[0]
+        ?.toUpperCase()
+        .slice(0, 2) || '?'
+    );
   }
 
   /** Pictures are optional; initials provide a quiet fallback. */
   expertAppearanceFields(form, currentPhoto = '', { name, random = false, avoidPhotos = [], onPictureChange } = {}) {
-    let intent = 0, converting = null;
-    const picture = this.pictureField('Profile picture', currentPhoto, value => onPictureChange?.(value), {
-      fallback: () => this.expertInitial(name?.value), alwaysRemove: true,
-      onIntent: () => { intent++; converting = null; },
+    let intent = 0,
+      converting = null;
+    const picture = this.pictureField('Profile picture', currentPhoto, (value) => onPictureChange?.(value), {
+      fallback: () => this.expertInitial(name?.value),
+      alwaysRemove: true,
+      onIntent: () => {
+        intent++;
+        converting = null;
+      },
     });
     const [upload, initials] = picture.wrap.querySelectorAll('button');
-    upload.textContent = 'Upload picture'; initials.textContent = 'Use initials';
+    upload.textContent = 'Upload picture';
+    initials.textContent = 'Use initials';
     name?.addEventListener?.('input', picture.refresh);
     form.append(picture.wrap);
     const select = async (avatar, automatic = false) => {
       const ticket = automatic ? intent : ++intent;
-      if (!automatic) { converting = null; picture.cancelPending(); }
+      if (!automatic) {
+        converting = null;
+        picture.cancelPending();
+      }
       try {
         const response = await this.doc.defaultView.fetch(avatar.src);
         if (!response.ok) throw new Error('Picture unavailable');
@@ -7967,13 +10996,17 @@ class ReverieChatApp {
         onPictureChange?.(image);
         return true;
       } catch {
-        if (!automatic && ticket === intent) this.toast('The avatar could not be loaded. Try again or upload a picture.', 'error');
+        if (!automatic && ticket === intent)
+          this.toast('The avatar could not be loaded. Try again or upload a picture.', 'error');
         return false;
-      } finally { if (converting === ticket) converting = null; }
+      } finally {
+        if (converting === ticket) converting = null;
+      }
     };
     const initialIntent = intent;
     const win = this.doc.defaultView;
-    let catalog = null, catalogRequest = null;
+    let catalog = null,
+      catalogRequest = null;
     const cancelCatalog = () => {
       const previous = catalogRequest;
       catalogRequest = null;
@@ -7986,79 +11019,156 @@ class ReverieChatApp {
       const request = { promise: null, cancel: null };
       catalogRequest = request;
       let rejectDeadline;
-      const deadline = new Promise((_, reject) => { rejectDeadline = reject; });
-      request.cancel = () => { rejectDeadline(new Error('Avatar catalog cancelled')); controller.abort(); };
+      const deadline = new Promise((_, reject) => {
+        rejectDeadline = reject;
+      });
+      request.cancel = () => {
+        rejectDeadline(new Error('Avatar catalog cancelled'));
+        controller.abort();
+      };
       const timer = win.setTimeout(() => {
         if (catalogRequest !== request) return;
-        rejectDeadline(new Error('Avatar catalog deadline')); controller.abort();
+        rejectDeadline(new Error('Avatar catalog deadline'));
+        controller.abort();
       }, 5000);
       let fetching;
-      try { fetching = win.fetch('/assets/avatars/pack-manifest.json', { cache: 'no-cache', signal: controller.signal }); }
-      catch (failure) { fetching = Promise.reject(failure); }
-      request.promise = Promise.race([fetching, deadline]).then(async response => {
-        if (!response.ok) throw new Error('Avatar catalog unavailable');
-        const manifest = await Promise.race([response.json(), deadline]);
-        // The manifest decides what is offered: every listed pack avatar except its one "withheld" line.
-        const withheld = new Set(Array.isArray(manifest.withheld) ? manifest.withheld : []);
-        const avatars = (Array.isArray(manifest.avatars) ? manifest.avatars : []).filter(avatar => avatar && /^pack-(?:0[1-9]|[1-9][0-9]|1[0-4][0-9]|15[01])$/.test(avatar.id) && !withheld.has(avatar.id) && typeof avatar.src === 'string' && avatar.src.split('?')[0] === `/assets/avatars/${avatar.id}.png` && /^\/assets\/avatars\/pack-[0-9]{2,3}\.png(?:\?v=[a-f0-9]{64})?$/.test(avatar.src))
-          .map(avatar => ({ ...avatar, thumb: typeof avatar.thumb === 'string' && avatar.thumb === `/assets/avatars/thumbs/${avatar.id}.webp${avatar.thumb.slice(avatar.thumb.indexOf('?'))}` && /^\/assets\/avatars\/thumbs\/pack-[0-9]{2,3}\.webp\?v=[a-f0-9]{64}$/.test(avatar.thumb) ? avatar.thumb : avatar.src }));
-        if (catalogRequest !== request || !form.isConnected) throw new Error('Avatar catalog cancelled');
-        if (!avatars.length) throw new Error('Avatar catalog unavailable');
-        catalog = avatars;
-        return avatars;
-      }).finally(() => {
-        win.clearTimeout(timer);
-        if (catalogRequest === request) catalogRequest = null;
-      });
+      try {
+        fetching = win.fetch('/assets/avatars/pack-manifest.json', { cache: 'no-cache', signal: controller.signal });
+      } catch (failure) {
+        fetching = Promise.reject(failure);
+      }
+      request.promise = Promise.race([fetching, deadline])
+        .then(async (response) => {
+          if (!response.ok) throw new Error('Avatar catalog unavailable');
+          const manifest = await Promise.race([response.json(), deadline]);
+          // The manifest decides what is offered: every listed pack avatar except its one "withheld" line.
+          const withheld = new Set(Array.isArray(manifest.withheld) ? manifest.withheld : []);
+          const avatars = (Array.isArray(manifest.avatars) ? manifest.avatars : [])
+            .filter(
+              (avatar) =>
+                avatar &&
+                /^pack-(?:0[1-9]|[1-9][0-9]|1[0-4][0-9]|15[01])$/.test(avatar.id) &&
+                !withheld.has(avatar.id) &&
+                typeof avatar.src === 'string' &&
+                avatar.src.split('?')[0] === `/assets/avatars/${avatar.id}.png` &&
+                /^\/assets\/avatars\/pack-[0-9]{2,3}\.png(?:\?v=[a-f0-9]{64})?$/.test(avatar.src)
+            )
+            .map((avatar) => ({
+              ...avatar,
+              thumb:
+                typeof avatar.thumb === 'string' &&
+                avatar.thumb ===
+                  `/assets/avatars/thumbs/${avatar.id}.webp${avatar.thumb.slice(avatar.thumb.indexOf('?'))}` &&
+                /^\/assets\/avatars\/thumbs\/pack-[0-9]{2,3}\.webp\?v=[a-f0-9]{64}$/.test(avatar.thumb)
+                  ? avatar.thumb
+                  : avatar.src,
+            }));
+          if (catalogRequest !== request || !form.isConnected) throw new Error('Avatar catalog cancelled');
+          if (!avatars.length) throw new Error('Avatar catalog unavailable');
+          catalog = avatars;
+          return avatars;
+        })
+        .finally(() => {
+          win.clearTimeout(timer);
+          if (catalogRequest === request) catalogRequest = null;
+        });
       return request.promise;
     };
-    void loadCatalog().then(avatars => {
-      const unused = avatars.filter(avatar => !avoidPhotos.includes(avatar.src));
-      if (random && unused.length && intent === initialIntent && !picture.value() && form.isConnected) void select(unused[Math.floor(Math.random() * unused.length)], true);
-    }).catch(() => {}); // One prefetch only; failures retry on explicit open/Retry.
-    const choose = this.button('ca-btn', 'Choose avatar', async () => {
-      if (this.doc.querySelector('.ca-avatar-dialog')) return;
-      intent++; converting = null; picture.cancelPending();
-      const dialog = this.el('dialog', 'ca-dialog ca-avatar-dialog');
-      dialog.setAttribute('aria-label', 'Choose avatar');
-      dialog.append(this.el('h2', '', 'Choose an avatar'));
-      const gallery = this.el('div', 'ca-expert-portraits');
-      gallery.setAttribute('role', 'group'); gallery.setAttribute('aria-label', 'Expert illustrations');
-      const note = this.el('p', 'ca-hint', 'Loading avatars…'); note.setAttribute('role', 'status');
-      let attempt = 0;
-      const close = () => { intent++; converting = null; dialog.close(); };
-      const cancel = this.button('ca-btn', 'Cancel', close, { text: 'Cancel' });
-      const retry = this.button('ca-btn', 'Retry avatars', () => { if (!retry.disabled) void populate(); }, { text: 'Retry' });
-      retry.hidden = true;
-      const actions = this.el('div', 'ca-dialog-actions'); actions.append(retry, cancel);
-      dialog.append(note, gallery, actions);
-      dialog.addEventListener('cancel', event => { event.preventDefault(); close(); });
-      dialog.addEventListener('close', () => { attempt++; intent++; converting = null; cancelCatalog(); dialog.remove(); choose.focus(); });
-      this.doc.body.append(dialog); dialog.showModal(); cancel.focus();
-      const populate = async () => {
-        const ticket = ++attempt;
-        retry.disabled = true; retry.hidden = true; gallery.replaceChildren();
-        note.textContent = 'Loading avatars…';
-        try {
-          const avatars = await loadCatalog();
-          if (ticket !== attempt || !dialog.isConnected || !form.isConnected) return;
-          note.textContent = '';
-          for (const avatar of avatars) {
-            const button = this.button('ca-btn', `Use ${avatar.name}`, async () => { if (await select(avatar) && dialog.isConnected) dialog.close(); });
-            button.title = avatar.name;
-            const image = this.el('img'); image.src = avatar.thumb; image.alt = ''; image.loading = 'lazy'; image.width = image.height = 56;
-            button.append(image); gallery.append(button);
+    void loadCatalog()
+      .then((avatars) => {
+        const unused = avatars.filter((avatar) => !avoidPhotos.includes(avatar.src));
+        if (random && unused.length && intent === initialIntent && !picture.value() && form.isConnected)
+          void select(unused[Math.floor(Math.random() * unused.length)], true);
+      })
+      .catch(() => {}); // One prefetch only; failures retry on explicit open/Retry.
+    const choose = this.button(
+      'ca-btn',
+      'Choose avatar',
+      async () => {
+        if (this.doc.querySelector('.ca-avatar-dialog')) return;
+        intent++;
+        converting = null;
+        picture.cancelPending();
+        const dialog = this.el('dialog', 'ca-dialog ca-avatar-dialog');
+        dialog.setAttribute('aria-label', 'Choose avatar');
+        dialog.append(this.el('h2', '', 'Choose an avatar'));
+        const gallery = this.el('div', 'ca-expert-portraits');
+        gallery.setAttribute('role', 'group');
+        gallery.setAttribute('aria-label', 'Expert illustrations');
+        const note = this.el('p', 'ca-hint', 'Loading avatars…');
+        note.setAttribute('role', 'status');
+        let attempt = 0;
+        const close = () => {
+          intent++;
+          converting = null;
+          dialog.close();
+        };
+        const cancel = this.button('ca-btn', 'Cancel', close, { text: 'Cancel' });
+        const retry = this.button(
+          'ca-btn',
+          'Retry avatars',
+          () => {
+            if (!retry.disabled) void populate();
+          },
+          { text: 'Retry' }
+        );
+        retry.hidden = true;
+        const actions = this.el('div', 'ca-dialog-actions');
+        actions.append(retry, cancel);
+        dialog.append(note, gallery, actions);
+        dialog.addEventListener('cancel', (event) => {
+          event.preventDefault();
+          close();
+        });
+        dialog.addEventListener('close', () => {
+          attempt++;
+          intent++;
+          converting = null;
+          cancelCatalog();
+          dialog.remove();
+          choose.focus();
+        });
+        this.doc.body.append(dialog);
+        dialog.showModal();
+        cancel.focus();
+        const populate = async () => {
+          const ticket = ++attempt;
+          retry.disabled = true;
+          retry.hidden = true;
+          gallery.replaceChildren();
+          note.textContent = 'Loading avatars…';
+          try {
+            const avatars = await loadCatalog();
+            if (ticket !== attempt || !dialog.isConnected || !form.isConnected) return;
+            note.textContent = '';
+            for (const avatar of avatars) {
+              const button = this.button('ca-btn', `Use ${avatar.name}`, async () => {
+                if ((await select(avatar)) && dialog.isConnected) dialog.close();
+              });
+              button.title = avatar.name;
+              const image = this.el('img');
+              image.src = avatar.thumb;
+              image.alt = '';
+              image.loading = 'lazy';
+              image.width = image.height = 56;
+              button.append(image);
+              gallery.append(button);
+            }
+          } catch (failure) {
+            if (ticket !== attempt || !dialog.isConnected || !form.isConnected) return;
+            note.textContent =
+              failure?.message === 'Avatar catalog deadline'
+                ? 'Avatars took too long to load. Retry, upload a picture, or use initials.'
+                : 'Avatars are unavailable. Retry, upload a picture, or use initials.';
+            retry.hidden = false;
+          } finally {
+            if (ticket === attempt && dialog.isConnected) retry.disabled = false;
           }
-        } catch (failure) {
-          if (ticket !== attempt || !dialog.isConnected || !form.isConnected) return;
-          note.textContent = failure?.message === 'Avatar catalog deadline'
-            ? 'Avatars took too long to load. Retry, upload a picture, or use initials.'
-            : 'Avatars are unavailable. Retry, upload a picture, or use initials.';
-          retry.hidden = false;
-        } finally { if (ticket === attempt && dialog.isConnected) retry.disabled = false; }
-      };
-      void populate();
-    }, { text: 'Choose avatar' });
+        };
+        void populate();
+      },
+      { text: 'Choose avatar' }
+    );
     initials.before(choose);
     return { picture, pending: () => converting !== null || picture.pending() };
   }
@@ -8071,40 +11181,78 @@ class ReverieChatApp {
       if (!match) return false;
       const binary = this.doc.defaultView.atob(match[2]);
       const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
-      return (await this.doc.defaultView.fetch(url, { method: 'POST', headers: { 'Content-Type': match[1] }, body: bytes })).ok;
-    } catch { return false; }
+      return (
+        await this.doc.defaultView.fetch(url, { method: 'POST', headers: { 'Content-Type': match[1] }, body: bytes })
+      ).ok;
+    } catch {
+      return false;
+    }
   }
 
-  leaveEmployeeOffice(employee, onSaved) { return this.changeEmployeeOffice(employee, true, onSaved); }
+  leaveEmployeeOffice(employee, onSaved) {
+    return this.changeEmployeeOffice(employee, true, onSaved);
+  }
 
-  enterEmployeeOffice(employee, onSaved) { return this.changeEmployeeOffice(employee, false, onSaved); }
+  enterEmployeeOffice(employee, onSaved) {
+    return this.changeEmployeeOffice(employee, false, onSaved);
+  }
 
   async changeEmployeeOffice(employee, leaving, onSaved) {
     this._changingOfficeEmployees ||= new Set();
-    if (this._changingOfficeEmployees.has(employee.id) || (leaving ? employee.onVacation === true : employee.onVacation !== true)) return;
+    if (
+      this._changingOfficeEmployees.has(employee.id) ||
+      (leaving ? employee.onVacation === true : employee.onVacation !== true)
+    )
+      return;
     this._changingOfficeEmployees.add(employee.id);
     let applied = false;
     try {
       const auth = await this.app._chatApi('/api/chatrooms/phone-status');
-      if (this.app._chatSelf || this.company?.canManage !== true || !auth.ok || auth.data?.self !== 'owner' || auth.data?.canSetOwn !== true)
+      if (
+        this.app._chatSelf ||
+        this.company?.canManage !== true ||
+        !auth.ok ||
+        auth.data?.self !== 'owner' ||
+        auth.data?.canSetOwn !== true
+      )
         return this.toast('Sign in as the owner to change an expert’s office status.', 'error');
       const label = leaving ? 'Leave office' : 'Enter office';
-      const question = leaving ? `Have ${employee.name} leave the office? This stops their agent and laptop until you bring them back. Active work is interrupted without a fresh handoff. Their identity, saved conversation, memory, files and room membership are kept.` : `Bring ${employee.name} into the office? This starts their laptop and resumes their agent using the current plan. Their identity, saved conversation, memory, files and room membership are kept.`;
-      if (!await this.confirmCompanyAction(employee.name, question, label)) return;
-      const result = await this.app._chatApi(`/api/company/employees/${encodeURIComponent(employee.id)}/vacation`, { method: 'POST', body: { enabled: leaving } });
-      if (!result.ok) return this.toast(result.error || `Could not ${leaving ? 'stop' : 'return'} ${employee.name}.`, 'error');
+      const question = leaving
+        ? `Have ${employee.name} leave the office? This stops their agent and laptop until you bring them back. Active work is interrupted without a fresh handoff. Their identity, saved conversation, memory, files and room membership are kept.`
+        : `Bring ${employee.name} into the office? This starts their laptop and resumes their agent using the current plan. Their identity, saved conversation, memory, files and room membership are kept.`;
+      if (!(await this.confirmCompanyAction(employee.name, question, label))) return;
+      const result = await this.app._chatApi(`/api/company/employees/${encodeURIComponent(employee.id)}/vacation`, {
+        method: 'POST',
+        body: { enabled: leaving },
+      });
+      if (!result.ok)
+        return this.toast(result.error || `Could not ${leaving ? 'stop' : 'return'} ${employee.name}.`, 'error');
       if (result.data?.employee?.id !== employee.id || result.data.employee.onVacation !== leaving)
         return this.toast(`${label} could not be confirmed. Check Company for the current state.`, 'error');
       applied = true;
       employee.onVacation = leaving;
       if (leaving) employee.desiredRunning = false;
-      await this.loadOwner(); await onSaved?.();
+      await this.loadOwner();
+      await onSaved?.();
       const startup = result.data?.startup;
-      const detail = leaving ? 'is out of office.' : startup?.state === 'started' ? 'is in the office. Agent started.' : startup?.state === 'failed' ? 'is in the office, but startup failed. Use Restart session to retry.' : 'is in the office. Check their status for startup progress.';
+      const detail = leaving
+        ? 'is out of office.'
+        : startup?.state === 'started'
+          ? 'is in the office. Agent started.'
+          : startup?.state === 'failed'
+            ? 'is in the office, but startup failed. Use Restart session to retry.'
+            : 'is in the office. Check their status for startup progress.';
       this.toast(`${employee.name} ${detail}`, startup?.state === 'failed' ? 'error' : 'info');
     } catch {
-      this.toast(applied ? `${employee.name}’s office status was saved. Reopen Company to refresh the view.` : 'Office status could not be confirmed. Check Company for the current state.', 'error');
-    } finally { this._changingOfficeEmployees.delete(employee.id); }
+      this.toast(
+        applied
+          ? `${employee.name}’s office status was saved. Reopen Company to refresh the view.`
+          : 'Office status could not be confirmed. Check Company for the current state.',
+        'error'
+      );
+    } finally {
+      this._changingOfficeEmployees.delete(employee.id);
+    }
   }
 
   /**
@@ -8114,106 +11262,244 @@ class ReverieChatApp {
    */
   async wakeEmployee(employee, onSaved) {
     this._wakingEmployees ||= new Set();
-    if (this._wakingEmployees.has(employee.id)) return this.toast(`A wake is already in progress for ${employee.name}.`, 'info');
+    if (this._wakingEmployees.has(employee.id))
+      return this.toast(`A wake is already in progress for ${employee.name}.`, 'info');
     this._wakingEmployees.add(employee.id);
-    const unconfirmed = () => this.toast(`Wake for ${employee.name} could not be confirmed. Check their status before trying again.`, 'error');
+    const unconfirmed = () =>
+      this.toast(`Wake for ${employee.name} could not be confirmed. Check their status before trying again.`, 'error');
     try {
       let result;
-      try { result = await this.app._chatApi(`/api/company/employees/${encodeURIComponent(employee.id)}/wake`, { method: 'POST', body: {} }); }
-      catch { return unconfirmed(); }
+      try {
+        result = await this.app._chatApi(`/api/company/employees/${encodeURIComponent(employee.id)}/wake`, {
+          method: 'POST',
+          body: {},
+        });
+      } catch {
+        return unconfirmed();
+      }
       // A missing HTTP response cannot tell us whether the POST committed.
-      if (!result.ok) return result.status ? this.toast(result.error || `${employee.name} could not be woken.`, 'error') : unconfirmed();
+      if (!result.ok)
+        return result.status
+          ? this.toast(result.error || `${employee.name} could not be woken.`, 'error')
+          : unconfirmed();
       const recovery = result.data?.recovery;
-      const ours = Array.isArray(recovery?.awakened) && Array.isArray(recovery?.skipped) && recovery.awakened.length + recovery.skipped.length <= 1
-        && recovery.awakened.every(id => id === employee.id)
-        && recovery.skipped.every(skip => skip?.employeeId === employee.id && typeof skip.reason === 'string' && skip.reason.length > 0 && skip.reason.length <= 200);
+      const ours =
+        Array.isArray(recovery?.awakened) &&
+        Array.isArray(recovery?.skipped) &&
+        recovery.awakened.length + recovery.skipped.length <= 1 &&
+        recovery.awakened.every((id) => id === employee.id) &&
+        recovery.skipped.every(
+          (skip) =>
+            skip?.employeeId === employee.id &&
+            typeof skip.reason === 'string' &&
+            skip.reason.length > 0 &&
+            skip.reason.length <= 200
+        );
       if (!ours) return unconfirmed();
-      try { await this.loadOwner(); await onSaved?.(); } catch { /* the wake itself is settled; the view refreshes on the next load */ }
-      if (recovery.awakened.length) return this.toast(`Woke ${employee.name}. Check that their terminal is ready.`, 'info');
-      if (!recovery.skipped.length) return this.toast(`${employee.name} is already running. Nothing was started.`, 'info');
+      try {
+        await this.loadOwner();
+        await onSaved?.();
+      } catch {
+        /* the wake itself is settled; the view refreshes on the next load */
+      }
+      if (recovery.awakened.length)
+        return this.toast(`Woke ${employee.name}. Check that their terminal is ready.`, 'info');
+      if (!recovery.skipped.length)
+        return this.toast(`${employee.name} is already running. Nothing was started.`, 'info');
       const reason = recovery.skipped[0].reason;
       // The start was attempted and its outcome is unknown: not "not woken", and never offered as a retry.
-      if (reason === 'start-unconfirmed') return this.toast(`Startup of ${employee.name} could not be confirmed. Check their status before trying again.`, 'error');
+      if (reason === 'start-unconfirmed')
+        return this.toast(
+          `Startup of ${employee.name} could not be confirmed. Check their status before trying again.`,
+          'error'
+        );
       this.toast(`${employee.name} was not woken: ${CA_WAKE_SKIPS[reason] ?? reason}.`, 'error');
-    } finally { this._wakingEmployees.delete(employee.id); }
+    } finally {
+      this._wakingEmployees.delete(employee.id);
+    }
   }
 
   async openEmployeeRestart(employee, onSaved) {
     const existing = this.doc.querySelector('.ca-employee-restart');
-    if (existing) { existing.querySelector('button')?.focus(); return; }
+    if (existing) {
+      existing.querySelector('button')?.focus();
+      return;
+    }
     this._restartingEmployees ||= new Set();
-    if (this._restartingEmployees.has(employee.id)) return this.toast(`A restart is already in progress for ${employee.name}.`, 'info');
+    if (this._restartingEmployees.has(employee.id))
+      return this.toast(`A restart is already in progress for ${employee.name}.`, 'info');
     const dialog = this.el('dialog', 'ca-dialog ca-company-confirm ca-employee-restart');
     dialog.setAttribute('aria-label', `Restart session: ${employee.name}`);
-    dialog.append(this.literalText('h2', '', `Restart session · ${employee.name}`), this.literalText('p', 'ca-dialog-note', `Restart ${employee.name} using their saved runtime settings? Active work is interrupted without a fresh handoff. Their expert identity, saved conversation, memory, files and channel memberships stay the same. Ask them to checkpoint first if the current work matters.`));
+    dialog.append(
+      this.literalText('h2', '', `Restart session · ${employee.name}`),
+      this.literalText(
+        'p',
+        'ca-dialog-note',
+        `Restart ${employee.name} using their saved runtime settings? Active work is interrupted without a fresh handoff. Their expert identity, saved conversation, memory, files and channel memberships stay the same. Ask them to checkpoint first if the current work matters.`
+      )
+    );
     const recoverLabel = this.el('label', 'ca-hint');
-    const recover = this.doc.createElement('input'); recover.type = 'checkbox'; recover.disabled = true;
-    recoverLabel.append(recover, this.doc.createTextNode(' Recover a stalled session. Only use if the expert has stopped responding; running tasks, an open dialog or input within two minutes prevent recovery.'));
+    const recover = this.doc.createElement('input');
+    recover.type = 'checkbox';
+    recover.disabled = true;
+    recoverLabel.append(
+      recover,
+      this.doc.createTextNode(
+        ' Recover a stalled session. Only use if the expert has stopped responding; running tasks, an open dialog or input within two minutes prevent recovery.'
+      )
+    );
     dialog.append(recoverLabel);
     const health = this.employeeHealth(employee);
-    const restartHealth = this.employeeHealthBadge(employee); restartHealth.dataset.healthRole = 'note'; restartHealth.setAttribute('role', 'note');
+    const restartHealth = this.employeeHealthBadge(employee);
+    restartHealth.dataset.healthRole = 'note';
+    restartHealth.setAttribute('role', 'note');
     dialog.append(restartHealth);
     if (health.state === 'dead') recoverLabel.hidden = true;
-    const error = this.el('p', 'ca-company-error'); error.setAttribute('role', 'alert');
-    const status = this.el('p', 'ca-hint', 'Checking owner access…'); status.setAttribute('role', 'status');
+    const error = this.el('p', 'ca-company-error');
+    error.setAttribute('role', 'alert');
+    const status = this.el('p', 'ca-hint', 'Checking owner access…');
+    status.setAttribute('role', 'status');
     const actions = this.el('div', 'ca-dialog-actions');
-    const cancel = this.button('ca-btn', 'Cancel', () => dialog.close(), { text: 'Cancel' }); cancel.autofocus = true;
+    const cancel = this.button('ca-btn', 'Cancel', () => dialog.close(), { text: 'Cancel' });
+    cancel.autofocus = true;
     let unconfirmed = false;
     const showUnconfirmed = () => {
       unconfirmed = true;
       error.textContent = '';
-      status.textContent = 'Restart could not be confirmed. The expert may already be restarting. Check their status before trying again.';
-      cancel.textContent = 'Close'; cancel.setAttribute('aria-label', 'Close');
+      status.textContent =
+        'Restart could not be confirmed. The expert may already be restarting. Check their status before trying again.';
+      cancel.textContent = 'Close';
+      cancel.setAttribute('aria-label', 'Close');
       recover.disabled = true;
     };
-    const restart = this.button('ca-btn is-primary is-danger', 'Restart session', async () => {
-      if (restart.disabled || this._restartingEmployees.has(employee.id)) return;
-      this._restartingEmployees.add(employee.id); restart.disabled = true; error.textContent = ''; status.textContent = 'Restarting session…';
-      try {
-        const result = await this.app._chatApi(`/api/company/employees/${encodeURIComponent(employee.id)}/restart`, { method: 'POST', body: recover.checked ? { forceRestart: true, confirmSessionId: employee.sessionId } : {} });
-        if (!result.ok) {
-          // A missing HTTP response cannot tell us whether the POST committed.
-          if (!result.status) showUnconfirmed();
-          else { error.textContent = result.error || 'The session could not restart. Check Runtime settings, then try again.'; status.textContent = ''; }
-          return;
+    const restart = this.button(
+      'ca-btn is-primary is-danger',
+      'Restart session',
+      async () => {
+        if (restart.disabled || this._restartingEmployees.has(employee.id)) return;
+        this._restartingEmployees.add(employee.id);
+        restart.disabled = true;
+        error.textContent = '';
+        status.textContent = 'Restarting session…';
+        try {
+          const result = await this.app._chatApi(`/api/company/employees/${encodeURIComponent(employee.id)}/restart`, {
+            method: 'POST',
+            body: recover.checked ? { forceRestart: true, confirmSessionId: employee.sessionId } : {},
+          });
+          if (!result.ok) {
+            // A missing HTTP response cannot tell us whether the POST committed.
+            if (!result.status) showUnconfirmed();
+            else {
+              error.textContent =
+                result.error || 'The session could not restart. Check Runtime settings, then try again.';
+              status.textContent = '';
+            }
+            return;
+          }
+          await this.loadOwner();
+          await onSaved?.();
+          dialog.close();
+          this.toast(
+            result.data?.recovery === 'normal-launch-requested'
+              ? `Restart requested for ${employee.name}. Reconnecting…`
+              : `Session restarted for ${employee.name}.`,
+            'info'
+          );
+        } catch {
+          showUnconfirmed();
+        } finally {
+          this._restartingEmployees.delete(employee.id);
+          restart.disabled = unconfirmed;
         }
-        await this.loadOwner(); await onSaved?.(); dialog.close();
-        this.toast(result.data?.recovery === 'normal-launch-requested' ? `Restart requested for ${employee.name}. Reconnecting…` : `Session restarted for ${employee.name}.`, 'info');
-      } catch { showUnconfirmed(); }
-      finally { this._restartingEmployees.delete(employee.id); restart.disabled = unconfirmed; }
-    }, { text: 'Restart session' });
-    recover.addEventListener('change', () => { restart.textContent = recover.checked ? 'Recover and restart' : 'Restart session'; });
-    restart.disabled = true; actions.append(cancel, restart); dialog.append(status, error, actions);
-    dialog.addEventListener('cancel', event => { event.preventDefault(); dialog.close(); });
-    dialog.addEventListener('close', () => dialog.remove()); this.doc.body.append(dialog); dialog.showModal(); cancel.focus();
+      },
+      { text: 'Restart session' }
+    );
+    recover.addEventListener('change', () => {
+      restart.textContent = recover.checked ? 'Recover and restart' : 'Restart session';
+    });
+    restart.disabled = true;
+    actions.append(cancel, restart);
+    dialog.append(status, error, actions);
+    dialog.addEventListener('cancel', (event) => {
+      event.preventDefault();
+      dialog.close();
+    });
+    dialog.addEventListener('close', () => dialog.remove());
+    this.doc.body.append(dialog);
+    dialog.showModal();
+    cancel.focus();
     try {
       const auth = await this.app._chatApi('/api/chatrooms/phone-status');
       if (!dialog.isConnected) return;
       status.textContent = '';
-      if (this.app._chatSelf || this.company?.canManage !== true || !auth.ok || auth.data?.self !== 'owner' || auth.data?.canSetOwn !== true) error.textContent = 'Sign in as the owner to restart this session.';
-      else if (employee.onVacation || employee.desiredRunning === false) error.textContent = 'Bring this expert into the office before restarting.';
-      else { restart.disabled = false; recover.disabled = false; }
-    } catch { if (dialog.isConnected) { status.textContent = ''; error.textContent = 'Owner access could not be checked. Close this dialog and try again.'; } }
+      if (
+        this.app._chatSelf ||
+        this.company?.canManage !== true ||
+        !auth.ok ||
+        auth.data?.self !== 'owner' ||
+        auth.data?.canSetOwn !== true
+      )
+        error.textContent = 'Sign in as the owner to restart this session.';
+      else if (employee.onVacation || employee.desiredRunning === false)
+        error.textContent = 'Bring this expert into the office before restarting.';
+      else {
+        restart.disabled = false;
+        recover.disabled = false;
+      }
+    } catch {
+      if (dialog.isConnected) {
+        status.textContent = '';
+        error.textContent = 'Owner access could not be checked. Close this dialog and try again.';
+      }
+    }
   }
 
   async openRuntimeSettings(employee, onSaved) {
     const existing = this.doc.querySelector('.ca-runtime-settings');
-    if (existing) { existing.querySelector('button')?.focus(); return; }
+    if (existing) {
+      existing.querySelector('button')?.focus();
+      return;
+    }
     const dialog = this.el('dialog', 'ca-dialog ca-runtime-settings');
     dialog.setAttribute('aria-label', `Runtime settings: ${employee.name}`);
-    dialog.append(this.literalText('h2', '', `Runtime settings · ${employee.name}`), this.el('p', 'ca-dialog-note', 'Changes restart this expert’s runtime. Their identity, memory and channel memberships stay with them.'));
-    const status = this.el('p', 'ca-hint', 'Loading runtime settings…'); status.setAttribute('role', 'status');
-    const error = this.el('p', 'ca-company-error'); error.setAttribute('role', 'alert');
+    dialog.append(
+      this.literalText('h2', '', `Runtime settings · ${employee.name}`),
+      this.el(
+        'p',
+        'ca-dialog-note',
+        'Changes restart this expert’s runtime. Their identity, memory and channel memberships stay with them.'
+      )
+    );
+    const status = this.el('p', 'ca-hint', 'Loading runtime settings…');
+    status.setAttribute('role', 'status');
+    const error = this.el('p', 'ca-company-error');
+    error.setAttribute('role', 'alert');
     const body = this.el('div');
     const close = this.button('ca-btn', 'Close runtime settings', () => dialog.close(), { text: 'Close' });
     dialog.append(status, error, body, close);
-    dialog.addEventListener('close', () => { this._companyConfirm?.(false); dialog.remove(); });
-    this.doc.body.append(dialog); dialog.showModal(); close.focus();
+    dialog.addEventListener('close', () => {
+      this._companyConfirm?.(false);
+      dialog.remove();
+    });
+    this.doc.body.append(dialog);
+    dialog.showModal();
+    close.focus();
     try {
       const path = `/api/sessions/${encodeURIComponent(employee.sessionId)}/runtime`;
-      const [runtime, options, auth] = await Promise.all([this.app._chatApi(path), this.app._chatApi('/api/company/hire-options'), this.app._chatApi('/api/chatrooms/phone-status')]);
+      const [runtime, options, auth] = await Promise.all([
+        this.app._chatApi(path),
+        this.app._chatApi('/api/company/hire-options'),
+        this.app._chatApi('/api/chatrooms/phone-status'),
+      ]);
       if (!dialog.isConnected) return;
-      if (this.app._chatSelf || this.company?.canManage !== true || !auth.ok || auth.data?.self !== 'owner' || auth.data?.canSetOwn !== true) throw new Error('Sign in as the owner to change runtime settings.');
+      if (
+        this.app._chatSelf ||
+        this.company?.canManage !== true ||
+        !auth.ok ||
+        auth.data?.self !== 'owner' ||
+        auth.data?.canSetOwn !== true
+      )
+        throw new Error('Sign in as the owner to change runtime settings.');
       if (!runtime.ok) throw new Error(runtime.error || 'Runtime settings are unavailable.');
       if (!options.ok) throw new Error(options.error || 'Plans and harnesses are unavailable.');
       const current = runtime.data || {};
@@ -8222,110 +11508,238 @@ class ReverieChatApp {
       const form = this.el('form', 'ca-runtime-form');
       const field = (name, label, tag = 'input') => {
         const wrap = this.el('label', 'ca-label');
-        const input = this.el(tag, 'ca-field'); input.name = name; input.setAttribute('aria-label', label);
-        wrap.append(this.el('span', 'ca-label-text', label), input); form.append(wrap); return input;
+        const input = this.el(tag, 'ca-field');
+        input.name = name;
+        input.setAttribute('aria-label', label);
+        wrap.append(this.el('span', 'ca-label-text', label), input);
+        form.append(wrap);
+        return input;
       };
-      const plan = field('source', 'Plan', 'select'); plan.required = true;
-      const placeholder = this.el('option', '', 'Choose a plan or local model'); placeholder.value = ''; plan.append(placeholder);
+      const plan = field('source', 'Plan', 'select');
+      plan.required = true;
+      const placeholder = this.el('option', '', 'Choose a plan or local model');
+      placeholder.value = '';
+      plan.append(placeholder);
       for (const source of sources) {
-        const option = this.literalText('option', '', `${source.label}${source.kind === 'local' ? ' · Local model' : ''}`);
-        option.value = `${source.kind}:${source.id}`; option.disabled = !source.modes?.length; plan.append(option);
+        const option = this.literalText(
+          'option',
+          '',
+          `${source.label}${source.kind === 'local' ? ' · Local model' : ''}`
+        );
+        option.value = `${source.kind}:${source.id}`;
+        option.disabled = !source.modes?.length;
+        plan.append(option);
       }
-      const currentKey = current.source?.kind === 'subscription' ? `subscription:${current.source.profileId}` : current.source?.kind === 'local' ? `local:${current.source.endpointId}` : '';
-      if (currentKey && !sources.some(source => `${source.kind}:${source.id}` === currentKey)) {
-        const unavailable = this.el('option', '', 'Current plan unavailable'); unavailable.value = currentKey; unavailable.disabled = true; plan.append(unavailable);
+      const currentKey =
+        current.source?.kind === 'subscription'
+          ? `subscription:${current.source.profileId}`
+          : current.source?.kind === 'local'
+            ? `local:${current.source.endpointId}`
+            : '';
+      if (currentKey && !sources.some((source) => `${source.kind}:${source.id}` === currentKey)) {
+        const unavailable = this.el('option', '', 'Current plan unavailable');
+        unavailable.value = currentKey;
+        unavailable.disabled = true;
+        plan.append(unavailable);
       }
       plan.value = currentKey;
-      const harness = field('mode', 'Harness', 'select'); harness.required = true;
-      const model = field('model', 'Model'); model.maxLength = 100;
-      const models = this.el('datalist'); models.id = 'ca-runtime-models'; model.setAttribute('list', models.id); form.append(models);
+      const harness = field('mode', 'Harness', 'select');
+      harness.required = true;
+      const model = field('model', 'Model');
+      model.maxLength = 100;
+      const models = this.el('datalist');
+      models.id = 'ca-runtime-models';
+      model.setAttribute('list', models.id);
+      form.append(models);
       const effort = field('effort', 'Effort', 'select');
-      const source = () => sources.find(entry => `${entry.kind}:${entry.id}` === plan.value);
-      const compatible = () => !!source()?.modes?.includes(harness.value) && harnesses.some(entry => entry.id === harness.value);
-      const apply = this.el('button', 'ca-btn is-primary', 'Apply runtime settings'); apply.type = 'submit';
-      const updateEffort = value => {
+      const source = () => sources.find((entry) => `${entry.kind}:${entry.id}` === plan.value);
+      const compatible = () =>
+        !!source()?.modes?.includes(harness.value) && harnesses.some((entry) => entry.id === harness.value);
+      const apply = this.el('button', 'ca-btn is-primary', 'Apply runtime settings');
+      apply.type = 'submit';
+      const updateEffort = (value) => {
         effort.replaceChildren();
-        const automatic = this.el('option', '', 'Harness default'); automatic.value = ''; effort.append(automatic);
-        const values = harnesses.find(entry => entry.id === harness.value)?.efforts || [];
-        for (const entry of values) { const option = this.el('option', '', entry); option.value = entry; effort.append(option); }
-        effort.value = values.includes(value) ? value : ''; effort.disabled = !values.length;
-      };
-      const updateSource = initial => {
-        const selected = source(); const previous = initial ? current.mode : selected?.defaultMode || selected?.modes?.[0];
-        harness.replaceChildren();
-        const empty = this.el('option', '', 'Choose a harness'); empty.value = ''; harness.append(empty);
-        for (const id of selected?.modes || []) {
-          const entry = harnesses.find(item => item.id === id); if (!entry) continue;
-          const option = this.literalText('option', '', entry.label); option.value = id; harness.append(option);
+        const automatic = this.el('option', '', 'Harness default');
+        automatic.value = '';
+        effort.append(automatic);
+        const values = harnesses.find((entry) => entry.id === harness.value)?.efforts || [];
+        for (const entry of values) {
+          const option = this.el('option', '', entry);
+          option.value = entry;
+          effort.append(option);
         }
-        harness.value = [...harness.options].some(option => option.value === previous) ? previous : initial ? '' : harness.options[1]?.value || '';
+        effort.value = values.includes(value) ? value : '';
+        effort.disabled = !values.length;
+      };
+      const updateSource = (initial) => {
+        const selected = source();
+        const previous = initial ? current.mode : selected?.defaultMode || selected?.modes?.[0];
+        harness.replaceChildren();
+        const empty = this.el('option', '', 'Choose a harness');
+        empty.value = '';
+        harness.append(empty);
+        for (const id of selected?.modes || []) {
+          const entry = harnesses.find((item) => item.id === id);
+          if (!entry) continue;
+          const option = this.literalText('option', '', entry.label);
+          option.value = id;
+          harness.append(option);
+        }
+        harness.value = [...harness.options].some((option) => option.value === previous)
+          ? previous
+          : initial
+            ? ''
+            : harness.options[1]?.value || '';
         harness.disabled = harness.options.length < 2;
         model.value = initial ? current.model || '' : selected?.defaultModel || '';
-        model.required = selected?.kind === 'local'; model.placeholder = selected?.kind === 'local' ? 'Choose a local model' : 'Leave empty for the harness default';
-        models.replaceChildren(); for (const id of selected?.models || []) { const option = this.el('option'); option.value = id; models.append(option); }
-        updateEffort(initial ? current.effort : ''); apply.disabled = !compatible();
+        model.required = selected?.kind === 'local';
+        model.placeholder = selected?.kind === 'local' ? 'Choose a local model' : 'Leave empty for the harness default';
+        models.replaceChildren();
+        for (const id of selected?.models || []) {
+          const option = this.el('option');
+          option.value = id;
+          models.append(option);
+        }
+        updateEffort(initial ? current.effort : '');
+        apply.disabled = !compatible();
       };
       plan.addEventListener('change', () => updateSource(false));
-      harness.addEventListener('change', () => { model.value = source()?.defaultModel || ''; updateEffort(''); apply.disabled = !compatible(); });
-      updateSource(true);
-      const actions = this.el('div', 'ca-dialog-actions'); actions.append(apply); form.append(actions);
-      let saving = false;
-      form.addEventListener('submit', async event => {
-        event.preventDefault(); if (saving || !form.reportValidity()) return;
-        if (!compatible()) { error.textContent = 'Choose a compatible plan and harness.'; return; }
-        saving = true; apply.disabled = true; error.textContent = ''; status.textContent = '';
-        const selected = source();
-        const payload = { mode: harness.value, source: selected.kind === 'local' ? { kind: 'local', endpointId: selected.id } : { kind: 'subscription', profileId: selected.id }, ...(model.value.trim() ? { model: model.value.trim() } : {}), ...(effort.value ? { effort: effort.value } : {}) };
-        try {
-          if (!await this.confirmCompanyAction(employee.name, `Apply runtime settings for ${employee.name}? This restarts their runtime using ${selected.label} and ${harness.selectedOptions[0].textContent}. Their identity, memory and channel memberships stay the same.`, 'Apply runtime settings') || !dialog.isConnected) return;
-          const result = await this.app._chatApi(path, { method: 'POST', body: payload });
-          if (!result.ok) { error.textContent = result.error || 'Runtime settings could not be applied.'; return; }
-          await this.loadOwner(); await onSaved?.(); dialog.close();
-          this.toast(`Runtime settings updated for ${employee.name}.`, 'info');
-        } catch { error.textContent = 'Runtime settings could not be applied. Check the current runtime before trying again.'; }
-        finally { saving = false; apply.disabled = !compatible(); }
+      harness.addEventListener('change', () => {
+        model.value = source()?.defaultModel || '';
+        updateEffort('');
+        apply.disabled = !compatible();
       });
-      body.append(form); status.textContent = '';
-    } catch (failure) { if (dialog.isConnected) { status.textContent = ''; error.textContent = failure.message || 'Runtime settings are unavailable.'; } }
+      updateSource(true);
+      const actions = this.el('div', 'ca-dialog-actions');
+      actions.append(apply);
+      form.append(actions);
+      let saving = false;
+      form.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        if (saving || !form.reportValidity()) return;
+        if (!compatible()) {
+          error.textContent = 'Choose a compatible plan and harness.';
+          return;
+        }
+        saving = true;
+        apply.disabled = true;
+        error.textContent = '';
+        status.textContent = '';
+        const selected = source();
+        const payload = {
+          mode: harness.value,
+          source:
+            selected.kind === 'local'
+              ? { kind: 'local', endpointId: selected.id }
+              : { kind: 'subscription', profileId: selected.id },
+          ...(model.value.trim() ? { model: model.value.trim() } : {}),
+          ...(effort.value ? { effort: effort.value } : {}),
+        };
+        try {
+          if (
+            !(await this.confirmCompanyAction(
+              employee.name,
+              `Apply runtime settings for ${employee.name}? This restarts their runtime using ${selected.label} and ${harness.selectedOptions[0].textContent}. Their identity, memory and channel memberships stay the same.`,
+              'Apply runtime settings'
+            )) ||
+            !dialog.isConnected
+          )
+            return;
+          const result = await this.app._chatApi(path, { method: 'POST', body: payload });
+          if (!result.ok) {
+            error.textContent = result.error || 'Runtime settings could not be applied.';
+            return;
+          }
+          await this.loadOwner();
+          await onSaved?.();
+          dialog.close();
+          this.toast(`Runtime settings updated for ${employee.name}.`, 'info');
+        } catch {
+          error.textContent = 'Runtime settings could not be applied. Check the current runtime before trying again.';
+        } finally {
+          saving = false;
+          apply.disabled = !compatible();
+        }
+      });
+      body.append(form);
+      status.textContent = '';
+    } catch (failure) {
+      if (dialog.isConnected) {
+        status.textContent = '';
+        error.textContent = failure.message || 'Runtime settings are unavailable.';
+      }
+    }
   }
 
   expertRestFields(container, employee = {}) {
     const create = (key, label, help) => {
       const wrap = this.el('label', 'ca-hint', ' ' + label);
       wrap.title = help;
-      const input = this.el('input', ''); input.type = 'checkbox'; input.name = key;
-      input.checked = employee[key] === true; input.title = help; input.setAttribute('aria-label', label);
-      wrap.prepend(input); container.append(wrap); return input;
+      const input = this.el('input', '');
+      input.type = 'checkbox';
+      input.name = key;
+      input.checked = employee[key] === true;
+      input.title = help;
+      input.setAttribute('aria-label', label);
+      wrap.prepend(input);
+      container.append(wrap);
+      return input;
     };
     return {
-      sleep: create('sleepEnabled', 'Sleep', 'Allow memory consolidation only in a Gantt task scheduled around work by the owner or an explicitly authorized scheduler. Scheduling is not connected yet; this preference does not start a timer.'),
-      dream: create('dreamEnabled', 'Dream', 'Allow scheduled creative exploration. Dream outputs are ideas, not facts. Scheduling is not connected yet; this preference does not start background work.'),
+      sleep: create(
+        'sleepEnabled',
+        'Sleep',
+        'Allow memory consolidation only in a Gantt task scheduled around work by the owner or an explicitly authorized scheduler. Scheduling is not connected yet; this preference does not start a timer.'
+      ),
+      dream: create(
+        'dreamEnabled',
+        'Dream',
+        'Allow scheduled creative exploration. Dream outputs are ideas, not facts. Scheduling is not connected yet; this preference does not start background work.'
+      ),
     };
   }
 
   employeeAvatarBackgroundFields(form, employee) {
     const wrap = this.el('label', 'ca-label');
     wrap.append(this.el('span', 'ca-label-text', 'Avatar background'));
-    const mode = this.el('select', 'ca-field'); mode.name = 'avatarBackgroundMode'; mode.setAttribute('aria-label', 'Avatar background');
-    for (const [value, label] of [['auto', 'Automatic'], ['custom', 'Custom color'], ['transparent', 'Transparent']]) {
-      const option = this.el('option', '', label); option.value = value; mode.append(option);
+    const mode = this.el('select', 'ca-field');
+    mode.name = 'avatarBackgroundMode';
+    mode.setAttribute('aria-label', 'Avatar background');
+    for (const [value, label] of [
+      ['auto', 'Automatic'],
+      ['custom', 'Custom color'],
+      ['transparent', 'Transparent'],
+    ]) {
+      const option = this.el('option', '', label);
+      option.value = value;
+      mode.append(option);
     }
     const saved = caAvatarBackground(employee.avatarBackground);
     mode.value = saved === 'transparent' ? 'transparent' : saved ? 'custom' : 'auto';
-    wrap.append(mode); form.append(wrap);
+    wrap.append(mode);
+    form.append(wrap);
     const colorLabel = this.el('label', 'ca-label');
     colorLabel.append(this.el('span', 'ca-label-text', 'Background color'));
-    const color = this.el('input', 'ca-field'); color.type = 'color'; color.name = 'avatarBackground';
+    const color = this.el('input', 'ca-field');
+    color.type = 'color';
+    color.name = 'avatarBackground';
     color.value = saved && saved !== 'transparent' ? saved : '#286b7a';
-    colorLabel.append(color); form.append(colorLabel);
-    const value = () => mode.value === 'auto' ? null : mode.value === 'transparent' ? 'transparent' : color.value;
+    colorLabel.append(color);
+    form.append(colorLabel);
+    const value = () => (mode.value === 'auto' ? null : mode.value === 'transparent' ? 'transparent' : color.value);
     const paint = () => {
       const preview = form.querySelector('.ca-picture-preview');
       if (preview) preview.style.backgroundColor = value() || `hsl(${this.app._chatHue(employee.id)} 45% 28%)`;
     };
     mode.addEventListener('change', paint);
-    color.addEventListener('input', () => { mode.value = 'custom'; paint(); });
-    color.addEventListener('change', () => { mode.value = 'custom'; paint(); });
+    color.addEventListener('input', () => {
+      mode.value = 'custom';
+      paint();
+    });
+    color.addEventListener('change', () => {
+      mode.value = 'custom';
+      paint();
+    });
     paint();
     return { value };
   }
@@ -8333,145 +11747,378 @@ class ReverieChatApp {
   coreBeliefFields(container, label, values = []) {
     let original = Array.isArray(values) ? [...values] : [];
     const details = this.el('details', 'ca-core-beliefs');
-    const summary = this.el('summary', '', label); const list = this.el('div', 'ca-core-belief-blocks');
-    details.append(summary, this.el('p', 'ca-hint', 'Each block preserves its text and paragraphs. Order is retained. Empty fields are removed when saved.'), list);
+    const summary = this.el('summary', '', label);
+    const list = this.el('div', 'ca-core-belief-blocks');
+    details.append(
+      summary,
+      this.el(
+        'p',
+        'ca-hint',
+        'Each block preserves its text and paragraphs. Order is retained. Empty fields are removed when saved.'
+      ),
+      list
+    );
     let fields = [];
-    const currentValues = () => fields.map(field => field.input.value === field.displayValue ? field.originalValue : field.input.value).filter(value => value !== '');
+    const currentValues = () =>
+      fields
+        .map((field) => (field.input.value === field.displayValue ? field.originalValue : field.input.value))
+        .filter((value) => value !== '');
     const paint = () => {
       summary.textContent = `${label} · ${fields.filter(({ input }) => input.value !== '').length} blocks`;
       add.disabled = fields.length >= 32;
       fields.forEach(({ input }, index) => input.setAttribute('aria-label', `${label} block ${index + 1}`));
     };
-    const append = value => {
-      const row = this.el('div', 'ca-core-belief-block'); const input = this.el('textarea', 'ca-field');
-      input.rows = 4; input.maxLength = 4000; input.value = value;
+    const append = (value) => {
+      const row = this.el('div', 'ca-core-belief-block');
+      const input = this.el('textarea', 'ca-field');
+      input.rows = 4;
+      input.maxLength = 4000;
+      input.value = value;
       input.addEventListener('input', paint);
-      const remove = this.button('ca-btn', `Remove ${label} block`, () => { fields = fields.filter(field => field.input !== input); row.remove(); paint(); }, { text: 'Remove block' });
-      row.append(input, remove); list.append(row); fields.push({ input, row, originalValue: value, displayValue: input.value });
+      const remove = this.button(
+        'ca-btn',
+        `Remove ${label} block`,
+        () => {
+          fields = fields.filter((field) => field.input !== input);
+          row.remove();
+          paint();
+        },
+        { text: 'Remove block' }
+      );
+      row.append(input, remove);
+      list.append(row);
+      fields.push({ input, row, originalValue: value, displayValue: input.value });
     };
-    const add = this.button('ca-btn', `Add ${label} block`, () => { if (fields.length < 32) { append(''); paint(); fields.at(-1).input.focus(); } }, { text: 'Add block' });
-    details.append(add); for (const value of original.length ? original : ['']) append(value); paint(); container.append(details);
-    return { values: currentValues, changed: () => JSON.stringify(currentValues()) !== JSON.stringify(original), markSaved: () => {
-      original = currentValues();
-      for (const field of fields) { field.originalValue = field.input.value === field.displayValue ? field.originalValue : field.input.value; field.displayValue = field.input.value; }
-    }, details };
+    const add = this.button(
+      'ca-btn',
+      `Add ${label} block`,
+      () => {
+        if (fields.length < 32) {
+          append('');
+          paint();
+          fields.at(-1).input.focus();
+        }
+      },
+      { text: 'Add block' }
+    );
+    details.append(add);
+    for (const value of original.length ? original : ['']) append(value);
+    paint();
+    container.append(details);
+    return {
+      values: currentValues,
+      changed: () => JSON.stringify(currentValues()) !== JSON.stringify(original),
+      markSaved: () => {
+        original = currentValues();
+        for (const field of fields) {
+          field.originalValue = field.input.value === field.displayValue ? field.originalValue : field.input.value;
+          field.displayValue = field.input.value;
+        }
+      },
+      details,
+    };
   }
 
   async openStartupContext(employee) {
     this.doc.querySelector('.ca-startup-context')?.remove();
-    const dialog = this.el('dialog', 'ca-dialog ca-startup-context'); dialog.setAttribute('aria-label', `Startup context: ${employee.name}`);
+    const dialog = this.el('dialog', 'ca-dialog ca-startup-context');
+    dialog.setAttribute('aria-label', `Startup context: ${employee.name}`);
     dialog._companyOrigin = this.companyPage;
     const header = this.el('header', 'ca-profile-edit-heading');
-    header.append(this.literalText('h2', '', `Startup context · ${employee.name}`), this.button('ca-btn', 'Close startup context', () => dialog.close(), { text: 'Close' }));
-    const status = this.el('p', 'ca-hint', 'Loading startup context…'); status.setAttribute('role', 'status');
-    const content = this.el('div'), copyStatus = this.el('p', 'ca-hint'); copyStatus.setAttribute('role', 'status');
-    const preview = this.el('textarea', 'ca-field ca-startup-preview'); preview.readOnly = true; preview.rows = 12; preview.setAttribute('aria-label', 'Current configured context preview');
-    const copy = this.button('ca-btn', 'Copy current configured context', async () => {
-      if (copy.disabled) return;
-      try {
-        const clipboard = this.doc.defaultView.navigator.clipboard;
-        if (clipboard?.writeText) await clipboard.writeText(preview.value);
-        else { preview.focus(); preview.select(); if (!this.doc.execCommand?.('copy')) throw new Error('Copy unavailable'); }
-        copyStatus.textContent = 'Current configured preview copied.';
-      } catch { preview.focus(); preview.select(); copyStatus.textContent = 'Preview selected. Use your device’s copy command.'; }
-    }, { text: 'Copy current preview' }); copy.disabled = true;
-    dialog.append(header, status, content, copy, copyStatus); dialog.addEventListener('close', () => dialog.remove()); this.doc.body.append(dialog); dialog.showModal();
+    header.append(
+      this.literalText('h2', '', `Startup context · ${employee.name}`),
+      this.button('ca-btn', 'Close startup context', () => dialog.close(), { text: 'Close' })
+    );
+    const status = this.el('p', 'ca-hint', 'Loading startup context…');
+    status.setAttribute('role', 'status');
+    const content = this.el('div'),
+      copyStatus = this.el('p', 'ca-hint');
+    copyStatus.setAttribute('role', 'status');
+    const preview = this.el('textarea', 'ca-field ca-startup-preview');
+    preview.readOnly = true;
+    preview.rows = 12;
+    preview.setAttribute('aria-label', 'Current configured context preview');
+    const copy = this.button(
+      'ca-btn',
+      'Copy current configured context',
+      async () => {
+        if (copy.disabled) return;
+        try {
+          const clipboard = this.doc.defaultView.navigator.clipboard;
+          if (clipboard?.writeText) await clipboard.writeText(preview.value);
+          else {
+            preview.focus();
+            preview.select();
+            if (!this.doc.execCommand?.('copy')) throw new Error('Copy unavailable');
+          }
+          copyStatus.textContent = 'Current configured preview copied.';
+        } catch {
+          preview.focus();
+          preview.select();
+          copyStatus.textContent = 'Preview selected. Use your device’s copy command.';
+        }
+      },
+      { text: 'Copy current preview' }
+    );
+    copy.disabled = true;
+    dialog.append(header, status, content, copy, copyStatus);
+    dialog.addEventListener('close', () => dialog.remove());
+    this.doc.body.append(dialog);
+    dialog.showModal();
     try {
-      const result = await this.app._chatApi(`/api/company/employees/${encodeURIComponent(employee.id)}/startup-context`);
+      const result = await this.app._chatApi(
+        `/api/company/employees/${encodeURIComponent(employee.id)}/startup-context`
+      );
       if (!dialog.isConnected) return;
       const data = result.data;
       if (!result.ok) throw new Error(result.error || 'Startup context is unavailable. Owner sign-in is required.');
-      if (data?.employeeId !== employee.id || typeof data.context !== 'string' || !Array.isArray(data.sections) || data.sections.length > 8 ||
-        !data.sections.every(section => typeof section.id === 'string' && typeof section.label === 'string' && typeof section.text === 'string' && ['configured', 'missing', 'captured'].includes(section.status)) ||
-        !['unavailable', 'captured'].includes(data.startup?.status) || !Number.isFinite(data.generatedAt))
+      if (
+        data?.employeeId !== employee.id ||
+        typeof data.context !== 'string' ||
+        !Array.isArray(data.sections) ||
+        data.sections.length > 8 ||
+        !data.sections.every(
+          (section) =>
+            typeof section.id === 'string' &&
+            typeof section.label === 'string' &&
+            typeof section.text === 'string' &&
+            ['configured', 'missing', 'captured'].includes(section.status)
+        ) ||
+        !['unavailable', 'captured'].includes(data.startup?.status) ||
+        !Number.isFinite(data.generatedAt)
+      )
         throw new Error('Startup context response could not be confirmed.');
-      const validReport = report => report?.employeeId === employee.id && typeof report.context === 'string' &&
-        typeof report.sessionId === 'string' && Number.isInteger(report.sessionGeneration) && report.sessionGeneration > 0 &&
-        ['startup', 'model-request'].includes(report.stage) && Number.isFinite(report.reportedAt) &&
-        report.assurance === 'harness-reported-input' && report.retention === 'website-process-lifetime';
-      if (data.startup.status === 'captured' && (!validReport(data.startup.report) || data.startup.report.stage !== 'startup' ||
-        data.startup.report.sessionId !== data.sessionId || data.startup.report.sessionGeneration !== data.sessionGeneration || data.startup.report.runtimeBinding !== data.runtimeBinding))
+      const validReport = (report) =>
+        report?.employeeId === employee.id &&
+        typeof report.context === 'string' &&
+        typeof report.sessionId === 'string' &&
+        Number.isInteger(report.sessionGeneration) &&
+        report.sessionGeneration > 0 &&
+        ['startup', 'model-request'].includes(report.stage) &&
+        Number.isFinite(report.reportedAt) &&
+        report.assurance === 'harness-reported-input' &&
+        report.retention === 'website-process-lifetime';
+      if (
+        data.startup.status === 'captured' &&
+        (!validReport(data.startup.report) ||
+          data.startup.report.stage !== 'startup' ||
+          data.startup.report.sessionId !== data.sessionId ||
+          data.startup.report.sessionGeneration !== data.sessionGeneration ||
+          data.startup.report.runtimeBinding !== data.runtimeBinding)
+      )
         throw new Error('Startup capture binding could not be confirmed.');
       const actual = this.el('section', 'ca-startup-evidence');
-      actual.append(this.el('h3', '', data.startup.status === 'captured' ? 'Captured startup report' : 'Startup capture unavailable'),
-        this.literalText('p', '', data.startup.reason || (data.startup.status === 'captured' ? 'The server reports captured startup evidence.' : 'This startup was not captured. Current configuration is not evidence of what that session loaded.')));
+      actual.append(
+        this.el(
+          'h3',
+          '',
+          data.startup.status === 'captured' ? 'Captured startup report' : 'Startup capture unavailable'
+        ),
+        this.literalText(
+          'p',
+          '',
+          data.startup.reason ||
+            (data.startup.status === 'captured'
+              ? 'The server reports captured startup evidence.'
+              : 'This startup was not captured. Current configuration is not evidence of what that session loaded.')
+        )
+      );
       const renderReport = (label, report) => {
         if (!validReport(report)) return;
         const block = this.el('section', 'ca-startup-reported');
-        const sameBinding = report.sessionId === data.sessionId && report.sessionGeneration === data.sessionGeneration && report.runtimeBinding === data.runtimeBinding;
-        block.append(this.literalText('h3', '', label),
-          this.literalText('p', 'ca-hint', `Stage ${report.stage} · Session ${report.sessionId} · Generation ${report.sessionGeneration} · Reported ${(globalThis.ReverieTime?.format(report.reportedAt) ?? new Date(report.reportedAt).toLocaleString('en-US', { timeZone: 'UTC', timeZoneName: 'short' }))}`),
-          this.literalText('p', 'ca-hint', sameBinding ? 'This report names the current session binding.' : 'This report names another session binding or runtime incarnation. It is not the current session’s captured startup.'),
-          this.el('p', 'ca-hint', 'Harness-reported input does not independently establish provider consumption. Retained for this website process only; a website restart clears the report.'));
-        const text = this.el('textarea', 'ca-field ca-startup-preview'); text.readOnly = true; text.rows = 8; text.value = report.context; text.setAttribute('aria-label', label);
-        block.append(text, this.button('ca-btn', `Copy ${label}`, async () => {
-          try {
-            const clipboard = this.doc.defaultView.navigator.clipboard;
-            if (clipboard?.writeText) await clipboard.writeText(text.value);
-            else { text.focus(); text.select(); if (!this.doc.execCommand?.('copy')) throw new Error('Copy unavailable'); }
-            copyStatus.textContent = `${label} copied.`;
-          } catch { text.focus(); text.select(); copyStatus.textContent = 'Report selected. Use your device’s copy command.'; }
-        }, { text: 'Copy reported input' })); content.append(block);
+        const sameBinding =
+          report.sessionId === data.sessionId &&
+          report.sessionGeneration === data.sessionGeneration &&
+          report.runtimeBinding === data.runtimeBinding;
+        block.append(
+          this.literalText('h3', '', label),
+          this.literalText(
+            'p',
+            'ca-hint',
+            `Stage ${report.stage} · Session ${report.sessionId} · Generation ${report.sessionGeneration} · Reported ${globalThis.ReverieTime?.format(report.reportedAt) ?? new Date(report.reportedAt).toLocaleString('en-US', { timeZone: 'UTC', timeZoneName: 'short' })}`
+          ),
+          this.literalText(
+            'p',
+            'ca-hint',
+            sameBinding
+              ? 'This report names the current session binding.'
+              : 'This report names another session binding or runtime incarnation. It is not the current session’s captured startup.'
+          ),
+          this.el(
+            'p',
+            'ca-hint',
+            'Harness-reported input does not independently establish provider consumption. Retained for this website process only; a website restart clears the report.'
+          )
+        );
+        const text = this.el('textarea', 'ca-field ca-startup-preview');
+        text.readOnly = true;
+        text.rows = 8;
+        text.value = report.context;
+        text.setAttribute('aria-label', label);
+        block.append(
+          text,
+          this.button(
+            'ca-btn',
+            `Copy ${label}`,
+            async () => {
+              try {
+                const clipboard = this.doc.defaultView.navigator.clipboard;
+                if (clipboard?.writeText) await clipboard.writeText(text.value);
+                else {
+                  text.focus();
+                  text.select();
+                  if (!this.doc.execCommand?.('copy')) throw new Error('Copy unavailable');
+                }
+                copyStatus.textContent = `${label} copied.`;
+              } catch {
+                text.focus();
+                text.select();
+                copyStatus.textContent = 'Report selected. Use your device’s copy command.';
+              }
+            },
+            { text: 'Copy reported input' }
+          )
+        );
+        content.append(block);
       };
       content.append(actual);
       if (data.startup.status === 'captured') renderReport('Captured startup input', data.startup.report);
       if (data.lastManagedDelivery) renderReport('Last harness-reported input', data.lastManagedDelivery);
-      content.append(this.el('h3', '', 'Current configured preview'),
-        this.literalText('p', 'ca-hint', `Generated ${(globalThis.ReverieTime?.format(data.generatedAt) ?? new Date(data.generatedAt).toLocaleString('en-US', { timeZone: 'UTC', timeZoneName: 'short' }))} · Session ${data.sessionId || 'not bound'} · Generation ${data.sessionGeneration ?? 'not bound'}`));
-      preview.value = data.context; content.append(preview);
+      content.append(
+        this.el('h3', '', 'Current configured preview'),
+        this.literalText(
+          'p',
+          'ca-hint',
+          `Generated ${globalThis.ReverieTime?.format(data.generatedAt) ?? new Date(data.generatedAt).toLocaleString('en-US', { timeZone: 'UTC', timeZoneName: 'short' })} · Session ${data.sessionId || 'not bound'} · Generation ${data.sessionGeneration ?? 'not bound'}`
+        )
+      );
+      preview.value = data.context;
+      content.append(preview);
       const sections = this.el('section', 'ca-startup-sections');
       for (const section of data.sections) {
         const detail = this.el('details');
         detail.append(this.literalText('summary', '', `${section.label} · ${section.status}`));
         if (section.source) detail.append(this.literalText('p', 'ca-hint', section.source));
-        detail.append(this.literalText('pre', '', section.text || (section.status === 'missing' ? 'Not configured.' : 'No text supplied.'))); sections.append(detail);
+        detail.append(
+          this.literalText(
+            'pre',
+            '',
+            section.text || (section.status === 'missing' ? 'Not configured.' : 'No text supplied.')
+          )
+        );
+        sections.append(detail);
       }
-      content.append(sections); status.textContent = 'Configured text and startup evidence are shown separately.'; copy.disabled = false;
-    } catch (error) { status.textContent = error.message || 'Startup context could not be loaded.'; }
+      content.append(sections);
+      status.textContent = 'Configured text and startup evidence are shown separately.';
+      copy.disabled = false;
+    } catch (error) {
+      status.textContent = error.message || 'Startup context could not be loaded.';
+    }
   }
 
   publicationCredentialsFields(container, employee) {
     const group = this.el('fieldset', 'ca-profile-publication');
     group.append(this.el('legend', '', 'Publication credentials'));
     const list = this.el('div');
-    const status = this.el('p', 'ca-hint'); status.setAttribute('role', 'status');
-    group.append(this.el('p', 'ca-hint', `Add a named GitHub PAT, then enable its access checkbox for ${employee.name}. Each change saves immediately; Save profile is not needed.`),
-      this.button('ca-btn is-primary', 'Manage PATs', () => this.openPublicationTokens(refresh, group), { text: 'Add / manage PATs' }),
-      this.el('p', 'ca-hint', 'Allow this expert to download selected named PATs through its scoped API. Repository declarations are notes; GitHub enforces the token’s actual permissions.'), list,
-      this.el('p', 'ca-hint', 'Removing access prevents new downloads; previously copied tokens must be revoked or rotated at GitHub.'));
-    let tokens = [], busy = false, inventoryFailed = false;
-    const granted = () => Array.isArray(employee.permissions?.publicationTokenIds) ? employee.permissions.publicationTokenIds : [];
+    const status = this.el('p', 'ca-hint');
+    status.setAttribute('role', 'status');
+    group.append(
+      this.el(
+        'p',
+        'ca-hint',
+        `Add a named GitHub PAT, then enable its access checkbox for ${employee.name}. Each change saves immediately; Save profile is not needed.`
+      ),
+      this.button('ca-btn is-primary', 'Manage PATs', () => this.openPublicationTokens(refresh, group), {
+        text: 'Add / manage PATs',
+      }),
+      this.el(
+        'p',
+        'ca-hint',
+        'Allow this expert to download selected named PATs through its scoped API. Repository declarations are notes; GitHub enforces the token’s actual permissions.'
+      ),
+      list,
+      this.el(
+        'p',
+        'ca-hint',
+        'Removing access prevents new downloads; previously copied tokens must be revoked or rotated at GitHub.'
+      )
+    );
+    let tokens = [],
+      busy = false,
+      inventoryFailed = false;
+    const granted = () =>
+      Array.isArray(employee.permissions?.publicationTokenIds) ? employee.permissions.publicationTokenIds : [];
     const paint = () => {
       list.replaceChildren();
-      const known = new Map(tokens.map(token => [token.id, token]));
-      const ids = [...known.keys(), ...granted().filter(id => !known.has(id))];
-      if (!ids.length) list.append(this.el('p', 'ca-hint', inventoryFailed ? 'Token inventory unavailable.' : 'No named PATs. Use Manage PATs to add one.'));
+      const known = new Map(tokens.map((token) => [token.id, token]));
+      const ids = [...known.keys(), ...granted().filter((id) => !known.has(id))];
+      if (!ids.length)
+        list.append(
+          this.el(
+            'p',
+            'ca-hint',
+            inventoryFailed ? 'Token inventory unavailable.' : 'No named PATs. Use Manage PATs to add one.'
+          )
+        );
       for (const id of ids) {
-        const token = known.get(id), label = this.el('label', 'ca-publication-grant');
-        const input = this.el('input'); input.type = 'checkbox'; input.checked = granted().includes(id); input.disabled = busy;
+        const token = known.get(id),
+          label = this.el('label', 'ca-publication-grant');
+        const input = this.el('input');
+        input.type = 'checkbox';
+        input.checked = granted().includes(id);
+        input.disabled = busy;
         input.setAttribute('aria-label', `Access to ${token?.name || 'unavailable PAT ' + id} for ${employee.name}`);
-        const text = this.el('span'); text.append(this.literalText('strong', '', token?.name || 'Unavailable PAT'));
+        const text = this.el('span');
+        text.append(this.literalText('strong', '', token?.name || 'Unavailable PAT'));
         if (token?.label) text.append(this.literalText('small', 'ca-hint', token.label));
-        text.append(this.literalText('small', 'ca-hint', token ? `Declared repositories: ${token.repositories?.join(', ') || 'Not specified'}` : 'No new downloads. Uncheck to remove this saved grant.'));
-        label.append(input, text); list.append(label);
+        text.append(
+          this.literalText(
+            'small',
+            'ca-hint',
+            token
+              ? `Declared repositories: ${token.repositories?.join(', ') || 'Not specified'}`
+              : 'No new downloads. Uncheck to remove this saved grant.'
+          )
+        );
+        label.append(input, text);
+        list.append(label);
         input.addEventListener('change', async () => {
           if (busy || !group.isConnected) return;
-          const enabled = input.checked; busy = true;
+          const enabled = input.checked;
+          busy = true;
           for (const control of list.querySelectorAll('input')) control.disabled = true;
           status.textContent = 'Saving PAT access…';
-          const controller = new AbortController(); const timeout = setTimeout(() => controller.abort(), 8000);
+          const controller = new AbortController();
+          const timeout = setTimeout(() => controller.abort(), 8000);
           try {
-            const result = await this.app._chatApi(`/api/company/employees/${encodeURIComponent(employee.id)}/publication-tokens/${encodeURIComponent(id)}`, { method: 'PUT', body: { enabled }, signal: controller.signal });
-            const saved = result.data?.employee, ids = saved?.permissions?.publicationTokenIds;
-            if (!result.ok) throw new Error(result.error || 'Access change not confirmed. Reopen the profile before trying again.');
-            if (saved?.id !== employee.id || !Array.isArray(ids) || ids.length > 64 ||
-              !ids.every(value => typeof value === 'string' && /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(value)) ||
-              new Set(ids).size !== ids.length || ids.includes(id) !== enabled)
+            const result = await this.app._chatApi(
+              `/api/company/employees/${encodeURIComponent(employee.id)}/publication-tokens/${encodeURIComponent(id)}`,
+              { method: 'PUT', body: { enabled }, signal: controller.signal }
+            );
+            const saved = result.data?.employee,
+              ids = saved?.permissions?.publicationTokenIds;
+            if (!result.ok)
+              throw new Error(result.error || 'Access change not confirmed. Reopen the profile before trying again.');
+            if (
+              saved?.id !== employee.id ||
+              !Array.isArray(ids) ||
+              ids.length > 64 ||
+              !ids.every(
+                (value) => typeof value === 'string' && /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(value)
+              ) ||
+              new Set(ids).size !== ids.length ||
+              ids.includes(id) !== enabled
+            )
               throw new Error('Access change not confirmed. Reopen the profile before trying again.');
             employee.permissions = { ...employee.permissions, publicationTokenIds: [...ids] };
             status.textContent = 'PAT access saved.';
-          } catch (error) { status.textContent = `Could not save PAT access: ${error.message}`; }
-          finally { clearTimeout(timeout); busy = false; paint(); }
+          } catch (error) {
+            status.textContent = `Could not save PAT access: ${error.message}`;
+          } finally {
+            clearTimeout(timeout);
+            busy = false;
+            paint();
+          }
         });
       }
     };
@@ -8479,45 +12126,108 @@ class ReverieChatApp {
       try {
         const result = await this.app._chatApi('/api/publication/tokens');
         if (!group.isConnected) return;
-        if (!result.ok || !Array.isArray(result.data?.tokens)) throw new Error('Token inventory unavailable. Existing grants can still be removed.');
-        tokens = result.data.tokens; inventoryFailed = false;
-      } catch { tokens = []; inventoryFailed = true; status.textContent = 'Token inventory unavailable. Existing grants can still be removed.'; }
+        if (!result.ok || !Array.isArray(result.data?.tokens))
+          throw new Error('Token inventory unavailable. Existing grants can still be removed.');
+        tokens = result.data.tokens;
+        inventoryFailed = false;
+      } catch {
+        tokens = [];
+        inventoryFailed = true;
+        status.textContent = 'Token inventory unavailable. Existing grants can still be removed.';
+      }
       paint();
     };
     group.append(status);
-    container.append(group); paint(); void refresh();
+    container.append(group);
+    paint();
+    void refresh();
   }
 
   async openPublicationTokens(onChanged, container = null) {
     const existing = this.doc.querySelector('.ca-publication-tokens');
-    if (existing) { existing.querySelector('button')?.focus(); return; }
-    const dialog = this.el(container ? 'section' : 'dialog', 'ca-dialog ca-publication-tokens'); dialog.setAttribute('aria-label', 'Manage PATs');
+    if (existing) {
+      existing.querySelector('button')?.focus();
+      return;
+    }
+    const dialog = this.el(container ? 'section' : 'dialog', 'ca-dialog ca-publication-tokens');
+    dialog.setAttribute('aria-label', 'Manage PATs');
     if (container) dialog.setAttribute('role', 'region');
     dialog._companyOrigin = this.companyPage;
     const heading = this.el('header', 'ca-profile-edit-heading');
-    heading.append(this.el('h2', '', 'Manage PATs'), this.button('ca-btn', 'Close Manage PATs', () => dialog.close(), { text: 'Close' }));
-    const list = this.el('div', 'ca-publication-inventory'), status = this.el('p', 'ca-hint', 'Loading named PATs…'); status.setAttribute('role', 'status');
-    const error = this.el('p', 'ca-company-error'); error.setAttribute('role', 'alert');
-    dialog.append(heading, this.el('p', 'ca-hint', 'Token values are write-only and are never listed. Repository declarations describe intended use; they do not restrict the token’s actual GitHub permissions.'), list, status, error);
+    heading.append(
+      this.el('h2', '', 'Manage PATs'),
+      this.button('ca-btn', 'Close Manage PATs', () => dialog.close(), { text: 'Close' })
+    );
+    const list = this.el('div', 'ca-publication-inventory'),
+      status = this.el('p', 'ca-hint', 'Loading named PATs…');
+    status.setAttribute('role', 'status');
+    const error = this.el('p', 'ca-company-error');
+    error.setAttribute('role', 'alert');
+    dialog.append(
+      heading,
+      this.el(
+        'p',
+        'ca-hint',
+        'Token values are write-only and are never listed. Repository declarations describe intended use; they do not restrict the token’s actual GitHub permissions.'
+      ),
+      list,
+      status,
+      error
+    );
     const form = this.el('form', 'ca-publication-token-form');
     const field = (label, tag = 'input') => {
-      const wrap = this.el('label', 'ca-label'), input = this.el(tag, 'ca-field'); input.setAttribute('aria-label', label);
-      wrap.append(this.el('span', '', label), input); form.append(wrap); return input;
+      const wrap = this.el('label', 'ca-label'),
+        input = this.el(tag, 'ca-field');
+      input.setAttribute('aria-label', label);
+      wrap.append(this.el('span', '', label), input);
+      form.append(wrap);
+      return input;
     };
-    const name = field('PAT name'); name.required = true; name.maxLength = 48; name.pattern = '[a-z][a-z0-9\\-]{0,47}';
+    const name = field('PAT name');
+    name.required = true;
+    name.maxLength = 48;
+    name.pattern = '[a-z][a-z0-9\\-]{0,47}';
     name.title = 'Start with a lowercase letter; use lowercase letters, numbers and hyphens.';
     name.placeholder = 'github-release';
     form.append(this.el('p', 'ca-hint', 'Name example: github-release. Use lowercase letters, numbers and hyphens.'));
-    const note = field('Description (optional)'); note.maxLength = 120;
-    const repositories = field('Declared repositories (optional)', 'textarea'); repositories.placeholder = 'owner/repository, owner/another';
-    const secret = field('PAT value (write-only)'); secret.type = 'password'; secret.maxLength = 4096; secret.autocomplete = 'new-password'; secret.spellcheck = false;
-    const secretHint = this.el('p', 'ca-hint', 'Required for a new PAT. When editing, leave blank to keep its current value.'); form.append(secretHint);
-    const submit = this.el('button', 'ca-btn is-primary', 'Add PAT'); submit.type = 'submit';
+    const note = field('Description (optional)');
+    note.maxLength = 120;
+    const repositories = field('Declared repositories (optional)', 'textarea');
+    repositories.placeholder = 'owner/repository, owner/another';
+    const secret = field('PAT value (write-only)');
+    secret.type = 'password';
+    secret.maxLength = 4096;
+    secret.autocomplete = 'new-password';
+    secret.spellcheck = false;
+    const secretHint = this.el(
+      'p',
+      'ca-hint',
+      'Required for a new PAT. When editing, leave blank to keep its current value.'
+    );
+    form.append(secretHint);
+    const submit = this.el('button', 'ca-btn is-primary', 'Add PAT');
+    submit.type = 'submit';
     const reset = this.button('ca-btn', 'Cancel PAT edit', () => clear(), { text: 'Cancel edit' });
-    const actions = this.el('div', 'ca-dialog-actions'); actions.append(submit, reset); form.append(actions);
-    let editing = null, busy = false;
-    const clear = () => { editing = null; name.value = ''; note.value = ''; repositories.value = ''; secret.value = ''; submit.textContent = 'Add PAT'; };
-    const setBusy = value => { busy = value; for (const control of dialog.querySelectorAll('form input, form textarea, form button, .ca-publication-inventory button')) control.disabled = value; };
+    const actions = this.el('div', 'ca-dialog-actions');
+    actions.append(submit, reset);
+    form.append(actions);
+    let editing = null,
+      busy = false;
+    const clear = () => {
+      editing = null;
+      name.value = '';
+      note.value = '';
+      repositories.value = '';
+      secret.value = '';
+      submit.textContent = 'Add PAT';
+    };
+    const setBusy = (value) => {
+      busy = value;
+      for (const control of dialog.querySelectorAll(
+        'form input, form textarea, form button, .ca-publication-inventory button'
+      ))
+        control.disabled = value;
+    };
     const inventory = async () => {
       const result = await this.app._chatApi('/api/publication/tokens');
       if (!dialog.isConnected) return;
@@ -8525,200 +12235,573 @@ class ReverieChatApp {
       list.replaceChildren();
       for (const token of result.data.tokens) {
         const row = this.el('article', 'ca-publication-token');
-        row.append(this.literalText('strong', '', token.name), this.literalText('p', 'ca-hint', token.label || ''), this.literalText('p', 'ca-hint', `Declared repositories: ${token.repositories?.join(', ') || 'Not specified'}`));
-        row.append(this.button('ca-btn', `Edit PAT ${token.name}`, () => {
-          if (busy) return; editing = token.id; name.value = token.name; note.value = token.label || ''; repositories.value = token.repositories?.join(', ') || ''; secret.value = ''; submit.textContent = 'Save PAT changes'; name.focus();
-        }, { text: 'Edit / replace' }), this.button('ca-btn is-danger', `Delete PAT ${token.name}`, async () => {
-          if (busy) return;
-          if (!await this.confirmCompanyAction(token.name, `Delete the named PAT ${token.name}? This prevents new downloads. Revoke or rotate the token at GitHub to invalidate copies already downloaded.`, 'Delete PAT') || !dialog.isConnected) return;
-          setBusy(true); error.textContent = '';
-          const controller = new AbortController(); const timeout = setTimeout(() => controller.abort(), 8000);
-          try {
-            const result = await this.app._chatApi(`/api/publication/tokens/${encodeURIComponent(token.id)}`, { method: 'DELETE', signal: controller.signal });
-            if (!result.ok || result.data?.id !== token.id || result.data?.deleted !== true) throw new Error('Deletion not confirmed. Refresh the inventory before trying again.');
-            if (editing === token.id) clear();
-            await inventory(); await onChanged?.(); status.textContent = 'Named PAT deleted. Existing copies require GitHub revocation or rotation.';
-          } catch (failure) { error.textContent = failure.message; }
-          finally { clearTimeout(timeout); setBusy(false); }
-        }, { text: 'Delete' })); list.append(row);
+        row.append(
+          this.literalText('strong', '', token.name),
+          this.literalText('p', 'ca-hint', token.label || ''),
+          this.literalText(
+            'p',
+            'ca-hint',
+            `Declared repositories: ${token.repositories?.join(', ') || 'Not specified'}`
+          )
+        );
+        row.append(
+          this.button(
+            'ca-btn',
+            `Edit PAT ${token.name}`,
+            () => {
+              if (busy) return;
+              editing = token.id;
+              name.value = token.name;
+              note.value = token.label || '';
+              repositories.value = token.repositories?.join(', ') || '';
+              secret.value = '';
+              submit.textContent = 'Save PAT changes';
+              name.focus();
+            },
+            { text: 'Edit / replace' }
+          ),
+          this.button(
+            'ca-btn is-danger',
+            `Delete PAT ${token.name}`,
+            async () => {
+              if (busy) return;
+              if (
+                !(await this.confirmCompanyAction(
+                  token.name,
+                  `Delete the named PAT ${token.name}? This prevents new downloads. Revoke or rotate the token at GitHub to invalidate copies already downloaded.`,
+                  'Delete PAT'
+                )) ||
+                !dialog.isConnected
+              )
+                return;
+              setBusy(true);
+              error.textContent = '';
+              const controller = new AbortController();
+              const timeout = setTimeout(() => controller.abort(), 8000);
+              try {
+                const result = await this.app._chatApi(`/api/publication/tokens/${encodeURIComponent(token.id)}`, {
+                  method: 'DELETE',
+                  signal: controller.signal,
+                });
+                if (!result.ok || result.data?.id !== token.id || result.data?.deleted !== true)
+                  throw new Error('Deletion not confirmed. Refresh the inventory before trying again.');
+                if (editing === token.id) clear();
+                await inventory();
+                await onChanged?.();
+                status.textContent = 'Named PAT deleted. Existing copies require GitHub revocation or rotation.';
+              } catch (failure) {
+                error.textContent = failure.message;
+              } finally {
+                clearTimeout(timeout);
+                setBusy(false);
+              }
+            },
+            { text: 'Delete' }
+          )
+        );
+        list.append(row);
       }
       if (!result.data.tokens.length) list.append(this.el('p', 'ca-hint', 'No named PATs yet.'));
       status.textContent = `${result.data.tokens.length} named PATs. Values are never displayed.`;
       if (!form.isConnected) dialog.insertBefore(form, list);
     };
-    form.addEventListener('submit', async event => {
-      event.preventDefault(); if (!dialog.isConnected || busy || !form.reportValidity()) return;
-      const value = secret.value; secret.value = '';
-      if ((!editing && !value) || (value && !/^[!-~]{1,4096}$/.test(value))) { error.textContent = 'Enter a PAT with no spaces or line breaks. The value is never displayed.'; return; }
-      const body = { name: name.value.trim(), repositories: repositories.value.split(/[\s,]+/).filter(Boolean), ...(note.value.trim() ? { label: note.value.trim() } : editing ? { label: null } : {}), ...(value ? { token: value } : {}) };
-      setBusy(true); error.textContent = '';
-      const controller = new AbortController(); const timeout = setTimeout(() => controller.abort(), 8000);
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      if (!dialog.isConnected || busy || !form.reportValidity()) return;
+      const value = secret.value;
+      secret.value = '';
+      if ((!editing && !value) || (value && !/^[!-~]{1,4096}$/.test(value))) {
+        error.textContent = 'Enter a PAT with no spaces or line breaks. The value is never displayed.';
+        return;
+      }
+      const body = {
+        name: name.value.trim(),
+        repositories: repositories.value.split(/[\s,]+/).filter(Boolean),
+        ...(note.value.trim() ? { label: note.value.trim() } : editing ? { label: null } : {}),
+        ...(value ? { token: value } : {}),
+      };
+      setBusy(true);
+      error.textContent = '';
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 8000);
       let failureDetail = '';
       try {
-        const result = await this.app._chatApi('/api/publication/tokens' + (editing ? '/' + encodeURIComponent(editing) : ''), { method: editing ? 'PUT' : 'POST', body, signal: controller.signal });
+        const result = await this.app._chatApi(
+          '/api/publication/tokens' + (editing ? '/' + encodeURIComponent(editing) : ''),
+          { method: editing ? 'PUT' : 'POST', body, signal: controller.signal }
+        );
         if (!result.ok) {
-          const code = Number.isInteger(result.status) && result.status >= 100 && result.status <= 599 ? result.status : null;
-          const hints = { 400: 'Check the lowercase PAT name, repository names and token format.',
+          const code =
+            Number.isInteger(result.status) && result.status >= 100 && result.status <= 599 ? result.status : null;
+          const hints = {
+            400: 'Check the lowercase PAT name, repository names and token format.',
             403: 'Owner access was refused. Sign in again before retrying.',
             409: 'The name or storage conflicts. Refresh the inventory before editing or choosing another name.',
-            503: 'Credential storage is unavailable. The website operator must check its storage configuration and permissions.' };
+            503: 'Credential storage is unavailable. The website operator must check its storage configuration and permissions.',
+          };
           failureDetail = `PAT save was not confirmed${code ? ` (HTTP ${code})` : ''}. ${hints[code] || 'Refresh the inventory before retrying.'} The token value is not displayed.`;
           throw new Error();
         }
         const saved = result.data?.token;
-        if (!result.ok || typeof saved?.id !== 'string' || !/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(saved.id) ||
-          saved.name !== body.name || (editing && saved.id !== editing)) throw new Error('Save not confirmed. Refresh the inventory before trying again.');
-        clear(); await inventory(); await onChanged?.(); status.textContent = 'Named PAT saved. Its value is not displayed.';
-      } catch { error.textContent = failureDetail || 'PAT could not be saved or confirmed. Check owner access and refresh before retrying; values are never displayed.'; }
-      finally { clearTimeout(timeout); delete body.token; secret.value = ''; setBusy(false); }
+        if (
+          !result.ok ||
+          typeof saved?.id !== 'string' ||
+          !/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(saved.id) ||
+          saved.name !== body.name ||
+          (editing && saved.id !== editing)
+        )
+          throw new Error('Save not confirmed. Refresh the inventory before trying again.');
+        clear();
+        await inventory();
+        await onChanged?.();
+        status.textContent = 'Named PAT saved. Its value is not displayed.';
+      } catch {
+        error.textContent =
+          failureDetail ||
+          'PAT could not be saved or confirmed. Check owner access and refresh before retrying; values are never displayed.';
+      } finally {
+        clearTimeout(timeout);
+        delete body.token;
+        secret.value = '';
+        setBusy(false);
+      }
     });
     const opener = this.doc.activeElement;
     const profile = container?.closest('dialog');
-    const close = () => { secret.value = ''; profile?.removeEventListener('close', close); dialog.remove(); opener?.focus?.(); };
+    const close = () => {
+      secret.value = '';
+      profile?.removeEventListener('close', close);
+      dialog.remove();
+      opener?.focus?.();
+    };
     dialog.addEventListener('close', close);
     if (container) {
       // Keep the owner in the profile instead of opening a second modal over it.
-      dialog.close = close; profile?.addEventListener('close', close, { once: true }); container.append(dialog);
+      dialog.close = close;
+      profile?.addEventListener('close', close, { once: true });
+      container.append(dialog);
       dialog.scrollIntoView?.({ block: 'start' });
-    } else { this.doc.body.append(dialog); dialog.showModal(); }
-    try { await inventory(); } catch (failure) { status.textContent = ''; error.textContent = failure.message; }
+    } else {
+      this.doc.body.append(dialog);
+      dialog.showModal();
+    }
+    try {
+      await inventory();
+    } catch (failure) {
+      status.textContent = '';
+      error.textContent = failure.message;
+    }
   }
 
   employeeGpuFields(container, employee, dialog) {
-    const group = this.el('fieldset', 'ca-employee-gpu'); group.append(this.el('legend', '', 'Laptop GPU access'));
-    const wrap = this.el('label', 'ca-hint'), enabled = this.el('input'); enabled.type = 'checkbox';
-    enabled.setAttribute('aria-label', `GPU access for ${employee.name}`); enabled.disabled = true; enabled.indeterminate = true;
+    const group = this.el('fieldset', 'ca-employee-gpu');
+    group.append(this.el('legend', '', 'Laptop GPU access'));
+    const wrap = this.el('label', 'ca-hint'),
+      enabled = this.el('input');
+    enabled.type = 'checkbox';
+    enabled.setAttribute('aria-label', `GPU access for ${employee.name}`);
+    enabled.disabled = true;
+    enabled.indeterminate = true;
     wrap.append(enabled, this.doc.createTextNode(' Request GPU access'));
-    const devices = this.el('select', 'ca-field'); devices.setAttribute('aria-label', `GPU device for ${employee.name}`); devices.disabled = true;
-    const state = this.el('p', 'ca-hint', 'Loading host GPU status…'); state.setAttribute('role', 'status');
+    const devices = this.el('select', 'ca-field');
+    devices.setAttribute('aria-label', `GPU device for ${employee.name}`);
+    devices.disabled = true;
+    const state = this.el('p', 'ca-hint', 'Loading host GPU status…');
+    state.setAttribute('role', 'status');
     const facts = this.el('dl', 'ca-gpu-facts');
-    const error = this.el('p', 'ca-company-error'); error.setAttribute('role', 'alert');
-    const save = this.button('ca-btn', `Save GPU request for ${employee.name}`, () => void submit(), { text: 'Save GPU request' });
-    const refresh = this.button('ca-btn', `Refresh GPU status for ${employee.name}`, () => void load(), { text: 'Refresh status' });
+    const error = this.el('p', 'ca-company-error');
+    error.setAttribute('role', 'alert');
+    const save = this.button('ca-btn', `Save GPU request for ${employee.name}`, () => void submit(), {
+      text: 'Save GPU request',
+    });
+    const refresh = this.button('ca-btn', `Refresh GPU status for ${employee.name}`, () => void load(), {
+      text: 'Refresh status',
+    });
+    const apply = this.button('ca-btn', `Apply saved GPU request for ${employee.name}`, () => void applySaved(), {
+      text: 'Apply saved request',
+    });
+    apply.hidden = true;
+    apply.disabled = true;
     save.disabled = true;
-    const actions = this.el('div', 'ca-company-actions'); actions.append(save, refresh);
-    group.append(wrap, devices, facts, state, error, actions,
-      this.el('p', 'ca-hint', 'GPU access is shared; it does not reserve GPU memory. Saving a request never stops current work or restarts a laptop.'));
+    const actions = this.el('div', 'ca-company-actions');
+    actions.append(save, apply, refresh);
+    group.append(
+      wrap,
+      devices,
+      facts,
+      state,
+      error,
+      actions,
+      this.el(
+        'p',
+        'ca-hint',
+        'GPU access is shared; it does not reserve GPU memory. Saving a request never stops current work or restarts a laptop.'
+      )
+    );
     container.append(group);
-    let report = null, busy = false, sequence = 0;
-    const live = () => dialog.isConnected && dialog.open && group.isConnected &&
+    let report = null,
+      busy = false,
+      sequence = 0;
+    const live = () =>
+      dialog.isConnected &&
+      dialog.open &&
+      group.isConnected &&
       (!dialog._companyOrigin || this.companyPage === dialog._companyOrigin);
     const controls = () => {
       enabled.disabled = busy || !report;
       devices.disabled = busy || !report || !enabled.checked || report.choices.known !== true;
-      save.disabled = busy || !report || enabled.indeterminate || (enabled.checked && (report.choices.known !== true ||
-        !report.choices.devices.some(item => item.deviceUuid === devices.value)));
+      save.disabled =
+        busy ||
+        !report ||
+        enabled.indeterminate ||
+        (enabled.checked &&
+          (report.choices.known !== true || !report.choices.devices.some((item) => item.deviceUuid === devices.value)));
+      apply.hidden = report?.canApply !== true;
+      apply.disabled =
+        busy ||
+        apply.hidden ||
+        !report?.requested ||
+        report.active.running !== false ||
+        enabled.checked !== report.requested.enabled ||
+        (enabled.checked && devices.value !== report.requested.deviceUuid);
       refresh.disabled = busy;
     };
-    const paint = value => {
-      if (value?.version !== 1 || value.employeeId !== employee.id || value.current?.sessionId !== employee.sessionId ||
-          value.current?.sessionGeneration !== employee.sessionGeneration || !Array.isArray(value.choices?.devices) ||
-          !value.applied || !value.active || !Number.isSafeInteger(value.revision))
+    const paint = (value) => {
+      if (
+        value?.version !== 1 ||
+        value.employeeId !== employee.id ||
+        value.current?.sessionId !== employee.sessionId ||
+        value.current?.sessionGeneration !== employee.sessionGeneration ||
+        !Array.isArray(value.choices?.devices) ||
+        !value.applied ||
+        !value.active ||
+        !Number.isSafeInteger(value.revision)
+      )
         throw new Error('The laptop binding or GPU status changed. Reopen the profile before requesting a change.');
       report = value;
       // An absent request preserves a pre-existing applied grant; it is never
       // converted into an implicit false write by the ordinary profile form.
       const choice = report.requested ? report.requested.enabled : report.applied.known ? report.applied.enabled : null;
-      enabled.checked = choice === true; enabled.indeterminate = choice === null;
+      enabled.checked = choice === true;
+      enabled.indeterminate = choice === null;
       const selected = report.requested?.deviceUuid || report.applied.deviceUuid || '';
       devices.replaceChildren();
-      const placeholder = this.el('option', '', report.choices.known ? 'Choose a GPU' : 'GPU inventory unavailable'); placeholder.value = ''; devices.append(placeholder);
+      const placeholder = this.el('option', '', report.choices.known ? 'Choose a GPU' : 'GPU inventory unavailable');
+      placeholder.value = '';
+      devices.append(placeholder);
       for (const item of report.choices.devices) {
-        const option = this.el('option', '', `${item.model} · ${item.deviceUuid}`); option.value = item.deviceUuid; devices.append(option);
+        const option = this.el('option', '', `${item.model} · ${item.deviceUuid}`);
+        option.value = item.deviceUuid;
+        devices.append(option);
       }
-      if (selected && !report.choices.devices.some(item => item.deviceUuid === selected)) {
-        const old = this.el('option', '', 'Existing GPU · inventory unavailable'); old.value = selected; devices.append(old);
+      if (selected && !report.choices.devices.some((item) => item.deviceUuid === selected)) {
+        const old = this.el('option', '', 'Existing GPU · inventory unavailable');
+        old.value = selected;
+        devices.append(old);
       }
       devices.value = selected || (report.choices.devices.length === 1 ? report.choices.devices[0].deviceUuid : '');
       facts.replaceChildren();
-      const yesNo = value => value === true ? 'On' : value === false ? 'Off' : 'Unknown';
-      const rows = [['Requested', report.requested ? yesNo(report.requested.enabled) : 'No explicit request'],
-        ['Host policy', report.applied.known ? yesNo(report.applied.enabled) + (report.applied.source === 'legacy-session' ? ' · session override' : '') : 'Unknown'],
-        ['Active device access', report.active.known ? yesNo(report.active.enabled) : 'Unknown']];
+      const yesNo = (value) => (value === true ? 'On' : value === false ? 'Off' : 'Unknown');
+      const rows = [
+        ['Requested', report.requested ? yesNo(report.requested.enabled) : 'No explicit request'],
+        [
+          'Host policy',
+          report.applied.known
+            ? yesNo(report.applied.enabled) + (report.applied.source === 'legacy-session' ? ' · session override' : '')
+            : 'Unknown',
+        ],
+        ['Active device access', report.active.known ? yesNo(report.active.enabled) : 'Unknown'],
+      ];
       for (const [label, text] of rows) facts.append(this.el('dt', '', label), this.el('dd', '', text));
-      state.textContent = report.state === 'reconciliation-required'
-        ? 'Host reconciliation is required. Current work has not been restarted; an owner operator must inspect the pending policy.'
-        : report.state === 'pending'
-          ? 'Request saved; host policy is pending. Current work keeps running. A coordinated host update is required before the next normal laptop recreation.'
-          : report.requested && report.applied.known && report.requested.enabled === report.applied.enabled
-            ? report.active.running === false
-              ? 'Host policy applied. Start the laptop normally when ready; no startup was requested.'
-              : !report.active.known
-                ? 'Host policy applied. Active device access is unknown; no work was restarted.'
-                : report.active.enabled !== report.requested.enabled
-                  ? 'Host policy applied. Restart needed to change active device access; current work was not stopped.'
-                  : 'Host policy and active device access match. No laptop restart was requested.'
-            : 'Current host policy shown. No laptop restart was requested.';
+      state.textContent =
+        report.state === 'reconciliation-required'
+          ? 'Host reconciliation is required. Current work has not been restarted; an owner operator must inspect the pending policy.'
+          : report.state === 'pending'
+            ? report.canApply === true
+              ? 'Request saved; host policy is pending. Apply the saved request while this laptop is stopped.'
+              : report.active.running === true
+                ? 'Request saved; host policy is pending. Current work keeps running.'
+                : report.canApply === false
+                  ? 'Request saved; host policy is pending. Applying this request is currently unavailable.'
+                  : 'Request saved; host policy is pending. Refresh status to check whether it can be applied.'
+            : report.requested && report.applied.known && report.requested.enabled === report.applied.enabled
+              ? report.active.running === false
+                ? 'Host policy applied. Start the laptop normally when ready; no startup was requested.'
+                : !report.active.known
+                  ? 'Host policy applied. Active device access is unknown; no work was restarted.'
+                  : report.active.enabled !== report.requested.enabled
+                    ? 'Host policy applied. Restart needed to change active device access; current work was not stopped.'
+                    : 'Host policy and active device access match. No laptop restart was requested.'
+              : 'Current host policy shown. No laptop restart was requested.';
       controls();
     };
     const load = async () => {
-      if (!live() || busy) return; const token = ++sequence; busy = true; controls(); error.textContent = '';
+      if (!live() || busy) return;
+      const token = ++sequence;
+      busy = true;
+      controls();
+      error.textContent = '';
       try {
         const result = await this.app._chatApi(`/api/company/employees/${encodeURIComponent(employee.id)}/gpu-access`);
         if (!live() || token !== sequence) return;
-        if (!result.ok) throw new Error(result.error || 'Host GPU controls are unavailable. Current access is unknown.');
-        paint(result.data?.gpuAccess);
-      } catch (failure) {
-        if (live() && token === sequence) { report = null; enabled.indeterminate = true; state.textContent = 'Host GPU status unavailable; no policy change is confirmed.'; error.textContent = failure.message; }
-      } finally { if (live() && token === sequence) { busy = false; controls(); } }
-    };
-    const submit = async () => {
-      if (!live() || busy || save.disabled || !report) return;
-      const token = ++sequence, baseline = report;
-      const body = { expected: { ...baseline.current, revision: baseline.revision }, enabled: enabled.checked,
-        ...(enabled.checked ? { deviceUuid: devices.value } : {}) };
-      busy = true; controls(); error.textContent = '';
-      try {
-        const result = await this.app._chatApi(`/api/company/employees/${encodeURIComponent(employee.id)}/gpu-access`, { method: 'POST', body });
-        if (!live() || token !== sequence) return;
-        if (!result.ok) throw new Error(result.error || 'GPU request not confirmed. Refresh status before trying again.');
+        if (!result.ok)
+          throw new Error(result.error || 'Host GPU controls are unavailable. Current access is unknown.');
         paint(result.data?.gpuAccess);
       } catch (failure) {
         if (live() && token === sequence) {
-          report = null; error.textContent = failure.message; state.textContent = 'Request not confirmed. Refresh before trying again; it was not retried automatically.';
+          report = null;
+          enabled.indeterminate = true;
+          state.textContent = 'Host GPU status unavailable; no policy change is confirmed.';
+          error.textContent = failure.message;
         }
-      } finally { if (live() && token === sequence) { busy = false; controls(); } }
+      } finally {
+        if (live() && token === sequence) {
+          busy = false;
+          controls();
+        }
+      }
     };
-    enabled.addEventListener('change', () => { enabled.indeterminate = false; controls(); });
+    const submit = async () => {
+      if (!live() || busy || save.disabled || !report) return;
+      const token = ++sequence,
+        baseline = report;
+      const body = {
+        expected: { ...baseline.current, revision: baseline.revision },
+        enabled: enabled.checked,
+        ...(enabled.checked ? { deviceUuid: devices.value } : {}),
+      };
+      busy = true;
+      controls();
+      error.textContent = '';
+      try {
+        const result = await this.app._chatApi(`/api/company/employees/${encodeURIComponent(employee.id)}/gpu-access`, {
+          method: 'POST',
+          body,
+        });
+        if (!live() || token !== sequence) return;
+        if (!result.ok)
+          throw new Error(result.error || 'GPU request not confirmed. Refresh status before trying again.');
+        paint(result.data?.gpuAccess);
+      } catch (failure) {
+        if (live() && token === sequence) {
+          report = null;
+          error.textContent = failure.message;
+          state.textContent = 'Request not confirmed. Refresh before trying again; it was not retried automatically.';
+        }
+      } finally {
+        if (live() && token === sequence) {
+          busy = false;
+          controls();
+        }
+      }
+    };
+    const applySaved = async () => {
+      if (!live() || busy || apply.disabled || report?.canApply !== true) return;
+      const selected = report;
+      const confirmed = await this.confirmCompanyAction(
+        'Laptop GPU access',
+        `Apply the saved GPU policy for ${employee.name}? The laptop stays stopped until you start it normally.`,
+        'Apply saved GPU request'
+      );
+      if (!confirmed || !live() || busy || report !== selected || apply.disabled) return;
+      const token = ++sequence;
+      busy = true;
+      controls();
+      error.textContent = '';
+      state.textContent = 'Applying the saved GPU policy…';
+      try {
+        const reply = await this.app._chatApi(
+          `/api/company/employees/${encodeURIComponent(employee.id)}/gpu-access/apply`,
+          {
+            method: 'POST',
+            body: { ...selected.current, revision: selected.revision, deviceUuid: selected.requested.deviceUuid },
+          }
+        );
+        if (!live() || token !== sequence) return;
+        if (!reply.ok) throw new Error(reply.error || 'Applying the saved GPU policy is unconfirmed.');
+        paint(reply.data?.gpuAccess);
+      } catch (failure) {
+        if (live() && token === sequence) {
+          report = null;
+          enabled.indeterminate = true;
+          facts.replaceChildren();
+          error.textContent = failure.message;
+          state.textContent = 'GPU policy outcome is unconfirmed. Refresh status before trying again.';
+        }
+      } finally {
+        if (live() && token === sequence) {
+          busy = false;
+          controls();
+        }
+      }
+    };
+    enabled.addEventListener('change', () => {
+      enabled.indeterminate = false;
+      controls();
+    });
     devices.addEventListener('change', controls);
-    dialog.addEventListener('close', () => { sequence++; }, { once: true });
+    dialog.addEventListener(
+      'close',
+      () => {
+        sequence++;
+      },
+      { once: true }
+    );
+    void load();
+  }
+
+  employeeHiringFields(container, employee, dialog) {
+    const host = this.el('fieldset', 'ca-profile-hiring');
+    host.append(this.el('legend', '', 'Hiring'));
+    const label = this.el('label', 'ca-hint', ' May hire and retire employees within company limits');
+    const enabled = this.el('input');
+    enabled.type = 'checkbox';
+    enabled.disabled = true;
+    enabled.setAttribute('aria-label', `Hiring permission for ${employee.name}`);
+    label.prepend(enabled);
+    const status = this.el('p', 'ca-hint');
+    status.setAttribute('role', 'status');
+    const error = this.el('p', 'ca-company-error');
+    error.setAttribute('role', 'alert');
+    let shown = null,
+      busy = false;
+    const live = () => dialog.isConnected && host.isConnected;
+    const load = async () => {
+      if (busy || !live()) return;
+      busy = true;
+      enabled.disabled = true;
+      error.textContent = '';
+      try {
+        const result = await this.app._chatApi(
+          `/api/company/employees/${encodeURIComponent(employee.id)}/hiring-permission`
+        );
+        if (!live()) return;
+        const value = result.data;
+        if (
+          !result.ok ||
+          value?.employeeId !== employee.id ||
+          typeof value.sessionId !== 'string' ||
+          typeof value.enabled !== 'boolean' ||
+          !['employee', 'legacy-session', 'none'].includes(value.source)
+        )
+          throw new Error(result.error || 'Hiring permission could not be verified.');
+        shown = value;
+        enabled.checked = value.enabled;
+        status.textContent =
+          value.source === 'employee'
+            ? 'Permission follows this employee when their plan changes.'
+            : value.source === 'legacy-session'
+              ? 'Legacy permission applies to this session only. Turn it off and back on to attach it to the employee.'
+              : 'No hiring permission.';
+      } catch (failure) {
+        shown = null;
+        if (live()) error.textContent = failure.message;
+      } finally {
+        busy = false;
+        if (live()) enabled.disabled = shown === null;
+      }
+    };
+    enabled.addEventListener('change', async () => {
+      if (busy || !live() || !shown) return;
+      const expected = shown,
+        selected = enabled.checked;
+      busy = true;
+      enabled.disabled = true;
+      error.textContent = '';
+      status.textContent = 'Saving hiring permission…';
+      try {
+        const result = await this.app._chatApi(
+          `/api/company/employees/${encodeURIComponent(employee.id)}/hiring-permission`,
+          {
+            method: 'PUT',
+            body: { expectedSessionId: expected.sessionId, expected: expected.enabled, enabled: selected },
+          }
+        );
+        if (!live()) return;
+        const value = result.data;
+        if (
+          !result.ok ||
+          value?.employeeId !== employee.id ||
+          value.sessionId !== expected.sessionId ||
+          value.enabled !== selected
+        )
+          throw new Error(result.error || 'Permission save is unconfirmed. Refresh before trying again.');
+        shown = value;
+        enabled.checked = value.enabled;
+        status.textContent = 'Hiring permission saved.';
+      } catch (failure) {
+        shown = null;
+        if (live()) {
+          error.textContent = failure.message;
+          status.textContent = 'Save is unconfirmed; refresh the current permission.';
+        }
+      } finally {
+        busy = false;
+        if (live()) enabled.disabled = shown === null;
+      }
+    });
+    host.append(
+      label,
+      status,
+      error,
+      this.button('ca-btn', `Refresh hiring permission for ${employee.name}`, () => load(), {
+        text: 'Refresh permission',
+      })
+    );
+    container.append(host);
     void load();
   }
 
   employeePermissionFields(container, employee) {
     const label = this.el('label', 'ca-hint', ' May recover employees and reconnect terminal viewers');
-    label.title = 'Explicit recovery delegation. Viewer-only repair preserves the provider; current scoped office authentication and native checks still apply. This does not grant provider transfers or owner access.';
+    label.title =
+      'Explicit recovery delegation. Viewer-only repair preserves the provider; current scoped office authentication and native checks still apply. This does not grant provider transfers or owner access.';
     const recovery = this.el('input', '');
     recovery.type = 'checkbox';
     recovery.checked = employee.permissions?.recoverEmployees === true;
     recovery.setAttribute('aria-label', `Recovery permission for ${employee.name}`);
     label.prepend(recovery);
     const officeLabel = this.el('label', 'ca-hint', ' Manage office attendance and restarts');
-    const manageOffice = this.el('input'); manageOffice.type = 'checkbox';
+    const manageOffice = this.el('input');
+    manageOffice.type = 'checkbox';
     manageOffice.checked = employee.permissions?.manageOffice === true;
     manageOffice.setAttribute('aria-label', `Manage office attendance and restarts for ${employee.name}`);
-    officeLabel.title = 'May explicitly bring employees into the office, send them out and restart their current saved runtime. Does not grant hiring, retirement, settings or permission changes.';
+    officeLabel.title =
+      'May explicitly bring employees into the office, send them out and restart their current saved runtime. Does not grant hiring, retirement, settings or permission changes.';
     officeLabel.prepend(manageOffice);
     const goalLabel = this.el('label', 'ca-hint', ' Manage team goals');
-    const manageGoals = this.el('input'); manageGoals.type = 'checkbox';
+    const manageGoals = this.el('input');
+    manageGoals.type = 'checkbox';
     manageGoals.checked = employee.permissions?.manageGoals === true;
     manageGoals.setAttribute('aria-label', `Manage team goals for ${employee.name}`);
-    goalLabel.title = 'Read, create and update this company’s operational goals before review. Does not grant verification, closing, cancellation, adoption, grants or unblocker attestations. Requires the authenticated Goal broker.';
+    goalLabel.title =
+      'Read, create and update this company’s operational goals before review. Does not grant verification, closing, cancellation, adoption, grants or unblocker attestations. Requires the authenticated Goal broker.';
     goalLabel.prepend(manageGoals);
     const planPermissions = {};
     const planLabels = [];
-    for (const [key, text] of [['moveOwnPlan', 'Move own plan'], ['managePlans', 'Manage team plans']]) {
+    for (const [key, text] of [
+      ['moveOwnPlan', 'Move own plan'],
+      ['managePlans', 'Manage team plans'],
+    ]) {
       const wrap = this.el('label', 'ca-hint', ` ${text}`);
-      const input = this.el('input'); input.type = 'checkbox'; input.checked = employee.permissions?.[key] === true;
+      const input = this.el('input');
+      input.type = 'checkbox';
+      input.checked = employee.permissions?.[key] === true;
       input.setAttribute('aria-label', `${text} for ${employee.name}`);
-      wrap.title = 'Ordinary requests require the expert’s approval. Also permits explicit forced transfers and guarded journal recovery through an authenticated native office connection, within this self/team scope. Forced transfers can interrupt work and require the caller’s handoff. No account sign-in or account administration.';
-      wrap.prepend(input); planPermissions[key] = input; planLabels.push(wrap);
+      wrap.title =
+        'Ordinary requests require the expert’s approval. Also permits explicit forced transfers and guarded journal recovery through an authenticated native office connection, within this self/team scope. Forced transfers can interrupt work and require the caller’s handoff. No account sign-in or account administration.';
+      wrap.prepend(input);
+      planPermissions[key] = input;
+      planLabels.push(wrap);
     }
     const boardPermissions = {};
     const boardSaves = new Set();
-    const boardProjection = value => caBoardPermissionFields.every(([key]) =>
-      typeof value?.effectiveBoardPermissions?.[key] === 'boolean' &&
-      ['explicit', 'legacy', 'included'].includes(value?.boardPermissionSources?.[key]));
+    const boardProjection = (value) =>
+      caBoardPermissionFields.every(
+        ([key]) =>
+          typeof value?.effectiveBoardPermissions?.[key] === 'boolean' &&
+          ['explicit', 'legacy', 'included'].includes(value?.boardPermissionSources?.[key])
+      );
     const boardFields = this.el('fieldset', 'ca-company-board-permissions');
     boardFields.append(this.el('legend', '', 'Board permissions'));
     const renderBoardPermissions = () => {
@@ -8729,19 +12812,26 @@ class ReverieChatApp {
         input.checked = effective === true;
         input.disabled = included || typeof effective !== 'boolean' || boardSaves.size > 0;
         const source = employee.boardPermissionSources?.[key];
-        note.textContent = typeof effective !== 'boolean' ? 'Current permission unavailable. Reopen Company after updating the server.'
-          : included ? 'Included with Manage company board.'
-          : source === 'legacy' ? 'Inherited current policy. Toggle to set an explicit choice.' : 'Owner-selected permission.';
+        note.textContent =
+          typeof effective !== 'boolean'
+            ? 'Current permission unavailable. Reopen Company after updating the server.'
+            : included
+              ? 'Included with Manage company board.'
+              : source === 'legacy'
+                ? 'Inherited current policy. Toggle to set an explicit choice.'
+                : 'Owner-selected permission.';
         input.closest('label').title = detail;
       }
     };
     for (const [key, text, detail] of caBoardPermissionFields) {
       const wrap = this.el('label', 'ca-hint');
-      const input = this.el('input'); input.type = 'checkbox';
+      const input = this.el('input');
+      input.type = 'checkbox';
       input.setAttribute('aria-label', `${text} for ${employee.name}`);
       const note = this.el('small', 'ca-hint');
       wrap.append(input, this.doc.createTextNode(` ${text} `), note, this.el('p', 'ca-hint', detail));
-      boardPermissions[key] = { input, note }; boardFields.append(wrap);
+      boardPermissions[key] = { input, note };
+      boardFields.append(wrap);
     }
     renderBoardPermissions();
     const preferenceStatus = this.el('p', 'ca-hint');
@@ -8753,8 +12843,11 @@ class ReverieChatApp {
       if (input.disabled || !container.isConnected) return;
       const value = input.checked;
       const boardPermission = Object.hasOwn(boardPermissions, key);
-      const previous = boardPermission ? employee.effectiveBoardPermissions?.[key] === true
-        : permission ? employee.permissions?.[key] === true : employee[key] === true;
+      const previous = boardPermission
+        ? employee.effectiveBoardPermissions?.[key] === true
+        : permission
+          ? employee.permissions?.[key] === true
+          : employee[key] === true;
       if (boardPermission) {
         boardSaves.add(key);
         for (const { input: control } of Object.values(boardPermissions)) control.disabled = true;
@@ -8767,10 +12860,13 @@ class ReverieChatApp {
       const timeout = setTimeout(() => controller.abort(), 8000);
       try {
         const result = await this.app._chatApi(`/api/company/employees/${encodeURIComponent(employee.id)}`, {
-          method: 'PUT', body: permission ? { permissions: { [key]: value } } : { [key]: value }, signal: controller.signal,
+          method: 'PUT',
+          body: permission ? { permissions: { [key]: value } } : { [key]: value },
+          signal: controller.signal,
         });
         const saved = result.data?.employee;
-        if (!result.ok && result.status >= 400 && result.status < 500) throw new Error(result.error || 'Request refused');
+        if (!result.ok && result.status >= 400 && result.status < 500)
+          throw new Error(result.error || 'Request refused');
         if (!result.ok || saved?.id !== employee.id || (permission ? saved.permissions?.[key] : saved[key]) !== value)
           throw new Error('Save not confirmed. Reopen Company to check the current value.');
         if (permission) employee.permissions = { ...employee.permissions, [key]: value };
@@ -8788,20 +12884,39 @@ class ReverieChatApp {
       } finally {
         clearTimeout(timeout);
         input.disabled = false;
-        if (boardPermission) { boardSaves.delete(key); renderBoardPermissions(); }
+        if (boardPermission) {
+          boardSaves.delete(key);
+          renderBoardPermissions();
+        }
         preferenceSaves--;
         if (preferenceSaves === 0) preferenceStatus.textContent = preferenceError || 'Preferences saved.';
       }
     };
-    recovery.addEventListener('change', () => { void savePreference(recovery, 'recoverEmployees', true); });
-    manageOffice.addEventListener('change', () => { void savePreference(manageOffice, 'manageOffice', true); });
-    manageGoals.addEventListener('change', () => { void savePreference(manageGoals, 'manageGoals', true); });
+    recovery.addEventListener('change', () => {
+      void savePreference(recovery, 'recoverEmployees', true);
+    });
+    manageOffice.addEventListener('change', () => {
+      void savePreference(manageOffice, 'manageOffice', true);
+    });
+    manageGoals.addEventListener('change', () => {
+      void savePreference(manageGoals, 'manageGoals', true);
+    });
     for (const [key, input] of Object.entries(planPermissions))
-      input.addEventListener('change', () => { void savePreference(input, key, true); });
+      input.addEventListener('change', () => {
+        void savePreference(input, key, true);
+      });
     for (const [key, { input }] of Object.entries(boardPermissions))
-      input.addEventListener('change', () => { void savePreference(input, key, true); });
+      input.addEventListener('change', () => {
+        void savePreference(input, key, true);
+      });
     const general = this.el('fieldset', 'ca-profile-permissions');
-    general.append(this.el('legend', '', 'Recovery, office, plans and goals'), label, officeLabel, ...planLabels, goalLabel);
+    general.append(
+      this.el('legend', '', 'Recovery, office, plans and goals'),
+      label,
+      officeLabel,
+      ...planLabels,
+      goalLabel
+    );
     preferenceStatus.classList.add('ca-profile-permission-status');
     container.append(general, boardFields, preferenceStatus);
   }
@@ -8809,12 +12924,21 @@ class ReverieChatApp {
   employeeLifecycleFields(container, employee, onSaved, dialog) {
     const origin = this.companyPage;
     const host = this.el('section', 'ca-profile-lifecycle');
-    const status = this.el('p', 'ca-hint ca-profile-lifecycle-status'); status.setAttribute('role', 'status');
+    const status = this.el('p', 'ca-hint ca-profile-lifecycle-status');
+    status.setAttribute('role', 'status');
     const paint = () => {
       host.replaceChildren();
-      const restart = this.button('ca-btn is-danger', `Restart session for ${employee.name}`, () => this.openEmployeeRestart(employee, onSaved), { text: 'Restart session' });
+      const restart = this.button(
+        'ca-btn is-danger',
+        `Restart session for ${employee.name}`,
+        () => this.openEmployeeRestart(employee, onSaved),
+        { text: 'Restart session' }
+      );
       restart.disabled = employee.onVacation === true || employee.desiredRunning === false;
-      restart.title = employee.onVacation || employee.desiredRunning === false ? 'Bring this expert into the office before restarting.' : 'Interrupt current work and restart without a fresh handoff. Saved conversation, memory and files remain.';
+      restart.title =
+        employee.onVacation || employee.desiredRunning === false
+          ? 'Bring this expert into the office before restarting.'
+          : 'Interrupt current work and restart without a fresh handoff. Saved conversation, memory and files remain.';
       const lifecycle = this.el('div', 'ca-company-actions');
       const lifecycleError = this.el('p', 'ca-company-error ca-company-lifecycle-error');
       lifecycleError.setAttribute('role', 'alert');
@@ -8825,34 +12949,59 @@ class ReverieChatApp {
         for (const control of lifecycle.querySelectorAll('button, input')) control.disabled = true;
         const returning = employee.onVacation === true;
         const confirmLabel = action === 'retire' ? 'Retire' : returning ? 'Enter office' : 'Leave office';
-        const question = action === 'retire'
-          ? `Retire ${employee.name}? This removes this expert from the company and its rooms, while keeping their identity in chat history.`
-          : returning
-            ? `Bring ${employee.name} into the office? This starts their laptop and resumes their agent using the current plan.`
-            : `Have ${employee.name} leave the office? This stops their session and keeps this expert off until you switch them back on. Active work is interrupted without a fresh handoff. Their identity, saved conversation, memory, files and room membership are kept.`;
+        const question =
+          action === 'retire'
+            ? `Retire ${employee.name}? This removes this expert from the company and its rooms, while keeping their identity in chat history.`
+            : returning
+              ? `Bring ${employee.name} into the office? This starts their laptop and resumes their agent using the current plan.`
+              : `Have ${employee.name} leave the office? This stops their session and keeps this expert off until you switch them back on. Active work is interrupted without a fresh handoff. Their identity, saved conversation, memory, files and room membership are kept.`;
         lifecycleError.textContent = '';
         let applied = false;
-        const success = action === 'retire' ? `Retired ${employee.name}.` : returning ? `${employee.name} is in the office.` : `${employee.name} is out of office.`;
+        const success =
+          action === 'retire'
+            ? `Retired ${employee.name}.`
+            : returning
+              ? `${employee.name} is in the office.`
+              : `${employee.name} is out of office.`;
         try {
-          if (!await this.confirmCompanyAction(employee.name, question, confirmLabel) || (origin && this.companyPage !== origin) || !dialog.isConnected) return;
+          if (
+            !(await this.confirmCompanyAction(employee.name, question, confirmLabel)) ||
+            (origin && this.companyPage !== origin) ||
+            !dialog.isConnected
+          )
+            return;
           if (returning && action === 'vacation') lifecycleError.textContent = `Starting ${employee.name}…`;
-          const result = await this.app._chatApi(`/api/company/employees/${encodeURIComponent(employee.id)}/${action}`, {
-            method: 'POST', body: action === 'vacation' ? { enabled: !returning } : {},
-          });
-          if (!result.ok) { lifecycleError.textContent = result.error || `Could not update ${employee.name}.`; return; }
+          const result = await this.app._chatApi(
+            `/api/company/employees/${encodeURIComponent(employee.id)}/${action}`,
+            {
+              method: 'POST',
+              body: action === 'vacation' ? { enabled: !returning } : {},
+            }
+          );
+          if (!result.ok) {
+            lifecycleError.textContent = result.error || `Could not update ${employee.name}.`;
+            return;
+          }
           applied = true;
           if (result.data?.employee?.id === employee.id) Object.assign(employee, result.data.employee);
           await this.loadOwner();
           await onSaved?.();
           const startup = result.data?.startup;
-          const startupMessage = startup?.state === 'blocked'
-            ? ` Could not start: ${startup.reason}. Use Restart session to retry.`
-            : startup?.state === 'started' ? ' Agent started.' : '';
+          const startupMessage =
+            startup?.state === 'blocked'
+              ? ` Could not start: ${startup.reason}. Use Restart session to retry.`
+              : startup?.state === 'started'
+                ? ' Agent started.'
+                : '';
           status.textContent = `${success}${startupMessage}${result.data?.failed?.length ? ' Some room removals failed; this expert may still appear in those rooms.' : ''}`;
-          const pageStatus = origin?.querySelector(':scope > [role="status"]'); if (pageStatus) pageStatus.textContent = status.textContent;
-          if (action === 'retire') dialog.close(); else paint();
+          const pageStatus = origin?.querySelector(':scope > [role="status"]');
+          if (pageStatus) pageStatus.textContent = status.textContent;
+          if (action === 'retire') dialog.close();
+          else paint();
         } catch {
-          lifecycleError.textContent = applied ? `${success} The view could not refresh. Reopen Company to see the updated roster.` : `Could not update ${employee.name}. Try again.`;
+          lifecycleError.textContent = applied
+            ? `${success} The view could not refresh. Reopen Company to see the updated roster.`
+            : `Could not update ${employee.name}. Try again.`;
           if (applied) status.textContent = lifecycleError.textContent;
         } finally {
           if (!applied) {
@@ -8867,24 +13016,47 @@ class ReverieChatApp {
       officeToggle.type = 'checkbox';
       officeToggle.setAttribute('role', 'switch');
       officeToggle.checked = !employee.onVacation;
-      officeToggle.setAttribute('aria-label', `${employee.onVacation ? 'Enter office' : 'Leave office'}: ${employee.name}`);
-      officeToggle.addEventListener('click', () => { void changeLifecycle('vacation'); });
+      officeToggle.setAttribute(
+        'aria-label',
+        `${employee.onVacation ? 'Enter office' : 'Leave office'}: ${employee.name}`
+      );
+      officeToggle.addEventListener('click', () => {
+        void changeLifecycle('vacation');
+      });
       officeLabel.prepend(officeToggle);
       const leave = !employee.onVacation
-        ? this.button('ca-btn is-danger', `Leave office for ${employee.name}`, () => changeLifecycle('vacation'), { text: 'Leave office' })
+        ? this.button('ca-btn is-danger', `Leave office for ${employee.name}`, () => changeLifecycle('vacation'), {
+            text: 'Leave office',
+          })
         : null;
       const retirement = this.el('details', 'ca-company-retirement');
-      retirement.append(this.el('summary', 'ca-hint', 'Remove from company'),
-        this.button('ca-btn', `Retire ${employee.name}`, () => changeLifecycle('retire'), { text: 'Retire' }));
-      const wake = this.button('ca-btn', `Wake ${employee.name}`, () => this.wakeEmployee(employee, onSaved), { text: 'Wake' });
+      retirement.append(
+        this.el('summary', 'ca-hint', 'Remove from company'),
+        this.button('ca-btn', `Retire ${employee.name}`, () => changeLifecycle('retire'), { text: 'Retire' })
+      );
+      const wake = this.button('ca-btn', `Wake ${employee.name}`, () => this.wakeEmployee(employee, onSaved), {
+        text: 'Wake',
+      });
       wake.disabled = restart.disabled;
-      wake.title = restart.disabled ? 'Bring this expert into the office before waking them.' : 'Start this expert if their agent is not running. A running agent is not interrupted.';
+      wake.title = restart.disabled
+        ? 'Bring this expert into the office before waking them.'
+        : 'Start this expert if their agent is not running. A running agent is not interrupted.';
       lifecycle.append(wake, restart, officeLabel);
       if (leave) lifecycle.append(leave);
       lifecycle.append(this.el('span', 'ca-hint', 'Off stays off until you switch it on.'), retirement);
       host.append(lifecycle, lifecycleError);
     };
-    container.append(this.el('h3', '', 'Session and company membership'), this.el('p', 'ca-hint', 'Session actions apply separately. They do not save profile edits. Off stays off until you switch it on.'), host, status); paint();
+    container.append(
+      this.el('h3', '', 'Session and company membership'),
+      this.el(
+        'p',
+        'ca-hint',
+        'Session actions apply separately. They do not save profile edits. Off stays off until you switch it on.'
+      ),
+      host,
+      status
+    );
+    paint();
   }
 
   openEmployeeProfile(employee, onSaved) {
@@ -8893,151 +13065,332 @@ class ReverieChatApp {
     dialog.setAttribute('aria-label', `Edit profile: ${employee.name}`);
     dialog._companyOrigin = this.companyPage;
     const heading = this.el('header', 'ca-profile-edit-heading');
-    heading.append(this.literalText('h2', '', employee.name), this.button('ca-btn', `Close profile for ${employee.name}`, () => dialog.close(), { text: 'Close' }));
+    heading.append(
+      this.literalText('h2', '', employee.name),
+      this.button('ca-btn', `Close profile for ${employee.name}`, () => dialog.close(), { text: 'Close' })
+    );
     // The footer hint states the save rule for the selected tab; a second copy here repeated it.
     dialog.append(heading, this.employeeHealthBadge(employee));
     const contextActions = this.el('div', 'ca-dialog-actions');
-    contextActions.append(this.button('ca-btn', 'Runtime settings', () => this.openRuntimeSettings(employee, onSaved), { text: 'Runtime settings' }), this.button('ca-btn', `View startup context for ${employee.name}`, () => this.openStartupContext(employee), { text: 'View startup context' }));
+    contextActions.append(
+      this.button('ca-btn', 'Runtime settings', () => this.openRuntimeSettings(employee, onSaved), {
+        text: 'Runtime settings',
+      }),
+      this.button('ca-btn', `View startup context for ${employee.name}`, () => this.openStartupContext(employee), {
+        text: 'View startup context',
+      })
+    );
     dialog.append(contextActions);
     const form = this.el('form');
-    const pronounLabel = this.el('label', 'ca-label'); pronounLabel.append(this.el('span', 'ca-label-text', 'Pronouns (optional)'));
+    const pronounLabel = this.el('label', 'ca-label');
+    pronounLabel.append(this.el('span', 'ca-label-text', 'Pronouns (optional)'));
     const profileField = (key, label, value, multiline = false) => {
-      const wrap = this.el('label', 'ca-label'); wrap.append(this.el('span', 'ca-label-text', label));
-      const input = this.el(multiline ? 'textarea' : 'input', 'ca-field'); input.name = key; input.value = value; wrap.append(input); form.append(wrap); return input;
+      const wrap = this.el('label', 'ca-label');
+      wrap.append(this.el('span', 'ca-label-text', label));
+      const input = this.el(multiline ? 'textarea' : 'input', 'ca-field');
+      input.name = key;
+      input.value = value;
+      wrap.append(input);
+      form.append(wrap);
+      return input;
     };
-    const position = profileField('position', 'Role title', employee.position || ''); position.maxLength = 100;
+    const position = profileField('position', 'Role title', employee.position || '');
+    position.maxLength = 100;
     const expertise = profileField('expertise', 'Skills and expertise', (employee.expertise || []).join(', '));
-    const responsibilities = profileField('responsibilities', 'Responsibilities (one per line)', (employee.responsibilities || []).join('\n'), true); responsibilities.maxLength = 10000;
-    const personality = profileField('personality', 'Personality and working style', employee.personality || '', true); personality.maxLength = 1000;
+    const responsibilities = profileField(
+      'responsibilities',
+      'Responsibilities (one per line)',
+      (employee.responsibilities || []).join('\n'),
+      true
+    );
+    responsibilities.maxLength = 10000;
+    const personality = profileField('personality', 'Personality and working style', employee.personality || '', true);
+    personality.maxLength = 1000;
     const personalCore = this.coreBeliefFields(form, 'Additional personal core beliefs', employee.coreBeliefs || []);
-    const corePreview = this.el('details', 'ca-core-beliefs'); corePreview.append(this.el('summary', '', 'Company core and effective order'));
+    const corePreview = this.el('details', 'ca-core-beliefs');
+    corePreview.append(this.el('summary', '', 'Company core and effective order'));
     const companyCore = this.el('pre', 'ca-core-preview', 'Loading company core beliefs…');
     const effectiveCore = this.el('pre', 'ca-core-preview', 'Effective preview unavailable.');
-    corePreview.append(this.el('h4', '', 'Company core beliefs · first'), companyCore, this.el('h4', '', 'Effective core beliefs · deduplicated'), effectiveCore); form.append(corePreview);
-    const pronouns = this.el('input', 'ca-field'); pronouns.name = 'pronouns'; pronouns.maxLength = 24; pronouns.value = employee.pronouns || ''; pronouns.placeholder = 'e.g. they/them'; pronounLabel.append(pronouns); form.append(pronounLabel);
+    corePreview.append(
+      this.el('h4', '', 'Company core beliefs · first'),
+      companyCore,
+      this.el('h4', '', 'Effective core beliefs · deduplicated'),
+      effectiveCore
+    );
+    form.append(corePreview);
+    const pronouns = this.el('input', 'ca-field');
+    pronouns.name = 'pronouns';
+    pronouns.maxLength = 24;
+    pronouns.value = employee.pronouns || '';
+    pronouns.placeholder = 'e.g. they/them';
+    pronounLabel.append(pronouns);
+    form.append(pronounLabel);
     const voice = this.expertVoiceFields(form, pronouns, { value: employee.name }, employee.voice);
     const parentLabel = this.el('label', 'ca-label');
     parentLabel.append(this.el('span', 'ca-label-text', 'Reports to'));
-    const parent = this.el('select', 'ca-field'); parent.name = 'reportsTo'; parent.disabled = true;
-    parent.setAttribute('aria-label', 'Reports to'); parentLabel.append(parent); form.append(parentLabel);
-    const addParent = (value, label) => { const option = this.el('option', '', label); option.value = value; parent.append(option); };
+    const parent = this.el('select', 'ca-field');
+    parent.name = 'reportsTo';
+    parent.disabled = true;
+    parent.setAttribute('aria-label', 'Reports to');
+    parentLabel.append(parent);
+    form.append(parentLabel);
+    const addParent = (value, label) => {
+      const option = this.el('option', '', label);
+      option.value = value;
+      parent.append(option);
+    };
     let reportingReady = false;
-    void this.app._chatApi('/api/company').then(response => {
-      if (!dialog.isConnected || !response.ok) return;
-      const baselineCore = response.data?.settings?.coreBeliefs;
-      companyCore.textContent = Array.isArray(baselineCore) && baselineCore.length ? baselineCore.join('\n\n') : 'No company core beliefs configured.';
-      const current = response.data?.employees?.find(item => item.id === employee.id);
-      const combinedCore = current?.effectiveCoreBeliefs;
-      effectiveCore.textContent = Array.isArray(combinedCore) ? (combinedCore.length ? combinedCore.join('\n\n') : 'No effective core beliefs configured.') : 'Effective preview unavailable. Use View startup context to inspect the current configuration.';
-      addParent('owner', response.data?.settings?.ownerName || 'Owner');
-      for (const candidate of response.data?.employees || []) if (candidate.id !== employee.id) addParent(candidate.id, candidate.name);
-      // Preserve implicit coordinator reporting rather than silently changing it on unrelated saves.
-      addParent('', 'Company default'); parent.lastElementChild.disabled = true; parent.value = employee.reportsTo || '';
-      reportingReady = true; parent.disabled = false;
-    }).catch(() => {});
-    const preferences = this.el('fieldset', 'ca-profile-preferences'); preferences.append(this.el('legend', '', 'Sleep and Dream · saved with profile'));
-    const rest = this.expertRestFields(preferences, employee); form.append(preferences);
+    void this.app
+      ._chatApi('/api/company')
+      .then((response) => {
+        if (!dialog.isConnected || !response.ok) return;
+        const baselineCore = response.data?.settings?.coreBeliefs;
+        companyCore.textContent =
+          Array.isArray(baselineCore) && baselineCore.length
+            ? baselineCore.join('\n\n')
+            : 'No company core beliefs configured.';
+        const current = response.data?.employees?.find((item) => item.id === employee.id);
+        const combinedCore = current?.effectiveCoreBeliefs;
+        effectiveCore.textContent = Array.isArray(combinedCore)
+          ? combinedCore.length
+            ? combinedCore.join('\n\n')
+            : 'No effective core beliefs configured.'
+          : 'Effective preview unavailable. Use View startup context to inspect the current configuration.';
+        addParent('owner', response.data?.settings?.ownerName || 'Owner');
+        for (const candidate of response.data?.employees || [])
+          if (candidate.id !== employee.id) addParent(candidate.id, candidate.name);
+        // Preserve implicit coordinator reporting rather than silently changing it on unrelated saves.
+        addParent('', 'Company default');
+        parent.lastElementChild.disabled = true;
+        parent.value = employee.reportsTo || '';
+        reportingReady = true;
+        parent.disabled = false;
+      })
+      .catch(() => {});
+    const preferences = this.el('fieldset', 'ca-profile-preferences');
+    preferences.append(this.el('legend', '', 'Sleep and Dream · saved with profile'));
+    const rest = this.expertRestFields(preferences, employee);
+    form.append(preferences);
     const appearance = this.expertAppearanceFields(form, employee.avatar || '', { name: { value: employee.name } });
     const background = this.employeeAvatarBackgroundFields(form, employee);
-    const error = this.el('p', 'ca-company-error'); error.setAttribute('role', 'alert');
-    const save = this.el('button', 'ca-btn is-primary', 'Save profile'); save.type = 'submit';
-    const cancel = this.el('button', 'ca-btn', 'Cancel'); cancel.type = 'button'; cancel.addEventListener('click', () => dialog.close());
-    const profileActions = this.el('div', 'ca-dialog-actions'); profileActions.append(save, cancel);
+    const error = this.el('p', 'ca-company-error');
+    error.setAttribute('role', 'alert');
+    const save = this.el('button', 'ca-btn is-primary', 'Save profile');
+    save.type = 'submit';
+    const cancel = this.el('button', 'ca-btn', 'Cancel');
+    cancel.type = 'button';
+    cancel.addEventListener('click', () => dialog.close());
+    const profileActions = this.el('div', 'ca-dialog-actions');
+    profileActions.append(save, cancel);
     form.append(error, profileActions);
-    form.addEventListener('submit', async event => {
+    form.addEventListener('submit', async (event) => {
       event.preventDefault();
       if (save.disabled || appearance.pending()) return;
       save.disabled = true;
       try {
         const roleChanges = {};
-        if (reportingReady && parent.value && parent.value !== (employee.reportsTo || '')) roleChanges.reportsTo = parent.value;
+        if (reportingReady && parent.value && parent.value !== (employee.reportsTo || ''))
+          roleChanges.reportsTo = parent.value;
         if (position.value.trim() !== (employee.position || '')) roleChanges.position = position.value.trim();
-        const skills = expertise.value.split(',').map(s => s.trim()).filter(Boolean);
-        const duties = responsibilities.value.split('\n').map(s => s.trim()).filter(Boolean);
+        const skills = expertise.value
+          .split(',')
+          .map((s) => s.trim())
+          .filter(Boolean);
+        const duties = responsibilities.value
+          .split('\n')
+          .map((s) => s.trim())
+          .filter(Boolean);
         if (JSON.stringify(skills) !== JSON.stringify(employee.expertise || [])) roleChanges.expertise = skills;
-        if (JSON.stringify(duties) !== JSON.stringify(employee.responsibilities || [])) roleChanges.responsibilities = duties;
-        if (personality.value.trim() !== (employee.personality || '')) roleChanges.personality = personality.value.trim();
+        if (JSON.stringify(duties) !== JSON.stringify(employee.responsibilities || []))
+          roleChanges.responsibilities = duties;
+        if (personality.value.trim() !== (employee.personality || ''))
+          roleChanges.personality = personality.value.trim();
         if (personalCore.changed()) roleChanges.coreBeliefs = personalCore.values();
-        const changed = await this.app._chatApi(`/api/company/employees/${encodeURIComponent(employee.id)}`, { method: 'PUT', body: { ...roleChanges, avatarBackground: background.value(), sleepEnabled: rest.sleep.checked, dreamEnabled: rest.dream.checked, icon: employee.avatar && !appearance.picture.value() ? this.expertInitial(employee.name) : employee.icon || this.expertInitial(employee.name), pronouns: pronouns.value.trim() || null, voice: voice.value() || null } });
-        if (!changed.ok) { error.textContent = changed.error || 'Profile could not be saved.'; return; }
-        if (appearance.picture.value() !== (employee.avatar || '') && !await this.saveEmployeePicture(employee.sessionId, appearance.picture.value())) {
-          error.textContent = 'The profile picture could not be saved. Try again.'; return;
+        const changed = await this.app._chatApi(`/api/company/employees/${encodeURIComponent(employee.id)}`, {
+          method: 'PUT',
+          body: {
+            ...roleChanges,
+            avatarBackground: background.value(),
+            sleepEnabled: rest.sleep.checked,
+            dreamEnabled: rest.dream.checked,
+            icon:
+              employee.avatar && !appearance.picture.value()
+                ? this.expertInitial(employee.name)
+                : employee.icon || this.expertInitial(employee.name),
+            pronouns: pronouns.value.trim() || null,
+            voice: voice.value() || null,
+          },
+        });
+        if (!changed.ok) {
+          error.textContent = changed.error || 'Profile could not be saved.';
+          return;
         }
-        await this.loadOwner(); await onSaved?.(); dialog.close();
-      } catch { error.textContent = 'Profile could not be saved. Try again.'; }
-      finally { save.disabled = false; }
+        if (
+          appearance.picture.value() !== (employee.avatar || '') &&
+          !(await this.saveEmployeePicture(employee.sessionId, appearance.picture.value()))
+        ) {
+          error.textContent = 'The profile picture could not be saved. Try again.';
+          return;
+        }
+        await this.loadOwner();
+        await onSaved?.();
+        dialog.close();
+      } catch {
+        error.textContent = 'Profile could not be saved. Try again.';
+      } finally {
+        save.disabled = false;
+      }
     });
     const management = this.el('section', 'ca-profile-management');
-    const permissionStatus = this.el('p', 'ca-hint', 'Checking owner access…'); permissionStatus.setAttribute('role', 'status'); management.append(permissionStatus);
+    const permissionStatus = this.el('p', 'ca-hint', 'Checking owner access…');
+    permissionStatus.setAttribute('role', 'status');
+    management.append(permissionStatus);
     const credentials = this.el('section', 'ca-profile-management ca-profile-credentials');
-    const credentialStatus = this.el('p', 'ca-hint', 'Checking owner access…'); credentialStatus.setAttribute('role', 'status'); credentials.append(credentialStatus);
+    const credentialStatus = this.el('p', 'ca-hint', 'Checking owner access…');
+    credentialStatus.setAttribute('role', 'status');
+    credentials.append(credentialStatus);
     // Keep the existing controls and submit handler; grouping never recreates fields
     // or changes immediate permission/session actions into profile writes.
     const profilePanel = this.el('section', 'ca-profile-panel ca-profile-fields');
     const identityPanel = this.el('section', 'ca-profile-panel ca-profile-fields');
-    const profileNodes = [position.parentElement, parentLabel, expertise.parentElement,
-      responsibilities.parentElement, personality.parentElement, preferences];
-    const identityNodes = [...form.children].filter(node => !profileNodes.includes(node) && node !== error && node !== profileActions);
-    profilePanel.append(...profileNodes); identityPanel.append(contextActions, ...identityNodes);
-    for (const node of [expertise.parentElement, responsibilities.parentElement, personality.parentElement]) node.classList.add('ca-profile-wide');
-    form.id = 'ca-employee-profile-form'; form.classList.add('ca-profile-form');
-    form.replaceChildren(profilePanel, identityPanel); save.setAttribute('form', form.id);
-    const tabs = this.el('nav', 'ca-profile-tabs'); tabs.setAttribute('role', 'tablist'); tabs.setAttribute('aria-label', 'Employee profile sections');
-    const panels = [['profile', 'Profile', profilePanel], ['permissions', 'Permissions', management], ['credentials', 'GitHub PATs', credentials], ['identity', 'Identity & context', identityPanel]];
-    const selectTab = key => {
+    const profileNodes = [
+      position.parentElement,
+      parentLabel,
+      expertise.parentElement,
+      responsibilities.parentElement,
+      personality.parentElement,
+      preferences,
+    ];
+    const identityNodes = [...form.children].filter(
+      (node) => !profileNodes.includes(node) && node !== error && node !== profileActions
+    );
+    profilePanel.append(...profileNodes);
+    identityPanel.append(contextActions, ...identityNodes);
+    for (const node of [expertise.parentElement, responsibilities.parentElement, personality.parentElement])
+      node.classList.add('ca-profile-wide');
+    form.id = 'ca-employee-profile-form';
+    form.classList.add('ca-profile-form');
+    form.replaceChildren(profilePanel, identityPanel);
+    save.setAttribute('form', form.id);
+    const tabs = this.el('nav', 'ca-profile-tabs');
+    tabs.setAttribute('role', 'tablist');
+    tabs.setAttribute('aria-label', 'Employee profile sections');
+    const panels = [
+      ['profile', 'Profile', profilePanel],
+      ['permissions', 'Permissions', management],
+      ['credentials', 'GitHub PATs', credentials],
+      ['identity', 'Identity & context', identityPanel],
+    ];
+    const selectTab = (key) => {
       for (const [id, , panel] of panels) {
         panel.hidden = id !== key;
         const tab = tabs.querySelector(`[data-profile-tab="${id}"]`);
-        tab.setAttribute('aria-selected', String(id === key)); tab.tabIndex = id === key ? 0 : -1;
+        tab.setAttribute('aria-selected', String(id === key));
+        tab.tabIndex = id === key ? 0 : -1;
       }
       form.hidden = key === 'permissions' || key === 'credentials';
       // Permissions and PATs save as they change, so Save profile would do nothing on those tabs.
       save.hidden = key === 'credentials' || key === 'permissions';
-      saveHint.textContent = key === 'credentials'
-        ? 'PATs and access checkboxes save immediately. Cancel does not undo saved PATs or access changes.'
-        : key === 'permissions'
-        ? 'Permissions save immediately. GPU requests show their own status. Cancel does not undo saved requests or session actions.'
-        : 'Profile changes are saved together. Cancel discards unsaved profile edits.';
+      saveHint.textContent =
+        key === 'credentials'
+          ? 'PATs and access checkboxes save immediately. Cancel does not undo saved PATs or access changes.'
+          : key === 'permissions'
+            ? 'Permissions save immediately. Resource changes have separate Apply or Preview actions. Cancel does not undo saved changes or session actions.'
+            : 'Profile changes are saved together. Cancel discards unsaved profile edits.';
       body.scrollTop = 0;
     };
     for (const [key, label, panel] of panels) {
       const tab = this.button('ca-btn', label, () => selectTab(key), { text: label });
-      tab.id = `ca-employee-tab-${key}`; tab.dataset.profileTab = key; tab.setAttribute('role', 'tab');
+      tab.id = `ca-employee-tab-${key}`;
+      tab.dataset.profileTab = key;
+      tab.setAttribute('role', 'tab');
       tab.setAttribute('aria-controls', `ca-employee-panel-${key}`);
-      panel.id = `ca-employee-panel-${key}`; panel.setAttribute('role', 'tabpanel'); panel.setAttribute('aria-labelledby', tab.id);
-      tab.addEventListener('keydown', event => {
+      panel.id = `ca-employee-panel-${key}`;
+      panel.setAttribute('role', 'tabpanel');
+      panel.setAttribute('aria-labelledby', tab.id);
+      tab.addEventListener('keydown', (event) => {
         const index = panels.findIndex(([id]) => id === key);
-        const next = event.key === 'ArrowRight' ? (index + 1) % panels.length : event.key === 'ArrowLeft' ? (index + panels.length - 1) % panels.length
-          : event.key === 'Home' ? 0 : event.key === 'End' ? panels.length - 1 : -1;
-        if (next < 0) return; event.preventDefault(); selectTab(panels[next][0]); tabs.children[next].focus();
+        const next =
+          event.key === 'ArrowRight'
+            ? (index + 1) % panels.length
+            : event.key === 'ArrowLeft'
+              ? (index + panels.length - 1) % panels.length
+              : event.key === 'Home'
+                ? 0
+                : event.key === 'End'
+                  ? panels.length - 1
+                  : -1;
+        if (next < 0) return;
+        event.preventDefault();
+        selectTab(panels[next][0]);
+        tabs.children[next].focus();
       });
       tabs.append(tab);
     }
-    const body = this.el('div', 'ca-profile-editor-body'); body.append(form, management, credentials);
+    const body = this.el('div', 'ca-profile-editor-body');
+    body.append(form, management, credentials);
     const saveHint = this.el('span', 'ca-hint ca-profile-save-hint');
-    profileActions.classList.add('ca-profile-footer'); profileActions.prepend(saveHint);
+    profileActions.classList.add('ca-profile-footer');
+    profileActions.prepend(saveHint);
     error.classList.add('ca-profile-save-error');
-    dialog.append(tabs, body, error, profileActions); selectTab('profile');
-    dialog.addEventListener('close', () => dialog.remove()); this.doc.body.append(dialog); dialog.showModal();
-    void Promise.all([this.app._chatApi('/api/company'), this.app._chatApi('/api/chatrooms/phone-status')]).then(([company, auth]) => {
-      if (!dialog.isConnected || (dialog._companyOrigin && this.companyPage !== dialog._companyOrigin)) return;
-      const current = company.ok && company.data?.employees?.find(item => item.id === employee.id);
-      if (!current || company.data?.canManage !== true || !auth.ok || auth.data?.self !== 'owner' || auth.data?.canSetOwn !== true) {
-        permissionStatus.textContent = 'Sign in as the owner to change permissions or manage this expert.';
-        credentialStatus.textContent = 'Sign in as the owner to add PATs or change access.'; return;
-      }
-      for (const key of ['permissions', 'effectiveBoardPermissions', 'boardPermissionSources', 'onVacation', 'desiredRunning', 'sessionId', 'sessionGeneration'])
-        if (Object.hasOwn(current, key)) employee[key] = current[key];
-      management.replaceChildren(); this.employeePermissionFields(management, employee);
-      this.employeeGpuFields(management, employee, dialog);
-      credentials.replaceChildren(); this.publicationCredentialsFields(credentials, employee);
-      this.employeeLifecycleFields(management, employee, onSaved, dialog);
-      management.append(this.button('ca-btn', `Open ${employee.name}'s journal map`, () => this.openJournalMap(employee), { text: 'Journal map' }));
-      if (company.data?.resourceReplacement === true) this.employeeMemoryFields(management, employee, dialog);
-    }).catch(() => { if (dialog.isConnected) {
-      permissionStatus.textContent = 'Permissions could not be loaded. Reopen the profile to try again.';
-      credentialStatus.textContent = 'PAT access could not be loaded. Reopen the profile to try again.';
-    } });
+    dialog.append(tabs, body, error, profileActions);
+    selectTab('profile');
+    dialog.addEventListener('close', () => dialog.remove());
+    this.doc.body.append(dialog);
+    dialog.showModal();
+    void Promise.all([this.app._chatApi('/api/company'), this.app._chatApi('/api/chatrooms/phone-status')])
+      .then(([company, auth]) => {
+        if (!dialog.isConnected || (dialog._companyOrigin && this.companyPage !== dialog._companyOrigin)) return;
+        const current = company.ok && company.data?.employees?.find((item) => item.id === employee.id);
+        if (
+          !current ||
+          company.data?.canManage !== true ||
+          !auth.ok ||
+          auth.data?.self !== 'owner' ||
+          auth.data?.canSetOwn !== true
+        ) {
+          permissionStatus.textContent = 'Sign in as the owner to change permissions or manage this expert.';
+          credentialStatus.textContent = 'Sign in as the owner to add PATs or change access.';
+          return;
+        }
+        for (const key of [
+          'permissions',
+          'effectiveBoardPermissions',
+          'boardPermissionSources',
+          'onVacation',
+          'desiredRunning',
+          'sessionId',
+          'sessionGeneration',
+        ])
+          if (Object.hasOwn(current, key)) employee[key] = current[key];
+        management.replaceChildren();
+        this.employeePermissionFields(management, employee);
+        this.employeeHiringFields(management, employee, dialog);
+        const resources = this.el('section', 'ca-profile-resources');
+        resources.setAttribute('aria-label', 'Laptop resources');
+        resources.append(
+          this.el('h3', '', 'Laptop resources'),
+          this.el('p', 'ca-hint', 'Requested policy and verified running limits are shown separately.')
+        );
+        management.append(resources);
+        globalThis.ReverieFleetResources?.mountEmployee(this, resources, dialog, employee);
+        this.employeeGpuFields(resources, employee, dialog);
+        if (company.data?.resourceReplacement === true) this.employeeMemoryFields(resources, employee, dialog);
+        credentials.replaceChildren();
+        this.publicationCredentialsFields(credentials, employee);
+        this.employeeLifecycleFields(management, employee, onSaved, dialog);
+        management.append(
+          this.button('ca-btn', `Open ${employee.name}'s journal map`, () => this.openJournalMap(employee), {
+            text: 'Journal map',
+          })
+        );
+      })
+      .catch(() => {
+        if (dialog.isConnected) {
+          permissionStatus.textContent = 'Permissions could not be loaded. Reopen the profile to try again.';
+          credentialStatus.textContent = 'PAT access could not be loaded. Reopen the profile to try again.';
+        }
+      });
   }
 
   /**
@@ -9050,29 +13403,57 @@ class ReverieChatApp {
     this.doc.querySelector('.ca-journal-dialog')?.close();
     const dialog = this.el('dialog', 'ca-dialog ca-journal-dialog');
     dialog.setAttribute('aria-label', `${employee.name}'s journal map`);
-    const status = this.el('p', 'ca-hint'); status.setAttribute('role', 'status'); status.textContent = 'Loading the journal…';
-    const search = this.el('input', 'ca-field'); search.type = 'search'; search.placeholder = 'Find a word or tag';
+    const status = this.el('p', 'ca-hint');
+    status.setAttribute('role', 'status');
+    status.textContent = 'Loading the journal…';
+    const search = this.el('input', 'ca-field');
+    search.type = 'search';
+    search.placeholder = 'Find a word or tag';
     search.setAttribute('aria-label', 'Find a memory by word or tag');
-    const ns = 'http://www.w3.org/2000/svg', W = 900;
+    const ns = 'http://www.w3.org/2000/svg',
+      W = 900;
     const svg = this.doc.createElementNS(ns, 'svg');
     svg.setAttribute('class', 'ca-journal-map');
     svg.setAttribute('aria-label', `Memories of ${employee.name}`);
-    const detail = this.el('section', 'ca-journal-detail'); detail.setAttribute('aria-live', 'polite');
+    const detail = this.el('section', 'ca-journal-detail');
+    detail.setAttribute('aria-live', 'polite');
     const close = this.button('ca-btn', 'Close journal map', () => dialog.close(), { text: 'Close' });
-    dialog.append(this.el('h2', '', `${employee.name}'s journal`),
-      this.el('p', 'ca-dialog-note', "Larger circles are more important memories; faded ones were superseded by a later entry. Solid lines: supersedes; dashed: related; thin: shared tags or topics. Entries are the employee's own account, not verified fact."),
-      search, status, svg, detail, close);
-    dialog.addEventListener('cancel', event => { event.preventDefault(); dialog.close(); });
+    dialog.append(
+      this.el('h2', '', `${employee.name}'s journal`),
+      this.el(
+        'p',
+        'ca-dialog-note',
+        "Larger circles are more important memories; faded ones were superseded by a later entry. Solid lines: supersedes; dashed: related; thin: shared tags or topics. Entries are the employee's own account, not verified fact."
+      ),
+      search,
+      status,
+      svg,
+      detail,
+      close
+    );
+    dialog.addEventListener('cancel', (event) => {
+      event.preventDefault();
+      dialog.close();
+    });
     dialog.addEventListener('close', () => dialog.remove());
-    this.doc.body.append(dialog); dialog.showModal(); close.focus();
+    this.doc.body.append(dialog);
+    dialog.showModal();
+    close.focus();
 
-    const LIMIT = 500, entries = [];
-    let before, more = false;
+    const LIMIT = 500,
+      entries = [];
+    let before,
+      more = false;
     for (let page = 0; page < 50 && entries.length < LIMIT; page++) {
-      const result = await this.app._chatApi(`/api/company/employees/${encodeURIComponent(employee.id)}/journal${before ? `?before=${before}` : ''}`);
+      const result = await this.app._chatApi(
+        `/api/company/employees/${encodeURIComponent(employee.id)}/journal${before ? `?before=${before}` : ''}`
+      );
       if (!dialog.isConnected) return;
       if (!result.ok) {
-        status.textContent = result.status === 403 ? 'Sign in as the owner to see this journal.' : 'The journal could not be loaded. Close and try again.';
+        status.textContent =
+          result.status === 403
+            ? 'Sign in as the owner to see this journal.'
+            : 'The journal could not be loaded. Close and try again.';
         return;
       }
       const got = Array.isArray(result.data?.entries) ? result.data.entries : [];
@@ -9082,23 +13463,34 @@ class ReverieChatApp {
       before = got[got.length - 1].entryId;
     }
     const shown = entries.slice(0, LIMIT);
-    if (!shown.length) { status.textContent = `${employee.name} has no journal entries yet.`; return; }
+    if (!shown.length) {
+      status.textContent = `${employee.name} has no journal entries yet.`;
+      return;
+    }
     status.textContent = `${shown.length} ${shown.length === 1 ? 'memory' : 'memories'}${more || entries.length > LIMIT ? ` (the newest ${LIMIT})` : ''}.`;
 
-    const byId = new Map(shown.map(e => [e.entryId, e]));
+    const byId = new Map(shown.map((e) => [e.entryId, e]));
     // A larger journal gets a taller map, so its memories still fit without overlapping.
     const H = shown.length <= 120 ? 600 : Math.round(600 * Math.sqrt(shown.length / 120));
     svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
-    const graph = caJournalGraph(shown), pos = caJournalLayout(graph, { width: W, height: H });
+    const graph = caJournalGraph(shown),
+      pos = caJournalLayout(graph, { width: W, height: H });
     // Each topic gets its own hue, spread by the golden angle in order of first appearance, so neighbours never share one.
-    const groups = [...new Set(graph.nodes.map(node => node.group))];
+    const groups = [...new Set(graph.nodes.map((node) => node.group))];
     const hue = (group) => Math.round((groups.indexOf(group) * 137.508 + 200) % 360);
-    const edgeLayer = this.doc.createElementNS(ns, 'g'), nodeLayer = this.doc.createElementNS(ns, 'g');
+    const edgeLayer = this.doc.createElementNS(ns, 'g'),
+      nodeLayer = this.doc.createElementNS(ns, 'g');
     for (const edge of graph.edges) {
-      const a = pos.get(edge.source), b = pos.get(edge.target), line = this.doc.createElementNS(ns, 'line');
-      line.setAttribute('x1', a.x); line.setAttribute('y1', a.y); line.setAttribute('x2', b.x); line.setAttribute('y2', b.y);
+      const a = pos.get(edge.source),
+        b = pos.get(edge.target),
+        line = this.doc.createElementNS(ns, 'line');
+      line.setAttribute('x1', a.x);
+      line.setAttribute('y1', a.y);
+      line.setAttribute('x2', b.x);
+      line.setAttribute('y2', b.y);
       line.setAttribute('class', `ca-journal-edge is-${edge.kind}`);
-      line.dataset.source = String(edge.source); line.dataset.target = String(edge.target);
+      line.dataset.source = String(edge.source);
+      line.dataset.target = String(edge.target);
       edgeLayer.append(line);
     }
     const nodeEls = new Map();
@@ -9106,26 +13498,50 @@ class ReverieChatApp {
       const entry = byId.get(id);
       if (!entry) return;
       for (const [nid, el] of nodeEls) el.classList.toggle('is-selected', nid === id);
-      for (const line of edgeLayer.children) line.classList.toggle('is-active', line.dataset.source === String(id) || line.dataset.target === String(id));
+      for (const line of edgeLayer.children)
+        line.classList.toggle('is-active', line.dataset.source === String(id) || line.dataset.target === String(id));
       const at = Date.parse(entry.committedAt);
-      const when = Number.isFinite(at) ? (globalThis.ReverieTime?.format(at) ?? new Date(at).toLocaleString('en-US', { timeZone: 'UTC', timeZoneName: 'short' })) : '';
-      const meta = [`#${entry.entryId}`, when, entry.annotations?.importance, entry.supersededBy?.length ? 'superseded' : ''].filter(Boolean).join(' · ');
-      const body = this.el('p', 'ca-journal-text'); body.textContent = String(entry.text ?? '');
+      const when = Number.isFinite(at)
+        ? (globalThis.ReverieTime?.format(at) ??
+          new Date(at).toLocaleString('en-US', { timeZone: 'UTC', timeZoneName: 'short' }))
+        : '';
+      const meta = [
+        `#${entry.entryId}`,
+        when,
+        entry.annotations?.importance,
+        entry.supersededBy?.length ? 'superseded' : '',
+      ]
+        .filter(Boolean)
+        .join(' · ');
+      const body = this.el('p', 'ca-journal-text');
+      body.textContent = String(entry.text ?? '');
       detail.replaceChildren(this.el('h3', '', meta), body);
       const tags = [...(entry.annotations?.topics ?? []), ...(entry.tags ?? [])];
       if (tags.length) detail.append(this.el('p', 'ca-hint', `Tags: ${tags.join(', ')}`));
       const sources = this.el('ul', 'ca-journal-sources');
       for (const source of entry.sources ?? []) {
         const item = this.el('li');
-        item.textContent = source.ref !== undefined ? `${source.ref} (unverified reference)`
-          : `${source.roomId}/${source.id}${source.quote ? `: "${source.quote}"` : ''}`;
+        item.textContent =
+          source.ref !== undefined
+            ? `${source.ref} (unverified reference)`
+            : `${source.roomId}/${source.id}${source.quote ? `: "${source.quote}"` : ''}`;
         sources.append(item);
       }
       if (sources.children.length) detail.append(this.el('h4', '', 'Sources'), sources);
       const links = this.el('div', 'ca-company-actions');
       const link = (label, target) => {
         if (!byId.has(target)) return links.append(this.el('span', 'ca-hint', `${label} #${target} (not shown)`));
-        links.append(this.button('ca-btn', `${label} memory ${target}`, () => { select(target); nodeEls.get(target)?.focus(); }, { text: `${label} #${target}` }));
+        links.append(
+          this.button(
+            'ca-btn',
+            `${label} memory ${target}`,
+            () => {
+              select(target);
+              nodeEls.get(target)?.focus();
+            },
+            { text: `${label} #${target}` }
+          )
+        );
       };
       for (const t of entry.annotations?.supersedes ?? []) link('Supersedes', t);
       for (const t of entry.supersededBy ?? []) link('Superseded by', t);
@@ -9133,27 +13549,45 @@ class ReverieChatApp {
       if (links.children.length) detail.append(links);
     };
     for (const node of graph.nodes) {
-      const p = pos.get(node.id), g = this.doc.createElementNS(ns, 'g'), circle = this.doc.createElementNS(ns, 'circle');
+      const p = pos.get(node.id),
+        g = this.doc.createElementNS(ns, 'g'),
+        circle = this.doc.createElementNS(ns, 'circle');
       const title = this.doc.createElementNS(ns, 'title');
       g.setAttribute('class', `ca-journal-node${node.superseded ? ' is-superseded' : ''}`);
-      g.setAttribute('transform', `translate(${p.x} ${p.y})`); g.setAttribute('tabindex', '0'); g.setAttribute('role', 'button');
-      g.setAttribute('aria-label', `Memory ${node.id}${node.importance ? `, ${node.importance}` : ''}${node.superseded ? ', superseded' : ''}: ${node.label}`);
+      g.setAttribute('transform', `translate(${p.x} ${p.y})`);
+      g.setAttribute('tabindex', '0');
+      g.setAttribute('role', 'button');
+      g.setAttribute(
+        'aria-label',
+        `Memory ${node.id}${node.importance ? `, ${node.importance}` : ''}${node.superseded ? ', superseded' : ''}: ${node.label}`
+      );
       g.style.setProperty('--hue', String(hue(node.group)));
-      circle.setAttribute('r', String(node.r)); title.textContent = node.label;
+      circle.setAttribute('r', String(node.r));
+      title.textContent = node.label;
       g.append(circle, title);
       g.addEventListener('click', () => select(node.id));
-      g.addEventListener('keydown', event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); select(node.id); } });
-      nodeEls.set(node.id, g); nodeLayer.append(g);
+      g.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          select(node.id);
+        }
+      });
+      nodeEls.set(node.id, g);
+      nodeLayer.append(g);
     }
     svg.append(edgeLayer, nodeLayer);
     search.addEventListener('input', () => {
       const q = search.value.trim().toLowerCase();
       for (const [id, el] of nodeEls) {
-        const e = byId.get(id), hay = [e.text, ...(e.tags ?? []), ...(e.annotations?.topics ?? [])].join(' ').toLowerCase();
+        const e = byId.get(id),
+          hay = [e.text, ...(e.tags ?? []), ...(e.annotations?.topics ?? [])].join(' ').toLowerCase();
         el.classList.toggle('is-dim', !!q && !hay.includes(q));
       }
     });
-    const top = [...shown].sort((a, b) => caJournalRadius(b.annotations?.importance) - caJournalRadius(a.annotations?.importance) || b.entryId - a.entryId)[0];
+    const top = [...shown].sort(
+      (a, b) =>
+        caJournalRadius(b.annotations?.importance) - caJournalRadius(a.annotations?.importance) || b.entryId - a.entryId
+    )[0];
     select(top.entryId);
   }
 
@@ -9165,32 +13599,51 @@ class ReverieChatApp {
    */
   employeeMemoryFields(container, employee, dialog) {
     const host = this.el('section', 'ca-profile-memory');
-    const status = this.el('p', 'ca-hint'); status.setAttribute('role', 'status');
+    const status = this.el('p', 'ca-hint');
+    status.setAttribute('role', 'status');
     const row = this.el('div', 'ca-company-actions');
     const label = this.el('label', 'ca-hint', 'Hard memory ceiling (MiB) ');
     const input = this.el('input', 'ca-field');
-    input.type = 'number'; input.min = '512'; input.max = '1048576'; input.step = '1'; input.required = true;
-    input.setAttribute('aria-label', `Laptop memory for ${employee.name} in MiB`); label.append(input);
+    input.type = 'number';
+    input.min = '512';
+    input.max = '1048576';
+    input.step = '1';
+    input.required = true;
+    input.setAttribute('aria-label', `Laptop memory for ${employee.name} in MiB`);
+    label.append(input);
     const draftBox = this.el('div', 'ca-profile-memory-draft');
-    const mib = n => `${Number(n).toLocaleString('en-US')} MiB`;
+    const mib = (n) => `${Number(n).toLocaleString('en-US')} MiB`;
     const legacyKey = `reverie:laptop-memory:${employee.id}`;
-    let ownerId = null, key = null;
+    let ownerId = null,
+      key = null;
     const uuid = /^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/;
     const tracked = new Set();
-    let busy = false, discovering = true, discoveryFailed = false, storageFailed = false;
+    let busy = false,
+      discovering = true,
+      discoveryFailed = false,
+      storageFailed = false;
     const currentOwner = async () => {
       try {
         const result = await this.app._chatApi('/api/owner/status');
-        const data = result.data, identity = data?.identity;
-        if (!result.ok || data?.configured !== true || data.signedIn !== true || identity?.role !== 'owner'
-          || typeof identity.id !== 'string' || !(identity.id === 'owner' || uuid.test(identity.id))
-          || (ownerId !== null && ownerId !== identity.id)) throw new Error();
+        const data = result.data,
+          identity = data?.identity;
+        if (
+          !result.ok ||
+          data?.configured !== true ||
+          data.signedIn !== true ||
+          identity?.role !== 'owner' ||
+          typeof identity.id !== 'string' ||
+          !(identity.id === 'owner' || uuid.test(identity.id)) ||
+          (ownerId !== null && ownerId !== identity.id)
+        )
+          throw new Error();
         ownerId = identity.id;
         key = `reverie:laptop-memory:${ownerId}:${employee.id}`;
         return true;
       } catch {
         discoveryFailed = true;
-        status.textContent = 'The signed-in owner could not be verified or changed. Reopen this profile after signing in; recovery records have been kept.';
+        status.textContent =
+          'The signed-in owner could not be verified or changed. Reopen this profile after signing in; recovery records have been kept.';
         return false;
       }
     };
@@ -9201,9 +13654,14 @@ class ReverieChatApp {
         const legacy = JSON.parse(this.doc.defaultView.localStorage.getItem(legacyKey) || '[]');
         if (!Array.isArray(legacy) || legacy.length || !key) throw new Error();
         const value = JSON.parse(this.doc.defaultView.localStorage.getItem(key) || '[]');
-        if (!Array.isArray(value) || value.length > 100 || value.some(id => typeof id !== 'string' || !uuid.test(id))) throw new Error();
-        storageFailed = false; return value;
-      } catch { storageFailed = true; return []; }
+        if (!Array.isArray(value) || value.length > 100 || value.some((id) => typeof id !== 'string' || !uuid.test(id)))
+          throw new Error();
+        storageFailed = false;
+        return value;
+      } catch {
+        storageFailed = true;
+        return [];
+      }
     };
     const retain = (remove) => {
       // Merge other open profiles/tabs; a late response may remove only its own
@@ -9211,8 +13669,13 @@ class ReverieChatApp {
       const ids = new Set([...readIds(), ...tracked]);
       if (storageFailed) return false;
       if (remove) ids.delete(remove);
-      try { this.doc.defaultView.localStorage.setItem(key, JSON.stringify([...ids])); return !storageFailed; }
-      catch { storageFailed = true; return false; }
+      try {
+        this.doc.defaultView.localStorage.setItem(key, JSON.stringify([...ids]));
+        return !storageFailed;
+      } catch {
+        storageFailed = true;
+        return false;
+      }
     };
     const unconfirmed = 'Restart unconfirmed. Check status; do not preview or apply another change.';
     const sync = () => {
@@ -9222,118 +13685,255 @@ class ReverieChatApp {
       check.disabled = busy || discovering;
     };
     const discover = async () => {
-      discovering = true; sync();
+      discovering = true;
+      sync();
       try {
-        if (!await currentOwner()) return;
+        if (!(await currentOwner())) return;
         for (const id of readIds()) tracked.add(id);
-        const result = await this.app._chatApi('/api/company/resources/operations', { method: 'POST', body: { employeeId: employee.id } });
-        if (!await currentOwner()) return;
-        if (!result.ok || !Array.isArray(result.data) || result.data.length > 200 || result.data.some(item =>
-          !item || !uuid.test(item.id) || item.employeeId !== employee.id || typeof item.phase !== 'string'
-          || typeof item.blocksFurtherChanges !== 'boolean')) throw new Error();
+        const result = await this.app._chatApi('/api/company/resources/operations', {
+          method: 'POST',
+          body: { employeeId: employee.id },
+        });
+        if (!(await currentOwner())) return;
+        if (
+          !result.ok ||
+          !Array.isArray(result.data) ||
+          result.data.length > 200 ||
+          result.data.some(
+            (item) =>
+              !item ||
+              !uuid.test(item.id) ||
+              item.employeeId !== employee.id ||
+              typeof item.phase !== 'string' ||
+              typeof item.blocksFurtherChanges !== 'boolean'
+          )
+        )
+          throw new Error();
         for (const item of result.data) if (item.blocksFurtherChanges) tracked.add(item.id);
         discoveryFailed = false;
-        if (tracked.size) { retain(); status.textContent = unconfirmed; }
-        else status.textContent = storageFailed ? 'The local recovery record is unavailable. Do not start another change; inspect owner operations.' : '';
+        if (tracked.size) {
+          retain();
+          status.textContent = unconfirmed;
+        } else
+          status.textContent = storageFailed
+            ? 'The local recovery record is unavailable. Do not start another change; inspect owner operations.'
+            : '';
       } catch {
         discoveryFailed = true;
-        status.textContent = 'Previous memory changes could not be checked. Check status before starting another change.';
-      } finally { discovering = false; sync(); }
+        status.textContent =
+          'Previous memory changes could not be checked. Check status before starting another change.';
+      } finally {
+        discovering = false;
+        sync();
+      }
     };
-    const check = this.button('ca-btn', `Check laptop memory change for ${employee.name}`, async () => {
-      if (busy || discovering) return;
-      if (discoveryFailed || storageFailed) await discover();
-      if (discoveryFailed || !tracked.size) return;
-      busy = true; sync();
-      try {
-        if (!await currentOwner()) return;
-        for (const operationId of [...tracked]) {
-          try {
-            if (!await currentOwner()) return;
-            const result = await this.app._chatApi('/api/company/resources/result', { method: 'POST', body: { operationId } });
-            if (!await currentOwner()) return;
-            const confirmed = result.ok && result.data?.id === operationId
-              && typeof result.data.phase === 'string' && typeof result.data.blocksFurtherChanges === 'boolean';
-            const phase = confirmed ? result.data.phase : null;
-            if (confirmed && result.data.blocksFurtherChanges === false) {
-              tracked.delete(operationId); retain(operationId);
-              status.textContent = phase === 'completed' ? `${employee.name}'s laptop now has the new memory.`
-                : phase === 'not-started' ? 'The restart was not dispatched. You can prepare a new preview.'
-                  : 'The earlier operation is settled. You can prepare a new preview.';
-            } else status.textContent = !result.ok
-              ? `Status could not be read (${result.status ?? 'network'}). The outcome is unknown; do not start another change.`
-              : phase === 'recovery-required' ? 'The change needs recovery. Do not start another one; check the plan move for this expert.'
-                : `In progress or unconfirmed (${phase || 'unknown'}). Check again; do not start another change.`;
-          } catch { status.textContent = 'Status could not be read. The outcome is unknown; do not start another change.'; }
+    const check = this.button(
+      'ca-btn',
+      `Check laptop memory change for ${employee.name}`,
+      async () => {
+        if (busy || discovering) return;
+        if (discoveryFailed || storageFailed) await discover();
+        if (discoveryFailed || !tracked.size) return;
+        busy = true;
+        sync();
+        try {
+          if (!(await currentOwner())) return;
+          for (const operationId of [...tracked]) {
+            try {
+              if (!(await currentOwner())) return;
+              const result = await this.app._chatApi('/api/company/resources/result', {
+                method: 'POST',
+                body: { operationId },
+              });
+              if (!(await currentOwner())) return;
+              const confirmed =
+                result.ok &&
+                result.data?.id === operationId &&
+                typeof result.data.phase === 'string' &&
+                typeof result.data.blocksFurtherChanges === 'boolean';
+              const phase = confirmed ? result.data.phase : null;
+              if (confirmed && result.data.blocksFurtherChanges === false) {
+                tracked.delete(operationId);
+                retain(operationId);
+                status.textContent =
+                  phase === 'completed'
+                    ? `${employee.name}'s laptop now has the new memory.`
+                    : phase === 'not-started'
+                      ? 'The restart was not dispatched. You can prepare a new preview.'
+                      : 'The earlier operation is settled. You can prepare a new preview.';
+              } else
+                status.textContent = !result.ok
+                  ? `Status could not be read (${result.status ?? 'network'}). The outcome is unknown; do not start another change.`
+                  : phase === 'recovery-required'
+                    ? 'The change needs recovery. Do not start another one; check the plan move for this expert.'
+                    : `In progress or unconfirmed (${phase || 'unknown'}). Check again; do not start another change.`;
+            } catch {
+              status.textContent = 'Status could not be read. The outcome is unknown; do not start another change.';
+            }
+          }
+          if (tracked.size && !status.textContent.includes('not start another')) status.textContent = unconfirmed;
+        } finally {
+          busy = false;
+          sync();
         }
-        if (tracked.size && !status.textContent.includes('not start another')) status.textContent = unconfirmed;
-      } finally { busy = false; sync(); }
-    }, { text: 'Check status' });
-    const preview = this.button('ca-btn', `Preview laptop memory for ${employee.name}`, async () => {
-      if (busy || discovering || discoveryFailed || storageFailed || tracked.size || !input.reportValidity()) return;
-      busy = true; sync(); draftBox.replaceChildren(); status.textContent = 'Preparing a preview…';
-      try {
-        if (!await currentOwner()) return;
-        const memoryMiB = Number(input.value);
-        const result = await this.app._chatApi('/api/company/resources/preview', { method: 'POST', body: { employeeId: employee.id, memoryMiB } });
-        if (!dialog.isConnected || !await currentOwner()) return;
-        if (!result.ok) {
-          const blockers = ['RESOURCE_PREVIEW_HOST_UNCONFIGURED', 'RESOURCE_PREVIEW_HOST_UNAVAILABLE',
-            'RESOURCE_PREVIEW_BUSY', 'RESOURCE_PREVIEW_PENDING'];
-          if (blockers.includes(result.errorCode) && typeof result.error === 'string') {
-            status.textContent = result.error;
-            // Only Preview's closed pre-dispatch diagnostics reach here. Apply
-            // uncertainty always keeps its retained operation and retry fence.
-            if (result.errorCode === 'RESOURCE_PREVIEW_PENDING') { discoveryFailed = true; sync(); }
+      },
+      { text: 'Check status' }
+    );
+    const preview = this.button(
+      'ca-btn',
+      `Preview laptop memory for ${employee.name}`,
+      async () => {
+        if (busy || discovering || discoveryFailed || storageFailed || tracked.size || !input.reportValidity()) return;
+        busy = true;
+        sync();
+        draftBox.replaceChildren();
+        status.textContent = 'Preparing a preview…';
+        try {
+          if (!(await currentOwner())) return;
+          const memoryMiB = Number(input.value);
+          const result = await this.app._chatApi('/api/company/resources/preview', {
+            method: 'POST',
+            body: { employeeId: employee.id, memoryMiB },
+          });
+          if (!dialog.isConnected || !(await currentOwner())) return;
+          if (!result.ok) {
+            const blockers = [
+              'RESOURCE_PREVIEW_HOST_UNCONFIGURED',
+              'RESOURCE_PREVIEW_HOST_UNAVAILABLE',
+              'RESOURCE_PREVIEW_BUSY',
+              'RESOURCE_PREVIEW_PENDING',
+            ];
+            if (blockers.includes(result.errorCode) && typeof result.error === 'string') {
+              status.textContent = result.error;
+              // Only Preview's closed pre-dispatch diagnostics reach here. Apply
+              // uncertainty always keeps its retained operation and retry fence.
+              if (result.errorCode === 'RESOURCE_PREVIEW_PENDING') {
+                discoveryFailed = true;
+                sync();
+              }
+              return;
+            }
+            status.textContent =
+              result.status === 404
+                ? 'Laptop memory changes are not enabled on this server.'
+                : result.status === 403
+                  ? 'Sign in again as the owner to change laptop memory.'
+                  : 'No preview: the laptop may be busy, or a previous change needs inspection. Check status before trying again.';
+            if (result.status !== 403 && result.status !== 404) void discover();
             return;
           }
-          status.textContent = result.status === 404 ? 'Laptop memory changes are not enabled on this server.'
-            : result.status === 403 ? 'Sign in again as the owner to change laptop memory.'
-              : 'No preview: the laptop may be busy, or a previous change needs inspection. Check status before trying again.';
-          if (result.status !== 403 && result.status !== 404) void discover();
-          return;
+          const draft = result.data,
+            r = draft?.resources || {};
+          if (!uuid.test(draft?.operationId) || !uuid.test(draft?.draftId)) throw new Error();
+          status.textContent = `Preview: ${mib(draft.sourceMemoryMiB)} now, ${mib(r.memoryMiB)} after the restart. Nothing has changed yet.`;
+          const cpu = r.cpus === 0 ? 'uncapped CPU' : `${r.cpus} CPUs`;
+          draftBox.append(
+            this.el(
+              'p',
+              'ca-hint',
+              `Kept: ${r.pidsLimit} tasks, ${cpu}. Shared pool: ${mib(r.poolMemoryMiB)}, ${r.poolTasksMax} tasks.`
+            )
+          );
+          const note = this.el('textarea', 'ca-field');
+          note.rows = 3;
+          note.maxLength = 12000;
+          note.required = true;
+          note.value = `Your laptop is being restarted with ${mib(r.memoryMiB)} of memory. Resume your current task from your journal and board cards.`;
+          note.setAttribute('aria-label', `Handoff note for ${employee.name} after the restart`);
+          const apply = this.button(
+            'ca-btn is-danger',
+            `Restart ${employee.name} with ${mib(r.memoryMiB)}`,
+            async () => {
+              if (busy || tracked.size || !note.value.trim()) return;
+              const question = `Restart ${employee.name}'s laptop with ${mib(r.memoryMiB)} of memory? Current work is interrupted and resumes from the note.`;
+              if (
+                !(await this.confirmCompanyAction(employee.name, question, 'Restart laptop')) ||
+                !dialog.isConnected ||
+                busy ||
+                tracked.size
+              )
+                return;
+              busy = true;
+              sync();
+              if (!(await currentOwner())) {
+                busy = false;
+                sync();
+                return;
+              }
+              if (!dialog.isConnected) {
+                busy = false;
+                sync();
+                return;
+              }
+              // Retain identity BEFORE dispatch/await and even if the profile closes.
+              tracked.add(draft.operationId);
+              if (!retain()) {
+                busy = false;
+                tracked.delete(draft.operationId);
+                status.textContent =
+                  'The recovery record could not be saved. Nothing was dispatched; check status before trying again.';
+                sync();
+                return;
+              }
+              busy = true;
+              apply.disabled = true;
+              sync();
+              status.textContent = 'Restarting the laptop…';
+              try {
+                const applied = await this.app._chatApi('/api/company/resources/apply', {
+                  method: 'POST',
+                  body: { previewId: draft.draftId, handoff: note.value.trim() },
+                });
+                status.textContent = applied.ok
+                  ? `Restart started (${applied.data?.phase || 'starting'}). Use Check status to follow it.`
+                  : unconfirmed;
+              } catch {
+                status.textContent = unconfirmed;
+              } finally {
+                busy = false;
+                sync();
+              }
+            },
+            { text: `Restart with ${mib(r.memoryMiB)}` }
+          );
+          draftBox.append(this.el('label', 'ca-hint', 'Note for the agent after the restart'), note, apply);
+        } catch {
+          status.textContent = 'A preview could not be obtained. No restart was dispatched.';
+        } finally {
+          busy = false;
+          sync();
         }
-        const draft = result.data, r = draft?.resources || {};
-        if (!uuid.test(draft?.operationId) || !uuid.test(draft?.draftId)) throw new Error();
-        status.textContent = `Preview: ${mib(draft.sourceMemoryMiB)} now, ${mib(r.memoryMiB)} after the restart. Nothing has changed yet.`;
-        const cpu = r.cpus === 0 ? 'uncapped CPU' : `${r.cpus} CPUs`;
-        draftBox.append(this.el('p', 'ca-hint', `Kept: ${r.pidsLimit} tasks, ${cpu}. Shared pool: ${mib(r.poolMemoryMiB)}, ${r.poolTasksMax} tasks.`));
-        const note = this.el('textarea', 'ca-field');
-        note.rows = 3; note.maxLength = 12000; note.required = true;
-        note.value = `Your laptop is being restarted with ${mib(r.memoryMiB)} of memory. Resume your current task from your journal and board cards.`;
-        note.setAttribute('aria-label', `Handoff note for ${employee.name} after the restart`);
-        const apply = this.button('ca-btn is-danger', `Restart ${employee.name} with ${mib(r.memoryMiB)}`, async () => {
-          if (busy || tracked.size || !note.value.trim()) return;
-          const question = `Restart ${employee.name}'s laptop with ${mib(r.memoryMiB)} of memory? Current work is interrupted and resumes from the note.`;
-          if (!await this.confirmCompanyAction(employee.name, question, 'Restart laptop') || !dialog.isConnected || busy || tracked.size) return;
-          busy = true; sync();
-          if (!await currentOwner()) { busy = false; sync(); return; }
-          if (!dialog.isConnected) { busy = false; sync(); return; }
-          // Retain identity BEFORE dispatch/await and even if the profile closes.
-          tracked.add(draft.operationId);
-          if (!retain()) { busy = false; tracked.delete(draft.operationId); status.textContent = 'The recovery record could not be saved. Nothing was dispatched; check status before trying again.'; sync(); return; }
-          busy = true; apply.disabled = true; sync(); status.textContent = 'Restarting the laptop…';
-          try {
-            const applied = await this.app._chatApi('/api/company/resources/apply', { method: 'POST', body: { previewId: draft.draftId, handoff: note.value.trim() } });
-            status.textContent = applied.ok ? `Restart started (${applied.data?.phase || 'starting'}). Use Check status to follow it.` : unconfirmed;
-          } catch { status.textContent = unconfirmed; }
-          finally { busy = false; sync(); }
-        }, { text: `Restart with ${mib(r.memoryMiB)}` });
-        draftBox.append(this.el('label', 'ca-hint', 'Note for the agent after the restart'), note, apply);
-      } catch { status.textContent = 'A preview could not be obtained. No restart was dispatched.'; }
-      finally { busy = false; sync(); }
-    }, { text: 'Preview' });
+      },
+      { text: 'Preview' }
+    );
     row.append(label, preview, check);
-    host.append(this.el('h3', '', 'Laptop memory'),
-      this.el('p', 'ca-hint', 'Changes this expert\'s hard memory ceiling by restarting the laptop. Task limits, CPU limits and the shared pool stay as they are. A soft memory limit controls reclaim pressure; it does not remove the hard ceiling or increase pool capacity.'),
-      row, draftBox, status);
-    container.append(host); status.textContent = 'Checking previous memory changes…'; sync(); void discover();
+    host.append(
+      this.el('h4', '', 'Hard RAM ceiling (restart required)'),
+      this.el(
+        'p',
+        'ca-hint',
+        "Changes this expert's hard memory ceiling by restarting the laptop. Task limits, CPU limits and the shared pool stay as they are. A soft memory limit controls reclaim pressure; it does not remove the hard ceiling or increase pool capacity."
+      ),
+      row,
+      draftBox,
+      status
+    );
+    container.append(host);
+    status.textContent = 'Checking previous memory changes…';
+    sync();
+    void discover();
   }
 
   /** Company marks share the existing upload, preview and workspace-picture persistence. */
   workspaceLogoField(current, onChange) {
     const picture = this.pictureField('Company logo (optional)', current, onChange);
-    picture.wrap.append(this.el('p', 'ca-hint', 'Choose a logo or upload your own. Remove the picture to use the first letter or your chosen icon.'));
+    picture.wrap.append(
+      this.el(
+        'p',
+        'ca-hint',
+        'Choose a logo or upload your own. Remove the picture to use the first letter or your chosen icon.'
+      )
+    );
     const choices = this.el('div', 'ca-company-logos');
     choices.setAttribute('role', 'group');
     choices.setAttribute('aria-label', 'Company logos');
@@ -9341,7 +13941,9 @@ class ReverieChatApp {
     let loading = false;
     const load = async () => {
       try {
-        const response = await this.doc.defaultView.fetch('/assets/company-logos/pack-manifest.json', { cache: 'no-cache' });
+        const response = await this.doc.defaultView.fetch('/assets/company-logos/pack-manifest.json', {
+          cache: 'no-cache',
+        });
         if (!response.ok) return;
         const manifest = await response.json();
         if (manifest.version !== 1 || !Array.isArray(manifest.logos)) return;
@@ -9349,9 +13951,16 @@ class ReverieChatApp {
         if (typeof revision !== 'string' || !/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,79}$/.test(revision)) return;
         const seen = new Set();
         for (const logo of manifest.logos.slice(0, 100)) {
-          if (!logo || !/^company-(?:0[1-9]|1[0-2])$/.test(logo.id) ||
-              logo.src !== `/assets/company-logos/${logo.id}.png` ||
-              typeof logo.name !== 'string' || !logo.name.trim() || logo.name.length > 80 || seen.has(logo.id)) continue;
+          if (
+            !logo ||
+            !/^company-(?:0[1-9]|1[0-2])$/.test(logo.id) ||
+            logo.src !== `/assets/company-logos/${logo.id}.png` ||
+            typeof logo.name !== 'string' ||
+            !logo.name.trim() ||
+            logo.name.length > 80 ||
+            seen.has(logo.id)
+          )
+            continue;
           seen.add(logo.id);
           const src = `${logo.src}?rev=${encodeURIComponent(revision)}`;
           const button = this.el('button', 'ca-btn');
@@ -9359,12 +13968,15 @@ class ReverieChatApp {
           button.setAttribute('aria-label', `Use ${logo.name} logo`);
           button.title = logo.name;
           const image = this.el('img');
-          image.src = src; image.alt = ''; image.loading = 'lazy';
+          image.src = src;
+          image.alt = '';
+          image.loading = 'lazy';
           image.width = image.height = 56;
           button.append(image);
           button.addEventListener('click', async () => {
             if (loading || picture.pending()) return;
-            loading = true; button.disabled = true;
+            loading = true;
+            button.disabled = true;
             try {
               const selected = await this.doc.defaultView.fetch(src);
               if (!selected.ok) throw new Error('Logo unavailable');
@@ -9374,12 +13986,15 @@ class ReverieChatApp {
             } catch {
               this.toast('The logo could not be loaded. Try again or upload your own.', 'error');
             } finally {
-              loading = false; button.disabled = false;
+              loading = false;
+              button.disabled = false;
             }
           });
           choices.append(button);
         }
-      } catch { /* The upload and initial remain available if the logo pack cannot load. */ }
+      } catch {
+        /* The upload and initial remain available if the logo pack cannot load. */
+      }
     };
     void load();
     return { ...picture, pending: () => loading || picture.pending() };
@@ -9410,7 +14025,10 @@ class ReverieChatApp {
       imageNote.textContent = '';
       imageNote.hidden = true;
       preview.replaceChildren();
-      const showFallback = () => preview.replaceChildren(this.el('span', fallback ? 'chatroom-avatar-glyph' : 'ca-hint', fallback ? fallback() : 'none'));
+      const showFallback = () =>
+        preview.replaceChildren(
+          this.el('span', fallback ? 'chatroom-avatar-glyph' : 'ca-hint', fallback ? fallback() : 'none')
+        );
       const src = this.iconImage(image);
       if (src) {
         const img = this.el('img', 'chatroom-avatar-img');
@@ -9443,10 +14061,14 @@ class ReverieChatApp {
         onChange(image);
       } catch (e) {
         if (ticket === revision) note.textContent = e?.message || 'That picture could not be used';
-      } finally { if (ticket === revision) loading = false; }
+      } finally {
+        if (ticket === revision) loading = false;
+      }
     });
     remove.addEventListener('click', () => {
-      revision++; loading = false; onIntent?.();
+      revision++;
+      loading = false;
+      onIntent?.();
       image = '';
       paint();
       onChange('');
@@ -9454,17 +14076,43 @@ class ReverieChatApp {
     paint();
     row.append(preview, choose, remove, input);
     wrap.append(row, imageNote, note);
-    return { wrap, value: () => image, pending: () => loading, refresh: paint, cancelPending: () => { revision++; loading = false; }, set: (v) => { revision++; loading = false; image = v || ''; paint(); } };
+    return {
+      wrap,
+      value: () => image,
+      pending: () => loading,
+      refresh: paint,
+      cancelPending: () => {
+        revision++;
+        loading = false;
+      },
+      set: (v) => {
+        revision++;
+        loading = false;
+        image = v || '';
+        paint();
+      },
+    };
   }
 
   openProfileEditor({ firstRun = false } = {}) {
-    if (this.humanSelf && !this.humanSelf.primary) { this.openPage('people'); return; }
+    if (this.humanSelf && !this.humanSelf.primary) {
+      this.openPage('people');
+      return;
+    }
     this.doc.querySelector('.ca-dialog.ca-profile-edit')?.remove();
     const p = this.profile;
     const dlg = this.el('dialog', 'ca-dialog ca-profile-edit');
     dlg.setAttribute('aria-label', firstRun ? 'Your name' : 'Edit profile');
     dlg.append(this.el('h2', '', firstRun ? 'What should we call you?' : 'Edit profile'));
-    dlg.append(this.el('p', 'ca-dialog-note', firstRun ? 'Your name appears in chat and your organization. You can change it later in your profile.' : 'Your name and picture appear with your messages.'));
+    dlg.append(
+      this.el(
+        'p',
+        'ca-dialog-note',
+        firstRun
+          ? 'Your name appears in chat and your organization. You can change it later in your profile.'
+          : 'Your name and picture appear with your messages.'
+      )
+    );
     const form = this.el('form', 'ca-form');
     const field = (label, value, max, placeholder = '') => {
       const wrap = this.el('label', 'ca-label');
@@ -9477,8 +14125,16 @@ class ReverieChatApp {
       return { wrap, input };
     };
     const fallback = this.ownerName || this.doc.defaultView?.__reverieUser?.username || 'You';
-    const name = field(firstRun ? 'Your name' : 'Display name', p.name || (firstRun ? '' : fallback), firstRun ? 100 : 32, firstRun ? '' : fallback);
-    if (firstRun) { name.input.required = true; name.input.setAttribute('aria-label', 'Your name'); }
+    const name = field(
+      firstRun ? 'Your name' : 'Display name',
+      p.name || (firstRun ? '' : fallback),
+      firstRun ? 100 : 32,
+      firstRun ? '' : fallback
+    );
+    if (firstRun) {
+      name.input.required = true;
+      name.input.setAttribute('aria-label', 'Your name');
+    }
     // Optionally make the name the instance's owner name: it follows you to other browsers and the org chart.
     const instance = this.el('label', 'ca-check');
     const instanceBox = this.el('input');
@@ -9498,11 +14154,14 @@ class ReverieChatApp {
       portrait.replaceChildren(this.profilePortrait(avatar, label));
     };
     if (!firstRun) {
-      paintPortrait(pictureBefore); dlg.append(portrait);
+      paintPortrait(pictureBefore);
+      dlg.append(portrait);
       name.input.addEventListener('input', () => paintPortrait(portraitPhoto));
     }
     if (!firstRun) form.append(name.wrap, instance, pronouns.wrap, status.wrap);
-    const appearance = !firstRun ? this.expertAppearanceFields(form, pictureBefore, { name: name.input, onPictureChange: paintPortrait }) : null;
+    const appearance = !firstRun
+      ? this.expertAppearanceFields(form, pictureBefore, { name: name.input, onPictureChange: paintPortrait })
+      : null;
     const pic = appearance?.picture;
     const swatches = this.el('div', 'ca-swatches');
     swatches.setAttribute('role', 'radiogroup');
@@ -9541,20 +14200,27 @@ class ReverieChatApp {
     save.type = 'submit';
     if (!firstRun) row.append(reset);
     row.append(this.el('span', 'ca-spacer'), cancel, save);
-    const nameError = this.el('p', 'ca-company-error'); nameError.setAttribute('role', 'alert');
+    const nameError = this.el('p', 'ca-company-error');
+    nameError.setAttribute('role', 'alert');
     if (firstRun) form.append(name.wrap, nameError, row);
     else form.append(colourWrap, row);
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
       if (firstRun) {
         const ownerName = name.input.value.trim();
-        if (!ownerName) { nameError.textContent = 'Enter your name, or choose Cancel.'; return; }
+        if (!ownerName) {
+          nameError.textContent = 'Enter your name, or choose Cancel.';
+          return;
+        }
         save.disabled = true;
         try {
           if (await this.saveOwnerName(ownerName, { quiet: true })) dlg.close();
           else nameError.textContent = 'Your name could not be saved. Try again.';
-        } catch { nameError.textContent = 'Your name could not be saved. Try again.'; }
-        finally { save.disabled = false; }
+        } catch {
+          nameError.textContent = 'Your name could not be saved. Try again.';
+        } finally {
+          save.disabled = false;
+        }
         return;
       }
       if (save.disabled || appearance.pending()) return;
@@ -9565,11 +14231,19 @@ class ReverieChatApp {
       if (image !== pictureBefore && (image || this.ownerAvatar)) {
         const stored = await this.saveOwnerPicture(image);
         if (stored) image = '';
-        else if (image) this.toast('Your picture could not be saved on the server; it is kept on this device only.', 'info');
+        else if (image)
+          this.toast('Your picture could not be saved on the server; it is kept on this device only.', 'info');
         else this.toast('Your picture could not be removed on the server, so it is still shown.', 'error');
       }
       if (image.startsWith('/api/')) image = '';
-      this.saveProfile({ name: name.input.value, pronouns: pronouns.input.value, status: status.input.value, icon: '', image, hue });
+      this.saveProfile({
+        name: name.input.value,
+        pronouns: pronouns.input.value,
+        status: status.input.value,
+        icon: '',
+        image,
+        hue,
+      });
       if (instanceBox.checked && name.input.value.trim()) await this.saveOwnerName(name.input.value.trim());
       dlg.close();
     });
@@ -9603,14 +14277,17 @@ class ReverieChatApp {
    * shown beside the entry. Arrow keys move, ArrowRight opens a sub-list, ArrowLeft/Escape close it, Escape closes the
    * menu and gives focus back to `focus`. `at` is { x, y } or an element to hang under (right-aligned when `right`).
    */
-  openMenu(entries, { at, focus, right = false, above = false, label = 'Menu', className = '', restoreFocus = false } = {}) {
+  openMenu(
+    entries,
+    { at, focus, right = false, above = false, label = 'Menu', className = '', restoreFocus = false } = {}
+  ) {
     this.closeMenus();
     const restore = focus || this.doc.activeElement;
     const open = [];
     const positions = new Map();
     const win = this.doc.defaultView;
     const viewport = win?.visualViewport;
-    const keepVisible = item => {
+    const keepVisible = (item) => {
       const menu = item?.closest?.('.ca-popmenu');
       if (!menu) return;
       const box = menu.getBoundingClientRect();
@@ -9620,7 +14297,10 @@ class ReverieChatApp {
       if (row.top < top) menu.scrollTop = Math.max(0, menu.scrollTop - (top - row.top));
       else if (row.bottom > bottom) menu.scrollTop += row.bottom - bottom;
     };
-    const focusItem = item => { item?.focus({ preventScroll: true }); keepVisible(item); };
+    const focusItem = (item) => {
+      item?.focus({ preventScroll: true });
+      keepVisible(item);
+    };
     const place = (menu, anchor, side) => {
       const w = viewport?.width > 0 ? viewport.width : win?.innerWidth || 1024;
       const h = viewport?.height > 0 ? viewport.height : win?.innerHeight || 768;
@@ -9630,17 +14310,21 @@ class ReverieChatApp {
       const bottom = top + Math.max(0, h - 16);
       menu.style.setProperty('--ca-menu-max-width', `${Math.max(0, w - 16)}px`);
       menu.style.setProperty('--ca-menu-max-height', `${Math.max(0, h - 16)}px`);
-      menu.style.bottom = ''; menu.style.right = '';
+      menu.style.bottom = '';
+      menu.style.right = '';
       const measured = menu.getBoundingClientRect();
       const width = Math.min(measured.width, Math.max(0, w - 16));
       const height = Math.min(measured.height, Math.max(0, h - 16));
       const clamp = (value, min, max) => Math.max(min, Math.min(value, Math.max(min, max)));
-      let x = left, y = top;
+      let x = left,
+        y = top;
       if (anchor && typeof anchor.getBoundingClientRect === 'function') {
         const r = anchor.getBoundingClientRect();
-        const below = r.bottom + 6, upward = r.top - height - 6;
-        const fitsAbove = upward >= top, fitsBelow = below + height <= bottom;
-        y = above ? (fitsAbove || !fitsBelow ? upward : below) : (fitsBelow || !fitsAbove ? below : upward);
+        const below = r.bottom + 6,
+          upward = r.top - height - 6;
+        const fitsAbove = upward >= top,
+          fitsBelow = below + height <= bottom;
+        y = above ? (fitsAbove || !fitsBelow ? upward : below) : fitsBelow || !fitsAbove ? below : upward;
         x = right ? r.right - width : r.left;
       } else if (anchor) {
         x = anchor.x;
@@ -9649,14 +14333,16 @@ class ReverieChatApp {
       if (side) {
         const r = side.getBoundingClientRect();
         const parent = side.closest('.ca-popmenu')?.getBoundingClientRect() || r;
-        const beside = parent.right + 4, flipped = parent.left - width - 4;
+        const beside = parent.right + 4,
+          flipped = parent.left - width - 4;
         x = beside + width <= rightEdge ? beside : flipped;
         y = r.top;
       }
       // Touch menus retain their bottom-sheet presentation, bounded by the
       // visible viewport (including a keyboard or a zoomed/offset viewport).
       if (win?.matchMedia?.('(max-width: 767px)')?.matches) {
-        x = left; y = bottom - height;
+        x = left;
+        y = bottom - height;
         menu.style.setProperty('--ca-menu-sheet-left', `${x}px`);
         menu.style.setProperty('--ca-menu-sheet-top', `${y}px`);
       }
@@ -9697,9 +14383,15 @@ class ReverieChatApp {
           menu.append(strip);
           continue;
         }
-        const b = this.el('button', `${e.danger ? 'is-danger' : e.success ? 'is-success' : ''}${e.checked !== undefined ? ' has-check' : ''}`);
+        const b = this.el(
+          'button',
+          `${e.danger ? 'is-danger' : e.success ? 'is-success' : ''}${e.checked !== undefined ? ' has-check' : ''}`
+        );
         b.type = 'button';
-        b.setAttribute('role', e.checked === undefined ? 'menuitem' : e.checkbox ? 'menuitemcheckbox' : 'menuitemradio');
+        b.setAttribute(
+          'role',
+          e.checked === undefined ? 'menuitem' : e.checkbox ? 'menuitemcheckbox' : 'menuitemradio'
+        );
         if (e.checked !== undefined) b.setAttribute('aria-checked', String(!!e.checked));
         b.disabled = !!e.disabled;
         if (e.tip) b.title = e.tip;
@@ -9733,7 +14425,7 @@ class ReverieChatApp {
       this.doc.body.append(menu);
       place(menu, anchor, side);
       open.push(menu);
-      menu.addEventListener('focusin', event => keepVisible(event.target));
+      menu.addEventListener('focusin', (event) => keepVisible(event.target));
       menu.addEventListener('scroll', () => refit(false), { passive: true });
       observer?.observe(menu);
       return menu;
@@ -9741,12 +14433,17 @@ class ReverieChatApp {
     const closeSub = () => {
       const sub = open.pop();
       const trigger = positions.get(sub)?.side;
-      observer?.unobserve(sub); positions.delete(sub); sub.remove();
+      observer?.unobserve(sub);
+      positions.delete(sub);
+      sub.remove();
       focusItem(trigger);
     };
     const openSub = (parent, trigger, list) => {
       while (open.length > open.indexOf(parent) + 1) {
-        const sub = open.pop(); observer?.unobserve(sub); positions.delete(sub); sub.remove();
+        const sub = open.pop();
+        observer?.unobserve(sub);
+        positions.delete(sub);
+        sub.remove();
       }
       const m = build(list, null, trigger);
       focusItem(m.querySelector('button:not(:disabled)'));
@@ -9758,7 +14455,8 @@ class ReverieChatApp {
       win?.removeEventListener('resize', refit);
       viewport?.removeEventListener('resize', refit);
       viewport?.removeEventListener('scroll', refit);
-      observer?.disconnect(); positions.clear();
+      observer?.disconnect();
+      positions.clear();
       this._openMenuClose = null;
       this._openMenuRefit = null;
       if (refocus || restoreFocus) restore?.focus?.();
@@ -9782,8 +14480,12 @@ class ReverieChatApp {
         } else closeAll(true);
       } else if (ev.key === 'ArrowDown' || ev.key === 'ArrowUp') {
         ev.preventDefault();
-        const next = at < 0 ? (ev.key === 'ArrowDown' ? 0 : items.length - 1)
-          : (at + (ev.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length;
+        const next =
+          at < 0
+            ? ev.key === 'ArrowDown'
+              ? 0
+              : items.length - 1
+            : (at + (ev.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length;
         focusItem(items[next]);
       } else if (ev.key === 'Home' || ev.key === 'End') {
         ev.preventDefault();
@@ -9837,7 +14539,12 @@ class ReverieChatApp {
     // The server matches names ignoring case ("Acme" and "acme" share a picture), so every spelling in use gets it.
     const byLower = new Map(Object.entries(this.wsIcons || {}).map(([name, image]) => [name.toLowerCase(), image]));
     if (byLower.size) {
-      const spellings = new Set([...Object.keys(all), ...Object.keys(this.wsIcons), ...(this.rooms || []).map((r) => r.workspace).filter(Boolean), '']);
+      const spellings = new Set([
+        ...Object.keys(all),
+        ...Object.keys(this.wsIcons),
+        ...(this.rooms || []).map((r) => r.workspace).filter(Boolean),
+        '',
+      ]);
       for (const name of spellings) {
         const image = byLower.get(name.toLowerCase());
         if (image) all[name] = { ...(Object.hasOwn(all, name) ? all[name] : {}), image };
@@ -9898,7 +14605,8 @@ class ReverieChatApp {
   setNotify(roomId, patch) {
     const all = this.notifyPrefs;
     const now = Date.now();
-    for (const [id, p] of Object.entries(all)) if (p.until > 0 && p.until <= now && p.level === 'default') delete all[id];
+    for (const [id, p] of Object.entries(all))
+      if (p.until > 0 && p.until <= now && p.level === 'default') delete all[id];
     const next = { ...(all[roomId] || { level: 'default', until: 0 }), ...patch };
     all[roomId] = next;
     const clean = caNotifyPrefs(all);
@@ -9911,12 +14619,18 @@ class ReverieChatApp {
   scheduleNotifyTick() {
     clearTimeout(this._notifyTimer);
     const now = Date.now();
-    const next = Object.values(this.notifyPrefs).filter((p) => p.until > now).map((p) => p.until).sort((a, b) => a - b)[0];
+    const next = Object.values(this.notifyPrefs)
+      .filter((p) => p.until > now)
+      .map((p) => p.until)
+      .sort((a, b) => a - b)[0];
     if (!next) return;
-    this._notifyTimer = this.doc.defaultView?.setTimeout(() => {
-      this.renderAll();
-      this.scheduleNotifyTick();
-    }, Math.min(next - now + 500, 2 ** 31 - 1));
+    this._notifyTimer = this.doc.defaultView?.setTimeout(
+      () => {
+        this.renderAll();
+        this.scheduleNotifyTick();
+      },
+      Math.min(next - now + 500, 2 ** 31 - 1)
+    );
   }
 
   /** The "Mute channel" sub-list and the notification radios, shared by the bell and the channel menu. */
@@ -9925,12 +14639,27 @@ class ReverieChatApp {
     const muted = caIsMuted(pref);
     const noun = room.noun || (caIsDm(room) ? 'conversation' : 'channel');
     const mute = muted
-      ? { label: `Unmute ${noun}`, hint: pref.until === -1 ? '' : `until ${(globalThis.ReverieTime?.format(pref.until) ?? new Date(pref.until).toLocaleString('en-US', { timeZone: 'UTC', timeZoneName: 'short' }))}`, run: () => this.setNotify(room.id, { until: 0 }) }
+      ? {
+          label: `Unmute ${noun}`,
+          hint:
+            pref.until === -1
+              ? ''
+              : `until ${globalThis.ReverieTime?.format(pref.until) ?? new Date(pref.until).toLocaleString('en-US', { timeZone: 'UTC', timeZoneName: 'short' })}`,
+          run: () => this.setNotify(room.id, { until: 0 }),
+        }
       : {
           label: `Mute ${noun}`,
-          sub: CA_MUTE_CHOICES.map(([label, ms]) => ({ label, run: () => this.setNotify(room.id, { until: ms === -1 ? -1 : Date.now() + ms }) })),
+          sub: CA_MUTE_CHOICES.map(([label, ms]) => ({
+            label,
+            run: () => this.setNotify(room.id, { until: ms === -1 ? -1 : Date.now() + ms }),
+          })),
         };
-    const levels = CA_NOTIFY_LEVELS.map(([level, label, hint]) => ({ label, hint, checked: pref.level === level, run: () => this.setNotify(room.id, { level }) }));
+    const levels = CA_NOTIFY_LEVELS.map(([level, label, hint]) => ({
+      label,
+      hint,
+      checked: pref.level === level,
+      run: () => this.setNotify(room.id, { level }),
+    }));
     return { mute, levels, muted };
   }
 
@@ -9939,7 +14668,12 @@ class ReverieChatApp {
     const room = this.room;
     if (!room || this.app._chatCreating) return;
     const { mute, levels } = this.notifyEntries(room);
-    this.openMenu([mute, { sep: true }, ...levels], { at: anchor, focus: anchor, right: true, label: 'Notification settings' });
+    this.openMenu([mute, { sep: true }, ...levels], {
+      at: anchor,
+      focus: anchor,
+      right: true,
+      label: 'Notification settings',
+    });
   }
 
   /** What the menus can do to a channel (a room), whichever is open. */
@@ -9947,7 +14681,12 @@ class ReverieChatApp {
     const dm = caIsDm(room);
     const out = [];
     const unread = Math.max(0, Number(room.unread) || 0);
-    if (this.serverFeatures.unread) out.push({ label: dm ? 'Mark conversation as read' : 'Mark channel as read', disabled: !unread, run: () => this.markRead(room.id) });
+    if (this.serverFeatures.unread)
+      out.push({
+        label: dm ? 'Mark conversation as read' : 'Mark channel as read',
+        disabled: !unread,
+        run: () => this.markRead(room.id),
+      });
     if (!dm) {
       out.push({ sep: true });
       out.push({ label: 'Invite agents', run: () => this.openInviteDialog(room.id) });
@@ -9959,44 +14698,74 @@ class ReverieChatApp {
     if (!dm) {
       out.push({ sep: true });
       out.push({ label: 'Edit channel', run: () => this.openChannelSettings(room.id) });
-      out.push({ label: 'Re-brief members', run: async () => {
-        if (this.roomId !== room.id) await this.selectRoom(room.id);
-        this.app._rebriefChatMember('all');
-      } });
+      out.push({
+        label: 'Re-brief members',
+        run: async () => {
+          if (this.roomId !== room.id) await this.selectRoom(room.id);
+          this.app._rebriefChatMember('all');
+        },
+      });
       if (this.app._speakRepliesMode) {
         const now = this.app._speakRepliesMode(room.id);
-        const choices = CA_READ_ALOUD_MODES.map(([mode, label, said]) => ({ label, checked: now === mode, run: () => {
-          this.app._setSpeakReplies(room.id, mode);
-          if (this.roomId === room.id) this.renderHeader();
-          this.toast(said, 'info');
-        } }));
+        const choices = CA_READ_ALOUD_MODES.map(([mode, label, said]) => ({
+          label,
+          checked: now === mode,
+          run: () => {
+            this.app._setSpeakReplies(room.id, mode);
+            if (this.roomId === room.id) this.renderHeader();
+            this.toast(said, 'info');
+          },
+        }));
         if (this.app._readAloudOptions && this.app._setReadAloudOptions) {
           const options = this.app._readAloudOptions(room.id);
-          choices.push({ sep: true }, {
-            label: 'Maximum spoken length (approx.)',
-            sub: [[null, 'Default (80-word limit)'], [5, '5 seconds'], [10, '10 seconds'], [20, '20 seconds'], [30, '30 seconds'], [0, 'Unlimited']].map(([seconds, label]) => ({
-              label, checked: options.seconds === seconds, run: () => {
-                this.app._setReadAloudOptions(room.id, { seconds });
-                this.toast('Speech length saved for this channel on this device; full text stays in chat', 'info');
-              },
-            })),
-          }, {
-            label: 'Speak emojis', checkbox: true, checked: options.emojis, run: () => {
-              this.app._setReadAloudOptions(room.id, { emojis: !options.emojis });
-              this.toast(`Emoji speech ${options.emojis ? 'off' : 'on'} for this channel on this device`, 'info');
+          choices.push(
+            { sep: true },
+            {
+              label: 'Maximum spoken length (approx.)',
+              sub: [
+                [null, 'Default (80-word limit)'],
+                [5, '5 seconds'],
+                [10, '10 seconds'],
+                [20, '20 seconds'],
+                [30, '30 seconds'],
+                [0, 'Unlimited'],
+              ].map(([seconds, label]) => ({
+                label,
+                checked: options.seconds === seconds,
+                run: () => {
+                  this.app._setReadAloudOptions(room.id, { seconds });
+                  this.toast('Speech length saved for this channel on this device; full text stays in chat', 'info');
+                },
+              })),
             },
-          });
+            {
+              label: 'Speak emojis',
+              checkbox: true,
+              checked: options.emojis,
+              run: () => {
+                this.app._setReadAloudOptions(room.id, { emojis: !options.emojis });
+                this.toast(`Emoji speech ${options.emojis ? 'off' : 'on'} for this channel on this device`, 'info');
+              },
+            }
+          );
         }
         out.push({ label: 'Read aloud', sub: choices });
       }
       if (caSpeaks(room)) {
-        if (this.app.openCarMode) out.push({ label: 'Car mode', run: async () => {
-          if (this.roomId !== room.id) await this.selectRoom(room.id);
-          this.app.openCarMode();
-        } });
+        if (this.app.openCarMode)
+          out.push({
+            label: 'Car mode',
+            run: async () => {
+              if (this.roomId !== room.id) await this.selectRoom(room.id);
+              this.app.openCarMode();
+            },
+          });
       }
       if (this.serverFeatures.placement) {
-        out.push({ label: room.archivedAt ? 'Restore channel' : 'Archive channel', run: () => this.archive(!room.archivedAt, room.id) });
+        out.push({
+          label: room.archivedAt ? 'Restore channel' : 'Archive channel',
+          run: () => this.archive(!room.archivedAt, room.id),
+        });
       }
       out.push({ sep: true });
       out.push({ label: 'Delete channel', danger: true, run: () => this.deleteRoom(room.id) });
@@ -10013,7 +14782,8 @@ class ReverieChatApp {
 
   /** A workspace is a grouping label. Removing it moves channels; it never deletes their history. */
   async deleteWorkspace(key) {
-    const owner = this.company?.canManage === true && this.phoneStatus?.self === 'owner' && this.phoneStatus?.canSetOwn === true;
+    const owner =
+      this.company?.canManage === true && this.phoneStatus?.self === 'owner' && this.phoneStatus?.canSetOwn === true;
     if (!owner || !key || key === 'home' || !this.serverFeatures.placement) return false;
     const rooms = this.rooms.filter((r) => !caIsDm(r) && r.workspace === key);
     const destination = this.defaultWorkspaceName();
@@ -10025,14 +14795,18 @@ class ReverieChatApp {
     try {
       for (const room of rooms) {
         const res = await this.app._chatApi(`/api/chatrooms/${encodeURIComponent(room.id)}/placement`, {
-          method: 'PUT', body: { workspace: '', category: room.category || '' },
+          method: 'PUT',
+          body: { workspace: '', category: room.category || '' },
         });
         if (!res.ok) throw new Error(res.error || 'Channel move refused');
         moved++;
       }
     } catch (error) {
       await this.app._loadChatRooms(this.roomId);
-      this.toast(`Workspace not removed: ${error.message}. ${moved} channel${moved === 1 ? '' : 's'} moved to "${destination}"; move the remaining channels and try again.`, 'error');
+      this.toast(
+        `Workspace not removed: ${error.message}. ${moved} channel${moved === 1 ? '' : 's'} moved to "${destination}"; move the remaining channels and try again.`,
+        'error'
+      );
       return false;
     }
     const meta = this.wsMetaLocal;
@@ -10043,7 +14817,8 @@ class ReverieChatApp {
     caWrite('local', 'reverie:chat:notify', JSON.stringify(notify));
     if (this.workspace === key) this.workspace = '';
     if (Object.keys(this.wsIcons || {}).some((name) => name.toLowerCase() === key.toLowerCase())) {
-      if (!await this.saveWsPicture(key, '')) this.toast('Channels moved, but the old workspace picture could not be removed.', 'error');
+      if (!(await this.saveWsPicture(key, '')))
+        this.toast('Channels moved, but the old workspace picture could not be removed.', 'error');
     }
     await this.app._loadChatRooms(this.roomId);
     this.renderAll();
@@ -10058,16 +14833,31 @@ class ReverieChatApp {
     const name = home ? 'Direct Messages' : key || this.defaultWorkspaceName();
     const out = [];
     if (this.serverFeatures.unread) {
-      out.push({ label: 'Mark all as read', disabled: !rooms.some((r) => (Number(r.unread) || 0) > 0), run: () => this.markAllRead(rooms) });
+      out.push({
+        label: 'Mark all as read',
+        disabled: !rooms.some((r) => (Number(r.unread) || 0) > 0),
+        run: () => this.markAllRead(rooms),
+      });
     }
     if (!home) {
       const { mute, levels } = this.notifyEntries({ id: `ws:${key || ''}`, noun: 'workspace' });
       out.push({ sep: true }, mute, { label: 'Notification settings', sub: levels });
-      out.push({ label: 'Hide muted channels', checkbox: true, checked: this.hideMuted, run: () => this.setHideMuted(!this.hideMuted) });
+      out.push({
+        label: 'Hide muted channels',
+        checkbox: true,
+        checked: this.hideMuted,
+        run: () => this.setHideMuted(!this.hideMuted),
+      });
       out.push({ sep: true });
       out.push({ label: 'Workspace settings', run: () => this.openWorkspaceSettings(key || '') });
       out.push({ label: 'Create channel', run: () => this.newRoom({ workspace: key || '' }) });
-      if (key && this.serverFeatures.placement && this.company?.canManage === true && this.phoneStatus?.self === 'owner' && this.phoneStatus?.canSetOwn === true) {
+      if (
+        key &&
+        this.serverFeatures.placement &&
+        this.company?.canManage === true &&
+        this.phoneStatus?.self === 'owner' &&
+        this.phoneStatus?.canSetOwn === true
+      ) {
         out.push({ sep: true }, { label: 'Delete workspace', danger: true, run: () => this.deleteWorkspace(key) });
       }
     } else if (this.serverFeatures.dms) {
@@ -10079,7 +14869,11 @@ class ReverieChatApp {
 
   /** The workspace name at the top of the sidebar, as a dropdown. */
   openWorkspaceMenu(anchor) {
-    this.openMenu(this.workspaceEntries(this.workspace || '', { full: true }), { at: anchor, focus: anchor, label: 'Workspace' });
+    this.openMenu(this.workspaceEntries(this.workspace || '', { full: true }), {
+      at: anchor,
+      focus: anchor,
+      label: 'Workspace',
+    });
   }
 
   /** Right-click or long press on a workspace icon in the rail. */
@@ -10103,7 +14897,10 @@ class ReverieChatApp {
 
   /** Mark one channel read on the server (and here, at once). */
   async markRead(roomId) {
-    const res = await this.app._chatApi(`/api/chatrooms/${encodeURIComponent(roomId)}/read`, { method: 'POST', body: {} });
+    const res = await this.app._chatApi(`/api/chatrooms/${encodeURIComponent(roomId)}/read`, {
+      method: 'POST',
+      body: {},
+    });
     if (!res.ok) return this.toast(`Chat: ${res.error}`, 'error');
     const room = this.rooms.find((r) => r.id === roomId);
     if (room) {
@@ -10123,7 +14920,10 @@ class ReverieChatApp {
   async promptRename() {
     const name = this.doc.defaultView?.prompt('Channel name', this.room?.name || '');
     if (!name) return;
-    const res = await this.app._chatApi(`/api/chatrooms/${encodeURIComponent(this.roomId)}`, { method: 'PUT', body: { name } });
+    const res = await this.app._chatApi(`/api/chatrooms/${encodeURIComponent(this.roomId)}`, {
+      method: 'PUT',
+      body: { name },
+    });
     if (!res.ok) this.toast(`Chat: ${res.error}`, 'error');
   }
 
@@ -10161,8 +14961,22 @@ class ReverieChatApp {
       wrap.append(input, list);
       return { wrap, input };
     };
-    const spaces = [...new Set(this.rooms.filter((r) => !caIsDm(r)).map((r) => r.workspace).filter(Boolean))];
-    const cats = [...new Set(this.rooms.filter((r) => !caIsDm(r)).map((r) => r.category).filter(Boolean))];
+    const spaces = [
+      ...new Set(
+        this.rooms
+          .filter((r) => !caIsDm(r))
+          .map((r) => r.workspace)
+          .filter(Boolean)
+      ),
+    ];
+    const cats = [
+      ...new Set(
+        this.rooms
+          .filter((r) => !caIsDm(r))
+          .map((r) => r.category)
+          .filter(Boolean)
+      ),
+    ];
     const ws = field('Workspace (empty for the default one)', room.workspace, 'ca-ws-list', spaces);
     const cat = field('Category (empty for none)', room.category, 'ca-cat-list', cats);
     const row = this.el('div', 'ca-dialog-actions');
@@ -10241,8 +15055,7 @@ class ReverieChatApp {
           mark.setAttribute('aria-hidden', 'true');
           o.append(mark);
           if (g.label) o.setAttribute('aria-label', `${r.label}, private channel`);
-        }
-        else {
+        } else {
           const peer = room ? caDmPeer(room) : null;
           o.append(this.app._chatAvatar(peer?.sessionId || r.id, r.label, { size: 'sm' }));
         }
@@ -10337,7 +15150,7 @@ class ReverieChatApp {
     const status = !view.open
       ? 'Closed'
       : view.closesAt
-        ? `Closes ${(globalThis.ReverieTime?.format(view.closesAt) ?? new Date(view.closesAt).toLocaleString('en-US', { timeZone: 'UTC', timeZoneName: 'short' }))}`
+        ? `Closes ${globalThis.ReverieTime?.format(view.closesAt) ?? new Date(view.closesAt).toLocaleString('en-US', { timeZone: 'UTC', timeZoneName: 'short' })}`
         : 'Open';
     head.append(this.el('span', 'ca-poll-status', `${status}${view.multi ? ' \u00B7 choose any' : ''}`));
     card.append(head, this.el('div', 'ca-poll-q', m.poll.question));
@@ -10347,7 +15160,10 @@ class ReverieChatApp {
     list.setAttribute('aria-label', 'Options');
     const mineIds = new Set(view.rows.filter((r) => r.mine).map((r) => r.id));
     for (const row of view.rows) {
-      const btn = this.el('button', `ca-poll-opt${row.mine ? ' is-mine' : ''}${row.leading && !view.open ? ' is-winner' : ''}`);
+      const btn = this.el(
+        'button',
+        `ca-poll-opt${row.mine ? ' is-mine' : ''}${row.leading && !view.open ? ' is-winner' : ''}`
+      );
       btn.type = 'button';
       btn.setAttribute('role', view.multi ? 'checkbox' : 'radio');
       btn.setAttribute('aria-checked', String(row.mine));
@@ -10363,7 +15179,10 @@ class ReverieChatApp {
       btn.append(fill, mark, label);
       if (tag) btn.append(tag);
       btn.append(count);
-      btn.setAttribute('aria-label', `${row.label}${row.rec ? ', recommended' : ''}, ${row.count} vote${row.count === 1 ? '' : 's'}, ${row.pct} percent${row.mine ? ', your choice' : ''}`);
+      btn.setAttribute(
+        'aria-label',
+        `${row.label}${row.rec ? ', recommended' : ''}, ${row.count} vote${row.count === 1 ? '' : 's'}, ${row.pct} percent${row.mine ? ', your choice' : ''}`
+      );
       btn.addEventListener('click', () => {
         const next = new Set(view.multi ? mineIds : []);
         if (row.mine) next.delete(row.id);
@@ -10373,7 +15192,13 @@ class ReverieChatApp {
       list.append(btn);
       if (row.voters.length) {
         const names = row.voters.map((v) => (v === 'user' ? this.userName() : this.app._chatNameOf(v)));
-        list.append(this.el('span', 'ca-poll-voters', names.length > 5 ? `${names.slice(0, 5).join(', ')} +${names.length - 5}` : names.join(', ')));
+        list.append(
+          this.el(
+            'span',
+            'ca-poll-voters',
+            names.length > 5 ? `${names.slice(0, 5).join(', ')} +${names.length - 5}` : names.join(', ')
+          )
+        );
       }
     }
     card.append(list);
@@ -10391,20 +15216,26 @@ class ReverieChatApp {
 
   /** Send this page's vote (an empty list withdraws it) and redraw the card from the server's answer. */
   async castVote(m, card, ids) {
-    const res = await this.app._chatApi(`/api/chatrooms/${encodeURIComponent(m.roomId || this.roomId)}/messages/${encodeURIComponent(m.id)}/poll/vote`, {
-      method: 'POST',
-      body: { options: ids },
-    });
+    const res = await this.app._chatApi(
+      `/api/chatrooms/${encodeURIComponent(m.roomId || this.roomId)}/messages/${encodeURIComponent(m.id)}/poll/vote`,
+      {
+        method: 'POST',
+        body: { options: ids },
+      }
+    );
     if (!res.ok) return this.toast(`Chat: ${res.error}`, 'error');
     this.redrawPoll(m, card, res.data.poll);
   }
 
   async closePoll(m, card) {
     if (!this.doc.defaultView?.confirm('Close this poll? No one can vote after it is closed.')) return;
-    const res = await this.app._chatApi(`/api/chatrooms/${encodeURIComponent(m.roomId || this.roomId)}/messages/${encodeURIComponent(m.id)}/poll/close`, {
-      method: 'POST',
-      body: {},
-    });
+    const res = await this.app._chatApi(
+      `/api/chatrooms/${encodeURIComponent(m.roomId || this.roomId)}/messages/${encodeURIComponent(m.id)}/poll/close`,
+      {
+        method: 'POST',
+        body: {},
+      }
+    );
     if (!res.ok) return this.toast(`Chat: ${res.error}`, 'error');
     this.redrawPoll(m, card, res.data.poll);
   }
@@ -10429,32 +15260,54 @@ class ReverieChatApp {
       const el = this.el('div', 'ca-sys');
       el.dataset.msgId = m.id;
       el.append(this.el('span', 'ca-sys-arrow', '→'), this.el('span', 'ca-sys-text', m.text));
-      el.append(this.el('time', 'ca-time', (globalThis.ReverieTime?.format(m.at) ?? new Date(m.at).toLocaleString('en-US', { timeZone: 'UTC', timeZoneName: 'short' }))));
+      el.append(
+        this.el(
+          'time',
+          'ca-time',
+          globalThis.ReverieTime?.format(m.at) ??
+            new Date(m.at).toLocaleString('en-US', { timeZone: 'UTC', timeZoneName: 'short' })
+        )
+      );
       return el;
     }
     if (m.deleted) return this.tombstoneEl(m);
     const mine = this.isHumanMessageMine(m.from);
     const direct = m.to !== 'all';
-    const el = this.el('div', `ca-msg${m.pinned ? ' is-pinned' : ''}${head ? ' is-head' : ' is-cont'}${mine ? ' is-mine' : ''}${direct ? ' is-direct' : ''}${this.replyTarget()?.id === m.id ? ' is-replying' : ''}`);
+    const el = this.el(
+      'div',
+      `ca-msg${m.pinned ? ' is-pinned' : ''}${head ? ' is-head' : ' is-cont'}${mine ? ' is-mine' : ''}${direct ? ' is-direct' : ''}${this.replyTarget()?.id === m.id ? ' is-replying' : ''}`
+    );
     el.dataset.msgId = m.id;
     // One tab stop per message; its toolbar shows (and is reachable) while it has focus.
     el.tabIndex = 0;
     // Right-click, or a long press on a phone, opens the message's actions (a bottom sheet on a phone).
     if (!m.deleted && !m.external) this.wireMessageMenu(el, m);
     // Ctrl-click (Cmd-click on a Mac) picks the message for a group delete; links, buttons and fields keep their own click.
-    if (!m.deleted && !m.external && this.serverFeatures.deletes) el.addEventListener('click', (ev) => {
-      if (!(ev.ctrlKey || ev.metaKey) || ev.target?.closest?.('a, button, input, textarea, select, summary, [contenteditable="true"]')) return;
-      ev.preventDefault();
-      this.toggleDeleteSelection(m);
-    });
+    if (!m.deleted && !m.external && this.serverFeatures.deletes)
+      el.addEventListener('click', (ev) => {
+        if (
+          !(ev.ctrlKey || ev.metaKey) ||
+          ev.target?.closest?.('a, button, input, textarea, select, summary, [contenteditable="true"]')
+        )
+          return;
+        ev.preventDefault();
+        this.toggleDeleteSelection(m);
+      });
     el.setAttribute('role', 'article');
     const gutter = this.el('div', 'ca-msg-gutter');
     const name = this.authorOf(m.from);
     if (head) {
       gutter.append(this.avatarFor(m.from, name, { size: 'md' }));
     } else {
-      const t = this.el('time', 'ca-time-hover', (globalThis.ReverieTime?.format(m.at) ?? new Date(m.at).toLocaleString('en-US', { timeZone: 'UTC', timeZoneName: 'short' })));
-      t.title = (globalThis.ReverieTime?.format(m.at) ?? new Date(m.at).toLocaleString('en-US', { timeZone: 'UTC', timeZoneName: 'short' }));
+      const t = this.el(
+        'time',
+        'ca-time-hover',
+        globalThis.ReverieTime?.format(m.at) ??
+          new Date(m.at).toLocaleString('en-US', { timeZone: 'UTC', timeZoneName: 'short' })
+      );
+      t.title =
+        globalThis.ReverieTime?.format(m.at) ??
+        new Date(m.at).toLocaleString('en-US', { timeZone: 'UTC', timeZoneName: 'short' });
       gutter.append(t);
     }
     const body = this.el('div', 'ca-msg-body');
@@ -10464,13 +15317,29 @@ class ReverieChatApp {
       const meta = this.el('div', 'ca-msg-meta');
       const from = this.el('span', 'ca-msg-from', name);
       from.style.setProperty('--chat-hue', String(this.authorHue(m.from, name)));
-      if (m.from.sessionId && m.from.sessionId === this.room?.coordinatorId) from.append(this.el('span', 'ca-tag', 'Admin'));
+      if (m.from.sessionId && m.from.sessionId === this.room?.coordinatorId)
+        from.append(this.el('span', 'ca-tag', 'Admin'));
       if (m.from.kind === 'bot') from.append(this.el('span', 'ca-tag ca-tag--bot', 'Bot'));
-      if ((m.from.kind === 'user' || m.from.kind === 'human') && m.from.humanId) from.append(this.el('span', 'ca-tag ca-tag--person', caHumanBadgeLabel(m.from.kind === 'human' ? 'limited' : 'owner')));
-      const time = this.el('time', 'ca-time', (globalThis.ReverieTime?.format(m.at) ?? new Date(m.at).toLocaleString('en-US', { timeZone: 'UTC', timeZoneName: 'short' })));
+      if ((m.from.kind === 'user' || m.from.kind === 'human') && m.from.humanId)
+        from.append(
+          this.el('span', 'ca-tag ca-tag--person', caHumanBadgeLabel(m.from.kind === 'human' ? 'limited' : 'owner'))
+        );
+      const time = this.el(
+        'time',
+        'ca-time',
+        globalThis.ReverieTime?.format(m.at) ??
+          new Date(m.at).toLocaleString('en-US', { timeZone: 'UTC', timeZoneName: 'short' })
+      );
       time.dateTime = new Date(m.at).toISOString();
       meta.append(from, time);
-      if (m.external) meta.append(this.el('span', m.own ? 'ca-tag eg-own' : 'ca-tag eg-trust', m.own ? 'Sent from this console' : 'UNTRUSTED EXTERNAL'));
+      if (m.external)
+        meta.append(
+          this.el(
+            'span',
+            m.own ? 'ca-tag eg-own' : 'ca-tag eg-trust',
+            m.own ? 'Sent from this console' : 'UNTRUSTED EXTERNAL'
+          )
+        );
       if (direct) meta.append(this.el('span', 'ca-msg-to', `→ ${m.to.map((r) => this.app._chatNameOf(r)).join(', ')}`));
       if (m.voice) meta.prepend(this.el('span', 'ca-voice-mark', '\u{1F3A4}'));
       body.append(meta);
@@ -10485,7 +15354,7 @@ class ReverieChatApp {
       if (!m.external) this.decorateWorkspaceFiles(text);
       if (m.edited) {
         const mark = this.el('span', 'ca-edited', '(edited)');
-        mark.title = `Edited ${(globalThis.ReverieTime?.format(m.edited.at) ?? new Date(m.edited.at).toLocaleString('en-US', { timeZone: 'UTC', timeZoneName: 'short' }))}`;
+        mark.title = `Edited ${globalThis.ReverieTime?.format(m.edited.at) ?? new Date(m.edited.at).toLocaleString('en-US', { timeZone: 'UTC', timeZoneName: 'short' })}`;
         text.append(' ', mark);
       }
       body.append(text);
@@ -10512,17 +15381,24 @@ class ReverieChatApp {
    */
   renderFeed({ keepScroll = false } = {}) {
     const history = this.historyView();
-    if (this.embassy?.selected) { this.renderJumpBar(); return this.embassy.renderPosts(); }
+    if (this.embassy?.selected) {
+      this.renderJumpBar();
+      return this.embassy.renderPosts();
+    }
     const feed = this.app._chatEls.feed;
     this.app._watchChatFeedTop?.(feed);
     if (!feed._caStick) {
       feed._caStick = true;
-      feed.addEventListener('scroll', () => {
-        const fromBottom = feed.scrollHeight - feed.scrollTop - feed.clientHeight;
-        this._feedStick = fromBottom < 60;
-        if (fromBottom < CA_HISTORY_EDGE_PX) void this.extendHistory('newer');
-        this.renderJumpBar();
-      }, { passive: true });
+      feed.addEventListener(
+        'scroll',
+        () => {
+          const fromBottom = feed.scrollHeight - feed.scrollTop - feed.clientHeight;
+          this._feedStick = fromBottom < 60;
+          if (fromBottom < CA_HISTORY_EDGE_PX) void this.extendHistory('newer');
+          this.renderJumpBar();
+        },
+        { passive: true }
+      );
     }
     const top = feed.scrollTop;
     const pinned = feed.scrollHeight - top - feed.clientHeight < 40;
@@ -10530,7 +15406,17 @@ class ReverieChatApp {
     const messages = (history || this.room)?.messages || [];
     this._readMarkAt = this.serverFeatures.unread && !history ? Number(this.room?.userReadAt) || 0 : 0;
     if (!messages.length) {
-      feed.append(this.el('p', 'ca-feed-empty', this.room?.historyAfter >= 0 ? 'History cleared from your view. New messages will appear here.' : this.room && caIsDm(this.room) ? `This is the beginning of your conversation with @${caRoomLabel(this.room)}.` : `This is the start of #${this.room?.name || 'the channel'}. Say hello: everyone in the channel reads it.`));
+      feed.append(
+        this.el(
+          'p',
+          'ca-feed-empty',
+          this.room?.historyAfter >= 0
+            ? 'History cleared from your view. New messages will appear here.'
+            : this.room && caIsDm(this.room)
+              ? `This is the beginning of your conversation with @${caRoomLabel(this.room)}.`
+              : `This is the start of #${this.room?.name || 'the channel'}. Say hello: everyone in the channel reads it.`
+        )
+      );
     }
     for (const item of caFeedItems(messages, this._readMarkAt)) feed.append(this.feedNode(item));
     this.app._chatPendingDraw?.();
@@ -10564,7 +15450,8 @@ class ReverieChatApp {
     const messages = this.room.messages;
     const idx = messages.findIndex((x) => x.id === m.id);
     const prev = idx > 0 ? messages[idx - 1] : undefined;
-    if (!prev || caDayKey(prev.at) !== caDayKey(m.at)) feed.append(this.feedNode({ type: 'day', label: caDayLabel(m.at) }));
+    if (!prev || caDayKey(prev.at) !== caDayKey(m.at))
+      feed.append(this.feedNode({ type: 'day', label: caDayLabel(m.at) }));
     feed.append(this.messageEl(m, !caContinues(prev, m)));
   }
 
@@ -10582,7 +15469,8 @@ class ReverieChatApp {
     // Something new arrives in a closed direct message: it comes back.
     if (room && caIsDm(room) && data.message?.from?.kind !== 'user') this.reopenDm(room.id);
     // A member that posts in the room it was woken from is done there (a quick answer ends "is typing").
-    if (data.message?.from?.kind === 'agent' && this.dropTurn(`${data.roomId}|${data.message.from.sessionId}`)) this.renderTyping();
+    if (data.message?.from?.kind === 'agent' && this.dropTurn(`${data.roomId}|${data.message.from.sessionId}`))
+      this.renderTyping();
     const open = !this.embassy?.selected && this.active && data.roomId === this.roomId && this.room;
     if (open) {
       if (this.room.messages.some((m) => m.id === data.message.id)) return true;
@@ -10615,7 +15503,15 @@ class ReverieChatApp {
       this._listTimer = setTimeout(() => this.refreshRooms(), 150);
       return;
     }
-    Object.assign(room, chatCountsAfterMessage(room, data.message, this.humanSelf ? [this.humanSelf.name] : this.app._chatOwnerNames, this.humanSelf?.id || 'owner'));
+    Object.assign(
+      room,
+      chatCountsAfterMessage(
+        room,
+        data.message,
+        this.humanSelf ? [this.humanSelf.name] : this.app._chatOwnerNames,
+        this.humanSelf?.id || 'owner'
+      )
+    );
     room.lastMessageAt = data.message.at;
     // An older server sends no counts: keep the terminal UI's own running total, as it always did.
     if (!this.serverFeatures.unread && data.message.from?.kind === 'agent') {
@@ -10628,25 +15524,45 @@ class ReverieChatApp {
 
   /** Hide this owner's existing history, while retaining the conversation and its stored messages. */
   clearDmHistory(roomId) {
-    const room = this.rooms.find(room => room.id === roomId);
+    const room = this.rooms.find((room) => room.id === roomId);
     if (!room?.canClearHistory || !caIsDm(room)) return;
     const dlg = this.el('dialog', 'ca-dialog');
     dlg.setAttribute('aria-label', 'Clear direct-message history');
-    dlg.append(this.el('h2', '', 'Clear history?'), this.el('p', 'ca-dialog-note',
-      'Hide all messages currently in this direct message from your view on every device. Stored messages and agent memory stay intact. New messages will still appear.'));
+    dlg.append(
+      this.el('h2', '', 'Clear history?'),
+      this.el(
+        'p',
+        'ca-dialog-note',
+        'Hide all messages currently in this direct message from your view on every device. Stored messages and agent memory stay intact. New messages will still appear.'
+      )
+    );
     const cancel = this.button('ca-btn', 'Cancel', () => dlg.close(), { text: 'Cancel' });
-    const clear = this.button('ca-btn is-danger', 'Clear history', async () => {
-      if (clear.disabled) return;
-      clear.disabled = true;
-      const res = await this.app._chatApi(`/api/chatrooms/${encodeURIComponent(roomId)}/clear-history`, { method: 'POST', body: {} });
-      clear.disabled = false;
-      if (!res.ok) return this.toast(`History could not be cleared: ${res.error}`, 'error');
-      this.app._chatHistoryChanged({ action: 'history-cleared', roomId, viewerId: this.humanSelf?.id || 'owner', historyAfter: res.data.historyAfter });
-      if (this.roomId === roomId) await this.app._applyChatRoom(roomId, res.data, { quiet: true, switched: false, redraw: true });
-      dlg.close();
-      await this.refreshRooms({ keepRoom: true });
-      this.toast('History cleared from your view on every device', 'info');
-    }, { text: 'Clear history' });
+    const clear = this.button(
+      'ca-btn is-danger',
+      'Clear history',
+      async () => {
+        if (clear.disabled) return;
+        clear.disabled = true;
+        const res = await this.app._chatApi(`/api/chatrooms/${encodeURIComponent(roomId)}/clear-history`, {
+          method: 'POST',
+          body: {},
+        });
+        clear.disabled = false;
+        if (!res.ok) return this.toast(`History could not be cleared: ${res.error}`, 'error');
+        this.app._chatHistoryChanged({
+          action: 'history-cleared',
+          roomId,
+          viewerId: this.humanSelf?.id || 'owner',
+          historyAfter: res.data.historyAfter,
+        });
+        if (this.roomId === roomId)
+          await this.app._applyChatRoom(roomId, res.data, { quiet: true, switched: false, redraw: true });
+        dlg.close();
+        await this.refreshRooms({ keepRoom: true });
+        this.toast('History cleared from your view on every device', 'info');
+      },
+      { text: 'Clear history' }
+    );
     dlg.append(cancel, clear);
     dlg.addEventListener('close', () => dlg.remove());
     this.doc.body.append(dlg);
@@ -10680,7 +15596,7 @@ class ReverieChatApp {
   async refreshRooms({ attempt = 0, reloadCurrent = false, keepRoom = false } = {}) {
     const res = await this.app._chatApi('/api/chatrooms');
     if (!res.ok) return;
-    this.app._chatRooms = (res.data.rooms || []).map(room => this.app._chatFilterHistory(room));
+    this.app._chatRooms = (res.data.rooms || []).map((room) => this.app._chatFilterHistory(room));
     this.app._chatFeatures = res.data.features || this.app._chatFeatures;
     this.app._chatOwnerNames = Array.isArray(res.data.ownerNames) ? res.data.ownerNames : this.app._chatOwnerNames;
     this.app._chatRetired = Array.isArray(res.data.retired) ? res.data.retired : this.app._chatRetired;
@@ -10697,14 +15613,20 @@ class ReverieChatApp {
   }
 
   markReadSoon() {
-    if (this.embassy?.selected) { this.embassy.markRead(); return; }
+    if (this.embassy?.selected) {
+      this.embassy.markRead();
+      return;
+    }
     clearTimeout(this._readTimer);
     this._readTimer = setTimeout(() => this.markRead(), 250);
   }
 
   /** The user can see the newest message of the open room: move the server-side read cursor. */
   async markRead() {
-    if (this.embassy?.selected) { this.embassy.markRead(); return; }
+    if (this.embassy?.selected) {
+      this.embassy.markRead();
+      return;
+    }
     if (!this.active || !this.serverFeatures.unread || this.historyView()) return;
     const entry = this.rooms.find((r) => r.id === this.roomId);
     const room = this.room;
@@ -10861,10 +15783,14 @@ function caInstall(proto) {
       if (place && opts?.method === 'POST' && path === '/api/chatrooms') {
         if (res.ok && res.data?.id) {
           app._pendingPlacement = null;
-          const put = await original._chatApi.call(this, `/api/chatrooms/${encodeURIComponent(res.data.id)}/placement`, {
-            method: 'PUT',
-            body: place,
-          });
+          const put = await original._chatApi.call(
+            this,
+            `/api/chatrooms/${encodeURIComponent(res.data.id)}/placement`,
+            {
+              method: 'PUT',
+              body: place,
+            }
+          );
           if (!put.ok) app.toast(`Chat: created, but not placed in the workspace (${put.error})`, 'error');
         }
       }
@@ -10892,30 +15818,42 @@ function caInstall(proto) {
     },
     // This WRAPS the app's own SSE handler (it calls it first). The name is quoted so the one-definition guard in
     // sse-dispatch-table.test.ts, which looks for a second copy of a handler that would shadow the app's, does not read it as one.
-    '_onInit'(data) {
+    _onInit(data) {
       const result = original._onInit?.call(this, data);
       const shell = this._chatApp;
-      const ids = new Set([shell?.room, ...(shell?.viewRooms || [])].flatMap(room => (room?.members || []).map(member => member.sessionId)));
+      const ids = new Set(
+        [shell?.room, ...(shell?.viewRooms || [])].flatMap((room) =>
+          (room?.members || []).map((member) => member.sessionId)
+        )
+      );
       for (const id of ids) shell?.syncSessionPresence?.(id, !this.sessions?.has?.(id));
       return result;
     },
-    '_onSessionCreated'(data) {
+    _onSessionCreated(data) {
       const result = original._onSessionCreated?.call(this, data);
       this._chatApp?.syncSessionPresence?.(data.id);
-      if (this._chatApp?.view === 'debug' && this.activeSessionId !== data.id && caRead('session', 'reverie:debug-session', '') === data.id)
+      if (
+        this._chatApp?.view === 'debug' &&
+        this.activeSessionId !== data.id &&
+        caRead('session', 'reverie:debug-session', '') === data.id
+      )
         this._restorePinnedDebugSession?.();
       return result;
     },
-    '_onSessionDeleted'(data) {
+    _onSessionDeleted(data) {
       const result = original._onSessionDeleted?.call(this, data);
       this._chatApp?.syncSessionPresence?.(data.id, true);
       return result;
     },
-    '_onSessionUpdated'(data) {
+    _onSessionUpdated(data) {
       const result = original._onSessionUpdated?.call(this, data);
       this._chatApp?.syncSessionPresence?.((data.session || data).id);
       const id = (data.session || data).id;
-      if (this._chatApp?.view === 'debug' && this.activeSessionId !== id && caRead('session', 'reverie:debug-session', '') === id)
+      if (
+        this._chatApp?.view === 'debug' &&
+        this.activeSessionId !== id &&
+        caRead('session', 'reverie:debug-session', '') === id
+      )
         this._restorePinnedDebugSession?.();
       return result;
     },
@@ -10926,7 +15864,10 @@ function caInstall(proto) {
       return result;
     },
     _attachChatFiles(files) {
-      if (this._chatApp?.embassy?.selected) { this.showToast?.('Embassy attachments are not available yet', 'info'); return; }
+      if (this._chatApp?.embassy?.selected) {
+        this.showToast?.('Embassy attachments are not available yet', 'info');
+        return;
+      }
       return original._attachChatFiles?.call(this, files);
     },
     _renderChatBadge() {
@@ -10969,7 +15910,8 @@ function caInstall(proto) {
       return undefined;
     },
     _toggleChatRoomMenu(e) {
-      if (this._chatApp?.built) return this._chatApp.openChannelMenu(this._chatApp.roomId, e.currentTarget, e.currentTarget);
+      if (this._chatApp?.built)
+        return this._chatApp.openChannelMenu(this._chatApp.roomId, e.currentTarget, e.currentTarget);
       return undefined;
     },
   });
@@ -10978,8 +15920,10 @@ function caInstall(proto) {
 /** Start the app once the ReverieApp singleton exists. */
 /** Pairing QR parsers are local and inert: no navigation, redeem or authority from labels. */
 function caPairFields(value, version) {
-  if (typeof value !== 'string' || value.length > 512 || new TextEncoder().encode(value).length > 512) throw new Error('Invalid pairing QR');
-  const qr = value.trim(), fields = qr.split('|');
+  if (typeof value !== 'string' || value.length > 512 || new TextEncoder().encode(value).length > 512)
+    throw new Error('Invalid pairing QR');
+  const qr = value.trim(),
+    fields = qr.split('|');
   if (fields.length !== 4 || fields[0] !== version) throw new Error('Invalid pairing QR');
   // Reuse the existing strict canonical HTTPS-origin parser; never accept arbitrary URLs.
   const { origin } = caEmbassyInvite(`embassy-v1|${fields[1]}|${'A'.repeat(43)}`);
@@ -10987,7 +15931,8 @@ function caPairFields(value, version) {
 }
 function caPairInvite(value) {
   const { qr, origin, fields } = caPairFields(value, 'embassy-v2');
-  if (!/^[A-Za-z0-9_-]{1,128}$/.test(fields[2]) || !/^[A-Za-z0-9_-]{43}$/.test(fields[3])) throw new Error('Invalid pairing invitation');
+  if (!/^[A-Za-z0-9_-]{1,128}$/.test(fields[2]) || !/^[A-Za-z0-9_-]{43}$/.test(fields[3]))
+    throw new Error('Invalid pairing invitation');
   return { qr, origin, roomId: fields[2] };
 }
 function caPairCode(value) {
@@ -10999,7 +15944,8 @@ function caPairCode(value) {
 }
 function caPairRequest(value, expectedOrigin) {
   const { qr, origin, fields } = caPairFields(value, 'embassy-pair-v1');
-  if (origin !== expectedOrigin || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(fields[2])) throw new Error('Wrong host or request');
+  if (origin !== expectedOrigin || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(fields[2]))
+    throw new Error('Wrong host or request');
   return { qr, origin, requestId: fields[2], code: caPairCode(fields[3]) };
 }
 
@@ -11010,20 +15956,40 @@ function caEmbassyInvite(value) {
   let claimedHost = null;
   if (!value.startsWith('embassy-v1|')) {
     const link = new URL(value);
-    if (link.protocol !== 'https:' || link.username || link.password || link.search || link.pathname !== '/') throw new Error('Invalid invite');
+    if (link.protocol !== 'https:' || link.username || link.password || link.search || link.pathname !== '/')
+      throw new Error('Invalid invite');
     const fields = new URLSearchParams(link.hash.slice(1));
-    if ([...fields].length !== 3 || fields.get('embassy') !== '1' || !fields.has('host') || !fields.has('key') || new Set(fields.keys()).size !== 3) throw new Error('Invalid invite');
+    if (
+      [...fields].length !== 3 ||
+      fields.get('embassy') !== '1' ||
+      !fields.has('host') ||
+      !fields.has('key') ||
+      new Set(fields.keys()).size !== 3
+    )
+      throw new Error('Invalid invite');
     claimedHost = fields.get('host');
     value = fields.get('key');
   }
   if (value.length > 512 || new TextEncoder().encode(value).length > 512) throw new Error('Invalid invite');
   const parts = value.split('|');
-  if (parts.length !== 3 || parts[0] !== 'embassy-v1' || !/^[A-Za-z0-9_-]{43}$/.test(parts[2])) throw new Error('Invalid invite');
+  if (parts.length !== 3 || parts[0] !== 'embassy-v1' || !/^[A-Za-z0-9_-]{43}$/.test(parts[2]))
+    throw new Error('Invalid invite');
   const host = new URL(parts[1]);
-  if (host.protocol !== 'https:' || host.origin !== parts[1] || host.username || host.password || host.pathname !== '/' || host.search || host.hash ||
-      host.hostname.length > 253 || !host.hostname.includes('.') || /^[0-9.]+$/.test(host.hostname) ||
-      !host.hostname.split('.').every(label => /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(label)) ||
-      (claimedHost !== null && claimedHost !== host.origin)) throw new Error('Invalid invite');
+  if (
+    host.protocol !== 'https:' ||
+    host.origin !== parts[1] ||
+    host.username ||
+    host.password ||
+    host.pathname !== '/' ||
+    host.search ||
+    host.hash ||
+    host.hostname.length > 253 ||
+    !host.hostname.includes('.') ||
+    /^[0-9.]+$/.test(host.hostname) ||
+    !host.hostname.split('.').every((label) => /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(label)) ||
+    (claimedHost !== null && claimedHost !== host.origin)
+  )
+    throw new Error('Invalid invite');
   return { key: value, origin: host.origin };
 }
 
@@ -11040,25 +16006,35 @@ function caEmbassyTakeFragment(win) {
   const hash = staged?.hash || win.location.hash;
   if (!/^#embassy(?:=|&)/.test(hash)) return null;
   // Invalid envelopes are scrubbed too. Preserve unrelated page/query state.
-  try { if (!staged?.scrubbed) win.history.replaceState(win.history.state, '', win.location.pathname + win.location.search); }
-  catch { return { invalid: true }; }
+  try {
+    if (!staged?.scrubbed) win.history.replaceState(win.history.state, '', win.location.pathname + win.location.search);
+  } catch {
+    return { invalid: true };
+  }
   // The envelope is independent of the joining console's (possibly localhost)
   // origin. This dummy origin is parsed only and is never requested.
-  try { return caEmbassyInvite('https://invite.invalid/' + hash); }
-  catch { return { invalid: true }; }
+  try {
+    return caEmbassyInvite('https://invite.invalid/' + hash);
+  } catch {
+    return { invalid: true };
+  }
 }
 
 const caEmbassyQrLoads = new Map();
 function caEmbassyQrAsset(win, kind) {
-  const loaded = () => kind === 'code' ? win.ReverieQRCode : win.jsQR;
+  const loaded = () => (kind === 'code' ? win.ReverieQRCode : win.jsQR);
   if (loaded()) return Promise.resolve(loaded());
   if (caEmbassyQrLoads.has(kind)) return caEmbassyQrLoads.get(kind);
   const promise = new Promise((resolve, reject) => {
     const script = win.document.createElement('script');
     script.src = kind === 'code' ? '/vendor/embassy-qr-code.min.js?v=1.5.4' : '/vendor/embassy-qr-scan.min.js?v=1.4.0';
     script.referrerPolicy = 'no-referrer';
-    script.onload = () => loaded() ? resolve(loaded()) : reject(new Error('QR unavailable'));
-    script.onerror = () => { script.remove(); caEmbassyQrLoads.delete(kind); reject(new Error('QR unavailable')); };
+    script.onload = () => (loaded() ? resolve(loaded()) : reject(new Error('QR unavailable')));
+    script.onerror = () => {
+      script.remove();
+      caEmbassyQrLoads.delete(kind);
+      reject(new Error('QR unavailable'));
+    };
     win.document.head.append(script);
   });
   caEmbassyQrLoads.set(kind, promise);
@@ -11092,13 +16068,21 @@ class ReverieEmbassyView {
     this.collapsed = caRead('local', 'reverie:embassies:collapsed', '') === '1';
     this.refresh().catch(() => {});
     const tick = async () => {
-      try { if (!this.doc.hidden) await this.refresh(); } catch { /* status is shown by refresh */ }
+      try {
+        if (!this.doc.hidden) await this.refresh();
+      } catch {
+        /* status is shown by refresh */
+      }
       this.timer = this.win.setTimeout(tick, 5000);
     };
     this.timer = this.win.setTimeout(tick, 5000);
   }
-  el(tag, cls, text) { return this.shell.el(tag, cls, text); }
-  button(label, run) { return this.shell.button('ca-btn eg-button', label, run, { text: label }); }
+  el(tag, cls, text) {
+    return this.shell.el(tag, cls, text);
+  }
+  button(label, run) {
+    return this.shell.button('ca-btn eg-button', label, run, { text: label });
+  }
   async api(path = '', options = {}) {
     try {
       if (/^\/__host__\/posts(?:\?|$)/.test(path)) {
@@ -11106,10 +16090,13 @@ class ReverieEmbassyView {
         return await this.pairing.api('/api/embassy-host/posts' + path.slice('/__host__/posts'.length), options);
       }
       return await this.shell.app._chatApi(`/api/embassy-guest${path}`, options);
+    } catch {
+      return { ok: false, error: 'Connection unavailable' };
     }
-    catch { return { ok: false, error: 'Connection unavailable' }; }
   }
-  failure(result) { return typeof result?.error === 'string' ? result.error : 'Request refused'; }
+  failure(result) {
+    return typeof result?.error === 'string' ? result.error : 'Request refused';
+  }
   key(id, kind) {
     const scope = id === '__host__' ? `__host__:${encodeURIComponent(this.hostScope || 'unbound')}` : id;
     return `reverie:embassy:${scope}:${kind}`;
@@ -11121,33 +16108,56 @@ class ReverieEmbassyView {
     if (this.selected === '__host__') this.close();
     this.hostScope = scope;
     this.version++;
-    for (const cache of [this.posts, this.pending, this.drafts, this.ownVerified, this.sentReceipts]) cache.delete('__host__');
+    for (const cache of [this.posts, this.pending, this.drafts, this.ownVerified, this.sentReceipts])
+      cache.delete('__host__');
     this.mutationUnknown.delete('__host__');
   }
   readCount(id) {
     const n = Number(caRead('local', this.key(id, 'read'), '0'));
     return Number.isSafeInteger(n) && n >= 0 ? n : 0;
   }
-  unread(c) { return Math.max(0, (Number(c.postCount) || 0) - this.readCount(c.id)); }
+  unread(c) {
+    return Math.max(0, (Number(c.postCount) || 0) - this.readCount(c.id));
+  }
   hostedConnection() {
     const p = this.pairing;
     if (!p?.owner || p.host.status !== 'ready') return null;
-    return { id: '__host__', origin: p.host.origin, roomId: p.host.room.id, roomName: p.host.room.name,
-      hostCompany: this.shell.defaultWorkspaceName(), enabled: true, status: 'live', expiresAt: Number.MAX_SAFE_INTEGER,
-      postCount: this.posts.get('__host__')?.size || 0 };
+    return {
+      id: '__host__',
+      origin: p.host.origin,
+      roomId: p.host.room.id,
+      roomName: p.host.room.name,
+      hostCompany: this.shell.defaultWorkspaceName(),
+      enabled: true,
+      status: 'live',
+      expiresAt: Number.MAX_SAFE_INTEGER,
+      postCount: this.posts.get('__host__')?.size || 0,
+    };
   }
-  availableConnections() { const host = this.hostedConnection(); return host ? [host, ...this.connections] : this.connections; }
-  connection() { return this.availableConnections().find(c => c.id === this.selected); }
+  availableConnections() {
+    const host = this.hostedConnection();
+    return host ? [host, ...this.connections] : this.connections;
+  }
+  connection() {
+    return this.availableConnections().find((c) => c.id === this.selected);
+  }
   async refresh() {
-    if (this.refreshing) { this.refreshAgain = true; return; }
+    if (this.refreshing) {
+      this.refreshAgain = true;
+      return;
+    }
     this.refreshing = true;
     const epoch = this.listEpoch;
     try {
       const result = await this.api();
       if (epoch !== this.listEpoch || this.changing) return;
       if (!result.ok) {
-        this.ownerRequired = result.status === 403 || /HTTP 403|signed-in owner|owner dashboard/i.test(this.failure(result));
-        this.lastFailure = { error: this.failure(result), status: Number.isInteger(result.status) ? result.status : undefined };
+        this.ownerRequired =
+          result.status === 403 || /HTTP 403|signed-in owner|owner dashboard/i.test(this.failure(result));
+        this.lastFailure = {
+          error: this.failure(result),
+          status: Number.isInteger(result.status) ? result.status : undefined,
+        };
         // Do not retain a previous owner's external content after authorization disappears.
         this.allowed = false;
         this.pairing.deny();
@@ -11166,12 +16176,15 @@ class ReverieEmbassyView {
       this.mutationUnknown.clear();
       this.ownerRequired = false;
       this.lastFailure = undefined;
-      this.connections = Array.isArray(result.data?.connections) ? result.data.connections.filter(c => c?.id !== '__host__') : [];
+      this.connections = Array.isArray(result.data?.connections)
+        ? result.data.connections.filter((c) => c?.id !== '__host__')
+        : [];
       await this.pairing.refresh();
       if (this.selected && !this.connection()) this.close();
       this.renderSidebar();
       if (this.startInvite && !this.dialog) {
-        const invite = this.startInvite; this.startInvite = null;
+        const invite = this.startInvite;
+        this.startInvite = null;
         this.joinDialog(invite);
       }
       if (this.selected) {
@@ -11180,7 +16193,10 @@ class ReverieEmbassyView {
       }
     } finally {
       this.refreshing = false;
-      if (this.refreshAgain) { this.refreshAgain = false; void this.refresh(); }
+      if (this.refreshAgain) {
+        this.refreshAgain = false;
+        void this.refresh();
+      }
     }
   }
   renderSidebar() {
@@ -11198,7 +16214,10 @@ class ReverieEmbassyView {
       if (this.ownerRequired) {
         const note = this.el('section', 'eg-access-note');
         note.setAttribute('role', 'status');
-        note.append(this.el('strong', '', 'Embassies'), this.el('p', '', 'Embassies need owner sign-in: run reverie owner bootstrap, then sign in at /owner/login.'));
+        note.append(
+          this.el('strong', '', 'Embassies'),
+          this.el('p', '', 'Embassies need owner sign-in: run reverie owner bootstrap, then sign in at /owner/login.')
+        );
         const login = this.el('a', '', 'Owner sign-in');
         login.href = '/owner/login';
         note.append(login);
@@ -11213,7 +16232,9 @@ class ReverieEmbassyView {
       note.setAttribute('role', 'alert');
       const detail = failure.status ? `${failure.error} (HTTP ${failure.status})` : failure.error;
       note.append(this.el('strong', '', 'Embassies'), this.el('p', '', `Embassies unavailable: ${detail}`));
-      const retry = this.button('Retry', () => { void this.refresh(); });
+      const retry = this.button('Retry', () => {
+        void this.refresh();
+      });
       retry.setAttribute('aria-label', 'Retry loading embassies');
       note.append(retry);
       host.append(note);
@@ -11235,7 +16256,9 @@ class ReverieEmbassyView {
     toggle.setAttribute('aria-label', 'Embassies');
     toggle.setAttribute('aria-expanded', String(!this.collapsed));
     toggle.setAttribute('aria-controls', 'eg-channel-list');
-    const add = this.shell.button('ca-icon-btn eg-add', 'Add embassy channel', () => this.pairing.open(), { icon: 'plus' });
+    const add = this.shell.button('ca-icon-btn eg-add', 'Add embassy channel', () => this.pairing.open(), {
+      icon: 'plus',
+    });
     add.setAttribute('aria-label', 'Add embassy channel');
     const total = this.availableConnections().reduce((n, c) => n + this.unread(c), 0);
     header.append(toggle, this.el('span', 'eg-unread-total', total ? String(total) : ''), add);
@@ -11243,7 +16266,9 @@ class ReverieEmbassyView {
     list.id = 'eg-channel-list';
     list.hidden = this.collapsed;
     for (const c of this.availableConnections()) {
-      const row = this.shell.button('ca-item eg-channel', c.roomName || 'Shared room', () => this.open(c.id), { text: c.roomName || 'Shared room' });
+      const row = this.shell.button('ca-item eg-channel', c.roomName || 'Shared room', () => this.open(c.id), {
+        text: c.roomName || 'Shared room',
+      });
       row.dataset.connection = c.id;
       const label = row.querySelector('span');
       label.classList.add('ca-name', 'eg-channel-label');
@@ -11262,7 +16287,10 @@ class ReverieEmbassyView {
     section.append(header, list);
     host.append(section);
     this.renderDirectory();
-    if (focused) [...section.querySelectorAll('button')].find(b => focusId ? b.dataset.connection === focusId : b.getAttribute('aria-label') === focusLabel)?.focus();
+    if (focused)
+      [...section.querySelectorAll('button')]
+        .find((b) => (focusId ? b.dataset.connection === focusId : b.getAttribute('aria-label') === focusLabel))
+        ?.focus();
   }
   platformName() {
     const name = this.el('span', '', 'Reverie');
@@ -11277,8 +16305,18 @@ class ReverieEmbassyView {
     intro.append('Shared rooms with other companies, here in your own ', this.platformName(), '.');
     box.append(this.el('h1', '', 'Embassies'), intro);
     if (!this.allowed) {
-      box.append(this.el('p', 'eg-directory-status', this.ownerRequired ? 'Sign in as the console owner to connect shared rooms.' : 'Checking embassy access…'));
-      if (this.ownerRequired) { const a = this.el('a', '', 'Owner sign-in'); a.href = '/owner/login'; box.append(a); }
+      box.append(
+        this.el(
+          'p',
+          'eg-directory-status',
+          this.ownerRequired ? 'Sign in as the console owner to connect shared rooms.' : 'Checking embassy access…'
+        )
+      );
+      if (this.ownerRequired) {
+        const a = this.el('a', '', 'Owner sign-in');
+        a.href = '/owner/login';
+        box.append(a);
+      }
       return box;
     }
     const add = this.button('Add embassy channel', () => this.joinDialog());
@@ -11286,23 +16324,39 @@ class ReverieEmbassyView {
     const list = this.el('div', 'eg-directory-list');
     for (const c of this.availableConnections()) {
       const row = this.button(c.roomName || 'Shared room', () => this.open(c.id));
-      row.classList.add('eg-directory-room'); row.dataset.connection = c.id;
+      row.classList.add('eg-directory-room');
+      row.dataset.connection = c.id;
       row.append(this.el('small', '', `${c.hostCompany || 'External company'} · ${c.origin}`));
       row.append(this.el('span', `eg-connection-state is-${c.status}`, this.connectionState(c)));
-      const count = this.unread(c); if (count) row.append(this.el('span', 'eg-unread', String(count)));
+      const count = this.unread(c);
+      if (count) row.append(this.el('span', 'eg-unread', String(count)));
       const card = this.el('article', 'eg-directory-card');
       const disconnect = this.button('Disconnect', () => this.leave(c.id));
-      disconnect.classList.add('eg-disconnect'); disconnect.disabled = !!this.changing || c.status === 'left';
+      disconnect.classList.add('eg-disconnect');
+      disconnect.disabled = !!this.changing || c.status === 'left';
       disconnect.setAttribute('aria-label', `Disconnect ${c.roomName || 'shared room'}`);
-      card.append(row, disconnect); list.append(card);
+      card.append(row, disconnect);
+      list.append(card);
     }
-    if (!this.availableConnections().length) list.append(this.el('p', 'ca-hint', 'No shared rooms connected. Add a key, scan a QR or paste a link.'));
-    box.append(list); return box;
+    if (!this.availableConnections().length)
+      list.append(this.el('p', 'ca-hint', 'No shared rooms connected. Add a key, scan a QR or paste a link.'));
+    box.append(list);
+    return box;
   }
   connectionState(c) {
     if (c.id === '__host__') return 'Hosted here';
-    return { live: 'Connected', connecting: 'Connecting…', disabled: 'Disabled here', left: 'Disconnected',
-      unreachable: 'Connection unavailable', expired: 'Access expired', refused: 'Connection refused', 'storage-full': 'Local copy full' }[c.status] || 'Connection unavailable';
+    return (
+      {
+        live: 'Connected',
+        connecting: 'Connecting…',
+        disabled: 'Disabled here',
+        left: 'Disconnected',
+        unreachable: 'Connection unavailable',
+        expired: 'Access expired',
+        refused: 'Connection refused',
+        'storage-full': 'Local copy full',
+      }[c.status] || 'Connection unavailable'
+    );
   }
   ownReceipts(id) {
     if (!this.sentReceipts.has(id)) {
@@ -11311,10 +16365,20 @@ class ReverieEmbassyView {
         const value = caRead('local', this.key(id, 'sent-receipts'), '[]');
         if (value.length <= 65536) {
           const parsed = JSON.parse(value);
-          if (Array.isArray(parsed) && parsed.length <= 256) receipts = parsed.filter(r => r && typeof r.ackId === 'string' && r.ackId.length <= 64 &&
-            Number.isSafeInteger(r.sequence) && r.sequence > 0 && /^[a-f0-9]{64}$/.test(r.sha256));
+          if (Array.isArray(parsed) && parsed.length <= 256)
+            receipts = parsed.filter(
+              (r) =>
+                r &&
+                typeof r.ackId === 'string' &&
+                r.ackId.length <= 64 &&
+                Number.isSafeInteger(r.sequence) &&
+                r.sequence > 0 &&
+                /^[a-f0-9]{64}$/.test(r.sha256)
+            );
         }
-      } catch { /* Missing/corrupt proof never turns an imported post into our own. */ }
+      } catch {
+        /* Missing/corrupt proof never turns an imported post into our own. */
+      }
       this.sentReceipts.set(id, receipts);
     }
     return this.sentReceipts.get(id);
@@ -11324,110 +16388,211 @@ class ReverieEmbassyView {
     const bytes = new TextEncoder().encode(text);
     if (bytes.length > 4096) throw new Error('No receipt');
     const digest = await this.win.crypto.subtle.digest('SHA-256', bytes);
-    return [...new Uint8Array(digest)].map(v => v.toString(16).padStart(2, '0')).join('');
+    return [...new Uint8Array(digest)].map((v) => v.toString(16).padStart(2, '0')).join('');
   }
   async rememberOwn(id, post, sent) {
     // Human-readable company/identity labels are spoofable. Only a confirmed
     // response to THIS console's exact publication can establish a local receipt.
-    if (!this.allowed || !post || typeof post.ackId !== 'string' || post.ackId.length > 64 ||
-        !Number.isSafeInteger(post.sequence) || post.sequence <= 0 || post.text !== sent.text) return;
-    const key = this.key(id, 'sent-receipts'), version = this.version;
+    if (
+      !this.allowed ||
+      !post ||
+      typeof post.ackId !== 'string' ||
+      post.ackId.length > 64 ||
+      !Number.isSafeInteger(post.sequence) ||
+      post.sequence <= 0 ||
+      post.text !== sent.text
+    )
+      return;
+    const key = this.key(id, 'sent-receipts'),
+      version = this.version;
     try {
       const sha256 = await this.textDigest(sent.text);
       if (!this.allowed || version !== this.version || key !== this.key(id, 'sent-receipts')) return;
-      const receipts = [...this.ownReceipts(id).filter(r => r.ackId !== post.ackId), { ackId: post.ackId, sequence: post.sequence, sha256 }].slice(-256);
+      const receipts = [
+        ...this.ownReceipts(id).filter((r) => r.ackId !== post.ackId),
+        { ackId: post.ackId, sequence: post.sequence, sha256 },
+      ].slice(-256);
       this.sentReceipts.set(id, receipts);
       caWrite('local', this.key(id, 'sent-receipts'), JSON.stringify(receipts));
-    } catch { /* No crypto/storage capability: keep conservative provenance. */ }
+    } catch {
+      /* No crypto/storage capability: keep conservative provenance. */
+    }
   }
   async verifyOwn(id, posts) {
-    const version = this.version, key = this.key(id, 'sent-receipts');
-    const receipts = new Map(this.ownReceipts(id).map(r => [r.ackId, r]));
+    const version = this.version,
+      key = this.key(id, 'sent-receipts');
+    const receipts = new Map(this.ownReceipts(id).map((r) => [r.ackId, r]));
     const verified = new Set();
-    await Promise.all(posts.filter(p => receipts.has(p.ackId)).slice(0, 256).map(async p => {
-      try {
-        const receipt = receipts.get(p.ackId);
-        if (receipt.sequence === p.sequence && receipt.sha256 === await this.textDigest(p.text)) verified.add(p.ackId);
-      } catch { /* Unverifiable content stays externally labelled. */ }
-    }));
-    if (this.allowed && version === this.version && key === this.key(id, 'sent-receipts')) this.ownVerified.set(id, verified);
+    await Promise.all(
+      posts
+        .filter((p) => receipts.has(p.ackId))
+        .slice(0, 256)
+        .map(async (p) => {
+          try {
+            const receipt = receipts.get(p.ackId);
+            if (receipt.sequence === p.sequence && receipt.sha256 === (await this.textDigest(p.text)))
+              verified.add(p.ackId);
+          } catch {
+            /* Unverifiable content stays externally labelled. */
+          }
+        })
+    );
+    if (this.allowed && version === this.version && key === this.key(id, 'sent-receipts'))
+      this.ownVerified.set(id, verified);
   }
   renderDirectory() {
     if (this.shell.embed === 'embassies' && this.shell.els.page) {
       const page = this.shell.els.page;
       const id = page.contains(this.doc.activeElement) ? this.doc.activeElement.dataset.connection : null;
       page.replaceChildren(this.directoryEl());
-      if (id) [...page.querySelectorAll('[data-connection]')].find(n => n.dataset.connection === id)?.focus();
+      if (id) [...page.querySelectorAll('[data-connection]')].find((n) => n.dataset.connection === id)?.focus();
     }
   }
   open(id) {
-    if (!this.allowed || !this.availableConnections().some(c => c.id === id)) return;
-    if (this.shell.app._chatSending) { this.shell.toast('Wait for the current message to finish sending', 'info'); return; }
-    this.close(); this.shell.closePage();
-    const app = this.shell.app, els = app._chatEls;
+    if (!this.allowed || !this.availableConnections().some((c) => c.id === id)) return;
+    if (this.shell.app._chatSending) {
+      this.shell.toast('Wait for the current message to finish sending', 'info');
+      return;
+    }
+    this.close();
+    this.shell.closePage();
+    const app = this.shell.app,
+      els = app._chatEls;
     // Reuse the actual local channel feed/composer. External records remain in
     // this adapter, never app._chatRoom, ChatroomStore or its agent wake path.
-    this.localState = { input: els.input.value, maxLength: els.input.getAttribute('maxlength'),
-      label: els.input.getAttribute('aria-label'), feedLabel: els.feed.getAttribute('aria-label'),
-      feedHidden: els.feed.hidden, composerHidden: els.composer.hidden, emptyHidden: els.empty.hidden };
-    els.feed.hidden = false; els.composer.hidden = false; els.empty.hidden = true;
-    this.selected = id; this.version++;
-    this.shell.setView('chat'); this.shell.toggleDrawer(null);
-    this.panel = this.shell.els.chat; this.panel.classList.add('eg-view');
-    this.feed = els.feed; this.feed.classList.add('eg-feed'); this.feed.dataset.signature = '';
+    this.localState = {
+      input: els.input.value,
+      maxLength: els.input.getAttribute('maxlength'),
+      label: els.input.getAttribute('aria-label'),
+      feedLabel: els.feed.getAttribute('aria-label'),
+      feedHidden: els.feed.hidden,
+      composerHidden: els.composer.hidden,
+      emptyHidden: els.empty.hidden,
+    };
+    els.feed.hidden = false;
+    els.composer.hidden = false;
+    els.empty.hidden = true;
+    this.selected = id;
+    this.version++;
+    this.shell.setView('chat');
+    this.shell.toggleDrawer(null);
+    this.panel = this.shell.els.chat;
+    this.panel.classList.add('eg-view');
+    this.feed = els.feed;
+    this.feed.classList.add('eg-feed');
+    this.feed.dataset.signature = '';
     this.feed.setAttribute('aria-label', 'Embassy conversation');
-    this.form = els.composer; this.form.classList.add('eg-composer'); this.form.dataset.connection = id;
-    this.input = els.input; this.input.classList.add('eg-input'); this.input.maxLength = 4096;
+    this.form = els.composer;
+    this.form.classList.add('eg-composer');
+    this.form.dataset.connection = id;
+    this.input = els.input;
+    this.input.classList.add('eg-input');
+    this.input.maxLength = 4096;
     this.input.setAttribute('aria-label', 'Message to shared room');
     this.send = els.send;
     this.detail = this.el('section', 'eg-detail');
-    this.status = this.el('p', 'eg-status'); this.status.setAttribute('role', 'status');
-    this.origin = this.el('p', 'eg-origin'); this.controls = this.el('div', 'eg-controls');
+    this.status = this.el('p', 'eg-status');
+    this.status.setAttribute('role', 'status');
+    this.origin = this.el('p', 'eg-origin');
+    this.controls = this.el('div', 'eg-controls');
     this.detail.append(this.status, this.origin, this.controls);
-    this.notice = this.el('p', 'eg-notice'); this.notice.setAttribute('role', 'status');
-    this.visibility = this.el('p', 'eg-visibility', 'UNTRUSTED EXTERNAL · Text and emoji shared with other companies. Files are not supported yet.');
-    els.feed.before(this.detail); els.composer.before(this.notice, this.visibility);
-    const pending = this.getPending(id); this.input.value = pending?.text || this.drafts.get(id) || '';
+    this.notice = this.el('p', 'eg-notice');
+    this.notice.setAttribute('role', 'status');
+    this.visibility = this.el(
+      'p',
+      'eg-visibility',
+      'UNTRUSTED EXTERNAL · Text and emoji shared with other companies. Files are not supported yet.'
+    );
+    els.feed.before(this.detail);
+    els.composer.before(this.notice, this.visibility);
+    const pending = this.getPending(id);
+    this.input.value = pending?.text || this.drafts.get(id) || '';
     this.shell.els.main.classList.add('eg-active');
     this.shell.cancelReplySilently?.();
-    this.shell.renderHeader(); this.shell.renderMembers(); this.shell.renderChrome(); this.shell.renderSidebar();
+    this.shell.renderHeader();
+    this.shell.renderMembers();
+    this.shell.renderChrome();
+    this.shell.renderSidebar();
     this.shell.renderTyping();
-    this.updateControls(); this.renderPosts(); void this.loadPosts(); this.input.focus();
+    this.updateControls();
+    this.renderPosts();
+    void this.loadPosts();
+    this.input.focus();
   }
   close() {
     if (!this.selected) return;
     if (this.input && this.form?.dataset.connection === this.selected) this.drafts.set(this.selected, this.input.value);
-    this.version++; this.selected = null;
-    this.detail?.remove(); this.notice?.remove(); this.visibility?.remove();
-    this.panel?.classList.remove('eg-view'); this.feed?.classList.remove('eg-feed'); this.form?.classList.remove('eg-composer'); this.input?.classList.remove('eg-input');
+    this.version++;
+    this.selected = null;
+    this.detail?.remove();
+    this.notice?.remove();
+    this.visibility?.remove();
+    this.panel?.classList.remove('eg-view');
+    this.feed?.classList.remove('eg-feed');
+    this.form?.classList.remove('eg-composer');
+    this.input?.classList.remove('eg-input');
     if (this.form) delete this.form.dataset.connection;
     if (this.localState) {
       this.input.value = this.localState.input;
-      this.feed.hidden = this.localState.feedHidden; this.form.hidden = this.localState.composerHidden;
+      this.feed.hidden = this.localState.feedHidden;
+      this.form.hidden = this.localState.composerHidden;
       this.shell.app._chatEls.empty.hidden = this.localState.emptyHidden;
-      if (this.localState.maxLength === null) this.input.removeAttribute('maxlength'); else this.input.setAttribute('maxlength', this.localState.maxLength);
-      if (this.localState.label === null) this.input.removeAttribute('aria-label'); else this.input.setAttribute('aria-label', this.localState.label);
-      if (this.localState.feedLabel === null) this.feed.removeAttribute('aria-label'); else this.feed.setAttribute('aria-label', this.localState.feedLabel);
+      if (this.localState.maxLength === null) this.input.removeAttribute('maxlength');
+      else this.input.setAttribute('maxlength', this.localState.maxLength);
+      if (this.localState.label === null) this.input.removeAttribute('aria-label');
+      else this.input.setAttribute('aria-label', this.localState.label);
+      if (this.localState.feedLabel === null) this.feed.removeAttribute('aria-label');
+      else this.feed.setAttribute('aria-label', this.localState.feedLabel);
       this.localState = null;
     }
-    this.input.disabled = false; this.input.readOnly = false; this.send.disabled = false; this.send.textContent = 'Send'; this.send.setAttribute('aria-label', 'Send message');
-    this.panel = null; this.shell.els.main.classList.remove('eg-active');
-    this.shell.renderHeader(); this.shell.renderMembers(); this.shell.renderFeed(); this.shell.renderChrome(); this.shell.syncComposer?.(); this.shell.renderTyping();
+    this.input.disabled = false;
+    this.input.readOnly = false;
+    this.send.disabled = false;
+    this.send.textContent = 'Send';
+    this.send.setAttribute('aria-label', 'Send message');
+    this.panel = null;
+    this.shell.els.main.classList.remove('eg-active');
+    this.shell.renderHeader();
+    this.shell.renderMembers();
+    this.shell.renderFeed();
+    this.shell.renderChrome();
+    this.shell.syncComposer?.();
+    this.shell.renderTyping();
   }
   renderPosts() {
     if (!this.selected || !this.feed) return;
     const values = [...(this.posts.get(this.selected)?.values() || [])].sort((a, b) => a.sequence - b.sequence);
-    const top = this.feed.scrollTop, pinned = this.feed.scrollHeight - top - this.feed.clientHeight < 40;
+    const top = this.feed.scrollTop,
+      pinned = this.feed.scrollHeight - top - this.feed.clientHeight < 40;
     this.feed.replaceChildren();
-    if (!values.length) this.feed.append(this.el('p', 'ca-feed-empty', 'This is the start of the shared room. Say hello.'));
+    if (!values.length)
+      this.feed.append(this.el('p', 'ca-feed-empty', 'This is the start of the shared room. Say hello.'));
     for (const p of values) {
       const own = this.ownVerified.get(this.selected)?.has(p.ackId) === true;
       // In the hosted room, a guest's post shows the picture the owner set for that guest's pairing request.
-      const avatar = !own && this.selected === '__host__' && p.author?.kind === 'guest' && typeof p.author.requestId === 'string'
-        ? this.pairing?.host?.guestAvatars?.[p.author.requestId] : undefined;
-      const row = this.shell.messageEl({ id: `embassy:${this.selected}:${p.ackId}`, at: Number(p.at) || Date.now(), to: 'all',
-        from: { kind: own ? 'user' : 'external', name: `${p.author?.company || 'External'} · ${p.author?.identity || 'Guest'}`, ...(avatar ? { avatar } : {}) }, text: p.text, external: true, own }, true);
-      row.classList.add('eg-post'); row.dataset.post = p.ackId; this.feed.append(row);
+      const avatar =
+        !own && this.selected === '__host__' && p.author?.kind === 'guest' && typeof p.author.requestId === 'string'
+          ? this.pairing?.host?.guestAvatars?.[p.author.requestId]
+          : undefined;
+      const row = this.shell.messageEl(
+        {
+          id: `embassy:${this.selected}:${p.ackId}`,
+          at: Number(p.at) || Date.now(),
+          to: 'all',
+          from: {
+            kind: own ? 'user' : 'external',
+            name: `${p.author?.company || 'External'} · ${p.author?.identity || 'Guest'}`,
+            ...(avatar ? { avatar } : {}),
+          },
+          text: p.text,
+          external: true,
+          own,
+        },
+        true
+      );
+      row.classList.add('eg-post');
+      row.dataset.post = p.ackId;
+      this.feed.append(row);
     }
     this.feed.scrollTop = pinned ? this.feed.scrollHeight : top;
   }
@@ -11435,38 +16600,70 @@ class ReverieEmbassyView {
     const c = this.connection();
     if (!c || !this.panel) return;
     this.shell.renderHeader();
-    this.origin.textContent = c.id === '__host__' ? `${c.origin} · Hosted room` : `${c.hostCompany} · ${c.origin} · Guest access (TLS origin; no signed identity pin)`;
-    const state = this.mutationUnknown.has(c.id) ? 'State change unconfirmed' : c.status === 'disabled' ? 'Disabled here' : c.status;
+    this.origin.textContent =
+      c.id === '__host__'
+        ? `${c.origin} · Hosted room`
+        : `${c.hostCompany} · ${c.origin} · Guest access (TLS origin; no signed identity pin)`;
+    const state = this.mutationUnknown.has(c.id)
+      ? 'State change unconfirmed'
+      : c.status === 'disabled'
+        ? 'Disabled here'
+        : c.status;
     this.status.textContent = `${this.mutationUnknown.has(c.id) ? state : this.connectionState(c)}${c.lastError ? ` · ${c.lastError}` : ''}`;
-    const controlFocus = this.controls.contains(this.doc.activeElement) ? this.doc.activeElement?.getAttribute('aria-label') : null;
+    const controlFocus = this.controls.contains(this.doc.activeElement)
+      ? this.doc.activeElement?.getAttribute('aria-label')
+      : null;
     this.controls.replaceChildren();
     if (c.id === '__host__') {
-      this.controls.append(this.button('Invite a company', () => this.pairing.open('invite')), this.button('Manage invitations', () => this.pairing.open('manage')));
+      this.controls.append(
+        this.button('Invite a company', () => this.pairing.open('invite')),
+        this.button('Manage invitations', () => this.pairing.open('manage'))
+      );
     } else if (c.status !== 'left') {
-      this.controls.append(this.button(c.enabled ? 'Disable' : 'Enable', () => this.setEnabled(c.id, !c.enabled)),
-        this.button('Disconnect', () => this.leave(c.id)));
+      this.controls.append(
+        this.button(c.enabled ? 'Disable' : 'Enable', () => this.setEnabled(c.id, !c.enabled)),
+        this.button('Disconnect', () => this.leave(c.id))
+      );
     }
     for (const b of this.controls.querySelectorAll('button')) b.disabled = !!this.changing;
-    if (controlFocus) [...this.controls.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === controlFocus)?.focus();
+    if (controlFocus)
+      [...this.controls.querySelectorAll('button')].find((b) => b.getAttribute('aria-label') === controlFocus)?.focus();
     const pending = this.getPending(c.id);
     this.send.textContent = pending ? 'Retry same message' : 'Send';
     this.send.setAttribute('aria-label', pending ? 'Retry same message' : 'Send message');
-    this.send.disabled = !!this.sending || this.changing === c.id || this.mutationUnknown.has(c.id) || !c.enabled || !['live', 'connecting'].includes(c.status) || c.expiresAt <= Date.now();
-    this.input.disabled = this.changing === c.id || this.mutationUnknown.has(c.id) || !c.enabled || c.status === 'left' || c.status === 'expired';
+    this.send.disabled =
+      !!this.sending ||
+      this.changing === c.id ||
+      this.mutationUnknown.has(c.id) ||
+      !c.enabled ||
+      !['live', 'connecting'].includes(c.status) ||
+      c.expiresAt <= Date.now();
+    this.input.disabled =
+      this.changing === c.id ||
+      this.mutationUnknown.has(c.id) ||
+      !c.enabled ||
+      c.status === 'left' ||
+      c.status === 'expired';
     this.input.readOnly = !!pending;
-    if (pending) this.notice.textContent = 'Not confirmed. Retry keeps the original message and request id; do not send it again as a new message.';
+    if (pending)
+      this.notice.textContent =
+        'Not confirmed. Retry keeps the original message and request id; do not send it again as a new message.';
   }
   async loadPosts() {
-    const id = this.selected, version = this.version;
+    const id = this.selected,
+      version = this.version;
     if (!id || this.loading === id) return;
     this.loading = id;
     try {
       const items = this.posts.get(id) || new Map();
-      let after = Math.max(0, ...[...items.values()].map(p => p.sequence));
+      let after = Math.max(0, ...[...items.values()].map((p) => p.sequence));
       for (let page = 0; page < 10; page++) {
         const result = await this.api(`/${encodeURIComponent(id)}/posts?after=${after}`);
         if (version !== this.version || this.selected !== id) return;
-        if (!result.ok) { this.notice.textContent = this.failure(result); return; }
+        if (!result.ok) {
+          this.notice.textContent = this.failure(result);
+          return;
+        }
         const incoming = result.data?.posts || [];
         for (const p of incoming) {
           if (!Number.isSafeInteger(p.sequence) || p.sequence <= 0 || typeof p.ackId !== 'string') continue;
@@ -11479,10 +16676,18 @@ class ReverieEmbassyView {
       if (version !== this.version || this.selected !== id) return;
       await this.verifyOwn(id, [...items.values()]);
       if (version !== this.version || this.selected !== id) return;
-      const sig = [...items.values()].sort((a, b) => a.sequence - b.sequence).map(p => `${p.ackId}:${this.ownVerified.get(id)?.has(p.ackId) ? 1 : 0}`).join('|');
-      if (sig !== this.feed.dataset.signature) { this.feed.dataset.signature = sig; this.renderPosts(); }
+      const sig = [...items.values()]
+        .sort((a, b) => a.sequence - b.sequence)
+        .map((p) => `${p.ackId}:${this.ownVerified.get(id)?.has(p.ackId) ? 1 : 0}`)
+        .join('|');
+      if (sig !== this.feed.dataset.signature) {
+        this.feed.dataset.signature = sig;
+        this.renderPosts();
+      }
       this.markRead();
-    } finally { if (this.loading === id) this.loading = null; }
+    } finally {
+      if (this.loading === id) this.loading = null;
+    }
   }
   markRead() {
     if (!this.selected || !this.feed || this.doc.hidden || this.shell.view !== 'chat') return;
@@ -11498,7 +16703,9 @@ class ReverieEmbassyView {
       try {
         const value = JSON.parse(caRead('session', this.key(id, 'pending'), 'null'));
         if (value && typeof value.text === 'string' && typeof value.requestId === 'string') this.pending.set(id, value);
-      } catch { /* no saved operation */ }
+      } catch {
+        /* no saved operation */
+      }
     }
     return this.pending.get(id);
   }
@@ -11510,16 +16717,21 @@ class ReverieEmbassyView {
     if (!pending) {
       const text = this.input.value.trim();
       if (!text) return;
-      if (new TextEncoder().encode(text).length > 4096) { this.notice.textContent = 'Message exceeds 4096 bytes'; return; }
+      if (new TextEncoder().encode(text).length > 4096) {
+        this.notice.textContent = 'Message exceeds 4096 bytes';
+        return;
+      }
       pending = { text, requestId: this.win.crypto.randomUUID() };
       caWrite('session', this.key(id, 'pending'), JSON.stringify(pending));
       if (caRead('session', this.key(id, 'pending'), '') !== JSON.stringify(pending)) {
-        this.notice.textContent = 'Cannot save retry identity in this tab. Sending is paused until browser storage is available.';
+        this.notice.textContent =
+          'Cannot save retry identity in this tab. Sending is paused until browser storage is available.';
         return;
       }
       this.pending.set(id, pending);
     }
-    const version = this.version, key = this.key(id, 'pending');
+    const version = this.version,
+      key = this.key(id, 'pending');
     this.sending = true;
     this.updateControls();
     const result = await this.api(`/${encodeURIComponent(id)}/posts`, { method: 'POST', body: pending });
@@ -11533,10 +16745,14 @@ class ReverieEmbassyView {
       caWrite('session', this.key(id, 'pending'), 'null');
     }
     if (this.selected === id) {
-      if (result.ok) { this.input.value = ''; this.notice.textContent = 'Posted'; await this.loadPosts(); }
-      else this.notice.textContent = `Not confirmed. ${this.failure(result)} Retry uses the same message id.`;
+      if (result.ok) {
+        this.input.value = '';
+        this.notice.textContent = 'Posted';
+        await this.loadPosts();
+      } else this.notice.textContent = `Not confirmed. ${this.failure(result)} Retry uses the same message id.`;
       this.updateControls();
-      this.shell.fitInput?.(); this.shell.syncComposer?.();
+      this.shell.fitInput?.();
+      this.shell.syncComposer?.();
     }
   }
   async mutateConnection(id, options) {
@@ -11549,7 +16765,7 @@ class ReverieEmbassyView {
     // Also invalidate snapshots started while the write was still in flight.
     this.listEpoch++;
     if (result.ok && result.data?.id === id) {
-      this.connections = this.connections.map(c => c.id === id ? result.data : c);
+      this.connections = this.connections.map((c) => (c.id === id ? result.data : c));
       this.mutationUnknown.delete(id);
     } else {
       this.mutationUnknown.add(id);
@@ -11564,7 +16780,12 @@ class ReverieEmbassyView {
     await this.mutateConnection(id, { method: 'PUT', body: { enabled } });
   }
   async leave(id) {
-    if (!this.win.confirm('Disconnect this embassy room? Sending and syncing stop. Synced history and copies elsewhere remain.')) return;
+    if (
+      !this.win.confirm(
+        'Disconnect this embassy room? Sending and syncing stop. Synced history and copies elsewhere remain.'
+      )
+    )
+      return;
     await this.mutateConnection(id, { method: 'DELETE' });
   }
   joinDialog(initial = null) {
@@ -11573,7 +16794,11 @@ class ReverieEmbassyView {
     this.dialog = dlg;
     dlg.setAttribute('aria-label', 'Add embassy channel');
     const title = this.el('h2', '', 'Add embassy channel');
-    const explain = this.el('p', '', 'Paste a key, scan a QR, or paste an invite link. Confirm the host before connecting. Guest access only.');
+    const explain = this.el(
+      'p',
+      '',
+      'Paste a key, scan a QR, or paste an invite link. Confirm the host before connecting. Guest access only.'
+    );
     const label = this.el('label', '', 'Invite key');
     const input = this.el('input', 'eg-key');
     input.type = 'password';
@@ -11583,115 +16808,231 @@ class ReverieEmbassyView {
     label.append(input);
     const note = this.el('p', 'eg-join-status');
     note.setAttribute('role', 'status');
-    let secret = '', origin = '', joining = false, closed = false, stream = null, scanTimer = null, cameraEpoch = 0, renderEpoch = 0, shareLink = '';
+    let secret = '',
+      origin = '',
+      joining = false,
+      closed = false,
+      stream = null,
+      scanTimer = null,
+      cameraEpoch = 0,
+      renderEpoch = 0,
+      shareLink = '';
     const valid = () => !closed && this.allowed && this.dialog === dlg;
     const tools = this.el('div', 'eg-join-tools');
-    const qr = this.el('section', 'eg-qr-output'); qr.hidden = true;
+    const qr = this.el('section', 'eg-qr-output');
+    qr.hidden = true;
     const qrCanvas = this.el('canvas', 'eg-qr-canvas');
-    qrCanvas.setAttribute('role', 'img'); qrCanvas.setAttribute('aria-label', 'Private embassy invite QR');
+    qrCanvas.setAttribute('role', 'img');
+    qrCanvas.setAttribute('aria-label', 'Private embassy invite QR');
     const shareLabel = this.el('label', '', 'Invite link (private)');
-    const shareInput = this.el('input', 'eg-share-link'); shareInput.type = 'password'; shareInput.readOnly = true; shareInput.autocomplete = 'off';
+    const shareInput = this.el('input', 'eg-share-link');
+    shareInput.type = 'password';
+    shareInput.readOnly = true;
+    shareInput.autocomplete = 'off';
     shareLabel.append(shareInput);
-    const scan = this.el('section', 'eg-scan'); scan.hidden = true;
+    const scan = this.el('section', 'eg-scan');
+    scan.hidden = true;
     const linkLabel = this.el('label', '', 'Invite link');
-    const linkInput = this.el('input', 'eg-invite-link'); linkInput.type = 'password'; linkInput.autocomplete = 'off'; linkInput.maxLength = 2048; linkInput.spellcheck = false;
+    const linkInput = this.el('input', 'eg-invite-link');
+    linkInput.type = 'password';
+    linkInput.autocomplete = 'off';
+    linkInput.maxLength = 2048;
+    linkInput.spellcheck = false;
     linkLabel.append(linkInput);
-    const video = this.el('video', 'eg-scan-video'); video.muted = true; video.playsInline = true; video.hidden = true;
+    const video = this.el('video', 'eg-scan-video');
+    video.muted = true;
+    video.playsInline = true;
+    video.hidden = true;
     const stopCamera = () => {
       cameraEpoch++;
       if (scanTimer !== null) this.win.clearTimeout(scanTimer);
       scanTimer = null;
       for (const track of stream?.getTracks() || []) track.stop();
-      stream = null; video.srcObject = null; video.hidden = true;
+      stream = null;
+      video.srcObject = null;
+      video.hidden = true;
     };
     const clearQR = () => {
-      renderEpoch++; shareLink = ''; shareInput.value = ''; shareInput.type = 'password';
-      qrCanvas.width = 0; qrCanvas.height = 0; qr.hidden = true;
+      renderEpoch++;
+      shareLink = '';
+      shareInput.value = '';
+      shareInput.type = 'password';
+      qrCanvas.width = 0;
+      qrCanvas.height = 0;
+      qr.hidden = true;
     };
     const acceptInvite = (value) => {
       const invite = caEmbassyInvite(value);
       if (!valid()) return;
-      stopCamera(); clearQR(); linkInput.value = ''; input.value = invite.key; scan.hidden = true;
+      stopCamera();
+      clearQR();
+      linkInput.value = '';
+      input.value = invite.key;
+      scan.hidden = true;
       note.textContent = `Invite ready for ${invite.origin}. Choose Check host, then confirm.`;
       next.focus();
     };
     const showQR = this.button('Show QR', async () => {
-      stopCamera(); clearQR(); scan.hidden = true; linkInput.value = '';
+      stopCamera();
+      clearQR();
+      scan.hidden = true;
+      linkInput.value = '';
       const epoch = renderEpoch;
       try {
         const link = caEmbassyJoinLink(input.value);
         const encoder = await caEmbassyQrAsset(this.win, 'code');
         if (!valid() || epoch !== renderEpoch) return;
         await encoder.toCanvas(qrCanvas, link, { errorCorrectionLevel: 'M', margin: 4, width: 320 });
-        if (!valid() || epoch !== renderEpoch) { qrCanvas.width = 0; return; }
-        shareLink = link; shareInput.value = link; qr.hidden = false;
-        note.replaceChildren('Private invite: scan or paste it in your own ', this.platformName(), ' console. Anyone with it can use its guest access.');
-      } catch { if (valid()) note.textContent = 'QR unavailable or invalid key. Paste a valid key, or join using the key directly.'; }
+        if (!valid() || epoch !== renderEpoch) {
+          qrCanvas.width = 0;
+          return;
+        }
+        shareLink = link;
+        shareInput.value = link;
+        qr.hidden = false;
+        note.replaceChildren(
+          'Private invite: scan or paste it in your own ',
+          this.platformName(),
+          ' console. Anyone with it can use its guest access.'
+        );
+      } catch {
+        if (valid())
+          note.textContent = 'QR unavailable or invalid key. Paste a valid key, or join using the key directly.';
+      }
     });
     const copy = this.button('Copy invite link', async () => {
       if (!valid() || !shareLink) return;
-      try { await this.win.navigator.clipboard.writeText(shareLink); if (valid()) note.textContent = 'Invite link copied. Share it privately.'; }
-      catch { if (valid()) { shareInput.type = 'text'; shareInput.focus(); shareInput.select(); note.textContent = 'Select and copy the invite link. Share it privately.'; } }
+      try {
+        await this.win.navigator.clipboard.writeText(shareLink);
+        if (valid()) note.textContent = 'Invite link copied. Share it privately.';
+      } catch {
+        if (valid()) {
+          shareInput.type = 'text';
+          shareInput.focus();
+          shareInput.select();
+          note.textContent = 'Select and copy the invite link. Share it privately.';
+        }
+      }
     });
-    qr.append(qrCanvas, this.el('p', '', 'Scan from Embassies + → Scan/paste link in the joining company’s console.'), shareLabel, copy);
+    qr.append(
+      qrCanvas,
+      this.el('p', '', 'Scan from Embassies + → Scan/paste link in the joining company’s console.'),
+      shareLabel,
+      copy
+    );
     const useLink = this.button('Use link', () => {
-      const value = linkInput.value; linkInput.value = '';
-      try { acceptInvite(value); } catch { note.textContent = 'Invalid invite link. No connection was made.'; }
+      const value = linkInput.value;
+      linkInput.value = '';
+      try {
+        acceptInvite(value);
+      } catch {
+        note.textContent = 'Invalid invite link. No connection was made.';
+      }
     });
     const startCamera = this.button('Scan with camera', async () => {
-      stopCamera(); const epoch = cameraEpoch;
-      if (!this.win.navigator.mediaDevices?.getUserMedia) { note.textContent = 'Camera unavailable. Paste the link or choose a QR image.'; return; }
+      stopCamera();
+      const epoch = cameraEpoch;
+      if (!this.win.navigator.mediaDevices?.getUserMedia) {
+        note.textContent = 'Camera unavailable. Paste the link or choose a QR image.';
+        return;
+      }
       try {
         const decoder = await caEmbassyQrAsset(this.win, 'scan');
         if (!valid() || epoch !== cameraEpoch) return;
-        const camera = await this.win.navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false });
-        if (!valid() || epoch !== cameraEpoch) { for (const track of camera.getTracks()) track.stop(); return; }
-        stream = camera; video.srcObject = camera; video.hidden = false; await video.play();
-        const canvas = this.el('canvas'); const ctx = canvas.getContext('2d', { willReadFrequently: true });
+        const camera = await this.win.navigator.mediaDevices.getUserMedia({
+          video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } },
+          audio: false,
+        });
+        if (!valid() || epoch !== cameraEpoch) {
+          for (const track of camera.getTracks()) track.stop();
+          return;
+        }
+        stream = camera;
+        video.srcObject = camera;
+        video.hidden = false;
+        await video.play();
+        const canvas = this.el('canvas');
+        const ctx = canvas.getContext('2d', { willReadFrequently: true });
         const deadline = Date.now() + 60000;
         const tick = () => {
-          if (!valid() || epoch !== cameraEpoch || this.doc.hidden || Date.now() > deadline) { stopCamera(); return; }
+          if (!valid() || epoch !== cameraEpoch || this.doc.hidden || Date.now() > deadline) {
+            stopCamera();
+            return;
+          }
           try {
             if (video.videoWidth && video.videoHeight) {
               const scale = Math.min(1, 1280 / Math.max(video.videoWidth, video.videoHeight));
-              canvas.width = Math.max(1, Math.round(video.videoWidth * scale)); canvas.height = Math.max(1, Math.round(video.videoHeight * scale));
+              canvas.width = Math.max(1, Math.round(video.videoWidth * scale));
+              canvas.height = Math.max(1, Math.round(video.videoHeight * scale));
               ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
               const image = ctx.getImageData(0, 0, canvas.width, canvas.height);
               const code = decoder(image.data, image.width, image.height, { inversionAttempts: 'dontInvert' });
-              if (code) { acceptInvite(code.data); canvas.width = 0; return; }
+              if (code) {
+                acceptInvite(code.data);
+                canvas.width = 0;
+                return;
+              }
             }
-          } catch { note.textContent = 'No valid embassy invite found yet. You can paste the link instead.'; }
+          } catch {
+            note.textContent = 'No valid embassy invite found yet. You can paste the link instead.';
+          }
           scanTimer = this.win.setTimeout(tick, 250);
         };
-        note.textContent = 'Camera scans locally. No images are uploaded.'; tick();
-      } catch { stopCamera(); if (valid()) note.textContent = 'Camera unavailable. Paste the link or choose a QR image.'; }
+        note.textContent = 'Camera scans locally. No images are uploaded.';
+        tick();
+      } catch {
+        stopCamera();
+        if (valid()) note.textContent = 'Camera unavailable. Paste the link or choose a QR image.';
+      }
     });
     const stop = this.button('Stop camera', stopCamera);
     const fileLabel = this.el('label', '', 'Choose QR image');
-    const file = this.el('input', 'eg-qr-file'); file.type = 'file'; file.accept = 'image/png,image/jpeg,image/webp'; fileLabel.append(file);
+    const file = this.el('input', 'eg-qr-file');
+    file.type = 'file';
+    file.accept = 'image/png,image/jpeg,image/webp';
+    fileLabel.append(file);
     file.addEventListener('change', async () => {
-      stopCamera(); const epoch = cameraEpoch; const imageFile = file.files?.[0]; file.value = '';
+      stopCamera();
+      const epoch = cameraEpoch;
+      const imageFile = file.files?.[0];
+      file.value = '';
       if (!imageFile) return;
-      if (imageFile.size > 5 * 1024 * 1024 || !['image/png', 'image/jpeg', 'image/webp'].includes(imageFile.type)) { note.textContent = 'Choose a PNG, JPEG or WebP QR image up to 5 MB.'; return; }
+      if (imageFile.size > 5 * 1024 * 1024 || !['image/png', 'image/jpeg', 'image/webp'].includes(imageFile.type)) {
+        note.textContent = 'Choose a PNG, JPEG or WebP QR image up to 5 MB.';
+        return;
+      }
       let bitmap = null;
       try {
         const decoder = await caEmbassyQrAsset(this.win, 'scan');
         if (!valid() || epoch !== cameraEpoch) return;
         bitmap = await this.win.createImageBitmap(imageFile);
         if (!valid() || epoch !== cameraEpoch) return;
-        if (!bitmap.width || !bitmap.height || bitmap.width * bitmap.height > 16000000) throw new Error('Image too large');
+        if (!bitmap.width || !bitmap.height || bitmap.width * bitmap.height > 16000000)
+          throw new Error('Image too large');
         const scale = Math.min(1, 2048 / Math.max(bitmap.width, bitmap.height));
-        const canvas = this.el('canvas'); canvas.width = Math.max(1, Math.round(bitmap.width * scale)); canvas.height = Math.max(1, Math.round(bitmap.height * scale));
-        const ctx = canvas.getContext('2d', { willReadFrequently: true }); ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+        const canvas = this.el('canvas');
+        canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+        canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+        const ctx = canvas.getContext('2d', { willReadFrequently: true });
+        ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
         const image = ctx.getImageData(0, 0, canvas.width, canvas.height);
-        const code = decoder(image.data, image.width, image.height); canvas.width = 0;
+        const code = decoder(image.data, image.width, image.height);
+        canvas.width = 0;
         if (!code) throw new Error('No QR');
         acceptInvite(code.data);
-      } catch { if (valid()) note.textContent = 'No valid embassy QR found. Paste the invite link instead.'; }
-      finally { bitmap?.close(); }
+      } catch {
+        if (valid()) note.textContent = 'No valid embassy QR found. Paste the invite link instead.';
+      } finally {
+        bitmap?.close();
+      }
     });
     scan.append(linkLabel, useLink, startCamera, stop, fileLabel, video);
-    const scanLink = this.button('Scan/paste link', () => { stopCamera(); clearQR(); scan.hidden = false; linkInput.focus(); });
+    const scanLink = this.button('Scan/paste link', () => {
+      stopCamera();
+      clearQR();
+      scan.hidden = false;
+      linkInput.focus();
+    });
     tools.append(showQR, scanLink);
     input.addEventListener('input', clearQR);
     const next = this.button('Check host', async () => {
@@ -11699,10 +17040,17 @@ class ReverieEmbassyView {
       next.disabled = true;
       const value = input.value;
       input.value = '';
-      stopCamera(); clearQR(); linkInput.value = ''; scan.hidden = true;
+      stopCamera();
+      clearQR();
+      linkInput.value = '';
+      scan.hidden = true;
       const result = await this.api('/preview', { method: 'POST', body: { key: value } });
       if (!valid()) return;
-      if (!result.ok) { note.textContent = 'Invalid invite key. Paste a valid key to try again.'; next.disabled = false; return; }
+      if (!result.ok) {
+        note.textContent = 'Invalid invite key. Paste a valid key to try again.';
+        next.disabled = false;
+        return;
+      }
       secret = value;
       origin = result.data.origin;
       label.hidden = true;
@@ -11716,97 +17064,181 @@ class ReverieEmbassyView {
     });
     const cleanup = () => {
       if (closed) return;
-      closed = true; stopCamera(); clearQR(); secret = ''; input.value = ''; linkInput.value = ''; file.value = '';
+      closed = true;
+      stopCamera();
+      clearQR();
+      secret = '';
+      input.value = '';
+      linkInput.value = '';
+      file.value = '';
       this.doc.removeEventListener('visibilitychange', visibility);
       this.win.removeEventListener('pagehide', cleanup);
-      dlg.remove(); this.dialog = null;
+      dlg.remove();
+      this.dialog = null;
       if (this.cancelJoin === cleanup) this.cancelJoin = null;
       this.shell.els.sideScroll.querySelector('[aria-label="Add embassy channel"]')?.focus();
     };
     const confirm = this.button('Connect', async () => {
       if (joining || !secret) return;
-      joining = true; confirm.disabled = true;
+      joining = true;
+      confirm.disabled = true;
       this.listEpoch++;
-      const key = secret; secret = '';
+      const key = secret;
+      secret = '';
       note.textContent = 'Connecting…';
       const result = await this.api('/join', { method: 'POST', body: { key, confirmedOrigin: origin } });
       this.listEpoch++;
-      if (!valid()) { if (this.allowed) await this.refresh(); return; }
+      if (!valid()) {
+        if (this.allowed) await this.refresh();
+        return;
+      }
       if (result.ok && result.data?.id) {
         const joined = result.data;
-        this.connections = [...this.connections.filter(c => c.id !== joined.id), joined];
+        this.connections = [...this.connections.filter((c) => c.id !== joined.id), joined];
         this.renderSidebar();
       }
-      if (!dlg.isConnected) { await this.refresh(); return; }
+      if (!dlg.isConnected) {
+        await this.refresh();
+        return;
+      }
       if (!result.ok) {
-        note.textContent = 'Join not confirmed or key refused. It may already have been used. Check connected rooms before asking for a new key; no automatic retry.';
-        await this.refresh(); return;
+        note.textContent =
+          'Join not confirmed or key refused. It may already have been used. Check connected rooms before asking for a new key; no automatic retry.';
+        await this.refresh();
+        return;
       }
       const id = result.data?.id;
-      cleanup(); if (id) this.open(id); await this.refresh();
+      cleanup();
+      if (id) this.open(id);
+      await this.refresh();
     });
     const cancel = this.button('Cancel', cleanup);
-    const visibility = () => { if (this.doc.hidden) stopCamera(); };
+    const visibility = () => {
+      if (this.doc.hidden) stopCamera();
+    };
     this.doc.addEventListener('visibilitychange', visibility);
     this.win.addEventListener('pagehide', cleanup);
     this.cancelJoin = cleanup;
-    dlg.addEventListener('cancel', e => { e.preventDefault(); cleanup(); });
+    dlg.addEventListener('cancel', (e) => {
+      e.preventDefault();
+      cleanup();
+    });
     dlg.addEventListener('close', cleanup);
     const heading = this.el('header', 'eg-dialog-head');
-    const headingText = this.el('div'); headingText.append(title, explain);
-    const close = this.button('Close', cleanup); close.textContent = '×'; close.classList.add('eg-dialog-close');
+    const headingText = this.el('div');
+    headingText.append(title, explain);
+    const close = this.button('Close', cleanup);
+    close.textContent = '×';
+    close.classList.add('eg-dialog-close');
     heading.append(headingText, close);
-    const content = this.el('div', 'eg-dialog-body'); content.append(label, tools, qr, scan, note);
-    const actions = this.el('footer', 'eg-dialog-actions'); next.classList.add('is-primary'); confirm.classList.add('is-primary');
-    actions.append(cancel, next); dlg.append(heading, content, actions);
+    const content = this.el('div', 'eg-dialog-body');
+    content.append(label, tools, qr, scan, note);
+    const actions = this.el('footer', 'eg-dialog-actions');
+    next.classList.add('is-primary');
+    confirm.classList.add('is-primary');
+    actions.append(cancel, next);
+    dlg.append(heading, content, actions);
     this.doc.body.append(dlg);
-    if (typeof dlg.showModal === 'function') dlg.showModal(); else dlg.setAttribute('open', '');
+    if (typeof dlg.showModal === 'function') dlg.showModal();
+    else dlg.setAttribute('open', '');
     input.focus();
-    if (initial?.key) { input.value = initial.key; note.textContent = `Invite ready for ${initial.origin}. Check host before connecting.`; }
-    else if (initial?.invalid) note.textContent = 'Invalid invite link. Paste a new key or link.';
+    if (initial?.key) {
+      input.value = initial.key;
+      note.textContent = `Invite ready for ${initial.origin}. Check host before connecting.`;
+    } else if (initial?.invalid) note.textContent = 'Invalid invite link. Paste a new key or link.';
   }
 }
 
 /** Owner-only two-scan UI. Credentials and operation recovery belong to the local backend. */
 class ReverieEmbassyPairingView {
   constructor(view) {
-    this.view = view; this.shell = view.shell; this.doc = view.doc; this.win = view.win;
-    this.host = { status: 'unconfigured' }; this.handles = []; this.epoch = 0; this.owner = false; this.requests = new Set();
+    this.view = view;
+    this.shell = view.shell;
+    this.doc = view.doc;
+    this.win = view.win;
+    this.host = { status: 'unconfigured' };
+    this.handles = [];
+    this.epoch = 0;
+    this.owner = false;
+    this.requests = new Set();
   }
-  el(tag, cls, text) { return this.view.el(tag, cls, text); }
-  button(text, run, primary = false) { const b = this.view.button(text, run); if (primary) b.classList.add('is-primary'); return b; }
+  el(tag, cls, text) {
+    return this.view.el(tag, cls, text);
+  }
+  button(text, run, primary = false) {
+    const b = this.view.button(text, run);
+    if (primary) b.classList.add('is-primary');
+    return b;
+  }
   async api(path, options = {}) {
-    const controller = new this.win.AbortController(); this.requests.add(controller);
+    const controller = new this.win.AbortController();
+    this.requests.add(controller);
     const timeout = this.win.setTimeout(() => controller.abort(), 20000);
     try {
       const result = await this.shell.app._chatApi(path, { ...options, signal: controller.signal });
       if (result.status === 403) this.deny();
       return result;
-    } catch { return { ok: false }; }
-    finally { this.win.clearTimeout(timeout); this.requests.delete(controller); }
+    } catch {
+      return { ok: false };
+    } finally {
+      this.win.clearTimeout(timeout);
+      this.requests.delete(controller);
+    }
   }
   error(result) {
     const code = result?.errorCode || result?.error?.code;
-    return ({ OWNER_ONLY: 'Sign in as the console owner to pair companies.', FORBIDDEN: 'Sign in as the console owner to pair companies.',
-      HOSTING_UNCONFIGURED: 'Hosting not set up.', EMBASSY_UNREACHABLE: 'The other company is unavailable. Try again later.',
-      INVALID_INVITE: 'This invitation has been used, expired or revoked.', GUEST_LABEL: 'That name is already in use. Choose another name.',
-      INVITE_LIMIT: 'Too many open invitations. Revoke an unused invitation first.', PAIR_PENDING_LIMIT: 'Too many pending connections. Try again later.',
-      PAIR_NOT_FOUND: 'Confirmation not found. Check the code or scan it again.', PAIR_PENDING: 'Waiting for the host to approve.',
-      PAIR_STATE: 'This request has already changed. Refresh its status.', PAIR_REJECTED: 'The host declined this request.',
-      PAIR_EXPIRED: 'This request has expired. Ask for a new invitation.', PAIR_REVOKED: 'This invitation has been revoked.',
-      CLAIM_LIMIT: 'Connection recovery is unavailable. Ask the host for help.', ROOM_NOT_FOUND: 'Shared room unavailable.',
-      ROOM_CLOSED: 'This shared room is closed.', PAIR_WRONG_HOST: 'This confirmation belongs to another host.',
-      PAIR_ROOM_MISMATCH: 'The invitation and shared room do not match.', PAIR_BAD_QR: 'This is not a valid pairing QR.' })[code] ||
-      (result?.status === 403 ? 'Sign in as the console owner to pair companies.' : 'Request not confirmed. Recover its status before trying again.');
+    return (
+      {
+        OWNER_ONLY: 'Sign in as the console owner to pair companies.',
+        FORBIDDEN: 'Sign in as the console owner to pair companies.',
+        HOSTING_UNCONFIGURED: 'Hosting not set up.',
+        EMBASSY_UNREACHABLE: 'The other company is unavailable. Try again later.',
+        INVALID_INVITE: 'This invitation has been used, expired or revoked.',
+        GUEST_LABEL: 'That name is already in use. Choose another name.',
+        INVITE_LIMIT: 'Too many open invitations. Revoke an unused invitation first.',
+        PAIR_PENDING_LIMIT: 'Too many pending connections. Try again later.',
+        PAIR_NOT_FOUND: 'Confirmation not found. Check the code or scan it again.',
+        PAIR_PENDING: 'Waiting for the host to approve.',
+        PAIR_STATE: 'This request has already changed. Refresh its status.',
+        PAIR_REJECTED: 'The host declined this request.',
+        PAIR_EXPIRED: 'This request has expired. Ask for a new invitation.',
+        PAIR_REVOKED: 'This invitation has been revoked.',
+        CLAIM_LIMIT: 'Connection recovery is unavailable. Ask the host for help.',
+        ROOM_NOT_FOUND: 'Shared room unavailable.',
+        ROOM_CLOSED: 'This shared room is closed.',
+        PAIR_WRONG_HOST: 'This confirmation belongs to another host.',
+        PAIR_ROOM_MISMATCH: 'The invitation and shared room do not match.',
+        PAIR_BAD_QR: 'This is not a valid pairing QR.',
+      }[code] ||
+      (result?.status === 403
+        ? 'Sign in as the console owner to pair companies.'
+        : 'Request not confirmed. Recover its status before trying again.')
+    );
   }
   deny() {
-    this.owner = false; this.host = { status: 'unconfigured' }; this.handles = []; this.view.syncHostScope(); if (this.view.selected === '__host__') this.view.close(); this.view.renderSidebar(); this.invite = null; this.record = null; this.guestQr = ''; this.guestOperation = null; this.inviteOperation = null;
+    this.owner = false;
+    this.host = { status: 'unconfigured' };
+    this.handles = [];
+    this.view.syncHostScope();
+    if (this.view.selected === '__host__') this.view.close();
+    this.view.renderSidebar();
+    this.invite = null;
+    this.record = null;
+    this.guestQr = '';
+    this.guestOperation = null;
+    this.inviteOperation = null;
     for (const request of this.requests) request.abort();
     if (!this.dlg?.isConnected) return;
-    this.clearBody(); this.body.append(this.el('p', 'eg-pair-status', 'Sign in as the console owner to pair companies.'));
-    const link = this.el('a', '', 'Owner sign-in'); link.href = '/owner/login'; this.body.append(link); this.actions.append(this.button('Close', this.cleanup));
+    this.clearBody();
+    this.body.append(this.el('p', 'eg-pair-status', 'Sign in as the console owner to pair companies.'));
+    const link = this.el('a', '', 'Owner sign-in');
+    link.href = '/owner/login';
+    this.body.append(link);
+    this.actions.append(this.button('Close', this.cleanup));
   }
-  isCurrent(epoch) { return this.dlg?.isConnected && this.view.dialog === this.dlg && this.epoch === epoch && this.view.allowed; }
+  isCurrent(epoch) {
+    return this.dlg?.isConnected && this.view.dialog === this.dlg && this.epoch === epoch && this.view.allowed;
+  }
   async refresh() {
     if (this.refreshing) return;
     this.refreshing = true;
@@ -11814,314 +17246,895 @@ class ReverieEmbassyPairingView {
     try {
       const [host, pending] = await Promise.all([this.api('/api/embassy-host'), this.api('/api/embassy-pairing')]);
       if (epoch !== this.epoch || !this.view.allowed) return;
-      if ([host, pending].some(r => r.status === 403)) { this.owner = false; this.host = { status: 'unconfigured' }; this.handles = []; return; }
+      if ([host, pending].some((r) => r.status === 403)) {
+        this.owner = false;
+        this.host = { status: 'unconfigured' };
+        this.handles = [];
+        return;
+      }
       this.owner = !!(host.ok || pending.ok);
       if (host.ok && host.data?.status === 'ready') {
         try {
           const needsAdvertisedOrigin = host.data.builtin === true && host.data.needsAdvertisedOrigin === true;
-          const origin = needsAdvertisedOrigin ? '' : caEmbassyInvite(`embassy-v1|${host.data.origin}|${'A'.repeat(43)}`).origin;
+          const origin = needsAdvertisedOrigin
+            ? ''
+            : caEmbassyInvite(`embassy-v1|${host.data.origin}|${'A'.repeat(43)}`).origin;
           const room = host.data.room;
-          if (!room || typeof room.id !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(room.id) || typeof room.name !== 'string') throw Error();
-          this.host = { status: 'ready', origin, builtin: host.data.builtin === true, needsAdvertisedOrigin, room: { id: room.id, name: room.name.slice(0, 200) },
-            ...(typeof host.data.bindingId === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(host.data.bindingId) ? { bindingId: host.data.bindingId } : {}),
-            guestAvatars: caGuestAvatars(host.data.guestAvatars) };
-        } catch { this.host = { status: 'unreachable' }; }
+          if (
+            !room ||
+            typeof room.id !== 'string' ||
+            !/^[A-Za-z0-9_-]{1,128}$/.test(room.id) ||
+            typeof room.name !== 'string'
+          )
+            throw Error();
+          this.host = {
+            status: 'ready',
+            origin,
+            builtin: host.data.builtin === true,
+            needsAdvertisedOrigin,
+            room: { id: room.id, name: room.name.slice(0, 200) },
+            ...(typeof host.data.bindingId === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(host.data.bindingId)
+              ? { bindingId: host.data.bindingId }
+              : {}),
+            guestAvatars: caGuestAvatars(host.data.guestAvatars),
+          };
+        } catch {
+          this.host = { status: 'unreachable' };
+        }
       } else this.host = { status: host.ok && host.data?.status === 'unconfigured' ? 'unconfigured' : 'unreachable' };
       if (pending.ok) {
         const values = Array.isArray(pending.data) ? pending.data : pending.data?.pairings;
-        this.handles = (Array.isArray(values) ? values : []).slice(0, 50).map(v => typeof v === 'string' ? { handle: v } : v)
-          .filter(v => v && typeof v.handle === 'string' && /^[A-Za-z0-9_-]{1,80}$/.test(v.handle));
+        this.handles = (Array.isArray(values) ? values : [])
+          .slice(0, 50)
+          .map((v) => (typeof v === 'string' ? { handle: v } : v))
+          .filter((v) => v && typeof v.handle === 'string' && /^[A-Za-z0-9_-]{1,80}$/.test(v.handle));
       }
-    } finally { this.view.syncHostScope(); this.refreshing = false; }
+    } finally {
+      this.view.syncHostScope();
+      this.refreshing = false;
+    }
   }
-  stopCamera() { this.scanEpoch = (this.scanEpoch || 0) + 1; this.win.clearTimeout(this.scanTimer); for (const t of this.stream?.getTracks() || []) t.stop(); this.stream = null; this.video?.remove(); this.video = null; }
-  stopPoll() { this.win.clearTimeout(this.pollTimer); this.pollTimer = null; }
-  clearBody() { this.win.clearTimeout(this.expiryTimer); this.epoch++; this.stopCamera(); this.stopPoll(); for (const c of this.body.querySelectorAll('canvas')) { c.width = 0; c.height = 0; } for (const i of this.body.querySelectorAll('input')) i.value = ''; this.invite = null; this.body.replaceChildren(); this.actions.replaceChildren(); this.qr = null; this.review = null; }
+  stopCamera() {
+    this.scanEpoch = (this.scanEpoch || 0) + 1;
+    this.win.clearTimeout(this.scanTimer);
+    for (const t of this.stream?.getTracks() || []) t.stop();
+    this.stream = null;
+    this.video?.remove();
+    this.video = null;
+  }
+  stopPoll() {
+    this.win.clearTimeout(this.pollTimer);
+    this.pollTimer = null;
+  }
+  clearBody() {
+    this.win.clearTimeout(this.expiryTimer);
+    this.epoch++;
+    this.stopCamera();
+    this.stopPoll();
+    for (const c of this.body.querySelectorAll('canvas')) {
+      c.width = 0;
+      c.height = 0;
+    }
+    for (const i of this.body.querySelectorAll('input')) i.value = '';
+    this.invite = null;
+    this.body.replaceChildren();
+    this.actions.replaceChildren();
+    this.qr = null;
+    this.review = null;
+  }
   close() {
-    this.win.clearTimeout(this.expiryTimer); this.epoch++; this.stopCamera(); this.stopPoll(); for (const r of this.requests) r.abort(); this.invite = null; this.record = null; this.guestQr = ''; this.guestOperation = null; this.inviteOperation = null;
+    this.win.clearTimeout(this.expiryTimer);
+    this.epoch++;
+    this.stopCamera();
+    this.stopPoll();
+    for (const r of this.requests) r.abort();
+    this.invite = null;
+    this.record = null;
+    this.guestQr = '';
+    this.guestOperation = null;
+    this.inviteOperation = null;
     for (const i of this.dlg?.querySelectorAll('input,textarea') || []) i.value = '';
-    for (const c of this.dlg?.querySelectorAll('canvas') || []) { c.width = 0; c.height = 0; }
-    this.dlg?.remove(); if (this.view.dialog === this.dlg) this.view.dialog = null;
+    for (const c of this.dlg?.querySelectorAll('canvas') || []) {
+      c.width = 0;
+      c.height = 0;
+    }
+    this.dlg?.remove();
+    if (this.view.dialog === this.dlg) this.view.dialog = null;
     if (this.view.cancelJoin === this.cleanup) this.view.cancelJoin = null;
-    this.doc.removeEventListener('visibilitychange', this.onVisibility); this.win.removeEventListener('pagehide', this.cleanup); this.dlg = null;
+    this.doc.removeEventListener('visibilitychange', this.onVisibility);
+    this.win.removeEventListener('pagehide', this.cleanup);
+    this.dlg = null;
   }
   async open(intent = 'home') {
     if (!this.view.allowed || this.view.dialog) return;
-    this.epoch++; const epoch = this.epoch;
-    const dlg = this.el('dialog', 'ca-dialog eg-dialog eg-pair-dialog'); this.dlg = dlg; this.view.dialog = dlg;
+    this.epoch++;
+    const epoch = this.epoch;
+    const dlg = this.el('dialog', 'ca-dialog eg-dialog eg-pair-dialog');
+    this.dlg = dlg;
+    this.view.dialog = dlg;
     dlg.setAttribute('aria-label', 'Connect companies');
-    this.title = this.el('h2', '', 'Connect companies'); const sub = this.el('p', '', 'Pair two companies in '); sub.append(this.view.platformName(), '.');
-    const text = this.el('div'); text.append(this.title, sub); const head = this.el('header', 'eg-dialog-head');
-    this.cleanup = () => this.close(); const close = this.button('Close', this.cleanup); close.textContent = '×'; close.classList.add('eg-dialog-close'); head.append(text, close);
-    this.body = this.el('div', 'eg-dialog-body'); this.actions = this.el('footer', 'eg-dialog-actions');
-    dlg.append(head, this.body, this.actions); this.doc.body.append(dlg);
-    dlg.addEventListener('cancel', e => { e.preventDefault(); this.close(); }); dlg.addEventListener('close', this.cleanup);
-    this.onVisibility = () => { if (this.doc.hidden) { this.stopCamera(); this.stopPoll(); } else if (this.record) void this.poll(); };
-    this.doc.addEventListener('visibilitychange', this.onVisibility); this.win.addEventListener('pagehide', this.cleanup); this.view.cancelJoin = this.cleanup;
-    if (typeof dlg.showModal === 'function') dlg.showModal(); else dlg.setAttribute('open', '');
-    this.body.append(this.el('p', 'eg-pair-status', 'Checking company access…')); this.actions.append(this.button('Cancel', this.cleanup));
-    await this.refresh(); if (this.isCurrent(epoch)) { this.home(); if (intent === 'invite') await this.createInvite(); else if (intent === 'manage') await this.invites(); }
+    this.title = this.el('h2', '', 'Connect companies');
+    const sub = this.el('p', '', 'Pair two companies in ');
+    sub.append(this.view.platformName(), '.');
+    const text = this.el('div');
+    text.append(this.title, sub);
+    const head = this.el('header', 'eg-dialog-head');
+    this.cleanup = () => this.close();
+    const close = this.button('Close', this.cleanup);
+    close.textContent = '×';
+    close.classList.add('eg-dialog-close');
+    head.append(text, close);
+    this.body = this.el('div', 'eg-dialog-body');
+    this.actions = this.el('footer', 'eg-dialog-actions');
+    dlg.append(head, this.body, this.actions);
+    this.doc.body.append(dlg);
+    dlg.addEventListener('cancel', (e) => {
+      e.preventDefault();
+      this.close();
+    });
+    dlg.addEventListener('close', this.cleanup);
+    this.onVisibility = () => {
+      if (this.doc.hidden) {
+        this.stopCamera();
+        this.stopPoll();
+      } else if (this.record) void this.poll();
+    };
+    this.doc.addEventListener('visibilitychange', this.onVisibility);
+    this.win.addEventListener('pagehide', this.cleanup);
+    this.view.cancelJoin = this.cleanup;
+    if (typeof dlg.showModal === 'function') dlg.showModal();
+    else dlg.setAttribute('open', '');
+    this.body.append(this.el('p', 'eg-pair-status', 'Checking company access…'));
+    this.actions.append(this.button('Cancel', this.cleanup));
+    await this.refresh();
+    if (this.isCurrent(epoch)) {
+      this.home();
+      if (intent === 'invite') await this.createInvite();
+      else if (intent === 'manage') await this.invites();
+    }
   }
   home() {
-    this.clearBody(); this.record = null; this.guestOperation = null; this.inviteOperation = null; this.title.textContent = 'Connect companies';
-    if (!this.owner) { this.body.append(this.el('p', 'eg-pair-status', 'Sign in as the console owner to pair companies.')); const a = this.el('a', '', 'Owner sign-in'); a.href = '/owner/login'; this.body.append(a); this.actions.append(this.button('Close', this.cleanup)); return; }
-    const invite = this.button('Invite a company', () => this.createInvite(), true); invite.disabled = this.host.status !== 'ready';
+    this.clearBody();
+    this.record = null;
+    this.guestOperation = null;
+    this.inviteOperation = null;
+    this.title.textContent = 'Connect companies';
+    if (!this.owner) {
+      this.body.append(this.el('p', 'eg-pair-status', 'Sign in as the console owner to pair companies.'));
+      const a = this.el('a', '', 'Owner sign-in');
+      a.href = '/owner/login';
+      this.body.append(a);
+      this.actions.append(this.button('Close', this.cleanup));
+      return;
+    }
+    const invite = this.button('Invite a company', () => this.createInvite(), true);
+    invite.disabled = this.host.status !== 'ready';
     const join = this.button('Join a company', () => this.scan('invite'));
-    join.disabled = this.handles.some(item => item.state === 'cancelling');
-    if (join.disabled) this.body.append(this.el('p', 'ca-hint', 'Recover the cancelling request below before starting another connection.'));
-    const choices = this.el('div', 'eg-pair-choices'); choices.append(invite, join); this.body.append(choices);
-    this.body.append(this.el('p', 'ca-hint', this.host.status === 'ready' ? (this.host.needsAdvertisedOrigin ? 'Embassy is ready locally. Set a shareable HTTPS address to invite another company.' : `${this.host.room.name} · ${this.host.origin}`) : this.host.status === 'unconfigured' ? 'Hosting not set up. You can still join another company.' : 'Hosting is unavailable. You can still join another company.'));
+    join.disabled = this.handles.some((item) => item.state === 'cancelling');
+    if (join.disabled)
+      this.body.append(
+        this.el('p', 'ca-hint', 'Recover the cancelling request below before starting another connection.')
+      );
+    const choices = this.el('div', 'eg-pair-choices');
+    choices.append(invite, join);
+    this.body.append(choices);
+    this.body.append(
+      this.el(
+        'p',
+        'ca-hint',
+        this.host.status === 'ready'
+          ? this.host.needsAdvertisedOrigin
+            ? 'Embassy is ready locally. Set a shareable HTTPS address to invite another company.'
+            : `${this.host.room.name} · ${this.host.origin}`
+          : this.host.status === 'unconfigured'
+            ? 'Hosting not set up. You can still join another company.'
+            : 'Hosting is unavailable. You can still join another company.'
+      )
+    );
     if (this.host.status === 'ready') this.body.append(this.button('Manage invitations', () => this.invites()));
     if (this.host.status === 'ready') this.body.append(this.button('Embassy name and closing', () => this.hostRoom()));
     if (this.host.builtin) this.body.append(this.button('Embassy address', () => this.hostAddress()));
     if (this.handles.length) {
-      const list = this.el('section', 'eg-pair-recent'); list.append(this.el('h3', '', 'Connections in progress'));
+      const list = this.el('section', 'eg-pair-recent');
+      list.append(this.el('h3', '', 'Connections in progress'));
       for (const item of this.handles) {
         list.append(this.button(item.room?.name || item.hostCompany || 'Resume connection', () => this.resume(item)));
-        if (item.state === 'connected') list.append(this.button(`Reconnect ${item.room?.name || 'shared room'}`, () => this.reconnect(item)));
+        if (item.state === 'connected')
+          list.append(this.button(`Reconnect ${item.room?.name || 'shared room'}`, () => this.reconnect(item)));
       }
       this.body.append(list);
     }
-    const fallback = this.el('details', 'eg-pair-fallback'); fallback.append(this.el('summary', '', 'Other ways to connect'));
-    fallback.append(this.button('Use an existing guest key', () => { this.close(); this.view.joinDialog(); })); this.body.append(fallback);
-    this.actions.append(this.button('Cancel', this.cleanup)); invite.disabled ? join.focus() : invite.focus();
+    const fallback = this.el('details', 'eg-pair-fallback');
+    fallback.append(this.el('summary', '', 'Other ways to connect'));
+    fallback.append(
+      this.button('Use an existing guest key', () => {
+        this.close();
+        this.view.joinDialog();
+      })
+    );
+    this.body.append(fallback);
+    this.actions.append(this.button('Cancel', this.cleanup));
+    invite.disabled ? join.focus() : invite.focus();
   }
   /** Rename the hosted embassy, or close it: closing revokes every invitation and guest's access. */
   hostRoom() {
     if (this.busy || !this.owner || this.host.status !== 'ready') return;
-    this.clearBody(); this.title.textContent = 'Embassy name and closing'; const epoch = this.epoch;
-    const label = this.el('label', '', 'Embassy name'), input = this.el('input');
-    input.type = 'text'; input.maxLength = 120; input.autocomplete = 'off'; input.value = this.host.room?.name || ''; label.append(input); this.body.append(label);
-    const note = this.el('p', 'eg-pair-status'); note.setAttribute('role', 'status');
-    const save = this.button('Save name', async () => {
-      if (this.busy || !this.owner || !this.isCurrent(epoch) || !input.value.trim()) return;
-      this.busy = true; save.disabled = true;
-      const result = await this.api('/api/embassy-host/rename', { method: 'POST', body: { name: input.value.trim() } });
-      this.busy = false; if (!this.isCurrent(epoch)) return; save.disabled = false;
-      if (!result.ok) { note.textContent = this.error(result); return; }
-      note.textContent = 'Name saved.'; await this.refresh();
-    }, true);
-    this.body.append(save, this.el('p', 'ca-hint', 'Closing ends every guest\'s access right away and revokes open invitations. The room keeps its history and a new invitation can reopen it.'));
+    this.clearBody();
+    this.title.textContent = 'Embassy name and closing';
+    const epoch = this.epoch;
+    const label = this.el('label', '', 'Embassy name'),
+      input = this.el('input');
+    input.type = 'text';
+    input.maxLength = 120;
+    input.autocomplete = 'off';
+    input.value = this.host.room?.name || '';
+    label.append(input);
+    this.body.append(label);
+    const note = this.el('p', 'eg-pair-status');
+    note.setAttribute('role', 'status');
+    const save = this.button(
+      'Save name',
+      async () => {
+        if (this.busy || !this.owner || !this.isCurrent(epoch) || !input.value.trim()) return;
+        this.busy = true;
+        save.disabled = true;
+        const result = await this.api('/api/embassy-host/rename', {
+          method: 'POST',
+          body: { name: input.value.trim() },
+        });
+        this.busy = false;
+        if (!this.isCurrent(epoch)) return;
+        save.disabled = false;
+        if (!result.ok) {
+          note.textContent = this.error(result);
+          return;
+        }
+        note.textContent = 'Name saved.';
+        await this.refresh();
+      },
+      true
+    );
+    this.body.append(
+      save,
+      this.el(
+        'p',
+        'ca-hint',
+        "Closing ends every guest's access right away and revokes open invitations. The room keeps its history and a new invitation can reopen it."
+      )
+    );
     let armed = false;
     const close = this.button('Close embassy', async () => {
       if (this.busy || !this.owner || !this.isCurrent(epoch)) return;
-      if (!armed) { armed = true; close.textContent = 'Confirm: close and end guest access'; return; }
-      this.busy = true; close.disabled = true;
+      if (!armed) {
+        armed = true;
+        close.textContent = 'Confirm: close and end guest access';
+        return;
+      }
+      this.busy = true;
+      close.disabled = true;
       const result = await this.api('/api/embassy-host/close', { method: 'POST', body: { confirm: 'close' } });
-      this.busy = false; if (!this.isCurrent(epoch)) return; close.disabled = false;
-      if (!result.ok) { note.textContent = this.error(result); return; }
-      note.textContent = 'Embassy closed. Guest access has ended.'; armed = false; close.textContent = 'Close embassy';
+      this.busy = false;
+      if (!this.isCurrent(epoch)) return;
+      close.disabled = false;
+      if (!result.ok) {
+        note.textContent = this.error(result);
+        return;
+      }
+      note.textContent = 'Embassy closed. Guest access has ended.';
+      armed = false;
+      close.textContent = 'Close embassy';
     });
     this.body.append(close, note);
-    this.actions.append(this.button('Back', () => this.home())); input.focus();
+    this.actions.append(this.button('Back', () => this.home()));
+    input.focus();
   }
   hostAddress() {
     if (this.busy || !this.owner || !this.host.builtin) return;
-    this.clearBody(); this.title.textContent = 'Embassy address'; const epoch = this.epoch;
-    this.body.append(this.el('p', 'ca-hint', 'Embassy is ready on this app. Enter the HTTPS address other companies can reach. This setting does not configure networking. Changing an existing address revokes outstanding invitations and guest access.'));
-    const label = this.el('label', '', 'Shareable HTTPS address'), input = this.el('input');
-    input.type = 'url'; input.autocomplete = 'off'; input.placeholder = 'https://embassy.example.com'; input.value = this.host.origin || ''; label.append(input); this.body.append(label);
-    const note = this.el('p', 'eg-pair-status'); note.setAttribute('role', 'status'); this.body.append(note);
-    const save = this.button('Save address and invite', async () => {
-      if (this.busy || !this.owner || !this.isCurrent(epoch)) return;
-      this.busy = true; save.disabled = true;
-      const result = await this.api('/api/embassy-host/settings', { method: 'POST', body: { origin: input.value.trim() } });
-      this.busy = false; if (!this.isCurrent(epoch)) return; save.disabled = false;
-      if (!result.ok) { note.textContent = this.error(result); return; }
-      await this.refresh(); if (this.isCurrent(epoch)) await this.createInvite();
-    }, true);
-    this.actions.append(this.button('Back', () => this.home()), save); input.focus();
+    this.clearBody();
+    this.title.textContent = 'Embassy address';
+    const epoch = this.epoch;
+    this.body.append(
+      this.el(
+        'p',
+        'ca-hint',
+        'Embassy is ready on this app. Enter the HTTPS address other companies can reach. This setting does not configure networking. Changing an existing address revokes outstanding invitations and guest access.'
+      )
+    );
+    const label = this.el('label', '', 'Shareable HTTPS address'),
+      input = this.el('input');
+    input.type = 'url';
+    input.autocomplete = 'off';
+    input.placeholder = 'https://embassy.example.com';
+    input.value = this.host.origin || '';
+    label.append(input);
+    this.body.append(label);
+    const note = this.el('p', 'eg-pair-status');
+    note.setAttribute('role', 'status');
+    this.body.append(note);
+    const save = this.button(
+      'Save address and invite',
+      async () => {
+        if (this.busy || !this.owner || !this.isCurrent(epoch)) return;
+        this.busy = true;
+        save.disabled = true;
+        const result = await this.api('/api/embassy-host/settings', {
+          method: 'POST',
+          body: { origin: input.value.trim() },
+        });
+        this.busy = false;
+        if (!this.isCurrent(epoch)) return;
+        save.disabled = false;
+        if (!result.ok) {
+          note.textContent = this.error(result);
+          return;
+        }
+        await this.refresh();
+        if (this.isCurrent(epoch)) await this.createInvite();
+      },
+      true
+    );
+    this.actions.append(
+      this.button('Back', () => this.home()),
+      save
+    );
+    input.focus();
   }
   async createInvite() {
     if (this.busy || !this.owner || this.host.status !== 'ready') return;
-    if (this.host.needsAdvertisedOrigin) { this.hostAddress(); return; }
-    this.clearBody(); this.record = null; this.title.textContent = 'Invite a company'; const epoch = this.epoch;
-    this.body.append(this.el('p', 'eg-pair-status', 'Creating your invitation…')); this.actions.append(this.button('Cancel', this.cleanup));
+    if (this.host.needsAdvertisedOrigin) {
+      this.hostAddress();
+      return;
+    }
+    this.clearBody();
+    this.record = null;
+    this.title.textContent = 'Invite a company';
+    const epoch = this.epoch;
+    this.body.append(this.el('p', 'eg-pair-status', 'Creating your invitation…'));
+    this.actions.append(this.button('Cancel', this.cleanup));
     if (!this.inviteOperation) this.inviteOperation = this.win.crypto.randomUUID();
-    this.busy = true; const result = await this.api('/api/embassy-host/invites', { method: 'POST', body: { clientRequestId: this.inviteOperation } }); this.busy = false;
+    this.busy = true;
+    const result = await this.api('/api/embassy-host/invites', {
+      method: 'POST',
+      body: { clientRequestId: this.inviteOperation },
+    });
+    this.busy = false;
     if (!this.isCurrent(epoch)) return;
-    if (!result.ok) { this.body.replaceChildren(this.el('p', 'eg-pair-status', this.error(result))); this.actions.prepend(this.button('Retry same invitation', () => this.createInvite())); return; }
-    if (result.data?.qr === null && result.data?.qrAvailable === false && ['pending', 'approved', 'connected', 'expired', 'revoked', 'rejected'].includes(result.data?.state)) {
-      this.body.replaceChildren(this.el('p', 'eg-pair-status', `Invitation ${result.data.state}. It will not be replaced automatically.`));
-      this.actions.replaceChildren(this.button('Back', () => this.home()), this.button('New invitation', () => { this.inviteOperation = null; return this.createInvite(); }, true));
-      if (result.data.state === 'pending') this.actions.prepend(this.button('Scan their confirmation', () => this.scan('request')));
+    if (!result.ok) {
+      this.body.replaceChildren(this.el('p', 'eg-pair-status', this.error(result)));
+      this.actions.prepend(this.button('Retry same invitation', () => this.createInvite()));
+      return;
+    }
+    if (
+      result.data?.qr === null &&
+      result.data?.qrAvailable === false &&
+      ['pending', 'approved', 'connected', 'expired', 'revoked', 'rejected'].includes(result.data?.state)
+    ) {
+      this.body.replaceChildren(
+        this.el('p', 'eg-pair-status', `Invitation ${result.data.state}. It will not be replaced automatically.`)
+      );
+      this.actions.replaceChildren(
+        this.button('Back', () => this.home()),
+        this.button(
+          'New invitation',
+          () => {
+            this.inviteOperation = null;
+            return this.createInvite();
+          },
+          true
+        )
+      );
+      if (result.data.state === 'pending')
+        this.actions.prepend(this.button('Scan their confirmation', () => this.scan('request')));
       return;
     }
     try {
       const invite = caPairInvite(result.data?.qr);
-      if (invite.origin !== this.host.origin || invite.roomId !== this.host.room.id || typeof result.data.inviteId !== 'string' || !Number.isFinite(result.data.expiresAt) || result.data.expiresAt <= Date.now() || result.data.expiresAt > Date.now() + 3600000) throw Error();
-      this.invite = { ...result.data, ...invite }; this.body.replaceChildren(this.el('p', '', `${this.host.room.name} · ${this.host.origin}`));
-      await this.showQR(invite.qr, 'Private company invitation QR'); if (!this.isCurrent(epoch)) return;
-      const note = this.el('p', 'eg-pair-status'); note.append('Have the other company scan this QR in their ', this.view.platformName(), '. Then scan their confirmation QR to approve the connection.'); this.body.append(note);
-      this.body.append(this.el('small', 'ca-hint', `Expires in ${Math.ceil((this.invite.expiresAt - Date.now()) / 60000)} min`));
-      const fallback = this.el('details', 'eg-pair-fallback'); fallback.append(this.el('summary', '', 'Share without a camera'));
-      fallback.append(this.button('Copy invitation', async () => {
-        if (!this.isCurrent(epoch)) return;
-        try { await this.win.navigator.clipboard.writeText(invite.qr); if (this.isCurrent(epoch)) note.textContent = 'Invitation copied. Send it privately to the joining company.'; }
-        catch { if (this.isCurrent(epoch)) { const input = this.el('input'); input.type = 'password'; input.readOnly = true; input.value = invite.qr; input.autocomplete = 'off'; fallback.append(input); input.focus(); input.select(); note.textContent = 'Copy the selected invitation and send it privately.'; } }
-      })); this.body.append(fallback);
-      this.expiryTimer = this.win.setTimeout(() => {
-        if (!this.isCurrent(epoch)) return; this.clearBody(); this.inviteOperation = null; this.body.append(this.el('p', 'eg-pair-status', 'Invitation expired. Create a new one to connect.')); this.actions.append(this.button('New invitation', () => this.createInvite(), true), this.button('Back', () => this.home()));
-      }, Math.max(1, this.invite.expiresAt - Date.now()));
-      this.actions.replaceChildren(this.button('Back', () => this.home()), this.button('Scan their confirmation', () => this.scan('request'), true));
-    } catch { if (this.isCurrent(epoch)) this.body.replaceChildren(this.el('p', 'eg-pair-status', 'Invitation unavailable. Recover invitations before creating another.')); }
+      if (
+        invite.origin !== this.host.origin ||
+        invite.roomId !== this.host.room.id ||
+        typeof result.data.inviteId !== 'string' ||
+        !Number.isFinite(result.data.expiresAt) ||
+        result.data.expiresAt <= Date.now() ||
+        result.data.expiresAt > Date.now() + 3600000
+      )
+        throw Error();
+      this.invite = { ...result.data, ...invite };
+      this.body.replaceChildren(this.el('p', '', `${this.host.room.name} · ${this.host.origin}`));
+      await this.showQR(invite.qr, 'Private company invitation QR');
+      if (!this.isCurrent(epoch)) return;
+      const note = this.el('p', 'eg-pair-status');
+      note.append(
+        'Have the other company scan this QR in their ',
+        this.view.platformName(),
+        '. Then scan their confirmation QR to approve the connection.'
+      );
+      this.body.append(note);
+      this.body.append(
+        this.el('small', 'ca-hint', `Expires in ${Math.ceil((this.invite.expiresAt - Date.now()) / 60000)} min`)
+      );
+      const fallback = this.el('details', 'eg-pair-fallback');
+      fallback.append(this.el('summary', '', 'Share without a camera'));
+      fallback.append(
+        this.button('Copy invitation', async () => {
+          if (!this.isCurrent(epoch)) return;
+          try {
+            await this.win.navigator.clipboard.writeText(invite.qr);
+            if (this.isCurrent(epoch))
+              note.textContent = 'Invitation copied. Send it privately to the joining company.';
+          } catch {
+            if (this.isCurrent(epoch)) {
+              const input = this.el('input');
+              input.type = 'password';
+              input.readOnly = true;
+              input.value = invite.qr;
+              input.autocomplete = 'off';
+              fallback.append(input);
+              input.focus();
+              input.select();
+              note.textContent = 'Copy the selected invitation and send it privately.';
+            }
+          }
+        })
+      );
+      this.body.append(fallback);
+      this.expiryTimer = this.win.setTimeout(
+        () => {
+          if (!this.isCurrent(epoch)) return;
+          this.clearBody();
+          this.inviteOperation = null;
+          this.body.append(this.el('p', 'eg-pair-status', 'Invitation expired. Create a new one to connect.'));
+          this.actions.append(
+            this.button('New invitation', () => this.createInvite(), true),
+            this.button('Back', () => this.home())
+          );
+        },
+        Math.max(1, this.invite.expiresAt - Date.now())
+      );
+      this.actions.replaceChildren(
+        this.button('Back', () => this.home()),
+        this.button('Scan their confirmation', () => this.scan('request'), true)
+      );
+    } catch {
+      if (this.isCurrent(epoch))
+        this.body.replaceChildren(
+          this.el('p', 'eg-pair-status', 'Invitation unavailable. Recover invitations before creating another.')
+        );
+    }
   }
   async showQR(value, label) {
-    const epoch = this.epoch; const canvas = this.el('canvas', 'eg-pair-qr'); canvas.setAttribute('role', 'img'); canvas.setAttribute('aria-label', label); this.body.append(canvas);
+    const epoch = this.epoch;
+    const canvas = this.el('canvas', 'eg-pair-qr');
+    canvas.setAttribute('role', 'img');
+    canvas.setAttribute('aria-label', label);
+    this.body.append(canvas);
     const encoder = await caEmbassyQrAsset(this.win, 'code');
     if (!this.isCurrent(epoch) || !canvas.isConnected) return;
     await encoder.toCanvas(canvas, value, { errorCorrectionLevel: 'M', margin: 4, width: 320 });
-    if (!this.isCurrent(epoch) || !canvas.isConnected) { canvas.width = 0; canvas.height = 0; }
+    if (!this.isCurrent(epoch) || !canvas.isConnected) {
+      canvas.width = 0;
+      canvas.height = 0;
+    }
   }
   scan(mode) {
     if (mode === 'invite') {
-      const cancelling = this.handles.find(item => item.state === 'cancelling');
-      if (cancelling) { void this.resume(cancelling); return; }
+      const cancelling = this.handles.find((item) => item.state === 'cancelling');
+      if (cancelling) {
+        void this.resume(cancelling);
+        return;
+      }
     }
-    this.clearBody(); this.record = null; this.title.textContent = mode === 'invite' ? 'Scan an invitation' : 'Scan their confirmation';
-    const note = this.el('p', 'eg-pair-status', mode === 'invite' ? 'Scan the host company’s QR. This creates a pending request; the host must approve before you can read or post.' : `Approve a request for ${this.host.room?.name || 'this room'} at ${this.host.origin || 'this host'}.`); note.setAttribute('role', 'status'); this.body.append(note);
+    this.clearBody();
+    this.record = null;
+    this.title.textContent = mode === 'invite' ? 'Scan an invitation' : 'Scan their confirmation';
+    const note = this.el(
+      'p',
+      'eg-pair-status',
+      mode === 'invite'
+        ? 'Scan the host company’s QR. This creates a pending request; the host must approve before you can read or post.'
+        : `Approve a request for ${this.host.room?.name || 'this room'} at ${this.host.origin || 'this host'}.`
+    );
+    note.setAttribute('role', 'status');
+    this.body.append(note);
     let company, identity;
     if (mode === 'invite') {
-      const labels = this.el('details', 'eg-pair-labels'); labels.append(this.el('summary', '', 'Choose company and person labels (optional)'));
+      const labels = this.el('details', 'eg-pair-labels');
+      labels.append(this.el('summary', '', 'Choose company and person labels (optional)'));
       for (const name of ['Company', 'Person']) {
-        const label = this.el('label', '', name), field = this.el('input'); field.type = 'text'; field.maxLength = name === 'Company' ? 120 : 80; field.autocomplete = 'off';
-        label.append(field); labels.append(label); if (name === 'Company') company = field; else identity = field;
+        const label = this.el('label', '', name),
+          field = this.el('input');
+        field.type = 'text';
+        field.maxLength = name === 'Company' ? 120 : 80;
+        field.autocomplete = 'off';
+        label.append(field);
+        labels.append(label);
+        if (name === 'Company') company = field;
+        else identity = field;
       }
       this.body.append(labels);
     }
-    const camera = this.button('Scan with camera', () => this.camera(note, accept)); this.body.append(camera);
-    const fileLabel = this.el('label', 'eg-pair-file', 'Or scan a QR image'); const file = this.el('input'); file.type = 'file'; file.accept = 'image/png,image/jpeg,image/webp'; fileLabel.append(file); this.body.append(fileLabel);
-    const fallback = this.el('details', 'eg-pair-fallback'); fallback.append(this.el('summary', '', mode === 'invite' ? 'Paste an invitation instead' : 'Type the confirmation code instead'));
-    const label = this.el('label', '', mode === 'invite' ? 'Invitation QR text' : 'Confirmation code'); const input = this.el('input', 'eg-pair-code'); input.type = mode === 'invite' ? 'password' : 'text'; input.autocomplete = 'off'; input.spellcheck = false; input.maxLength = 512; label.append(input);
-    const use = this.button(mode === 'invite' ? 'Request to join' : 'Look up confirmation', () => { const value = input.value; input.value = ''; void accept(value); }); fallback.append(label, use); this.body.append(fallback);
+    const camera = this.button('Scan with camera', () => this.camera(note, accept));
+    this.body.append(camera);
+    const fileLabel = this.el('label', 'eg-pair-file', 'Or scan a QR image');
+    const file = this.el('input');
+    file.type = 'file';
+    file.accept = 'image/png,image/jpeg,image/webp';
+    fileLabel.append(file);
+    this.body.append(fileLabel);
+    const fallback = this.el('details', 'eg-pair-fallback');
+    fallback.append(
+      this.el('summary', '', mode === 'invite' ? 'Paste an invitation instead' : 'Type the confirmation code instead')
+    );
+    const label = this.el('label', '', mode === 'invite' ? 'Invitation QR text' : 'Confirmation code');
+    const input = this.el('input', 'eg-pair-code');
+    input.type = mode === 'invite' ? 'password' : 'text';
+    input.autocomplete = 'off';
+    input.spellcheck = false;
+    input.maxLength = 512;
+    label.append(input);
+    const use = this.button(mode === 'invite' ? 'Request to join' : 'Look up confirmation', () => {
+      const value = input.value;
+      input.value = '';
+      void accept(value);
+    });
+    fallback.append(label, use);
+    this.body.append(fallback);
     const epoch = this.epoch;
-    const accept = async value => {
-      if (!this.isCurrent(epoch) || this.busy) return; this.stopCamera(); file.value = ''; input.value = '';
+    const accept = async (value) => {
+      if (!this.isCurrent(epoch) || this.busy) return;
+      this.stopCamera();
+      file.value = '';
+      input.value = '';
       if (mode === 'invite') {
-        const labels = { ...(company?.value.trim() ? { company: company.value.trim() } : {}), ...(identity?.value.trim() ? { identity: identity.value.trim() } : {}) };
-        if (company) company.value = ''; if (identity) identity.value = '';
+        const labels = {
+          ...(company?.value.trim() ? { company: company.value.trim() } : {}),
+          ...(identity?.value.trim() ? { identity: identity.value.trim() } : {}),
+        };
+        if (company) company.value = '';
+        if (identity) identity.value = '';
         await this.join(value, note, labels);
       } else await this.lookup(value, note);
     };
     file.addEventListener('change', async () => {
-      const image = file.files?.[0]; file.value = ''; if (!image) return;
-      if (!['image/png', 'image/jpeg', 'image/webp'].includes(image.type) || image.size > 5 * 1024 * 1024) { note.textContent = 'Choose a PNG, JPEG or WebP under 5 MB.'; return; }
+      const image = file.files?.[0];
+      file.value = '';
+      if (!image) return;
+      if (!['image/png', 'image/jpeg', 'image/webp'].includes(image.type) || image.size > 5 * 1024 * 1024) {
+        note.textContent = 'Choose a PNG, JPEG or WebP under 5 MB.';
+        return;
+      }
       let bitmap;
       try {
-        const decode = await caEmbassyQrAsset(this.win, 'scan'); bitmap = await this.win.createImageBitmap(image);
+        const decode = await caEmbassyQrAsset(this.win, 'scan');
+        bitmap = await this.win.createImageBitmap(image);
         if (!this.isCurrent(epoch) || !file.isConnected) return;
         if (bitmap.width * bitmap.height > 25000000) throw Error();
-        const canvas = this.el('canvas'), scale = Math.min(1, 1600 / Math.max(bitmap.width, bitmap.height)); canvas.width = Math.max(1, Math.round(bitmap.width * scale)); canvas.height = Math.max(1, Math.round(bitmap.height * scale));
-        const ctx = canvas.getContext('2d', { willReadFrequently: true }); ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height); const pixels = ctx.getImageData(0, 0, canvas.width, canvas.height); const qr = decode(pixels.data, canvas.width, canvas.height); canvas.width = 0;
-        if (!qr) throw Error(); await accept(qr.data);
-      } catch { if (this.isCurrent(epoch) && note.isConnected) note.textContent = 'QR not found. Try another image or paste the invitation/code.'; }
-      finally { bitmap?.close(); }
+        const canvas = this.el('canvas'),
+          scale = Math.min(1, 1600 / Math.max(bitmap.width, bitmap.height));
+        canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+        canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+        const ctx = canvas.getContext('2d', { willReadFrequently: true });
+        ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+        const pixels = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const qr = decode(pixels.data, canvas.width, canvas.height);
+        canvas.width = 0;
+        if (!qr) throw Error();
+        await accept(qr.data);
+      } catch {
+        if (this.isCurrent(epoch) && note.isConnected)
+          note.textContent = 'QR not found. Try another image or paste the invitation/code.';
+      } finally {
+        bitmap?.close();
+      }
     });
-    this.actions.append(this.button('Back', () => this.home())); camera.focus();
+    this.actions.append(this.button('Back', () => this.home()));
+    camera.focus();
   }
   async camera(note, accept) {
-    this.stopCamera(); const scanEpoch = this.scanEpoch, epoch = this.epoch;
-    if (!this.win.navigator.mediaDevices?.getUserMedia) { note.textContent = 'Camera unavailable. Use a QR image or paste the invitation/code.'; return; }
+    this.stopCamera();
+    const scanEpoch = this.scanEpoch,
+      epoch = this.epoch;
+    if (!this.win.navigator.mediaDevices?.getUserMedia) {
+      note.textContent = 'Camera unavailable. Use a QR image or paste the invitation/code.';
+      return;
+    }
     try {
-      const stream = await this.win.navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false });
-      if (!this.isCurrent(epoch) || scanEpoch !== this.scanEpoch || !note.isConnected || this.doc.hidden) { for (const t of stream.getTracks()) t.stop(); return; }
-      this.stream = stream; const video = this.el('video', 'eg-scan-video'); this.video = video; video.muted = true; video.playsInline = true; video.srcObject = stream; note.after(video); await video.play();
-      const decode = await caEmbassyQrAsset(this.win, 'scan'), end = Date.now() + 60000;
+      const stream = await this.win.navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'environment' },
+        audio: false,
+      });
+      if (!this.isCurrent(epoch) || scanEpoch !== this.scanEpoch || !note.isConnected || this.doc.hidden) {
+        for (const t of stream.getTracks()) t.stop();
+        return;
+      }
+      this.stream = stream;
+      const video = this.el('video', 'eg-scan-video');
+      this.video = video;
+      video.muted = true;
+      video.playsInline = true;
+      video.srcObject = stream;
+      note.after(video);
+      await video.play();
+      const decode = await caEmbassyQrAsset(this.win, 'scan'),
+        end = Date.now() + 60000;
       const tick = async () => {
-        if (!this.isCurrent(epoch) || scanEpoch !== this.scanEpoch || !note.isConnected || this.doc.hidden) { this.stopCamera(); return; }
-        if (Date.now() >= end) { this.stopCamera(); note.textContent = 'Camera paused. Scan again or use the code fallback.'; return; }
+        if (!this.isCurrent(epoch) || scanEpoch !== this.scanEpoch || !note.isConnected || this.doc.hidden) {
+          this.stopCamera();
+          return;
+        }
+        if (Date.now() >= end) {
+          this.stopCamera();
+          note.textContent = 'Camera paused. Scan again or use the code fallback.';
+          return;
+        }
         if (video.readyState >= 2) {
-          const c = this.el('canvas'), scale = Math.min(1, 960 / Math.max(video.videoWidth, video.videoHeight)); c.width = Math.max(1, Math.round(video.videoWidth * scale)); c.height = Math.max(1, Math.round(video.videoHeight * scale));
-          const ctx = c.getContext('2d', { willReadFrequently: true }); ctx.drawImage(video, 0, 0, c.width, c.height); const px = ctx.getImageData(0, 0, c.width, c.height), qr = decode(px.data, c.width, c.height); c.width = 0;
-          if (qr) { await accept(qr.data); return; }
+          const c = this.el('canvas'),
+            scale = Math.min(1, 960 / Math.max(video.videoWidth, video.videoHeight));
+          c.width = Math.max(1, Math.round(video.videoWidth * scale));
+          c.height = Math.max(1, Math.round(video.videoHeight * scale));
+          const ctx = c.getContext('2d', { willReadFrequently: true });
+          ctx.drawImage(video, 0, 0, c.width, c.height);
+          const px = ctx.getImageData(0, 0, c.width, c.height),
+            qr = decode(px.data, c.width, c.height);
+          c.width = 0;
+          if (qr) {
+            await accept(qr.data);
+            return;
+          }
         }
         this.scanTimer = this.win.setTimeout(tick, 250);
-      }; await tick();
-    } catch { this.stopCamera(); if (this.isCurrent(epoch) && note.isConnected) note.textContent = 'Camera unavailable. Use a QR image or paste the invitation/code.'; }
+      };
+      await tick();
+    } catch {
+      this.stopCamera();
+      if (this.isCurrent(epoch) && note.isConnected)
+        note.textContent = 'Camera unavailable. Use a QR image or paste the invitation/code.';
+    }
   }
   async join(value, note, labels = {}) {
     if (this.busy || !this.owner) return;
-    let invite; try { invite = caPairInvite(value); } catch { note.textContent = 'Invalid pairing invitation. Scan the host’s Invite QR.'; return; }
-    const epoch = this.epoch; this.guestQr = invite.qr; this.busy = true; note.textContent = `Requesting approval from ${invite.origin}…`;
-    const result = await this.api('/api/embassy-pairing', { method: 'POST', body: { ...labels, qr: invite.qr, clientRequestId: this.guestOperation || (this.guestOperation = this.win.crypto.randomUUID()) } }); this.busy = false;
+    let invite;
+    try {
+      invite = caPairInvite(value);
+    } catch {
+      note.textContent = 'Invalid pairing invitation. Scan the host’s Invite QR.';
+      return;
+    }
+    const epoch = this.epoch;
+    this.guestQr = invite.qr;
+    this.busy = true;
+    note.textContent = `Requesting approval from ${invite.origin}…`;
+    const result = await this.api('/api/embassy-pairing', {
+      method: 'POST',
+      body: {
+        ...labels,
+        qr: invite.qr,
+        clientRequestId: this.guestOperation || (this.guestOperation = this.win.crypto.randomUUID()),
+      },
+    });
+    this.busy = false;
     if (!this.isCurrent(epoch)) return;
-    if (!result.ok) { this.guestQr = ''; note.textContent = this.error(result); this.actions.replaceChildren(this.button('Recover connections', async () => { await this.refresh(); if (this.isCurrent(epoch)) this.home(); })); return; }
+    if (!result.ok) {
+      this.guestQr = '';
+      note.textContent = this.error(result);
+      this.actions.replaceChildren(
+        this.button('Recover connections', async () => {
+          await this.refresh();
+          if (this.isCurrent(epoch)) this.home();
+        })
+      );
+      return;
+    }
     this.guestQr = '';
     try {
       const data = result.data;
-      if (!['creating', 'pending', 'approved', 'connected', 'failed', 'cancelling', 'cancelled', 'rejected', 'expired', 'revoked'].includes(data?.state) || data?.origin !== invite.origin || data?.room?.id !== invite.roomId || !this.validHandle(data?.handle)) throw Error();
+      if (
+        ![
+          'creating',
+          'pending',
+          'approved',
+          'connected',
+          'failed',
+          'cancelling',
+          'cancelled',
+          'rejected',
+          'expired',
+          'revoked',
+        ].includes(data?.state) ||
+        data?.origin !== invite.origin ||
+        data?.room?.id !== invite.roomId ||
+        !this.validHandle(data?.handle)
+      )
+        throw Error();
       let requestId;
       if (['pending', 'approved'].includes(data.state)) {
         const qr = caPairRequest(data.requestQr, invite.origin);
         if (caPairCode(data.code) !== qr.code) throw Error();
         requestId = qr.requestId;
       }
-      this.record = { ...data, ...(requestId ? { requestId } : {}) }; await this.showRecord();
-    } catch { note.textContent = 'Pairing response did not match this invitation. Recover connections to check the outcome.'; }
+      this.record = { ...data, ...(requestId ? { requestId } : {}) };
+      await this.showRecord();
+    } catch {
+      note.textContent = 'Pairing response did not match this invitation. Recover connections to check the outcome.';
+    }
   }
-  validHandle(value) { return typeof value === 'string' && /^[A-Za-z0-9_-]{1,80}$/.test(value); }
-  async resume(value) { if (!this.validHandle(value?.handle)) return; this.clearBody(); this.body.append(this.el('p', 'eg-pair-status', 'Restoring connection…')); this.record = { ...value }; await this.poll(); }
+  validHandle(value) {
+    return typeof value === 'string' && /^[A-Za-z0-9_-]{1,80}$/.test(value);
+  }
+  async resume(value) {
+    if (!this.validHandle(value?.handle)) return;
+    this.clearBody();
+    this.body.append(this.el('p', 'eg-pair-status', 'Restoring connection…'));
+    this.record = { ...value };
+    await this.poll();
+  }
   async showRecord() {
-    const record = this.record; if (!record || !this.validHandle(record.handle)) return;
-    this.handles = [...this.handles.filter(item => item.handle !== record.handle), { ...record }];
-    this.clearBody(); this.title.textContent = 'Connect companies';
-    const label = { creating: 'Creating request', pending: 'Waiting for host approval', approved: 'Approved · connecting', connected: 'Connected', rejected: 'Request declined', expired: 'Request expired', revoked: 'Invitation revoked', cancelling: 'Cancelling… (waiting for the host embassy to confirm)', cancelled: 'Request cancelled', failed: 'Connection unavailable' }[record.state] || 'Checking connection';
-    const note = this.el('p', 'eg-pair-status', label); note.setAttribute('role', 'status'); this.body.append(note);
-    if (record.hostCompany) this.body.append(this.el('p', '', `Connecting to ${String(record.hostCompany).slice(0, 200)}`));
-    if (record.room) this.body.append(this.el('p', 'ca-hint', `${record.room.name || 'Shared room'} · ${record.origin || ''}`));
+    const record = this.record;
+    if (!record || !this.validHandle(record.handle)) return;
+    this.handles = [...this.handles.filter((item) => item.handle !== record.handle), { ...record }];
+    this.clearBody();
+    this.title.textContent = 'Connect companies';
+    const label =
+      {
+        creating: 'Creating request',
+        pending: 'Waiting for host approval',
+        approved: 'Approved · connecting',
+        connected: 'Connected',
+        rejected: 'Request declined',
+        expired: 'Request expired',
+        revoked: 'Invitation revoked',
+        cancelling: 'Cancelling… (waiting for the host embassy to confirm)',
+        cancelled: 'Request cancelled',
+        failed: 'Connection unavailable',
+      }[record.state] || 'Checking connection';
+    const note = this.el('p', 'eg-pair-status', label);
+    note.setAttribute('role', 'status');
+    this.body.append(note);
+    if (record.hostCompany)
+      this.body.append(this.el('p', '', `Connecting to ${String(record.hostCompany).slice(0, 200)}`));
+    if (record.room)
+      this.body.append(this.el('p', 'ca-hint', `${record.room.name || 'Shared room'} · ${record.origin || ''}`));
     if (record.state === 'pending' && record.requestQr && record.origin) {
       try {
-        const qr = caPairRequest(record.requestQr, record.origin); if (record.requestId && qr.requestId !== record.requestId || caPairCode(record.code) !== qr.code) throw Error();
-        try { await this.showQR(qr.qr, 'Public confirmation QR'); }
-        catch { if (note.isConnected) note.textContent = 'QR unavailable. Have the host enter the confirmation code instead.'; }
+        const qr = caPairRequest(record.requestQr, record.origin);
+        if ((record.requestId && qr.requestId !== record.requestId) || caPairCode(record.code) !== qr.code)
+          throw Error();
+        try {
+          await this.showQR(qr.qr, 'Public confirmation QR');
+        } catch {
+          if (note.isConnected) note.textContent = 'QR unavailable. Have the host enter the confirmation code instead.';
+        }
         if (!note.isConnected) return;
-        this.body.append(this.el('strong', 'eg-pair-confirm-code', qr.code), this.el('p', '', 'Have the host scan this confirmation QR, or enter this code. You cannot read or post until they approve.'));
-      } catch { if (note.isConnected) note.textContent = 'Confirmation unavailable. Recover the request status.'; }
+        this.body.append(
+          this.el('strong', 'eg-pair-confirm-code', qr.code),
+          this.el(
+            'p',
+            '',
+            'Have the host scan this confirmation QR, or enter this code. You cannot read or post until they approve.'
+          )
+        );
+      } catch {
+        if (note.isConnected) note.textContent = 'Confirmation unavailable. Recover the request status.';
+      }
     }
     if (!note.isConnected) return;
     if (record.state === 'failed' && record.error === 'GUEST_LABEL') {
       note.textContent = 'That name is already in use. Cancel this request before starting over with another name.';
-      this.actions.append(this.button('Cancel and start over', () => this.restartAfterLabelConflict()), this.button('Back', () => this.home()));
+      this.actions.append(
+        this.button('Cancel and start over', () => this.restartAfterLabelConflict()),
+        this.button('Back', () => this.home())
+      );
       return;
     }
     if (record.state === 'cancelling') {
-      this.actions.append(this.button('Check status', () => this.poll()), this.button('Close', this.cleanup));
+      this.actions.append(
+        this.button('Check status', () => this.poll()),
+        this.button('Close', this.cleanup)
+      );
       this.schedulePoll();
     } else if (record.state === 'cancelled') {
-      this.actions.append(this.button('Start over', () => {
-        if (this.record?.handle !== record.handle || this.record.state !== 'cancelled') return;
-        this.record = null; this.guestOperation = null; this.guestQr = ''; this.scan('invite');
-      }), this.button('Back', () => this.home()));
+      this.actions.append(
+        this.button('Start over', () => {
+          if (this.record?.handle !== record.handle || this.record.state !== 'cancelled') return;
+          this.record = null;
+          this.guestOperation = null;
+          this.guestQr = '';
+          this.scan('invite');
+        }),
+        this.button('Back', () => this.home())
+      );
     } else if (record.state === 'failed') {
-      this.actions.append(this.button('Cancel request', () => this.cancel()), this.button('Check status', () => this.poll()));
-    } else if (record.state === 'connected' && record.connectionId) this.actions.append(this.button('Open shared room', () => this.openConnected(record), true));
+      this.actions.append(
+        this.button('Cancel request', () => this.cancel()),
+        this.button('Check status', () => this.poll())
+      );
+    } else if (record.state === 'connected' && record.connectionId)
+      this.actions.append(this.button('Open shared room', () => this.openConnected(record), true));
     else if (['creating', 'pending', 'approved'].includes(record.state)) {
-      this.actions.append(this.button('Cancel request', () => this.cancel()), this.button('Check status', () => this.poll()));
+      this.actions.append(
+        this.button('Cancel request', () => this.cancel()),
+        this.button('Check status', () => this.poll())
+      );
       this.schedulePoll();
     } else this.actions.append(this.button('Back', () => this.home()));
   }
-  schedulePoll() { this.stopPoll(); if (!this.doc.hidden && this.dlg) this.pollTimer = this.win.setTimeout(() => this.poll(), 3000); }
+  schedulePoll() {
+    this.stopPoll();
+    if (!this.doc.hidden && this.dlg) this.pollTimer = this.win.setTimeout(() => this.poll(), 3000);
+  }
   async poll() {
     if (!this.record || this.doc.hidden) return;
-    if (this.polling) { this.schedulePoll(); return; }
-    const handle = this.record.handle, epoch = this.epoch; if (!this.validHandle(handle)) return;
-    this.polling = true; const result = await this.api(`/api/embassy-pairing/${encodeURIComponent(handle)}`); this.polling = false;
+    if (this.polling) {
+      this.schedulePoll();
+      return;
+    }
+    const handle = this.record.handle,
+      epoch = this.epoch;
+    if (!this.validHandle(handle)) return;
+    this.polling = true;
+    const result = await this.api(`/api/embassy-pairing/${encodeURIComponent(handle)}`);
+    this.polling = false;
     if (!this.isCurrent(epoch) || this.record?.handle !== handle) return;
-    if (!result.ok) { this.clearBody(); this.body.append(this.el('p', 'eg-pair-status', this.error(result))); this.actions.append(this.button('Check status', () => this.poll()), this.button('Close', this.cleanup)); return; }
-    const states = ['creating', 'pending', 'approved', 'connected', 'rejected', 'expired', 'revoked', 'cancelling', 'cancelled', 'failed'];
-    if (!states.includes(result.data?.state) || result.data?.handle !== handle) { this.clearBody(); this.body.append(this.el('p', 'eg-pair-status', 'Pairing status unavailable. Recover the original request.')); this.actions.append(this.button('Check status', () => this.poll()), this.button('Close', this.cleanup)); return; }
+    if (!result.ok) {
+      this.clearBody();
+      this.body.append(this.el('p', 'eg-pair-status', this.error(result)));
+      this.actions.append(
+        this.button('Check status', () => this.poll()),
+        this.button('Close', this.cleanup)
+      );
+      return;
+    }
+    const states = [
+      'creating',
+      'pending',
+      'approved',
+      'connected',
+      'rejected',
+      'expired',
+      'revoked',
+      'cancelling',
+      'cancelled',
+      'failed',
+    ];
+    if (!states.includes(result.data?.state) || result.data?.handle !== handle) {
+      this.clearBody();
+      this.body.append(this.el('p', 'eg-pair-status', 'Pairing status unavailable. Recover the original request.'));
+      this.actions.append(
+        this.button('Check status', () => this.poll()),
+        this.button('Close', this.cleanup)
+      );
+      return;
+    }
     if (this.record.state === 'cancelling' && !['cancelling', 'cancelled'].includes(result.data.state)) {
-      this.clearBody(); this.body.append(this.el('p', 'eg-pair-status', 'Cancellation is not confirmed. Recover the original request status.'));
-      this.actions.append(this.button('Check status', () => this.poll()), this.button('Close', this.cleanup)); return;
+      this.clearBody();
+      this.body.append(
+        this.el('p', 'eg-pair-status', 'Cancellation is not confirmed. Recover the original request status.')
+      );
+      this.actions.append(
+        this.button('Check status', () => this.poll()),
+        this.button('Close', this.cleanup)
+      );
+      return;
     }
     this.record = { ...this.record, ...result.data, handle };
-    if (!['pending', 'approved'].includes(this.record.state)) { delete this.record.requestQr; delete this.record.code; }
+    if (!['pending', 'approved'].includes(this.record.state)) {
+      delete this.record.requestQr;
+      delete this.record.code;
+    }
     if (this.record.state !== 'connected') delete this.record.connectionId;
-    const record = this.record; await this.showRecord();
-    if (this.record === record && this.dlg?.isConnected && this.record?.state === 'connected') await this.openConnected(record);
+    const record = this.record;
+    await this.showRecord();
+    if (this.record === record && this.dlg?.isConnected && this.record?.state === 'connected')
+      await this.openConnected(record);
   }
   async restartAfterLabelConflict() {
-    if (this.busy || !this.owner || this.record?.state !== 'failed' || this.record.error !== 'GUEST_LABEL' || !this.validHandle(this.record.handle)) return;
+    if (
+      this.busy ||
+      !this.owner ||
+      this.record?.state !== 'failed' ||
+      this.record.error !== 'GUEST_LABEL' ||
+      !this.validHandle(this.record.handle)
+    )
+      return;
     const handle = this.record.handle;
     this.clearBody();
     this.body.append(this.el('p', 'eg-pair-status', 'Cancelling the previous request…'));
@@ -12130,97 +18143,278 @@ class ReverieEmbassyPairingView {
     const result = await this.api(`/api/embassy-pairing/${encodeURIComponent(handle)}`, { method: 'DELETE' });
     this.busy = false;
     if (!this.isCurrent(epoch) || this.record?.handle !== handle) return;
-    if (!result.ok || result.data?.handle !== handle || result.data?.state !== 'cancelled' || result.data?.cancelPending === true) {
-      this.clearBody(); this.body.append(this.el('p', 'eg-pair-status', result.ok ? 'Cancellation is not confirmed. Recover the request before starting over.' : this.error(result)));
-      this.actions.append(this.button('Check status', () => this.poll()), this.button('Back', () => this.home())); return;
+    if (
+      !result.ok ||
+      result.data?.handle !== handle ||
+      result.data?.state !== 'cancelled' ||
+      result.data?.cancelPending === true
+    ) {
+      this.clearBody();
+      this.body.append(
+        this.el(
+          'p',
+          'eg-pair-status',
+          result.ok ? 'Cancellation is not confirmed. Recover the request before starting over.' : this.error(result)
+        )
+      );
+      this.actions.append(
+        this.button('Check status', () => this.poll()),
+        this.button('Back', () => this.home())
+      );
+      return;
     }
-    this.handles = this.handles.map(item => item.handle === handle ? { ...result.data } : item);
-    this.record = null; this.guestOperation = null; this.guestQr = '';
+    this.handles = this.handles.map((item) => (item.handle === handle ? { ...result.data } : item));
+    this.record = null;
+    this.guestOperation = null;
+    this.guestQr = '';
     this.scan('invite');
   }
   async reconnect(record) {
     if (this.busy || !this.owner || record?.state !== 'connected' || !this.validHandle(record.handle)) return;
-    if (!this.win.confirm('Recover this connection after losing local access? This replaces the previous session.')) return;
-    this.clearBody(); this.record = { ...record }; const epoch = this.epoch;
+    if (!this.win.confirm('Recover this connection after losing local access? This replaces the previous session.'))
+      return;
+    this.clearBody();
+    this.record = { ...record };
+    const epoch = this.epoch;
     this.body.append(this.el('p', 'eg-pair-status', 'Recovering connection…'));
     this.busy = true;
-    const result = await this.api(`/api/embassy-pairing/${encodeURIComponent(record.handle)}/reconnect`, { method: 'POST' });
+    const result = await this.api(`/api/embassy-pairing/${encodeURIComponent(record.handle)}/reconnect`, {
+      method: 'POST',
+    });
     this.busy = false;
     if (!this.isCurrent(epoch) || this.record?.handle !== record.handle) return;
     if (!result.ok) {
       this.body.replaceChildren(this.el('p', 'eg-pair-status', this.error(result)));
-      this.actions.append(this.button('Check status', () => this.poll()), this.button('Back', () => this.home()));
+      this.actions.append(
+        this.button('Check status', () => this.poll()),
+        this.button('Back', () => this.home())
+      );
       return;
     }
-    if (result.data?.handle !== record.handle || !['connected', 'expired', 'revoked', 'cancelling', 'cancelled', 'rejected', 'failed'].includes(result.data?.state)) {
-      this.body.replaceChildren(this.el('p', 'eg-pair-status', 'Recovery status unavailable. Check the connection before trying again.'));
-      this.actions.append(this.button('Check status', () => this.poll())); return;
+    if (
+      result.data?.handle !== record.handle ||
+      !['connected', 'expired', 'revoked', 'cancelling', 'cancelled', 'rejected', 'failed'].includes(result.data?.state)
+    ) {
+      this.body.replaceChildren(
+        this.el('p', 'eg-pair-status', 'Recovery status unavailable. Check the connection before trying again.')
+      );
+      this.actions.append(this.button('Check status', () => this.poll()));
+      return;
     }
-    this.record = { ...result.data }; await this.showRecord();
+    this.record = { ...result.data };
+    await this.showRecord();
   }
   async openConnected(record) {
     if (record?.state !== 'connected' || typeof record.connectionId !== 'string') return;
-    const epoch = this.epoch; await this.view.refresh();
-    if (!this.isCurrent(epoch) || !this.view.connections.some(c => c.id === record.connectionId)) return;
-    this.close(); this.view.open(record.connectionId);
+    const epoch = this.epoch;
+    await this.view.refresh();
+    if (!this.isCurrent(epoch) || !this.view.connections.some((c) => c.id === record.connectionId)) return;
+    this.close();
+    this.view.open(record.connectionId);
   }
   async cancel() {
     if (this.busy || !this.record || !this.owner) return;
-    const handle = this.record.handle; this.clearBody(); const epoch = this.epoch; this.busy = true;
+    const handle = this.record.handle;
+    this.clearBody();
+    const epoch = this.epoch;
+    this.busy = true;
     this.body.append(this.el('p', 'eg-pair-status', 'Requesting cancellation…'));
-    const result = await this.api(`/api/embassy-pairing/${encodeURIComponent(handle)}`, { method: 'DELETE' }); this.busy = false;
+    const result = await this.api(`/api/embassy-pairing/${encodeURIComponent(handle)}`, { method: 'DELETE' });
+    this.busy = false;
     if (!this.isCurrent(epoch) || this.record?.handle !== handle) return;
     const data = result.data;
-    const states = ['creating', 'pending', 'approved', 'connected', 'rejected', 'expired', 'revoked', 'cancelling', 'cancelled', 'failed'];
-    if (result.ok && data?.handle === handle && states.includes(data.state) && !(data.state === 'cancelled' && data.cancelPending === true)) {
+    const states = [
+      'creating',
+      'pending',
+      'approved',
+      'connected',
+      'rejected',
+      'expired',
+      'revoked',
+      'cancelling',
+      'cancelled',
+      'failed',
+    ];
+    if (
+      result.ok &&
+      data?.handle === handle &&
+      states.includes(data.state) &&
+      !(data.state === 'cancelled' && data.cancelPending === true)
+    ) {
       this.record = { ...this.record, ...data };
-      if (['rejected', 'expired', 'revoked', 'cancelling', 'cancelled', 'failed'].includes(data.state)) { delete this.record.requestQr; delete this.record.code; delete this.record.connectionId; }
+      if (['rejected', 'expired', 'revoked', 'cancelling', 'cancelled', 'failed'].includes(data.state)) {
+        delete this.record.requestQr;
+        delete this.record.code;
+        delete this.record.connectionId;
+      }
       await this.showRecord();
     } else {
-      this.clearBody(); this.body.append(this.el('p', 'eg-pair-status', result.ok ? 'Cancellation is not confirmed. Recover the original request status.' : this.error(result)));
-      this.actions.append(this.button('Check status', () => this.poll()), this.button('Close', this.cleanup));
+      this.clearBody();
+      this.body.append(
+        this.el(
+          'p',
+          'eg-pair-status',
+          result.ok ? 'Cancellation is not confirmed. Recover the original request status.' : this.error(result)
+        )
+      );
+      this.actions.append(
+        this.button('Check status', () => this.poll()),
+        this.button('Close', this.cleanup)
+      );
     }
   }
   async lookup(value, note) {
     if (this.busy || !this.owner || this.host.status !== 'ready') return;
     let body, code, requestId;
-    try { if (String(value).startsWith('embassy-pair-v1|')) { const qr = caPairRequest(value, this.host.origin); body = { qr: qr.qr }; code = qr.code; requestId = qr.requestId; } else { code = caPairCode(value); body = { code }; } }
-    catch { note.textContent = 'Invalid confirmation or wrong host. Scan this company’s request QR, or enter its code.'; return; }
-    const epoch = this.epoch; this.busy = true; const result = await this.api('/api/embassy-host/lookup', { method: 'POST', body }); this.busy = false;
-    if (!this.isCurrent(epoch)) return; if (!result.ok) { note.textContent = this.error(result); return; }
+    try {
+      if (String(value).startsWith('embassy-pair-v1|')) {
+        const qr = caPairRequest(value, this.host.origin);
+        body = { qr: qr.qr };
+        code = qr.code;
+        requestId = qr.requestId;
+      } else {
+        code = caPairCode(value);
+        body = { code };
+      }
+    } catch {
+      note.textContent = 'Invalid confirmation or wrong host. Scan this company’s request QR, or enter its code.';
+      return;
+    }
+    const epoch = this.epoch;
+    this.busy = true;
+    const result = await this.api('/api/embassy-host/lookup', { method: 'POST', body });
+    this.busy = false;
+    if (!this.isCurrent(epoch)) return;
+    if (!result.ok) {
+      note.textContent = this.error(result);
+      return;
+    }
     const data = result.data;
-    if (!data || !/^[0-9a-f-]{36}$/.test(data.requestId) || requestId && data.requestId !== requestId || !data.guest || typeof data.guest.company !== 'string' || typeof data.guest.identity !== 'string') { note.textContent = 'Confirmation response did not match the request.'; return; }
-    this.clearBody(); this.review = { requestId: data.requestId, code }; this.title.textContent = 'Approve connection?';
-    this.body.append(this.el('p', 'eg-pair-guest', `${data.guest.identity.slice(0, 200)} from ${data.guest.company.slice(0, 200)}`), this.el('p', 'ca-hint', `${this.host.room.name} · ${this.host.origin}`), this.el('p', 'ca-hint', 'Company and person names are labels, not verified identity.'));
-    if (data.state === 'pending' && Number.isFinite(data.expiresAt) && data.expiresAt > Date.now()) this.actions.append(this.button('Decline', () => this.decide('reject')), this.button('Approve connection', () => this.decide('approve'), true));
-    else { this.body.append(this.el('p', 'eg-pair-status', data.state === 'approved' || data.state === 'claimed' ? 'This connection is already approved.' : 'This request is no longer available.')); this.actions.append(this.button('Back', () => this.home())); }
+    if (
+      !data ||
+      !/^[0-9a-f-]{36}$/.test(data.requestId) ||
+      (requestId && data.requestId !== requestId) ||
+      !data.guest ||
+      typeof data.guest.company !== 'string' ||
+      typeof data.guest.identity !== 'string'
+    ) {
+      note.textContent = 'Confirmation response did not match the request.';
+      return;
+    }
+    this.clearBody();
+    this.review = { requestId: data.requestId, code };
+    this.title.textContent = 'Approve connection?';
+    this.body.append(
+      this.el('p', 'eg-pair-guest', `${data.guest.identity.slice(0, 200)} from ${data.guest.company.slice(0, 200)}`),
+      this.el('p', 'ca-hint', `${this.host.room.name} · ${this.host.origin}`),
+      this.el('p', 'ca-hint', 'Company and person names are labels, not verified identity.')
+    );
+    if (data.state === 'pending' && Number.isFinite(data.expiresAt) && data.expiresAt > Date.now())
+      this.actions.append(
+        this.button('Decline', () => this.decide('reject')),
+        this.button('Approve connection', () => this.decide('approve'), true)
+      );
+    else {
+      this.body.append(
+        this.el(
+          'p',
+          'eg-pair-status',
+          data.state === 'approved' || data.state === 'claimed'
+            ? 'This connection is already approved.'
+            : 'This request is no longer available.'
+        )
+      );
+      this.actions.append(this.button('Back', () => this.home()));
+    }
   }
   async decide(kind) {
-    if (this.busy || !this.owner || !this.review || this.host.status !== 'ready' || !['approve', 'reject'].includes(kind)) return;
-    const epoch = this.epoch, review = this.review; this.busy = true; for (const b of this.actions.querySelectorAll('button')) b.disabled = true;
-    const result = await this.api(`/api/embassy-host/${kind}`, { method: 'POST', body: review }); this.busy = false;
+    if (
+      this.busy ||
+      !this.owner ||
+      !this.review ||
+      this.host.status !== 'ready' ||
+      !['approve', 'reject'].includes(kind)
+    )
+      return;
+    const epoch = this.epoch,
+      review = this.review;
+    this.busy = true;
+    for (const b of this.actions.querySelectorAll('button')) b.disabled = true;
+    const result = await this.api(`/api/embassy-host/${kind}`, { method: 'POST', body: review });
+    this.busy = false;
     if (!this.isCurrent(epoch) || this.review !== review) return;
-    this.clearBody(); this.body.append(this.el('p', 'eg-pair-status', result.ok ? kind === 'approve' ? 'Approved. The other company can now finish connecting.' : 'Request declined.' : this.error(result)));
-    if (!result.ok) { this.review = review; this.actions.append(this.button('Retry same decision', () => this.decide(kind))); }
+    this.clearBody();
+    this.body.append(
+      this.el(
+        'p',
+        'eg-pair-status',
+        result.ok
+          ? kind === 'approve'
+            ? 'Approved. The other company can now finish connecting.'
+            : 'Request declined.'
+          : this.error(result)
+      )
+    );
+    if (!result.ok) {
+      this.review = review;
+      this.actions.append(this.button('Retry same decision', () => this.decide(kind)));
+    }
     this.actions.append(this.button('Done', () => this.home()));
   }
   async invites() {
     if (this.busy || !this.owner || this.host.status !== 'ready') return;
-    this.clearBody(); this.title.textContent = 'Invitations'; const epoch = this.epoch;
-    this.body.append(this.el('p', 'eg-pair-status', 'Loading invitations…')); const result = await this.api('/api/embassy-host/invites');
-    if (!this.isCurrent(epoch)) return; this.body.replaceChildren();
+    this.clearBody();
+    this.title.textContent = 'Invitations';
+    const epoch = this.epoch;
+    this.body.append(this.el('p', 'eg-pair-status', 'Loading invitations…'));
+    const result = await this.api('/api/embassy-host/invites');
+    if (!this.isCurrent(epoch)) return;
+    this.body.replaceChildren();
     if (!result.ok) this.body.append(this.el('p', 'eg-pair-status', this.error(result)));
     else {
       const rows = Array.isArray(result.data) ? result.data : result.data?.invites;
       for (const row of (Array.isArray(rows) ? rows : []).slice(0, 100)) {
         if (typeof row.inviteId !== 'string') continue;
-        const item = this.el('section', 'eg-pair-invite'); item.append(this.el('span', '', row.guest ? `${row.guest.identity || 'Guest'} · ${row.guest.company || 'Company'}` : 'Company invitation'), this.el('small', '', ['open', 'pending', 'approved', 'connected', 'expired', 'revoked', 'rejected'].includes(row.state) ? row.state : 'Unavailable'));
-        if (Number.isFinite(row.expiresAt)) item.append(this.el('small', '', row.expiresAt > Date.now() ? `Expires in ${Math.ceil((row.expiresAt - Date.now()) / 60000)} min` : 'Expired'));
-        if (['open', 'pending', 'approved', 'connected'].includes(row.state)) item.append(this.button('Revoke', async () => {
-          if (this.busy || !this.win.confirm('Revoke this invitation and stop its guest access?')) return;
-          this.busy = true; const answer = await this.api(`/api/embassy-host/invites/${encodeURIComponent(row.inviteId)}`, { method: 'DELETE' }); this.busy = false;
-          if (!this.isCurrent(epoch)) return; if (answer.ok) await this.invites(); else item.append(this.el('p', 'eg-pair-status', this.error(answer)));
-        })); this.body.append(item);
+        const item = this.el('section', 'eg-pair-invite');
+        item.append(
+          this.el(
+            'span',
+            '',
+            row.guest ? `${row.guest.identity || 'Guest'} · ${row.guest.company || 'Company'}` : 'Company invitation'
+          ),
+          this.el(
+            'small',
+            '',
+            ['open', 'pending', 'approved', 'connected', 'expired', 'revoked', 'rejected'].includes(row.state)
+              ? row.state
+              : 'Unavailable'
+          )
+        );
+        if (Number.isFinite(row.expiresAt))
+          item.append(
+            this.el(
+              'small',
+              '',
+              row.expiresAt > Date.now()
+                ? `Expires in ${Math.ceil((row.expiresAt - Date.now()) / 60000)} min`
+                : 'Expired'
+            )
+          );
+        if (['open', 'pending', 'approved', 'connected'].includes(row.state))
+          item.append(
+            this.button('Revoke', async () => {
+              if (this.busy || !this.win.confirm('Revoke this invitation and stop its guest access?')) return;
+              this.busy = true;
+              const answer = await this.api(`/api/embassy-host/invites/${encodeURIComponent(row.inviteId)}`, {
+                method: 'DELETE',
+              });
+              this.busy = false;
+              if (!this.isCurrent(epoch)) return;
+              if (answer.ok) await this.invites();
+              else item.append(this.el('p', 'eg-pair-status', this.error(answer)));
+            })
+          );
+        this.body.append(item);
       }
       if (!this.body.childElementCount) this.body.append(this.el('p', 'eg-pair-status', 'No invitations yet.'));
     }
@@ -12278,19 +18472,29 @@ function caJournalRadius(importance) {
  * three per entry by overlap so the map stays readable. Links to entries not on the page are left out.
  */
 function caJournalGraph(entries) {
-  const list = Array.isArray(entries) ? entries.filter(e => e && Number.isSafeInteger(e.entryId)) : [];
-  const ids = new Set(list.map(e => e.entryId));
-  const words = (e) => new Set([...(e.annotations?.topics ?? []), ...(e.tags ?? [])].map(w => String(w).toLowerCase()));
-  const nodes = list.map(e => ({
-    id: e.entryId, r: caJournalRadius(e.annotations?.importance), importance: e.annotations?.importance ?? '',
-    superseded: (e.supersededBy ?? []).length > 0, group: String(e.annotations?.topics?.[0] ?? e.tags?.[0] ?? ''),
-    label: String(e.text ?? '').replace(/\s+/g, ' ').trim().slice(0, 60), committedAt: e.committedAt ?? '',
+  const list = Array.isArray(entries) ? entries.filter((e) => e && Number.isSafeInteger(e.entryId)) : [];
+  const ids = new Set(list.map((e) => e.entryId));
+  const words = (e) =>
+    new Set([...(e.annotations?.topics ?? []), ...(e.tags ?? [])].map((w) => String(w).toLowerCase()));
+  const nodes = list.map((e) => ({
+    id: e.entryId,
+    r: caJournalRadius(e.annotations?.importance),
+    importance: e.annotations?.importance ?? '',
+    superseded: (e.supersededBy ?? []).length > 0,
+    group: String(e.annotations?.topics?.[0] ?? e.tags?.[0] ?? ''),
+    label: String(e.text ?? '')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 60),
+    committedAt: e.committedAt ?? '',
   }));
-  const edges = [], seen = new Set();
+  const edges = [],
+    seen = new Set();
   const add = (a, b, kind, weight) => {
     const key = a < b ? `${a}:${b}` : `${b}:${a}`;
     if (a === b || !ids.has(a) || !ids.has(b) || seen.has(key)) return;
-    seen.add(key); edges.push({ source: a, target: b, kind, weight });
+    seen.add(key);
+    edges.push({ source: a, target: b, kind, weight });
   };
   for (const e of list) for (const t of e.annotations?.supersedes ?? []) add(e.entryId, t, 'supersedes', 3);
   for (const e of list) for (const t of e.annotations?.related ?? []) add(e.entryId, t, 'related', 2);
@@ -12315,35 +18519,63 @@ function caJournalGraph(entries) {
  * and stay inside the box. Returns a Map of entry id to {x, y}.
  */
 function caJournalLayout(graph, { width = 900, height = 600, iterations } = {}) {
-  const nodes = graph.nodes, n = nodes.length, pos = new Map();
+  const nodes = graph.nodes,
+    n = nodes.length,
+    pos = new Map();
   if (!n) return pos;
-  const cx = width / 2, cy = height / 2, k = Math.sqrt((width * height) / n) * 0.4;
-  const xs = new Float64Array(n), ys = new Float64Array(n), index = new Map(nodes.map((node, i) => [node.id, i]));
+  const cx = width / 2,
+    cy = height / 2,
+    k = Math.sqrt((width * height) / n) * 0.4;
+  const xs = new Float64Array(n),
+    ys = new Float64Array(n),
+    index = new Map(nodes.map((node, i) => [node.id, i]));
   const spread = Math.min(width, height) * 0.45;
   for (let i = 0; i < n; i++) {
-    const radius = spread * Math.sqrt((i + 0.5) / n), angle = i * 2.399963229728653;
-    xs[i] = cx + radius * Math.cos(angle); ys[i] = cy + radius * Math.sin(angle);
+    const radius = spread * Math.sqrt((i + 0.5) / n),
+      angle = i * 2.399963229728653;
+    xs[i] = cx + radius * Math.cos(angle);
+    ys[i] = cy + radius * Math.sin(angle);
   }
   const rounds = iterations ?? (n > 200 ? 120 : 250);
   let temperature = Math.min(width, height) / 8;
-  const dx = new Float64Array(n), dy = new Float64Array(n);
+  const dx = new Float64Array(n),
+    dy = new Float64Array(n);
   for (let round = 0; round < rounds; round++) {
-    dx.fill(0); dy.fill(0);
-    for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) {
-      let x = xs[i] - xs[j], y = ys[i] - ys[j], d2 = x * x + y * y;
-      if (d2 < 0.01) { x = 0.1 * ((i % 3) - 1 || 1); y = 0.1; d2 = 0.02; }
-      const f = (k * k) / d2;
-      dx[i] += x * f; dy[i] += y * f; dx[j] -= x * f; dy[j] -= y * f;
-    }
+    dx.fill(0);
+    dy.fill(0);
+    for (let i = 0; i < n; i++)
+      for (let j = i + 1; j < n; j++) {
+        let x = xs[i] - xs[j],
+          y = ys[i] - ys[j],
+          d2 = x * x + y * y;
+        if (d2 < 0.01) {
+          x = 0.1 * ((i % 3) - 1 || 1);
+          y = 0.1;
+          d2 = 0.02;
+        }
+        const f = (k * k) / d2;
+        dx[i] += x * f;
+        dy[i] += y * f;
+        dx[j] -= x * f;
+        dy[j] -= y * f;
+      }
     for (const edge of graph.edges) {
-      const a = index.get(edge.source), b = index.get(edge.target);
-      const x = xs[a] - xs[b], y = ys[a] - ys[b], d = Math.sqrt(x * x + y * y) || 0.01;
+      const a = index.get(edge.source),
+        b = index.get(edge.target);
+      const x = xs[a] - xs[b],
+        y = ys[a] - ys[b],
+        d = Math.sqrt(x * x + y * y) || 0.01;
       const f = (d * edge.weight) / k;
-      dx[a] -= x * f; dy[a] -= y * f; dx[b] += x * f; dy[b] += y * f;
+      dx[a] -= x * f;
+      dy[a] -= y * f;
+      dx[b] += x * f;
+      dy[b] += y * f;
     }
     for (let i = 0; i < n; i++) {
-      dx[i] += (cx - xs[i]) * 0.06; dy[i] += (cy - ys[i]) * 0.06;
-      const d = Math.sqrt(dx[i] * dx[i] + dy[i] * dy[i]) || 1, step = Math.min(d, temperature);
+      dx[i] += (cx - xs[i]) * 0.06;
+      dy[i] += (cy - ys[i]) * 0.06;
+      const d = Math.sqrt(dx[i] * dx[i] + dy[i] * dy[i]) || 1,
+        step = Math.min(d, temperature);
       const r = nodes[i].r + 2;
       xs[i] = Math.min(width - r, Math.max(r, xs[i] + (dx[i] / d) * step));
       ys[i] = Math.min(height - r, Math.max(r, ys[i] + (dy[i] / d) * step));
@@ -12353,16 +18585,26 @@ function caJournalLayout(graph, { width = 900, height = 600, iterations } = {}) 
   // Then push overlapping circles apart (a 3 px gap), so a dense topic does not stack its memories on each other.
   for (let pass = 0; pass < (n > 200 ? 120 : 40); pass++) {
     let moved = false;
-    for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) {
-      const x = xs[j] - xs[i], y = ys[j] - ys[i], d = Math.sqrt(x * x + y * y) || 0.01, need = nodes[i].r + nodes[j].r + 3;
-      if (d >= need) continue;
-      const push = (need - d) / 2, ux = x / d, uy = y / d;
-      xs[i] -= ux * push; ys[i] -= uy * push; xs[j] += ux * push; ys[j] += uy * push;
-      moved = true;
-    }
+    for (let i = 0; i < n; i++)
+      for (let j = i + 1; j < n; j++) {
+        const x = xs[j] - xs[i],
+          y = ys[j] - ys[i],
+          d = Math.sqrt(x * x + y * y) || 0.01,
+          need = nodes[i].r + nodes[j].r + 3;
+        if (d >= need) continue;
+        const push = (need - d) / 2,
+          ux = x / d,
+          uy = y / d;
+        xs[i] -= ux * push;
+        ys[i] -= uy * push;
+        xs[j] += ux * push;
+        ys[j] += uy * push;
+        moved = true;
+      }
     for (let i = 0; i < n; i++) {
       const r = nodes[i].r + 2;
-      xs[i] = Math.min(width - r, Math.max(r, xs[i])); ys[i] = Math.min(height - r, Math.max(r, ys[i]));
+      xs[i] = Math.min(width - r, Math.max(r, xs[i]));
+      ys[i] = Math.min(height - r, Math.max(r, ys[i]));
     }
     if (!moved) break;
   }

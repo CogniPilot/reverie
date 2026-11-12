@@ -125,7 +125,7 @@ impl std::fmt::Display for LaptopError {
     }
 }
 impl LaptopError {
-    pub(super) fn unconfirmed_native(&self) -> bool {
+    pub(crate) fn unconfirmed_native(&self) -> bool {
         match self {
             Self::OrdinaryStop(_) => true,
             Self::MemoryEffectUnconfirmed(_) => true,

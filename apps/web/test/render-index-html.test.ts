@@ -23,7 +23,7 @@ import { isDeepSeekAvailable, isDeepSeekRunnable } from '../src/utils/deepseek-c
 import { isOmpAvailable } from '../src/utils/omp-cli-resolver.js';
 import { isCloudflaredAvailable } from '../src/utils/cloudflared-resolver.js';
 import { isGitAvailable } from '../src/git-clone.js';
-import { enabledClis, reloadCliRegistry } from '../src/config/cli-registry/registry.js';
+import { listClis, reloadCliRegistry } from '../src/config/cli-registry/registry.js';
 import { STOCK_CLIS } from '../src/config/cli-registry/stock.js';
 import { dataPath } from '../src/config/instance.js';
 import { mkdirSync, writeFileSync } from 'node:fs';
@@ -85,12 +85,12 @@ vi.mock('../src/git-clone.js', () => ({
   isGitAvailable: vi.fn(() => false),
 }));
 // The custom-model list carries `label`, a string a user's own clis.json can set.
-// Wrap enabledClis so ONE test below can hand renderIndexHtml a label with `$'`
+// Wrap the canonical catalog so ONE test can hand renderIndexHtml a label with `$'`
 // in it while every other test still reads the real stock registry through the
 // real implementation.
 vi.mock('../src/config/cli-registry/registry.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../src/config/cli-registry/registry.js')>();
-  return { ...actual, enabledClis: vi.fn(actual.enabledClis) };
+  return { ...actual, listClis: vi.fn(actual.listClis) };
 });
 
 const TEMPLATE = [
@@ -267,6 +267,7 @@ describe('WebServer.renderIndexHtml', () => {
       order: number;
       kind: string;
       external: boolean;
+      supportsCustomModel: boolean;
       enabled: boolean;
       available: boolean;
     }>;
@@ -279,10 +280,15 @@ describe('WebServer.renderIndexHtml', () => {
     // claude is `kind: 'agent'` too; `external` is what keeps its Respawn/Ralph options visible.
     expect(catalog.find((entry) => entry.id === 'claude')).toMatchObject({ kind: 'agent', external: false });
     expect(catalog.find((entry) => entry.id === 'shell')).toMatchObject({ enabled: true, available: true });
+    for (const entry of STOCK_CLIS) {
+      expect(catalog.find(row => row.id === entry.id)?.supportsCustomModel).toBe(
+        entry.kind === 'agent' && entry.capabilities.customModelInjection.kind !== 'unsupported'
+      );
+    }
     expect(
       catalog.every((entry) =>
         Object.keys(entry).every((key) =>
-          ['id', 'label', 'shortBadge', 'order', 'kind', 'external', 'enabled', 'available'].includes(key)
+          ['id', 'label', 'shortBadge', 'order', 'kind', 'external', 'enabled', 'available', 'supportsCustomModel'].includes(key)
         )
       )
     ).toBe(true);
@@ -332,8 +338,8 @@ describe('WebServer.renderIndexHtml', () => {
     // verbatim. The other `$` forms ride along so a partial escape cannot pass.
     const claude = STOCK_CLIS.find((e) => e.id === 'claude')!;
     const label = "Claude $' $& $` $1 $$";
-    const real = vi.mocked(enabledClis).getMockImplementation()!;
-    vi.mocked(enabledClis).mockImplementation(() => [{ ...claude, label }]);
+    const real = vi.mocked(listClis).getMockImplementation()!;
+    vi.mocked(listClis).mockImplementation(() => [{ ...claude, label }]);
     try {
       const { server } = makeServer({});
       const html = await render(server);
@@ -341,7 +347,7 @@ describe('WebServer.renderIndexHtml', () => {
       const clis = JSON.parse(html.match(/window\.__reverieCustomModelClis=(\[.*?\]);/)![1]);
       expect(clis).toEqual([{ id: 'claude', label }]);
     } finally {
-      vi.mocked(enabledClis).mockImplementation(real);
+      vi.mocked(listClis).mockImplementation(real);
     }
   });
 

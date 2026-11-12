@@ -1,11 +1,13 @@
-{ pkgs, src, reverie, console, memory, runtime, worker ? false, browserRuntime ? null, chatLanguageTools ? null, rootlessDocker ? null, resourceReplacement ? false, ownerTerminalWebsite ? null, memoryGuestCapsule ? null, perfGuestCapsule ? null }:
+{ pkgs, src, reverie, console, memory, runtime, runtimePackages ? null, worker ? false, browserRuntime ? null, chatLanguageTools ? null, rootlessDocker ? null, resourceReplacement ? false, ownerTerminalWebsite ? null, memoryGuestCapsule ? null, perfGuestCapsule ? null }:
 let
   uid = if rootlessDocker == null then 2000 else rootlessDocker.uid;
   gid = if rootlessDocker == null then 2000 else rootlessDocker.gid;
   idmap = import ./worker-idmap.nix { inherit pkgs; };
   imagePython = if worker then import ./worker-python.nix { inherit pkgs memory; } else memory;
-  laptopTools = import ./laptop-tools.nix { inherit pkgs src; };
-  childArtifacts = import ./policy-artifacts.nix { inherit pkgs src; };
+  laptopTools = if runtimePackages == null then import ./laptop-tools.nix { inherit pkgs src; }
+    else runtimePackages.laptopTools;
+  childArtifacts = if runtimePackages == null then import ./policy-artifacts.nix { inherit pkgs src; }
+    else runtimePackages.policyArtifacts;
   childManifest = if worker then "${runtime.workerChild}/share/reverie/worker-child-program.json" else null;
   # Kernel-start the untouched Claude/Bun ELF so /proc/self/exe names Claude,
   # not ld-linux (its bundled grep/find shims use process.execPath).
@@ -13,8 +15,10 @@ let
     else if pkgs.stdenv.hostPlatform.isAarch64 then "/lib/ld-linux-aarch64.so.1"
     else null;
   entrypoint = pkgs.writeShellScript "reverie-start" (builtins.readFile (src + "/docker/entrypoint.sh"));
-  humanToolkit = import ./human-terminal-toolkit.nix { inherit pkgs src; };
-  nixPrepare = import ./nix-store-prepare.nix { inherit pkgs src; };
+  humanToolkit = if runtimePackages == null then import ./human-terminal-toolkit.nix { inherit pkgs src; }
+    else runtimePackages.humanTerminalToolkit;
+  nixPrepare = if runtimePackages == null then import ./nix-store-prepare.nix { inherit pkgs src; }
+    else runtimePackages.workerNativeNixStorePrepare;
   # dockerTools.caCertificates, but from the runtime's CA bundle rather than the pinned nixpkgs' older one.
   caCertificates = pkgs.runCommand "ca-certificates" { } ''
     mkdir -p $out/etc/ssl/certs $out/etc/pki/tls/certs
@@ -78,6 +82,17 @@ pkgs.dockerTools.buildLayeredImage {
       # Fixed real files survive the employee's writable /nix overlay.
       # This candidate slot does not select an installed launch policy.
       cp -r ${perfGuestCapsule}/opt/reverie/perf opt/reverie/perf
+      for directory in opt opt/reverie opt/reverie/perf opt/reverie/perf/bin; do
+        test -d "$directory" && test ! -L "$directory"
+      done
+      for program in perf reverie-perf-check reverie-worker-init; do
+        test -f "opt/reverie/perf/bin/$program"
+        test ! -L "opt/reverie/perf/bin/$program"
+        test -x "opt/reverie/perf/bin/$program"
+      done
+      test -f opt/reverie/perf/build-inputs.json
+      test ! -L opt/reverie/perf/build-inputs.json
+      chmod -R a-w opt/reverie/perf
       test ! -e opt/rvprf
     ''}
     unlink bin/reverie
@@ -223,8 +238,10 @@ pkgs.dockerTools.buildLayeredImage {
   config = {
     User = "${toString uid}:${toString gid}";
     WorkingDir = "/reverie_workspace";
-    Entrypoint = if worker then (if perfGuestCapsule == null then [ "/bin/sleep" ] else [ "/opt/reverie/perf/bin/reverie-worker-init" ]) else [ "/bin/tini" "-g" "-s" "--" "/usr/local/bin/reverie-start" ];
-    Cmd = if worker then (if perfGuestCapsule == null then [ "infinity" ] else []) else if ownerTerminalWebsite != null then
+    # Keep the worker factory-v1 program ABI. Actual native J selects its fixed
+    # task-v2 init explicitly; payload presence alone selects no launch policy.
+    Entrypoint = if worker then [ "/bin/sleep" ] else [ "/bin/tini" "-g" "-s" "--" "/usr/local/bin/reverie-start" ];
+    Cmd = if worker then [ "infinity" ] else if ownerTerminalWebsite != null then
       ([ "${ownerTerminalWebsite}/libexec/reverie" ] ++ ownerTerminalWebsite.webArgs) else
       [ "reverie" "web" "--host" "0.0.0.0" "--port" "3000" ]
       ++ pkgs.lib.optionals resourceReplacement [ "--resource-replacement" ];
@@ -257,6 +274,8 @@ pkgs.dockerTools.buildLayeredImage {
       "org.reverie.worker.rootless-docker" = if rootlessDocker == null then "0" else "1";
     } // pkgs.lib.optionalAttrs worker {
       "org.reverie.worker.child-manifest" = childManifest;
+    } // pkgs.lib.optionalAttrs (worker && perfGuestCapsule != null) {
+      "org.reverie.worker.perf-capsule-manifest" = "${perfGuestCapsule}/opt/reverie/perf/build-inputs.json";
     } // pkgs.lib.optionalAttrs (!worker && (resourceReplacement || ownerTerminalWebsite != null)) {
       "org.reverie.website.runtime" = if ownerTerminalWebsite == null then "resource"
         else if builtins.elem "--resource-replacement" ownerTerminalWebsite.webArgs then "resource-terminal"

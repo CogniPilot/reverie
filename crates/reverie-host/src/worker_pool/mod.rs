@@ -1,25 +1,57 @@
 //! Docker-controller cgroup ownership. Public policy/anchor values are data;
 //! the installed witness retains the actual opened kernel directory. This is
 //! not a Gate, storage lease, stop receipt or global shutdown acknowledgement.
+mod birth_compatibility;
+pub use birth_compatibility::ControllerBirthCompatibilityError;
 mod bootstrap;
 mod client;
 #[cfg(test)]
 mod close_classification_tests;
 mod controller_limits;
-pub use client::{ActivatedController, ControllerActivationFailure, ControllerStatusData};
+pub use client::{
+    ActivatedController, ControllerActivationFailure, ControllerCapacity, ControllerStatusData,
+    EmployeeResourceObservation, MemberPolicyEditCommitted, MemberPolicyEditError,
+    MemberPolicyEditRejected, MemberPolicyEditSelection, MemberPolicyEditSettlement,
+    MemberPolicyEditVerified, PreparedMemberPolicyEdit,
+};
 pub(crate) mod directory;
 mod endpoint;
 mod engine;
+mod image_inputs_reference;
+pub use image_inputs_reference::{
+    compiled_pool_image_inputs_reference, compiled_previous_pool_image_inputs_reference,
+};
 mod installation_request;
 pub use installation_request::load_os_pool_installation_request;
+pub use installation_request::{
+    PoolAbsenceObservation, PoolNominationError, PoolNominationFailure, PoolNominationPublished,
+    PoolNominationRevisionFailure, publish_current_os_pool_nomination, publish_os_pool_nomination,
+    rebase_uninstalled_os_pool_nomination, recover_uninstalled_os_pool_pending,
+    retire_failed_os_pool_installation, revise_os_pool_nomination,
+};
 mod member;
+mod member_policy;
+mod member_request;
+pub use member_request::MemberRequestRefusal;
 mod namespace;
 mod policy;
+mod predecessor;
+pub use predecessor::{
+    PendingPoolPredecessorRetirement, PoolPredecessorError, PoolPredecessorFailure,
+    PoolPredecessorRetirementFailure, PoolPredecessorRetirementPhase, PreparedPoolPredecessor,
+    RenamedPoolPredecessor, RetainedPoolObservationFailure, observe_retained_pool_anchor,
+};
 mod publication;
 mod service;
+mod target_observation;
+pub use target_observation::{PoolTargetObservation, PoolTargetObservationError, PoolTargetPhase};
+#[cfg(test)]
+#[path = "target_observation/tests.rs"]
+mod target_observation_tests;
 pub use service::{ControllerServing, ControllerServingFailure};
 #[cfg(test)]
 mod tests;
+pub use crate::worker_laptop::PoolMemberCreation;
 pub use bootstrap::{BrokerBootstrapBinding, BrokerBootstrapFailure};
 use directory::PoolDirectory;
 pub use endpoint::{
@@ -31,15 +63,37 @@ pub use publication::{ControllerBirthPublication, PublishedControllerBirthData};
 use reverie_contracts::worker_pool::WorkerPoolPolicy;
 use std::{fmt, io};
 
+/// Controlled refusal DATA for the downstream owned-Created unit fixture. No
+/// controller, installed pool, current native observation or write grant is
+/// constructed; native exchange acceptance is tested separately.
+#[cfg(test)]
+pub(crate) fn controlled_member_refusal(
+    target: Option<&crate::worker_laptop::CreatedPoolTarget<'_>>,
+) -> PoolError {
+    let refusal = MemberRequestRefusal::capacity();
+    PoolError::MemberRequestRefused(match target {
+        Some(target) => refusal.bind_created(target),
+        None => refusal,
+    })
+}
+
 #[derive(Debug)]
 pub enum PoolError {
     Refused(&'static str),
     Io(io::Error),
+    PublicationDirectory(Box<reverie_store::operations::JournalError>),
     Observation(crate::ObservationError),
     Finalization(Box<PoolError>, Box<PoolError>),
     MetadataClose(Box<PoolError>),
     BootstrapFacts(Box<crate::website_facts::WebsiteFactsError>),
     Engine(crate::engine_metadata::EngineError),
+    Member(std::sync::Arc<crate::worker_laptop::LaptopError>),
+    Channel(crate::worker_reports::WorkerReportError),
+    CreationBudget(reverie_contracts::creation_budget::CreationBudgetError),
+    CreationDeadline,
+    MemberPolicyEditInProgress,
+    MemberRequestRefused(MemberRequestRefusal),
+    BirthCompatibility(Box<ControllerBirthCompatibilityError>),
 }
 impl fmt::Display for PoolError {
     fn fmt(&self, output: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -50,31 +104,63 @@ impl std::error::Error for PoolError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::Io(error) => Some(error),
+            Self::PublicationDirectory(error) => Some(error.as_ref()),
             Self::Observation(error) => Some(error),
             Self::Finalization(primary, _) => Some(primary),
             Self::MetadataClose(error) => Some(error),
             Self::BootstrapFacts(error) => Some(error),
             Self::Engine(error) => Some(error),
-            Self::Refused(_) => None,
+            Self::Member(error) => Some(error.as_ref()),
+            Self::Channel(error) => Some(error),
+            Self::CreationBudget(error) => Some(error),
+            Self::BirthCompatibility(error) => Some(error.as_ref()),
+            Self::Refused(_)
+            | Self::CreationDeadline
+            | Self::MemberPolicyEditInProgress
+            | Self::MemberRequestRefused(_) => None,
         }
     }
 }
 impl PoolError {
+    pub fn birth_compatibility_error(&self) -> Option<&ControllerBirthCompatibilityError> {
+        match self {
+            Self::BirthCompatibility(error) => Some(error),
+            Self::Finalization(primary, _) | Self::MetadataClose(primary) => {
+                primary.birth_compatibility_error()
+            }
+            _ => None,
+        }
+    }
+    pub fn has_unconfirmed_close(&self) -> bool {
+        self.close_unknown()
+    }
     pub fn code(&self) -> &'static str {
         match self {
             Self::Refused(code) => code,
             Self::Io(_) => "WORKER_POOL_IO_UNKNOWN",
+            Self::PublicationDirectory(_) => "WORKER_POOL_PUBLICATION_DIRECTORY_SCAN",
             Self::Observation(_) => "WORKER_POOL_CLOSE_UNKNOWN",
             Self::Finalization(_, _) => "WORKER_POOL_FINALIZATION_UNKNOWN",
             Self::MetadataClose(_) => "WORKER_POOL_CLOSE_UNKNOWN",
             Self::BootstrapFacts(error) => error.code(),
             Self::Engine(_) => "WORKER_POOL_CAPTURED_ENGINE",
+            Self::Member(error) => error.code(),
+            Self::Channel(error) => error.code(),
+            Self::CreationBudget(error) => error.code(),
+            Self::CreationDeadline => "WORKER_POOL_CREATION_BUDGET_DEADLINE",
+            Self::MemberPolicyEditInProgress => "WORKER_POOL_MEMBER_EDIT_RETAINED",
+            Self::MemberRequestRefused(refusal) => refusal.code(),
+            Self::BirthCompatibility(error) => error.code(),
         }
     }
     pub(crate) fn close_unknown(&self) -> bool {
         match self {
-            Self::MetadataClose(_) => true,
+            Self::MetadataClose(_) | Self::PublicationDirectory(_) => true,
             Self::Observation(error) => error.has_unconfirmed_close(),
+            Self::BootstrapFacts(error) => error.has_unconfirmed_close(),
+            Self::Member(error) => error.unconfirmed_native(),
+            Self::Channel(error) => error.has_unconfirmed_close(),
+            Self::BirthCompatibility(error) => error.has_unconfirmed_close(),
             Self::Finalization(primary, secondary) => {
                 primary.close_unknown() || secondary.close_unknown()
             }

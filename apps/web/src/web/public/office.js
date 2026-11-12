@@ -171,8 +171,11 @@
       const withheld = new Set(Array.isArray(catalog.withheld) ? catalog.withheld : []);
       for (const avatar of catalog.avatars) {
         const path = typeof avatar?.src === 'string' ? avatar.src.split('?')[0] : '';
-        if (!withheld.has(avatar.id) && path === `/assets/avatars/${avatar.id}.png` &&
-            /^\/assets\/avatars\/pack-(?:0[1-9]|[1-9][0-9]|1[0-4][0-9]|15[01])\.png$/.test(path)) {
+        if (
+          !withheld.has(avatar.id) &&
+          path === `/assets/avatars/${avatar.id}.png` &&
+          /^\/assets\/avatars\/pack-(?:0[1-9]|[1-9][0-9]|1[0-4][0-9]|15[01])\.png$/.test(path)
+        ) {
           const o = document.createElement('option');
           o.value = path;
           o.textContent = avatar.name;

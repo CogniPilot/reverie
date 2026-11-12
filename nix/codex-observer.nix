@@ -1,5 +1,5 @@
 # Optional source-built diagnostic candidate. It never supplies bin/codex.
-{ pkgs }:
+{ pkgs, artifacts ? import ./policy-artifacts.nix { inherit pkgs; src = ../.; } }:
 let
   inherit (pkgs) lib;
   provenance = builtins.fromJSON (builtins.readFile ./codex-observer/provenance.json);
@@ -22,14 +22,14 @@ let
     allowBuiltinFetchGit = false;
   };
   sourceCheck = pkgs.runCommand "codex-observer-source-check" { } ''
-    ${pkgs.python3}/bin/python3 -I -B ${./codex-observer/verify-inputs.py} source \
+    ${artifacts}/bin/reverie-policy-artifacts codex-observer-inputs source \
       ${patchedSource} ${./codex-observer/provenance.json} ${./codex-observer/git-output-hashes.json} > "$out"
   '';
   vendorCheck = pkgs.runCommand "codex-observer-vendor-check" {
     nativeBuildInputs = [ pkgs.cargo pkgs.rustc ];
   } ''
-    ${pkgs.python3}/bin/python3 -I -B ${./codex-observer/verify-inputs.py} vendor \
-      ${cargoDeps} ${./codex-observer/provenance.json} ${./codex-observer/git-output-hashes.json} > "$out"
+    ${artifacts}/bin/reverie-policy-artifacts codex-observer-inputs vendor \
+      ${cargoDeps} ${./codex-observer/provenance.json} ${./codex-observer/git-output-hashes.json} > "$TMPDIR/qualified-inputs.json"
     cp -R ${patchedSource} source
     chmod -R u+w source
     mkdir -p source/.cargo "$TMPDIR/cargo-home"
@@ -39,13 +39,9 @@ let
     pushd source/codex-rs
     cargo metadata --locked --offline --format-version 1 --no-deps > "$TMPDIR/metadata.json"
     popd
-    ${pkgs.python3}/bin/python3 -I -B - "$out" "$TMPDIR/metadata.json" <<'PY'
-import json, sys
-result = json.load(open(sys.argv[1]))
-metadata = json.load(open(sys.argv[2]))
-result.update(lockedOfflineCargoMetadata=True, workspaceMembers=len(metadata["workspace_members"]))
-json.dump(result, open(sys.argv[1], "w"), sort_keys=True)
-PY
+    ${artifacts}/bin/reverie-policy-artifacts codex-observer-inputs vendor \
+      ${cargoDeps} ${./codex-observer/provenance.json} ${./codex-observer/git-output-hashes.json} \
+      --cargo-metadata "$TMPDIR/metadata.json" > "$out"
   '';
   candidate = pkgs.rustPlatform.buildRustPackage {
   pname = "reverie-codex-observer";

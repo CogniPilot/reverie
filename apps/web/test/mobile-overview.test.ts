@@ -576,9 +576,7 @@ describe('mobile overview Run picker, driven by the registry catalogue', () => {
     ]);
   });
 
-  it('renders every stock CLI exactly as the static fallback table did', () => {
-    // The catalogue-driven path must be byte-identical to the pre-registry table for the
-    // shipped CLIs; only a CLI the table never knew (a custom entry) may differ.
+  it('renders every registered stock CLI and preserves legacy fallback labels', () => {
     const catalog = STOCK_CLIS.map((e) => ({
       id: e.id,
       label: e.label,
@@ -588,6 +586,18 @@ describe('mobile overview Run picker, driven by the registry catalogue', () => {
     }));
     const { modes, staticTable } = loadRunModes(catalog);
     const byMode = (list: Array<{ mode: string }>) => [...list].sort((a, b) => a.mode.localeCompare(b.mode));
-    expect(byMode(modes)).toEqual(byMode(staticTable));
+    expect(byMode(modes)).toEqual(
+      byMode(
+        STOCK_CLIS.map((entry) => ({
+          mode: entry.id,
+          label: entry.kind === 'shell' ? 'Terminal / Shell' : entry.label,
+          short: entry.label,
+        }))
+      )
+    );
+    // Legacy fallback metadata remains compatible; it does not decide the set
+    // of CLIs an authoritative server catalog can offer.
+    const legacyIds = new Set(staticTable.map((entry: { mode: string }) => entry.mode));
+    expect(byMode(modes.filter((entry: { mode: string }) => legacyIds.has(entry.mode)))).toEqual(byMode(staticTable));
   });
 });

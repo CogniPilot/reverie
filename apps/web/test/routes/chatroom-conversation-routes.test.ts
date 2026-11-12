@@ -77,7 +77,10 @@ describe('conversation routes', () => {
 
   it('tells the page what the server can do, so it never shows a control that would do nothing', async () => {
     const res = await app.inject({ url: '/api/chatrooms' });
-    expect(res.json().data.features).toEqual({ pollingModes: [], unread: true, dms: true, placement: true, replies: true, deletes: true, reports: true, topics: true, edits: true, pins: true, order: true, notify: true, replace: true });
+    expect(res.json().data.features).toEqual({ search: true, pollingModes: ['hands'], unread: true, dms: true, placement: true, replies: true, deletes: true, reports: true, topics: true, edits: true, pins: true, order: true, notify: true, replace: true });
+    const agent = await app.inject({ url: '/api/chatrooms', headers: as(A) });
+    expect(agent.statusCode).toBe(200);
+    expect(agent.json().data.features.search).toBe(false);
   });
 
   describe('direct messages', () => {

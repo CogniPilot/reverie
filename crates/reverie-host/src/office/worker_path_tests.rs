@@ -14,6 +14,21 @@ fn close_phone(fixture: &Fixture, phone: &OfficePhone) {
         .unwrap();
 }
 #[test]
+fn expired_recovery_deadline_refuses_before_worker_socket_preparation() {
+    let fixture = fixture_with_socket_root(|root| root.join("office"));
+    let failure = fixture
+        .service
+        .bind_worker_retained_until(ProfileSessionId::parse(SID).unwrap(), Instant::now())
+        .err()
+        .unwrap();
+    let (error, owner) = failure.into_parts();
+    assert!(matches!(error, OfficeError::Deadline));
+    assert!(owner.is_none());
+    assert!(fixture.service.offices.lock().unwrap().is_empty());
+    assert!(!fixture.root.join("office").exists());
+}
+
+#[test]
 fn worker_root_spellings_preserve_real_mkdir_effects_before_anchored_bind() {
     for case in [
         "plain",

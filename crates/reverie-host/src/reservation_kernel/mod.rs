@@ -29,6 +29,8 @@ const PROC: &str = "/proc";
 const CGROUP: &str = "/sys/fs/cgroup";
 #[derive(Debug)]
 pub enum ReservationKernelError {
+    /// Read-only scan needs a fresh extended stopped-state observation.
+    StoppedMountStateRequired(reverie_core::ids::ContainerId),
     Observation(ObservationError),
     Data(KernelDataError),
     Mounts(MountTableError),
@@ -43,6 +45,7 @@ impl ReservationKernelError {
     }
     pub fn code(&self) -> &'static str {
         match self {
+            Self::StoppedMountStateRequired(_) => "RESERVATION_STOPPED_MOUNT_STATE_REQUIRED",
             Self::Observation(value) => value.code(),
             Self::Data(value) => value.code(),
             Self::Mounts(value) => {
@@ -70,7 +73,7 @@ impl std::error::Error for ReservationKernelError {
             Self::EngineData(error) => Some(error),
             Self::Baseline(error) => Some(error),
             Self::StartData(error) => Some(error),
-            Self::Refused(_) => None,
+            Self::Refused(_) | Self::StoppedMountStateRequired(_) => None,
         }
     }
 }
@@ -130,6 +133,7 @@ trait Source {
     fn read(&self, path: &PosixPath, maximum: usize) -> Result<Vec<u8>>;
     fn exists(&self, path: &PosixPath) -> Result<bool>;
     fn resolve(&self, path: &PosixPath) -> Result<PosixPath>;
+    fn resolve_future(&self, path: &PosixPath) -> Result<PosixPath>;
     fn identity(&self, path: &PosixPath) -> Result<[u64; 4]>;
     fn identity_text(&self, points: &[u32]) -> Result<[u64; 4]>;
     fn resolve_optional(&self, path: &PosixPath) -> Result<PosixPath>;
@@ -157,6 +161,9 @@ impl Source for Installed {
     }
     fn resolve(&self, path: &PosixPath) -> Result<PosixPath> {
         Ok(native::resolve_strict_text(&path.codepoints())?)
+    }
+    fn resolve_future(&self, path: &PosixPath) -> Result<PosixPath> {
+        Ok(native::resolve_future_text(&path.codepoints())?)
     }
     fn identity(&self, path: &PosixPath) -> Result<[u64; 4]> {
         Ok(native::reservation_identity(path)?)
@@ -363,6 +370,16 @@ impl ReservationKernel {
         end: Instant,
     ) -> Result<()> {
         custody::scan_targets(&Installed, config, targets, rows, table, end)
+    }
+    pub fn custody_paths_with_stopped(
+        &self,
+        config: &ReservationConfiguration,
+        targets: &CustodyPaths,
+        inventory: &reverie_contracts::reservation_engine::CustodyInventory<'_>,
+        table: &MountTable,
+        end: Instant,
+    ) -> Result<()> {
+        custody::scan_with_stopped(&Installed, config, targets, inventory, table, end)
     }
     pub fn storage(
         &self,

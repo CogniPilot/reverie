@@ -1,0 +1,182 @@
+//! Initial whole owner: retained service IMAGE fence across website deployment
+//! and actual actor setup. No broker/worker restart or pool consent is inferred.
+use crate::{
+    DeploymentError, DeploymentPreview, DeploymentProfile, DeploymentService, DeploymentStatus,
+};
+use reverie_application::{
+    installing_broker::{
+        InstallingBroker, OfflineActorSetupClosed, OfflineActorSetupFailure,
+        PreparedOfflineActorSetup,
+    },
+    reservation_gate::GateError,
+    worker_validation::{WorkerValidationError, load_owner_config},
+};
+use reverie_contracts::{
+    reservation_engine::ReservationConfiguration,
+    resource_actor::{ResourceActorDataError, ResourceActorSettings},
+    worker_config,
+};
+use reverie_core::operations::JournalId;
+use reverie_host::{
+    resource_facts::{ResourceFactsError, fresh_owner_nonce},
+    worker_service::{
+        ClosedImageServiceMaintenance, DeploymentServiceQuiesceFailure, ImageServiceMaintenance,
+        NativeWorkerServiceRole, maintain_stopped_deployment_service,
+        quiesce_stopped_worker_service,
+    },
+};
+use std::{
+    path::{Path, PathBuf},
+    time::Instant,
+};
+mod error;
+mod run;
+pub use error::{InitialWebsiteRolloutError, InitialWebsiteRolloutFailure};
+type RolloutResult<'a, T> = std::result::Result<T, InitialWebsiteRolloutError<'a>>;
+struct Owner<'a> {
+    broker: &'a InstallingBroker,
+    root: PathBuf,
+    source: PathBuf,
+    image: String,
+    operation: Option<JournalId>,
+    deployment: Option<DeploymentService>,
+    preview: Option<DeploymentPreview>,
+    status: Option<DeploymentStatus>,
+    service: Option<ImageServiceMaintenance>,
+    closed_service: Option<ClosedImageServiceMaintenance>,
+    actor: Option<PreparedOfflineActorSetup<'a>>,
+    actor_attempted: bool,
+    previous_facts: reverie_host::resource_facts::InstalledFactsObserver,
+    flow: WebsiteFlow,
+    input: reverie_host::website_facts::ImmutableInputObserver,
+    deployment_close_attempted: bool,
+    end: Instant,
+}
+enum WebsiteFlow {
+    Initial,
+    Update { skip_backup: bool },
+    RecoverActor { deployment_operation: String },
+}
+impl WebsiteFlow {
+    fn refresh(&self) -> bool {
+        !matches!(self, Self::Initial)
+    }
+    fn skip_backup(&self) -> bool {
+        matches!(self, Self::Update { skip_backup: true })
+    }
+    fn recovery_operation(&self) -> Option<&str> {
+        match self {
+            Self::RecoverActor {
+                deployment_operation,
+            } => Some(deployment_operation),
+            _ => None,
+        }
+    }
+}
+pub struct InitialWebsiteRolloutClosed {
+    operation: JournalId,
+    deployment: DeploymentStatus,
+    actor: OfflineActorSetupClosed,
+}
+impl InitialWebsiteRolloutClosed {
+    pub fn operation_id(&self) -> &str {
+        self.operation.as_str()
+    }
+    pub fn deployment_status(&self) -> &DeploymentStatus {
+        &self.deployment
+    }
+    pub fn actor_configuration_digest(&self) -> &str {
+        self.actor.configuration_digest().as_str()
+    }
+    pub fn actor_preview_digest(&self) -> &str {
+        self.actor.preview_digest().as_str()
+    }
+}
+/// OS-owner initial installation only. The broker must be the original stable
+/// unstarted installing instance, not reconstructed after an unknown outcome.
+pub fn rollout_initial_website<'a>(
+    broker: &'a InstallingBroker,
+    root: &Path,
+    source: &Path,
+    image: &str,
+    end: Instant,
+) -> std::result::Result<InitialWebsiteRolloutClosed, Box<InitialWebsiteRolloutFailure<'a>>> {
+    rollout_website_mode(broker, root, source, image, end, WebsiteFlow::Initial)
+}
+/// Update the registered protected website and refresh its selected actor under
+/// the same original stopped-service fence. This does not activate a pool.
+pub fn update_uninstalled_website<'a>(
+    broker: &'a InstallingBroker,
+    root: &Path,
+    source: &Path,
+    image: &str,
+    end: Instant,
+    skip_backup: bool,
+) -> std::result::Result<InitialWebsiteRolloutClosed, Box<InitialWebsiteRolloutFailure<'a>>> {
+    rollout_website_mode(
+        broker,
+        root,
+        source,
+        image,
+        end,
+        WebsiteFlow::Update { skip_backup },
+    )
+}
+/// Fresh actor-only recovery after a verified protected website deployment.
+/// The prior outcome stays unknown; no website effect, consent or start repeats.
+pub fn recover_uninstalled_website_actor<'a>(
+    broker: &'a InstallingBroker,
+    root: &Path,
+    source: &Path,
+    image: &str,
+    deployment_operation: &str,
+    end: Instant,
+) -> std::result::Result<InitialWebsiteRolloutClosed, Box<InitialWebsiteRolloutFailure<'a>>> {
+    rollout_website_mode(
+        broker,
+        root,
+        source,
+        image,
+        end,
+        WebsiteFlow::RecoverActor {
+            deployment_operation: deployment_operation.to_owned(),
+        },
+    )
+}
+fn rollout_website_mode<'a>(
+    broker: &'a InstallingBroker,
+    root: &Path,
+    source: &Path,
+    image: &str,
+    end: Instant,
+    flow: WebsiteFlow,
+) -> std::result::Result<InitialWebsiteRolloutClosed, Box<InitialWebsiteRolloutFailure<'a>>> {
+    let mut owner = Box::new(Owner {
+        broker,
+        root: root.to_owned(),
+        source: source.to_owned(),
+        image: image.to_owned(),
+        operation: None,
+        deployment: None,
+        preview: None,
+        status: None,
+        service: None,
+        closed_service: None,
+        actor: None,
+        actor_attempted: false,
+        previous_facts: Default::default(),
+        flow,
+        input: Default::default(),
+        deployment_close_attempted: false,
+        end,
+    });
+    match owner.run() {
+        Ok(closed) => Ok(closed),
+        Err(cause) => Err(InitialWebsiteRolloutFailure::new(owner, cause)),
+    }
+}
+fn require<'a>(value: bool, code: &'static str) -> RolloutResult<'a, ()> {
+    value
+        .then_some(())
+        .ok_or(InitialWebsiteRolloutError::Refused(code))
+}

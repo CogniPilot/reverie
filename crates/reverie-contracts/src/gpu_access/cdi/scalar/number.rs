@@ -1,5 +1,7 @@
 use super::*;
 use reverie_core::{python_numeric_text, python_trim_text as trim_text};
+mod float_value;
+pub(super) use float_value::float_value;
 fn scalar_number(raw: &str) -> Option<String> {
     let value = python_numeric_text(&raw.replace('_', ""))?;
     (!value.bytes().any(|byte| matches!(byte, 0x1c..=0x1f))).then_some(value)
@@ -58,19 +60,6 @@ fn radix(value: &str, base: u32) -> bool {
         .or_else(|| value.strip_prefix(prefixes[1]))
         .unwrap_or(value);
     !value.is_empty() && value.chars().all(|point| point.is_digit(base))
-}
-pub(super) fn float(raw: &str) -> bool {
-    let Some(value) = scalar_number(raw) else {
-        return false;
-    };
-    let value = value.to_ascii_lowercase();
-    let value = value.strip_prefix(['+', '-']).unwrap_or(&value);
-    if matches!(value, ".inf" | ".nan") {
-        return true;
-    }
-    value
-        .split(':')
-        .all(|part| trim_text(part).parse::<f64>().is_ok())
 }
 pub(super) fn binary(value: &str) -> Result<usize> {
     if !value.is_ascii() {

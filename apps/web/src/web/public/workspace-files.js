@@ -275,11 +275,17 @@
       limited = !!data.limited;
       // The bounded folder listing may not contain the linked file. Its separately authorized
       // resolver metadata can add exactly that entry without walking the rest of the directory.
-      if (limited && selection?.entry && !entries.some(row => row.path === selection.path))
+      if (limited && selection?.entry && !entries.some((row) => row.path === selection.path))
         entries.push(selection.entry);
       if (push) history.pushState({}, '', `?${new URLSearchParams({ path })}`);
-      const selected = selection && entries.find(row => row.path === selection.path && row.kind === 'file' &&
-        (!selection.binding || row.binding === selection.binding));
+      const selected =
+        selection &&
+        entries.find(
+          (row) =>
+            row.path === selection.path &&
+            row.kind === 'file' &&
+            (!selection.binding || row.binding === selection.binding)
+        );
       if (selected) selectedPath = selected.path;
       renderFiles();
       if (selection) {
@@ -287,7 +293,7 @@
           status('Linked file is unavailable or changed. Refresh the folder to find its current version.', true);
           return;
         }
-        const button = [...$('files').querySelectorAll('button.file')].find(row => row.dataset.path === selectedPath);
+        const button = [...$('files').querySelectorAll('button.file')].find((row) => row.dataset.path === selectedPath);
         button?.focus({ preventScroll: true });
         button?.scrollIntoView?.({ block: 'nearest' });
         if (selected.size <= 32 * 1024 * 1024) void preview(selected, button);
@@ -400,12 +406,17 @@
           // Drawn by an <img> from a data: URL, as in the console viewers: an image runs none of the file's script, and a
           // data: URL (unlike a same-origin blob:) cannot be opened as a page on this origin. The server sends it as text.
           let binary = '';
-          for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+          for (let i = 0; i < bytes.length; i += 0x8000)
+            binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
           const img = node('img');
           img.alt = entry.name;
           img.src = `data:image/svg+xml;base64,${btoa(binary)}`;
           note.replaceWith(img);
-        } else if (/\.md(?:own)?$|\.markdown$/i.test(entry.name) && window.marked?.parse && window.sanitizeMarkdownHtml) {
+        } else if (
+          /\.md(?:own)?$|\.markdown$/i.test(entry.name) &&
+          window.marked?.parse &&
+          window.sanitizeMarkdownHtml
+        ) {
           const template = staticDocument(window.marked.parse(text, { async: false }));
           const article = node('article', undefined, 'workspace-markdown');
           article.append(template.content);
@@ -500,24 +511,42 @@
       const timer = setTimeout(() => controller.abort(), 12000);
       try {
         const response = await fetch(url('api/workspace/resolve', { path: absolute, locate: '1' }), {
-          credentials: 'same-origin', cache: 'no-store', redirect: 'error', signal: controller.signal,
+          credentials: 'same-origin',
+          cache: 'no-store',
+          redirect: 'error',
+          signal: controller.signal,
         });
-        if (!response.ok || response.redirected || response.status === 206) throw new Error('Linked file is unavailable.');
-        const raw = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(await previewBytes(response, 65536, controller.signal)));
+        if (!response.ok || response.redirected || response.status === 206)
+          throw new Error('Linked file is unavailable.');
+        const raw = JSON.parse(
+          new TextDecoder('utf-8', { fatal: true }).decode(await previewBytes(response, 65536, controller.signal))
+        );
         if (turn !== locationEpoch) return;
         const item = raw.data;
-        if (raw.success !== true || item?.kind !== 'workspace' || item.absolutePath !== absolute ||
-          typeof item.path !== 'string' || !item.path || item.path.length > 2048 ||
-          item.path.split('/').some(part => !part || part.startsWith('.') || /[\\\x00-\x1f\x7f]/.test(part)) ||
-          item.name !== item.path.split('/').at(-1) || !/^[a-f0-9]{64}$/.test(item.binding) ||
-          !Number.isSafeInteger(item.size) || item.size < 0 || typeof item.modified !== 'string' ||
-          (query.has('binding') && query.get('binding') !== item.binding))
+        if (
+          raw.success !== true ||
+          item?.kind !== 'workspace' ||
+          item.absolutePath !== absolute ||
+          typeof item.path !== 'string' ||
+          !item.path ||
+          item.path.length > 2048 ||
+          item.path.split('/').some((part) => !part || part.startsWith('.') || /[\\\x00-\x1f\x7f]/.test(part)) ||
+          item.name !== item.path.split('/').at(-1) ||
+          !/^[a-f0-9]{64}$/.test(item.binding) ||
+          !Number.isSafeInteger(item.size) ||
+          item.size < 0 ||
+          typeof item.modified !== 'string' ||
+          (query.has('binding') && query.get('binding') !== item.binding)
+        )
           throw new Error('Linked file is unavailable or changed.');
         const folder = item.path.split('/').slice(0, -1).join('/');
         await load(folder, false, { path: item.path, binding: item.binding, entry: { ...item, kind: 'file' } });
       } catch (error) {
-        if (turn === locationEpoch) status(controller.signal.aborted ? 'Opening the linked file timed out.' : error.message, true);
-      } finally { clearTimeout(timer); }
+        if (turn === locationEpoch)
+          status(controller.signal.aborted ? 'Opening the linked file timed out.' : error.message, true);
+      } finally {
+        clearTimeout(timer);
+      }
       return;
     }
     const selected = query.get('select');

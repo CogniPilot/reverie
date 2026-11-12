@@ -9,6 +9,8 @@ import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { performance } from 'node:perf_hooks';
 import { z } from 'zod';
+import { EmployeeGpuIntentData, EmployeeGpuApplyData } from './employee-gpu-data.js';
+import { EmployeePolicyEditApproval, EmployeePolicyEditResult } from './resource-employee-data.js';
 import { Session } from './session.js';
 import type { PlanMoveRecord } from './plan-move.js';
 import { ResourceWorkerLaunch } from './resource-worker-launch.js';
@@ -17,13 +19,18 @@ import { RamResourceSessionLaunchTask } from './resource-ram-session.js';
 import {
   ResourceOwnerAuthority,
   assertResourceOperation,
-  type ResourceApproval,
   type ResourceOwnerBinding,
   type ResourceOwnerContext,
   type ResourcePreviewContext,
   type AnyResourceContext,
   type RamResourceOwnerContext,
   type RamResourcePreviewContext,
+  type RamResourceStatusContext,
+  type RamGpuStatusContext,
+  type RamGpuApplyStatusContext,
+  type RamGpuRequestContext,
+  type RamGpuApplyContext,
+  type RamEmployeePolicyEditContext,
 } from './resource-owner-authority.js';
 
 const MAX_FRAME = 64 * 1024;
@@ -59,10 +66,26 @@ const Check = z
     approval: Approval.nullable(),
   })
   .strict();
-const RamCheck = Check.extend({ approval: RamApproval.nullable() }).strict();
+const RamCheck = Check.extend({
+  approval: z.union([RamApproval, EmployeeGpuIntentData, EmployeeGpuApplyData, EmployeePolicyEditApproval]).nullable(),
+  stage: z.enum([
+    'preview',
+    'apply',
+    'status',
+    'gpu-status',
+    'gpu-apply-status',
+    'gpu-request',
+    'gpu-apply',
+    'employee-policy-edit',
+  ]),
+}).strict();
 const RamDraft = z
   .object({ employeeId: UUID, idempotencyKey: UUID, memoryMiB: z.number().int().min(512).max(1_048_576) })
   .strict();
+const EmployeeStatus = z.object({ employeeId: UUID, sessionId: UUID }).strict();
+const GpuApply = z.object({ employeeId: UUID, approval: EmployeeGpuApplyData }).strict();
+const GpuRequest = z.object({ employeeId: UUID, approval: EmployeeGpuIntentData }).strict();
+const EmployeePolicyEdit = z.object({ employeeId: UUID, approval: EmployeePolicyEditApproval }).strict();
 const RamClaim = z.object({ approval: RamApproval }).strict();
 const RamReference = z
   .object({
@@ -120,6 +143,12 @@ const Completion = z
     readOnly: z.literal(true),
   })
   .strict();
+
+export class ResourceNativeRefusal extends Error {
+  constructor(readonly reason: string) {
+    super('Protected resource operation refused: ' + reason);
+  }
+}
 
 /** A fresh read-only host result, never a permit or serialized authority.
  * Reinspection after the metadata save catches observed drift during storage.
@@ -334,7 +363,15 @@ export class ResourceNativeClient {
   static async openRam(
     path: string,
     authority: ResourceOwnerAuthority,
-    context: RamResourceOwnerContext | RamResourcePreviewContext
+    context:
+      | RamResourceOwnerContext
+      | RamResourcePreviewContext
+      | RamResourceStatusContext
+      | RamGpuStatusContext
+      | RamGpuApplyStatusContext
+      | RamGpuRequestContext
+      | RamGpuApplyContext
+      | RamEmployeePolicyEditContext
   ): Promise<ResourceNativeClient> {
     need(context.purpose === 'resource-ram-pool-v2');
     return this.#open(path, authority, context);
@@ -501,10 +538,10 @@ export class ResourceNativeClient {
           check.stage === this.#context.stage
       );
       pending.challenges.add(check.nonce);
-      const approval: Readonly<ResourceApproval> | null =
-        this.#context.stage === 'apply' ? this.#context.approval : null;
+      const approval = 'approval' in this.#context ? this.#context.approval : null;
       need(
-        check.employeeId === (approval?.employeeId ?? (this.#context as ResourcePreviewContext).employeeId) &&
+        check.employeeId ===
+          (this.#context.stage === 'apply' ? this.#context.approval.employeeId : this.#context.employeeId) &&
           isDeepStrictEqual(check.approval, approval)
       );
       const ownerReply = {
@@ -584,10 +621,24 @@ export class ResourceNativeClient {
     } else if (Refusal.safeParse(value).success) {
       const refused = Refusal.parse(value);
       need(refused.requestId === pending.id);
-      this.close(new Error('Protected resource operation refused: ' + refused.reason));
+      this.close(new ResourceNativeRefusal(refused.reason));
     } else {
       const reply = Reply.parse(value);
       need(reply.requestId === pending.id);
+      if (['gpu-status', 'gpu-apply-status', 'gpu-request', 'gpu-apply'].includes(this.#context.stage))
+        need(pending.challenges.size > 0);
+      if (this.#context.stage === 'employee-policy-edit') {
+        const result = EmployeePolicyEditResult.parse(reply.value);
+        const approval = this.#context.approval;
+        need(
+          pending.challenges.size > 0 &&
+            result.employeeId === this.#context.employeeId &&
+            result.sessionId === approval.sessionId &&
+            result.operationId === approval.operationId &&
+            result.memoryHighMiB === approval.memoryHighMiB &&
+            result.cpuWeight === approval.cpuWeight
+        );
+      }
       pending.resultSeen = true;
       void (async () => {
         try {
@@ -623,6 +674,12 @@ export class ResourceNativeClient {
   }
   async request(
     verb:
+      | 'employee-status'
+      | 'gpu-status'
+      | 'gpu-apply-status'
+      | 'gpu-request'
+      | 'gpu-apply'
+      | 'employee-policy-edit'
       | 'draft'
       | 'claim'
       | 'publication'
@@ -642,7 +699,40 @@ export class ResourceNativeClient {
     let ramReference: string | undefined;
     if (this.#context.purpose === 'resource-ram-pool-v2') {
       need(readiness === undefined);
-      if (verb === 'draft') {
+      if (verb === 'employee-status') {
+        const selected = EmployeeStatus.parse(fields);
+        need(
+          this.#context.stage === 'status' && selected.employeeId === this.#context.employeeId && launch === undefined
+        );
+        selectedFields = Object.freeze(selected);
+      } else if (verb === 'gpu-status' || verb === 'gpu-apply-status') {
+        const selected = EmployeeStatus.parse(fields);
+        need(
+          this.#context.stage === verb &&
+            selected.employeeId === this.#context.employeeId &&
+            selected.sessionId === this.#context.sessionId &&
+            launch === undefined
+        );
+        selectedFields = Object.freeze(selected);
+      } else if (verb === 'gpu-request' || verb === 'gpu-apply') {
+        const selected = (verb === 'gpu-request' ? GpuRequest : GpuApply).parse(fields);
+        need(
+          this.#context.stage === verb &&
+            selected.employeeId === this.#context.employeeId &&
+            isDeepStrictEqual(selected.approval, this.#context.approval) &&
+            launch === undefined
+        );
+        selectedFields = Object.freeze({ employeeId: selected.employeeId, approval: this.#context.approval });
+      } else if (verb === 'employee-policy-edit') {
+        const selected = EmployeePolicyEdit.parse(fields);
+        need(
+          this.#context.stage === 'employee-policy-edit' &&
+            selected.employeeId === this.#context.employeeId &&
+            isDeepStrictEqual(selected.approval, this.#context.approval) &&
+            launch === undefined
+        );
+        selectedFields = Object.freeze({ employeeId: selected.employeeId, approval: this.#context.approval });
+      } else if (verb === 'draft') {
         const selected = RamDraft.parse(fields);
         need(
           this.#context.stage === 'preview' && selected.employeeId === this.#context.employeeId && launch === undefined
@@ -668,10 +758,44 @@ export class ResourceNativeClient {
       }
     }
     need(
-      ['draft', 'claim', 'publication', 'prepare', 'source-stop', 'start', 'verify', 'finalize', 'completion'].includes(
-        verb
-      ) &&
-        this.#context.stage === (verb === 'draft' || verb === 'completion' ? 'preview' : 'apply') &&
+      [
+        'employee-status',
+        'gpu-status',
+        'gpu-apply-status',
+        'gpu-request',
+        'gpu-apply',
+        'employee-policy-edit',
+        'draft',
+        'claim',
+        'publication',
+        'prepare',
+        'source-stop',
+        'start',
+        'verify',
+        'finalize',
+        'completion',
+      ].includes(verb) &&
+        (![
+          'employee-status',
+          'gpu-status',
+          'gpu-apply-status',
+          'gpu-request',
+          'gpu-apply',
+          'employee-policy-edit',
+        ].includes(verb) ||
+          this.#context.purpose === 'resource-ram-pool-v2') &&
+        this.#context.stage ===
+          (verb === 'gpu-status' ||
+          verb === 'gpu-apply-status' ||
+          verb === 'gpu-request' ||
+          verb === 'gpu-apply' ||
+          verb === 'employee-policy-edit'
+            ? verb
+            : verb === 'employee-status'
+              ? 'status'
+              : verb === 'draft' || verb === 'completion'
+                ? 'preview'
+                : 'apply') &&
         Object.keys(fields).every((key) => !['kind', 'requestId', 'verb'].includes(key)) &&
         (verb === 'start'
           ? this.#context.purpose === 'resource-ram-pool-v2'
@@ -685,6 +809,7 @@ export class ResourceNativeClient {
     const id = randomUUID(),
       remaining = Math.min(180_000, this.#context.expiresAtEpochMs - Date.now());
     need(remaining > 0);
+    if (this.#context.stage === 'employee-policy-edit') this.#authority.consumeEmployeePolicyEdit(this.#context);
     return new Promise((resolve, reject) => {
       const timer = setTimeout(
         () => this.close(new Error('Protected resource outcome expired; do not retry')),

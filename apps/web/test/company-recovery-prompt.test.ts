@@ -111,6 +111,7 @@ function realRecoverySession(initial = '') {
     }),
   };
   Object.assign(session, { _pid: 42, _mux: mux, _muxSession: { muxName: 'owned-recovery', pid: 42 } });
+  registerMuxFixture(session);
   vi.spyOn(session as any, '_recheckPaneDialogSoon').mockImplementation(() => {});
   return { session, writes, mux, pane: () => pane, setPane: (body: string) => { pane = codexPane(body); } };
 }
@@ -143,3 +144,4 @@ describe('actual Session recovery submission ownership', () => {
     expect(f.writes).toHaveLength(1); expect(f.pane()).toBe(codexPane('new owner draft'));
   });
 });
+import { registerMuxFixture } from './helpers/registered-mux-fixture.js';

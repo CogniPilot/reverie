@@ -6,13 +6,13 @@ import { planRebootRestore, type RebootRestoreEntry } from './reboot-restore.js'
 export interface CompanyWakeDeps {
   company(): CompanyState;
   saved(sessionId: string): SessionState | undefined;
-  /** Fresh bounded native facts for explicit attendance; viewer/PID liveness is not provider health. */
+  /** Fresh bounded native facts for every wake; viewer/PID liveness is not provider health. */
   nativeHealth?(sessionId: string): 'healthy' | 'dead' | 'unknown';
   live(sessionId: string): boolean;
   closing(sessionId: string): boolean;
   noteRunning(sessionId: string): Promise<void>;
   begin(employeeId: string, sessionId: string): { current(): boolean; finish(): void } | undefined;
-  claim(employeeId: string, sessionId: string, now: number, automatic: boolean): Promise<boolean>;
+  claim(employeeId: string, sessionId: string, now: number, automatic: boolean, stillCurrent?: () => boolean): Promise<boolean>;
   wake(entry: RebootRestoreEntry, allowed: () => boolean): Promise<boolean>;
   now?(): number;
   kickoff?(employee: CompanyEmployee, allowed: () => boolean): Promise<void>;
@@ -114,10 +114,17 @@ export class CompanyWake {
       .sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id));
     if (manualId && targets.length === 0) report.skipped.push({ employeeId: manualId, reason: 'changed-or-stopping' });
     for (const planned of targets) {
+      const binding = {
+        id: planned.id,
+        sessionId: planned.sessionId,
+        owner: planned.owner,
+        generation: planned.sessionGeneration,
+      };
       const current = () =>
         this.deps
           .company()
-          .employees.find((e) => e.id === planned.id && e.sessionId === planned.sessionId && e.owner === planned.owner);
+          .employees.find((e) => e.id === binding.id && e.sessionId === binding.sessionId && e.owner === binding.owner &&
+            e.sessionGeneration === binding.generation && !e.bindingMigration);
       const baseAllowed = () => {
         const employee = current();
         return (
@@ -146,10 +153,9 @@ export class CompanyWake {
         continue;
       }
       if (!stillCurrent()) { skip('changed-or-stopping'); continue; }
-      const isLive = () => explicitStart && this.deps.nativeHealth
+      const isLive = () => this.deps.nativeHealth
         ? this.deps.nativeHealth(employee.sessionId)==='healthy' : this.deps.live(employee.sessionId);
-      if (explicitStart && this.deps.nativeHealth && this.deps.live(employee.sessionId) &&
-          this.deps.nativeHealth(employee.sessionId)==='unknown') { skip('native-health-unconfirmed'); continue; }
+      if (this.deps.nativeHealth?.(employee.sessionId)==='unknown') { skip('native-health-unconfirmed'); continue; }
       if (isLive()) {
         await this.deps.noteRunning(employee.sessionId);
         continue;
@@ -188,8 +194,8 @@ export class CompanyWake {
       // outcome is unknown: never reported as "did not start", which would invite a second start.
       let attempted = false;
       try {
-        if (!(await this.deps.claim(employee.id, employee.sessionId, (this.deps.now ?? Date.now)(), !manualId))) {
-          skip('disabled-or-retry-limited');
+        if (!(await this.deps.claim(employee.id, employee.sessionId, (this.deps.now ?? Date.now)(), !manualId, allowed))) {
+          skip(allowed() ? 'disabled-or-retry-limited' : 'changed-or-stopping');
           continue;
         }
         if (!allowed()) {
@@ -200,10 +206,16 @@ export class CompanyWake {
           await this.deps.noteRunning(employee.sessionId);
           continue;
         }
+        // A claim can await disk I/O. Unknown native facts after that wait are
+        // still a pre-effect refusal; an alive viewer cannot supply the proof.
+        if (this.deps.nativeHealth?.(employee.sessionId)==='unknown') {
+          skip('native-health-unconfirmed');
+          continue;
+        }
         attempted = true;
         const woke = await this.deps.wake(entry, allowed);
         if (!allowed()) {
-          skip('changed-or-stopping');
+          skip('start-unconfirmed');
           continue;
         }
         if (woke) {

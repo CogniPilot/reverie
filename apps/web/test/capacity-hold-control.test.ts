@@ -1,3 +1,4 @@
+import { registerMuxFixture } from './helpers/registered-mux-fixture.js';
 import {it,expect,vi} from 'vitest';
 import {Session} from '../src/session.js';
 import {typeAndSubmit} from '../src/submit-settle.js';
@@ -15,6 +16,7 @@ it('invariant: a plan-move capacity hold forbids the pending retry Enter after t
   (await typeAndSubmit(io,input.replace(/\r/g,''),{glyph:'›',workingLine:'esc to interrupt'},'owned capacity control',options.requireEmptyComposer))!=='not-written'};
  session=new Session({workingDir:'/tmp',mode:'codex',useMux:true,mux:mux as never,
   muxSession:{muxName:'reverie-owned-review',sessionId:'owned-review',pid:42}as never});
+ registerMuxFixture(session);
  try{
   const retry=(session as any)._capacityRetry;expect(retry).toBeTruthy();retry.deps.delaysMs=[1];retry.check();
   await vi.advanceTimersByTimeAsync(1);

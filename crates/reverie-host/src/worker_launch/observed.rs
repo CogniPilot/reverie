@@ -105,7 +105,16 @@ pub struct ObservedCreatePlan {
     storage: StoragePaths,
     arguments: CreateArguments,
 }
+/// Private same-observation correlation only; it contains no runtime/effect
+/// authority and cannot be supplied by an application or decoded from DATA.
+pub(crate) struct ObservedPlanIdentity(Arc<()>);
 impl ObservedCreatePlan {
+    pub(crate) fn original_observation(&self) -> ObservedPlanIdentity {
+        ObservedPlanIdentity(self.observation.clone())
+    }
+    pub(crate) fn matches_observation(&self, original: &ObservedPlanIdentity) -> bool {
+        Arc::ptr_eq(&self.observation, &original.0)
+    }
     /// Pure same-owner provenance, not filesystem freshness or launch approval.
     /// Paths/SID and a successful later Nix result cannot reconstruct this
     /// identity. A consumed-unconfirmed owner still refuses independently.

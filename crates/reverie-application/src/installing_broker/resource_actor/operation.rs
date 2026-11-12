@@ -7,6 +7,9 @@ use reverie_store::storage_identity::{self, StorageIdentityConfig};
 use std::time::{SystemTime, UNIX_EPOCH};
 mod claim;
 mod cursor;
+mod employee_status;
+mod gpu;
+mod member_policy;
 mod preview;
 mod receipt;
 mod reference;
@@ -165,6 +168,10 @@ impl AuthenticatedResourceOperation<'_> {
     pub fn assert_live(&self) -> Result<()> {
         let frame = &self.website.frame;
         frame.assert_metadata(frame.deadline)?;
+        self.assert_owner_channel_live()
+    }
+    fn assert_owner_channel_live(&self) -> Result<()> {
+        let frame = &self.website.frame;
         expiry(self.owner.as_ref().ok_or(ResourceActorError::Refused(
             "RESOURCE_ACTOR_OWNER_CONTEXT_REQUIRED",
         ))?)?;

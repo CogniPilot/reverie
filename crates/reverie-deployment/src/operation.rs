@@ -8,6 +8,8 @@ use std::{
 };
 mod claim;
 mod diagnostic;
+mod invalid_create;
+pub(crate) use invalid_create::PROOF as INVALID_CREATE_PROOF;
 #[cfg(test)]
 mod tests;
 
@@ -26,8 +28,42 @@ pub(super) struct Operation {
     pub(super) directory: PathBuf,
     pub(super) plan: Plan,
 }
+impl Plan {
+    pub(super) fn profile(&self) -> model::DeploymentProfile {
+        self.preview.profile.unwrap_or_default()
+    }
+    fn validate_profile(&self) -> Result<()> {
+        let profile = self.profile();
+        let historical = self.version == 2 && profile == model::DeploymentProfile::ProtectedWebsite;
+        require(
+            self.version == profile.version() || historical,
+            "DEPLOYMENT_OPERATION_INVALID",
+        )?;
+        require(
+            self.preview.profile == profile.preview(),
+            "DEPLOYMENT_OPERATION_PROFILE_INVALID",
+        )?;
+        if profile == model::DeploymentProfile::ProtectedWebsite {
+            model::supported_profile(&self.source, profile)?;
+            if historical {
+                model::validate_legacy_invalid_body(&self.source, &self.body)?;
+            } else {
+                model::validate_profile_body(&self.source, &self.body, profile)?;
+            }
+        }
+        Ok(())
+    }
+    pub(super) fn candidate_matches(&self, actual: &Value) -> Result<()> {
+        model::candidate_matches(actual, &self.source, &self.body, self.profile())
+    }
+}
 impl Operation {
     pub(super) fn create(state: &Path, plan: Plan) -> Result<Self> {
+        require(
+            plan.version == plan.profile().version(),
+            "DEPLOYMENT_LEGACY_PLAN_READ_ONLY",
+        )?;
+        plan.validate_profile()?;
         let parent = state.join("console-deployments");
         std::fs::DirBuilder::new()
             .mode(0o700)
@@ -54,10 +90,8 @@ impl Operation {
             &directory.join("plan.json"),
             16 * 1024 * 1024,
         )?)?;
-        require(
-            plan.version == 1 && plan.operation == id,
-            "DEPLOYMENT_OPERATION_INVALID",
-        )?;
+        require(plan.operation == id, "DEPLOYMENT_OPERATION_INVALID")?;
+        plan.validate_profile()?;
         Ok(Self { directory, plan })
     }
     pub(super) fn record(&self, name: &str, data: &Value) -> Result<()> {
@@ -123,6 +157,7 @@ impl Operation {
             ("claim-attempt", "CLAIM_HANDOVER_UNCONFIRMED"),
             ("claim-acquired", "CLAIMED"),
             ("create-attempt", "CREATE_UNCONFIRMED"),
+            ("invalid-create-refused", "INVALID_CREATE_REFUSED"),
             ("candidate", "CANDIDATE_UNVALIDATED"),
             ("prepared", "PREPARED"),
             ("stop-attempt", "STOP_UNCONFIRMED"),
@@ -162,6 +197,9 @@ impl Operation {
     }
     fn receipt_valid(&self, file: &str) -> bool {
         match file {
+            "invalid-create-refused" => self
+                .assert_invalid_create_refused(&self.plan.source)
+                .is_ok(),
             "claim-acquired" => self
                 .read_record(file)
                 .is_ok_and(|r| r["operation"] == self.plan.operation),

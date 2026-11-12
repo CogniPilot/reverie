@@ -1,36 +1,61 @@
 //! Actual create ACK mints ownership before publication/start/memory. Every
 //! refusal retains it; only the real pane and guard finalizers reach Started.
 use super::*;
+use crate::installing_broker::InstalledMemberCreation;
 use reverie_host::worker_laptop::{
     ColdCommit, ContainerStart, LaptopCreation, NixGuardRelease, PaneStart,
 };
 impl<'a> ColdBody<'a> {
     pub(super) fn start_body(&mut self) -> Result<Arc<StartedLaptop>, ColdError> {
         let source = self.broker().configuration()?;
-        if reverie_contracts::worker_pool::WorkerPoolProvider::from_config(source.configuration())
-            .map_err(|_| ColdError::Refused("WORKER_POOL_PROVIDER_INVALID"))?
-            .is_some()
-        {
-            // A parsed policy or an installed controller is not the missing
-            // fleet maintenance/admission owner. Never fall back to legacy.
-            return Err(ColdError::Refused(
-                "WORKER_POOL_PROVIDER_MAINTENANCE_REQUIRED",
-            ));
+        let provider =
+            reverie_contracts::worker_pool::WorkerPoolProvider::from_config(source.configuration())
+                .map_err(|_| ColdError::Refused("WORKER_POOL_PROVIDER_INVALID"))?
+                .is_some();
+        if !provider {
+            return self.start_using_member(None);
         }
+        let broker = self.broker();
+        let network = self.network();
+        let connection = self.scope.preparing.admitted.request.connection.clone();
+        let end = self.end();
+        let mut controller = broker.borrow_controller_for_creation()?;
+        let mut member = network.prepare_controller_member(&mut controller, &connection, end)?;
+        self.scope
+            .preparing
+            .admitted
+            .admission
+            .as_ref()
+            .ok_or(ColdError::Refused("WORKER_POOL_MEMBER_ADMISSION_REQUIRED"))?
+            .check_member_creation(&mut member)?;
+        self.start_using_member(Some(&mut member))
+    }
+
+    fn start_using_member(
+        &mut self,
+        mut member: Option<&mut InstalledMemberCreation<'_>>,
+    ) -> Result<Arc<StartedLaptop>, ColdError> {
         let network = self.network();
         let connection = self.scope.preparing.admitted.request.connection.clone();
         // Complete late argv and the mandatory same-runtime telemetry check
         // happen in the actual record immediately before its fixed create.
-        let created =
-            match network.create_for_connection(self.broker().command_telemetry(), &connection)? {
-                LaptopCreation::Created(created) => created,
-                LaptopCreation::Rejected | LaptopCreation::Retained => {
-                    return Err(Self::phase_refused(
-                        &network,
-                        "WORKER_COLD_CREATE_UNCONFIRMED",
-                    ));
-                }
-            };
+        let creation = match member.as_deref_mut() {
+            Some(member) => network.create_controller_member(
+                member,
+                self.broker().command_telemetry(),
+                &connection,
+            ),
+            None => network.create_for_connection(self.broker().command_telemetry(), &connection),
+        }?;
+        let created = match creation {
+            LaptopCreation::Created(created) => created,
+            LaptopCreation::Rejected | LaptopCreation::Retained => {
+                return Err(Self::phase_refused(
+                    &network,
+                    "WORKER_COLD_CREATE_UNCONFIRMED",
+                ));
+            }
+        };
         self.creation = Some(CreationContext {
             created,
             started: None,
@@ -40,8 +65,17 @@ impl<'a> ColdBody<'a> {
             .creation
             .as_mut()
             .expect("successful create owns target");
-        network.publish_created(&creation.created)?;
-        match network.start_for_connection(&creation.created, &connection)? {
+        match member.as_deref_mut() {
+            Some(member) => {
+                network.publish_controller_member(member, &creation.created, &connection)
+            }
+            None => network.publish_created(&creation.created),
+        }?;
+        let start = match member.as_deref_mut() {
+            Some(member) => network.start_controller_member(member, &creation.created, &connection),
+            None => network.start_for_connection(&creation.created, &connection),
+        }?;
+        match start {
             ContainerStart::Started(started) => creation.started = Some(started),
             ContainerStart::Rejected | ContainerStart::Retained => {
                 return Err(Self::phase_refused(
@@ -50,7 +84,7 @@ impl<'a> ColdBody<'a> {
                 ));
             }
         }
-        let memory = self.configure_memory()?;
+        let memory = self.configure_memory(member)?;
         let cold = match network.commit_cold(&memory, &connection)? {
             ColdCommit::Committed(cold) => cold,
             ColdCommit::Rejected | ColdCommit::Retained => {

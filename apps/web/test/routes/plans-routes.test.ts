@@ -5,7 +5,7 @@ import { trustedFixtureOwner } from '../helpers/trusted-owner-fixture.js';
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { installRouteErrorHandler } from '../../src/web/route-error-handler.js';
@@ -13,7 +13,7 @@ import { registerPlansRoutes } from '../../src/web/routes/plans-routes.js';
 import { PlanService, type PlanSessionLike } from '../../src/plan-accounts.js';
 import { WEEK_MS } from '../../src/plan-pace.js';
 import { getDataDir } from '../../src/config/instance.js';
-import type { SubscriptionProfile } from '../../src/subscription-profiles.js';
+import { defaultSubscriptionProfiles, type SubscriptionProfile } from '../../src/subscription-profiles.js';
 
 const NOW = Date.UTC(2026, 9, 15, 12, 0, 0);
 const RESET = NOW + WEEK_MS / 2; // half the week left: elapsed 50 %
@@ -43,6 +43,15 @@ describe('plans routes', () => {
     mkdirSync(join(home, '.claude-accounts', 'secondary'));
     mkdirSync(join(home, '.claude-accounts', 'tertiary'));
     symlinkSync(join(home, '.codex'), join(home, '.codex-accounts', 'secondary'));
+    // Explicit registry entries model owner-enrolled accounts. Empty directories
+    // alone intentionally do not authorize discovery of a subscription plan.
+    writeFileSync(join(getDataDir(), 'subscription-profiles.json'), JSON.stringify([
+      ...defaultSubscriptionProfiles(),
+      ...['secondary', 'tertiary'].map(name => ({
+        id: `acct-anthropic-${name}`, label: name, provider: 'anthropic',
+        configDir: join(home, '.claude-accounts', name), openCodeDataDir: join(home, 'opencode', name),
+      })),
+    ]), { mode: 0o600 });
     Object.assign(usage, {
       'anthropic-default': { status: 'ready', five: 30, week: 70 }, // pace +20: ease
       'acct-anthropic-secondary': { status: 'ready', five: 5, week: 10 }, // pace -40: push
@@ -128,7 +137,7 @@ describe('plans routes', () => {
     });
     expect(primary.pace).toMatchObject({ elapsed: 50, pace: 20, recommendation: 'ease' });
     expect(primary.sessions.map((s: { name: string }) => s.name)).toEqual(['w1-rumoca', 'w4-orchestrator']);
-    expect(byLabel['anthropic:secondary']).toMatchObject({ profileId: null, isDefault: false, orchestrator: false });
+    expect(byLabel['anthropic:secondary']).toMatchObject({ profileId: 'acct-anthropic-secondary', isDefault: false, orchestrator: false });
     expect(byLabel['anthropic:secondary'].pace.recommendation).toBe('push');
     expect(byLabel['anthropic:secondary'].sessions.map((s: { name: string }) => s.name)).toEqual(['w2-lean']);
     expect(byLabel['anthropic:tertiary']).toMatchObject({ signedIn: false });
@@ -146,10 +155,14 @@ describe('plans routes', () => {
     expect(initial.headers['cache-control']).toBe('no-store');
     expect(initial.json().data.accounts.find((account: { id: string }) => account.id === 'openai-default').sessionIds).toEqual(['s-codex']);
     mkdirSync(join(home, '.codex-accounts', 'primary'));
+    const { addSubscriptionProfile } = await import('../../src/subscription-profiles.js');
+    const registered = await addSubscriptionProfile({
+      label: 'primary', provider: 'openai', configDir: join(home, '.codex-accounts', 'primary'),
+    });
     sessions.find((current) => current.id === 's-codex')!.getEnvOverridesForPersist = () => ({ CODEX_HOME: join(home, '.codex-accounts', 'primary') });
     const updated = (await app.inject({ method: 'GET', url: '/api/plans/allocations' })).json().data;
     expect(updated.accounts.find((account: { id: string }) => account.id === 'openai-default').sessionIds).toEqual([]);
-    expect(updated.accounts.find((account: { id: string }) => account.id === 'acct-openai-primary').sessionIds).toEqual(['s-codex']);
+    expect(updated.accounts.find((account: { id: string }) => account.id === registered.id).sessionIds).toEqual(['s-codex']);
     expect(usageReads).toBe(0);
     expect(existsSync(join(home, 'plan-history.json'))).toBe(false);
     expect(updated.employees).toEqual([]);
@@ -179,7 +192,7 @@ describe('plans routes', () => {
     expect(res.statusCode).toBe(200);
     const { account, launch } = res.json().data;
     expect(account.label).toBe('secondary');
-    expect(launch).toEqual({ envOverrides: { CLAUDE_CONFIG_DIR: join(home, '.claude-accounts', 'secondary') } });
+    expect(launch).toEqual({ subscriptionProfileId: 'acct-anthropic-secondary', envOverrides: { CLAUDE_CONFIG_DIR: join(home, '.claude-accounts', 'secondary') } });
   });
 
   it('answers 409 when no account of that provider has room', async () => {

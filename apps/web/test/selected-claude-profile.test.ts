@@ -94,8 +94,9 @@ describe('selected Claude account preparation', () => {
   });
   it('prepares before real Session launch and restart without changing permission mode', async () => {
     const mux = new TmuxManager();
-    const create = vi.spyOn(mux, 'createSession').mockImplementation(async () => {
+    const create = vi.spyOn(mux, 'createSession').mockImplementation(async options => {
       expect((await read()).hasCompletedOnboarding).toBe(true);
+      options.onProviderDispatch?.();
       return { sessionId: 'selected-session', muxName: 'reverie-selected', pid: 1234 } as never;
     });
     const session = new Session({ workingDir: dir, mode: 'claude', claudeMode: 'normal', useMux: true, mux,
@@ -105,8 +106,9 @@ describe('selected Claude account preparation', () => {
     expect(create).toHaveBeenCalledWith(expect.objectContaining({ claudeMode: 'normal' }));
     await fs.rm(join(dir, '.claude.json'));
     vi.spyOn(mux, 'muxSessionExists').mockReturnValue(true);
-    const respawn = vi.spyOn(mux, 'respawnPane').mockImplementation(async () => {
+    const respawn = vi.spyOn(mux, 'respawnPane').mockImplementation(async options => {
       expect((await read()).projects[dir].hasTrustDialogAccepted).toBe(true);
+      options.onProviderDispatch?.();
       return 5678;
     });
     expect(await session.restartCli()).toBe(true);

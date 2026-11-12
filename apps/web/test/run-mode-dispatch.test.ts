@@ -31,6 +31,8 @@ interface HarnessApp {
   runClaude: ReturnType<typeof vi.fn>;
   runShell: ReturnType<typeof vi.fn>;
   _runCliMode: ReturnType<typeof vi.fn>;
+  _beginSessionLaunchStatus: ReturnType<typeof vi.fn>;
+  _reportSessionLaunchError: ReturnType<typeof vi.fn>;
 }
 
 interface Harness {
@@ -62,6 +64,8 @@ function loadHarness(catalog: Array<{ id: string; kind: string; enabled: boolean
   app.runClaude = vi.fn(async () => 'claude');
   app.runShell = vi.fn(async () => 'shell');
   app._runCliMode = vi.fn(async (mode: string) => `cli:${mode}`);
+  app._beginSessionLaunchStatus = vi.fn(() => 'synthetic-status');
+  app._reportSessionLaunchError = vi.fn();
   return {
     app,
     runBtn: win.document.getElementById('runBtn') as HTMLButtonElement,
@@ -117,14 +121,15 @@ describe('run() dispatch (session-ui.js)', () => {
     expect(app.runClaude).not.toHaveBeenCalled();
   });
 
-  it('an unknown mode lands on runClaude(), never on the shared launcher', async () => {
+  it('refuses an unknown explicit mode visibly rather than launching a different CLI', async () => {
     // A stale localStorage mode must not reach `_runCliMode()`: it has neither
     // a stock launch shape nor an enabled registry entry to launch.
     for (const mode of ['nope', 'CLAUDE', 'code x']) {
       const { app } = loadHarness();
       app._runMode = mode;
-      await expect(app.run()).resolves.toBe('claude');
-      expect(app.runClaude).toHaveBeenCalledTimes(1);
+      await expect(app.run()).resolves.toBeUndefined();
+      expect(app._reportSessionLaunchError).toHaveBeenCalledWith('synthetic-status', expect.stringContaining('no longer registered'));
+      expect(app.runClaude).not.toHaveBeenCalled();
       expect(app._runCliMode).not.toHaveBeenCalled();
       expect(app.runShell).not.toHaveBeenCalled();
     }

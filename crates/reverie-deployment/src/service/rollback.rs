@@ -3,7 +3,7 @@ impl DeploymentService {
     /// Restore only the exact retained old container. This never restores data,
     /// reconfigures the broker, deletes a container or invents a release receipt.
     pub fn rollback(&self, id: &str) -> Result<DeploymentStatus> {
-        let operation = self.operation(id)?;
+        let operation = self.effect_operation(id)?;
         let pins = self.pins(&operation)?;
         let result = self.rollback_pinned(&operation, &pins);
         DeploymentError::finalized(result, pins.close())
@@ -27,7 +27,7 @@ impl DeploymentService {
         )?;
         let candidate = operation.candidate()?;
         let current = self.engine.container(&candidate)?;
-        model::candidate_matches(&current, &operation.plan.source, &operation.plan.body)?;
+        operation.plan.candidate_matches(&current)?;
         let original_name = format!("/{}", operation.plan.container);
         let backup_name = format!("/{}", temporary_name(operation, "before-front"));
         let candidate_name = format!("/{}", temporary_name(operation, "candidate"));

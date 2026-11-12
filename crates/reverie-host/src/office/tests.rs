@@ -4,6 +4,8 @@
 mod construction;
 #[path = "native_tests.rs"]
 mod native;
+#[path = "packaged_hook_tests.rs"]
+mod packaged_hooks;
 mod retention;
 mod telemetry;
 use super::*;
@@ -289,12 +291,13 @@ fn actual_hook_checks_fixed_session_and_only_injects_host_secret_after_validatio
             "POST",
             "/api/hook-event",
             body.as_bytes(),
-            "X-Reverie-Hook-Secret: forged\r\n"
+            "X-Reverie-Hook-Secret: forged\r\nX-Reverie-Hook-Generation: synthetic-generation\r\n"
         )),
         204
     );
     let request = upstream.captured().to_ascii_lowercase();
     assert!(request.contains("x-reverie-hook-secret: synthetic-hook"));
+    assert!(request.contains("x-reverie-hook-generation: synthetic-generation"));
     assert!(!request.contains("forged"));
 }
 #[test]

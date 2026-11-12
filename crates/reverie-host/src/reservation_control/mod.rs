@@ -9,7 +9,7 @@ mod pool_transition;
 mod private_record;
 mod publication;
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 use crate::{ObservationError, native};
 pub use draft::{publish_draft, read_draft};
 pub use history::{
@@ -18,7 +18,12 @@ pub use history::{
 };
 pub use image::{CurrentImageBinding, ImageHostError, capture_current_image};
 pub use policy::{PolicyBinding, PolicyFileStamp, PolicyTransaction, publish_prepared_policy};
-pub use pool_transition::PoolTransitionPending;
+pub(crate) use pool_transition::PoolRenameFence;
+pub use pool_transition::{
+    MemberPolicyCancellation, MemberPolicyPending, MemberPolicyPublication, PoolPublication,
+    PoolPublicationCause, PoolPublicationFailure, PoolPublicationPrepared, PoolTerminal,
+    PoolTransitionPending,
+};
 pub use publication::{
     PublicationStamp, assert_native_publication, observe_publication, publish_publication,
 };
@@ -55,6 +60,10 @@ pub enum ControlHostError {
     },
     Native(ObservationError),
     PoolTransitionClose(std::sync::Arc<ObservationError>),
+    PoolPublication(std::sync::Arc<PoolPublicationFailure>),
+    PoolWriter(Box<crate::gpu_access::GpuHostError>),
+    PoolActor(Box<crate::resource_facts::ResourceFactsError>),
+    PoolReleaseUnknown(Box<Self>),
     /// Preserve ledger/finalizer variants for typed inspection; no erased
     /// io::Error wrapper is needed to reach a secondary checked-close error.
     Journal(reverie_store::operations::JournalError),
@@ -70,6 +79,10 @@ impl ControlHostError {
             Self::Finalization { primary, .. } => primary.code(),
             Self::Native(e) => e.code(),
             Self::PoolTransitionClose(e) => e.code(),
+            Self::PoolPublication(e) => e.code(),
+            Self::PoolWriter(e) => e.code(),
+            Self::PoolActor(e) => e.code(),
+            Self::PoolReleaseUnknown(_) => "POOL_TRANSITION_RELEASE_UNCONFIRMED",
             Self::Journal(e) => e.code(),
             Self::Metadata(e) => e.code(),
             Self::Configuration(e) => e.code(),
@@ -82,6 +95,10 @@ impl ControlHostError {
         match self {
             Self::Native(error) => error.has_unconfirmed_close(),
             Self::PoolTransitionClose(error) => error.has_unconfirmed_close(),
+            Self::PoolPublication(error) => error.has_unconfirmed_close(),
+            Self::PoolWriter(error) => error.has_unconfirmed_close(),
+            Self::PoolActor(error) => error.has_unconfirmed_close(),
+            Self::PoolReleaseUnknown(error) => error.has_unconfirmed_close(),
             Self::Metadata(error) => error.has_unconfirmed_close(),
             Self::Finalization { primary, secondary } => {
                 primary.has_unconfirmed_close() || secondary.has_unconfirmed_close()
@@ -110,6 +127,10 @@ impl std::error::Error for ControlHostError {
             Self::Finalization { primary, .. } => Some(primary),
             Self::Native(error) => Some(error),
             Self::PoolTransitionClose(error) => Some(error.as_ref()),
+            Self::PoolPublication(error) => Some(error.as_ref()),
+            Self::PoolWriter(error) => Some(error.as_ref()),
+            Self::PoolActor(error) => Some(error.as_ref()),
+            Self::PoolReleaseUnknown(error) => Some(error.as_ref()),
             Self::Journal(error) => Some(error),
             Self::Metadata(error) => Some(error),
             Self::Configuration(error) => Some(error),
@@ -120,6 +141,16 @@ impl std::error::Error for ControlHostError {
 impl From<ObservationError> for ControlHostError {
     fn from(value: ObservationError) -> Self {
         Self::Native(value)
+    }
+}
+impl From<crate::gpu_access::GpuHostError> for ControlHostError {
+    fn from(value: crate::gpu_access::GpuHostError) -> Self {
+        Self::PoolWriter(Box::new(value))
+    }
+}
+impl From<crate::resource_facts::ResourceFactsError> for ControlHostError {
+    fn from(value: crate::resource_facts::ResourceFactsError) -> Self {
+        Self::PoolActor(Box::new(value))
     }
 }
 impl From<IdentityError> for ControlHostError {
@@ -145,12 +176,57 @@ fn need(value: bool, code: &'static str) -> Result<()> {
         Err(ControlHostError::Refused(code))
     }
 }
-pub struct AdmissionLock(native::HeldAdmission);
+pub struct AdmissionLock {
+    native: native::HeldAdmission,
+    acquisition: std::sync::Arc<AdmissionAcquisition>,
+    close_attempted: bool,
+}
+
+pub(crate) struct AdmissionAcquisition {
+    checked_closed: std::sync::atomic::AtomicBool,
+}
+
+impl AdmissionAcquisition {
+    pub(crate) fn assert_closed(&self) -> Result<()> {
+        need(
+            self.checked_closed
+                .load(std::sync::atomic::Ordering::Acquire),
+            "RESERVATION_ORIGINAL_ADMISSION_CLOSE_UNCONFIRMED",
+        )
+    }
+}
+/// Contention is returned only after the unsuccessful native acquisition's
+/// descriptor has checked-close. It never describes a partial launch/effect.
+pub enum AdmissionLockAttempt {
+    Acquired(AdmissionLock),
+    Contended,
+}
 impl AdmissionLock {
+    pub(crate) fn acquisition(&self) -> &std::sync::Arc<AdmissionAcquisition> {
+        &self.acquisition
+    }
+    pub fn try_acquire(config: &ReservationConfiguration) -> Result<AdmissionLockAttempt> {
+        match native::open_admission(config.control_paths()?.root()) {
+            Ok(native) => Ok(AdmissionLockAttempt::Acquired(Self {
+                native,
+                acquisition: std::sync::Arc::new(AdmissionAcquisition {
+                    checked_closed: std::sync::atomic::AtomicBool::new(false),
+                }),
+                close_attempted: false,
+            })),
+            Err(ObservationError::Refused(crate::ObservationFault::AdmissionBusy)) => {
+                Ok(AdmissionLockAttempt::Contended)
+            }
+            Err(error) => Err(error.into()),
+        }
+    }
     pub fn acquire(config: &ReservationConfiguration) -> Result<Self> {
-        Ok(Self(native::open_admission(
-            config.control_paths()?.root(),
-        )?))
+        match Self::try_acquire(config)? {
+            AdmissionLockAttempt::Acquired(lock) => Ok(lock),
+            AdmissionLockAttempt::Contended => {
+                Err(ObservationError::Refused(crate::ObservationFault::AdmissionBusy).into())
+            }
+        }
     }
     pub fn assert_current(
         &self,
@@ -158,13 +234,20 @@ impl AdmissionLock {
         binding: &ControlBinding,
     ) -> Result<()> {
         Ok(self
-            .0
+            .native
             .assert_current(binding.admission_lock(), config.uid()?)?)
     }
     /// Checked exactly-once close. The application must finish it before
     /// acknowledging admission; closing does not grant capacity credit.
     pub fn close(&mut self) -> Result<()> {
-        Ok(self.0.close()?)
+        let first_attempt = !std::mem::replace(&mut self.close_attempted, true);
+        self.native.close()?;
+        if first_attempt {
+            self.acquisition
+                .checked_closed
+                .store(true, std::sync::atomic::Ordering::Release);
+        }
+        Ok(())
     }
 }
 pub fn pending_present(config: &ReservationConfiguration) -> Result<bool> {

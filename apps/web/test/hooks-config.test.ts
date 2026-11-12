@@ -578,15 +578,15 @@ describe('writeHooksConfig', () => {
     expect(readFileSync(settingsPath, 'utf-8')).toBe('{ malformed');
   });
 
-  it('should handle malformed existing settings.local.json', async () => {
+  it('reports malformed existing settings as unconfirmed without overwriting bytes', async () => {
     const claudeDir = join(testDir, '.claude');
     mkdirSync(claudeDir, { recursive: true });
     writeFileSync(join(claudeDir, 'settings.local.json'), 'not valid json{{{');
 
-    await writeHooksConfig(testDir);
+    const outcome = await writeHooksConfig(testDir);
+    expect(outcome).toMatchObject({state: 'unconfirmed', cause: expect.any(SyntaxError)});
 
-    const parsed = JSON.parse(readFileSync(join(claudeDir, 'settings.local.json'), 'utf-8'));
-    expect(parsed.hooks).toBeDefined();
+    expect(readFileSync(join(claudeDir, 'settings.local.json'), 'utf-8')).toBe('not valid json{{{');
   });
 
   it('should end file with newline', async () => {

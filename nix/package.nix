@@ -16,7 +16,7 @@ let
     version = manifest.version;
     src = lib.cleanSource (src + "/apps/web");
     nodejs = pkgs.nodejs_22;
-    npmDepsHash = "sha256-DGKWvITtXvL3pYAsu4vqiynelRLeTR8BkjXJmLqMNc0=";
+    npmDepsHash = "sha256-gXM3copzdgACtQaPnEYO1n12oHrAfQMPLbXBmhmK1QQ=";
     nativeBuildInputs = [ pkgs.python3 pkgs.makeWrapper ];
     npmFlags = [ "--ignore-scripts" ];
     npmRebuildFlags = [ "--ignore-scripts" ];
@@ -66,7 +66,23 @@ let
       # tmux socket directory, and every server binds port 0 (test/test-ports-guard.test.ts).
       export NIX_TEST_FILE_WORKERS=2
       # Refuse missing or duplicate registrations before the longer test batches.
-      npm test -- test/test-suite-partition.test.ts
+      npm test -- test/test-suite-partition.test.ts test/test-selection.test.ts
+      npm test -- test/account-replacement-profile.test.ts
+      npm test -- test/startup-account-profile.test.ts
+      npm test -- test/native-thread-profile.test.ts
+      npm test -- test/hire-launch-selection.test.ts
+      npm test -- test/frontend-declarations.test.ts
+      npm test -- test/workspace-hook-preparation.test.ts test/launch-reservation.test.ts
+      npm test -- test/owned-process.test.ts
+      npm test -- test/operator-viewer-bridge.test.ts
+      npm test -- test/native-hook-artifact-selection.test.ts
+      npm test -- test/approvals-ui-held.test.ts
+      npm test -- test/browser-coverage-collection.test.ts test/browser-coverage-execution.test.ts test/browser-coverage-report.test.ts test/browser-coverage-convert.test.ts test/browser-coverage-producer.test.ts
+      npm test -- test/company-employee-resources-ui.test.ts test/resource-employee-data.test.ts \
+        test/resource-employee-service.test.ts test/resource-fleet-operation.test.ts \
+        test/resource-fleet-native-failure-client.test.ts test/resource-fleet-codec-upgrade.test.ts \
+        test/native-owner-channel.test.ts test/prepare-test-vendor.test.ts test/spreadsheet-assets.test.ts test/capture-claude-launch.test.ts \
+        test/control-behavior-inventory.test.ts
       npm test -- test/fixed-resume-message.test.ts test/recovery-authority.test.ts \
         test/recovery-transaction.test.ts test/recovery-operation-clock.test.ts test/recovery-ledger-client.test.ts \
         test/rest-canonical-metadata.test.ts \
@@ -131,7 +147,7 @@ let
         test/plan-move-runtime.test.ts test/plan-move-composer.test.ts test/plan-move-routes.test.ts test/plan-move-company.test.ts test/plan-move-launch.test.ts \
         test/plan-move-resources.test.ts test/plan-move-resource-runtime.test.ts \
         test/resource-owner-authority.test.ts test/resource-owner-office-authority.test.ts test/resource-native-client.test.ts \
-        test/owner-registration-identity.test.ts test/owner-registration-durability.test.ts \
+        test/owner-registration-identity.test.ts test/owner-registration-durability.test.ts test/browser-input-identity.test.ts test/input-receipt-read.test.ts \
         test/company-resource-binding-cas.test.ts test/resource-session-publication.test.ts \
         test/resource-ram-session-publication.test.ts test/resource-ram-owner-incarnation.test.ts \
         test/pool-installation-consent.test.ts \

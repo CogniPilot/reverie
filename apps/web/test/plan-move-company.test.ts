@@ -175,17 +175,33 @@ describe('plan move recovery using real company and chatroom persistence', () =>
     }
   );
 
-  it('persists the actual destination recipe for future restarts, and restores it on a failed room rebind', async () => {
+  it('persists the actual destination recipe and retains a published reservation when the room rebind fails', async () => {
     const employee = await company.hire({ name: 'Casey', icon: 'C', position: 'Developer', expertise: ['console'], sessionId: 'old', researchEnabled: false });
     await company.saveRuntimeRecipe('old', recipes.get('old')!);
     const general = chat.createRoom('general', undefined); chat.addMember(general.id, 'old');
     await company.rebind(employee.id, undefined, 'candidate');
     const persisted = new CompanyStore(join(directory, 'company.json')); await persisted.init();
     expect(persisted.snapshot().employees[0]).toMatchObject({ id: employee.id, sessionId: 'candidate', runtimeRecipe: { subscriptionProfile: { id: 'second' }, configs: { codexConfig: { model: 'model-second' } } } });
-    vi.spyOn(chat, 'replaceSession').mockRejectedValueOnce(new Error('Room storage unavailable'));
-    await expect(company.rebind(employee.id, undefined, 'old')).rejects.toThrow('Room storage unavailable');
-    expect(company.view().employees[0]).toMatchObject({ sessionId: 'candidate', runtimeRecipe: recipes.get('candidate') });
+    const before = company.view().employees[0];
+    const cause = new Error('Room storage unavailable');
+    const replace = vi.spyOn(chat, 'replaceSession').mockRejectedValueOnce(cause);
+    let retained: unknown;
+    try { await company.rebind(employee.id, undefined, 'old'); } catch (error) { retained = error; }
+    expect(retained).toMatchObject({ status: 409, cause });
+    expect(company.replacementPublicationRecovery(retained, panes.get('old')!,
+      { employeeId: employee.id, replacesSessionId: 'candidate' }, undefined)).toMatchObject({
+      employeeId: employee.id, sessionId: 'old', sourceGeneration: before.sessionGeneration,
+    });
+    const held = company.store.snapshot().employees[0];
+    expect(held).toMatchObject({ id: employee.id, sessionId: 'candidate',
+      sessionGeneration: before.sessionGeneration + 1, runtimeRecipe: recipes.get('old'),
+      bindingMigration: { from: 'candidate', to: 'old' } });
+    expect(chat.room(general.id)?.members.map(member => member.sessionId)).toEqual(['candidate']);
+    expect([...panes.keys()].sort()).toEqual(['candidate', 'old']);
+    await expect(company.rebind(employee.id, undefined, 'old')).rejects.toThrow('Binding migration requires reconciliation');
+    expect(replace).toHaveBeenCalledOnce();
     const after = new CompanyStore(join(directory, 'company.json')); await after.init();
-    expect(after.snapshot().employees[0].runtimeRecipe).toEqual(recipes.get('candidate'));
+    expect(after.snapshot().employees[0]).toEqual(held);
+    expect(company.store.publicationUnconfirmed).toBe(false);
   });
 });

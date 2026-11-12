@@ -636,7 +636,7 @@ export async function agentSpawn(deps: AgentDeps, options: SpawnOptions): Promis
   if (options.bypassApprovals) codexConfig.dangerouslyBypassApprovals = true;
   if (options.resumeSessionId !== undefined) codexConfig.resumeSessionId = options.resumeSessionId;
   if (Object.keys(codexConfig).length > 0) {
-    if (options.mode !== 'codex') {
+    if (getCli(options.mode)?.launch.legacyConfigField !== 'codexConfig') {
       return fail(deps, '--reasoning-effort, --bypass-approvals and --resume-session apply to --mode codex only');
     }
     if (
@@ -906,9 +906,12 @@ export async function agentWakeEmployee(deps: AgentDeps, options: { employeeId: 
     return fail(deps, 'Employee wake result could not be confirmed. Check its current state before trying again.');
   if (deps.json) emitJson(deps, data);
   else if (recovery.awakened.length) deps.io.out(`Awakened employee ${id}.`);
+  else if (recovery.skipped.some((skip) => skip.reason === 'start-unconfirmed'))
+    deps.io.out(`Employee ${id} wake outcome is unconfirmed. Check its current state before trying again.`);
   else if (recovery.skipped.length)
     deps.io.out(`Skipped employee ${id}: ${quoteForPane(recovery.skipped[0].reason, 200)}`);
   else deps.io.out(`No employee awakened; the server returned no recovery outcome for ${id}.`);
+  if (recovery.skipped.some((skip) => skip.reason === 'start-unconfirmed')) return EXIT.error;
   return recovery.awakened.length ? EXIT.ok : EXIT.refused;
 }
 

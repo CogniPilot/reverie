@@ -50,8 +50,32 @@ impl PendingFile {
     /// Caller latches its attempt before entry. Take the actual parent FD so
     /// every file and parent finalizer finishes before minting the local owner.
     pub(crate) fn create(directory: File, path: PathBuf, bytes: &[u8], owner: u32) -> Result<Self> {
+        Self::create_selected(directory, path, bytes, owner, None)
+    }
+    pub(crate) fn create_with_stop(
+        directory: File,
+        path: PathBuf,
+        bytes: &[u8],
+        owner: u32,
+        end: Instant,
+        stop: &crate::worker_runtime::WorkerStopBudget,
+    ) -> Result<Self> {
+        Self::create_selected(directory, path, bytes, owner, Some((end, stop)))
+    }
+    fn create_selected(
+        directory: File,
+        path: PathBuf,
+        bytes: &[u8],
+        owner: u32,
+        bound: Option<(Instant, &crate::worker_runtime::WorkerStopBudget)>,
+    ) -> Result<Self> {
         let body = (|| {
             let name = path.file_name().ok_or(PendingError::Parent)?;
+            if let Some((end, stop)) = bound
+                && Instant::now() >= stop.deadline().map_or(end, |stop| end.min(stop))
+            {
+                return Err(PendingError::Deadline);
+            }
             let mut file = native::create_policy_temporary(&directory, name)?;
             let written = write_pending(&mut file, bytes, owner);
             let stamp = finalized(written, native::close(file).map_err(Into::into))?;
@@ -91,6 +115,19 @@ impl PendingFile {
     /// is no owned descriptor close after unlink and no Drop/retry cleanup.
     pub(crate) fn release(&mut self, end: Option<Instant>) -> Result<()> {
         self.assert_current()?;
+        self.unlink_before(end)
+    }
+    /// Original pool budget, read after the final named-file check and directly
+    /// before the one unlink. This never constructs a grace or replacement budget.
+    pub(crate) fn release_with_stop(
+        &mut self,
+        end: Instant,
+        stop: &crate::worker_runtime::WorkerStopBudget,
+    ) -> Result<()> {
+        self.assert_current()?;
+        self.unlink_before(Some(stop.deadline().map_or(end, |stop| end.min(stop))))
+    }
+    fn unlink_before(&mut self, end: Option<Instant>) -> Result<()> {
         if end.is_some_and(|end| Instant::now() >= end) {
             return Err(PendingError::Deadline);
         }

@@ -1,3 +1,4 @@
+import {TerminalInputService} from '../../src/web/terminal-input-service.js';
 /**
  * Mock context for route handler testing.
  *
@@ -31,6 +32,7 @@ export function createMockRouteContext(options?: {
 
   return {
     // -- SessionPort --
+    terminalInput: new TerminalInputService(),
     sessions,
     addSession: vi.fn(async (s: MockSession) => {
       sessions.set(s.id, s);

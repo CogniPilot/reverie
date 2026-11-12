@@ -4,7 +4,14 @@
 //! before and after every receive chunk; no verifier callback is accepted here.
 mod current_pin;
 mod io;
+mod original_handlers;
 pub use current_pin::WorkerActorPinError;
+pub use original_handlers::WorkerRecoveryExclusion;
+pub use original_handlers::{
+    WorkerOriginalHandlersCleanupBinding, WorkerOriginalHandlersCleanupError,
+    WorkerOriginalHandlersClosed, WorkerOriginalHandlersDrain, WorkerOriginalInterruptionProgress,
+    WorkerServiceMaintenanceHandlers,
+};
 mod pool_registration;
 pub use pool_registration::PoolRegistrationPin;
 mod resource_journal;
@@ -19,6 +26,7 @@ enum Purpose {
     ResumeWebsite,
     ResumeOwner,
     ResourceWebsite,
+    FleetMaintenanceWebsite,
     PoolRegistrationWebsite,
 }
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -89,6 +97,14 @@ impl WorkerServiceConnection {
     ) -> std::result::Result<WorkerActorChannel, Box<WorkerActorChannelFailure>> {
         WorkerActorChannel::retain(self, runtime, Purpose::ResourceWebsite)
     }
+    /// Distinct transport purpose, not fleet consent or resource authority.
+    /// The original Q bytes must be the closed fleet-maintenance hello.
+    pub fn retain_fleet_maintenance_website_channel(
+        self,
+        runtime: &WorkerRuntime,
+    ) -> std::result::Result<WorkerActorChannel, Box<WorkerActorChannelFailure>> {
+        WorkerActorChannel::retain(self, runtime, Purpose::FleetMaintenanceWebsite)
+    }
     /// Separate counted installation channel. It cannot acquire the RAM
     /// purpose by presenting another hello or an employee approval payload.
     pub fn retain_pool_registration_website_channel(
@@ -107,7 +123,9 @@ impl WorkerActorChannel {
         let expected = match purpose {
             Purpose::ResumeWebsite => WorkerServicePurpose::ResumeRegistration,
             Purpose::ResumeOwner => WorkerServicePurpose::Control,
-            Purpose::ResourceWebsite => WorkerServicePurpose::ResourceActor,
+            Purpose::ResourceWebsite | Purpose::FleetMaintenanceWebsite => {
+                WorkerServicePurpose::ResourceActor
+            }
             Purpose::PoolRegistrationWebsite => WorkerServicePurpose::PoolRegistration,
         };
         if !connection.same_runtime(runtime) || connection.purpose() != expected {
@@ -115,6 +133,17 @@ impl WorkerActorChannel {
                 connection,
                 hold: None,
                 cause: WorkerReportError::Peer,
+            }));
+        }
+        if purpose == Purpose::FleetMaintenanceWebsite
+            && let Err(cause) = reverie_contracts::resource_actor::decode_fleet_maintenance_hello(
+                connection.request_bytes(),
+            )
+        {
+            return Err(Box::new(WorkerActorChannelFailure {
+                connection,
+                hold: None,
+                cause: WorkerReportError::FleetHello(cause),
             }));
         }
         let hold = match connection.retain_lifecycle() {
@@ -148,6 +177,80 @@ impl WorkerActorChannel {
     }
     pub fn assert_service(&self, expected: &Arc<WorkerReportService>) -> Result<()> {
         self.connection.assert_service(expected)
+    }
+    /// Observe the same service's original records, excluding only this Q.
+    /// Started handlers require their actual parent join; an original unread
+    /// parent Drop may instead prove no handler started. Neither outcome
+    /// substitutes for socket/Hold closure or grants resource release.
+    pub fn other_original_handlers_settled(
+        &self,
+        expected: &Arc<WorkerReportService>,
+    ) -> Result<bool> {
+        if self.purpose != Purpose::ResourceWebsite {
+            return Err(WorkerReportError::Unconfirmed);
+        }
+        self.original_handlers_settled(expected)
+    }
+    /// SAME-record observation for the distinct closed fleet channel. The RAM
+    /// observer remains separate; both reuse identical closure semantics.
+    pub fn fleet_other_original_handlers_settled(
+        &self,
+        expected: &Arc<WorkerReportService>,
+    ) -> Result<bool> {
+        if self.purpose != Purpose::FleetMaintenanceWebsite {
+            return Err(WorkerReportError::Unconfirmed);
+        }
+        self.original_handlers_settled(expected)
+    }
+    fn original_handlers_settled(&self, expected: &Arc<WorkerReportService>) -> Result<bool> {
+        self.assert_service(expected)?;
+        if self.failed
+            || self.close != ClosePhase::Open
+            || expected.closed.load(Ordering::Acquire)
+            || expected.opaque.load(Ordering::Acquire)
+            || self.connection.record.opaque()
+        {
+            return Err(WorkerReportError::Unconfirmed);
+        }
+        let records = match expected.records.try_lock() {
+            Ok(records) => records,
+            Err(TryLockError::WouldBlock) => return Ok(false),
+            Err(TryLockError::Poisoned(_)) => {
+                expected.opaque.store(true, Ordering::Release);
+                return Err(WorkerReportError::Unconfirmed);
+            }
+        };
+        if !records
+            .iter()
+            .any(|record| Arc::ptr_eq(record, &self.connection.record))
+        {
+            return Err(WorkerReportError::Unconfirmed);
+        }
+        for record in records.iter() {
+            if Arc::ptr_eq(record, &self.connection.record) {
+                continue;
+            }
+            if record.opaque() {
+                return Err(WorkerReportError::Unconfirmed);
+            }
+            let job = match record.handler_job() {
+                Ok(Some(job)) => job,
+                Ok(None) => return Ok(false),
+                Err(cause) if record.opaque() => return Err(cause),
+                Err(_) => return Ok(false),
+            };
+            let settled = job.known_settled() && record.settled();
+            if record.opaque() {
+                return Err(WorkerReportError::Unconfirmed);
+            }
+            if !settled {
+                return Ok(false);
+            }
+        }
+        if expected.opaque.load(Ordering::Acquire) || self.connection.record.opaque() {
+            return Err(WorkerReportError::Unconfirmed);
+        }
+        Ok(true)
     }
     /// Qualifying the actual installed process remains the domain's task. The
     /// exact kernel socket-peer handle cannot be selected from wire PID data.

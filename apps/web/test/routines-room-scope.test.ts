@@ -22,7 +22,11 @@ const headers = (session: string) => ({ 'x-reverie-parent-session': session });
 const source = ts.createSourceFile('server.ts', readFileSync(new URL('../src/web/server.ts', import.meta.url), 'utf8'), ts.ScriptTarget.Latest, true);
 let posterSource: string;
 let membershipSource: string;
+let authorSource: string;
 function findWiring(node: ts.Node): void {
+  if (ts.isVariableDeclaration(node) && node.name.getText(source) === 'authorFor' && node.initializer) {
+    authorSource = node.initializer.getText(source);
+  }
   if (ts.isCallExpression(node) && node.expression.getText(source) === 'this.cronService.setBotPoster') {
     posterSource = node.arguments[0].getText(source);
   }
@@ -67,9 +71,15 @@ async function fixture() {
   // Execute the production closures themselves: mutating server.ts must break these tests.
   expect(posterSource).toBeTruthy();
   expect(membershipSource).toBeTruthy();
+  expect(authorSource).toBeTruthy();
   const context = { chatroomService: chat };
-  const poster = new Function('companyStore', 'chatBots', `return (${posterSource});`)
-    .call(context, { snapshot: () => ({ employees: people }) }, { get: () => undefined }) as BotPoster;
+  const companyStore = { snapshot: () => ({ employees: people }) };
+  const authorCode = ts.transpileModule(`const authorFor = ${authorSource};`, {
+    compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext },
+  }).outputText;
+  const authorFor = new Function('companyStore', `${authorCode}\nreturn authorFor;`).call(context, companyStore);
+  const poster = new Function('companyStore', 'chatBots', 'authorFor', `return (${posterSource});`)
+    .call(context, companyStore, { get: () => undefined }, authorFor) as BotPoster;
   const isMember = new Function(`return (${membershipSource});`).call(context) as (room: string, session: string) => boolean;
   cron.setBotPoster(poster);
   const grants = new RoutinesGrants(join(dir, 'grants.json'));

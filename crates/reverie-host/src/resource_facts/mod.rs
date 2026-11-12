@@ -1,7 +1,11 @@
 //! Existing-only installed private facts observation. No provisioning, engine
 //! access, process authentication, current-owner grant or launch authority.
+mod fixed_reference;
+mod rebind;
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
+pub use fixed_reference::compiled_actor_image_provenance_reference;
+mod setup;
 use crate::{
     goal_custody::{
         GoalCustodyError,
@@ -9,10 +13,13 @@ use crate::{
     },
     native,
 };
+pub use rebind::{ActorRebindPlan, ActorRebound};
 use reverie_contracts::{
     resource_actor::{InstalledFactsDocument, ResourceActorDataError, ResourceActorSettings},
     worker_config::EffectiveWorkerConfig,
 };
+pub use setup::{ActorSetupFacts, ActorSetupFactsError};
+pub use setup::{ActorSetupHistoryClosed, ActorSetupHistoryError, ActorSetupHistoryObservation};
 use std::{fmt, path::Path, time::Instant};
 
 #[derive(Debug)]
@@ -20,6 +27,7 @@ pub enum ResourceFactsError {
     Refused(&'static str),
     Private(GoalCustodyError),
     Data(ResourceActorDataError),
+    Writer(Box<crate::gpu_access::GpuHostError>),
     Finalization {
         primary: Box<Self>,
         cleanup: Box<Self>,
@@ -31,7 +39,19 @@ impl ResourceFactsError {
             Self::Refused(code) => code,
             Self::Private(_) => "RESOURCE_INSTALL_PRIVATE_ENTRY",
             Self::Data(error) => error.code(),
+            Self::Writer(error) => error.code(),
             Self::Finalization { .. } => "RESOURCE_INSTALL_FINALIZATION",
+        }
+    }
+    pub fn has_unconfirmed_close(&self) -> bool {
+        match self {
+            Self::Private(GoalCustodyError::Cleanup) => true,
+            Self::Private(GoalCustodyError::Native(error)) => error.has_unconfirmed_close(),
+            Self::Writer(error) => error.has_unconfirmed_close(),
+            Self::Finalization { primary, cleanup } => {
+                primary.has_unconfirmed_close() || cleanup.has_unconfirmed_close()
+            }
+            _ => false,
         }
     }
 }
@@ -59,18 +79,21 @@ fn need(value: bool, code: &'static str) -> Result<()> {
         Err(ResourceFactsError::Refused(code))
     }
 }
+#[derive(Clone, Eq, PartialEq)]
 struct BoundDocument {
     path: std::path::PathBuf,
     stamp: Fingerprint,
     raw: Vec<u8>,
     identities: Vec<(std::path::PathBuf, native::private_goal::PathIdentity)>,
     domain: reverie_core::operations::JournalDigest,
+    end: Instant,
 }
 #[derive(Default)]
 #[must_use = "retain the original observer and actor hold after uncertain close"]
 pub struct InstalledFactsObserver {
     original: Option<BoundDocument>,
     close_uncertain: bool,
+    identity: std::sync::Arc<()>,
 }
 impl InstalledFactsObserver {
     pub fn assert_finalized(&self) -> Result<()> {
@@ -125,24 +148,7 @@ impl InstalledFactsObserver {
                     == bound.path,
             "RESOURCE_INSTALL_CHANGED",
         )?;
-        for (path, original) in &bound.identities {
-            let info = std::fs::symlink_metadata(path).map_err(GoalCustodyError::from)?;
-            need(
-                !info.file_type().is_symlink()
-                    && native::private_goal::identity(&info) == *original,
-                "RESOURCE_INSTALL_CHANGED",
-            )?;
-        }
-        match std::fs::symlink_metadata(bound.path.with_file_name("resource-actor.installing.json"))
-        {
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            _ => {
-                return Err(ResourceFactsError::Refused(
-                    "RESOURCE_INSTALL_PENDING_REQUIRES_INSPECTION",
-                ));
-            }
-        }
-        PrivateBatch::check_exact_private_json(&bound.path, &bound.stamp)?;
+        bound.assert_paths()?;
         check(end)
     }
     fn read(
@@ -180,6 +186,7 @@ impl InstalledFactsObserver {
                 raw,
                 identities,
                 domain: selected.domain().clone(),
+                end,
             },
         ))
     }

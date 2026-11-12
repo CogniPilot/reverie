@@ -1,5 +1,8 @@
+import {TerminalInputUnconfirmedError} from '../../terminal-input-outcome.js';
 import { NO_OWNER, type OwnerVerifier } from '../../owner-auth/marks.js';
 import { delegatedSessionStartAdmission } from '../../owner-auth/delegated-session-create.js';
+import { sessionCreateAdmission } from '../../owner-auth/session-create-admission.js';
+import type { TabLayout } from '../../tab-layout.js';
 import { runtimeSwitches } from './session-runtime-routes.js';
 import { clampExternalCliBypassForOwner } from '../../session-config-clamp.js';
 /**
@@ -9,6 +12,8 @@ import { clampExternalCliBypassForOwner } from '../../session-config-clamp.js';
  */
 
 import { guardShellKey } from '../../opencode-input.js';
+import { registerInputReceiptRoutes } from './input-receipt-routes.js';
+import { prepareWorkspaceHooks, workspaceHookPolicy, type WorkspaceHookPreparation } from '../../workspace-hook-policy.js';
 import { FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { join, dirname, extname, basename } from 'node:path';
@@ -38,6 +43,7 @@ import {
 } from '../../types.js';
 import {
   Session,
+  ProviderDispatchUnconfirmedError,
   cliTakesSessionModel,
   isAltScreenStripMode,
   isExternalCliMode,
@@ -46,6 +52,7 @@ import {
 } from '../../session.js';
 import type { PaneCaptureOptions } from '../../mux-interface.js';
 import { SseEvent } from '../sse-events.js';
+import {LaunchReservation} from '../launch-reservation.js';
 import { webviewCapabilities } from '../../webview-capabilities.js';
 import { htmlViewCapabilities } from '../../html-view-capabilities.js';
 import {
@@ -141,7 +148,6 @@ import { legacyConfigForMode } from '../../session-cli-registry-bridge.js';
 import { isMultiUserMode } from '../../config/multiuser.js';
 import { AUTH_COOKIE_NAME } from '../middleware/auth.js';
 import {
-  writeHooksConfig,
   updateCaseModel,
   stripCaseEnvKeys,
   agentSkillDir,
@@ -149,8 +155,6 @@ import {
   applyAgentSkill,
   refreshUserAgentSkill,
   seedAgentSessionPreamble,
-  applyWorkspaceHooks,
-  refreshStaleReverieHooks,
 } from '../../hooks-config.js';
 import { generateClaudeMd } from '../../templates/claude-md.js';
 import { imageWatcher } from '../../image-watcher.js';
@@ -830,6 +834,17 @@ function abortOnClientHangUp(reply: FastifyReply): AbortController {
   return controller;
 }
 
+/** Release only hook-dependent waits when their original provider start changes. */
+function fenceHookWait(session: Session, until: readonly WaitSignal[], abort: AbortController) {
+  let changed = false;
+  const onChange = () => { changed = true; abort.abort(); };
+  const enabled = until.includes('stop') || until.includes('blocked');
+  if (enabled) session.on('workspaceHookGenerationChanged', onChange);
+  return {changed: () => changed, release: () => {
+    if (enabled) session.off('workspaceHookGenerationChanged', onChange);
+  }};
+}
+
 /**
  * Inject the agent skill into a case on create, surfacing only the REFUSALS.
  *
@@ -868,12 +883,9 @@ async function injectAgentSkill(casePath: string, dir: AgentSkillDir): Promise<v
   }
 }
 
-// Workspace hooks: the install-vs-refresh decision core moved to
-// `applyWorkspaceHooks` in hooks-config.ts (imported above) so the non-route
-// claude create paths — cron fires, legacy scheduled runs, the plan-orchestrator
-// one-shots, the boot recovery sweep — share the SAME decision instead of
-// bypassing the `workspaceHooksEnabled` setting. Route handlers here resolve the
-// setting through the ConfigPort (tests stub it) and pass it as the second arg.
+// Registry workspace profiles choose authoring by creation phase. Their install
+// policy delegates to hooks-config's shared setting/refresh core, also used by
+// non-route creation paths. A runtime's lifecycle hook support grants no writes.
 
 /**
  * A "Resume"/"continue" request for a NEW omp-mode session (the frontend's
@@ -941,7 +953,7 @@ function wakeableHost(host: RemoteHost): WakeableRemote {
 
 /** Persist a launch seed only once that runtime's conversation is known. */
 export async function persistDockerLaunchConversation(session: Session, configDir: string): Promise<void> {
-  if (!session.docker || session.mode !== 'claude' || session.claudeSessionIdPending) return;
+  if (!session.docker || getCli(session.mode)?.launch.resumeSelection !== 'claude-transcript' || session.claudeSessionIdPending) return;
   await persistDockerCaseClaudeSessionId(configDir, session.docker.containerName,
     session.claudeSessionId || session.id);
 }
@@ -960,26 +972,27 @@ export function registerSessionRoutes(
     onReplacementFailed?: (info: { employeeId?: string; replacedSessionIds: string[]; error: string }) => void;
   } = {}
 ): RemoteWakeRegistry {
-  // Delivery knowledge belongs to this Session object, not a reusable SID. Keep
-  // a bounded receipt window; an evicted duplicate is unknown, not proof
-  // of delivery. Never replay an attempted terminal write to resolve uncertainty.
-  const terminalInputReceipts = new WeakMap<Session, LRUMap<string, 'pending' | 'confirmed' | 'unconfirmed' | 'typed-unsent'>>();
+  registerInputReceiptRoutes(app, ctx);
   /** Bug 11: an explicit restart by the VERIFIED OWNER records running intent through the same guarded transaction as the
    * runtime route (CompanyService.prepareRuntimeRestart): intent is claimed BEFORE the launch, an owner Stop or vacation
    * that lands mid-start cancels it and wins, a failed start rolls it back. Non-owner callers and every automatic path
    * (UI re-attach, respawn, cron, ralph, wake, observation) get no transaction and only fill missing intent. */
-  const ownerRestart = async (req: FastifyRequest, session: Session, start: () => Promise<boolean>): Promise<boolean> => {
+  const ownerRestart = async (req: FastifyRequest, session: Session, start: (stillCurrent: () => boolean, admitted: () => boolean) => Promise<boolean>): Promise<boolean> => {
     const intent =
       options.company && (options.verifiedOwner ?? NO_OWNER)(req)
         ? options.company.prepareRuntimeRestart(session.id, ownerFor(req))
         : undefined;
     try {
       await intent?.claim();
-      const restarted = await start();
+      const current = () => ctx.sessions.get(session.id) === session && (!intent || intent.current());
+      const admitted = () => current() && !session.isBusy();
+      if (!admitted()) {await intent?.rollback(); return false;}
+      const restarted = await start(current, admitted);
       if (!restarted) await intent?.rollback();
       return restarted;
     } catch (error) {
-      await intent?.rollback().catch(() => {});
+      if (!(error instanceof ProviderDispatchUnconfirmedError)) await intent?.rollback().catch(() => {});
+      else ctx.persistSessionStateNow(session);
       throw error;
     } finally {
       intent?.finish();
@@ -1019,6 +1032,54 @@ export function registerSessionRoutes(
     const info = { employeeId: identity?.employeeId, replacedSessionIds: claim.stopped, error: getErrorMessage(error) };
     console.error('[replacement_failed]', JSON.stringify(info));
     options.onReplacementFailed?.(info);
+  };
+  class CandidateCleanupUnconfirmed extends Error {
+    #session: Session; #owner: string | undefined;
+    constructor(session: Session, owner: string | undefined, cause: unknown) {
+      super('Candidate cleanup required: ' + getErrorMessage(cause), {cause});
+      this.#session = session; this.#owner = owner;
+    }
+    static matches(error: unknown, session: Session, owner: string | undefined): error is CandidateCleanupUnconfirmed {
+      return error instanceof CandidateCleanupUnconfirmed && #session in error
+        && error.#session === session && error.#owner === owner;
+    }
+  }
+  const retainUnconfirmedLaunch = (error: unknown, session: Session | undefined, claim: ThreadClaim,
+    identity?: {employeeId?: string; replacesSessionId?: string}, owner?: string) => {
+    if (!session) return undefined;
+    const binding = options.company?.replacementPublicationRecovery(error, session, identity, owner);
+    const provider = error instanceof ProviderDispatchUnconfirmedError && session.providerDispatchHeld;
+    const cleanup = CandidateCleanupUnconfirmed.matches(error, session, owner);
+    if (!binding && !provider && !cleanup) return undefined;
+    const replacementClaim = claim.retainUnconfirmed();
+    const current = ctx.sessions.get(session.id) === session && session.owner === owner;
+    let persistenceUnconfirmed = false;
+    if (current) {
+      try { ctx.persistSessionStateNow(session); } catch { persistenceUnconfirmed = true; }
+    }
+    return {...createErrorResponse(ApiErrorCode.CONFLICT, binding
+      ? 'Employee binding publication is unconfirmed. Preserve this session and identity; do not replay the replacement.'
+      : (error as Error).message),
+      recoveryRequired: true, sessionId: binding?.sessionId ?? session.id, replacementClaim,
+      ...(binding ? { reason: binding.reason, sourceGeneration: binding.sourceGeneration } : cleanup ? {reason: 'candidate-cleanup-unconfirmed'} : {}),
+      ...(!current ? { retainedSession: 'ownership-lost' } : {}),
+      ...(persistenceUnconfirmed ? { sessionPersistence: 'unconfirmed' } : {}),
+      ...(identity?.employeeId ? {employeeId: identity.employeeId} : {}),
+      ...(identity?.replacesSessionId ? {replacesSessionId: identity.replacesSessionId} : {}),
+      reconciliation: (replacementClaim === 'held' ? 'The original replacement claim is held in this process. '
+        : replacementClaim === 'ownership-lost' ? 'Original replacement claim ownership is no longer current; newer claims were not changed. '
+        : 'This launch has no employee or conversation claim. ')
+        + (cleanup ? 'Original candidate cleanup is not confirmed; preserve the original attempt and do not replay this replacement.'
+          : binding ? 'Canonical binding reconciliation is not implemented; do not replay this replacement.'
+          : 'Persisted launch reconciliation after restart is not implemented; do not replay this launch.')};
+  };
+  const cleanupOwnedCandidate = async (session: Session, owner: string | undefined, reason: string) => {
+    // A known refusal cannot authorize stopping a successor that reused this SID.
+    try {
+      if (ctx.sessions.get(session.id) !== session || session.owner !== owner)
+        throw new Error('original session identity changed');
+      await ctx.cleanupSession(session.id, true, reason, {session, owner});
+    } catch (cause) { throw new CandidateCleanupUnconfirmed(session, owner, cause); }
   };
   // A coordinator may continue a GONE agent's conversation in a room it coordinates (REVERIE_RESUME_TAKEOVER=owner turns
   // this off). Every conversation let through that way is written to the audit log before the session is created.
@@ -1171,6 +1232,11 @@ export function registerSessionRoutes(
   // ========== Session Creation ==========
 
   app.post('/api/sessions', async (req, reply) => {
+    const admitted = sessionCreateAdmission(req);
+    const assertAdmission = () => {
+      if (admitted && !admitted()) throw new Error('Session creation admission changed during preparation');
+    };
+    assertAdmission();
     const owner = ownerFor(req);
     // Global + per-user session cap.
     const capMsg = sessionCapacityMessage(ctx.sessions, owner);
@@ -1356,8 +1422,11 @@ export function registerSessionRoutes(
     // as a junk local dir), and only when the caller named a workingDir: the
     // process-cwd fallback is $HOME under installer-created services, and hooks
     // materializing in ~/.claude/settings.local.json was never asked for.
-    if (!remote && body.workingDir && (body.mode ?? 'claude') === 'claude') {
-      await applyWorkspaceHooks(workingDir, await ctx.getWorkspaceHooksEnabled());
+    let workspaceHookPreparation: WorkspaceHookPreparation | undefined;
+    if (!remote && body.workingDir) {
+      workspaceHookPreparation = await prepareWorkspaceHooks(workingDir, workspaceHookPolicy(body.mode ?? 'claude', 'sessionCreate'), {
+        scaffold: false, enabled: () => ctx.getWorkspaceHooksEnabled(),
+      });
     }
 
     // Refuse up front if the requested CLI cannot start, rather than spawning a pane that
@@ -1482,7 +1551,7 @@ export function registerSessionRoutes(
     const terminalHistoryConfig = await ctx.getTerminalHistoryConfig();
     // The thread is decided once, before anything is stopped: the stop removes the old record the employee's thread may come from.
     const launchThread =
-      mode === 'opencode'
+      getCli(mode)?.launch.threadStateProfile === 'forkable-continue-v1'
         ? typeof launchBody.openCodeConfig?.continueSession === 'string'
           ? launchBody.openCodeConfig.continueSession
           : employeeThread(ctx, spawnIdentity)
@@ -1504,8 +1573,13 @@ export function registerSessionRoutes(
       claim.release();
       return createErrorResponse(spawnRefusalCode(error), getErrorMessage(error));
     }
+    let createdSession: Session | undefined;
     try {
+      // Await every option before the final construction guard. Constructor argument evaluation must not yield afterward.
+      const envOverrides = { ...(await clampEnvOverridesForOwner(owner, body.envOverrides)), ...subscriptionLaunch(req).env };
+      assertAdmission();
       const session = new Session({
+        workspaceHookPreparation,
         workingDir,
         mode,
         name: spawnIdentity?.name ?? body.name ?? '',
@@ -1524,10 +1598,7 @@ export function registerSessionRoutes(
         deepSeekConfig: mode === 'deepseek' ? gatedDeepSeekConfig : undefined,
         ompConfig: resolveOmpConfigForCreate(mode, workingDir, launchBody.ompConfig),
         resumeSessionId: validatedResumeId,
-        envOverrides: {
-          ...(await clampEnvOverridesForOwner(owner, body.envOverrides)),
-          ...subscriptionLaunch(req).env,
-        },
+        envOverrides,
         subscriptionProfile: subscriptionLaunch(req).selection,
         effort: body.effort,
         advisorModel: body.advisorModel,
@@ -1537,11 +1608,21 @@ export function registerSessionRoutes(
         parentSessionId,
       });
 
-      const tabLayout = body.tabGroupId
-        ? await ctx.addSession(session, { tabGroupId: body.tabGroupId })
-        : await ctx.addSession(session);
+      createdSession = session;
+      let tabLayout: TabLayout;
+      try {
+        const placement = body.tabGroupId ? { tabGroupId: body.tabGroupId } : undefined;
+        tabLayout = admitted
+          ? await ctx.addSession(session, placement, admitted)
+          : placement ? await ctx.addSession(session, placement) : await ctx.addSession(session);
+      } catch (error) {
+        // This newly-owned object has never launched. Dispose its local trackers only; never signal any provider/mux.
+        if (ctx.sessions.get(session.id) !== session) await session.stop(false);
+        throw error;
+      }
       ctx.store.incrementSessionsCreated();
       ctx.persistSessionState(session);
+      if (!claim.admitDispatch()) throw new Error('The original replacement claim is no longer current; no provider start was admitted');
       await ctx.setupSessionListeners(session);
       if (spawnIdentity) {
         try {
@@ -1553,8 +1634,11 @@ export function registerSessionRoutes(
             replacementIntent?.token
           );
         } catch (error) {
+          const retained = retainUnconfirmedLaunch(error, session, claim, spawnIdentity, ownerFor(req));
+          if (retained) return retained;
           // The session is already running; without its rooms and record it would be an orphan under the employee's name.
-          await ctx.cleanupSession(session.id, true, 'spawn_failed').catch(() => {});
+          try { await cleanupOwnedCandidate(session, ownerFor(req), 'spawn_failed'); }
+          catch (cleanup) { return retainUnconfirmedLaunch(cleanup, session, claim, spawnIdentity, ownerFor(req)); }
           await replacementIntent?.rollback().catch(() => {});
           replacementFailed(spawnIdentity, claim, error);
           claim.release();
@@ -1585,6 +1669,8 @@ export function registerSessionRoutes(
         ...(resumeWarnings.length ? { warnings: resumeWarnings } : {}),
       };
     } catch (error) {
+      const retained = retainUnconfirmedLaunch(error, createdSession, claim, spawnIdentity, ownerFor(req));
+      if (retained) return retained;
       await replacementIntent?.rollback().catch(() => {});
       replacementFailed(spawnIdentity, claim, error);
       claim.release();
@@ -1650,6 +1736,8 @@ export function registerSessionRoutes(
     const { id } = req.params as { id: string };
     const body = parseBody(CustomModelSelectionSchema, req.body, 'Invalid request body');
     const session = findSessionOrFail(ctx, id, req);
+    if (session.providerDispatchHeld) throw new ProviderDispatchUnconfirmedError();
+    if (session.terminalInputHeld) throw new TerminalInputUnconfirmedError();
 
     if (session.remote || session.docker) {
       return createErrorResponse(
@@ -1664,7 +1752,7 @@ export function registerSessionRoutes(
     if ('clear' in body) {
       const { previousConfigDir } = session.setCustomModel(undefined);
       removeConfigDir(previousConfigDir);
-      const restarted = await ownerRestart(req, session, () => session.restartCli()); // Bug 11: guarded owner intent
+      const restarted = await ownerRestart(req, session, (stillCurrent, admitted) => session.restartCli(stillCurrent, admitted)); // Bug 11: guarded owner intent
       persistAndBroadcastSession(ctx, session);
       return { customModel: session.customModel, restarted };
     }
@@ -1799,7 +1887,7 @@ export function registerSessionRoutes(
       triggerLlamaSwapLoad(endpoint, body.modelId);
     }
 
-    const restarted = await ownerRestart(req, session, () => session.restartCli()); // Bug 11: guarded owner intent
+    const restarted = await ownerRestart(req, session, (stillCurrent, admitted) => session.restartCli(stillCurrent, admitted)); // Bug 11: guarded owner intent
     persistAndBroadcastSession(ctx, session);
     return { customModel: session.customModel, restarted, modelSwapInProgress: swapStatus.isLlamaSwap && !targetReady };
   });
@@ -1949,6 +2037,8 @@ export function registerSessionRoutes(
     const { id } = req.params as { id: string };
     const { prompt } = parseBody(RunPromptSchema, req.body);
     const session = findSessionOrFail(ctx, id, req);
+    if (session.providerDispatchHeld) return createErrorResponse(ApiErrorCode.CONFLICT, new ProviderDispatchUnconfirmedError().message);
+    if (session.terminalInputHeld) return createErrorResponse(ApiErrorCode.CONFLICT, new TerminalInputUnconfirmedError().message);
 
     if (session.isBusy()) {
       return createErrorResponse(ApiErrorCode.SESSION_BUSY, 'Session is busy');
@@ -2043,6 +2133,7 @@ export function registerSessionRoutes(
 
       return {};
     } catch (err) {
+      if (err instanceof ProviderDispatchUnconfirmedError) ctx.persistSessionStateNow(session);
       return createErrorResponse(ApiErrorCode.OPERATION_FAILED, getErrorMessage(err));
     }
   });
@@ -2075,6 +2166,7 @@ export function registerSessionRoutes(
       ctx.broadcast(SseEvent.SessionUpdated, { session: ctx.getSessionStateWithRespawn(session) });
       return {};
     } catch (err) {
+      if (err instanceof ProviderDispatchUnconfirmedError) ctx.persistSessionStateNow(session);
       return createErrorResponse(ApiErrorCode.OPERATION_FAILED, getErrorMessage(err));
     }
   });
@@ -2150,18 +2242,10 @@ export function registerSessionRoutes(
     const { id } = req.params as { id: string };
     const { input, useMux, seq, clientId, wait, waitTimeout, ifIdle } = parseBody(SessionInputWithLimitSchema, req.body);
     const session = findSessionOrFail(ctx, id, req);
-    // A cheap early refusal, before the dedup seq is spent. It is NOT the idle decision: a turn can start during any await
-    // below (the wake-target probe among them), so the session decides again at the write itself (writeViaMux requireIdle).
-    if (ifIdle && session.isWorking) {
-      return createErrorResponse(ApiErrorCode.SESSION_BUSY, 'Session is working; nothing was typed');
-    }
-    // An agent's input (send, wake: the request names its calling session) never types into a composer a plan move owns: the
-    // move's handoff goes into that composer and would be appended to it. A person's own typing stays allowed.
+    if (session.providerDispatchHeld) return {...createErrorResponse(ApiErrorCode.CONFLICT, new ProviderDispatchUnconfirmedError().message), recoveryRequired: true};
+    if (session.terminalInputHeld) return {...createErrorResponse(ApiErrorCode.CONFLICT, new TerminalInputUnconfirmedError().message), recoveryRequired: true};
     const agentCaller =
       typeof req.headers['x-reverie-parent-session'] === 'string' && req.headers['x-reverie-parent-session'] !== '';
-    if (agentCaller && session.composerHeldByMove) {
-      return createErrorResponse(ApiErrorCode.SESSION_BUSY, 'A plan move owns this session\'s composer; nothing was typed');
-    }
 
     const inputStr = String(input);
     if (inputStr.length > MAX_INPUT_LENGTH) {
@@ -2192,20 +2276,12 @@ export function registerSessionRoutes(
     // client's ACK, so a proven tagged duplicate returns 200 without a write.
     // An uncertain terminal attempt cannot be ACKed as applied or replayed.
     // Untagged requests (curl/legacy) always apply.
-    const tagged = typeof clientId === 'string' && typeof seq === 'number';
-    const duplicate = tagged && !session.shouldApplyInput(clientId as string, seq as number);
     const terminalScope = session.runtimeHealthScope === 'terminal';
-    let receipts = terminalScope && tagged ? terminalInputReceipts.get(session) : undefined;
-    if (terminalScope && tagged && !receipts) {
-      receipts = new LRUMap({ maxSize: 256 });
-      terminalInputReceipts.set(session, receipts);
-    }
-    const receiptKey = JSON.stringify([clientId, seq]);
-    const recordReceipt = (state: 'pending' | 'confirmed' | 'unconfirmed' | 'typed-unsent') => receipts?.set(receiptKey, state);
-    const unconfirmedInput = () => createErrorResponse(
+    let inputPersistenceUnconfirmed = false;
+    const unconfirmedInput = () => ({...createErrorResponse(
       ApiErrorCode.OPERATION_FAILED,
       'Input delivery is unconfirmed; it will not be replayed. Check the session before sending anything again.'
-    );
+    ), recoveryRequired: true, ...(inputPersistenceUnconfirmed ? {sessionPersistence: 'unconfirmed'} : {})});
     const typedUnsentInput = () => ({
       ...createErrorResponse(ApiErrorCode.SESSION_BUSY,
         'Input text remains unsent in the composer; Enter was withheld. Do not resend the text.'),
@@ -2213,10 +2289,25 @@ export function registerSessionRoutes(
     });
     const idleRefusal = () => createErrorResponse(ApiErrorCode.SESSION_BUSY,
       'Session is busy or has a draft in its composer; nothing was typed.');
-    if (duplicate && terminalScope && receipts?.get(receiptKey) === 'typed-unsent') return typedUnsentInput();
-    if (duplicate && terminalScope && receipts?.get(receiptKey) !== 'confirmed') return unconfirmedInput();
-    if (duplicate && !wantsWait) {
-      return {};
+    const rawInput = agentCaller && getCli(session.mode)?.capabilities.input?.shellKeyGuard ? guardShellKey(inputStr) : inputStr;
+    const admission = ctx.terminalInput.begin(session, {input: inputStr, rawInput, clientId, seq, useMux, ifIdle: ifIdle ?? undefined, agentInput: agentCaller},
+      () => ctx.sessions.get(id) === session);
+    if (admission.state === 'held') return unconfirmedInput();
+    if (admission.state === 'pending') return {pending: true};
+    if (admission.state === 'typed-unsent') return typedUnsentInput();
+    if (admission.state === 'capacity') return createErrorResponse(ApiErrorCode.CONFLICT,
+      'Input receipt capacity is held by unresolved operations; no new input was issued.');
+    const duplicate = admission.state === 'duplicate';
+    const receipt = admission.state === 'admitted' ? admission.operation : undefined;
+    const inputAdmission = receipt?.admitted ?? (() => false);
+    if (duplicate && !wantsWait) return {};
+    if (!duplicate && ifIdle && session.isWorking) {
+      receipt?.refuse();
+      return createErrorResponse(ApiErrorCode.SESSION_BUSY, 'Session is working; nothing was typed');
+    }
+    if (!duplicate && agentCaller && session.composerHeldByMove) {
+      receipt?.refuse();
+      return createErrorResponse(ApiErrorCode.SESSION_BUSY, 'A plan move owns this session\'s composer; nothing was typed');
     }
 
     // Wake-on-LAN (remote-wake.ts): a wake-enabled remote host that suspended leaves
@@ -2240,7 +2331,8 @@ export function registerSessionRoutes(
         // recovery for.
         if (!(await remoteWake.ensureAwake(session))) {
           // Nothing was typed, so a refused wake's seq is handed back for its retry.
-          if (ifIdle && tagged) session.forgetInputSeq(clientId as string, seq as number);
+          receipt?.refuse();
+
           return createErrorResponse(
             ApiErrorCode.OPERATION_FAILED,
             `${session.remote?.label ?? 'the remote host'} did not come back after a wake-on-LAN request — nothing was sent`
@@ -2255,10 +2347,10 @@ export function registerSessionRoutes(
         // was over the wake buffer's cap and is GONE (a 200 with no field could not
         // tell delivered from buffered from dropped).
         if (outcome === 'buffered') {
-          recordReceipt('confirmed'); // The wake buffer owns this seq; a lost ACK must not enqueue it twice.
+          if (!receipt?.acceptBuffered(ctx)) return unconfirmedInput();
           return { buffered: true };
         }
-        if (outcome === 'dropped') return { buffered: true, dropped: true };
+        if (outcome === 'dropped') {receipt?.refuse(); return { buffered: true, dropped: true };}
       }
     }
 
@@ -2270,7 +2362,8 @@ export function registerSessionRoutes(
     if (!duplicate && terminalScope && (
       session.viewerInputHeld || session.pid == null || session.paneExit || (wantsWait && workerIsDead(ctx.mux, session))
     )) {
-      if (tagged) session.forgetInputSeq(clientId as string, seq as number);
+      receipt?.refuse();
+
       return createErrorResponse(ApiErrorCode.SESSION_BUSY, 'Terminal viewer unavailable; reconnect it. Nothing was typed.');
     }
     const workerDead = wantsWait && !terminalScope && workerIsDead(ctx.mux, session);
@@ -2281,6 +2374,7 @@ export function registerSessionRoutes(
     // abortOnClientHangUp: on THIS route a request-side listener fires the moment the
     // JSON body finishes streaming and aborts every send-and-wait before it starts.
     const abort = abortOnClientHangUp(reply);
+    const hookFence = fenceHookWait(session, wantsWait ? until : [], abort);
     let waitPromise: Promise<SignalWaitResult> | null = null;
     if (wantsWait) {
       try {
@@ -2301,13 +2395,17 @@ export function registerSessionRoutes(
           // Nothing has been written yet, but `shouldApplyInput` already consumed the
           // seq. Give it back or the caller's retry is rejected as a duplicate and the
           // input is lost by the very mechanism meant to make delivery reliable.
-          if (tagged && !duplicate) session.forgetInputSeq(clientId as string, seq as number);
+          if (!duplicate) receipt?.refuse();
+
+          hookFence.release();
           return waitCapacityResponse(err);
         }
+        hookFence.release();
         throw err;
       }
     }
     const stopDeathWatch = wantsWait ? watchForDeadWorker(ctx.mux, session, id) : () => {};
+    try {
 
     // Write input to PTY. Direct write is synchronous; writeViaMux
     // (tmux send-keys) is fire-and-forget to avoid blocking the HTTP response.
@@ -2320,13 +2418,12 @@ export function registerSessionRoutes(
     // receipt stays unconfirmed. A move gate that typed nothing is retryable.
     let terminalWriteUnconfirmed = false;
     const undoOnFailure = () => {
-      if (terminalScope && !heldByMove && !idleRefused) {
+      if (terminalWriteUnconfirmed || (terminalScope && !heldByMove && !idleRefused)) {
         terminalWriteUnconfirmed = true;
-        recordReceipt('unconfirmed');
+        receipt?.unconfirmed(new TerminalInputUnconfirmedError(), ctx);
         return;
       }
-      receipts?.delete(receiptKey);
-      if (tagged) session.forgetInputSeq(clientId as string, seq as number);
+      receipt?.refuse();
     };
 
     // Whether the bytes actually reached a write path. Only meaningful on the wait
@@ -2342,6 +2439,20 @@ export function registerSessionRoutes(
     // An agent's write refused before any byte because a plan move took the composer after the early check above (during the
     // wake-target probe, say): busy, with the seq handed back for a retry once the move is done.
     let heldByMove = false;
+    const muxFailure = (cause: unknown): false => {
+      if (cause instanceof TerminalInputUnconfirmedError || session.terminalInputHeld) {
+        typedUnsent = false;
+        terminalWriteUnconfirmed = true;
+        receipt?.unconfirmed(new TerminalInputUnconfirmedError(), ctx);
+        const reported = receipt?.unconfirmed(cause, ctx);
+        inputPersistenceUnconfirmed ||= reported?.persistenceUnconfirmed === true;
+      }
+      return false;
+    };
+
+    const writeRaw = (): boolean => {
+      try {return receipt?.writeRaw(rawOptions) ?? false;} catch (cause) {return muxFailure(cause);}
+    };
 
     // A plain prompt (`<text>\r`) goes through the mux even when the caller did not
     // ask for it: written straight into the pane it arrives as one burst, and Claude
@@ -2355,40 +2466,40 @@ export function registerSessionRoutes(
     // An agent's write also answers to a plan move's hold at the write itself (agentInput); a person's typing does not.
     const agentHold = agentCaller ? { agentInput: true, onMoveHeld: () => { heldByMove = true; } } : {};
     const muxOptions = agentCaller
-      ? { fromUser: true, opencodeGuard: true, ...agentHold, onTypedUnsent: () => { typedUnsent = true; } }
-      : { fromUser: true };
+      ? { fromUser: true, admitted: inputAdmission, opencodeGuard: true, ...agentHold, onTypedUnsent: () => { typedUnsent = true; } }
+      : { fromUser: true, admitted: inputAdmission };
     // The direct PTY writes (a mux failure's fallback, an explicit raw write) carry the same text: an agent's goes in without "!".
-    const rawInput = agentCaller && session.mode === 'opencode' ? guardShellKey(inputStr) : inputStr;
-    const rawOptions = { fromUser: true, ...agentHold };
+    const rawOptions = { fromUser: true, admitted: inputAdmission, ...agentHold };
     // A terminal failure may have typed text: never replay through another write path.
     // Local fallback still respects the existing typed-unsent and move gates.
-    const mayFallBack = () => !terminalScope && !typedUnsent && !heldByMove;
+    const mayFallBack = () => !terminalWriteUnconfirmed && !terminalScope && !typedUnsent && !heldByMove;
 
-    if (!duplicate) recordReceipt('pending');
-    if (duplicate) {
+    if (workerDead && !duplicate) {
+      // An observed direct-provider dead pane is refused before any effect.
+      // Never write first and then refund a confirmed original receipt.
+      receipt?.refuse();
+    } else if (duplicate) {
       // Redelivery of an already-applied input: skip the write, but still honor the
       // wait, since the caller's question ("tell me when this settles") is unanswered.
     } else if (ifIdle) {
       // Idle-only (agent wake): through the mux with an empty composer required, and no raw fallback, so a session that
       // just started a turn or holds a draft gets nothing typed.
-      delivered = await session
-        .writeViaMux(inputStr, { ...muxOptions, requireEmptyComposer: true, requireIdle: true,
+      delivered = await receipt!
+        .writeMux({ ...muxOptions, requireEmptyComposer: true, requireIdle: true,
           onTypedUnsent: () => { typedUnsent = true; }, onIdleRefused: () => { idleRefused = true; } })
-        .catch(() => false);
+        .catch(muxFailure);
       // Typed but Enter withheld is not "nothing was typed": the text sits unsent in the composer, so the seq stays spent
       // and a retry cannot type it a second time.
       if (!delivered && !typedUnsent) undoOnFailure();
-      if (delivered) recordReceipt('confirmed');
     } else if ((useMux || autoMux) && waitPromise) {
       // The response is already staying open for the wait, so the tmux write can be
       // awaited here. This is the ONE path where a writeViaMux failure is observable.
-      const ok = await session.writeViaMux(inputStr, muxOptions).catch(() => false);
+      const ok = await receipt!.writeMux(muxOptions).catch(muxFailure);
       if (ok) {
         delivered = true;
-        recordReceipt('confirmed');
       } else if (mayFallBack()) {
         console.warn(`[Server] writeViaMux failed for session ${id}, falling back to direct write`);
-        delivered = session.write(rawInput, rawOptions);
+        delivered = writeRaw();
         if (!delivered) undoOnFailure();
       } else if (!typedUnsent) undoOnFailure();
     } else if (autoMux) {
@@ -2396,70 +2507,62 @@ export function registerSessionRoutes(
       // from the browser's POST fallback, which sends its frames one at a time and
       // waits for each 2xx; answering only once Enter has gone out is what keeps the
       // next keystroke from overtaking it.
-      const ok = await session.writeViaMux(inputStr, muxOptions).catch(() => false);
+      const ok = await receipt!.writeMux(muxOptions).catch(muxFailure);
       if (!ok && mayFallBack()) {
         console.warn(`[Server] writeViaMux failed for session ${id}, falling back to direct write`);
-        if (!session.write(rawInput, rawOptions)) undoOnFailure();
+        if (!writeRaw()) undoOnFailure();
       } else if (!ok && !typedUnsent) undoOnFailure();
-      if (ok) recordReceipt('confirmed');
     } else if (useMux) {
       // Historical fire-and-forget: a 2xx accepts a still-pending write, it does
       // not confirm delivery. Only local failures may use the raw fallback;
       // terminal receipts settle asynchronously without replaying input.
-      session
-        .writeViaMux(inputStr, muxOptions)
+      receipt!
+        .writeMux(muxOptions)
         .then((ok) => {
-          if (ok) {
-            recordReceipt('confirmed');
-            return;
-          }
+          if (ok) return;
           if (typedUnsent) {
-            recordReceipt('typed-unsent');
             return;
           }
           if (!mayFallBack()) return undoOnFailure();
           console.warn(`[Server] writeViaMux failed for session ${id}, falling back to direct write`);
-          if (!session.write(rawInput, rawOptions)) undoOnFailure();
+          if (!writeRaw()) undoOnFailure();
         })
-        .catch(() => {
-          if (mayFallBack() && session.write(rawInput, rawOptions)) return;
+        .catch((cause) => {
+          muxFailure(cause);
+          if (mayFallBack() && writeRaw()) return;
           if (!typedUnsent) undoOnFailure();
         });
     } else {
-      // Same rollback. NOT an error response, deliberately: a session can
-      // legitimately have no PTY yet (created but not started), and callers have
-      // always been able to write to one without a 4xx.
-      delivered = session.write(rawInput, rawOptions);
-      if (delivered) recordReceipt('confirmed');
-      else undoOnFailure();
+      // A known missing PTY is retryable, never a delivery acknowledgement.
+      delivered = writeRaw();
+      if (!delivered) undoOnFailure();
     }
     if (typedUnsent) {
-      recordReceipt('typed-unsent');
-      terminalWriteUnconfirmed = terminalScope;
+      terminalWriteUnconfirmed ||= terminalScope;
     }
+
+    // A callback alone cannot settle an async writer: a later error still dominates.
+    if (!waitPromise && receipt?.pending) return {pending: true};
 
     // An idle-only write (agent wake) was awaited above, so its outcome is known even without a wait: a refusal (a turn
     // just started, or a draft in the composer) must not read as accepted.
+    if (receipt?.held) return {...createErrorResponse(ApiErrorCode.CONFLICT,
+      'The original input subject changed. This request is held and will not be replayed.'), held: true, recoveryRequired: true};
     if (heldByMove && !waitPromise) {
       return createErrorResponse(ApiErrorCode.SESSION_BUSY, 'A plan move owns this session\'s composer; nothing was typed');
     }
-    if (!waitPromise && terminalScope && typedUnsent) return typedUnsentInput();
+    if (!waitPromise && typedUnsent) return typedUnsentInput();
     if (!waitPromise && terminalScope && idleRefused) return idleRefusal();
     if (!waitPromise && terminalWriteUnconfirmed) return unconfirmedInput();
+    if (!waitPromise && receipt?.notIssued) return {...createErrorResponse(ApiErrorCode.SESSION_BUSY,
+      'Input was not issued because the terminal is unavailable or not accepting input; retry the same request when available.'),
+      data: {delivered: false}};
     if (!waitPromise) return ifIdle || typedUnsent ? (typedUnsent ? { delivered, typedUnsent } : { delivered }) : {};
 
-    try {
       // `send-keys` SUCCEEDS against a dead pane — tmux is happy to write into a corpse
       // — so a truthful `delivered` cannot come from the write's return value alone.
       // This is the case the field exists for: "delivered, but it timed out" tells an
       // agent to wait longer when the truth is "restart the worker".
-      if (delivered && workerDead) {
-        delivered = false;
-        // The bytes went nowhere, so the seq must not be recorded as applied or the
-        // caller's retry against a restarted worker is refused as a duplicate.
-        if (!duplicate) undoOnFailure();
-      }
-
       // Nothing was written and nothing will be: no turn is coming, so blocking for the
       // full timeout would only delay the caller's real recovery by up to ten minutes.
       // Releasing the waiter also hands its slot back immediately.
@@ -2470,9 +2573,9 @@ export function registerSessionRoutes(
       if (heldByMove) {
         return createErrorResponse(ApiErrorCode.SESSION_BUSY, 'A plan move owns this session\'s composer; nothing was typed');
       }
-      if (terminalScope && typedUnsent) return typedUnsentInput();
+      if (typedUnsent) return typedUnsentInput();
       if (terminalScope && idleRefused) return idleRefusal();
-      if (terminalScope && !delivered && !duplicate) return unconfirmedInput();
+      if (terminalWriteUnconfirmed || (terminalScope && !delivered && !duplicate)) return unconfirmedInput();
       if (terminalScope && (result.signal === 'exit' || result.ended)) {
         return createErrorResponse(
           ApiErrorCode.OPERATION_FAILED,
@@ -2500,10 +2603,12 @@ export function registerSessionRoutes(
           // reporting `aborted: true` there would break that promise and hand an agent
           // a second, contradictory reason for the same outcome. `delivered: false`
           // already says what happened; `ended` says the wait was released early.
-          wait: { ...result, aborted: selfReleased ? false : result.aborted, until: [...until] },
+          wait: { ...result, aborted: selfReleased || hookFence.changed() ? false : result.aborted, until: [...until] },
         },
       };
     } finally {
+      hookFence.release();
+      abort.abort();
       stopDeathWatch();
     }
   });
@@ -2543,6 +2648,7 @@ export function registerSessionRoutes(
     // Free the waiter when the caller hangs up; the response can no longer be sent by
     // then, so freeing the slot is the entire purpose.
     const abort = abortOnClientHangUp(reply);
+    const hookFence = fenceHookWait(session, until, abort);
     // A worker that dies while this request is parked emits nothing at all (the tmux
     // attach client survives it), so a wait would otherwise run to its full timeout.
     const stopDeathWatch = watchForDeadWorker(ctx.mux, session, id);
@@ -2570,13 +2676,14 @@ export function registerSessionRoutes(
           // One shape across all three endpoints, so a single `is_done(resp)` helper
           // works against any of them. `result.timeoutMs` is the value actually
           // applied after clamping, which is what makes the clamp observable.
-          wait: { ...result, until: [...until] },
+          wait: { ...result, aborted: hookFence.changed() ? false : result.aborted, until: [...until] },
         },
       };
     } catch (err) {
       if (err instanceof WaitCapacityError) return waitCapacityResponse(err);
       throw err;
     } finally {
+      hookFence.release();
       stopDeathWatch();
     }
   });
@@ -3986,6 +4093,8 @@ export function registerSessionRoutes(
     const muxRecord = ctx.mux.getSession(id);
     if (!muxRecord) return refuse(409, ApiErrorCode.CONFLICT, 'The session has no pane to restart');
 
+    if (session.providerDispatchHeld) return refuse(409, ApiErrorCode.CONFLICT, new ProviderDispatchUnconfirmedError().message);
+    if (session.terminalInputHeld) return refuse(409, ApiErrorCode.CONFLICT, new TerminalInputUnconfirmedError().message);
     modeSwitches.add(id);
     try {
       const from = session.mode;
@@ -4003,8 +4112,12 @@ export function registerSessionRoutes(
       ctx.mux.updateSessionMode(id, mode);
       let restarted = false;
       try {
-        restarted = await ownerRestart(req, session, () => session.restartCli()); // Bug 11: guarded owner intent
+        restarted = await ownerRestart(req, session, (stillCurrent, admitted) => session.restartCli(stillCurrent, admitted)); // Bug 11: guarded owner intent
       } catch (err) {
+        if (err instanceof ProviderDispatchUnconfirmedError) {
+          persistAndBroadcastSession(ctx, session);
+          return refuse(409, ApiErrorCode.CONFLICT, err.message);
+        }
         console.error('[mode] restart failed:', getErrorMessage(err));
       }
       if (!restarted) {
@@ -4517,6 +4630,7 @@ export function registerSessionRoutes(
 
     // Create case folder and CLAUDE.md if it doesn't exist (only for non-linked, non-remote,
     // non-docker cases — docker workspaces are scaffolded in their own block below)
+    let workspaceHookPreparation: WorkspaceHookPreparation | undefined;
     if (localCaseState === 'absent') {
       try {
         if (newCaseOnly) {
@@ -4532,19 +4646,9 @@ export function registerSessionRoutes(
         const claudeMd = generateClaudeMd(caseName, '', templatePath);
         writeFileSync(join(resolvedCasePath, 'CLAUDE.md'), claudeMd);
 
-        // Write .claude/settings.local.json with hooks for desktop notifications
-        // (Claude-specific — OpenCode, Codex, Gemini, Antigravity, Pi, Grok, DeepSeek and OMP use their own systems)
-        if (
-          mode !== 'opencode' &&
-          mode !== 'codex' &&
-          mode !== 'gemini' &&
-          mode !== 'antigravity' &&
-          mode !== 'pi' &&
-          mode !== 'grok' &&
-          mode !== 'omp'
-        ) {
-          await writeHooksConfig(resolvedCasePath);
-        }
+        workspaceHookPreparation = await prepareWorkspaceHooks(resolvedCasePath, workspaceHookPolicy(mode, 'freshCase'), {
+          scaffold: true, enabled: () => ctx.getWorkspaceHooksEnabled(),
+        });
 
         // Label a directory an AGENT asked us to create, so the scratch workspaces a
         // long orchestration leaves behind can be told apart from the user's real
@@ -4570,18 +4674,16 @@ export function registerSessionRoutes(
       } catch (err) {
         return createErrorResponse(ApiErrorCode.OPERATION_FAILED, `Failed to create case: ${getErrorMessage(err)}`);
       }
-    } else if (!remote && !docker && mode !== 'opencode') {
+    } else if (!remote && !docker) {
       // EXISTING case directory (a linked case, a cloned repo, anything Reverie did
       // not scaffold): install-or-refresh per the setting (see applyWorkspaceHooks).
       // Other modes keep the narrower COD-91 self-heal unconditionally: only claude
       // reads `.claude` hooks, so a shell/codex quick-start should not author a block
       // of its own. Skipped for remote cases — resolvedCasePath is a REMOTE path that
       // doesn't exist on the local filesystem.
-      if (getCli(mode)?.capabilities.hooks === 'always') {
-        await applyWorkspaceHooks(resolvedCasePath, await ctx.getWorkspaceHooksEnabled());
-      } else {
-        await refreshStaleReverieHooks(resolvedCasePath).catch(() => {});
-      }
+      workspaceHookPreparation = await prepareWorkspaceHooks(resolvedCasePath, workspaceHookPolicy(mode, 'existingCase'), {
+        scaffold: false, enabled: () => ctx.getWorkspaceHooksEnabled(),
+      });
     }
 
     // Agent skill injection (docs/agent-control-plan.md §2): ADD-ONLY on create,
@@ -4598,26 +4700,23 @@ export function registerSessionRoutes(
     // Docker cases: the workspace is a REAL host dir bind-mounted into the container.
     // Scaffold hooks (+ a CLAUDE.md) if MISSING so in-container permission prompts and
     // hook-idle detection fire (decision: wire hooks now). Never clobbers an existing
-    // configured project. Claude mode ONLY — only claude reads `.claude` hooks, so a
-    // shell or external-CLI quick-start must not author a block of its own (the same
-    // rule the existing-case branch above states; this branch used to exclude just
-    // the five external CLIs and let `shell` through).
-    if (docker && docker.hooksEnabled && getCli(mode)?.capabilities.hooks === 'always') {
+    // configured project. Docker opt-in and the CLI's session-create policy are
+    // separate requirements; a local fresh-case scaffold never grants Docker access.
+    const dockerHooksPolicy = workspaceHookPolicy(mode, 'sessionCreate');
+    if (docker && docker.hooksEnabled && dockerHooksPolicy !== 'none') {
+      const policy = dockerHooksPolicy;
       try {
-        if (!existsSync(join(resolvedCasePath, 'CLAUDE.md'))) {
+        if (policy === 'install' && !existsSync(join(resolvedCasePath, 'CLAUDE.md'))) {
           const templatePath = await ctx.getDefaultClaudeMdPath();
           writeFileSync(join(resolvedCasePath, 'CLAUDE.md'), generateClaudeMd(caseName, '', templatePath));
         }
-        if (!existsSync(join(resolvedCasePath, '.claude', 'settings.local.json'))) {
-          await writeHooksConfig(resolvedCasePath);
-        } else {
-          // A settings file with no hooks in it is the same dead-surface case as a
-          // linked case. This branch is already gated on `docker.hooksEnabled`, and
-          // applyWorkspaceHooks adds the user-level gate on top.
-          await applyWorkspaceHooks(resolvedCasePath, await ctx.getWorkspaceHooksEnabled());
-        }
-      } catch {
-        /* non-fatal — the session still runs, hooks may be degraded */
+        workspaceHookPreparation = await prepareWorkspaceHooks(resolvedCasePath, policy, {
+          scaffold: !existsSync(join(resolvedCasePath, '.claude', 'settings.local.json')),
+          enabled: () => ctx.getWorkspaceHooksEnabled(),
+        });
+      } catch (error) {
+        return createErrorResponse(ApiErrorCode.OPERATION_FAILED,
+          `Docker workspace hooks could not be prepared; no provider was started. ${getErrorMessage(error)}`);
       }
     }
 
@@ -4642,7 +4741,7 @@ export function registerSessionRoutes(
     // Decided once, here; the old session is stopped only just before the new one starts (claimEmployeeThread below), after every
     // check that can still refuse the request.
     let qsThread: string | undefined;
-    if (mode === 'opencode') {
+    if (getCli(mode)?.launch.threadStateProfile === 'forkable-continue-v1') {
       qsThread =
         typeof openCodeConfig?.continueSession === 'string'
           ? openCodeConfig.continueSession
@@ -4847,6 +4946,7 @@ export function registerSessionRoutes(
     }
 
     const qsSessionOptions: ConstructorParameters<typeof Session>[0] = {
+      workspaceHookPreparation,
       id: qsCustomModelSessionId,
       workingDir: resolvedCasePath,
       name: qsSpawnIdentity?.name ?? (sessionName ? sessionName.slice(0, MAX_SESSION_NAME_LENGTH) : ''),
@@ -4949,13 +5049,15 @@ export function registerSessionRoutes(
       await qsReplacementIntent?.claim();
     } catch (error) {
       qsReplacementIntent?.finish();
-      await ctx.cleanupSession(session.id, true, 'quick_start_error').catch(() => {});
+      try { await cleanupOwnedCandidate(session, ownerFor(req), 'quick_start_error'); }
+      catch (cleanup) { return retainUnconfirmedLaunch(cleanup, session, qsClaim, qsSpawnIdentity, ownerFor(req)); }
       replacementFailed(qsSpawnIdentity, qsClaim, error);
       qsClaim.release();
       return createErrorResponse(spawnRefusalCode(error), getErrorMessage(error));
     }
     // Start in the appropriate mode
     try {
+      if (!qsClaim.admitDispatch()) throw new Error('The original replacement claim is no longer current; no provider start was admitted');
       if (getCli(mode)?.capabilities.startMode === 'shell') {
         await session.startShell();
         getLifecycleLog().log({
@@ -5025,8 +5127,11 @@ export function registerSessionRoutes(
         ...(tabGroupId ? { tabLayout } : {}),
       };
     } catch (err) {
+      const retained = retainUnconfirmedLaunch(err, session, qsClaim, qsSpawnIdentity, ownerFor(req));
+      if (retained) return retained;
       // Clean up session on error to prevent orphaned resources
-      await ctx.cleanupSession(session.id, true, 'quick_start_error');
+      try { await cleanupOwnedCandidate(session, ownerFor(req), 'quick_start_error'); }
+      catch (cleanup) { return retainUnconfirmedLaunch(cleanup, session, qsClaim, qsSpawnIdentity, ownerFor(req)); }
       await qsReplacementIntent?.rollback().catch(() => {});
       replacementFailed(qsSpawnIdentity, qsClaim, err);
       return createErrorResponse(
@@ -5307,6 +5412,22 @@ export function registerSessionRoutes(
   async function decodeProjectKey(projKey: string): Promise<string> {
     const encoded = projKey.startsWith('-') ? projKey.slice(1) : projKey;
     const segments = encoded.split('-');
+    const componentWindow = 4;
+
+    // Preserve the legacy dash/underscore precedence. Internal periods need
+    // mixed joins (e.g. nix-shell.opaque), not a uniform dot join. The existing
+    // four-segment window bounds this to 27 combinations; only exact CLI-key
+    // round trips become additional candidates, and stat still must prove them.
+    const componentCandidates = (start: number, end: number, underscoreFirst = false): string[] => {
+      const parts = segments.slice(start, end + 1);
+      if (parts.length > componentWindow) return [];
+      const basic = underscoreFirst ? [parts.join('_'), parts.join('-')] : [parts.join('-'), parts.join('_')];
+      const mixed = parts.slice(1).reduce<string[]>((prefixes, part) =>
+        prefixes.flatMap(prefix => ['-', '_', '.'].map(separator => prefix + separator + part)), [parts[0]]);
+      const periodCandidates = mixed.filter(child => child.includes('.') && child.replace(/[^A-Za-z0-9]/g, '-') === parts.join('-'));
+      return [...new Set([...basic, ...periodCandidates])].filter(child =>
+        child !== '' && child !== '.' && child !== '..' && !child.includes('/') && !child.includes('\\'));
+    };
 
     const isDirCache = new Map<string, boolean>();
     const isDir = async (p: string): Promise<boolean> => {
@@ -5325,22 +5446,10 @@ export function registerSessionRoutes(
     // dash-containing directory names win over shorter same-prefix siblings.
     async function tryDecode(idx: number, current: string): Promise<string | null> {
       if (idx >= segments.length) return current;
-      const maxLook = Math.min(idx + 4, segments.length);
+      const maxLook = Math.min(idx + componentWindow, segments.length);
       // Longest first: end = maxLook-1 down to idx
       for (let end = maxLook - 1; end >= idx; end--) {
-        const candidates: string[] = [];
-        if (end === idx) {
-          // Skip an EMPTY segment: `isDir(current + '/' + '')` stats `current + '/'`,
-          // which always succeeds, so the empty candidate would match unconditionally
-          // and swallow the doubled dash that is the whole signature of a dotdir. It
-          // then resolves "/home/x/.sib" to "/home/x//sib" whenever a non-dot sibling
-          // exists, and shadows the dotdir branch below in every other case.
-          if (segments[idx] !== '') candidates.push(segments[idx]);
-        } else {
-          candidates.push(segments.slice(idx, end + 1).join('-'));
-          candidates.push(segments.slice(idx, end + 1).join('_'));
-        }
-        for (const child of candidates) {
+        for (const child of componentCandidates(idx, end)) {
           const candidate = current + '/' + child;
           if (await isDir(candidate)) {
             const result = await tryDecode(end + 1, candidate);
@@ -5352,13 +5461,9 @@ export function registerSessionRoutes(
       // original path (e.g. "/home/timkjr/.reverie") collapses into an empty
       // split segment here. Retry this window as a dotdir/dotfile: ".<join>".
       if (segments[idx] === '' && idx + 1 < segments.length) {
-        const dotMaxLook = Math.min(idx + 1 + 4, segments.length);
+        const dotMaxLook = Math.min(idx + 1 + componentWindow, segments.length);
         for (let end = dotMaxLook - 1; end >= idx + 1; end--) {
-          const dotCandidates =
-            end === idx + 1
-              ? [segments[idx + 1]]
-              : [segments.slice(idx + 1, end + 1).join('-'), segments.slice(idx + 1, end + 1).join('_')];
-          for (const child of dotCandidates) {
+          for (const child of componentCandidates(idx + 1, end)) {
             const candidate = current + '/.' + child;
             if (await isDir(candidate)) {
               const result = await tryDecode(end + 1, candidate);
@@ -5380,19 +5485,9 @@ export function registerSessionRoutes(
     let i = 0;
     while (i < segments.length) {
       let matched = false;
-      const maxLook = Math.min(i + 4, segments.length);
+      const maxLook = Math.min(i + componentWindow, segments.length);
       for (let end = i; end < maxLook; end++) {
-        const candidates: string[] = [];
-        if (end === i) {
-          // Same empty-segment skip as tryDecode above. This loop is shortest-match
-          // first, so without it the empty candidate matches on the very first try
-          // and sets `matched`, leaving the dotdir branch below permanently dead.
-          if (segments[i] !== '') candidates.push(segments[i]);
-        } else {
-          candidates.push(segments.slice(i, end + 1).join('_'));
-          candidates.push(segments.slice(i, end + 1).join('-'));
-        }
-        for (const child of candidates) {
+        for (const child of componentCandidates(i, end, true)) {
           const candidate = current + '/' + child;
           if (await isDir(candidate)) {
             current = candidate;
@@ -5404,13 +5499,9 @@ export function registerSessionRoutes(
         if (matched) break;
       }
       if (!matched && segments[i] === '' && i + 1 < segments.length) {
-        const dotMaxLook = Math.min(i + 1 + 4, segments.length);
+        const dotMaxLook = Math.min(i + 1 + componentWindow, segments.length);
         for (let end = i + 1; end < dotMaxLook; end++) {
-          const dotCandidates =
-            end === i + 1
-              ? [segments[i + 1]]
-              : [segments.slice(i + 1, end + 1).join('_'), segments.slice(i + 1, end + 1).join('-')];
-          for (const child of dotCandidates) {
+          for (const child of componentCandidates(i + 1, end, true)) {
             const candidate = current + '/.' + child;
             if (await isDir(candidate)) {
               current = candidate;
@@ -6277,9 +6368,9 @@ function employeeThread(
 }
 
 /** Employees whose replacement is being started, with the time the claim lapses if its holder never lets go (a throw mid-launch). */
-const replacementsInFlight = new Map<string, number>();
+const replacementsInFlight = new Map<string, LaunchReservation>();
 /** Conversation threads with a launch in progress, same lease: two launches on one thread would both pass the holders() check. */
-const threadsInFlight = new Map<string, number>();
+const threadsInFlight = new Map<string, LaunchReservation>();
 const REPLACEMENT_LEASE_MS = 120_000;
 
 /**
@@ -6289,7 +6380,7 @@ const REPLACEMENT_LEASE_MS = 120_000;
  *   launch goes ahead only if the thread is then free. Call this as late as possible, after every other refusal, so a refused
  *   request never leaves the employee on a stopped session.
  * - Two replacements of one employee cannot overlap: the second is told to wait. The returned `release()` ends the claim; a claim
- *   that is never released lapses after two minutes.
+ *   with a known pending outcome lapses after two minutes; an unknown dispatched outcome remains held.
  */
 async function claimEmployeeThread(
   ctx: {
@@ -6306,10 +6397,12 @@ async function claimEmployeeThread(
   const employeeId = identity?.employeeId;
   if (employeeId) {
     const until = replacementsInFlight.get(employeeId);
-    if (until !== undefined && until > Date.now())
+    if (until?.blocks(Date.now()))
       return {
         refusal: 'This employee is already being replaced; wait for that launch to finish',
         release: noop,
+        retainUnconfirmed: () => 'not-applicable',
+        admitDispatch: () => false,
         stopped,
         released: true,
       };
@@ -6321,22 +6414,33 @@ async function claimEmployeeThread(
         (s.id === identity?.replacesSessionId && !!thread)
     );
   const threadUntil = thread ? threadsInFlight.get(thread) : undefined;
-  if (thread && threadUntil !== undefined && threadUntil > Date.now()) {
+  if (thread && threadUntil?.blocks(Date.now())) {
     return {
       refusal: 'Another launch is starting on this conversation thread; wait for it to finish',
       release: noop,
+      retainUnconfirmed: () => 'not-applicable',
+      admitDispatch: () => false,
       stopped,
       released: true,
     };
   }
-  const lease = Date.now() + REPLACEMENT_LEASE_MS;
+  const lease = new LaunchReservation(Date.now() + REPLACEMENT_LEASE_MS);
   if (employeeId) replacementsInFlight.set(employeeId, lease);
   if (thread) threadsInFlight.set(thread, lease);
   const claim: ThreadClaim = {
+    admitDispatch: () => (!employeeId || lease.owns(replacementsInFlight, employeeId))
+      && (!thread || lease.owns(threadsInFlight, thread)) && lease.beginDispatch(),
+    retainUnconfirmed: () => {
+      lease.retainUnconfirmed();
+      if (!employeeId && !thread) return 'not-applicable';
+      return (!employeeId || lease.owns(replacementsInFlight, employeeId)) && (!thread || lease.owns(threadsInFlight, thread))
+        ? 'held' : 'ownership-lost';
+    },
     release: () => {
+      if (!lease.release()) return;
       claim.released = true;
-      if (employeeId && replacementsInFlight.get(employeeId) === lease) replacementsInFlight.delete(employeeId);
-      if (thread && threadsInFlight.get(thread) === lease) threadsInFlight.delete(thread);
+      if (employeeId) lease.removeOwned(replacementsInFlight, employeeId);
+      if (thread) lease.removeOwned(threadsInFlight, thread);
     },
     stopped,
     released: false,
@@ -6363,6 +6467,8 @@ async function claimEmployeeThread(
         ? `${busy(blocking[0])}. Only the owner can replace a running session; ask the owner`
         : busy(blocking[0]),
       release: noop,
+      retainUnconfirmed: () => 'not-applicable',
+      admitDispatch: () => false,
       stopped,
       released: true,
     };
@@ -6374,6 +6480,8 @@ async function claimEmployeeThread(
 interface ThreadClaim {
   refusal?: string;
   release(): void;
+  retainUnconfirmed(): 'held' | 'ownership-lost' | 'not-applicable';
+  admitDispatch(): boolean;
   stopped: string[];
   /** True once the launch is over (done or given up); a failure after that is not a failed replacement. */
   released: boolean;

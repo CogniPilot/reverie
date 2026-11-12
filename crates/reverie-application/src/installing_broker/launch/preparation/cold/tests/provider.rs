@@ -51,30 +51,37 @@ fn selected_native_provider_without_controller_refuses_before_any_create_or_star
             "version":1,"purpose":"reverie-docker-worker-pool-provider-v1","policy":policy
         })),
     );
-    let (_client, cold) = classified(&broker);
-    let result = cold.prepare_cold();
-    // Close only the real synthetic Office producer before the verdict. The
-    // original launch and storage owner remain retained on either branch.
-    match &result {
-        Ok(owner) => owner
-            .started
-            .office
-            .close_for_stopped_source(super::super::super::tests::end())
-            .unwrap(),
-        Err(owner) => owner
-            .owner
-            .office
-            .as_ref()
-            .unwrap()
-            .owner()
-            .close_for_stopped_source(super::super::super::tests::end())
-            .unwrap(),
-    }
-    let calls = fs::read_to_string(tree.root.join("calls.txt")).unwrap();
+    let (_client, inspected) = inspected(&broker);
+    let original = inspected
+        .observed
+        .claimed
+        .preparing
+        .admitted
+        .request
+        .connection
+        .clone();
+    let Err(mut failure) = inspected.classify_existing() else {
+        panic!("selected native provider cannot fall back to legacy");
+    };
+    assert!(matches!(
+        &failure.cause,
+        PreparationError::Budget(
+            crate::installing_broker::creation::CreationBudgetError::Controller(
+                reverie_host::worker_pool::PoolError::Refused("WORKER_CONTROLLER_NOT_INSTALLED")
+            )
+        )
+    ));
+    assert!(Arc::ptr_eq(
+        &original,
+        &failure.preparing.admitted.request.connection
+    ));
     assert!(
-        result.is_err(),
-        "selected native provider cannot fall back to legacy"
+        failure
+            .close_transport(super::super::super::tests::end())
+            .is_empty()
     );
+    assert!(failure.storage.is_some() && failure.active.is_some());
+    let calls = fs::read_to_string(tree.root.join("calls.txt")).unwrap();
     assert!(
         !calls
             .lines()

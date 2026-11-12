@@ -195,6 +195,26 @@ impl ObservedMemoryPolicy {
     pub fn uses_pool(&self) -> bool {
         self.pool
     }
+
+    /// Derive current physical expectations for a qualified shared-pool
+    /// member. The original projected policy continues to identify creation.
+    pub fn with_pool_member_policy(
+        mut self,
+        settings: crate::worker_pool::WorkerPoolMemberPolicy,
+    ) -> Result<Self> {
+        let high = UnsignedInteger::from_u64(settings.memory_high_bytes());
+        let maximum = u64::from(crate::worker_pool::MEMORY_MAX_MIB) * 1_048_576;
+        if !self.pool
+            || self.memory.to_u64() != Some(maximum)
+            || !self.swap.is_zero()
+            || self.high.is_none()
+            || high > self.memory
+        {
+            return Err(EngineDataError::Policy);
+        }
+        self.high = Some(high);
+        Ok(self)
+    }
 }
 fn scalar(value: Option<&Value>) -> Result<String> {
     text(value)

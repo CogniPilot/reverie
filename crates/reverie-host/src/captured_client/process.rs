@@ -295,7 +295,7 @@ impl Process {
         for output in &mut self.output {
             if job.nix_tail {
                 super::nix_tail::finish(output);
-            } else {
+            } else if !job.raw_stdout {
                 std::str::from_utf8(output).map_err(|_| EngineError::new(EngineFault::Utf8))?;
             }
         }

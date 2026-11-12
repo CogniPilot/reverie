@@ -14,6 +14,7 @@ pub enum WorkerReportError {
     NativeClose(crate::ObservationError),
     Telemetry(super::TelemetryError),
     Launch(reverie_contracts::worker_launch::LaunchDataError),
+    FleetHello(reverie_contracts::resource_actor::ResourceActorDataError),
     Finalization {
         primary: Box<Self>,
         secondary: Box<Self>,
@@ -48,6 +49,7 @@ impl WorkerReportError {
             Self::NativeClose(_) => "WORKER_TELEMETRY_CLOSE_UNCONFIRMED",
             Self::Telemetry(_) => "TELEMETRY_REPORT_REFUSED",
             Self::Launch(error) => launch_message(error),
+            Self::FleetHello(error) => error.code(),
             Self::Finalization { .. } | Self::Unconfirmed => "WORKER_TELEMETRY_CLOSE_UNCONFIRMED",
         }
     }
@@ -93,6 +95,7 @@ impl std::error::Error for WorkerReportError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::NativeClose(error) => Some(error),
+            Self::FleetHello(error) => Some(error),
             _ => None,
         }
     }

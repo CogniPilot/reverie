@@ -76,6 +76,28 @@ export const SETENV_PROFILE_NAMES = [
 export type LauncherProfileName = (typeof LAUNCHER_PROFILE_NAMES)[number];
 export type SetenvProfileName = (typeof SETENV_PROFILE_NAMES)[number];
 
+/** Closed, stock-owned account replacement protocols. Their pure codecs live in
+ * account-replacement-policy.ts; eligibility is resolved from the actual registry. */
+export const ACCOUNT_REPLACEMENT_PROFILE_NAMES = ['anthropic-account-v1', 'openai-account-v1'] as const;
+export type AccountReplacementProfileName = (typeof ACCOUNT_REPLACEMENT_PROFILE_NAMES)[number];
+
+/** Local selected-account file/argument protocols, independent of transcript and replacement support. */
+export const STARTUP_ACCOUNT_PROFILE_NAMES = ['anthropic-local-account-v1', 'openai-local-account-v1'] as const;
+export type StartupAccountProfileName = (typeof STARTUP_ACCOUNT_PROFILE_NAMES)[number];
+
+/** Session-level effort wire/engine codec; enum parameters remain declared launch data. */
+export const LAUNCH_EFFORT_INPUT_NAMES = ['session-effort-v1'] as const;
+export type LaunchEffortInputName = (typeof LAUNCH_EFFORT_INPUT_NAMES)[number];
+
+/** Native thread storage/launch codecs. These do not grant reboot or lifecycle permission. */
+export const THREAD_STATE_PROFILE_NAMES = ['conversation-chain-v1', 'nested-resume-v1', 'forkable-continue-v1'] as const;
+export type ThreadStateProfileName = (typeof THREAD_STATE_PROFILE_NAMES)[number];
+export const THREAD_STATE_BINDINGS = Object.freeze({
+  'conversation-chain-v1': Object.freeze({kind:'conversation-chain',param:'resumeId',key:'resumeSessionId'} as const),
+  'nested-resume-v1': Object.freeze({kind:'nested-resume',param:'resumeId',field:'codexConfig',key:'resumeSessionId'} as const),
+  'forkable-continue-v1': Object.freeze({kind:'forkable-continue',param:'resumeId',field:'openCodeConfig',key:'continueSession',forkParam:'forkSession',forkKey:'forkSession'} as const),
+}) satisfies Record<ThreadStateProfileName, {kind:string;param:string;key:string;field?:string;forkParam?:string;forkKey?:string}>;
+
 /**
  * Transcript readers, selected via `capabilities.transcript`. Unlike the profile registries
  * above this one is closed over the schema enum itself rather than an open string, since

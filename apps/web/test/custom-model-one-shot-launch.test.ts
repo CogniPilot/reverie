@@ -17,7 +17,7 @@
  */
 import { readFileSync } from 'node:fs';
 import { JSDOM } from 'jsdom';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 const CONSTANTS_JS = readFileSync(new URL('../src/web/public/constants.js', import.meta.url), 'utf-8');
 const SESSION_UI_JS = readFileSync(new URL('../src/web/public/session-ui.js', import.meta.url), 'utf-8');
@@ -54,6 +54,38 @@ function bootApp() {
 }
 
 describe('runCustomModelEntry dispatch', () => {
+  it('does not fall back to Claude when a selected CLI disappears before launch', async () => {
+    const {app, win} = bootApp();
+    (win as any).__reverieCliCatalog = [];
+    app._runMinLockMs = 0;
+    app.runClaude = vi.fn();
+    (win as any).fetch = vi.fn();
+    await app.runCustomModelEntry('removed-cli', 'synthetic-endpoint', 'selected-model');
+    expect(app._lastReportedError).toContain('no longer registered');
+    expect(app.runClaude).not.toHaveBeenCalled();
+    expect((win as any).fetch).not.toHaveBeenCalled();
+    expect(app._pendingCustomModelForLaunch).toBeUndefined();
+  });
+  it.each([false, undefined])('refuses an endpoint when the catalog capability is %s instead of launching a default model', async supportsCustomModel => {
+    const {win, app} = bootApp();
+    (win as any).__reverieCliCatalog = [{id: 'synthetic-cli', label: 'Synthetic CLI', kind: 'agent', supportsCustomModel}];
+    app.isCliAvailable = () => true;
+    app._pendingCustomModelForLaunch = {endpointId: 'synthetic-endpoint', modelId: 'selected-model'};
+    (win as any).fetch = vi.fn();
+    await app._runCliMode('synthetic-cli');
+    expect(app._lastReportedError).toContain('no verified custom-model launch capability');
+    expect((win as any).fetch).not.toHaveBeenCalled();
+  });
+
+  it('refuses a selected endpoint for a remote case before sending a default launch', async () => {
+    const {win, app} = bootApp();
+    app.cases = [{name: 'testcase', location: 'remote'}];
+    app._pendingCustomModelForLaunch = {endpointId: 'synthetic-endpoint', modelId: 'selected-model'};
+    (win as any).fetch = vi.fn();
+    await app._runCliMode('codex');
+    expect(app._lastReportedError).toContain('require a local case');
+    expect((win as any).fetch).not.toHaveBeenCalled();
+  });
   it('routes claude through the restart-after-launch path', async () => {
     const { app } = bootApp();
     let calledRestart = false;

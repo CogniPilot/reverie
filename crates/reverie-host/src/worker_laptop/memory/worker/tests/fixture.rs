@@ -74,7 +74,7 @@ impl Context {
             panic!("actual start");
         };
         let digest = worker_config::policy_digest(&effective).to_hex();
-        let row = json!([{"Id":"c".repeat(64),"Name":format!("/fixture-agent-{}",sid.as_str()),"Config":{"Labels":{"reverie.worker":"fixture","reverie.session":sid.as_str(),"reverie.worker-policy":digest}},"State":{"Running":true,"Pid":321},"HostConfig":{"Memory":2147483648u64,"MemorySwap":2147483648u64,"PidsLimit":128,"NanoCpus":0},"Image":format!("sha256:{}","a".repeat(64))}]);
+        let row = json!([{"Id":"c".repeat(64),"Name":format!("/fixture-agent-{}",sid.as_str()),"Config":{"Labels":{"reverie.worker":"fixture","reverie.session":sid.as_str(),"reverie.worker-policy":digest}},"State":{"Running":true,"Pid":321},"Mounts":[],"HostConfig":{"Memory":2147483648u64,"MemorySwap":2147483648u64,"PidsLimit":128,"NanoCpus":0},"Image":format!("sha256:{}","a".repeat(64))}]);
         fs::write(
             fixture.root.join("memory-inspect.json"),
             serde_json::to_vec(&row).unwrap(),

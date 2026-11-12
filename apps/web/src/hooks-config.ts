@@ -481,21 +481,35 @@ function withSettingsLock<T>(path: string, fn: () => Promise<T>): Promise<T> {
  * chain, or a `.claude` that resolves outside the case, refuses the write.
  * A missing `.claude` is fine (the writer creates it).
  */
-export async function settingsWriteBlocker(casePath: string): Promise<string | null> {
+export type SettingsWriteOutcome =
+  | { state: 'completed' }
+  | { state: 'opted-out' }
+  | { state: 'refused'; reason: string }
+  | { state: 'unconfirmed'; reason: string; cause: unknown };
+
+async function assessSettingsWrite(casePath: string): Promise<Extract<SettingsWriteOutcome, {state: 'refused' | 'unconfirmed'}> | null> {
   const claudeDir = join(casePath, '.claude');
   try {
-    const dirStat = await lstat(claudeDir).catch(() => null);
-    if (dirStat?.isSymbolicLink()) return 'its .claude is a symlink';
-    if (dirStat && !dirStat.isDirectory()) return 'its .claude is a file, not a directory';
+    const maybeStat = (path: string) => lstat(path).catch(error => {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+      throw error;
+    });
+    const dirStat = await maybeStat(claudeDir);
+    if (dirStat?.isSymbolicLink()) return {state: 'refused', reason: 'its .claude is a symlink'};
+    if (dirStat && !dirStat.isDirectory()) return {state: 'refused', reason: 'its .claude is a file, not a directory'};
     if (dirStat && (await realpath(claudeDir)) !== join(await realpath(casePath), '.claude')) {
-      return 'its .claude directory resolves outside the case';
+      return {state: 'refused', reason: 'its .claude directory resolves outside the case'};
     }
-    const settingsStat = await lstat(join(claudeDir, 'settings.local.json')).catch(() => null);
-    if (settingsStat?.isSymbolicLink()) return 'its .claude/settings.local.json is a symlink';
+    const settingsStat = await maybeStat(join(claudeDir, 'settings.local.json'));
+    if (settingsStat?.isSymbolicLink()) return {state: 'refused', reason: 'its .claude/settings.local.json is a symlink'};
   } catch (err) {
-    return `its .claude paths could not be verified (${String(err)})`;
+    return {state: 'unconfirmed', reason: 'its .claude paths could not be verified', cause: err};
   }
   return null;
+}
+
+export async function settingsWriteBlocker(casePath: string): Promise<string | null> {
+  return (await assessSettingsWrite(casePath))?.reason ?? null;
 }
 
 /**
@@ -508,22 +522,23 @@ export async function settingsWriteBlocker(casePath: string): Promise<string | n
  * can never redirect ANY of them outside the case (#251 review: the guard
  * originally covered only two writers, and applyStatusLineConfig was shown
  * writing through a symlinked settings file). Refusal is a console.warn, not
- * a throw: hooks/statusline degrade gracefully and the session still runs.
+ * a throw for optional writers. Mandatory scaffolds consume the returned receipt
+ * and refuse provider startup when preparation did not complete.
  */
 async function withSafeSettingsWrite(
   casePath: string,
   purpose: string,
-  fn: (claudeDir: string, settingsPath: string) => Promise<void>
-): Promise<void> {
+  fn: (claudeDir: string, settingsPath: string) => Promise<void | SettingsWriteOutcome>
+): Promise<SettingsWriteOutcome> {
   const claudeDir = join(casePath, '.claude');
   const settingsPath = join(claudeDir, 'settings.local.json');
-  await withSettingsLock(settingsPath, async () => {
-    const blocker = await settingsWriteBlocker(casePath);
+  return withSettingsLock(settingsPath, async () => {
+    const blocker = await assessSettingsWrite(casePath);
     if (blocker) {
-      console.warn(`[hooks-config] Refusing to write ${purpose} for ${casePath}: ${blocker}`);
-      return;
+      console.warn(`[hooks-config] Refusing to write ${purpose} for ${casePath}: ${blocker.reason}`);
+      return blocker;
     }
-    await fn(claudeDir, settingsPath);
+    return (await fn(claudeDir, settingsPath)) ?? {state: 'completed'};
   });
 }
 
@@ -728,6 +743,7 @@ export function generateHooksConfig(): { hooks: Record<string, unknown[]> } {
     `curl -sk ${options.discardStdout ? '-o /dev/null ' : ''}-X POST "$REVERIE_API_URL/api/hook-event" ` +
     `-H 'Content-Type: application/json' ` +
     `-H "X-Reverie-Hook-Secret: $(cat "$REVERIE_HOOK_SECRET_FILE" 2>/dev/null)" ` +
+    `-H "X-Reverie-Hook-Generation: $REVERIE_HOOK_GENERATION" ` +
     `--data @- ` +
     `2>/dev/null || true`;
 
@@ -1024,31 +1040,26 @@ export async function updateCaseModel(casePath: string, model: string | null): P
 /**
  * Writes hooks config to .claude/settings.local.json in the given case path.
  * Merges with existing file content, only touching the `hooks` key.
- * Refuses (with a console.warn, not a throw: hooks degrade to output-based
- * idle detection) when `settingsWriteBlocker` reports the target unsafe.
+ * Returns a closed outcome: mandatory start owners refuse when configuration
+ * was not completed; optional callers retain output-based evidence.
  */
-export async function writeHooksConfig(casePath: string): Promise<void> {
-  await withSafeSettingsWrite(casePath, 'hooks', async (claudeDir, settingsPath) => {
-    if (!(await pathExistsForWrite(claudeDir))) {
-      await mkdir(claudeDir, { recursive: true });
-    }
+/** Read settings without turning damaged or unreadable bytes into permission to replace them. */
+async function readHookSettings(settingsPath: string): Promise<Record<string, unknown>> {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(await readFile(settingsPath, 'utf-8'));
+  } catch (cause) {
+    if ((cause as NodeJS.ErrnoException).code === 'ENOENT') return {};
+    throw cause;
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new TypeError('Workspace hook settings must be a JSON object');
+  }
+  return parsed as Record<string, unknown>;
+}
 
-    let existing: Record<string, unknown> = {};
-    try {
-      existing = JSON.parse(await readFile(settingsPath, 'utf-8'));
-    } catch {
-      // If file is malformed or doesn't exist, start fresh
-      existing = {};
-    }
-
-    const hooksConfig = generateHooksConfig();
-    const merged = {
-      ...existing,
-      hooks: mergeReverieHooks(existing.hooks, hooksConfig.hooks),
-    };
-
-    await writeFile(settingsPath, JSON.stringify(merged, null, 2) + '\n');
-  });
+export async function writeHooksConfig(casePath: string): Promise<SettingsWriteOutcome> {
+  return ensureReverieHooks(casePath);
 }
 
 /**
@@ -1075,27 +1086,20 @@ export async function writeHooksConfig(casePath: string): Promise<void> {
  * on the next server start. Claude Code re-reads the file, so a session ALREADY running
  * in the workspace picks the hooks up without a restart (verified live, 2026-08-15).
  */
-export async function ensureReverieHooks(casePath: string): Promise<void> {
-  await withSafeSettingsWrite(casePath, 'hooks (ensure)', async (claudeDir, settingsPath) => {
+export async function ensureReverieHooks(casePath: string): Promise<SettingsWriteOutcome> {
+  return withSafeSettingsWrite(casePath, 'hooks (ensure)', async (claudeDir, settingsPath) => {
     if (!(await pathExistsForWrite(claudeDir))) {
       await mkdir(claudeDir, { recursive: true });
     }
 
-    let existing: Record<string, unknown> = {};
-    try {
-      const parsed: unknown = JSON.parse(await readFile(settingsPath, 'utf-8'));
-      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return;
-      existing = parsed as Record<string, unknown>;
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') return;
-    }
+    const existing = await readHookSettings(settingsPath);
 
     const generated = generateHooksConfig();
     const hooks = mergeReverieHooks(existing.hooks, generated.hooks);
     if (JSON.stringify(existing.hooks ?? {}) === JSON.stringify(hooks)) return;
 
     await writeFile(settingsPath, JSON.stringify({ ...existing, hooks }, null, 2) + '\n');
-  });
+  }).catch(cause => ({state: 'unconfirmed', reason: 'the required hooks settings could not be prepared', cause}));
 }
 
 /**
@@ -1116,62 +1120,22 @@ export async function ensureReverieHooks(casePath: string): Promise<void> {
  * when the file/hooks are absent (we never impose hooks on a user who removed them) or
  * when the hooks aren't ours, so it is cheap enough to call on every Claude spawn.
  */
-export async function refreshStaleReverieHooks(casePath: string): Promise<void> {
-  if (await absentOrUnreachable(join(casePath, '.claude', 'settings.local.json'))) return;
-  await withSafeSettingsWrite(casePath, 'hooks (refresh)', async (_claudeDir, settingsPath) => {
-    let existing: Record<string, unknown>;
-    try {
-      existing = JSON.parse(await readFile(settingsPath, 'utf-8'));
-    } catch {
-      return; // malformed — leave it untouched (case-create owns the happy path)
-    }
+export async function refreshStaleReverieHooks(casePath: string): Promise<SettingsWriteOutcome> {
+  const state = await probeBeforeTouching(join(casePath, '.claude', 'settings.local.json'));
+  if (state === 'absent') return {state: 'opted-out'};
+  if (state === 'unknown') return {state: 'unconfirmed', reason: 'the existing hooks settings could not be read', cause: undefined};
+  return withSafeSettingsWrite(casePath, 'hooks (refresh)', async (_claudeDir, settingsPath) => {
+    const existing = await readHookSettings(settingsPath);
     const hooksJson = JSON.stringify(existing.hooks ?? null);
-    const isOurs = hooksJson.includes('/api/hook-event');
-    // The generated curl carries this header literal (see generateHooksConfig); its
-    // absence on our own hooks means they predate COD-54 and need regenerating.
-    const hasSecret = hooksJson.includes('X-Reverie-Hook-Secret');
-    const hasBackgroundWake = hooksJson.includes(BACKGROUND_WAKE_MARKER);
-    // The pre--k curl shape: `curl -sk -X POST` does not contain `curl -s -X POST`
-    // as a substring, so this cleanly identifies hook curls that die with exit 60
-    // on a self-signed HTTPS install.
-    const hasTlsFlaglessCurl = hooksJson.includes('curl -s -X POST');
-    const hasSubagentStopGuard = hooksJson.includes(SUBAGENT_STOP_GUARD_MARKER);
-    const hasRmScope = hooksJson.includes(RM_SCOPE_MARKER);
-    // Approvals Inbox needs the elicitation_complete/elicitation_response
-    // matchers; their absence marks a pre-inbox hooks block.
-    const hasElicitationComplete = hooksJson.includes('elicitation_complete');
-    // The UserPromptSubmit event is what gives a tmux-driven pane a first-hand
-    // conversation id; its absence marks a pre-prompt_submitted hooks block.
-    // ⚠️ No surrounding quotes: `hooksJson` is JSON.stringify'd, so the marker
-    // inside the command reads \"prompt_submitted\" and a quoted needle never
-    // matches — which would make this gate permanently false and rewrite every
-    // workspace's settings file on every Claude spawn. The sibling markers are
-    // quote-free for the same reason.
-    const hasPromptSubmit = hooksJson.includes('prompt_submitted');
-    const hasTurnSummary = hooksJson.includes(TURN_SUMMARY_MARKER);
-    const hasMemoryBrief = hooksJson.includes(MEMORY_BRIEF_MARKER);
-    // Compaction reporting (PreCompact / SessionStart "compact"); quote-free like the markers above.
-    const hasCompaction = hooksJson.includes('compact_started');
-    if (
-      !isOurs ||
-      (hasSecret &&
-        hasBackgroundWake &&
-        hasSubagentStopGuard &&
-        hasRmScope &&
-        hasElicitationComplete &&
-        hasPromptSubmit &&
-        hasTurnSummary &&
-        hasMemoryBrief &&
-        hasCompaction &&
-        !hasTlsFlaglessCurl)
-    )
-      return;
+    if (!hooksJson.includes('/api/hook-event')) return {state: 'opted-out'};
     const generated = generateHooksConfig();
     const merged = {
       ...existing,
       hooks: mergeReverieHooks(existing.hooks, generated.hooks),
     };
-    await writeFile(settingsPath, JSON.stringify(merged, null, 2) + '\n');
+    if (JSON.stringify(existing.hooks ?? {}) !== JSON.stringify(merged.hooks))
+      await writeFile(settingsPath, JSON.stringify(merged, null, 2) + '\n');
+    return {state: 'completed'};
   });
 }
 
@@ -1204,26 +1168,22 @@ export async function refreshStaleReverieHooks(casePath: string): Promise<void> 
  *  - a workspace that does not exist is skipped — `ensureReverieHooks` mkdir -p's,
  *    so a deleted repo whose tmux session survived would otherwise be resurrected
  *    as an empty directory tree holding only `.claude/settings.local.json`;
- *  - errors are swallowed — a session create must never fail on hooks.
+ *  - errors retain an unconfirmed outcome and original cause. Optional callers
+ *    may ignore it; mandatory start owners must refuse before provider launch.
  */
-export async function applyWorkspaceHooks(workspace: string, install?: boolean): Promise<void> {
+export async function applyWorkspaceHooks(workspace: string, install?: boolean): Promise<SettingsWriteOutcome> {
   try {
-    // "absent" stays absent: the install below would mkdir -p a deleted repo back
-    // into being. "unknown" is skipped too, never asked again with an unbounded
-    // lstat (see probeBeforeTouching).
     const state = await probeBeforeTouching(workspace);
-    if (state === 'absent') return;
-    if (state === 'unknown') {
-      console.warn(
-        `[hooks] ${workspace} is not responding or not readable (unreachable mount?); Reverie hooks not checked or installed`
-      );
-      return;
+    if (state !== 'present') {
+      if (state === 'unknown') console.warn(`[hooks] ${workspace} is not responding or not readable; Reverie hooks not confirmed`);
+      return {state: 'unconfirmed', reason: 'the workspace could not be verified as present', cause: undefined};
     }
     const shouldInstall = install ?? (await readWorkspaceHooksEnabled());
-    await (shouldInstall ? ensureReverieHooks(workspace) : refreshStaleReverieHooks(workspace));
-  } catch {
-    // Best-effort by contract (see doc comment): hooks degrade to output-based
-    // idle detection; the create goes ahead.
+    return await (shouldInstall ? ensureReverieHooks(workspace) : refreshStaleReverieHooks(workspace));
+  } catch (cause) {
+    // Optional callers may continue with output-based evidence. Mandatory start
+    // owners consume this receipt and refuse before launching their provider.
+    return {state: 'unconfirmed', reason: 'the hooks configuration could not be prepared', cause};
   }
 }
 

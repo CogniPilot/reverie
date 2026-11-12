@@ -142,3 +142,56 @@ refused by the existing v1 initializer before any limit write. Privileged
 Activate/Configure, a selected native controller, broker member joins and the
 complete supported installation workflow remain required work. Component
 filesystem tests do not establish genuine native-broker origin or activation.
+
+## Explicit OS nomination and service role
+
+`reverie-worker-broker pool nominate-v1 --config SOURCE --request FILE` imports
+the existing closed installation-request DATA. The explicit enrollment principal
+and nominated policy are not authentication or consent. The command checks the
+actual NSS instance and owner, current configuration, fixed packaged image input,
+and the actual daemon and complete loaded image observations. It writes only the
+fixed private `~/reverie/worker-pool/registration-request.json` exclusively, then
+checks readback and original native closure. An existing or partial request is
+never overwritten, deleted, adopted as success or automatically replayed. The
+registered instance directory must already exist. This import is not the future
+principal-only derivation command described below.
+
+`pool prepare-nomination-v1 --config SOURCE --enrollment FILE` accepts only the
+explicit enrollment response DATA. It reads the registered actor/website,
+current company/configuration, actual compatible daemon, uniquely matching
+loaded fixed images and the cgroup-v2 effective CPU set. The proposed parent is
+48 GiB/8192 tasks with CPU weight100. Existing finite employee soft highs are
+preserved; otherwise the current effective hard ceiling is reported explicitly
+as a **proposed** soft high, not an already-approved soft policy. Nonzero swap
+is refused without rewriting it. The complete nomination and fallback employee
+IDs are returned for review. Only later fresh Q maintenance consent can approve
+that exact policy before any controller or fleet effects. Actor setup and
+loaded factory images are prerequisites; no policy/image/CPU overrides or
+credential lookup are accepted by this owner-facing command.
+
+The packaged service has two closed recipes. Existing commands default to
+`--role broker`; `--role offer-pool-v1` selects only the second immutable packaged
+unit and its exact original argv. Install/upgrade/start/stop retain the same
+source, stopped-generation, pending, predecessor and checked-close rules. An
+explicit upgrade `--restart` carries that same selected role into start. No
+arbitrary unit, executable or command argument can be supplied. Offer startup
+still owns its original five-minute deadline; images and owner enrollment must
+be prepared beforehand. Actor installation and actual authenticated fleet
+maintenance remain separate required components.
+
+# Maintained service quiescence
+
+`reverie-worker-broker service quiesce-stop --config SOURCE` is an opt-in
+native service operation. Its closed `quiesce-for-deployment` C request denies
+new launches, settles the original active handler records, and uses the original
+fleet stop owners before requesting service shutdown. A broker without that
+operation refuses it; the client never retries a failed or lost reply. The
+service action requires its current packaged unit before creating pending or
+calling C; it cannot be used to quiesce an older predecessor broker.
+
+The owning Host `quiesce_stopped_worker_service` API additionally returns the
+existing image-maintenance service fence. Keep that actual owner through the
+deployment's fresh complete writer census, effects and checked finalizers, then
+close and release it last. The standalone CLI proves its stopped service only;
+its reply does not authorize a deployment or preserve a fence across CLI exit.
+Ordinary `stop-laptops` and `service stop` keep their existing behavior.

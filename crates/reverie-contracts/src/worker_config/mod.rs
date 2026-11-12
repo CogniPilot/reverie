@@ -1,10 +1,13 @@
 //! Legacy effective-worker JSON bytes, with Python's default spaces and ASCII.
 //! Inputs are projected data, never evidence of validation, readiness or authority.
+mod actor;
 mod encode;
+mod publication;
 /// Python `repr(float)` for a finite value (shared by named byte encoders).
 pub(crate) use encode::float as python_float_repr;
 /// Python `json.dumps` of one string with the default `ensure_ascii`.
 pub(crate) use encode::string as python_json_string;
+pub(crate) use publication::publication_bytes;
 
 use crate::legacy_json::{self, Node, Text, Value};
 use sha2::{Digest, Sha256};
@@ -65,11 +68,65 @@ impl Clone for EffectiveWorkerConfig {
     }
 }
 impl EffectiveWorkerConfig {
+    /// Preserve the already decoded private metadata's Python-byte JSON and
+    /// insertion order. This adds no file custody or worker validation claim.
+    pub fn from_private_metadata(
+        metadata: &crate::storage_identity::OrderedMetadata,
+    ) -> Result<Self, WorkerConfigError> {
+        Self::from_ordered(metadata.ordered().clone())
+    }
+    pub(crate) fn patch_employee_perf_policy(
+        &mut self,
+        employee: &reverie_core::ids::ProfileEmployeeId,
+        policy: Option<reverie_core::task_perf::TaskPerfPolicy>,
+    ) -> Option<()> {
+        let Node::Object(root) = &mut self.0.0 else {
+            return None;
+        };
+        let name = Text("employeePerfPolicies".chars().map(u32::from).collect());
+        if policy.is_none() && !root.contains_key(&name) {
+            return Some(());
+        }
+        let value = root
+            .entry(name)
+            .or_insert_with(|| Value(Node::Object(BTreeMap::new())));
+        let Node::Object(map) = &mut value.0 else {
+            return None;
+        };
+        let employee = Text(employee.as_str().chars().map(u32::from).collect());
+        if let Some(policy) = policy {
+            map.insert(
+                employee,
+                Value(Node::String(Text(
+                    policy.name().chars().map(u32::from).collect(),
+                ))),
+            );
+        } else {
+            map.remove(&employee);
+        }
+        Some(())
+    }
     pub(crate) fn patch_employee_gpu_grant(
         &mut self,
         employee: &reverie_core::operations::JournalId,
         device: Option<&reverie_core::gpu_access::GpuDeviceUuid>,
     ) -> Option<()> {
+        let device = device.map(reverie_core::gpu_access::GpuDeviceUuid::device);
+        self.patch_gpu_entry(
+            employee.as_str(),
+            device
+                .as_ref()
+                .map(reverie_core::device_policy::NvidiaCdiDevice::as_str),
+        )
+    }
+    pub(crate) fn patch_preflight_gpu_grant(
+        &mut self,
+        employee: &reverie_core::ids::ProfileEmployeeId,
+        device: &reverie_core::device_policy::NvidiaCdiDevice,
+    ) -> Option<()> {
+        self.patch_gpu_entry(employee.as_str(), Some(device.as_str()))
+    }
+    fn patch_gpu_entry(&mut self, employee: &str, device: Option<&str>) -> Option<()> {
         let Node::Object(root) = &mut self.0.0 else {
             unreachable!("worker object invariant");
         };
@@ -80,13 +137,11 @@ impl EffectiveWorkerConfig {
         let Node::Object(grants) = &mut grants.0 else {
             return None;
         };
-        let employee = Text(employee.as_str().chars().map(u32::from).collect());
+        let employee = Text(employee.chars().map(u32::from).collect());
         if let Some(device) = device {
             grants.insert(
                 employee,
-                Value(Node::String(Text(
-                    device.device().as_str().chars().map(u32::from).collect(),
-                ))),
+                Value(Node::String(Text(device.chars().map(u32::from).collect()))),
             );
         } else {
             grants.remove(&employee);
@@ -132,6 +187,18 @@ impl EffectiveWorkerConfig {
             _ => Vec::new(),
         };
         Self(Value(Node::Object(value)), order)
+    }
+    pub(crate) fn pool_configuration_fields(&self, fields: BTreeMap<Text, Value>) -> Option<Self> {
+        let mut after = Self::from_object(fields);
+        let mut before_keys = self.1.clone();
+        let mut after_keys = after.1.clone();
+        before_keys.sort_by(|a, b| a.codepoints().cmp(b.codepoints()));
+        after_keys.sort_by(|a, b| a.codepoints().cmp(b.codepoints()));
+        if before_keys != after_keys {
+            return None;
+        }
+        after.1 = self.1.clone();
+        Some(after)
     }
 }
 /// Python dictionary equality for captured configuration DATA, distinct from

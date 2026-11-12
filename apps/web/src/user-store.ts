@@ -19,7 +19,7 @@
 import { existsSync, mkdirSync } from 'node:fs';
 import fs from 'node:fs/promises';
 import { isAbsolute, join, relative } from 'node:path';
-import { randomBytes, scrypt as scryptCb, timingSafeEqual } from 'node:crypto';
+import { createHash, randomBytes, scrypt as scryptCb, timingSafeEqual } from 'node:crypto';
 import { promisify } from 'node:util';
 import { dataPath, getDataDir } from './config/instance.js';
 import { getUserSpacesDir, isMultiUserMode, maxUsers } from './config/multiuser.js';
@@ -62,6 +62,14 @@ export function normalizeUsername(name: string): string {
   return String(name ?? '')
     .trim()
     .toLowerCase();
+}
+
+/** Private cookie provenance. A reused username cannot inherit its predecessor's sign-in. */
+export function userAuthenticationFingerprint(user: Pick<UserRecord, 'username' | 'createdAt' | 'password'>): string {
+  const { algo, N, r, p, salt, hash } = user.password;
+  return createHash('sha256')
+    .update(JSON.stringify([user.username, user.createdAt, algo, N, r, p, salt, hash]))
+    .digest('hex');
 }
 
 export function isValidUsername(name: string): boolean {
@@ -335,6 +343,20 @@ export async function setPassword(
     if (opts.mustChangePassword !== undefined) record.mustChangePassword = opts.mustChangePassword;
     await writeUsers(users);
     return record;
+  });
+}
+
+/** Upgrade only the exact authenticated incarnation; never overwrite a concurrent credential reset. */
+export async function rehashAuthenticatedUser(verified: UserRecord, password: string): Promise<UserRecord | null> {
+  const expected = userAuthenticationFingerprint(verified);
+  const candidate = await hashPassword(password);
+  return withUsersLock(async () => {
+    const users = await readUsers(true);
+    const current = users.find((user) => user.username === verified.username);
+    if (!current || current.disabled || userAuthenticationFingerprint(current) !== expected) return null;
+    current.password = candidate;
+    await writeUsers(users);
+    return current;
   });
 }
 

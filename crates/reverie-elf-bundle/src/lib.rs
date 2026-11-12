@@ -3,14 +3,18 @@
 //! never runtime identity, installation consent, or execution authority.
 #![forbid(unsafe_code)]
 mod files;
+mod idmap;
 mod image;
 mod libraries;
+mod static_elf;
 mod tools;
 mod tree;
 
 pub use files::{copy, digest, executable_machine, machine};
+pub use idmap::build_idmap;
 pub use image::ImageLayout;
 pub use libraries::Libraries;
+pub use static_elf::require_static_elf64;
 pub use tools::{Tools, immutable_input};
 pub use tree::{readonly, tree};
 

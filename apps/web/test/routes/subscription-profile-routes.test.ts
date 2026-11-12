@@ -10,10 +10,16 @@ import {
 } from '../../src/web/routes/subscription-profile-routes.js';
 import { SubscriptionUsageReader } from '../../src/subscription-usage.js';
 import { installRouteErrorHandler } from '../../src/web/route-error-handler.js';
+import { defaultSubscriptionProfiles } from '../../src/subscription-profiles.js';
 
 const apps: ReturnType<typeof Fastify>[] = [];
 beforeEach(async () => {
-  await fs.rm(join(getDataDir(), 'subscription-profiles.json'), { force: true });
+  await fs.mkdir(getDataDir(), { recursive: true });
+  // Named-account behavior needs registered profiles. Empty credential
+  // directories intentionally no longer create implicit provider plans.
+  await fs.writeFile(join(getDataDir(), 'subscription-profiles.json'), JSON.stringify(defaultSubscriptionProfiles()), {
+    mode: 0o600,
+  });
 });
 afterEach(async () => {
   for (const app of apps.splice(0)) await app.close();
@@ -28,6 +34,20 @@ async function app() {
   return instance;
 }
 describe('subscription profile API', () => {
+  it('does not advertise phantom accounts when neither a registry nor logins exist', async () => {
+    await fs.rm(join(getDataDir(), 'subscription-profiles.json'), { force: true });
+    const server = await app();
+    expect((await server.inject('/api/subscription-profiles')).json().data.profiles).toEqual([]);
+    expect(
+      (
+        await server.inject({
+          method: 'PATCH',
+          url: '/api/subscription-profiles/openai-default',
+          payload: { label: 'Unregistered' },
+        })
+      ).statusCode
+    ).toBe(404);
+  });
   it('selects a known account before a session launch and never accepts arbitrary credentials', async () => {
     const server = await app();
     const profiles = (await server.inject('/api/subscription-profiles')).json().data.profiles;

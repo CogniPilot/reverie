@@ -186,3 +186,88 @@ fn unsupported_agent_stop_never_dispatches_native_work_and_known_refusal_closes(
     assert_eq!(response["success"], false);
     assert!(!dispatched);
 }
+
+#[test]
+fn shared_native_drain_never_replays_a_completed_native_stop_sequence() {
+    crate::test_process::owning_case!(
+        shared_native_drain_never_replays_a_completed_native_stop_sequence
+    );
+    let (root, broker) = recovered::tests::Tree::bootstrap_parts("", "admission", 512, 4096);
+    let broker = Arc::new(broker);
+    let mut drain = LegacyFleetDrain::new(&broker, Instant::now() + Duration::from_secs(5));
+    let first = drain.run_ordinary();
+    let before = std::fs::read(root.join("calls.txt")).unwrap_or_default();
+    let second = drain.run_ordinary();
+    let after = std::fs::read(root.join("calls.txt")).unwrap_or_default();
+    drop(drain);
+    let (client, server) = UnixStream::pair().unwrap();
+    let closed = nix::unistd::close(server);
+    let cleanup = finish(root, broker, client);
+    first.unwrap();
+    closed.unwrap();
+    cleanup.unwrap();
+    assert!(
+        second.is_err(),
+        "the same completed drain must not obtain a fresh lifecycle generation"
+    );
+    assert_eq!(
+        before, after,
+        "the original native census/stop sequence must not replay"
+    );
+}
+
+#[test]
+fn shared_native_drain_failed_attempt_is_not_replayed_during_original_component_cleanup() {
+    crate::test_process::owning_case!(
+        shared_native_drain_failed_attempt_is_not_replayed_during_original_component_cleanup
+    );
+    let (root, broker) =
+        recovered::tests::Tree::bootstrap_parts("foreign-name\n", "admission", 512, 4096);
+    let broker = Arc::new(broker);
+    let mut drain = LegacyFleetDrain::new(&broker, Instant::now() + Duration::from_secs(5));
+    let first = drain.run_ordinary();
+    let before = std::fs::read(root.join("calls.txt")).unwrap_or_default();
+    let second = drain.run_ordinary();
+    let settled = drain.settle_components();
+    let closed = drain.abort_admission();
+    let after = std::fs::read(root.join("calls.txt")).unwrap_or_default();
+    drop(drain);
+    let (client, server) = UnixStream::pair().unwrap();
+    let socket = nix::unistd::close(server);
+    let cleanup = finish(root, broker, client);
+    socket.unwrap();
+    cleanup.unwrap();
+    closed.unwrap();
+    assert!(first.is_err() && second.is_err());
+    assert!(settled.is_empty());
+    assert_eq!(
+        before, after,
+        "settlement only closes original tickets; no new census is dispatched"
+    );
+}
+
+#[test]
+fn shared_native_drain_expired_original_deadline_refuses_before_any_native_census() {
+    crate::test_process::owning_case!(
+        shared_native_drain_expired_original_deadline_refuses_before_any_native_census
+    );
+    let (root, broker) = recovered::tests::Tree::bootstrap_parts("", "admission", 512, 4096);
+    let broker = Arc::new(broker);
+    let before = std::fs::read(root.join("calls.txt")).unwrap_or_default();
+    let mut drain = LegacyFleetDrain::new(&broker, Instant::now());
+    let result = drain.run_ordinary();
+    let closed = drain.abort_admission();
+    let after = std::fs::read(root.join("calls.txt")).unwrap_or_default();
+    drop(drain);
+    let (client, server) = UnixStream::pair().unwrap();
+    let socket = nix::unistd::close(server);
+    let cleanup = finish(root, broker, client);
+    socket.unwrap();
+    cleanup.unwrap();
+    closed.unwrap();
+    assert!(matches!(
+        result,
+        Err(DrainCause::Refused("WORKER_FLEET_DRAIN_DEADLINE"))
+    ));
+    assert_eq!(before, after);
+}

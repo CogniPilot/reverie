@@ -179,7 +179,7 @@ describe('refreshStaleReverieHooks', () => {
   it('leaves a malformed settings file untouched', async () => {
     const garbage = '{ not valid json';
     writeFileSync(settingsPath, garbage);
-    await refreshStaleReverieHooks(dir);
+    await expect(refreshStaleReverieHooks(dir)).rejects.toThrow(SyntaxError);
     expect(readFileSync(settingsPath, 'utf-8')).toBe(garbage);
   });
 });

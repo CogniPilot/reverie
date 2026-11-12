@@ -61,8 +61,15 @@ it('refuses a replacement of the selected normal Session object during room migr
   replaceSession.mockImplementationOnce(async () => {
     sessions.set('reserved-session', {id: 'reserved-session', name: 'Different incarnation'});
   });
-  await expect(company.rebind(expected.employee.id, undefined, 'reserved-session', 'owner', undefined, expected))
-    .rejects.toThrow('replacement session or recipe changed');
+  const original = sessions.get('reserved-session')!;
+  const error = await company.rebind(expected.employee.id, undefined, 'reserved-session', 'owner', undefined, expected)
+    .catch(error => error);
+  expect(error).toMatchObject({message: expect.stringContaining('publication is unconfirmed'),
+    cause: expect.objectContaining({message: 'Replacement session or owner changed'})});
+  expect(company.replacementPublicationRecovery(error, original,
+    {employeeId: expected.employee.id, replacesSessionId: 'old-session'}, undefined)).toBeDefined();
+  expect(company.replacementPublicationRecovery(error, sessions.get('reserved-session')!,
+    {employeeId: expected.employee.id, replacesSessionId: 'old-session'}, undefined)).toBeUndefined();
   // The reserved generation remains an explicit unfinished migration. It is
   // not silently rebound back or reported as a completed resource replacement.
   expect(company.view().employees[0].sessionId).toBe('old-session');
@@ -74,8 +81,12 @@ it('refuses recipe drift during room migration and preserves the pending generat
   replaceSession.mockImplementationOnce(async () => {
     recipes.set('reserved-session', {...expected.targetRecipe, mode: 'claude'});
   });
-  await expect(company.rebind(expected.employee.id, undefined, 'reserved-session', 'owner', undefined, expected))
-    .rejects.toThrow('replacement session or recipe changed');
+  const error = await company.rebind(expected.employee.id, undefined, 'reserved-session', 'owner', undefined, expected)
+    .catch(error => error);
+  expect(error).toMatchObject({message: expect.stringContaining('publication is unconfirmed'),
+    cause: expect.objectContaining({message: 'Approved replacement session or recipe changed'})});
+  expect(company.replacementPublicationRecovery(error, sessions.get('reserved-session')!,
+    {employeeId: expected.employee.id, replacesSessionId: 'old-session'}, undefined)).toBeDefined();
   expect(company.view().employees[0].sessionId).toBe('old-session');
   expect(company.view().employees[0].sessionGeneration).toBe(expected.employee.sessionGeneration + 1);
 });

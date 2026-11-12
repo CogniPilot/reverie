@@ -17,9 +17,18 @@
   };
   collect();
   window.addEventListener('hashchange', collect);
-  window.addEventListener('pagehide', () => { pending = null; });
+  window.addEventListener('pagehide', () => {
+    pending = null;
+  });
   Object.defineProperty(window, 'ReverieEmbassyInvite', {
-    value: Object.freeze({ take() { const value = pending; pending = null; return value; } }),
-    writable: false, configurable: false,
+    value: Object.freeze({
+      take() {
+        const value = pending;
+        pending = null;
+        return value;
+      },
+    }),
+    writable: false,
+    configurable: false,
   });
 })();

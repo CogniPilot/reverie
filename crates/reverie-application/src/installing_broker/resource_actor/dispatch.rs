@@ -142,6 +142,12 @@ fn retained<'a>(
 }
 fn dispatch(operation: &mut AuthenticatedResourceOperation<'_>) -> Result<()> {
     let reply = match operation.request().selection() {
+        ResourceRequestSelection::EmployeeStatus { .. } => operation.employee_status_reply(),
+        ResourceRequestSelection::EmployeePolicyEdit { .. } => operation.employee_policy_reply(),
+        ResourceRequestSelection::GpuStatus { .. }
+        | ResourceRequestSelection::GpuApplyStatus { .. }
+        | ResourceRequestSelection::GpuRequest { .. }
+        | ResourceRequestSelection::GpuApply { .. } => operation.gpu_reply(),
         ResourceRequestSelection::Preview { .. } => operation.preview_reply(),
         ResourceRequestSelection::Apply { .. } => {
             operation.assert_current()?;
@@ -159,9 +165,21 @@ fn dispatch(operation: &mut AuthenticatedResourceOperation<'_>) -> Result<()> {
         Err(primary) => {
             // At most one refusal attempt. If original native/owner checks
             // failed, send's real guards may refuse as well; retain both.
-            let refused = operation
-                .request()
-                .refusal_reply("RESOURCE_OPERATION_UNCONFIRMED_KEEP_CLAIM")?;
+            let code = match (operation.request().selection(), primary.code()) {
+                (
+                    ResourceRequestSelection::EmployeePolicyEdit { .. },
+                    code @ ("EMPLOYEE_RESOURCE_REVISION_CHANGED"
+                    | "EMPLOYEE_RESOURCE_EDIT_UNAVAILABLE"
+                    | "EMPLOYEE_RESOURCE_POLICY_UNCHANGED"
+                    | "EMPLOYEE_RESOURCE_POLICY_INVALID"
+                    | "EMPLOYEE_RESOURCE_EDIT_REFUSED"
+                    | "EMPLOYEE_RESOURCE_ACTIVE_OPERATION"
+                    | "RESERVATION_ADMISSION_LOCK_BUSY"
+                    | "EMPLOYEE_RESOURCE_RECONCILIATION_REQUIRED"),
+                ) => code,
+                _ => "RESOURCE_OPERATION_UNCONFIRMED_KEEP_CLAIM",
+            };
+            let refused = operation.request().refusal_reply(code)?;
             let sent = operation.send_operation_reply(&refused);
             error::finalized(Err(primary), sent)
         }

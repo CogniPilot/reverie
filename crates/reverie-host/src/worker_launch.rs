@@ -2,6 +2,7 @@
 //! runtime provenance is retained without granting API or start permission.
 mod observed;
 use crate::{native, rootless};
+pub(crate) use observed::ObservedPlanIdentity;
 pub use observed::{
     CreateObservationError, ExistingCaptureFailure, ExistingLaptopInspection,
     ExistingObservationError, ExistingPaneState, ExistingProcessIncarnation, ObservedCreatePlan,

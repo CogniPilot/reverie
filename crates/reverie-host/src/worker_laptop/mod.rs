@@ -10,8 +10,8 @@ mod cold_prepare;
 mod connection;
 mod controller;
 pub use cold_prepare::{ColdPreparation, PreparedColdTemporary};
-pub use controller::ControllerMemberConfigured;
-pub(crate) use controller::CreatedPoolTarget;
+pub use controller::{ControllerMemberConfigured, PoolMemberCreation};
+pub(crate) use controller::{CreatedPoolTarget, MemberConfigurationAttempt};
 mod create;
 mod diagnostic;
 mod direct_finalization;
@@ -114,6 +114,9 @@ enum Phase {
     Held,
     Running,
     Known,
+    /// A verified refusal of this exact member configuration attempt. The
+    /// created laptop stays owned and may only proceed through cleanup.
+    MemberRefused,
     Retained,
     Cleaning,
     FinalizingStarted,

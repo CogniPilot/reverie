@@ -78,6 +78,7 @@ beforeEach(async () => {
       candidateCommands.push(workerLaunchCommand(command, value.workingDir, value.sessionId, false, value.workerResourceLaunch));
       const row = {sessionId: value.sessionId, muxName: 'fixture-' + value.sessionId.slice(0,8), pid: 654,
         createdAt: Date.now(), workingDir: value.workingDir, mode: value.mode, attached: false};
+      value.onProviderDispatch?.();
       options.set(value.sessionId, row); return row;
     },
     capturePaneText: (name: string) => {

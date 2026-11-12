@@ -13,7 +13,7 @@
  */
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { execFileSync } from 'node:child_process';
+import { captureClaudeLaunch } from './helpers/capture-claude-launch.js';
 import { buildAdvisorSettings, buildInteractiveArgs } from '../src/session-cli-builder.js';
 import { buildSpawnCommand } from '../src/tmux-manager.js';
 import { isAdvisorModel, ADVISOR_MODEL_ALIASES } from '../src/types.js';
@@ -44,11 +44,10 @@ vi.mock('node-pty', async (importOriginal) => {
   };
 });
 
-function extractSettingsJson(cmd: string): unknown {
-  const idx = cmd.indexOf('--settings ');
-  expect(idx).toBeGreaterThan(-1);
-  const out = execFileSync('bash', ['-c', `set -- ${cmd.slice(idx)}; printf '%s' "$2"`]).toString();
-  return JSON.parse(out);
+function extractSettingsJson(cmd: string, transcriptId?: string): unknown {
+  const args = captureClaudeLaunch(cmd, transcriptId);
+  expect(args.filter(arg => arg === '--settings')).toHaveLength(1);
+  return JSON.parse(args[args.indexOf('--settings') + 1]);
 }
 
 describe('isAdvisorModel', () => {
@@ -97,7 +96,7 @@ describe('buildSpawnCommand advisorModel (tmux launch, claude mode)', () => {
   it('rides --settings as the advisorModel key, never the --advisor flag', () => {
     const cmd = buildSpawnCommand({ mode: 'claude', sessionId: 'sid-1', advisorModel: 'opus' });
     expect(cmd).not.toContain('--advisor');
-    expect(cmd.match(/--settings/g)).toHaveLength(1);
+    expect(captureClaudeLaunch(cmd).filter(arg => arg === '--settings')).toHaveLength(1);
     expect(extractSettingsJson(cmd)).toEqual({ advisorModel: 'opus' });
   });
 
@@ -109,7 +108,7 @@ describe('buildSpawnCommand advisorModel (tmux launch, claude mode)', () => {
       advisorModel: 'fable',
       statusLineCommand: EXPORTER_CMD,
     });
-    expect(cmd.match(/--settings/g)).toHaveLength(1);
+    expect(captureClaudeLaunch(cmd).filter(arg => arg === '--settings')).toHaveLength(1);
     expect(extractSettingsJson(cmd)).toEqual({
       ultracode: true,
       advisorModel: 'fable',
@@ -119,7 +118,8 @@ describe('buildSpawnCommand advisorModel (tmux launch, claude mode)', () => {
 
   it('keeps a regular --effort flag beside the advisor settings', () => {
     const cmd = buildSpawnCommand({ mode: 'claude', sessionId: 'sid-1', effort: 'high', advisorModel: 'sonnet' });
-    expect(cmd).toContain("--effort 'high'");
+    const args = captureClaudeLaunch(cmd);
+    expect(args[args.indexOf('--effort') + 1]).toBe('high');
     expect(extractSettingsJson(cmd)).toEqual({ advisorModel: 'sonnet' });
   });
 
@@ -130,8 +130,8 @@ describe('buildSpawnCommand advisorModel (tmux launch, claude mode)', () => {
       resumeSessionId: '00000009-000b-4000-8000-00000000000d',
       advisorModel: 'opus',
     });
-    expect(cmd).toContain('--resume');
-    expect(extractSettingsJson(cmd)).toEqual({ advisorModel: 'opus' });
+    expect(captureClaudeLaunch(cmd, '00000009-000b-4000-8000-00000000000d')).toContain('--resume');
+    expect(extractSettingsJson(cmd, '00000009-000b-4000-8000-00000000000d')).toEqual({ advisorModel: 'opus' });
   });
 
   it('leaves the command byte-identical when no advisor (or an invalid one) is set', () => {
@@ -206,13 +206,16 @@ describe('a per-session model together with an advisor', () => {
         resumeSessionId,
         claudeCliVersion: null,
       });
-      // The resume variant renders `resume || new`, so the model appears once per branch.
-      expect(cmd).toContain(`--model "${MODEL}"`);
-      expect(cmd).not.toContain('--advisor ');
-      const settingsFlags = cmd.match(/--settings /g) ?? [];
-      expect(settingsFlags.length).toBe(resumeSessionId ? 2 : 1);
-      expect(extractSettingsJson(cmd)).toEqual(settings);
-      if (effort === 'high') expect(cmd).toContain("--effort 'high'");
+      // Actual metadata selects one branch before invoking a single provider.
+      for (const transcriptId of resumeSessionId ? [undefined, resumeSessionId] : [undefined]) {
+        const args = captureClaudeLaunch(cmd, transcriptId);
+        expect(args[args.indexOf('--model') + 1]).toBe(MODEL);
+        expect(args).not.toContain('--advisor');
+        expect(args.filter(arg => arg === '--settings')).toHaveLength(1);
+        expect(JSON.parse(args[args.indexOf('--settings') + 1])).toEqual(settings);
+        expect(args[args.indexOf(transcriptId ? '--resume' : '--session-id') + 1]).toBe(transcriptId ?? 'sid-1');
+        if (effort === 'high') expect(args[args.indexOf('--effort') + 1]).toBe('high');
+      }
     }
   });
 
@@ -226,8 +229,9 @@ describe('a per-session model together with an advisor', () => {
       statusLineCommand: EXPORTER_CMD,
       claudeCliVersion: null,
     });
-    expect(cmd).toContain(`--model "${MODEL}"`);
-    expect(cmd.match(/--settings /g)).toHaveLength(1);
+    const args = captureClaudeLaunch(cmd);
+    expect(args[args.indexOf('--model') + 1]).toBe(MODEL);
+    expect(args.filter(arg => arg === '--settings')).toHaveLength(1);
     expect(extractSettingsJson(cmd)).toEqual({
       ultracode: true,
       advisorModel: 'fable',

@@ -94,6 +94,16 @@ describe('approval routes', () => {
   let harness: RouteTestHarness;
   let session: MockSession;
 
+  it('shows a terminal-input hold and refuses approval writes without rebinding its provider lease', async () => {
+    await postHook(harness, 'permission_prompt', {message: 'Synthetic permission'});
+    const before = await listApprovals(harness); expect(before).toHaveLength(1);
+    Object.defineProperty(session, 'terminalInputHeld', {value: true, configurable: true});
+    const held = await listApprovals(harness); expect(held[0].answerState).toBe('held');
+    expect(held[0].heldReason).toContain('unconfirmed'); expect(held[0].id).toBe(before[0].id);
+    const answer = await harness.app.inject({method: 'POST', url: `/api/approvals/${String(held[0].id)}/answer`, payload: {action: 'option', option: 1}});
+    expect(answer.statusCode).toBe(409); expect(session.writeBuffer).toEqual([]);
+  });
+
   beforeEach(async () => {
     harness = await createEnvelopeHarness();
     session = harness.ctx.sessions.get(SESSION_ID)!;

@@ -143,10 +143,12 @@ fn progressing_headers_obey_one_deadline_and_close_before_next_request() {
             head(&mut stream);
             progressing_header(&mut stream);
             let mut byte = [0];
-            assert_eq!(
-                stream.read(&mut byte).unwrap(),
-                0,
-                "same socket closed before another runtime poll"
+            let closed = stream.read(&mut byte);
+            // The deadline can close the peer with a slow-header byte unread.
+            assert!(
+                matches!(closed, Ok(0))
+                    || matches!(&closed, Err(error) if error.kind() == io::ErrorKind::ConnectionReset),
+                "same socket closed before another runtime poll: {closed:?}"
             );
             let mut next = accepted(&fixture.listener);
             head(&mut next);

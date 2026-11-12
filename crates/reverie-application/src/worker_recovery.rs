@@ -14,7 +14,7 @@ use reverie_host::{
     worker_recovery::{RecoveryContainerInspection, WorkerRecoveryError},
     worker_runtime::WorkerRuntime,
 };
-use std::fmt;
+use std::{fmt, time::Instant};
 #[derive(Debug)]
 pub enum RecoveryMemoryError {
     Host(WorkerRecoveryError),
@@ -64,6 +64,15 @@ pub fn verify_recovered_memory(
     snapshot: &ValidatedWorkerSnapshot,
     row: &RecoveryContainerInspection,
 ) -> Result<(), RecoveryMemoryError> {
+    verify_recovered_memory_scoped(runtime, snapshot, row, None)
+}
+/// Verify the existing memory policy within the original recovery deadline.
+pub(crate) fn verify_recovered_memory_scoped(
+    runtime: &WorkerRuntime,
+    snapshot: &ValidatedWorkerSnapshot,
+    row: &RecoveryContainerInspection,
+    inherited_end: Option<Instant>,
+) -> Result<(), RecoveryMemoryError> {
     row.assert_binding(runtime, snapshot.envelope().base())?;
     let source = snapshot.configuration();
     let resources = resource_staging::effective_config(source.clone(), row.session())?;
@@ -76,7 +85,8 @@ pub fn verify_recovered_memory(
     let repeated = resource_staging::effective_config(source.clone(), row.session())?;
     row.data()
         .assert_memory_policy(&worker_config::policy_digest(&repeated))?;
-    let context = NativeObserver::capture_worker(runtime, source.clone());
+    let context =
+        NativeObserver::capture_worker_with_deadline(runtime, source.clone(), inherited_end);
     context.host_root()?;
     context.verify_recovery_limits(row.data())?;
     Ok(())

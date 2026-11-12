@@ -98,7 +98,13 @@ describe('the client never queues or keeps an undeliverable frame', () => {
 
   it('drops a frame the WebSocket refused with an error ACK', () => {
     const handler = appSource.slice(appSource.indexOf('_onWsInputAck(seq, msg, sessionId = this._wsSessionId) {'));
-    expect(handler.slice(0, 600)).toMatch(/if \(msg && msg\.err\)/);
+    const method = handler.slice(0, handler.indexOf('\n  }') + 4);
+    const ack = vm.runInNewContext(`({${method}})._onWsInputAck`);
+    const rejected: unknown[] = [];
+    const record = {seq: 1, data: 'oversized'};
+    ack.call({_pendingDeliveries: new Map([['s', [record]]]), _sessionInputHeld: () => false,
+      _dropRejectedInput: (...args: unknown[]) => rejected.push(args)}, 1, {err: true}, 's');
+    expect(rejected).toEqual([['s', record]]);
   });
 
   it('prunes oversized frames persisted by an older build on load', () => {

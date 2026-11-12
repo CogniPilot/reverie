@@ -1,6 +1,7 @@
 //! Fixed Docker controller role. No arbitrary executable, engine endpoint,
 //! configuration path, target PID or privileged command is accepted.
 use clap::{Parser, Subcommand};
+mod check_birth;
 use reverie_host::worker_pool::{ControllerEndpoint, ControllerPoolPolicy};
 use std::{
     process::ExitCode,
@@ -13,6 +14,8 @@ struct Arguments {
 }
 #[derive(Subcommand)]
 enum Role {
+    /// Decode bounded birth bytes from stdin without host, service or engine initialization.
+    CheckBirth,
     Serve {
         #[arg(long)]
         confinement_version: u8,
@@ -21,15 +24,28 @@ enum Role {
     },
 }
 fn main() -> ExitCode {
-    let Role::Serve {
-        confinement_version,
-        birth_sha256,
-    } = Arguments::parse().role;
+    match Arguments::parse().role {
+        Role::CheckBirth => {
+            match check_birth::run(std::io::stdin().lock(), std::io::stdout().lock()) {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(error) => {
+                    eprintln!("{error}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
+        Role::Serve {
+            confinement_version,
+            birth_sha256,
+        } => serve(confinement_version, &birth_sha256),
+    }
+}
+fn serve(confinement_version: u8, birth_sha256: &str) -> ExitCode {
     if confinement_version != 2 {
         eprintln!("WORKER_POOL_CONFINEMENT_VERSION");
         return ExitCode::FAILURE;
     }
-    let Some(digest) = digest(&birth_sha256) else {
+    let Some(digest) = digest(birth_sha256) else {
         eprintln!("WORKER_POOL_BIRTH_DIGEST");
         return ExitCode::FAILURE;
     };

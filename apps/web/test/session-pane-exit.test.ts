@@ -192,7 +192,11 @@ describe('a relaunch in the same pane forgetting the old exit', () => {
     const mux = {
       isAvailable: () => true,
       muxSessionExists: () => true,
-      respawnPane: async () => 4242,
+      respawnPane: async (options: import('../src/mux-interface.js').RespawnPaneOptions) => {
+        if (options.admitted && !options.admitted()) return null;
+        options.onProviderDispatch?.();
+        return 4242;
+      },
       clearPaneExit: (muxName: string) => cleared.push(muxName),
     };
     return { mux: mux as unknown as TerminalMultiplexer, cleared };

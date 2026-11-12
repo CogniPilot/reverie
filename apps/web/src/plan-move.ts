@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import {assertResourceOperation, type ResourceOwnerBinding} from './resource-owner-authority.js';
 import {ResourceHistoricalSettlement} from './resource-native-client.js';
+import { accountReplacementProfile } from './utils/account-replacement-profile.js';
 
 export type PlanMovePhase =
   | 'waiting'
@@ -150,6 +151,9 @@ export class PlanMoveError extends Error {
   }
 }
 
+/** Deny-only: an uncertain operation never authorizes rollback, cleanup or another launch. */
+export class PlanMoveUnconfirmed extends PlanMoveError {}
+
 /** Only a supported, currently observed composer that is not yet ready is retryable.
  * Unknown capability, account, binding and source-cleanup failures remain ordinary refusals.
  */
@@ -247,6 +251,30 @@ export class PlanMoves {
     } });
   }
 
+  /** Read-only terminal inspection excludes move effects without resolving a held journal. */
+  async viewerInspectionGuard(employeeId: string, owner?: string): Promise<PlanViewerReconnectLease> {
+    const end = performance.now() + 10_000;
+    await this.init();
+    let closed = false;
+    const simple = (check: () => boolean) => Object.assign(() => !closed && performance.now() < end && check(), {
+      revalidate: async () => !closed && performance.now() < end && check(), close: () => { closed = true; },
+    });
+    if (!this.locked.has(employeeId)) return simple(() => !this.locked.has(employeeId));
+    const unresolved = () => [...this.records.values()].filter(record => record.employeeId === employeeId &&
+      !['completed', 'failed'].includes(record.phase));
+    const records = unresolved(), record = records[0];
+    if (records.length !== 1 || !record || record.owner !== owner || record.phase !== 'recovery-required' ||
+      this.intents.has(record.id) || this.aborts.has(record.id) || performance.now() >= end) return simple(() => false);
+    const fingerprint = JSON.stringify(record), id = record.id;
+    this.intents.add(id);
+    const current = () => !closed && performance.now() < end && this.intents.has(id) && !this.aborts.has(id) &&
+      this.locked.has(employeeId) && this.records.get(id) === record && JSON.stringify(record) === fingerprint &&
+      unresolved().length === 1;
+    return Object.assign(current, { revalidate: async () => current(), close: () => {
+      if (!closed) { closed = true; this.intents.delete(id); }
+    } });
+  }
+
   async get(id: string, owner?: string): Promise<PlanMoveRecord | undefined> {
     await this.init();
     const record = this.records.get(id);
@@ -340,7 +368,7 @@ export class PlanMoves {
         throw new PlanMoveError('The employee or account changed; refresh before moving');
       if (input.purpose === 'runtime-refresh') {
         if (input.fromAccount !== input.toAccount || input.forceBusy || !input.handoff.trim() ||
-            !['codex', 'claude'].includes(snapshot.mode ?? '') ||
+            !accountReplacementProfile(snapshot.mode) ||
             (input.model !== undefined && input.model !== snapshot.model) ||
             (input.targetMode !== undefined && input.targetMode !== snapshot.mode) ||
             !input.runtimeDigest || !/^[a-f0-9]{64}$/.test(input.runtimeDigest) || snapshot.runtimeDigest !== input.runtimeDigest)
@@ -574,9 +602,10 @@ export class PlanMoves {
       }
     } catch (error) {
       record.error = error instanceof Error ? error.message : 'Move failed';
-      let recovered = !record.newSession && executor.binding(record.employeeId, record.owner) === record.oldSession;
+      const unconfirmed = error instanceof PlanMoveUnconfirmed;
+      let recovered = !unconfirmed && !record.newSession && executor.binding(record.employeeId, record.owner) === record.oldSession;
       if (
-        !record.resourceIntent && !stopping &&
+        !unconfirmed && !record.resourceIntent && !stopping &&
         record.newSession &&
         executor.exists(record.oldSession) &&
         executor.binding(record.employeeId, record.owner) === record.newSession
@@ -588,7 +617,7 @@ export class PlanMoves {
           record.error += `; rollback requires inspection: ${rollbackError instanceof Error ? rollbackError.message : 'failed'}`;
         }
       }
-      if (stopping && record.newSession) {
+      if (!unconfirmed && stopping && record.newSession) {
         // Once the old stop began, its process and transport may be gone. Clean only
         // this move's candidate and retain recovery-required; never revive an old SID
         // or restore a stale copy of the employee's persistent data.

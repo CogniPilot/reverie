@@ -95,7 +95,7 @@ fn ancestry(
         init: initial,
     })
 }
-fn walk(
+pub(super) fn walk(
     files: &mut Descriptors,
     peer: &ProcessSnapshot,
     init: &UnsignedInteger,

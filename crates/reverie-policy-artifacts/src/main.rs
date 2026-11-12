@@ -5,9 +5,18 @@ use reverie_contracts::task_perf_v1::{
     MAX_ARTIFACT_BYTES, PerfSystem, TaskPerfPolicy, produce_task_perf_for_policy,
 };
 use std::path::{Path, PathBuf};
+mod build_archive;
+mod build_input;
+mod codex_inputs;
+mod human_toolkit;
+mod idmap;
 mod output;
+mod pool_images;
+mod resume_program;
 mod verify;
+mod website_provenance;
 mod worker_child;
+mod worker_provenance;
 
 #[derive(Parser)]
 #[command(
@@ -37,7 +46,21 @@ struct Arguments {
     verify_manifest: Option<PathBuf>,
 }
 fn main() {
-    let result = if worker_child::requested() {
+    let result = if resume_program::requested() {
+        resume_program::run()
+    } else if human_toolkit::requested() {
+        human_toolkit::run()
+    } else if worker_provenance::requested() {
+        worker_provenance::run()
+    } else if website_provenance::requested() {
+        website_provenance::run()
+    } else if idmap::requested() {
+        idmap::run()
+    } else if codex_inputs::requested() {
+        codex_inputs::run()
+    } else if pool_images::requested() {
+        pool_images::run()
+    } else if worker_child::requested() {
         worker_child::run()
     } else {
         run(Arguments::parse())

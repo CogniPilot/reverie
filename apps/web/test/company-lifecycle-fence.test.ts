@@ -36,6 +36,7 @@ const { spendRebootRestore } = await import('../src/web/routes/reboot-restore-ro
 const { createMockRouteContext } = await import('./mocks/index.js');
 const directories: string[] = [];
 afterEach(async () => {
+  vi.restoreAllMocks();
   for (const path of directories.splice(0)) await rm(path, { recursive: true, force: true });
 });
 function gate() {
@@ -89,8 +90,8 @@ async function fixture(running = true) {
     closing: () => false,
     noteRunning: (id: string) => service.setDesiredRunning(id, true),
     begin: (id: string, session: string) => service.prepareWake(id, session),
-    claim: vi.fn((id: string, session: string, now: number, automatic: boolean) =>
-      service.claimWake(id, session, now, automatic)
+    claim: vi.fn((id: string, session: string, now: number, automatic: boolean, stillCurrent?: () => boolean) =>
+      service.claimWake(id, session, now, automatic, stillCurrent)
     ),
     wake: vi.fn(async (_entry: unknown, allowed: () => boolean) => {
       if (!allowed()) return false;
@@ -99,10 +100,65 @@ async function fixture(running = true) {
     }),
     now: () => 1000000,
   };
-  return { store, service, deps, recovery: new CompanyWake(deps), live, discard };
+  return { store, service, deps, recovery: new CompanyWake(deps), live, discard, sessions };
+}
+
+async function delegatedAuthority(f: Awaited<ReturnType<typeof fixture>>) {
+  f.sessions.set('delegate-session', {id: 'delegate-session', name: 'Delegate', owner: undefined});
+  await f.store.update(state => { state.employees.push(EmployeeSchema.parse({
+    id: 'delegate', sessionId: 'delegate-session', name: 'Delegate', position: 'Coordinator', expertise: ['systems'],
+    icon: 'X', createdAt: 1, desiredRunning: true, permissions: {recoverEmployees: true},
+  })); });
+  return f.service.recoveryAction('employee', undefined, 'delegate-session');
 }
 
 describe('shared owner restart/recovery in-flight fence', () => {
+  it.each(['generation', 'grant'] as const)('a queued canonical %s change prevents wake-claim mutation itself', async change => {
+    const f = await fixture(), action = await delegatedAuthority(f), entered = gate(), release = gate(), claiming = gate();
+    const prior = f.store.update(state => {
+      if (change === 'generation') state.employees[0].sessionGeneration++;
+      else state.employees.find(employee => employee.id === 'delegate')!.permissions.recoverEmployees = false;
+    }, undefined, async () => { entered.resolve(); await release.promise; });
+    await entered.promise;
+    f.deps.claim.mockImplementationOnce((...args) => { claiming.resolve(); return f.service.claimWake(...args); });
+    const pending = f.recovery.wakeOne('employee', {stillCurrent: action.current});
+    try {
+      await claiming.promise; release.resolve(); await prior;
+      expect(await pending).toEqual({awakened: [], skipped: [{employeeId: 'employee', reason: 'changed-or-stopping'}]});
+      const employee = f.store.snapshot().employees.find(employee => employee.id === 'employee')!;
+      expect(employee.wakeAttempts).toEqual([]); expect(employee.desiredRunning).toBe(true);
+      expect(f.deps.wake).not.toHaveBeenCalled();
+    } finally { release.resolve(); await prior; await pending; }
+  });
+
+  it('actor replacement at canonical precommit aborts publication and leaves no attempt', async () => {
+    const f = await fixture(), action = await delegatedAuthority(f), entered = gate(), release = gate();
+    const before = f.store.snapshot();
+    const update = f.store.update.bind(f.store);
+    const spy = vi.spyOn(f.store, 'update').mockImplementationOnce((...args) =>
+      update(args[0], args[1], async result => {
+        await args[2]?.(result); entered.resolve(); await release.promise;
+      }));
+    const pending = f.recovery.wakeOne('employee', {stillCurrent: action.current});
+    try {
+      await entered.promise;
+      f.sessions.set('delegate-session', {id: 'delegate-session', name: 'Replacement', owner: undefined});
+      release.resolve();
+      expect((await pending).awakened).toEqual([]);
+      expect(f.store.snapshot()).toEqual(before);
+      const reloaded = new CompanyStore(f.store.file); await reloaded.init();
+      expect(reloaded.snapshot()).toEqual(before);
+      expect(f.deps.wake).not.toHaveBeenCalled();
+    } finally { release.resolve(); await pending; spy.mockRestore(); }
+  });
+  it('a wake lease cannot survive same-session generation replacement', async () => {
+    const f = await fixture(), flight = f.service.prepareWake('employee', 'current-session')!;
+    try {
+      expect(flight.current()).toBe(true);
+      await f.store.update(state => { state.employees[0].sessionGeneration++; });
+      expect(flight.current()).toBe(false);
+    } finally { flight.finish(); }
+  });
   it('a stale guarded stop cannot cancel a recovery already waiting on its durable claim', async () => {
     const f = await fixture(), claimed = gate(), release = gate();
     f.deps.claim.mockImplementation(async (...args) => {

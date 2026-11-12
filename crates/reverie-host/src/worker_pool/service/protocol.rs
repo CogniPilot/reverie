@@ -1,11 +1,13 @@
 //! Closed controller messages. These are correlation/selection DATA, never a
 //! serialized consent, maintenance fence, Created owner or pool capability.
 use super::super::*;
+use reverie_contracts::worker_pool::WorkerPoolMemberPolicy;
 use reverie_core::operations::JournalId;
 use serde::{Deserialize, Serialize};
 
 pub(in crate::worker_pool) const MAX_FRAME: usize = 8192;
 const PURPOSE: &str = "reverie-worker-pool-control-v1";
+pub(in crate::worker_pool) const MEMBER_POLICY_EDIT_VERSION: u32 = 1;
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 #[serde(rename_all = "camelCase")]
@@ -40,6 +42,10 @@ pub(in crate::worker_pool) enum Request {
         request_id: String,
         host_reserve_mi_b: u32,
     },
+    Resume {
+        request_id: String,
+        host_reserve_mi_b: u32,
+    },
     ConfigureMember {
         request_id: String,
         employee: String,
@@ -52,6 +58,31 @@ pub(in crate::worker_pool) enum Request {
         session: String,
         container: String,
     },
+    ApplyMemberPolicy {
+        request_id: String,
+        version: u32,
+        edit: MemberPolicyEdit,
+    },
+    CommitMemberPolicy {
+        request_id: String,
+        version: u32,
+        operation: String,
+    },
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub(in crate::worker_pool) struct MemberPolicyEdit {
+    pub(in crate::worker_pool) operation: String,
+    pub(in crate::worker_pool) employee: String,
+    pub(in crate::worker_pool) session: String,
+    pub(in crate::worker_pool) container: String,
+    pub(in crate::worker_pool) pid: u32,
+    pub(in crate::worker_pool) start: String,
+    pub(in crate::worker_pool) leaf: (u64, u64),
+    pub(in crate::worker_pool) before: WorkerPoolMemberPolicy,
+    pub(in crate::worker_pool) proposed: WorkerPoolMemberPolicy,
+    pub(in crate::worker_pool) expected_revision: u64,
 }
 impl Request {
     pub(in crate::worker_pool) fn decode(raw: &[u8]) -> Result<Received> {
@@ -79,6 +110,9 @@ impl Request {
         match &value {
             Self::Activate {
                 host_reserve_mi_b, ..
+            }
+            | Self::Resume {
+                host_reserve_mi_b, ..
             } => need(
                 *host_reserve_mi_b >= 256,
                 "WORKER_POOL_CONTROL_HOST_RESERVE",
@@ -103,6 +137,17 @@ impl Request {
                 )?;
             }
             Self::Status { .. } | Self::ContinueOriginal { .. } | Self::Close { .. } => (),
+            Self::ApplyMemberPolicy { version, edit, .. } => {
+                edit.validate(*version)?;
+            }
+            Self::CommitMemberPolicy {
+                version, operation, ..
+            } => {
+                need(
+                    *version == MEMBER_POLICY_EDIT_VERSION && JournalId::parse(operation).is_ok(),
+                    "WORKER_POOL_MEMBER_EDIT_REQUEST",
+                )?;
+            }
         }
         Ok(Received {
             request: value,
@@ -115,9 +160,31 @@ impl Request {
             | Self::ContinueOriginal { request_id }
             | Self::Close { request_id }
             | Self::Activate { request_id, .. }
+            | Self::Resume { request_id, .. }
             | Self::ConfigureMember { request_id, .. }
-            | Self::ObserveMember { request_id, .. } => request_id,
+            | Self::ObserveMember { request_id, .. }
+            | Self::ApplyMemberPolicy { request_id, .. }
+            | Self::CommitMemberPolicy { request_id, .. } => request_id,
         }
+    }
+}
+
+impl MemberPolicyEdit {
+    fn validate(&self, version: u32) -> Result<()> {
+        need(
+            version == MEMBER_POLICY_EDIT_VERSION
+                && JournalId::parse(&self.operation).is_ok()
+                && reverie_core::ids::ProfileEmployeeId::parse(&self.employee).is_ok()
+                && reverie_core::ids::ProfileSessionId::parse(&self.session).is_ok()
+                && reverie_contracts::worker_pool::hex_id(&self.container)
+                && self.pid > 1
+                && self
+                    .start
+                    .parse::<u64>()
+                    .is_ok_and(|value| value.to_string() == self.start)
+                && self.leaf.1 > 0,
+            "WORKER_POOL_MEMBER_EDIT_REQUEST",
+        )
     }
 }
 #[derive(Serialize)]
@@ -129,6 +196,51 @@ pub(in crate::worker_pool) struct Reply<'a> {
     pub(in crate::worker_pool) known: bool,
     pub(in crate::worker_pool) primary_error: Option<&'static str>,
     pub(in crate::worker_pool) anchor: Option<AnchorData>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(in crate::worker_pool) member_policy_edit_version: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(in crate::worker_pool) restored_birth: Option<RestoredBirthAck>,
+}
+
+#[derive(Clone, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub(in crate::worker_pool) struct RestoredBirthAck {
+    birth_sha256: String,
+    member_revision: u64,
+}
+
+impl RestoredBirthAck {
+    pub(in crate::worker_pool) fn from_birth(
+        birth: &reverie_contracts::worker_pool::ControllerServiceBirth,
+        digest: [u8; 32],
+    ) -> Option<Self> {
+        birth.restored().then(|| Self {
+            birth_sha256: super::super::policy::digest_text(digest),
+            member_revision: birth
+                .member_snapshot()
+                .map_or(0, |snapshot| snapshot.revision()),
+        })
+    }
+
+    pub(in crate::worker_pool) fn assert_reply(
+        &self,
+        reply: &serde_json::Value,
+        phase: &'static str,
+    ) -> Result<()> {
+        let observed = reply
+            .get("restoredBirth")
+            .ok_or(PoolError::Refused("WORKER_POOL_RESTORED_BIRTH_UNSUPPORTED"))?;
+        let observed: Self = serde_json::from_value(observed.clone())
+            .map_err(|_| PoolError::Refused("WORKER_POOL_RESTORED_BIRTH_ACK"))?;
+        need(
+            &observed == self
+                && reply["memberPolicyEditVersion"] == MEMBER_POLICY_EDIT_VERSION
+                && reply["known"] == true
+                && reply["phase"] == phase
+                && reply["primaryError"].is_null(),
+            "WORKER_POOL_RESTORED_BIRTH_ACK",
+        )
+    }
 }
 #[derive(Serialize)]
 pub(in crate::worker_pool) struct AnchorData {
@@ -188,5 +300,25 @@ mod tests {
         ))
         .unwrap();
         assert!(received.end <= before + std::time::Duration::from_secs(21));
+    }
+
+    #[test]
+    fn resume_accepts_only_the_original_correlation_and_bounded_reserve() {
+        let mut request = serde_json::json!({
+            "verb":"resume","requestId":"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee","hostReserveMiB":256
+        });
+        let received = Request::decode(&frame(request.clone(), u64::MAX)).unwrap();
+        assert!(matches!(
+            received.request,
+            Request::Resume {
+                host_reserve_mi_b: 256,
+                ..
+            }
+        ));
+        request["anchor"] = serde_json::json!("a".repeat(64));
+        assert!(Request::decode(&frame(request.clone(), u64::MAX)).is_err());
+        request.as_object_mut().unwrap().remove("anchor");
+        request["hostReserveMiB"] = serde_json::json!(255);
+        assert!(Request::decode(&frame(request, u64::MAX)).is_err());
     }
 }

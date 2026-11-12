@@ -25,6 +25,7 @@ pub(in crate::worker_laptop) enum Pending {
         row: RecoveryInspection,
         target: target::Target,
         attempted: bool,
+        controller_policy: Option<reverie_contracts::worker_pool::WorkerPoolMemberPolicy>,
         budget: CallBudget,
     },
 }

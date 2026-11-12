@@ -54,10 +54,14 @@ impl Pins {
         }
     }
     fn initialize(&mut self, source: &Value) -> Result<()> {
+        model::observed_mounts(source)?;
         let mounts = source["Mounts"]
             .as_array()
             .ok_or_else(|| DeploymentError::new("DEPLOYMENT_MOUNTS_REQUIRED"))?;
         for mount in mounts {
+            if mount["Type"] == "tmpfs" {
+                continue;
+            }
             let path = PathBuf::from(model::string(mount, "Source")?);
             let destination = model::string(mount, "Destination")?.to_owned();
             let held = ObservedPath::capture(&path)
@@ -101,6 +105,9 @@ impl Pins {
         Ok(())
     }
     pub(super) fn running_mounts(&self, container: &Value) -> Result<()> {
+        // Fixed ephemeral mounts have no host source to pin. Validate their
+        // complete profile separately, while retaining every real bind anchor.
+        model::observed_mounts(container)?;
         self.verify()?;
         let pid = container["State"]["Pid"]
             .as_u64()
@@ -115,7 +122,8 @@ impl Pins {
                 "DEPLOYMENT_RUNNING_BIND_CHANGED",
             )?;
         }
-        self.verify()
+        self.verify()?;
+        model::observed_mounts(container)
     }
     pub(super) fn close(self) -> Result<()> {
         let mut result = Ok(());

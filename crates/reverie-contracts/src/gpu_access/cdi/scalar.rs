@@ -2,7 +2,9 @@ use super::*;
 use libyaml_safer::ScalarStyle;
 use regex_lite::Regex;
 use std::sync::OnceLock;
+mod integer_value;
 mod number;
+pub(super) use integer_value::integer_value;
 mod timestamp;
 
 pub(super) fn construct(
@@ -14,17 +16,22 @@ pub(super) fn construct(
     let kind = kind(value, tag, style)?;
     match kind.as_str() {
         "str" => Ok(CdiValue::Text(restore.text(value))),
-        "null" => Ok(CdiValue::Atom),
+        "null" => Ok(CdiValue::Primitive(Value(Node::Null))),
         "bool"
             if matches!(
                 value.to_ascii_lowercase().as_str(),
                 "yes" | "no" | "true" | "false" | "on" | "off"
             ) =>
         {
-            Ok(CdiValue::Atom)
+            Ok(CdiValue::Primitive(Value(Node::Bool(matches!(
+                value.to_ascii_lowercase().as_str(),
+                "yes" | "true" | "on"
+            )))))
         }
-        "int" if number::integer(value) => Ok(CdiValue::Atom),
-        "float" if number::float(value) => Ok(CdiValue::Atom),
+        "int" if number::integer(value) => Ok(CdiValue::YamlInteger(value.into())),
+        "float" => number::float_value(value)
+            .map(|value| CdiValue::Primitive(Value(Node::Number(Number::Float(value)))))
+            .ok_or(GpuDataError::CdiDocument),
         "timestamp" if timestamp::valid(value) => Ok(CdiValue::Atom),
         "binary" => number::binary(value).map(CdiValue::Bytes),
         _ => Err(GpuDataError::CdiDocument),

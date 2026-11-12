@@ -48,7 +48,11 @@ describe('employee identity on the chat HTTP representations', () => {
     for (const suffix of ['', '/messages']) {
       const read = await harness.app.inject({ method: 'GET', url: `/api/chatrooms/${room.id}${suffix}`, headers: { 'x-reverie-parent-session': NEXT } });
       expect(read.statusCode).toBe(200);
-      expect(read.json().data.messages.find((entry: ChatMessage) => entry.id === legacy.id).from).toEqual({ ...legacy.from, employeeId: EMPLOYEE });
+      const from = read.json().data.messages.find((entry: ChatMessage) => entry.id === legacy.id).from;
+      expect(from).toMatchObject({ ...legacy.from, employeeId: EMPLOYEE });
+      // Historical agent identity never supplies verified-owner authority,
+      // whether a representation omits the optional mark or emits false.
+      expect(from.authenticatedOwner).not.toBe(true);
     }
     const pins = await harness.app.inject({ method: 'GET', url: `/api/chatrooms/${room.id}/pins`, headers: { 'x-reverie-parent-session': NEXT } });
     expect(pins.statusCode).toBe(200);

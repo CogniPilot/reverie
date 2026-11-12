@@ -21,7 +21,7 @@ beforeEach(() => {
   for (const path of [home, config, cwd, join(root, 'bin')]) mkdirSync(path);
   symlinkSync(PYTHON, join(root, 'bin', 'python3'));
   const provider = join(root, 'provider.cjs');
-  writeFileSync(provider, `const fs=require('node:fs');fs.appendFileSync(process.env.FIXTURE_LOG,JSON.stringify({args:process.argv.slice(2),cwd:process.cwd(),config:process.env.CLAUDE_CONFIG_DIR})+'\\n');if(process.env.FIXTURE_SIGNAL)process.kill(process.pid,process.env.FIXTURE_SIGNAL);else process.exit(Number(process.env.FIXTURE_EXIT));`);
+  writeFileSync(provider, `const fs=require('node:fs');fs.appendFileSync(process.env.FIXTURE_LOG,JSON.stringify({args:process.argv.slice(2),cwd:process.cwd(),config:process.env.CLAUDE_CONFIG_DIR})+'\\n');if(process.env.FIXTURE_PID_LOG)fs.writeFileSync(process.env.FIXTURE_PID_LOG,String(process.pid));if(process.env.FIXTURE_SIGNAL)process.kill(process.pid,process.env.FIXTURE_SIGNAL);else process.exit(Number(process.env.FIXTURE_EXIT));`);
   const fake = join(root, 'bin', 'claude');
   writeFileSync(fake, `#!/bin/sh\nexec ${quote(process.execPath)} ${quote(provider)} "$@"\n`); chmodSync(fake, 0o700);
 });
@@ -50,12 +50,16 @@ describe('single launch in actual selected namespace', () => {
     });
   }
   for (const signal of ['SIGKILL', 'SIGTERM']) {
-    it(`preserves actual ${signal} outcome without a second provider`, () => {
+    it(`keeps the selected provider in the exec caller and preserves ${signal} without a second provider`, () => {
       transcript(OLD);
       const direct = execute(`exec claude --resume ${quote(OLD)}`, 0, { FIXTURE_SIGNAL: signal });
       rmSync(log);
-      const wrapped = execute(command(), 0, { FIXTURE_SIGNAL: signal });
+      // Replace the fixture caller too. An extra non-exec outer shell may
+      // legitimately translate child signals to 128+signal (dash vs bash).
+      const pidFile = join(root, 'provider.pid');
+      const wrapped = execute(`exec ${command()}`, 0, { FIXTURE_SIGNAL: signal, FIXTURE_PID_LOG: pidFile });
       expect([wrapped.result.status, wrapped.result.signal]).toEqual([direct.result.status, direct.result.signal]);
+      expect(Number(readFileSync(pidFile, 'utf8'))).toBe(wrapped.result.pid);
       expect(wrapped.calls).toEqual([{ args: ['--resume', OLD], cwd, config }]);
     });
   }

@@ -3,9 +3,11 @@
 //! commands, owner authorization, engine identity or mutation permission.
 mod bootstrap;
 mod control;
+mod gpu_preflight;
 #[cfg(test)]
 mod installed_context_tests;
 mod owner;
+pub use gpu_preflight::{GpuPreflightEngine, GpuPreflightQuery};
 #[cfg(test)]
 pub(crate) mod tests;
 pub use bootstrap::EngineBootstrap;
@@ -40,15 +42,25 @@ const GPU_INFORMATION_FORMAT: &str = concat!(
     "{\"ID\":{{json .ID}},\"OSType\":{{json .OSType}},\"KernelVersion\":{{json .KernelVersion}},",
     "\"ServerVersion\":{{json .ServerVersion}},\"CDISpecDirs\":{{json .CDISpecDirs}}}"
 );
+const WORKER_POOL_INFORMATION_FORMAT: &str = concat!(
+    "{\"ID\":{{json .ID}},\"OSType\":{{json .OSType}},",
+    "\"CgroupDriver\":{{json .CgroupDriver}},\"CgroupVersion\":{{json .CgroupVersion}},",
+    "\"SecurityOptions\":{{json .SecurityOptions}}}"
+);
 
 pub enum EngineQuery<'a> {
     InventoryIds,
     InspectBatch(&'a [ContainerId]),
     InspectStopped(&'a ContainerId),
     GpuInformation,
+    WorkerPoolInformation,
+    WorkerPoolImageInventory,
     TelemetryInventory,
     TelemetryInspect(&'a reverie_core::command_telemetry::TelemetryContainerId),
     WorkerPoolInspect(&'a ContainerId),
+    /// Whole website object for the existing actor facts validator. Other pool
+    /// inspectors retain their original one-element-array contract.
+    WorkerPoolWebsiteInspect(&'a ContainerId),
     WorkerImageInspect(&'a reverie_contracts::worker_image_switch::WorkerImageId),
     ProviderPane(&'a ContainerId),
     ProviderTop(&'a ContainerId),
@@ -56,6 +68,11 @@ pub enum EngineQuery<'a> {
 impl EngineQuery<'_> {
     fn arguments(self) -> Result<Vec<OsString>> {
         let (format, ids) = match self {
+            Self::WorkerPoolImageInventory => {
+                return Ok(["image", "ls", "--all", "--no-trunc", "--quiet"]
+                    .map(Into::into)
+                    .to_vec());
+            }
             Self::WorkerImageInspect(id) => {
                 return Ok(["image", "inspect", "--format", "{{json .}}", id.as_str()]
                     .map(Into::into)
@@ -106,8 +123,18 @@ impl EngineQuery<'_> {
             Self::WorkerPoolInspect(id) => {
                 return Ok(["inspect", id.as_str()].map(Into::into).to_vec());
             }
+            Self::WorkerPoolWebsiteInspect(id) => {
+                return Ok(["inspect", "--format", "{{json .}}", id.as_str()]
+                    .map(Into::into)
+                    .to_vec());
+            }
             Self::GpuInformation => {
                 return Ok(["info", "--format", GPU_INFORMATION_FORMAT]
+                    .map(Into::into)
+                    .to_vec());
+            }
+            Self::WorkerPoolInformation => {
+                return Ok(["info", "--format", WORKER_POOL_INFORMATION_FORMAT]
                     .map(Into::into)
                     .to_vec());
             }

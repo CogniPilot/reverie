@@ -4,6 +4,7 @@ use super::*;
 mod abort_held;
 mod cold;
 mod completion;
+mod controller;
 mod created_return;
 pub(in crate::installing_broker) use created_return::{
     CreatedStorageFinishFailure, CreatedStorageReturned,
@@ -18,12 +19,14 @@ use reverie_host::{
 pub enum NetworkStorageError {
     Nix(NixStorageError),
     Host(LaptopError),
+    Controller(reverie_host::worker_pool::PoolError),
 }
 impl std::fmt::Display for NetworkStorageError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Nix(error) => error.fmt(f),
             Self::Host(error) => error.fmt(f),
+            Self::Controller(error) => error.fmt(f),
         }
     }
 }
@@ -32,6 +35,7 @@ impl std::error::Error for NetworkStorageError {
         match self {
             Self::Nix(error) => Some(error),
             Self::Host(error) => Some(error),
+            Self::Controller(error) => Some(error),
         }
     }
 }

@@ -92,11 +92,14 @@ impl TaskPerfConfiguration {
             let Some(Value(Node::Object(docker))) = fields.get_mut(&key("rootlessDocker")) else {
                 return Err(TaskPerfError::FixedBaseRequired);
             };
+            // Nix may give identical immutable base bytes different store
+            // paths. The consuming host validates the configured file and
+            // its actual hash; this DATA join requires that same fixed hash.
+            // Only the fixed verified DERIVED profile is ever projected.
             if docker
                 .get(&key("seccompProfile"))
                 .and_then(string)
-                .as_deref()
-                != Some(fixed.base_profile())
+                .is_none_or(|path| super::manifest::nix_path(&path).is_err())
                 || docker
                     .get(&key("seccompSha256"))
                     .and_then(string)

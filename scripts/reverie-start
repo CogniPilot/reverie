@@ -62,10 +62,14 @@ function main() {
   }
   const config = JSON.parse(readFileSync(configPath, 'utf8'));
   const keys = ['version', 'containerName', 'port', 'companyRoot', 'workspace', 'scratch', 'memoryMiB', 'pidsLimit'];
-  if (!config || Array.isArray(config) || Object.keys(config).some(k => ![...keys, 'adminPhoneWake', 'ownerCodingEvidence', 'protectedWebsite', 'websiteRuntime', 'ownerTerminalConfig'].includes(k)) ||
+  if (!config || Array.isArray(config) || Object.keys(config).some(k => ![...keys, 'adminPhoneWake', 'ownerCodingEvidence', 'protectedWebsite', 'websiteRuntime', 'ownerTerminalConfig', 'workerViewerSocket'].includes(k)) ||
       keys.some(k => !(k in config)) || config.version !== 1) fail('Unsupported deployment.json fields or version.');
   if ('adminPhoneWake' in config && typeof config.adminPhoneWake !== 'boolean') fail('adminPhoneWake must be a boolean.');
   if ('ownerCodingEvidence' in config && typeof config.ownerCodingEvidence !== 'boolean') fail('ownerCodingEvidence must be a boolean.');
+  if ('workerViewerSocket' in config) {
+    directory(config.workerViewerSocket);
+    if (Buffer.byteLength(config.workerViewerSocket) >= 108) fail('workerViewerSocket exceeds the Unix socket path limit.');
+  }
   if ('protectedWebsite' in config && typeof config.protectedWebsite !== 'boolean') fail('protectedWebsite must be a boolean.');
   if ('websiteRuntime' in config && typeof config.websiteRuntime !== 'string') fail('websiteRuntime must be a closed string.');
   const websiteRuntimes = {
@@ -134,6 +138,7 @@ function main() {
     add(lifecycle.description.bootstrapMount.Source, '/run/reverie-owner-terminal', true);
     const environment = ['REVERIE_CASES_PATH=/reverie_workspace/cases', 'REVERIE_RESEARCH_ROOT=/reverie_workspace/research'];
     if (config.adminPhoneWake === true) environment.push('REVERIE_ADMIN_PHONE_WAKE=enabled');
+    if (config.workerViewerSocket) environment.push('REVERIE_WORKER_VIEWER_SOCKET=' + config.workerViewerSocket);
     environment.push('REVERIE_OWNER_CODING_EVIDENCE=' + (config.ownerCodingEvidence === false ? 'disabled' : 'enabled'));
     if (updates) environment.push('REVERIE_CONTROL_DIR=/run/reverie-control');
     return { name: config.containerName, user: uid + ':' + gid, workdir: '/reverie_workspace',
@@ -168,6 +173,11 @@ function main() {
       ? evidenceValues.length === 1 && evidenceValues[0] === 'REVERIE_OWNER_CODING_EVIDENCE=disabled'
       : evidenceValues.length === 0 || (evidenceValues.length === 1 && evidenceValues[0] === 'REVERIE_OWNER_CODING_EVIDENCE=enabled');
     if (!evidenceMatches) fail('Existing console coding evidence startup setting differs. Use the reviewed update workflow; nothing was replaced.');
+    const viewerValues = (container.Config?.Env || []).filter(value => value.startsWith('REVERIE_WORKER_VIEWER_SOCKET='));
+    const viewerMatches = config.workerViewerSocket === undefined
+      ? viewerValues.length === 0 || (viewerValues.length === 1 && viewerValues[0] === 'REVERIE_WORKER_VIEWER_SOCKET=')
+      : viewerValues.length === 1 && viewerValues[0] === 'REVERIE_WORKER_VIEWER_SOCKET=' + config.workerViewerSocket;
+    if (!viewerMatches) fail('Existing console worker viewer startup setting differs. Use the reviewed update workflow; nothing was replaced.');
     if (config.protectedWebsite === true) {
       // Inspect actual protection before start/reuse; the deployment label is not security evidence.
       const host = container.HostConfig || {}, env = container.Config?.Env;
@@ -265,6 +275,7 @@ function main() {
   mount(join(identity, 'passwd'), '/etc/passwd', true); mount(join(identity, 'group'), '/etc/group', true);
   command.push('--env', 'REVERIE_CASES_PATH=/reverie_workspace/cases', '--env', 'REVERIE_RESEARCH_ROOT=/reverie_workspace/research');
   if (config.adminPhoneWake === true) command.push('--env', 'REVERIE_ADMIN_PHONE_WAKE=enabled');
+  if (config.workerViewerSocket) command.push('--env', 'REVERIE_WORKER_VIEWER_SOCKET=' + config.workerViewerSocket);
   command.push('--env', 'REVERIE_OWNER_CODING_EVIDENCE=' + (config.ownerCodingEvidence === false ? 'disabled' : 'enabled'));
   if (source) mount(source, '/workspace');
   for (const project of projects) mount(project.path, '/projects/' + project.name);

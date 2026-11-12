@@ -1041,7 +1041,7 @@ Object.assign(ReverieApp.prototype, {
     if (typeof CjkInput !== 'undefined') {
       this._cjkInput = CjkInput.init({
         send: (text) => {
-          this._handleCjkInput(text);
+          return this._handleCjkInput(text);
         },
       });
     }
@@ -4357,8 +4357,10 @@ Object.assign(ReverieApp.prototype, {
   _handleCjkInput(text) {
     if (!this.activeSessionId) {
       _crashDiag.log(`CJK send DROP no-session len=${text.length}`);
-      return;
+      return false;
     }
+    // A known hold must not spend the user's one-shot modifiers or predictions.
+    if (this._sessionInputHeld?.(this.activeSessionId)) return false;
     // ── One-shot Ctrl (mobile shell bar, issue #262) ──
     // While the CJK field is visible it OWNS the keyboard: onData returns early
     // for everything it swallows, and the focus router even redirects
@@ -4376,7 +4378,7 @@ Object.assign(ReverieApp.prototype, {
     // Bypasses onData (like insertTerminalText): predictions cannot see this
     if (this._localEchoPolicy === 'predict') this._predictiveEcho?.clearPredictions();
     _crashDiag.log(`CJK send→${this.activeSessionId.slice(0, 8)} len=${text.length}`);
-    this._sendInputAsync(this.activeSessionId, text);
+    return this._sendInputAsync(this.activeSessionId, text);
   },
 
   /**

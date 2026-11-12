@@ -12,7 +12,7 @@ use std::{
     time::{Duration, Instant},
 };
 mod apply;
-mod broker_close;
+pub(super) mod broker_close;
 pub use broker_close::{ClosedOfflineImageInspection, OfflineImageInspectionFailure};
 mod error;
 mod preflight;

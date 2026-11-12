@@ -69,7 +69,7 @@ function liveSession(mode: SessionMode, extra: Record<string, unknown> = {}) {
   const session = new Session({ workingDir, mode, mux, useMux: true, muxSession, ...extra });
   sessions.push(session);
   vi.spyOn(mux, 'muxSessionExists').mockReturnValue(true);
-  const respawn = vi.spyOn(mux, 'respawnPane').mockResolvedValue(4242);
+  const respawn = vi.spyOn(mux, 'respawnPane').mockImplementation(async options => {options.onProviderDispatch?.(); return 4242;});
   return { session, respawn };
 }
 
@@ -92,7 +92,8 @@ describe('clearing a selection unsets what it injected', () => {
     expect(await session.restartCli()).toBe(true);
     const options = respawn.mock.calls[0][0];
     expect(options.unsetEnvKeys).toEqual(CLAUDE_KEYS);
-    expect(options.envOverrides).toEqual({ CLAUDE_CODE_KEEP: '1' });
+    expect(options.envOverrides).toEqual({ CLAUDE_CODE_KEEP: '1', REVERIE_HOOK_GENERATION: expect.any(String) });
+    for (const key of CLAUDE_KEYS) expect(options.envOverrides).not.toHaveProperty(key);
 
     // Drained once the respawn succeeded: the next relaunch has nothing to unset.
     respawn.mockClear();
@@ -133,13 +134,15 @@ describe('clearing a selection unsets what it injected', () => {
 });
 
 describe('restartCli() must not kill a working pane', () => {
-  it('claude: pins the live conversation id so the relaunch renders --resume <id> || --session-id <id>', async () => {
+  it('claude: delegates transcript selection to its actual runtime with the exact owner-bound candidate', async () => {
     const { session, respawn } = liveSession('claude');
     giveTranscript(session.id);
     await session.restartCli();
     const options = respawn.mock.calls[0][0];
-    expect(options.resumeSessionId).toBe(session.claudeSessionId);
-    expect(options.resumeSessionId).toBe(session.id);
+    expect(options.resumeSessionId).toBeUndefined();
+    expect(options.claudeResumeCandidates).toEqual([session.id]);
+    expect(session.claudeSessionId).toBeNull();
+    expect(session.toState().claudeSessionIdPending).toBe(true);
     // The pin is per-respawn: nothing about the session's own resume id changed.
     expect(session.toState().resumeSessionId).toBeUndefined();
   });

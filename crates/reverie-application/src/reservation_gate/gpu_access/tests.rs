@@ -165,6 +165,38 @@ fn end() -> Instant {
     Instant::now() + Duration::from_secs(20)
 }
 #[test]
+fn protected_apply_checks_exact_present_stopped_state() {
+    let ordinary = json!({"Id":format!("{:064x}",1),"Name":"/owned-fixture","Image":format!("sha256:{}","a".repeat(64)),
+        "Config":{"Labels":{}},"State":{"Running":false,"Pid":0},"Mounts":[],
+        "HostConfig":{"Memory":536870912,"MemorySwap":536870912,"PidsLimit":128,"NanoCpus":0}});
+    for (status, paused, restarting, dead, expected) in [
+        ("created", false, false, false, true),
+        ("exited", false, false, false, true),
+        ("exited", true, false, false, false),
+        ("exited", false, true, false, false),
+        ("exited", false, false, true, false),
+        ("removing", false, false, false, false),
+    ] {
+        let fixture = Fixture::new();
+        let config = worker_config::decode(b"{}").unwrap();
+        let context = fixture.observer().capture(config, None);
+        assert!(website::stopped_target(None, &context, end()).unwrap());
+        assert!(fixture.events().is_empty());
+        fixture.inventory(std::slice::from_ref(&ordinary));
+        let mut stopped = ordinary.clone();
+        stopped["State"] = json!({"Running":false,"Pid":0,"Status":status,"StartedAt":"2026-11-10T00:00:00Z",
+            "Paused":paused,"Restarting":restarting,"Dead":dead});
+        fixture.stopped_inspection(&stopped);
+        let rows = context.inventory(Some(end())).unwrap();
+        let selected = rows.rows().next().unwrap();
+        assert_eq!(
+            website::stopped_target(Some(&selected), &context, end()).unwrap(),
+            expected
+        );
+        assert_eq!(fixture.events(), ["ps", "inspect", "stopped"]);
+    }
+}
+#[test]
 fn actual_stopped_transition_updates_both_files_and_same_ram_tuple_then_releases_last_pending() {
     crate::test_process::owning_case!(
         actual_stopped_transition_updates_both_files_and_same_ram_tuple_then_releases_last_pending

@@ -70,6 +70,7 @@ const DROP_REQUEST_HEADERS = new Set([
   'origin',
   'referer',
   'x-reverie-hook-secret',
+  'x-reverie-hook-generation',
 ]);
 
 /** Response headers dropped on the way back to the browser. */

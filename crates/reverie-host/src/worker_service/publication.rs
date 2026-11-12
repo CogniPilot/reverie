@@ -85,6 +85,9 @@ impl State {
         Ok(())
     }
     pub(super) fn finish_attempt(&mut self) -> Result<()> {
+        if let Some(owner) = &mut self.stop_takeover {
+            owner.assert_closed()?;
+        }
         need(
             self.marker
                 && !self.uncertain

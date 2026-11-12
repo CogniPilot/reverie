@@ -4,7 +4,7 @@ use super::*;
 use crate::installing_broker::launch::service::{HandlerReturned, run_service_launch};
 use crate::installing_broker::{
     installation_offer::SharedInstallationOffer,
-    resource_actor::{PoolRegistrationFailure, ResourceOperationFailure},
+    resource_actor::{FleetDispatchFailure, PoolRegistrationFailure, ResourceOperationFailure},
 };
 use reverie_host::worker_reports::{
     AcceptedWorkerServiceConnection, RegisteredWorkerConnection, WorkerHandlerCommand,
@@ -20,6 +20,7 @@ enum Retained<'a> {
     Goal(Box<GoalCustodyHandlerFailure>),
     Registration(Box<PoolRegistrationFailure<'a>>),
     ResourceOperation(Box<ResourceOperationFailure<'a>>),
+    FleetPreview(Box<FleetDispatchFailure<'a>>),
     Socket(WorkerServiceConnection),
 }
 struct Stack<'a> {
@@ -66,6 +67,15 @@ impl Stack<'_> {
                 }
                 Err(owner) => Some(Retained::ResourceOperation(owner)),
             },
+            Some(Retained::FleetPreview(owner)) => match owner.settle_for_worker() {
+                Ok(closed) => {
+                    if closed.primary_error_code().is_some() {
+                        eprintln!("{closed}");
+                    }
+                    None
+                }
+                Err(owner) => Some(Retained::FleetPreview(owner)),
+            },
             // These concrete domain failures retain their own original native
             // producers. No replay of observe/fetch/install is permitted here.
             other => other,
@@ -84,6 +94,7 @@ impl Stack<'_> {
             Some(Retained::Goal(owner)) => Some(owner.to_string()),
             Some(Retained::Registration(owner)) => Some(owner.to_string()),
             Some(Retained::ResourceOperation(owner)) => Some(owner.to_string()),
+            Some(Retained::FleetPreview(owner)) => Some(owner.to_string()),
             Some(Retained::Socket(connection)) => {
                 Some(format!("{:?}: socket close retained", connection.purpose()))
             }
@@ -132,6 +143,14 @@ pub(super) fn run(
         {
             registration(&broker, connection, installation_offer.as_ref())
         }
+        Ok(AcceptedWorkerServiceConnection::Service(connection))
+            if connection.purpose() == WorkerServicePurpose::ResourceActor
+                && reverie_contracts::resource_actor::is_fleet_maintenance_hello(
+                    connection.request_bytes(),
+                ) =>
+        {
+            fleet(&broker, connection, installation_offer.clone())
+        }
         Ok(AcceptedWorkerServiceConnection::Service(connection)) => service(&broker, connection),
         Err(error) => {
             eprintln!("{error}");
@@ -164,6 +183,36 @@ pub(super) fn run(
         }
     }
 }
+fn fleet<'a>(
+    broker: &'a Arc<InstallingBroker>,
+    connection: WorkerServiceConnection,
+    offer: Option<SharedInstallationOffer>,
+) -> Option<Retained<'a>> {
+    if let Err(cause) = reverie_contracts::resource_actor::decode_fleet_maintenance_hello(
+        connection.request_bytes(),
+    ) {
+        if let Err(error) = connection.report_failure(cause.code()) {
+            eprintln!("{error}");
+        }
+        return match connection.close_socket_for_worker() {
+            Ok(_) => None,
+            Err(error) => {
+                eprintln!("{error}");
+                Some(Retained::Socket(connection))
+            }
+        };
+    }
+    match broker.handle_fleet_operation(connection, offer) {
+        Ok(closed) => {
+            if closed.primary_error_code().is_some() {
+                eprintln!("{closed}");
+            }
+            None
+        }
+        Err(owner) => Some(Retained::FleetPreview(owner)),
+    }
+}
+
 fn registration<'a>(
     broker: &'a Arc<InstallingBroker>,
     connection: WorkerServiceConnection,

@@ -76,6 +76,12 @@ impl Drop for Fixture {
 
 #[test]
 fn actual_registered_locks_remain_exclusive_until_known_component_close() {
+    if crate::test_process::isolate_case(concat!(
+        "worker_image::maintenance::tests::",
+        "actual_registered_locks_remain_exclusive_until_known_component_close"
+    )) {
+        return;
+    }
     let fixture = Fixture::new();
     let mut locks = fixture
         .capture()

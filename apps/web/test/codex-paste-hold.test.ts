@@ -59,8 +59,9 @@ it.each([
     expect(session.composerHeldByMove).toBe(true);
     expect(port.calls.filter(c => c === 'paste-buffer' || c.startsWith('send-keys'))).toEqual(typed); // never an Enter
     expect(session.shouldApplyInput('codex-paste', 1)).toBe(handedBack);
-    expect(result.json().errorCode === 'SESSION_BUSY').toBe(handedBack);
-    if (!handedBack) expect(result.json()).toEqual({ delivered: false, typedUnsent: true });
+    expect(result.json().errorCode).toBe('SESSION_BUSY');
+    if (handedBack) expect(result.json().error).toContain('nothing was typed');
+    if (!handedBack) expect(result.json()).toMatchObject({ success: false, errorCode: 'SESSION_BUSY', data: { delivered: false, typedUnsent: true } });
   } finally {
     release?.(); port.hold = () => {}; port.at = '';
     Object.assign(session, { ptyProcess: null, _muxSession: null }); await session.stop(false);

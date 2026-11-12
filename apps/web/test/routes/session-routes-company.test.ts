@@ -68,13 +68,13 @@ describe('temporary worker creation with company identity and channel inheritanc
   const owner = (extra = {}) =>
     app.inject({ method: 'POST', url: '/api/sessions', payload: { workingDir: directory, mode: 'claude', ...extra } });
 
-  it('gives a random human name/icon and joins the parent’s only channel', async () => {
+  it('gives a generated agent identity and joins the parent’s only channel', async () => {
     const room = rooms.create('Engineering', undefined);
     rooms.addMember(room.id, 'test-session-1');
     const response = await spawn();
     expect(response.statusCode).toBe(200);
     const { session, identity } = response.json();
-    expect(session.name).toMatch(/^[A-Za-z]+$/);
+    expect(session.name).toMatch(/^Agent [a-f0-9]{8}$/);
     expect(identity.icon).toBeTruthy();
     expect(room.members.find((m) => m.sessionId === session.id)?.icon).toBe(identity.icon);
     expect(company.view().temporaryAgents[0].name).toBe(session.name);
@@ -302,9 +302,13 @@ describe('temporary worker creation with company identity and channel inheritanc
       vi.spyOn(company, 'completeSpawn').mockRejectedValue(new CompanyError('Session already bound', 409));
       const response = await owner({ employeeId: abe.id, mode: 'opencode' });
       expect(response.json().errorCode).toBe('CONFLICT');
-      const created = ctx.addSession.mock.calls[0][0].id as string;
-      expect(ctx.cleanupSession).toHaveBeenCalledWith(created, true, 'spawn_failed');
-      expect(ctx.sessions.has(created)).toBe(false);
+      expect(response.json().recoveryRequired).toBeUndefined();
+      const created = ctx.addSession.mock.calls[0][0];
+      expect(ctx.cleanupSession).toHaveBeenCalledWith(created.id, true, 'spawn_failed',
+        {session: created, owner: created.owner});
+      expect(ctx.cleanupSession.mock.calls.find(call => call[0] === created.id)?.[3]?.session).toBe(created);
+      expect(ctx.sessions.has(created.id)).toBe(false);
+      expect(company.view().employees[0]).toMatchObject({id: abe.id, sessionId: 'test-session-1'});
     });
 
     it('does the same on quick-start', async () => {
@@ -317,8 +321,13 @@ describe('temporary worker creation with company identity and channel inheritanc
         payload: { caseName: 'abe-restart', mode: 'opencode', employeeId: abe.id },
       });
       expect(response.json().success).toBe(false);
-      const created = ctx.addSession.mock.calls[0][0].id as string;
-      expect(ctx.cleanupSession).toHaveBeenCalledWith(created, true, 'quick_start_error');
+      expect(response.json().recoveryRequired).toBeUndefined();
+      const created = ctx.addSession.mock.calls[0][0];
+      expect(ctx.cleanupSession).toHaveBeenCalledWith(created.id, true, 'quick_start_error',
+        {session: created, owner: created.owner});
+      expect(ctx.cleanupSession.mock.calls.find(call => call[0] === created.id)?.[3]?.session).toBe(created);
+      expect(ctx.sessions.has(created.id)).toBe(false);
+      expect(company.view().employees[0]).toMatchObject({id: abe.id, sessionId: 'test-session-1'});
     });
   });
 
@@ -352,7 +361,7 @@ describe('temporary worker creation with company identity and channel inheritanc
     const { sessionId, identity } = response.json();
     expect(sessionId).toBeTruthy();
     expect(ctx.sessions.get(sessionId)?.name).toBe(identity.name);
-    expect(identity.name).toMatch(/^[A-Za-z]+$/);
+    expect(identity.name).toMatch(/^Agent [a-f0-9]{8}$/);
     expect(room.members.find((m) => m.sessionId === sessionId)?.icon).toBe(identity.icon);
     const chosen = await app.inject({
       method: 'POST',

@@ -13,6 +13,47 @@ pub(crate) struct FleetStopAdmission {
     admission: admission::Admission,
 }
 impl ReservationGate {
+    /// Same-record fleet stop only after actual authorized Q and physical
+    /// settlement of its bound original handlers. No launch or release grant.
+    pub(crate) fn admit_transition_fleet_stop(
+        &self,
+        authorization: &mut crate::installing_broker::resource_actor::AuthenticatedFleetMaintenance<
+            '_,
+        >,
+        fence: &PoolTransitionFence,
+        closed: &reverie_host::worker_reports::WorkerOriginalHandlersClosed,
+        installed: &Arc<crate::installing_broker::InstalledWorker>,
+        budget: &WorkerStopBudget,
+    ) -> Result<FleetStopAdmission> {
+        authorization.assert_fleet_stop_gate(self)?;
+        fence.assert_gate(self)?;
+        fence.assert_selection(authorization.selection())?;
+        need(
+            Arc::ptr_eq(installed, &self.inner.installed),
+            "WORKER_STOP_ADMISSION_ORIGIN",
+        )?;
+        let purpose = fence.legacy_fleet_cleanup(closed, authorization.fleet_stop_targets()?)?;
+        let admission = self.inner.admit_transition_entry(
+            purpose,
+            budget,
+            authorization.fleet_stop_deadline(),
+        )?;
+        let owned = FleetStopAdmission {
+            gate: Arc::clone(&self.inner),
+            admission,
+        };
+        let body = (|| {
+            authorization.assert_fleet_stop_gate(self)?;
+            let rows = self.inner.guard(None)?;
+            authorization.assert_fleet_stop_inventory(&rows)?;
+            authorization.assert_fleet_stop_gate(self)?;
+            owned.check_transition_history()
+        })();
+        match body {
+            Ok(()) => Ok(owned),
+            Err(primary) => finalized(Err(primary), owned.abort()),
+        }
+    }
     /// Same ordinary allocation/native guards, but the supervisor skips an
     /// actually busy entry instead of blocking the main service accept loop.
     pub(crate) fn try_admit_service_stop(
@@ -56,13 +97,25 @@ impl ReservationGate {
 }
 impl FleetStopAdmission {
     pub(crate) fn check_target(&self, target: &WorkerContainerName) -> Result<()> {
-        self.gate.check_ordinary_stop(target.as_str())
+        if let Some(cleanup) = &self.gate.held(None)?.original_cleanup {
+            cleanup.assert_target(target)?;
+        }
+        self.gate.check_ordinary_stop(target.as_str())?;
+        self.check_transition_history()
     }
     pub(crate) fn close(self) -> Result<()> {
-        self.admission.finish()
+        let checked = self.check_transition_history();
+        finalized(checked, self.admission.finish())
     }
     pub(crate) fn abort(self) -> Result<()> {
         self.admission.abort()
+    }
+    fn check_transition_history(&self) -> Result<()> {
+        self.gate
+            .held(None)?
+            .original_cleanup
+            .as_ref()
+            .map_or(Ok(()), |cleanup| cleanup.assert_fleet_history(&self.gate))
     }
 }
 #[must_use = "finish or abort the actual same-thread stop allocation scope"]
@@ -85,6 +138,9 @@ impl ReservationGate {
             Arc::ptr_eq(installed, &self.inner.installed),
             "WORKER_STOP_ADMISSION_ORIGIN",
         )?;
+        // Ordinary callers cannot inherit an original-handler cleanup purpose
+        // merely because the same thread currently owns that admission.
+        self.inner.assert_no_pool_transition()?;
         let borrowed = self
             .inner
             .state
@@ -116,6 +172,40 @@ impl ReservationGate {
             .inherit_native_budget(native_budget)
             .and_then(|()| scope.gate.check_ordinary_stop(target.as_str()));
         match checked {
+            Ok(()) => Ok(scope),
+            Err(cause) => scope.fail(cause),
+        }
+    }
+}
+impl ReservationGate {
+    pub(crate) fn admit_original_handler_cleanup(
+        &self,
+        installed: &Arc<crate::installing_broker::InstalledWorker>,
+        connection: &reverie_host::worker_reports::WorkerLaunchConnection,
+        target: &WorkerContainerName,
+        runtime: &WorkerRuntime,
+    ) -> Result<OrdinaryStopAdmission> {
+        need(
+            Arc::ptr_eq(installed, &self.inner.installed) && connection.same_runtime(runtime),
+            "WORKER_STOP_ADMISSION_ORIGIN",
+        )?;
+        let budget = runtime.stop_budget();
+        let Some(cleanup) = self.inner.original_cleanup(connection, target, runtime)? else {
+            return self.admit_ordinary_stop(installed, target, Some(&budget));
+        };
+        cleanup.assert_target(target)?;
+        let admission = self.inner.admit_original_cleanup(cleanup, &budget)?;
+        let active = match self.inner.held(None) {
+            Ok(active) => active,
+            Err(cause) => return admission.conclude(Err(cause)),
+        };
+        let scope = OrdinaryStopAdmission {
+            gate: self.inner.clone(),
+            active,
+            scope: Scope::Owned(admission),
+            budget: Some(budget),
+        };
+        match scope.gate.check_ordinary_stop(target.as_str()) {
             Ok(()) => Ok(scope),
             Err(cause) => scope.fail(cause),
         }

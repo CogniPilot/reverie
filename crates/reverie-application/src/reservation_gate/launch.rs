@@ -6,6 +6,7 @@ use reverie_core::{
     ids::ProfileSessionId,
     resources::{BudgetMode, ResourcePolicy},
 };
+mod member;
 #[path = "launch_pool.rs"]
 mod pool;
 

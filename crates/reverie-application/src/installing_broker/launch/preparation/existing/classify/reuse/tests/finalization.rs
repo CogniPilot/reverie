@@ -1,6 +1,7 @@
 //! Real accepted J, same employee lease and owned Rust provider/viewer. These
 //! fixtures contact no host engine or running company.
 use super::*;
+mod foreign_stop_scope;
 mod recovered;
 use std::{
     fs,

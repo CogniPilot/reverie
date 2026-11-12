@@ -1647,7 +1647,7 @@ describe('File Viewer server search', () => {
 
       expect(selectStart).toBeGreaterThanOrEqual(0);
       expect(appJs.slice(activeAssignment, activation + 53)).toMatch(
-        /this\.activeSessionId = sessionId;\s*this\._activateFileBrowserSession\?\.\(sessionId\);/
+        /this\.activeSessionId = sessionId;\s*this\._renderInputRecoveryBanner\(\);\s*this\._activateFileBrowserSession\?\.\(sessionId\);/
       );
       expect(activeAssignment).toBeLessThan(activation);
       expect(activation).toBeLessThan(firstTerminalAwait);

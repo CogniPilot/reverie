@@ -14,6 +14,7 @@
 import { closeSync, constants, fstatSync, openSync, readSync, readdirSync, realpathSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, isAbsolute, join, resolve, sep } from 'node:path';
+import { getCli } from '../../config/cli-registry/registry.js';
 
 /** What a report may include: direct-message rooms only for the owner. */
 export interface ProfileView {
@@ -169,7 +170,9 @@ function loadRuntime(policyPath: string): Runtime {
   const fallback = get(policy, 'fallback');
   const chosen = typeof fallback === 'string' ? get(backends, fallback) : undefined;
   if (!isObject(chosen) || !truthy(chosen.enabled)) throw new Error('an enabled local fallback is required');
-  if (chosen.mode !== 'opencode') throw new Error('the fallback must use the local OpenCode adapter');
+  const injection = typeof chosen.mode === 'string' ? getCli(chosen.mode)?.capabilities.customModelInjection : undefined;
+  if (injection?.kind !== 'configContentEnv' || injection.template !== 'opencode-json')
+    throw new Error('the fallback must use the local OpenCode adapter');
   return { dir, policy, state: isObject(state) ? state : {} };
 }
 
@@ -364,7 +367,7 @@ export function buildProfile(sources: ProfileSources, sessionId: string, state: 
     effort: {
       configured: field(live, 'effort'),
       observed:
-        live.mode === 'claude' && chain.length
+        typeof live.mode === 'string' && getCli(live.mode)?.capabilities.transcript === 'claude-jsonl' && chain.length
           ? observedEffort(chain[chain.length - 1], sources.transcriptProjectsDir)
           : null,
     },

@@ -1,6 +1,7 @@
 use super::*;
 pub struct StoppedState {
     state: Value,
+    ordinary: InventoryDigest,
 }
 impl StoppedState {
     /// Validate the ordinary census row before issuing the fresh stopped query.
@@ -70,7 +71,20 @@ impl StoppedState {
         if digest(&observed)? != ordinary.snapshot_digest()? {
             return Err(EngineDataError::StoppedChanged);
         }
-        Ok(Self { state })
+        Ok(Self {
+            state,
+            ordinary: ordinary.snapshot_digest()?,
+        })
+    }
+    /// Checked source classification DATA, bound to the complete original row.
+    /// A running, paused, restarting or changed row cannot use future paths.
+    pub fn permits_future_mount_source(&self, ordinary: &ContainerRow) -> Result<bool> {
+        Ok(self.ordinary == ordinary.snapshot_digest()?
+            && !self.flag(StoppedFlag::Running)
+            && !self.flag(StoppedFlag::Paused)
+            && !self.flag(StoppedFlag::Restarting)
+            && !self.flag(StoppedFlag::Dead)
+            && (self.status_is("created") || self.status_is("exited")))
     }
     pub fn status_is(&self, value: &str) -> bool {
         text(field(

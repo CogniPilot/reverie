@@ -2,6 +2,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 import { JSDOM } from 'jsdom';
+import {frontendDeclarations} from './helpers/frontend-declarations.js';
 
 const windows: JSDOM[] = [];
 afterEach(() => { for (const dom of windows.splice(0)) dom.window.close(); });
@@ -15,7 +16,7 @@ function fixture(decision: object, writesEnabled: boolean | undefined = true) {
   const load = vi.fn(async () => {});
   const context = vm.createContext({ document: dom.window.document, CSS: { escape: (value: string) => value }, fetch, load, boardActive: true, readyForActions: true,
     B: { rev: 7, decisions: [decision], polls: [], structuredDecisionWrites: writesEnabled }, when: () => 'Today' });
-  new vm.Script(`${/const esc = .*/.exec(script)![0]}\n${script.slice(script.indexOf('const cardErr = {}'))}\ncards();`).runInContext(context);
+  new vm.Script(`${frontendDeclarations(script, ['esc'])}\n${script.slice(script.indexOf('const cardErr = {}'))}\ncards();`).runInContext(context);
   return { document: dom.window.document, fetch, load, context };
 }
 

@@ -64,6 +64,12 @@ fn scoped_owner_checks_actual_engine_before_native_admission_and_keeps_fixed_opt
 }
 #[test]
 fn scoped_consumed_close_uncertainty_keeps_original_ticket_and_refuses_native_replay() {
+    if crate::test_process::isolate_case(concat!(
+        "engine_metadata::tests::owner_cases::",
+        "scoped_consumed_close_uncertainty_keeps_original_ticket_and_refuses_native_replay"
+    )) {
+        return;
+    }
     let tree = Tree::new();
     let mut bootstrap = tree.bootstrap("close");
     let failed = bootstrap.hooks.close_failed.clone();

@@ -10,18 +10,33 @@
   const suggestion = (name, valid) => {
     const value = query.has(name) ? query.get(name) : hash.get(name);
     if (value === null) return null;
-    if (!valid(value)) { invalidLink = true; return null; }
+    if (!valid(value)) {
+      invalidLink = true;
+      return null;
+    }
     return value;
   };
-  const suggestedSession = suggestion('sessionId', value => /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(value));
-  const suggestedPort = suggestion('port', value => /^[0-9]{4,5}$/.test(value) && Number(value) >= 1024 &&
-    Number(value) <= 65535 && ![8092, 8093].includes(Number(value)));
-  const suggestedPath = suggestion('path', value => value.length <= 4096 && value.startsWith('/') &&
-    !value.startsWith('//') && !/[\\#\x00-\x1f\x7f]/.test(value));
+  const suggestedSession = suggestion('sessionId', (value) =>
+    /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(value)
+  );
+  const suggestedPort = suggestion(
+    'port',
+    (value) =>
+      /^[0-9]{4,5}$/.test(value) &&
+      Number(value) >= 1024 &&
+      Number(value) <= 65535 &&
+      ![8092, 8093].includes(Number(value))
+  );
+  const suggestedPath = suggestion(
+    'path',
+    (value) =>
+      value.length <= 4096 && value.startsWith('/') && !value.startsWith('//') && !/[\\#\x00-\x1f\x7f]/.test(value)
+  );
   if (suggestedPort) $('expose').elements.port.value = suggestedPort;
   if (suggestedPath) $('expose').elements.path.value = suggestedPath;
-  const status = text => {
-    $('status').textContent = (invalidLink ? 'Some preview link fields were invalid; check the laptop, port and path. ' : '') + text;
+  const status = (text) => {
+    $('status').textContent =
+      (invalidLink ? 'Some preview link fields were invalid; check the laptop, port and path. ' : '') + text;
   };
   const element = (tag, text) => {
     const node = document.createElement(tag);
@@ -38,7 +53,8 @@
     const reply = await response.json();
     // Every /api reply arrives in the console envelope ({success, data}); a console error envelope carries its error
     // itself. The preview route's own reply, an error included, is the envelope's data.
-    const data = reply && typeof reply === 'object' && 'success' in reply && reply.data !== undefined ? reply.data : reply;
+    const data =
+      reply && typeof reply === 'object' && 'success' in reply && reply.data !== undefined ? reply.data : reply;
     if (!response.ok) throw new Error(data?.error || reply?.error || 'Preview request failed.');
     return data;
   }
@@ -63,7 +79,7 @@
       options.push(option);
     }
     $('expose').elements.sessionId.replaceChildren(...options);
-    if (options.some(option => option.value === selected)) $('expose').elements.sessionId.value = selected;
+    if (options.some((option) => option.value === selected)) $('expose').elements.sessionId.value = selected;
     else if (selected || query.has('sessionId') || hash.has('sessionId')) {
       $('expose').elements.sessionId.value = '';
       invalidLink = true;
@@ -119,9 +135,11 @@
         card.append(path, open, remove);
         $('previews').append(card);
       }
-      status(errors.concat(data.previews.length
-        ? 'Exposed ports are listed below.'
-        : 'No laptop ports are exposed.').join(' '));
+      status(
+        errors
+          .concat(data.previews.length ? 'Exposed ports are listed below.' : 'No laptop ports are exposed.')
+          .join(' ')
+      );
     } catch (error) {
       status(error.message);
     }

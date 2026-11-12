@@ -7,6 +7,10 @@ mod security;
 mod tests;
 const FULL_SPEC: &str = "WEBSITE_FULL_SPEC_CHANGED";
 
+pub(super) fn validate_protected_website_settings(raw: &[u8]) -> Result<()> {
+    security::settings(raw)
+}
+
 /// A PID declared by fully matching engine metadata, still only DATA. The
 /// native caller must independently pin/inspect the actual process and peer.
 pub struct QualifiedWebsiteMetadata {
@@ -18,6 +22,15 @@ impl QualifiedWebsiteMetadata {
     }
 }
 impl EngineMetadata {
+    /// Derive complete selected fields from the actual daemon document. This
+    /// DATA constructor does not attest its input, its process, or an installer.
+    pub fn installation_website_digests(&self) -> Result<[JournalDigest; 3]> {
+        Ok([
+            digest(required(&self.0, "Config")?)?,
+            digest(&host_config(required(&self.0, "HostConfig")?)?)?,
+            digest(&mounts::normalize(required(&self.0, "Mounts")?)?)?,
+        ])
+    }
     pub fn qualify_website(&self, selected: &WebsiteSelection) -> Result<QualifiedWebsiteMetadata> {
         let pid = header(&self.0, selected)?;
         need(

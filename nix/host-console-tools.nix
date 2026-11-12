@@ -8,7 +8,7 @@ let
   workspace = import ./rust-workspace-source.nix {
     inherit pkgs src;
     members = [
-      "reverie-contracts" "reverie-core" "reverie-diagnostics" "reverie-host" "reverie-http" "reverie-python-regex" "reverie-store"
+      "reverie-contracts" "reverie-core" "reverie-diagnostics" "reverie-host" "reverie-worker-client" "reverie-http" "reverie-python-regex" "reverie-store"
       "reverie-application" "reverie-memory-cli" "reverie-mcp-cli"
     ];
     vendors = [ "rustpython-sre-engine" "rustpython-wtf8" ];

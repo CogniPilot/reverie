@@ -12,7 +12,7 @@
  * That stayed invisible because config/vitest.ci.config.ts excludes
  * `test/mobile/**`, so CI never ran the suite.
  *
- * ⚠️ scripts/postinstall.js:238-303 already writes these same 7 outputs (same
+ * ⚠️ scripts/postinstall.js already writes these same 8 outputs (same
  * names, same alias tail), so a plain `npm install` leaves the suite working. What
  * this script adds is FRESHNESS and independence from install time: a checkout
  * installed with `--ignore-scripts`, or one borrowing another tree's
@@ -45,7 +45,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const OUT = join(ROOT, 'src', 'web', 'public', 'vendor');
+const OUT = process.argv[2] ? resolve(process.argv[2]) : join(ROOT, 'src', 'web', 'public', 'vendor');
 const NM = join(ROOT, 'node_modules');
 
 /**
@@ -78,6 +78,13 @@ const ASSETS = [
     // The alias tail appended below. Its absence means the output is a partial
     // write from an older version of this script, whatever its mtime says.
     mustContain: 'window.LocalEchoOverlay',
+  },
+  {
+    src: join(ROOT, 'packages/xterm-zerolag-input/src/predictive-echo-addon.ts'),
+    out: 'xterm-predictive-echo.js',
+    mode: 'bundle',
+    globalName: 'XtermPredictiveEcho',
+    mustContain: 'window.PredictiveEchoOverlay',
   },
 ];
 
@@ -238,6 +245,21 @@ for (const asset of ASSETS) {
           '}\n'
       );
     }
+    if (asset.out === 'xterm-predictive-echo.js') {
+      appendFileSync(
+        tmp,
+        '\n// Global aliases for browser usage\n' +
+          'if(typeof window!=="undefined"){' +
+          'window.PredictiveEchoAddon=XtermPredictiveEcho.PredictiveEchoAddon;' +
+          'window.PredictiveEchoOverlay=class extends XtermPredictiveEcho.PredictiveEchoAddon{' +
+          'constructor(terminal){' +
+          'super({});' +
+          'this.activate(terminal);' +
+          '}' +
+          '};' +
+          '}\n'
+      );
+    }
 
     // Only now is the output complete, so publish it. The append and the rename
     // are inside this try as well: a failure there has to clean the temp up and
@@ -251,4 +273,10 @@ for (const asset of ASSETS) {
   built += 1;
 }
 
-console.log(`[test-vendor] ${built} built, ${skipped} up to date -> src/web/public/vendor/`);
+// The source server also serves the lazy spreadsheet worker. Use its canonical
+// pinned preparer so --ignore-scripts checkouts have the same assets as builds.
+execFileSync(process.execPath, [join(ROOT, 'scripts/prepare-spreadsheet-assets.mjs'), OUT], {
+  cwd: ROOT,
+  stdio: 'inherit',
+});
+console.log(`[test-vendor] ${built} built, ${skipped} up to date -> ${OUT}`);

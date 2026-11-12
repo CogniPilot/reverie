@@ -135,6 +135,7 @@ fn make_operation(
         refreshed_environment_keys: refreshed,
         broker_preserved: true,
         backup_metadata_scope: "fixture".into(),
+        profile: None,
     };
     Operation::create(
         &service.installation.state,

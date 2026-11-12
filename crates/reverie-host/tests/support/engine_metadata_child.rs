@@ -49,11 +49,20 @@ fn main() {
             }
         },
         "native-worker-manager-rollback" => {
+            if args == ["--user", "reset-failed", "reverie-worker-broker.service"] {
+                std::fs::write("manager-reset-attempted", b"exact fixed unit reset").unwrap();
+                if std::path::Path::new("manager-reset-refused").exists() { std::process::exit(1); }
+                if std::path::Path::new("manager-reset-lost").exists() { wait_file("release-reset"); }
+                if std::path::Path::new("manager-reset-reactivate").exists() { std::fs::write("manager-started", b"unexpected reactivation").unwrap(); }
+                if std::path::Path::new("manager-reset-new-invocation").exists() { std::fs::write("manager-lastpid-changed", b"new invocation").unwrap(); }
+                std::fs::write("manager-reset-completed", b"controlled manager reset").unwrap();
+                return;
+            }
             if args == ["--user", "daemon-reload"] { std::fs::write("manager-reloaded", b"known fixed reload").unwrap();return; }
             if args == ["--user", "start", "reverie-worker-broker.service"] { std::fs::write("manager-started", b"known fixed start").unwrap();return; }
             assert_eq!(args, ["--user", "show", "reverie-worker-broker.service", "--property=LoadState", "--property=ActiveState", "--property=SubState", "--property=FragmentPath", "--property=DropInPaths", "--property=NeedDaemonReload"]);
             let target=std::fs::read_link(".config/systemd/user/reverie-worker-broker.service").unwrap();
-            let (active,sub)=if std::path::Path::new("manager-started").exists(){("active","running")}else{("inactive","dead")};
+            let (active,sub)=if std::path::Path::new("manager-started").exists(){("active","running")}else if std::path::Path::new("manager-failed").exists() && !std::path::Path::new("manager-reset-completed").exists(){("failed","failed")}else{("inactive","dead")};
             let fragment=if std::path::Path::new("manager-fragment-link").is_file(){env::current_dir().unwrap().join(".config/systemd/user/reverie-worker-broker.service")}else{target};
             print!("LoadState=loaded\nActiveState={active}\nSubState={sub}\nFragmentPath={}\nDropInPaths=\nNeedDaemonReload=no\n",fragment.display());
         },
@@ -84,6 +93,8 @@ fn main() {
             assert!(owned.wait().unwrap().success());
         }
         "gpu-info"=>gpu_info(&args),
+        "worker-pool-info" => worker_pool_info(&args),
+        "pool-target" => pool_target(&args),
         "storage-writer" | "image-refresh" | "command-telemetry" | "cold-admission" => {
             use std::fs::{self,OpenOptions};
             let mut trace=OpenOptions::new().create(true).append(true).open("calls.txt").unwrap();
@@ -361,6 +372,24 @@ fn cold_launch(args: &[String]) -> bool {
     }
     true
 }
+fn worker_pool_info(args: &[String]) {
+    let format = concat!(
+        "{\"ID\":{{json .ID}},\"OSType\":{{json .OSType}},",
+        "\"CgroupDriver\":{{json .CgroupDriver}},\"CgroupVersion\":{{json .CgroupVersion}},",
+        "\"SecurityOptions\":{{json .SecurityOptions}}}"
+    );
+    assert_eq!(args, ["info", "--format", format]);
+    let mut trace = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open("calls.txt")
+        .unwrap();
+    writeln!(trace, "{}", args.join("\0")).unwrap();
+    drop(trace);
+    io::stdout()
+        .write_all(&std::fs::read("info.json").unwrap())
+        .unwrap();
+}
 fn gpu_info(args:&[String]){
     use std::fs;
     assert!(args.len()==3&&args[0]=="info"&&args[1]=="--format","fixed GPU information purpose only");
@@ -407,4 +436,48 @@ fn reuse_finalizer(args: &[String]) {
         ["network","ls","--no-trunc","--format","{{.ID}} {{.Name}}"] => {},
         _ => std::process::exit(83),
     }
+}
+
+fn pool_target(args: &[String]) {
+    use std::fs::{self, OpenOptions};
+    let mut trace = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open("target-calls.txt")
+        .unwrap();
+    writeln!(trace, "{}", args.join("\0")).unwrap();
+    drop(trace);
+    if std::path::Path::new("query-refused").is_file() {
+        std::process::exit(7);
+    }
+    let file = match args
+        .iter()
+        .map(String::as_str)
+        .collect::<Vec<_>>()
+        .as_slice()
+    {
+        ["info", "--format", format] => {
+            assert_eq!(
+                *format,
+                concat!(
+                    "{\"ID\":{{json .ID}},\"OSType\":{{json .OSType}},",
+                    "\"CgroupDriver\":{{json .CgroupDriver}},\"CgroupVersion\":{{json .CgroupVersion}},",
+                    "\"SecurityOptions\":{{json .SecurityOptions}}}"
+                )
+            );
+            "info.json"
+        }
+        ["image", "inspect", "--format", "{{json .}}", id]
+            if *id == format!("sha256:{}", "a".repeat(64)) =>
+        {
+            "anchor.json"
+        }
+        ["image", "inspect", "--format", "{{json .}}", id]
+            if *id == format!("sha256:{}", "b".repeat(64)) =>
+        {
+            "controller.json"
+        }
+        _ => panic!("only the fixed pool target observation reads are allowed"),
+    };
+    io::stdout().write_all(&fs::read(file).unwrap()).unwrap();
 }

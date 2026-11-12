@@ -12,6 +12,15 @@ export async function writeCompanyStateFile(
   data: string,
   beforeCommit: () => void = () => {}
 ): Promise<void> {
+  return writeCanonicalState(file, data, beforeCommit, () => {});
+}
+
+async function writeCanonicalState(
+  file: string,
+  data: string,
+  beforeCommit: () => void,
+  beforeRename: () => void
+): Promise<void> {
   const directory = dirname(file);
   await fs.mkdir(directory, { recursive: true, mode: 0o700 });
   const temporary = `${file}.${randomUUID()}.tmp`;
@@ -24,6 +33,7 @@ export async function writeCompanyStateFile(
       await handle.close();
     }
     beforeCommit();
+    beforeRename();
     await fs.rename(temporary, file);
     const parent = await fs.open(directory, 'r');
     try {
@@ -35,6 +45,25 @@ export async function writeCompanyStateFile(
     await fs.rm(temporary, { force: true });
   }
 }
+
+/** Only this module can issue an uncertain publication receipt for an actual writer attempt. */
+class CompanyPublicationUnconfirmed extends Error {
+  #store: CompanyStore;
+  constructor(store: CompanyStore, cause: unknown) {
+    super('Canonical company publication is unconfirmed; preserve the current identity and do not replay it.', {
+      cause,
+    });
+    this.#store = store;
+  }
+  static belongsTo(value: unknown, store: CompanyStore): boolean {
+    return value instanceof CompanyPublicationUnconfirmed && #store in value && value.#store === store;
+  }
+}
+
+export type CompanyUpdateOutcome<T> =
+  | { readonly state: 'committed'; readonly value: T }
+  | { readonly state: 'not-issued'; readonly cause: unknown }
+  | { readonly state: 'unconfirmed'; readonly receipt: CompanyPublicationUnconfirmed };
 
 /** Cross-process lock covers reload, validation, CAS and durable rename. The kernel releases it on process death. */
 /** Canonical byte budget for service authority (serviceGrants plus serviceGrantRevocations), enforced at every commit. */
@@ -73,6 +102,18 @@ export class CompanyStore {
     retired: [],
   };
   private chain: Promise<unknown> = Promise.resolve();
+  private writeUncertain = false;
+
+  get publicationUnconfirmed(): boolean {
+    return this.writeUncertain;
+  }
+  isPublicationReceipt(value: unknown): boolean {
+    return CompanyPublicationUnconfirmed.belongsTo(value, this);
+  }
+  private assertWritable(): void {
+    if (this.writeUncertain)
+      throw new Error('Canonical company publication is unconfirmed; this writer is held pending reconciliation.');
+  }
   private queued = 0;
   private existed = false;
   private readStamp?: string;
@@ -99,6 +140,7 @@ export class CompanyStore {
   }
 
   async init(): Promise<void> {
+    this.assertWritable();
     const before = this.possibleHealthStamp();
     try {
       this.state = CompanyStateSchema.parse(JSON.parse(await fs.readFile(this.file, 'utf8')));
@@ -296,43 +338,68 @@ export class CompanyStore {
     validateAuthority: () => void = () => {},
     beforeSave?: (result: T) => void | Promise<void>
   ): Promise<T> {
-    if (this.queued >= 128) return Promise.reject(new Error('Canonical company transaction queue is full'));
+    return this.updateOutcome(mutate, validateAuthority, beforeSave).then((outcome) => {
+      if (outcome.state === 'committed') return outcome.value;
+      throw outcome.state === 'not-issued' ? outcome.cause : outcome.receipt;
+    });
+  }
+
+  /** The current call's closed writer outcome; a recycled exception never supplies publication authority. */
+  updateOutcome<T>(
+    mutate: (state: CompanyState) => T,
+    validateAuthority: () => void = () => {},
+    beforeSave?: (result: T) => void | Promise<void>
+  ): Promise<CompanyUpdateOutcome<T>> {
+    if (this.queued >= 128)
+      return Promise.resolve({ state: 'not-issued', cause: new Error('Canonical company transaction queue is full') });
     this.queued++;
     const run = this.chain
-      .then(() =>
-        this.locked(async () => {
-          let current: CompanyState;
-          try {
-            current = CompanyStateSchema.parse(JSON.parse(await fs.readFile(this.file, 'utf8')));
-          } catch (error) {
-            if ((error as NodeJS.ErrnoException).code !== 'ENOENT' || this.existed) throw error;
-            current = structuredClone(this.state);
-          }
-          validateAuthority();
-          const result = mutate(current);
-          CompanyStateSchema.parse(current);
-          const goalBytes = Buffer.byteLength(
-            JSON.stringify({ goals: current.goals, grants: current.goalGrants, proofs: current.goalUnblockProofs })
-          );
-          if (goalBytes > 8 * 1024 * 1024) throw new Error('Canonical Goal storage budget exhausted');
-          if (serviceAuthorityBytes(current) > SERVICE_AUTHORITY_BUDGET)
-            throw new Error('Canonical service grant storage budget exhausted');
-          // Optional audit runs while this transaction still owns the writer
-          // lock. It receives a copy and cannot mutate the pending company.
-          if (beforeSave) {
-            await beforeSave(structuredClone(result));
+      .then(async (): Promise<CompanyUpdateOutcome<T>> => {
+        let issued = false;
+        try {
+          this.assertWritable();
+          const value = await this.locked(async () => {
+            this.assertWritable();
+            let current: CompanyState;
+            try {
+              current = CompanyStateSchema.parse(JSON.parse(await fs.readFile(this.file, 'utf8')));
+            } catch (error) {
+              if ((error as NodeJS.ErrnoException).code !== 'ENOENT' || this.existed) throw error;
+              current = structuredClone(this.state);
+            }
             validateAuthority();
-          }
-          await writeCompanyStateFile(this.file, JSON.stringify(current), validateAuthority);
-          this.state = current;
-          this.existed = true;
-          // The transaction callback has seen `current`; reload a private copy on the next read.
-          this.readStamp = undefined;
-          // This transaction still owns the canonical cross-process writer lock.
-          this.rememberHealth(this.possibleHealthStamp());
-          return structuredClone(result);
-        })
-      )
+            const result = mutate(current);
+            CompanyStateSchema.parse(current);
+            const goalBytes = Buffer.byteLength(
+              JSON.stringify({ goals: current.goals, grants: current.goalGrants, proofs: current.goalUnblockProofs })
+            );
+            if (goalBytes > 8 * 1024 * 1024) throw new Error('Canonical Goal storage budget exhausted');
+            if (serviceAuthorityBytes(current) > SERVICE_AUTHORITY_BUDGET)
+              throw new Error('Canonical service grant storage budget exhausted');
+            // Optional audit runs while this transaction still owns the writer
+            // lock. It receives a copy and cannot mutate the pending company.
+            if (beforeSave) {
+              await beforeSave(structuredClone(result));
+              validateAuthority();
+            }
+            await writeCanonicalState(this.file, JSON.stringify(current), validateAuthority, () => {
+              issued = true;
+            });
+            this.state = current;
+            this.existed = true;
+            // The transaction callback has seen `current`; reload a private copy on the next read.
+            this.readStamp = undefined;
+            // This transaction still owns the canonical cross-process writer lock.
+            this.rememberHealth(this.possibleHealthStamp());
+            return structuredClone(result);
+          });
+          return { state: 'committed', value };
+        } catch (cause) {
+          if (!issued) return { state: 'not-issued', cause };
+          this.writeUncertain = true;
+          return { state: 'unconfirmed', receipt: new CompanyPublicationUnconfirmed(this, cause) };
+        }
+      })
       .finally(() => {
         this.queued--;
       });

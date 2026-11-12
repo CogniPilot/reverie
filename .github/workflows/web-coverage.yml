@@ -1,0 +1,48 @@
+name: Web coverage
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: web-coverage-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  web-coverage:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: cachix/install-nix-action@448cde739abec1eaf0646249e3d25bb8d9bc7702 # v31
+      - name: Install locked test dependencies
+        run: nix develop --command npm ci --prefix apps/web --ignore-scripts
+      - name: Verify the native PTY and prepare browser assets
+        working-directory: apps/web
+        run: |
+          nix develop --command node scripts/fix-node-pty.mjs
+          nix develop --command node scripts/prepare-test-vendor.mjs
+      - name: Run every default web test and enforce source coverage
+        working-directory: apps/web
+        env:
+          NIX_TEST_FILE_WORKERS: 2
+        run: |
+          # Credential custody intentionally refuses world-writable ancestry.
+          # Use only fresh synthetic state under this runner's private home.
+          mkdir -m 700 "$HOME/reverie-coverage-tmp"
+          nix develop --command env TMPDIR="$HOME/reverie-coverage-tmp" npm run test:coverage
+      - name: Preserve coverage even when tests or thresholds fail
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: web-source-coverage
+          path: apps/web/coverage/
+          if-no-files-found: error
+          retention-days: 14

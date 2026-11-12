@@ -132,3 +132,31 @@ monotonic within their own process, never subtracted across clock origins.
 Healthy-batch acceptance requires non-overlapping requests and complete timing;
 actual WAV, ASR, duration, voice and latency bounds remain unchanged. Portable
 busy/cancel/deadline controls do not establish real model performance.
+
+## Synthetic office browser coverage
+
+The image workflow collects Chromium V8 ranges while the real isolated office
+tests run. It includes source scripts, authored inline scripts and unvisited
+owned modules. Generated echo and spreadsheet bundles must match fresh canonical
+preparer output. Script IDs, execution contexts, source hashes and frame ancestry
+qualify execution; a successful network fetch or iframe preload does not.
+
+After the office and owner-control suites and the iframe negative control finish,
+the workflow runs the committed validator:
+
+```bash
+cd apps/web
+node --import tsx scripts/report-browser-coverage.ts RAW_DIRECTORY SUMMARY_JSON
+```
+
+Missing evidence, mixed source revisions, corrupt snapshots and unqualified
+required iframe execution fail validation. The always-uploaded acceptance
+artifact retains partial reports on failure. Only the checkout integration test
+requires Git objects; pure collector, execution and report tests run in the
+packaged Nix check too.
+
+This is a raw execution baseline. Browser percentage conversion and coverage
+floors are not enforced yet. Anonymous/evaluated scripts, unmatched server-injected
+scripts, workers and unavailable out-of-process contexts remain explicit gaps.
+The behavioral control inventory records additional untested controls; executed
+bytes do not establish that every button, error or recovery path works.

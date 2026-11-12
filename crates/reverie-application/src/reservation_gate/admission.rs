@@ -1,5 +1,7 @@
 use super::*;
 use std::time::Duration;
+mod contention;
+mod fleet_cleanup;
 /// Monotonic installing-service bounds. Entry waiting is bounded independently
 /// from the operation body; neither path creates a protected start capability.
 #[derive(Clone, Copy, Default)]
@@ -21,7 +23,7 @@ impl AdmissionBounds {
 }
 pub(super) struct Admission {
     gate: Arc<Inner>,
-    active: Arc<Active>,
+    pub(super) active: Arc<Active>,
     finished: bool,
     ram_journal: Option<super::ram_journal::SharedJournal>,
     _thread: std::marker::PhantomData<std::rc::Rc<()>>,
@@ -38,6 +40,7 @@ pub(super) struct Entering {
 pub(super) struct Entry {
     gate: Arc<Inner>,
     token: Arc<()>,
+    original_cleanup: Option<pool_transition::OriginalCleanupAdmission>,
     finished: bool,
     _thread: std::marker::PhantomData<std::rc::Rc<()>>,
 }
@@ -59,6 +62,14 @@ impl Inner {
         budget: Option<&reverie_host::worker_runtime::WorkerStopBudget>,
     ) -> Result<Admission> {
         self.admit_selected(AdmissionBounds::default(), None, budget)
+    }
+    pub(super) fn admit_original_cleanup(
+        self: &Arc<Self>,
+        cleanup: pool_transition::OriginalCleanupAdmission,
+        budget: &reverie_host::worker_runtime::WorkerStopBudget,
+    ) -> Result<Admission> {
+        let entry = self.reserve_selected_entry(None, Some(cleanup))?;
+        self.enter_reserved(AdmissionBounds::default(), None, None, Some(budget), entry)
     }
     fn admit_selected(
         self: &Arc<Self>,
@@ -100,6 +111,7 @@ impl Inner {
         let entry = Entry {
             gate: self.clone(),
             token,
+            original_cleanup: None,
             finished: false,
             _thread: std::marker::PhantomData,
         };
@@ -120,9 +132,14 @@ impl Inner {
             Ok(config) => config,
             Err(error) => return finalized(Err(error), entry.cancel()),
         };
-        let lock = match AdmissionLock::acquire(&config) {
+        let acquired = if let (None, Some(end)) = (native_budget, end) {
+            self.acquire_contended_entry(&config, end)
+        } else {
+            AdmissionLock::acquire(&config).map_err(GateError::from)
+        };
+        let lock = match acquired {
             Ok(lock) => lock,
-            Err(error) => return finalized(Err(error.into()), entry.cancel()),
+            Err(error) => return finalized(Err(error), entry.cancel()),
         };
         let active = Arc::new(Active {
             thread: std::thread::current().id(),
@@ -134,6 +151,7 @@ impl Inner {
             gpu_transition: Mutex::new(None),
             image_transition: Mutex::new(None),
             ram_authority: Mutex::new(None),
+            original_cleanup: entry.original_cleanup.clone(),
         });
         #[cfg(test)]
         {
@@ -177,7 +195,14 @@ impl Inner {
         }
     }
     pub(super) fn reserve_entry(self: &Arc<Self>, end: Option<Instant>) -> Result<Entry> {
-        self.assert_no_pool_transition()?;
+        self.reserve_selected_entry(end, None)
+    }
+    fn reserve_selected_entry(
+        self: &Arc<Self>,
+        end: Option<Instant>,
+        original_cleanup: Option<pool_transition::OriginalCleanupAdmission>,
+    ) -> Result<Entry> {
+        self.assert_entry_purpose(original_cleanup.as_ref())?;
         self.assert_no_failed_image()?;
         let mut state = self
             .state
@@ -219,7 +244,7 @@ impl Inner {
                     .map_err(|_| GateError::Refused("RESERVATION_ADMISSION_UNAVAILABLE"))?
             };
         }
-        self.assert_no_pool_transition()?;
+        self.assert_entry_purpose(original_cleanup.as_ref())?;
         self.assert_no_failed_image()?;
         let token = Arc::new(());
         state.entering = Some(Entering {
@@ -230,6 +255,7 @@ impl Inner {
         Ok(Entry {
             gate: self.clone(),
             token,
+            original_cleanup,
             finished: false,
             _thread: std::marker::PhantomData,
         })
@@ -331,7 +357,7 @@ impl Admission {
                 .quarantine()
         })
     }
-    fn finish_result<T>(mut self, result: Result<T>) -> Result<T> {
+    pub(super) fn finish_result<T>(mut self, result: Result<T>) -> Result<T> {
         let purpose = if result.is_ok() {
             CleanupPurpose::BoundaryClosed
         } else {

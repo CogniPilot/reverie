@@ -205,9 +205,9 @@ impl<'a> RuntimeWorkerLaunch<'a> {
             true,
         )?;
         if !self.verified.running {
-            broker.check_creation_budget_locked(
+            broker.check_creation_budget_for_plan_locked(
                 &observed.claimed.lifecycle,
-                session,
+                &observed.plan,
                 &resources,
                 observed.claimed.preparing.admitted.admission.as_ref(),
             )?;

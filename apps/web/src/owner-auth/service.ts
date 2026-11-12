@@ -21,6 +21,7 @@
  */
 import { promises as fs, readFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
+import type { BrowserInputIdentity } from '../browser-input-identity.js';
 import { z } from 'zod';
 import type { Socket } from 'node:net';
 import { hashPassword, verifyPasswordHash, normalizeUsername, isValidUsername } from '../user-store.js';
@@ -228,6 +229,7 @@ export class OwnerAuthService {
   private readonly setupSources = new Map<string, { at: number; count: number }>();
   private readonly connections = new Map<string, Set<Socket>>();
   private readonly connectionClosers = new WeakMap<Socket, Map<string, () => void>>();
+  private readonly inputScopes = new WeakMap<Session, string>();
   /** The last account read successfully: kept when the file later goes missing or corrupt. */
   private lastGood: OwnerAccount | undefined;
   private warned = { missing: false, corrupt: false };
@@ -270,6 +272,17 @@ export class OwnerAuthService {
     const { account } = this.registrationAccount(token);
     if (!account.accountId) throw new OwnerAuthError('Explicit account enrollment is required', 409);
     return Object.freeze({ accountId: account.accountId, personId: 'owner', sessionEpoch: account.epoch });
+  }
+
+  /** Read-only journal provenance. Legacy sign-ins work without implicit enrollment. */
+  inputIdentity(token: string | undefined): BrowserInputIdentity {
+    const { account, session } = this.registrationAccount(token);
+    let scopeId = account.accountId;
+    if (!scopeId) {
+      scopeId = this.inputScopes.get(session) ?? randomUUID();
+      this.inputScopes.set(session, scopeId);
+    }
+    return Object.freeze({ version: 1, kind: account.accountId ? 'account' : 'session', scopeId, epoch: account.epoch });
   }
 
   /** Explicit authenticated enrollment under the existing cross-process account lock.

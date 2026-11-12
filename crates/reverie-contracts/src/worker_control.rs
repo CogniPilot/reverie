@@ -1,9 +1,11 @@
 //! Closed legacy C subset. Decoding is DATA, never a stop permit.
 pub enum WorkerControlRequest {
     StopLaptops,
+    QuiesceForDeployment,
     Status,
     ProviderHealth,
     StorageStatus,
+    PoolRecoveryStatus,
     UnsupportedStopAgent,
 }
 
@@ -17,9 +19,11 @@ impl WorkerControlRequest {
         let fields = value.as_object().ok_or("WORKER_CONTROL_UNSUPPORTED")?;
         match fields.get("action").and_then(serde_json::Value::as_str) {
             Some("stop-laptops") if fields.len() == 1 => Ok(Self::StopLaptops),
+            Some("quiesce-for-deployment") if fields.len() == 1 => Ok(Self::QuiesceForDeployment),
             Some("status") if fields.len() == 1 => Ok(Self::Status),
             Some("provider-health") if fields.len() == 1 => Ok(Self::ProviderHealth),
             Some("storage-status") if fields.len() == 1 => Ok(Self::StorageStatus),
+            Some("pool-recovery-status") if fields.len() == 1 => Ok(Self::PoolRecoveryStatus),
             Some("stop-agent") if stop_agent(fields) => Ok(Self::UnsupportedStopAgent),
             _ => Err("WORKER_CONTROL_UNSUPPORTED"),
         }

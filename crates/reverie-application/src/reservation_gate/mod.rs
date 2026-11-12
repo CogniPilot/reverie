@@ -1,7 +1,9 @@
 //! Actual reservation admission/control composition. This internal service is
 //! not an HTTP authority or a process/start permit. Effect-owner cohorts remain
 //! separate from the read-side admission dependencies.
+mod actor_setup;
 mod admission;
+pub(crate) use actor_setup::{ActorSetupAdmission, ActorSetupPreview};
 mod claim;
 mod draft;
 mod error;
@@ -16,9 +18,14 @@ pub(crate) use image_switch::{
     ImageGateClosed, ImageGateFailure, ImageGateTransition, ImageSwitchPreview,
 };
 mod launch;
+mod member_policy;
+pub(crate) use member_policy::{MemberPolicyAdmission, MemberPolicyEnd};
 mod observation;
 mod ordinary_stop;
+mod perf_transition;
+pub(crate) use perf_transition::{PerfAdmission, PerfPreview};
 mod pool_transition;
+pub(crate) use pool_transition::{PoolMigrationPublished, PublishedPool};
 pub use pool_transition::{PoolTransitionFailure, PoolTransitionFence};
 mod stop_admission;
 pub(crate) use stop_admission::OrdinaryStopAdmission;
@@ -96,6 +103,7 @@ struct Inner {
     changed: Condvar,
     failed_gpu: Mutex<Vec<Arc<gpu_access::TransitionRecord>>>,
     failed_image: Mutex<Option<Arc<image_switch::ImageTransitionRecord>>>,
+    failed_member_policy: Mutex<Option<member_policy::RetainedMemberPolicy>>,
     pool_transition: Mutex<Option<Arc<pool_transition::TransitionRecord>>>,
     #[cfg(test)]
     entry_capture_pause: Mutex<Option<crate::test_process::PausePoint<ObservationContext>>>,
@@ -117,6 +125,7 @@ struct Active {
     gpu_transition: Mutex<Option<Arc<gpu_access::TransitionRecord>>>,
     image_transition: Mutex<Option<Weak<image_switch::ImageTransitionRecord>>>,
     ram_authority: Mutex<Option<Weak<ram_authority::RamJournalAuthority>>>,
+    original_cleanup: Option<pool_transition::OriginalCleanupAdmission>,
 }
 impl ReservationGate {
     /// Stop/settle the same persistent owned metadata-client context before an
@@ -134,7 +143,10 @@ impl ReservationGate {
                 self.inner.assert_no_failed_gpu(),
                 finalized(
                     self.inner.assert_no_failed_image(),
-                    self.inner.assert_no_pool_transition(),
+                    finalized(
+                        self.inner.assert_no_pool_transition(),
+                        self.inner.assert_no_failed_member_policy(),
+                    ),
                 ),
             ),
         )
@@ -187,6 +199,7 @@ impl ReservationGate {
                 changed: Condvar::new(),
                 failed_gpu: Mutex::new(Vec::new()),
                 failed_image: Mutex::new(None),
+                failed_member_policy: Mutex::new(None),
                 pool_transition: Mutex::new(None),
                 #[cfg(test)]
                 entry_capture_pause: Mutex::new(None),

@@ -88,5 +88,32 @@ pub fn read_allowed(config: &EffectiveWorkerConfig, session: &ProfileSessionId) 
     }
 }
 
+/// Viewer-only selection requires an actual current company member. Unlike
+/// ordinary detached recovery, an absent SID never falls through to allowance.
+pub fn read_current_viewer_binding(
+    config: &EffectiveWorkerConfig,
+    session: &ProfileSessionId,
+) -> Result<Option<reverie_contracts::storage_identity::CurrentEmployee>> {
+    let company = company_path(&WorkerIntentConfiguration::new(config))?;
+    let raw = company_text(&company).map_err(IntentHostError::Company)?;
+    if worker_intent::current_allowed(&raw, session)? != Some(true) {
+        return Ok(None);
+    }
+    let metadata = reverie_contracts::storage_identity::decode_metadata(&raw)
+        .map_err(|cause| IntentHostError::Plan(IdentityError::Data(cause)))?;
+    let records = metadata
+        .company_records()
+        .map_err(|cause| IntentHostError::Plan(IdentityError::Data(cause)))?;
+    let Some(employee) = records.by_session(session) else {
+        return Ok(None);
+    };
+    let identity = employee
+        .canonical_identity()
+        .map_err(|cause| IntentHostError::Plan(IdentityError::Data(cause)))?;
+    metadata
+        .current_employee(&identity, session, employee.owner())
+        .map_err(|cause| IntentHostError::Plan(IdentityError::Data(cause)))
+}
+
 #[cfg(test)]
 mod tests;

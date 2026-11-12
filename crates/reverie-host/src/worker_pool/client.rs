@@ -54,6 +54,8 @@ struct ControllerState {
     stop_attempted: bool,
     cleanup_end: Option<Instant>,
     original_end: Instant,
+    capacity_failure: Option<Box<PoolError>>,
+    member_policy_edit: member_policy::EditState,
 }
 pub struct ControllerActivationFailure {
     owner: ActivatedController,
@@ -68,6 +70,7 @@ impl BrokerBootstrapBinding {
         end: Instant,
     ) -> std::result::Result<ActivatedController, Box<ControllerActivationFailure>> {
         let policy = publication.birth_data().policy().clone();
+        let member_policy_edit = member_policy::EditState::from_birth(publication.service_birth());
         let query = runtime.installed_engine().readonly().capture_query_owner();
         let mut owner = ControllerState {
             binding: self,
@@ -90,6 +93,8 @@ impl BrokerBootstrapBinding {
             stop_attempted: false,
             cleanup_end: None,
             original_end: end.min(Instant::now() + Duration::from_secs(20)),
+            capacity_failure: None,
+            member_policy_edit,
         };
         match owner.activate(runtime, host_reserve_mib) {
             Ok(()) => Ok(ActivatedController {
@@ -126,6 +131,62 @@ impl ActivatedController {
     pub fn close_components(&mut self, end: Instant) -> Result<()> {
         self.state_mut().close_components(end)
     }
+    /// The first actual native capacity/member cause remains with this SAME owner.
+    pub fn capacity_failure(&self) -> Option<&PoolError> {
+        self.state().capacity_failure.as_deref()
+    }
+    /// Retain the first whole member/preparation cause in the SAME original
+    /// controller, whose mutex already owns this Send but non-Sync error tree.
+    pub(crate) fn retain_member_result<T>(&mut self, result: Result<T>) -> Result<T> {
+        match result {
+            Ok(value) => Ok(value),
+            Err(PoolError::MemberPolicyEditInProgress) => {
+                Err(PoolError::MemberPolicyEditInProgress)
+            }
+            Err(PoolError::MemberRequestRefused(refusal))
+                if !self.state().effect_unknown
+                    && !self.state().close_unknown
+                    && self.state().capacity_failure.is_none() =>
+            {
+                Err(PoolError::MemberRequestRefused(refusal))
+            }
+            Err(PoolError::Member(error)) if !error.unconfirmed_native() => {
+                // Known pre-effect member refusal remains in its original
+                // workflow. Native unknowns are latched by actual record state
+                // before this projection, not inferred from error wording.
+                Err(PoolError::Member(error))
+            }
+            Err(error) => {
+                self.retain_member_cause(error);
+                Err(PoolError::Refused("WORKER_POOL_MEMBER_RETAINED"))
+            }
+        }
+    }
+    pub(crate) fn retain_member_cause(&mut self, error: PoolError) {
+        self.state_mut().retain_native_error(error);
+    }
+    pub(crate) fn observe_member_capacity(
+        &mut self,
+        website: &reverie_contracts::reservation_engine::NativeLimitBinding,
+        end: Instant,
+    ) -> Result<ControllerCapacity<'_>> {
+        let end = self
+            .state()
+            .binding
+            .stop
+            .deadline()
+            .map_or(end, |stop| end.min(stop));
+        need(Instant::now() < end, "WORKER_POOL_MEMBER_CREATION_DEADLINE")?;
+        let engine = self.state().binding.engine.readonly();
+        let policy = self.policy_data().clone();
+        let ids = need(
+            policy.broker_uid == native::uid()
+                && policy.broker_gid == nix::unistd::getgid().as_raw(),
+            "WORKER_POOL_NATIVE_BROKER_IDS",
+        );
+        self.retain_member_result(ids)?;
+        self.observe_capacity(&engine, &policy, website, end)
+    }
     pub(crate) fn configure_target(
         &mut self,
         runtime: &WorkerRuntime,
@@ -136,6 +197,12 @@ impl ActivatedController {
     }
 }
 impl ControllerState {
+    fn retain_native_error(&mut self, error: PoolError) {
+        self.close_unknown |= error.close_unknown();
+        if self.capacity_failure.is_none() {
+            self.capacity_failure = Some(Box::new(error));
+        }
+    }
     fn policy_data(&self) -> &WorkerPoolPolicy {
         &self.policy
     }
@@ -179,13 +246,33 @@ impl ControllerState {
         self.effect_unknown = false;
         let inspected = self.inspect_controller(runtime, self.original_end)?;
         self.connect(runtime, &inspected, self.original_end)?;
+        let restored = super::service::protocol::RestoredBirthAck::from_birth(
+            self.publication.service_birth(),
+            self.digest,
+        );
+        if let Some(restored) = &restored {
+            let reply = self.exchange(
+                serde_json::json!({"verb":"status","requestId":fresh_id()?}),
+                self.original_end,
+            )?;
+            restored.assert_reply(&reply, "opening")?;
+        }
         self.publication.assert_current()?;
+        let verb = if self.publication.retained_anchor().is_some() {
+            "resume"
+        } else {
+            "activate"
+        };
         self.effect_unknown = true;
         let reply = self.exchange(
-            serde_json::json!({"verb":"activate","requestId":fresh_id()?,"hostReserveMiB":reserve}),
+            serde_json::json!({"verb":verb,"requestId":fresh_id()?,"hostReserveMiB":reserve}),
             self.original_end,
         )?;
+        if let Some(restored) = &restored {
+            restored.assert_reply(&reply, "active")?;
+        }
         self.capture_parent(runtime, &reply, self.original_end)?;
+        self.member_policy_edit.negotiate(&reply);
         self.effect_unknown = false;
         self.publication.assert_current()?;
         self.publication.close()?;
@@ -227,16 +314,25 @@ impl ControllerState {
         self.query
             .assert_engine(&runtime.installed_engine().readonly())
             .map_err(PoolError::Engine)?;
+        self.inspect_original_controller(end)
+    }
+    fn inspect_original_controller(&self, end: Instant) -> Result<serde_json::Value> {
+        self.inspect_controller_with_query(&self.query, end)
+    }
+    fn inspect_controller_with_query(
+        &self,
+        query: &MetadataQueryOwner,
+        end: Instant,
+    ) -> Result<serde_json::Value> {
         let id = self
             .controller
             .as_ref()
             .ok_or(PoolError::Refused("WORKER_POOL_CONTROLLER_UNKNOWN"))?;
-        let raw = self
-            .query
+        let raw = query
             .query(
                 EngineQuery::WorkerPoolInspect(id),
                 end,
-                &runtime.cancellation(),
+                &self.binding.engine.cancellation(),
             )
             .map_err(PoolError::Engine)?;
         let values: Vec<serde_json::Value> = serde_json::from_str(&raw)
@@ -406,31 +502,75 @@ impl ControllerState {
             .as_u64()
             .and_then(|pid| u32::try_from(pid).ok())
             .ok_or(PoolError::Refused("WORKER_POOL_ANCHOR_PID"))?;
-        reverie_contracts::worker_pool::validate_anchor_inspection(
-            &serde_json::to_vec(&values[0])
-                .map_err(|_| PoolError::Refused("WORKER_POOL_ANCHOR_REPLY"))?,
-            &self.policy,
-            &id,
-            pid,
-            &hex(self.digest),
-        )
-        .map_err(|_| PoolError::Refused("WORKER_POOL_ANCHOR_REPLY"))?;
+        let inspected = serde_json::to_vec(&values[0])
+            .map_err(|_| PoolError::Refused("WORKER_POOL_ANCHOR_REPLY"))?;
+        let retained = self.publication.retained_anchor();
+        if let Some(anchor) = retained {
+            need(
+                anchor.container_id() == id && anchor.pid() == pid && reply["anchor"]["pid"] == pid,
+                "WORKER_POOL_RETAINED_ANCHOR_IDENTITY",
+            )?;
+            reverie_contracts::worker_pool::validate_retained_anchor_inspection(
+                &inspected,
+                &self.policy,
+                anchor,
+            )
+            .map_err(|_| PoolError::Refused("WORKER_POOL_RETAINED_ANCHOR_INSPECTION"))?;
+        } else {
+            reverie_contracts::worker_pool::validate_anchor_inspection(
+                &inspected,
+                &self.policy,
+                &id,
+                pid,
+                &hex(self.digest),
+            )
+            .map_err(|_| PoolError::Refused("WORKER_POOL_ANCHOR_REPLY"))?;
+        }
         self.anchor = Some(id);
         self.anchor_pid = pid;
-        self.directory.acquire(
-            &self.policy,
-            self.anchor.as_deref().expect("actual observed anchor"),
-            pid,
-        )?;
+        if let Some(anchor) = retained {
+            self.directory.acquire_retained(&self.policy, anchor)?;
+        } else {
+            self.directory.acquire(
+                &self.policy,
+                self.anchor.as_deref().expect("actual observed anchor"),
+                pid,
+            )?;
+        }
         self.directory.assert_limits(&self.policy)
     }
     fn assert_current(&mut self, runtime: &WorkerRuntime, end: Instant) -> Result<()> {
-        need(
-            self.active && !self.close_unknown && !self.effect_unknown,
-            "WORKER_POOL_CONTROLLER_NOT_ACTIVE",
-        )?;
+        self.require_active()?;
         self.binding.assert_current(runtime, end)?;
-        self.verify_peer(&self.inspect_controller(runtime, end)?)?;
+        self.assert_original_controller_current(end)
+    }
+    fn require_active(&self) -> Result<()> {
+        self.require_no_member_policy_edit()?;
+        self.require_controller_active()?;
+        Ok(())
+    }
+    fn require_no_member_policy_edit(&self) -> Result<()> {
+        if self.member_policy_edit.attempt.is_some() {
+            return Err(PoolError::MemberPolicyEditInProgress);
+        }
+        Ok(())
+    }
+    fn require_controller_active(&self) -> Result<()> {
+        need(
+            self.active
+                && !self.close_unknown
+                && !self.effect_unknown
+                && self.capacity_failure.is_none(),
+            "WORKER_POOL_CONTROLLER_NOT_ACTIVE",
+        )
+    }
+    fn assert_original_controller_current(&mut self, end: Instant) -> Result<()> {
+        self.require_active()?;
+        self.binding.assert_original_current(end)?;
+        self.assert_controller_with_query(&self.query, end)
+    }
+    fn assert_controller_with_query(&self, query: &MetadataQueryOwner, end: Instant) -> Result<()> {
+        self.verify_peer(&self.inspect_controller_with_query(query, end)?)?;
         self.directory.assert_anchor_current(
             self.anchor.as_deref().expect("active original anchor"),
             self.anchor_pid,
@@ -438,6 +578,7 @@ impl ControllerState {
         self.directory.assert_limits(&self.policy)
     }
     fn close_components(&mut self, end: Instant) -> Result<()> {
+        self.require_no_member_policy_edit()?;
         self.active = false;
         let end = *self.cleanup_end.get_or_insert_with(|| {
             self.binding
@@ -491,7 +632,7 @@ impl ControllerState {
         );
         closed?;
         need(
-            !self.close_unknown && !self.effect_unknown,
+            !self.close_unknown && !self.effect_unknown && self.capacity_failure.is_none(),
             "WORKER_POOL_CONTROLLER_EFFECT_UNCONFIRMED",
         )
     }
@@ -575,7 +716,19 @@ fn fresh_id() -> Result<String> {
         .map(|id| id.as_str().into())
         .map_err(|_| PoolError::Refused("WORKER_POOL_RANDOM"))
 }
+mod capacity;
+pub use capacity::ControllerCapacity;
+mod creation_pool;
+mod employee_status;
+pub use employee_status::EmployeeResourceObservation;
 mod io;
+mod member_policy;
+pub use member_policy::{
+    MemberPolicyEditCommitted, MemberPolicyEditError, MemberPolicyEditRejected,
+    MemberPolicyEditSelection, MemberPolicyEditSettlement, MemberPolicyEditVerified,
+    PreparedMemberPolicyEdit,
+};
 mod member;
+mod retained_anchor;
 mod setup;
 use setup::{controller_arguments, prepare_control_directory};

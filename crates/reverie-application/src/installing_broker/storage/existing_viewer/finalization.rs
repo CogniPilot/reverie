@@ -18,28 +18,16 @@ impl ExistingStoragePreparation {
         }
         Ok(observed.is_file())
     }
-    pub(in crate::installing_broker) fn stop_completed(
-        &self,
-        broker: &InstallingBroker,
-    ) -> Result<(), ExistingStorageError> {
-        self.check()?;
-        if !Arc::ptr_eq(self.destination.registry(), &broker.storage) {
-            return Err(ExistingStorageError::Refused("WORKER_STOP_STORAGE_ORIGIN"));
-        }
-        let runtime = &self.destination.registry().runtime;
-        let target = runtime.existing_viewer_stop_target(&self.viewer)?;
-        let admission = broker
-            .admit_ordinary_stop(&target)
-            .map_err(StorageWorkflowError::from)?;
-        self.stop_under_admission(broker, admission)
-    }
-    fn stop_under_admission(
+    pub(in crate::installing_broker) fn stop_under_admission(
         &self,
         broker: &InstallingBroker,
         admission: WorkerStopAdmission<'_>,
     ) -> Result<(), ExistingStorageError> {
         let body = (|| {
             self.check()?;
+            if !Arc::ptr_eq(self.destination.registry(), &broker.storage) {
+                return Err(ExistingStorageError::Refused("WORKER_STOP_STORAGE_ORIGIN"));
+            }
             admission
                 .assert_broker(broker)
                 .map_err(StorageWorkflowError::from)?;

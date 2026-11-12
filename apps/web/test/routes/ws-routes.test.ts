@@ -14,6 +14,14 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { AddressInfo } from 'node:net';
 import Fastify, { type FastifyInstance } from 'fastify';
 import fastifyWebsocket from '@fastify/websocket';
+import fastifyCookie from '@fastify/cookie';
+import {Session} from '../../src/session.js';
+import {TerminalInputReceipts} from '../../src/terminal-input-outcome.js';
+import {TerminalInputService} from '../../src/web/terminal-input-service.js';
+import {registerSessionRoutes} from '../../src/web/routes/session-routes.js';
+import {installResponseEnvelope} from '../../src/web/response-envelope.js';
+import {installRouteErrorHandler} from '../../src/web/route-error-handler.js';
+import {trustedFixtureOwner} from '../helpers/trusted-owner-fixture.js';
 import WebSocket from 'ws';
 import { createMockRouteContext, type MockRouteContext } from '../mocks/index.js';
 import { registerWsRoutes } from '../../src/web/routes/ws-routes.js';
@@ -46,6 +54,21 @@ function nextMessage(ws: WebSocket, timeoutMs = 2000): Promise<unknown> {
       clearTimeout(timer);
       resolve(JSON.parse(String(raw)));
     });
+  });
+}
+
+/** Collect only input disposition; a held real Session also emits refresh telemetry. */
+function inputReply(ws: WebSocket, frame: Record<string, unknown>, timeoutMs = 2000, ignorePending = false): Promise<Record<string, unknown>> {
+  return new Promise((resolve, reject) => {
+    const cleanup = () => {clearTimeout(timer); ws.off('message', receive);};
+    const timer = setTimeout(() => {cleanup(); reject(new Error('Input reply timeout'));}, timeoutMs);
+    const receive = (raw: WebSocket.RawData) => {
+      const message = JSON.parse(String(raw)) as Record<string, unknown>;
+      if (ignorePending && message.t === 'ip') return;
+      if ((message.t === 'ia' || message.t === 'ir' || message.t === 'ie' || message.t === 'ip')
+        && (frame.seq === undefined || message.seq === frame.seq)) {cleanup(); resolve(message);}
+    };
+    ws.on('message', receive); ws.send(JSON.stringify(frame));
   });
 }
 
@@ -84,9 +107,12 @@ describe('ws-routes', () => {
   beforeEach(async () => {
     app = Fastify({ logger: false });
     await app.register(fastifyWebsocket);
+    await app.register(fastifyCookie);
 
     ctx = createMockRouteContext({ sessionId: 'ws-test-session' });
     registerWsRoutes(app, ctx as never, () => ({ bindHost: '127.0.0.1', allowedHosts: [], tunnelHost: null }));
+    registerSessionRoutes(app, ctx as never, {verifiedOwner: trustedFixtureOwner});
+    installResponseEnvelope(app, ''); installRouteErrorHandler(app);
 
     await app.listen({ port: 0, host: '127.0.0.1' });
     PORT = (app.server.address() as AddressInfo).port;
@@ -123,8 +149,8 @@ describe('ws-routes', () => {
         expect(msg.t).toBe('o');
         // Should contain DEC 2026 sync markers wrapping the data
         expect(msg.d).toContain('hello world');
-        expect(msg.d).toMatch(/^\x1b\[\?2026h/); // starts with DEC 2026 start
-        expect(msg.d).toMatch(/\x1b\[\?2026l$/); // ends with DEC 2026 end
+        expect(msg.d.startsWith('\x1b[?2026h')).toBe(true); // starts with DEC 2026 start
+        expect(msg.d.endsWith('\x1b[?2026l')).toBe(true); // ends with DEC 2026 end
       } finally {
         ws.close();
       }
@@ -195,6 +221,430 @@ describe('ws-routes', () => {
   // ========== Client input ==========
 
   describe('client input', () => {
+    function installRealSession(write: (data: string) => void, owner?: string): Session {
+      const session = new Session({id: 'ws-test-session', workingDir: process.env.HOME!, useMux: false, owner});
+      Object.assign(session, {ptyProcess: {pid: 999_999_971, write, kill: vi.fn(), resize: vi.fn()}, _pid: 999_999_971});
+      ctx.sessions.set(session.id, session as never); return session;
+    }
+    const postInput = (payload: Record<string, unknown>) => app.inject({method: 'POST', url: '/api/sessions/ws-test-session/input', payload});
+    const frame = (d = 'same input', cid = 'shared-client', seq = 1) => ({t: 'i', d, cid, seq});
+
+    it('reports known missing-PTY refusal without submit bookkeeping and retries the exact original tag after attachment', async () => {
+      const writes: string[] = [];
+      const session = new Session({id: 'ws-test-session', workingDir: process.env.HOME!, useMux: false});
+      ctx.sessions.set(session.id, session as never);
+      const submitted = vi.fn(); session.on('promptSubmitted', submitted);
+      const dialog = vi.spyOn(session as never as {_recheckPaneDialogSoon(): void}, '_recheckPaneDialogSoon');
+      const ws = await connectWs('/ws/sessions/ws-test-session/terminal');
+      const request = frame('known request\r');
+      const payload = {input: request.d, clientId: request.cid, seq: request.seq, useMux: false};
+      try {
+        const before = {lastSubmitAt: session.lastSubmitAt, isWorking: session.isWorking, status: session.status, name: session.name};
+        const refused = await postInput(payload);
+        expect(refused.statusCode).toBe(409); expect(refused.json().errorCode).toBe('SESSION_BUSY');
+        expect(refused.json().data).toEqual({delivered: false}); expect(refused.json().recoveryRequired).toBeUndefined();
+        expect(await inputReply(ws, {...request, useMux: false}))
+          .toEqual({t: 'ir', seq: 1, retryable: true, reason: 'unavailable'});
+        expect({lastSubmitAt: session.lastSubmitAt, isWorking: session.isWorking, status: session.status, name: session.name}).toEqual(before);
+        expect(session.inputSeqSpent(request.cid, request.seq)).toBe(false);
+        expect(submitted).not.toHaveBeenCalled(); expect(dialog).not.toHaveBeenCalled();
+        expect(session.terminalInputHeld).toBe(false);
+        Object.assign(session, {ptyProcess: {pid: 999_999_971, write: (data: string) => writes.push(data), kill: vi.fn(), resize: vi.fn()}, _pid: 999_999_971});
+        const retried = await postInput(payload);
+        expect(retried.statusCode).toBe(200);
+        expect(await inputReply(ws, {...request, useMux: false})).toEqual({t: 'ia', seq: 1, confirmed: true});
+        expect(writes).toEqual([request.d]); expect(session.inputSeqSpent(request.cid, request.seq)).toBe(true);
+      } finally {ws.close(); await session.stop(false);}
+    });
+
+    it('keeps original tag settlement private when a caller changes its intent object', async () => {
+      const session = installRealSession(() => {});
+      const intent = {input: 'original input', clientId: 'original-client', seq: 1};
+      try {
+        const admitted = ctx.terminalInput.begin(session, intent, () => true);
+        expect(admitted.state).toBe('admitted'); if (admitted.state !== 'admitted') throw new Error('Expected owned operation');
+        const mux = vi.spyOn(session, 'writeViaMux').mockResolvedValue(false);
+        expect(await admitted.operation.writeMux()).toBe(false);
+        session.shouldApplyInput('unrelated-client', 9);
+        intent.clientId = 'unrelated-client'; intent.seq = 9;
+        admitted.operation.refuse();
+        expect(session.lastInputSeq('original-client')).toBe(0); expect(session.lastInputSeq('unrelated-client')).toBe(9);
+        const uncertain = ctx.terminalInput.begin(session, {input: 'next input', clientId: 'original-client', seq: 1}, () => true);
+        expect(uncertain.state).toBe('admitted'); if (uncertain.state !== 'admitted') throw new Error('Expected original retry');
+        mux.mockRejectedValue(new Error('synthetic uncertain dispatch'));
+        await expect(uncertain.operation.writeMux()).rejects.toMatchObject({name: 'TerminalInputUnconfirmedError'});
+        uncertain.operation.unconfirmed(new Error('synthetic uncertain dispatch'), ctx as never);
+        uncertain.operation.refuse();
+        expect(await uncertain.operation.writeMux()).toBe(false);
+        expect(session.lastInputSeq('original-client')).toBe(1); expect(session.terminalInputHeld).toBe(true);
+        expect(ctx.terminalInput.begin(session, {input: 'next input', clientId: 'original-client', seq: 1}, () => true).state).toBe('held');
+      } finally {await session.stop(false);}
+    });
+
+    it('consumes one operation and cannot redispatch, refund confirmation or regress its receipt', async () => {
+      const writes: string[] = []; const session = installRealSession(data => {writes.push(data);});
+      try {
+        const intent = {input: 'owned input', clientId: 'original-client', seq: 1, useMux: false};
+        const admission = ctx.terminalInput.begin(session, intent, () => true);
+        expect(admission.state).toBe('admitted'); if (admission.state !== 'admitted') throw new Error('Expected operation');
+        const operation = admission.operation; expect(Object.isFrozen(operation)).toBe(true);
+        expect(await operation.dispatch(ctx as never)).toBe('confirmed');
+        expect(await operation.dispatch(ctx as never)).toBe('confirmed');
+        expect(operation.writeRaw()).toBe(false); expect(await operation.writeMux()).toBe(false);
+        operation.refuse(); expect(session.lastInputSeq('original-client')).toBe(1);
+        expect('record' in operation).toBe(false);
+        expect(ctx.terminalInput.begin(session, intent, () => true).state).toBe('duplicate');
+        expect(writes).toEqual(['owned input']);
+      } finally {await session.stop(false);}
+    });
+
+    it('accepts an unseen sequence zero once and never treats its spent watermark as missing history', async () => {
+      const writes: string[] = []; const session = installRealSession(data => {writes.push(data);});
+      const ws = await connectWs('/ws/sessions/ws-test-session/terminal');
+      try {
+        expect(session.inputSeqSpent('zero-client', 0)).toBe(false);
+        expect(await inputReply(ws, frame('zero input', 'zero-client', 0))).toEqual({t: 'ia', seq: 0, confirmed: true});
+        expect(session.inputSeqSpent('zero-client', 0)).toBe(true);
+        expect((await postInput({input: 'zero input', clientId: 'zero-client', seq: 0})).statusCode).toBe(200);
+        expect(writes).toEqual(['zero input']);
+      } finally {ws.close(); await session.stop(false);}
+    });
+
+    it('keeps a confirmed input receipt when post-write desktop telemetry fails', async () => {
+      const writes: string[] = []; const session = installRealSession(data => {writes.push(data);});
+      const claim = vi.spyOn(session, 'claimDesktopSizing');
+      const note = vi.spyOn(session, 'noteDesktopActivity').mockImplementation(() => {throw new Error('synthetic observer failure');});
+      const ws = await connectWs('/ws/sessions/ws-test-session/terminal');
+      try {
+        ws.send(JSON.stringify({t: 'z', c: 120, r: 40, v: 'desktop'}));
+        await vi.waitFor(() => expect(claim).toHaveBeenCalledOnce());
+        expect(await inputReply(ws, frame())).toEqual({t: 'ia', seq: 1, confirmed: true});
+        expect(note).toHaveBeenCalledOnce(); expect(session.terminalInputHeld).toBe(false);
+        expect(await inputReply(ws, frame())).toEqual({t: 'ia', seq: 1, confirmed: true});
+        expect(writes).toEqual(['same input']); expect(ctx.broadcast.mock.calls.some(([event]) => event === 'session:error')).toBe(true);
+      } finally {ws.close(); await session.stop(false);}
+    });
+
+    it('shares confirmed original receipts across WS and HTTP without duplicate/resequence ACKs', async () => {
+      const writes: string[] = []; const session = installRealSession(data => {writes.push(data);});
+      const ws = await connectWs('/ws/sessions/ws-test-session/terminal');
+      try {
+        expect(await inputReply(ws, frame())).toEqual({t: 'ia', seq: 1, confirmed: true});
+        expect(await inputReply(ws, frame())).toEqual({t: 'ia', seq: 1, confirmed: true});
+        const http = await postInput({input: 'same input', clientId: 'shared-client', seq: 1});
+        expect(http.statusCode).toBe(200); expect(http.json().success).toBe(true); expect(writes).toEqual(['same input']);
+        expect((await postInput({input: 'second input', clientId: 'shared-client', seq: 2})).statusCode).toBe(200);
+        expect(await inputReply(ws, frame('second input', 'shared-client', 2))).toEqual({t: 'ia', seq: 2, confirmed: true});
+        expect(writes).toEqual(['same input', 'second input']);
+      } finally {ws.close(); await session.stop(false);}
+    });
+    it('preserves the browser useMux:true intent across lost-ACK fallback in both directions', async () => {
+      const writes: string[] = []; const session = installRealSession(data => {writes.push(data);});
+      const mux = vi.spyOn(session, 'writeViaMux'), raw = vi.spyOn(session, 'write');
+      const ws = await connectWs('/ws/sessions/ws-test-session/terminal');
+      try {
+        const selected = {...frame('selected prompt\r'), useMux: true};
+        expect(await inputReply(ws, selected)).toEqual({t: 'ia', seq: 1, confirmed: true});
+        // Simulate the browser ignoring/loss of its first WS ACK, then posting its unchanged queue record.
+        expect((await postInput({input: selected.d, clientId: selected.cid, seq: selected.seq, useMux: true})).statusCode).toBe(200);
+        expect(mux).toHaveBeenCalledOnce(); expect(raw).not.toHaveBeenCalled();
+        expect((await postInput({input: 'second selected prompt\r', clientId: 'shared-client', seq: 2, useMux: true})).statusCode).toBe(200);
+        await new Promise<void>(resolve => setImmediate(resolve));
+        expect(await inputReply(ws, {...frame('second selected prompt\r', 'shared-client', 2), useMux: true})).toEqual({t: 'ia', seq: 2, confirmed: true});
+        expect(mux).toHaveBeenCalledTimes(2); expect(writes).toEqual(['selected prompt\r', 'second selected prompt\r']);
+        expect(await inputReply(ws, {...selected, useMux: false})).toEqual({t: 'ia', seq: 1, held: true});
+        expect((await postInput({input: selected.d, clientId: selected.cid, seq: selected.seq, useMux: false})).statusCode).toBe(422);
+        expect(mux).toHaveBeenCalledTimes(2); expect(raw).not.toHaveBeenCalled();
+      } finally {ws.close(); await session.stop(false);}
+    });
+    it('observes an exact in-flight WS mux request as pending over both transports, then confirms its original effect', async () => {
+      const writes: string[] = []; const session = installRealSession(data => {writes.push(data);});
+      const original = session.writeViaMux.bind(session); let entered!: () => void, release!: () => void;
+      const started = new Promise<void>(resolve => {entered = resolve;});
+      const mux = vi.spyOn(session, 'writeViaMux').mockImplementation(async (data, options) => {
+        entered(); await new Promise<void>(resolve => {release = resolve;}); return original(data, options);
+      });
+      const ws = await connectWs('/ws/sessions/ws-test-session/terminal');
+      try {
+        const request = {...frame('pending selected prompt\r'), useMux: true};
+        const first = inputReply(ws, request, 2000, true); await started;
+        const pending = await postInput({input: request.d, clientId: request.cid, seq: request.seq, useMux: true});
+        expect(pending.json().data).toEqual({pending: true});
+        expect(await inputReply(ws, request)).toEqual({t: 'ip', seq: 1});
+        expect(mux).toHaveBeenCalledOnce(); expect(session.terminalInputHeld).toBe(false);
+        release(); expect(await first).toEqual({t: 'ia', seq: 1, confirmed: true});
+        expect(await inputReply(ws, request)).toEqual({t: 'ia', seq: 1, confirmed: true});
+        expect((await postInput({input: request.d, clientId: request.cid, seq: request.seq, useMux: true})).json().data).toEqual({});
+        expect(mux).toHaveBeenCalledOnce(); expect(writes).toEqual(['pending selected prompt\r']);
+      } finally {release?.(); ws.close(); await session.stop(false);}
+    });
+    it('cancels unstarted queued frames without phantom spent tags while an original dispatch settles after disconnect', async () => {
+      const writes: string[] = []; const session = installRealSession(data => {writes.push(data);});
+      const original = session.writeViaMux.bind(session); let entered!: () => void, release!: () => void;
+      const started = new Promise<void>(resolve => {entered = resolve;});
+      const mux = vi.spyOn(session, 'writeViaMux').mockImplementation(async (data, options) => {
+        entered(); await new Promise<void>(resolve => {release = resolve;}); return original(data, options);
+      });
+      const begin = vi.spyOn(ctx.terminalInput, 'begin');
+      const ws = await connectWs('/ws/sessions/ws-test-session/terminal');
+      try {
+        ws.send(JSON.stringify({...frame('first\r'), useMux: true}));
+        ws.send(JSON.stringify(frame('following', 'shared-client', 2)));
+        await started; await vi.waitFor(() => expect(begin.mock.calls.some(([, intent]) => intent.seq === 2)).toBe(true));
+        const closed = waitForClose(ws); ws.close(); await closed;
+        release(); await vi.waitFor(() => expect(writes).toEqual(['first\r']));
+        await new Promise<void>(resolve => setImmediate(resolve));
+        expect(session.lastInputSeq('shared-client')).toBe(1); expect(session.terminalInputHeld).toBe(false);
+        mux.mockRestore();
+        expect((await postInput({input: 'first\r', clientId: 'shared-client', seq: 1, useMux: true})).statusCode).toBe(200);
+        expect((await postInput({input: 'following', clientId: 'shared-client', seq: 2})).statusCode).toBe(200);
+        expect(writes).toEqual(['first\r', 'following']); expect(session.lastInputSeq('shared-client')).toBe(2);
+      } finally {release?.(); ws.close(); await session.stop(false);}
+    });
+    it('retains a subject fence for queued requests when the original Session is replaced before their effects', async () => {
+      const writes: string[] = [], successorWrites: string[] = [];
+      const originalSession = installRealSession(data => {writes.push(data);});
+      const originalWrite = originalSession.writeViaMux.bind(originalSession); let entered!: () => void, release!: () => void;
+      const started = new Promise<void>(resolve => {entered = resolve;});
+      vi.spyOn(originalSession, 'writeViaMux').mockImplementation(async (data, options) => {
+        entered(); await new Promise<void>(resolve => {release = resolve;}); return originalWrite(data, options);
+      });
+      const begin = vi.spyOn(ctx.terminalInput, 'begin');
+      const ws = await connectWs('/ws/sessions/ws-test-session/terminal'); let successor: Session | undefined;
+      try {
+        const first = inputReply(ws, {...frame('first\r'), useMux: true});
+        const second = inputReply(ws, frame('following', 'shared-client', 2));
+        await started; await vi.waitFor(() => expect(begin.mock.calls.some(([, intent]) => intent.seq === 2)).toBe(true));
+        successor = installRealSession(data => {successorWrites.push(data);}, 'successor'); release();
+        expect(await first).toEqual({t: 'ia', seq: 1, held: true}); expect(await second).toEqual({t: 'ia', seq: 2, held: true});
+        const response = await postInput({input: 'following', clientId: 'shared-client', seq: 2});
+        expect(response.statusCode).toBe(422); expect(response.json().recoveryRequired).toBe(true);
+        expect(writes).toEqual([]); expect(successorWrites).toEqual([]);
+      } finally {release?.(); ws.close(); await originalSession.stop(false); await successor?.stop(false);}
+    });
+
+    it('publishes known typed-unsent callbacks consistently across WS and HTTP without retyping or confirmation', async () => {
+      const retained: string[] = []; const session = installRealSession(() => {});
+      const mux = vi.spyOn(session, 'writeViaMux').mockImplementation(async (data, options) => {
+        retained.push(data); options?.onTypedUnsent?.(); return false;
+      });
+      const raw = vi.spyOn(session, 'write'); const ws = await connectWs('/ws/sessions/ws-test-session/terminal');
+      try {
+        const request = {...frame('retained text\r'), useMux: true};
+        const negative = {t: 'ia', seq: 1, typedUnsent: true, delivered: false};
+        expect(await inputReply(ws, request)).toEqual(negative);
+        expect(await inputReply(ws, request)).toEqual(negative);
+        const http = await postInput({input: request.d, clientId: request.cid, seq: 1, useMux: true});
+        expect(http.statusCode).toBe(409); expect(http.json().data).toEqual({typedUnsent: true, delivered: false});
+        expect(session.terminalInputHeld).toBe(false); expect(mux).toHaveBeenCalledOnce(); expect(raw).not.toHaveBeenCalled();
+        await postInput({input: 'other retained text\r', clientId: 'shared-client', seq: 2, useMux: true});
+        await new Promise<void>(resolve => setImmediate(resolve));
+        expect(await inputReply(ws, {...frame('other retained text\r', 'shared-client', 2), useMux: true}))
+          .toEqual({t: 'ia', seq: 2, typedUnsent: true, delivered: false});
+        expect(retained).toEqual(['retained text\r', 'other retained text\r']);
+        expect(await inputReply(ws, frame('\r', 'shared-client', 3))).toEqual({t: 'ia', seq: 3, confirmed: true});
+        expect(raw).toHaveBeenCalledOnce(); expect(session.lastInputSeq('shared-client')).toBe(3);
+      } finally {ws.close(); await session.stop(false);}
+    });
+    it('keeps an HTTP terminal callback pending until its writer settles, so later uncertainty dominates', async () => {
+      const session = installRealSession(() => {}); Object.assign(session, {_workerBacked: true});
+      const mux = vi.spyOn(session, 'writeViaMux').mockImplementation(async (_data, options) => {
+        options?.onTypedUnsent?.(); throw new Error('synthetic terminal result lost after callback');
+      });
+      try {
+        const first = await postInput({input: 'retained or sent\r', clientId: 'shared-client', seq: 1, useMux: true});
+        expect(first.json().data?.typedUnsent).not.toBe(true);
+        expect(first.json().data?.pending === true || first.json().recoveryRequired === true).toBe(true);
+        await new Promise<void>(resolve => setImmediate(resolve));
+        const next = await postInput({input: 'retained or sent\r', clientId: 'shared-client', seq: 1, useMux: true});
+        expect(next.json().recoveryRequired).toBe(true); expect(next.json().data?.typedUnsent).not.toBe(true);
+        expect(session.terminalInputHeld).toBe(true); expect(mux).toHaveBeenCalledOnce();
+      } finally {await session.stop(false);}
+    });
+
+    it('lets explicit uncertainty dominate an earlier typed-unsent callback', async () => {
+      const session = installRealSession(() => {});
+      vi.spyOn(session, 'writeViaMux').mockImplementation(async (_data, options) => {
+        options?.onTypedUnsent?.(); throw new Error('synthetic terminal outcome lost after callback');
+      });
+      const raw = vi.spyOn(session, 'write'); const ws = await connectWs('/ws/sessions/ws-test-session/terminal');
+      try {
+        expect(await inputReply(ws, {...frame('retained or sent\r'), useMux: true})).toEqual({t: 'ia', seq: 1, unconfirmed: true});
+        const http = await postInput({input: 'retained or sent\r', clientId: 'shared-client', seq: 1, useMux: true});
+        expect(http.json().recoveryRequired).toBe(true); expect(http.json().data?.typedUnsent).not.toBe(true);
+        expect(session.terminalInputHeld).toBe(true); expect(raw).not.toHaveBeenCalled();
+      } finally {ws.close(); await session.stop(false);}
+    });
+
+    it('does not issue raw fallback after a selected mux write may have reached the PTY', async () => {
+      const writes: string[] = []; const session = installRealSession(data => {writes.push(data); throw new Error('synthetic mux completion lost');});
+      const mux = vi.spyOn(session, 'writeViaMux'), raw = vi.spyOn(session, 'write');
+      const ws = await connectWs('/ws/sessions/ws-test-session/terminal');
+      try {
+        expect(await inputReply(ws, {...frame('selected prompt\r'), useMux: true})).toEqual({t: 'ia', seq: 1, unconfirmed: true});
+        expect(mux).toHaveBeenCalledOnce(); expect(raw).not.toHaveBeenCalled(); expect(writes).toEqual(['selected prompt\r']);
+        expect(session.terminalInputHeld).toBe(true);
+      } finally {ws.close(); await session.stop(false);}
+    });
+    it('keeps raw input behind an earlier async mux owner in the same ordered stream', async () => {
+      const writes: string[] = []; const session = installRealSession(data => {writes.push(data);});
+      const original = session.writeViaMux.bind(session); let started!: () => void, release!: () => void;
+      const entered = new Promise<void>(resolve => {started = resolve;});
+      vi.spyOn(session, 'writeViaMux').mockImplementation(async (data, options) => {
+        started(); await new Promise<void>(resolve => {release = resolve;}); return original(data, options);
+      });
+      const begin = vi.spyOn(ctx.terminalInput, 'begin');
+      const ws = await connectWs('/ws/sessions/ws-test-session/terminal');
+      try {
+        const first = inputReply(ws, {...frame('first\r'), useMux: true});
+        const second = inputReply(ws, {...frame('following', 'shared-client', 2), useMux: false});
+        await entered; await vi.waitFor(() => expect(begin.mock.calls.some(([, intent]) => intent.seq === 2)).toBe(true));
+        expect(session.lastInputSeq('shared-client')).toBe(1);
+        expect(writes).toEqual([]); release();
+        expect(await first).toEqual({t: 'ia', seq: 1, confirmed: true}); expect(await second).toEqual({t: 'ia', seq: 2, confirmed: true});
+        expect(writes).toEqual(['first\r', 'following']);
+      } finally {release?.(); ws.close(); await session.stop(false);}
+    });
+    it.each(['bytes', 'slots'] as const)('refuses deferred WS %s capacity without spending a seq or declaring an unknown effect', async limit => {
+      ctx.terminalInput = new TerminalInputService(new TerminalInputReceipts(512, 512));
+      const writes: string[] = []; const session = installRealSession(data => {writes.push(data);});
+      let release!: (sent: boolean) => void;
+      const pending = new Promise<boolean>(resolve => {release = resolve;});
+      const mux = vi.spyOn(session, 'writeViaMux').mockReturnValue(pending);
+      const begin = vi.spyOn(ctx.terminalInput, 'begin');
+      const ws = await connectWs('/ws/sessions/ws-test-session/terminal');
+      const data = limit === 'bytes' ? 'é'.repeat(32_768) : 'x';
+      const count = limit === 'bytes' ? 16 : 256;
+      try {
+        for (let seq = 1; seq <= count; seq++) ws.send(JSON.stringify({...frame(data, 'queue-client', seq), useMux: true}));
+        await vi.waitFor(() => expect(begin.mock.calls.some(([, intent]) => intent.seq === count)).toBe(true));
+        const response = await inputReply(ws, {...frame(data, 'queue-client', count + 1), useMux: true});
+        expect(response).toEqual({t: 'ir', seq: count + 1, retryable: true, reason: 'capacity'});
+        expect(session.lastInputSeq('queue-client')).toBe(1); expect(mux).toHaveBeenCalledOnce();
+        expect(session.terminalInputHeld).toBe(false); expect(writes).toEqual([]);
+        release(true); await vi.waitFor(() => expect(mux).toHaveBeenCalledTimes(count));
+      } finally {release(true); ws.close(); await session.stop(false);}
+    });
+
+    it('does not transfer confirmed proof to a different payload or explicit raw/mux intent', async () => {
+      const writes: string[] = []; const session = installRealSession(data => {writes.push(data);});
+      const ws = await connectWs('/ws/sessions/ws-test-session/terminal');
+      try {
+        expect(await inputReply(ws, frame())).toEqual({t: 'ia', seq: 1, confirmed: true});
+        expect(await inputReply(ws, frame('different input'))).toEqual({t: 'ia', seq: 1, held: true});
+        for (const payload of [{input: 'different input'}, {input: 'same input', useMux: false}, {input: 'same input', useMux: true}]) {
+          const response = await postInput({...payload, clientId: 'shared-client', seq: 1});
+          expect(response.statusCode).toBe(422); expect(response.json().recoveryRequired).toBe(true);
+        }
+        expect(writes).toEqual(['same input']);
+      } finally {ws.close(); await session.stop(false);}
+    });
+    it.each([false, true])('reports a real partial WS write as unknown and blocks HTTP replay (persistence failure=%s)', async persistenceFailure => {
+      const writes: string[] = []; const session = installRealSession(data => {writes.push(data); throw new Error('synthetic PTY completion lost');});
+      if (persistenceFailure) ctx.persistSessionStateNow.mockImplementation(() => {throw new Error('synthetic disk failure');});
+      const ws = await connectWs('/ws/sessions/ws-test-session/terminal');
+      try {
+        expect(await inputReply(ws, frame())).toEqual({t: 'ia', seq: 1, unconfirmed: true});
+        expect(session.terminalInputHeld).toBe(true); expect(session.providerDispatchHeld).toBe(false);
+        expect(ctx.persistSessionStateNow).toHaveBeenCalledWith(session);
+        expect(ctx.broadcast.mock.calls.some(([event]) => event === 'session:updated')).toBe(true);
+        expect(await inputReply(ws, frame())).toEqual({t: 'ia', seq: 1, held: true});
+        expect(await inputReply(ws, frame('new input', 'new-client'))).toEqual({t: 'ia', seq: 1, held: true});
+        for (const clientId of ['shared-client', 'new-http-client']) {
+          const http = await postInput({input: 'same input', clientId, seq: 1});
+          expect(http.statusCode).toBe(409); expect(http.json().recoveryRequired).toBe(true);
+        }
+        expect(writes).toEqual(['same input']);
+      } finally {ws.close(); await session.stop(false);}
+    });
+    it('keeps HTTP uncertainty visible to WS, including an untagged diagnostic frame', async () => {
+      const writes: string[] = []; const session = installRealSession(data => {writes.push(data); throw new Error('synthetic failed write');});
+      try {
+        const http = await postInput({input: 'same input', clientId: 'shared-client', seq: 1});
+        expect(http.statusCode).toBe(422); expect(http.json().recoveryRequired).toBe(true);
+        const ws = await connectWs('/ws/sessions/ws-test-session/terminal');
+        try {
+          expect(await inputReply(ws, frame())).toEqual({t: 'ia', seq: 1, held: true});
+          expect(await inputReply(ws, {t: 'i', d: 'untagged retry'})).toEqual({t: 'ie', held: true});
+        } finally {ws.close();}
+        expect(writes).toEqual(['same input']);
+      } finally {await session.stop(false);}
+    });
+    it('shares a pending HTTP reservation with WS and confirms only its settled original input', async () => {
+      const writes: string[] = []; const session = installRealSession(data => {writes.push(data);});
+      let started!: () => void, settle!: (value: boolean) => void;
+      const entered = new Promise<void>(resolve => {started = resolve;});
+      const mux = vi.spyOn(session, 'writeViaMux').mockImplementation(() => {started(); return new Promise(resolve => {settle = resolve;});});
+      const ws = await connectWs('/ws/sessions/ws-test-session/terminal');
+      const pending = postInput({input: 'same input\r', clientId: 'shared-client', seq: 1}).then(result => result);
+      try {
+        await entered;
+        expect(await inputReply(ws, frame('same input\r'))).toEqual({t: 'ip', seq: 1});
+        settle(true); expect((await pending).statusCode).toBe(200);
+        expect(await inputReply(ws, frame('same input\r'))).toEqual({t: 'ia', seq: 1, confirmed: true});
+        expect(mux).toHaveBeenCalledOnce(); expect(writes).toEqual([]);
+      } finally {settle?.(true); ws.close(); await session.stop(false);}
+    });
+    it.each(['owner', 'registry'] as const)('refuses an existing socket after its original %s changes', async change => {
+      const writes: string[] = [], successorWrites: string[] = [];
+      const original = installRealSession(data => {writes.push(data);});
+      const ws = await connectWs('/ws/sessions/ws-test-session/terminal');
+      let successor: Session | undefined;
+      try {
+        if (change === 'owner') original.owner = 'successor';
+        else successor = installRealSession(data => {successorWrites.push(data);});
+        expect(await inputReply(ws, frame())).toEqual({t: 'ia', seq: 1, held: true});
+        expect(writes).toEqual([]); expect(successorWrites).toEqual([]);
+      } finally {ws.close(); await original.stop(false); await successor?.stop(false);}
+    });
+    it('keeps the original unknown barrier across same-SID successor objects without leaking predecessor proof', async () => {
+      const writes: string[] = [], successorWrites: string[] = [];
+      const original = installRealSession(data => {writes.push(data); throw new Error('private predecessor error');});
+      const ws = await connectWs('/ws/sessions/ws-test-session/terminal');
+      let successor: Session | undefined;
+      try {
+        expect(await inputReply(ws, frame())).toEqual({t: 'ia', seq: 1, unconfirmed: true});
+        successor = installRealSession(data => {successorWrites.push(data);}, 'successor');
+        const next = await connectWs('/ws/sessions/ws-test-session/terminal');
+        try {
+          const answer = await inputReply(next, frame('new input', 'successor-client'));
+          expect(answer).toEqual({t: 'ia', seq: 1, held: true}); expect(JSON.stringify(answer)).not.toContain('private');
+          expect((await postInput({input: 'new input', clientId: 'successor-client', seq: 2})).statusCode).toBe(422);
+        } finally {next.close();}
+        expect(writes).toEqual(['same input']); expect(successorWrites).toEqual([]);
+      } finally {ws.close(); await original.stop(false); await successor?.stop(false);}
+    });
+    it('retains unknown custody without persisting the predecessor over a replacement during physical input', async () => {
+      const originalWrites: string[] = [], successorWrites: string[] = [];
+      let successor: Session | undefined;
+      const original = installRealSession(data => {
+        originalWrites.push(data); successor = installRealSession(value => {successorWrites.push(value);}, 'successor');
+      });
+      const ws = await connectWs('/ws/sessions/ws-test-session/terminal');
+      try {
+        expect(await inputReply(ws, frame())).toEqual({t: 'ia', seq: 1, unconfirmed: true});
+        expect(ctx.persistSessionStateNow).not.toHaveBeenCalled(); expect(ctx.broadcast).not.toHaveBeenCalled();
+        expect(original.terminalInputHeld).toBe(true); expect(successor?.terminalInputHeld).toBe(false);
+        const next = await connectWs('/ws/sessions/ws-test-session/terminal');
+        try {expect(await inputReply(next, frame('new input', 'successor-client'))).toEqual({t: 'ia', seq: 1, held: true});}
+        finally {next.close();}
+        expect(originalWrites).toEqual(['same input']); expect(successorWrites).toEqual([]);
+      } finally {ws.close(); await original.stop(false); await successor?.stop(false);}
+    });
+
+    it('refuses WS input before effects or seq spend when unresolved HTTP capacity is full', async () => {
+      ctx.terminalInput = new TerminalInputService(new TerminalInputReceipts(1, 1));
+      const writes: string[] = []; const session = installRealSession(data => {writes.push(data);});
+      let settle!: (value: boolean) => void;
+      vi.spyOn(session, 'writeViaMux').mockReturnValue(new Promise(resolve => {settle = resolve;}));
+      const ws = await connectWs('/ws/sessions/ws-test-session/terminal');
+      try {
+        expect((await postInput({input: 'pending', useMux: true, clientId: 'http-client', seq: 1})).statusCode).toBe(200);
+        expect(await inputReply(ws, frame())).toEqual({t: 'ir', seq: 1, retryable: true, reason: 'capacity'});
+        expect(session.lastInputSeq('shared-client')).toBe(0); expect(writes).toEqual([]);
+      } finally {settle(true); ws.close(); await session.stop(false);}
+    });
+
     it('forwards input messages to session.write()', async () => {
       const ws = await connectWs('/ws/sessions/ws-test-session/terminal');
       try {
@@ -217,14 +667,14 @@ describe('ws-routes', () => {
         const session = ctx._session;
         ws.send(JSON.stringify({ t: 'i', d: 'ok\r', cid: 'c1', seq: 1 }));
 
-        expect(await nextMessage(ws)).toEqual({ t: 'ia', seq: 1 });
+        expect(await nextMessage(ws)).toEqual({ t: 'ia', seq: 1, confirmed: true });
         expect(session.shouldApplyInput('c1', 1)).toBe(false);
       } finally {
         ws.close();
       }
     });
 
-    it('withholds the ACK and re-opens the seq when the write did not land', async () => {
+    it('reports a known not-issued refusal and re-opens the seq when the write did not land', async () => {
       // A session whose PTY is gone swallows the write. ACKing anyway told the
       // client to drop the frame from its durable queue while the seq stayed
       // burnt, so the retry that reliable delivery exists for was rejected as a
@@ -236,16 +686,15 @@ describe('ws-routes', () => {
 
         ws.send(JSON.stringify({ t: 'i', d: 'lost\r', cid: 'c1', seq: 1 }));
 
-        await expect(nextMessage(ws, 600)).rejects.toThrow(/timeout/);
+        expect(await nextMessage(ws, 600)).toEqual({t: 'ir', seq: 1, retryable: true, reason: 'unavailable'});
         expect(session.shouldApplyInput('c1', 1)).toBe(true);
       } finally {
         ws.close();
       }
     });
 
-    it('still ACKs a duplicate frame the server deliberately skipped', async () => {
-      // Dedup must stay silent-but-acknowledged: the client has to be able to
-      // drop a frame it already delivered once.
+    it('holds a spent seq with no original delivery receipt instead of minting a duplicate ACK', async () => {
+      // A seq watermark alone is not original-subject delivery proof.
       const ws = await connectWs('/ws/sessions/ws-test-session/terminal');
       try {
         const session = ctx._session;
@@ -253,10 +702,8 @@ describe('ws-routes', () => {
 
         ws.send(JSON.stringify({ t: 'i', d: 'again\r', cid: 'c1', seq: 7 }));
 
-        // The ACK now SAYS it was a duplicate and hands back the watermark: a bare
-        // ACK is indistinguishable from "applied", and that ambiguity left a client
-        // whose seq counter had rolled back silently unable to type at all.
-        expect(await nextMessage(ws)).toEqual({ t: 'ia', seq: 7, dup: true, last: 7 });
+        // A held reply neither claims delivery nor mints a new seq for replay.
+        expect(await nextMessage(ws)).toEqual({ t: 'ia', seq: 7, held: true });
         expect(session.writeBuffer).not.toContain('again\r');
       } finally {
         ws.close();

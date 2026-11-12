@@ -5,7 +5,21 @@ impl WorkerActorChannel {
     /// B-only idle readiness. Human view/consent may pause on the same socket;
     /// no receive, descriptor clone, new hold or ordinary-Q timeout changes.
     pub fn pool_registration_frame_ready(&self, deadline: Instant) -> Result<bool> {
-        if self.purpose != Purpose::PoolRegistrationWebsite || !self.greeted {
+        if self.purpose != Purpose::PoolRegistrationWebsite {
+            return Err(WorkerReportError::Unconfirmed);
+        }
+        self.frame_ready(deadline)
+    }
+    /// Fleet-only idle consent readiness on the SAME counted socket. This
+    /// neither consumes bytes nor grants website, owner or resource authority.
+    pub fn fleet_maintenance_frame_ready(&self, deadline: Instant) -> Result<bool> {
+        if self.purpose != Purpose::FleetMaintenanceWebsite {
+            return Err(WorkerReportError::Unconfirmed);
+        }
+        self.frame_ready(deadline)
+    }
+    fn frame_ready(&self, deadline: Instant) -> Result<bool> {
+        if !self.greeted {
             return Err(WorkerReportError::Unconfirmed);
         }
         let remaining = self.remaining(deadline)?;
@@ -37,6 +51,7 @@ impl WorkerActorChannel {
             Purpose::ResumeWebsite => b"HOST_RESUME_READY\n".as_slice(),
             Purpose::ResumeOwner => b"HOST_RESUME_OWNER_READY\n".as_slice(),
             Purpose::ResourceWebsite => b"RESOURCE_READY\n".as_slice(),
+            Purpose::FleetMaintenanceWebsite => b"FLEET_MAINTENANCE_CHANNEL_V2\n".as_slice(),
             Purpose::PoolRegistrationWebsite => b"POOL_REGISTRATION_CHANNEL_V1\n".as_slice(),
         };
         // Original worker initial greetings inherit its ten-second sendall
@@ -72,6 +87,26 @@ impl WorkerActorChannel {
             return Err(WorkerReportError::Unconfirmed);
         }
         let raw = frame.canonical().map_err(|_| WorkerReportError::Frame)?;
+        let mut bytes = (raw.len() as u32).to_be_bytes().to_vec();
+        bytes.extend(raw);
+        let result = self.write(
+            &bytes,
+            deadline.min(Instant::now() + Duration::from_secs(2)),
+        );
+        self.failed |= result.is_err();
+        result
+    }
+    /// A distinct immutable output codec is accepted only on negotiated fleet Q.
+    /// Ordinary resources, B, and every incoming request keep the 8 KiB bound.
+    pub fn send_fleet_reply(
+        &mut self,
+        frame: &reverie_contracts::resource_actor::FleetReplyFrame,
+        deadline: Instant,
+    ) -> Result<()> {
+        if !self.greeted || self.purpose != Purpose::FleetMaintenanceWebsite {
+            return Err(WorkerReportError::Unconfirmed);
+        }
+        let raw = frame.bytes();
         let mut bytes = (raw.len() as u32).to_be_bytes().to_vec();
         bytes.extend(raw);
         let result = self.write(

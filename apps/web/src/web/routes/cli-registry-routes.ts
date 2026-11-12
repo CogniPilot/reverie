@@ -44,6 +44,7 @@ import { mutateRegistryFile, RegistryWriteRefusedError } from '../../config/cli-
 import { CliEntrySchema } from '../../config/cli-registry/schema.js';
 import { STOCK_CLIS } from '../../config/cli-registry/stock.js';
 import type { CliEntry } from '../../config/cli-registry/types.js';
+import { cliPublicDescriptor, type CliPublicDescriptor } from '../../config/cli-registry/public-descriptor.js';
 import { CliCustomEntrySchema, CliEnableSchema } from '../schemas.js';
 import { appendAdminAudit } from '../admin-audit.js';
 import { invalidateCliExecutableResolvers } from '../../utils/cli-executable-resolver.js';
@@ -61,13 +62,7 @@ export async function readCliManagementEnabled(): Promise<boolean> {
   return settings.cliManagementEnabled === true;
 }
 
-export interface CliListItem {
-  id: string;
-  label: string;
-  shortBadge: string;
-  order: number;
-  kind: CliEntry['kind'];
-  enabled: boolean;
+export interface CliListItem extends CliPublicDescriptor {
   stock: boolean;
   installed: boolean;
   /**
@@ -412,11 +407,9 @@ export function registerCliRegistryRoutes(app: FastifyInstance, verifiedOwner: O
   // ---- Phase 2: read ----------------------------------------------------
   // GET /api/clis — every registry entry, disabled ones included (this is an
   // admin/settings surface; every SPAWN-time caller elsewhere uses
-  // enabledClis() instead). Deliberately excludes launch/env/capabilities/
-  // overlays/discovery — the same rule every other catalogue-export surface in
-  // this codebase follows, with one deliberate exception: the page catalog
-  // (`window.__reverieCliCatalog`, server.ts) carries `capabilities.external`,
-  // which Session Options reads to keep Claude's Respawn and Ralph tabs.
+  // enabledClis() instead). Public capability booleans use the same projection
+  // as the page catalog. Launch recipes, environment and configuration stay
+  // server-side, so refreshing Settings cannot lose a custom-model capability.
   //
   // NOT gated on cliManagementEnabled: reading the list is cheap and is not
   // the risky part. The Settings UI section simply never fetches this while
@@ -427,12 +420,7 @@ export function registerCliRegistryRoutes(app: FastifyInstance, verifiedOwner: O
     }
     const stockAvailability = await probeStockCliAvailability();
     const data = listClis().map((entry) => ({
-      id: entry.id as string,
-      label: entry.label,
-      shortBadge: entry.shortBadge,
-      order: entry.order,
-      kind: entry.kind,
-      enabled: entry.enabled,
+      ...cliPublicDescriptor(entry),
       stock: entry.stock,
       installed: isCliEntryInstalled(entry, stockAvailability),
       ...(entry.stock ? { installCommand: resolveInstallCommandForPlatform(entry) } : {}),

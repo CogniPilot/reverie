@@ -41,6 +41,15 @@ use std::{collections::BTreeMap, fmt};
 type Object = BTreeMap<Text, Value>;
 type Result<T> = std::result::Result<T, ColdDataError>;
 
+pub(crate) fn canonical_mount_rows(rows: &[Value]) -> Vec<Value> {
+    let mut rows = rows
+        .iter()
+        .map(|row| (worker_config::encode_data(row), row))
+        .collect::<Vec<_>>();
+    rows.sort_by(|a, b| a.0.cmp(&b.0));
+    rows.into_iter().map(|(_, row)| row.deep_clone()).collect()
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ColdDataError {
     Policy,

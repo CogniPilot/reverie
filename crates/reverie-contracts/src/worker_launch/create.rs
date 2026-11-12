@@ -71,6 +71,10 @@ impl CreateArguments {
     pub fn args(&self) -> &[MetadataText] {
         &self.args
     }
+    /// Exact image in this closed argv tail; never a new runtime selection.
+    pub fn image(&self) -> &MetadataText {
+        &self.args[self.tail_offset + 2]
+    }
     /// Late mounts precede the captured closed layout's entrypoint/image tail.
     /// Inputs are mount DATA; the real Host owner derives them from its retained
     /// Nix result and fresh account observations before the telemetry boundary.

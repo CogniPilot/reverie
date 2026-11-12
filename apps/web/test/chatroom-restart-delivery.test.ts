@@ -1,3 +1,4 @@
+import {TerminalInputAttempt} from '../src/terminal-input-outcome.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -9,7 +10,7 @@ import { wakePayload } from './helpers/wake-payload.js';
 import { sqlite } from '../src/chat-db.js';
 import ts from 'typescript';
 import { runInNewContext } from 'node:vm';
-import { typeAndSubmit } from '../src/submit-settle.js';
+import { typeAndSubmit, writeGateActive, writeGateOpen, pastesInsteadOfKeys } from '../src/submit-settle.js';
 
 const services = new Set<ChatroomService>();
 afterEach(async () => {
@@ -641,11 +642,21 @@ function partialMuxFailure() {
     }).outputText,
     {
       IS_TEST_MODE: false,
+      TerminalInputAttempt,
       EXEC_TIMEOUT_MS: 1000,
       isValidMuxName: () => true,
       shellescape: (value: string) => JSON.stringify(value),
       typeAndSubmit,
+      writeGateActive,
+      writeGateOpen,
+      pastesInsteadOfKeys,
       execAsync: async (command: string) => {
+        if (command === 'mock-tmux send-keys -t "fixture-alice" Enter') {
+          if (failEnter) throw new Error('Enter failed after text was typed');
+          return;
+        }
+        if (!command.includes(' send-keys ') || !command.includes(' -l '))
+          throw new Error('Unexpected owned mux command: ' + command);
         textWrites.push(command);
       },
       console: { log() {}, warn() {}, error() {} },
@@ -658,9 +669,6 @@ function partialMuxFailure() {
     submitIo: () => ({
       capture: () => null,
       sleep: async () => {},
-      sendEnter: async () => {
-        if (failEnter) throw new Error('Enter failed after text was typed');
-      },
     }),
   };
   return {
@@ -741,7 +749,11 @@ describe('pending delivery durability', () => {
     const room = a.createRoom('Workshop', undefined);
     a.addMember(room.id, 'alice', {});
     const mux = partialMuxFailure();
-    f.sessions.get('alice')!.writeViaMux = (text) => mux.write(text);
+    let current = a;
+    f.sessions.get('alice')!.writeViaMux = (text) => {
+      f.writes.alice.push(wakePayload(current, 'alice', text));
+      return mux.write(text);
+    };
     const message = a.post(room.id, { kind: 'user', name: 'Owner' }, 'perform once', ['alice']);
     f.ready();
     await a.delivery.flushAll();
@@ -756,6 +768,7 @@ describe('pending delivery durability', () => {
     expect(mux.textWrites).toHaveLength(1);
     await f.stop(a);
     const b = await f.create();
+    current = b;
     await b.delivery.flushAll();
     expect(mux.textWrites).toHaveLength(1);
     expect(f.alerts.filter((text) => text.startsWith('Some chat deliveries'))).toHaveLength(1);
@@ -763,8 +776,8 @@ describe('pending delivery durability', () => {
     f.tick();
     await b.delivery.flushAll();
     expect(mux.textWrites).toHaveLength(2);
-    expect(mux.textWrites[1]).toContain('later queued task');
-    expect(mux.textWrites[1]).not.toContain('perform once');
+    expect(f.writes.alice[1]).toContain('later queued task');
+    expect(f.writes.alice[1]).not.toContain('perform once');
   });
 
   it('removes a newly dropped passive identity behind a full waking queue, including across restart', async () => {

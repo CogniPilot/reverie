@@ -4,6 +4,7 @@ import cookie from '@fastify/cookie';
 import { mkdtemp, rm, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { randomUUID } from 'node:crypto';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { OwnerAuthStore } from '../src/owner-auth/store.js';
 import { OwnerAuthService } from '../src/owner-auth/service.js';
@@ -26,6 +27,9 @@ const preview = {
 };
 let app: FastifyInstance, directory: string, auth: OwnerAuthService, token: string;
 let company: CompanyService;
+let fleet: FleetResourcesService,
+  observeUninstalledPool: ReturnType<typeof vi.fn>,
+  wakeEmployee: ReturnType<typeof vi.fn>;
 const headers = () => ({ host: 'localhost', origin: 'http://localhost', cookie: 'reverie_owner=' + token });
 beforeEach(async () => {
   directory = await mkdtemp(join(tmpdir(), 'fleet-api-'));
@@ -61,13 +65,49 @@ beforeEach(async () => {
   });
   app = Fastify();
   await app.register(cookie);
+  observeUninstalledPool = vi.fn(async () => {
+    const now = Date.now();
+    return {
+      version: 1,
+      purpose: 'worker-pool-uninstalled-observation-v1',
+      nonce: randomUUID(),
+      observedAtEpochMs: now,
+      expiresAtEpochMs: now + 5000,
+      nominationDigest: 'a'.repeat(64),
+      configurationDigest: 'b'.repeat(64),
+      brokerPid: 123,
+      brokerStart: '100',
+      brokerProgramDigest: 'c'.repeat(64),
+      lifecycleGeneration: '1',
+      principal: auth.registrationIdentity(token),
+      websiteContainerId: 'd'.repeat(64),
+      uninstalled: true,
+      oldOperationOutcome: 'unconfirmed',
+      startsAuthorized: false,
+      activationAuthorized: false,
+    };
+  });
+  wakeEmployee = vi.fn();
+  fleet = new FleetResourcesService(
+    company,
+    auth,
+    undefined,
+    {
+      observeUninstalledPool,
+      wakeEmployee,
+      refreshHealth: async () => {},
+      providerHealth: () => undefined,
+    },
+    join(directory, 'recovery.json')
+  );
   registerFleetResourceRoutes(
     app,
     ownerVerifier({ service: auth, ctx: { sessions } as unknown as SessionPort }),
-    new FleetResourcesService(company)
+    fleet
   );
 });
 afterEach(async () => {
+  fleet.close();
   await app.close();
   await rm(directory, { recursive: true, force: true });
 });
@@ -179,4 +219,75 @@ it('accepts an explicit unbounded pool threshold without enabling rollout or nul
   });
   expect(refused.statusCode).toBe(400);
   expect(await readFile(join(directory, 'company.json'))).toEqual(before);
+});
+
+const recoveryRequest = () => ({ operationId: randomUUID(), preserveUnconfirmedHistory: true });
+it('records the lost prior reference as UNKNOWN and never starts employees or grants activation', async () => {
+  const payload = recoveryRequest();
+  const before = await readFile(join(directory, 'company.json'));
+  const response = await app.inject({
+    method: 'POST',
+    url: '/api/company/resources/fleet/native-reconcile',
+    headers: headers(),
+    payload,
+  });
+  expect(response.statusCode).toBe(200);
+  expect(response.json().data).toMatchObject({
+    operationId: payload.operationId,
+    priorOutcome: 'unconfirmed',
+    currentState: 'pool-uninstalled',
+    historyRecorded: true,
+    activationAuthorized: false,
+    startsAuthorized: false,
+  });
+  const history = JSON.parse(await readFile(join(directory, 'recovery.json'), 'utf8'));
+  expect(history).toHaveLength(1);
+  expect(history[0]).toMatchObject({ operationId: payload.operationId, oldOutcome: 'unconfirmed' });
+  expect(wakeEmployee).not.toHaveBeenCalled();
+  expect(await readFile(join(directory, 'company.json'))).toEqual(before);
+});
+it('rejects unauthorized recovery before invoking the native observer', async () => {
+  for (const extra of [
+    { cookie: '' },
+    { origin: 'http://elsewhere.invalid' },
+    { authorization: 'Bearer fixture' },
+    { 'x-reverie-service-token': 'fixture' },
+    { 'x-reverie-parent-session': 'one' },
+    { 'x-reverie-goal-proof': 'fixture' },
+  ]) {
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/company/resources/fleet/native-reconcile',
+      headers: { ...headers(), ...extra },
+      payload: recoveryRequest(),
+    });
+    expect(response.statusCode).toBe(403);
+  }
+  expect(observeUninstalledPool).not.toHaveBeenCalled();
+  expect(wakeEmployee).not.toHaveBeenCalled();
+});
+it('retains UNKNOWN when native observation fails, expires, or owner logs out during observation', async () => {
+  const good = await observeUninstalledPool();
+  observeUninstalledPool.mockRejectedValueOnce(new Error('native connection closed'));
+  const send = () =>
+    app.inject({
+      method: 'POST',
+      url: '/api/company/resources/fleet/native-reconcile',
+      headers: headers(),
+      payload: recoveryRequest(),
+    });
+  expect((await send()).statusCode).toBe(503);
+  observeUninstalledPool.mockResolvedValueOnce({
+    ...good,
+    observedAtEpochMs: Date.now() - 6000,
+    expiresAtEpochMs: Date.now() - 1000,
+  });
+  expect((await send()).statusCode).toBe(503);
+  observeUninstalledPool.mockImplementationOnce(async () => {
+    auth.logout(token);
+    return good;
+  });
+  expect((await send()).statusCode).toBe(403);
+  await expect(readFile(join(directory, 'recovery.json'))).rejects.toMatchObject({ code: 'ENOENT' });
+  expect(wakeEmployee).not.toHaveBeenCalled();
 });

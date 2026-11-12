@@ -11,6 +11,12 @@
  */
 
 import type { TokenPattern } from './patterns.js';
+import type {
+  AccountReplacementProfileName,
+  LaunchEffortInputName,
+  StartupAccountProfileName,
+  ThreadStateProfileName,
+} from './profiles.js';
 
 /**
  * A CLI identifier. Branded so an arbitrary string cannot be passed where a validated id is
@@ -132,6 +138,10 @@ export interface CliLaunch {
   chain?: 'first' | 'fallback';
   /** Fixed launch-time transcript metadata selection; never fallback on provider exit. */
   resumeSelection?: 'claude-transcript';
+  /** Native identifier/config representation, independent of restore eligibility. */
+  threadStateProfile?: ThreadStateProfileName;
+  /** Session-level effort codec; requires the shipped engine binding, never inferred from an id. */
+  effortInput?: LaunchEffortInputName;
   variants: CliVariant[];
   /**
    * Maps a declared param name to the field name it arrives under on the legacy
@@ -347,7 +357,39 @@ export interface CliEnv {
  * `!isExternalCliMode()` wrongly accepted `until=stop` on it and hung for the full timeout.
  * Keeping them as separate fields makes that invariant structural rather than commented.
  */
+export type WorkspaceHookPolicy = 'install' | 'refresh-only' | 'none';
+export type WorkspaceHookPhase = 'sessionCreate' | 'freshCase' | 'existingCase';
+export type WorkspaceHookProfile = Record<WorkspaceHookPhase, WorkspaceHookPolicy>;
+
+export interface FullAccessDefaults {
+  values: Record<string, boolean | string>;
+  /** An explicit owner policy in this JSON config field suppresses these defaults. */
+  unlessJsonProperty?: {configField: string; property: string};
+}
+
 export interface CliCapabilities {
+  /** Terminal input protocol, independent of transcript and account support. */
+  input?: {
+    keyBurstMaxChars?: number;
+    requiresEmptyComposer?: boolean;
+    shellKeyGuard?: boolean;
+  };
+  /** Local workspace hook codec installed before starting the provider. */
+  turnSummaryHooks?: 'codex-config-v1';
+  /** Presentation preference among enabled harnesses with supported local-model injection. */
+  localModelPreference?: 'preferred';
+  /** Explicit reboot offer policy; never inferred from a transcript reader or resume argument. */
+  rebootRestore?: 'native-required' | 'native-or-new' | 'persistent-record';
+  /** Shipped local account config codec; requires actual resolved stock protocol provenance. */
+  startupAccountProfile?: StartupAccountProfileName;
+  /** Extra stock config defaults not represented by a boolean privileged launch param. */
+  fullAccessDefaults?: FullAccessDefaults;
+  /** A shipped protocol implementation, usable only with canonical resolved stock provenance. */
+  accountReplacementProfile?: AccountReplacementProfileName;
+  /** Stock explanation when an account replacement adapter is unavailable. */
+  accountReplacementRefusal?: string;
+  /** Workspace file authoring, independent from runtime lifecycle hook support. */
+  workspaceHooks: WorkspaceHookProfile;
   /** Positive opt-in: reads its server-authorized rooms through the API; never type into its pane. */
   chatDelivery?: 'poll';
   /**

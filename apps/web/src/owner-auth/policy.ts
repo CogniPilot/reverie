@@ -102,6 +102,7 @@ const AGENT_ROUTES = new Set([
   'GET /api/sessions/:id/wait',
   'GET /api/sessions/:id/wait-output',
   'POST /api/sessions/:id/input',
+  'GET /api/sessions/:id/input-receipt',
   'POST /api/quick-start',
   'GET /api/session-lifecycle',
   'GET /api/company',
@@ -178,6 +179,7 @@ export const ADMIN_ROUTES = new Set([
 ]);
 /** Agent routes that act on another session: scoped by `relations.ts` (related, upward, keeper). */
 export const SESSION_SCOPED_ROUTES = new Set([
+  'GET /api/sessions/:id/input-receipt',
   'DELETE /api/sessions/:id',
   'GET /api/sessions/:id/terminal',
   'GET /api/sessions/:id/last-response',

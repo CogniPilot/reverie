@@ -31,7 +31,7 @@ impl<'a> OfflineImageSwitchError<'a> {
             Cause::Finalized(..) => "WORKER_IMAGE_FINALIZATION_RETAINED",
         }
     }
-    pub(in crate::installing_broker::worker_image) fn refused(v: &'static str) -> Self {
+    pub(in crate::installing_broker) fn refused(v: &'static str) -> Self {
         Self {
             kind: Cause::Refused(v),
         }
@@ -41,7 +41,7 @@ impl<'a> OfflineImageSwitchError<'a> {
             kind: Cause::Qualification(v),
         }
     }
-    pub(in crate::installing_broker::worker_image) fn gate(v: GateError) -> Self {
+    pub(in crate::installing_broker) fn gate(v: GateError) -> Self {
         Self {
             kind: Cause::Gate(v),
         }
@@ -51,22 +51,24 @@ impl<'a> OfflineImageSwitchError<'a> {
             kind: Cause::GateOwner(v),
         }
     }
-    pub(super) fn service(v: Box<StoppedServiceFailure>) -> Self {
+    pub(in crate::installing_broker) fn service(v: Box<StoppedServiceFailure>) -> Self {
         Self {
             kind: Cause::Service(v),
         }
     }
-    pub(super) fn service_component(v: WorkerServiceError) -> Self {
+    pub(in crate::installing_broker) fn service_component(v: WorkerServiceError) -> Self {
         Self {
             kind: Cause::ServiceComponent(v),
         }
     }
-    pub(super) fn maintenance(v: Box<ImageMaintenanceFailure>) -> Self {
+    pub(in crate::installing_broker) fn maintenance(v: Box<ImageMaintenanceFailure>) -> Self {
         Self {
             kind: Cause::Maintenance(v),
         }
     }
-    pub(super) fn files(v: reverie_host::worker_image::ImageFileError) -> Self {
+    pub(in crate::installing_broker) fn files(
+        v: reverie_host::worker_image::ImageFileError,
+    ) -> Self {
         Self {
             kind: Cause::Files(v),
         }
@@ -81,7 +83,7 @@ impl<'a> OfflineImageSwitchError<'a> {
             kind: Cause::Finalized(Box::new(a), Box::new(b)),
         }
     }
-    fn close_components(&mut self, errors: &mut Vec<Self>) {
+    pub(in crate::installing_broker) fn close_components(&mut self, errors: &mut Vec<Self>) {
         match &mut self.kind {
             Cause::Finalized(a, b) => {
                 a.close_components(errors);

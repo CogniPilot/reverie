@@ -3,6 +3,7 @@
 mod capacity;
 mod custody;
 mod error;
+mod shared_pool;
 mod source;
 mod stop_budget;
 mod stopped_ram;
@@ -36,25 +37,47 @@ use std::{
 pub struct NativeObserver {
     source: Arc<dyn Source>,
     cancellation: CancellationToken,
+    controller: Option<crate::installing_broker::InstalledControllerSlot>,
 }
 impl NativeObserver {
     /// Actual worker memory reads share its existing capture, cancellation and
-    /// first-stop ceiling. No caller token/deadline selector or new runner.
+    /// first-stop ceiling and captured engine.
     pub(crate) fn capture_worker(
         runtime: &reverie_host::worker_runtime::WorkerRuntime,
         config: EffectiveWorkerConfig,
     ) -> ObservationContext {
+        Self::capture_worker_with_deadline(runtime, config, None)
+    }
+    pub(crate) fn capture_worker_with_deadline(
+        runtime: &reverie_host::worker_runtime::WorkerRuntime,
+        config: EffectiveWorkerConfig,
+        inherited_end: Option<Instant>,
+    ) -> ObservationContext {
         let observer = Self {
             source: Arc::new(Installed::new(runtime.readonly())),
             cancellation: runtime.cancellation(),
+            controller: None,
         };
-        observer.capture(config, runtime.stop_deadline())
+        let end = [runtime.stop_deadline(), inherited_end]
+            .into_iter()
+            .flatten()
+            .min();
+        observer.capture(config, end)
     }
     pub fn new(engine: ReadonlyEngine) -> Self {
         Self {
             source: Arc::new(Installed::new(engine)),
             cancellation: CancellationToken::new(),
+            controller: None,
         }
+    }
+    pub(crate) fn with_installed_controller(
+        engine: ReadonlyEngine,
+        controller: crate::installing_broker::InstalledControllerSlot,
+    ) -> Self {
+        let mut observer = Self::new(engine);
+        observer.controller = Some(controller);
+        observer
     }
     pub fn cancellation(&self) -> CancellationToken {
         self.cancellation.clone()
@@ -104,6 +127,16 @@ impl ObservedInventory {
         current: &reverie_contracts::storage_identity::CurrentEmployee,
     ) -> std::result::Result<Option<ObservedRow<'_>>, reverie_contracts::gpu_access::GpuDataError>
     {
+        self.employee_selected(config, current)
+    }
+    /// Reuse the same exact current EID/SID/name/label selection and native
+    /// context origin. This grants no GPU, resource mutation or release.
+    pub(crate) fn employee_selected(
+        &self,
+        config: &EffectiveWorkerConfig,
+        current: &reverie_contracts::storage_identity::CurrentEmployee,
+    ) -> std::result::Result<Option<ObservedRow<'_>>, reverie_contracts::gpu_access::GpuDataError>
+    {
         let selected =
             reverie_contracts::gpu_access::selected_container(&self.rows, config, current)?;
         Ok(selected
@@ -131,6 +164,15 @@ impl ObservedRow<'_> {
     }
 }
 impl ObservationContext {
+    /// Borrow the SAME original context's readonly native calls and custody.
+    /// Callers must join the actual runtime/engine; this creates no new owner.
+    pub(crate) fn metadata_query_owner(
+        &self,
+    ) -> Result<&reverie_host::engine_metadata::MetadataQueryOwner> {
+        self.metadata.as_deref().ok_or(ObserverError::Refused(
+            "RESERVATION_NATIVE_METADATA_OWNER_REQUIRED",
+        ))
+    }
     pub(crate) fn assert_inventory_origin(&self, rows: &ObservedInventory) -> Result<()> {
         need(
             Arc::ptr_eq(&self.origin, &rows.origin),
@@ -408,7 +450,29 @@ impl ObservationContext {
                 && (!stable_pool_policy || policy_digest(&effective) == policy_digest(&repeated)),
             "RESERVATION_SOURCE_POLICY",
         )?;
-        Ok(Some(policy))
+        self.running_memory_policy(row, policy).map(Some)
+    }
+    fn running_memory_policy(
+        &self,
+        row: &NativeLimitFields<'_>,
+        policy: ObservedMemoryPolicy,
+    ) -> Result<ObservedMemoryPolicy> {
+        if !policy.uses_pool() {
+            return Ok(policy);
+        }
+        let Some(provider) = reverie_contracts::worker_pool::WorkerPoolProvider::from_config(
+            self.config.configuration(),
+        )
+        .map_err(|_| ObserverError::Refused("RESERVATION_POOL_PROVIDER_INVALID"))?
+        else {
+            return Ok(policy);
+        };
+        for (employee, settings) in provider.member_overrides() {
+            if row.label_is("reverie.employee", employee)? {
+                return Ok(policy.with_pool_member_policy(*settings)?);
+            }
+        }
+        Ok(policy)
     }
     pub fn storage(
         &self,

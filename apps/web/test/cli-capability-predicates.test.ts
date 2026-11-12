@@ -23,32 +23,33 @@ import type { SessionMode } from '../src/types/session.js';
 
 const MODES = enabledCliIds() as SessionMode[];
 
+const CAPABILITY_CASES = [
+  // mode           external  altScreenStrip  hooks
+  ['claude', false, true, true],
+  ['shell', false, false, false],
+  ['opencode', true, false, false],
+  ['codex', true, true, false],
+  ['gemini', true, true, false],
+  ['antigravity', true, false, false],
+  ['pi', true, false, false],
+  ['grok', true, false, false],
+  ['deepseek', true, false, true],
+  ['omp', true, false, false],
+  ['hands', true, false, false],
+] as Array<[SessionMode, boolean, boolean, boolean]>;
+
 describe('per-mode capability predicates', () => {
-  it.each([
-    // mode           external  altScreenStrip  hooks
-    ['claude', false, true, true],
-    ['shell', false, false, false],
-    ['opencode', true, false, false],
-    ['codex', true, true, false],
-    ['gemini', true, true, false],
-    ['antigravity', true, false, false],
-    ['pi', true, false, false],
-    ['grok', true, false, false],
-    ['deepseek', true, false, true],
-    ['omp', true, false, false],
-  ] as Array<[SessionMode, boolean, boolean, boolean]>)(
-    '%s: external=%s altScreenStrip=%s hooks=%s',
-    (mode, external, altScreen, hooks) => {
-      expect(isExternalCliMode(mode)).toBe(external);
-      expect(isAltScreenStripMode(mode)).toBe(altScreen);
-      expect(hooksAvailableForMode(mode)).toBe(hooks);
-    }
-  );
+  it.each(CAPABILITY_CASES)('%s: external=%s altScreenStrip=%s hooks=%s', (mode, external, altScreen, hooks) => {
+    expect(isExternalCliMode(mode)).toBe(external);
+    expect(isAltScreenStripMode(mode)).toBe(altScreen);
+    expect(hooksAvailableForMode(mode)).toBe(hooks);
+  });
 
   it('covers every enabled mode (sanity)', () => {
     // If a CLI is added without a row above, this fails rather than the table silently
     // describing a subset of reality.
-    expect(MODES.length).toBe(10);
+    expect(new Set(CAPABILITY_CASES.map(([mode]) => mode))).toEqual(new Set(MODES));
+    expect(CAPABILITY_CASES).toHaveLength(new Set(MODES).size);
   });
 
   it('keeps the three predicates genuinely distinct', () => {

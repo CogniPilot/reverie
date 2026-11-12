@@ -33,16 +33,20 @@ use std::{
     os::unix::fs::{MetadataExt, PermissionsExt},
     path::{Path, PathBuf},
     process::Command,
-    sync::atomic::{AtomicU64, Ordering},
+    sync::atomic::Ordering,
     time::Duration,
 };
 static PROGRAM: OnceLock<PathBuf> = OnceLock::new();
-static NEXT: AtomicU64 = AtomicU64::new(0);
 const SID: &str = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
 fn program() -> &'static Path {
     PROGRAM.get_or_init(|| {
-        let root = std::env::temp_dir().join(format!("laptop-child-build-{}", std::process::id()));
-        fs::create_dir_all(&root).unwrap();
+        let nonce = crate::resource_facts::fresh_owner_nonce().unwrap();
+        let root = std::env::temp_dir().join(format!(
+            "laptop-child-build-{}-{}",
+            std::process::id(),
+            nonce.as_str()
+        ));
+        fs::create_dir(&root).unwrap();
         let source = root.join("child.rs");
         fs::write(
             &source,
@@ -95,14 +99,17 @@ fn direct_resources(
 pub(super) struct Fixture {
     pub(super) root: PathBuf,
     runtime: Option<Arc<WorkerRuntime>>,
-    office: OfficeService,
+    pub(super) office: OfficeService,
     pub(super) source: EffectiveWorkerConfig,
 }
 impl Fixture {
     pub(super) fn employee(mode: &str) -> Self {
         Self::employee_with_hooks(mode, crate::captured_client::test_hooks::Hooks::default())
     }
-    fn employee_with_hooks(mode: &str, hooks: crate::captured_client::test_hooks::Hooks) -> Self {
+    pub(super) fn employee_with_hooks(
+        mode: &str,
+        hooks: crate::captured_client::test_hooks::Hooks,
+    ) -> Self {
         let fixture = Self::new_with_hooks(mode, hooks);
         fs::write(fixture.root.join("company.json"), serde_json::to_vec(&json!({"employees":[{"id":"11111111-2222-4333-8444-555555555555","sessionId":SID,"owner":null,"name":"Owned fixture","desiredRunning":true}]})).unwrap()).unwrap();
         fixture
@@ -112,13 +119,12 @@ impl Fixture {
     }
     fn new_with_hooks(mode: &str, hooks: crate::captured_client::test_hooks::Hooks) -> Self {
         let _ = program();
+        let nonce = crate::resource_facts::fresh_owner_nonce().unwrap();
+        // Keep the private socket path short, including Nix's TMPDIR prefix.
+        let nonce = nonce.as_str().replace('-', "");
         let root = fs::canonicalize(std::env::temp_dir())
             .unwrap()
-            .join(format!(
-                "lp-{}-{}",
-                std::process::id(),
-                NEXT.fetch_add(1, Ordering::Relaxed)
-            ));
+            .join(format!("lp-{}", &nonce[..16]));
         fs::create_dir(&root).unwrap();
         fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).unwrap();
         fs::write(root.join("company.json"), b"{\"employees\":[]}").unwrap();

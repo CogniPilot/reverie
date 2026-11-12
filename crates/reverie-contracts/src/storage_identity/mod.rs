@@ -5,7 +5,7 @@ mod inventory_tests;
 pub(crate) mod lineage;
 mod provider;
 mod registry;
-pub use provider::ProviderHealthBinding;
+pub use provider::{MAX_PROVIDER_EMPLOYEES, ProviderHealthBinding};
 #[cfg(test)]
 mod provider_tests;
 

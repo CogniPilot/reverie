@@ -20,6 +20,7 @@ describe('session submit anchor', () => {
     expect(session.toState().lastSubmitAt).toBeUndefined();
 
     const before = Date.now();
+    Object.assign(session, { ptyProcess: { write() {} } });
     session.write('hello\r');
     const after = Date.now();
 
@@ -39,6 +40,7 @@ describe('session submit anchor', () => {
 
   it('restores the anchor from persisted state on boot recovery', () => {
     const submitted = new Session({ workingDir: '/tmp' });
+    Object.assign(submitted, { ptyProcess: { write() {} } });
     submitted.write('prompt\r');
     const persisted = submitted.toState();
 
