@@ -41,7 +41,10 @@ export async function findProvider(): Promise<string | null> {
     if (await executable(candidate)) return candidate;
   }
   const nixosDriver = '/run/opengl-driver/bin/nvidia-smi';
-  return await executable(nixosDriver) ? nixosDriver : null;
+  for (const candidate of ['/usr/bin/nvidia-smi', nixosDriver]) {
+    if (await executable(candidate)) return candidate;
+  }
+  return null;
 }
 async function clearReading(output: string) {
   try { await unlink(output); } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }

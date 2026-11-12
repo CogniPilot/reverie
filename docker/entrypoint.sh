@@ -65,7 +65,7 @@ fi
 
 [ "$#" -gt 0 ] || set -- reverie web --host 0.0.0.0 --port "${REVERIE_PORT:-3000}"
 # Optional host inference uses a private socket, with no GPU device or firewall change in the agent container.
-if [ "${1##*/}" = reverie ] && [ "${2:-}" = web ] && [ -d /run/reverie-control ] &&
+if [ "${REVERIE_MODEL_RELAY_MANAGED:-0}" != 1 ] && [ "${1##*/}" = reverie ] && [ "${2:-}" = web ] && [ -d /run/reverie-control ] &&
    command -v reverie-model-relay >/dev/null 2>&1; then
   reverie-model-relay </dev/null &
 fi

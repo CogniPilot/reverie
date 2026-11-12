@@ -64,9 +64,10 @@ assert rootlessDocker == null || (worker && builtins.isInt uid && builtins.isInt
   && rootlessDocker.subgidStart + rootlessDocker.subidCount < 4294967295
   && !(uid >= rootlessDocker.subuidStart && uid < rootlessDocker.subuidStart + rootlessDocker.subidCount)
   && !(gid >= rootlessDocker.subgidStart && gid < rootlessDocker.subgidStart + rootlessDocker.subidCount));
-pkgs.dockerTools.buildLayeredImage {
+pkgs.dockerTools.buildLayeredImage rec {
   name = if browserRuntime != null then "reverie-worker-browser" else if worker then "reverie-worker" else if ownerTerminalWebsite != null then "reverie-owner-terminal" else "reverie";
   tag = "latest";
+  passthru.reverieConfig = config;
   created = "1970-01-01T00:00:01Z";
   contents = baseContents ++ pkgs.lib.optional worker nixBase
     ++ pkgs.lib.optional (ownerTerminalWebsite != null) ownerTerminalWebsite;

@@ -1060,6 +1060,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "reverie-container-runtime"
+version = "0.1.0"
+dependencies = [
+ "getrandom",
+ "nix",
+ "reverie-local-model",
+ "tokio",
+]
+
+[[package]]
 name = "reverie-contracts"
 version = "0.1.0"
 dependencies = [
