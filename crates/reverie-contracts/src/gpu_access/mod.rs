@@ -7,19 +7,22 @@ mod current;
 mod engine;
 mod native_row;
 mod peers;
+pub mod preflight;
 mod queue;
 mod status;
 mod transition;
 use crate::legacy_json::{Node, Number, Text, Value};
-pub use cdi::{CdiDocument, CdiSelectedEdits};
+pub use cdi::{CdiDocument, CdiPreflightEdits, CdiSelectedEdits};
+pub(crate) use command::decode_website_intent;
 pub use command::{GpuCommand, GpuEmployeeSelector, decode_command};
 pub use configuration::{
     GpuCandidate, applied, has_resource_actor, patch_employee_grant, private_config_matches,
 };
 pub use current::{GpuCurrentEmployee, current_binding, current_session};
-pub use engine::GpuEngineInformation;
+pub use engine::{GpuEngineInformation, PreflightEndpoint, PreflightEngineData};
 pub use native_row::{policy_label_matches, selected_container};
 pub use peers::GpuPeerSessions;
+pub(crate) use queue::decode_row as decode_queued_approval;
 pub use queue::{decode_requests, encode_requests};
 use reverie_core::{gpu_access::GpuAccessError, operations::OperationError};
 pub use status::encode_status;

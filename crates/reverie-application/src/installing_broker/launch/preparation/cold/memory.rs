@@ -9,7 +9,10 @@ use reverie_host::worker_laptop::{
     ConfiguredMemory, MemoryConfiguration, WorkerMemoryBegin, WorkerMemoryEffect,
 };
 impl ColdBody<'_> {
-    pub(super) fn configure_memory(&mut self) -> Result<ConfiguredMemory, ColdError> {
+    pub(super) fn configure_memory(
+        &mut self,
+        member: Option<&mut crate::installing_broker::InstalledMemberCreation<'_>>,
+    ) -> Result<ConfiguredMemory, ColdError> {
         let network = self.network();
         let connection = self.scope.preparing.admitted.request.connection.clone();
         let source = self.broker().configuration()?;
@@ -23,13 +26,19 @@ impl ColdBody<'_> {
             .started
             .as_ref()
             .expect("actual start ACK");
-        let configured = self.broker().configure_controller_member(
-            source.configuration(),
-            &self.creation.as_ref().expect("actual creation").created,
-            started,
-            &connection,
-            self.end(),
-        )?;
+        let created = &self.creation.as_ref().expect("actual creation").created;
+        let configured = match member {
+            Some(member) => {
+                Some(network.configure_controller_member(member, created, started, &connection)?)
+            }
+            None => self.broker().configure_controller_member(
+                source.configuration(),
+                created,
+                started,
+                &connection,
+                self.end(),
+            )?,
+        };
         match network.begin_memory(started, &connection, effective.as_ref())? {
             WorkerMemoryBegin::Configured(configured) => return Ok(configured),
             WorkerMemoryBegin::Policy(policy) => self.memory = Some(MemoryJoin::Policy(policy)),

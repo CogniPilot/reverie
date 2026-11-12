@@ -72,6 +72,36 @@ function fixture() {
 }
 
 describe('company crash recovery selection', () => {
+  it.each([false, true])('native healthy provider with a dead viewer is preserved for delegated/automatic wake (%s)', async automatic => {
+    const f = fixture();
+    const recovery = new CompanyWake({...f.deps, nativeHealth: () => 'healthy' as const});
+    const result = await (automatic ? recovery.tick() : recovery.wakeOne(f.root.id));
+    expect(result).toEqual({awakened: [], skipped: []});
+    expect(f.deps.claim).not.toHaveBeenCalled();
+    expect(f.deps.wake).not.toHaveBeenCalled();
+    expect(f.deps.noteRunning).toHaveBeenCalledExactlyOnceWith(f.root.sessionId);
+  });
+  it.each([false, true])('native dead provider with an alive viewer is eligible for delegated/automatic wake (%s)', async automatic => {
+    const f = fixture(); f.live.add(f.root.sessionId);
+    const recovery = new CompanyWake({...f.deps, nativeHealth: () => 'dead' as const});
+    const result = await (automatic ? recovery.tick() : recovery.wakeOne(f.root.id));
+    expect(result.awakened).toEqual([f.root.id]);
+    expect(f.deps.wake).toHaveBeenCalledOnce();
+  });
+  it.each([false, true])('unknown native health is visible and refuses every wake before claiming (%s)', async viewerLive => {
+    const f = fixture(); if (viewerLive) f.live.add(f.root.sessionId);
+    const recovery = new CompanyWake({...f.deps, nativeHealth: () => 'unknown' as const});
+    for (const result of [await recovery.tick(), await recovery.wakeOne(f.root.id)])
+      expect(result).toEqual({awakened: [], skipped: [{employeeId: f.root.id, reason: 'native-health-unconfirmed'}]});
+    expect(f.deps.claim).not.toHaveBeenCalled(); expect(f.deps.wake).not.toHaveBeenCalled();
+  });
+  it('native health lost during the claim never reaches the runtime producer', async () => {
+    const f = fixture(); let healthy: 'dead' | 'unknown' = 'dead';
+    f.deps.claim.mockImplementationOnce(async () => { healthy = 'unknown'; return true; });
+    const result = await new CompanyWake({...f.deps, nativeHealth: () => healthy}).wakeOne(f.root.id);
+    expect(result).toEqual({awakened: [], skipped: [{employeeId: f.root.id, reason: 'native-health-unconfirmed'}]});
+    expect(f.deps.wake).not.toHaveBeenCalled();
+  });
   it('explicit entry preserves a genuinely healthy native provider even without a viewer or saved row', async () => {
     const f=fixture();f.saved.delete(f.root.sessionId);
     const recovery=new CompanyWake({...f.deps,nativeHealth:()=> 'healthy' as const});
@@ -103,7 +133,7 @@ describe('company crash recovery selection', () => {
     const recovery = new CompanyWake(f.deps);
     expect((await recovery.wakeOne(f.report.id)).awakened).toEqual([]);
     expect((await recovery.wakeOne(f.report.id, { explicitStart: true })).awakened).toEqual([f.report.id]);
-    expect(f.deps.claim).toHaveBeenCalledWith(f.report.id, f.report.sessionId, expect.any(Number), false);
+    expect(f.deps.claim).toHaveBeenCalledWith(f.report.id, f.report.sessionId, expect.any(Number), false, expect.any(Function));
     expect(f.deps.wake).toHaveBeenCalledWith(expect.objectContaining({
       sessionId: f.report.sessionId, mode,
       state: expect.objectContaining({ status: 'idle', respawnBlocked: false }),
@@ -252,6 +282,22 @@ describe('company crash recovery selection', () => {
       return true;
     });
     expect((await new CompanyWake(f.deps).tick()).awakened).toEqual([]);
+  });
+  it('a newer generation of the same session invalidates the original recovery before dispatch', async () => {
+    const f = fixture();
+    f.deps.claim.mockImplementation(async () => { f.root.sessionGeneration++; return true; });
+    const result = await new CompanyWake(f.deps).wakeOne(f.root.id);
+    expect(result).toEqual({awakened: [], skipped: [{employeeId: f.root.id, reason: 'changed-or-stopping'}]});
+    expect(f.deps.wake).not.toHaveBeenCalled();
+  });
+  it('authority loss after issuing wake preserves an unconfirmed start instead of a safe refusal', async () => {
+    const f = fixture();
+    let granted = true;
+    f.deps.wake.mockImplementationOnce(async () => { granted = false; return true; });
+    const result = await new CompanyWake(f.deps).wakeOne(f.root.id, {stillCurrent: () => granted});
+    expect(result).toEqual({awakened: [], skipped: [{employeeId: f.root.id, reason: 'start-unconfirmed'}]});
+    expect(f.deps.wake).toHaveBeenCalledOnce();
+    expect(f.deps.kickoff).not.toHaveBeenCalled();
   });
   it('a wake that throws after it was called is unconfirmed, never "did not start"; a throw before it is wake-failed', async () => {
     const f = fixture();

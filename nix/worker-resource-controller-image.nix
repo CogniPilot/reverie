@@ -7,7 +7,6 @@ pkgs.dockerTools.buildLayeredImage {
   contents = [ controller ];
   config = {
     Entrypoint = [ "/bin/reverie-worker-resource-controller" ];
-    Cmd = [ ];
     Env = [ "PATH=/bin" "LANG=C.UTF-8" ];
     User = "0:0";
     WorkingDir = "/";

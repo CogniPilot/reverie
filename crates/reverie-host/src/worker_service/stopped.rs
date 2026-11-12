@@ -3,7 +3,7 @@ use super::*;
 pub(super) mod bus;
 mod image;
 pub use image::{ClosedImageServiceMaintenance, ImageServiceMaintenance};
-pub(super) const IMAGE_PENDING: &[u8] = b"NATIVE_SERVICE_IMAGE_TRANSITION_PENDING_V1\n";
+pub(super) const IMAGE_PENDING: &[u8] = RetainedServicePending::Image.bytes();
 use bus::{BusReader, ExpectedCommands};
 
 #[derive(Clone, Debug)]
@@ -83,6 +83,26 @@ pub fn capture_stopped_worker_service(
             primary,
         })
     })?;
+    capture_state(state)
+}
+pub fn capture_stopped_worker_service_for_role(
+    source: &Path,
+    end: Instant,
+    role: NativeWorkerServiceRole,
+) -> std::result::Result<StoppedWorkerService, Box<StoppedServiceFailure>> {
+    let state = State::capture_for_role(source, end, &WorkerServiceAction::Status, role).map_err(
+        |primary| {
+            Box::new(StoppedServiceFailure {
+                owner: None,
+                primary,
+            })
+        },
+    )?;
+    capture_state(state)
+}
+fn capture_state(
+    state: State,
+) -> std::result::Result<StoppedWorkerService, Box<StoppedServiceFailure>> {
     let mut proof = StoppedWorkerService::new(state);
     let result = proof.capture_bus().and_then(|()| proof.revalidate());
     match result {
@@ -92,6 +112,21 @@ pub fn capture_stopped_worker_service(
             primary,
         })),
     }
+}
+/// Only the whole deployment coordinator captures this longer original
+/// maintenance window. Ordinary read/image/PERF constructors stay unchanged.
+pub(super) fn capture_deployment_maintenance(
+    source: &Path,
+    end: Instant,
+    role: NativeWorkerServiceRole,
+) -> std::result::Result<StoppedWorkerService, Box<StoppedServiceFailure>> {
+    let state = State::capture_deployment_maintenance(source, end, role).map_err(|primary| {
+        Box::new(StoppedServiceFailure {
+            owner: None,
+            primary,
+        })
+    })?;
+    capture_state(state)
 }
 impl StoppedWorkerService {
     fn new(state: State) -> Self {

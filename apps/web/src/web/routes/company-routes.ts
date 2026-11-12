@@ -178,17 +178,19 @@ export function registerCompanyRoutes(
       const owner = ownerFor(req);
       const view = service.view(owner);
       const self = caller(req);
-      if (
-        !verifiedOwner(req) &&
-        (!self || !view.employees.some((e) => e.sessionId === self && e.permissions.recoverEmployees))
-      )
+      const isOwner = verifiedOwner(req);
+      if (!isOwner && !self)
         throw new CompanyError('Only the owner or an employee granted recovery permission may wake an employee', 403);
+      parseBody(z.object({}).strict(), req.body ?? {});
       const { id } = req.params as { id: string };
       const employee = view.employees.find((e) => e.id === id);
       if (!employee) throw new CompanyError('Unknown company employee', 404);
       if (employee.onVacation) throw new CompanyError('Return the employee from vacation before waking them', 409);
       if (!wakeEmployee) throw new CompanyError('Recovery is not ready', 503);
-      const result = await wakeEmployee(id);
+      const action = service.recoveryAction(id, owner, isOwner ? undefined : self);
+      const stillCurrent = () => action.current() && (self ? caller(req) === self : verifiedOwner(req));
+      action.require();
+      const result = await wakeEmployee(id, { stillCurrent });
       void appendAdminAudit({
         admin: self ? 'session ' + self : 'owner',
         action: 'employee_wake',
@@ -196,7 +198,13 @@ export function registerCompanyRoutes(
         ip: req.ip,
         detail: { id, by: self },
       });
-      return { recovery: result };
+      // The producer may already have started before an awaited authorization
+      // check changed. Preserve uncertainty instead of claiming a current start.
+      return {
+        recovery: stillCurrent() ? result : {
+          awakened: [], skipped: [{ employeeId: id, reason: 'start-unconfirmed' }],
+        },
+      };
     })
   );
   app.put('/api/company/employees/:id/session', async (req, reply) =>

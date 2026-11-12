@@ -43,7 +43,8 @@
   /** Is this request a same-origin call to /api/* (with or without the mount base)? */
   function isApiRequest(input) {
     try {
-      const raw = typeof input === 'string' ? input : input && typeof input.url === 'string' ? input.url : String(input);
+      const raw =
+        typeof input === 'string' ? input : input && typeof input.url === 'string' ? input.url : String(input);
       const url = new URL(raw, global.location.href);
       if (url.origin !== global.location.origin) return false;
       const p = appPath(url.pathname);

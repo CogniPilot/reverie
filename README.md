@@ -31,6 +31,8 @@ For private registry access, custom host mounts or an existing deployment, see t
 
 For NVIDIA inference and telemetry inside the container, see the
 [self-contained GPU deployment](docs/container-gpu.md).
+Existing isolated-worker deployments can use a separate persistent terminal
+viewer service. See [viewer configuration](docs/runtime-configuration.md#isolated-worker-terminal-viewers).
 
 ## Automatic startup
 

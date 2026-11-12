@@ -4,27 +4,49 @@ mod facts;
 mod image_time;
 mod metadata;
 mod native_client;
+mod pool_image_inputs;
 mod process;
+pub use pool_image_inputs::{
+    POOL_IMAGE_INPUT_FACTORY_FILES, POOL_IMAGE_INPUTS_PROGRAM_PURPOSE, POOL_IMAGE_INPUTS_PURPOSE,
+    PoolImageInputsData, PoolImageRole,
+};
+#[cfg(test)]
+mod pool_image_inputs_tests;
 mod protocol;
 pub use protocol::{
-    CurrentPoolInstallationConsent, CurrentPoolInstallationViewer, CurrentResourceOwner,
+    CurrentFleetMaintenanceOwner, CurrentFleetPreviewViewer, CurrentPoolInstallationConsent,
+    CurrentPoolInstallationViewer, CurrentResourceOwner, EmployeePolicyEdit,
+    FLEET_MAINTENANCE_PURPOSE, FLEET_REPLY_MAX_FRAME, FleetMaintenanceAction,
+    FleetMaintenanceRequest, FleetPreviewRequest, FleetReplyFrame,
     POOL_INSTALLATION_CONSENT_PURPOSE, POOL_INSTALLATION_REQUEST_PURPOSE,
     POOL_REGISTRATION_PURPOSE, PoolInstallationConsentRequest, PoolInstallationOfferViewData,
-    PoolInstallationRequestData, PoolInstallationViewRequest, RAM_POOL_PURPOSE,
-    RamLaunchCommandData, RamPreviewFields, ResourceContinuationRequest, ResourceContinuationVerb,
-    ResourceOperationRequest, ResourceOwnerPrincipal, ResourceRequestSelection,
-    decode_pool_registration_hello, decode_ram_pool_hello,
+    PoolInstallationRequestData, PoolInstallationViewRequest, PreparedFleetMigrationReply,
+    RAM_POOL_PURPOSE, RamLaunchCommandData, RamPreviewFields, ResourceContinuationRequest,
+    ResourceContinuationVerb, ResourceOperationRequest, ResourceOwnerPrincipal,
+    ResourceRequestSelection, decode_fleet_maintenance_hello, decode_pool_registration_hello,
+    decode_ram_pool_hello, is_fleet_maintenance_hello,
 };
 mod provenance;
+mod provenance_build;
+pub use provenance_build::{
+    HUMAN_TERMINAL_FILES, WORKER_IMAGE_V1_FACTORY_FILES, WebsiteArchiveConfiguration,
+    WebsiteArchiveManifest, WebsiteProvenanceBuild, WebsiteStartupBuildGraph,
+    WorkerImageProvenanceBuild,
+};
 mod worker_image;
 pub use worker_image::WorkerImageProvenance;
 mod settings;
+mod setup;
+pub use setup::history as actor_setup_history;
+pub use setup::{ActorSetupDataError, ActorSetupTransition};
 #[cfg(test)]
 mod tests;
 mod website;
 use crate::legacy_json::{self, Node, Number, Text, Value};
 pub use facts::{ArtifactReference, EngineSelection, InstalledFactsDocument};
-pub use metadata::{EngineMetadata, MAX_ENGINE_BODY, QualifiedWebsiteMetadata};
+pub use metadata::{
+    EngineMetadata, MAX_ENGINE_BODY, QualifiedWebsiteMetadata, validate_protected_website_settings,
+};
 pub use native_client::NativeResourceClientManifest;
 pub use process::{ProcessStatData, require_peer_kernel_status};
 pub use provenance::{
@@ -36,7 +58,7 @@ use std::{collections::BTreeMap, fmt};
 pub use website::{CodeFile, ProgramSelection, WebsiteSelection};
 
 pub const PURPOSE: &str = "resource-replacement-v1";
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct ResourceActorDataError(&'static str);
 impl ResourceActorDataError {
     pub fn code(&self) -> &'static str {

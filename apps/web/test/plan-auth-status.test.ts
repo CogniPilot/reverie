@@ -1,15 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
+import {frontendDeclarations} from './helpers/frontend-declarations.js';
 const html = readFileSync(new URL('../src/web/public/company-plans.html', import.meta.url), 'utf8');
-const source = html.slice(html.indexOf('function planAuthLabel('), html.indexOf('function plans()'));
+const script = /<script>([\s\S]*)<\/script>/.exec(html)![1];
+const source = frontendDeclarations(script, ['planAuthLabel']);
 function label(row: object, sign: unknown = null) {
   return vm.runInNewContext(`${source}; planAuthLabel(row)`, { row, sign, SETTLED: ['signed_in', 'failed', 'timeout', 'cancelled'] });
 }
 describe('plan authentication display', () => {
   it('shows authenticated independently of absent usage', () => {
     expect(label({ authState: 'signed-in', signedIn: true, used: null })).toBe('Signed in');
-    expect(html).toContain("p.used == null ? 'no data'");
+    expect(script).toMatch(/p\.used\s*==\s*null\s*\?\s*'no data'/);
   });
   it('never labels unavailable or signed-out authentication signed in', () => {
     expect(label({ authState: 'signed-out', signedIn: false })).toBe('Signed out');

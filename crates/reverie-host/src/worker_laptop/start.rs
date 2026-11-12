@@ -23,11 +23,12 @@ pub enum ContainerStart {
     Retained,
 }
 impl Workflows {
-    fn start(
+    pub(super) fn start(
         &self,
         runtime: &WorkerRuntime,
         created: &CreatedLaptop,
         deadline: CallBudget,
+        mut member: Option<&mut PoolMemberCreation<'_>>,
     ) -> Result<ContainerStart> {
         self.bound(runtime, &created.workflow)?;
         let mut record = created
@@ -46,14 +47,16 @@ impl Workflows {
                 }),
             "WORKER_LAPTOP_START_PHASE",
         )?;
+        controller::check_member(runtime, &record.resources().plan, member.as_deref_mut())?;
         record.phase = Phase::Running;
         record
             .creation
             .as_mut()
             .expect("actual created owner")
             .stage = create::CreateStage::Starting;
-        let result = run(runtime, &mut record, deadline);
+        let result = run(runtime, &mut record, deadline, member.as_deref_mut());
         record.outcome = Some(result.map_err(Arc::new));
+        controller::retain_outcome(member, &record);
         if record.pending.is_some() || record.unknown {
             record.phase = Phase::Retained;
             return Ok(ContainerStart::Retained);
@@ -70,12 +73,22 @@ impl Workflows {
         }))
     }
 }
-fn run(runtime: &WorkerRuntime, record: &mut Record, deadline: CallBudget) -> Result<()> {
+fn run(
+    runtime: &WorkerRuntime,
+    record: &mut Record,
+    deadline: CallBudget,
+    mut member: Option<&mut PoolMemberCreation<'_>>,
+) -> Result<()> {
     need(
         create::start_allowed(record)?,
         "Current employee running intent changed before startup",
     )?;
     let name = record.resources().plan.arguments().name().to_owned();
+    if let Some(member) = member.as_deref_mut() {
+        member
+            .assert_plan(runtime, &record.resources().plan)
+            .map_err(controller::pool_error)?;
+    }
     let output = network::call_with_budget(
         runtime,
         record,
@@ -86,6 +99,12 @@ fn run(runtime: &WorkerRuntime, record: &mut Record, deadline: CallBudget) -> Re
     if !output.succeeded {
         record.unknown = true;
         return Err(LaptopError::Refused("WORKER_LAPTOP_START_UNCONFIRMED"));
+    }
+    if let Some(member) = member
+        && let Err(error) = member.assert_plan(runtime, &record.resources().plan)
+    {
+        record.unknown = true;
+        return Err(controller::pool_error(error));
     }
     Ok(())
 }
@@ -98,7 +117,7 @@ impl WorkerRuntime {
         deadline: Instant,
     ) -> Result<ContainerStart> {
         self.laptop_workflows()
-            .start(self, created, CallBudget::bounded(deadline))
+            .start(self, created, CallBudget::bounded(deadline), None)
     }
     pub fn start_laptop_container_for_connection(
         &self,
@@ -108,6 +127,6 @@ impl WorkerRuntime {
         self.laptop_workflows()
             .assert_worker_connection(self, &created.workflow, connection)?;
         self.laptop_workflows()
-            .start(self, created, CallBudget::worker())
+            .start(self, created, CallBudget::worker(), None)
     }
 }

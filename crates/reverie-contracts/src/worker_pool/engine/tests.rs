@@ -22,6 +22,39 @@ fn policy() -> WorkerPoolPolicy {
         )]),
     }
 }
+
+#[test]
+#[ignore = "requires explicitly selected private recorded birth and failed inspection DATA; no native effects"]
+fn recorded_failed_service_v2_preserves_actual_readback_and_rejects_environment_overrides() {
+    use sha2::{Digest, Sha256};
+    let birth_bytes =
+        std::fs::read(std::env::var_os("REVERIE_POOL_RECORDED_BIRTH").unwrap()).unwrap();
+    let birth = ControllerBirthV2::decode(&birth_bytes).unwrap();
+    let raw = std::fs::read(std::env::var_os("REVERIE_POOL_RECORDED_INSPECTION").unwrap()).unwrap();
+    let value: Value = serde_json::from_slice(&raw).unwrap();
+    let cid = value["Id"].as_str().unwrap();
+    let name = value["Name"].as_str().unwrap().strip_prefix('/').unwrap();
+    let digest = value["Config"]["Labels"]["reverie.pool.birth-policy"]
+        .as_str()
+        .unwrap();
+    assert_eq!(format!("{:x}", Sha256::digest(&birth_bytes)), digest);
+    let check = |bytes: &[u8]| {
+        validate_failed_controller_service_v2_inspection(bytes, birth.policy(), cid, digest, name)
+    };
+    check(&raw).unwrap();
+    assert!(
+        validate_controller_service_v2_inspection(&raw, birth.policy(), cid, 0, digest).is_err()
+    );
+    for env in [
+        json!(["LANG=C.UTF-8", "PATH=/bin", "EXTRA=1"]),
+        json!(["LANG=C.UTF-8", "LANG=C.UTF-8"]),
+        json!(["LANG=C.UTF-8", "PATH=/other"]),
+    ] {
+        let mut changed = value.clone();
+        changed["Config"]["Env"] = env;
+        assert!(check(&serde_json::to_vec(&changed).unwrap()).is_err());
+    }
+}
 fn controller(policy: &WorkerPoolPolicy) -> Value {
     let digest = "d".repeat(64);
     let mounts = [
@@ -121,6 +154,105 @@ fn valid_v2(value: &Value, policy: &WorkerPoolPolicy) -> bool {
     )
     .is_ok()
 }
+
+#[test]
+fn stopped_predecessor_preserves_exit_status_without_qualifying_live_or_partial_rows() {
+    let policy = policy();
+    let id = "e".repeat(64);
+    let digest = "d".repeat(64);
+    let mut value = service_v2(&policy);
+    let check = |value: &Value| {
+        validate_stopped_controller_service_v2_inspection(
+            &serde_json::to_vec(value).unwrap(),
+            &policy,
+            &id,
+            &digest,
+        )
+    };
+    assert!(check(&value).is_err());
+    value["HostConfig"]["AutoRemove"] = json!(false);
+    value["HostConfig"]["RestartPolicy"] = json!({"Name":"no","MaximumRetryCount":0});
+    value["RestartCount"] = json!(0);
+    value["State"] = json!({
+        "Pid":0,"Running":false,"Paused":false,"Restarting":false,"Dead":false,"Status":"exited",
+        "ExitCode":143,"OOMKilled":false,"Error":"",
+        "StartedAt":"2026-11-10T00:00:00Z","FinishedAt":"2026-11-10T00:01:00Z"
+    });
+    assert_eq!(check(&value).unwrap(), 143);
+    assert!(
+        validate_failed_controller_service_v2_inspection(
+            &serde_json::to_vec(&value).unwrap(),
+            &policy,
+            &id,
+            &digest,
+            &policy.controller_name(),
+        )
+        .is_err()
+    );
+    for (field, replacement) in [
+        ("Pid", json!(1)),
+        ("Running", json!(true)),
+        ("Restarting", json!(true)),
+        ("Dead", json!(true)),
+        ("Status", json!("removing")),
+        ("ExitCode", json!(256)),
+        ("ExitCode", json!(null)),
+    ] {
+        let mut changed = value.clone();
+        changed["State"][field] = replacement;
+        assert!(check(&changed).is_err(), "{field}");
+    }
+    value["Mounts"].as_array_mut().unwrap().pop();
+    assert!(check(&value).is_err());
+}
+
+#[test]
+fn retained_anchor_requires_original_birth_and_a_stable_container() {
+    let policy = policy();
+    let cid = "e".repeat(64);
+    let original = "d".repeat(64);
+    let anchor: RetainedPoolAnchor = serde_json::from_value(json!({
+        "containerId":cid,"originalBirthDigest":original,"bootId":"11111111-1111-4111-8111-111111111111",
+        "pid":123,"processStart":"805",
+        "parentIdentity":[10,11],"leafIdentity":[10,12]
+    }))
+    .unwrap();
+    let inspection = json!({
+        "Id":cid,"Image":policy.anchor_image,"Name":format!("/{}",policy.anchor_name()),
+        "RestartCount":0,
+        "State":{"Pid":123,"Status":"running","Running":true,"Paused":false,"Restarting":false,
+            "Dead":false,"OOMKilled":false,"Error":""},
+        "Config":{"User":format!("{}:{}",policy.broker_uid,policy.broker_gid),"Entrypoint":["/bin/sleep"],
+            "Cmd":["infinity"],"Labels":{"reverie.pool.anchor":policy.deployment,
+                "reverie.pool.birth-policy":original}},
+        "HostConfig":{"CgroupParent":policy.parent_slice(),"Privileged":false,"ReadonlyRootfs":true,
+            "NetworkMode":"none","CapDrop":["ALL"],"CapAdd":null,
+            "SecurityOpt":["no-new-privileges:true"],"Memory":67_108_864,"MemorySwap":67_108_864,
+            "PidsLimit":16,"CpuShares":2,"CpuQuota":0,"NanoCpus":0,"CpusetCpus":policy.cpu_list(),
+            "AutoRemove":false,"RestartPolicy":{"Name":"no","MaximumRetryCount":0}},
+        "Mounts":[]
+    });
+    let valid = |value: &Value| {
+        validate_retained_anchor_inspection(&serde_json::to_vec(value).unwrap(), &policy, &anchor)
+            .is_ok()
+    };
+    assert!(valid(&inspection));
+    for (pointer, value) in [
+        (
+            "/Config/Labels/reverie.pool.birth-policy",
+            json!("f".repeat(64)),
+        ),
+        ("/State/Pid", json!(124)),
+        ("/State/Status", json!("removing")),
+        ("/State/Restarting", json!(true)),
+        ("/RestartCount", json!(1)),
+        ("/HostConfig/RestartPolicy/Name", json!("always")),
+    ] {
+        let mut changed = inspection.clone();
+        *changed.pointer_mut(pointer).unwrap() = value;
+        assert!(!valid(&changed), "{pointer}");
+    }
+}
 #[test]
 fn service_v2_is_exact_fifth_control_bind_without_silently_relaxing_v1() {
     let policy = policy();
@@ -153,5 +285,43 @@ fn service_v2_is_exact_fifth_control_bind_without_silently_relaxing_v1() {
         let mut changed = new.clone();
         changed["HostConfig"][field] = bad;
         assert!(!valid_v2(&changed, &policy));
+    }
+}
+#[test]
+fn service_v2_accepts_docker_environment_order_without_accepting_overrides() {
+    let policy = policy();
+    let mut value = service_v2(&policy);
+    value["Config"]["Env"] = json!(["LANG=C.UTF-8", "PATH=/bin"]);
+    assert!(valid_v2(&value, &policy));
+    for bad in [
+        json!([]),
+        json!(["PATH=/bin"]),
+        json!(["PATH=/bin", "PATH=/bin"]),
+        json!(["LANG=C.UTF-8", "PATH=/bin", "PATH=/elsewhere"]),
+        json!(["PATH=/bin", "LANG=C.UTF-8", "EXTRA=1"]),
+        json!(["PATH=/elsewhere", "LANG=C.UTF-8"]),
+        json!(["PATH=/bin", "LANG=C"]),
+        json!(["LANG=C.UTF-8", null]),
+        json!({"PATH":"/bin","LANG":"C.UTF-8"}),
+    ] {
+        value["Config"]["Env"] = bad;
+        assert!(!valid_v2(&value, &policy));
+    }
+    let mut original = controller(&policy);
+    original["Config"]["Env"] = json!(["LANG=C.UTF-8", "PATH=/bin"]);
+    assert!(!valid(&original, &policy));
+}
+#[test]
+fn failed_startup_classification_is_exact_and_not_a_general_error_allowlist() {
+    assert!(super::super::failed_controller_startup_log(
+        b"WORKER_POOL_CONTROLLER_SPEC\n"
+    ));
+    for bad in [
+        b"WORKER_POOL_CONTROLLER_SPEC".as_slice(),
+        b"WORKER_POOL_CONTROLLER_SPEC\nOTHER_FAILURE\n",
+        b"WORKER_POOL_PARENT_WRITE\n",
+        b"",
+    ] {
+        assert!(!super::super::failed_controller_startup_log(bad));
     }
 }

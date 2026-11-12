@@ -88,6 +88,19 @@ describe('permanent employee across three runtime replacements', () => {
     });
   }
 
+  async function heldMove(employeeId: string, from: string, to: string, cause: string) {
+    const error = await company.rebind(employeeId, undefined, to).then(
+      () => { throw new Error('Expected a retained binding failure'); }, error => error);
+    expect(error).toMatchObject({message: expect.stringContaining('publication is unconfirmed'),
+      cause: expect.objectContaining({message: cause})});
+    expect(company.replacementPublicationRecovery(error, panes.get(to)!,
+      {employeeId, replacesSessionId: from}, undefined)).toMatchObject({employeeId, sessionId: to,
+      replacesSessionId: from, reason: 'binding-publication-unconfirmed'});
+    expect(panes.has(from)).toBe(true); expect(panes.has(to)).toBe(true);
+    expect(companyStore.publicationUnconfirmed).toBe(false);
+    return error;
+  }
+
   it('keeps one employee and room seat, coordinator role, DM and history through three rebinds', async () => {
     const hired = await employee();
     const memory = await company.remember(hired.id, undefined, 'Keep the dragon story');
@@ -183,16 +196,18 @@ describe('permanent employee across three runtime replacements', () => {
     expect(chat.room(room.id)!.members.map((m) => m.sessionId)).toEqual(['different-employee']);
   });
 
-  it('does not leave the employee bound to the successor when membership migration fails', async () => {
+  it('retains the reserved generation and source binding when membership migration fails', async () => {
     const hired = await employee();
     const room = chat.createRoom('migration failure', undefined);
     chat.addMember(room.id, 'worker-0');
     const before = structuredClone(chat.room(room.id));
     vi.spyOn(chat, 'replaceSession').mockRejectedValueOnce(new Error('migration failed'));
-    await expect(company.rebind(hired.id, undefined, 'worker-1')).rejects.toThrow('migration failed');
+    await heldMove(hired.id, 'worker-0', 'worker-1', 'migration failed');
     expect(company.view().employees[0].sessionId).toBe('worker-0');
-    expect(company.view().employees[0].sessionGeneration).toBe(3);
+    expect(company.view().employees[0]).toMatchObject({sessionGeneration: 2,
+      bindingMigration: {from: 'worker-0', to: 'worker-1'}});
     expect(chat.room(room.id)).toEqual(before);
+    await expect(company.rebind(hired.id, undefined, 'worker-1')).rejects.toThrow('reconciliation');
   });
 
   it('does not undo a bind that a concurrent rebind has since moved on', async () => {
@@ -205,18 +220,21 @@ describe('permanent employee across three runtime replacements', () => {
       });
       throw new Error('migration failed');
     });
-    await expect(company.rebind(hired.id, undefined, 'worker-1')).rejects.toThrow('migration failed');
+    await heldMove(hired.id, 'worker-0', 'worker-1', 'migration failed');
     expect(company.view().employees[0].sessionId).toBe('worker-2');
+    expect(company.view().employees[0].bindingMigration).toMatchObject({from: 'worker-0', to: 'worker-1'});
   });
 
-  it('posts no move notice for a move that was rolled back', async () => {
+  it('posts no completed move notice for a retained migration failure', async () => {
     const hired = await employee();
     const room = chat.createRoom('notices', undefined);
     chat.addMember(room.id, 'worker-0');
     vi.spyOn(chat as any, 'changed').mockImplementationOnce(() => {
       throw new Error('broadcast failed');
     });
-    await expect(company.rebind(hired.id, undefined, 'worker-1')).rejects.toThrow('broadcast failed');
+    await heldMove(hired.id, 'worker-0', 'worker-1', 'broadcast failed');
+    expect(company.view().employees[0]).toMatchObject({sessionId: 'worker-0',
+      bindingMigration: {from: 'worker-0', to: 'worker-1'}});
     expect(JSON.stringify(chat.room(room.id)!.messages)).not.toContain('moved to a new session');
   });
 
@@ -246,19 +264,19 @@ describe('permanent employee across three runtime replacements', () => {
       if (++calls === 2) throw new Error('room two failed');
       return real(...args);
     });
-    await expect(company.rebind(hired.id, undefined, 'worker-1')).rejects.toThrow('room two failed');
+    await heldMove(hired.id, 'worker-0', 'worker-1', 'room two failed');
     expect(company.view().employees[0].sessionId).toBe('worker-0');
     [...rooms, dm].forEach((r, i) => expect(chat.room(r.id)!.members).toEqual(before[i]));
     expect(chat.room(dm.id)!.dm).toEqual(dmBefore);
-    // Nothing was retired, so the next attempt starts clean and moves all of them.
+    // The chatroom transaction restored its own rooms, but that is no canonical
+    // binding undo receipt. Keep the published reservation and refuse replay.
     vi.restoreAllMocks();
-    await company.rebind(hired.id, undefined, 'worker-1');
-    for (const r of [...rooms, dm]) {
-      expect(chat.room(r.id)!.members.map((m) => m.sessionId)).toEqual(['worker-1']);
-    }
+    await expect(company.rebind(hired.id, undefined, 'worker-1')).rejects.toThrow('reconciliation');
+    expect(company.view().employees[0].bindingMigration).toMatchObject({from: 'worker-0', to: 'worker-1'});
+    [...rooms, dm].forEach((r, i) => expect(chat.room(r.id)!.members).toEqual(before[i]));
   });
 
-  it('keeps the employee\'s thread across sessions: adopted when known, kept when the successor has none, restored on a failed move', async () => {
+  it('keeps the thread across successful sessions and retains its reserved value on an unconfirmed move', async () => {
     threads.set('worker-0', 'ses_first');
     const hired = await employee();
     expect(hired.threadId).toBe('ses_first');
@@ -269,13 +287,14 @@ describe('permanent employee across three runtime replacements', () => {
     threads.set('worker-2', 'ses_second');
     await company.rebind(hired.id, undefined, 'worker-2');
     expect(company.view().employees[0].threadId).toBe('ses_second');
-    // A failed move undoes the thread with the binding.
+    // A post-reservation failure cannot manufacture a thread/binding rollback.
     threads.set('worker-3', 'ses_third');
     vi.spyOn(chat, 'replaceSession').mockRejectedValueOnce(new Error('migration failed'));
     const room = chat.createRoom('thread rollback', undefined);
     chat.addMember(room.id, 'worker-2');
-    await expect(company.rebind(hired.id, undefined, 'worker-3')).rejects.toThrow('migration failed');
-    expect(company.view().employees[0]).toMatchObject({ sessionId: 'worker-2', threadId: 'ses_second' });
+    await heldMove(hired.id, 'worker-2', 'worker-3', 'migration failed');
+    expect(company.view().employees[0]).toMatchObject({ sessionId: 'worker-2', threadId: 'ses_third',
+      bindingMigration: {from: 'worker-2', to: 'worker-3'} });
     // The owner can seed or clear it, and the next replacement is told it.
     await company.setThread(hired.id, undefined, 'ses_seed');
     expect(company.prepareSpawn({ employeeId: hired.id }).threadId).toBe('ses_seed');

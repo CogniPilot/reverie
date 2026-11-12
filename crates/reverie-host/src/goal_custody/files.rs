@@ -54,6 +54,34 @@ impl PrivateBatch {
         });
         self.read_json(path, true)
     }
+    /// Existing host-resume PLAN/RESULT records are opaque preserved history,
+    /// not actor wire frames. Keep their bounded byte-hash read separate from
+    /// the existing 64 KiB JSON purposes; the same FD/finalizer owner is used.
+    pub(crate) fn read_actor_history_record(
+        &mut self,
+        path: &Path,
+        remaining: usize,
+    ) -> Result<(Fingerprint, Vec<u8>)> {
+        self.read_actor_history_bounded(path, remaining.min(16 * 1024 * 1024))
+    }
+    pub(crate) fn read_actor_history_metadata(
+        &mut self,
+        path: &Path,
+        remaining: usize,
+    ) -> Result<(Fingerprint, Vec<u8>)> {
+        self.read_actor_history_bounded(path, remaining.min(65536))
+    }
+    fn read_actor_history_bounded(
+        &mut self,
+        path: &Path,
+        limit: usize,
+    ) -> Result<(Fingerprint, Vec<u8>)> {
+        let (stamp, bytes) = self.observe(path, false, false, Some(limit), true)?;
+        Ok((
+            stamp.expect("required record"),
+            bytes.expect("bounded history read"),
+        ))
+    }
     fn read_json(&mut self, path: &Path, exact: bool) -> Result<(Fingerprint, Vec<u8>)> {
         let (fingerprint, bytes) = self.observe(path, false, false, Some(65536), exact)?;
         Ok((

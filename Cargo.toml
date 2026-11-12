@@ -19,6 +19,8 @@ serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["raw_value", "float_roundtrip"] }
 toml = "0.9"
 sha2 = "0.10"
+tar = { version = "0.4", default-features = false }
+flate2 = "1"
 libyaml-safer = "=0.3.0"
 regex-lite = "=0.1.9"
 blake2 = "0.10.6"
@@ -49,7 +51,9 @@ reverie-core = { path = "crates/reverie-core" }
 reverie-contracts = { path = "crates/reverie-contracts" }
 reverie-store = { path = "crates/reverie-store" }
 reverie-host = { path = "crates/reverie-host" }
+reverie-worker-client = { path = "crates/reverie-worker-client" }
 reverie-application = { path = "crates/reverie-application" }
+reverie-deployment = { path = "crates/reverie-deployment" }
 reverie-diagnostics = { path = "crates/reverie-diagnostics" }
 reverie-elf-bundle = { path = "crates/reverie-elf-bundle" }
 

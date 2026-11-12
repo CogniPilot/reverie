@@ -39,15 +39,7 @@ impl WorkerImageQualificationError {
     }
 }
 fn facts_unknown(error: &reverie_host::website_facts::WebsiteFactsError) -> bool {
-    use reverie_host::website_facts::WebsiteFactsError as E;
-    match error {
-        E::Cleanup => true,
-        E::Channel(e) => e.has_unconfirmed_close(),
-        E::Finalization { primary, secondary } => {
-            facts_unknown(primary) || facts_unknown(secondary)
-        }
-        _ => false,
-    }
+    error.has_unconfirmed_close()
 }
 impl std::fmt::Display for WorkerImageQualificationError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

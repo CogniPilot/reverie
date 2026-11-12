@@ -11,6 +11,7 @@
  */
 
 import type { CliEntry } from './types.js';
+import {THREAD_STATE_BINDINGS} from './profiles.js';
 import { CODEX_REASONING_EFFORTS } from '../../types/session.js';
 
 const HOME_DIRS = {
@@ -36,6 +37,7 @@ function agentDefaults(): Pick<
   | 'external'
   | 'requiresMux'
   | 'hooks'
+  | 'workspaceHooks'
   | 'transcript'
   | 'altScreen'
   | 'wheelForward'
@@ -57,6 +59,7 @@ function agentDefaults(): Pick<
     external: true,
     requiresMux: true,
     hooks: 'none',
+    workspaceHooks: { sessionCreate: 'none', freshCase: 'none', existingCase: 'refresh-only' },
     transcript: 'none',
     altScreen: 'strip-mux-only',
     wheelForward: { mode: 'never' },
@@ -130,6 +133,8 @@ const CLAUDE: CliEntry = {
   launch: {
     chain: 'fallback',
     resumeSelection: 'claude-transcript',
+    threadStateProfile: 'conversation-chain-v1',
+    effortInput: 'session-effort-v1',
     params: {
       claudeMode: {
         type: 'enum',
@@ -201,7 +206,7 @@ const CLAUDE: CliEntry = {
     ],
     // Claude has no `<Mode>Config` object of its own — the bridge synthesizes one from its
     // discrete top-level spawn fields, under their EXISTING field name `resumeSessionId`.
-    legacyConfigAliases: { resumeId: 'resumeSessionId' },
+    legacyConfigAliases: { resumeId: THREAD_STATE_BINDINGS['conversation-chain-v1'].key },
   },
   env: {
     // Claude asks for truecolor, like every CLI here except `shell` and `opencode`.
@@ -230,6 +235,9 @@ const CLAUDE: CliEntry = {
   },
   capabilities: {
     external: false,
+    accountReplacementProfile: 'anthropic-account-v1',
+    startupAccountProfile: 'anthropic-local-account-v1',
+    rebootRestore: 'native-required',
     // Claude indents its transcript body two columns and puts its own ●/✻/❯ markers
     // in them, so a copy can drop two and paste flush. Claude and codex are the only
     // entries that declare this, because theirs are the only gutters that have been measured.
@@ -280,6 +288,7 @@ const CLAUDE: CliEntry = {
     // Claude installs Reverie's own hooks block into every workspace it runs in, so its
     // stop/idle signals are unconditional — no per-session veto, unlike deepseek's bridge.
     hooks: 'always',
+    workspaceHooks: { sessionCreate: 'install', freshCase: 'install', existingCase: 'install' },
     transcript: 'claude-jsonl',
     altScreen: 'strip-full',
     echo: { policy: 'buffer', anchor: { kind: 'glyph', glyph: '❯', offset: 2 } },
@@ -420,6 +429,7 @@ const SHELL: CliEntry = {
     // has no hooks but is not an "external CLI", so a predicate derived from `external`
     // once accepted `until=stop` on a shell session and hung for the full timeout.
     hooks: 'none',
+    workspaceHooks: { sessionCreate: 'none', freshCase: 'install', existingCase: 'refresh-only' },
     transcript: 'none',
     altScreen: 'preserve',
     echo: { policy: 'off', anchor: { kind: 'none' } },
@@ -501,8 +511,9 @@ const OPENCODE: CliEntry = {
         ],
       },
     ],
-    legacyConfigAliases: { resumeId: 'continueSession' },
-    legacyConfigField: 'openCodeConfig',
+    threadStateProfile: 'forkable-continue-v1',
+    legacyConfigAliases: { resumeId: THREAD_STATE_BINDINGS['forkable-continue-v1'].key },
+    legacyConfigField: THREAD_STATE_BINDINGS['forkable-continue-v1'].field,
   },
   env: {
     exports: [],
@@ -515,6 +526,8 @@ const OPENCODE: CliEntry = {
   },
   capabilities: {
     ...agentDefaults(),
+    workspaceHooks: { sessionCreate: 'none', freshCase: 'none', existingCase: 'none' },
+    input: { shellKeyGuard: true },
     ...AGENTS_DIR_SKILL,
     altScreen: 'strip-mux-and-mouse',
     echo: { policy: 'buffer', anchor: { kind: 'cursor' }, predictProfile: undefined },
@@ -541,6 +554,9 @@ const OPENCODE: CliEntry = {
     // last `┃` row on screen is the composer's agent/model row (or the permission box's
     // closing bar), never the prompt text, so the submit verifier stands down.
     composerReadyMark: 'tab agents',
+    accountReplacementRefusal: 'OpenCode thread moves require a launch-then-stop adapter and are not supported yet',
+    rebootRestore: 'native-required',
+    fullAccessDefaults: {values: {autoAllowTools: true}, unlessJsonProperty: {configField: 'configContent', property: 'permission'}},
     workDetect: {
       promptGlyph: '┃',
       workingLine: '[⬝■]{8}',
@@ -572,6 +588,7 @@ const OPENCODE: CliEntry = {
     // own `env.configContentVar` already declares — the builder in custom-model-injection.ts
     // must merge into whatever opencode config Reverie would otherwise send, not clobber it.
     customModelInjection: { kind: 'configContentEnv', envVar: 'OPENCODE_CONFIG_CONTENT', template: 'opencode-json' },
+    localModelPreference: 'preferred',
     // OPENCODE_CONFIG_CONTENT already matches the OPENCODE_ allowedPrefix above, so it was
     // ALREADY reachable via plain envOverrides before this feature existed — it replaces
     // opencode's whole config, provider api keys included, so a non-granted multi-user owner
@@ -642,8 +659,9 @@ const CODEX: CliEntry = {
         ],
       },
     ],
-    legacyConfigAliases: { bypassApprovals: 'dangerouslyBypassApprovals', resumeId: 'resumeSessionId' },
-    legacyConfigField: 'codexConfig',
+    threadStateProfile: 'nested-resume-v1',
+    legacyConfigAliases: { bypassApprovals: 'dangerouslyBypassApprovals', resumeId: THREAD_STATE_BINDINGS['nested-resume-v1'].key },
+    legacyConfigField: THREAD_STATE_BINDINGS['nested-resume-v1'].field,
     resumeAppend: { style: 'positional', token: 'resume' },
   },
   env: {
@@ -660,6 +678,8 @@ const CODEX: CliEntry = {
   capabilities: {
     ...agentDefaults(),
     ...AGENTS_DIR_SKILL,
+    input: { keyBurstMaxChars: 1000, requiresEmptyComposer: true },
+    turnSummaryHooks: 'codex-config-v1',
     // Codex draws `› Ask Codex to do anything` on its composer row and
     // `Working (2m 49s • esc to interrupt)` above it while a turn runs. It animates no
     // braille spinner, and it never prints `esc to interrupt` at rest, so that phrase
@@ -695,6 +715,9 @@ const CODEX: CliEntry = {
     // Nothing is misfiled by that (codex raises no idle prompts), and there is no row to
     // match until codex pins one.
     composerReadyMark: '? for shortcuts',
+    accountReplacementProfile: 'openai-account-v1',
+    startupAccountProfile: 'openai-local-account-v1',
+    rebootRestore: 'native-or-new',
     workDetect: {
       promptGlyph: '›',
       workingLine: '[Ee]sc to interrupt',
@@ -1433,6 +1456,7 @@ const DEEPSEEK: CliEntry = {
     // launcher's own default, `workspace-write`, which already asks. Clamping to
     // `read-only` instead would break the workspace rather than protect it.
     privilegedParams: [{ param: 'permissionMode', clampTo: 'workspace-write' }],
+    fullAccessDefaults: {values: {permissionMode: 'danger-full-access'}},
     // The half no other CLI needs. `DSH_*` is an allowlisted envOverrides prefix and
     // applyEnvOverrides() runs LAST, so without this a non-granted owner could send
     // DSH_PERMISSION_MODE on the same request and land after the config clamp.
@@ -1626,7 +1650,7 @@ const HANDS: CliEntry = {
   launch: { params: {}, variants: [{ id: 'default', args: [{ lit: 'reverie-hands' }] }] },
   env: { exports: [], unset: [], tmuxSetenvKeys: HANDS_ENV, dockerExecEnvNames: HANDS_ENV, allowedPrefixes: [], allowedKeys: HANDS_ENV },
   capabilities: {
-    ...agentDefaults(), chatDelivery: 'poll', stripInkBloat: false,
+    ...agentDefaults(), chatDelivery: 'poll', stripInkBloat: false, rebootRestore: 'persistent-record',
     model: { source: 'none' }, echo: { policy: 'buffer', anchor: { kind: 'none' } },
     customModelInjection: { kind: 'env', baseUrlVar: 'REVERIE_HANDS_BASE_URL', apiKeyVar: 'REVERIE_HANDS_API_KEY', modelVars: ['REVERIE_HANDS_MODEL'], appendV1Suffix: true },
   }, overlays: {},

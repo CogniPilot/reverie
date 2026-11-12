@@ -1,8 +1,8 @@
 /**
  * @fileoverview The spoken-turn hint (chatroom-delivery.ts SPOKEN_TURN_HINT) end to end through the post route and
  * the pane: only a post the server marks owner_spoken (a verified owner session cookie, no agent header, spoken
- * true) is delivered with it. An unsigned body claiming spoken, an agent, and a typed owner post are delivered as
- * before, and the mark (so the hint) survives save/load. Synthetic fixtures only.
+ * true) is delivered with it. Unauthenticated claims are rejected before persistence; agent and typed owner posts
+ * carry no spoken hint. Legacy unverified spoken metadata never becomes owner evidence on reload. Synthetic fixtures only.
  * Port: N/A (app.inject()).
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -47,7 +47,7 @@ describe('spoken-turn hint on delivery', () => {
     file = join(dir, 'chatrooms.json');
     const store = new OwnerAuthStore(join(dir, 'owner-auth.json'));
     const oneTime = (await admin.bootstrap(store, USER)).oneTimePassword;
-    await admin.setPolicy(store, 'off'); // as deployed: the policy is off, the cookie still verifies
+    await admin.setPolicy(store, 'off'); // Legacy policy mode still verifies actual owner cookies.
     const auth = new OwnerAuthService({ store, auditFile: join(dir, 'owner-auth-audit.jsonl') });
     const harness = await createRouteTestHarness((fastify, c) => {
       const deps = { service: auth, ctx: c as unknown as SessionPort };
@@ -103,15 +103,17 @@ describe('spoken-turn hint on delivery', () => {
     await rm(dir, { recursive: true, force: true });
   });
 
-  const post = async (text: string, opts: { cookie?: string; agent?: string; spoken?: boolean } = {}) => {
-    const res = await app.inject({
+  const requestPost = (text: string, opts: { cookie?: string; agent?: string; spoken?: boolean } = {}) =>
+    app.inject({
       method: 'POST',
       url: `/api/chatrooms/${roomId}/messages`,
       payload: { text, ...(opts.spoken ? { spoken: true } : {}) },
       ...(opts.cookie !== undefined ? { cookies: { [OWNER_COOKIE]: opts.cookie } } : {}),
       ...(opts.agent ? { headers: { 'x-reverie-parent-session': opts.agent } } : {}),
     });
-    expect(res.statusCode).toBe(200);
+  const post = async (text: string, opts: { cookie?: string; agent?: string; spoken?: boolean } = {}) => {
+    const res = await requestPost(text, opts);
+    expect(res.statusCode, res.body).toBe(200);
     return res.json().data.message as ChatMessage;
   };
   /** Everything a member's hook carried so far, after delivery has run; its pane only ever gets the wake line. */
@@ -128,18 +130,22 @@ describe('spoken-turn hint on delivery', () => {
     expect(written).toContain(`user: how is the deploy ${SPOKEN_TURN_HINT}`);
   });
 
-  it('gives no hint to an unsigned headerless body claiming spoken', async () => {
-    const m = await post('ordinary API post', { spoken: true });
-    expect(m.from).toEqual({ kind: 'user', name: 'user' });
-    expect(m.spoken).toBe(true); // the request is stored as made; it is not evidence
+  it('rejects an unsigned spoken claim without storing or delivering it', async () => {
+    const before = service.room(roomId)!.messages.length;
+    const response = await requestPost('ordinary API post', { spoken: true });
+    expect(response.statusCode).toBe(403);
+    expect(service.room(roomId)!.messages).toHaveLength(before);
     const written = await pane(ALPHA);
-    expect(written).toContain('user: ordinary API post');
+    expect(written).not.toContain('ordinary API post');
     expect(written).not.toContain('spoken in car mode');
   });
 
-  it('gives no hint to a bad cookie claiming spoken', async () => {
-    const m = await post('forged cookie', { cookie: 'not-a-real-session-token', spoken: true });
-    expect((m.from as { mark?: string }).mark).toBeUndefined();
+  it('rejects a bad cookie spoken claim without storing or delivering it', async () => {
+    const before = service.room(roomId)!.messages.length;
+    const response = await requestPost('forged cookie', { cookie: 'not-a-real-session-token', spoken: true });
+    expect(response.statusCode).toBe(403);
+    expect(service.room(roomId)!.messages).toHaveLength(before);
+    expect(await pane(ALPHA)).not.toContain('forged cookie');
     expect(await pane(ALPHA)).not.toContain('spoken in car mode');
   });
 
@@ -158,9 +164,14 @@ describe('spoken-turn hint on delivery', () => {
     expect(await pane(ALPHA)).not.toContain('spoken in car mode');
   });
 
-  it('keeps the hint for an owner spoken turn after save/load, and none for the unsigned one', async () => {
+  it('preserves the owner hint after reload without elevating legacy unverified spoken metadata', async () => {
     const signed = await post('signed turn', { cookie: owner, spoken: true });
-    const unsigned = await post('unsigned turn', { spoken: true });
+    // Model persisted history from older writers, not a request accepted by
+    // today's authenticated posting route. The stored spoken flag is DATA.
+    const unsigned = service.post(roomId, { kind: 'user', name: 'user' }, 'legacy unsigned turn', 'all', {
+      spoken: true,
+      deliver: false,
+    });
     await service.stop();
     const reloaded = (await loadChatrooms(file)).find((r) => r.id === roomId)!;
     const byId = (id: string) => reloaded.messages.find((m) => m.id === id)!;
@@ -171,6 +182,8 @@ describe('spoken-turn hint on delivery', () => {
         ` ${SPOKEN_TURN_HINT} ${answerLinkHint(signed.id)}`
       )
     ).toBe(true);
+    expect(byId(unsigned.id).spoken).toBe(true);
+    expect((byId(unsigned.id).from as { mark?: string }).mark).toBeUndefined();
     expect(renderForRecipient(reloaded, byId(unsigned.id), ALPHA, () => 'alpha')).not.toContain('spoken in car mode');
   });
 });

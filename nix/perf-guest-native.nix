@@ -5,7 +5,7 @@ let
     inherit pkgs src;
     members = [
       "reverie-perf-check" "reverie-worker-init" "reverie-core" "reverie-contracts"
-      "reverie-host" "reverie-store" "reverie-http"
+      "reverie-host" "reverie-worker-client" "reverie-store" "reverie-http"
       "reverie-diagnostics" "reverie-python-regex"
     ];
     vendors = [ "rustpython-sre-engine" "rustpython-wtf8" ];

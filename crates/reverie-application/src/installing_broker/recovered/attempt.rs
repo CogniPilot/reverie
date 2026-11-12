@@ -5,14 +5,16 @@ use reverie_host::office::OfficeConstruction;
 use std::time::{Duration, Instant};
 
 pub(super) struct Attempt {
+    end: Option<Instant>,
     claims: Vec<(ProfileSessionId, StorageClaim)>,
     phones: Vec<(ProfileSessionId, OfficePhone)>,
     office: Option<Arc<OfficeService>>,
     constructions: Vec<OfficeConstruction>,
 }
 impl Attempt {
-    pub(super) fn new() -> Self {
+    pub(super) fn new(end: Option<Instant>) -> Self {
         Self {
+            end,
             claims: Vec::new(),
             phones: Vec::new(),
             office: None,
@@ -39,7 +41,8 @@ impl Attempt {
         // Every selected storage claim/marker validation precedes the first
         // actual Office constructor, including already registered members.
         for (sid, _) in selected.entries() {
-            let claim = broker.storage.claim(source, sid)?;
+            check_deadline(self.end)?;
+            let claim = broker.storage.claim_with_end(source, sid, self.end)?;
             let paths = claim.paths().clone();
             self.claims.push((sid.clone(), claim));
             if paths.kind() == StorageKind::Employee {
@@ -56,6 +59,7 @@ impl Attempt {
         lifecycle: &LaptopLifecycle<'_>,
     ) -> Result<()> {
         for (sid, _) in names {
+            check_deadline(self.end)?;
             if broker.storage.runtime.cancellation().is_cancelled() {
                 return Err(RecoveryError::Refused("WORKER_OFFICE_RECOVERY_STOPPING"));
             }
@@ -78,7 +82,12 @@ impl Attempt {
         // Retain the service BEFORE bind, including failed/unknown actual
         // constructors which return no completed phone.
         self.office = Some(office.clone());
-        let phone = match office.bind_worker_retained(sid.clone()) {
+        check_deadline(self.end)?;
+        let phone = match self.end {
+            Some(end) => office.bind_worker_retained_until(sid.clone(), end),
+            None => office.bind_worker_retained(sid.clone()),
+        };
+        let phone = match phone {
             Ok(phone) => phone,
             Err(failure) => {
                 let (error, construction) = failure.into_parts();

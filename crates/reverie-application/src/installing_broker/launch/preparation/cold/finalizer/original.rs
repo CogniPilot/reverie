@@ -18,7 +18,7 @@ impl Finalizer<'_> {
             return;
         };
         let broker = self.owner.scope().preparing.broker();
-        let admission = match broker.admit_ordinary_stop(&target) {
+        let admission = match self.owner.scope().preparing.admit_original_cleanup(&target) {
             Ok(admission) => admission,
             Err(error) => {
                 self.errors.push(error.into());
@@ -106,7 +106,7 @@ impl Finalizer<'_> {
             return;
         };
         let broker = self.owner.scope().preparing.broker();
-        let admission = match broker.admit_ordinary_stop(&target) {
+        let admission = match self.owner.scope().preparing.admit_original_cleanup(&target) {
             Ok(admission) => admission,
             Err(error) => {
                 self.errors.push(error.into());

@@ -5,15 +5,16 @@ use std::{
     os::{fd::AsRawFd, unix::fs::MetadataExt},
     path::PathBuf,
 };
-const NAMES: [&str; 3] = ["", "worker-pool", "policies"];
-const MODES: [u32; 3] = [0o700, 0o700, 0o750];
+const NAMES: [&str; 4] = ["", "worker-pool", "policies", "control"];
+const PARENTS: [usize; 4] = [0, 0, 1, 1];
+const MODES: [u32; 4] = [0o700, 0o700, 0o750, 0o770];
 
 pub(super) struct Directories {
     root: PathBuf,
     ids: [u32; 2],
-    files: [Option<File>; 3],
-    identity: [[u64; 2]; 3],
-    creation_attempted: [bool; 3],
+    files: [Option<File>; 4],
+    identity: [[u64; 2]; 4],
+    creation_attempted: [bool; 4],
     close_unknown: bool,
 }
 impl Directories {
@@ -21,9 +22,9 @@ impl Directories {
         Self {
             root,
             ids,
-            files: [None, None, None],
-            identity: [[0; 2]; 3],
-            creation_attempted: [false; 3],
+            files: [None, None, None, None],
+            identity: [[0; 2]; 4],
+            creation_attempted: [false; 4],
             close_unknown: false,
         }
     }
@@ -41,15 +42,15 @@ impl Directories {
     }
     pub(super) fn open_child(&mut self, index: usize) -> Result<()> {
         need(
-            (1..=2).contains(&index)
+            (1..=3).contains(&index)
                 && self.files[index].is_none()
                 && !self.creation_attempted[index],
             "WORKER_POOL_PUBLICATION_DIRECTORY_REPLAYED",
         )?;
-        self.current(index - 1)?;
+        self.current(PARENTS[index])?;
         self.creation_attempted[index] = true;
         let created = match nix::sys::stat::mkdirat(
-            self.file(index - 1)?,
+            self.file(PARENTS[index])?,
             NAMES[index],
             nix::sys::stat::Mode::S_IRWXU,
         ) {
@@ -58,7 +59,7 @@ impl Directories {
             Err(error) => return Err(io::Error::from(error).into()),
         };
         self.files[index] = Some(native::open_at(
-            self.file(index - 1)?.as_raw_fd(),
+            self.file(PARENTS[index])?.as_raw_fd(),
             OsStr::new(NAMES[index]),
             libc::O_RDONLY | libc::O_DIRECTORY,
         )?);
@@ -73,7 +74,19 @@ impl Directories {
             .map_err(io::Error::from)?;
         }
         self.capture(index)?;
-        self.current(index - 1)
+        if index == 3 {
+            // Only initial metadata preparation requires an empty directory.
+            // The original controller may later publish its legitimate socket.
+            let held = PathBuf::from(format!("/proc/self/fd/{}", self.file(index)?.as_raw_fd()));
+            let names = reverie_store::operations::settlement_directory_names(&held)
+                .map_err(|cause| PoolError::PublicationDirectory(Box::new(cause)))?;
+            need(
+                names.is_empty(),
+                "WORKER_POOL_PUBLICATION_CONTROL_NOT_EMPTY",
+            )?;
+            self.current(index)?;
+        }
+        self.current(PARENTS[index])
     }
     fn file(&self, index: usize) -> Result<&File> {
         self.files[index].as_ref().ok_or(PoolError::Refused(
@@ -86,7 +99,7 @@ impl Directories {
         } else {
             Ok(fs::symlink_metadata(format!(
                 "/proc/self/fd/{}/{}",
-                self.file(index - 1)?.as_raw_fd(),
+                self.file(PARENTS[index])?.as_raw_fd(),
                 NAMES[index]
             ))?)
         }
@@ -118,7 +131,7 @@ impl Directories {
         )
     }
     pub(super) fn versions(&self) -> Result<&File> {
-        for index in 0..=2 {
+        for index in 0..=3 {
             self.current(index)?;
         }
         self.file(2)
@@ -141,7 +154,7 @@ impl Directories {
     pub(super) fn sync(&self) -> Result<()> {
         // Sync every actual parent, including newly created directory entries.
         let mut result = Ok(());
-        for index in (0..=2).rev() {
+        for index in (0..=3).rev() {
             let synced = self
                 .current(index)
                 .and_then(|()| self.file(index)?.sync_all().map_err(Into::into));

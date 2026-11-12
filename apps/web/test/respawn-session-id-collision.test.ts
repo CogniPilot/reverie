@@ -54,6 +54,7 @@ function recordingMux() {
     setAttached: () => {},
     respawnPane: async (options: RespawnPaneOptions) => {
       calls.push(options);
+      options.onProviderDispatch?.();
       return 4242;
     },
   };
@@ -78,6 +79,7 @@ function failingRespawnMux() {
     respawnPane: async () => 0,
     createSession: async (options: CreateSessionOptions) => {
       calls.push(options);
+      options.onProviderDispatch?.();
       return muxSession('reverie-recreated');
     },
   };
@@ -100,10 +102,12 @@ function vanishedSessionMux() {
     setAttached: () => {},
     respawnPane: async (options: RespawnPaneOptions) => {
       respawns.push(options);
+      options.onProviderDispatch?.();
       return 4242;
     },
     createSession: async (options: CreateSessionOptions) => {
       calls.push(options);
+      options.onProviderDispatch?.();
       return muxSession('reverie-recreated');
     },
   };

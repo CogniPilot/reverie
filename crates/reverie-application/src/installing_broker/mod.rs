@@ -1,6 +1,11 @@
 //! Actual installing-service current configuration owner. Native admission,
 //! lifecycle registry and effects remain private composition of this service;
 //! a captured configuration is neither owner authorization nor a start grant.
+mod actor_setup;
+pub use actor_setup::{
+    OfflineActorSetupClosed, OfflineActorSetupError, OfflineActorSetupFailure,
+    PreparedOfflineActorSetup,
+};
 mod bootstrap;
 mod chat_images;
 pub use bootstrap::{BootstrapSettlementError, BrokerBootstrapCause, BrokerBootstrapFailure};
@@ -9,22 +14,33 @@ pub use chat_images::{ChatImageHandlerClosed, ChatImageHandlerFailure, ChatImage
 mod bootstrap_tests;
 mod control;
 mod creation;
+mod fleet_drain;
 mod goal_custody;
 mod gpu_access;
 pub use goal_custody::{GoalCustodyHandlerClosed, GoalCustodyHandlerFailure};
 mod image_refresh;
+mod os_pool_nomination;
+pub use os_pool_nomination::{
+    nominate_current_os_worker_pool, nominate_os_worker_pool,
+    rebase_uninstalled_os_worker_pool_nomination, recover_uninstalled_os_worker_pool_pending,
+    retire_failed_os_worker_pool_installation, revise_os_worker_pool_nomination,
+};
 mod worker_image;
+mod worker_perf;
 pub use worker_image::{
     ClosedOfflineImageInspection, OfflineImageInspectionFailure, OfflineImageSwitchClosed,
     OfflineImageSwitchError, OfflineImageSwitchFailure, PreparedOfflineImageSwitch,
     QualifiedWorkerImage, WorkerImageQualificationError, WorkerImageQualificationFailure,
 };
+pub use worker_perf::{OfflinePerfClosed, OfflinePerfFailure, PreparedOfflinePerfSwitch};
 mod installed_controller;
 pub use installed_controller::ControllerInstallFailure;
+pub(crate) use installed_controller::{InstalledControllerSlot, InstalledMemberCreation};
 mod installation_offer;
 pub use installation_offer::{
     BrokerInstallationOffer, BrokerInstallationOfferCause, BrokerInstallationOfferFailure,
-    OsPoolInstallationFailure,
+    ObservedOfferTarget, OfferPreparationView, OfferTargetObservationError,
+    OfferTargetObservationFailure, OsPoolInstallationFailure, UnpreparedOfferBinding,
 };
 mod launch;
 mod lifecycle;
@@ -36,8 +52,8 @@ mod recovered;
 pub mod resource_actor;
 mod service;
 pub use service::{
-    BrokerService, BrokerServiceClosed, BrokerServiceError, BrokerServiceFailure,
-    BrokerServiceStartup, BrokerStartupCause, BrokerStartupFailure,
+    BrokerPoolRestoreError, BrokerService, BrokerServiceClosed, BrokerServiceError,
+    BrokerServiceFailure, BrokerServiceStartup, BrokerStartupCause, BrokerStartupFailure,
 };
 mod seat_stop;
 pub(crate) mod source;
@@ -204,7 +220,7 @@ pub struct InstallingBroker {
     recovery: Arc<RecoveryOwners>,
     goals: Arc<reverie_host::goal_custody::GoalCustodyState>,
     images: Arc<chat_images::ChatImages>,
-    controller: Mutex<Option<reverie_host::worker_pool::ActivatedController>>,
+    controller: InstalledControllerSlot,
 }
 impl InstallingBroker {
     /// Trusted installing bootstrap; no wire-selected native engine or path.

@@ -1,6 +1,7 @@
 //! One original fixed Docker anchor attempt. Raw create reply and immutable
 //! CID are retained before subsequent fallible native observations.
 use super::*;
+use reverie_contracts::worker_pool::RetainedPoolAnchor;
 
 #[derive(Default)]
 pub(super) struct Anchor {
@@ -12,6 +13,20 @@ pub(super) struct Anchor {
     pub(super) daemon_unknown: bool,
 }
 impl Anchor {
+    pub(super) fn reopen(
+        &mut self,
+        policy: &ControllerPoolPolicy,
+        anchor: &RetainedPoolAnchor,
+        end: Instant,
+    ) -> Result<()> {
+        need(self.id.is_none(), "WORKER_POOL_ANCHOR_ALREADY_ATTEMPTED")?;
+        check(end)?;
+        policy.assert_anchor(anchor.container_id(), anchor.pid())?;
+        self.id = Some(anchor.container_id().to_owned());
+        self.pid = anchor.pid();
+        check(end)
+    }
+
     pub(super) fn create(&mut self, policy: &ControllerPoolPolicy, end: Instant) -> Result<()> {
         need(
             !self.create_attempted,

@@ -1,4 +1,4 @@
-//! Closed bind-only projection: never let Docker create a missing host source.
+//! Closed real-bind projection: never let Docker create a missing host source.
 use super::*;
 use serde_json::{Map, Value, json};
 use std::collections::BTreeSet;
@@ -174,6 +174,12 @@ fn projected_mount(
     selected.ok_or_else(|| DeploymentError::new(INVALID))
 }
 pub(super) fn project(source: &Value) -> Result<Value> {
+    project_profile(source, model::DeploymentProfile::Ordinary)
+}
+pub(super) fn project_profile(source: &Value, profile: model::DeploymentProfile) -> Result<Value> {
+    if profile == model::DeploymentProfile::ProtectedWebsite {
+        model::source_mounts(source, profile)?;
+    }
     let mut host = source["HostConfig"]
         .as_object()
         .cloned()
@@ -187,6 +193,9 @@ pub(super) fn project(source: &Value) -> Result<Value> {
     let mut output = Vec::new();
     for mount in mounts {
         check(targets.insert(path(&mount["Destination"])?.to_owned()))?;
+        if profile == model::DeploymentProfile::ProtectedWebsite && mount["Type"] == "tmpfs" {
+            continue;
+        }
         output.push(projected_mount(mount, legacy, original, &mut used)?);
     }
     check(used.len() == legacy.len() + original.len())?;
@@ -221,6 +230,31 @@ pub(super) fn equivalent(actual: &Value, expected: &Value) -> Result<()> {
         "DEPLOYMENT_CREATED_HOST_CONFIG_CHANGED",
     )
 }
+pub(super) fn equivalent_profile(
+    actual: &Value,
+    expected: &Value,
+    profile: model::DeploymentProfile,
+) -> Result<()> {
+    if profile == model::DeploymentProfile::Ordinary {
+        return equivalent(actual, expected);
+    }
+    let normalize = |value: &Value| -> Result<Value> {
+        let mut normalized = normalized_host(value)?;
+        normalized["Tmpfs"] = model::normalized_tmpfs(&value["Tmpfs"])?;
+        if value["CapAdd"].is_null() || value["CapAdd"].as_array().is_some_and(|v| v.is_empty()) {
+            normalized["CapAdd"] = Value::Null;
+        }
+        if value["PidMode"] == "" {
+            normalized["PidMode"] = json!("private");
+        }
+        normalized["SecurityOpt"] = model::normalized_security_options(&value["SecurityOpt"])?;
+        Ok(normalized)
+    };
+    require(
+        normalize(actual)? == normalize(expected)?,
+        "DEPLOYMENT_CREATED_HOST_CONFIG_CHANGED",
+    )
+}
 pub(super) fn same_grants(actual: &Value, expected: &Value) -> Result<()> {
     let normalize = |value: &Value| -> Result<Vec<Value>> {
         let mut values = list(value)?.iter().map(grant).collect::<Result<Vec<_>>>()?;
@@ -231,6 +265,27 @@ pub(super) fn same_grants(actual: &Value, expected: &Value) -> Result<()> {
         normalize(actual)? == normalize(expected)?,
         "DEPLOYMENT_CREATED_MOUNTS_CHANGED",
     )
+}
+pub(super) fn same_profile_grants(
+    actual: &Value,
+    expected: &Value,
+    profile: model::DeploymentProfile,
+) -> Result<()> {
+    if profile == model::DeploymentProfile::Ordinary {
+        return same_grants(actual, expected);
+    }
+    let real = |rows: &Value| -> Result<Value> {
+        let mut binds = Vec::new();
+        for row in list(rows)? {
+            match row["Type"].as_str() {
+                Some("bind") => binds.push(row.clone()),
+                Some("tmpfs") => {}
+                _ => return Err(DeploymentError::new(INVALID)),
+            }
+        }
+        Ok(json!(binds))
+    };
+    same_grants(&real(actual)?, &real(expected)?)
 }
 
 #[cfg(test)]

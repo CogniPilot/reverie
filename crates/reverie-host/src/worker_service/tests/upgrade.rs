@@ -1,6 +1,96 @@
 use super::*;
+use crate::worker_service::stopped::bus::BusReader;
 use std::os::unix::fs::PermissionsExt;
+#[test]
+fn failed_reset_is_fixed_unit_only_and_keeps_denial_and_original_manager_invocation() {
+    let (mut state, root, _, _) = selection();
+    fs::write(root.join("manager-failed"), b"failed original invocation").unwrap();
+    let before = state.observe().unwrap();
+    let pending = fs::read(state.folder().join("pending")).unwrap();
+    let mut bus = BusReader::controlled(&state).unwrap();
+    let original = bus.stopped_group().unwrap();
+    state.reset_failed_manager(&before).unwrap();
+    assert!(
+        state
+            .observe()
+            .unwrap()
+            .require_action_finished(&WorkerServiceAction::Stop)
+            .is_ok()
+    );
+    assert!(bus.stopped_group().unwrap() == original);
+    assert_eq!(fs::read(state.folder().join("pending")).unwrap(), pending);
+    assert!(root.join("manager-reset-attempted").is_file());
+    assert!(!root.join("manager-started").exists());
+    bus.close().unwrap();
+    state.close().unwrap();
+    fs::remove_dir_all(root).unwrap();
+}
+#[test]
+fn reset_refusal_or_reactivation_never_establishes_stopped_state() {
+    for fault in ["manager-reset-refused", "manager-reset-reactivate"] {
+        let (mut state, root, _, _) = selection();
+        fs::write(root.join("manager-failed"), b"failed invocation").unwrap();
+        fs::write(root.join(fault), b"controlled fault").unwrap();
+        let before = state.observe().unwrap();
+        assert!(state.reset_failed_manager(&before).is_err());
+        assert!(state.folder().join("pending").is_file());
+        state.close().unwrap();
+        fs::remove_dir_all(root).unwrap();
+    }
+}
+#[test]
+fn reset_does_not_adopt_a_replaced_original_invocation() {
+    let (mut state, root, _, _) = selection();
+    fs::write(root.join("manager-failed"), b"failed invocation").unwrap();
+    fs::write(
+        root.join("manager-reset-new-invocation"),
+        b"controlled replacement",
+    )
+    .unwrap();
+    let mut bus = BusReader::controlled(&state).unwrap();
+    let original = bus.stopped_group().unwrap();
+    let before = state.observe().unwrap();
+    state.reset_failed_manager(&before).unwrap();
+    // Production's retained native group check refuses this changed tuple.
+    assert!(bus.stopped_group().unwrap() != original);
+    assert!(state.folder().join("pending").is_file());
+    bus.close().unwrap();
+    state.close().unwrap();
+    fs::remove_dir_all(root).unwrap();
+}
+#[test]
+fn lost_reset_reply_keeps_original_call_and_denial_without_resending() {
+    let (mut state, root, _, _) = selection();
+    fs::write(root.join("manager-failed"), b"failed invocation").unwrap();
+    fs::write(root.join("manager-reset-lost"), b"hold original reply").unwrap();
+    let before = state.observe().unwrap();
+    state.attempted = true;
+    state.end = Instant::now() + Duration::from_millis(200);
+    assert!(state.reset_failed_manager(&before).is_err());
+    assert!(state.uncertain && state.call.is_some());
+    assert!(state.command(&["reset-failed", UNIT]).is_err());
+    assert!(state.folder().join("pending").is_file());
+    fs::write(root.join("release-reset"), b"test teardown only").unwrap();
+    // Settle the isolated test child for teardown; the original service
+    // operation retains its expired deadline and uncertain outcome.
+    state
+        .client
+        .settle_call(
+            state.call.as_ref().unwrap(),
+            Instant::now() + Duration::from_secs(3),
+        )
+        .unwrap();
+    assert!(state.close().is_err());
+    assert!(state.finish_attempt().is_err());
+    assert!(state.folder().join("pending").is_file());
+    fs::remove_dir_all(root).unwrap();
+}
 fn selection() -> (State, PathBuf, PathBuf, PathBuf) {
+    selection_with_action(WorkerServiceAction::Upgrade {
+        force_stopped: false,
+    })
+}
+fn selection_with_action(action: WorkerServiceAction) -> (State, PathBuf, PathBuf, PathBuf) {
     let (mut state, root, program) = fixture_mode("native-worker-manager-rollback");
     state.root = root.join("reverie");
     state.source = state.root.join("worker.json");
@@ -24,11 +114,7 @@ fn selection() -> (State, PathBuf, PathBuf, PathBuf) {
     }
     let history = state.folder().join("history");
     fs::DirBuilder::new().mode(0o700).create(&history).unwrap();
-    state
-        .begin_attempt(&WorkerServiceAction::Upgrade {
-            force_stopped: false,
-        })
-        .unwrap();
+    state.begin_attempt(&action).unwrap();
     (state, root, program, history)
 }
 #[test]
@@ -116,6 +202,113 @@ fn forced_marker_archival_preserves_unknown_bytes_and_never_touches_resource_pen
         b"original R unknown; no clear permission"
     );
     assert!(state.folder().join("pending").is_file());
+    fs::remove_dir_all(root).unwrap();
+}
+#[test]
+fn retained_maintenance_codec_accepts_only_exact_stop_or_image_pending() {
+    for kind in [RetainedServicePending::Stop, RetainedServicePending::Image] {
+        assert_eq!(RetainedServicePending::decode(kind.bytes()), Some(kind));
+        let mut changed = kind.bytes().to_vec();
+        changed.push(b' ');
+        assert_eq!(RetainedServicePending::decode(&changed), None);
+    }
+    for action in [
+        WorkerServiceAction::Start,
+        WorkerServiceAction::Install,
+        WorkerServiceAction::Upgrade {
+            force_stopped: true,
+        },
+        WorkerServiceAction::Rollback {
+            start_previous: true,
+        },
+    ] {
+        assert_eq!(RetainedServicePending::decode(pending_bytes(&action)), None);
+    }
+}
+#[test]
+fn exact_image_pending_archival_keeps_original_inode_and_collision_is_unchanged() {
+    use std::os::unix::fs::MetadataExt;
+    let (mut state, root, _, history) = selection_with_action(WorkerServiceAction::Stop);
+    let pending = state.folder().join("pending");
+    fs::write(&pending, RetainedServicePending::Image.bytes()).unwrap();
+    let original = fs::File::open(&pending).unwrap();
+    let before = original.metadata().unwrap();
+    let target = history.join(RetainedServicePending::Image.archive_name());
+    fs::write(&target, b"earlier unknown record").unwrap();
+    let from = fs::File::open(state.folder()).unwrap();
+    let to = fs::File::open(&history).unwrap();
+    assert_eq!(
+        native::retain_stopped_service_pending(&from, &to, RetainedServicePending::Image)
+            .unwrap_err()
+            .kind(),
+        std::io::ErrorKind::AlreadyExists
+    );
+    assert_eq!(
+        fs::read(&pending).unwrap(),
+        RetainedServicePending::Image.bytes()
+    );
+    assert_eq!(fs::read(&target).unwrap(), b"earlier unknown record");
+    fs::remove_file(&target).unwrap();
+    native::retain_stopped_service_pending(&from, &to, RetainedServicePending::Image).unwrap();
+    let after = fs::metadata(&target).unwrap();
+    assert_eq!((before.dev(), before.ino()), (after.dev(), after.ino()));
+    assert_eq!(
+        fs::read(&target).unwrap(),
+        RetainedServicePending::Image.bytes()
+    );
+    assert!(!pending.exists());
+    // Only the standalone rename component was exercised; the actual service
+    // owner is intentionally still uncertain and cannot release an attempt.
+    assert!(state.finish_attempt().is_err());
+    let _ = state.close();
+    fs::remove_dir_all(root).unwrap();
+}
+#[test]
+fn never_running_stop_recovery_keeps_a_genuine_denial_until_upgrade_archives_it() {
+    let (mut state, root, _, history) = selection_with_action(WorkerServiceAction::Stop);
+    let pending = state.folder().join("pending");
+    assert!(!state.folder().join("native-running").exists());
+    let (barrier, _) = state.stop_recovery_denial_for_test().unwrap();
+    assert_eq!(
+        fs::read(&barrier).unwrap(),
+        b"NATIVE_STOP_RECOVERY_DENIAL_V1\n"
+    );
+    assert!(crate::worker_service::failure_fence::assert_failure_absent(&barrier).is_err());
+    assert_eq!(
+        fs::read(&pending).unwrap(),
+        pending_bytes(&WorkerServiceAction::Stop)
+    );
+    assert!(state.attempted && state.uncertain);
+    state.archive_old_markers(&history).unwrap();
+    assert_eq!(
+        fs::read(history.join("native-failure")).unwrap(),
+        b"NATIVE_STOP_RECOVERY_DENIAL_V1\n"
+    );
+    assert!(pending.is_file());
+    assert_eq!(
+        state.close().unwrap_err().code(),
+        "NATIVE_SERVICE_ORIGINAL_EFFECT_RETAINED"
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+#[test]
+fn racing_recovery_denial_never_overwrites_existing_history_or_releases_stop() {
+    let (mut state, root, _, _) = selection_with_action(WorkerServiceAction::Stop);
+    let pending = state.folder().join("pending");
+    let barrier = state.folder().join("native-failure");
+    fs::write(&barrier, b"earlier UNKNOWN record").unwrap();
+    fs::set_permissions(&barrier, fs::Permissions::from_mode(0o600)).unwrap();
+    assert!(state.stop_recovery_denial_for_test().is_err());
+    assert_eq!(fs::read(&barrier).unwrap(), b"earlier UNKNOWN record");
+    assert_eq!(
+        fs::read(pending).unwrap(),
+        pending_bytes(&WorkerServiceAction::Stop)
+    );
+    assert!(state.attempted && state.uncertain);
+    assert_eq!(
+        state.close().unwrap_err().code(),
+        "NATIVE_SERVICE_ORIGINAL_EFFECT_RETAINED"
+    );
     fs::remove_dir_all(root).unwrap();
 }
 #[test]

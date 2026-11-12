@@ -99,6 +99,19 @@ describe('TmuxManager (unit)', () => {
     manager.destroy();
   });
 
+  it('refuses a failed private hook environment write without logging its value', () => {
+    const token = 'synthetic-private-generation';
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    mockedExecSync.mockImplementation(() => {throw new Error('setenv failed: ' + token);});
+    try {
+      const apply = manager as unknown as {applyEnvOverrides(name: string, env: Record<string, string>): void};
+      expect(() => apply.applyEnvOverrides('reverie-synthetic', {REVERIE_HOOK_GENERATION: token}))
+        .toThrow('Hook generation environment could not be installed');
+      expect(JSON.stringify(warn.mock.calls)).not.toContain(token);
+      expect(mockedExecSync.mock.calls.filter(([cmd]) => String(cmd).includes('respawn-pane'))).toHaveLength(0);
+    } finally {warn.mockRestore();}
+  });
+
   describe('backend', () => {
     it('should report tmux as backend', () => {
       expect(manager.backend).toBe('tmux');
@@ -753,6 +766,328 @@ describe('TmuxManager (unit)', () => {
       }
       return module.TmuxManager;
     }
+
+    // Initial process witness and exit reader are component fixtures here;
+    // the actual non-test kill coordinator must never issue a later name kill.
+    it.each(['live-successor', 'unreadable', 'dead-original'] as const)('guarded cleanup readback %s never kills a pane by reusable name', async state => {
+      const NonTestTmuxManager = await importWithTmuxCommandsEnabled();
+      const signal = await import('../src/signal-target.js');
+      const instance = new NonTestTmuxManager();
+      instance.registerSession({sessionId: 'readback123', muxName: 'reverie-abcd5678', pid: 12345,
+        createdAt: Date.now(), workingDir: '/synthetic', mode: 'claude', attached: true});
+      const tracked = instance.getSession('readback123')!;
+      const witness = vi.spyOn(signal, 'resolveLivePaneTarget').mockResolvedValue({
+        target: {pid: 12345, startTime: 1, ownGroup: false}, pane: {state: 'live', pid: 12345}});
+      const internal = instance as unknown as {getServerPidAsync(): Promise<number>;
+        listPanesAsync(): Promise<string | null>; getChildPidsFresh(pid: number): Promise<number[]>;
+        verifyProcessesDead(pids: number[], timeout: number): Promise<boolean>};
+      vi.spyOn(internal, 'getServerPidAsync').mockResolvedValue(6001);
+      vi.spyOn(internal, 'getChildPidsFresh').mockResolvedValue([]);
+      vi.spyOn(internal, 'verifyProcessesDead').mockResolvedValue(true);
+      vi.spyOn(internal, 'listPanesAsync').mockResolvedValue(state === 'unreadable' ? null
+        : state === 'live-successor' ? '0 23456 reverie-abcd5678' : '1 12345 reverie-abcd5678');
+      const signals = vi.spyOn(process, 'kill').mockImplementation(() => true);
+      const count = vi.mocked(exec).mock.calls.length;
+      try {
+        const stopped = instance.killSessionIfCurrent('readback123', tracked, () => true);
+        if (state === 'dead-original') {expect(await stopped).toBe(true); expect(instance.getSession('readback123')).toBeUndefined();}
+        else {await expect(stopped).rejects.toThrow(/cleanup.*required/i); expect(instance.getSession('readback123')).toBe(tracked);}
+        expect(vi.mocked(exec).mock.calls.slice(count).filter(([command]) => /kill-session/.test(String(command)))).toEqual([]);
+        expect(signals).not.toHaveBeenCalled();
+      } finally {signals.mockRestore(); witness.mockRestore(); instance.destroy();}
+    });
+
+    it.each(['owner', 'record', 'pid'] as const)('refuses guarded cleanup changed %s during local pane probes', async change => {
+      const NonTestTmuxManager = await importWithTmuxCommandsEnabled();
+      const instance = new NonTestTmuxManager();
+      const original: MuxSession = {sessionId: 'cleanup123', muxName: 'reverie-abcd5678', pid: 12345,
+        createdAt: Date.now(), workingDir: '/synthetic', mode: 'claude', attached: true};
+      instance.registerSession(original);
+      const tracked = instance.getSession(original.sessionId)!;
+      let entered!: () => void, release!: () => void;
+      const waiting = new Promise<void>(resolve => {entered = resolve;});
+      const held = new Promise<void>(resolve => {release = resolve;});
+      const internals = instance as unknown as {getServerPidAsync(): Promise<number>; listPanesAsync(): Promise<string>};
+      vi.spyOn(internals, 'getServerPidAsync').mockImplementation(async () => {entered(); await held; return 6001;});
+      vi.spyOn(internals, 'listPanesAsync').mockResolvedValue('');
+      const signals = vi.spyOn(process, 'kill').mockImplementation(() => true);
+      const commandCount = vi.mocked(exec).mock.calls.length;
+      let allowed = true;
+      try {
+        const stopping = instance.killSessionIfCurrent(original.sessionId, tracked, () => allowed);
+        await waiting;
+        if (change === 'owner') allowed = false;
+        else if (change === 'pid') tracked.pid++;
+        else instance.registerSession({...tracked, pid: tracked.pid + 1});
+        release();
+        await expect(stopping).rejects.toThrow(/cleanup.*required/i);
+        expect(signals).not.toHaveBeenCalled();
+        expect(vi.mocked(exec).mock.calls.slice(commandCount).filter(([command]) => /kill-session/.test(String(command)))).toEqual([]);
+        expect(instance.getSession(original.sessionId)).toBeDefined();
+      } finally {release(); signals.mockRestore(); instance.destroy();}
+    });
+
+    it.each(['text', 'paste'] as const)('rechecks private admission after async %s staging and withholds remaining keys', async stage => {
+      const NonTestTmuxManager = await importWithTmuxCommandsEnabled();
+      const instance = new NonTestTmuxManager();
+      instance.registerSession({sessionId: 'admission123', muxName: 'reverie-abcd5678', pid: 12345,
+        createdAt: Date.now(), workingDir: '/tmp', mode: stage === 'paste' ? 'codex' : 'claude', attached: true});
+      const {exec: currentExec} = await import('node:child_process');
+      const previous = vi.mocked(currentExec).getMockImplementation();
+      let allowed = true;
+      const commands: string[] = [];
+      vi.mocked(currentExec).mockImplementation((cmd, optionsOrCallback, maybeCallback) => {
+        const command = String(cmd); commands.push(command);
+        const callback = typeof optionsOrCallback === 'function' ? optionsOrCallback : maybeCallback;
+        if (command.includes(stage === 'paste' ? 'load-buffer' : 'send-keys')) allowed = false;
+        if (typeof callback === 'function') setImmediate(() => callback(null, '', ''));
+        return {on: vi.fn(), kill: vi.fn(), pid: 999_999_992} as never;
+      });
+      vi.spyOn(instance, 'capturePaneText').mockReturnValue('');
+      try {
+        const sending = instance.sendInput('admission123', (stage === 'paste' ? 'x'.repeat(2000) : 'synthetic') + '\r', {admitted: () => allowed});
+        if (stage === 'paste') expect(await sending).toBe(false);
+        else await expect(sending).rejects.toMatchObject({name: 'TerminalInputUnconfirmedError'});
+        expect(commands.some(cmd => /send-keys.* Enter/.test(cmd))).toBe(false);
+        expect(commands.some(cmd => cmd.includes('paste-buffer'))).toBe(false);
+        if (stage === 'paste') {
+          expect(commands.some(cmd => cmd.includes('load-buffer'))).toBe(true);
+          expect(commands.some(cmd => cmd.includes('delete-buffer'))).toBe(true);
+        } else expect(commands.filter(cmd => cmd.includes('send-keys'))).toHaveLength(1);
+      } finally {vi.mocked(currentExec).mockImplementation(previous!); instance.destroy();}
+    });
+    it.each(['held', 'epoch', 'owner'] as const)('ordinary Session input withholds later Enter when %s changes during physical text IO', async change => {
+      const NonTestTmuxManager = await importWithTmuxCommandsEnabled();
+      const instance = new NonTestTmuxManager();
+      const {Session} = await import('../src/session.js');
+      const record = {owner: 'original', sessionId: 'ordinary-admission123', muxName: 'reverie-abcd5678', pid: 12345,
+        createdAt: Date.now(), workingDir: '/tmp', mode: 'opencode' as const, attached: true};
+      instance.registerSession(record);
+      const session = new Session({id: record.sessionId, workingDir: '/tmp', mode: 'opencode', useMux: true,
+        mux: instance, muxSession: record, owner: 'original'});
+      const {exec: currentExec} = await import('node:child_process');
+      const previous = vi.mocked(currentExec).getMockImplementation();
+      const commands: string[] = [];
+      let release: (() => void) | undefined;
+      let reached!: () => void;
+      const firstKey = new Promise<void>(resolve => {reached = resolve;});
+      vi.mocked(currentExec).mockImplementation((cmd, optionsOrCallback, maybeCallback) => {
+        const command = String(cmd); commands.push(command);
+        const callback = typeof optionsOrCallback === 'function' ? optionsOrCallback : maybeCallback;
+        if (typeof callback === 'function') {
+          if (command.includes('send-keys') && !release) {release = () => callback(null, '', ''); reached();}
+          else setImmediate(() => callback(null, '', ''));
+        }
+        return {on: vi.fn(), kill: vi.fn(), pid: 999_999_985} as never;
+      });
+      vi.spyOn(instance, 'capturePaneText').mockReturnValue('');
+      try {
+        const writing = session.writeViaMux('synthetic ordinary text\r', {admitted: () => true});
+        await firstKey;
+        if (change === 'held') {
+          vi.spyOn(instance, 'respawnPane').mockImplementation(async options => {options.onProviderDispatch?.(); return null;});
+          await expect(session.restartCli()).rejects.toMatchObject({name: 'ProviderDispatchUnconfirmedError'});
+        } else if (change === 'epoch') {session.setMode('shell'); session.setMode('opencode');}
+        else session.owner = 'successor';
+        release!(); await expect(writing).rejects.toMatchObject({name: 'TerminalInputUnconfirmedError'});
+        expect(commands.filter(command => command.includes('send-keys'))).toHaveLength(1);
+        expect(commands.some(command => /send-keys.* Enter/.test(command))).toBe(false);
+      } finally {release?.(); vi.mocked(currentExec).mockImplementation(previous!); await session.stop(false); instance.destroy();}
+    });
+    it.each(['epoch', 'owner', 'mux', 'mux-record', 'subject', 'held', 'caller', 'new-arm', 'unchanged'] as const)(
+      'delayed verifier admission across %s while its real Escape IO awaits', async change => {
+        const NonTestTmuxManager = await importWithTmuxCommandsEnabled();
+        const instance = new NonTestTmuxManager(), replacement = new NonTestTmuxManager();
+        const {Session} = await import('../src/session.js');
+        const record = {owner: 'original', sessionId: 'verifier-admission123', muxName: 'reverie-abcd5678', pid: 12345,
+          createdAt: Date.now(), workingDir: '/tmp', mode: 'opencode' as const, attached: true};
+        instance.registerSession(record);
+        const session = new Session({id: record.sessionId, workingDir: '/tmp', mode: 'opencode', useMux: true,
+          mux: instance, muxSession: record, owner: 'original'});
+        const {exec: currentExec} = await import('node:child_process');
+        const previous = vi.mocked(currentExec).getMockImplementation();
+        const commands: string[] = [];
+        let release: (() => void) | undefined, allowed = true;
+        let frame = '┃ synthetic draft\n────────────────\nesc exit shell mode';
+        const capture = vi.spyOn(instance, 'capturePaneText').mockImplementation(() => frame);
+        vi.mocked(currentExec).mockImplementation((cmd, optionsOrCallback, maybeCallback) => {
+          const command = String(cmd); commands.push(command);
+          const callback = typeof optionsOrCallback === 'function' ? optionsOrCallback : maybeCallback;
+          if (typeof callback === 'function') {
+            if (command.includes('send-keys') && command.includes('Escape') && !release)
+              release = () => callback(null, '', '');
+            else setImmediate(() => callback(null, '', ''));
+          }
+          return {on: vi.fn(), kill: vi.fn(), pid: 999_999_983} as never;
+        });
+        const originalOutcome = vi.fn(), nextOutcome = vi.fn();
+        vi.useFakeTimers({toFake: ['setTimeout', 'clearTimeout', 'Date']});
+        try {
+          session.verifySubmitted('synthetic draft', originalOutcome, () => allowed);
+          await vi.advanceTimersByTimeAsync(2_200);
+          expect(release).toBeTypeOf('function');
+          expect(commands.filter(command => command.includes('Escape'))).toHaveLength(1);
+          if (change === 'epoch') {session.setMode('shell'); session.setMode('opencode');}
+          else if (change === 'owner') session.owner = 'successor';
+          else if (change === 'mux') Object.assign(session, {_mux: replacement});
+          else if (change === 'mux-record') instance.registerSession({...record, pid: record.pid + 1});
+          else if (change === 'subject') Object.assign(session, {_muxSession: {...record, muxName: 'reverie-new12345'}});
+          else if (change === 'held') {
+            vi.spyOn(instance, 'respawnPane').mockImplementation(async options => {options.onProviderDispatch?.(); return null;});
+            await expect(session.restartCli()).rejects.toMatchObject({name: 'ProviderDispatchUnconfirmedError'});
+          } else if (change === 'caller') allowed = false;
+          else if (change === 'new-arm') {frame = '┃ successor draft\n────────────────\nnormal'; session.verifySubmitted('successor draft', nextOutcome);}
+          if (change !== 'new-arm') frame = '┃ synthetic draft\n────────────────\nnormal';
+          release!(); await vi.advanceTimersByTimeAsync(500);
+          if (change === 'unchanged') {
+            expect(commands.filter(command => /send-keys.*Enter/.test(command))).toHaveLength(1);
+            expect(originalOutcome).not.toHaveBeenCalled();
+            frame = '┃ \n────────────────\nnormal';
+            await vi.advanceTimersByTimeAsync(3_000);
+            expect(originalOutcome).toHaveBeenCalledExactlyOnceWith('submitted');
+          } else {
+            expect(commands.some(command => /send-keys.*Enter/.test(command))).toBe(false);
+            expect(originalOutcome).toHaveBeenCalledExactlyOnceWith('unverified');
+          }
+          if (change === 'new-arm') {
+            expect(session.terminalInputHeld).toBe(true);
+            expect(nextOutcome).toHaveBeenCalledExactlyOnceWith('unverified');
+            frame = '┃ \n────────────────\nnormal';
+            await vi.advanceTimersByTimeAsync(2_000);
+            expect(nextOutcome).toHaveBeenCalledExactlyOnceWith('unverified');
+          }
+          expect(capture).toHaveBeenCalled();
+        } finally {release?.(); vi.mocked(currentExec).mockImplementation(previous!); await session.stop(false);
+          instance.destroy(); replacement.destroy(); vi.useRealTimers();}
+      });
+    it.each(['ordinary', 'verifier'] as const)('refuses a manager successor before the original %s dispatch', async path => {
+      const NonTestTmuxManager = await importWithTmuxCommandsEnabled();
+      const instance = new NonTestTmuxManager();
+      const {Session} = await import('../src/session.js');
+      const {exec: currentExec} = await import('node:child_process');
+      const record = {sessionId: 'pre-dispatch-subject', muxName: 'reverie-abcd5678', pid: 12345,
+        createdAt: Date.now(), workingDir: '/tmp', mode: 'opencode' as const, attached: true};
+      instance.registerSession(record);
+      const session = new Session({id: record.sessionId, workingDir: '/tmp', useMux: true, mux: instance, muxSession: record});
+      const original = session.captureInputAdmission(); const outcome = vi.fn();
+      const previous = vi.mocked(currentExec).getMockImplementation(); vi.mocked(currentExec).mockClear();
+      vi.spyOn(instance, 'capturePaneText').mockReturnValue('┃ original draft\n────────────────\nesc exit shell mode');
+      vi.useFakeTimers({toFake: ['setTimeout', 'clearTimeout', 'Date']});
+      try {
+        if (path === 'verifier') session.verifySubmitted('original draft', outcome);
+        instance.registerSession({...record, pid: 23456});
+        expect(original()).toBe(false);
+        if (path === 'ordinary') expect(await session.writeViaMux('original draft\r')).toBe(false);
+        else {await vi.advanceTimersByTimeAsync(3_000); expect(outcome).toHaveBeenCalledExactlyOnceWith('unverified');}
+        expect(vi.mocked(currentExec)).not.toHaveBeenCalled(); expect(session.terminalInputHeld).toBe(false);
+      } finally {vi.mocked(currentExec).mockImplementation(previous!); await session.stop(false); instance.destroy(); vi.useRealTimers();}
+    });
+    it.each(['missing-subject', 'record-owner'] as const)('refuses a pre-dispatch %s mismatch without adopting its manager authority', async change => {
+      const NonTestTmuxManager = await importWithTmuxCommandsEnabled(); const instance = new NonTestTmuxManager();
+      const {Session} = await import('../src/session.js'); const {exec: currentExec} = await import('node:child_process');
+      const record = {owner: 'original', sessionId: 'original-input-owner', muxName: 'reverie-abcd5678', pid: 12345,
+        createdAt: Date.now(), workingDir: '/tmp', mode: 'claude' as const, attached: true};
+      if (change === 'record-owner') instance.registerSession(record);
+      const session = new Session({id: record.sessionId, owner: 'original', workingDir: '/tmp', useMux: true, mux: instance,
+        ...(change === 'record-owner' ? {muxSession: record} : {})});
+      const raw = vi.fn(); Object.assign(session, {ptyProcess: {pid: 999_999_972, write: raw, kill: vi.fn()}});
+      const admission = session.captureInputAdmission(); expect(admission()).toBe(true);
+      vi.mocked(currentExec).mockClear();
+      try {
+        if (change === 'record-owner') record.owner = 'successor'; else instance.registerSession(record);
+        expect(admission()).toBe(false); expect(session.captureInputAdmission()()).toBe(false);
+        expect(await session.writeViaMux('original input\r')).toBe(false);
+        expect(session.write('original input', {admitted: admission})).toBe(false);
+        expect(session.write('original input')).toBe(false);
+        expect(raw).not.toHaveBeenCalled(); expect(vi.mocked(currentExec)).not.toHaveBeenCalled();
+        expect(session.terminalInputHeld).toBe(false);
+      } finally {await session.stop(false); instance.destroy();}
+    });
+    it.each(['text', 'enter', 'authority', 'persistence'] as const)('actual HTTP input never falls back or replays after %s uncertainty', async failure => {
+      const NonTestTmuxManager = await importWithTmuxCommandsEnabled();
+      const instance = new NonTestTmuxManager();
+      const {Session} = await import('../src/session.js');
+      const {default: Fastify} = await import('fastify');
+      const {default: cookie} = await import('@fastify/cookie');
+      const {registerSessionRoutes} = await import('../src/web/routes/session-routes.js');
+      const {installResponseEnvelope} = await import('../src/web/response-envelope.js');
+      const {installRouteErrorHandler} = await import('../src/web/route-error-handler.js');
+      const {createMockRouteContext} = await import('./mocks/index.js');
+      const {trustedFixtureOwner} = await import('./helpers/trusted-owner-fixture.js');
+      const record = {sessionId: 'http-admission123', muxName: 'reverie-abcd5678', pid: 12345,
+        createdAt: Date.now(), workingDir: '/tmp', mode: 'claude' as const, attached: true};
+      instance.registerSession(record);
+      const session = new Session({id: record.sessionId, workingDir: '/tmp', useMux: true, mux: instance, muxSession: record});
+      const rawWrites: string[] = [];
+      Object.assign(session, {ptyProcess: {pid: 999_999_980, write: (data: string) => rawWrites.push(data), kill: vi.fn()}, _pid: 999_999_980});
+      const {exec: currentExec} = await import('node:child_process');
+      const previous = vi.mocked(currentExec).getMockImplementation();
+      const commands: string[] = [];
+      vi.mocked(currentExec).mockImplementation((cmd, optionsOrCallback, maybeCallback) => {
+        const command = String(cmd); commands.push(command);
+        const callback = typeof optionsOrCallback === 'function' ? optionsOrCallback : maybeCallback;
+        const text = command.includes('send-keys') && command.includes(' -l ');
+        if (text && failure === 'authority') {session.setMode('shell'); session.setMode('claude');}
+        const failed = (text && (failure === 'text' || failure === 'persistence')) || (command.includes(' Enter') && failure === 'enter');
+        if (typeof callback === 'function') setImmediate(() => callback(failed ? new Error('synthetic RPC failed after possible input') : null, '', ''));
+        return {on: vi.fn(), kill: vi.fn(), pid: 999_999_979} as never;
+      });
+      vi.spyOn(instance, 'capturePaneText').mockReturnValue('❯ synthetic line\n────────────────');
+      const ctx = createMockRouteContext(); ctx.sessions.clear(); ctx.sessions.set(session.id, session as never);
+      Object.assign(ctx, {mux: instance});
+      if (failure === 'persistence') ctx.persistSessionStateNow.mockImplementation(() => {throw new Error('synthetic state write failed');});
+      const app = Fastify(); await app.register(cookie);
+      registerSessionRoutes(app, ctx as never, {verifiedOwner: trustedFixtureOwner});
+      installResponseEnvelope(app, ''); installRouteErrorHandler(app); await app.ready();
+      const request = () => app.inject({method: 'POST', url: `/api/sessions/${session.id}/input`,
+        payload: {input: 'synthetic line\r', clientId: 'synthetic-client', seq: 1}});
+      try {
+        const first = await request(); expect(first.statusCode, first.body).toBe(422);
+        expect(first.json().error).toContain('unconfirmed');
+        expect(first.json().recoveryRequired).toBe(true);
+        if (failure === 'persistence') expect(first.json().sessionPersistence).toBe('unconfirmed');
+        expect(rawWrites).toEqual([]);
+        expect(commands.filter(command => command.includes(' -l '))).toHaveLength(1);
+        expect(commands.filter(command => command.includes(' Enter'))).toHaveLength(failure === 'enter' ? 1 : 0);
+        expect(session.terminalInputHeld).toBe(true); expect(session.providerDispatchHeld).toBe(false);
+        expect(session.toState().terminalInputHeld).toBe(true);
+        expect(ctx.persistSessionStateNow).toHaveBeenCalledWith(session);
+        const effects = commands.length;
+        const duplicate = await request(); expect(duplicate.statusCode).toBe(409);
+        expect(duplicate.json().error).toContain('Do not replay'); expect(commands).toHaveLength(effects);
+        expect(rawWrites).toEqual([]); expect(ctx.broadcast.mock.calls.some(([event]) => event === 'session:error')).toBe(true);
+        const fresh = await app.inject({method: 'POST', url: `/api/sessions/${session.id}/input`,
+          payload: {input: 'different input', clientId: 'fresh-client', seq: 1}});
+        expect(fresh.statusCode).toBe(409); expect(commands).toHaveLength(effects); expect(rawWrites).toEqual([]);
+        ctx.broadcast.mockClear();
+        const run = await app.inject({method: 'POST', url: `/api/sessions/${session.id}/run`, payload: {prompt: 'do not run'}});
+        expect(run.statusCode).toBe(409); expect(ctx.broadcast.mock.calls.some(([event]) => event === 'session:running')).toBe(false);
+
+        const successor = new Session({id: session.id, workingDir: '/tmp', useMux: false});
+        const successorWrite = vi.fn(); Object.assign(successor, {ptyProcess: {pid: 999_999_977, write: successorWrite, kill: vi.fn()}});
+        ctx.sessions.set(session.id, successor as never);
+        try {
+          const replaced = await app.inject({method: 'POST', url: `/api/sessions/${session.id}/input`,
+            payload: {input: 'different input', clientId: 'successor-client', seq: 1}});
+          expect(replaced.statusCode).toBe(422); expect(replaced.json().error).toContain('unconfirmed');
+          expect(successorWrite).not.toHaveBeenCalled(); expect(commands).toHaveLength(effects);
+        } finally {await successor.stop(false);}
+
+      } finally {await app.close(); vi.mocked(currentExec).mockImplementation(previous!); await session.stop(false); instance.destroy();}
+    });
+    it('private admission never bypasses existing menu-key writeGate restrictions', async () => {
+      const NonTestTmuxManager = await importWithTmuxCommandsEnabled();
+      const instance = new NonTestTmuxManager();
+      instance.registerSession({sessionId: 'admission123', muxName: 'reverie-abcd5678', pid: 12345,
+        createdAt: Date.now(), workingDir: '/tmp', mode: 'claude', attached: true});
+      const {withWriteGate: originalGate} = await import('../src/submit-settle.js');
+      const {exec: currentExec} = await import('node:child_process');
+      vi.mocked(currentExec).mockClear();
+      try {
+        expect((await originalGate(() => true, () => instance.sendInput('admission123', '1', {admitted: () => true}))).result).toBe(false);
+        expect(vi.mocked(currentExec).mock.calls).toHaveLength(0);
+      } finally {instance.destroy();}
+    });
 
     beforeEach(() => {
       mockedExecSync.mockImplementation((cmd: string) => {
@@ -1561,4 +1896,70 @@ describe('hasObservablePaneSession', () => {
   // The predicate has to agree with `Session.paneExitApplies`, which is where
   // the rule is enforced; that pairing is pinned in session-pane-exit.test.ts,
   // where a real Session can answer for itself.
+});
+
+
+describe('terminal input effect and replay owners', () => {
+  it('retains the original error after a possible effect and forbids settlement/replay', async () => {
+    const {TerminalInputAttempt, TerminalInputUnconfirmedError} = await import('../src/terminal-input-outcome.js');
+    const attempt = new TerminalInputAttempt();
+    expect(attempt.fail(new Error('before dispatch'))).toBeUndefined();
+    attempt.beforeEffect(); const cause = new Error('RPC completion lost'); const error = attempt.fail(cause);
+    expect(error).toBeInstanceOf(TerminalInputUnconfirmedError); expect(error?.cause).toBe(cause);
+    expect(attempt.continuing()).toBe(false); expect(() => attempt.beforeEffect()).toThrow(error!);
+    expect(() => attempt.finish(true, true)).toThrow(error!); expect(attempt.fail(new Error('later'))).toBe(error);
+    const refused = new TerminalInputAttempt(); expect(refused.finish(false, false)).toBe(false);
+    expect(() => refused.beforeEffect()).toThrow('already settled');
+    const confirmed = new TerminalInputAttempt(); confirmed.beforeEffect(); expect(confirmed.finish(true, true)).toBe(true);
+  });
+  it('never transfers original pending/positive proof to another object or owner, or expires unknown', async () => {
+    const {TerminalInputReceipts} = await import('../src/terminal-input-outcome.js');
+    const receipts = new TerminalInputReceipts(2, 3), original = {}, successor = {};
+    const first = receipts.reserve('original', 'sid', 'request', original, 'original-intent')!;
+    expect(receipts.lookup('original', 'sid', 'new', successor, 'original-intent')).toBe('held');
+    first.record('confirmed');
+    expect(receipts.lookup('original', 'sid', 'request', original, 'original-intent')).toBe('confirmed');
+    expect(receipts.lookup('original', 'sid', 'request', successor, 'original-intent')).toBe('held');
+    expect(receipts.lookup('successor', 'sid', 'request', original, 'original-intent')).toBe('held');
+    first.record('unconfirmed'); first.record('confirmed'); first.release();
+    vi.useFakeTimers(); try {
+      vi.advanceTimersByTime(365 * 24 * 60 * 60 * 1000);
+      expect(receipts.lookup('successor', 'sid', 'different', successor, 'original-intent')).toBe('held');
+    } finally {vi.useRealTimers();}
+    receipts.reserve('original', 'other', 'second', {}, 'original-intent')!.record('typed-unsent');
+    expect(receipts.reserve('original', 'new', 'third', {}, 'original-intent')).toBeUndefined();
+    receipts.reserve('other-owner', 'third', 'fourth', {}, 'original-intent')!.record('unconfirmed');
+    expect(receipts.reserve('third-owner', 'fourth', 'fifth', {}, 'original-intent')).toBeUndefined();
+    expect(receipts.lookup('original', 'sid', 'request', original, 'original-intent')).toBe('held');
+  });
+  it('evicts only confirmed entries and stale closures cannot release a successor', async () => {
+    const {TerminalInputReceipts} = await import('../src/terminal-input-outcome.js');
+    const receipts = new TerminalInputReceipts(1, 1), subject = {};
+    const old = receipts.reserve('owner', 'sid', 'first', subject, 'original-intent')!; old.record('confirmed');
+    old.record('pending'); old.release();
+    expect(receipts.lookup('owner', 'sid', 'first', subject, 'original-intent')).toBe('confirmed');
+    const next = receipts.reserve('owner', 'sid', 'second', subject, 'original-intent')!; next.record('unconfirmed');
+    old.release(); old.record('confirmed');
+    expect(receipts.lookup('owner', 'sid', 'second', subject, 'original-intent')).toBe('held');
+    expect(receipts.reserve('owner', 'other', 'third', {}, 'original-intent')).toBeUndefined();
+  });
+  it('restores only a deny-only input marker, separate from launch/viewer health and opaque subjects', async () => {
+    const {Session} = await import('../src/session.js');
+    const {inputAdmissionSubject} = await import('../src/terminal-input-outcome.js');
+    const session = new Session({workingDir: '/tmp', useMux: false, owner: 'original'});
+    const first = session.captureInputAdmission(); expect(inputAdmissionSubject(first)).toBe(inputAdmissionSubject(session.captureInputAdmission()));
+    session.owner = 'successor'; expect(inputAdmissionSubject(first)).not.toBe(inputAdmissionSubject(session.captureInputAdmission()));
+    const originalCause = new Error('partial terminal input'); session.holdUnconfirmedInput(originalCause);
+    const state = session.toState(); expect(state.terminalInputHeld).toBe(true); expect(state.providerDispatchHeld).not.toBe(true);
+    expect(JSON.stringify(state)).not.toContain('partial terminal input');
+    const restored = new Session({workingDir: '/tmp', useMux: false, terminalInputHeld: state.terminalInputHeld});
+    try {
+      expect(restored.terminalInputHeld).toBe(true); expect(restored.providerDispatchHeld).toBe(false);
+      expect(restored.write('new input')).toBe(false); expect(await restored.writeViaMux('new input')).toBe(false);
+      expect(restored.captureInputAdmission()()).toBe(false);
+      (restored as unknown as {clearPaneExitForNewPane: () => void}).clearPaneExitForNewPane(); expect(restored.terminalInputHeld).toBe(true);
+      await expect(restored.runPrompt('new launch')).rejects.toThrow('unconfirmed');
+      const mode = restored.mode; expect(() => restored.setMode('shell')).toThrow('unconfirmed'); expect(restored.mode).toBe(mode);
+    } finally {await session.stop(false); await restored.stop(false);}
+  });
 });

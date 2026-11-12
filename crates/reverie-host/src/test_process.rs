@@ -34,30 +34,7 @@ pub(crate) fn isolate_cold_namespace(name: &str) -> bool {
             || name.starts_with("worker_storage::cold_tmp::retained::references::tests::actual_")
     );
     if std::env::var_os(MARKER).as_deref() == Some(std::ffi::OsStr::new(name)) {
-        assert_eq!(std::process::id(), 1, "actual owned PID namespace");
-        assert!(crate::native::uid() > 0, "actual positive worker UID");
-        assert_eq!(
-            crate::native::uid().to_string(),
-            std::env::var("REVERIE_COLD_NAMESPACE_UID").unwrap()
-        );
-        if retained_mount_case(name) {
-            assert_ne!(
-                std::fs::read_link("/proc/self/ns/net").unwrap().as_os_str(),
-                std::env::var_os("REVERIE_COLD_PARENT_NETWORK").unwrap(),
-                "fixed finish control must not reinterpret host Unix paths beneath its own /tmp mount"
-            );
-            let status = std::fs::read_to_string("/proc/self/status").unwrap();
-            let caps = status
-                .lines()
-                .find_map(|line| line.strip_prefix("CapEff:"))
-                .unwrap()
-                .trim();
-            assert_ne!(
-                u64::from_str_radix(caps, 16).unwrap() & (1 << 21),
-                0,
-                "actual private-user-namespace CAP_SYS_ADMIN for fixed bind control"
-            );
-        }
+        assert_cold_child_scope(name);
         return false;
     }
     let nonce = reverie_store::worker_storage::instruction_temporary_name().unwrap();
@@ -89,12 +66,16 @@ pub(crate) fn isolate_cold_namespace(name: &str) -> bool {
     // util-linux explicitly carries this new namespace's granted capabilities
     // across exec. Only fixed retained-finish tests require actual bind mounts;
     // ordinary same-UID permission/UNKNOWN and required root cases are unchanged.
-    if retained_mount_case(name) {
-        command.args(["--keep-caps", "--net"]);
+    if retained_reference_case(name) {
+        command.arg("--net");
         command.env(
             "REVERIE_COLD_PARENT_NETWORK",
             std::fs::read_link("/proc/self/ns/net").unwrap(),
         );
+    }
+    if retained_mount_case(name) {
+        // The overmount also hides the checkout when Cargo runs under /tmp.
+        command.arg("--keep-caps").current_dir(&root);
     }
     let output = command
         .arg(&executable)
@@ -131,6 +112,36 @@ pub(crate) fn isolate_cold_namespace(name: &str) -> bool {
     std::fs::remove_dir_all(root).unwrap();
     true
 }
+
+fn assert_cold_child_scope(name: &str) {
+    assert_eq!(std::process::id(), 1, "actual owned PID namespace");
+    assert!(crate::native::uid() > 0, "actual positive worker UID");
+    assert_eq!(
+        crate::native::uid().to_string(),
+        std::env::var("REVERIE_COLD_NAMESPACE_UID").unwrap()
+    );
+    if retained_reference_case(name) {
+        assert_ne!(
+            std::fs::read_link("/proc/self/ns/net").unwrap().as_os_str(),
+            std::env::var_os("REVERIE_COLD_PARENT_NETWORK").unwrap(),
+            "the retained reference controls must own their Unix socket census"
+        );
+    }
+    if retained_mount_case(name) {
+        let status = std::fs::read_to_string("/proc/self/status").unwrap();
+        let caps = status
+            .lines()
+            .find_map(|line| line.strip_prefix("CapEff:"))
+            .unwrap()
+            .trim();
+        assert_ne!(
+            u64::from_str_radix(caps, 16).unwrap() & (1 << 21),
+            0,
+            "actual private-user-namespace CAP_SYS_ADMIN for fixed bind control"
+        );
+    }
+}
+
 /// Copy only the actual current test ELF into the uniquely owned fixture.
 /// No caller-selected executable or production/reference-reader change.
 fn copy_namespace_executable(root: &std::path::Path) -> std::path::PathBuf {
@@ -202,6 +213,10 @@ fn executable_digest(file: &mut std::fs::File) -> [u8; 32] {
 }
 fn retained_mount_case(name: &str) -> bool {
     name.starts_with("worker_laptop::tests::cold_prepare::retained::finish::")
+}
+fn retained_reference_case(name: &str) -> bool {
+    name.starts_with("worker_laptop::tests::cold_prepare::retained::")
+        || name.starts_with("worker_storage::cold_tmp::retained::references::tests::actual_")
 }
 fn cold_fixture_root(name: &str, nonce: &str) -> std::path::PathBuf {
     let leaf = format!("cn-{}", &nonce[nonce.len() - 8..]);

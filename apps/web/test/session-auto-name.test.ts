@@ -11,6 +11,7 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { Session } from '../src/session.js';
+import { registerMuxFixture } from './helpers/registered-mux-fixture.js';
 import {
   SubmittedPromptTracker,
   deriveAutoSessionName,
@@ -262,6 +263,7 @@ describe('Session promptSubmitted', () => {
     const sendInput = vi.fn(async () => false);
     (session as unknown as { _mux: unknown; _muxSession: unknown })._mux = { sendInput };
     (session as unknown as { _mux: unknown; _muxSession: unknown })._muxSession = { sessionId: session.id };
+    registerMuxFixture(session);
 
     expect(await session.writeViaMux('dropped\r', { fromUser: true })).toBe(false);
     expect(prompts).toEqual([]);

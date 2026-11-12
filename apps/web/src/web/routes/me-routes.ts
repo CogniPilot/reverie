@@ -15,7 +15,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { ApiErrorCode, createErrorResponse } from '../../types.js';
 import { isMultiUserMode } from '../../config/multiuser.js';
-import { findUser, setPassword, verifyPassword } from '../../user-store.js';
+import { findUser, setPassword, userAuthenticationFingerprint, verifyPassword } from '../../user-store.js';
 import { getAuthUser, revokeUserSessions } from '../route-helpers.js';
 import { AUTH_COOKIE_NAME } from '../middleware/auth.js';
 import type { AuthPort } from '../ports/auth-port.js';
@@ -66,7 +66,7 @@ export function registerMeRoutes(app: FastifyInstance, ctx: AuthPort): void {
       reply.code(403);
       return createErrorResponse(ApiErrorCode.FORBIDDEN, 'Current password is incorrect');
     }
-    await setPassword(username, parsed.data.newPassword, { mustChangePassword: false });
+    const updated = await setPassword(username, parsed.data.newPassword, { mustChangePassword: false });
 
     // Revoke this user's OTHER cookie sessions; keep the caller's own session alive
     // and clear its mustChangePassword snapshot so they aren't re-locked immediately.
@@ -74,7 +74,13 @@ export function registerMeRoutes(app: FastifyInstance, ctx: AuthPort): void {
     revokeUserSessions(ctx.authSessions, username, currentToken);
     if (currentToken) {
       const rec = ctx.authSessions?.get(currentToken);
-      if (rec) rec.mustChangePassword = false;
+      if (rec) {
+        ctx.authSessions?.set(currentToken, {
+          ...rec,
+          mustChangePassword: false,
+          credentialFingerprint: userAuthenticationFingerprint(updated),
+        });
+      }
     }
     return { success: true };
   });

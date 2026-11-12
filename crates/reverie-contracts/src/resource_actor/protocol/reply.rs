@@ -95,7 +95,7 @@ impl ResourceOperationRequest {
             (key("reason"), string(reason)),
         ]))))
     }
-    fn result_reply(&self, value: Value) -> Result<HumanFrame> {
+    pub(super) fn result_reply(&self, value: Value) -> Result<HumanFrame> {
         frame(Value(Node::Object(BTreeMap::from([
             (key("kind"), string("resource-result")),
             (key("requestId"), string(self.request_id().as_str())),

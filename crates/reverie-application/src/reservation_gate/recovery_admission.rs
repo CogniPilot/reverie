@@ -29,7 +29,16 @@ impl ReservationGate {
         );
     }
     pub(crate) fn admit_recovery(&self) -> Result<RecoveryAdmission> {
-        let admission = self.inner.admit(AdmissionBounds::default())?;
+        self.admit_recovery_with_bounds(AdmissionBounds::default())
+    }
+    pub(crate) fn admit_recovery_until(&self, end: Instant) -> Result<RecoveryAdmission> {
+        self.admit_recovery_with_bounds(AdmissionBounds {
+            operation: Some(end),
+            entry: Some(end),
+        })
+    }
+    fn admit_recovery_with_bounds(&self, bounds: AdmissionBounds) -> Result<RecoveryAdmission> {
+        let admission = self.inner.admit(bounds)?;
         match self.inner.check_recovery() {
             Ok(_) => Ok(RecoveryAdmission {
                 gate: self.inner.clone(),
@@ -40,6 +49,19 @@ impl ReservationGate {
     }
 }
 impl RecoveryAdmission {
+    pub(crate) fn host_reserve_mib(&self) -> u32 {
+        self.gate.option.host_reserve_mib()
+    }
+    pub(crate) fn assert_pool_startup_current(
+        &self,
+        original: &Arc<ValidatedWorkerSnapshot>,
+    ) -> Result<()> {
+        self.gate.guard(None)?;
+        need(
+            Arc::ptr_eq(original, &self.gate.installed.snapshot()?),
+            "WORKER_POOL_STARTUP_CONFIGURATION_CHANGED",
+        )
+    }
     pub(crate) fn check_launch(&self, session: &reverie_core::ids::ProfileSessionId) -> Result<()> {
         // Preserve the original check_launch's nonnil journal UUID rule only
         // when a real Gate exists. No-Gate name recovery still accepts nil.

@@ -71,6 +71,7 @@ impl Fixture {
         NativeObserver {
             source: Arc::new(self.clone()),
             cancellation: CancellationToken::new(),
+            controller: None,
         }
     }
     /// Only the kernel observations remain synthetic. Every metadata query and
@@ -84,6 +85,7 @@ impl Fixture {
         NativeObserver {
             source: Arc::new(self.clone()),
             cancellation,
+            controller: None,
         }
     }
     pub(crate) fn inventory(&self, rows: &[Value]) {
@@ -103,6 +105,9 @@ impl Fixture {
                     .join("\n"),
             );
         }
+    }
+    pub(crate) fn stopped_inspection(&self, row: &Value) {
+        self.0.lock().unwrap().outputs.push_back(row.to_string());
     }
     pub(crate) fn replace_inventory(&self, rows: &[Value]) {
         self.0.lock().unwrap().outputs.clear();
@@ -315,7 +320,10 @@ impl Source for Arc<Fixture> {
                 EngineQuery::InspectStopped(_) => "stopped",
                 EngineQuery::GpuInformation => "gpu-info",
                 EngineQuery::TelemetryInventory | EngineQuery::TelemetryInspect(_) => "telemetry",
-                EngineQuery::WorkerPoolInspect(_)
+                EngineQuery::WorkerPoolInformation
+                | EngineQuery::WorkerPoolImageInventory
+                | EngineQuery::WorkerPoolInspect(_)
+                | EngineQuery::WorkerPoolWebsiteInspect(_)
                 | EngineQuery::WorkerImageInspect(_)
                 | EngineQuery::ProviderPane(_)
                 | EngineQuery::ProviderTop(_) => {
@@ -418,7 +426,7 @@ impl Source for Arc<Fixture> {
         &self,
         _: &ReservationConfiguration,
         targets: &reverie_host::reservation_kernel::CustodyPaths,
-        _: &InventoryRows,
+        _: &reverie_contracts::reservation_engine::CustodyInventory<'_>,
         _: &MountTable,
         _: Instant,
     ) -> Result<()> {
@@ -653,6 +661,42 @@ fn custody_rechecks_full_mount_shape_but_does_not_replace_first_census() {
         [
             "table", "ps", "inspect", "custody", "table", "ps", "inspect"
         ]
+    );
+}
+#[test]
+fn custody_refuses_native_state_changes_even_when_mounts_are_unchanged() {
+    for state in [
+        json!({"Running":false,"Pid":0}),
+        json!({"Running":true,"Pid":999}),
+    ] {
+        let fixture = Fixture::new();
+        let first = row(1, true);
+        let mut second = first.clone();
+        second["State"] = state;
+        fixture.inventory(&[first]);
+        fixture.inventory(&[second]);
+        let observer = fixture.observer();
+        let context = observer.capture(configuration(), None);
+        assert_eq!(
+            result_code(context.custody(None)),
+            Some("RESERVATION_MOUNT_INVENTORY_CHANGED")
+        );
+    }
+}
+#[test]
+fn custody_distinguishes_absent_state_from_explicit_null() {
+    let fixture = Fixture::new();
+    let mut absent = row(1, true);
+    absent.as_object_mut().unwrap().remove("State");
+    let mut null = absent.clone();
+    null["State"] = Value::Null;
+    fixture.inventory(&[absent]);
+    fixture.inventory(&[null]);
+    let observer = fixture.observer();
+    let context = observer.capture(configuration(), None);
+    assert_eq!(
+        result_code(context.custody(None)),
+        Some("RESERVATION_MOUNT_INVENTORY_CHANGED")
     );
 }
 #[test]

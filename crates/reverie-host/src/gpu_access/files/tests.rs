@@ -10,6 +10,7 @@ pub(super) enum Point {
     WriterClosed,
     BeforeCas,
     Renamed,
+    ActorReadback,
 }
 type Hook = Box<dyn FnOnce(&Path, &OsStr) -> Result<()>>;
 thread_local! {static HOOKS:RefCell<Vec<(Point,Hook)>>=RefCell::default();}

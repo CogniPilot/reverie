@@ -2,17 +2,32 @@
 //! installed-controller, maintenance, admission or kernel-readback capability.
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+mod anchor_recovery;
+mod configuration_transition;
 mod controller_v2;
-mod engine;
-mod provider;
-pub use controller_v2::SERVICE_PURPOSE as CONTROLLER_SERVICE_V2_PURPOSE;
-pub use controller_v2::{BrokerBirthData, BrokerProgramData, ControllerBirthV2};
-pub use engine::validate_anchor_inspection;
-pub use engine::{
-    validate_controller_inspection, validate_controller_service_v2_inspection,
-    validate_engine_information, website_process_data,
+pub use anchor_recovery::RetainedPoolAnchor;
+pub use configuration_transition::{
+    PoolConfigurationDataError, PoolMemberPolicyEdit, WorkerPoolConfigurationTransition,
 };
+mod engine;
+mod member_policy;
+mod provider;
+mod retired;
+pub use controller_v2::SERVICE_PURPOSE as CONTROLLER_SERVICE_V2_PURPOSE;
+pub use controller_v2::{
+    BrokerBirthData, BrokerProgramData, CommittedMemberSnapshot, ControllerBirthCheck,
+    ControllerBirthV2, ControllerServiceBirth,
+};
+pub use engine::{
+    validate_anchor_inspection, validate_controller_inspection,
+    validate_controller_service_v2_inspection, validate_engine_information,
+    validate_failed_controller_service_v2_inspection, validate_pool_image_information,
+    validate_retained_anchor_inspection, validate_stopped_controller_service_v2_inspection,
+    website_process_data,
+};
+pub use member_policy::WorkerPoolMemberPolicy;
 pub use provider::WorkerPoolProvider;
+pub use retired::{RetiredControllerData, failed_controller_startup_log};
 
 pub const PURPOSE: &str = "reverie-docker-worker-pool-v1";
 pub const MEMORY_MAX_MIB: u32 = 49_152;
@@ -173,11 +188,11 @@ fn instance_root(value: &str) -> bool {
 impl std::error::Error for PoolPolicyError {}
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     mod provider;
     use super::*;
 
-    pub(super) fn policy() -> WorkerPoolPolicy {
+    pub(crate) fn policy() -> WorkerPoolPolicy {
         WorkerPoolPolicy {
             version: 1,
             purpose: PURPOSE.into(),

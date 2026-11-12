@@ -1,7 +1,6 @@
 //! Actual legacy C stop-laptops consumer. It grants no pool administration.
-use super::seat_stop::SeatStop as Seat;
+use super::fleet_drain::{DrainCause, LegacyFleetDrain};
 use super::*;
-use crate::reservation_gate::FleetStopAdmission;
 use reverie_contracts::worker_control::WorkerControlRequest;
 use reverie_host::{
     worker_reports::{
@@ -14,7 +13,9 @@ use std::{
     rc::Rc,
     time::{Duration, Instant},
 };
+mod pool_recovery;
 mod query;
+mod quiesce;
 #[cfg(test)]
 mod tests;
 
@@ -23,11 +24,18 @@ enum Cause {
     Gate(GateError),
     Storage(StorageWorkflowError),
     Native(SourceStopError),
+    Drain(DrainCause),
     Report(reverie_host::worker_reports::WorkerReportError),
+    Handlers(Rc<reverie_host::worker_reports::WorkerReportError>),
+    Finalization {
+        primary: Box<Self>,
+        secondary: Box<Self>,
+    },
     Identity(Arc<reverie_store::storage_identity::IdentityError>),
     Observation(Arc<crate::reservation_observer::ObserverError>),
     Provider(Rc<reverie_host::website_facts::WebsiteFactsError>),
     Refused(&'static str),
+    Pool(Rc<reverie_host::worker_pool::PoolNominationError>),
 }
 impl fmt::Display for Cause {
     fn fmt(&self, out: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -35,11 +43,17 @@ impl fmt::Display for Cause {
             Self::Gate(e) => e.fmt(out),
             Self::Storage(e) => e.fmt(out),
             Self::Native(e) => e.fmt(out),
+            Self::Drain(e) => e.fmt(out),
             Self::Report(e) => e.fmt(out),
+            Self::Handlers(e) => e.fmt(out),
+            Self::Finalization { primary, secondary } => {
+                write!(out, "{primary}; cleanup: {secondary}")
+            }
             Self::Identity(e) => e.fmt(out),
             Self::Observation(e) => e.fmt(out),
             Self::Provider(e) => e.fmt(out),
             Self::Refused(e) => out.write_str(e),
+            Self::Pool(e) => e.fmt(out),
         }
     }
 }
@@ -64,24 +78,28 @@ impl From<reverie_host::worker_reports::WorkerReportError> for Cause {
     }
 }
 
+impl From<DrainCause> for Cause {
+    fn from(e: DrainCause) -> Self {
+        Self::Drain(e)
+    }
+}
 struct Frame<'a> {
     broker: &'a Arc<InstallingBroker>,
     connection: WorkerServiceConnection,
     action: Option<WorkerControlRequest>,
     hold: Option<WorkerLaunchHold>,
-    admission: Option<FleetStopAdmission>,
-    drain: Option<lifecycle::DrainingOwner>,
     census: Option<ControlStopCensus>,
-    originals: Vec<LaptopRegistration>,
-    loose: Option<StorageClaim>,
-    seats: Vec<Seat>,
+    native: Option<Box<LegacyFleetDrain<'a>>>,
+    service_drain: Option<lifecycle::DrainingOwner>,
+    handlers: Option<reverie_host::worker_reports::WorkerServiceMaintenanceHandlers>,
+    closed_handlers: Option<reverie_host::worker_reports::WorkerOriginalHandlersClosed>,
     end: Instant,
-    sessions: Vec<ProfileSessionId>,
-    orphan_offices: Vec<Arc<recovered::RecoveredOffice>>,
     completed: bool,
-    finalization_failed: bool,
     identity_unknown: Option<Arc<reverie_store::storage_identity::IdentityError>>,
     health: Option<query::HealthReaders>,
+    absence: Option<reverie_host::worker_pool::PoolAbsenceObservation>,
+    recovery_drain: Option<lifecycle::DrainingOwner>,
+    recovery_exclusion: Option<reverie_host::worker_reports::WorkerRecoveryExclusion>,
 }
 pub(in crate::installing_broker) struct ControlFailure<'a> {
     owner: Option<Box<Frame<'a>>>,
@@ -105,19 +123,18 @@ impl InstallingBroker {
             connection,
             action: None,
             hold: None,
-            admission: None,
-            drain: None,
             census: None,
-            originals: Vec::new(),
-            loose: None,
-            seats: Vec::new(),
+            native: None,
+            service_drain: None,
+            handlers: None,
+            closed_handlers: None,
             end: Instant::now() + Duration::from_secs(120),
-            sessions: Vec::new(),
-            orphan_offices: Vec::new(),
             completed: false,
-            finalization_failed: false,
             identity_unknown: None,
             health: None,
+            absence: None,
+            recovery_drain: None,
+            recovery_exclusion: None,
         });
         match owner.run() {
             Ok(()) => Ok(()),
@@ -150,169 +167,26 @@ impl Frame<'_> {
             WorkerControlRequest::Status => return self.status(),
             WorkerControlRequest::ProviderHealth => return self.provider_health(),
             WorkerControlRequest::StorageStatus => return self.storage_status(),
+            WorkerControlRequest::PoolRecoveryStatus => return self.pool_recovery_status(),
             WorkerControlRequest::UnsupportedStopAgent => return self.unsupported_stop(),
             WorkerControlRequest::StopLaptops => {}
+            WorkerControlRequest::QuiesceForDeployment => return self.quiesce_for_deployment(),
         }
         self.stop_laptops()
     }
     fn stop_laptops(&mut self) -> Result<(), Cause> {
-        let snapshot = self.broker.configuration()?;
-        self.admission = self
-            .broker
-            .resource_reservations()?
-            .map(|gate| {
-                gate.admit_fleet_stop(
-                    &self.broker.installed,
-                    &self.broker.storage.runtime.stop_budget(),
-                )
-            })
-            .transpose()?;
-        let mut lifecycle = self.broker.installed.lifecycle()?;
-        // Exact original J owners must finish before C can consume idle storage.
-        if !lifecycle.guard.transients_empty() {
-            return Err(Cause::Refused("WORKER_STOP_ACTIVE_LAUNCH_OR_VIEWER"));
-        }
-        self.census = Some(
-            self.broker
-                .storage
-                .runtime
-                .control_stop_census(snapshot.envelope().base(), self.end)?,
-        );
-        let census = self
-            .census
-            .as_mut()
-            .expect("retained census")
-            .read(&self.broker.storage.runtime)?;
-        for (_, name) in census.entries() {
-            if let Some(admission) = &self.admission {
-                admission.check_target(name)?;
-            }
-        }
-        for entry in lifecycle.guard.iter() {
-            if let Some(admission) = &self.admission {
-                admission.check_target(&entry.name)?;
-            }
-        }
-        self.drain = Some(lifecycle.begin_control_drain()?);
-        self.originals = std::mem::take(&mut **lifecycle.guard);
-        self.prepare_registered(snapshot.configuration())?;
-        for (sid, _) in census.entries() {
-            // Registered seats were selected from the original registry; only
-            // genuinely detached names need a fresh actual lease acquisition.
-            if self.sessions.contains(sid) {
-                continue;
-            }
-            self.loose = Some(self.broker.storage.claim(snapshot.configuration(), sid)?);
-            self.prepare_loose(snapshot.configuration(), None)?;
-        }
-        for seat in &self.seats {
-            seat.stop.as_ref().expect("actual stop owner").stop()?;
-        }
-        if !self
-            .census
-            .as_mut()
-            .expect("same census")
-            .read(&self.broker.storage.runtime)?
-            .entries()
-            .is_empty()
-        {
-            return Err(Cause::Refused("WORKER_STOP_RUNNING_REMAIN"));
-        }
-        self.finish_seats()?;
-        if let Some(admission) = self.admission.take()
-            && let Err(cause) = admission.close()
-        {
-            self.finalization_failed = true;
-            return Err(cause.into());
-        }
-        lifecycle.finish_control_drain(self.drain.as_ref().expect("actual drain"))?;
-        self.drain = None;
+        let drain = self
+            .native
+            .get_or_insert_with(|| Box::new(LegacyFleetDrain::new(self.broker, self.end)));
+        drain.run_ordinary()?;
         self.connection
             .reply_json(br#"{"action":"stop-laptops","success":true}"#)?;
         self.close_transport()?;
         self.completed = true;
         Ok(())
     }
-    fn prepare_registered(
-        &mut self,
-        source: &reverie_contracts::worker_config::EffectiveWorkerConfig,
-    ) -> Result<(), Cause> {
-        while let Some(entry) = self.originals.pop() {
-            self.prepare_registered_entry(entry, source)?;
-        }
-        Ok(())
-    }
-    fn prepare_registered_entry(
-        &mut self,
-        entry: LaptopRegistration,
-        source: &reverie_contracts::worker_config::EffectiveWorkerConfig,
-    ) -> Result<(), Cause> {
-        self.sessions.push(entry.session.clone());
-        match entry.owner {
-            LaptopOwner::Recovered(owner) => {
-                self.loose = Some(owner.storage);
-                self.prepare_loose(source, Some(owner.office))?;
-            }
-            LaptopOwner::Started(owner) => {
-                match self
-                    .broker
-                    .storage
-                    .retain_started_control_stop(&owner, source, self.end)
-                {
-                    Ok(stop) => self.seats.push(Seat {
-                        stop: Some(stop),
-                        claim: None,
-                        office: Some(owner.office.clone()),
-                    }),
-                    Err(cause) => {
-                        self.originals.push(LaptopRegistration {
-                            owner: LaptopOwner::Started(owner),
-                            ..entry
-                        });
-                        return Err(cause.into());
-                    }
-                }
-            }
-            #[cfg(test)]
-            LaptopOwner::Modeled => {
-                self.originals.push(entry);
-                return Err(Cause::Refused("WORKER_MODELED_STOP_REFUSED"));
-            }
-        }
-        Ok(())
-    }
-    fn prepare_loose(
-        &mut self,
-        source: &reverie_contracts::worker_config::EffectiveWorkerConfig,
-        office: Option<Arc<recovered::RecoveredOffice>>,
-    ) -> Result<(), Cause> {
-        let claim = self.loose.take().expect("same actual claim");
-        match claim.into_control_stop(source, self.end) {
-            Ok(stop) => {
-                self.seats.push(Seat {
-                    stop: Some(stop),
-                    claim: None,
-                    office,
-                });
-                Ok(())
-            }
-            Err(failure) => {
-                let (claim, cause) = *failure;
-                self.loose = Some(claim);
-                if let Some(office) = office {
-                    self.orphan_offices.push(office);
-                }
-                Err(cause.into())
-            }
-        }
-    }
-    fn finish_seats(&mut self) -> Result<(), Cause> {
-        for seat in &mut self.seats {
-            seat.finish(self.end)?;
-        }
-        Ok(())
-    }
     fn close_transport(&mut self) -> Result<(), Cause> {
+        self.close_recovery_observation()?;
         let socket = self.connection.close_socket_for_worker();
         let readers = self.close_health_readers();
         socket?;
@@ -343,45 +217,51 @@ impl ControlFailure<'_> {
                     WorkerControlRequest::Status
                         | WorkerControlRequest::ProviderHealth
                         | WorkerControlRequest::StorageStatus
+                        | WorkerControlRequest::PoolRecoveryStatus
                 )
             });
-        (readonly || matches!(self.causes.first(), Some(Cause::Refused(_)))) && self.reconcile()
+        (readonly
+            || matches!(
+                self.causes.first(),
+                Some(Cause::Refused(_) | Cause::Drain(DrainCause::Refused(_)))
+            ))
+            && self.reconcile()
     }
     pub(in crate::installing_broker) fn reconcile(&mut self) -> bool {
         let Some(owner) = self.owner.as_mut() else {
             return true;
         };
         let runtime = &owner.broker.storage.runtime;
-        let mut known = !owner.finalization_failed;
+        let mut known = true;
+        if let Some(handlers) = &mut owner.handlers {
+            known &= matches!(
+                handlers.settle(runtime),
+                Ok(reverie_host::worker_reports::WorkerHandlersProgress::Settled)
+            );
+        }
         if let Some(census) = &mut owner.census
             && let Err(cause) = census.settle(runtime, owner.end)
         {
             known = false;
             self.causes.push(cause.into());
         }
-        for seat in &owner.seats {
-            if let Some(stop) = &seat.stop
-                && let Err(cause) = stop.settle(owner.end)
-            {
-                known = false;
+        if let Some(native) = &mut owner.native {
+            let failures = native.settle_components();
+            known &= failures.is_empty();
+            self.causes.extend(failures.into_iter().map(Cause::Drain));
+            let service_stopped = matches!(
+                owner.action.as_ref(),
+                Some(WorkerControlRequest::QuiesceForDeployment)
+            ) && native.service_stop_finished();
+            if !known || (native.retained() && !service_stopped) {
+                return false;
+            }
+            if !service_stopped && let Err(cause) = native.abort_admission() {
                 self.causes.push(cause.into());
+                return false;
             }
         }
-        // Native call settlement alone never forgives a failed physical stop,
-        // restores consumed resources, clears draining or releases admission.
-        if !known
-            || owner.drain.is_some()
-            || !owner.seats.is_empty()
-            || !owner.originals.is_empty()
-            || owner.loose.is_some()
-        {
-            return false;
-        }
-        if let Some(admission) = owner.admission.take()
-            && let Err(cause) = admission.abort()
-        {
-            owner.finalization_failed = true;
-            self.causes.push(cause.into());
+        if !known {
             return false;
         }
         match owner.close_transport() {
@@ -395,7 +275,10 @@ impl ControlFailure<'_> {
                 // failure. Reconcile cannot replay a read or grow diagnostics.
                 if !matches!(
                     cause,
-                    Cause::Identity(_) | Cause::Observation(_) | Cause::Provider(_)
+                    Cause::Identity(_)
+                        | Cause::Observation(_)
+                        | Cause::Provider(_)
+                        | Cause::Handlers(_)
                 ) {
                     self.causes.push(cause);
                 }
@@ -416,14 +299,16 @@ impl Drop for Frame<'_> {
         if !self.completed {
             std::mem::forget((
                 Arc::clone(self.broker),
-                self.admission.take(),
                 self.hold.take(),
+                self.native.take(),
+                self.service_drain.take(),
+                self.handlers.take(),
+                self.closed_handlers.take(),
                 self.census.take(),
                 self.health.take(),
-                self.loose.take(),
-                std::mem::take(&mut self.originals),
-                std::mem::take(&mut self.seats),
-                std::mem::take(&mut self.orphan_offices),
+                self.absence.take(),
+                self.recovery_drain.take(),
+                self.recovery_exclusion.take(),
             ));
         }
     }

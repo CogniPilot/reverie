@@ -29,7 +29,10 @@ function auditExpressions(): string[] {
   const sf = ts.createSourceFile('session-routes.ts', source, ts.ScriptTarget.Latest, true);
   const found: string[] = [];
   function visit(n: ts.Node): void {
-    if (ts.isCallExpression(n) && ts.isPropertyAccessExpression(n.expression) && n.expression.name.text === 'completeSpawn' && n.arguments.length === 3) {
+    if (ts.isCallExpression(n) && ts.isPropertyAccessExpression(n.expression) && n.expression.name.text === 'completeSpawn') {
+      // Replacement custody is a fourth argument. Audit authority remains the
+      // required third argument; do not silently skip these calls as APIs grow.
+      expect(n.arguments.length).toBeGreaterThanOrEqual(3);
       found.push(n.arguments[2].getText(sf));
     }
     ts.forEachChild(n, visit);

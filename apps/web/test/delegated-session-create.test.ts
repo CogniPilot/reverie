@@ -4,6 +4,7 @@ import cookie from '@fastify/cookie';
 import { registerOwnerPolicy } from '../src/owner-auth/policy.js';
 import { withDelegatedSessionCreate, withDelegatedSessionStart, claimDelegatedSessionCreate, consumeDelegatedSessionCreate, delegatedSessionStartAdmission } from '../src/owner-auth/delegated-session-create.js';
 import { registerSessionRoutes } from '../src/web/routes/session-routes.js';
+import { sessionCreateAdmission, withSessionCreateAdmission } from '../src/owner-auth/session-create-admission.js';
 
 const id = '00000001-0001-4000-8000-000000000001';
 const other = '00000002-0002-4000-8000-000000000002';
@@ -22,7 +23,7 @@ describe('private delegated session-create authority', () => {
       service: { policy: () => 'enforce', session: () => undefined, service: () => false, audit: vi.fn(), closeEnded() {} } as any,
       ctx: { sessions } as any,
       isCapabilityRequest: () => false,
-      relations: { known: () => true, related: (a: string, b: string) => a === b || (recordedCandidate && a === id && b === other), upward: () => false, keeper: () => false, admin: () => false },
+      relations: { known: () => true, related: (a: string, b: string) => a === b || (recordedCandidate && a === id && b === other), upward: () => false, keeper: () => false, admin: () => false, coordinated: () => false },
     });
     app.addHook('preValidation', async () => { if (revokeOnParse) authorized = false; });
     app.post('/api/sessions', async () => { handled++; return { session: { id: 'child' } }; });
@@ -138,5 +139,36 @@ describe('private delegated session-create authority', () => {
       expect(result).toMatchObject({ success: false, errorCode: 'FORBIDDEN' });
     });
     expect(startInteractive).not.toHaveBeenCalled();
+  });
+
+  it('keeps the private creation fence bound to one exact payload, request, owner and scope lifetime', async () => {
+    const req: any = { method: 'POST', url: '/api/sessions', routeOptions: { url: '/api/sessions' }, headers: {}, body: payload };
+    expect(sessionCreateAdmission(req)).toBeUndefined();
+    let admitted!: () => boolean;
+    await withSessionCreateAdmission({ owner: undefined, payload, authorized: () => authorized }, async () => {
+      admitted = sessionCreateAdmission(req)!;
+      expect(admitted()).toBe(true);
+      expect(sessionCreateAdmission({ ...req })!()).toBe(false);
+      req.body = { ...payload, subscriptionProfileId: 'other' };
+      expect(admitted()).toBe(false);
+      req.body = payload;
+      authorized = false;
+      expect(admitted()).toBe(false);
+      authorized = true;
+      expect(admitted()).toBe(true);
+    });
+    expect(admitted()).toBe(false);
+    await withSessionCreateAdmission({ owner: 'other-owner', payload, authorized: () => true }, async () => {
+      expect(sessionCreateAdmission(req)!()).toBe(false);
+    });
+    await withSessionCreateAdmission({ owner: undefined, payload, authorized: () => true }, async () => {
+      expect(sessionCreateAdmission({ ...req, url: '/api/settings', routeOptions: { url: '/api/settings' } })!()).toBe(false);
+    });
+  });
+
+  it('does not turn the creation fence or forged body fields into HTTP create authority', async () => {
+    expect((await request({ ...payload, admitted: true, authorized: true })).statusCode).toBe(403);
+    expect((await withSessionCreateAdmission({ owner: undefined, payload, authorized: () => true }, () => request())).statusCode).toBe(403);
+    expect(handled).toBe(0);
   });
 });

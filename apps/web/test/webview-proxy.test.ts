@@ -220,11 +220,13 @@ describe('buildUpstreamRequestHeaders', () => {
 
   it('NEVER forwards Reverie credentials to the dashboard', () => {
     const headers = buildUpstreamRequestHeaders(
-      { authorization: 'Basic REVERIECREDS', cookie: 'reverie_session=SECRET; dash=1', accept: '*/*' },
+      { authorization: 'Basic REVERIECREDS', cookie: 'reverie_session=SECRET; dash=1', accept: '*/*',
+        'x-reverie-hook-generation': 'synthetic-private-generation' },
       upstream,
       { forwardCookies: false, sessionCookieName: 'reverie_session' }
     );
     expect(headers.authorization).toBeUndefined();
+    expect(headers['x-reverie-hook-generation']).toBeUndefined();
     expect(headers.cookie).toBeUndefined();
     expect(headers.accept).toBe('*/*');
   });

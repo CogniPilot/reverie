@@ -33,6 +33,7 @@ pub mod office_hook;
 pub mod office_plan;
 pub mod operations_v1;
 pub mod ops_command;
+pub mod perf_transition;
 pub mod profiles_v1;
 pub mod prune;
 pub mod prune_receipts;

@@ -1,6 +1,7 @@
 //! Fixed read-only container policy mount. No request-selected host pathname.
 use super::*;
 use crate::native;
+use reverie_contracts::worker_pool::{ControllerServiceBirth, RetainedPoolAnchor};
 use sha2::{Digest, Sha256};
 use std::{
     fs::File,
@@ -14,7 +15,7 @@ mod tests;
 
 pub struct ControllerPoolPolicy {
     data: WorkerPoolPolicy,
-    birth: Option<reverie_contracts::worker_pool::ControllerBirthV2>,
+    birth: Option<ControllerServiceBirth>,
     digest: [u8; 32],
     file: Option<File>,
     directory: Option<File>,
@@ -34,8 +35,7 @@ impl ControllerPoolPolicy {
     ) -> std::result::Result<Self, Box<ControllerPoolPolicyFailure>> {
         Self::open_with(expected_sha256, false)
     }
-    /// Explicit v2 birth record selected by the trusted registered bootstrap.
-    /// It still grants no maintenance, policy activation or member write.
+    /// Birth input selected by the trusted confinement-v2 registered bootstrap.
     pub fn open_service_v2(
         expected_sha256: [u8; 32],
     ) -> std::result::Result<Self, Box<ControllerPoolPolicyFailure>> {
@@ -86,7 +86,7 @@ impl ControllerPoolPolicy {
         self.assert_current()?;
         self.birth
             .as_ref()
-            .map(|birth| birth.broker())
+            .map(|birth| birth.identity().broker())
             .ok_or(PoolError::Refused("WORKER_POOL_SERVICE_V2_REQUIRED"))
     }
     pub(super) fn bound_broker_data(
@@ -94,8 +94,14 @@ impl ControllerPoolPolicy {
     ) -> Result<&reverie_contracts::worker_pool::BrokerBirthData> {
         self.birth
             .as_ref()
-            .map(|birth| birth.broker())
+            .map(|birth| birth.identity().broker())
             .ok_or(PoolError::Refused("WORKER_POOL_SERVICE_V2_REQUIRED"))
+    }
+    pub(super) fn service_birth(&self) -> Option<&ControllerServiceBirth> {
+        self.birth.as_ref()
+    }
+    pub(super) fn bound_anchor(&self) -> Option<&RetainedPoolAnchor> {
+        self.birth.as_ref()?.retained_anchor()
     }
     pub(super) fn require_component_initialization(&self) -> Result<()> {
         need(
@@ -111,6 +117,18 @@ impl ControllerPoolPolicy {
     }
     pub(super) fn assert_anchor(&self, id: &str, pid: u32) -> Result<()> {
         self.require_open()?;
+        if let Some(anchor) = self.bound_anchor() {
+            need(
+                anchor.container_id() == id && anchor.pid() == pid,
+                "WORKER_POOL_RETAINED_ANCHOR_IDENTITY",
+            )?;
+            return reverie_contracts::worker_pool::validate_retained_anchor_inspection(
+                &self.engine.inspect(id)?,
+                &self.data,
+                anchor,
+            )
+            .map_err(|_| PoolError::Refused("WORKER_POOL_RETAINED_ANCHOR_INSPECTION"));
+        }
         self.engine.verify_anchor(&self.data, id, pid, self.digest)
     }
     pub(super) fn assert_current(&self) -> Result<()> {
@@ -224,7 +242,7 @@ struct OpeningPolicy {
 }
 struct CapturedPolicy {
     data: WorkerPoolPolicy,
-    birth: Option<reverie_contracts::worker_pool::ControllerBirthV2>,
+    birth: Option<ControllerServiceBirth>,
     identity: (u64, u64),
     directory_identity: (u64, u64),
 }
@@ -374,14 +392,11 @@ fn file_identity(file: &File) -> Result<(u64, u64)> {
     )?;
     Ok((metadata.dev(), metadata.ino()))
 }
-fn read_policy(
+pub(super) fn read_policy(
     file: &File,
     digest: [u8; 32],
     service_v2: bool,
-) -> Result<(
-    WorkerPoolPolicy,
-    Option<reverie_contracts::worker_pool::ControllerBirthV2>,
-)> {
+) -> Result<(WorkerPoolPolicy, Option<ControllerServiceBirth>)> {
     use std::os::unix::fs::FileExt;
     let mut raw = [0u8; 65_537];
     let count = file.read_at(&mut raw, 0)?;
@@ -390,9 +405,8 @@ fn read_policy(
     need(actual == digest, "WORKER_POOL_POLICY_DIGEST")?;
     let invalid = |_| PoolError::Refused("WORKER_POOL_POLICY_INVALID");
     if service_v2 {
-        let birth = reverie_contracts::worker_pool::ControllerBirthV2::decode(&raw[..count])
-            .map_err(invalid)?;
-        Ok((birth.policy().clone(), Some(birth)))
+        let birth = ControllerServiceBirth::decode(&raw[..count]).map_err(invalid)?;
+        Ok((birth.identity().policy().clone(), Some(birth)))
     } else {
         Ok((
             WorkerPoolPolicy::decode(&raw[..count]).map_err(invalid)?,

@@ -1,3 +1,6 @@
+import {issueInputAdmission, TerminalInputUnconfirmedError} from './terminal-input-outcome.js';
+import {issueSessionProviderLease, type SessionProviderLease} from './session-provider-lease.js';
+import {prepareWorkspaceHooks, workspaceHookPolicy, consumeWorkspaceHookPreparation, type WorkspaceHookPreparation, type WorkspaceHookConfiguration} from './workspace-hook-policy.js';
 import { applyCodexTurnSummaryHooks } from './hooks-config.js';
 import { cliConfigContent } from './cli-config-content.js';
 import { prepareSelectedClaudeProfile } from './selected-claude-profile.js';
@@ -506,6 +509,30 @@ export interface ClaudeMessage {
 /** Why a pane was not replaced: an owner stop of this agent is not settled yet. */
 const OWNER_STOP_HELD = 'An unsettled owner stop holds this expert; its pane is not replaced until the laptop settles the stop';
 
+/** A dispatched provider command may have run; no caller may replay it as a rollback. */
+export class ProviderDispatchUnconfirmedError extends Error {
+  constructor(cause?: unknown) {
+    super('Provider launch outcome is unconfirmed. Input is held. Do not replay it; inspect the terminal and confirm whether the provider ran. Same-session retry cannot clear this hold; supported reconciliation is not yet implemented.', {cause});
+    this.name = 'ProviderDispatchUnconfirmedError';
+  }
+}
+
+interface HookProviderDispatch {
+  envOverrides: Record<string, string>;
+  onProviderDispatch(): void;
+  attempted(): boolean;
+  providerAttempted(): boolean;
+  current(): boolean;
+  settle(success: boolean): boolean;
+}
+
+interface HookStartAttempt {
+  configuration: WorkspaceHookConfiguration;
+  mode: string;
+  initialEpoch: number;
+  operation?: HookProviderDispatch;
+}
+
 export class Session extends EventEmitter {
   readonly id: string;
   readonly workingDir: string;
@@ -706,6 +733,7 @@ export class Session extends EventEmitter {
    */
   private _paneExit: PaneExit | null = null;
   private _viewerInputHeld = false;
+  private _viewerInspectionRequested = false;
   private _viewerClientLost = false;
   private _muxWritesInFlight = 0;
   /** One id per mux write in flight (the counter above is always its size): a gated write's gate counts only the OTHER
@@ -784,6 +812,175 @@ export class Session extends EventEmitter {
   // Ephemeral env overrides (e.g., CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS). Exported by tmux
   // at spawn, preserved across respawns via persisted state. Not written to .claude/settings.local.json.
   private _envOverrides: Record<string, string> | undefined;
+  #workspaceHookPreparation?: WorkspaceHookPreparation;
+  #providerDispatchUncertainty?: ProviderDispatchUnconfirmedError;
+  #terminalInputUncertainty?: TerminalInputUnconfirmedError;
+  #inputSubject?: {identity: () => boolean; token: object};
+  get terminalInputHeld(): boolean {return this.#terminalInputUncertainty !== undefined;}
+  /** Deny-only evidence of a possibly issued input; neither health nor a new client clears it. */
+  holdUnconfirmedInput(cause?: unknown): TerminalInputUnconfirmedError {
+    if (!this.#terminalInputUncertainty) {
+      this.#terminalInputUncertainty = cause instanceof TerminalInputUnconfirmedError ? cause : new TerminalInputUnconfirmedError(cause);
+      this._submitVerifier?.cancel();
+      this.emit('needsRefresh');
+    }
+    return this.#terminalInputUncertainty;
+  }
+  get providerDispatchHeld(): boolean {return this.#providerDispatchUncertainty !== undefined;}
+  private _holdUnconfirmedProvider(cause?: unknown): ProviderDispatchUnconfirmedError {
+    return this.#providerDispatchUncertainty ??= cause instanceof ProviderDispatchUnconfirmedError ? cause : new ProviderDispatchUnconfirmedError(cause);
+  }
+  /** Canonical deny-only provider-effect admission; viewer attachment is separate. */
+  private _providerEffectsAdmitted(): boolean {return this.#providerDispatchUncertainty === undefined && this.#terminalInputUncertainty === undefined;}
+  private _assertProviderEffectAdmission(): void {
+    if (!this._providerEffectsAdmitted()) throw this.#providerDispatchUncertainty ?? this.#terminalInputUncertainty!;
+  }
+  #workspaceHookEvidence: {configuration: 'fenced' | 'legacy-attachment' | 'opted-out'}
+    | {configuration: 'preparing' | 'prepared'; generation: string} = {configuration: 'fenced'};
+  #workspaceHookEpoch = 0;
+  #hookStartAttempt?: HookStartAttempt;
+
+  /** Configuration evidence only; no provider-readiness or hook-emission claim. */
+  get workspaceHookConfiguration(): WorkspaceHookConfiguration {
+    const configuration = this.#workspaceHookEvidence.configuration;
+    return configuration === 'prepared' || configuration === 'opted-out' ? configuration : 'unknown';
+  }
+
+  /** Admission precedes every report effect; an unknown owned start is never a legacy attachment. */
+  admitHookReport(value: unknown): 'refused' | 'legacy-attachment' | 'preparing' | 'current' | 'supervised' {
+    if (this._isStopped || this._closing || this.#providerDispatchUncertainty) return 'refused';
+    const capability = getCli(this.mode)?.capabilities.hooks;
+    if (capability === 'supervised') return 'supervised';
+    if (capability !== 'always') return 'refused';
+    const evidence = this.#workspaceHookEvidence;
+    switch (evidence.configuration) {
+      case 'legacy-attachment': return 'legacy-attachment';
+      case 'preparing': return value === evidence.generation ? 'preparing' : 'refused';
+      case 'prepared': return value === evidence.generation ? 'current' : 'refused';
+      case 'fenced':
+      case 'opted-out': return 'refused';
+    }
+  }
+
+  /** A prompt may authorize input only to the same provider epoch and Session object. */
+  captureApprovalProviderLease(currentOwner: () => boolean = () => true): SessionProviderLease | undefined {
+    const evidence = this.#workspaceHookEvidence;
+    if (this._isStopped || this._closing || this.#providerDispatchUncertainty || (evidence.configuration !== 'prepared'
+      && evidence.configuration !== 'legacy-attachment' && getCli(this.mode)?.capabilities.hooks !== 'supervised')) return;
+    const epoch = this.#workspaceHookEpoch;
+    const mode = this.mode;
+    const originalOwner = this.owner;
+    return issueSessionProviderLease(this, () => !this._isStopped && !this._closing
+      && this.#workspaceHookEpoch === epoch && this.mode === mode && this.owner === originalOwner && currentOwner(), originalOwner, epoch);
+  }
+
+  private _invalidateWorkspaceHooks(): void {
+    this.#workspaceHookEpoch++;
+    this.#workspaceHookEvidence = {configuration: 'fenced'};
+    this.emit('workspaceHookGenerationChanged');
+  }
+
+  private _launchEnvOverrides(): Record<string, string> {
+    // The reserved value outranks caller overrides and is never stored in them.
+    return {...this._envOverrides, REVERIE_HOOK_GENERATION: 'generation' in this.#workspaceHookEvidence
+      ? this.#workspaceHookEvidence.generation : ''};
+  }
+
+  private _sealWorkspaceHooks(configuration: WorkspaceHookConfiguration, exported: boolean): void {
+    const evidence = this.#workspaceHookEvidence;
+    if (evidence.configuration === 'legacy-attachment') return;
+    this.#workspaceHookEvidence = configuration === 'prepared' && exported && evidence.configuration === 'preparing'
+      ? {configuration: 'prepared', generation: evidence.generation}
+      : {configuration: configuration === 'opted-out' ? 'opted-out' : 'fenced'};
+  }
+
+  private _hookStartCurrent(): boolean {
+    const attempt = this.#hookStartAttempt;
+    return !this._isStopped && !this._closing && (!attempt || (attempt.mode === this.mode
+      && (attempt.operation ? attempt.operation.current() : attempt.initialEpoch === this.#workspaceHookEpoch)));
+  }
+
+  /** Stage private env without revoking a provider that is still working during preparation. */
+  private _stageProviderHookDispatch(configuration: WorkspaceHookConfiguration,
+    authority: () => boolean, eligible: () => boolean = authority, viewerOnly = false): HookProviderDispatch {
+    const initialEpoch = this.#workspaceHookEpoch;
+    const mode = this.mode;
+    const generation = configuration === 'prepared' && !viewerOnly && !this._remote && !this._docker
+      ? uuidv4() : undefined;
+    let phase: {state: 'staged'} | {state: 'dispatched' | 'refused' | 'failed' | 'succeeded'; epoch: number} = {state: 'staged'};
+    const current = () => authority() && (viewerOnly || this._providerEffectsAdmitted()) && !this._closing && !this._isStopped && mode === this.mode
+      && (phase.state === 'staged' ? initialEpoch : phase.epoch) === this.#workspaceHookEpoch;
+    return {
+      envOverrides: {...this._envOverrides, REVERIE_HOOK_GENERATION: generation ?? ''},
+      onProviderDispatch: () => {
+        if (phase.state !== 'staged') throw new Error('Session launch dispatch was already settled');
+        if (!current() || !eligible()) {phase = {state: 'refused', epoch: initialEpoch}; throw new Error('Session launch generation changed');}
+        const epoch = viewerOnly ? initialEpoch : initialEpoch + 1;
+        phase = {state: 'dispatched', epoch};
+        if (!viewerOnly) this._invalidateWorkspaceHooks();
+        if (!current()) throw new Error('Session launch generation changed');
+        if (generation) this.#workspaceHookEvidence = {configuration: 'preparing', generation};
+      },
+      attempted: () => phase.state === 'dispatched' || phase.state === 'failed' || phase.state === 'succeeded',
+      providerAttempted: () => !viewerOnly && (phase.state === 'dispatched' || phase.state === 'failed' || phase.state === 'succeeded'),
+      current,
+      settle: (success) => {
+        if (phase.state !== 'staged' && phase.state !== 'dispatched') return phase.state === 'succeeded';
+        if (phase.state === 'staged') {
+          // A known refusal made no dispatch. An adapter claiming success without
+          // this boundary supplies no proof of what actually ran.
+          if (success) this._invalidateWorkspaceHooks();
+          phase = {state: success ? 'failed' : 'refused', epoch: this.#workspaceHookEpoch};
+          return false;
+        }
+        if (!success || !current()) {
+          if (!viewerOnly && phase.epoch === this.#workspaceHookEpoch) this._invalidateWorkspaceHooks();
+          phase = {state: 'failed', epoch: this.#workspaceHookEpoch};
+          return false;
+        }
+        if (!viewerOnly) this._sealWorkspaceHooks(configuration, generation !== undefined);
+        phase = {state: 'succeeded', epoch: this.#workspaceHookEpoch};
+        return true;
+      },
+    };
+  }
+
+  private _stageStartHookDispatch(): HookProviderDispatch {
+    const attempt = this.#hookStartAttempt;
+    this._assertProviderEffectAdmission();
+    if (!attempt || !this._hookStartCurrent()) throw new Error('Session launch generation changed');
+    if (attempt.operation?.attempted()) throw new Error('A provider dispatch is already unsettled');
+    const operation = this._stageProviderHookDispatch(attempt.configuration,
+      () => this.#hookStartAttempt === attempt && this.mode === attempt.mode,
+      undefined, this._workerAttachOnly || !!(this._remote?.owned === false && this._remote.remoteSessionName));
+    attempt.operation = operation;
+    return operation;
+  }
+
+  private async _withWorkspaceHookStart(start: () => Promise<void>): Promise<void> {
+    if (this.#hookStartAttempt) throw new Error('Session launch is already in progress');
+    const preparation = this.#workspaceHookPreparation;
+    this.#workspaceHookPreparation = undefined;
+    const attempt: HookStartAttempt = {configuration: consumeWorkspaceHookPreparation(preparation, this.workingDir),
+      mode: this.mode, initialEpoch: this.#workspaceHookEpoch};
+    this.#hookStartAttempt = attempt;
+    try {
+      await start();
+      if (attempt.operation && !attempt.operation.settle(true)) {
+        if (attempt.operation.providerAttempted()) throw this._holdUnconfirmedProvider();
+        throw new Error('Terminal attachment outcome is unconfirmed');
+      }
+    } catch (error) {
+      const attempted = attempt.operation?.providerAttempted();
+      attempt.operation?.settle(false);
+      if (attempted) throw this._holdUnconfirmedProvider(error);
+      this._assertProviderEffectAdmission();
+      throw error;
+    } finally {
+      this.#hookStartAttempt = undefined;
+    }
+  }
+
   private readonly _workerAttachOnly: boolean;
   private readonly _workerResourceLaunch?: ResourceWorkerLaunch;
 
@@ -912,6 +1109,13 @@ export class Session extends EventEmitter {
       /** Extra env vars exported to the CLI at spawn time (no disk persistence) */
       envOverrides?: Record<string, string>;
       workerAttachOnly?: boolean;
+      /** Private, single-start filesystem configuration receipt; never restored from JSON. */
+      workspaceHookPreparation?: WorkspaceHookPreparation;
+      /** Saved safety fence only; restored transport/provider readiness is never implied. */
+      viewerInputHeld?: boolean;
+      /** Deny-only recovery fence, never positive provider/transport evidence. */
+      providerDispatchHeld?: boolean;
+      terminalInputHeld?: boolean;
       /** Internal, in-process only. Normal HTTP create schemas do not admit it. */
       workerResourceLaunch?: ResourceWorkerLaunch;
       subscriptionProfile?: SessionState['subscriptionProfile'];
@@ -961,8 +1165,12 @@ export class Session extends EventEmitter {
 
     this.id = config.id || uuidv4();
     this._workerAttachOnly = config.workerAttachOnly === true;
+    this._viewerInputHeld = this._workerBacked && config.viewerInputHeld === true;
     this._workerResourceLaunch = config.workerResourceLaunch;
+    if (config.providerDispatchHeld === true) this._holdUnconfirmedProvider();
+    if (config.terminalInputHeld === true) this.#terminalInputUncertainty = new TerminalInputUnconfirmedError();
     this.workingDir = config.workingDir;
+    this.#workspaceHookPreparation = config.workspaceHookPreparation;
     this.createdAt = config.createdAt || Date.now();
     this._mode = config.mode || 'claude';
     this.subscriptionProfile = config.subscriptionProfile;
@@ -1026,6 +1234,10 @@ export class Session extends EventEmitter {
     this._mux = config.mux || null;
     this._useMux = config.useMux ?? (this._mux !== null && this._mux.isAvailable());
     this._muxSession = config.muxSession || null;
+    // Actual restore/attach metadata, never a serialized hook-readiness claim.
+    if (config.muxSession || config.discoveredMuxSession || config.workerAttachOnly
+      || (config.remote?.owned === false && config.remote.remoteSessionName))
+      this.#workspaceHookEvidence = {configuration: 'legacy-attachment'};
 
     // Apply Nice priority configuration if provided
     if (config.niceConfig) {
@@ -1432,8 +1644,12 @@ export class Session extends EventEmitter {
     return this._paneExit ?? undefined;
   }
 
-  /** Read-only presentation of the existing gate; never persistence or authority. */
+  /** Safety fence; restoring it grants no input or provider authority. */
   get viewerInputHeld(): boolean { return this._viewerInputHeld; }
+  /** An explicit inspection request, never attached transport or provider proof. */
+  get viewerInspectionRequested(): boolean {
+    return this._viewerInspectionRequested && this._viewerInputHeld;
+  }
 
   /** A worker pane observes terminal transport, not the provider inside its laptop. */
   get runtimeHealthScope(): 'provider' | 'terminal' {
@@ -1511,10 +1727,12 @@ export class Session extends EventEmitter {
    * session stays quiet. `/interactive` and `/shell` did exactly that until
    * Ark0N/Codeman#446 review; both now persist on their success path.
    */
-  private clearPaneExitForNewPane(): void {
+  private clearPaneExitForNewPane(holdInput = false): void {
     this._viewerInputHeld = false;
+    this._viewerInspectionRequested = false;
     this._viewerClientLost = false;
     this.setPaneExit(undefined);
+    this._viewerInputHeld = holdInput;
     if (this._muxSession) this._mux?.clearPaneExit?.(this._muxSession.muxName);
   }
 
@@ -1987,7 +2205,10 @@ export class Session extends EventEmitter {
    * (identity, rooms, pin, OpenCode thread) stays, so switching back to `opencode` resumes the same thread.
    */
   setMode(mode: SessionMode): void {
+    this._assertProviderEffectAdmission();
     if (!getCli(mode)) throw new Error(`No CLI registry entry for mode ${mode}`);
+    this.#workspaceHookPreparation = undefined;
+    this._invalidateWorkspaceHooks();
     this._mode = mode;
     if (getCli(mode)?.launch.resumeSelection !== 'claude-transcript') this._claudeSessionIdPending = false;
     this._acceptsPrompts = getCli(mode)?.capabilities.startMode !== 'shell';
@@ -2000,6 +2221,7 @@ export class Session extends EventEmitter {
     mode: SessionMode; selection?: SessionState['subscriptionProfile']; env: Record<string, string>;
     sourceKey: string; model?: string; effort?: string; effortField?: string; preserveRecipe?: boolean;
   }): () => void {
+    this._assertProviderEffectAdmission();
     const record = this as unknown as Record<string, unknown>;
     const fields = ['_mode', '_acceptsPrompts', '_cliVersion', 'subscriptionProfile', '_envOverrides', '_customModel',
       '_model', '_effort', '_resumeSessionId', '_claudeSessionId', '_claudeSessionIdPending', '_claudeSessionIdIsFirstHand', '_claudeSessionChain', '_runtimeThreads',
@@ -2054,7 +2276,7 @@ export class Session extends EventEmitter {
       delete next.continueSession; delete next.resumeSessionId; delete next.forkSession; delete next.configContent;
       next.model = options.model;
       if (options.effortField) next[options.effortField] = options.effort;
-      if (targetThread) next[options.mode === 'opencode' ? 'continueSession' : 'resumeSessionId'] = targetThread;
+      if (targetThread) next[getCli(options.mode)?.launch.legacyConfigAliases?.resumeId ?? 'resumeSessionId'] = targetThread;
       record['_' + field] = next;
     } else this._resumeSessionId = targetThread;
     return () => {
@@ -2265,7 +2487,7 @@ export class Session extends EventEmitter {
    * because every start would fork the thread again.
    */
   setOpenCodeThread(thread: string): void {
-    if (this.mode !== 'opencode') throw new Error('Only an OpenCode session has a thread');
+    if (getCli(this.mode)?.launch.threadStateProfile !== 'forkable-continue-v1') throw new Error('Only an OpenCode session has a thread');
     if (this._openCodeConfig?.forkSession === true) throw new Error('This session forks its thread on every start');
     this._openCodeConfig = { ...this._openCodeConfig, continueSession: thread };
   }
@@ -2376,6 +2598,10 @@ export class Session extends EventEmitter {
       runtimeHealth: this.runtimeHealth,
       runtimeHealthScope: this.runtimeHealthScope,
       workerViewerReconnect: this.workerViewerReconnect,
+      viewerInputHeld: this.viewerInputHeld,
+      ...(this.providerDispatchHeld ? {providerDispatchHeld: true} : {}),
+      ...(this.terminalInputHeld ? {terminalInputHeld: true} : {}),
+      viewerInspectionRequested: this.viewerInspectionRequested,
       attachmentHistory: this.attachmentHistory.length > 0 ? this.attachmentHistory : undefined,
       lastSubmitAt: this._lastSubmitAt || undefined,
       // Only a chain the CLI's own hooks vouched for is persisted, and only when
@@ -2516,9 +2742,13 @@ export class Session extends EventEmitter {
     admitted?: () => boolean;
   }): Promise<{ isRestored: boolean; respawnedResumeId?: string; respawnedDeadPane: boolean }> {
     const mux = this._mux!;
-    const admitted = () => !ownerStopPending(this.id) && (!options.admitted || options.admitted());
-    const assertAdmission = () => { if (options.admitted && !options.admitted()) throw new Error('Session launch authorization changed'); };
+    const admitted = () => this._hookStartCurrent() && !ownerStopPending(this.id) && (!options.admitted || options.admitted());
+    const assertAdmission = () => { if (!this._hookStartCurrent() || (options.admitted && !options.admitted())) throw new Error('Session launch authorization changed'); };
     assertAdmission();
+    // A held outcome may attach an unchanged live viewer, but must preserve the
+    // original subject when observation would otherwise discard or replace it.
+    if (!this._providerEffectsAdmitted() && (!this._muxSession || !mux.muxSessionExists(this._muxSession.muxName)
+      || mux.isPaneDead(this._muxSession.muxName))) this._assertProviderEffectAdmission();
     // An unsettled owner stop (owner-stop-journal) could still signal whatever holds this agent's pane, so until the
     // laptop settles it no new process goes there: only an existing live pane may be attached to.
     if (ownerStopPending(this.id) && (!this._muxSession || !mux.muxSessionExists(this._muxSession.muxName) || mux.isPaneDead(this._muxSession.muxName)))
@@ -2531,6 +2761,7 @@ export class Session extends EventEmitter {
     // genuinely new session starts with `_muxSession` null and never sets this.
     let muxSessionVanished = false;
     if (this._muxSession && !mux.muxSessionExists(this._muxSession.muxName)) {
+      this._assertProviderEffectAdmission();
       console.log('[Session] Stale mux session detected (tmux gone):', this._muxSession.muxName);
       this._muxSession = null;
       muxSessionVanished = true;
@@ -2542,6 +2773,7 @@ export class Session extends EventEmitter {
     let respawnedDeadPane = false;
     let respawnedResumeId: string | undefined;
     if (this._muxSession && mux.isPaneDead(this._muxSession.muxName)) {
+      this._refuseNewProviderWhileRecoveryHeld();
       console.log('[Session] Dead pane detected, respawning:', this._muxSession.muxName);
       // Confirmed dead — safe to resolve/pin now (see `_pinOmpRespawnId()`).
       // `options.respawnPaneOptions` was built eagerly before this dead-pane
@@ -2550,12 +2782,15 @@ export class Session extends EventEmitter {
       const respawnOptions = await this._buildRespawnPaneOptionsWithResumePin();
       assertAdmission();
       // The pane may have read live at the guard above and dead here: check again, now and at the tmux command.
-      this._refuseNewProcessWhileStopHeld();
-      this._beginClaudeConversationSelection();
+      this._refuseNewProviderWhileRecoveryHeld();
       assertAdmission();
+      const dispatch = this._stageStartHookDispatch();
+      Object.assign(respawnOptions, {envOverrides: dispatch.envOverrides, onProviderDispatch: () => {dispatch.onProviderDispatch(); this._beginClaudeConversationSelection();}});
       const newPid = await mux.respawnPane({ ...respawnOptions, admitted: () => admitted() && (!respawnOptions.admitted || respawnOptions.admitted()) });
       assertAdmission();
       if (!newPid) {
+        if (dispatch.attempted()) throw new Error('Provider respawn outcome is unconfirmed');
+        dispatch.settle(false);
         console.error('[Session] Failed to respawn pane, will create new session');
         needsNewSession = true;
       } else {
@@ -2574,7 +2809,8 @@ export class Session extends EventEmitter {
     // recovery and an explicit start, NOT a click on an exited tab — the browser
     // re-attaches only on a null pid, and the premise of Ark0N/Codeman#446 is
     // that an exited pane keeps its pid. `restartCli()` clears separately.
-    this.clearPaneExitForNewPane();
+    // Restoring a readable terminal must not release a persisted input fence.
+    this.clearPaneExitForNewPane(this._viewerInputHeld);
 
     // Check if we already have a mux session (restored session)
     const isRestored = this._muxSession !== null && !needsNewSession;
@@ -2607,9 +2843,10 @@ export class Session extends EventEmitter {
           this._resumeSessionId = pinned;
         }
       }
-      this._refuseNewProcessWhileStopHeld();
-      this._beginClaudeConversationSelection();
+      this._refuseNewProviderWhileRecoveryHeld();
       assertAdmission();
+      const dispatch = this._stageStartHookDispatch();
+      Object.assign(options.createSessionOptions, {envOverrides: dispatch.envOverrides, onProviderDispatch: () => {dispatch.onProviderDispatch(); this._beginClaudeConversationSelection();}});
       this._muxSession = await mux.createSession({ ...options.createSessionOptions,
         admitted: () => admitted() && (!options.createSessionOptions.admitted || options.createSessionOptions.admitted()) });
       assertAdmission();
@@ -2680,6 +2917,7 @@ export class Session extends EventEmitter {
    * @returns true if the pane was respawned (reattach issued), false otherwise.
    */
   async reattachRemote(): Promise<boolean> {
+    if (!this._providerEffectsAdmitted()) return false;
     if (!this._remote) return false; // not a remote session
     if (!this._useMux || !this._mux || !this._muxSession) return false;
     const mux = this._mux;
@@ -2694,8 +2932,15 @@ export class Session extends EventEmitter {
     if (ownerStopPending(this.id)) return false;  // an unsettled owner stop: no new process in this pane yet
     // Confirmed the mux session (and thus the pane) exists but this reattach
     // is about to respawn it — safe to resolve/pin now.
+    const originalRemote = this._remote, originalMode = this.mode, originalOwner = this.owner;
+    const originalEpoch = this.#workspaceHookEpoch;
+    const current = () => this._providerEffectsAdmitted() && !ownerStopPending(this.id) && !this._closing && !this._isStopped
+      && this._remote === originalRemote && this.mode === originalMode && this.owner === originalOwner
+      && this.#workspaceHookEpoch === originalEpoch;
+    if (!current()) return false;
     this._pinOmpRespawnId();
-    const newPid = await mux.respawnPane({ ...this._buildRespawnPaneOptions(), admitted: () => !ownerStopPending(this.id) });
+    const newPid = await mux.respawnPane({ ...this._buildRespawnPaneOptions(), admitted: current });
+    if (!current()) return false;
     if (!newPid) {
       console.error('[Session] reattachRemote: respawnPane failed for', this._muxSession.muxName);
       return false;
@@ -2727,8 +2972,8 @@ export class Session extends EventEmitter {
    * @returns true if the pane was respawned, false otherwise (no mux session, or
    *   the mux session is gone — see {@link reattachRemote} for that reasoning).
    */
-  async restartCli(): Promise<boolean> {
-    return this._withPaneLifecycle(() => this._doRestartCli());
+  async restartCli(stillCurrent: () => boolean = () => true, admitted: () => boolean = stillCurrent): Promise<boolean> {
+    return this._withPaneLifecycle(() => this._doRestartCli(false, stillCurrent, false, admitted));
   }
 
   /** An attach-only viewer is available only for a local isolated worker pane. */
@@ -2745,15 +2990,17 @@ export class Session extends EventEmitter {
     return undefined;
   }
 
-  async reconnectWorkerViewer(stillCurrent: () => boolean, revalidateMove?: () => Promise<boolean>): Promise<boolean> {
+  async reconnectWorkerViewer(stillCurrent: () => boolean, revalidateMove?: () => Promise<boolean>, diagnostic = false): Promise<boolean> {
+    const diagnosticEnd = performance.now() + 10_000;
     if (!this.workerViewerReconnect || !stillCurrent() || this._closing || this.paneLifecycleInFlight || this._muxWritesInFlight > 0) return false;
     if (!this._viewerInputHeld && !this._viewerClientLost && !this.hasDeadPane()) return false;
     return this._withPaneLifecycle(async () => {
       const mux = this._mux!, name = this._muxSession!.muxName;
       const options = this._buildRespawnPaneOptions();
       const mark = getCli(this.mode)?.capabilities.composerReadyMark;
-      if ((!mark && getCli(this.mode)?.capabilities.workDetect) || !stillCurrent() || this._closing) return false;
+      if ((!diagnostic && !mark && getCli(this.mode)?.capabilities.workDetect) || !stillCurrent() || this._closing) return false;
       this._viewerInputHeld = true;
+      this._viewerInspectionRequested = false;
       // Previous unknown submissions belong to the old viewer; never retry their Enter here.
       this._submitVerifier?.cancel();
       this._submitVerifier = null;
@@ -2769,6 +3016,20 @@ export class Session extends EventEmitter {
       }
       const client = this.ptyProcess;
       if (!client || this._pid === null) return false;
+      if (diagnostic) {
+        const pane = await mux.readPaneLiveness!(name);
+        if (!stillCurrent() || performance.now() >= diagnosticEnd || pane.state !== 'live' || pane.pid !== pid) return false;
+        // Error output is not readiness. Even ordinary-looking scrollback cannot
+        // prove a fresh native attachment, so this path only reports a request.
+        if (/^Reverie worker(?: unavailable)?:\s*\S/m.test(mux.capturePaneText?.(name) ?? '')) return false;
+        if (revalidateMove && !await revalidateMove()) return false;
+        const final = await mux.readPaneLiveness!(name);
+        if (!stillCurrent() || performance.now() >= diagnosticEnd || final.state !== 'live' || final.pid !== pid ||
+          this.ptyProcess !== client || this._pid === null) return false;
+        this._viewerInspectionRequested = true;
+        this.emit('needsRefresh');
+        return true;
+      }
       const deadline = performance.now() + 10_000;
       do {
         if (!stillCurrent() || this._closing) return false;
@@ -2801,7 +3062,8 @@ export class Session extends EventEmitter {
   }
 
   private async _doRestartCli(onlyIfDead = false, stillCurrent: () => boolean = () => true,
-    explicitRecovery = false): Promise<boolean> {
+    explicitRecovery = false, dispatchAdmitted: () => boolean = stillCurrent): Promise<boolean> {
+    this._assertProviderEffectAdmission();
     if (!this._useMux || !this._mux || !this._muxSession) return false;
     if (ownerStopPending(this.id)) {
       console.log(`[Session ${this.id.slice(0, 8)}] restart refused: an unsettled owner stop holds this pane`);
@@ -2814,29 +3076,51 @@ export class Session extends EventEmitter {
       return false;
     }
 
+    const originalMode = this.mode;
+    const current = () => stillCurrent() && this.mode === originalMode && !this._closing && !this._isStopped;
+    if (!current() || !dispatchAdmitted()) return false;
+    const preparation = !this._remote && !this._docker
+      ? await prepareWorkspaceHooks(this.workingDir, workspaceHookPolicy(this.mode, 'sessionCreate'), {scaffold: false})
+      : undefined;
+    // Filesystem preparation cannot authorize a stop of a replacement provider.
+    if (!current() || !dispatchAdmitted() || ownerStopPending(this.id)) return false;
     this._pinOmpRespawnId();
     await this.applyFullAccessDefault();
     await this._prepareSelectedClaudeProfile();
     await this._prepareManagedCodexTrust();
-    if (this.mode === 'codex' && !this._remote && !this._docker) {
+    if (getCli(this.mode)?.capabilities.turnSummaryHooks === 'codex-config-v1' && !this._remote && !this._docker) {
       await applyCodexTurnSummaryHooks(this.workingDir);
     }
     await this._prepareCodexHookTrust();
     const options = await this._buildRespawnPaneOptionsWithResumePin();
-    if (!stillCurrent() || (onlyIfDead && (this._closing || (this._respawnBlocked && !explicitRecovery)))) return false;
+    if (!current() || !dispatchAdmitted() || (onlyIfDead && this._respawnBlocked && !explicitRecovery)) return false;
     // Preparation above awaited: an owner stop may have been recorded meanwhile. Check now and at the tmux command.
     if (ownerStopPending(this.id)) {
       console.log(`[Session ${this.id.slice(0, 8)}] restart refused after preparation: an unsettled owner stop holds this pane`);
       return false;
     }
-    const admitted = () => !ownerStopPending(this.id) && stillCurrent();
-    this._beginClaudeConversationSelection();
-    const newPid = await mux.respawnPane(onlyIfDead ? { ...options, onlyIfDead: true, stillCurrent, admitted } : { ...options, admitted });
-    if (!newPid) {
-      console.error('[Session] restartCli: respawnPane failed for', this._muxSession.muxName);
+    const admitted = () => !ownerStopPending(this.id) && current() && dispatchAdmitted();
+    this.#workspaceHookPreparation = undefined;
+    const configuration = consumeWorkspaceHookPreparation(preparation, this.workingDir);
+    const dispatch = this._stageProviderHookDispatch(configuration, current, admitted);
+    Object.assign(options, {envOverrides: dispatch.envOverrides, onProviderDispatch: () => {
+      dispatch.onProviderDispatch();
+      this._beginClaudeConversationSelection();
+    }});
+    let newPid: number | null;
+    try {
+      newPid = await mux.respawnPane(onlyIfDead ? { ...options, onlyIfDead: true, stillCurrent, admitted } : { ...options, admitted });
+    } catch (error) {
+      const attempted = dispatch.attempted();
+      dispatch.settle(false);
+      if (attempted) throw this._holdUnconfirmedProvider(error);
+      throw error;
+    }
+    const attempted = dispatch.attempted();
+    if (!dispatch.settle(!!newPid)) {
+      if (attempted || newPid) throw this._holdUnconfirmedProvider();
       return false;
     }
-    if (!stillCurrent()) return false;
     if (explicitRecovery) this._respawnBlocked = false;
     this._pendingEnvUnsets.clear();
     // A relaunch in the same pane, so any exit observed of the previous command
@@ -2886,7 +3170,7 @@ export class Session extends EventEmitter {
       ompConfig: this._ompConfig,
       resumeSessionId: this._resumeSessionId,
       claudeResumeCandidates: this._claudeLaunchCandidates(),
-      envOverrides: this._envOverrides,
+      envOverrides: this._launchEnvOverrides(),
       unsetEnvKeys: this._pendingEnvUnsets.size > 0 ? [...this._pendingEnvUnsets] : undefined,
       effort: this._effort,
       advisorModel: this._advisorModel,
@@ -3202,7 +3486,11 @@ export class Session extends EventEmitter {
   }
 
   async startInteractive(admitted?: () => boolean): Promise<void> {
-    const assertAdmission = () => { if (admitted && !admitted()) throw new Error('Session launch authorization changed'); };
+    return this._withWorkspaceHookStart(() => this._startInteractive(admitted));
+  }
+
+  private async _startInteractive(admitted?: () => boolean): Promise<void> {
+    const assertAdmission = () => { if (!this._hookStartCurrent() || (admitted && !admitted())) throw new Error('Session launch authorization changed'); };
     assertAdmission();
     if (this._workerResourceLaunch && (!this._useMux || !this._mux || this._remote || this._docker))
       throw new Error('Resource replacement requires the normal local native worker multiplexer');
@@ -3248,7 +3536,7 @@ export class Session extends EventEmitter {
     assertAdmission();
     await this._prepareManagedCodexTrust();
     assertAdmission();
-    if (this.mode === 'codex' && !this._remote && !this._docker) {
+    if (getCli(this.mode)?.capabilities.turnSummaryHooks === 'codex-config-v1' && !this._remote && !this._docker) {
       await applyCodexTurnSummaryHooks(this.workingDir);
       assertAdmission();
     }
@@ -3382,7 +3670,7 @@ export class Session extends EventEmitter {
             ompConfig: this._ompConfig,
             resumeSessionId: this._resumeSessionId,
             claudeResumeCandidates: this._claudeLaunchCandidates(),
-            envOverrides: this._envOverrides,
+            envOverrides: this._launchEnvOverrides(),
             effort: this._effort,
             advisorModel: this._advisorModel,
             historyLimit: this._tmuxHistoryLimit,
@@ -3483,7 +3771,11 @@ export class Session extends EventEmitter {
         }
       } catch (err) {
         assertAdmission();
+        this._assertProviderEffectAdmission();
         if (this._workerResourceLaunch) throw err;
+        if (this.#hookStartAttempt?.operation?.attempted()) throw err;
+        if (this._muxSession && this._mux?.muxSessionExists(this._muxSession.muxName)
+          && !this._mux.isPaneDead(this._muxSession.muxName)) throw err;
         // Held by an unsettled owner stop: keep the pane as it is (no fallback process, no forgotten mux session).
         if (ownerStopPending(this.id)) throw err;
         console.error('[Session] Failed to create mux session, falling back to direct PTY:', err);
@@ -3526,17 +3818,19 @@ export class Session extends EventEmitter {
           getClaudeCliVersion(),
           this._advisorModel
         );
-        this._refuseNewProcessWhileStopHeld();
+        this._refuseNewProviderWhileRecoveryHeld();
         assertAdmission();
         this.ptyProcess = spawnPtyWithHelperRepair(() => {
           assertAdmission();
+          const dispatch = this._stageStartHookDispatch();
+          dispatch.onProviderDispatch();
           return pty.spawn(getClaudeBinaryPath(), args, {
             name: 'xterm-256color',
             cols: 120,
             rows: 40,
             cwd: this.workingDir,
             // Merge envOverrides after buildClaudeEnv so user settings shadow defaults.
-            env: { ...buildClaudeEnv(this.id), ...(this._envOverrides ?? {}) },
+            env: { ...buildClaudeEnv(this.id), ...dispatch.envOverrides },
           });
         });
         this._notePtySpawnGeometry(120, 40);
@@ -4361,6 +4655,10 @@ export class Session extends EventEmitter {
    * ```
    */
   async startShell(): Promise<void> {
+    return this._withWorkspaceHookStart(() => this._startShell());
+  }
+
+  private async _startShell(): Promise<void> {
     if (this.ptyProcess) {
       throw new Error('Session already has a running process');
     }
@@ -4387,7 +4685,7 @@ export class Session extends EventEmitter {
             workingDir: this.workingDir,
             mode: 'shell',
             niceConfig: this._niceConfig,
-            envOverrides: this._envOverrides,
+            envOverrides: this._launchEnvOverrides(),
             historyLimit: this._tmuxHistoryLimit,
             remote: this._remote,
             docker: this._docker,
@@ -4399,7 +4697,7 @@ export class Session extends EventEmitter {
             mode: 'shell',
             name: this._name,
             niceConfig: this._niceConfig,
-            envOverrides: this._envOverrides,
+            envOverrides: this._launchEnvOverrides(),
             historyLimit: this._tmuxHistoryLimit,
             remote: this._remote,
             docker: this._docker,
@@ -4412,14 +4710,18 @@ export class Session extends EventEmitter {
         // For RESTORED sessions: don't clear - we want to see the existing output
         if (!isRestored) {
           setTimeout(() => {
-            if (this.ptyProcess) {
+            if (this.ptyProcess && !this._inputHeldForRecovery() && !this._viewerInputHeld) {
               this._terminalBuffer.clear();
               this.ptyProcess.write('clear\n');
             }
           }, 100);
         }
       } catch (err) {
+        this._assertProviderEffectAdmission();
         if (ownerStopPending(this.id)) throw err;  // held by an unsettled owner stop: no fallback process
+        if (this.#hookStartAttempt?.operation?.attempted()) throw err;
+        if (this._muxSession && this._mux?.muxSessionExists(this._muxSession.muxName)
+          && !this._mux.isPaneDead(this._muxSession.muxName)) throw err;
         console.error('[Session] Failed to create mux session, falling back to direct PTY:', err);
         this._useMux = false;
         this._muxSession = null;
@@ -4432,16 +4734,18 @@ export class Session extends EventEmitter {
         throw new Error('Isolated sessions require the worker transport through tmux. Local fallback is disabled.');
       }
       try {
-        this._refuseNewProcessWhileStopHeld();
-        this.ptyProcess = spawnPtyWithHelperRepair(() =>
-          pty.spawn(shell, [], {
+        this._refuseNewProviderWhileRecoveryHeld();
+        this.ptyProcess = spawnPtyWithHelperRepair(() => {
+          const dispatch = this._stageStartHookDispatch();
+          dispatch.onProviderDispatch();
+          return pty.spawn(shell, [], {
             name: 'xterm-256color',
             cols: 120,
             rows: 40,
             cwd: this.workingDir,
-            env: buildShellEnv(this.id),
-          })
-        );
+            env: {...buildShellEnv(this.id), ...dispatch.envOverrides},
+          });
+        });
         this._notePtySpawnGeometry(120, 40);
       } catch (spawnErr) {
         console.error('[Session] Failed to spawn shell PTY:', spawnErr);
@@ -4518,6 +4822,8 @@ export class Session extends EventEmitter {
     prompt: string,
     options?: { model?: string; onProgress?: (info: { tokens?: number; status?: string }) => void }
   ): Promise<{ result: string; cost: number }> {
+    this._assertProviderEffectAdmission();
+    if (this._inputHeldForRecovery()) throw this.#providerDispatchUncertainty ?? this.#terminalInputUncertainty ?? new Error('Session input is held for recovery');
     return new Promise((resolve, reject) => {
       if (this._viewerInputHeld || this.paneLifecycleInFlight) {
         reject(new Error('The terminal viewer is reconnecting'));
@@ -4528,6 +4834,8 @@ export class Session extends EventEmitter {
         return;
       }
 
+      this.#workspaceHookPreparation = undefined;
+      this._invalidateWorkspaceHooks();
       this._resetBuffers();
       this._promptResolved = false; // Reset race condition guard
 
@@ -4547,16 +4855,16 @@ export class Session extends EventEmitter {
         const launch = workerPtyCommand(getClaudeBinaryPath(), args, this.workingDir, this.id);
 
         try {
-          this._refuseNewProcessWhileStopHeld();
+          this._refuseNewProviderWhileRecoveryHeld();
           this.ptyProcess = spawnPtyWithHelperRepair(() =>
-            pty.spawn(launch.binary, launch.args, {
+            {this._assertProviderEffectAdmission(); return pty.spawn(launch.binary, launch.args, {
               name: 'xterm-256color',
               cols: 120,
               rows: 40,
               cwd: this.workingDir,
               // Merge envOverrides after buildClaudeEnv so user settings shadow defaults.
-              env: { ...buildClaudeEnv(this.id), ...(this._envOverrides ?? {}) },
-            })
+              env: { ...buildClaudeEnv(this.id), ...this._launchEnvOverrides() },
+            });}
           );
           this._notePtySpawnGeometry(120, 40);
         } catch (spawnErr) {
@@ -5041,6 +5349,23 @@ export class Session extends EventEmitter {
 
   // Note: checkAutoCompact/checkAutoClear moved to SessionAutoOps (this._autoOps)
 
+  /** Trusted in-process input lease; never serialized or accepted from HTTP. */
+  captureInputAdmission(caller?: () => boolean): () => boolean {
+    const epoch = this.#workspaceHookEpoch, mode = this.mode, owner = this.owner;
+    const mux = this._mux, subject = this._muxSession, pty = this.ptyProcess;
+    const registered = mux?.getSession?.(this.id);
+    const name = subject?.muxName, sessionId = subject?.sessionId, pid = subject?.pid, subjectOwner = subject?.owner;
+    const identity = () => this.#workspaceHookEpoch === epoch && this.mode === mode && this.owner === owner
+      && this._mux === mux && this._muxSession === subject
+      && (!mux || (typeof mux.getSession === 'function' && (registered ?? null) === subject
+        && (mux.getSession(this.id) ?? null) === subject && (!subject || (subjectOwner === owner && subject.owner === subjectOwner))))
+      && (!subject || (subject.muxName === name && subject.sessionId === sessionId && subject.pid === pid))
+      && (!!mux && !!subject || this.ptyProcess === pty);
+    if (!this.#inputSubject?.identity()) this.#inputSubject = {identity, token: Object.freeze({})};
+    return issueInputAdmission(this.#inputSubject.token, () => (!caller || caller()) && identity()
+      && !this._viewerInputHeld && !this._inputHeldForRecovery() && !this._closing && !this._isStopped);
+  }
+
   /**
    * Sends input directly to the PTY process.
    *
@@ -5060,16 +5385,19 @@ export class Session extends EventEmitter {
    * input could disappear while the caller believed it had been delivered.
    */
   write(data: string, options: SessionWriteOptions = {}): boolean {
+    const admitted = this.captureInputAdmission(options.admitted);
+    if (!admitted()) return false;
     if (this._viewerInputHeld || this._inputHeldForRecovery()) return false;
     // An agent's raw write (a mux failure's fallback, an explicit raw send) is checked here, with no await before the write.
     if (options.agentInput && this._moveHolds > 0) {
       options.onMoveHeld?.();
       return false;
     }
+    if (!this.ptyProcess) return false;
     const submittedPrompt = this._trackSubmit(data, options);
     this._recheckPaneDialogSoon();
-    if (!this.ptyProcess) return false;
-    this.ptyProcess.write(data);
+    try {this.ptyProcess.write(data);} catch (cause) {throw this.holdUnconfirmedInput(cause);}
+    if (!admitted()) throw this.holdUnconfirmedInput();
     this._emitSubmittedPrompt(submittedPrompt);
     return true;
   }
@@ -5166,9 +5494,15 @@ export class Session extends EventEmitter {
     return this._appliedInputSeq.get(clientId) ?? 0;
   }
 
+  /** Negative-only watermark observation; unlike lastInputSeq, unseen and spent zero differ. */
+  inputSeqSpent(clientId: string, seq: number): boolean {
+    const last = this._appliedInputSeq.get(clientId);
+    return last !== undefined && seq <= last;
+  }
+
   shouldApplyInput(clientId: string, seq: number): boolean {
     const last = this._appliedInputSeq.get(clientId);
-    if (last !== undefined && seq <= last) return false;
+    if (this.inputSeqSpent(clientId, seq)) return false;
     // Re-insert to move this client to the MRU end for fair eviction.
     if (last !== undefined) this._appliedInputSeq.delete(clientId);
     this._appliedInputSeq.set(clientId, seq);
@@ -5238,7 +5572,7 @@ export class Session extends EventEmitter {
 
   /** Also while a durably recorded owner stop of this session is unsettled, whichever Session object (or process) took it. */
   private _inputHeldForRecovery(): boolean {
-    return this._recoveryHold || ownerStopPending(this.id);
+    return this._recoveryHold || this.providerDispatchHeld || this.terminalInputHeld || ownerStopPending(this.id);
   }
 
   /**
@@ -5246,7 +5580,8 @@ export class Session extends EventEmitter {
    * Called immediately before each process creation, after any await, and also handed to the mux as `admitted`, so the
    * last check is at the tmux command itself. Attaching a viewer to a live pane is not a new process.
    */
-  private _refuseNewProcessWhileStopHeld(): void {
+  private _refuseNewProviderWhileRecoveryHeld(): void {
+    this._assertProviderEffectAdmission();
     if (ownerStopPending(this.id)) throw new Error(OWNER_STOP_HELD);
   }
 
@@ -5257,7 +5592,7 @@ export class Session extends EventEmitter {
    */
   holdInputForRecovery(): (() => void) | undefined {
     // A start, restart or attach in progress may be about to create a process: a stop must not race it.
-    if (this._inputHeldForRecovery() || this._muxWritesInFlight > 0 || this._paneLifecycleOps > 0) return undefined;
+    if (this._recoveryHold || ownerStopPending(this.id) || this._muxWritesInFlight > 0 || this._paneLifecycleOps > 0) return undefined;
     this._recoveryHold = true;
     const resume = this._capacityRetry?.pause() ?? (() => {});
     let released = false;
@@ -5270,8 +5605,6 @@ export class Session extends EventEmitter {
   }
 
   private _capacityWrites = 0;
-  /** The gate of the write the submit verifier is tracking (null: an ungated write); see _verifySubmitted. */
-  private _verifierGate: (() => boolean) | null = null;
   private _capacityRetryWriting(): boolean {
     return this._capacityWrites > 0;
   }
@@ -5314,7 +5647,7 @@ export class Session extends EventEmitter {
    * (never a guessed or restored one), on this host, and only when exactly one file carries it.
    */
   async claudeTranscript(): Promise<string | undefined> {
-    if (this.mode !== 'claude' || this._remote || !this._claudeSessionIdIsFirstHand || !this._claudeSessionId) return undefined;
+    if (getCli(this.mode)?.capabilities.transcript !== 'claude-jsonl' || this._remote || !this._claudeSessionIdIsFirstHand || !this._claudeSessionId) return undefined;
     return locateClaudeTranscript(this._claudeSessionId, this._claudeConfigDir());
   }
 
@@ -5324,21 +5657,22 @@ export class Session extends EventEmitter {
 
   canAcceptChatInput(): boolean {
     if (this._viewerInputHeld || this.paneLifecycleInFlight || (this._workerBacked && this._paneExit)) return false;
-    if (this.mode !== 'codex') return true;
+    if (!getCli(this.mode)?.capabilities.input?.requiresEmptyComposer) return true;
     const glyph = getCli(this.mode)?.capabilities.workDetect?.promptGlyph ?? '';
     return !!this._muxSession && composerIsEmpty(this._mux?.capturePaneText?.(this._muxSession.muxName, undefined, { escapes: true }), glyph);
   }
 
   async writeViaMux(data: string, options: SessionWriteOptions = {}): Promise<boolean> {
-    if (this._viewerInputHeld || this._inputHeldForRecovery()) return false;
+    const admitted = this.captureInputAdmission(options.admitted);
+    if (!admitted()) return false;
     // An agent's input is refused here, at the write, not only by the route's earlier look: a plan move can take the composer
     // during any await before it. From here to the first key there is no await.
     if (options.agentInput && this._moveHolds > 0) {
       options.onMoveHeld?.();
       return false;
     }
-    const fromEmptyComposer = this.mode === 'codex' && this.canAcceptChatInput();
-    if (options.requireEmptyComposer && this.mode === 'codex' && !fromEmptyComposer) {
+    const fromEmptyComposer = !!getCli(this.mode)?.capabilities.input?.requiresEmptyComposer && this.canAcceptChatInput();
+    if (options.requireEmptyComposer && getCli(this.mode)?.capabilities.input?.requiresEmptyComposer && !fromEmptyComposer) {
       if (options.requireIdle) options.onIdleRefused?.();
       return false;
     }
@@ -5361,11 +5695,11 @@ export class Session extends EventEmitter {
     }
     // An agent's or the chat's text in an OpenCode pane: no ASCII "!" (it would flip the composer into shell mode).
     const guard = options.opencodeGuard;
-    const opencode = !!guard && this.mode === 'opencode';
+    const opencode = !!guard && !!getCli(this.mode)?.capabilities.input?.shellKeyGuard;
     if (opencode) data = guardShellKey(data, { keepLeading: guard === 'person' });
     this._recheckPaneDialogSoon();
     if (this._mux && this._muxSession) {
-      const muxOptions = { ...(opencode ? { opencode: guard === 'person' ? 'person' as const : true } : {}),
+      const muxOptions = {admitted, ...(opencode ? { opencode: guard === 'person' ? 'person' as const : true } : {}),
         ...(options.requireEmptyComposer || options.requireIdle ? { requireEmptyComposer: true } : {}),
         };
       const writeId = this._beginMuxWrite();
@@ -5401,19 +5735,25 @@ export class Session extends EventEmitter {
             if (unsent) options.onTypedUnsent?.();
           } finally { if (options.capacityRetry) this._capacityWrites--; }
         } else sent = await send();
+        if (sent && !admitted()) {try {options.onOutcome?.('unverified');} catch { /* bookkeeping only */ } throw new TerminalInputUnconfirmedError();}
         if (sent) {
           this._emitSubmittedPrompt(this._trackSubmit(data, options));
-          this._verifySubmitted(data, options.onOutcome, fromEmptyComposer, gate ?? (options.agentInput ? moveFree : undefined));
+          this._verifySubmitted(data, options.onOutcome, fromEmptyComposer, gate ?? (options.agentInput ? moveFree : undefined), admitted);
         } else if (heldByMove && !unsent) {
           // The gate closed before the text: nothing was typed.
           options.onMoveHeld?.();
         }
         return sent;
+      } catch (cause) {
+        if (cause instanceof TerminalInputUnconfirmedError) throw this.holdUnconfirmedInput(cause);
+        throw cause;
       } finally { this._endMuxWrite(writeId); }
     }
     // Fallback to PTY write
     if (this.ptyProcess) {
-      this.ptyProcess.write(data);
+      if (!admitted()) return false;
+      try {this.ptyProcess.write(data);} catch (cause) {throw this.holdUnconfirmedInput(cause);}
+      if (!admitted()) throw this.holdUnconfirmedInput();
       this._emitSubmittedPrompt(this._trackSubmit(data, options));
       // No pane to read: nothing can say the prompt left the composer.
       options.onOutcome?.('unverified');
@@ -5428,8 +5768,8 @@ export class Session extends EventEmitter {
    * separately. `text` is what the composer line starts with while the prompt is still
    * unsent; the check re-presses Enter only while that holds.
    */
-  verifySubmitted(text: string, onOutcome?: SessionWriteOptions['onOutcome']): void {
-    this._verifySubmitted(`${text}\r`, onOutcome);
+  verifySubmitted(text: string, onOutcome?: SessionWriteOptions['onOutcome'], admitted?: () => boolean): void {
+    this._verifySubmitted(`${text}\r`, onOutcome, false, undefined, admitted);
   }
 
   /**
@@ -5438,63 +5778,52 @@ export class Session extends EventEmitter {
    * so the pair `sendInput` just sent can leave the text stranded. Only a mux session
    * can read its pane, only text can be stranded, and the glyph is the CLI's own.
    */
-  private _verifySubmitted(data: string, onOutcome?: SessionWriteOptions['onOutcome'], fromEmptyComposer = false, gate?: () => boolean): void {
-    // A gated write's later Enter (2s..60s) answers to the same gate as its first keys: the verifier tracks one write at a
-    // time, so the gate of the write it now tracks travels with it.
-    const unverified = (): void => {
-      try {
-        onOutcome?.('unverified');
-      } catch {
-        // ignore
-      }
-    };
-    if (!data.includes('\r') || !this._mux?.capturePaneText || !this._muxSession) return unverified();
+  private _verifySubmitted(data: string, onOutcome?: SessionWriteOptions['onOutcome'], fromEmptyComposer = false,
+    gate?: () => boolean, admitted?: () => boolean): void {
+    const original = this.captureInputAdmission(admitted);
+    const unverified = (): void => {try {onOutcome?.('unverified');} catch { /* bookkeeping cannot stop verification */ }};
+    const mux = this._mux, subject = this._muxSession, mode = this.mode;
+    if (!original() || !data.includes('\r') || !mux?.capturePaneText || !subject) return unverified();
     const text = data.replace(/[\r\n]/g, '').trimEnd();
     if (!text) return unverified();
-    this._submitVerifier ??= new SubmitVerifier({
-      capture: () =>
-        this._isStopped || !this._mux || !this._muxSession
-          ? null
-          : this._mux.capturePaneText?.(this._muxSession.muxName, undefined, { escapes: true }),
-      // An OpenCode composer left in shell mode must be cleared first: a bare Enter there would run the line in bash.
+    const name = subject.muxName;
+    const current = (): boolean => original() && this._submitVerifier === verifier;
+    const verifier = new SubmitVerifier({
+      capture: () => current() ? mux.capturePaneText?.(name, undefined, {escapes: true}) : null,
       sendEnter: async () => {
-        if (this._viewerInputHeld || this._inputHeldForRecovery()) return false;
-        const gate = this._verifierGate;
-        if (gate && !gate()) {
-          // Closed once (busy, or a plan move took the composer): this write's verification ends here and its text stays unsent.
-          this._verifierGate = null;
-          console.log(`[Session ${this.id.slice(0, 8)}] submit check: the write's gate closed; later Enter withheld, text left unsent`);
-          queueMicrotask(() => this._submitVerifier?.cancel());
-          return false;
-        }
+        if (!current() || (gate && !gate())) {verifier.cancel(); return false;}
         const enterId = this._beginMuxWrite();
+        // The original exclusive gate must ignore this Enter's own write ID,
+        // while retaining every other writer, idle, move and caller restriction.
+        const effect = () => {
+          this._muxWriteIds.delete(enterId);
+          try {return current() && (!gate || gate()) && current();}
+          finally {this._muxWriteIds.add(enterId);}
+        };
         try {
-          // OpenCode's Enter is its own key sequence (settle, footer reads, maybe Escape) with awaits before the key: it goes
-          // under the write's gate, which its typer re-checks at the key itself. This Enter's own id is not "another write"
-          // to that gate. Other harnesses' Enter is one key sent with no await after the check above.
-          if (gate && this.mode === 'opencode') {
-            const own = () => { this._muxWriteIds.delete(enterId); try { return gate(); } finally { this._muxWriteIds.add(enterId); } };
-            return (await withWriteGate(own, () => this._mux!.sendInput(this.id, '\r', { opencode: true }))).result;
-          }
-          return await this._mux?.sendInput(this.id, '\r', this.mode === 'opencode' ? { opencode: true } : undefined);
-        } finally { this._endMuxWrite(enterId); }
+          const send = () => mux.sendInput(this.id, '\r', {admitted: effect, ...(getCli(mode)?.capabilities.input?.shellKeyGuard ? {opencode: true} : {})});
+          const sent = gate && getCli(mode)?.capabilities.input?.shellKeyGuard ? (await withWriteGate(effect, send)).result : await send();
+          if (!effect()) verifier.cancel();
+          return sent;
+        } catch (cause) {
+          if (cause instanceof TerminalInputUnconfirmedError) {this.holdUnconfirmedInput(cause); verifier.cancel();}
+          throw cause;
+        } finally {this._endMuxWrite(enterId);}
       },
-      // ⚠ NO fallback glyph here, unlike the screen-reading probe elsewhere in this file.
-      // Only claude, codex, pi, opencode, omp and gemini declare a promptGlyph; the other modes would fall back
-      // to claude's `❯`, which is ALSO starship's default shell prompt (and pure's, and
-      // spaceship's, and p10k lean's). On a shell session the line `❯ npm run build` sits
-      // on screen for as long as the command runs, promptStillInComposer() reads that as
-      // "still unsubmitted", and the verifier presses Enter into the running program's
-      // stdin on its 2s..60s schedule. Mostly a stray blank line; not harmless against a
-      // y/N prompt, `read -p`, an installer or a pager, where it takes the default.
-      // promptStillInComposer() returns undefined for an empty glyph, so this makes the
-      // verifier inert for every CLI that does not declare one, which is what the Claude
-      // Code 2.1.277 defect it exists for actually calls for.
-      glyph: () => getCli(this.mode)?.capabilities.workDetect?.promptGlyph ?? '',
-      log: (m) => console.log(`[Session ${this.id.slice(0, 8)}] ${m}`),
+      // Only the original provider's declared composer can confirm this write.
+      // Unknown/no-glyph sessions remain unverified and never receive a blind Enter.
+      glyph: () => current() ? getCli(mode)?.capabilities.workDetect?.promptGlyph ?? '' : '',
+      log: message => console.log(`[Session ${this.id.slice(0, 8)}] ${message}`),
     });
-    this._verifierGate = gate ?? null; // set only when the verifier is re-armed for this write
-    this._submitVerifier.arm(text, onOutcome, fromEmptyComposer);
+    const previous = this._submitVerifier;
+    this._submitVerifier = verifier;
+    previous?.cancel();
+    // A cancellation callback can synchronously arm a newer prompt. Never steal
+    // its verifier or bind predecessor data to that later arm.
+    if (!current()) {verifier.cancel(); return unverified();}
+    verifier.arm(text, outcome => {
+      try {onOutcome?.(current() ? outcome : 'unverified');} catch { /* bookkeeping only */ }
+    }, fromEmptyComposer);
   }
 
   /** The conversation any CLI's own config resumes (resume-guard.ts), so start() keeps the same thread alias the constructor set. */
@@ -5732,7 +6061,50 @@ export class Session extends EventEmitter {
    * await session.stop(false);
    * ```
    */
-  async stop(killMux: boolean = true): Promise<void> {
+  /** Capture original local transport before an asynchronous candidate cleanup starts. */
+  captureCleanupStop(stillCurrent: () => boolean): {require: () => void; stop: () => Promise<void>} {
+    const mux = this._mux, record = mux?.getSession(this.id), pty = this.ptyProcess;
+    const owner = this.owner, mode = this.mode, epoch = this.#workspaceHookEpoch;
+    const ptyStat = pty && readProcStat(pty.pid);
+    const fields = record && {sessionId: record.sessionId, muxName: record.muxName, pid: record.pid,
+      createdAt: record.createdAt, owner: record.owner, remote: record.remote, docker: record.docker};
+    const original = () => stillCurrent() && this.owner === owner && this.mode === mode && this._mux === mux
+      && mux?.getSession(this.id) === record && (!record || (Object.entries(fields!).every(([key, value]) =>
+        record[key as keyof MuxSession] === value)));
+    // A console wrapper does not prove ownership of the native job behind it.
+    // Preserve that attempt for supported native reconciliation; never stop by SID.
+    if (!this._providerEffectsAdmitted()
+      || (this._muxSession !== null && this._muxSession !== record)
+      || (record && (record !== this._muxSession || record.sessionId !== this.id || record.owner !== owner))
+      || (this._pid !== null && !record && !pty)
+      || this._workerBacked || this._remote || this._docker
+      || (record && !mux?.killSessionIfCurrent))
+      throw new Error('Candidate cleanup required: original provider stop authority is unavailable');
+    if (pty && (!ptyStat || ptyStat.ppid !== process.pid))
+      throw new Error('Candidate cleanup required: original PTY identity was not verified');
+    if (!original()) throw new Error('Candidate cleanup required: original session changed');
+    const require = () => {
+      if (this.#workspaceHookEpoch !== epoch || this.ptyProcess !== pty || !original()
+        || (pty && readProcStat(pty.pid)?.startTime !== ptyStat?.startTime))
+        throw new Error('Candidate cleanup required: original provider generation or transport changed');
+    };
+    return {require, stop: () => { require(); return this.stop(true, {admitted: stillCurrent, transportCurrent: original,
+      pty, ptyStartTime: ptyStat?.startTime, record}); }};
+  }
+
+  async stop(killMux: boolean = true, expected?: {admitted: () => boolean; transportCurrent: () => boolean;
+    pty: pty.IPty | null; ptyStartTime: number | undefined; record: MuxSession | undefined}): Promise<void> {
+    const assertCurrent = () => {
+      if (expected && !expected.admitted()) throw new Error('Candidate cleanup required: original session changed');
+    };
+    const assertTransport = () => {
+      assertCurrent();
+      if (expected && (!expected.transportCurrent() || this.ptyProcess !== expected.pty))
+        throw new Error('Candidate cleanup required: original transport changed');
+    };
+    assertTransport();
+    this.#workspaceHookPreparation = undefined;
+    this._invalidateWorkspaceHooks();
     // Set stopped flag first to prevent new timers from being created
     this._isStopped = true;
     // A pane that is gone is watching nothing. Nothing probes a stopped session, so
@@ -5766,19 +6138,27 @@ export class Session extends EventEmitter {
         // stopPtyChild): node-pty's kill() is a bare process.kill(pid), so a zero,
         // reused or foreign pid must never reach it. Unverified: no signal here; the
         // mux teardown below still runs.
-        await stopPtyChild(this.ptyProcess, {
+        const stopped = await stopPtyChild(this.ptyProcess, {
           stat: readProcStat,
-          kill: (p, sig) => process.kill(p, sig),
+          kill: (p, sig) => { assertTransport(); return process.kill(p, sig); },
           selfPid: process.pid,
           selfPgid: readProcStat(process.pid)?.pgid ?? null,
-          wait: (pids) => waitForProcessesExit(pids, { timeoutMs: GRACEFUL_SHUTDOWN_DELAY_MS }),
+          wait: async (pids) => { await waitForProcessesExit(pids, { timeoutMs: GRACEFUL_SHUTDOWN_DELAY_MS }); assertTransport(); },
           warn: (msg) => console.warn(`[Session] ${msg}`),
-        });
+        }, assertTransport, expected?.ptyStartTime);
+        if (expected) {
+          if (stopped !== 'stopped') throw new Error('Candidate cleanup required: original PTY stop was not verified');
+          await waitForProcessesExit([this.ptyProcess.pid], {timeoutMs: GRACEFUL_SHUTDOWN_DELAY_MS});
+          assertTransport();
+          if (readProcStat(this.ptyProcess.pid)?.startTime === expected.ptyStartTime)
+            throw new Error('Candidate cleanup required: original PTY exit was not confirmed');
+        }
       } else {
         // Server shutdown: just detach — the process lives on inside tmux
         console.log('[Session] Detaching from PTY (server shutdown) — mux session preserved');
       }
 
+      assertTransport();
       this.ptyProcess = null;
     }
     this._pid = null;
@@ -5793,13 +6173,23 @@ export class Session extends EventEmitter {
     if (killMux && this._mux) {
       // Try to kill mux session even if _muxSession is not set (e.g., restored sessions)
       try {
-        const killed = await this._mux.killSession(this.id);
+        assertCurrent();
+        const killed = expected
+          ? expected.record ? await this._mux.killSessionIfCurrent!(this.id, expected.record,
+              () => expected.admitted() && expected.transportCurrent()) : false
+          : await this._mux.killSession(this.id);
+        assertCurrent();
+        if (expected && expected.record && !killed) throw new Error('Candidate cleanup required: original mux stop was not confirmed');
+        if (expected && this._mux.getSession(this.id))
+          throw new Error('Candidate cleanup required: a mux record remains after the original stop');
         if (killed) {
           console.log('[Session] Killed mux session for:', this.id);
         }
       } catch (err) {
+        if (expected) throw err;
         console.error('[Session] Failed to kill mux session:', err);
       }
+      assertCurrent();
       this._muxSession = null;
     } else if (this._muxSession && !killMux) {
       console.log('[Session] Keeping mux session alive:', this._muxSession.muxName);

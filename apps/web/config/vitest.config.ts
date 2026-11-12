@@ -1,7 +1,10 @@
+import { assertExplicitTestSelection } from './test-selection';
 import { resolve } from 'node:path';
-import { defineConfig } from 'vitest/config';
+import { defineConfig, configDefaults } from 'vitest/config';
 
 const root = resolve(import.meta.dirname, '..');
+const selection = { root, suite: 'all', include: ['test/**/*.test.ts'], exclude: configDefaults.exclude };
+assertExplicitTestSelection(selection);
 
 /**
  * EVERY test in the repo, including the ones that cannot pass on an arbitrary
@@ -19,7 +22,8 @@ export default defineConfig({
     root,
     globals: true,
     environment: 'node',
-    include: ['test/**/*.test.ts'],
+    include: selection.include,
+    exclude: selection.exclude,
     setupFiles: ['./test/setup.ts'],
     // Run test files sequentially to respect mux session limits
     // Individual tests within files still run in parallel where safe

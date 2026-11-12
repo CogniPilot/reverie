@@ -1,13 +1,18 @@
 /* Display-only company timezone. No timestamp, reset instant or job schedule is rewritten. */
 (function () {
   let zone = 'UTC';
-  const normalize = value => {
+  const normalize = (value) => {
     if (typeof value !== 'string' || value.length > 100) return 'UTC';
-    try { return new Intl.DateTimeFormat('en-US', { timeZone: value }).resolvedOptions().timeZone; }
-    catch { return 'UTC'; }
+    try {
+      return new Intl.DateTimeFormat('en-US', { timeZone: value }).resolvedOptions().timeZone;
+    } catch {
+      return 'UTC';
+    }
   };
   const api = {
-    get timeZone() { return zone; },
+    get timeZone() {
+      return zone;
+    },
     setTimeZone(value) {
       const next = normalize(value);
       if (next === zone) return;
@@ -18,12 +23,23 @@
       const date = new Date(at);
       if (!Number.isFinite(date.getTime())) return '—';
       return new Intl.DateTimeFormat('en-US', {
-        year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
-        ...options, timeZone: zone, timeZoneName: 'short',
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+        ...options,
+        timeZone: zone,
+        timeZoneName: 'short',
       }).format(date);
     },
     day(at) {
-      return new Intl.DateTimeFormat('en-CA', { timeZone: zone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(at);
+      return new Intl.DateTimeFormat('en-CA', {
+        timeZone: zone,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+      }).format(at);
     },
     async load() {
       try {
@@ -31,7 +47,9 @@
         if (!response.ok) return;
         const result = await response.json();
         if (result.success && result.data?.settings) api.setTimeZone(result.data.settings.timeZone);
-      } catch { /* Explicit UTC label remains until authorized settings are available. */ }
+      } catch {
+        /* Explicit UTC label remains until authorized settings are available. */
+      }
     },
   };
   window.ReverieTime = api;

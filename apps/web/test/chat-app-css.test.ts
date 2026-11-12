@@ -10,6 +10,11 @@ import postcss from 'postcss';
 const css = readFileSync(resolve(import.meta.dirname, '../src/web/public/chat-app.css'), 'utf8');
 const root = postcss.parse(css);
 
+function menuOwnsToken(selectors: string[], token: string, supplied: Set<string>): boolean {
+  const owners = new Set(['.ca-popmenu', '.ca-popmenu:where(.ca-member-picker)']);
+  return supplied.has(token) && selectors.every((selector) => owners.has(selector));
+}
+
 function phoneRules(): postcss.Rule[] {
   const out: postcss.Rule[] = [];
   root.walkAtRules('media', (at) => {
@@ -24,6 +29,20 @@ const decl = (rules: postcss.Rule[], selector: string, prop: string): string | u
   }
   return found;
 };
+
+it('shows unknown agent health as readable text in compact company cards', () => {
+  const rules: postcss.Rule[] = [];
+  root.walkRules((rule) => {
+    if (rule.selector.includes('.ca-company-map .ca-company-person .ca-company-state') &&
+      rule.selector.includes('.is-unknown')) rules.push(rule);
+  });
+  const values = new Map<string, string>();
+  for (const rule of rules) rule.walkDecls((entry) => { values.set(entry.prop, entry.value); });
+  expect(values.get('position')).toBe('static');
+  expect(values.get('font-size')).toBe('11px');
+  expect(values.get('overflow')).toBe('visible');
+  expect(values.get('height')).toBe('auto');
+});
 
 describe('phone drawers', () => {
   const rules = phoneRules();
@@ -96,6 +115,15 @@ describe('the message box', () => {
 });
 
 describe('theme tokens', () => {
+  it('does not treat sibling, suffix or unrelated selectors as inheriting menu properties', () => {
+    const supplied = new Set(['--ca-menu-max-height']);
+    for (const selector of ['.ca-popmenu', '.ca-popmenu:where(.ca-member-picker)'])
+      expect(menuOwnsToken([selector], '--ca-menu-max-height', supplied)).toBe(true);
+    for (const selector of ['.ca-dialog', '.ca-popmenu-foreign', '.ca-popmenu + .ca-dialog', '.ca-popmenu ~ .ca-dialog'])
+      expect(menuOwnsToken([selector], '--ca-menu-max-height', supplied), selector).toBe(false);
+    expect(menuOwnsToken(['.ca-popmenu', '.ca-dialog'], '--ca-menu-max-height', supplied)).toBe(false);
+    expect(menuOwnsToken(['.ca-popmenu'], '--ca-menu-missing', supplied)).toBe(false);
+  });
   it('are defined on :root too, because menus, cards, dialogs and the settings page live outside .ca-root', () => {
     const rootDecls = new Set<string>();
     root.walkRules((r) => {
@@ -113,20 +141,25 @@ describe('theme tokens', () => {
     }
   });
 
-  it('every --ca- token used by something appended to <body> has a :root definition', () => {
+  it('body surfaces use root tokens or properties supplied by their own menu positioner', () => {
     const defined = new Set<string>();
     root.walkRules((r) => {
       if (r.selectors.includes(':root')) r.walkDecls((d) => defined.add(d.prop));
     });
-    const used = new Set<string>();
+    const positioner = readFileSync(resolve(import.meta.dirname, '../src/web/public/chat-app.js'), 'utf8');
+    const menuProperties = new Set(
+      [...positioner.matchAll(/menu\.style\.setProperty\('(--ca-menu-[a-z-]+)'/g)].map((match) => match[1])
+    );
     root.walkRules((r) => {
       // rules scoped under .ca-root are inside the grid; the rest render in <body>
       if (r.selectors.every((sel) => /^\.ca-root\b/.test(sel) || /^#chatApp/.test(sel))) return;
       r.walkDecls((d) => {
-        for (const m of d.value.matchAll(/var\((--ca-[a-z-]+)/g)) used.add(m[1]);
+        for (const m of d.value.matchAll(/var\(\s*(--ca-[\w-]+)/g)) {
+          const menuOwned = menuOwnsToken(r.selectors, m[1], menuProperties);
+          expect(defined.has(m[1]) || menuOwned || ['--ca-vh', '--ca-vtop', '--ca-depth'].includes(m[1]), `${r.selector}: ${m[1]}`).toBe(true);
+        }
       });
     });
-    for (const t of used) expect(defined.has(t) || ['--ca-vh', '--ca-vtop', '--ca-depth'].includes(t), t).toBe(true);
   });
 });
 
@@ -141,10 +174,12 @@ describe('phones and touch screens', () => {
     return out;
   };
 
-  it('turns menus into bottom sheets on a phone, with big rows', () => {
+  it('uses the visible-viewport positioner for phone sheets and keeps big rows', () => {
     const phone = inMedia(/max-width:\s*767px/);
-    expect(decl(phone, '.ca-popmenu', 'bottom')).toBe('0');
-    expect(decl(phone, '.ca-popmenu', 'left')).toContain('0');
+    expect(decl(phone, '.ca-popmenu', 'bottom')).toBe('auto');
+    expect(decl(phone, '.ca-popmenu', 'left')).toMatch(/^var\(--ca-menu-sheet-left,\s*8px\)$/);
+    expect(decl(phone, '.ca-popmenu', 'top')).toMatch(/^var\(--ca-menu-sheet-top,\s*8px\)$/);
+    expect(decl(phone, '.ca-popmenu', 'max-height')).toContain('--ca-menu-max-height');
     expect(decl(phone, '.ca-popmenu button', 'min-height')).toBe('48px');
   });
 
@@ -305,8 +340,14 @@ describe('Add people is visible', () => {
     expect(rules('.ca-root .ca-head-invite').every((d) => d.display !== 'none')).toBe(true);
   });
   it('keeps a real tap target on a touch screen', () => {
-    expect(css).toMatch(/\.ca-root \.ca-icon-btn \{ min-width: 44px; min-height: 44px; \}/);
-    expect(css).toMatch(/\.ca-item-act \{ width: 36px; height: 36px; \}/);
+    const coarse: postcss.Rule[] = [];
+    root.walkAtRules('media', (at) => {
+      if (/pointer:\s*coarse/.test(at.params)) at.walkRules((rule) => { coarse.push(rule); });
+    });
+    expect(decl(coarse, '.ca-root .ca-icon-btn', 'min-width')).toBe('44px');
+    expect(decl(coarse, '.ca-root .ca-icon-btn', 'min-height')).toBe('44px');
+    expect(decl(coarse, '.ca-item-act', 'width')).toBe('36px');
+    expect(decl(coarse, '.ca-item-act', 'height')).toBe('36px');
   });
 });
 

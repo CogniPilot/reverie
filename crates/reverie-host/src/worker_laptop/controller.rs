@@ -5,12 +5,35 @@ use crate::worker_reports::WorkerLaunchConnection;
 use reverie_contracts::worker_config::WorkerPolicyDigest;
 use reverie_core::ids::{ContainerId, ProfileEmployeeId, ProfileSessionId};
 
+mod creation;
+#[cfg(test)]
+mod tests;
+pub use creation::PoolMemberCreation;
+pub(super) use creation::{check_member, retain_outcome};
+
+/// Private identity of one original Created configuration attempt. This binds
+/// a native refusal to its locked record; no serialized value constructs it.
+#[derive(Clone, Debug)]
+pub(crate) struct MemberConfigurationAttempt(Arc<()>);
+impl MemberConfigurationAttempt {
+    fn new() -> Self {
+        Self(Arc::new(()))
+    }
+    pub(crate) fn same(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+
 pub(crate) struct CreatedPoolTarget<'a> {
     record: &'a Record,
     employee: ProfileEmployeeId,
     container: ContainerId,
+    attempt: MemberConfigurationAttempt,
 }
 impl CreatedPoolTarget<'_> {
+    pub(crate) fn member_attempt(&self) -> MemberConfigurationAttempt {
+        self.attempt.clone()
+    }
     pub(crate) fn employee(&self) -> &ProfileEmployeeId {
         &self.employee
     }
@@ -31,6 +54,56 @@ impl CreatedPoolTarget<'_> {
         }
     }
 }
+
+impl Record {
+    fn begin_controller_member_attempt(&mut self) -> MemberConfigurationAttempt {
+        let attempt = MemberConfigurationAttempt::new();
+        self.creation
+            .as_mut()
+            .expect("actual Created")
+            .controller_member_attempt = Some(attempt.clone());
+        self.phase = Phase::Running;
+        attempt
+    }
+    fn reject_controller_member(
+        &mut self,
+        attempt: &MemberConfigurationAttempt,
+        error: PoolError,
+    ) -> PoolError {
+        let known_refusal = matches!(&error,
+            PoolError::MemberRequestRefused(refusal) if refusal.is_for_created(attempt));
+        let original_known_attempt = self.phase == Phase::Running
+            && !self.unknown
+            && self.pending.is_none()
+            && self.outcome.as_ref().is_some_and(|outcome| outcome.is_ok())
+            && self.creation.as_ref().is_some_and(|creation| {
+                creation.stage == create::CreateStage::Started
+                    && creation
+                        .controller_member_attempt
+                        .as_ref()
+                        .is_some_and(|original| original.same(attempt))
+            });
+        if known_refusal && original_known_attempt {
+            let failure = Arc::new(pool_error(error));
+            self.outcome = Some(Err(failure.clone()));
+            self.phase = Phase::MemberRefused;
+            return PoolError::Member(failure);
+        }
+        self.unknown = true;
+        self.phase = Phase::Retained;
+        if matches!(error, PoolError::MemberRequestRefused(_)) {
+            // A real refusal for some other attempt cannot remain a known
+            // request-local error when this Created owner is still unknown.
+            return PoolError::Finalization(
+                Box::new(error),
+                Box::new(PoolError::Refused(
+                    "WORKER_POOL_CREATED_REFUSAL_UNCONFIRMED",
+                )),
+            );
+        }
+        error
+    }
+}
 #[must_use = "consume this actual completed controller member effect in the original memory phase"]
 pub struct ControllerMemberConfigured {
     workflow: LaptopWorkflow,
@@ -40,9 +113,16 @@ pub struct ControllerMemberConfigured {
     start: String,
     leaf: (u64, u64),
     high: u64,
+    settings: reverie_contracts::worker_pool::WorkerPoolMemberPolicy,
     group: String,
 }
 impl ControllerMemberConfigured {
+    pub(in crate::worker_laptop) fn settings(
+        &self,
+    ) -> reverie_contracts::worker_pool::WorkerPoolMemberPolicy {
+        self.settings
+    }
+
     pub(in crate::worker_laptop) fn assert_memory(
         &self,
         runtime: &WorkerRuntime,
@@ -128,7 +208,7 @@ impl ControllerMemberConfigured {
         Ok(())
     }
 }
-fn pool_error(error: PoolError) -> LaptopError {
+pub(super) fn pool_error(error: PoolError) -> LaptopError {
     LaptopError::ControllerPool(error::ControllerPoolFailure::new(error))
 }
 impl ActivatedController {
@@ -156,8 +236,14 @@ impl ActivatedController {
             .map_err(|_| PoolError::Refused("WORKER_POOL_CREATED_RETAINED"))?;
         if record.phase != Phase::Known
             || record.unknown
+            || record.pending.is_some()
+            || !record
+                .outcome
+                .as_ref()
+                .is_some_and(|outcome| outcome.is_ok())
             || !record.creation.as_ref().is_some_and(|c| {
                 c.stage == create::CreateStage::Started
+                    && c.controller_member_attempt.is_none()
                     && c.container.as_ref() == created.container_id()
             })
         {
@@ -170,16 +256,24 @@ impl ActivatedController {
             .employee()
             .ok_or(PoolError::Refused("WORKER_POOL_EMPLOYEE_REQUIRED"))?
             .clone();
+        let provider = reverie_contracts::worker_pool::WorkerPoolProvider::from_config(
+            record.resources().plan.source(),
+        )
+        .map_err(|_| PoolError::Refused("WORKER_POOL_PROVIDER_INVALID"))?
+        .ok_or(PoolError::Refused("WORKER_POOL_CREATE_PROVIDER_CHANGED"))?;
+        self.assert_member_policy_provider(&provider)?;
+        self.assert_member_policy_unfenced()?;
         let container = created
             .container_id()
             .ok_or(PoolError::Refused("WORKER_POOL_CREATED_CID"))?
             .clone();
         let policy = record.resources().plan.arguments().policy_digest().clone();
-        record.phase = Phase::Running;
+        let attempt = record.begin_controller_member_attempt();
         let target = CreatedPoolTarget {
             record: &record,
             employee,
             container: container.clone(),
+            attempt: attempt.clone(),
         };
         let observed = self.configure_target(runtime, &target, end);
         match observed {
@@ -192,15 +286,12 @@ impl ActivatedController {
                     process: native.pid,
                     start: native.start,
                     leaf: native.leaf,
-                    high: native.high,
+                    high: native.settings.memory_high_bytes(),
+                    settings: native.settings,
                     group: native.group,
                 })
             }
-            Err(error) => {
-                record.unknown = true;
-                record.phase = Phase::Retained;
-                Err(error)
-            }
+            Err(error) => Err(record.reject_controller_member(&attempt, error)),
         }
     }
 }

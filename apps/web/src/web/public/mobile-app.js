@@ -5,21 +5,31 @@
   let dialog;
   const key = 'reverie-mobile-notifications';
   const prefs = () => {
-    try { return JSON.parse(localStorage.getItem(key) || '{}'); } catch { return {}; }
+    try {
+      return JSON.parse(localStorage.getItem(key) || '{}');
+    } catch {
+      return {};
+    }
   };
-  const installed = () => window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+  const installed = () =>
+    window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
   // iPhone and iPad never offer an install prompt: Safari's Share menu adds the app, and push needs the installed app.
   // iPadOS reports itself as a Mac, so a touch screen tells them apart.
-  const ios = () => /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-  const installHelp = () => ios()
-    ? 'On iPhone or iPad, open Reverie in Safari, tap Share, then Add to Home Screen. Open it from the home screen to enable notifications (iOS 16.4 or later).'
-    : 'In Chrome, tap ⋮ → Add to home screen → Install. If Install is unavailable, choose Create shortcut.';
+  const ios = () =>
+    /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  const installHelp = () =>
+    ios()
+      ? 'On iPhone or iPad, open Reverie in Safari, tap Share, then Add to Home Screen. Open it from the home screen to enable notifications (iOS 16.4 or later).'
+      : 'In Chrome, tap ⋮ → Add to home screen → Install. If Install is unavailable, choose Create shortcut.';
   window.addEventListener('beforeinstallprompt', (event) => {
     event.preventDefault();
     installPrompt = event;
     refresh();
   });
-  window.addEventListener('appinstalled', () => { installPrompt = null; refresh(); });
+  window.addEventListener('appinstalled', () => {
+    installPrompt = null;
+    refresh();
+  });
 
   function status(text) {
     if (dialog) dialog.querySelector('[data-status]').textContent = text;
@@ -33,23 +43,38 @@
     dialog.querySelector('[data-enable]').disabled = insecure;
     const notice = dialog.querySelector('[data-insecure]');
     notice.hidden = !insecure;
-    if (insecure) notice.textContent = `This page is open at ${location.origin}, a plain HTTP address. Phones only install apps and allow notifications over HTTPS, so open Reverie through its HTTPS address and try again.`;
+    if (insecure)
+      notice.textContent = `This page is open at ${location.origin}, a plain HTTP address. Phones only install apps and allow notifications over HTTPS, so open Reverie through its HTTPS address and try again.`;
     const permission = window.Notification?.permission;
     const subscribed = !!window.app?._pushSubscription;
     dialog.querySelector('[data-enable]').textContent = subscribed ? 'Update notifications' : 'Enable notifications';
     dialog.querySelector('[data-test]').disabled = !subscribed;
     dialog.querySelector('[data-disable]').hidden = !subscribed;
     if (!window.isSecureContext) status('Open Reverie through its HTTPS address to install and enable notifications.');
-    else if (permission === 'denied') status('Notifications are blocked. In Chrome, open site settings → Notifications → Allow, then try again.');
-    else status(subscribed ? 'Notifications are enabled for this device.' : 'Install the app, then enable notifications when you are ready.');
+    else if (permission === 'denied')
+      status('Notifications are blocked. In Chrome, open site settings → Notifications → Allow, then try again.');
+    else
+      status(
+        subscribed
+          ? 'Notifications are enabled for this device.'
+          : 'Install the app, then enable notifications when you are ready.'
+      );
   }
   async function run(button, action) {
     button.disabled = true;
-    try { await action(); } catch (error) { status(error.message || 'Please try again.'); }
-    finally { button.disabled = false; }
+    try {
+      await action();
+    } catch (error) {
+      status(error.message || 'Please try again.');
+    } finally {
+      button.disabled = false;
+    }
   }
   function remember() {
-    const value = { all: dialog.querySelector('[data-all]').checked, preview: dialog.querySelector('[data-preview]').checked };
+    const value = {
+      all: dialog.querySelector('[data-all]').checked,
+      preview: dialog.querySelector('[data-preview]').checked,
+    };
     localStorage.setItem(key, JSON.stringify(value));
     return value;
   }
@@ -75,41 +100,61 @@
     dialog.querySelector('[data-preview]').checked = stored.preview === true;
     dialog.querySelector('[data-close]').onclick = () => dialog.close();
     dialog.addEventListener('close', () => dialog.remove());
-    dialog.querySelector('[data-install]').onclick = (event) => run(event.currentTarget, async () => {
-      if (!installPrompt) {
-        const help = dialog.querySelector('[data-install-help]');
-        help.textContent = installHelp();
-        help.hidden = false;
-        return;
-      }
-      const prompt = installPrompt;
-      installPrompt = null;
-      await prompt.prompt();
-      await prompt.userChoice;
-      refresh();
-    });
-    dialog.querySelector('[data-enable]').onclick = (event) => run(event.currentTarget, async () => {
-      if (ios() && !installed()) throw new Error('On iPhone or iPad, add Reverie to your home screen first, then enable notifications from the installed app.');
-      if (!window.isSecureContext || !('PushManager' in window) || !('Notification' in window)) throw new Error(ios() ? 'Notifications need iOS 16.4 or later and the HTTPS Reverie address.' : 'Use Chrome and the HTTPS Reverie address for background notifications.');
-      // Permission is requested only from this explicit tap, before network work.
-      const permission = await Notification.requestPermission();
-      if (permission !== 'granted') { refresh(); return; }
-      remember();
-      await window.app.registerServiceWorker();
-      if (!await window.app.subscribeToPush()) throw new Error('Could not enable notifications. Check your connection and try again.');
-      refresh();
-    });
-    dialog.querySelector('[data-test]').onclick = (event) => run(event.currentTarget, async () => {
-      const id = window.app._pushSubscriptionId || localStorage.getItem('reverie-push-subscription-id');
-      if (!id) throw new Error('Enable notifications again to register this device.');
-      const result = await window.app._apiJson('/api/push/subscribe/' + encodeURIComponent(id) + '/test', { method: 'POST', body: {} });
-      if (!result?.accepted) throw new Error('The push service did not accept the test. Enable notifications again and retry.');
-      status('Test accepted by the push service. Look for a Reverie notification on your phone.');
-    });
-    dialog.querySelector('[data-disable]').onclick = (event) => run(event.currentTarget, async () => {
-      await window.app.unsubscribeFromPush();
-      refresh();
-    });
+    dialog.querySelector('[data-install]').onclick = (event) =>
+      run(event.currentTarget, async () => {
+        if (!installPrompt) {
+          const help = dialog.querySelector('[data-install-help]');
+          help.textContent = installHelp();
+          help.hidden = false;
+          return;
+        }
+        const prompt = installPrompt;
+        installPrompt = null;
+        await prompt.prompt();
+        await prompt.userChoice;
+        refresh();
+      });
+    dialog.querySelector('[data-enable]').onclick = (event) =>
+      run(event.currentTarget, async () => {
+        if (ios() && !installed())
+          throw new Error(
+            'On iPhone or iPad, add Reverie to your home screen first, then enable notifications from the installed app.'
+          );
+        if (!window.isSecureContext || !('PushManager' in window) || !('Notification' in window))
+          throw new Error(
+            ios()
+              ? 'Notifications need iOS 16.4 or later and the HTTPS Reverie address.'
+              : 'Use Chrome and the HTTPS Reverie address for background notifications.'
+          );
+        // Permission is requested only from this explicit tap, before network work.
+        const permission = await Notification.requestPermission();
+        if (permission !== 'granted') {
+          refresh();
+          return;
+        }
+        remember();
+        await window.app.registerServiceWorker();
+        if (!(await window.app.subscribeToPush()))
+          throw new Error('Could not enable notifications. Check your connection and try again.');
+        refresh();
+      });
+    dialog.querySelector('[data-test]').onclick = (event) =>
+      run(event.currentTarget, async () => {
+        const id = window.app._pushSubscriptionId || localStorage.getItem('reverie-push-subscription-id');
+        if (!id) throw new Error('Enable notifications again to register this device.');
+        const result = await window.app._apiJson('/api/push/subscribe/' + encodeURIComponent(id) + '/test', {
+          method: 'POST',
+          body: {},
+        });
+        if (!result?.accepted)
+          throw new Error('The push service did not accept the test. Enable notifications again and retry.');
+        status('Test accepted by the push service. Look for a Reverie notification on your phone.');
+      });
+    dialog.querySelector('[data-disable]').onclick = (event) =>
+      run(event.currentTarget, async () => {
+        await window.app.unsubscribeFromPush();
+        refresh();
+      });
     refresh();
     dialog.showModal();
   }

@@ -115,6 +115,47 @@ interface CompanySession {
   owner?: string;
   name: string;
 }
+
+interface BindingAttemptSubject {
+  employeeId: string;
+  owner?: string;
+  sourceSid: string;
+  sourceGeneration: number;
+  targetSid: string;
+  migrationId: string;
+}
+/** Deny-only recovery evidence for this service's actual canonical binding attempt. */
+class BindingPublicationUnconfirmed extends CompanyError {
+  #service: CompanyService;
+  #target: CompanySession;
+  #subject: Readonly<BindingAttemptSubject>;
+  static is(value: unknown): value is BindingPublicationUnconfirmed {
+    return value instanceof BindingPublicationUnconfirmed && #subject in value;
+  }
+  constructor(service: CompanyService, target: CompanySession, subject: BindingAttemptSubject, cause: unknown) {
+    super('Employee binding publication is unconfirmed. Preserve this session and identity; do not replay the replacement.', 409);
+    this.#service = service;
+    this.#target = target;
+    this.#subject = Object.freeze({ ...subject });
+    this.cause = cause;
+  }
+  recovery(
+    service: CompanyService,
+    target: object,
+    identity: { employeeId?: string; replacesSessionId?: string } | undefined,
+    owner: string | undefined
+  ) {
+    const subject = this.#subject;
+    if (
+      service !== this.#service || target !== this.#target || owner !== subject.owner ||
+      identity?.employeeId !== subject.employeeId || identity.replacesSessionId !== subject.sourceSid
+    ) return;
+    return {
+      employeeId: subject.employeeId, sessionId: subject.targetSid, replacesSessionId: subject.sourceSid,
+      sourceGeneration: subject.sourceGeneration, reason: 'binding-publication-unconfirmed' as const,
+    };
+  }
+}
 export interface CompanyServiceDeps {
   /** Trusted server composition only. Absent identity/custody remains inaccessible. */
   goalAuthentication?: GoalAuthentication;
@@ -160,7 +201,7 @@ const ICONS = ['🧭', '🌱', '🦉', '🚀', '🔭', '🎨', '🦊', '🌊', '
 const sameOwner = (a?: string, b?: string): boolean => a === b;
 
 /** Validate the rendered hierarchy against the transaction's current active roster. */
-function validateReportingLine(state: CompanyState, employee: CompanyEmployee): void {
+function validateReportingLine(state: CompanyState, employee: Pick<CompanyEmployee, 'id' | 'owner' | 'reportsTo'>): void {
   const employees = state.employees.filter((e) => sameOwner(e.owner, employee.owner));
   const byId = new Map(employees.map((e) => [e.id, e]));
   const coordinatorEmployeeId = state.settings.find((s) => sameOwner(s.owner, employee.owner))?.coordinatorEmployeeId;
@@ -225,6 +266,20 @@ export class CompanyService {
 
   /** A route-selected actor, not a caller-supplied identity or title. Every effect rechecks this closure. */
   officeAction(employeeId: string, owner: string | undefined, callerSessionId?: string) {
+    return this.employeeAction(employeeId, owner, callerSessionId, 'manageOffice');
+  }
+
+  /** Recovery shares attendance's exact revocable actor and target binding. */
+  recoveryAction(employeeId: string, owner: string | undefined, callerSessionId?: string) {
+    return this.employeeAction(employeeId, owner, callerSessionId, 'recoverEmployees');
+  }
+
+  private employeeAction(
+    employeeId: string,
+    owner: string | undefined,
+    callerSessionId: string | undefined,
+    permission: 'manageOffice' | 'recoverEmployees'
+  ) {
     const initial = this.store.snapshot();
     const target = initial.employees.find((e) => e.id === employeeId && sameOwner(e.owner, owner));
     if (!target) throw new CompanyError('Unknown company employee', 404);
@@ -248,9 +303,13 @@ export class CompanyService {
             !e.bindingMigration &&
             !e.onVacation &&
             e.desiredRunning !== false &&
-            e.permissions.manageOffice === true
+            e.permissions[permission] === true
         ));
-    if (!actorMatches(initial)) throw new CompanyError('Office management permission is required', 403);
+    if (!actorMatches(initial))
+      throw new CompanyError(
+        permission === 'manageOffice' ? 'Office management permission is required' : 'Employee recovery permission is required',
+        403
+      );
     const recipe = JSON.stringify(target.runtimeRecipe);
     const current = (state = this.store.snapshot()) =>
       actorMatches(state) &&
@@ -266,7 +325,13 @@ export class CompanyService {
     return {
       current,
       require: (state?: CompanyState) => {
-        if (!current(state)) throw new CompanyError('Office permission or employee binding changed', 409);
+        if (!current(state))
+          throw new CompanyError(
+            permission === 'manageOffice'
+              ? 'Office permission or employee binding changed'
+              : 'Recovery permission or employee binding changed',
+            409
+          );
       },
     };
   }
@@ -353,6 +418,7 @@ export class CompanyService {
     const employee = this.store.snapshot().employees.find((e) => e.id === employeeId && e.sessionId === sessionId);
     if (
       !employee ||
+      employee.bindingMigration ||
       employee.onVacation ||
       employee.desiredRunning === false ||
       this.runtimeRestarts.has(sessionId) ||
@@ -369,6 +435,8 @@ export class CompanyService {
           !flight.cancelled &&
           !!current &&
           sameOwner(current.owner, employee.owner) &&
+          current.sessionGeneration === employee.sessionGeneration &&
+          !current.bindingMigration &&
           !current.onVacation &&
           current.desiredRunning !== false
         );
@@ -432,7 +500,7 @@ export class CompanyService {
       }
       const employee = state.employees.find((e) => e.sessionId === sessionId);
       if (employee) employee.desiredRunning = employee.onVacation ? false : running;
-    });
+    }, () => { stillCurrent(); });
   }
 
   /** A live observation may fill missing intent, never reverse an owner stop or binding migration. */
@@ -454,10 +522,27 @@ export class CompanyService {
   }
 
   /** A durable, bounded automatic-start claim. No identity or title confers a grant. */
-  async claimWake(employeeId: string, sessionId: string, now: number, automatic = true): Promise<boolean> {
+  async claimWake(
+    employeeId: string,
+    sessionId: string,
+    now: number,
+    automatic = true,
+    stillCurrent: () => boolean = () => true
+  ): Promise<boolean> {
+    const original = this.store.snapshot().employees.find((e) => e.id === employeeId && e.sessionId === sessionId);
+    if (!original) return false;
+    const matches = (employee: CompanyEmployee | undefined) =>
+      !!employee &&
+      employee.owner === original.owner &&
+      employee.sessionId === sessionId &&
+      employee.sessionGeneration === original.sessionGeneration &&
+      !employee.bindingMigration &&
+      !employee.onVacation &&
+      employee.desiredRunning !== false;
+    let claimed = false;
     return this.store.update((state) => {
       const employee = state.employees.find((e) => e.id === employeeId && e.sessionId === sessionId);
-      if (!employee || employee.onVacation || employee.desiredRunning === false || this.runtimeRestarts.has(sessionId))
+      if (!employee || !matches(employee) || !stillCurrent() || this.runtimeRestarts.has(sessionId))
         return false;
       const settings = state.settings.find((s) => s.owner === employee.owner);
       if (automatic && settings?.autoWakeEnabled === false) return false;
@@ -465,7 +550,15 @@ export class CompanyService {
       if (attempts.length >= 3) return false;
       employee.wakeAttempts = [...attempts, now];
       employee.desiredRunning = true;
+      claimed = true;
       return true;
+    }, () => {
+      if (
+        claimed &&
+        (!stillCurrent() || this.runtimeRestarts.has(sessionId) ||
+          !matches(this.store.snapshot().employees.find((e) => e.id === employeeId)))
+      )
+        throw new CompanyError('Recovery authority or employee binding changed before claim commit', 409);
     });
   }
 
@@ -616,7 +709,12 @@ export class CompanyService {
     return employee;
   }
 
-  async hire(input: Omit<CompanyEmployeeInput, 'id' | 'createdAt'>): Promise<CompanyEmployee> {
+  /** Read-only preflight; the actual hire repeats this check inside its canonical transaction. */
+  validateHireReportingLine(owner: string | undefined, reportsTo?: string): void {
+    validateReportingLine(this.store.snapshot(), { id: randomUUID(), owner, reportsTo });
+  }
+
+  async hire(input: Omit<CompanyEmployeeInput, 'id' | 'createdAt'>, admitted?: () => boolean): Promise<CompanyEmployee> {
     const employee = EmployeeSchema.parse({
       ...input,
       threadId: input.threadId ?? this.deps.threadOf?.(input.sessionId),
@@ -626,6 +724,11 @@ export class CompanyService {
     const session = this.deps.getSession(employee.sessionId);
     if (!session || !sameOwner(session.owner, employee.owner))
       throw new CompanyError('Bind an existing session owned by this company');
+    const assertAdmission = () => {
+      if (admitted !== undefined &&
+          (!admitted() || this.deps.getSession(employee.sessionId) !== session || !sameOwner(session.owner, employee.owner)))
+        throw new CompanyError('Hire authority or the original session changed before canonical publication', 403);
+    };
     const hired = await this.store.update((state) => {
       if (
         state.employees.some((e) => sameOwner(e.owner, employee.owner) && employeeNamesConflict(e.name, employee.name))
@@ -641,7 +744,7 @@ export class CompanyService {
       state.employees.push(employee);
       validateReportingLine(state, employee);
       return employee;
-    });
+    }, assertAdmission);
     this.deps.bindIdentity?.(hired);
     return hired;
   }
@@ -763,6 +866,8 @@ export class CompanyService {
     const persistedRecipe = (value: unknown) => RuntimeRecipeSchema.parse(JSON.parse(JSON.stringify(value)));
     const expectedRecipe = expected ? persistedRecipe(expected.targetRecipe) : undefined;
     const validateCandidate = () => {
+      if (this.deps.getSession(sessionId) !== session || !sameOwner(session.owner, owner))
+        throw new CompanyError('Replacement session or owner changed', 409);
       const resource = expected?.resourceOperation;
       if (resource) {
         const source = resource.source;
@@ -806,10 +911,9 @@ export class CompanyService {
       throw new CompanyError('Approved replacement recipe changed', 409);
     validateCandidate();
     let previous: string | undefined;
-    let previousThread: string | undefined;
-    let previousRecipe: RuntimeRecipe | undefined;
+    let subject: BindingAttemptSubject | undefined;
     const migrationId = randomUUID();
-    const bound = await this.store.update((state) => {
+    const reservation = await this.store.updateOutcome((state) => {
       const employee = state.employees.find((e) => e.id === employeeId && sameOwner(e.owner, owner));
       if (!employee) throw new CompanyError('Unknown employee', 404);
       if (expectedEmployee && !isDeepStrictEqual(persistedEmployee(employee), expectedEmployee))
@@ -819,12 +923,14 @@ export class CompanyService {
       if (state.employees.some((e) => e.id !== employeeId && e.sessionId === sessionId))
         throw new CompanyError('Session already bound', 409);
       previous = employee.sessionId;
+      subject = {
+        employeeId, owner, sourceSid: employee.sessionId, sourceGeneration: employee.sessionGeneration,
+        targetSid: sessionId, migrationId,
+      };
       const restart = this.runtimeRestarts.get(previous);
       if (restart && restart !== keep) restart.cancelled = true;
       const wake = this.wakeFlights.get(previous);
       if (wake) wake.cancelled = true;
-      previousThread = employee.threadId;
-      previousRecipe = employee.runtimeRecipe;
       if (employee.sessionId !== sessionId) {
         employee.sessionGeneration += 1;
         employee.bindingMigration = { id: migrationId, from: employee.sessionId, to: sessionId };
@@ -835,52 +941,52 @@ export class CompanyService {
       if (thread) employee.threadId = thread;
       return employee;
     }, validateCandidate);
+    if (reservation.state === 'not-issued') throw reservation.cause;
+    const retained = (cause: unknown): BindingPublicationUnconfirmed => {
+      if (!subject) throw new CompanyError('Canonical binding subject is unavailable; inspect the original session', 409);
+      return new BindingPublicationUnconfirmed(this, session, subject, cause);
+    };
+    if (reservation.state === 'unconfirmed') {
+      if (!this.store.isPublicationReceipt(reservation.receipt)) throw new CompanyError('Invalid canonical publication receipt', 409);
+      throw retained(reservation.receipt);
+    }
+    const bound = reservation.value;
     // The employee is the identity and the session only its current runtime: room seats, DMs and undelivered lines follow it, and
     // the replaced session leaves every room at once instead of lingering as a second copy of the same person.
-    if (previous && previous !== sessionId) {
-      try {
+    try {
+      if (previous && previous !== sessionId) {
         await this.deps.chatrooms.replaceSession?.(previous, sessionId, by, (room) => sameOwner(room.owner, owner));
-      } catch (error) {
-        // A reserved generation is never reused, even after a failed room migration.
-        const back = previous;
-        await this.store.update((state) => {
-          const employee = state.employees.find((e) => e.id === employeeId && sameOwner(e.owner, owner));
-          // Only undo our own bind: a concurrent rebind may already have moved the person on.
-          if (
-            employee &&
-            employee.bindingMigration?.id === migrationId &&
-            employee.sessionId === bound.sessionId &&
-            employee.sessionGeneration === bound.sessionGeneration
-          ) {
-            employee.sessionId = back;
-            employee.threadId = previousThread;
-            employee.runtimeRecipe = previousRecipe;
-            employee.sessionGeneration += 1;
-            delete employee.bindingMigration;
-          }
-        });
-        throw error;
       }
+      const committed = bound.bindingMigration
+        ? await this.store.update((state) => {
+            const employee = state.employees.find((e) => e.id === employeeId && sameOwner(e.owner, owner));
+            if (
+              !employee ||
+              (expected && !isDeepStrictEqual(persistedEmployee(employee), persistedEmployee(bound))) ||
+              employee.bindingMigration?.id !== migrationId ||
+              employee.sessionId !== bound.sessionId ||
+              employee.sessionGeneration !== bound.sessionGeneration
+            )
+              throw new CompanyError('Binding migration ownership changed', 409);
+            employee.sessionId = sessionId;
+            delete employee.bindingMigration;
+            return employee;
+          }, validateCandidate)
+        : bound;
+      validateCandidate();
+      this.deps.bindIdentity?.(committed);
+      return committed;
+    } catch (cause) {
+      // Reservation publication already happened. A later refusal or room/write
+      // error cannot prove that every durable binding effect was undone.
+      throw retained(cause);
     }
-    const committed = bound.bindingMigration
-      ? await this.store.update((state) => {
-          const employee = state.employees.find((e) => e.id === employeeId && sameOwner(e.owner, owner));
-          if (
-            !employee ||
-            (expected && !isDeepStrictEqual(persistedEmployee(employee), persistedEmployee(bound))) ||
-            employee.bindingMigration?.id !== migrationId ||
-            employee.sessionId !== bound.sessionId ||
-            employee.sessionGeneration !== bound.sessionGeneration
-          )
-            throw new CompanyError('Binding migration ownership changed', 409);
-          employee.sessionId = sessionId;
-          delete employee.bindingMigration;
-          return employee;
-        }, validateCandidate)
-      : bound;
-    validateCandidate();
-    this.deps.bindIdentity?.(committed);
-    return committed;
+  }
+
+  /** Diagnostic projection only after exact private service/Session/owner/employee correlation. */
+  replacementPublicationRecovery(error: unknown, target: object,
+    identity: { employeeId?: string; replacesSessionId?: string } | undefined, owner: string | undefined) {
+    return BindingPublicationUnconfirmed.is(error) ? error.recovery(this, target, identity, owner) : undefined;
   }
 
   /**

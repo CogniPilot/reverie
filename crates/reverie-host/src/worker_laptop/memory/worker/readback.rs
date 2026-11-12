@@ -28,6 +28,7 @@ impl Workflows {
             row,
             target,
             attempted,
+            controller_policy,
             budget,
         }) = record
             .creation
@@ -50,6 +51,7 @@ impl Workflows {
             &target,
             resources,
             digest,
+            controller_policy,
         );
         let result = classify(finalized(result, target.close()), attempted);
         Ok(state::complete(&mut record, &observed.workflow, result))
@@ -62,6 +64,7 @@ fn finish(
     target: &target::Target,
     resources: &EffectiveWorkerConfig,
     digest: Option<&WorkerPolicyDigest>,
+    controller_policy: Option<reverie_contracts::worker_pool::WorkerPoolMemberPolicy>,
 ) -> Result<()> {
     let ObservationStep {
         runtime,
@@ -90,7 +93,16 @@ fn finish(
             "RESERVATION_SOURCE_POLICY",
         )?;
     }
-    facts.limits_selected(row, policy.as_ref(), budget.end(runtime, 30))?;
+    let physical = match controller_policy {
+        Some(settings) => Some(
+            policy
+                .ok_or(LaptopError::Refused("LAPTOP_CONTROLLER_MEMORY_POLICY"))?
+                .with_pool_member_policy(settings)
+                .map_err(LaptopError::MemoryData)?,
+        ),
+        None => policy,
+    };
+    facts.limits_selected(row, physical.as_ref(), budget.end(runtime, 30))?;
     // Unlike a pre-write refresh, original configure_started's final check is
     // outer fences FIRST, followed by the slow same-engine row comparison.
     target.fences()?;

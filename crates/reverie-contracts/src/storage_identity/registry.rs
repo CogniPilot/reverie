@@ -14,6 +14,17 @@ impl RegistryEmployee {
     pub fn canonical_identity(&self) -> Result<ProfileEmployeeId> {
         employee_id(&self.identity)
     }
+    pub(crate) fn canonical_session(&self) -> Result<Option<ProfileSessionId>> {
+        self.session
+            .as_ref()
+            .map(|value| {
+                let text = value
+                    .scalar_text()
+                    .ok_or(IdentityDataError::CanonicalIdentity)?;
+                ProfileSessionId::parse(&text).map_err(|_| IdentityDataError::CanonicalIdentity)
+            })
+            .transpose()
+    }
     pub fn owner(&self) -> &Option<MetadataText> {
         &self.owner
     }
@@ -23,6 +34,23 @@ pub struct CompanyRecords {
     records: Vec<RegistryEmployee>,
 }
 impl CompanyRecords {
+    /// Canonical current and retired SID bindings, after the same full company
+    /// ambiguity check. These values grant no migration or stop permission.
+    pub fn session_employees(
+        &self,
+    ) -> Result<std::collections::BTreeMap<ProfileSessionId, ProfileEmployeeId>> {
+        let mut sessions = std::collections::BTreeMap::new();
+        for row in &self.records {
+            let Some(session) = row.canonical_session()? else {
+                continue;
+            };
+            let employee = row.canonical_identity()?;
+            if sessions.insert(session, employee).is_some() {
+                return Err(IdentityDataError::AmbiguousRegistry);
+            }
+        }
+        Ok(sessions)
+    }
     pub fn records(&self) -> &[RegistryEmployee] {
         &self.records
     }

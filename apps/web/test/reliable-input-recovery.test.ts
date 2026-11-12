@@ -1,46 +1,73 @@
-/**
- * @fileoverview A client whose seq counter rolled back must heal itself.
- *
- * The failure: the browser tags input with (clientId, seq) and persists the
- * counters to localStorage on a DEBOUNCED write. A tab killed between a send and
- * that write comes back counting from BELOW the server's watermark, so every
- * later keystroke is rejected as a duplicate — and, because a rejected frame was
- * ACKed exactly like an applied one, the client dropped it from its queue and the
- * UI looked perfectly healthy while the terminal took no input at all. Reloading
- * could not help: clientId and the stale counter both come back from localStorage.
- *
- * Observed live on a server session: a fresh browser (new clientId, no watermark)
- * typed into the same session fine, which is what isolated it to client state.
- */
+/** Current process-local receipt behavior, plus bounded legacy client compatibility. */
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+import {Session} from '../src/session.js';
+import {TerminalInputReceipts} from '../src/terminal-input-outcome.js';
+import {TerminalInputService} from '../src/web/terminal-input-service.js';
 
 const appSource = readFileSync(resolve(import.meta.dirname, '../src/web/public/app.js'), 'utf8');
-const wsSource = readFileSync(resolve(import.meta.dirname, '../src/web/routes/ws-routes.ts'), 'utf8');
 
-describe('the duplicate ACK carries what the client needs', () => {
-  it('marks a rejected frame as dup and reports the watermark', () => {
-    // A bare ACK is indistinguishable from "applied" — that ambiguity is the bug.
-    expect(wsSource).toMatch(/"dup":true,"last":\$\{watermark\}/);
-    expect(wsSource).toContain('lastInputSeq');
+describe('current original-subject receipt contract', () => {
+  function harness(service = new TerminalInputService()) {
+    const writes: string[] = [];
+    const session = new Session({id: 'receipt-contract', workingDir: process.env.HOME!, useMux: false});
+    Object.assign(session, {ptyProcess: {pid: 999_999_970, write: (data: string) => writes.push(data), kill: vi.fn()}});
+    const sessions = new Map([[session.id, session]]);
+    const report = {sessions, persistSessionStateNow: vi.fn(), getSessionStateWithRespawn: (value: Session) => value.toState(), broadcast: vi.fn()};
+    return {service, session, writes, report, current: () => sessions.get(session.id) === session};
+  }
+  it('confirms only the exact original receipt without issuing a second input', async () => {
+    const h = harness(), intent = {input: 'original text', clientId: 'browser', seq: 1, useMux: false};
+    try {
+      const first = h.service.begin(h.session, intent, h.current);
+      expect(first.state).toBe('admitted'); if (first.state !== 'admitted') throw new Error('Expected owned input');
+      expect(await first.operation.dispatch(h.report)).toBe('confirmed');
+      expect(h.service.begin(h.session, intent, h.current).state).toBe('duplicate');
+      expect(h.service.begin(h.session, {...intent, input: 'other text'}, h.current).state).toBe('held');
+      expect(h.writes).toEqual(['original text']);
+    } finally {await h.session.stop(false);}
   });
-
-  it('reads the watermark defensively, so a port without it still ACKs', () => {
-    // The session arrives through a structural port. A throw inside the message
-    // handler aborts it before the ACK is sent, stranding the frame in the
-    // client's durable queue — which is worse than the ambiguity being fixed here.
-    expect(wsSource).toMatch(/typeof \(session as \{ lastInputSeq\?/);
+  it('holds missing, evicted and successor proof rather than deriving delivery from a watermark', async () => {
+    const h = harness(new TerminalInputService(new TerminalInputReceipts(1, 1)));
+    let successor: Session | undefined;
+    try {
+      h.session.shouldApplyInput('missing', 1);
+      expect(h.service.begin(h.session, {input: 'missing proof', clientId: 'missing', seq: 1}, h.current).state).toBe('held');
+      for (const seq of [1, 2]) {
+        const operation = h.service.begin(h.session, {input: `owned ${seq}`, clientId: 'browser', seq, useMux: false}, h.current);
+        if (operation.state !== 'admitted') throw new Error('Expected original reservation');
+        expect(await operation.operation.dispatch(h.report)).toBe('confirmed');
+      }
+      expect(h.service.begin(h.session, {input: 'owned 1', clientId: 'browser', seq: 1, useMux: false}, h.current).state).toBe('held');
+      successor = new Session({id: h.session.id, owner: 'successor', workingDir: process.env.HOME!, useMux: false});
+      h.report.sessions.set(successor.id, successor);
+      expect(h.service.begin(successor, {input: 'owned 2', clientId: 'browser', seq: 2, useMux: false}, () => true).state).toBe('held');
+      expect(h.writes).toEqual(['owned 1', 'owned 2']);
+    } finally {await h.session.stop(false); await successor?.stop(false);}
   });
-
-  it('still ACKs a rejected frame, so the client can drop it from its queue', () => {
-    // Silence would strand the record and the redelivery sweep would spin on it.
-    const block = wsSource.slice(wsSource.indexOf('if (seq !== null && socket.readyState === 1)'));
-    expect(block.slice(0, 1200)).toContain('"t":"ia"');
+  it('keeps an exact pending request distinct from unknown and confirms it only after its original dispatch', async () => {
+    const h = harness(), intent = {input: 'pending text', clientId: 'browser', seq: 1, useMux: true};
+    const original = h.session.writeViaMux.bind(h.session); let release!: () => void;
+    vi.spyOn(h.session, 'writeViaMux').mockImplementation(async (data, options) => {
+      await new Promise<void>(resolve => {release = resolve;}); return original(data, options);
+    });
+    try {
+      const first = h.service.begin(h.session, intent, h.current);
+      if (first.state !== 'admitted') throw new Error('Expected original reservation');
+      expect(h.session.lastInputSeq('browser')).toBe(0);
+      expect(h.service.begin(h.session, intent, h.current).state).toBe('pending');
+      const writing = first.operation.dispatch(h.report);
+      expect(h.session.lastInputSeq('browser')).toBe(1);
+      expect(h.service.begin(h.session, intent, h.current).state).toBe('pending');
+      release(); expect(await writing).toBe('confirmed');
+      expect(h.service.begin(h.session, intent, h.current).state).toBe('duplicate');
+      expect(h.writes).toEqual(['pending text']); expect(h.session.terminalInputHeld).toBe(false);
+    } finally {release?.(); await h.session.stop(false);}
   });
 });
 
-describe('the client lifts itself over the watermark', () => {
+describe('legacy client watermark compatibility only; not current server delivery proof', () => {
   const handler = appSource.slice(
     appSource.indexOf('_onWsInputAck(seq, msg, sessionId'),
     appSource.indexOf('/** Called from ws.onopen')

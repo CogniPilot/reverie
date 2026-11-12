@@ -53,19 +53,102 @@ fn controller(
     service_v2: bool,
 ) -> Result<(), PoolPolicyError> {
     let value = decode(raw)?;
+    let state = &value["State"];
+    if !(pid > 1
+        && state["Pid"] == pid
+        && state["Running"] == true
+        && state["Paused"] == false
+        && state["Restarting"] == false)
+    {
+        return Err(PoolPolicyError);
+    }
+    controller_spec(
+        &value,
+        policy,
+        cid,
+        birth_digest,
+        service_v2,
+        &policy.controller_name(),
+    )
+}
+/// Failed service-v2 component DATA only. Never activation or cleanup authority.
+/// The host owner must independently bind its original attempt and native state.
+pub fn validate_failed_controller_service_v2_inspection(
+    raw: &[u8],
+    policy: &WorkerPoolPolicy,
+    cid: &str,
+    birth_digest: &str,
+    name: &str,
+) -> Result<(), PoolPolicyError> {
+    if stopped_controller(raw, policy, cid, birth_digest, name)? != 1 {
+        return Err(PoolPolicyError);
+    }
+    Ok(())
+}
+
+/// Complete stopped service-v2 controller DATA and its exact exit status.
+/// A stopped state alone does not prove that an earlier attempt settled.
+pub fn validate_stopped_controller_service_v2_inspection(
+    raw: &[u8],
+    policy: &WorkerPoolPolicy,
+    cid: &str,
+    birth_digest: &str,
+) -> Result<u8, PoolPolicyError> {
+    stopped_controller(raw, policy, cid, birth_digest, &policy.controller_name())
+}
+
+fn stopped_controller(
+    raw: &[u8],
+    policy: &WorkerPoolPolicy,
+    cid: &str,
+    birth_digest: &str,
+    name: &str,
+) -> Result<u8, PoolPolicyError> {
+    let value = decode(raw)?;
+    let state = &value["State"];
+    let exit_code = state["ExitCode"]
+        .as_u64()
+        .and_then(|code| u8::try_from(code).ok())
+        .ok_or(PoolPolicyError)?;
+    let valid = state["Pid"] == 0
+        && state["Running"] == false
+        && state["Paused"] == false
+        && state["Restarting"] == false
+        && state["Dead"] == false
+        && state["Status"] == "exited"
+        && state["OOMKilled"] == false
+        && state["Error"] == ""
+        && state["StartedAt"]
+            .as_str()
+            .is_some_and(|v| !v.starts_with("0001-") && !v.is_empty())
+        && state["FinishedAt"]
+            .as_str()
+            .is_some_and(|v| !v.starts_with("0001-") && !v.is_empty())
+        && value["RestartCount"] == 0
+        && value["HostConfig"]["AutoRemove"] == false
+        && value["HostConfig"]["RestartPolicy"] == json!({"Name":"no","MaximumRetryCount":0});
+    if !valid {
+        return Err(PoolPolicyError);
+    }
+    controller_spec(&value, policy, cid, birth_digest, true, name)?;
+    Ok(exit_code)
+}
+fn controller_spec(
+    value: &Value,
+    policy: &WorkerPoolPolicy,
+    cid: &str,
+    birth_digest: &str,
+    service_v2: bool,
+    name: &str,
+) -> Result<(), PoolPolicyError> {
     let host = &value["HostConfig"];
     let config = &value["Config"];
     let labels = &config["Labels"];
     let valid = hex_id(cid)
         && hex_id(birth_digest)
-        && pid > 1
         && value["Id"] == cid
         && value["Image"] == policy.controller_image
-        && value["Name"] == format!("/{}", policy.controller_name())
-        && value["State"]["Pid"] == pid
-        && value["State"]["Running"] == true
-        && value["State"]["Paused"] == false
-        && value["State"]["Restarting"] == false
+        && value["Name"] == format!("/{name}")
         && config["User"] == format!("0:{}", policy.broker_gid)
         && config["Entrypoint"] == json!(["/bin/reverie-worker-resource-controller"])
         && config["Cmd"]
@@ -80,7 +163,7 @@ fn controller(
             } else {
                 json!(["serve", "--policy-sha256", birth_digest])
             }
-        && config["Env"] == json!(["PATH=/bin", "LANG=C.UTF-8"])
+        && controller_environment(&config["Env"], service_v2)
         && labels["reverie.resource-controller"] == policy.deployment
         && labels["reverie.pool.purpose"]
             == if service_v2 {
@@ -107,11 +190,22 @@ fn controller(
         && host["CapDrop"] == json!(["ALL"])
         && (host["CapAdd"].is_null() || host["CapAdd"] == json!([]))
         && (host["GroupAdd"].is_null() || host["GroupAdd"] == json!([]))
-        && host["SecurityOpt"] == json!(["no-new-privileges:true"]);
+        // Docker may append its SELinux label-disable default for the fixed
+        // host-PID service. Keep every other option and the v1 codec exact.
+        && (host["SecurityOpt"] == json!(["no-new-privileges:true"])
+            || (service_v2
+                && host["SecurityOpt"]
+                    == json!(["no-new-privileges:true", "label=disable"])));
     if !valid {
         return Err(PoolPolicyError);
     }
     mounts(&value["Mounts"], policy, service_v2)
+}
+fn controller_environment(value: &Value, service_v2: bool) -> bool {
+    // Docker may reorder these two unique fixed variables. No additional,
+    // duplicate, overridden or malformed variable is accepted. V1 stays exact.
+    value == &json!(["PATH=/bin", "LANG=C.UTF-8"])
+        || (service_v2 && value == &json!(["LANG=C.UTF-8", "PATH=/bin"]))
 }
 pub fn website_process_data(raw: &[u8], expected: &str) -> Result<Option<u32>, PoolPolicyError> {
     let value = decode(raw)?;
@@ -190,6 +284,41 @@ pub fn validate_anchor_inspection(
     policy_digest: &str,
 ) -> Result<(), PoolPolicyError> {
     let value = decode(raw)?;
+    anchor_spec(&value, policy, cid, pid, policy_digest)
+}
+
+pub fn validate_retained_anchor_inspection(
+    raw: &[u8],
+    policy: &WorkerPoolPolicy,
+    anchor: &RetainedPoolAnchor,
+) -> Result<(), PoolPolicyError> {
+    let value = decode(raw)?;
+    anchor_spec(
+        &value,
+        policy,
+        anchor.container_id(),
+        anchor.pid(),
+        anchor.original_birth_digest(),
+    )?;
+    let state = &value["State"];
+    let host = &value["HostConfig"];
+    let stable = state["Status"] == "running"
+        && state["Dead"] == false
+        && state["OOMKilled"] == false
+        && state["Error"] == ""
+        && value["RestartCount"] == 0
+        && host["AutoRemove"] == false
+        && host["RestartPolicy"] == json!({"Name":"no","MaximumRetryCount":0});
+    stable.then_some(()).ok_or(PoolPolicyError)
+}
+
+fn anchor_spec(
+    value: &Value,
+    policy: &WorkerPoolPolicy,
+    cid: &str,
+    pid: u32,
+    policy_digest: &str,
+) -> Result<(), PoolPolicyError> {
     let host = &value["HostConfig"];
     let config = &value["Config"];
     let valid = hex_id(cid)
@@ -230,4 +359,20 @@ fn decode(raw: &[u8]) -> Result<Value, PoolPolicyError> {
         return Err(PoolPolicyError);
     }
     serde_json::from_slice(raw).map_err(|_| PoolPolicyError)
+}
+
+/// Image inspection DATA only. The exact immutable ID commits image contents;
+/// qualifying the selected repository-factory source remains the App's duty.
+/// Container create overrides entrypoint/user, so no image defaults are used
+/// as substitutes for the existing runtime container-level confinement checks.
+pub fn validate_pool_image_information(
+    raw: &[u8],
+    image: &crate::worker_image_switch::WorkerImageId,
+) -> Result<(), PoolPolicyError> {
+    let value = decode(raw)?;
+    let valid = value.is_object()
+        && value["Id"] == image.as_str()
+        && value["Os"] == "linux"
+        && value["Config"].is_object();
+    valid.then_some(()).ok_or(PoolPolicyError)
 }

@@ -154,12 +154,7 @@ fn projection(row: &ColdContainer) -> Result<Value> {
         .ok_or(ColdDataError::Inventory)?;
     let select =
         |fields: &Object, name| field(fields, name).map_or(Value(Node::Null), Value::deep_clone);
-    let mut mounts = row
-        .mount_values()?
-        .iter()
-        .map(|row| (worker_config::encode_data(row), row))
-        .collect::<Vec<_>>();
-    mounts.sort_by(|a, b| a.0.cmp(&b.0));
+    let mounts = canonical_mount_rows(row.mount_values()?);
     Ok(Value(Node::Object(BTreeMap::from([
         (key("id"), select(fields, "Id")),
         (key("image"), select(fields, "Image")),
@@ -172,15 +167,7 @@ fn projection(row: &ColdContainer) -> Result<Value> {
                     .into(),
             )),
         ),
-        (
-            key("mounts"),
-            Value(Node::Array(
-                mounts
-                    .into_iter()
-                    .map(|(_, row)| row.deep_clone())
-                    .collect(),
-            )),
-        ),
+        (key("mounts"), Value(Node::Array(mounts))),
         (key("labels"), select(config, "Labels")),
         (key("user"), select(config, "User")),
     ]))))

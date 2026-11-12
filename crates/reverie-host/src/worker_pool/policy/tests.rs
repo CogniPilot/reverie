@@ -186,13 +186,8 @@ fn pool_close_fences_confirmed_stage_before_fallible_metadata_close() {
     assert!(pool.close().is_err());
 }
 
-#[test]
-fn service_v2_birth_cannot_reuse_component_initialization_without_maintenance() {
-    if isolated("service_v2_birth_cannot_reuse_component_initialization_without_maintenance") {
-        return;
-    }
+fn service_birth_data() -> reverie_contracts::worker_pool::ControllerBirthV2 {
     use reverie_contracts::worker_pool::{BrokerBirthData, BrokerProgramData, ControllerBirthV2};
-    let tree = Tree::new();
     let policy = WorkerPoolPolicy::decode(&policy_bytes()).unwrap();
     let broker = BrokerBirthData::from_observations(
         std::process::id(),
@@ -211,10 +206,77 @@ fn service_v2_birth_cannot_reuse_component_initialization_without_maintenance() 
         .unwrap(),
     )
     .unwrap();
-    let raw = ControllerBirthV2::from_observations(policy, broker, program)
-        .unwrap()
-        .encode()
-        .unwrap();
+    ControllerBirthV2::from_observations(policy, broker, program).unwrap()
+}
+
+#[test]
+fn restored_birth_seeds_native_member_settings_and_refuses_unproven_peer_reply() {
+    if isolated("restored_birth_seeds_native_member_settings_and_refuses_unproven_peer_reply") {
+        return;
+    }
+    use crate::worker_pool::service::protocol::{MEMBER_POLICY_EDIT_VERSION, RestoredBirthAck};
+    use reverie_contracts::{worker_config, worker_pool::WorkerPoolProvider};
+    use serde_json::json;
+    let tree = Tree::new();
+    let identity = service_birth_data();
+    let employee = "22222222-2222-4222-8222-222222222222";
+    let config = worker_config::decode(
+        &serde_json::to_vec(&json!({"workerPoolProvider":{
+            "version":2,"purpose":"reverie-docker-worker-pool-provider-v2",
+            "policy":identity.policy(),"memberRevision":7,
+            "memberOverrides":{employee:{"memoryHighMiB":8192,"cpuWeight":200}}
+        }}))
+        .unwrap(),
+    )
+    .unwrap();
+    let provider = WorkerPoolProvider::from_config(&config).unwrap().unwrap();
+    let birth = ControllerServiceBirth::from_installed_provider(identity, &provider, None).unwrap();
+    let raw = birth.encode().unwrap();
+    let mut opening = tree.opening(&raw);
+    opening.service_v2 = true;
+    opening.capture_policy().unwrap();
+    let original = opening.captured.as_ref().unwrap();
+    let loaded = original.birth.as_ref().unwrap();
+    let (settings, revision) =
+        crate::worker_pool::member_policy::MemberPolicies::from_birth(Some(loaded));
+    assert_eq!(revision, provider.member_revision());
+    assert_eq!(settings.overrides(), provider.member_overrides());
+    assert_eq!(
+        settings.effective(&original.data, employee).unwrap(),
+        provider.member_policy(employee).unwrap()
+    );
+    let wrong_file_digest = read_policy(opening.file.as_ref().unwrap(), [0; 32], true);
+    assert_eq!(
+        wrong_file_digest.err().unwrap().code(),
+        "WORKER_POOL_POLICY_DIGEST"
+    );
+
+    let expected = RestoredBirthAck::from_birth(loaded, opening.digest).unwrap();
+    let mut reply = json!({"known":true,"phase":"opening","primaryError":null,
+        "memberPolicyEditVersion":MEMBER_POLICY_EDIT_VERSION});
+    assert_eq!(
+        expected.assert_reply(&reply, "opening").unwrap_err().code(),
+        "WORKER_POOL_RESTORED_BIRTH_UNSUPPORTED"
+    );
+    reply["restoredBirth"] = serde_json::to_value(&expected).unwrap();
+    expected.assert_reply(&reply, "opening").unwrap();
+    assert!(expected.assert_reply(&reply, "active").is_err());
+    let verified = reply.clone();
+    reply["restoredBirth"]["memberRevision"] = json!(0);
+    assert!(expected.assert_reply(&reply, "opening").is_err());
+    reply = verified;
+    reply["restoredBirth"]["birthSha256"] = json!("f".repeat(64));
+    assert!(expected.assert_reply(&reply, "opening").is_err());
+    opening.close().unwrap();
+}
+
+#[test]
+fn service_v2_birth_cannot_reuse_component_initialization_without_maintenance() {
+    if isolated("service_v2_birth_cannot_reuse_component_initialization_without_maintenance") {
+        return;
+    }
+    let tree = Tree::new();
+    let raw = service_birth_data().encode().unwrap();
     let mut opening = tree.opening(&raw);
     opening.service_v2 = true;
     opening.capture_policy().unwrap();

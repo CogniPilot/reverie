@@ -46,6 +46,8 @@ function harness() {
     AbortController,
     setTimeout: vi.fn(),
     clearTimeout: vi.fn(),
+    fmt: (time: number, options: Intl.DateTimeFormatOptions) =>
+      new Intl.DateTimeFormat('en-US', {timeZone: 'America/Indiana/Indianapolis', ...options}).format(time),
     B: {
       planBurn: [
         { id: 'first', name: 'Gmail', provider: 'openai' },
@@ -368,14 +370,16 @@ describe('held plan move recovery navigation', () => {
 
 describe('blocked move contextual recovery', () => {
   const reply = (data: unknown) => ({ok:true,status:200,json:async()=>({success:true,data})});
-  const held = {id:'held',employeeId:'alex',name:'Alex',phase:'recovery-required',oldSession:'old',newSession:'new',toAccount:'second',sourceStopRequested:true,sourceCleanupVerified:true};
+  const held = {id:'held',employeeId:'alex',name:'Alex',phase:'recovery-required',oldSession:'old',newSession:'new',toAccount:'second',sourceStopRequested:true,sourceCleanupVerified:true,at:Date.UTC(2026,10,5,5,43)};
   const conflict = () => ({ok:false,status:409,json:async()=>({success:false,error:'This employee already has a move in progress or requiring recovery',blocker:{id:'held',action:'inspect-existing'}})});
   it('takes the blocked form straight to its exact current move and recovers once only after a fresh check', async () => {
     const h=harness();await h.methods.openPlanMove('alex','second');
     h.fetch.mockImplementation(async(path:string)=>path==='/api/plans/requests'?conflict():reply(path.endsWith('/resolve')?{...held,phase:'completed'}:held));
     h.dialog.querySelector('form')!.dispatchEvent(new h.dom.window.Event('submit',{bubbles:true,cancelable:true}));
     await vi.waitFor(()=>expect(h.dialog.querySelector('[data-resolve]')).not.toBeNull());
-    expect(h.dialog.textContent).toContain('Alex');expect(h.dialog.querySelector('form')).toBeNull();
+    expect(h.dialog.querySelector('h3')!.textContent).toContain('Existing plan move: Alex');
+    expect(h.dialog.querySelector('[data-move-context]')!.textContent).toContain('The existing move blocked your new request. Move started Nov 5, 2026');
+    expect(h.dialog.querySelector('form')).toBeNull();
     expect(h.fetch.mock.calls.filter(([path])=>path.endsWith('/recent'))).toHaveLength(0);
     expect(h.fetch.mock.calls.filter(([path])=>path.endsWith('/resolve'))).toHaveLength(0);
     const recover=h.dialog.querySelector<HTMLButtonElement>('[data-resolve]')!;recover.click();recover.click();

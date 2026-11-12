@@ -18,6 +18,7 @@ describe('push-routes', () => {
     // Push routes expect ctx.pushStore to be a real object (not null)
     harness.ctx.pushStore = {
       getPublicKey: vi.fn(() => 'test-vapid-public-key-base64'),
+      get: vi.fn((id: string) => id === 'sub-123' ? { id, username: undefined } : undefined),
       addSubscription: vi.fn((record: Record<string, unknown>) => record),
       updatePreferences: vi.fn(() => true),
       removeSubscription: vi.fn(() => true),
@@ -153,10 +154,11 @@ describe('push-routes', () => {
           pushPreferences: { 'session:idle': true },
         },
       });
-      expect(res.statusCode).toBe(200);
+      expect(res.statusCode).toBe(404);
       const body = JSON.parse(res.body);
       expect(body.success).toBe(false);
       expect(body.error).toContain('not found');
+      expect(harness.ctx.pushStore.updatePreferences).not.toHaveBeenCalled();
     });
 
     it('rejects invalid body (missing pushPreferences)', async () => {
@@ -196,10 +198,23 @@ describe('push-routes', () => {
         method: 'DELETE',
         url: '/api/push/subscribe/nonexistent',
       });
-      expect(res.statusCode).toBe(200);
+      expect(res.statusCode).toBe(404);
       const body = JSON.parse(res.body);
       expect(body.success).toBe(false);
       expect(body.error).toContain('not found');
+      expect(harness.ctx.pushStore.removeSubscription).not.toHaveBeenCalled();
     });
+  });
+
+  it.each(['PUT', 'DELETE'] as const)('refuses an unverified %s before modifying a known subscription', async (method) => {
+    const res = await harness.app.inject({
+      method,
+      url: '/api/push/subscribe/sub-123',
+      headers: { 'x-reverie-parent-session': 'test-session-1' },
+      ...(method === 'PUT' ? { payload: { pushPreferences: { 'session:idle': true } } } : {}),
+    });
+    expect(res.statusCode).toBe(404);
+    expect(harness.ctx.pushStore.updatePreferences).not.toHaveBeenCalled();
+    expect(harness.ctx.pushStore.removeSubscription).not.toHaveBeenCalled();
   });
 });

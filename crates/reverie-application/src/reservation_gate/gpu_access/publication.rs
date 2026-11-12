@@ -1,10 +1,26 @@
 use super::*;
 use reverie_contracts::gpu_access::GpuTransitionIntent;
-use reverie_host::gpu_access::GpuPendingFile;
+use reverie_host::{
+    gpu_access::{
+        CdiObservation, GpuActorPublication, GpuActorPublicationInput, GpuParentGuard,
+        GpuPendingFile, GpuProtectedStores,
+    },
+    resource_facts::ActorRebindPlan,
+    worker_runtime::WorkerStopBudget,
+};
+pub(super) struct OriginalPublication {
+    pub(super) configuration: GpuFileStamp,
+    pub(super) binding: GpuFileStamp,
+    pub(super) request: Option<GpuFileStamp>,
+    pub(super) parents: GpuParentGuard,
+    pub(super) protected: GpuProtectedStores,
+    pub(super) cdi: Option<CdiObservation>,
+    pub(super) current: GpuCurrentEmployee,
+}
 enum Pending {
     NotSubmitted,
     Attempted,
-    Owned(GpuPendingFile),
+    Owned(Box<GpuPendingFile>),
 }
 /// Actual same-admission file producer state, never constructible from JSON or
 /// a historical receipt. Failed records remain with the Gate and block entry.
@@ -13,7 +29,10 @@ pub(in crate::reservation_gate) struct TransitionRecord {
     pub(super) files: GpuControlFiles,
     pub(super) intent: Arc<GpuTransitionIntent>,
     pub(super) before: Arc<ValidatedWorkerSnapshot>,
-    after: Arc<ValidatedWorkerSnapshot>,
+    pub(super) after: Arc<ValidatedWorkerSnapshot>,
+    pub(super) original: OriginalPublication,
+    actor: Option<ActorRebindPlan>,
+    publication: Mutex<Option<Arc<GpuActorPublication>>>,
     pending: Mutex<Pending>,
 }
 pub(crate) struct PublishedGpu {
@@ -21,16 +40,23 @@ pub(crate) struct PublishedGpu {
     before: Arc<ValidatedWorkerSnapshot>,
     after: Arc<ValidatedWorkerSnapshot>,
     binding: ControlBinding,
+    actor: Option<Arc<GpuActorPublication>>,
 }
 impl PublishedGpu {
-    pub(crate) fn into_parts(
-        self,
+    pub(crate) fn parts(
+        &self,
     ) -> (
-        Arc<ValidatedWorkerSnapshot>,
-        Arc<ValidatedWorkerSnapshot>,
-        ControlBinding,
+        &Arc<ValidatedWorkerSnapshot>,
+        &Arc<ValidatedWorkerSnapshot>,
+        &ControlBinding,
     ) {
-        (self.before, self.after, self.binding)
+        (&self.before, &self.after, &self.binding)
+    }
+    pub(crate) fn assert_live(&self) -> Result<()> {
+        if let Some(actor) = &self.actor {
+            actor.assert_live()?;
+        }
+        Ok(())
     }
     pub(super) fn belongs_to(&self, record: &Arc<TransitionRecord>) -> bool {
         Arc::ptr_eq(&self.record, record)
@@ -43,6 +69,8 @@ impl TransitionRecord {
         intent: GpuTransitionIntent,
         before: Arc<ValidatedWorkerSnapshot>,
         after: Arc<ValidatedWorkerSnapshot>,
+        actor: Option<ActorRebindPlan>,
+        original: OriginalPublication,
     ) -> Self {
         Self {
             files,
@@ -50,10 +78,18 @@ impl TransitionRecord {
             intent: Arc::new(intent),
             before,
             after,
+            original,
+            actor,
+            publication: Mutex::new(None),
             pending: Mutex::new(Pending::NotSubmitted),
         }
     }
-    pub(super) fn publish_pending(&self, end: Instant) -> Result<()> {
+    pub(super) fn publish_pending(
+        &self,
+        end: Instant,
+        active: &Active,
+        stop: Option<&WorkerStopBudget>,
+    ) -> Result<()> {
         let mut state = self
             .pending
             .lock()
@@ -63,8 +99,32 @@ impl TransitionRecord {
             "GPU_APPLY_REQUIRES_RECONCILIATION",
         )?;
         *state = Pending::Attempted;
-        let file = self.files.publish_pending(self.intent.clone(), end)?;
-        *state = Pending::Owned(file);
+        let file = match (&self.actor, stop) {
+            (Some(_), Some(stop)) => {
+                let admission = active
+                    .lock
+                    .lock()
+                    .map_err(|_| GateError::Refused("RESERVATION_ADMISSION_UNAVAILABLE"))?;
+                let request = self
+                    .original
+                    .request
+                    .as_ref()
+                    .ok_or(GateError::Refused("GPU_REQUEST_CHANGED"))?;
+                self.files.publish_pending_with_actor(
+                    self.intent.clone(),
+                    end,
+                    &admission,
+                    stop,
+                    request,
+                )?
+            }
+            (None, None) => self.files.publish_pending(self.intent.clone(), end)?,
+            _ => return Err(GateError::Refused("GPU_ACTOR_PUBLICATION_CHANGED")),
+        };
+        *state = Pending::Owned(Box::new(file));
+        if let (Some(_), Pending::Owned(pending)) = (&self.actor, &*state) {
+            pending.assert_current(&self.files)?;
+        }
         Ok(())
     }
     pub(in crate::reservation_gate) fn assert_pending(&self) -> Result<()> {
@@ -77,42 +137,47 @@ impl TransitionRecord {
         };
         Ok(pending.assert_current(&self.files)?)
     }
-    /// The sealed RAM handoff exists only after BOTH actual fixed CAS writers
-    /// and their checked finalizers acknowledge success. No data-only factory.
-    pub(super) fn publish_files(
-        self: &Arc<Self>,
-        config: &GpuFileStamp,
-        binding: &GpuFileStamp,
-    ) -> Result<PublishedGpu> {
-        self.files.publish_configuration(&self.intent, config)?;
-        #[cfg(test)]
-        super::tests::faults::at(super::tests::faults::Point::ConfigWritten, self)?;
-        self.files.publish_binding(&self.intent, binding)?;
+    /// The sealed GPU handoff follows all applicable fixed CAS writes and
+    /// their checked finalizers.
+    pub(super) fn publish_files(self: &Arc<Self>, active: &Active) -> Result<PublishedGpu> {
+        let actor = match &self.actor {
+            Some(plan) => Some(self.publish_actor(plan, active)?),
+            None => {
+                self.publish_legacy()?;
+                None
+            }
+        };
         Ok(PublishedGpu {
             record: self.clone(),
             before: self.before.clone(),
             after: self.after.clone(),
             binding: self.intent.after_binding().clone(),
+            actor,
         })
     }
-    pub(super) fn terminal(
+    fn publish_legacy(self: &Arc<Self>) -> Result<()> {
+        self.files
+            .publish_configuration(&self.intent, &self.original.configuration)?;
+        #[cfg(test)]
+        super::tests::faults::at(super::tests::faults::Point::ConfigWritten, self)?;
+        self.files
+            .publish_binding(&self.intent, &self.original.binding)?;
+        Ok(())
+    }
+    fn publish_actor(
         &self,
-        request: Option<&GpuFileStamp>,
-        protected: &reverie_host::gpu_access::GpuProtectedStores,
-        cdi: Option<&reverie_host::gpu_access::CdiObservation>,
-    ) -> Result<reverie_host::gpu_access::GpuTerminalSnapshot> {
-        let pending = self
-            .pending
+        actor: &ActorRebindPlan,
+        active: &Active,
+    ) -> Result<Arc<GpuActorPublication>> {
+        let mut output = self
+            .publication
             .lock()
             .map_err(|_| GateError::Refused("GPU_APPLY_REQUIRES_RECONCILIATION"))?;
-        let Pending::Owned(pending) = &*pending else {
-            return Err(GateError::Refused("GPU_TRANSITION_PENDING_CHANGED"));
-        };
-        Ok(self
-            .files
-            .capture_terminal(request, pending, protected, cdi)?)
-    }
-    pub(super) fn release(&self) -> Result<()> {
+        need(output.is_none(), "GPU_ACTOR_PUBLICATION_CHANGED")?;
+        let admission = active
+            .lock
+            .lock()
+            .map_err(|_| GateError::Refused("RESERVATION_ADMISSION_UNAVAILABLE"))?;
         let mut pending = self
             .pending
             .lock()
@@ -120,7 +185,60 @@ impl TransitionRecord {
         let Pending::Owned(pending) = &mut *pending else {
             return Err(GateError::Refused("GPU_TRANSITION_PENDING_CHANGED"));
         };
-        Ok(pending.release()?)
+        let actual = pending.publish_with_actor(
+            &self.files,
+            GpuActorPublicationInput {
+                configuration: &self.original.configuration,
+                binding: &self.original.binding,
+                actor,
+                admission: &admission,
+                cdi: self.original.cdi.as_ref(),
+            },
+        )?;
+        let actual = Arc::new(actual);
+        *output = Some(Arc::clone(&actual));
+        Ok(actual)
+    }
+    pub(super) fn actor_publication(&self) -> Result<Arc<GpuActorPublication>> {
+        self.publication
+            .lock()
+            .map_err(|_| GateError::Refused("GPU_APPLY_REQUIRES_RECONCILIATION"))?
+            .as_ref()
+            .map(Arc::clone)
+            .ok_or(GateError::Refused("GPU_ACTOR_PUBLICATION_REQUIRED"))
+    }
+    pub(super) fn terminal(&self) -> Result<reverie_host::gpu_access::GpuTerminalSnapshot> {
+        let pending = self
+            .pending
+            .lock()
+            .map_err(|_| GateError::Refused("GPU_APPLY_REQUIRES_RECONCILIATION"))?;
+        let Pending::Owned(pending) = &*pending else {
+            return Err(GateError::Refused("GPU_TRANSITION_PENDING_CHANGED"));
+        };
+        Ok(self.files.capture_terminal(
+            self.original.request.as_ref(),
+            pending,
+            &self.original.protected,
+            self.original.cdi.as_ref(),
+        )?)
+    }
+    pub(super) fn release(&self) -> Result<()> {
+        let actor = self
+            .actor
+            .as_ref()
+            .map(|_| self.actor_publication())
+            .transpose()?;
+        let mut pending = self
+            .pending
+            .lock()
+            .map_err(|_| GateError::Refused("GPU_APPLY_REQUIRES_RECONCILIATION"))?;
+        let Pending::Owned(pending) = &mut *pending else {
+            return Err(GateError::Refused("GPU_TRANSITION_PENDING_CHANGED"));
+        };
+        match actor {
+            Some(actor) => Ok(pending.release_with_actor(&actor)?),
+            None => Ok(pending.release()?),
+        }
     }
 }
 impl Inner {

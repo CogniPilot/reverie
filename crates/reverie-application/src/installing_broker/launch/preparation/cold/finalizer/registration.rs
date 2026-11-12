@@ -38,7 +38,7 @@ impl Finalizer<'_> {
             .target
             .as_ref()
             .ok_or(ColdError::Refused("WORKER_COLD_STOP_TARGET_REQUIRED"))?;
-        let admission = broker.admit_ordinary_stop(target)?;
+        let admission = scope.preparing.admit_original_cleanup(target)?;
         let body = (|| {
             admission.assert_broker(broker)?;
             admission.assert_target(target)?;

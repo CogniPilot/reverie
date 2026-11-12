@@ -29,6 +29,7 @@ import {
   needsRehash,
   normalizeUsername,
   readUsers,
+  rehashAuthenticatedUser,
   resolveClaudeModeForUser,
   setPassword,
   toPublicUser,
@@ -69,6 +70,38 @@ afterEach(async () => {
   invalidateUsersCache();
   await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
   await fs.rm(spacesDir, { recursive: true, force: true }).catch(() => {});
+});
+
+describe('authenticated password-hash upgrade custody', () => {
+  const password = 'Synthetic-verified-rehash-42!';
+  it('changes only the password of the exact current account and preserves live permissions', async () => {
+    const verified = await createUser({ username: 'fixture-user', password, role: 'user' });
+    await updateUser('fixture-user', { mustChangePassword: true, canBypassPermissions: true });
+    const upgraded = await rehashAuthenticatedUser(verified, password);
+    expect(upgraded).toMatchObject({
+      username: verified.username,
+      createdAt: verified.createdAt,
+      mustChangePassword: true,
+      canBypassPermissions: true,
+    });
+    expect(upgraded!.password).not.toEqual(verified.password);
+    expect(await verifyPasswordHash(password, upgraded!.password)).toBe(true);
+    expect(await rehashAuthenticatedUser(verified, password)).toBeNull();
+  });
+  it.each(['recreate', 'reset', 'disable'] as const)(
+    'cannot overwrite the %s successor after authentication',
+    async (change) => {
+      const verified = await createUser({ username: 'fixture-user', password, role: 'user' });
+      if (change === 'recreate') {
+        await deleteUser('fixture-user');
+        await createUser({ username: 'fixture-user', password: password + '-successor', role: 'user' });
+      } else if (change === 'reset') await setPassword('fixture-user', password + '-successor');
+      else await updateUser('fixture-user', { disabled: true });
+      const before = await fs.readFile(path.join(tmpDir, 'users.json'), 'utf8');
+      expect(await rehashAuthenticatedUser(verified, password)).toBeNull();
+      expect(await fs.readFile(path.join(tmpDir, 'users.json'), 'utf8')).toBe(before);
+    }
+  );
 });
 
 describe('username validation', () => {

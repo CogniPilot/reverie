@@ -9,6 +9,7 @@ mod finalization;
 mod provider;
 mod service;
 mod started;
+mod started_abort;
 mod started_prefix;
 mod supervisor;
 fn broker(tree: &Tree) -> InstallingBroker {
@@ -34,7 +35,9 @@ fn broker_with_provider(tree: &Tree, provider: Option<serde_json::Value>) -> Ins
     tree.write("inspect.out.status", b"7");
     broker
 }
-fn classified(broker: &InstallingBroker) -> (std::os::unix::net::UnixStream, ColdWorkerLaunch<'_>) {
+fn inspected(
+    broker: &InstallingBroker,
+) -> (std::os::unix::net::UnixStream, InspectedWorkerLaunch<'_>) {
     let (client, socket) =
         crate::installing_broker::launch::tests::incoming_as(broker, b'J', SID, false);
     let WorkerConnectionDispatch::Launch(received) =
@@ -42,14 +45,12 @@ fn classified(broker: &InstallingBroker) -> (std::os::unix::net::UnixStream, Col
     else {
         panic!("actual accepted J");
     };
-    let ClassifiedWorkerLaunch::Cold(cold) = received
-        .begin_ordinary()
-        .unwrap()
-        .prepare_prefix()
-        .unwrap()
-        .classify_existing()
-        .unwrap()
-    else {
+    let inspected = received.begin_ordinary().unwrap().prepare_prefix().unwrap();
+    (client, inspected)
+}
+fn classified(broker: &InstallingBroker) -> (std::os::unix::net::UnixStream, ColdWorkerLaunch<'_>) {
+    let (client, inspected) = inspected(broker);
+    let ClassifiedWorkerLaunch::Cold(cold) = inspected.classify_existing().unwrap() else {
         panic!("actual initial Cold classification");
     };
     assert!(matches!(cold.target(), ExistingColdTarget::Absent));

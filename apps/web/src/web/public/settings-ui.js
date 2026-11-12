@@ -3219,8 +3219,8 @@ Object.assign(ReverieApp.prototype, {
   /** Keep the launch surfaces in sync with Settings mutations without a reload. */
   _syncCliLaunchCatalog() {
     if (!Array.isArray(this._cliList) || this._cliList.length === 0) return;
-    // /api/clis rows carry no capabilities, so keep the served catalog's `external`
-    // (isExternalCliSession() reads it). A new custom CLI has none and falls back to `kind`.
+    // New API rows carry the same public capabilities as the served page.
+    // Keep prior facts only when refreshing against an older server.
     const previous = new Map(
       (Array.isArray(window.__reverieCliCatalog) ? window.__reverieCliCatalog : []).map((cli) => [cli.id, cli])
     );
@@ -3230,7 +3230,8 @@ Object.assign(ReverieApp.prototype, {
       shortBadge: cli.shortBadge,
       order: cli.order,
       kind: cli.kind,
-      external: previous.get(cli.id)?.external,
+      external: cli.external ?? previous.get(cli.id)?.external,
+      supportsCustomModel: cli.supportsCustomModel ?? previous.get(cli.id)?.supportsCustomModel,
       enabled: cli.enabled,
       available: cli.kind === 'shell' || (cli.enabled && cli.installed),
     }));
@@ -3238,6 +3239,9 @@ Object.assign(ReverieApp.prototype, {
       ...(window.__reverieCliAvailable || {}),
       ...Object.fromEntries(this._cliList.map((cli) => [cli.id, cli.kind === 'shell' || (cli.enabled && cli.installed)])),
     };
+    window.__reverieCustomModelClis = window.__reverieCliCatalog
+      .filter((cli) => cli.enabled && cli.kind === 'agent' && cli.supportsCustomModel === true)
+      .map((cli) => ({ id: cli.id, label: cli.label }));
     if (!window.__reverieCliCatalog.some((cli) => cli.id === this.runMode && cli.enabled)) {
       this.setRunMode?.('claude');
     }

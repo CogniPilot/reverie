@@ -1,18 +1,35 @@
-# Optional owner-local metadata tooling, never a driver/service/permission installer.
+# Owner-local metadata tooling; never a driver/service/permission installer.
 { pkgs, src }:
-let python = pkgs.python3.withPackages (ps: [ ps.pyyaml ]);
-in pkgs.writeShellApplication {
-  name = "reverie-worker-gpu";
-  runtimeInputs = [ python pkgs.docker-client ];
-  text = ''exec python3 -I -B ${src}/python/reverie/worker_gpu_preflight.py "$@"'';
-  derivationArgs.postCheck = ''
-    ${python}/bin/python3 -I -B -c '
-    import sys,unittest
-    sys.path[:0]=["${src}/python","${src}"]
-    suite=unittest.defaultTestLoader.loadTestsFromName("tests.test_worker_gpu_preflight.GPUPreflightTests.test_yaml_specs_use_safe_unique_alias_free_parser")
-    result=unittest.TextTestRunner().run(suite)
-    assert result.wasSuccessful() and result.testsRun==1 and not result.skipped
-    '
-    "$target" --help >/dev/null
-  '';
+let
+  workspace = import ./rust-workspace-source.nix {
+    inherit pkgs src;
+    members = [
+      "reverie-gpu-preflight" "reverie-application" "reverie-host" "reverie-worker-client"
+      "reverie-core" "reverie-contracts" "reverie-store" "reverie-http"
+      "reverie-diagnostics" "reverie-python-regex"
+    ];
+    vendors = [ "rustpython-sre-engine" "rustpython-wtf8" ];
+  };
+  baseProfile = import ./worker-docker-profile.nix { inherit pkgs src; };
+  policyV1 = import ./worker-perf-profile.nix { inherit pkgs src baseProfile; };
+  policyV2 = import ./worker-perf-profile.nix { inherit pkgs src baseProfile; policy = "task-v2"; };
+in pkgs.rustPlatform.buildRustPackage {
+  pname = "reverie-gpu-preflight";
+  version = "0.1.0";
+  src = workspace.source;
+  cargoLock.lockFile = workspace.lockFile;
+  cargoBuildFlags = [ "-p" "reverie-gpu-preflight" ];
+  cargoTestFlags = [ "-p" "reverie-gpu-preflight" ];
+  env = {
+    REVERIE_FIXED_GPU_PREFLIGHT_ENGINE = "${pkgs.docker-client}/bin/docker";
+    REVERIE_FIXED_TASK_PERF_MANIFEST = "${policyV1}/share/reverie/worker-perf-profile.json";
+    REVERIE_FIXED_TASK_PERF_V2_MANIFEST = "${policyV2}/share/reverie/worker-perf-profile.json";
+  };
+  doCheck = true;
+  meta = {
+    description = "Read-only selected employee GPU/CDI/image preflight";
+    license = pkgs.lib.licenses.mit;
+    platforms = pkgs.lib.platforms.linux;
+    mainProgram = "reverie-worker-gpu";
+  };
 }

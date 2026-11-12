@@ -1,9 +1,9 @@
-{ pkgs, src }:
+{ pkgs, src, artifacts ? import ./policy-artifacts.nix { inherit pkgs src; } }:
 pkgs.pkgsStatic.stdenv.mkDerivation {
   pname = "reverie-human-terminal-toolkit";
   version = "1";
   dontUnpack = true;
-  nativeBuildInputs = [ pkgs.binutils pkgs.python3 ];
+  nativeBuildInputs = [ pkgs.binutils artifacts ];
   buildPhase = ''
     $CC -std=c11 -O2 -Wall -Wextra -Werror -static -no-pie \
       ${src}/python/reverie/human_terminal_static.c -o reverie-human-shell
@@ -21,16 +21,8 @@ pkgs.pkgsStatic.stdenv.mkDerivation {
         exit 1
       fi
     done
-    python3 - "$out" <<'PY'
-import hashlib,json,pathlib,sys
-root=pathlib.Path(sys.argv[1])
-files={}
-for path in sorted((root/'opt/reverie/human/bin').iterdir()):
-    data=path.read_bytes()
-    assert data[:4]==b'\x7fELF'
-    files['/'+str(path.relative_to(root))]={'sha256':hashlib.sha256(data).hexdigest(),'bytes':len(data)}
-(root/'share/reverie-human-terminal/manifest.json').write_text(json.dumps({'version':1,'static':True,'files':files},sort_keys=True,separators=(',',':'))+'\n')
-PY
+    ${artifacts}/bin/reverie-policy-artifacts human-terminal-manifest \
+      --root "$out" --system ${pkgs.stdenv.hostPlatform.system}
   '';
   meta.platforms = pkgs.lib.platforms.linux;
 }

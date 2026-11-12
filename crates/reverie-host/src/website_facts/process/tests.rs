@@ -218,19 +218,24 @@ fn actual_failed_snapshot_child_cannot_supply_ready_and_is_reaped_before_verdict
 }
 #[test]
 fn actual_consumed_descriptor_close_failure_latches_observer_without_retry() {
+    let mut other = WebsiteProcessObserver::default();
+    let original = other.observe_current_broker(end()).unwrap();
     let mut observer = WebsiteProcessObserver::default();
     crate::native::test_faults::set(None, true);
     let first = observer.observe_init(&metadata(std::process::id()), end());
     crate::native::test_faults::set(None, false);
     let later = observer.observe_init(&metadata(std::process::id()), end());
-    assert_eq!(
-        first.err().unwrap().code(),
-        "BACKEND_CODE_CLOSE_UNCONFIRMED"
-    );
+    let cause = first.err().unwrap();
+    assert_eq!(cause.code(), "BACKEND_CODE_CLOSE_UNCONFIRMED");
+    assert!(cause.has_unconfirmed_close());
+    let pooled = crate::worker_pool::PoolError::BootstrapFacts(Box::new(cause));
+    assert!(pooled.has_unconfirmed_close());
     assert_eq!(
         later.err().unwrap().code(),
         "WEBSITE_PROCESS_CLOSE_UNCONFIRMED"
     );
+    other.assert_finalized().unwrap();
+    assert_eq!(other.observe_current_broker(end()).unwrap(), original);
 }
 #[test]
 #[ignore = "fixed owned native child, invoked only by its control"]

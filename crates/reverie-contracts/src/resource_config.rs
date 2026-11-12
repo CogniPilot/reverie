@@ -5,6 +5,7 @@ use crate::broker_resources::{self, ResourceConfigError};
 use crate::legacy_json::{Node, Text, Value};
 use crate::storage_identity::MetadataText;
 use crate::worker_config::EffectiveWorkerConfig;
+use crate::worker_pool::WorkerPoolProvider;
 use reverie_core::ids::{ProfileEmployeeId, ProfileSessionId};
 use reverie_core::resource_projection::ResourceProjection;
 use reverie_core::resources::{ResourcePolicy, ResourceTemplate};
@@ -27,13 +28,20 @@ type Result<T> = std::result::Result<T, ResourceConfigError>;
 pub struct ResourceConfiguration {
     source: EffectiveWorkerConfig,
     resources: ResourceProjection,
+    worker_pool: Option<WorkerPoolProvider>,
 }
 impl ResourceConfiguration {
     /// Validate every configured resource entry, including unselected entries,
     /// without the profile-stage-only finite-value or compact-input bound.
     pub fn capture(source: EffectiveWorkerConfig) -> Result<Self> {
         let resources = broker_resources::projection(source.as_value())?;
-        Ok(Self { source, resources })
+        let worker_pool = WorkerPoolProvider::from_config(&source)
+            .map_err(|_| ResourceConfigError::ResourceShape)?;
+        Ok(Self {
+            source,
+            resources,
+            worker_pool,
+        })
     }
     /// Original launch selects the effective pool only by key presence.
     pub fn has_resource_maps(&self) -> bool {
@@ -59,6 +67,10 @@ impl ResourceConfiguration {
         };
         for name in CONTROLS {
             fields.remove(&key(name));
+        }
+        if let Some(pool) = &self.worker_pool {
+            pool.project_birth_fields(&mut fields)
+                .map_err(|_| ResourceConfigError::ResourceShape)?;
         }
         let selected = self.resources.sessions().get(session).or_else(|| {
             storage_employee.and_then(|employee| self.resources.employees().get(employee))

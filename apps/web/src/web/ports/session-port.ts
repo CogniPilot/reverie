@@ -1,3 +1,4 @@
+import type {TerminalInputService} from '../terminal-input-service.js';
 /**
  * @fileoverview Session port — capabilities for session lifecycle management.
  * Route modules that manage sessions depend on this port.
@@ -9,14 +10,17 @@ import type { TabLayout } from '../../tab-layout.js';
 import type { SessionPlacementHint } from '../../tab-layout-service.js';
 
 export interface SessionPort {
+  readonly terminalInput: TerminalInputService;
   readonly sessions: ReadonlyMap<string, Session>;
   /**
    * Register a created session with the owner's tab layout. `placement.tabGroupId`
    * puts it at the end of that group in the same layout write (ignored when the
    * group is not in the owner's layout). Resolves to the committed layout.
    */
-  addSession(session: Session, placement?: SessionPlacementHint): Promise<TabLayout>;
-  cleanupSession(sessionId: string, killMux?: boolean, reason?: string): Promise<void>;
+  addSession(session: Session, placement?: SessionPlacementHint, admitted?: () => boolean): Promise<TabLayout>;
+  /** Expected candidate is process-local identity, never a wire cleanup grant. */
+  cleanupSession(sessionId: string, killMux?: boolean, reason?: string,
+    expected?: {session: Session; owner: string | undefined}): Promise<void>;
   setupSessionListeners(session: Session): Promise<void>;
   persistSessionState(session: Session): void;
   persistSessionStateNow(session: Session): void;

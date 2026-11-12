@@ -11,6 +11,7 @@ nix = { workspace = true, features = ["fs"] }
 reverie-application.workspace = true
 reverie-contracts.workspace = true
 reverie-core.workspace = true
+reverie-deployment.workspace = true
 reverie-host.workspace = true
 serde_json.workspace = true
 sha2.workspace = true

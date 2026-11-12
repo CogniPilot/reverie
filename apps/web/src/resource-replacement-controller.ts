@@ -15,6 +15,7 @@ import type {SessionPort} from './web/ports/session-port.js';
 import type {TerminalMultiplexer} from './mux-interface.js';
 import {ResourceOwnerAuthority, ResourceOwnerAuthorizationError, type ResourceApproval, type ResourcePreviewContext} from './resource-owner-authority.js';
 import {ResourceSessionPublication} from './resource-session-publication.js';
+import { accountReplacementProfile } from './utils/account-replacement-profile.js';
 import {ResourceNativeClient} from './resource-native-client.js';
 import {ResourceReplacementRuntime} from './resource-replacement-runtime.js';
 import {RESOURCE_PREVIEW_BLOCKERS, type ResourceOperationSummary, type ResourcePreviewBlocker} from './types/resource-preview.js';
@@ -98,7 +99,7 @@ export class ResourceReplacementController {
     const executor = planMoveExecutor(this.#runtime(request, context), context.owner);
     const before = await executor.snapshot(employeeId, context.owner, 'runtime-refresh');
     if (before.working) throw new ResourcePreviewBlocked('RESOURCE_PREVIEW_BUSY');
-    need(before.runtimeDigest && ['claude','codex'].includes(before.mode ?? ''));
+    need(before.runtimeDigest && accountReplacementProfile(before.mode));
     let native: ResourceNativeClient;
     try {native = await ResourceNativeClient.open(this.#socket, this.#authority, context);}
     catch {

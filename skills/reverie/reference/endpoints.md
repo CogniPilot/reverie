@@ -237,7 +237,7 @@ minutes, never retry the credential.
 flushed slightly *after* the `stop` hook fires, so a read taken the instant the wait
 returns is too early (verified live: empty on the first call, full prose seconds later).
 It is also `""` before the worker's first completed turn, and permanently `""` for
-`shell`, `opencode`, `gemini`, `antigravity`, `pi`, `grok` and `omp`, which write no transcript at
+`shell`, `opencode`, `gemini`, `antigravity`, `pi`, `grok`, `omp` and `hands`, which write no transcript at
 all. `deepseek` is NOT one of those — it is read from `$DSH_HOME/sessions/**` and lags
 for the same reason claude does (the harness finalizes the assistant message just after
 it reports `idle`), so poll it the same way.
@@ -341,7 +341,7 @@ ESC=$(printf '\033')
 
 `POST /api/v1/quick-start` body (all optional):
 `{"caseName":"worker-1","mode":"claude","sessionName":"auth-worker","effort":"high"}`
-,  `mode` ∈ `claude|shell|opencode|codex|gemini|antigravity|pi|grok|deepseek|omp`; response is
+,  `mode` ∈ `claude|shell|opencode|codex|gemini|antigravity|pi|grok|deepseek|omp|hands`; response is
 `.data.{sessionId, caseName, casePath}`. Creates the case directory (a real directory
 on the user's disk) if missing, do not retry it in a loop, and remember the name.
 
@@ -353,8 +353,16 @@ a soft default the worker can change with `/advisor`. Remote and docker cases re
 `REVERIE_WORKER_ADVISOR` is set.
 
 ⚠️ A `mode` whose CLI is **not installed on the server** fails the spawn with
-`OPERATION_FAILED`; it never falls back to claude. Probe first whenever you did not pick
-the mode yourself: `GET /api/v1/claude/status`, `GET /api/v1/opencode/status`,
+`OPERATION_FAILED`; it never falls back to claude. The canonical registry discovery read
+is **`GET /api/v1/clis`**, whose `.data[]` rows carry `id`, `enabled`, `installed` and
+`supportsCustomModel`. Launch only an enabled, installed entry; a missing entry is not
+permission to substitute another CLI. This also covers newly registered custom CLIs
+without inventing a per-mode status endpoint. In multi-user mode this is an owner/admin
+read: a non-admin receives `[]`, which means discovery is unavailable to that caller,
+not that no CLI is installed. Ask an authorized owner for that selection.
+
+The following dedicated probes remain compatibility endpoints for their named CLIs:
+`GET /api/v1/claude/status`, `GET /api/v1/opencode/status`,
 `GET /api/v1/codex/status`, `GET /api/v1/gemini/status`, `GET /api/v1/antigravity/status`, `GET /api/v1/grok/status`, `GET /api/v1/deepseek/status`,
 `GET /api/v1/pi/status` and `GET /api/v1/omp/status` each return `.data.{available, path}` (no session needed).
 Pi's, grok's and OMP's also carry `.data.version`, because `pi` is a short generic name,
@@ -486,8 +494,8 @@ Quirks that will bite you:
 - ⚠️ **`active-tools` proves presence, never absence.** It is fed by the BashToolParser,
   which reads Claude's rendered `● Bash(…)` lines, and `_processExpensiveParsers`
   returns early for every external CLI mode (`session.ts:~2225`), so it is permanently
-  `[]` on `opencode`/`codex`/`gemini`/`antigravity`/`pi`/`grok`/`deepseek`/`omp`. ⚠️ **`shell` is NOT one of those**
-  (`isExternalCliMode`, `session.ts:176-187`, lists only those seven), so the parser does
+  `[]` on `opencode`/`codex`/`gemini`/`antigravity`/`pi`/`grok`/`deepseek`/`omp`/`hands`. ⚠️ **`shell` is NOT one of those**
+  (`isExternalCliMode` reads the registry's external capability), so the parser does
   run on a shell worker, and `TEXT_COMMAND_PATTERN` (`bash-tool-parser.ts:89`) matches
   bare `tail|cat|head|less|grep|watch|multitail <path>` lines with no `● Bash(` wrapper:
   a shell worker running `cat build.log` really does populate this. In practice it stays

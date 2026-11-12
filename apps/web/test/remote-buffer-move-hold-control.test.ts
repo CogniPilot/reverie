@@ -1,3 +1,4 @@
+import { registerMuxFixture } from './helpers/registered-mux-fixture.js';
 import Fastify from 'fastify';
 import fastifyCookie from '@fastify/cookie';
 import { expect, it, vi } from 'vitest';
@@ -22,6 +23,7 @@ it.each([true, false])('buffered remote input keeps its agent origin through a p
   const session = new Session({ id: 'test-session-1', workingDir: '/owned/fixture', mode: 'claude', useMux: true,
     remote: { hostId: 'owned-host', label: 'Owned fixture', host: '192.0.2.1', wakeCommand: 'synthetic-wake' } as never,
     mux: mux as never, muxSession: { muxName: 'reverie-owned-review', sessionId: 'test-session-1', pid: 42 } as never });
+  registerMuxFixture(session);
   Object.assign(session, { reattachRemote: vi.fn(async () => true) });
   let ready!: (value: boolean) => void;
   const readiness = new Promise<boolean>(resolve => { ready = resolve; });

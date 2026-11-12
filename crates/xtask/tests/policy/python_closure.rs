@@ -1,7 +1,7 @@
 //! Retirement closure: a removed Python module must not stay selected.
 //! Every `[project.scripts]` console command and every Nix reference to a
-//! Python source file or `-m`/quoted `reverie.*` module must name a module
-//! that still exists, so deleting a script also removes its registrations.
+//! Python source file or `-m`/quoted `reverie.*` module value must name a
+//! module that still exists. Quoted Nix attribute keys are not module values.
 
 use crate::support::workspace_root;
 use std::fs;
@@ -34,9 +34,9 @@ fn console_modules(pyproject: &str) -> Vec<String> {
     modules
 }
 
-/// Maximal `[A-Za-z0-9_./]` runs that start with `prefix`, with the byte
-/// that follows each run (`None` at the end of the text).
-fn tokens<'a>(text: &'a str, prefix: &str) -> Vec<(&'a str, Option<u8>)> {
+/// Maximal `[A-Za-z0-9_./]` runs that start with `prefix`, with the source
+/// suffix that follows each run.
+fn tokens<'a>(text: &'a str, prefix: &str) -> Vec<(&'a str, &'a str)> {
     let word = |byte: u8| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'.' | b'/');
     let mut found = Vec::new();
     let mut start = 0;
@@ -47,10 +47,28 @@ fn tokens<'a>(text: &'a str, prefix: &str) -> Vec<(&'a str, Option<u8>)> {
             .bytes()
             .position(|byte| !word(byte))
             .map_or(text.len(), |length| body + length);
-        found.push((&text[begin..end], text.as_bytes().get(end).copied()));
+        found.push((&text[begin..end], &text[end..]));
         start = end.max(begin + 1);
     }
     found
+}
+
+/// A quoted attribute key is followed by a Nix assignment, allowing Nix
+/// whitespace/comments. Equality expressions still contain module values.
+fn attribute_assignment(mut suffix: &str) -> bool {
+    loop {
+        suffix = suffix.trim_start();
+        if let Some(comment) = suffix.strip_prefix('#') {
+            suffix = comment.split_once('\n').map_or("", |(_, rest)| rest);
+        } else if let Some(comment) = suffix.strip_prefix("/*") {
+            let Some((_, rest)) = comment.split_once("*/") else {
+                return false;
+            };
+            suffix = rest;
+        } else {
+            return suffix.starts_with('=') && !suffix.starts_with("==");
+        }
+    }
 }
 
 fn nix_problems(root: &Path, name: &str, text: &str) -> Vec<String> {
@@ -66,17 +84,21 @@ fn nix_problems(root: &Path, name: &str, text: &str) -> Vec<String> {
     for marker in ["-m reverie.", "'reverie.", "\"reverie."] {
         let skip = marker.len() - "reverie.".len();
         let quote = marker.as_bytes()[0];
-        // A quoted name is a module only when its own quote closes it (not a
-        // label such as "reverie.worker.nix-store"); `-m` ends at a separator.
-        let closed = |next: Option<u8>| match quote {
-            b'-' => next.is_none_or(|byte| {
+        // Quoted module values close with their own quote; keys and partial
+        // names such as "reverie.worker.nix-store" are not module selections.
+        // Explicit `-m` execution remains checked independently of Nix keys.
+        let selected = |suffix: &str| match quote {
+            b'-' => suffix.bytes().next().is_none_or(|byte| {
                 byte.is_ascii_whitespace() || matches!(byte, b'\'' | b'"' | b';')
             }),
-            _ => next == Some(quote),
+            _ => {
+                suffix.as_bytes().first() == Some(&quote)
+                    && (quote != b'"' || !attribute_assignment(&suffix[1..]))
+            }
         };
         for (token, _) in tokens(text, marker)
             .into_iter()
-            .filter(|(_, next)| closed(*next))
+            .filter(|(_, suffix)| selected(suffix))
         {
             let module = token[skip..].trim_end_matches('.');
             if !module_exists(root, module) {
@@ -85,6 +107,51 @@ fn nix_problems(root: &Path, name: &str, text: &str) -> Vec<String> {
         }
     }
     problems
+}
+
+#[test]
+fn quoted_nix_attribute_keys_are_not_python_module_selections() {
+    let problems = nix_problems(
+        &workspace_root(),
+        "fixture.nix",
+        r#"Labels = {
+          "reverie.purpose" = "reverie-worker-viewer-v1";
+          "reverie.future.label" /* packaging metadata */
+            # The key and its assignment can span lines.
+            = "metadata";
+        };"#,
+    );
+    assert!(problems.is_empty(), "{problems:?}");
+}
+
+#[test]
+fn attribute_keys_do_not_hide_quoted_module_values_or_execution() {
+    let problems = nix_problems(
+        &workspace_root(),
+        "fixture.nix",
+        r#""reverie.label" = "reverie.absent_value";
+           if module == "reverie.absent_comparison": pass
+           if "reverie.absent_left" == module: pass
+           if "reverie.absent_comment" # a comparison, not an attribute
+               == module: pass
+           if module in ('reverie.absent_allowlist',): pass
+           'reverie.absent_single_quote' = invalid;
+           python3 -m reverie.absent_execution;
+           python3 -m reverie.absent_assignment = value;"#,
+    );
+    assert_eq!(
+        problems,
+        [
+            "fixture.nix: selects missing module reverie.absent_execution",
+            "fixture.nix: selects missing module reverie.absent_assignment",
+            "fixture.nix: selects missing module reverie.absent_allowlist",
+            "fixture.nix: selects missing module reverie.absent_single_quote",
+            "fixture.nix: selects missing module reverie.absent_value",
+            "fixture.nix: selects missing module reverie.absent_comparison",
+            "fixture.nix: selects missing module reverie.absent_left",
+            "fixture.nix: selects missing module reverie.absent_comment",
+        ]
+    );
 }
 
 fn closure_problems(root: &Path) -> Vec<String> {

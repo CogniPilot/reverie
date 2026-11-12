@@ -32,4 +32,13 @@ impl Frame<'_> {
         self.channel()?.send_frame(frame, end)?;
         self.guard_peer(end)
     }
+    pub(super) fn send_fleet_reply(&mut self, frame: &FleetReplyFrame, end: Instant) -> Result<()> {
+        need(
+            matches!(self.purpose, WebsitePurpose::FleetPreview),
+            "FLEET_REPLY_CHANNEL_REQUIRED",
+        )?;
+        self.guard_peer(end)?;
+        self.channel()?.send_fleet_reply(frame, end)?;
+        self.guard_peer(end)
+    }
 }

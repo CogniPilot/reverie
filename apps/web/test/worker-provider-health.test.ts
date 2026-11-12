@@ -97,6 +97,11 @@ it('projects independently observed runtime health while the viewer remains disc
   expect(f.changed).toHaveBeenCalledOnce();
   expect(f.employee.desiredRunning).toBe(true);
 });
+it('does not turn a diagnostic request or live outer PID into attached transport proof', () => {
+  const session = { pid: 123, runtimeHealth: 'unknown', runtimeHealthScope: 'terminal', viewerInputHeld: true,
+    viewerInspectionRequested: true };
+  expect(viewerHealth(session)).toBe('disconnected');
+});
 it('never refreshes an old native observation timestamp when status serves the same cache hit', async () => {
   const f = fixture();
   await f.health.refresh();

@@ -1,3 +1,4 @@
+import { registerMuxFixture } from './helpers/registered-mux-fixture.js';
 import { expect, it, vi } from 'vitest';
 import { Session } from '../src/session.js';
 import { typeIntoOpencode } from '../src/opencode-input.js';
@@ -22,6 +23,7 @@ it.each(['before-verifier', 'inside-opencode'] as const)('retains the agent move
     } };
   session = new Session({ id: 'test-session-1', workingDir: '/owned/fixture', mode: 'opencode', useMux: true,
     mux: mux as never, muxSession: { muxName: 'reverie-owned-review', sessionId: 'test-session-1', pid: 42 } as never });
+  registerMuxFixture(session);
   try {
     await session.writeViaMux('synthetic note\r', { agentInput: true, opencodeGuard: true });
     expect(keys).toEqual(['text', 'initialEnter', 'initialEnter']);

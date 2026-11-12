@@ -1,10 +1,12 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import vm from 'node:vm';
 import { JSDOM } from 'jsdom';
+import postcss from 'postcss';
+import {frontendCallStatements, frontendDeclarations} from './helpers/frontend-declarations.js';
 import { registerBoardPageRoutes } from '../src/web/routes/board-page-routes.js';
 
 const SHIPPED = join(__dirname, '..', 'src', 'web', 'public', 'company-plans.html');
@@ -48,8 +50,31 @@ describe('GET /board (page)', () => {
 describe('shipped Board page', () => {
   it('refreshes the visible Board every ten seconds', () => {
     const html = readFileSync(join(__dirname, '..', 'src', 'web', 'public', 'board.html'), 'utf8');
-    expect(html).toContain('setInterval(() => { if (boardActive && !document.hidden) load(); }, 10e3)');
-    expect(html).toContain("addEventListener('focus'");
+    const script = /<script>([\s\S]*)<\/script>/.exec(html)![1];
+    const intervals: Array<{callback: () => void; delay: number}> = [];
+    const listeners: Array<{name: string; callback: () => void}> = [];
+    const load = vi.fn(), tick = vi.fn();
+    const context = vm.createContext({boardActive: true, document: {hidden: false}, load, tick, pollTimer: null, clockTimer: null,
+      setInterval: (callback: () => void, delay: number) => intervals.push({callback, delay}),
+      addEventListener: (name: string, callback: () => void) => listeners.push({name, callback})});
+    const focus = frontendCallStatements(script, 'addEventListener', 'focus');
+    expect(focus).toHaveLength(1);
+    vm.runInContext(`${frontendDeclarations(script, ['startBoardTimers'])}\nstartBoardTimers();startBoardTimers();\n${focus.join('\n')}`, context);
+    expect(intervals.map(entry => entry.delay)).toEqual([10000, 30000]);
+    intervals[0].callback();
+    expect(load).toHaveBeenCalledTimes(1);
+    context.boardActive = false;
+    intervals[0].callback();
+    context.boardActive = true;
+    context.document.hidden = true;
+    intervals[0].callback();
+    expect(load).toHaveBeenCalledTimes(1);
+    context.document.hidden = false;
+    expect(listeners.map(entry => entry.name)).toEqual(['focus']);
+    listeners[0].callback();
+    expect(load).toHaveBeenCalledTimes(2);
+    intervals[1].callback();
+    expect(tick).toHaveBeenCalledTimes(1);
   });
   it('keeps its script parse check after plans move into Company', () => {
     const html = readFileSync(join(__dirname, '..', 'src', 'web', 'public', 'board.html'), 'utf8');
@@ -70,7 +95,13 @@ describe('shipped Company plans page', () => {
 
   it('has a phone viewport and no horizontal page overflow rule it relies on', () => {
     expect(html).toContain('name="viewport"');
-    expect(readFileSync(join(__dirname, '..', 'src', 'web', 'public', 'company-board.css'), 'utf8')).toContain('[hidden]{display:none!important}');
+    const hidden: Array<{value: string; important: boolean}> = [];
+    postcss.parse(readFileSync(join(__dirname, '..', 'src', 'web', 'public', 'company-board.css'), 'utf8')).walkRules(rule => {
+      if (rule.selector === '[hidden]') rule.walkDecls('display', declaration => {
+        hidden.push({value: declaration.value, important: declaration.important === true});
+      });
+    });
+    expect(hidden).toEqual([{value: 'none', important: true}]);
   });
 
   it('its script parses', () => {
@@ -87,13 +118,13 @@ describe('shipped Company plans page', () => {
   const script = /<script>([\s\S]*)<\/script>/.exec(html)?.[1] ?? '';
   const between = (from: string, to: string) => script.slice(script.indexOf(from), script.indexOf(to));
   const planActions = (planEdit: string | null, planErr: Record<string, string> = {}) =>
-    new vm.Script(`${/const esc = .*/.exec(script)?.[0]}\n${between('function planActions(p)', 'function wirePlanActions')}; planActions`).runInNewContext({ planEdit, planErr }) as (p: object) => string;
+    new vm.Script(`${frontendDeclarations(script, ['esc'])}\n${between('function planActions(p)', 'function wirePlanActions')}; planActions`).runInNewContext({ planEdit, planErr }) as (p: object) => string;
   const plan = { id: 'p-1', profileId: 'p-1', provider: 'anthropic', isDefault: false, label: 'Work <a>' };
 
   it('uses only the plans and subscription-profile account APIs for the plan actions', () => {
     const paths = new Set([...between('/* ---------- Plan accounts', "document.getElementById('addAcct').onclick").matchAll(/['"`](\/api\/[a-z/-]+)/g)].map((m) => m[1]));
     expect([...paths].sort()).toEqual(['/api/plans/accounts/', '/api/plans/logins/', '/api/subscription-profiles', '/api/subscription-profiles/']);
-    expect(script).toContain("method: 'PATCH', body: {label}");
+    expect(script).toMatch(/method:\s*'PATCH',\s*body:\s*{\s*label\s*}/);
     expect(html).toMatch(/<dialog id="addDlg"[\s\S]*<dialog id="signDlg"[\s\S]*<dialog id="removeDlg"/);
   });
 
@@ -114,7 +145,7 @@ describe('shipped Company plans page', () => {
 
   it('keeps the scale near 100 % and ends a steep projection at its run-out marker', () => {
     const svg = { innerHTML: '' };
-    const run = new vm.Script(`${/const esc = .*/.exec(script)?.[0]}\n${between('function burnChart(svg, p)', "document.getElementById('refresh').onclick")}; burnChart`).runInNewContext({
+    const run = new vm.Script(`${frontendDeclarations(script, ['esc'])}\n${between('function burnChart(svg, p)', "document.getElementById('refresh').onclick")}; burnChart`).runInNewContext({
       css: (v: string) => v, fmt: () => 'M', startOfDay: (t: number) => t, D: 864e5, H: 36e5, planRisk: () => 'good',
     }) as (svg: object, p: object) => void;
     const weekStart = 1_000_000_000_000, reset = weekStart + 7 * 864e5;
@@ -149,7 +180,7 @@ describe('shipped Company plans page', () => {
       const svg = dom.window.document.querySelector('svg')!;
       const weekStart = Date.parse('2026-10-20T14:48:00-04:00'), reset = weekStart + 7 * 864e5;
       const expiresAt = weekStart + expiryDays * 864e5;
-      const run = new vm.Script(`${/const esc = .*/.exec(script)?.[0]}\n${between('function burnChart(svg, p)', "document.getElementById('refresh').onclick")}; burnChart`).runInNewContext({
+      const run = new vm.Script(`${frontendDeclarations(script, ['esc'])}\n${between('function burnChart(svg, p)', "document.getElementById('refresh').onclick")}; burnChart`).runInNewContext({
         Date: { now: () => weekStart + 864e5 },
         css: (value: string) => value,
         fmt: (timestamp: number, options: Intl.DateTimeFormatOptions) => new Intl.DateTimeFormat('en-US', { ...options, timeZone: 'America/New_York' }).format(timestamp),
@@ -190,7 +221,7 @@ describe('shipped Company plans page', () => {
     { count: 1, expiresAt: 0 },
   ])('keeps the weekly stop when banked expiry is unavailable: %j', (banked) => {
     const svg = { innerHTML: '' };
-    const run = new vm.Script(`${/const esc = .*/.exec(script)?.[0]}\n${between('function burnChart(svg, p)', "document.getElementById('refresh').onclick")}; burnChart`).runInNewContext({
+    const run = new vm.Script(`${frontendDeclarations(script, ['esc'])}\n${between('function burnChart(svg, p)', "document.getElementById('refresh').onclick")}; burnChart`).runInNewContext({
       css: (value: string) => value, fmt: () => 'M', startOfDay: (timestamp: number) => timestamp, D: 864e5, H: 36e5, planRisk: () => 'good',
     }) as (svg: object, plan: object) => void;
     const weekStart = 1_000_000_000_000, reset = weekStart + 7 * 864e5;
@@ -219,7 +250,7 @@ describe('shipped Company plans page', () => {
   });
 
   it('shows Codex banked resets on each plan tile without a redundant headline count', () => {
-    const stat = new vm.Script(`${/const esc = .*/.exec(script)?.[0]}\n${between('function bankedStat(p)', '/* ---------- Plan accounts')}; bankedStat`).runInNewContext({
+    const stat = new vm.Script(`${frontendDeclarations(script, ['esc'])}\n${between('function bankedStat(p)', '/* ---------- Plan accounts')}; bankedStat`).runInNewContext({
       dayLbl: () => 'Thu, 29 Oct', hm: () => '14:48',
     }) as (p: object) => string;
     expect(stat({ banked: null })).toBe('');
@@ -261,7 +292,7 @@ describe('shipped Company plans page', () => {
       },
       load: async () => {},
     });
-    w.eval(`${/const esc = .*/.exec(script)?.[0]}\n${between('/* ---------- Plan accounts', "document.getElementById('addAcct').onclick")}; var plans = () => {}; var B = {};
+    w.eval(`${frontendDeclarations(script, ['esc'])}\n${between('/* ---------- Plan accounts', "document.getElementById('addAcct').onclick")}; var plans = () => {}; var B = {};
       globalThis.acct = { sign: () => sign, edit: (id) => { planEdit = id; } };`);
     const tick = () => new Promise((r) => setTimeout(r, 20));
     return { w, calls, replies, tick };
@@ -299,6 +330,8 @@ describe('shipped Company plans page', () => {
       replies['PATCH /api/subscription-profiles/p-1'] = { status, body: { success: false, error } };
       expect(await submit('Default Claude')).toEqual({ alert: 'Not renamed: ' + error, hint });
     }
+    expect(calls.filter(call => call.method === 'PATCH').map(call => ({path: call.path, body: call.body})))
+      .toEqual(Array.from({length: 2}, () => ({path: '/api/subscription-profiles/p-1', body: {label: 'Default Claude'}})));
   });
 
   it('never reloads the page from a refused account call, and refuses an empty name before sending', () => {

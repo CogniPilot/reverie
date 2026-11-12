@@ -14,7 +14,7 @@ impl LaptopWorkflow {
             Phase::Held => PhaseView::Held,
             Phase::Running => PhaseView::Running,
             Phase::Known => PhaseView::Known,
-            Phase::Retained => PhaseView::Retained,
+            Phase::MemberRefused | Phase::Retained => PhaseView::Retained,
             Phase::Cleaning => PhaseView::Cleaning,
             Phase::FinalizingStarted => PhaseView::FinalizingStarted,
             Phase::Stopped => PhaseView::Stopped,

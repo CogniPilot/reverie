@@ -2,9 +2,11 @@ use super::*;
 #[cfg(test)]
 mod tests;
 use reverie_contracts::{
+    gpu_access::preflight::PreflightCdiData,
     gpu_access::{CdiDocument, CdiSelectedEdits, GpuEngineInformation},
     storage_identity::MetadataText,
 };
+use reverie_core::device_policy::NvidiaCdiDevice;
 use reverie_core::{gpu_access::GpuDeviceUuid, posix_path::PosixPath};
 use std::{
     fs,
@@ -55,27 +57,128 @@ impl GpuHardware {
         device: &GpuDeviceUuid,
         end: Instant,
     ) -> Result<CdiObservation> {
-        let end = end.min(Instant::now() + Duration::from_secs(5));
-        let mut count = 0;
-        let mut total = 0;
-        let mut selected = Vec::new();
-        for directory in info.cdi_directories()? {
-            let Some(directory) = directory_path(directory?)? else {
-                continue;
-            };
-            let entries = entries(&directory, end, &mut count)?;
-            selected.extend(selected_entries(entries, device, end, &mut total)?);
-        }
-        need(selected.len() == 1, "GPU_CDI_MISSING_OR_AMBIGUOUS")?;
-        Ok(selected.pop().expect("one selected CDI entry"))
+        Self::cdi_device(info, &device.device(), end)
+    }
+    /// Exact standalone device spelling. This is still only the existing
+    /// numeric/edit observation; the complete preflight report is separate.
+    pub fn cdi_device(
+        info: &GpuEngineInformation,
+        device: &NvidiaCdiDevice,
+        end: Instant,
+    ) -> Result<CdiObservation> {
+        observe::<Standard>(info, device, end)
+    }
+    pub fn preflight_cdi(
+        info: &GpuEngineInformation,
+        device: &NvidiaCdiDevice,
+        end: Instant,
+    ) -> Result<PreflightCdiObservation> {
+        observe::<Complete>(info, device, end)
     }
 }
-fn selected_entries(
+pub struct PreflightCdiObservation {
+    observation: CdiObservation,
+    data: PreflightCdiData,
+}
+impl PreflightCdiObservation {
+    pub fn observation(&self) -> &CdiObservation {
+        &self.observation
+    }
+    pub fn data(&self) -> &PreflightCdiData {
+        &self.data
+    }
+    pub fn equivalent(&self, other: &Self) -> bool {
+        self.observation.equivalent(&other.observation)
+    }
+}
+trait Selection {
+    type Output;
+    fn select(
+        document: CdiDocument,
+        device: &NvidiaCdiDevice,
+        source: Source,
+        raw: &[u8],
+    ) -> Result<Option<Self::Output>>;
+}
+struct Source {
+    path: PosixPath,
+    stamp: GpuFileStamp,
+}
+struct Standard;
+struct Complete;
+impl Source {
+    fn observation(self, edits: CdiSelectedEdits, sha256: String) -> CdiObservation {
+        CdiObservation {
+            path: self.path,
+            stamp: self.stamp,
+            sha256,
+            edits,
+        }
+    }
+}
+impl Selection for Standard {
+    type Output = CdiObservation;
+    fn select(
+        document: CdiDocument,
+        device: &NvidiaCdiDevice,
+        source: Source,
+        raw: &[u8],
+    ) -> Result<Option<Self::Output>> {
+        Ok(document
+            .selected(device)?
+            .map(|edits| source.observation(edits, reverie_contracts::gpu_access::cdi_digest(raw))))
+    }
+}
+impl Selection for Complete {
+    type Output = PreflightCdiObservation;
+    fn select(
+        document: CdiDocument,
+        device: &NvidiaCdiDevice,
+        source: Source,
+        raw: &[u8],
+    ) -> Result<Option<Self::Output>> {
+        let Some(projection) = document.into_preflight(device)? else {
+            return Ok(None);
+        };
+        let path = MetadataText::from_python_text(
+            reverie_core::PythonText::try_new(source.path.codepoints())
+                .expect("native path codepoints"),
+        );
+        let sha256 = reverie_contracts::gpu_access::cdi_digest(raw);
+        let digest =
+            reverie_core::operations::JournalDigest::parse(&sha256).map_err(GpuDataError::from)?;
+        let edits = projection.edits().clone();
+        Ok(Some(PreflightCdiObservation {
+            observation: source.observation(edits, sha256),
+            data: PreflightCdiData::new(path, digest, projection),
+        }))
+    }
+}
+fn observe<S: Selection>(
+    info: &GpuEngineInformation,
+    device: &NvidiaCdiDevice,
+    end: Instant,
+) -> Result<S::Output> {
+    let end = end.min(Instant::now() + Duration::from_secs(5));
+    let mut count = 0;
+    let mut total = 0;
+    let mut selected = Vec::new();
+    for directory in info.cdi_directories()? {
+        let Some(directory) = directory_path(directory?)? else {
+            continue;
+        };
+        let entries = entries(&directory, end, &mut count)?;
+        selected.extend(selected_entries::<S>(entries, device, end, &mut total)?);
+    }
+    need(selected.len() == 1, "GPU_CDI_MISSING_OR_AMBIGUOUS")?;
+    Ok(selected.pop().expect("one selected CDI entry"))
+}
+fn selected_entries<S: Selection>(
     entries: Vec<PosixPath>,
-    device: &GpuDeviceUuid,
+    device: &NvidiaCdiDevice,
     end: Instant,
     total: &mut usize,
-) -> Result<Vec<CdiObservation>> {
+) -> Result<Vec<S::Output>> {
     let mut selected = Vec::new();
     for path in entries {
         let native_path = native::python_path(&path.codepoints())?;
@@ -92,13 +195,9 @@ fn selected_entries(
             "GPU_CDI_BOUND_OR_DEADLINE",
         )?;
         let document = CdiDocument::decode(&raw)?;
-        if let Some(edits) = document.selected(&device.device())? {
-            selected.push(CdiObservation {
-                path,
-                stamp,
-                sha256: reverie_contracts::gpu_access::cdi_digest(&raw),
-                edits,
-            });
+        let source = Source { path, stamp };
+        if let Some(observation) = S::select(document, device, source, &raw)? {
+            selected.push(observation);
         }
     }
     Ok(selected)

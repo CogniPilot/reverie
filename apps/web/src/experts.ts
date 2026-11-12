@@ -125,6 +125,8 @@ export const ExpertSettingsSchema = z
   .object({
     /** Session ids (owner-managed) that may hire and retire on the owner's behalf. */
     hireDelegates: z.array(z.string().trim().min(1).max(100)).max(20).default([]),
+    /** Employee identities; authorization follows only their current session. */
+    hireEmployeeDelegates: z.array(z.string().trim().min(1).max(100)).max(20).default([]),
     /** Hires in any rolling 24 hours, across every caller. */
     maxHiresPerDay: z.number().int().min(0).max(20).default(2),
     /** Hires not yet retired. */
@@ -143,7 +145,11 @@ export const ExpertSettingsSchema = z
     /** Minutes between the budget-stop checkpoint request and the retirement. */
     budgetStopGraceMinutes: z.number().int().min(1).max(120).default(10),
   })
-  .strict();
+  .strict()
+  .refine(
+    (settings) => settings.hireDelegates.length + settings.hireEmployeeDelegates.length <= 20,
+    'Choose at most 20 hiring delegates across employee and legacy session permissions'
+  );
 export type ExpertSettings = z.infer<typeof ExpertSettingsSchema>;
 
 /** What a hire body sets: stop the hire once this plan's weekly usage reaches `weeklyPercent`. */
@@ -164,11 +170,22 @@ export const BudgetStopSchema = BudgetStopBodySchema.extend({
 });
 export type BudgetStop = z.infer<typeof BudgetStopSchema>;
 
-export const ExpertHireSchema = z.object({
+/** Launch return is a dispatch acknowledgement, never proof of readiness or current presence. */
+export const ExpertStartupSchema = z.discriminatedUnion('phase', [
+  z.object({ phase: z.literal('legacy') }).strict(),
+  z.object({ phase: z.literal('prepared'), sessionGeneration: z.number().int().positive() }).strict(),
+  z.object({ phase: z.literal('issued'), sessionGeneration: z.number().int().positive() }).strict(),
+  z.object({ phase: z.literal('launch-returned'), sessionGeneration: z.number().int().positive() }).strict(),
+  z.object({ phase: z.literal('recovery-required'), sessionGeneration: z.number().int().positive() }).strict(),
+  z.object({ phase: z.literal('not-issued'), sessionGeneration: z.number().int().positive() }).strict(),
+]);
+const LegacyExpertHireSchema = z.object({
   id: z.string(),
   templateId: z.string(),
   sessionId: z.string(),
   employeeId: z.string(),
+  /** Canonical company scope at hire time. Missing legacy values stay unscoped. */
+  owner: z.string().optional(),
   /** 'owner' or 'agent:<session id>'. */
   by: z.string(),
   reason: z.string(),
@@ -181,6 +198,22 @@ export const ExpertHireSchema = z.object({
   /** Set when the owner hired by approving a delegate's request. */
   requestId: z.string().optional(),
 });
+export const ExpertHireSchema = LegacyExpertHireSchema.extend({
+  startup: ExpertStartupSchema,
+  notice: z.enum(['unconfirmed', 'posted']).optional(),
+  audit: z.enum(['unconfirmed', 'recorded']).optional(),
+})
+  .strict()
+  .superRefine((hire, context) => {
+    if (hire.startup.phase === 'legacy') return;
+    for (const field of ['id', 'employeeId', 'sessionId'] as const)
+      if (!hire[field].trim())
+        context.addIssue({
+          code: 'custom',
+          path: [field],
+          message: 'A retained startup requires its exact non-empty identity',
+        });
+  });
 export type ExpertHire = z.infer<typeof ExpertHireSchema>;
 
 /** The binding a hire request holds on its template: every field, so a same-millisecond edit is a different template. */
@@ -197,22 +230,47 @@ export const MAX_PENDING_HIRE_REQUESTS = 5;
  * plus optional identity overrides. Nothing in it takes effect until the owner approves it.
  */
 export const HireRequestFieldsSchema = z.object({
-  workingDir: z.string().min(1).max(4096).refine((p) => p.startsWith('/'), 'workingDir is an absolute path'),
+  workingDir: z
+    .string()
+    .min(1)
+    .max(4096)
+    .refine((p) => p.startsWith('/'), 'workingDir is an absolute path'),
   mode: CliModeSchema.optional(),
   model: ModelIdSchema.optional(),
   effort: EffortSchema.optional(),
   accountProfileId: AccountProfileIdSchema.optional(),
   reason: z.string().trim().min(3).max(500),
   budgetStop: BudgetStopBodySchema.optional(),
-  name: z.string().trim().min(1).max(100).refine((s) => !/[\p{Cc}\u2028\u2029]/u.test(s), 'A name is one line of text').optional(),
+  name: z
+    .string()
+    .trim()
+    .min(1)
+    .max(100)
+    .refine((s) => !/[\p{Cc}\u2028\u2029]/u.test(s), 'A name is one line of text')
+    .optional(),
   position: z.string().trim().min(1).max(100).optional(),
   reportsTo: z.string().trim().min(1).max(100).optional(),
   rooms: z.array(z.string().trim().min(1).max(100)).max(20).optional(),
 });
 export type HireRequestFields = z.infer<typeof HireRequestFieldsSchema>;
 
+export const HireReservationSchema = z.discriminatedUnion('phase', [
+  z.object({ phase: z.literal('creation-issued'), at: z.number().finite() }).strict(),
+  z
+    .object({
+      phase: z.literal('session-bound'),
+      at: z.number().finite(),
+      sessionId: z
+        .string()
+        .min(1)
+        .refine((id) => !!id.trim()),
+    })
+    .strict(),
+]);
 export const ExpertHireRequestSchema = z.object({
   id: z.string(),
+  /** Canonical owner at request time; missing legacy scope remains unscoped. */
+  owner: z.string().optional(),
   templateId: z.string(),
   /** sha256 of the whole template as it stood at the request; the hire refuses any other template, at every step. */
   templateSha256: z.string().regex(/^[0-9a-f]{64}$/),
@@ -226,17 +284,157 @@ export const ExpertHireRequestSchema = z.object({
   decidedBy: z.string().optional(),
   note: z.string().optional(),
   hireId: z.string().optional(),
+  /** A creation attempt may have no returned SID. Only session-bound carries the genuine returned SID. */
+  reservation: HireReservationSchema.optional(),
 });
 export type ExpertHireRequest = z.infer<typeof ExpertHireRequestSchema>;
 
-export const ExpertStateSchema = z.object({
+/** v1 is read for migration only; v2's literal version fences the previous v1 reader. */
+export const LegacyExpertStateSchema = z.object({
   version: z.literal(1),
   templates: z.array(ExpertTemplateSchema),
   settings: ExpertSettingsSchema,
-  hires: z.array(ExpertHireSchema),
+  hires: z.array(LegacyExpertHireSchema),
   hireRequests: z.array(ExpertHireRequestSchema).default([]),
 });
+export const ExpertStateSchema = LegacyExpertStateSchema.extend({
+  version: z.literal(2),
+  hires: z.array(ExpertHireSchema),
+}).strict();
 export type ExpertState = z.infer<typeof ExpertStateSchema>;
+
+/** An approval with an unresolved canonical-creation result keeps a capacity reservation across restarts. */
+export function expertHireUsage(
+  state: ExpertState,
+  at: number,
+  excludeHireId?: string,
+  excludeRequestId?: string
+): { recent: number; active: number } {
+  const reserved = state.hireRequests.filter(
+    (request) =>
+      request.id !== excludeRequestId &&
+      request.status === 'approving' &&
+      request.reservation &&
+      !state.hires.some((hire) => hire.id === request.hireId || hire.requestId === request.id)
+  );
+  return {
+    recent:
+      state.hires.filter((hire) => hire.id !== excludeHireId && hire.hiredAt > at - DAY_MS).length +
+      reserved.filter((request) => request.reservation!.at > at - DAY_MS).length,
+    active:
+      state.hires.filter((hire) => hire.id !== excludeHireId && hire.status === 'active').length + reserved.length,
+  };
+}
+
+/** One-way startup journal. Employment retirement never supplies launch or readiness evidence. */
+function validateHireTransitions(previous: ExpertState, next: ExpertState): void {
+  const allowed: Record<ExpertHire['startup']['phase'], readonly ExpertHire['startup']['phase'][]> = {
+    legacy: ['legacy'],
+    prepared: ['prepared', 'issued', 'not-issued'],
+    issued: ['issued', 'launch-returned', 'recovery-required'],
+    'launch-returned': ['launch-returned'],
+    'recovery-required': ['recovery-required'],
+    'not-issued': ['not-issued'],
+  };
+  const ids = new Set<string>();
+  for (const hire of next.hires) {
+    if (ids.has(hire.id)) throw new ExpertError('Duplicate hire operation', 409);
+    ids.add(hire.id);
+    const old = previous.hires.find((row) => row.id === hire.id);
+    if (!old) {
+      if (!['prepared', 'not-issued'].includes(hire.startup.phase))
+        throw new ExpertError('A hire must begin before launch dispatch', 409);
+      continue;
+    }
+    if (
+      (old.status === 'retired' && hire.status !== 'retired') ||
+      old.employeeId !== hire.employeeId ||
+      old.sessionId !== hire.sessionId ||
+      old.owner !== hire.owner ||
+      old.requestId !== hire.requestId ||
+      old.templateId !== hire.templateId ||
+      old.by !== hire.by ||
+      old.hiredAt !== hire.hiredAt ||
+      old.reason !== hire.reason ||
+      !allowed[old.startup.phase].includes(hire.startup.phase) ||
+      (old.startup.phase !== 'legacy' &&
+        (hire.startup.phase === 'legacy' || old.startup.sessionGeneration !== hire.startup.sessionGeneration))
+    )
+      throw new ExpertError('Invalid retained hire startup transition or binding change', 409);
+  }
+  if (previous.hires.some((hire) => !ids.has(hire.id)))
+    throw new ExpertError('Retained hire history cannot be removed', 409);
+  validateHireRequestTransitions(previous, next);
+}
+
+/** Preserve approval identity and correlate both directions of each newly introduced hire link. */
+function validateHireRequestTransitions(previous: ExpertState, next: ExpertState): void {
+  for (const request of previous.hireRequests) {
+    const current = next.hireRequests.find((row) => row.id === request.id);
+    if (
+      !current ||
+      current.owner !== request.owner ||
+      current.requestedBy !== request.requestedBy ||
+      current.templateId !== request.templateId ||
+      current.templateSha256 !== request.templateSha256 ||
+      JSON.stringify(current.fields) !== JSON.stringify(request.fields)
+    )
+      throw new ExpertError('Hire request identity and approved fields cannot be rewritten', 409);
+    if (!request.hireId && !request.reservation) continue;
+    if (
+      (request.hireId && current.hireId !== request.hireId) ||
+      (request.reservation &&
+        (!current.reservation ||
+          current.reservation.at !== request.reservation.at ||
+          (request.reservation.phase === 'session-bound' &&
+            (current.reservation.phase !== 'session-bound' ||
+              current.reservation.sessionId !== request.reservation.sessionId)))) ||
+      ['pending', 'declined', 'withdrawn'].includes(current.status)
+    )
+      throw new ExpertError('A linked hire approval cannot be cleared or replayed', 409);
+  }
+  const requestIds = new Set<string>();
+  for (const request of next.hireRequests) {
+    if (requestIds.has(request.id)) throw new ExpertError('Duplicate hire request identity', 409);
+    requestIds.add(request.id);
+    const old = previous.hireRequests.find((row) => row.id === request.id);
+    if (
+      request.reservation &&
+      !old?.reservation &&
+      (request.reservation.phase !== 'creation-issued' || request.status !== 'approving')
+    )
+      throw new ExpertError('A creation reservation must begin issued without an invented session identity', 409);
+    if (!request.hireId || request.hireId === old?.hireId) continue;
+    const hire = next.hires.find((row) => row.id === request.hireId);
+    if (
+      request.reservation?.phase !== 'session-bound' ||
+      !hire ||
+      hire.requestId !== request.id ||
+      hire.owner !== request.owner ||
+      hire.sessionId !== request.reservation.sessionId ||
+      hire.templateId !== request.templateId ||
+      hire.by !== 'owner' ||
+      !['approving', 'approved'].includes(request.status)
+    )
+      throw new ExpertError(
+        'A new hire approval link must match its reserved session, owner, template and request',
+        409
+      );
+  }
+  for (const hire of next.hires) {
+    if (hire.startup.phase === 'legacy' || !hire.requestId) continue;
+    const request = next.hireRequests.find((row) => row.id === hire.requestId);
+    if (
+      !request ||
+      request.hireId !== hire.id ||
+      request.owner !== hire.owner ||
+      request.reservation?.phase !== 'session-bound' ||
+      request.reservation.sessionId !== hire.sessionId ||
+      request.templateId !== hire.templateId
+    )
+      throw new ExpertError('A retained requested hire must match its exact approval reservation', 409);
+  }
+}
 
 /** Validate one template body for `id`, or throw an ExpertError naming the field (never the matched text). */
 export function parseExpertTemplate(id: string, raw: unknown, now: number, previous?: ExpertTemplate): ExpertTemplate {
@@ -261,11 +459,15 @@ export function parseExpertSettings(raw: unknown): ExpertSettings {
     const issue = parsed.error.issues[0];
     throw new ExpertError(`${issue?.path.join('.') || 'body'}: ${issue?.message ?? 'invalid'}`);
   }
-  return { ...parsed.data, hireDelegates: [...new Set(parsed.data.hireDelegates)] };
+  return {
+    ...parsed.data,
+    hireDelegates: [...new Set(parsed.data.hireDelegates)],
+    hireEmployeeDelegates: [...new Set(parsed.data.hireEmployeeDelegates)],
+  };
 }
 
 const emptyState = (): ExpertState => ({
-  version: 1,
+  version: 2,
   templates: [],
   settings: ExpertSettingsSchema.parse({}),
   hires: [],
@@ -279,6 +481,20 @@ const emptyState = (): ExpertState => ({
 export class ExpertStore {
   private state: ExpertState | undefined;
   private chain: Promise<unknown> = Promise.resolve();
+  /** A rejected write can have renamed the file already. This process must not write stale cached state. */
+  private writeUncertain = false;
+
+  get storageUncertain(): boolean {
+    return this.writeUncertain;
+  }
+
+  assertWritable(): void {
+    if (this.writeUncertain)
+      throw new ExpertError(
+        'Hiring storage has an unconfirmed write; reload it through a fresh console process before changing hires',
+        503
+      );
+  }
 
   constructor(
     readonly file: string,
@@ -305,7 +521,17 @@ export class ExpertStore {
       }
       const parsed = (() => {
         try {
-          return ExpertStateSchema.safeParse(JSON.parse(text));
+          const raw: unknown = JSON.parse(text);
+          const legacy = LegacyExpertStateSchema.safeParse(raw);
+          return ExpertStateSchema.safeParse(
+            legacy.success
+              ? {
+                  ...legacy.data,
+                  version: 2,
+                  hires: legacy.data.hires.map((hire) => ({ ...hire, startup: { phase: 'legacy' } })),
+                }
+              : raw
+          );
         } catch {
           return undefined;
         }
@@ -346,14 +572,33 @@ export class ExpertStore {
     return structuredClone(this.state);
   }
 
-  /** Apply `mutate` to a copy, validate, write it whole, then publish it. A throw changes nothing. */
-  async update<T>(mutate: (state: ExpertState) => T): Promise<T> {
+  /** Publish only a confirmed write. A write rejection fences further writes until a fresh process reloads disk. */
+  async update<T>(mutate: (state: ExpertState) => T, validateAuthority: () => void = () => {}): Promise<T> {
     await this.load();
     const run = this.chain.then(async () => {
+      this.assertWritable();
+      validateAuthority();
       const next = structuredClone(this.state!);
       const result = mutate(next);
       ExpertStateSchema.parse(next);
-      await writeCompanyStateFile(this.file, JSON.stringify(next, null, 2));
+      validateHireTransitions(this.state!, next);
+      let beforePublishRefusal: { proof: Error; cause: unknown } | undefined;
+      try {
+        await writeCompanyStateFile(this.file, JSON.stringify(next, null, 2), () => {
+          try {
+            validateAuthority();
+          } catch (cause) {
+            // The canonical writer invokes this before rename. This exact private exception
+            // proves this publication was refused; no public flag/error text can stand in for it.
+            beforePublishRefusal = { proof: new Error('Expert publication authority refused'), cause };
+            throw beforePublishRefusal.proof;
+          }
+        });
+      } catch (error) {
+        if (beforePublishRefusal && error === beforePublishRefusal.proof) throw beforePublishRefusal.cause;
+        this.writeUncertain = true;
+        throw error;
+      }
       this.state = next;
       return structuredClone(result);
     });

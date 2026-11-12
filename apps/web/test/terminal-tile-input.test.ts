@@ -35,6 +35,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FakeFit, FakeSocket, FakeTerminal } from './mocks/terminal-tile-fakes.js';
 
 const fetchMock = vi.fn();
+const storageMock = {length: 0, key: vi.fn(), getItem: vi.fn(), setItem: vi.fn(), removeItem: vi.fn()};
 
 function loadContext() {
   const read = (f: string) => readFileSync(resolve(import.meta.dirname, `../src/web/public/${f}`), 'utf8');
@@ -66,7 +67,7 @@ function loadContext() {
     fetch: (...args: unknown[]) => fetchMock(...args),
     location: { protocol: 'http:', host: 'reverie.test' },
     document: { addEventListener: vi.fn(), documentElement: { dataset: {} } },
-    localStorage: { length: 0, key: vi.fn(), getItem: vi.fn(), setItem: vi.fn(), removeItem: vi.fn() },
+    localStorage: storageMock,
     window: windowStub,
     MobileDetection: {
       isTouchDevice: () => false,
@@ -74,6 +75,8 @@ function loadContext() {
       getDeviceType: () => 'desktop',
     },
   });
+  // Queue deadlines and their timer callbacks must share the test's clock.
+  Object.defineProperty(context, 'Date', {get: () => globalThis.Date});
   vm.runInContext(
     `${read('constants.js')}\n${read('terminal-keycode229-recovery.js')}\n${read('app.js')}\n` +
       `${read('terminal-ui.js')}\n${read('terminal-tile.js')}\n` +
@@ -155,6 +158,7 @@ beforeEach(() => {
   FakeFit.proposed = { cols: 80, rows: 24 };
   FakeSocket.instances = [];
   fetchMock.mockReset();
+  storageMock.getItem.mockReset(); storageMock.setItem.mockReset();
   fetchMock.mockImplementation(async () => ({
     ok: true,
     status: 200,
@@ -172,6 +176,338 @@ describe('TerminalTile socket identity', () => {
 });
 
 describe('TerminalTile input through the exactly-once queue', () => {
+  it('keeps a pending original receipt and later text behind it until a confirmed ACK', async () => {
+    const app = makeApp() as App & {_redeliverSweep: () => void; _sessionInputHeld: (id: string) => boolean};
+    const {ws, term} = await connectTile(app); ws.open();
+    vi.useFakeTimers();
+    try {
+      term.type('original input');
+      ws.receive({t: 'ip', seq: 1});
+      term.type('later text');
+      expect(ws.inputFrames().map(frame => [frame.seq, frame.d])).toEqual([[1, 'original input']]);
+      expect(app._pendingDeliveries.get('s-tile')?.map(frame => frame.data)).toEqual(['original input', 'later text']);
+      expect(app._sessionInputHeld('s-tile')).toBe(false); expect(app.markIdleAlertSeen).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(1001); app._redeliverSweep();
+      expect(ws.inputFrames().map(frame => [frame.seq, frame.d])).toEqual([[1, 'original input'], [1, 'original input']]);
+      term.type('typed during lookup');
+      expect(ws.inputFrames()).toHaveLength(2);
+      ws.receive({t: 'ip', seq: 1});
+      ws.receive({t: 'ia', seq: 1, confirmed: true});
+      expect(ws.inputFrames().map(frame => [frame.seq, frame.d])).toEqual([[1, 'original input'], [1, 'original input'], [2, 'later text'], [3, 'typed during lookup']]);
+      expect(app._pendingDeliveries.get('s-tile')?.map(frame => frame.data)).toEqual(['later text', 'typed during lookup']);
+      expect(app.markIdleAlertSeen).toHaveBeenCalledOnce();
+    } finally {vi.useRealTimers();}
+  });
+
+  it('polls an HTTP pending receipt with its original tag before sending later queued text', async () => {
+    const app = makeApp() as App & {_sendInputAsync: (id: string, text: string) => boolean;
+      _redeliverSweep: () => void; _sessionInputHeld: (id: string) => boolean};
+    const posts: Array<{input: string; seq: number}> = [];
+    let settled = false;
+    // Closed synthetic backend: the first tagged request starts one effect;
+    // identical retries only look up that original receipt.
+    const effects = new Set<number>();
+    fetchMock.mockImplementation(async (_url, options) => {
+      const body = JSON.parse(options.body); posts.push(body); effects.add(body.seq);
+      return {ok: true, status: 200, json: async () => ({success: true, data: body.seq === 1 && !settled ? {pending: true} : {}})};
+    });
+    vi.useFakeTimers();
+    try {
+      expect(app._sendInputAsync('s-http', 'original input')).toBe(true);
+      await vi.waitFor(() => expect((app._postDraining as Set<string>).size).toBe(0));
+      expect(app._pendingDeliveries.get('s-http')?.map(frame => frame.data)).toEqual(['original input']);
+      app._sendInputAsync('s-http', 'later text');
+      expect(posts.map(post => post.seq)).toEqual([1]); expect(effects.size).toBe(1);
+      expect(app._sessionInputHeld('s-http')).toBe(false); expect(app.markIdleAlertSeen).not.toHaveBeenCalled();
+      settled = true; vi.advanceTimersByTime(1001); app._redeliverSweep();
+      await vi.waitFor(() => expect(app._pendingDeliveries.get('s-http')).toBeUndefined());
+      expect(posts.map(post => [post.seq, post.input])).toEqual([[1, 'original input'], [1, 'original input'], [2, 'later text']]);
+      expect(effects.size).toBe(2);
+    } finally {vi.useRealTimers();}
+  });
+
+  it('finalizes a compatible HTTP typed-unsent response negatively before a manual new Enter', async () => {
+    const app = makeApp() as App & {_sendInputAsync: (id: string, text: string) => boolean; _sessionInputHeld: (id: string) => boolean};
+    const posts: Array<{input: string; seq: number}> = [];
+    fetchMock.mockImplementation(async (_url, options) => {
+      const body = JSON.parse(options.body); posts.push(body);
+      return {ok: true, status: 200, json: async () => ({success: true, data: {typedUnsent: true, delivered: false}})};
+    });
+    app._sendInputAsync('s-http', 'original text\r');
+    await vi.waitFor(() => expect((app._postDraining as Set<string>).size).toBe(0));
+    expect(app._pendingDeliveries.get('s-http')).toBeUndefined();
+    expect(app._sessionInputHeld('s-http')).toBe(false); expect(app.markIdleAlertSeen).not.toHaveBeenCalled();
+    app._sendInputAsync('s-http', '\r');
+    await vi.waitFor(() => expect(posts).toHaveLength(2));
+    expect(posts.map(post => [post.seq, post.input])).toEqual([[1, 'original text\r'], [2, '\r']]);
+  });
+
+  it('retains a compatible HTTP known-not-delivered response and retries the same tag after backoff', async () => {
+    const app = makeApp() as App & {_sendInputAsync: (id: string, text: string) => boolean; _redeliverSweep: () => void;
+      _sessionInputHeld: (id: string) => boolean};
+    const posts: Array<{input: string; seq: number}> = [];
+    fetchMock.mockImplementation(async (_url, options) => {
+      posts.push(JSON.parse(options.body));
+      return {ok: true, status: 200, json: async () => ({success: true, data: {delivered: false}})};
+    });
+    vi.useFakeTimers();
+    try {
+      app._sendInputAsync('s-http', 'original');
+      await vi.waitFor(() => expect((app._postDraining as Set<string>).size).toBe(0));
+      app._sendInputAsync('s-http', 'later');
+      expect(posts.map(post => post.seq)).toEqual([1]);
+      expect(app._pendingDeliveries.get('s-http')?.map(record => record.seq)).toEqual([1, 2]);
+      expect(app._sessionInputHeld('s-http')).toBe(false); expect(app.markIdleAlertSeen).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(1001); app._redeliverSweep();
+      await vi.waitFor(() => expect(posts).toHaveLength(2));
+      expect(posts.map(post => [post.seq, post.input])).toEqual([[1, 'original'], [1, 'original']]);
+    } finally {vi.useRealTimers();}
+  });
+
+  it.each([{recoveryRequired: true}, {unconfirmed: true}, {held: true}])('keeps HTTP uncertainty dominant over typed-unsent compatibility: %j', async denial => {
+    const app = makeApp() as App & {_sendInputAsync: (id: string, text: string) => boolean; _sessionInputHeld: (id: string) => boolean};
+    fetchMock.mockResolvedValue({ok: true, status: 200, json: async () => ({success: true,
+      data: {typedUnsent: true, delivered: false, ...denial}})});
+    app._sendInputAsync('s-http', 'original');
+    await vi.waitFor(() => expect(app._sessionInputHeld('s-http')).toBe(true));
+    app._sendInputAsync('s-http', '\r');
+    expect(fetchMock).toHaveBeenCalledOnce(); expect(app.markIdleAlertSeen).not.toHaveBeenCalled();
+  });
+
+  it('does not let malformed or mismatched pending replies settle a frame or clear another hold', async () => {
+    const app = makeApp() as App & {_sessionInputHeld: (id: string) => boolean};
+    const {ws, term} = await connectTile(app); ws.open(); term.type('original');
+    ws.receive({t: 'ip', seq: '1'}); ws.receive({t: 'ip', seq: 999});
+    ws.receive({t: 'ip', seq: 1, confirmed: true});
+    expect(app._pendingDeliveries.get('s-tile')?.[0]).not.toHaveProperty('receiptPending');
+    expect(app.markIdleAlertSeen).not.toHaveBeenCalled();
+    ws.receive({t: 'ia', seq: 1, held: true}); ws.receive({t: 'ip', seq: 1});
+    ws.receive({t: 'ia', seq: 1, dup: true, last: 99}); term.type('blocked');
+    expect(app._sessionInputHeld('s-tile')).toBe(true);
+    expect(ws.inputFrames().map(frame => frame.seq)).toEqual([1]);
+    expect(app._pendingDeliveries.get('s-tile')?.[0].data).toBe('original');
+    expect(app.markIdleAlertSeen).not.toHaveBeenCalled();
+  });
+
+  it('does not settle an explicit pending receipt from a legacy watermark or plain ACK', async () => {
+    const app = makeApp(); const {ws, term} = await connectTile(app); ws.open();
+    term.type('original'); ws.receive({t: 'ip', seq: 1});
+    ws.receive({t: 'ia', seq: 1, dup: true, last: 99}); ws.receive({t: 'ia', seq: 1});
+    expect(ws.inputFrames()).toHaveLength(1);
+    expect(app._pendingDeliveries.get('s-tile')?.map(frame => frame.seq)).toEqual([1]);
+    expect(app.markIdleAlertSeen).not.toHaveBeenCalled();
+  });
+
+  it('keeps unknown sticky after pending even if a late pending or confirmed reply arrives', async () => {
+    const app = makeApp() as App & {_redeliverSweep: () => void; _sessionInputHeld: (id: string) => boolean};
+    const {ws, term} = await connectTile(app); ws.open();
+    term.type('original'); ws.receive({t: 'ip', seq: 1}); term.type('later text');
+    ws.receive({t: 'ia', seq: 1, unconfirmed: true});
+    ws.receive({t: 'ip', seq: 1}); ws.receive({t: 'ia', seq: 1, confirmed: true});
+    app._redeliverSweep(); term.type('blocked');
+    expect(app._sessionInputHeld('s-tile')).toBe(true);
+    expect(app._pendingDeliveries.get('s-tile')?.map(frame => frame.data)).toEqual(['later text']);
+    expect(ws.inputFrames().map(frame => frame.seq)).toEqual([1]);
+    expect(app.markIdleAlertSeen).not.toHaveBeenCalled();
+  });
+
+  it('finishes a known typed-unsent pending frame negatively and allows one explicit new-sequence Enter', async () => {
+    const app = makeApp() as App & {_sessionInputHeld: (id: string) => boolean};
+    const {ws, term} = await connectTile(app); ws.open();
+    term.type('original text\r'); ws.receive({t: 'ip', seq: 1});
+    ws.receive({t: 'ia', seq: 1, typedUnsent: true, delivered: false});
+    expect(app._pendingDeliveries.get('s-tile')).toBeUndefined();
+    expect(app._sessionInputHeld('s-tile')).toBe(false); expect(app.markIdleAlertSeen).not.toHaveBeenCalled();
+    expect(ws.inputFrames().map(frame => [frame.seq, frame.d])).toEqual([[1, 'original text\r']]);
+    term.type('\r');
+    expect(ws.inputFrames().map(frame => [frame.seq, frame.d])).toEqual([[1, 'original text\r'], [2, '\r']]);
+  });
+
+  it('does not let typed-unsent clear an existing hold or acknowledge its queued text', async () => {
+    const app = makeApp() as App & {_sessionInputHeld: (id: string) => boolean};
+    const {ws, term} = await connectTile(app); ws.open(); term.type('original');
+    ws.receive({t: 'ia', seq: 1, held: true});
+    ws.receive({t: 'ia', seq: 1, typedUnsent: true, delivered: false}); term.type('\r');
+    expect(app._sessionInputHeld('s-tile')).toBe(true);
+    expect(app._pendingDeliveries.get('s-tile')?.[0].data).toBe('original');
+    expect(ws.inputFrames().map(frame => frame.seq)).toEqual([1]); expect(app.markIdleAlertSeen).not.toHaveBeenCalled();
+  });
+
+  it.each([{typedUnsent: true, delivered: true}, {typedUnsent: true, delivered: false, confirmed: true},
+    {typedUnsent: false, delivered: false}])('ignores a contradictory typed-unsent reply without positive ACK: %j', fields => {
+    const app = makeApp();
+    return connectTile(app).then(({ws, term}) => {
+      ws.open(); term.type('original'); ws.receive({t: 'ia', seq: 1, ...fields});
+      expect(app._pendingDeliveries.get('s-tile')?.[0].data).toBe('original');
+      expect(ws.inputFrames()).toHaveLength(1); expect(app.markIdleAlertSeen).not.toHaveBeenCalled();
+    });
+  });
+
+  it('restores the pending-receipt barrier and later queued text without pipelining later input', async () => {
+    const stored = new Map<string, string>([['reverie:clientId', 'c-test']]);
+    storageMock.getItem.mockImplementation((key: string) => stored.get(key) ?? null);
+    storageMock.setItem.mockImplementation((key: string, value: string) => {stored.set(key, value);});
+    const prototype = ReverieApp.prototype as {_persistReliableNow: () => void; _loadReliableState: () => void};
+    const app = makeApp() as App & {_sendInputAsync: (id: string, text: string) => boolean};
+    app._persistReliableNow = prototype._persistReliableNow;
+    const {ws, term} = await connectTile(app); ws.open();
+    term.type('original'); ws.receive({t: 'ip', seq: 1}); term.type('later text');
+    const snapshot = JSON.parse(stored.get('reverie:pendingInput')!);
+    expect(snapshot.pending['s-tile'][0].receiptPending).toBe(true);
+    expect(snapshot.pending['s-tile'].map((record: {data: string}) => record.data)).toEqual(['original', 'later text']);
+    const restored = makeApp(); prototype._loadReliableState.call(restored);
+    const next = await connectTile(restored); next.ws.open();
+    expect(next.ws.inputFrames().map(frame => [frame.seq, frame.d])).toEqual([[1, 'original']]);
+    expect(restored._pendingDeliveries.get('s-tile')?.map(frame => frame.data)).toEqual(['original', 'later text']);
+  });
+
+  it.each(['malformed-pending', 'unreadable', 'failed-envelope'] as const)('holds a %s HTTP result without acknowledging or replaying its frame', async failure => {
+    const app = makeApp() as App & {_sendInputAsync: (id: string, text: string) => boolean; _sessionInputHeld: (id: string) => boolean};
+    fetchMock.mockResolvedValue({ok: true, status: 200, json: async () => {
+      if (failure === 'unreadable') throw new Error('Synthetic truncated response');
+      if (failure === 'failed-envelope') return {success: false, error: 'Synthetic uncertain input'};
+      return {success: true, data: {pending: 'invalid'}};
+    }});
+    app._sendInputAsync('s-http', 'original');
+    await vi.waitFor(() => expect(app._sessionInputHeld('s-http')).toBe(true));
+    app._sendInputAsync('s-http', 'blocked');
+    expect(fetchMock).toHaveBeenCalledOnce(); expect(app.markIdleAlertSeen).not.toHaveBeenCalled();
+  });
+
+  it('carries the same mux selection in a queued WebSocket frame as its HTTP fallback', async () => {
+    const app = makeApp() as App & {_sendInputAsync: (id: string, text: string, options: {useMux: boolean}) => boolean};
+    const {ws} = await connectTile(app);
+    ws.open();
+    expect(app._sendInputAsync('s-tile', 'one prompt\r', {useMux: true})).toBe(true);
+    expect(ws.inputFrames()).toEqual([{t: 'i', d: 'one prompt\r', seq: 1, cid: 'c-test', useMux: true}]);
+  });
+
+  it('backs off a known-never-issued capacity refusal and retries the same frame and sequence', async () => {
+    const app = makeApp() as App & {_redeliverSweep: () => void; _onWsReady: (id: string) => void};
+    const {ws, term} = await connectTile(app);
+    ws.open();
+    vi.useFakeTimers();
+    try {
+      term.type('retained frame');
+      ws.receive({t: 'ir', seq: 1, retryable: true, reason: 'capacity'});
+      term.type('later frame');
+      app._onWsReady('s-tile'); app._redeliverSweep();
+      expect(ws.inputFrames()).toHaveLength(1);
+      expect(app._pendingDeliveries.get('s-tile')).toHaveLength(2);
+      expect(app.markIdleAlertSeen).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(1001); app._redeliverSweep();
+      expect(ws.inputFrames().map(frame => [frame.seq, frame.d])).toEqual([
+        [1, 'retained frame'], [1, 'retained frame'], [2, 'later frame'],
+      ]);
+    } finally {vi.useRealTimers();}
+  });
+
+  it('warns once for unavailable input, then retries its original tag when the terminal is ready', async () => {
+    const app = makeApp() as App & {_redeliverSweep: () => void; _sessionInputHeld: (id: string) => boolean};
+    const {ws, term} = await connectTile(app); ws.open();
+    vi.useFakeTimers();
+    try {
+      term.type('retained frame');
+      const unavailable = {t: 'ir', seq: 1, retryable: true, reason: 'unavailable'};
+      ws.receive(unavailable); ws.receive(unavailable);
+      expect(app.showToast).toHaveBeenCalledExactlyOnceWith('Terminal not ready; input remains queued', 'warning');
+      expect(app._pendingDeliveries.get('s-tile')?.[0].data).toBe('retained frame');
+      expect(app.markIdleAlertSeen).not.toHaveBeenCalled(); expect(app._sessionInputHeld('s-tile')).toBe(false);
+      app._redeliverSweep(); expect(ws.inputFrames()).toHaveLength(1);
+      vi.advanceTimersByTime(1001); app._redeliverSweep();
+      expect(ws.inputFrames().map(frame => [frame.seq, frame.d])).toEqual([[1, 'retained frame'], [1, 'retained frame']]);
+      ws.receive({t: 'ia', seq: 1, confirmed: true});
+      expect(app._pendingDeliveries.get('s-tile')).toBeUndefined();
+      expect(app.markIdleAlertSeen).toHaveBeenCalledOnce();
+      expect(app.showToast).toHaveBeenCalledOnce();
+    } finally {vi.useRealTimers();}
+  });
+
+  it('does not let an unavailable refusal clear unknown holds or accept contradictory positive flags', async () => {
+    const app = makeApp() as App & {_sessionInputHeld: (id: string) => boolean};
+    const {ws, term} = await connectTile(app); ws.open(); term.type('original');
+    ws.receive({t: 'ir', seq: 1, retryable: true, reason: 'unavailable', confirmed: true});
+    expect(app.showToast).not.toHaveBeenCalled(); expect(app.markIdleAlertSeen).not.toHaveBeenCalled();
+    ws.receive({t: 'ia', seq: 1, held: true});
+    ws.receive({t: 'ir', seq: 1, retryable: true, reason: 'unavailable'}); term.type('blocked');
+    expect(app._sessionInputHeld('s-tile')).toBe(true);
+    expect(app._pendingDeliveries.get('s-tile')?.[0].data).toBe('original');
+    expect(ws.inputFrames()).toHaveLength(1);
+    expect(app.showToast).toHaveBeenCalledExactlyOnceWith('Input is held. Inspect the terminal and refresh its status before continuing.', 'warning');
+  });
+
+  it('stages every split draft frame before its first transport dispatch', async () => {
+    const app = makeApp() as App & {_sendInputAsync: (id: string, text: string) => boolean};
+    const {ws} = await connectTile(app);
+    ws.open();
+    const oldLimit = windowStub.ReverieInputLimit;
+    const observed: number[] = [];
+    const send = ws.send.bind(ws);
+    ws.send = data => {observed.push(app._pendingDeliveries.get('s-tile')?.length ?? 0); return send(data);};
+    windowStub.ReverieInputLimit = {FRAME_MAX_CHARS: 3, PASTE_MAX_CHARS: 12, split: () => ['abc', 'def']};
+    try {
+      expect(app._sendInputAsync('s-tile', 'abcdef')).toBe(true);
+      expect(observed).toEqual([2, 2]);
+      expect(ws.inputFrames().map(frame => [frame.seq, frame.d])).toEqual([[1, 'abc'], [2, 'def']]);
+    } finally {windowStub.ReverieInputLimit = oldLimit;}
+  });
+
+  it.each([404, 410])('does not acknowledge an idle alert for a refused HTTP frame (%s)', async status => {
+    const app = makeApp();
+    const {term} = await connectTile(app);
+    fetchMock.mockImplementation(async () => ({ok: false, status, json: async () => ({})}));
+    term.type('refused input');
+    await vi.waitFor(() => expect(app._pendingDeliveries.size).toBe(0));
+    expect(app.markIdleAlertSeen).not.toHaveBeenCalled();
+  });
+
+  it('does not acknowledge a new idle alert from an unmatched or rejected old ACK', async () => {
+    const app = makeApp();
+    const {ws} = await connectTile(app);
+    ws.open();
+    ws.receive({t: 'ia', seq: 99, confirmed: true});
+    ws.receive({t: 'ia', seq: 99, err: 'too_large'});
+    expect(app.markIdleAlertSeen).not.toHaveBeenCalled();
+  });
+
+  it('holds later input after an unconfirmed ACK without reissuing the first frame', async () => {
+    const app = makeApp();
+    const {ws, term} = await connectTile(app);
+    ws.open();
+    term.type('first');
+    ws.receive({t: 'ia', seq: 1, unconfirmed: true});
+    term.type('later');
+    ws.receive({t: 'ia', seq: 1, dup: true, last: 1, held: true});
+    expect(ws.inputFrames().map(frame => frame.d)).toEqual(['first']);
+    expect(app._pendingDeliveries.get('s-tile')).toBeUndefined();
+    expect(app.markIdleAlertSeen).not.toHaveBeenCalled();
+    expect(fetchMock.mock.calls.filter(([url]) => String(url).endsWith('/input'))).toHaveLength(0);
+  });
+
+  it('retains a refused pending frame while a held ACK prevents redelivery', async () => {
+    const app = makeApp();
+    const {ws, term} = await connectTile(app);
+    ws.open();
+    term.type('keep this pending');
+    ws.receive({t: 'ia', seq: 1, held: true});
+    ws.receive({t: 'ia', seq: 1, held: true});
+    expect(app._pendingDeliveries.get('s-tile')?.map(frame => frame.data)).toEqual(['keep this pending']);
+    term.type('blocked');
+    expect(ws.inputFrames().map(frame => frame.d)).toEqual(['keep this pending']);
+  });
+
+  it('drops an original confirmed duplicate without minting a new sequence', async () => {
+    const app = makeApp();
+    const {ws, term} = await connectTile(app);
+    ws.open();
+    term.type('one original input');
+    ws.receive({t: 'ia', seq: 1, confirmed: true});
+    expect(ws.inputFrames()).toHaveLength(1);
+    expect(app._pendingDeliveries.get('s-tile')).toBeUndefined();
+    term.type('next input');
+    expect(ws.inputFrames().map(frame => frame.seq)).toEqual([1, 2]);
+  });
+
   it('sends typed input as seq-tagged frames with the bare clientId once the socket opens', async () => {
     const app = makeApp();
     const { ws, term } = await connectTile(app);

@@ -705,6 +705,20 @@ describe('Codex quick start settings', () => {
       expect(context.isExternalCliSession('codex')).toBe(true);
     });
 
+    it('uses fresh API capability changes for custom launch entries and the endpoint menu', () => {
+      const catalog = CATALOG.map(cli => ({...cli, supportsCustomModel: true}));
+      const {app, context} = loadUi(undefined, catalog);
+      app._cliList = catalog.map(cli => ({...cli, installed: true, supportsCustomModel: cli.id !== 'custom-agent'}));
+      app.runMode = 'claude';
+      app._syncCliLaunchCatalog();
+      expect(context.cliRunModeLaunch('custom-agent').supportsCustomModel).toBe(false);
+      expect(context.__reverieCustomModelClis.some((cli: any) => cli.id === 'custom-agent')).toBe(false);
+      app._cliList.find((cli: any) => cli.id === 'custom-agent').supportsCustomModel = true;
+      app._syncCliLaunchCatalog();
+      expect(context.cliRunModeLaunch('custom-agent').supportsCustomModel).toBe(true);
+      expect(context.__reverieCustomModelClis.some((cli: any) => cli.id === 'custom-agent')).toBe(true);
+    });
+
     it('gates Session Options on isExternalCliSession, not the launch-path check', () => {
       const src = readFileSync(resolve(import.meta.dirname, '../src/web/public/session-ui.js'), 'utf8');
       const open = src.slice(src.indexOf('\n  openSessionOptions('));

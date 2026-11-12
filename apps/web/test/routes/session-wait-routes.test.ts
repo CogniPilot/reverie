@@ -85,6 +85,10 @@ async function harness(options?: { authUser?: { username: string; role: 'admin' 
   const app = Fastify({ logger: false });
   await app.register(fastifyCookie);
   const ctx = createMockRouteContext({ sessionId: SESSION_ID });
+  // This transport-only route fixture models a start whose hook configuration
+  // was prepared. Actual receipt/generation ownership is tested with real Session.
+  Object.defineProperty(ctx._session, 'workspaceHookConfiguration', {get: () => 'prepared'});
+  ctx._session.setMaxListeners(25); // Same bound as the real Session; waiter cap is sixteen.
   const rawReplies: ServerResponse[] = [];
 
   const authUser = options?.authUser;

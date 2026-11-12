@@ -322,7 +322,8 @@ fn same(
     deadline: Instant,
 ) -> Result<()> {
     need(
-        row.same_memory_observation(&inspect(runtime, record, deadline)?),
+        row.same_memory_observation(&inspect(runtime, record, deadline)?)
+            .map_err(LaptopError::MemoryIdentity)?,
         "LAPTOP_MEMORY_ENGINE_CHANGED",
     )
 }
@@ -352,7 +353,8 @@ fn same_with_budget(
     budget: CallBudget,
 ) -> Result<()> {
     need(
-        row.same_memory_observation(&inspect_with_budget(runtime, record, budget)?),
+        row.same_memory_observation(&inspect_with_budget(runtime, record, budget)?)
+            .map_err(LaptopError::MemoryIdentity)?,
         "LAPTOP_MEMORY_ENGINE_CHANGED",
     )
 }

@@ -81,6 +81,34 @@ describe('employee GPU settings', () => {
     expect(posts).toBe(1);expect(h.container.textContent).toContain('not retried automatically');
     expect(h.container.querySelector<HTMLButtonElement>('[aria-label="Save GPU request for Synthetic Expert"]')!.disabled).toBe(true);
   });
+  it('confirms the exact saved stopped request and requires refresh after an unknown Apply', async () => {
+    const calls: Array<{url: string; options?: {method?: string; body?: unknown}}> = [];
+    const saved = {...status(), revision: 7, canApply: true, state: 'pending',
+      requested: {enabled: false, deviceUuid: null, revision: 7},
+      active: {known: true, running: false, enabled: false, deviceUuid: null}};
+    const h = await fixture((url, options) => {
+      calls.push({url, options});
+      return Promise.resolve(options?.method === 'POST' ? {ok: false, error: 'Not confirmed'} : {ok: true, data: {gpuAccess: saved}});
+    });
+    const apply = h.container.querySelector<HTMLButtonElement>('[aria-label="Apply saved GPU request for Synthetic Expert"]')!;
+    const input = h.container.querySelector<HTMLInputElement>('input')!;
+    expect(apply.hidden).toBe(false);expect(apply.disabled).toBe(false);
+    input.checked = true;input.dispatchEvent(new h.window.Event('change', {bubbles: true}));
+    expect(apply.disabled).toBe(true);
+    input.checked = false;input.dispatchEvent(new h.window.Event('change', {bubbles: true}));
+    let confirm!: (value: boolean) => void;
+    h.shell.confirmCompanyAction = () => new Promise(resolve => {confirm = resolve;});
+    apply.click();await h.flush();expect(calls).toHaveLength(1);
+    confirm(false);await h.flush();expect(calls).toHaveLength(1);
+    apply.click();await h.flush();confirm(true);await h.flush();
+    expect(calls).toEqual([
+      {url: `/api/company/employees/${EID}/gpu-access`, options: undefined},
+      {url: `/api/company/employees/${EID}/gpu-access/apply`, options: {method: 'POST', body: {...saved.current, revision: 7, deviceUuid: null}}},
+    ]);
+    expect(h.container.textContent).toContain('GPU policy outcome is unconfirmed. Refresh status');
+    expect(apply.disabled).toBe(true);
+    apply.click();await h.flush();expect(calls).toHaveLength(2);
+  });
   it('does not paint an old closed widget when its status response arrives late', async () => {
     let resolve!: (value: unknown) => void;
     const h = await fixture(() => new Promise(done => {resolve = done;}));

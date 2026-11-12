@@ -3,6 +3,7 @@
  * instead of "is this the room's coordinator". A private channel is joined by itself only with members.join_any.
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { trustedFixtureOwner } from '../helpers/trusted-owner-fixture.js';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -36,7 +37,7 @@ describe('chatroom roles: members family and room settings', () => {
     await roles.init();
     const harness = await createRouteTestHarness((fastify, c) => {
       service = new ChatroomService({ file: join(dir, 'chatrooms.json'), getSession: (id) => c.sessions.get(id), broadcast: () => undefined });
-      registerChatroomRoutes(fastify, c, service, new ChatFileStore(mkdtempSync(join(tmpdir(), 'chatfiles-'))), undefined, roles, (id) => EMPLOYEES[id]);
+      registerChatroomRoutes(fastify, c, service, new ChatFileStore(mkdtempSync(join(tmpdir(), 'chatfiles-'))), trustedFixtureOwner, roles, (id) => EMPLOYEES[id]);
     });
     app = harness.app;
     ctx = harness.ctx;
@@ -50,6 +51,7 @@ describe('chatroom roles: members family and room settings', () => {
       url: '/api/chatrooms',
       payload: { name: 'Reverie', members: [{ sessionId: MEMBER }, { sessionId: MOD }, { sessionId: ADMIN }], coordinatorSessionId: LEAD },
     });
+    expect(res.statusCode, res.body).toBe(200);
     roomId = res.json().data.id;
   });
 

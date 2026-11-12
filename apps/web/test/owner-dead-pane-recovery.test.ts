@@ -1,3 +1,4 @@
+import { registerMuxFixture } from './helpers/registered-mux-fixture.js';
 import Fastify from 'fastify';
 import {afterEach,describe,expect,it,vi} from 'vitest';
 import {mkdtemp,rm} from 'node:fs/promises';
@@ -10,17 +11,18 @@ import {CompanyService} from '../src/company-service.js';
 import {registerSessionRuntimeRoutes,resumeOwnerStops,type LaptopAgentStop,type StopBounds} from '../src/web/routes/session-runtime-routes.js';
 import {ownerStopPending,recordOwnerStop,useOwnerStopJournal} from '../src/owner-stop-journal.js';
 import {chmodSync,mkdirSync,readdirSync,statSync} from 'node:fs';
-import type {TerminalMultiplexer,MuxSession} from '../src/mux-interface.js';
+import type {TerminalMultiplexer,MuxSession,RespawnPaneOptions} from '../src/mux-interface.js';
 
 const cleanups:Array<()=>Promise<void>>=[];
 afterEach(async()=>{vi.unstubAllEnvs();vi.restoreAllMocks();for(const clean of cleanups.splice(0).reverse())await clean();});
 async function setup(stop?:LaptopAgentStop,waitMs?:number,bounds?:StopBounds){
  const dir=await mkdtemp(join(tmpdir(),'dead-pane-owner-'));cleanups.push(()=>rm(dir,{recursive:true,force:true}));
  const mux={isAvailable:()=>true,muxSessionExists:vi.fn(()=>true),isPaneDead:vi.fn(()=>true),
-  respawnPane:vi.fn(async()=>42),clearPaneExit:vi.fn()};
+  respawnPane:vi.fn(async(options:RespawnPaneOptions)=>{options.onProviderDispatch?.();return 42;}),clearPaneExit:vi.fn()};
  const session=new Session({workingDir:dir,mode:'opencode',useMux:true,mux:mux as unknown as TerminalMultiplexer,
   muxSession:{sessionId:'owned',muxName:'reverie-owned',pid:41}as MuxSession,
   subscriptionProfile:{provider:'openai',id:'selected',label:'Selected'},openCodeConfig:{model:'selected/model',continueSession:'ses_selected'}});
+ const registry = registerMuxFixture(session);
  cleanups.push(async()=>{Object.assign(session,{ptyProcess:null,_muxSession:null});await session.stop(false);});
  session.setPaneExit({status:137,at:Date.now()});
  const store=new CompanyStore(join(dir,'company.json'));await store.init();
@@ -30,7 +32,7 @@ async function setup(stop?:LaptopAgentStop,waitMs?:number,bounds?:StopBounds){
  const ctx={sessions:new Map([[session.id,session]]),persistSessionStateNow:vi.fn(),getSessionStateWithRespawn:(s:Session)=>s.toState(),broadcast:vi.fn()};
  const app=Fastify();registerSessionRuntimeRoutes(app,ctx as never,req=>req.headers.cookie==='fixture-owner=yes',undefined,company,undefined,stop,waitMs,bounds);
  await app.ready();cleanups.push(()=>app.close());
- return {app,session,mux,store,company,employee,ctx,url:`/api/company/employees/${employee.id}/restart`};
+ return {app,session,mux,registry,store,company,employee,ctx,url:`/api/company/employees/${employee.id}/restart`};
 }
 const headers={cookie:'fixture-owner=yes'};
 describe('verified owner dead-pane recovery',()=>{
@@ -375,6 +377,7 @@ describe('an unsettled owner stop across a website restart',()=>{
   useOwnerStopJournal(journal);
   const restored=new Session({...f.session.toState(),id:f.session.id,useMux:true,mux:f.mux as unknown as TerminalMultiplexer,
    muxSession:{sessionId:'owned',muxName:'reverie-owned',pid:41}as MuxSession});
+  f.registry.set(restored.id, (restored as unknown as {_muxSession: MuxSession})._muxSession);
   cleanups.push(async()=>{Object.assign(restored,{ptyProcess:null,_muxSession:null});await restored.stop(false);});
   f.ctx.sessions.set(f.session.id,restored);
   return restored;
@@ -470,6 +473,7 @@ describe('an unsettled owner stop across a website restart',()=>{
   const saved=f.session.toState();
   const restored=new Session({...saved,id:f.session.id,useMux:true,mux:f.mux as unknown as TerminalMultiplexer,
    muxSession:{sessionId:'owned',muxName:'reverie-owned',pid:41}as MuxSession});
+  f.registry.set(restored.id, (restored as unknown as {_muxSession: MuxSession})._muxSession);
   cleanups.push(async()=>{Object.assign(restored,{ptyProcess:null,_muxSession:null});await restored.stop(false);});
   f.ctx.sessions.set(f.session.id,restored);
   const wrote=await restored.writeViaMux('new work after website restoration\r',{fromUser:true});

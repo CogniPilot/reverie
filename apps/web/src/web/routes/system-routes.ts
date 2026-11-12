@@ -20,7 +20,7 @@ import { getDiskStats } from '../../disk-stats.js';
 import { ApiErrorCode, createErrorResponse, getErrorMessage, type NiceConfig } from '../../types.js';
 import { isUnauthenticatedNetworkAcknowledged } from '../network-auth-policy.js';
 import { isMultiUserMode } from '../../config/multiuser.js';
-import { findUser, canUsernameRunPrivilegedCommands } from '../../user-store.js';
+import { findUser, canUsernameRunPrivilegedCommands, userAuthenticationFingerprint } from '../../user-store.js';
 import { getAuthUser, requireAdmin, canAccessOwned } from '../route-helpers.js';
 import {
   ConfigUpdateSchema,
@@ -57,7 +57,7 @@ import { getInstallInfo, checkForUpdate, startUpdate, getUpdateStatusForApi } fr
 import { getRepositoryStatus } from '../repo-status.js';
 import { spanDisplays, systemSpanHost } from '../../span-displays.js';
 import type { SessionPort, EventPort, ConfigPort, InfraPort, AuthPort, TabLayoutPort } from '../ports/index.js';
-import { AUTH_COOKIE_NAME } from '../middleware/auth.js';
+import { AUTH_COOKIE_NAME, browserAuthSession } from '../middleware/auth.js';
 import { QR_AUTH_FAILURE_MAX } from '../../config/tunnel-config.js';
 import { AUTH_SESSION_TTL_MS } from '../../config/auth-config.js';
 import { resolveTerminalHistoryConfig } from '../../config/terminal-history.js';
@@ -194,7 +194,15 @@ export function registerSystemRoutes(
       if (isMultiUserMode()) {
         // A rotating global token cannot carry identity — mint a single-use token
         // bound to the requesting user so the scanned code logs THEM in.
-        const shortCode = ctx.tunnelManager.mintUserToken(getAuthUser(req).username);
+        const record = browserAuthSession(req);
+        if (!record?.username || !record.credentialFingerprint)
+          return reply
+            .code(403)
+            .send(createErrorResponse(ApiErrorCode.FORBIDDEN, 'Current browser sign-in is required for a QR code'));
+        const shortCode = ctx.tunnelManager.mintUserToken({
+          username: record.username,
+          credentialFingerprint: record.credentialFingerprint,
+        });
         const svg = await ctx.tunnelManager.getQrSvgForCode(url, shortCode);
         return { svg, authEnabled: true };
       }
@@ -238,10 +246,10 @@ export function registerSystemRoutes(
     }
 
     // Validate and atomically consume the token (with any bound identity).
-    const consumed = shortCode ? ctx.tunnelManager.consumeTokenWithIdentity(shortCode) : { ok: false };
+    const consumed = shortCode ? ctx.tunnelManager.consumeTokenWithIdentity(shortCode) : { ok: false as const };
     // In multi-user mode a token MUST carry an identity (an identity-less rotating
     // token can't create a scoped session), so reject those too.
-    if (!consumed.ok || (multiUser && !consumed.username)) {
+    if (!consumed.ok || (multiUser && !consumed.identity)) {
       ctx.qrAuthFailures?.set(clientIp, qrFailures + 1);
       return reply.code(401).send('Invalid or expired QR code');
     }
@@ -249,14 +257,21 @@ export function registerSystemRoutes(
     // Resolve the role for the bound user (disabled/deleted users fail closed).
     // Carry the bound user's real mustChangePassword flag out of this block so the
     // minted cookie enforces the lockbox instead of hardcoding false.
-    let identity: { username: string; role: 'admin' | 'user'; mustChangePassword: boolean } | undefined;
-    if (multiUser && consumed.username) {
-      const user = await findUser(consumed.username);
-      if (!user || user.disabled) {
+    let identity:
+      | { username: string; role: 'admin' | 'user'; mustChangePassword: boolean; credentialFingerprint: string }
+      | undefined;
+    if (multiUser && consumed.identity) {
+      const user = await findUser(consumed.identity.username);
+      if (!user || user.disabled || userAuthenticationFingerprint(user) !== consumed.identity.credentialFingerprint) {
         ctx.qrAuthFailures?.set(clientIp, qrFailures + 1);
         return reply.code(401).send('Invalid or expired QR code');
       }
-      identity = { username: user.username, role: user.role, mustChangePassword: !!user.mustChangePassword };
+      identity = {
+        username: user.username,
+        role: user.role,
+        mustChangePassword: !!user.mustChangePassword,
+        credentialFingerprint: userAuthenticationFingerprint(user),
+      };
     }
 
     // Issue session cookie (same pattern as Basic Auth success path)
@@ -268,6 +283,7 @@ export function registerSystemRoutes(
       createdAt: Date.now(),
       method: 'qr',
       username: identity?.username,
+      credentialFingerprint: identity?.credentialFingerprint,
       role: identity?.role,
       mustChangePassword: !!identity?.mustChangePassword,
     });
@@ -958,7 +974,9 @@ export function registerSystemRoutes(
     // installations still using the legacy authentication mode.
     if (settings.displayName !== undefined) {
       if (!verifiedOwner(req))
-        return reply.code(403).send(createErrorResponse(ApiErrorCode.FORBIDDEN, 'Only the owner may rename the instance'));
+        return reply
+          .code(403)
+          .send(createErrorResponse(ApiErrorCode.FORBIDDEN, 'Only the owner may rename the instance'));
       if (!requireAdmin(req, reply)) return;
     }
 

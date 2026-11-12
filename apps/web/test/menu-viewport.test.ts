@@ -97,3 +97,21 @@ it('uses visual-viewport offsets and refits on viewport scrolling, resize and la
   h.viewport!.offsetTop = 400; h.viewport!.dispatchEvent(new h.window.Event('scroll'));
   expect(menu.style.top).toBe(lastTop);
 });
+
+it('places phone sheets inside the offset visible viewport through their owned CSS properties', async () => {
+  const h = await fixture(390, 900, { width: 280, height: 180, offsetLeft: 40, offsetTop: 210 });
+  const matchMedia = h.window.matchMedia.bind(h.window);
+  vi.spyOn(h.window, 'matchMedia').mockImplementation((query: string) =>
+    query === '(max-width: 767px)' ? { ...matchMedia(query), matches: true } : matchMedia(query)
+  );
+  const run = vi.fn();
+  const menu = h.shell.openMenu(Array.from({ length: 20 }, (_, i) => ({ label: `Action ${i}`, run })), { at: { x: 900, y: 850 } });
+  expect(menu.style.getPropertyValue('--ca-menu-sheet-left')).toBe('48px');
+  expect(menu.style.getPropertyValue('--ca-menu-sheet-top')).toBe(`${390 - 8 - menu.getBoundingClientRect().height}px`);
+  expect(menu.getBoundingClientRect().bottom).toBeLessThanOrEqual(382);
+  expect(menu.getBoundingClientRect().right).toBeLessThanOrEqual(312);
+  h.key('End');
+  expect(h.document.activeElement?.textContent).toBe('Action 19');
+  expect(h.document.activeElement!.getBoundingClientRect().bottom).toBeLessThanOrEqual(382);
+  expect(run).not.toHaveBeenCalled();
+});

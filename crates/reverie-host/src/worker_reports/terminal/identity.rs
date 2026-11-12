@@ -40,4 +40,23 @@ impl RelayIdentity {
             && self.record.can_progress()
             && self.record.require_terminal_hold().is_ok()
     }
+    /// Read the original service/record without treating opacity or ordinary
+    /// hold contention as a positive known-cancellation result. No I/O or join.
+    pub(crate) fn observe_progress(&self) -> std::result::Result<Option<bool>, WorkerReportError> {
+        let service = self
+            .service
+            .upgrade()
+            .ok_or(WorkerReportError::Unconfirmed)?;
+        if service.opaque.load(std::sync::atomic::Ordering::Acquire) || self.record.opaque() {
+            return Err(WorkerReportError::Unconfirmed);
+        }
+        let progress = self
+            .record
+            .terminal_progress()?
+            .map(|live| live && !service.stopping());
+        if service.opaque.load(std::sync::atomic::Ordering::Acquire) || self.record.opaque() {
+            return Err(WorkerReportError::Unconfirmed);
+        }
+        Ok(progress)
+    }
 }

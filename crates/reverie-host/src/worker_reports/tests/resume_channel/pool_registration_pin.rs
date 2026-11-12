@@ -68,6 +68,12 @@ fn pins_require_distinct_original_purpose_greeting_and_same_service() {
 }
 #[test]
 fn registration_pin_refuses_empty_socket_eof_without_replacing_original_peer() {
+    if crate::test_process::isolate_case(concat!(
+        "worker_reports::tests::resume_channel::pool_registration_pin::",
+        "registration_pin_refuses_empty_socket_eof_without_replacing_original_peer"
+    )) {
+        return;
+    }
     let fixture = Fixture::new();
     let service = Arc::new(fixture.service());
     let (client, mut channel) = registration_channel(&fixture, &service);
@@ -98,6 +104,12 @@ fn registration_pin_refuses_empty_socket_eof_without_replacing_original_peer() {
 }
 #[test]
 fn registration_pin_refuses_buffered_fin_while_legacy_input_still_drains() {
+    if crate::test_process::isolate_case(concat!(
+        "worker_reports::tests::resume_channel::pool_registration_pin::",
+        "registration_pin_refuses_buffered_fin_while_legacy_input_still_drains"
+    )) {
+        return;
+    }
     let fixture = Fixture::new();
     for half_close in [true, false] {
         let service = Arc::new(fixture.service());

@@ -1,9 +1,20 @@
 use super::*;
+mod actor_setup;
 mod pending;
+mod perf;
+mod protected;
+pub(crate) use protected::WorkerProtectedStores;
+mod rename_fence;
+use rename_fence::ConfigurationRenameFence;
 mod terminal;
 #[cfg(test)]
 mod tests;
-pub use pending::GpuPendingFile;
+pub use actor_setup::{
+    ActorSetupControlError, ActorSetupControlFiles, ActorSetupPending, ActorSetupTerminal,
+};
+pub(crate) use pending::GpuRenameFence;
+pub use pending::{GpuActorPublication, GpuActorPublicationInput, GpuPendingFile};
+pub use perf::{PerfControlFiles, PerfPending, PerfProtectedStores, PerfTerminal};
 use reverie_contracts::{
     gpu_access::{GpuTransitionIntent, MAX_BYTES, REQUEST_FILE, encode_requests},
     reservation_engine::ReservationConfiguration,
@@ -163,9 +174,63 @@ pub(crate) fn replace_image_configuration(
         bytes,
         Some(expected),
         Some((group, end, pending)),
-        fence,
+        fence.map(ConfigurationRenameFence::Image),
     )?
     .ok_or(GpuHostError::Refused("WORKER_IMAGE_READBACK_REQUIRED"))
+}
+/// Same strict writer with the closed original-pool-admission fence.
+pub(crate) fn replace_pool_configuration(
+    path: &Path,
+    bytes: &[u8],
+    expected: &GpuFileStamp,
+    group: u32,
+    end: std::time::Instant,
+    pending: &crate::private_pending::PendingFile,
+    fence: &mut crate::reservation_control::PoolRenameFence<'_>,
+) -> Result<GpuFileStamp> {
+    replace_mode(
+        path,
+        bytes,
+        Some(expected),
+        Some((group, end, pending)),
+        Some(ConfigurationRenameFence::Pool(fence)),
+    )?
+    .ok_or(GpuHostError::Refused("POOL_PUBLICATION_READBACK_REQUIRED"))
+}
+fn replace_actor_configuration(
+    path: &Path,
+    bytes: &[u8],
+    expected: Option<&GpuFileStamp>,
+    group: u32,
+    end: std::time::Instant,
+    pending: &crate::private_pending::PendingFile,
+    fence: &mut actor_setup::ActorSetupRenameFence<'_>,
+) -> Result<GpuFileStamp> {
+    replace_mode(
+        path,
+        bytes,
+        expected,
+        Some((group, end, pending)),
+        Some(ConfigurationRenameFence::ActorSetup(fence)),
+    )?
+    .ok_or(GpuHostError::Refused("ACTOR_SETUP_READBACK_REQUIRED"))
+}
+fn publish_absent_actor(
+    path: &Path,
+    bytes: &[u8],
+    group: u32,
+    end: std::time::Instant,
+    pending: &crate::private_pending::PendingFile,
+    fence: &mut actor_setup::ActorSetupRenameFence<'_>,
+) -> Result<GpuFileStamp> {
+    replace_mode(
+        path,
+        bytes,
+        None,
+        Some((group, end, pending)),
+        Some(ConfigurationRenameFence::ActorSetupAbsent(fence)),
+    )?
+    .ok_or(GpuHostError::Refused("ACTOR_SETUP_READBACK_REQUIRED"))
 }
 fn replace_mode(
     path: &Path,
@@ -176,7 +241,7 @@ fn replace_mode(
         std::time::Instant,
         &crate::private_pending::PendingFile,
     )>,
-    mut fence: Option<&mut crate::worker_image::ImageRenameFence<'_>>,
+    mut fence: Option<ConfigurationRenameFence<'_, '_>>,
 ) -> Result<Option<GpuFileStamp>> {
     let parent = path
         .parent()
@@ -224,12 +289,22 @@ fn replace_mode(
                 pending.assert_current().map_err(pending::gpu_error)?;
             }
             if let Some(fence) = fence.as_mut() {
-                fence
-                    .assert_current()
-                    .map_err(|e| GpuHostError::ImageFence(Box::new(e)))?;
+                fence.assert_current()?;
+            }
+            // Publication guards may perform native reads. Recheck the same target,
+            // prepared inode and parent AFTER those waits, adjacent to rename.
+            if fence
+                .as_ref()
+                .is_some_and(ConfigurationRenameFence::rechecks_target)
+            {
+                assert_prepared_target(&directory, parent, leaf, expected, &temporary)?;
+                image_current(image)?;
+            }
+            if let Some(fence) = &fence {
+                fence.assert_before_rename()?;
             }
             attempted = true;
-            native::replace_policy(&directory, &temporary.name, leaf)?;
+            rename_prepared(&directory, &temporary.name, leaf, fence.as_ref())?;
             #[cfg(test)]
             tests::hit(tests::Point::Renamed, parent, &temporary.name)?;
             directory.sync_all()?;
@@ -259,6 +334,37 @@ fn replace_mode(
         result.map_err(|error| GpuHostError::PublicationUnknown(Box::new(error)))
     } else {
         result
+    }
+}
+fn assert_prepared_target(
+    directory: &File,
+    parent: &Path,
+    leaf: &OsStr,
+    expected: Option<&GpuFileStamp>,
+    temporary: &Prepared,
+) -> Result<()> {
+    let named = match GpuFileStamp::named(directory, leaf) {
+        Ok(value) => Some(value),
+        Err(GpuHostError::Io(e)) if e.kind() == io::ErrorKind::NotFound => None,
+        Err(e) => return Err(e),
+    };
+    need(named.as_ref() == expected, "GPU_FILE_CAS_CHANGED")?;
+    temporary.assert_current(directory)?;
+    need(
+        parent_identity(&directory.metadata()?) == parent_identity(&fs::symlink_metadata(parent)?),
+        "GPU_PARENT_CUSTODY_CHANGED",
+    )
+}
+fn rename_prepared(
+    directory: &File,
+    temporary: &OsStr,
+    leaf: &OsStr,
+    fence: Option<&ConfigurationRenameFence<'_, '_>>,
+) -> io::Result<()> {
+    if fence.is_some_and(ConfigurationRenameFence::publishes_absent_actor) {
+        native::publish_absent_actor_policy(directory, temporary, leaf)
+    } else {
+        native::replace_policy(directory, temporary, leaf)
     }
 }
 fn image_current(

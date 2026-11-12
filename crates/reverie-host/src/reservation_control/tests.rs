@@ -12,12 +12,67 @@ use std::{
     sync::atomic::{AtomicU64, Ordering},
 };
 static NEXT: AtomicU64 = AtomicU64::new(0);
-struct Tree {
-    root: PathBuf,
-    config: ReservationConfiguration,
+#[test]
+fn admission_checked_close_is_bound_to_the_original_acquisition() {
+    if crate::test_process::isolate_case(
+        "reservation_control::tests::admission_checked_close_is_bound_to_the_original_acquisition",
+    ) {
+        return;
+    }
+    let tree = Tree::new();
+    let mut first = AdmissionLock::acquire(&tree.config).unwrap();
+    let original = std::sync::Arc::clone(&first.acquisition);
+    assert!(original.assert_closed().is_err());
+    native::test_faults::set(None, true);
+    assert!(first.close().is_err());
+    native::test_faults::set(None, false);
+    first.close().unwrap();
+    assert!(
+        original.assert_closed().is_err(),
+        "a consumed close cannot be retried"
+    );
+    let mut next = AdmissionLock::acquire(&tree.config).unwrap();
+    assert!(!std::sync::Arc::ptr_eq(&next.acquisition, &original));
+    next.close().unwrap();
+    next.acquisition.assert_closed().unwrap();
+    assert!(
+        original.assert_closed().is_err(),
+        "another acquisition cannot settle the original"
+    );
+}
+#[test]
+fn typed_admission_contention_requires_checked_clean_constructor_close() {
+    if crate::test_process::isolate_case(
+        "reservation_control::tests::typed_admission_contention_requires_checked_clean_constructor_close",
+    ) {
+        return;
+    }
+    let tree = Tree::new();
+    let mut first = AdmissionLock::acquire(&tree.config).unwrap();
+    assert!(matches!(
+        AdmissionLock::try_acquire(&tree.config).unwrap(),
+        AdmissionLockAttempt::Contended
+    ));
+    native::test_faults::set(None, true);
+    assert!(matches!(
+        AdmissionLock::try_acquire(&tree.config),
+        Err(ControlHostError::Native(
+            ObservationError::Finalization { .. }
+        ))
+    ));
+    native::test_faults::set(None, false);
+    first.close().unwrap();
+    match AdmissionLock::try_acquire(&tree.config).unwrap() {
+        AdmissionLockAttempt::Acquired(mut next) => next.close().unwrap(),
+        AdmissionLockAttempt::Contended => panic!("original lock has checked-close"),
+    }
+}
+pub(crate) struct Tree {
+    pub(crate) root: PathBuf,
+    pub(crate) config: ReservationConfiguration,
 }
 impl Tree {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         let root = std::env::temp_dir().join(format!(
             "reverie-control-{}-{}",
             std::process::id(),
@@ -52,7 +107,7 @@ impl Tree {
         tree.marker(&[".", "profiles", "operations"]);
         tree
     }
-    fn write(&self, name: &str, raw: &[u8]) {
+    pub(crate) fn write(&self, name: &str, raw: &[u8]) {
         let path = self.root.join(name);
         fs::write(&path, raw).unwrap();
         fs::set_permissions(path, fs::Permissions::from_mode(0o600)).unwrap();
@@ -61,7 +116,7 @@ impl Tree {
         let info = fs::symlink_metadata(self.root.join(name)).unwrap();
         format!("[{},{}]", info.dev(), info.ino())
     }
-    fn marker(&self, order: &[&str]) {
+    pub(crate) fn marker(&self, order: &[&str]) {
         let mut directories = Vec::new();
         for name in order {
             let path = if *name == "." {
@@ -90,7 +145,7 @@ impl Tree {
         );
         self.write("state/resource-reservation-control.json", raw.as_bytes());
     }
-    fn binding(&self) -> ControlBinding {
+    pub(crate) fn binding(&self) -> ControlBinding {
         ControlBinding::from_metadata(
             &read_marker(&self.config).unwrap(),
             self.config.configuration(),

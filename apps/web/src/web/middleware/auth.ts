@@ -24,7 +24,13 @@ import {
 } from '../../config/auth-config.js';
 import { getHookSecret, HOOK_SECRET_HEADER } from '../../config/hook-secret.js';
 import { isMultiUserMode } from '../../config/multiuser.js';
-import { findUser, setPassword, touchLastLogin, verifyPassword } from '../../user-store.js';
+import {
+  findUser,
+  rehashAuthenticatedUser,
+  touchLastLogin,
+  userAuthenticationFingerprint,
+  verifyPassword,
+} from '../../user-store.js';
 import { webviewCapabilities } from '../../webview-capabilities.js';
 import { capabilityFromHtmlViewPath, htmlViewCapabilities } from '../../html-view-capabilities.js';
 import {
@@ -47,6 +53,13 @@ declare module 'fastify' {
 
 // Auth session cookie name
 export const AUTH_COOKIE_NAME = 'reverie_session';
+
+// Only the authentication hook can attest a Basic/QR session for this request.
+// Never infer authentication from a caller-supplied header or a synthetic admin.
+const browserAuthSessions = new WeakMap<FastifyRequest, AuthSessionRecord>();
+export function browserAuthSession(req: FastifyRequest): AuthSessionRecord | undefined {
+  return browserAuthSessions.get(req);
+}
 
 /** State returned from registerAuthMiddleware for cleanup in server stop() */
 interface AuthState {
@@ -412,8 +425,14 @@ export function registerAuthMiddleware(
     // Federation endpoints validate one-time invite/proof/guest capabilities in their own handlers.
     // Match registered route patterns, never raw URL prefixes that could expose owner APIs.
     const embassyRoute = req.routeOptions?.url;
-    if (isEmbassyProtocolRoute(req.method, embassyRoute?.startsWith(basePath + '/') ? embassyRoute.slice(basePath.length) : embassyRoute)) {
-      done(); return;
+    if (
+      isEmbassyProtocolRoute(
+        req.method,
+        embassyRoute?.startsWith(basePath + '/') ? embassyRoute.slice(basePath.length) : embassyRoute
+      )
+    ) {
+      done();
+      return;
     }
 
     // The owner form is the browser's single login in enforce mode. Agent and
@@ -460,7 +479,9 @@ export function registerAuthMiddleware(
     // Check session cookie first (avoids re-sending credentials on every request)
     // Use get() instead of has() so refreshOnGet extends the TTL on active sessions
     const sessionToken = req.cookies[AUTH_COOKIE_NAME];
-    if (sessionToken && authSessions.get(sessionToken) !== undefined) {
+    const authenticatedRecord = sessionToken ? authSessions.get(sessionToken) : undefined;
+    if (sessionToken && authenticatedRecord) {
+      browserAuthSessions.set(req, authenticatedRecord);
       // Sliding cookie: re-issue on every authenticated request so the browser
       // cookie lifetime tracks the server-side sliding TTL (refreshOnGet above).
       reply.setCookie(AUTH_COOKIE_NAME, sessionToken, {
@@ -488,12 +509,14 @@ export function registerAuthMiddleware(
         if (oldestKey !== undefined) authSessions.delete(oldestKey);
       }
 
-      authSessions.set(token, {
+      const record: AuthSessionRecord = {
         ip: clientIp,
         ua: req.headers['user-agent'] ?? '',
         createdAt: Date.now(),
         method: 'basic',
-      });
+      };
+      authSessions.set(token, record);
+      browserAuthSessions.set(req, record);
 
       // Reset failure count on successful auth
       authFailures.delete(clientIp);
@@ -619,7 +642,12 @@ function registerMultiUserAuthHook(
         enforcePasswordChange(req, reply, !!record.mustChangePassword);
         return;
       }
-      if (!live || live.disabled) {
+      if (
+        !live ||
+        live.disabled ||
+        (record.credentialFingerprint !== undefined &&
+          record.credentialFingerprint !== userAuthenticationFingerprint(live))
+      ) {
         authSessions.delete(sessionToken!);
         reply.clearCookie(AUTH_COOKIE_NAME, { path: '/' });
         reply.code(401).send('Unauthorized');
@@ -628,6 +656,7 @@ function registerMultiUserAuthHook(
       // Trust the LIVE role/mustChangePassword, not the (possibly stale) cookie snapshot
       // (also defends #9/#13: a CLI demotion is reflected without a revoke).
       req.authUser = { username: live.username, role: live.role };
+      if (!live.mustChangePassword && record.credentialFingerprint !== undefined) browserAuthSessions.set(req, record);
       setSessionCookie(reply, sessionToken!); // sliding re-issue
       enforcePasswordChange(req, reply, !!live.mustChangePassword);
       return;
@@ -650,23 +679,30 @@ function registerMultiUserAuthHook(
       // win and self-heal both buckets, regardless of the username-failure count.
       const result = await verifyPassword(creds.username, creds.password);
       if (result) {
-        const { user, needsRehash: rehash } = result;
-        if (rehash) void setPassword(user.username, creds.password).catch(() => {});
+        const { user: verifiedUser, needsRehash: rehash } = result;
+        const user = rehash ? await rehashAuthenticatedUser(verifiedUser, creds.password) : verifiedUser;
+        if (!user) {
+          reply.code(401).send('Sign-in credentials changed; sign in again');
+          return;
+        }
         void touchLastLogin(user.username).catch(() => {});
         authFailures.delete(clientIp);
         userFailures.delete(normUser);
 
         const token = randomBytes(32).toString('hex');
         if (authSessions.size >= MAX_AUTH_SESSIONS) evictForCapacity(user.username);
-        authSessions.set(token, {
+        const record: AuthSessionRecord = {
           ip: clientIp,
           ua: req.headers['user-agent'] ?? '',
           createdAt: Date.now(),
           method: 'basic',
           username: user.username,
+          credentialFingerprint: userAuthenticationFingerprint(user),
           role: user.role,
           mustChangePassword: !!user.mustChangePassword,
-        });
+        };
+        authSessions.set(token, record);
+        if (!user.mustChangePassword) browserAuthSessions.set(req, record);
         req.authUser = { username: user.username, role: user.role };
         setSessionCookie(reply, token);
         enforcePasswordChange(req, reply, !!user.mustChangePassword);

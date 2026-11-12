@@ -131,6 +131,33 @@ it is not permission to launch or evidence of applied kernel limits. Created,
 started, ready and settled are separate native outcomes. Lost replies or
 unconfirmed effects retain the original operation and forbid automatic replay.
 
+## Never-issued preview history
+
+An original version-one `prepared` operation at sequence zero proves that native
+migration consent was never dispatched: the writer must durably commit `issued`
+before invoking the native migration client. When that preview expires or loses
+its connection, its current enrolled owner may end it and request a new review.
+After a web-process restart, the same prepared record can be ended from its
+durable no-dispatch evidence. These transitions use the private store's checked
+compare-and-swap and current authorization; uncertain writes still block changes.
+
+The terminal record explicitly uses version two, purpose
+`fleet-migration-operation-v2`, phase `not-issued` and sequence one. It preserves
+the original preview, principal, owner scope and cohort, contains no native
+result, native failure, employee restoration or pool-absence receipt, and has no
+outgoing transitions. The reader supports unchanged version-one history and
+this one version-two terminal state. Existing version-one records are not
+silently normalized. Older writers cannot read the version-two state; rolling
+back requires a compatible reader rather than rewriting or deleting history.
+
+This state proves no migration dispatch. It does not prove that the broker
+released the old preview hold, that the pool is installed or absent, or that any
+employee is running. A new review may still report a host-side pending preview
+until its original hold is released or expires. Issued or already unknown
+operations remain unknown and fenced; they cannot use this transition even when
+they have no recorded native response. Recovery of an unknown operation while
+the pool remains installed is a separate unresolved workflow.
+
 ## Native integration work
 
 The [native integration map](rust-overhaul.md#native-integration-map) names the
@@ -154,6 +181,61 @@ incarnation and kernel limits before normal pane startup. Keep stopped/absent
 preparation separate from running-source preparation. A configured policy,
 successful isolated test or closed socket cannot substitute for any of those
 ownership joins or the final pressure/recovery acceptance.
+
+Member configuration retains a maximum of 256 attempted container identities.
+Deadline, duplicate, capacity and member-policy checks run before native
+observation or admission of another identity. Their closed `memberRefused`
+reply rejects only that request; it does not retain a controller-wide primary
+failure or clear uncertainty from an earlier request. The broker accepts this
+outcome only from its original authenticated exchange with the exact request
+nonce and current controller identity. Older, malformed or unconfirmed replies
+remain fenced, as do failures after native observation or configuration begins.
+Correlating a refusal does not clear the broker's actual uncertainty flag: the
+same owner rechecks current native identity first, and a failed guard leaves
+that flag retained. The reply's closed anchor observation is data only.
+Observation and policy-edit preflight remain available when new-member capacity
+is exhausted.
+
+A known refusal is also terminal for the same original Created configuration
+attempt. Its private cleanup-only state retains the actual CID, storage and
+Office owners and the full refusal cause; it permits no configuration retry,
+memory, pane, viewer or ordinary settlement promotion. A refusal from another
+attempt, an unbound value, a diagnostic lookalike or any prior native uncertainty
+cannot enter that state. Only the original exact-CID stop/readback and every
+required native, storage and Office finalizer may return resources and release
+the failed launch's hold. Cleanup uncertainty remains retained.
+
+This isolation does not recycle the attempted identities or implement turnover.
+Retirement needs the original confirmed stopped-laptop removal, exact fresh
+container absence and known closure of every retained member component. The
+controller has no such receipt-consuming retirement operation yet. Count, age,
+desired employee state and a parsed absence DTO cannot free a slot. A positive
+native turnover/edit sequence still needs the owned controller integration
+fixture; metadata-only preflight tests do not establish that acceptance.
+
+## Fleet reply codec compatibility
+
+The fleet Q handshake requires `replyVersion: 2` and the native
+`FLEET_MAINTENANCE_CHANNEL_V2` greeting. Update the website and native broker
+together. Missing or unsupported codec negotiation is refused before preview,
+consent, handler interruption or pool publication; there is no version-one
+fallback. Persisted version-one operation data and reply JSON retain their
+existing schemas. Package provenance is not proof that an older website/broker
+pair supports this codec.
+
+Incoming requests, owner checks, pool registration and ordinary resource replies
+remain limited to 8 KiB. Only the closed fleet preview/result output type has a
+64 KiB budget. The maximum supported provider registry remains 64 employees;
+the pool policy may separately retain 256 employee thresholds. A maximal valid
+policy with 4,096 CPUs, a 4,096-byte escaped instance path and 64 restoration rows
+encodes to 63,543 bytes in the contract regression.
+
+Before interrupting handlers or draining employees, the coordinator encodes and
+validates all variable-length result fields from the original approved policy
+and restoration cohort. Publication then fills only the two fixed-width digest
+slots from its actual configuration and control-domain receipt. This prepared
+reply is data; it neither authorizes effects nor establishes that publication
+or employee recovery succeeded.
 
 ## Perf qualification boundary
 

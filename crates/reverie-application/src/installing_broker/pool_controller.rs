@@ -1,6 +1,7 @@
 //! Original installed broker bootstrap only. This confers neither root owner
 //! consent nor host registration, Fleet/Q maintenance or pool activation.
 use super::*;
+use reverie_contracts::worker_pool::RetainedPoolAnchor;
 use reverie_host::worker_pool::{
     BrokerBootstrapBinding, BrokerBootstrapFailure, ControllerBirthPublication,
     PublishedControllerBirthData,
@@ -16,6 +17,12 @@ pub(super) enum BrokerControllerActivationFailure {
     Native(Box<reverie_host::worker_pool::ControllerActivationFailure>),
 }
 impl BrokerControllerActivationFailure {
+    pub(super) fn code(&self) -> &'static str {
+        match self {
+            Self::Bootstrap(error) => error.cause().code(),
+            Self::Native(error) => error.primary_error().code(),
+        }
+    }
     pub(super) fn close_components(
         &mut self,
         end: Instant,
@@ -48,6 +55,16 @@ pub enum BrokerControllerBootstrapCause {
     Native(Box<BrokerBootstrapFailure>),
     Observation(reverie_host::worker_pool::PoolError),
     Refused(&'static str),
+}
+impl BrokerControllerBootstrapCause {
+    pub(super) fn code(&self) -> &'static str {
+        match self {
+            Self::Configuration(error) => error.code(),
+            Self::Native(error) => error.primary_error().code(),
+            Self::Observation(error) => error.code(),
+            Self::Refused(code) => code,
+        }
+    }
 }
 impl BrokerControllerBootstrapFailure {
     pub fn cause(&self) -> &BrokerControllerBootstrapCause {
@@ -142,6 +159,34 @@ impl InstallingBroker {
     }
 }
 impl BrokerControllerBootstrap {
+    pub(super) fn publish_restored_birth_metadata(
+        mut self,
+        anchor: RetainedPoolAnchor,
+        original: &ValidatedWorkerSnapshot,
+        end: Instant,
+    ) -> Result<Self, Box<BrokerControllerBootstrapFailure>> {
+        let expected = reverie_contracts::worker_config::config_digest(original.configuration());
+        match self.publish_birth(
+            |binding, runtime, source| {
+                binding.prepare_restored_birth_publication(
+                    runtime,
+                    source,
+                    &expected,
+                    Some(anchor),
+                    end,
+                )
+            },
+            end,
+        ) {
+            Ok(_) => Ok(self),
+            Err(cause) => Err(Box::new(BrokerControllerBootstrapFailure {
+                owner: Some(self),
+                unopened_broker: None,
+                cause,
+            })),
+        }
+    }
+
     pub(super) fn activate_controller(
         mut self,
         host_reserve_mib: u32,
@@ -265,6 +310,23 @@ impl BrokerControllerBootstrap {
         policy: reverie_contracts::worker_pool::WorkerPoolPolicy,
         end: Instant,
     ) -> Result<PublishedControllerBirthData, BrokerControllerBootstrapCause> {
+        self.publish_birth(
+            |binding, runtime, source| {
+                binding.prepare_birth_publication(runtime, source, policy, end)
+            },
+            end,
+        )
+    }
+    fn publish_birth(
+        &mut self,
+        prepare: impl FnOnce(
+            &mut BrokerBootstrapBinding,
+            &reverie_host::worker_runtime::WorkerRuntime,
+            &std::path::Path,
+        )
+            -> Result<ControllerBirthPublication, reverie_host::worker_pool::PoolError>,
+        end: Instant,
+    ) -> Result<PublishedControllerBirthData, BrokerControllerBootstrapCause> {
         if self.birth_attempted {
             return Err(BrokerControllerBootstrapCause::Refused(
                 "WORKER_POOL_PUBLICATION_REPLAYED",
@@ -273,13 +335,16 @@ impl BrokerControllerBootstrap {
         self.birth_attempted = true;
         self.assert_current(end)?;
         self.publication = Some(
-            self.binding
-                .as_mut()
-                .ok_or(BrokerControllerBootstrapCause::Refused(
-                    "WORKER_POOL_BINDING_TRANSFERRED",
-                ))?
-                .prepare_birth_publication(&self.broker.storage.runtime, &self.source, policy, end)
-                .map_err(BrokerControllerBootstrapCause::Observation)?,
+            prepare(
+                self.binding
+                    .as_mut()
+                    .ok_or(BrokerControllerBootstrapCause::Refused(
+                        "WORKER_POOL_BINDING_TRANSFERRED",
+                    ))?,
+                &self.broker.storage.runtime,
+                &self.source,
+            )
+            .map_err(BrokerControllerBootstrapCause::Observation)?,
         );
         self.publication
             .as_mut()

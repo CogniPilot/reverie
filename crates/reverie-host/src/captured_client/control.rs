@@ -53,6 +53,7 @@ pub(super) struct Job {
     pub(super) policy: Policy,
     pub(super) nix_tail: bool,
     pub(super) stdout_only: bool,
+    pub(super) raw_stdout: bool,
     #[cfg(test)]
     pub(super) hooks: super::test_hooks::Hooks,
 }
@@ -119,6 +120,7 @@ enum ExecutionMode {
     CombinedWaiting,
     NixTail,
     GoalStdout,
+    GpuPreflightStdout,
 }
 impl CallFailure {
     fn before_admission(error: EngineError) -> Self {
@@ -381,6 +383,27 @@ impl CapturedClient {
             ExecutionMode::Combined,
         )
     }
+    /// Fixed pure controller decoder only. The original bounded birth input is
+    /// consumed by Process before spawn, using the same checked input custody.
+    pub(crate) fn check_controller_birth(
+        &self,
+        deadline: Instant,
+        cancellation: &CancellationToken,
+        input: &mut Option<std::fs::File>,
+    ) -> std::result::Result<CapturedOutput, CallFailure> {
+        self.run_owned(
+            vec!["check-birth".into()],
+            deadline,
+            cancellation,
+            Policy {
+                maximum: std::time::Duration::from_secs(10),
+                maximum_output: 4096,
+                successful_exit: true,
+            },
+            input,
+            ExecutionMode::CombinedWaiting,
+        )
+    }
     /// Fixed metadata readers own this whole bounded query window. Effect
     /// owners with their own live stop/admission loop use immediate run_scoped.
     pub(crate) fn run_scoped_waiting(
@@ -415,6 +438,25 @@ impl CapturedClient {
             policy,
             &mut None,
             ExecutionMode::GoalStdout,
+        )
+    }
+    /// The closed GPU preflight reader accepts JSON bytes (including Python's
+    /// byte-JSON BOM encodings) and discards stderr at spawn. It retains the
+    /// same admitted native job, absolute deadline and checked finalizers.
+    pub(crate) fn run_gpu_preflight(
+        &self,
+        args: Vec<OsString>,
+        deadline: Instant,
+        cancellation: &CancellationToken,
+        policy: Policy,
+    ) -> std::result::Result<CapturedOutput, CallFailure> {
+        self.run_owned(
+            args,
+            deadline,
+            cancellation,
+            policy,
+            &mut None,
+            ExecutionMode::GpuPreflightStdout,
         )
     }
     /// The closed guest bootstrap alone streams a one-shot installed
@@ -480,7 +522,9 @@ impl CapturedClient {
                 Err(error)
                     if matches!(
                         mode,
-                        ExecutionMode::CombinedWaiting | ExecutionMode::GoalStdout
+                        ExecutionMode::CombinedWaiting
+                            | ExecutionMode::GoalStdout
+                            | ExecutionMode::GpuPreflightStdout
                     ) && error.is_admission_busy() =>
                 {
                     #[cfg(test)]
@@ -568,7 +612,11 @@ impl CapturedClient {
             }),
             policy,
             nix_tail: matches!(mode, ExecutionMode::NixTail),
-            stdout_only: matches!(mode, ExecutionMode::GoalStdout),
+            stdout_only: matches!(
+                mode,
+                ExecutionMode::GoalStdout | ExecutionMode::GpuPreflightStdout
+            ),
+            raw_stdout: matches!(mode, ExecutionMode::GpuPreflightStdout),
             #[cfg(test)]
             hooks: self.bootstrap.hooks.clone(),
         });

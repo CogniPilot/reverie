@@ -29,9 +29,16 @@ import type {
   StatusLineExporter,
 } from './types.js';
 
-/**
- * Multiplexer session metadata.
- */
+/** Input authority remains distinct from exclusive composer/idle gates. */
+export interface MuxInputOptions {
+  opencode?: boolean | 'person';
+  requireEmptyComposer?: boolean;
+  stillIdle?: () => boolean;
+  /** Original operation authority; distinct from exclusive composer/idle gates. */
+  admitted?: () => boolean;
+}
+
+/** Multiplexer session metadata. */
 export interface MuxSession {
   /** Reverie session ID */
   sessionId: string;
@@ -98,6 +105,8 @@ export interface CreateSessionOptions {
   workerAttachOnly?: boolean;
   /** Process-local final admission (an owner stop holds the pane), checked right before the first process starts. */
   admitted?: () => boolean;
+  /** Private, at-most-once boundary after final admission, immediately before the actual command. */
+  onProviderDispatch?: () => void;
   /** Process-local fixed resource actor join, never a persisted/wire option. */
   workerResourceLaunch?: ResourceWorkerLaunch;
   sessionId: string;
@@ -149,6 +158,8 @@ export interface RespawnPaneOptions {
   workerAttachOnly?: boolean;
   /** Process-local final admission (an owner stop holds the pane), checked with stillCurrent right before the launch. */
   admitted?: () => boolean;
+  /** Private, at-most-once boundary after final admission, immediately before the actual command. */
+  onProviderDispatch?: () => void;
   /** Internal, launch-only exact workspace trust for managed Codex. */
   codexTrustWorkspace?: string;
   /** Internal, launch-only trust for Reverie's own Codex hooks (shell-escaped --config value). */
@@ -300,6 +311,8 @@ export interface TerminalMultiplexer extends EventEmitter {
    * Uses a multi-strategy approach (children → process group → mux kill → SIGKILL).
    */
   killSession(sessionId: string): Promise<boolean>;
+  /** Optional exact-record cleanup capability. Implementations must recheck admission at every effect boundary. */
+  killSessionIfCurrent?(sessionId: string, original: MuxSession, admitted: () => boolean): Promise<boolean>;
 
   /** Clean up resources (stop stats collection, etc.) */
   destroy(): void;
@@ -323,7 +336,7 @@ export interface TerminalMultiplexer extends EventEmitter {
   /**
    * Send input to a session via tmux send-keys.
    */
-  sendInput(sessionId: string, input: string, options?: { opencode?: boolean | 'person'; requireEmptyComposer?: boolean; stillIdle?: () => boolean }): Promise<boolean>;
+  sendInput(sessionId: string, input: string, options?: MuxInputOptions): Promise<boolean>;
 
   // ========== Metadata ==========
 

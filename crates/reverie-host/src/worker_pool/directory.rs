@@ -4,6 +4,8 @@
 pub(super) mod fixture;
 use super::*;
 use crate::native;
+use reverie_contracts::worker_pool::RetainedPoolAnchor;
+use reverie_core::{ids::ContainerId, operations::JournalDigest};
 use std::{
     ffi::OsStr,
     fs::File,
@@ -47,6 +49,73 @@ impl PoolDirectory {
         anchor: &str,
         pid: u32,
     ) -> Result<()> {
+        self.open_anchor(policy, anchor, pid)?;
+        self.assert_anchor_only(anchor, pid)
+    }
+
+    pub(super) fn acquire_retained(
+        &mut self,
+        policy: &WorkerPoolPolicy,
+        anchor: &RetainedPoolAnchor,
+    ) -> Result<()> {
+        self.open_anchor(policy, anchor.container_id(), anchor.pid())?;
+        self.assert_retained_anchor(anchor)?;
+        self.assert_limits(policy)
+    }
+
+    /// Read-only discovery for a predecessor that did not record a retained
+    /// anchor. An installed parent may already contain live laptop scopes.
+    pub(super) fn observe_retained(
+        &mut self,
+        policy: &WorkerPoolPolicy,
+        anchor: &ContainerId,
+        pid: u32,
+        birth: &JournalDigest,
+    ) -> Result<RetainedPoolAnchor> {
+        self.open_anchor(policy, anchor.as_str(), pid)?;
+        self.assert_limits(policy)?;
+        self.retained_anchor_data(anchor, pid, birth)
+    }
+
+    pub(super) fn assert_retained_anchor(&self, anchor: &RetainedPoolAnchor) -> Result<()> {
+        let boot = bounded_path("/proc/sys/kernel/random/boot_id", 64)?;
+        need(
+            anchor.matches_kernel(
+                boot.trim_end_matches('\n'),
+                &self.anchor_start,
+                self.identity,
+                self.anchor_identity,
+            ),
+            "WORKER_POOL_RETAINED_ANCHOR_CHANGED",
+        )?;
+        self.assert_anchor_current(anchor.container_id(), anchor.pid())
+    }
+
+    pub(super) fn retained_anchor_data(
+        &self,
+        anchor: &ContainerId,
+        pid: u32,
+        birth: &JournalDigest,
+    ) -> Result<RetainedPoolAnchor> {
+        self.assert_anchor_current(anchor.as_str(), pid)?;
+        let boot = bounded_path("/proc/sys/kernel/random/boot_id", 64)?;
+        RetainedPoolAnchor::from_observations(
+            anchor,
+            birth,
+            boot.trim_end_matches('\n'),
+            pid,
+            &self.anchor_start,
+            self.identity,
+            self.anchor_identity,
+        )
+        .map_err(|_| PoolError::Refused("WORKER_POOL_RETAINED_ANCHOR_DATA"))
+    }
+
+    fn open_anchor(&mut self, policy: &WorkerPoolPolicy, anchor: &str, pid: u32) -> Result<()> {
+        need(
+            self.root.is_none() && !self.close_unknown,
+            "WORKER_POOL_DIRECTORY_ALREADY_OPENED",
+        )?;
         self.root = Some(native::open_at(
             nix::libc::AT_FDCWD,
             OsStr::new("/sys/fs/cgroup"),
@@ -99,7 +168,7 @@ impl PoolDirectory {
                 .ok_or(PoolError::Refused("WORKER_POOL_DIRECTORY_CLOSED"))?,
         )?;
         self.anchor_start = process_start(pid)?;
-        self.assert_anchor_only(anchor, pid)
+        Ok(())
     }
     pub(super) fn parent(&self) -> Result<&File> {
         self.parent

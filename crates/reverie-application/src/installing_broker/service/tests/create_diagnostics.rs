@@ -17,6 +17,10 @@ fn live_service_diagnostic_read_preserves_original_listener_and_native_trace() {
         .unwrap();
     let before = fs::read(root.join("calls.txt")).unwrap();
     let diagnostics = service.completed_create_diagnostics();
+    let no_offer = service
+        .installation_offer_preparation_view()
+        .unwrap()
+        .is_none();
     let after = fs::read(root.join("calls.txt")).unwrap();
     let listener = root.join("control/broker.sock").exists();
     broker.request_stop();
@@ -25,6 +29,7 @@ fn live_service_diagnostic_read_preserves_original_listener_and_native_trace() {
     closed.unwrap();
     fs::remove_dir_all(root).unwrap();
     assert!(diagnostics.unwrap().is_empty());
+    assert!(no_offer, "ordinary service has no OS installation offer");
     assert_eq!(before, after);
     assert!(listener);
 }

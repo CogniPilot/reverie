@@ -123,6 +123,17 @@ impl ImageMaintenanceLocks {
     pub fn end(&self) -> Instant {
         self.owner().end
     }
+    /// Same original deployment locks, only for initial actor history custody.
+    pub fn assert_actor_setup_resume_maintenance(&mut self, deployment: &Path) -> Result<()> {
+        self.assert_held_current()?;
+        require(
+            self.owner()
+                .deployment
+                .as_ref()
+                .is_some_and(|(path, _)| path == deployment),
+            "ACTOR_SETUP_RESUME_MAINTENANCE_CHANGED",
+        )
+    }
     pub fn assert_held_current(&mut self) -> Result<()> {
         let owner = self.owner.as_mut().expect("original maintenance");
         if let Some(error) = &owner.failure {

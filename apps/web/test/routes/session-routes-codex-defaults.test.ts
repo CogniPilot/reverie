@@ -86,7 +86,8 @@ describe('Codex launch defaults', () => {
     ]) {
       await writeFile(SETTINGS_PATH, JSON.stringify(settings));
       expect(await resolveCodexDefaults(undefined)).toBeUndefined();
-      expect(buildCodexCommand(await resolveCodexDefaults(undefined))).toBe('codex');
+      // Runtime policy disables self-updates even when no user model/effort is selected.
+      expect(buildCodexCommand(await resolveCodexDefaults(undefined))).toBe('codex --config check_for_update_on_startup=false');
     }
   });
 

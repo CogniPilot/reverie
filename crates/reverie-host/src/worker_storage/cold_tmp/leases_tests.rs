@@ -59,6 +59,12 @@ impl Fixture {
 }
 #[test]
 fn barriers_are_real_and_missing_target_locks_are_never_created() {
+    if crate::test_process::isolate_case(concat!(
+        "worker_storage::cold_tmp::leases_tests::",
+        "barriers_are_real_and_missing_target_locks_are_never_created"
+    )) {
+        return;
+    }
     let fixture = Fixture::new();
     let mut first = fixture.capture();
     first.barriers(fixture.end()).unwrap();
@@ -100,6 +106,12 @@ fn janitor_keys_include_every_real_directory_and_ancestors_but_not_symlink_targe
 }
 #[test]
 fn actual_shared_holder_and_live_reservation_refuse_without_deleting_anything() {
+    if crate::test_process::isolate_case(concat!(
+        "worker_storage::cold_tmp::leases_tests::",
+        "actual_shared_holder_and_live_reservation_refuse_without_deleting_anything"
+    )) {
+        return;
+    }
     let fixture = Fixture::new();
     let path = fixture.file("1-2.lock", b"");
     let holder = OpenOptions::new()

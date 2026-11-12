@@ -106,6 +106,12 @@ fn private_tree(path: &Path, stop: &Path) {
 }
 #[test]
 fn actual_relevant_kernel_lock_and_barrier_remain_held_until_checked_close() {
+    if crate::test_process::isolate_case(concat!(
+        "worker_storage::cold_tmp::leases::retained::tests::",
+        "actual_relevant_kernel_lock_and_barrier_remain_held_until_checked_close"
+    )) {
+        return;
+    }
     let fixture = Fixture::new();
     let scope = fixture.scope();
     let key = fixture.registered(&fixture.target(), "/tmp");
@@ -255,6 +261,12 @@ fn strict_reader_refuses_symlink_fifo_hardlink_writable_and_oversize_metadata() 
 }
 #[test]
 fn global_registered_bound_counts_barrier_and_preserves_raw_leading_zero_keys() {
+    if crate::test_process::isolate_case(concat!(
+        "worker_storage::cold_tmp::leases::retained::tests::",
+        "global_registered_bound_counts_barrier_and_preserves_raw_leading_zero_keys"
+    )) {
+        return;
+    }
     let fixture = Fixture::new();
     let scope = fixture.scope();
     for n in 0..MAX_RECORDS - 1 {

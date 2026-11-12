@@ -59,6 +59,32 @@ const submit = (h: any) =>
     .querySelector('.ca-company-settings .ca-company-settings-form')
     .dispatchEvent(new h.window.Event('submit', { bubbles: true, cancelable: true }));
 
+it('switches settings sections with keyboard controls while preserving drafts and never submitting changes', async () => {
+  const { h, calls } = await setup(); await h.shell.openCompanySettings();
+  const dialog = h.document.querySelector('.ca-company-settings')!;
+  const tabs = [...dialog.querySelectorAll('[role="tab"]')] as HTMLButtonElement[];
+  expect(tabs.map(tab => tab.textContent)).toEqual(['Company', 'Employees', 'Hiring', 'Reports']);
+  expect(tabs[1].getAttribute('aria-selected')).toBe('true');
+  tabs[0].click();
+  const draft = dialog.querySelector('[aria-label="Owner display name"]') as HTMLInputElement; draft.value = 'Unsaved company name';
+  tabs[0].dispatchEvent(new h.window.KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+  expect(tabs[1].getAttribute('aria-selected')).toBe('true'); expect(h.document.activeElement).toBe(tabs[1]);
+  expect(draft.closest<HTMLElement>('[role="tabpanel"]')!.hidden).toBe(true);
+  tabs[1].dispatchEvent(new h.window.KeyboardEvent('keydown', { key: 'Home', bubbles: true }));
+  expect(draft.value).toBe('Unsaved company name'); expect(draft.closest<HTMLElement>('[role="tabpanel"]')!.hidden).toBe(false);
+  expect(calls.filter(call => call.method && call.method !== 'GET')).toEqual([]);
+});
+
+it('keeps owner resource and hiring sections unavailable to an unverified viewer', async () => {
+  const { h, calls } = await setup(false); await h.shell.openCompanySettings();
+  const dialog = h.document.querySelector('.ca-company-settings')!;
+  expect((dialog.querySelector('[data-settings-tab="runtime"]') as HTMLButtonElement).hidden).toBe(true);
+  expect((dialog.querySelector('[data-settings-tab="hiring"]') as HTMLButtonElement).hidden).toBe(true);
+  expect(dialog.querySelector('[data-settings-tab="general"]')!.getAttribute('aria-selected')).toBe('true');
+  expect(dialog.querySelector('.ca-fleet-resources')).toBeNull();
+  expect(calls.some(call => call.path.startsWith('/api/company/resources'))).toBe(false);
+});
+
 it('opens styled settings within Company without the legacy registration or nightly schedule UI', async () => {
   const { h, native } = await setup();
   h.app.openLegacyCompany = vi.fn();

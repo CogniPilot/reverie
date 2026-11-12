@@ -211,9 +211,9 @@ impl ColdBody<'_> {
             ));
         }
         self.broker()
-            .check_creation_budget_locked(
+            .check_creation_budget_for_plan_locked(
                 self.lifecycle(),
-                input.plan.session(),
+                &input.plan,
                 &self.scope.resources,
                 self.scope.preparing.admitted.admission.as_ref(),
             )

@@ -1,3 +1,4 @@
+import {TerminalInputUnconfirmedError} from '../../terminal-input-outcome.js';
 import { CompanyError, type CompanyService, type RuntimeRestartIntent } from '../../company-service.js';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { randomBytes } from 'node:crypto';
@@ -6,7 +7,7 @@ import type { SessionPort } from '../ports/session-port.js';
 import type { EventPort } from '../ports/event-port.js';
 import { SseEvent } from '../sse-events.js';
 import { clearOwnerStop, ownerStopPending, pendingOwnerStops, recordOwnerStop } from '../../owner-stop-journal.js';
-import type { Session } from '../../session.js';
+import {ProviderDispatchUnconfirmedError, type Session} from '../../session.js';
 import { getCli } from '../../config/cli-registry/registry.js';
 import { selectedSubscription } from '../../subscription-profiles.js';
 import { readCustomModelHosts } from '../../custom-model-hosts.js';
@@ -201,6 +202,7 @@ export function registerSessionRuntimeRoutes(app: FastifyInstance, ctx: SessionP
         return { success: true, data: { employee: company?.view(ownerFor(req)).employees.find(e => e.id === employee.id),
           sessionId: session.id, recovery: 'normal-launch-requested' } };
       } catch (error) {
+        if (error instanceof ProviderDispatchUnconfirmedError) {ctx.persistSessionStateNow(session); return reply.code(409).send({success: false, error: error.message});}
         if (error instanceof CompanyError) return reply.code(error.status).send({ success: false, error: error.message });
         // No automatic second launch, rollback restart, lease break or provider signal.
         return reply.code(409).send({ success: false, error: 'Recovery outcome is unconfirmed. Reconnect to inspect this expert before another action.' });
@@ -231,6 +233,8 @@ export function registerSessionRuntimeRoutes(app: FastifyInstance, ctx: SessionP
     const session = detached ? loadSession?.(id, req) : findSessionOrFail(ctx, id, req);
     if (!session) return reply.code(404).send({ success: false, error: 'Unknown expert runtime' });
     const fail = (status: number, error: string) => reply.code(status).send({ success: false, error });
+    if (session.providerDispatchHeld) return fail(409, new ProviderDispatchUnconfirmedError().message);
+    if (session.terminalInputHeld) return fail(409, new TerminalInputUnconfirmedError().message);
     // A worker transport respawn replaces the server's terminal viewer. The
     // broker may reuse its still-running laptop and ignore the new launch line,
     // so a new viewer PID cannot confirm a runtime switch. Keep the selected
@@ -299,7 +303,8 @@ export function registerSessionRuntimeRoutes(app: FastifyInstance, ctx: SessionP
         await ctx.addSession(session);
         requireIntent();
         await ctx.setupSessionListeners(session);
-      } else if (!await session.restartCli()) throw new Error('The selected runtime did not start');
+      } else if (!await session.restartCli(() => authorized() && ctx.sessions.get(id) === session
+        && (!intent || intent.current()), () => !workBlocked())) throw new Error('The selected runtime did not start');
       requireIntent();
       ctx.persistSessionStateNow(session);
       await onRuntimeSaved?.(session, () => authorized() && (!intent || intent.current()), preserveRecipe);
@@ -309,6 +314,14 @@ export function registerSessionRuntimeRoutes(app: FastifyInstance, ctx: SessionP
         detached ? state : { session: state });
       return { success: true, data: runtimeView(session) };
     } catch (error) {
+      if (error instanceof ProviderDispatchUnconfirmedError) {
+        // Keep the attempted recipe and desired intent. Never replay a launch,
+        // roll its metadata back, or stop an unknown old/new provider here.
+        ctx.persistSessionStateNow(session);
+        const state = ctx.getSessionStateWithRespawn?.(session);
+        if (state !== undefined) ctx.broadcast?.(SseEvent.SessionUpdated, {session: state});
+        return fail(409, error.message);
+      }
       if (rollback) {
         rollback(); session.setPinned(wasPinned);
         ctx.mux?.updateSessionMode(id, session.mode);

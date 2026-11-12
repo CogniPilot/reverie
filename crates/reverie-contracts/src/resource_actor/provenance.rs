@@ -1,5 +1,6 @@
 //! Complete selected image fields and program graph DATA. Native callers must
 //! obtain the exact immutable bytes and actual daemon response independently.
+mod installation;
 mod startup;
 #[cfg(test)]
 mod tests;
@@ -16,6 +17,10 @@ pub struct WebsiteImageProvenance {
     code: Vec<CodeFile>,
 }
 impl WebsiteImageProvenance {
+    /// Fixed manifest DATA only; native process/file custody is independent.
+    pub fn node_prefix(&self) -> &ProgramSelection {
+        &self.node
+    }
     pub fn decode(raw: &[u8]) -> Result<Self> {
         need(
             !raw.is_empty() && raw.len() <= 65536,

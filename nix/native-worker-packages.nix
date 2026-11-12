@@ -4,10 +4,26 @@
 # measurements in workerResumeProgram's normal build.
 { pkgs, src, console, ownerTerminalProgram ? null }:
 rec {
+  # Independent terminal transport. Its optional broker integrations are absent:
+  # this package only attaches to existing employee laptops.
+  nativeWorkerViewerProgram = import ./native-worker-broker.nix {
+    inherit pkgs src;
+  };
+  nativeWorkerViewerImage = import ./worker-viewer-image.nix {
+    inherit pkgs;
+    broker = nativeWorkerViewerProgram;
+  };
+  nativeWorkerPoolAnchorImage = import ./worker-pool-anchor-image.nix { inherit pkgs; };
   nativeWorkerResourceController = import ./worker-resource-controller.nix { inherit pkgs src; };
   nativeWorkerResourceControllerImage = import ./worker-resource-controller-image.nix {
     inherit pkgs;
     controller = nativeWorkerResourceController;
+  };
+  nativeWorkerPoolImageInputs = import ./worker-pool-image-inputs.nix {
+    inherit pkgs src;
+    controllerImage = nativeWorkerResourceControllerImage;
+    controllerProgram = nativeWorkerResourceController;
+    anchorImage = nativeWorkerPoolAnchorImage;
   };
   # Explicit integration output only; the shipped hybrid workerBroker below is
   # unchanged until mandatory native service/maintenance consumers qualify.
@@ -17,6 +33,7 @@ rec {
     perfGuestCapsule = nativePerfGuestCapsule;
     taskPerfPolicy = workerTaskPerfPolicy;
     taskPerfPolicyV2 = workerTaskPerfPolicyV2;
+    poolImageInputs = nativeWorkerPoolImageInputs;
   };
   nativePerfGuestCapsule = import ./perf-guest-capsule.nix { inherit pkgs src; };
   workerDockerSeccomp = import ./worker-docker-profile.nix { inherit pkgs src; };

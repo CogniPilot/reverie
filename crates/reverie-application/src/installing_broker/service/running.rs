@@ -4,6 +4,7 @@ use super::*;
 use reverie_host::worker_reports::{WorkerBrokerListener, WorkerReportError};
 mod create_diagnostics;
 mod handler;
+mod installation_offer;
 mod shutdown;
 mod supervisor;
 pub(in crate::installing_broker) use shutdown::ClosedBrokerResources;

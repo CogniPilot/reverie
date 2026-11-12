@@ -1,4 +1,5 @@
 use super::*;
+mod program_directory;
 use crate::{engine_metadata::EngineBootstrap, installed_worker_engine::InstalledWorkerEngine};
 use reverie_contracts::{
     kernel_accounting,
@@ -37,8 +38,7 @@ pub(super) fn end() -> Instant {
 }
 fn program() -> &'static Path {
     PROGRAM.get_or_init(|| {
-        let root = std::env::temp_dir().join(format!("source-stop-build-{}", std::process::id()));
-        fs::create_dir(&root).unwrap();
+        let root = program_directory::allocate(&std::env::temp_dir()).unwrap();
         let source = root.join("child.rs");
         fs::write(
             &source,

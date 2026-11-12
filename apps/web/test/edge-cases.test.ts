@@ -1,3 +1,4 @@
+import { prepareHttpOwner } from './helpers/real-owner-fixture.js';
 import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest';
 import { WebServer } from '../src/web/server.js';
 import { join } from 'node:path';
@@ -9,12 +10,15 @@ const CASES_DIR = join(homedir(), 'reverie-cases');
 describe('Edge Cases and Error Handling', () => {
   let server: WebServer;
   let baseUrl: string;
+  let ownerFetch: typeof fetch;
   const createdCases: string[] = [];
 
   beforeAll(async () => {
+    const signIn = await prepareHttpOwner();
     server = new WebServer(0, false, true);
     await server.start();
     baseUrl = `http://localhost:${server.boundPort}`;
+    ownerFetch = await signIn(baseUrl);
   });
 
   afterEach(() => {
@@ -33,7 +37,7 @@ describe('Edge Cases and Error Handling', () => {
 
   describe('Session Edge Cases', () => {
     it('should handle deleting non-existent session gracefully', async () => {
-      const response = await fetch(`${baseUrl}/api/sessions/non-existent-id-12345`, {
+      const response = await ownerFetch(`${baseUrl}/api/sessions/non-existent-id-12345`, {
         method: 'DELETE',
       });
       const data = await response.json();
@@ -43,14 +47,14 @@ describe('Edge Cases and Error Handling', () => {
     });
 
     it('should handle getting non-existent session gracefully', async () => {
-      const response = await fetch(`${baseUrl}/api/sessions/non-existent-id-12345`);
+      const response = await ownerFetch(`${baseUrl}/api/sessions/non-existent-id-12345`);
       const data = await response.json();
 
       expect(data.error).toContain('not found');
     });
 
     it('should handle running prompt on non-existent session', async () => {
-      const response = await fetch(`${baseUrl}/api/sessions/non-existent/run`, {
+      const response = await ownerFetch(`${baseUrl}/api/sessions/non-existent/run`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ prompt: 'test' }),
@@ -61,7 +65,7 @@ describe('Edge Cases and Error Handling', () => {
     });
 
     it('should handle input to non-existent session', async () => {
-      const response = await fetch(`${baseUrl}/api/sessions/non-existent/input`, {
+      const response = await ownerFetch(`${baseUrl}/api/sessions/non-existent/input`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ input: 'test' }),
@@ -72,7 +76,7 @@ describe('Edge Cases and Error Handling', () => {
     });
 
     it('should handle resize on non-existent session', async () => {
-      const response = await fetch(`${baseUrl}/api/sessions/non-existent/resize`, {
+      const response = await ownerFetch(`${baseUrl}/api/sessions/non-existent/resize`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ cols: 80, rows: 24 }),
@@ -83,7 +87,7 @@ describe('Edge Cases and Error Handling', () => {
     });
 
     it('should handle interactive mode on non-existent session', async () => {
-      const response = await fetch(`${baseUrl}/api/sessions/non-existent/interactive`, {
+      const response = await ownerFetch(`${baseUrl}/api/sessions/non-existent/interactive`, {
         method: 'POST',
       });
       const data = await response.json();
@@ -92,14 +96,14 @@ describe('Edge Cases and Error Handling', () => {
     });
 
     it('should handle terminal buffer request on non-existent session', async () => {
-      const response = await fetch(`${baseUrl}/api/sessions/non-existent/terminal`);
+      const response = await ownerFetch(`${baseUrl}/api/sessions/non-existent/terminal`);
       const data = await response.json();
 
       expect(data.error).toContain('not found');
     });
 
     it('should handle output request on non-existent session', async () => {
-      const response = await fetch(`${baseUrl}/api/sessions/non-existent/output`);
+      const response = await ownerFetch(`${baseUrl}/api/sessions/non-existent/output`);
       const data = await response.json();
 
       expect(data.error).toContain('not found');
@@ -108,7 +112,7 @@ describe('Edge Cases and Error Handling', () => {
 
   describe('Case Edge Cases', () => {
     it('should reject empty case name', async () => {
-      const response = await fetch(`${baseUrl}/api/cases`, {
+      const response = await ownerFetch(`${baseUrl}/api/cases`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: '' }),
@@ -120,7 +124,7 @@ describe('Edge Cases and Error Handling', () => {
     });
 
     it('should reject case name with only special characters', async () => {
-      const response = await fetch(`${baseUrl}/api/cases`, {
+      const response = await ownerFetch(`${baseUrl}/api/cases`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: '!@#$%^' }),
@@ -132,7 +136,7 @@ describe('Edge Cases and Error Handling', () => {
     });
 
     it('should reject case name with path traversal attempt', async () => {
-      const response = await fetch(`${baseUrl}/api/cases`, {
+      const response = await ownerFetch(`${baseUrl}/api/cases`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: '../escape' }),
@@ -144,7 +148,7 @@ describe('Edge Cases and Error Handling', () => {
     });
 
     it('should handle getting non-existent case', async () => {
-      const response = await fetch(`${baseUrl}/api/cases/this-case-does-not-exist-12345`);
+      const response = await ownerFetch(`${baseUrl}/api/cases/this-case-does-not-exist-12345`);
       const data = await response.json();
 
       expect(data.error).toBe('Case not found');
@@ -153,7 +157,7 @@ describe('Edge Cases and Error Handling', () => {
 
   describe('Quick Start Edge Cases', () => {
     it('should reject quick start with empty case name', async () => {
-      const response = await fetch(`${baseUrl}/api/quick-start`, {
+      const response = await ownerFetch(`${baseUrl}/api/quick-start`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ caseName: '' }),
@@ -165,7 +169,7 @@ describe('Edge Cases and Error Handling', () => {
     });
 
     it('should reject quick start with special characters', async () => {
-      const response = await fetch(`${baseUrl}/api/quick-start`, {
+      const response = await ownerFetch(`${baseUrl}/api/quick-start`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ caseName: 'test/../../etc/passwd' }),
@@ -179,7 +183,7 @@ describe('Edge Cases and Error Handling', () => {
     it('should handle very long case names gracefully', async () => {
       // Test with a very long but valid case name
       const longName = 'a'.repeat(100);
-      const response = await fetch(`${baseUrl}/api/quick-start`, {
+      const response = await ownerFetch(`${baseUrl}/api/quick-start`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ caseName: longName }),
@@ -197,7 +201,7 @@ describe('Edge Cases and Error Handling', () => {
 
   describe('Respawn Controller Edge Cases', () => {
     it('should handle getting respawn status for non-existent session', async () => {
-      const response = await fetch(`${baseUrl}/api/sessions/non-existent/respawn`);
+      const response = await ownerFetch(`${baseUrl}/api/sessions/non-existent/respawn`);
       const data = await response.json();
 
       expect(data.data.enabled).toBe(false);
@@ -205,7 +209,7 @@ describe('Edge Cases and Error Handling', () => {
     });
 
     it('should handle starting respawn on non-existent session', async () => {
-      const response = await fetch(`${baseUrl}/api/sessions/non-existent/respawn/start`, {
+      const response = await ownerFetch(`${baseUrl}/api/sessions/non-existent/respawn/start`, {
         method: 'POST',
       });
       const data = await response.json();
@@ -214,7 +218,7 @@ describe('Edge Cases and Error Handling', () => {
     });
 
     it('should handle stopping non-existent respawn controller', async () => {
-      const response = await fetch(`${baseUrl}/api/sessions/non-existent/respawn/stop`, {
+      const response = await ownerFetch(`${baseUrl}/api/sessions/non-existent/respawn/stop`, {
         method: 'POST',
       });
       const data = await response.json();
@@ -226,7 +230,7 @@ describe('Edge Cases and Error Handling', () => {
     });
 
     it('should handle updating config on non-existent session', async () => {
-      const response = await fetch(`${baseUrl}/api/sessions/non-existent/respawn/config`, {
+      const response = await ownerFetch(`${baseUrl}/api/sessions/non-existent/respawn/config`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ idleTimeoutMs: 5000 }),
@@ -239,7 +243,7 @@ describe('Edge Cases and Error Handling', () => {
 
   describe('Scheduled Run Edge Cases', () => {
     it('should handle stopping non-existent scheduled run', async () => {
-      const response = await fetch(`${baseUrl}/api/scheduled/non-existent`, {
+      const response = await ownerFetch(`${baseUrl}/api/scheduled/non-existent`, {
         method: 'DELETE',
       });
       const data = await response.json();
@@ -249,7 +253,7 @@ describe('Edge Cases and Error Handling', () => {
     });
 
     it('should handle getting non-existent scheduled run', async () => {
-      const response = await fetch(`${baseUrl}/api/scheduled/non-existent`);
+      const response = await ownerFetch(`${baseUrl}/api/scheduled/non-existent`);
       const data = await response.json();
 
       expect(data.error).toBe('Scheduled run not found');
@@ -260,11 +264,14 @@ describe('Edge Cases and Error Handling', () => {
 describe('Concurrent Session Handling', () => {
   let server: WebServer;
   let baseUrl: string;
+  let ownerFetch: typeof fetch;
 
   beforeAll(async () => {
+    const signIn = await prepareHttpOwner();
     server = new WebServer(0, false, true);
     await server.start();
     baseUrl = `http://localhost:${server.boundPort}`;
+    ownerFetch = await signIn(baseUrl);
   });
 
   afterAll(async () => {
@@ -276,7 +283,7 @@ describe('Concurrent Session Handling', () => {
     const createPromises = Array(5)
       .fill(null)
       .map(() =>
-        fetch(`${baseUrl}/api/sessions`, {
+        ownerFetch(`${baseUrl}/api/sessions`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ workingDir: '/tmp' }),
@@ -292,13 +299,13 @@ describe('Concurrent Session Handling', () => {
     }
 
     // Verify sessions are listed
-    const listRes = await fetch(`${baseUrl}/api/sessions`);
+    const listRes = await ownerFetch(`${baseUrl}/api/sessions`);
     const sessions = await listRes.json();
     expect(sessions.data.length).toBeGreaterThanOrEqual(5);
 
     // Clean up - delete all created sessions
     for (const result of results) {
-      await fetch(`${baseUrl}/api/sessions/${result.data.session.id}`, {
+      await ownerFetch(`${baseUrl}/api/sessions/${result.data.session.id}`, {
         method: 'DELETE',
       });
     }
@@ -309,7 +316,7 @@ describe('Concurrent Session Handling', () => {
 
     for (let i = 0; i < iterations; i++) {
       // Create
-      const createRes = await fetch(`${baseUrl}/api/sessions`, {
+      const createRes = await ownerFetch(`${baseUrl}/api/sessions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ workingDir: '/tmp' }),
@@ -318,7 +325,7 @@ describe('Concurrent Session Handling', () => {
       expect(createData.success).toBe(true);
 
       // Delete immediately
-      const deleteRes = await fetch(`${baseUrl}/api/sessions/${createData.data.session.id}`, {
+      const deleteRes = await ownerFetch(`${baseUrl}/api/sessions/${createData.data.session.id}`, {
         method: 'DELETE',
       });
       const deleteData = await deleteRes.json();
@@ -331,7 +338,7 @@ describe('Concurrent Session Handling', () => {
     const createdCases: string[] = [];
 
     const quickStartPromises = caseNames.map((name) =>
-      fetch(`${baseUrl}/api/quick-start`, {
+      ownerFetch(`${baseUrl}/api/quick-start`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ caseName: `${name}-${Date.now()}` }),
@@ -357,11 +364,14 @@ describe('Concurrent Session Handling', () => {
 describe('API Request Validation', () => {
   let server: WebServer;
   let baseUrl: string;
+  let ownerFetch: typeof fetch;
 
   beforeAll(async () => {
+    const signIn = await prepareHttpOwner();
     server = new WebServer(0, false, true);
     await server.start();
     baseUrl = `http://localhost:${server.boundPort}`;
+    ownerFetch = await signIn(baseUrl);
   });
 
   afterAll(async () => {
@@ -369,7 +379,7 @@ describe('API Request Validation', () => {
   }, 30000);
 
   it('should handle malformed JSON in request body', async () => {
-    const response = await fetch(`${baseUrl}/api/sessions`, {
+    const response = await ownerFetch(`${baseUrl}/api/sessions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: 'not valid json',
@@ -380,7 +390,7 @@ describe('API Request Validation', () => {
   });
 
   it('should handle empty request body when one is expected', async () => {
-    const response = await fetch(`${baseUrl}/api/sessions`, {
+    const response = await ownerFetch(`${baseUrl}/api/sessions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: '',
@@ -392,7 +402,7 @@ describe('API Request Validation', () => {
   });
 
   it('should handle requests with missing content-type', async () => {
-    const response = await fetch(`${baseUrl}/api/sessions`, {
+    const response = await ownerFetch(`${baseUrl}/api/sessions`, {
       method: 'POST',
     });
 

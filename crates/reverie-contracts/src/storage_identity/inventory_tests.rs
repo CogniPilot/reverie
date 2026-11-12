@@ -101,3 +101,28 @@ fn literal_accepted_legacy_text_ids_and_integral_generation_are_not_uuid_migrati
     assert_eq!(observed["employees"][0]["sessionId"], "existing-session");
     assert_eq!(observed["employees"][0]["sessionGeneration"], "1");
 }
+
+#[test]
+fn company_snapshot_digest_reuses_full_inventory_fingerprint_without_projection_loss() {
+    let mut original = company();
+    original["unprojectedPrivateField"] = json!({"value":"PRIVATE_FULL_DOCUMENT"});
+    let decoded = metadata(&original);
+    let fingerprint = decoded.company_snapshot_digest().unwrap();
+    assert_eq!(report(&original, None)["companyDigest"], fingerprint);
+    let pretty = decode_metadata(&serde_json::to_vec_pretty(&original).unwrap()).unwrap();
+    assert_eq!(pretty.company_snapshot_digest().unwrap(), fingerprint);
+    original["unprojectedPrivateField"]["value"] = json!("changed");
+    assert_ne!(
+        metadata(&original).company_snapshot_digest().unwrap(),
+        fingerprint
+    );
+    assert_eq!(fingerprint.len(), 64);
+    assert!(!fingerprint.contains("PRIVATE_FULL_DOCUMENT"));
+}
+
+#[test]
+fn company_snapshot_digest_refuses_ambiguous_current_and_retired_identity() {
+    let mut duplicate = company();
+    duplicate["retired"] = duplicate["employees"].clone();
+    assert!(metadata(&duplicate).company_snapshot_digest().is_err());
+}

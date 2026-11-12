@@ -161,6 +161,13 @@ impl<'a> PreparingWorkerLaunch<'a> {
     fn broker(&self) -> &'a InstallingBroker {
         self.admitted.request.broker
     }
+    fn admit_original_cleanup(
+        &self,
+        target: &WorkerContainerName,
+    ) -> Result<WorkerStopAdmission<'a>, GateError> {
+        self.broker()
+            .admit_original_handler_cleanup(&self.admitted.request.connection, target)
+    }
     fn claim(mut self) -> Result<ClaimedWorkerLaunch<'a>, Box<PreparationFailure<'a>>> {
         let observed = match WaitObservation::capture(&self) {
             Ok(observed) => observed,

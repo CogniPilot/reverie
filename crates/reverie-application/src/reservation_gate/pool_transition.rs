@@ -2,6 +2,10 @@
 use super::*;
 use reverie_contracts::reservation_control::{PoolTransitionIntent, PoolTransitionSelection};
 use reverie_host::reservation_control::PoolTransitionPending;
+mod cleanup;
+mod publication;
+pub(super) use cleanup::OriginalCleanupAdmission;
+pub(crate) use publication::{PoolMigrationPublished, PublishedPool};
 #[cfg(test)]
 mod tests;
 
@@ -14,6 +18,9 @@ pub(super) struct TransitionRecord {
     binding: ControlBinding,
     intent: Arc<PoolTransitionIntent>,
     pending: Mutex<Pending>,
+    original_cleanup:
+        Mutex<Option<reverie_host::worker_reports::WorkerOriginalHandlersCleanupBinding>>,
+    published: Mutex<Option<Arc<publication::PublishedConfiguration>>>,
 }
 /// Minted only after the exclusive durable writer and actual admission close.
 /// It grants no maintenance effect, capacity credit or pending-file removal.
@@ -83,11 +90,18 @@ impl ReservationGate {
         let mut fence = None;
         let body = (|| {
             self.inner.require_host_job_idle()?;
+            let document = self.inner.document()?;
             need(
-                self.inner
-                    .active_operations(&self.inner.document()?)?
-                    .is_empty(),
+                self.inner.active_operations(&document)?.is_empty(),
                 "POOL_TRANSITION_RESOURCE_WORK_RETAINED",
+            )?;
+            need(
+                document.operations().is_empty(),
+                "POOL_TRANSITION_RESOURCE_HISTORY_RETAINED",
+            )?;
+            need(
+                reservation_control::read_host_job_intent(self.inner.config()?.as_ref())?.is_none(),
+                "POOL_TRANSITION_HOST_HISTORY_RETAINED",
             )?;
             self.inner.guard(None)?;
             let config = self.inner.config()?;
@@ -108,6 +122,8 @@ impl ReservationGate {
                 binding,
                 intent,
                 pending: Mutex::new(Pending::Attempted),
+                original_cleanup: Mutex::new(None),
+                published: Mutex::new(None),
             });
             self.inner.retain_pool_transition(&record)?;
             fence = Some(PoolTransitionFence {
@@ -210,20 +226,22 @@ impl PoolTransitionFence {
                 &self.record.binding,
                 &admission,
             )?;
-            let pending = self
-                .record
-                .pending
-                .lock()
-                .map_err(|_| GateError::Refused("POOL_TRANSITION_REQUIRES_RECONCILIATION"))?;
-            let Pending::Published(pending) = &*pending else {
-                return Err(GateError::Refused(
-                    "POOL_TRANSITION_REQUIRES_RECONCILIATION",
-                ));
-            };
-            pending
-                .assert_current(&self.record.config)
-                .map_err(Into::into)
+            self.record.assert_pending()
         })();
         finalized(body, admission.close().map_err(Into::into))
+    }
+}
+impl TransitionRecord {
+    fn assert_pending(&self) -> Result<()> {
+        let pending = self
+            .pending
+            .lock()
+            .map_err(|_| GateError::Refused("POOL_TRANSITION_REQUIRES_RECONCILIATION"))?;
+        let Pending::Published(pending) = &*pending else {
+            return Err(GateError::Refused(
+                "POOL_TRANSITION_REQUIRES_RECONCILIATION",
+            ));
+        };
+        pending.assert_current(&self.config).map_err(Into::into)
     }
 }

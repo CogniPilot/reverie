@@ -143,6 +143,24 @@ fn backend_first_stop_before_admission_dispatches_nothing_and_keeps_sibling() {
     assert_eq!(starts, 1);
 }
 #[test]
+fn recovery_inspection_does_not_renew_an_expired_census_deadline() {
+    let fixture = Fixture::new();
+    let sibling = fixture.sibling();
+    let failure =
+        inspect_fixed_container_with_bound(&fixture.engine, "test-console", Some(Instant::now()))
+            .err()
+            .unwrap();
+    let starts = fixture.hooks.starts.load(Ordering::Acquire);
+    sibling.release().unwrap();
+    fixture.close().unwrap();
+    assert!(
+        matches!(failure.error, WorkerRecoveryError::Engine(error) if error.fault() == crate::engine_metadata::EngineFault::Deadline)
+    );
+    assert!(failure.call.is_none());
+    assert_eq!(starts, 1);
+}
+
+#[test]
 fn backend_started_unknown_retains_original_ticket_and_never_reissues() {
     if crate::test_process::isolate_case(
         "worker_recovery::tests::backend_started_unknown_retains_original_ticket_and_never_reissues",

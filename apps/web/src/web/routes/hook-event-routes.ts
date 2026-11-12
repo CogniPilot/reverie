@@ -1,3 +1,4 @@
+import {sessionProviderLeaseCurrent} from '../../session-provider-lease.js';
 /**
  * @fileoverview Hook event route.
  * Receives Claude Code hook events and broadcasts to SSE clients.
@@ -13,8 +14,8 @@ import { HookEventSchema, isValidWorkingDir } from '../schemas.js';
 import { sanitizeHookData, parseBody, persistAndBroadcastSession } from '../route-helpers.js';
 import { persistDockerCaseClaudeSessionId } from '../../docker-hosts.js';
 import { getDataDir } from '../../config/instance.js';
-import { sessionWaits, hooksAvailableForMode, sessionHookOptions } from '../session-wait-registry.js';
 import { getCli } from '../../config/cli-registry/registry.js';
+import { sessionWaits, hooksAvailableForMode, sessionHookOptions } from '../session-wait-registry.js';
 import { approvalInbox, type ApprovalKind } from '../approval-inbox.js';
 import type { SessionPort, EventPort, RespawnPort, ConfigPort, InfraPort } from '../ports/index.js';
 
@@ -64,6 +65,19 @@ export function registerHookEventRoutes(
       return createErrorResponse(ApiErrorCode.NOT_FOUND, 'Session not found');
     }
 
+    const waitSession = ctx.sessions.get(sessionId)!;
+    const admission = waitSession.admitHookReport(req.headers['x-reverie-hook-generation']);
+    // Matching reports received before start settlement are deliberately dropped.
+    // They cannot prove loaded configuration, readiness, or completion. In
+    // particular, fenced/failed/stopped starts never fall back to legacy effects.
+    if (admission === 'refused' || admission === 'preparing') return {};
+    const originalProviderLease = waitSession.captureApprovalProviderLease(() => ctx.sessions.get(sessionId) === waitSession);
+    const currentReport = () => sessionProviderLeaseCurrent(originalProviderLease, waitSession);
+    if (!currentReport()) return {};
+    const reportHooksAvailable = admission === 'legacy-attachment'
+      ? hooksAvailableForMode(waitSession.mode)
+      : hooksAvailableForMode(waitSession.mode, sessionHookOptions(waitSession));
+
     // DeepSeek status-bridge ordering: drop a stale retried report (see
     // dshSeqBySession above). Success rather than an error, so the shim exits 0
     // and the TUI does not keep retrying a report that will stay stale.
@@ -85,18 +99,19 @@ export function registerHookEventRoutes(
     // and can flap mid-turn), so these two are what an orchestrating agent should
     // wait on.
     //
-    // Gated on the session's MODE, matching `resolveWaitSignals` on the read side.
+    // Gated on capability AND current-start evidence, matching resolveWaitSignals.
+    // The shared instance secret authenticates transport, not provider generation.
     // Without it the guard is one-sided: a caller cannot ASK for `stop` on a shell or
     // codex session, but this endpoint would happily deliver one for it. Hook events
     // carry no identity beyond a per-instance secret shared by every case, so this is
     // also the cheap half of the forgery surface — a `stop` claimed for a session that
     // could never legitimately emit one is now dropped instead of steering another
     // agent's control flow.
-    const waitSession = ctx.sessions.get(sessionId);
-    if (waitSession && hooksAvailableForMode(waitSession.mode, sessionHookOptions(waitSession))) {
-      if (event === 'stop') {
+    if (reportHooksAvailable) {
+      const qualified = admission === 'current' || admission === 'supervised';
+      if (qualified && event === 'stop') {
         sessionWaits.notifySignal(sessionId, 'stop');
-      } else if (event === 'permission_prompt' || event === 'elicitation_dialog') {
+      } else if (qualified && (event === 'permission_prompt' || event === 'elicitation_dialog')) {
         sessionWaits.notifySignal(sessionId, 'blocked');
       }
       // Compacting is shown only on the harness's own report, and cleared by its end report or anything that proves the
@@ -106,6 +121,7 @@ export function registerHookEventRoutes(
       }
     }
 
+    if (!currentReport()) return {};
     // Signal the respawn controller based on hook event type
     const controller = ctx.respawnControllers.get(sessionId);
     if (controller) {
@@ -129,6 +145,7 @@ export function registerHookEventRoutes(
       }
     }
 
+    if (!currentReport()) return {};
     // Sync Claude's current conversation id. Interactive PTY mode never emits
     // `session_id` on stdout, so hooks are the only reliable way to learn that
     // the user ran `/clear` (which spins up a new conversation jsonl).
@@ -172,6 +189,7 @@ export function registerHookEventRoutes(
       }
     }
 
+    if (!currentReport()) return {};
     // Sanitize forwarded data: only include known safe fields, limit size
     const safeData = sanitizeHookData(data);
     const session = ctx.sessions.get(sessionId);
@@ -189,7 +207,7 @@ export function registerHookEventRoutes(
     // is worth even less on a phone than in a tab.
     let acknowledgedReason: string | undefined;
     const approvalKind = APPROVAL_KIND_BY_EVENT[event];
-    if (session && hooksAvailableForMode(session.mode, sessionHookOptions(session))) {
+    if (session && reportHooksAvailable) {
       if (approvalKind) {
         const toolInput =
           safeData.tool_input && typeof safeData.tool_input === 'object'
@@ -199,6 +217,7 @@ export function registerHookEventRoutes(
           ? [toolInput.command, toolInput.file_path, toolInput.description].find((v) => typeof v === 'string')
           : undefined;
         const item = approvalInbox.notePrompt({
+          providerLease: originalProviderLease,
           sessionId,
           sessionName,
           kind: approvalKind,
@@ -222,6 +241,7 @@ export function registerHookEventRoutes(
             return frame ?? session.terminalBuffer.slice(-8192) ?? null;
           },
         });
+        if (!item) return {};
         approvalId = item.id;
         acknowledgedReason = item.acknowledgedReason;
       } else if (APPROVAL_RESOLVING_EVENTS.has(event)) {

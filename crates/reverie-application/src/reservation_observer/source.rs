@@ -3,6 +3,15 @@ use reverie_contracts::kernel_mounts::MountTable;
 use reverie_core::{decimal::UnsignedInteger, ids::ProfileSessionId};
 use reverie_host::reservation_kernel::{CustodyPaths, ReservationKernel};
 pub(super) trait Source: Send + Sync {
+    fn controller_capacity<'owner>(
+        &self,
+        _owner: &'owner mut reverie_host::worker_pool::ActivatedController,
+        _policy: &reverie_contracts::worker_pool::WorkerPoolPolicy,
+        _website: &NativeLimitBinding,
+        _end: Instant,
+    ) -> Result<reverie_host::worker_pool::ControllerCapacity<'owner>> {
+        Err(ObserverError::Refused("RESERVATION_POOL_NATIVE_REQUIRED"))
+    }
     fn provider_process(
         &self,
         _owner: Option<&reverie_host::engine_metadata::MetadataQueryOwner>,
@@ -103,7 +112,7 @@ pub(super) trait Source: Send + Sync {
         &self,
         config: &ReservationConfiguration,
         paths: &CustodyPaths,
-        rows: &InventoryRows,
+        inventory: &reverie_contracts::reservation_engine::CustodyInventory<'_>,
         table: &MountTable,
         end: Instant,
     ) -> Result<()>;
@@ -140,6 +149,17 @@ impl Installed {
     }
 }
 impl Source for Installed {
+    fn controller_capacity<'owner>(
+        &self,
+        owner: &'owner mut reverie_host::worker_pool::ActivatedController,
+        policy: &reverie_contracts::worker_pool::WorkerPoolPolicy,
+        website: &NativeLimitBinding,
+        end: Instant,
+    ) -> Result<reverie_host::worker_pool::ControllerCapacity<'owner>> {
+        owner
+            .observe_capacity(&self.engine, policy, website, end)
+            .map_err(|error| ObserverError::Refused(error.code()))
+    }
     fn provider_process(
         &self,
         owner: Option<&reverie_host::engine_metadata::MetadataQueryOwner>,
@@ -291,11 +311,13 @@ impl Source for Installed {
         &self,
         config: &ReservationConfiguration,
         paths: &CustodyPaths,
-        rows: &InventoryRows,
+        inventory: &reverie_contracts::reservation_engine::CustodyInventory<'_>,
         table: &MountTable,
         end: Instant,
     ) -> Result<()> {
-        Ok(self.kernel.custody_paths(config, paths, rows, table, end)?)
+        Ok(self
+            .kernel
+            .custody_paths_with_stopped(config, paths, inventory, table, end)?)
     }
     fn storage(
         &self,

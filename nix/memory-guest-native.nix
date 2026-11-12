@@ -5,7 +5,7 @@ let
   workspace = import ./rust-workspace-source.nix {
     inherit pkgs src;
     members = [
-      "reverie-core" "reverie-contracts" "reverie-store" "reverie-host"
+      "reverie-core" "reverie-contracts" "reverie-store" "reverie-host" "reverie-worker-client"
       "reverie-application" "reverie-http" "reverie-diagnostics"
       "reverie-python-regex" "reverie-memory-cli" "reverie-mcp-cli"
     ];

@@ -3,6 +3,7 @@
 use super::*;
 use crate::human_protocol::HumanFrame;
 use reverie_core::{
+    gpu_access::{GpuIntent, GpuQueuedRequest},
     ids::{ProfileEmployeeId, ProfileSessionId},
     operations::JournalId,
     revision::ProfileVersion,
@@ -10,9 +11,18 @@ use reverie_core::{
 mod approval;
 mod command;
 mod continuation;
+mod fleet;
+mod gpu;
 pub use command::RamLaunchCommandData;
 pub use continuation::{ResourceContinuationRequest, ResourceContinuationVerb};
+pub use fleet::{
+    CurrentFleetMaintenanceOwner, CurrentFleetPreviewViewer, FLEET_MAINTENANCE_PURPOSE,
+    FLEET_REPLY_MAX_FRAME, FleetMaintenanceAction, FleetMaintenanceRequest, FleetPreviewRequest,
+    FleetReplyFrame, PreparedFleetMigrationReply, decode_fleet_maintenance_hello,
+    is_fleet_maintenance_hello,
+};
 mod installation;
+mod member_policy;
 mod owner;
 mod principal;
 mod registration;
@@ -26,6 +36,7 @@ pub use installation::{
     PoolInstallationConsentRequest, PoolInstallationOfferViewData, PoolInstallationRequestData,
     PoolInstallationViewRequest,
 };
+pub use member_policy::EmployeePolicyEdit;
 pub use owner::CurrentResourceOwner;
 pub use principal::ResourceOwnerPrincipal;
 pub use registration::{POOL_REGISTRATION_PURPOSE, decode_pool_registration_hello};
@@ -33,6 +44,30 @@ pub const RAM_POOL_PURPOSE: &str = "resource-ram-pool-v2";
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ResourceRequestSelection {
+    EmployeeStatus {
+        employee_id: ProfileEmployeeId,
+        session_id: ProfileSessionId,
+    },
+    EmployeePolicyEdit {
+        employee_id: ProfileEmployeeId,
+        approval: EmployeePolicyEdit,
+    },
+    GpuStatus {
+        employee_id: ProfileEmployeeId,
+        session_id: ProfileSessionId,
+    },
+    GpuApplyStatus {
+        employee_id: ProfileEmployeeId,
+        session_id: ProfileSessionId,
+    },
+    GpuApply {
+        employee_id: ProfileEmployeeId,
+        queued: GpuQueuedRequest,
+    },
+    GpuRequest {
+        employee_id: ProfileEmployeeId,
+        intent: GpuIntent,
+    },
     Preview {
         employee_id: ProfileEmployeeId,
         idempotency_key: JournalId,
@@ -73,6 +108,27 @@ impl ResourceOperationRequest {
         literal(field(value, "kind")?, "resource-operation")?;
         let request = identifier(field(value, "requestId")?)?;
         let (selected, approval) = match scalar(field(value, "verb")?)?.as_str() {
+            "employee-status" => {
+                closed(
+                    value,
+                    &["kind", "requestId", "verb", "employeeId", "sessionId"],
+                )?;
+                (
+                    ResourceRequestSelection::EmployeeStatus {
+                        employee_id: employee(field(value, "employeeId")?)?,
+                        session_id: ProfileSessionId::parse(
+                            identifier(field(value, "sessionId")?)?.as_str(),
+                        )
+                        .map_err(|_| ResourceActorDataError("RESOURCE_RAM_UUID"))?,
+                    },
+                    None,
+                )
+            }
+            "gpu-status" => (gpu::status(value)?, None),
+            "gpu-apply-status" => (gpu::apply_status(value)?, None),
+            "gpu-request" => gpu::request(value)?,
+            "gpu-apply" => gpu::apply(value)?,
+            "employee-policy-edit" => member_policy::request(value)?,
             "draft" => {
                 closed(
                     value,
@@ -120,6 +176,12 @@ impl ResourceOperationRequest {
     pub fn employee_id(&self) -> &ProfileEmployeeId {
         match &self.selected {
             ResourceRequestSelection::Preview { employee_id, .. }
+            | ResourceRequestSelection::EmployeeStatus { employee_id, .. }
+            | ResourceRequestSelection::EmployeePolicyEdit { employee_id, .. }
+            | ResourceRequestSelection::GpuStatus { employee_id, .. }
+            | ResourceRequestSelection::GpuApplyStatus { employee_id, .. }
+            | ResourceRequestSelection::GpuRequest { employee_id, .. }
+            | ResourceRequestSelection::GpuApply { employee_id, .. }
             | ResourceRequestSelection::Apply { employee_id, .. } => employee_id,
         }
     }
@@ -137,10 +199,15 @@ impl ResourceOperationRequest {
         )
     }
     fn stage(&self) -> &'static str {
-        if self.approval.is_some() {
-            "apply"
-        } else {
-            "preview"
+        match self.selected {
+            ResourceRequestSelection::EmployeeStatus { .. } => "status",
+            ResourceRequestSelection::EmployeePolicyEdit { .. } => "employee-policy-edit",
+            ResourceRequestSelection::GpuStatus { .. } => "gpu-status",
+            ResourceRequestSelection::GpuApplyStatus { .. } => "gpu-apply-status",
+            ResourceRequestSelection::GpuRequest { .. } => "gpu-request",
+            ResourceRequestSelection::GpuApply { .. } => "gpu-apply",
+            ResourceRequestSelection::Apply { .. } => "apply",
+            ResourceRequestSelection::Preview { .. } => "preview",
         }
     }
     fn approval_value(&self) -> Value {

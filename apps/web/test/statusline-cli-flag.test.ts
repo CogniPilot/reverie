@@ -16,7 +16,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { execFileSync } from 'node:child_process';
+import { captureClaudeLaunch } from './helpers/capture-claude-launch.js';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -25,14 +25,11 @@ import { SETTINGS_PATH } from '../src/web/route-helpers.js';
 
 const EXPORTER_CMD = 'curl -sfk -X POST "$REVERIE_API_URL/api/status-telemetry" --data @- 2>/dev/null || true';
 
-/** Extract the `--settings <arg>` fragment from a built command and have a
- * real shell resolve its quoting, printing the arg back out verbatim. */
-function extractSettingsJson(cmd: string): unknown {
-  const idx = cmd.indexOf('--settings ');
-  expect(idx).toBeGreaterThan(-1);
-  const fragment = cmd.slice(idx);
-  const out = execFileSync('bash', ['-c', `set -- ${fragment}; printf '%s' "$2"`]).toString();
-  return JSON.parse(out);
+/** Inspect the settings argument after the actual shell and selector execute. */
+function extractSettingsJson(cmd: string, transcriptId?: string): unknown {
+  const args = captureClaudeLaunch(cmd, transcriptId);
+  expect(args.filter(arg => arg === '--settings')).toHaveLength(1);
+  return JSON.parse(args[args.indexOf('--settings') + 1]);
 }
 
 describe('buildSpawnCommand statusLineCommand (claude mode)', () => {
@@ -55,7 +52,7 @@ describe('buildSpawnCommand statusLineCommand (claude mode)', () => {
       statusLineCommand: EXPORTER_CMD,
     });
     // Only one --settings flag total — never two (Claude Code accepts just one).
-    expect(cmd.match(/--settings/g)).toHaveLength(1);
+    expect(captureClaudeLaunch(cmd).filter(arg => arg === '--settings')).toHaveLength(1);
     expect(extractSettingsJson(cmd)).toEqual({
       ultracode: true,
       statusLine: { type: 'command', command: EXPORTER_CMD },
@@ -69,8 +66,9 @@ describe('buildSpawnCommand statusLineCommand (claude mode)', () => {
       effort: 'high',
       statusLineCommand: EXPORTER_CMD,
     });
-    expect(cmd).toContain('--effort');
-    expect(cmd).toContain('--settings');
+    const args = captureClaudeLaunch(cmd);
+    expect(args[args.indexOf('--effort') + 1]).toBe('high');
+    expect(args).toContain('--settings');
     expect(extractSettingsJson(cmd)).toEqual({ statusLine: { type: 'command', command: EXPORTER_CMD } });
   });
 

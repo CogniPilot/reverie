@@ -3,6 +3,7 @@
 use super::call_budget::CallBudget;
 use super::*;
 mod diagnostic;
+mod perf_image;
 use crate::command_telemetry::CommandTelemetry;
 pub use diagnostic::LaptopCreateDiagnostic;
 use reverie_contracts::{resource_config::ResourceIdentitySettings, worker_launch};
@@ -36,6 +37,7 @@ pub(super) struct Creation {
     pub(super) publication: Option<super::publication::Publication>,
     pub(super) worker_memory: Option<super::memory::Pending>,
     pub(super) worker_perf: Option<super::perf::Attempt>,
+    pub(super) controller_member_attempt: Option<MemberConfigurationAttempt>,
 }
 impl Creation {
     pub(super) fn owns_created(&self) -> bool {
@@ -64,12 +66,13 @@ pub enum LaptopCreation {
     Retained,
 }
 impl Workflows {
-    fn create(
+    pub(super) fn create(
         &self,
         runtime: &WorkerRuntime,
         workflow: &LaptopWorkflow,
         telemetry: &CommandTelemetry,
         deadline: CallBudget,
+        mut member: Option<&mut PoolMemberCreation<'_>>,
     ) -> Result<LaptopCreation> {
         self.bound(runtime, workflow)?;
         let mut record = workflow
@@ -88,14 +91,7 @@ impl Workflows {
         // The retained plan may precede the App's latest source read. Until a
         // genuine provider-maintenance owner is joined, neither snapshot may
         // turn native-provider selection into an ordinary legacy create.
-        let provider = reverie_contracts::worker_pool::WorkerPoolProvider::from_config(
-            record.resources().plan.source(),
-        )
-        .map_err(|_| LaptopError::Refused("WORKER_POOL_PROVIDER_INVALID"))?;
-        need(
-            provider.is_none(),
-            "WORKER_POOL_PROVIDER_MAINTENANCE_REQUIRED",
-        )?;
+        controller::check_member(runtime, &record.resources().plan, member.as_deref_mut())?;
         // Retain the one-shot phase before the first possible constructor.
         record.creation = Some(Creation {
             created: false,
@@ -105,10 +101,18 @@ impl Workflows {
             publication: None,
             worker_memory: None,
             worker_perf: None,
+            controller_member_attempt: None,
         });
         record.phase = Phase::Running;
-        let result = run(runtime, &mut record, telemetry, deadline);
+        let result = run(
+            runtime,
+            &mut record,
+            telemetry,
+            deadline,
+            member.as_deref_mut(),
+        );
         record.outcome = Some(result.map_err(Arc::new));
+        controller::retain_outcome(member, &record);
         if record.pending.is_some() || record.unknown {
             record.phase = Phase::Retained;
             return Ok(LaptopCreation::Retained);
@@ -138,10 +142,12 @@ fn run(
     record: &mut Record,
     telemetry: &CommandTelemetry,
     deadline: CallBudget,
+    mut member: Option<&mut PoolMemberCreation<'_>>,
 ) -> Result<()> {
     telemetry
         .assert_runtime(runtime)
         .map_err(|error| LaptopError::Telemetry(CreateTelemetryFailure::new(error)))?;
+    perf_image::assert_current(runtime, record, deadline)?;
     let resources = record.resources();
     resources
         .held_nix()?
@@ -176,6 +182,11 @@ fn run(
     telemetry
         .check_create_args(runtime, &args)
         .map_err(|error| LaptopError::Telemetry(CreateTelemetryFailure::new(error)))?;
+    if let Some(member) = member.as_deref_mut() {
+        member
+            .assert_arguments(runtime, &record.resources().plan, &args)
+            .map_err(controller::pool_error)?;
+    }
     let argv = network::encode_arguments(&args)?;
     let output = network::call_with_budget(
         runtime,
@@ -205,6 +216,14 @@ fn run(
         .scalar_text()
         .expect("scalar capture");
     created.container = ContainerId::parse(&trimmed).ok();
+    if let Some(member) = member
+        && let Err(error) = member.assert_plan(runtime, &record.resources().plan)
+    {
+        // The create ACK already owns the target. A failed parent/native
+        // postcheck cannot turn that effect into a known absent resource.
+        record.unknown = true;
+        return Err(controller::pool_error(error));
+    }
     Ok(())
 }
 pub(super) fn start_allowed(record: &Record) -> Result<bool> {
@@ -230,8 +249,13 @@ impl WorkerRuntime {
         telemetry: &CommandTelemetry,
         deadline: Instant,
     ) -> Result<LaptopCreation> {
-        self.laptop_workflows()
-            .create(self, workflow, telemetry, CallBudget::bounded(deadline))
+        self.laptop_workflows().create(
+            self,
+            workflow,
+            telemetry,
+            CallBudget::bounded(deadline),
+            None,
+        )
     }
     pub fn create_laptop_for_connection(
         &self,
@@ -242,6 +266,6 @@ impl WorkerRuntime {
         self.laptop_workflows()
             .assert_worker_connection(self, workflow, connection)?;
         self.laptop_workflows()
-            .create(self, workflow, telemetry, CallBudget::worker())
+            .create(self, workflow, telemetry, CallBudget::worker(), None)
     }
 }

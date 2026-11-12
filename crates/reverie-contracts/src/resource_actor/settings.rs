@@ -11,6 +11,14 @@ pub struct ResourceActorSettings {
     gid: u32,
 }
 impl ResourceActorSettings {
+    /// Closed DATA precondition for the initial installer. Presence of any
+    /// selector, including an invalid value, belongs to a different workflow.
+    pub fn require_unselected(config: &EffectiveWorkerConfig) -> Result<()> {
+        need(
+            !object(config.as_value())?.contains_key(&key("resourceActorConfig")),
+            "RESOURCE_INSTALL_ALREADY_SELECTED",
+        )
+    }
     pub fn capture(config: &EffectiveWorkerConfig) -> Result<Self> {
         let selected = ReservationConfiguration::capture(config.clone());
         let root = selected

@@ -672,9 +672,9 @@ describe("pi's work-detection descriptor", () => {
 
   it('leaves the submit verifier unable to press Enter on a pi pane', () => {
     // The verifier reads the last row starting with the glyph, which for pi is a bare
-    // rule with no prompt text in it: it must stand down, never report "unsubmitted".
-    expect(promptStillInComposer(PI_AT_REST, 'say ok', pi!.promptGlyph)).toBe(false);
-    expect(promptStillInComposer(PI_WORKING, 'say ok', pi!.promptGlyph)).toBe(false);
+    // rule with no prompt text in it: the result is unknown, never proof of submission or authority to press Enter.
+    expect(promptStillInComposer(PI_AT_REST, 'say ok', pi!.promptGlyph)).toBeUndefined();
+    expect(promptStillInComposer(PI_WORKING, 'say ok', pi!.promptGlyph)).toBeUndefined();
   });
 });
 
@@ -754,9 +754,11 @@ describe("opencode's work-detection descriptor", () => {
     // The last `┃` row is the composer's agent/model row, or the permission box's closing
     // bar: never the prompt text, so the verifier stands down rather than re-pressing Enter.
     const typed = OC_COMPOSER.replace('  ┃\n  ┃\n', '  ┃\n  ┃  say ok\n');
-    expect(promptStillInComposer(typed, 'say ok', oc!.promptGlyph)).toBe(false);
-    expect(promptStillInComposer(OC_AT_REST, 'say ok', oc!.promptGlyph)).toBe(false);
-    expect(promptStillInComposer(OC_WORKING, 'sleep 12', oc!.promptGlyph)).toBe(false);
+    expect(promptStillInComposer(typed, 'say ok', oc!.promptGlyph)).toBeUndefined();
+    expect(promptStillInComposer(OC_AT_REST, 'say ok', oc!.promptGlyph)).toBeUndefined();
+    expect(promptStillInComposer(OC_WORKING, 'sleep 12', oc!.promptGlyph)).toBeUndefined();
+    // This permission screen exposes an empty composer; it still supplies no
+    // positive proof that a prompt is stranded and needs another Enter.
     expect(promptStillInComposer(OC_PERMISSION, 'Echo permission-check', oc!.promptGlyph)).toBe(false);
   });
 });
@@ -895,9 +897,9 @@ describe("gemini's work-detection descriptor", () => {
     // The last row starting with `▀` is a bar, never prompt text, even when the echoed
     // prompt sits just above it while a confirmation waits.
     const typed = GEM_COMPOSER.replace('Type your message or @path/to/file', 'say ok');
-    expect(promptStillInComposer(typed, 'say ok', gem!.promptGlyph)).toBe(false);
-    expect(promptStillInComposer(GEM_AT_REST, 'say ok', gem!.promptGlyph)).toBe(false);
-    expect(promptStillInComposer(GEM_CONFIRM, 'Run sleep 8 in the shell', gem!.promptGlyph)).toBe(false);
+    expect(promptStillInComposer(typed, 'say ok', gem!.promptGlyph)).toBeUndefined();
+    expect(promptStillInComposer(GEM_AT_REST, 'say ok', gem!.promptGlyph)).toBeUndefined();
+    expect(promptStillInComposer(GEM_CONFIRM, 'Run sleep 8 in the shell', gem!.promptGlyph)).toBeUndefined();
   });
 });
 

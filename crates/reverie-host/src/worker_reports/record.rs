@@ -305,6 +305,36 @@ impl Record {
                 error.into_inner()
             }
         };
+        self.interrupt_control(&slot)
+    }
+    /// Original-handler drain distinguishes no-issued contention from an
+    /// actual shutdown outcome; a poisoned control owner never grants a call.
+    pub(super) fn try_interrupt_original(
+        &self,
+        service: &WorkerReportService,
+        original_end: Instant,
+    ) -> Result<bool> {
+        let slot = match self.control.try_lock() {
+            Ok(slot) => slot,
+            Err(std::sync::TryLockError::WouldBlock) => return Ok(false),
+            Err(std::sync::TryLockError::Poisoned(_)) => {
+                self.mark_opaque();
+                return Err(WorkerReportError::Unconfirmed);
+            }
+        };
+        if self.opaque() {
+            return Err(WorkerReportError::Unconfirmed);
+        }
+        let end = service
+            .engine
+            .stop_deadline()
+            .map_or(original_end, |stop| stop.min(original_end));
+        if service.stopping() || Instant::now() >= end {
+            return Err(WorkerReportError::Stopping);
+        }
+        self.interrupt_control(&slot).map(|()| true)
+    }
+    fn interrupt_control(&self, slot: &Option<UnixStream>) -> Result<()> {
         let result = slot.as_ref().map_or(Ok(()), wire::shutdown);
         if result.is_err() {
             self.opaque.store(true, Ordering::Release);
@@ -425,6 +455,27 @@ impl Record {
     pub(super) fn can_progress(&self) -> bool {
         !self.finished() && !self.opaque.load(Ordering::Acquire)
     }
+    /// Actual terminal state only. Ordinary hold contention remains pending;
+    /// a poisoned/opaque record can never become known inactivity.
+    pub(super) fn terminal_progress(&self) -> Result<Option<bool>> {
+        if self.opaque() {
+            return Err(WorkerReportError::Unconfirmed);
+        }
+        let hold = match self.lifecycle.try_lock() {
+            Ok(hold) => hold,
+            Err(std::sync::TryLockError::WouldBlock) => return Ok(None),
+            Err(std::sync::TryLockError::Poisoned(_)) => {
+                self.mark_opaque();
+                return Err(WorkerReportError::Unconfirmed);
+            }
+        };
+        let live =
+            !self.finished() && matches!(*hold, super::retention::LifecycleHoldState::Held(_));
+        if self.opaque() {
+            return Err(WorkerReportError::Unconfirmed);
+        }
+        Ok(Some(live))
+    }
     pub(super) fn opaque(&self) -> bool {
         self.opaque.load(Ordering::Acquire)
     }
@@ -490,6 +541,10 @@ impl Record {
     #[cfg(test)]
     pub(super) fn control_ready(&self) -> bool {
         self.control.try_lock().is_ok_and(|slot| slot.is_some())
+    }
+    #[cfg(test)]
+    pub(super) fn test_control_guard(&self) -> MutexGuard<'_, Option<UnixStream>> {
+        self.control.lock().unwrap()
     }
 }
 pub(super) fn close(stream: UnixStream) -> Result<()> {

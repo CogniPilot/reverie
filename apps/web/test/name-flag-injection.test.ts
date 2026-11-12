@@ -18,6 +18,7 @@ import {
   CLAUDE_NAME_FLAG_MIN_VERSION,
 } from '../src/session-cli-builder.js';
 import { buildSpawnCommand } from '../src/tmux-manager.js';
+import { captureClaudeLaunch } from './helpers/capture-claude-launch.js';
 
 describe('sanitizeCliSessionName', () => {
   it('passes ordinary Reverie session names through', () => {
@@ -123,7 +124,8 @@ describe('buildSpawnCommand with a session name (tmux path)', () => {
 
   it('appends a quoted --name when the injected version supports it', () => {
     const cmd = buildSpawnCommand({ ...base, sessionName: 'w1-msgtest-worker', claudeCliVersion: '2.1.226' });
-    expect(cmd).toContain(' --name "w1-msgtest-worker"');
+    const args = captureClaudeLaunch(cmd);
+    expect(args[args.indexOf('--name') + 1]).toBe('w1-msgtest-worker');
   });
 
   it('stays byte-identical to the flagless command on an old version', () => {
@@ -145,16 +147,19 @@ describe('buildSpawnCommand with a session name (tmux path)', () => {
     expect(cmd).not.toContain('--name');
   });
 
-  it('carries the flag in BOTH branches of the resume fallback chain', () => {
+  it('carries the flag on both metadata-selected fresh and resume launches', () => {
     const cmd = buildSpawnCommand({
       ...base,
       sessionName: 'w1-a',
       claudeCliVersion: '2.1.226',
       resumeSessionId: '0000002e-0039-4000-8000-000000000053',
     });
-    const occurrences = cmd.split(' --name "w1-a"').length - 1;
-    expect(cmd).toContain(' || ');
-    expect(occurrences).toBe(2);
+    for (const transcriptId of [undefined, base.sessionId]) {
+      const args = captureClaudeLaunch(cmd, transcriptId);
+      expect(args.filter(arg => arg === '--name')).toHaveLength(1);
+      expect(args[args.indexOf('--name') + 1]).toBe('w1-a');
+      expect(args[args.indexOf(transcriptId ? '--resume' : '--session-id') + 1]).toBe(base.sessionId);
+    }
   });
 
   it('sanitizes a hostile name before interpolation', () => {
@@ -163,11 +168,10 @@ describe('buildSpawnCommand with a session name (tmux path)', () => {
       sessionName: 'w1"; rm -rf /; echo "',
       claudeCliVersion: '2.1.226',
     });
-    const m = cmd.match(/ --name "([^"]*)"/);
-    expect(m).not.toBeNull();
-    // Whatever remains inside the quotes must be inert: no quote/dollar/backtick/
-    // backslash can survive the allowlist, so the shell sees one literal argv.
-    expect(m![1]).not.toMatch(/["$`\\;/]/);
+    const args = captureClaudeLaunch(cmd);
+    expect(args.filter(arg => arg === '--name')).toHaveLength(1);
+    expect(args[args.indexOf('--name') + 1]).toBe(sanitizeCliSessionName('w1"; rm -rf /; echo "'));
+    expect(args[args.indexOf('--name') + 1]).not.toMatch(/["$`\\;/]/);
   });
 
   it('never adds --name to non-claude modes', () => {

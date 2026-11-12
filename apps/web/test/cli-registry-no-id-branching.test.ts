@@ -88,7 +88,6 @@ const allow = (count: number, reason: string): Allowance => ({ count, reason });
  * Keyed `<relative path>::<the matched expression>`.
  */
 const ALLOWED_BRANCHES: Record<string, Allowance> = {
-  "plan-move-runtime.ts::mode === 'claude'": allow(1, 'strict native Claude composer grammar fallback; canonical empty composer and confirmed task footer remain CLI-specific, never a generic glyph readiness grant'),
   // --- Legacy <Mode>Config plumbing (public wire shape, see the header) ---
   "web/routes/session-routes.ts::mode === 'opencode'": allow(2, 'legacy <Mode>Config plumbing'),
   "web/routes/session-routes.ts::mode === 'codex'": allow(2, 'legacy <Mode>Config plumbing'),
@@ -97,7 +96,6 @@ const ALLOWED_BRANCHES: Record<string, Allowance> = {
   "web/routes/session-routes.ts::mode === 'pi'": allow(2, 'legacy <Mode>Config plumbing'),
   "web/routes/session-routes.ts::mode === 'grok'": allow(2, 'legacy <Mode>Config plumbing'),
   "web/routes/session-routes.ts::mode === 'deepseek'": allow(2, 'legacy <Mode>Config plumbing'),
-  "web/server.ts::mode === 'opencode'": allow(1, 'legacy <Mode>Config plumbing (session recovery)'),
   "web/server.ts::mode === 'codex'": allow(1, 'legacy <Mode>Config plumbing (session recovery)'),
   "web/server.ts::mode === 'gemini'": allow(1, 'legacy <Mode>Config plumbing (session recovery)'),
   "web/server.ts::mode === 'antigravity'": allow(1, 'legacy <Mode>Config plumbing (session recovery)'),
@@ -128,7 +126,7 @@ const ALLOWED_BRANCHES: Record<string, Allowance> = {
   "cron/cron-service.ts::mode === 'claude'": allow(1, 'cron launch handling, not yet generalised'),
   "cron/cron-service.ts::mode === 'shell'": allow(1, 'cron launch handling, not yet generalised'),
   "web/routes/session-routes.ts::mode === 'claude'": allow(
-    2,
+    1,
     'docker case bookkeeping keyed on the claude conversation id'
   ),
   "cli.ts::mode === 'shell'": allow(1, 'a CLI-table label, not behaviour'),
@@ -169,26 +167,13 @@ const ALLOWED_BRANCHES: Record<string, Allowance> = {
 
   // Legacy <Mode>Config plumbing, same category as the `===` entries above.
   "web/routes/session-routes.ts::mode !== 'omp'": allow(
-    2,
-    'legacy <Mode>Config plumbing (resolveOmpConfigForCreate), and one link of the scaffolded-case hooks ' +
-      'chain (see the opencode entry below)'
+    1,
+    'legacy <Mode>Config plumbing (resolveOmpConfigForCreate)'
   ),
-
-  // ⚠️ Scaffolded-case hooks. This chain excludes seven CLIs but NOT `deepseek`, while its
-  // own comment says DeepSeek uses its own system — so a scaffolded deepseek case gets a
-  // Claude hooks block written into it. That inconsistency is UPSTREAM's and predates this
-  // change; expressing the chain as a capability would have to pick a side and would
-  // therefore be a behaviour change. Left exactly as found, and named here so it is visible.
   "web/routes/session-routes.ts::mode !== 'opencode'": allow(
-    2,
-    'scaffolded-case hooks + the COD-91 self-heal skip; the chain omits deepseek upstream, ' +
-      'so any capability form would change behaviour — see PR discussion'
+    1,
+    'dedicated legacy OpenCode thread endpoint wire shape'
   ),
-  "web/routes/session-routes.ts::mode !== 'codex'": allow(1, 'scaffolded-case hooks (see the opencode entry)'),
-  "web/routes/session-routes.ts::mode !== 'gemini'": allow(1, 'scaffolded-case hooks (see the opencode entry)'),
-  "web/routes/session-routes.ts::mode !== 'antigravity'": allow(1, 'scaffolded-case hooks (see the opencode entry)'),
-  "web/routes/session-routes.ts::mode !== 'pi'": allow(1, 'scaffolded-case hooks (see the opencode entry)'),
-  "web/routes/session-routes.ts::mode !== 'grok'": allow(1, 'scaffolded-case hooks (see the opencode entry)'),
 };
 
 /** Every stock CLI id, derived rather than restated so a new entry is covered automatically. */

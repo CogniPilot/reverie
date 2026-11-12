@@ -17,7 +17,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { dataPath } from '../src/config/instance.js';
 import { STOCK_CLIS } from '../src/config/cli-registry/stock.js';
@@ -131,6 +131,44 @@ describe('resolveRegistry (pure)', () => {
 describe('loadCliRegistry (on disk)', () => {
   beforeEach(() => reloadCliRegistry());
   afterEach(() => reloadCliRegistry());
+
+  it('retains shipped workspace policies for old stock overrides while an old custom cannot claim stock identity', () => {
+    const old = (id: string) => {
+      const entry = JSON.parse(JSON.stringify(STOCK_CLIS.find((item) => item.id === id)!));
+      delete entry.capabilities.workspaceHooks;
+      return entry;
+    };
+    const custom = { ...old('claude'), id: 'claude', stock: true, order: 999 };
+    try {
+      writeRegistryFile({
+        schemaVersion: 1,
+        clis: { claude: old('claude'), shell: old('shell'), 'synthetic-custom': custom },
+      });
+      const before = readFileSync(dataPath('clis.json'), 'utf8');
+      const { entries, warnings } = loadCliRegistry();
+      expect(warnings).toEqual([]);
+      expect(entries.find((entry) => entry.id === 'claude')?.capabilities.workspaceHooks).toEqual({
+        sessionCreate: 'install',
+        freshCase: 'install',
+        existingCase: 'install',
+      });
+      expect(entries.find((entry) => entry.id === 'shell')?.capabilities.workspaceHooks).toEqual({
+        sessionCreate: 'none',
+        freshCase: 'install',
+        existingCase: 'refresh-only',
+      });
+      expect(entries.find((entry) => entry.id === 'synthetic-custom')).toMatchObject({
+        stock: false,
+        capabilities: { workspaceHooks: { sessionCreate: 'none', freshCase: 'none', existingCase: 'none' } },
+      });
+      expect(readFileSync(dataPath('clis.json'), 'utf8')).toBe(before);
+      expect(readdirSync(dirname(dataPath('clis.json'))).some((name) => name.startsWith('clis.json.invalid-'))).toBe(
+        false
+      );
+    } finally {
+      rmSync(dataPath('clis.json'), { force: true });
+    }
+  });
 
   it('WRITES NOTHING when no file exists', () => {
     const path = dataPath('clis.json');

@@ -41,6 +41,12 @@ export const BROWSER_TEST_GLOBS = [
   'test/webhook-removal.browser.test.ts',
   'test/company-ui.browser.test.ts',
   'test/company-profile-pat.browser.test.ts',
+  'test/company-resource-layout.browser.test.ts',
+  'test/office-server.browser.test.ts',
+  'test/office-owner-controls.browser.test.ts',
+  'test/approvals-held-layout.browser.test.ts',
+  'test/terminal-input-recovery.browser.test.ts',
+  'test/browser-coverage-attribution.browser.test.ts',
   'test/office-power.browser.test.ts',
   'test/workspace-gutter-navigation.browser.test.ts',
   'test/board-preload.browser.test.ts',
@@ -114,6 +120,8 @@ export const NON_CI_TEST_GLOBS = [...MOBILE_TEST_GLOBS, ...PERF_TEST_GLOBS, ...B
  * on one of those lines; list it here only with the reason it cannot run there.
  */
 export const NIX_UNCHECKED_TESTS: Record<string, string> = {
+  'test/browser-coverage-git-integration.test.ts':
+    'Requires the real checkout Git object database to verify source authority; runs in the full web CI suite, not flattened packaged Nix source.',
   'test/advisor-model.test.ts':
     '8 of 31 fail: the spawn command now wraps its settings in a /bin/sh -c launcher, which this test\'s settings-JSON parser cannot read.',
   'test/agent-skill-mode-lists.test.ts':
@@ -190,8 +198,6 @@ export const NIX_UNCHECKED_TESTS: Record<string, string> = {
     '1 of 11 fails: the pinned conversation id is undefined where the test expects null.',
   'test/session-model-recovery.test.ts':
     '6 of 12 fail: the spawn command is now a /bin/sh -c launcher, so the model flag is not found where the test looks.',
-  'test/spreadsheet-assets.test.ts':
-    '1 of 9 fails: .gitignore does not list the vendor output path the test expects.',
   'test/spreadsheet-preview-worker.test.ts':
     'Its test worker runs out of JavaScript heap (about 1 GiB on a 2 GiB machine) in the bracketed-format cases, so 9 of 43 never finish.',
   'test/statusline-cli-flag.test.ts':

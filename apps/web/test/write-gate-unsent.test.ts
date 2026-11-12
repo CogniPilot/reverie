@@ -4,6 +4,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { Session } from '../src/session.js';
 import { typeAndSubmit } from '../src/submit-settle.js';
 import { registerSessionRoutes } from '../src/web/routes/session-routes.js';
+import { installResponseEnvelope } from '../src/web/response-envelope.js';
 import { installRouteErrorHandler } from '../src/web/route-error-handler.js';
 import { createMockRouteContext } from './mocks/index.js';
 import { trustedFixtureOwner } from './helpers/trusted-owner-fixture.js';
@@ -20,7 +21,6 @@ afterEach(async () => {
 /** A real Session over a mux whose sendInput runs the real typeAndSubmit against a scripted pane. */
 function codexSession(screen: { text: string }, hooks: { onType?: (s: Session) => void; onSleep?: (s: Session) => void } = {}) {
   const keys: string[] = [];
-  let session!: Session;
   const io = {
     capture: () => screen.text,
     typeText: async (text: string) => {
@@ -34,13 +34,15 @@ function codexSession(screen: { text: string }, hooks: { onType?: (s: Session) =
       screen.text = `• Working (esc to interrupt)\n›\n${FOOTER}`;
     },
   };
+  const record = {muxName: 'reverie-owned-review', sessionId: 'test-session-1', pid: 42};
   const mux = {
+    getSession: () => record,
     capturePaneText: () => screen.text,
     sendInput: vi.fn(async (_id: string, input: string, options: { requireEmptyComposer?: boolean } = {}) =>
       (await typeAndSubmit(io, input.replace(/\r/g, ''), { glyph: '›', workingLine: 'esc to interrupt' }, 'control', options.requireEmptyComposer)) !== 'not-written'),
   };
-  session = new Session({ id: 'test-session-1', workingDir: '/tmp', mode: 'codex', useMux: true, mux: mux as never,
-    muxSession: { muxName: 'reverie-owned-review', sessionId: 'test-session-1', pid: 42 } as never });
+  const session = new Session({ id: 'test-session-1', workingDir: '/tmp', mode: 'codex', useMux: true, mux: mux as never,
+    muxSession: record as never });
   cleanups.push(async () => {
     Object.assign(session, { ptyProcess: null, _muxSession: null });
     await session.stop(false);
@@ -56,20 +58,26 @@ it('control: a wake whose turn starts between text and Enter is preserved, repor
   const ctx = createMockRouteContext();
   ctx.sessions.set(session.id, session as never);
   registerSessionRoutes(app, ctx as never, { verifiedOwner: trustedFixtureOwner, remoteWake: { hasWakeTarget: vi.fn(async () => false) } as never });
+  installResponseEnvelope(app, '');
   installRouteErrorHandler(app);
   await app.ready();
   cleanups.push(() => app.close());
   const wake = (seq: number) => app.inject({ method: 'POST', url: '/api/sessions/test-session-1/input', payload: { input: 'wake\r', ifIdle: true, clientId: 'review', seq } });
 
   const first = await wake(1);
-  expect(first.json()).toEqual({ delivered: false, typedUnsent: true });
+  expect(first.statusCode).toBe(409);
+  expect(first.json().data).toEqual({ delivered: false, typedUnsent: true });
+  const duplicate = await wake(1);
+  expect(duplicate.statusCode).toBe(first.statusCode);
+  expect(duplicate.json()).toEqual(first.json());
   expect(keys).toEqual(['wake']); // the text went in; Enter never did
   expect(screen.text).toContain('› wake'); // preserved, not cleared
 
   // The turn ends; the composer still holds the unsent text, so a second wake types nothing on top of it.
   Object.assign(session, { _isWorking: false, _status: 'idle' });
   const second = await wake(2);
-  expect(second.json()).toEqual({ delivered: false });
+  expect(second.statusCode).toBe(409);
+  expect(second.json().data).toEqual({ delivered: false });
   expect(keys).toEqual(['wake']);
   expect(mux.sendInput).toHaveBeenCalledOnce();
 });

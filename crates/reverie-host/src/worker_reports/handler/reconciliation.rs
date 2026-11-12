@@ -76,30 +76,56 @@ impl WorkerHandlerInbox {
     }
 }
 impl HandlerJob {
-    fn request_progress(&self, command: WorkerHandlerCommand, end: Instant) -> Result<()> {
+    fn dispatch_progress(&self, command: WorkerHandlerCommand) -> Dispatch {
         if self.known_settled() {
-            return Ok(());
+            return Dispatch::Unavailable;
         }
-        let slot = self
-            .reconciliation
-            .try_lock()
-            .map_err(|_| WorkerReportError::Unconfirmed)?;
+        let slot = match self.reconciliation.try_lock() {
+            Ok(slot) => slot,
+            Err(TryLockError::WouldBlock) => return Dispatch::Contended,
+            Err(TryLockError::Poisoned(_)) => return Dispatch::Poisoned,
+        };
         let Some(sender) = slot.as_ref() else {
-            return Ok(());
+            return Dispatch::Unavailable;
         };
         let (reply, response) = mpsc::sync_channel(1);
         let request = Request { command, reply };
         match sender.try_send(request) {
-            Ok(()) => {}
-            Err(TrySendError::Full(_)) => return Ok(()),
-            Err(TrySendError::Disconnected(_)) => return Ok(()),
+            Ok(()) => Dispatch::Sent(response),
+            Err(TrySendError::Full(_)) => Dispatch::Pending,
+            Err(TrySendError::Disconnected(_)) => Dispatch::Unavailable,
         }
-        drop(slot);
+    }
+    /// The original-handler owner only queues this closed existing command.
+    /// It never blocks on a reply or treats a reply as record/resource closure.
+    pub(in crate::worker_reports) fn try_reconcile_original(&self) -> Result<bool> {
+        match self.dispatch_progress(WorkerHandlerCommand::Reconcile) {
+            Dispatch::Pending | Dispatch::Contended => Ok(false),
+            Dispatch::Poisoned => {
+                self.opaque.store(true, Ordering::Release);
+                Err(WorkerReportError::Unconfirmed)
+            }
+            Dispatch::Sent(_) | Dispatch::Unavailable => Ok(true),
+        }
+    }
+    fn request_progress(&self, command: WorkerHandlerCommand, end: Instant) -> Result<()> {
+        let response = match self.dispatch_progress(command) {
+            Dispatch::Sent(response) => response,
+            Dispatch::Contended | Dispatch::Poisoned => return Err(WorkerReportError::Unconfirmed),
+            Dispatch::Pending | Dispatch::Unavailable => return Ok(()),
+        };
         let _ = response.recv_timeout(self.bound(end).saturating_duration_since(Instant::now()));
         // No response, Retained and Finalized alike still require the actual
         // record/hold/socket and published-thread checks below.
         Ok(())
     }
+}
+enum Dispatch {
+    Contended,
+    Poisoned,
+    Pending,
+    Unavailable,
+    Sent(Receiver<WorkerHandlerDisposition>),
 }
 impl WorkerReportService {
     /// Seal only this original admission and interrupt its actual sockets,

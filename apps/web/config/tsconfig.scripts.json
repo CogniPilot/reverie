@@ -7,5 +7,5 @@
     "declarationMap": false,
     "sourceMap": false
   },
-  "include": ["../scripts/test-local-llm-harnesses.ts"]
+  "include": ["../scripts/test-local-llm-harnesses.ts", "../scripts/operator-viewer-bridge.ts", "../scripts/control-behavior-inventory.ts", "../scripts/test-native-worker-hooks.ts", "../scripts/select-native-hook-host-test.ts", "../test/fixtures/native-hook-provider.ts", "../src/types/heic-decode.d.ts", "./test-selection.ts"]
 }

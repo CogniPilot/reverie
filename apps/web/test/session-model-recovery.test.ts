@@ -19,7 +19,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { execFileSync } from 'node:child_process';
+import { captureClaudeLaunch } from './helpers/capture-claude-launch.js';
 import { Session } from '../src/session.js';
 import { TmuxManager, buildSpawnCommand } from '../src/tmux-manager.js';
 import type { MuxSession, RespawnPaneOptions, TerminalMultiplexer } from '../src/mux-interface.js';
@@ -99,11 +99,11 @@ describe('a launch model and an advisor survive recovery together', () => {
     for (const s of sessions.splice(0)) await s.stop();
   });
 
-  /** The settings JSON exactly as a shell would hand it to claude. */
+  /** The settings JSON actually received by the synthetic provider. */
   function settingsOf(cmd: string): unknown {
-    expect(cmd.match(/--settings /g)).toHaveLength(1);
-    const tail = cmd.slice(cmd.indexOf('--settings '));
-    return JSON.parse(execFileSync('bash', ['-c', `set -- ${tail}; printf '%s' "$2"`]).toString());
+    const args = captureClaudeLaunch(cmd);
+    expect(args.filter(arg => arg === '--settings')).toHaveLength(1);
+    return JSON.parse(args[args.indexOf('--settings') + 1]);
   }
 
   /** Render what tmux-manager hands buildSpawnCommand for these options. */
@@ -119,12 +119,13 @@ describe('a launch model and an advisor survive recovery together', () => {
   }
 
   function expectBoth(cmd: string, effort: EffortLevel | undefined): void {
-    expect(cmd).toContain(`--model "${MODEL}"`);
+    const args = captureClaudeLaunch(cmd);
+    expect(args[args.indexOf('--model') + 1]).toBe(MODEL);
     expect(cmd).not.toContain('--advisor ');
     expect(settingsOf(cmd)).toEqual(
       effort === 'ultracode' ? { ultracode: true, advisorModel: ADVISOR } : { advisorModel: ADVISOR }
     );
-    if (effort && effort !== 'ultracode') expect(cmd).toContain(`--effort '${effort}'`);
+    if (effort && effort !== 'ultracode') expect(args[args.indexOf('--effort') + 1]).toBe(effort);
   }
 
   function persistedRecord(effort: EffortLevel | undefined) {
@@ -175,6 +176,8 @@ describe('a launch model and an advisor survive recovery together', () => {
         setAttached: () => {},
         respawnPane: async (options: RespawnPaneOptions) => {
           respawns.push(options);
+          if (options.admitted && !options.admitted()) return null;
+          options.onProviderDispatch?.(); // The fake pane now actually dispatches.
           return 4242;
         },
       } as unknown as TerminalMultiplexer;

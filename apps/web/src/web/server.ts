@@ -1,11 +1,15 @@
+import {TerminalInputService} from './terminal-input-service.js';
 import {WorkerProviderHealth,viewerHealth} from '../worker-provider-health.js';
+import { cliPublicDescriptor } from '../config/cli-registry/public-descriptor.js';
 import { displayTimeZone } from '../display-time.js';
 import { registerBrowserJobEvidence } from '../browser-job-evidence.js';
 import { restSessionMetadataFromRegistry } from '../rest-canonical-metadata.js';
 import { OWNER_COOKIE } from '../owner-auth/policy.js';
 import { OfficeAuthService } from '../owner-auth/office.js';
+import { registerInputIdentityRoutes } from './routes/input-identity-routes.js';
 import { registerOfficeRoutes } from './routes/office-routes.js';
 import { withDelegatedSessionCreate } from '../owner-auth/delegated-session-create.js';
+import { withSessionCreateAdmission } from '../owner-auth/session-create-admission.js';
 import { ownPlanRecovery } from '../agent-plan-recovery.js';
 import { agentPlanRequestExecution } from '../agent-plan-request.js';
 import { BuiltinEmbassy } from '../embassy-builtin.js';
@@ -347,9 +351,10 @@ import { PlanRequestStore } from '../plan-request-store.js';
 import { PlanRequestCapabilities } from '../plan-request-capability.js';
 import { deliverPlanRequest } from '../plan-request-prompt.js';
 import { registerPlanRequestRoutes } from './routes/plan-request-routes.js';
-import { planMoveExecutor, type PlanMoveRuntime } from '../plan-move-runtime.js';
+import { planMoveExecutor, planMoveSessionResponse, type PlanMoveRuntime } from '../plan-move-runtime.js';
 import {ResourceReplacementController, registerResourceReplacementRoutes} from '../resource-replacement-controller.js';
 import { FleetResourcesService, registerFleetResourceRoutes } from '../resource-fleet-service.js';
+import { EmployeeResourcesService, registerEmployeeResourceRoutes } from '../resource-employee-service.js';
 import { PoolInstallationController, registerPoolInstallationRoutes } from '../pool-installation-controller.js';
 import { PlanService } from '../plan-accounts.js';
 import { PlanCostTracker } from '../plan-agent-burn.js';
@@ -676,11 +681,17 @@ export class WebServer extends EventEmitter {
     // Approvals Inbox → SSE. The singleton has no server reference; these
     // callbacks are its only way out. Broadcasts carry sessionId, so the
     // multi-user SSE scoping applies to them like any session event.
+    const broadcastApproval = (event: string, item: import('./approval-inbox.js').ApprovalItem) => {
+      const session = this.sessions.get(item.sessionId);
+      const original = approvalInbox.notificationOwner(item, session);
+      this.sse.broadcast(event, approvalInbox.publicItem(item, session), isMultiUserMode()
+        ? original?.owner ? {username: original.owner, sessionScoped: true} : {adminOnly: true} : undefined);
+    };
     approvalInbox.onPending = (item) => {
-      this.broadcast(SseEvent.ApprovalPending, { ...item });
+      broadcastApproval(SseEvent.ApprovalPending, item);
       this.inputWatch?.pending(item);
     };
-    approvalInbox.onUpdated = (item) => this.broadcast(SseEvent.ApprovalUpdated, { ...item });
+    approvalInbox.onUpdated = (item) => broadcastApproval(SseEvent.ApprovalUpdated, item);
     approvalInbox.onResolved = (info) => this.broadcast(SseEvent.ApprovalResolved, { ...info });
 
     // Set up mux event listeners
@@ -947,8 +958,10 @@ export class WebServer extends EventEmitter {
    * the placement it asked for (`tabGroupId`) lands in the same versioned write
    * that first records it.
    */
-  private async registerSessionWithLayout(session: Session, placement?: SessionPlacementHint): Promise<TabLayout> {
+  private async registerSessionWithLayout(session: Session, placement?: SessionPlacementHint, admitted?: () => boolean): Promise<TabLayout> {
     return this.tabLayouts.sessionCreated(ownerLayoutKey(session.owner), session.id, placement, () => {
+      if (admitted && !admitted()) throw new Error('Session creation admission changed before registration');
+      if (admitted && this.sessions.has(session.id)) throw new Error('Fresh session identity is already registered');
       this.sessions.set(session.id, session);
       return () => {
         if (this.sessions.get(session.id) === session) this.sessions.delete(session.id);
@@ -960,11 +973,14 @@ export class WebServer extends EventEmitter {
    * Build a route context object satisfying all 5 port interfaces.
    * Single object with zero runtime cost — ISP enforced at the type level.
    */
+  private readonly terminalInput = new TerminalInputService();
+
   private createRouteContext() {
     // eslint-disable-next-line @typescript-eslint/no-this-alias
     const self = this;
     return {
       // SessionPort
+      terminalInput: this.terminalInput,
       sessions: this.sessions as ReadonlyMap<string, Session>,
       addSession: this.registerSessionWithLayout.bind(this),
       tabLayouts: this.tabLayouts,
@@ -1131,6 +1147,7 @@ export class WebServer extends EventEmitter {
       basePath: this.basePath,
     });
     registerOwnerRoutes(this.app, ownerAuth, this.https);
+    registerInputIdentityRoutes(this.app, ownerAuth, authState.authSessions !== null);
     registerResourceHistoryRoutes(this.app, req => callerOf(req, { service: ownerAuth, ctx }).kind === 'owner');
     // Marks user chat posts a signed-in owner made (whatever the policy); see owner-auth/marks.ts.
     const verifiedOwner = ownerVerifier({
@@ -1732,8 +1749,8 @@ export class WebServer extends EventEmitter {
       closing: (id) => !this.companyWakeReady || this.cleaningUp.has(id),
       noteRunning: (id) => this.companyService.recordObservedRunning(id, () => !this.cleaningUp.has(id)),
       begin: (employeeId, sessionId) => this.companyService.prepareWake(employeeId, sessionId),
-      claim: (employeeId, sessionId, now, automatic) =>
-        this.companyService.claimWake(employeeId, sessionId, now, automatic),
+      claim: (employeeId, sessionId, now, automatic, stillCurrent) =>
+        this.companyService.claimWake(employeeId, sessionId, now, automatic, stillCurrent),
       wake: async (entry, allowed) => {
         if (!allowed() || !rebootRestoreRegistry.beginSpending(entry.owner)) return false;
         const parked = rebootRestoreRegistry.take((owner) => owner === entry.owner, [entry.sessionId], entry.owner);
@@ -1836,7 +1853,9 @@ export class WebServer extends EventEmitter {
       agentSession: currentAgentSession,
       company: owner => this.companyService.view(owner),
     }, memoryScopePublisher);
-    registerEmployeeGpuRoutes(this.app, this.companyService, new EmployeeGpuClient(process.env.REVERIE_WORKER_SOCKET), verifiedOwner);
+    const employeeGpu = new EmployeeGpuClient(process.env.REVERIE_WORKER_SOCKET, ownerAuth);
+    registerEmployeeGpuRoutes(this.app, this.companyService, employeeGpu, verifiedOwner);
+    this.app.addHook('onClose', async () => employeeGpu.close());
     registerCompanyRoutes(
       this.app,
       ctx,
@@ -2142,20 +2161,21 @@ export class WebServer extends EventEmitter {
       verifiedOwner,
       store: new ExpertStore(dataPath('experts.json'), envValue(process.env, 'EXPERTS_SEED_DIR') || undefined),
       callerSession: (req) => resolveParentSessionId(ctx, req, undefined, ownerFor(req)),
-      createSession: async (req, launch, delegate) => {
+      createSession: async (req, launch, admission) => {
         const headers: Record<string, string> = { 'content-type': 'application/json' };
         for (const name of ['cookie', 'authorization', 'origin', 'host']) {
           const value = req.headers[name];
           if (typeof value === 'string') headers[name] = value;
         }
         const payload = sessionCreateBody(launch);
-        if (delegate) {
+        const delegateSessionId = admission.delegateSessionId;
+        if (delegateSessionId) {
           // A delegate is always evaluated as an agent, even when an owner browser
           // also supplied cookies on the outer request. Basic auth still identifies
           // the same multi-user principal; no owner credential is synthesized.
           delete headers.cookie;
-          headers['x-reverie-parent-session'] = delegate.sessionId;
-          payload.parentSessionId = delegate.sessionId;
+          headers['x-reverie-parent-session'] = delegateSessionId;
+          payload.parentSessionId = delegateSessionId;
         }
         const inject = () =>
           this.app.inject({
@@ -2164,12 +2184,15 @@ export class WebServer extends EventEmitter {
             headers,
             payload,
           });
-        const res = delegate
-          ? await withDelegatedSessionCreate(
-              { sessionId: delegate.sessionId, owner: ownerFor(req), payload, authorized: delegate.authorized },
-              inject
-            )
-          : await inject();
+        const res = await withSessionCreateAdmission(
+          { owner: ownerFor(req), payload, authorized: admission.authorized },
+          () => delegateSessionId
+            ? withDelegatedSessionCreate(
+                { sessionId: delegateSessionId, owner: ownerFor(req), payload, authorized: admission.authorized },
+                inject
+              )
+            : inject()
+        );
         let json:
           | { success?: boolean; error?: string; session?: { id?: unknown }; data?: { session?: { id?: unknown } } }
           | undefined;
@@ -2180,35 +2203,30 @@ export class WebServer extends EventEmitter {
         }
         const id = json?.data?.session?.id ?? json?.session?.id;
         if (res.statusCode >= 400 || json?.success === false || typeof id !== 'string') {
-          if (typeof id === 'string') {
-            await this.cleanupSession(id, true, 'expert_hire_rollback');
-            await company.removeTemporaryAgent(ownerFor(req), id).catch(() => undefined);
-          }
+          // An error response is not proof of no creation and grants no authority to stop a returned ID.
           const status = res.statusCode >= 400 && res.statusCode < 500 ? res.statusCode : 502;
-          throw new ExpertError(`The session was not created: ${json?.error ?? `status ${res.statusCode}`}`, status);
+          throw new ExpertError(`Session creation was not confirmed: ${json?.error ?? `status ${res.statusCode}`}`, status);
         }
         return id;
       },
-      startSession: async (id) => {
+      startSession: async (id, admitted) => {
         const session = this.sessions.get(id);
         if (!session) throw new ExpertError('The newly hired runtime no longer exists', 409);
-        await session.startInteractive();
-        await company.saveRuntimeRecipe(id, expertRuntimeRecipe(session));
-        await company.setDesiredRunning(id, true);
+        await session.startInteractive(admitted);
+        if (!admitted()) throw new ExpertError('Hire authorization changed after launch; inspect the retained employee', 409);
+        await company.saveRuntimeRecipe(id, expertRuntimeRecipe(session), admitted);
+        if (!admitted()) throw new ExpertError('Hire authorization changed before running intent publication', 409);
+        await company.setDesiredRunning(id, true, admitted);
       },
       stopSession: (id) => this.cleanupSession(id, true, 'expert_retire'),
       sessionExists: (id) => this.sessions.has(id),
+      employeeSession: (id, owner) => company.view(owner).employees.find((employee) => employee.id === id)?.sessionId,
+      employeeForSession: (id, owner) => company.view(owner).employees.find((employee) => employee.sessionId === id),
       employeeNames: (owner) => company.view(owner).employees.map((employee) => employee.name),
+      validateHireReportingLine: (owner, reportsTo) => company.validateHireReportingLine(owner, reportsTo),
       // Nightly research stays off: putting an expert on a schedule is a separate owner step.
-      hireEmployee: (input) => company.hire({ ...input, researchEnabled: false }),
-      inviteEmployee: (employeeId, roomId, owner) => void company.invite(employeeId, roomId, owner),
-      removeEmployee: async (employeeId) => {
-        await company.store.update((state) => {
-          state.employees = state.employees.filter((e) => e.id !== employeeId);
-        });
-      },
-      leaveRoom: (roomId, sessionId) => void this.chatroomService.removeMember(roomId, sessionId),
-      forgetSpawnProfile: (owner, sessionId) => company.removeTemporaryAgent(owner, sessionId).catch(() => undefined),
+      hireEmployee: (input, admitted) => company.hire({ ...input, researchEnabled: false }, admitted),
+      inviteEmployee: async (employeeId, roomId, owner) => { await company.invite(employeeId, roomId, owner); },
       postNotice: (roomId, text) => void this.chatroomService.post(roomId, { kind: 'system', name: 'experts' }, text),
       audit: appendAdminAudit,
       noticeRoomFallback: envValue(process.env, 'EXPERTS_NOTICE_ROOM') || undefined,
@@ -2339,6 +2357,8 @@ export class WebServer extends EventEmitter {
       session: id => this.sessions.get(id),
       ready: () => this.companyWakeReady,
       providerHealthy: employee => this.workerProviderHealth?.read(employee)?.state === 'healthy',
+      diagnosticViewer: () => !!process.env.REVERIE_WORKER_VIEWER_SOCKET,
+      diagnosticMoveGuard: (id, owner) => planMoves.viewerInspectionGuard(id, owner),
       moveGuard: id => {
         const employee = this.companyService.registeredEmployees().find(row => row.id === id);
         return planMoves.viewerReconnectGuard(id, employee ? { owner: employee.owner, sessionId: employee.sessionId,
@@ -2374,18 +2394,25 @@ export class WebServer extends EventEmitter {
               },
               ...(payload === undefined ? {} : { payload: JSON.stringify(payload) }),
             });
-            const body = result.json();
-            if (result.statusCode >= 400 || body?.success === false)
-              throw new PlanMoveError(
-                body?.error ?? 'The normal session launch path refused the move',
-                result.statusCode >= 400 ? result.statusCode : 409
-              );
-            return body;
+            return planMoveSessionResponse(result.statusCode, result.json());
           },
         },
         ownerFor(request)
       );
-    registerFleetResourceRoutes(this.app, verifiedOwner, new FleetResourcesService(this.companyService));
+    const fleetResources = new FleetResourcesService(this.companyService, ownerAuth, process.env.REVERIE_WORKER_SOCKET, {
+        wakeEmployee: (id, options) => this.companyWake.wakeOne(id, options),
+        refreshHealth: async () => {
+          if (!this.workerProviderHealth) throw new Error('Native employee health is unavailable');
+          await this.workerProviderHealth.refresh();
+        },
+        providerHealth: (employee) => this.workerProviderHealth?.read(employee),
+        observeUninstalledPool: () => laptopPower('pool-recovery-status'),
+    }, dataPath('fleet-setup-recovery.json'), dataPath('fleet-migration-operations.json'));
+    registerFleetResourceRoutes(this.app, verifiedOwner, fleetResources);
+    this.app.addHook('onClose', async () => fleetResources.close());
+    const employeeResources = new EmployeeResourcesService(this.companyService, ownerAuth, process.env.REVERIE_WORKER_SOCKET);
+    registerEmployeeResourceRoutes(this.app, verifiedOwner, employeeResources);
+    this.app.addHook('onClose', async () => employeeResources.close());
     const poolInstallation = new PoolInstallationController(ownerAuth, process.env.REVERIE_WORKER_SOCKET);
     registerPoolInstallationRoutes(this.app, poolInstallation);
     this.app.addHook('onClose', async () => poolInstallation.close());
@@ -2681,9 +2708,24 @@ export class WebServer extends EventEmitter {
    */
   private killingSessions: Set<string> = new Set();
 
-  private async cleanupSession(sessionId: string, killMux: boolean = true, reason?: string): Promise<void> {
+  private async cleanupSession(sessionId: string, killMux: boolean = true, reason?: string,
+    expected?: {session: Session; owner: string | undefined}): Promise<void> {
+    const assertCurrent = () => {
+      if (expected && (this.sessions.get(sessionId) !== expected.session || expected.session.id !== sessionId
+        || expected.session.owner !== expected.owner))
+        throw new Error('Candidate cleanup required: original session is no longer current');
+    };
+    assertCurrent();
+    // Capture local transport before intent changes or any await. Native jobs
+    // without original-attempt stop authority are retained, never stopped by SID.
+    const stopOriginal = expected && expected.session.captureCleanupStop(() => {
+      assertCurrent(); return true;
+    });
     // Guard against concurrent cleanup of the same session
-    if (this.cleaningUp.has(sessionId)) return;
+    if (this.cleaningUp.has(sessionId)) {
+      if (expected) throw new Error('Candidate cleanup required: another cleanup is in progress');
+      return;
+    }
     this.cleaningUp.add(sessionId);
     if (killMux) this.killingSessions.add(sessionId);
     // Refuse a start or attach from here on (Ark0N/Codeman#446): a start that
@@ -2693,8 +2735,13 @@ export class WebServer extends EventEmitter {
     session?.markClosing(true);
 
     try {
-      if (killMux) await this.companyService?.setDesiredRunning(sessionId, false);
-      await this._doCleanupSession(sessionId, killMux, reason);
+      if (killMux) {
+        if (expected) await this.companyService?.setDesiredRunning(sessionId, false, () => { stopOriginal!.require(); return true; });
+        else await this.companyService?.setDesiredRunning(sessionId, false);
+      }
+      assertCurrent();
+      if (expected) await this._doCleanupSession(sessionId, killMux, reason, true, {assertCurrent, stop: stopOriginal!.stop});
+      else await this._doCleanupSession(sessionId, killMux, reason);
     } finally {
       this.cleaningUp.delete(sessionId);
       this.killingSessions.delete(sessionId);
@@ -2708,14 +2755,25 @@ export class WebServer extends EventEmitter {
     sessionId: string,
     killMux: boolean,
     reason?: string,
-    coordinateLayout = true
+    coordinateLayout = true,
+    expected?: {assertCurrent: () => void; stop: () => Promise<void>}
   ): Promise<void> {
+    expected?.assertCurrent();
     const session = this.sessions.get(sessionId);
     const pinned = session?.pinned === true || this.store.getSession(sessionId)?.pinned === true;
     if (coordinateLayout && session && killMux && !pinned) {
       return this.tabLayouts.runSessionDeletion([{ id: sessionId, owner: session.owner }], () =>
-        this._doCleanupSession(sessionId, killMux, reason, false)
-      );
+        this._doCleanupSession(sessionId, killMux, reason, false, expected), () => {
+          if (expected && this.sessions.has(sessionId))
+            throw new Error('Candidate cleanup required: a successor appeared before layout publication');
+        });
+    }
+    // Guarded candidate cleanup stops the original transport before touching any
+    // SID-keyed observer state. A stale/unknown stop leaves those records intact.
+    if (expected) {
+      expected.assertCurrent();
+      await expected.stop();
+      expected.assertCurrent();
     }
     const lifecycleLog = getLifecycleLog();
     lifecycleLog.log({
@@ -2736,7 +2794,7 @@ export class WebServer extends EventEmitter {
     this._customModelDisplacedNotified.delete(sessionId);
 
     // Kill all subagents spawned by this session (scoped to sessionId to avoid cross-session kills)
-    if (session && killMux) {
+    if (session && killMux && !expected) {
       try {
         await subagentWatcher.killSubagentsForSession(session.workingDir, sessionId);
       } catch (err) {
@@ -2857,7 +2915,7 @@ export class WebServer extends EventEmitter {
       // working directory rather than the session, so it stays while another live
       // session in the same case still uses it (Ark0N/Codeman#446).
       if (
-        killMux &&
+        killMux && !expected &&
         session.workingDir &&
         !pasteImageDirInUseByOtherSession({
           live: this.sessions.values(),
@@ -2886,13 +2944,14 @@ export class WebServer extends EventEmitter {
       // Drop the agent skill's preamble cache for this session (seeded at create).
       // killMux only: a detach leaves the session recoverable, and its agent would
       // come back to a loader whose file we deleted.
-      if (killMux) {
+      if (killMux && !expected) {
         void removeAgentSessionPreamble(sessionId);
         // The per-session custom-model config dir carries the endpoint's API key (pi and
         // omp embed it literally); it must not outlive the session it was written for.
         removeConfigDir(customModelConfigDir(sessionId));
       }
-      await session.stop(killMux);
+      if (!expected) await session.stop(killMux);
+      expected?.assertCurrent();
       this.sessions.delete(sessionId);
       // Only remove from state.json if we're also killing the mux session.
       // When killMux=false (server shutdown), preserve state for recovery.
@@ -3061,13 +3120,7 @@ export class WebServer extends EventEmitter {
         const enabled = entry.enabled;
         available[id] = enabled && installed;
         return {
-          id,
-          label: entry.label,
-          shortBadge: entry.shortBadge,
-          order: entry.order,
-          kind: entry.kind,
-          external: entry.capabilities.external,
-          enabled,
+          ...cliPublicDescriptor(entry),
           available: enabled && installed,
         };
       });
@@ -3086,8 +3139,8 @@ export class WebServer extends EventEmitter {
       // (never an id list here) so a CLI whose customModelInjection lands later shows
       // up in the picker with no frontend change, and one that ships `unsupported`
       // (antigravity, and `shell`'s `kind !== 'agent'`) never does.
-      const customModelClis = enabledClis()
-        .filter((entry) => entry.kind === 'agent' && entry.capabilities.customModelInjection.kind !== 'unsupported')
+      const customModelClis = cliCatalog
+        .filter((entry) => entry.enabled && entry.supportsCustomModel)
         .map((entry) => ({ id: entry.id, label: entry.label }));
       // Unlike the boolean-only __reverieCliAvailable above, this payload carries
       // `label`, a string a user's own clis.json can set (CliEntry.label, up to 60
@@ -4733,7 +4786,7 @@ export class WebServer extends EventEmitter {
     if (dead.length === 0) return 0;
 
     const persisted = this.store.getSessions();
-    const codexRecords = dead.map((id) => persisted[id]).filter((saved) => saved?.mode === 'codex');
+    const codexRecords = dead.map((id) => persisted[id]).filter((saved) => getCli(saved?.mode ?? '')?.capabilities.transcript === 'codex-rollout');
     if (codexRecords.length) {
       const profiles = await readSubscriptionProfiles();
       const bindings = new Map<string | undefined, Map<string, string>>();
@@ -5076,6 +5129,10 @@ export class WebServer extends EventEmitter {
               // pane-exit watcher's own tick replaces it with a first-hand
               // reading (not the stats collector — see `startPaneExitWatcher`).
               paneExit: savedState?.paneExit,
+              // A saved input fence survives reattachment; transport proof does not.
+              viewerInputHeld: savedState?.viewerInputHeld,
+              providerDispatchHeld: savedState?.providerDispatchHeld,
+              terminalInputHeld: savedState?.terminalInputHeld,
               // The model the CLI last reported (statusline or its own footer), so a
               // tile header keeps naming it until the next report; an idle claude
               // session re-renders its statusline only on its next turn.

@@ -1,5 +1,6 @@
 /** Shared-office humans. Each login reuses the existing password/2FA/session implementation. */
 import { randomUUID } from 'node:crypto';
+import type { BrowserInputIdentity } from '../browser-input-identity.js';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type { Socket } from 'node:net';
@@ -147,6 +148,15 @@ export class OfficeAuthService extends OwnerAuthService {
     const account = this.forSession(token);
     const identity = account === this ? super.registrationIdentity(token) : account.registrationIdentity(token);
     return Object.freeze({ ...identity, personId: person.id });
+  }
+
+  override inputIdentity(token: string | undefined): BrowserInputIdentity {
+    const person = this.identity(token), session = this.session(token);
+    if (!person || !session || session.restricted)
+      throw new OwnerAuthError('Current unrestricted sign-in is required', 403);
+    const account = this.forSession(token);
+    const identity = account === this ? super.inputIdentity(token) : account.inputIdentity(token);
+    return Object.freeze({ ...identity, scopeId: JSON.stringify([identity.scopeId, person.id]) });
   }
 
   override async enrollRegistrationIdentity(token: string | undefined): Promise<OwnerRegistrationIdentity> {

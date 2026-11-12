@@ -252,7 +252,7 @@ jobs:
   worker-browser:
     needs: image
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 60
     permissions:
       contents: read
     steps:
@@ -291,19 +291,139 @@ jobs:
             --project integration-workers --repo "$PWD" --expect 2G --disk 1G --jobs 1 \
             -- python3 .github/ci/worker-isolation-smoke.py --image "$(cat "$RUNNER_TEMP/tested-image-id")" \
             2>&1 | tee acceptance/worker-smoke.log
+      - name: Qualify the actual packaged native viewer without restarting a provider
+        env:
+          CARGO_TARGET_DIR: ${{ runner.temp }}/reverie-viewer-target
+        run: |
+          set -euo pipefail
+          nix build .#nativeWorkerViewerImage --out-link "$RUNNER_TEMP/native-viewer-image" --print-build-logs
+          docker load --input "$RUNNER_TEMP/native-viewer-image"
+          viewer_image=$(docker image inspect --format '{{.Id}}' reverie-worker-viewer:native-v1)
+          # The test rejects mutable tags and verifies both loaded image IDs.
+          # All workers, mounts and engine mutations belong to its fresh fixture.
+          nix develop --command env \
+            REVERIE_VIEWER_DOCKER_FIXTURE=1 \
+            REVERIE_VIEWER_TEST_WORKER_IMAGE="$(cat "$RUNNER_TEMP/tested-image-id")" \
+            REVERIE_VIEWER_TEST_SERVICE_IMAGE="$viewer_image" \
+            cargo test -p reverie-host worker_viewer::tests::docker \
+              -- --ignored --nocapture --test-threads=1 \
+            2>&1 | tee acceptance/native-viewer.log
+      - name: Qualify the factory-pinned retained controller birth decoder
+        env:
+          CARGO_TARGET_DIR: ${{ runner.temp }}/reverie-viewer-target
+          CARGO_BUILD_JOBS: '2'
+        run: |
+          set -euo pipefail
+          mkdir -p acceptance
+          # Build exact image/program provenance; no image is loaded or run.
+          nix build .#nativeWorkerPoolImageInputs --out-link "$RUNNER_TEMP/controller-birth-inputs" \
+            --no-write-lock-file --max-jobs 2 --cores 2 --print-build-logs \
+            2>&1 | tee acceptance/controller-birth-build.log
+          export REVERIE_CONTROLLER_CHECK_INPUTS
+          REVERIE_CONTROLLER_CHECK_INPUTS=$(readlink -f "$RUNNER_TEMP/controller-birth-inputs/share/reverie/worker-pool-image-inputs.json")
+          test -f "$REVERIE_CONTROLLER_CHECK_INPUTS"
+          export REVERIE_CONTROLLER_CHECK_INPUTS_SHA256
+          REVERIE_CONTROLLER_CHECK_INPUTS_SHA256=$(sha256sum "$REVERIE_CONTROLLER_CHECK_INPUTS" | cut -d ' ' -f1)
+          # This consumes real producer bytes through the measured packaged decoder.
+          # It qualifies decoder compatibility, not native pool/controller readiness.
+          nix develop --command cargo test -p reverie-host \
+            worker_pool::birth_compatibility::tests::actual_factory_pinned_current_decoder_consumes_produced_retained_birth_without_engine_or_publication \
+            -- --exact --ignored --nocapture \
+            2>&1 | tee acceptance/controller-birth-check.log
       - name: Build the sandboxed browser and exercise synthetic office controls
         run: |
           set -euo pipefail
           nix build .#browserRuntime --out-link "$RUNNER_TEMP/browser-runtime" --print-build-logs
           nix develop --command npm ci --prefix apps/web --ignore-scripts
+          nix develop --command node apps/web/scripts/fix-node-pty.mjs
+          nix develop --command node apps/web/scripts/prepare-test-vendor.mjs
           export REVERIE_BROWSER_EXECUTABLE="$RUNNER_TEMP/browser-runtime/bin/chromium"
           export REVERIE_BROWSER_ARTIFACTS="$PWD/acceptance/browser"
+          export TEST_BROWSER_COVERAGE_DIR="$REVERIE_BROWSER_ARTIFACTS/raw-coverage"
           df -h /
           nix develop --command python3 -m reverie.buildenv \
             --project integration-browser --repo "$PWD" --expect 2G --disk 1G --jobs 1 \
             -- bash -euo pipefail -c 'node .github/ci/company-office-browser.mjs; node .github/ci/laptop-power-browser.mjs' \
             2>&1 | tee acceptance/browser.log
+          # Render the real management UI at desktop and narrow phone widths.
+          # Every response comes from synthetic fixtures on an ephemeral port.
+          PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH="$REVERIE_BROWSER_EXECUTABLE" \
+            TEST_RESOURCE_SCREENSHOT_DIR="$REVERIE_BROWSER_ARTIFACTS/resources" \
+            TEST_OFFICE_SCREENSHOT_DIR="$REVERIE_BROWSER_ARTIFACTS/office" \
+            TEST_OWNER_CONTROLS_SCREENSHOT_DIR="$REVERIE_BROWSER_ARTIFACTS/owner-controls" \
+            TEST_APPROVALS_SCREENSHOT_DIR="$REVERIE_BROWSER_ARTIFACTS/approvals" \
+            TEST_INPUT_RECOVERY_SCREENSHOT_DIR="$REVERIE_BROWSER_ARTIFACTS/input-recovery" \
+            nix develop --command node apps/web/node_modules/vitest/vitest.mjs run \
+              --config apps/web/config/vitest.browser.config.ts \
+              apps/web/test/company-resource-layout.browser.test.ts \
+              apps/web/test/office-server.browser.test.ts \
+              apps/web/test/office-owner-controls.browser.test.ts \
+              apps/web/test/approvals-held-layout.browser.test.ts \
+              apps/web/test/terminal-input-recovery.browser.test.ts \
+              apps/web/test/browser-coverage-attribution.browser.test.ts \
+            2>&1 | tee acceptance/resource-layout.log
+          # Validate actual execution/context/source evidence after every suite
+          # settles. This raw report does not imply percentage or full-site coverage.
+          (
+            cd apps/web
+            nix develop --command node --import tsx scripts/report-browser-coverage.ts \
+              "$TEST_BROWSER_COVERAGE_DIR" "$TEST_BROWSER_COVERAGE_DIR/validated-summary.json"
+          ) 2>&1 | tee acceptance/browser-coverage.log
           printf 'Worker and browser acceptance completed for %s\n' "$(cat "$RUNNER_TEMP/tested-image-id")" > acceptance/PASS.txt
+      - name: Qualify private native hook generations through the actual guest and Office
+        env:
+          CARGO_TARGET_DIR: ${{ runner.temp }}/reverie-viewer-target
+          CARGO_BUILD_JOBS: '2'
+        run: |
+          set -euo pipefail
+          # This factory matches the runner's ordinary UID/GID. The website
+          # image above has no worker-child manifest; perf tags are unrelated.
+          export REVERIE_HOOK_UID="$(id -u)" REVERIE_HOOK_GID="$(id -g)"
+          archive="$RUNNER_TEMP/native-hook-worker-image"
+          test ! -e "$archive" && test ! -L "$archive"
+          nix build --impure --expr '
+            let f = builtins.getFlake (builtins.getEnv "GITHUB_WORKSPACE");
+            in f.lib.workerDockerImage {
+              system = builtins.currentSystem;
+              uid = builtins.fromJSON (builtins.getEnv "REVERIE_HOOK_UID");
+              gid = builtins.fromJSON (builtins.getEnv "REVERIE_HOOK_GID");
+            }' --out-link "$archive" --print-build-logs --no-write-lock-file --max-jobs 2 --cores 2
+          client="$RUNNER_TEMP/native-hook-client"
+          test ! -e "$client" && test ! -L "$client"
+          nix build .#workerNativeClient --out-link "$client" --print-build-logs --no-write-lock-file --max-jobs 2 --cores 2
+          tag="reverie-native-hook-ci:$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          images=$(docker --host unix:///var/run/docker.sock image ls --quiet --filter "reference=$tag")
+          test -z "$images"
+          # Claim this initially absent destination before import, including a
+          # possible partial publication. Never remove another tag or force/prune.
+          cleanup() {
+            result=$?
+            trap - EXIT
+            if ! docker --host unix:///var/run/docker.sock image rm "$tag"; then result=1; fi
+            exit "$result"
+          }
+          trap cleanup EXIT
+          nix run --no-write-lock-file .#workerPerfImageTransport -- \
+            --insecure-policy copy --dest-daemon-host unix:///var/run/docker.sock \
+            "docker-archive:$(readlink -f "$archive")" "docker-daemon:$tag"
+          docker --host unix:///var/run/docker.sock image inspect --format '{{.Id}}' "$tag" > acceptance/native-hook-image-id
+          # Only a fresh, successful Cargo JSON stream selects the ELF. Cached
+          # files that Cargo did not select never become executable authority.
+          nix develop --command cargo test --locked -p reverie-host --lib --no-run --message-format=json \
+            > acceptance/native-hook-cargo.jsonl
+          export DOCKER_HOST=unix:///var/run/docker.sock
+          nix develop --command bash -euo pipefail -c '
+            cd apps/web
+            host_test=$(node --import tsx scripts/select-native-hook-host-test.ts \
+              "$GITHUB_WORKSPACE" "$CARGO_TARGET_DIR" "$GITHUB_WORKSPACE/acceptance/native-hook-cargo.jsonl")
+            node --import tsx scripts/test-native-worker-hooks.ts \
+              --image "$(cat "$GITHUB_WORKSPACE/acceptance/native-hook-image-id")" \
+              --worker-exec "$RUNNER_TEMP/native-hook-client/bin/reverie-worker-exec" \
+              --host-tests "$host_test" --docker "$(command -v docker)" --tmux "$(command -v tmux)" \
+              --output "$GITHUB_WORKSPACE/acceptance/native-hooks.json"
+          ' 2>&1 | tee acceptance/native-hooks.log
+          # Private retained rnh directories and native requests are not artifacts.
+          # This qualifies hook transport components, not ordinary broker admission.
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:

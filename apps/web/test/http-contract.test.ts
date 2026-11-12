@@ -329,6 +329,9 @@ describe('Stable HTTP contract (live server)', () => {
     });
 
     it('wraps the non-wait input response as { success: true, data: {} }', async () => {
+      const session = (server as unknown as {sessions: Map<string, object>}).sessions.get(sessionId)!;
+      const write = vi.fn();
+      Object.assign(session, {ptyProcess: {write}});
       // What a client actually receives on the fire-and-forget path — NOT the bare
       // `{}` the handler returns and the route tests assert.
       const res = await fetch(`${base}/api/v1/sessions/${sessionId}/input`, {
@@ -338,6 +341,8 @@ describe('Stable HTTP contract (live server)', () => {
       });
       expect(res.status).toBe(200);
       expect(await res.json()).toEqual({ success: true, data: {} });
+      expect(write).toHaveBeenCalledExactlyOnceWith('hello');
+      Object.assign(session, {ptyProcess: null});
     });
 
     it('serves wait-output through the same envelope', async () => {

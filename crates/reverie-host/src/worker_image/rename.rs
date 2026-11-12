@@ -7,7 +7,7 @@ pub(crate) struct ImageRenameFence<'a> {
     service: &'a ImageServiceMaintenance,
 }
 impl<'a> ImageRenameFence<'a> {
-    pub(super) fn new(
+    pub(crate) fn new(
         source: &'a Path,
         locks: &'a mut ImageMaintenanceLocks,
         service: &'a ImageServiceMaintenance,

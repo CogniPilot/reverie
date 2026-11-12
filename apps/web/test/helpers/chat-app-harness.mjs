@@ -458,6 +458,17 @@ export async function createHarness({
     window.ReverieApp = ReverieApp;
   `);
   for (const f of ['chatroom-ui.js', 'chat-media.js', 'company-resources.js']) window.eval(read(f));
+  // Full-state SSE handlers depend on the same sticky input-recovery policy as
+  // the page. Load those real methods rather than stubbing away their holds.
+  const recoverySource = read('app.js');
+  const recoveryMethods = recoverySource.slice(recoverySource.indexOf('  _sessionInputHeld(sessionId) {'),
+    recoverySource.indexOf('  async _refreshInputRecovery(id, button, status) {'));
+  window.eval(`{
+    const recovery = class Recovery {${recoveryMethods}};
+    for (const name of Object.getOwnPropertyNames(recovery.prototype)) {
+      if (name !== 'constructor') window.ReverieApp.prototype[name] = recovery.prototype[name];
+    }
+  }`);
   window.app = new window.ReverieApp();
   for (const s of sessions) window.app.sessions.set(s.id, s);
   const startShell = async () => {

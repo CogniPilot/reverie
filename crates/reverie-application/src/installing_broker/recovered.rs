@@ -12,6 +12,7 @@ use reverie_host::{
     worker_storage,
 };
 use reverie_store::storage_identity::StorageKind;
+use std::time::Instant;
 mod attempt;
 use attempt::Attempt;
 mod error;
@@ -131,10 +132,66 @@ impl InstallingBroker {
         // Existing source serve performs recovery before publishing its broker
         // listener. This lifecycle owner also excludes a competing publication.
         let mut lifecycle = self.installed.lifecycle()?;
+        self.recover_running_locked(&mut lifecycle, admission, None)
+    }
+    pub(super) fn recover_running_locked(
+        &self,
+        lifecycle: &mut LaptopLifecycle<'_>,
+        admission: Option<&crate::reservation_gate::RecoveryAdmission>,
+        end: Option<Instant>,
+    ) -> Result<RecoverySummary> {
+        if !lifecycle.belongs_to(&self.installed) {
+            return Err(RecoveryError::Refused("WORKER_RECOVERY_LIFECYCLE_CHANGED"));
+        }
+        lifecycle.assert_recoverable()?;
+        check_deadline(end)?;
+        let snapshot = self.configuration()?;
+        let source = snapshot.configuration();
+        let runtime = &self.storage.runtime;
+        let base = snapshot.envelope().base();
+        let census = match end {
+            Some(end) => runtime.observe_recovery_names_until(base, end),
+            None => runtime.observe_recovery_names(base),
+        }?;
+        if memory::resource_projection_required(source) {
+            for (_, name) in census.names().entries() {
+                let row = runtime.inspect_recovery_laptop(&census, name)?;
+                crate::worker_recovery::verify_recovered_memory_scoped(
+                    runtime, &snapshot, &row, end,
+                )?;
+            }
+        }
+        if let Some(admission) = admission {
+            for (sid, _) in census.names().entries() {
+                admission.check_launch(sid)?;
+            }
+        }
+        let names = merged(lifecycle, census.names());
+        check_budget(&snapshot, &names)?;
+        let mut attempt = Attempt::new(end);
+        let prepared = (|| {
+            attempt.prepare(self, &snapshot, census.names(), &names, lifecycle)?;
+            if let (Some(_), Some(admission)) = (end, admission) {
+                admission.assert_pool_startup_current(&snapshot)?;
+            }
+            check_deadline(end)
+        })();
+        if let Err(primary) = prepared {
+            return Err(attempt.cleanup(self, primary));
+        }
+        attempt.register(lifecycle, names);
+        Ok(RecoverySummary {
+            selected: census.names().entries().len(),
+            registered: lifecycle.guard.len(),
+        })
+    }
+}
+impl LaptopLifecycle<'_> {
+    pub(super) fn assert_recoverable(&self) -> Result<()> {
         // Startup recovery cannot replace a live newly-started SAME-record
         // owner with a reconstructed Direct claim. Its resource borrower is a
         // separate required service consumer, not recovery membership DATA.
-        if lifecycle
+        if self
             .guard
             .iter()
             .any(|entry| matches!(entry.owner, LaptopOwner::Started(_)))
@@ -146,11 +203,11 @@ impl InstallingBroker {
         // This is the actual startup recovery boundary. Hold THIS guard through
         // publication, so no pending J can appear after a separate early check.
         // A tracked pending name is never a recovered storage/Office owner.
-        if lifecycle.guard.has_pending() {
+        if self.guard.has_pending() {
             return Err(RecoveryError::Refused("WORKER_RECOVERY_LAUNCH_IN_PROGRESS"));
         }
         #[cfg(test)]
-        if lifecycle
+        if self
             .guard
             .iter()
             .any(|entry| matches!(&entry.owner, LaptopOwner::Modeled))
@@ -159,33 +216,14 @@ impl InstallingBroker {
                 "WORKER_MODELED_REGISTRATION_IS_NOT_RECOVERY_OWNER",
             ));
         }
-        let snapshot = self.configuration()?;
-        let source = snapshot.configuration();
-        let runtime = &self.storage.runtime;
-        let census = runtime.observe_recovery_names(snapshot.envelope().base())?;
-        if memory::resource_projection_required(source) {
-            for (_, name) in census.names().entries() {
-                let row = runtime.inspect_recovery_laptop(&census, name)?;
-                crate::worker_recovery::verify_recovered_memory(runtime, &snapshot, &row)?;
-            }
-        }
-        if let Some(admission) = admission {
-            for (sid, _) in census.names().entries() {
-                admission.check_launch(sid)?;
-            }
-        }
-        let names = merged(&lifecycle, census.names());
-        check_budget(&snapshot, &names)?;
-        let mut attempt = Attempt::new();
-        if let Err(primary) = attempt.prepare(self, &snapshot, census.names(), &names, &lifecycle) {
-            return Err(attempt.cleanup(self, primary));
-        }
-        attempt.register(&mut lifecycle, names);
-        Ok(RecoverySummary {
-            selected: census.names().entries().len(),
-            registered: lifecycle.guard.len(),
-        })
+        Ok(())
     }
+}
+pub(super) fn check_deadline(end: Option<Instant>) -> Result<()> {
+    if end.is_some_and(|end| Instant::now() >= end) {
+        return Err(RecoveryError::Refused("WORKER_RECOVERY_DEADLINE"));
+    }
+    Ok(())
 }
 fn merged(
     lifecycle: &LaptopLifecycle<'_>,

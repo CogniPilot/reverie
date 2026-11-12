@@ -173,6 +173,8 @@ const HOOK_ONLY_SIGNALS: readonly WaitSignal[] = ['stop', 'blocked'];
 
 /** Per-session facts that can turn a mode's hook capability OFF for one session. */
 export interface HookCapabilityOptions {
+  /** Private current-start configuration evidence; omitted only for a pure capability query. */
+  workspaceHookConfiguration?: 'prepared' | 'opted-out' | 'unknown';
   /**
    * `deepSeekConfig.statusReporting`, verbatim (so `undefined` means "not sent",
    * i.e. ON). `false` is the per-session opt-out that stops `_configureCliEnv()`
@@ -228,9 +230,9 @@ export function hooksAvailableForMode(mode: SessionMode, options: HookCapability
   // different questions — see CliCapabilities.hooks.
   switch (getCli(mode)?.capabilities.hooks) {
     case 'always':
-      // The CLI installs Reverie's own hooks block into its workspace (claude), so the
-      // signals are unconditional.
-      return true;
+      // Mode capability alone is a pure catalog question. A live Session must
+      // additionally own current-start configuration evidence.
+      return options.workspaceHookConfiguration === undefined || options.workspaceHookConfiguration === 'prepared';
     case 'supervised':
       // The CLI REPORTS its own state to a supervisor and Reverie is that supervisor
       // (deepseek, via deepseek-status-shim.ts) — definitive signals rather than inferred
@@ -259,8 +261,10 @@ export function sessionHookOptions(session: {
   deepSeekStatusReporting?: boolean;
   docker?: unknown;
   remote?: unknown;
+  workspaceHookConfiguration?: 'prepared' | 'opted-out' | 'unknown';
 }): HookCapabilityOptions {
   return {
+    workspaceHookConfiguration: session.workspaceHookConfiguration ?? 'unknown',
     deepSeekStatusReporting: session.deepSeekStatusReporting,
     deepSeekBridgeUnreachable: Boolean(session.docker || session.remote),
   };
@@ -318,7 +322,10 @@ export function resolveWaitSignals(
       // is not, so saying "never fire for deepseek sessions" would send the
       // caller looking for a bug that is really a setting they chose.
       error:
-        options.mode === 'deepseek'
+        getCli(options.mode)?.capabilities.hooks === 'always' && options.workspaceHookConfiguration !== undefined
+          ? `Signal(s) ${rejected.join(', ')} unavailable: this start's hook configuration is ${options.workspaceHookConfiguration}. ` +
+            'Inspect workspace hooks before a new authorized start, or use idle or exit.'
+          : options.mode === 'deepseek'
           ? options.deepSeekBridgeUnreachable
             ? `Signal(s) ${rejected.join(', ')} never fire for this deepseek session: it runs in a container or on ` +
               `a remote host, where the local status bridge cannot reach the harness. Use idle or exit.`

@@ -4,9 +4,11 @@ mod diagnostic;
 mod direct_finalization;
 mod error;
 mod finalization;
+mod fleet_preview;
 pub(in crate::installing_broker) use direct_finalization::{
     DirectStorageFinishFailure, DirectStoragePreparation,
 };
+pub(in crate::installing_broker) use fleet_preview::StorageFleetSnapshot;
 mod existing_viewer;
 pub(in crate::installing_broker) use existing_viewer::{
     ExistingStorageError, ExistingStoragePreparation, ExistingStorageReturned,
@@ -146,15 +148,27 @@ impl StorageRegistry {
         source: &reverie_contracts::worker_config::EffectiveWorkerConfig,
         session: &ProfileSessionId,
     ) -> Result<StorageClaim, StorageWorkflowError> {
+        self.claim_with_end(source, session, None)
+    }
+    pub(super) fn claim_with_end(
+        self: &Arc<Self>,
+        source: &reverie_contracts::worker_config::EffectiveWorkerConfig,
+        session: &ProfileSessionId,
+        end: Option<Instant>,
+    ) -> Result<StorageClaim, StorageWorkflowError> {
         // Preserve source order and the real no-lease legacy branch: resolve
         // BEFORE the registry lock, and never census/register legacy storage.
         let selected = self.runtime.resolve_storage(source, session)?;
-        self.claim_selected(selected)
+        self.claim_selected(selected, end)
     }
     fn claim_selected(
         self: &Arc<Self>,
         selected: reverie_host::worker_storage::StorageSelection,
+        end: Option<Instant>,
     ) -> Result<StorageClaim, StorageWorkflowError> {
+        if end.is_some_and(|end| Instant::now() >= end) {
+            return Err(StorageWorkflowError::refused("WORKER_RECOVERY_DEADLINE"));
+        }
         let session = selected.paths().session().clone();
         if selected.paths().kind() != StorageKind::Employee {
             return Ok(StorageClaim {
@@ -164,7 +178,10 @@ impl StorageRegistry {
                 },
             });
         }
-        let mut entries = self.lock(None)?;
+        let mut entries = self.lock(end)?;
+        if end.is_some_and(|end| Instant::now() >= end) {
+            return Err(StorageWorkflowError::refused("WORKER_RECOVERY_DEADLINE"));
+        }
         if let Some(entry) = entries
             .iter()
             .find(|entry| entry.paths.session() == &session)
@@ -185,7 +202,7 @@ impl StorageRegistry {
                 ));
             }
             self.runtime
-                .check_selected_storage_writers(&selected, None)?;
+                .check_selected_storage_writers(&selected, end)?;
             return Ok(self.handle(entry, false));
         }
         if entries
@@ -199,7 +216,7 @@ impl StorageRegistry {
         let owner = selected
             .acquire()
             .map_err(|failure| StorageWorkflowError::from(failure.into_parts().1))?;
-        if let Err(primary) = self.runtime.check_storage_writers(&owner, None) {
+        if let Err(primary) = self.runtime.check_storage_writers(&owner, end) {
             let end = self
                 .runtime
                 .stop_deadline()

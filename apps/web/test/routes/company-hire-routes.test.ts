@@ -8,6 +8,7 @@ import { CompanyStore } from '../../src/company-store.js';
 import { registerCompanyHireRoutes } from '../../src/web/routes/company-hire-routes.js';
 import { installRouteErrorHandler } from '../../src/web/route-error-handler.js';
 import * as registry from '../../src/config/cli-registry/registry.js';
+import type { CliEntry } from '../../src/config/cli-registry/types.js';
 
 describe('fresh permanent expert hire', () => {
   let directory: string;
@@ -61,10 +62,20 @@ describe('fresh permanent expert hire', () => {
       verifiedOwner: (req) => req.headers['x-unverified'] === undefined,
       profiles: async () => [
         { id: 'work', label: 'Work plan', provider: 'openai', configDir: directory, openCodeDataDir: directory },
-        { id: 'claude-plan', label: 'Claude plan', provider: 'anthropic', configDir: directory, openCodeDataDir: directory },
+        {
+          id: 'claude-plan',
+          label: 'Claude plan',
+          provider: 'anthropic',
+          configDir: directory,
+          openCodeDataDir: directory,
+        },
       ],
       endpoints: async () => [endpoint],
-      captureRuntime: () => ({ mode: String(start.mock.calls.at(-1)?.[1].mode), workingDir: '/workspace/expert', configs: {} }),
+      captureRuntime: () => ({
+        mode: String(start.mock.calls.at(-1)?.[1].mode),
+        workingDir: '/workspace/expert',
+        configs: {},
+      }),
       start,
       stop,
       forget,
@@ -100,12 +111,19 @@ describe('fresh permanent expert hire', () => {
     const restarted = new CompanyStore(store.file);
     await restarted.init();
     expect(restarted.snapshot().employees[0].id).toBe(employee.id);
-    expect(restarted.snapshot().employees[0].runtimeRecipe).toMatchObject({ mode: 'codex', workingDir: '/workspace/expert' });
+    expect(restarted.snapshot().employees[0].runtimeRecipe).toMatchObject({
+      mode: 'codex',
+      workingDir: '/workspace/expert',
+    });
   });
   it('persists explicit sleep and dream opt-ins at hire without enabling research', async () => {
     const response = await hire({ ...body, sleepEnabled: true, dreamEnabled: true } as never);
     expect(response.statusCode).toBe(200);
-    expect(response.json().data.employee).toMatchObject({ sleepEnabled: true, dreamEnabled: true, researchEnabled: false });
+    expect(response.json().data.employee).toMatchObject({
+      sleepEnabled: true,
+      dreamEnabled: true,
+      researchEnabled: false,
+    });
   });
 
   it('uses the same configured local model with OpenCode without copying credentials or account selection', async () => {
@@ -124,6 +142,73 @@ describe('fresh permanent expert hire', () => {
     expect(JSON.stringify(start.mock.calls[0][1])).not.toContain(endpoint.apiKey);
     expect(start.mock.calls[0][1]).not.toHaveProperty('subscriptionProfileId');
   });
+  it('passes the session effort codec at the top level and preserves a cosmetic stock label', async () => {
+    const getCli = registry.getCli;
+    const entry = { ...structuredClone(getCli('claude')!), label: 'Owner display label' };
+    vi.spyOn(registry, 'getCli').mockImplementation((mode) => (mode === entry.id ? entry : getCli(mode)));
+    const response = await hire({
+      ...body,
+      mode: 'claude',
+      source: { kind: 'subscription', profileId: 'claude-plan' },
+      effort: 'ultracode',
+    } as never);
+    expect(response.statusCode).toBe(200);
+    expect(start.mock.calls[0][1]).toMatchObject({ mode: 'claude', effort: 'ultracode', modelOverride: 'model-main' });
+    expect(start.mock.calls[0][1]).not.toHaveProperty('claudeConfig');
+  });
+  it('uses a custom declared enum effort destination through the same hire API', async () => {
+    const getCli = registry.getCli;
+    const entry = { ...structuredClone(getCli('pi')!), id: 'custom-agent' as CliEntry['id'], stock: false };
+    vi.spyOn(registry, 'getCli').mockImplementation((mode) => (mode === entry.id ? entry : getCli(mode)));
+    const response = await hire({
+      ...body,
+      mode: entry.id,
+      source: { kind: 'local', endpointId: 'local' },
+      model: 'model-local',
+      effort: 'high',
+    } as never);
+    expect(response.statusCode).toBe(200);
+    expect(start.mock.calls[0][1]).toMatchObject({
+      mode: entry.id,
+      piConfig: { thinking: 'high' },
+      customModel: { endpointId: 'local', modelId: 'model-local' },
+    });
+    expect(start.mock.calls[0][1]).not.toHaveProperty('effort');
+  });
+  it('refuses a changed stock effort protocol before any runtime starts', async () => {
+    const getCli = registry.getCli;
+    const entry = structuredClone(getCli('claude')!);
+    entry.launch.variants[0].args[0] = { lit: 'different-program' };
+    vi.spyOn(registry, 'getCli').mockImplementation((mode) => (mode === entry.id ? entry : getCli(mode)));
+    const response = await hire({
+      ...body,
+      mode: 'claude',
+      source: { kind: 'subscription', profileId: 'claude-plan' },
+    } as never);
+    expect(response.statusCode).toBe(400);
+    expect(response.body).toContain('effort supported');
+    expect(start).not.toHaveBeenCalled();
+  });
+  it.each(['unknown', 'shell', 'disabled', 'copied-codec'] as const)(
+    'refuses an unsupported %s hiring selection before runtime creation',
+    async (selection) => {
+      const getCli = registry.getCli;
+      const mode = selection === 'shell' ? 'shell' : 'custom-agent';
+      if (selection === 'disabled' || selection === 'copied-codec') {
+        const entry = { ...structuredClone(getCli('claude')!), id: mode as CliEntry['id'], stock: true };
+        if (selection === 'disabled') entry.enabled = false;
+        vi.spyOn(registry, 'getCli').mockImplementation((id) => (id === mode ? entry : getCli(id)));
+      }
+      const response = await hire({
+        ...body,
+        mode,
+        source: { kind: 'subscription', profileId: 'claude-plan' },
+      } as never);
+      expect(response.statusCode).toBe(400);
+      expect(start).not.toHaveBeenCalled();
+      expect(stop).not.toHaveBeenCalled();
+    }
+  );
   it('keeps owner-selected pronouns and voice through store reopen and runtime replacement', async () => {
     const voice = { provider: 'browser', id: 'voice://chosen' };
     const response = await hire({ ...body, pronouns: 'they/them', voice } as never);
@@ -187,23 +272,62 @@ describe('fresh permanent expert hire', () => {
     expect(sources.find((s) => s.id === 'work')).toMatchObject({ defaultMode: 'codex', modes: ['codex', 'opencode'] });
     expect(sources.find((s) => s.id === 'claude-plan')).toMatchObject({ defaultMode: 'claude', modes: ['claude'] });
     expect(sources.find((s) => s.kind === 'local').defaultMode).toBe('opencode');
-    expect(response.json().data.roles.map((r: { id: string }) => r.id)).toEqual(['cto', 'coo', 'software', 'systems', 'assistant', 'custom']);
+    expect(response.json().data.roles.map((r: { id: string }) => r.id)).toEqual([
+      'cto',
+      'coo',
+      'software',
+      'systems',
+      'assistant',
+      'custom',
+    ]);
   });
+  it.each(['disabled', 'unsupported'] as const)(
+    'never prefers a %s local harness before the existing custom fallback',
+    async (reason) => {
+      const preferred = structuredClone(registry.getCli('opencode')!);
+      if (reason === 'disabled') preferred.enabled = false;
+      else preferred.capabilities.customModelInjection = { kind: 'unsupported' };
+      const custom = { ...structuredClone(registry.getCli('pi')!), id: 'custom-agent' as CliEntry['id'], stock: false };
+      vi.spyOn(registry, 'listClis').mockReturnValue([registry.getCli('claude')!, preferred, custom]);
+      const response = await app.inject('/api/company/hire-options');
+      expect(response.statusCode).toBe(200);
+      const local = response.json().data.sources.find((source: { kind: string }) => source.kind === 'local');
+      expect(local.defaultMode).toBe(custom.id);
+      expect(local.modes).toContain(custom.id);
+      expect(local.modes).not.toContain(preferred.id);
+      expect(start).not.toHaveBeenCalled();
+    }
+  );
   it('persists owner-edited role details and only the explicitly selected recovery permission', async () => {
-    const result = await hire({ ...body, responsibilities: ['Review architecture with evidence'], personality: 'Calm and precise', permissions: { recoverEmployees: true } } as never);
+    const result = await hire({
+      ...body,
+      responsibilities: ['Review architecture with evidence'],
+      personality: 'Calm and precise',
+      permissions: { recoverEmployees: true },
+    } as never);
     expect(result.statusCode).toBe(200);
     const employee = result.json().data.employee;
-    expect(employee).toMatchObject({ responsibilities: ['Review architecture with evidence'], personality: 'Calm and precise', permissions: { recoverEmployees: true } });
+    expect(employee).toMatchObject({
+      responsibilities: ['Review architecture with evidence'],
+      personality: 'Calm and precise',
+      permissions: { recoverEmployees: true },
+    });
     await company.update(employee.id, undefined, { icon: 'X' });
-    const reopened = new CompanyStore(store.file); await reopened.init();
-    expect(reopened.snapshot().employees[0]).toMatchObject({ responsibilities: ['Review architecture with evidence'], personality: 'Calm and precise' });
+    const reopened = new CompanyStore(store.file);
+    await reopened.init();
+    expect(reopened.snapshot().employees[0]).toMatchObject({
+      responsibilities: ['Review architecture with evidence'],
+      personality: 'Calm and precise',
+    });
     await company.update(employee.id, undefined, { responsibilities: [], personality: '' });
     expect(company.view().employees[0]).toMatchObject({ responsibilities: [], personality: '' });
   });
   it('rejects a case-insensitive duplicate name before starting another runtime', async () => {
-    expect((await hire()).statusCode).toBe(200); start.mockClear();
+    expect((await hire()).statusCode).toBe(200);
+    start.mockClear();
     const result = await hire({ ...body, name: ' reviewer ' });
-    expect(result.statusCode).toBe(409); expect(result.body).toContain('distinct name');
+    expect(result.statusCode).toBe(409);
+    expect(result.body).toContain('distinct name');
     expect(start).not.toHaveBeenCalled();
   });
   it.each([
@@ -218,24 +342,31 @@ describe('fresh permanent expert hire', () => {
     expect((await hire({ ...body, name })).statusCode).toBe(200);
     expect(start.mock.calls[0][1]).toMatchObject({ caseName, sessionName: name, newCaseOnly: true });
   });
-  it.each(['ＲＥＶＩＥＷＥＲ', 'Réviewer', 'Reviewer!'])('refuses normalized name or case-folder collision %s', async name => {
-    expect((await hire()).statusCode).toBe(200);
-    start.mockClear();
-    expect((await hire({ ...body, name })).statusCode).toBe(409);
-    expect(start).not.toHaveBeenCalled();
-  });
+  it.each(['ＲＥＶＩＥＷＥＲ', 'Réviewer', 'Reviewer!'])(
+    'refuses normalized name or case-folder collision %s',
+    async (name) => {
+      expect((await hire()).statusCode).toBe(200);
+      start.mockClear();
+      expect((await hire({ ...body, name })).statusCode).toBe(409);
+      expect(start).not.toHaveBeenCalled();
+    }
+  );
   it('reserves the name while the first hire is still starting and releases it on completion', async () => {
     let release!: () => void;
     let entered!: () => void;
-    const gate = new Promise<void>(resolve => { release = resolve; });
-    const started = new Promise<void>(resolve => { entered = resolve; });
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const started = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
     start.mockImplementationOnce(async () => {
       entered();
       await gate;
       sessions.set('new-runtime', { id: 'new-runtime', name: 'Expert' });
       return 'new-runtime';
     });
-    const first = hire().then(response => response);
+    const first = hire().then((response) => response);
     await started;
     const second = await hire({ ...body, name: 'Réviewer' });
     release();
@@ -259,7 +390,11 @@ describe('fresh permanent expert hire', () => {
   });
   it('local sources prefer an enabled saved custom harness when OpenCode is unavailable', async () => {
     const custom = { ...registry.getCli('opencode')!, id: registry.asCliId('custom-local'), stock: false };
-    vi.spyOn(registry, 'listClis').mockReturnValue([registry.getCli('codex')!, { ...registry.getCli('opencode')!, enabled: false }, custom]);
+    vi.spyOn(registry, 'listClis').mockReturnValue([
+      registry.getCli('codex')!,
+      { ...registry.getCli('opencode')!, enabled: false },
+      custom,
+    ]);
     const response = await app.inject('/api/company/hire-options');
     const local = response.json().data.sources.find((s) => s.kind === 'local');
     expect(local.defaultMode).toBe('custom-local');

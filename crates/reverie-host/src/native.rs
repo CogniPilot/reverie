@@ -22,7 +22,11 @@ pub(crate) use perf_init::perf_init_pidfd;
 mod memory_namespace;
 mod memory_profile;
 pub(crate) mod metadata_socket;
+mod pool_retirement;
 mod rename;
+pub(crate) use pool_retirement::{
+    archive_failed_pool_control, archive_failed_pool_policies, archive_uninstalled_pool_pending,
+};
 pub(crate) mod socket_entry;
 pub(crate) mod worker_directory;
 pub(crate) use cold_temporary::{
@@ -59,7 +63,8 @@ pub(crate) use lease::observe_ops_private;
 pub(crate) use lease::observe_with_ancestors;
 pub(crate) use policy::{
     PolicyEntryStamp, create_policy_temporary, entry_stat, named_policy_entry,
-    open_policy_child_directory, open_policy_original, policy_effective_uid, replace_policy,
+    open_policy_child_directory, open_policy_original, policy_effective_uid,
+    publish_absent_actor_policy, replace_policy,
 };
 pub(crate) use reservation::{
     read_reservation, reservation_identity, reservation_identity_text, reservation_location,
@@ -74,7 +79,7 @@ mod worker_config;
 pub(crate) use office::office_plan_capability;
 pub(crate) use passwd::home_directory;
 pub(crate) use passwd::username;
-pub(crate) use resolve::{resolve_optional_text, resolve_strict_text};
+pub(crate) use resolve::{resolve_future_text, resolve_optional_text, resolve_strict_text};
 pub(crate) use worker_config::read_owned_text_file as read_nix_rollback;
 pub(crate) use worker_config::read_worker_config;
 
@@ -277,5 +282,6 @@ mod tests;
 mod worker_service;
 pub(crate) use worker_service::{
     restore_previous_service_unit, retain_native_service_environment, retain_native_service_unit,
-    retain_predecessor, retain_upgrade_failure, retain_upgrade_package, retain_upgrade_running,
+    retain_predecessor, retain_stopped_service_pending, retain_upgrade_failure,
+    retain_upgrade_package, retain_upgrade_running,
 };

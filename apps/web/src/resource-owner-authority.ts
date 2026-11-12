@@ -8,11 +8,23 @@ import type { FastifyRequest } from 'fastify';
 import { OwnerAuthService } from './owner-auth/service.js';
 import { OWNER_COOKIE, SERVICE_HEADER, sameOrigin } from './owner-auth/policy.js';
 import { ownerFor } from './web/route-helpers.js';
+import {
+  EmployeeGpuIntentData,
+  EmployeeGpuApplyData,
+  type EmployeeGpuIntent,
+  type EmployeeGpuApply,
+} from './employee-gpu-data.js';
+import { EmployeePolicyEditApproval } from './resource-employee-data.js';
 
 const PURPOSE = 'resource-replacement-v1';
 const RAM_PURPOSE = 'resource-ram-pool-v2';
 export const POOL_INSTALLATION_CONSENT_PURPOSE = 'host-pool-installation-consent-v1';
-type ResourcePurpose = typeof PURPOSE | typeof RAM_PURPOSE | typeof POOL_INSTALLATION_CONSENT_PURPOSE;
+export const FLEET_MAINTENANCE_PURPOSE = 'resource-fleet-maintenance-v1';
+type ResourcePurpose =
+  | typeof PURPOSE
+  | typeof RAM_PURPOSE
+  | typeof POOL_INSTALLATION_CONSENT_PURPOSE
+  | typeof FLEET_MAINTENANCE_PURPOSE;
 const UUID = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/;
 const NIL_UUID = '00000000-0000-0000-0000-000000000000';
 const HEX = /^[a-f0-9]{64}$/;
@@ -66,6 +78,39 @@ export interface RamResourcePreviewContext extends ResourceContext<typeof RAM_PU
   readonly employeeId: string;
   readonly principal: Readonly<ResourceOwnerPrincipal>;
 }
+/** Read-only employee observation; this stage cannot authorize a draft or Apply. */
+export interface RamResourceStatusContext extends ResourceContext<typeof RAM_PURPOSE> {
+  readonly stage: 'status';
+  readonly employeeId: string;
+  readonly principal: Readonly<ResourceOwnerPrincipal>;
+}
+export interface RamGpuStatusContext extends ResourceContext<typeof RAM_PURPOSE> {
+  readonly stage: 'gpu-status';
+  readonly employeeId: string;
+  readonly sessionId: string;
+  readonly principal: Readonly<ResourceOwnerPrincipal>;
+}
+export interface RamGpuApplyStatusContext extends Omit<RamGpuStatusContext, 'stage'> {
+  readonly stage: 'gpu-apply-status';
+}
+export interface RamGpuRequestContext extends ResourceContext<typeof RAM_PURPOSE> {
+  readonly stage: 'gpu-request';
+  readonly employeeId: string;
+  readonly approval: Readonly<EmployeeGpuIntent>;
+  readonly principal: Readonly<ResourceOwnerPrincipal>;
+}
+export interface RamGpuApplyContext extends ResourceContext<typeof RAM_PURPOSE> {
+  readonly stage: 'gpu-apply';
+  readonly employeeId: string;
+  readonly approval: Readonly<EmployeeGpuApply>;
+  readonly principal: Readonly<ResourceOwnerPrincipal>;
+}
+export interface RamEmployeePolicyEditContext extends ResourceContext<typeof RAM_PURPOSE> {
+  readonly stage: 'employee-policy-edit';
+  readonly employeeId: string;
+  readonly approval: EmployeePolicyEditApproval;
+  readonly principal: Readonly<ResourceOwnerPrincipal>;
+}
 /** Current canonical identity DATA, meaningful only with its actual retained
  * context, cookie/session and attested native channel. */
 export interface ResourceOwnerPrincipal {
@@ -101,7 +146,37 @@ export interface PoolInstallationConsentContext
   readonly consent: true;
   readonly principal: Readonly<ResourceOwnerPrincipal>;
 }
-type PrincipalFor<P extends ResourcePurpose> = P extends typeof RAM_PURPOSE | typeof POOL_INSTALLATION_CONSENT_PURPOSE
+export interface FleetApproval {
+  readonly operationId: string;
+  readonly previewId: string;
+  readonly cohortDigest: string;
+  readonly poolPolicyDigest: string;
+  readonly coverageDigest: string;
+  readonly revisionDigest: string;
+}
+export interface FleetViewerContext extends ResourceContext<typeof FLEET_MAINTENANCE_PURPOSE> {
+  readonly stage: 'fleet-viewer';
+  readonly requestId: string;
+  readonly principal: Readonly<ResourceOwnerPrincipal>;
+}
+export interface FleetPreviewContext extends ResourceContext<typeof FLEET_MAINTENANCE_PURPOSE> {
+  readonly stage: 'fleet-preview';
+  readonly requestId: string;
+  readonly approval: Readonly<FleetApproval>;
+  readonly principal: Readonly<ResourceOwnerPrincipal>;
+}
+export interface FleetMigrationContext extends ResourceContext<typeof FLEET_MAINTENANCE_PURPOSE> {
+  readonly stage: 'fleet-migration';
+  readonly requestId: string;
+  readonly verb: 'migrate-pool';
+  readonly consent: true;
+  readonly approval: Readonly<FleetApproval>;
+  readonly principal: Readonly<ResourceOwnerPrincipal>;
+}
+type PrincipalFor<P extends ResourcePurpose> = P extends
+  | typeof RAM_PURPOSE
+  | typeof POOL_INSTALLATION_CONSENT_PURPOSE
+  | typeof FLEET_MAINTENANCE_PURPOSE
   ? { readonly principal: Readonly<ResourceOwnerPrincipal> }
   : object;
 /** Website metadata/command correlation DATA. Only the retained owner binding
@@ -118,12 +193,21 @@ export type AnyResourceContext =
   | ResourceOwnerContext
   | ResourcePreviewContext
   | RamResourceOwnerContext
-  | RamResourcePreviewContext;
+  | RamResourcePreviewContext
+  | RamResourceStatusContext
+  | RamGpuStatusContext
+  | RamGpuApplyStatusContext
+  | RamGpuRequestContext
+  | RamGpuApplyContext
+  | RamEmployeePolicyEditContext;
 type AuthorityContext =
   | AnyResourceContext
   | PoolInstallationViewerContext
   | PoolInstallationOfferContext
-  | PoolInstallationConsentContext;
+  | PoolInstallationConsentContext
+  | FleetViewerContext
+  | FleetPreviewContext
+  | FleetMigrationContext;
 
 /** Process-local authority join. A serialized scope digest never recreates it. */
 export class ResourceOwnerBinding {
@@ -251,8 +335,11 @@ export class ResourceOwnerAuthority {
   readonly #auth: OwnerAuthService;
   readonly #epoch = randomBytes(32).toString('hex');
   readonly #contexts = new WeakSet<object>();
+  readonly #submittedEmployeePolicies = new WeakSet<RamEmployeePolicyEditContext>();
   readonly #poolViews = new WeakSet<object>();
   readonly #consentedPoolViews = new WeakSet<object>();
+  readonly #fleetViews = new WeakMap<FleetPreviewContext, FleetViewerContext>();
+  readonly #consentedFleetViews = new WeakSet<object>();
   readonly #sessions = new WeakMap<object, { account: OwnerAuthService; token: string }>();
   readonly #channels = new Map<Socket, Map<string, { account: OwnerAuthService; count: number }>>();
   #closed = false;
@@ -268,12 +355,14 @@ export class ResourceOwnerAuthority {
   #identity(
     request: FastifyRequest,
     token: string,
-    purpose: ResourcePurpose = PURPOSE
+    purpose: ResourcePurpose = PURPOSE,
+    access: 'operation' | 'employee-status' = 'operation'
   ): { key: string; principal?: Readonly<ResourceOwnerPrincipal> } {
     need(
       !this.#closed &&
-        request.method === 'POST' &&
-        sameOrigin(request) &&
+        (access === 'employee-status'
+          ? purpose === RAM_PURPOSE && request.method === 'GET'
+          : request.method === 'POST' && sameOrigin(request)) &&
         request.cookies?.[OWNER_COOKIE] === token &&
         request.headers.authorization === undefined &&
         request.headers[SERVICE_HEADER] === undefined &&
@@ -354,12 +443,149 @@ export class ResourceOwnerAuthority {
     need(typeof employeeId === 'string' && UUID.test(employeeId));
     return this.#capture(request, { stage: 'preview' as const, employeeId }, RAM_PURPOSE);
   }
+  captureRamStatus(request: FastifyRequest, employeeId: string): RamResourceStatusContext {
+    need(typeof employeeId === 'string' && UUID.test(employeeId) && employeeId !== NIL_UUID);
+    return this.#capture(request, { stage: 'status' as const, employeeId }, RAM_PURPOSE);
+  }
+  captureRamGpuStatus(request: FastifyRequest, employeeId: string, sessionId: string): RamGpuStatusContext {
+    need(UUID.test(employeeId) && employeeId !== NIL_UUID && UUID.test(sessionId) && sessionId !== NIL_UUID);
+    return this.#capture(
+      request,
+      { stage: 'gpu-status' as const, employeeId, sessionId },
+      RAM_PURPOSE,
+      Date.now() + 35_000
+    );
+  }
+  captureRamGpuApplyStatus(request: FastifyRequest, original: RamGpuStatusContext): RamGpuApplyStatusContext {
+    this.assertContext(original);
+    need(original.stage === 'gpu-status');
+    return this.#capture(
+      request,
+      { stage: 'gpu-apply-status' as const, employeeId: original.employeeId, sessionId: original.sessionId },
+      RAM_PURPOSE,
+      original.expiresAtEpochMs,
+      original
+    );
+  }
+  captureRamGpuRequest(request: FastifyRequest, employeeId: string, value: EmployeeGpuIntent): RamGpuRequestContext {
+    need(UUID.test(employeeId) && employeeId !== NIL_UUID);
+    const selected = EmployeeGpuIntentData.parse(value);
+    const approval = Object.freeze({ ...selected, expected: Object.freeze(selected.expected) });
+    return this.#capture(
+      request,
+      { stage: 'gpu-request' as const, employeeId, approval },
+      RAM_PURPOSE,
+      Date.now() + 35_000
+    );
+  }
+  captureRamGpuApply(request: FastifyRequest, employeeId: string, value: EmployeeGpuApply): RamGpuApplyContext {
+    need(UUID.test(employeeId) && employeeId !== NIL_UUID);
+    const approval = Object.freeze(EmployeeGpuApplyData.parse(value));
+    return this.#capture(
+      request,
+      { stage: 'gpu-apply' as const, employeeId, approval },
+      RAM_PURPOSE,
+      Date.now() + 35_000
+    );
+  }
+  captureRamEmployeePolicyEdit(
+    request: FastifyRequest,
+    employeeId: string,
+    value: EmployeePolicyEditApproval
+  ): RamEmployeePolicyEditContext {
+    need(UUID.test(employeeId) && employeeId !== NIL_UUID);
+    const approval = EmployeePolicyEditApproval.parse(value);
+    return this.#capture(request, { stage: 'employee-policy-edit' as const, employeeId, approval }, RAM_PURPOSE);
+  }
+  consumeEmployeePolicyEdit(context: RamEmployeePolicyEditContext): void {
+    this.assertContext(context);
+    need(context.stage === 'employee-policy-edit' && !this.#submittedEmployeePolicies.has(context));
+    this.#submittedEmployeePolicies.add(context);
+  }
   capturePoolInstallationViewer(request: FastifyRequest): PoolInstallationViewerContext {
     return this.#capture(
       request,
       { stage: 'viewer' as const, requestId: randomUUID() },
       POOL_INSTALLATION_CONSENT_PURPOSE
     );
+  }
+  captureFleetViewer(request: FastifyRequest): FleetViewerContext {
+    return this.#capture(
+      request,
+      { stage: 'fleet-viewer' as const, requestId: randomUUID() },
+      FLEET_MAINTENANCE_PURPOSE
+    );
+  }
+  captureFleetPreview(
+    request: FastifyRequest,
+    viewer: FleetViewerContext,
+    approval: FleetApproval,
+    expires: number
+  ): FleetPreviewContext {
+    this.assertContext(viewer);
+    need(viewer.purpose === FLEET_MAINTENANCE_PURPOSE && viewer.stage === 'fleet-viewer');
+    need(
+      Object.keys(approval).sort().join(',') ===
+        'cohortDigest,coverageDigest,operationId,poolPolicyDigest,previewId,revisionDigest'
+    );
+    for (const name of ['operationId', 'previewId'] as const)
+      need(UUID.test(approval[name]) && approval[name] !== NIL_UUID);
+    for (const name of ['cohortDigest', 'coverageDigest', 'poolPolicyDigest', 'revisionDigest'] as const)
+      need(HEX.test(approval[name]));
+    need(Number.isSafeInteger(expires) && expires > Date.now());
+    const context = this.#capture(
+      request,
+      {
+        stage: 'fleet-preview' as const,
+        requestId: viewer.requestId,
+        approval: Object.freeze({ ...approval }),
+      },
+      FLEET_MAINTENANCE_PURPOSE,
+      Math.min(expires, viewer.expiresAtEpochMs),
+      viewer
+    );
+    this.#fleetViews.set(context, viewer);
+    return context;
+  }
+  captureFleetMigration(request: FastifyRequest, preview: FleetPreviewContext): FleetMigrationContext {
+    const viewer = this.#fleetViews.get(preview);
+    need(viewer && !this.#consentedFleetViews.has(preview));
+    this.assertContext(preview);
+    need(preview.purpose === FLEET_MAINTENANCE_PURPOSE && preview.stage === 'fleet-preview');
+    const body = request.body;
+    need(body && typeof body === 'object' && !Array.isArray(body));
+    need(Object.keys(body).sort().join(',') === 'consent,expectedRevision,previewId,verb');
+    const value = body as Record<string, unknown>;
+    need(
+      value.consent === true &&
+        value.verb === 'migrate-pool' &&
+        value.previewId === preview.approval.previewId &&
+        value.expectedRevision === preview.approval.revisionDigest
+    );
+    // The preview window gates this one consent. Subsequent challenges use
+    // the SAME original viewer deadline and scope, never a fresh five minutes.
+    const context = this.#capture(
+      request,
+      {
+        stage: 'fleet-migration' as const,
+        verb: 'migrate-pool' as const,
+        consent: true as const,
+        requestId: preview.requestId,
+        approval: preview.approval,
+      },
+      FLEET_MAINTENANCE_PURPOSE,
+      viewer.expiresAtEpochMs,
+      viewer
+    );
+    this.assertSameSession(preview, context);
+    this.#consentedFleetViews.add(preview);
+    return context;
+  }
+  assertFleetSession(request: FastifyRequest, context: FleetViewerContext): void {
+    need(
+      this.#contexts.has(context) && context.purpose === FLEET_MAINTENANCE_PURPOSE && context.stage === 'fleet-viewer'
+    );
+    this.#assertOriginalSession(request, context);
   }
   capturePoolInstallationOffer(
     request: FastifyRequest,
@@ -448,12 +674,15 @@ export class ResourceOwnerAuthority {
     need(
       this.#contexts.has(context) && context.purpose === POOL_INSTALLATION_CONSENT_PURPOSE && context.stage === 'viewer'
     );
+    this.#assertOriginalSession(request, context);
+  }
+  #assertOriginalSession(request: FastifyRequest, context: PoolInstallationViewerContext | FleetViewerContext): void {
     const source = this.#sessions.get(context),
       token = request.cookies?.[OWNER_COOKIE];
     need(
       source && typeof token === 'string' && token === source.token && this.#auth.forSession(token) === source.account
     );
-    const current = this.#identity(request, token, POOL_INSTALLATION_CONSENT_PURPOSE).principal;
+    const current = this.#identity(request, token, context.purpose).principal;
     need(
       current &&
         current.accountId === context.principal.accountId &&
@@ -472,18 +701,40 @@ export class ResourceOwnerAuthority {
     T extends
       | { stage: 'apply'; approval: Readonly<ResourceApproval> }
       | { stage: 'preview'; employeeId: string }
-      | { stage: 'viewer'; requestId: string }
-      | (PoolInstallationSelection & ({ stage: 'offer' } | { stage: 'consent'; consent: true })),
+      | { stage: 'status'; employeeId: string }
+      | { stage: 'gpu-status' | 'gpu-apply-status'; employeeId: string; sessionId: string }
+      | { stage: 'gpu-request'; employeeId: string; approval: Readonly<EmployeeGpuIntent> }
+      | { stage: 'gpu-apply'; employeeId: string; approval: Readonly<EmployeeGpuApply> }
+      | { stage: 'employee-policy-edit'; employeeId: string; approval: EmployeePolicyEditApproval }
+      | { stage: 'viewer' | 'fleet-viewer'; requestId: string }
+      | (PoolInstallationSelection & ({ stage: 'offer' } | { stage: 'consent'; consent: true }))
+      | { stage: 'fleet-preview'; requestId: string; approval: Readonly<FleetApproval> }
+      | {
+          stage: 'fleet-migration';
+          requestId: string;
+          verb: 'migrate-pool';
+          consent: true;
+          approval: Readonly<FleetApproval>;
+        },
   >(
     request: FastifyRequest,
     selected: T,
     purpose: P,
-    originalExpiry?: number
+    originalExpiry?: number,
+    origin?: AuthorityContext
   ): Readonly<ResourceContext<P> & T> & PrincipalFor<P> {
     const token = request.cookies?.[OWNER_COOKIE];
     need(typeof token === 'string' && token.length > 0 && token.length <= 4096);
-    const identity = this.#identity(request, token, purpose),
+    const access =
+      selected.stage === 'status' || selected.stage === 'gpu-status' || selected.stage === 'gpu-apply-status'
+        ? 'employee-status'
+        : 'operation';
+    const identity = this.#identity(request, token, purpose, access),
       owner = ownerFor(request);
+    if (origin) {
+      this.assertContext(origin);
+      need(origin.purpose === purpose);
+    }
     const issued = Date.now(),
       expires = Math.min(issued + 300_000, originalExpiry ?? issued + 300_000);
     need(Number.isSafeInteger(issued) && Number.isSafeInteger(expires) && expires > issued);
@@ -492,13 +743,14 @@ export class ResourceOwnerAuthority {
         this.#contexts.has(context) &&
           Date.now() >= issued &&
           Date.now() < expires &&
-          this.#identity(request, token, purpose).key === identity.key
+          this.#identity(request, token, purpose, access).key === identity.key
       );
     };
     const context = Object.freeze({
       purpose,
       owner,
-      ownerScopeDigest: digest(this.#epoch + identity.key + randomBytes(32).toString('hex')),
+      ownerScopeDigest:
+        origin?.ownerScopeDigest ?? digest(this.#epoch + identity.key + randomBytes(32).toString('hex')),
       ...(identity.principal === undefined ? {} : { principal: identity.principal }),
       ...selected,
       expiresAtEpochMs: expires,
@@ -511,6 +763,7 @@ export class ResourceOwnerAuthority {
     this.#contexts.add(context);
     this.#sessions.set(context, { account: this.#auth.forSession(token), token });
     assertCurrent();
+    if (origin) this.#sameSession(origin, context);
     return context;
   }
   assertContext(context: AuthorityContext): void {
@@ -520,6 +773,9 @@ export class ResourceOwnerAuthority {
   assertSameSession(left: AuthorityContext, right: AuthorityContext): void {
     this.assertContext(left);
     this.assertContext(right);
+    this.#sameSession(left, right);
+  }
+  #sameSession(left: ResourceContext<ResourcePurpose>, right: ResourceContext<ResourcePurpose>): void {
     const a = this.#sessions.get(left),
       b = this.#sessions.get(right);
     need(

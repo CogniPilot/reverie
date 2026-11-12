@@ -1,3 +1,4 @@
+import { registerMuxFixture } from './helpers/registered-mux-fixture.js';
 /**
  * Workspace-trust dialog auto-accept.
  *
@@ -161,6 +162,7 @@ describe('Session trust-dialog auto-accept', () => {
       mux,
       muxSession: { muxName: 'reverie-test', sessionId: 'test', createdAt: Date.now() },
     } as ConstructorParameters<typeof Session>[0]);
+    registerMuxFixture(session);
     const internals = session as unknown as {
       _maybeAcceptTrustDialog(): void;
       _interactiveStartedAt: number;

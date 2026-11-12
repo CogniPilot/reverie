@@ -2,6 +2,7 @@ import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { z } from 'zod';
 import { PlanMoveError, type PlanMoveExecutor, type PlanMoves, type PlanMoveSnapshot } from './plan-move.js';
 import { PlanRequestId } from './plan-request-capability.js';
+import { accountReplacementProfile } from './utils/account-replacement-profile.js';
 
 export const PlanRequestSchema = z
   .object({
@@ -295,7 +296,7 @@ export class PlanMoveRequests {
         throw new PlanMoveError('The expert or plan changed. Refresh before requesting a move.');
       const target = await this.port.validateTarget(snapshot, input.toAccount, owner);
       if (input.purpose === 'runtime-refresh' &&
-          (!['codex', 'claude'].includes(snapshot.mode ?? '') || target?.mode !== snapshot.mode))
+          (!accountReplacementProfile(snapshot.mode) || target?.mode !== snapshot.mode))
         throw new PlanMoveError('Runtime refresh requires the unchanged supported harness');
       if (this.records.size >= 100) {
         const old = [...this.records.values()].find((record) => !active(record.phase));

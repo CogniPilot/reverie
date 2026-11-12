@@ -201,7 +201,11 @@ fn remaining(service: &WorkerReportService, deadline: Instant) -> Result<Duratio
     }
     Ok(remaining)
 }
+#[cfg(test)]
+thread_local! { pub(super) static SHUTDOWNS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) }; }
 pub(super) fn shutdown(stream: &UnixStream) -> Result<()> {
+    #[cfg(test)]
+    SHUTDOWNS.with(|count| count.set(count.get() + 1));
     match stream.shutdown(Shutdown::Both) {
         Ok(()) => Ok(()),
         Err(e) if e.kind() == std::io::ErrorKind::NotConnected => Ok(()),

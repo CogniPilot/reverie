@@ -11,6 +11,7 @@
  * (test/submit-settle.test.ts).
  */
 import { AsyncLocalStorage } from 'node:async_hooks';
+import { getCli } from './config/cli-registry/registry.js';
 import { composerIsEmpty, promptStillInComposer } from './session-submit-verifier.js';
 import { stripAnsi } from './utils/index.js';
 
@@ -37,8 +38,9 @@ export const CODEX_KEY_BURST_MAX_CHARS = 1000;
 
 /** Does this text go to a pane of `mode` as a bracketed paste rather than keys? Text with control characters is always typed. */
 export function pastesInsteadOfKeys(mode: string, text: string): boolean {
+  const limit = getCli(mode)?.capabilities.input?.keyBurstMaxChars;
   // eslint-disable-next-line no-control-regex
-  return mode === 'codex' && text.length > CODEX_KEY_BURST_MAX_CHARS && !/[\u0000-\u001f\u007f-\u009f]/.test(text);
+  return limit !== undefined && text.length > limit && !/[\u0000-\u001f\u007f-\u009f]/.test(text);
 }
 
 /** After Enter, the pane is read this often, up to the window, for signs that a turn started. */
@@ -184,6 +186,11 @@ function ownsComposer(stillIdle?: () => boolean): boolean {
 /** Whether the current async call is a gated write; any key shape other than a gated text + Enter must refuse it. */
 export function writeGateActive(): boolean {
   return writeGate.getStore() !== undefined;
+}
+
+/** Text was positively written but this gate deliberately withheld Enter. */
+export function writeGateTypedUnsent(): boolean {
+  return writeGate.getStore()?.typedUnsent === true;
 }
 function gateOpen(stillIdle?: () => boolean): boolean {
   return (stillIdle ? stillIdle() : true) && (writeGate.getStore()?.open() ?? true);

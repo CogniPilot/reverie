@@ -1,7 +1,7 @@
 import { trustedFixtureOwner } from './helpers/trusted-owner-fixture.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Session } from '../src/session.js';
-import type { MuxSession, TerminalMultiplexer } from '../src/mux-interface.js';
+import type { MuxSession, RespawnPaneOptions, TerminalMultiplexer } from '../src/mux-interface.js';
 import { registerSessionRoutes } from '../src/web/routes/session-routes.js';
 import { ApiErrorCode, httpStatusForErrorCode } from '../src/types.js';
 import { createRouteTestHarness } from './routes/_route-test-utils.js';
@@ -18,7 +18,11 @@ function fixture(extra: Record<string, unknown> = {}) {
     isAvailable: () => true,
     muxSessionExists: vi.fn(() => true),
     isPaneDead: vi.fn(() => true),
-    respawnPane: vi.fn(async () => 4242 as number | null),
+    respawnPane: vi.fn(async (options: RespawnPaneOptions) => {
+      if (options.admitted && !options.admitted()) return null;
+      options.onProviderDispatch?.(); // The synthetic successful launch boundary.
+      return 4242 as number | null;
+    }),
     clearPaneExit: vi.fn(),
   };
   const session = new Session({
@@ -79,7 +83,7 @@ describe('interactive recovery with a retained attach client', () => {
     await expect(session.startInteractive()).rejects.toThrow('circuit breaker tripped');
     expect(mux.respawnPane).not.toHaveBeenCalled();
     session.resetRespawnBreaker(); session.markClosing(true);
-    await expect(session.startInteractive()).rejects.toThrow('being closed');
+    await expect(session.startInteractive()).rejects.toThrow('Session launch authorization changed');
     expect(mux.respawnPane).not.toHaveBeenCalled();
     session.markClosing(false);
   });
@@ -101,12 +105,18 @@ describe('interactive recovery with a retained attach client', () => {
   it('refuses a concurrent interactive start while the first pane recovery is in flight', async () => {
     const { session, mux } = fixture();
     let release!: (pid: number) => void;
-    mux.respawnPane.mockImplementation(() => new Promise((resolve) => { release = resolve; }));
+    mux.respawnPane.mockImplementation(options => new Promise((resolve) => {
+      release = pid => {
+        if (options.admitted && !options.admitted()) {resolve(null); return;}
+        options.onProviderDispatch?.();
+        resolve(pid);
+      };
+    }));
     const first = session.startInteractive();
     await vi.waitFor(() => expect(mux.respawnPane).toHaveBeenCalledOnce());
     try {
       expect(session.paneLifecycleInFlight).toBe(true);
-      await expect(session.startInteractive()).rejects.toThrow('already has a running process');
+      await expect(session.startInteractive()).rejects.toThrow('Session launch is already in progress');
       expect(mux.respawnPane).toHaveBeenCalledOnce();
     } finally { release(4242); await first; }
   });

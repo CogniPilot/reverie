@@ -9,10 +9,17 @@ use reverie_host::{
     worker_runtime::WorkerRuntime,
 };
 use std::{path::PathBuf, process::ExitCode};
+mod actor;
 mod image;
 mod inventory;
 mod manifest;
+mod offline_owner;
+mod perf;
+mod pool;
+mod pool_image_inputs;
 mod service;
+mod startup;
+mod website;
 
 #[derive(Parser)]
 #[command(
@@ -26,6 +33,24 @@ struct Arguments {
 }
 #[derive(Subcommand)]
 enum Role {
+    /// Initial maintained protected website and actor setup. Stops the native
+    /// broker/workers through their actual owners; never restarts them.
+    Website {
+        #[command(subcommand)]
+        action: website::Action,
+    },
+    /// Inspect or install the fixed running website actor identity. Apply
+    /// requires an inactive native service and unchanged employee policies;
+    /// it does not start the service or authorize a resource-pool rollout.
+    Actor {
+        #[command(subcommand)]
+        action: actor::Action,
+    },
+    /// Explicit OS-owner pool nomination; never installs or starts resources.
+    Pool {
+        #[command(subcommand)]
+        action: pool::Action,
+    },
     /// Read the registered OS-owner employee/declared-plan inventory without
     /// starting a broker or exposing private model, thread or account fields.
     Inventory {
@@ -38,6 +63,13 @@ enum Role {
         #[command(subcommand)]
         action: image::Action,
     },
+    /// Preview or apply employee task profiling policy while the registered
+    /// service and workers are stopped. Apply preserves employee data and
+    /// does not restart the service or recreate laptops.
+    Perf {
+        #[command(subcommand)]
+        action: perf::Action,
+    },
     /// Validate an existing configuration and print its snapshot digest as JSON.
     /// Reads the file and its declared host paths without starting the broker.
     CheckConfig {
@@ -49,6 +81,14 @@ enum Role {
     Broker {
         #[arg(long)]
         config: PathBuf,
+    },
+    /// Attach-only terminal endpoint, independent of worker lifecycle/resource
+    /// admission. It never starts or restarts a laptop or provider process.
+    ViewerOnly {
+        #[arg(long)]
+        config: PathBuf,
+        #[arg(long)]
+        socket: PathBuf,
     },
     /// Offer the OS-selected worker pool, then serve for explicit owner consent.
     /// Reads ~/reverie/worker-pool/registration-request.json using the system
@@ -64,6 +104,10 @@ enum Role {
     /// Explicit ordinary-owner native unit bootstrap/control.
     Service {
         action: service::Action,
+        /// Only these two immutable packaged recipes can be selected. The
+        /// default preserves the ordinary registered broker role.
+        #[arg(long, value_enum, default_value_t = service::Role::Broker)]
+        role: service::Role,
         #[arg(long)]
         start_previous: bool,
         /// Start the new broker only after a known completed native upgrade.
@@ -90,8 +134,12 @@ fn main() -> ExitCode {
 }
 fn run(arguments: Arguments) -> Result<(), Box<dyn std::error::Error>> {
     match arguments.command {
+        Role::Website { action } => website::run(action),
+        Role::Actor { action } => actor::run(action),
+        Role::Pool { action } => pool::run(action),
         Role::Inventory { config } => inventory::run(&config),
         Role::Image { action } => image::run(action),
+        Role::Perf { action } => perf::run(action),
         Role::CheckConfig { config } => {
             let snapshot = load_owner_config(&config).inspect_err(|error| {
                 eprintln!("Configuration validation stage: {:?}", error.stage());
@@ -112,12 +160,29 @@ fn run(arguments: Arguments) -> Result<(), Box<dyn std::error::Error>> {
         Role::ServiceUnit => Ok(manifest::publish_service_unit()?),
         Role::Service {
             action,
+            role,
             config,
             start_previous,
             restart,
             force_stopped,
-        } => service::run(action, &config, start_previous, restart, force_stopped),
+        } => service::run(
+            action,
+            &config,
+            start_previous,
+            restart,
+            force_stopped,
+            role,
+        ),
         Role::Broker { config } => serve(config, false),
+        Role::ViewerOnly { config, socket } => {
+            // Standalone role, before any helper threads or socket creation.
+            nix::sys::stat::umask(nix::sys::stat::Mode::from_bits_truncate(0o077));
+            let service = reverie_host::worker_viewer::WorkerViewerService::new(
+                &config,
+                captured_engine_bootstrap()?,
+            )?;
+            Ok(service.run(&socket)?)
+        }
         Role::OfferPoolV1 { config } => serve(config, true),
     }
 }
@@ -135,21 +200,8 @@ fn serve(config: PathBuf, offer: bool) -> Result<(), Box<dyn std::error::Error>>
     let snapshot =
         load_owner_config(&source).map_err(|primary| fenced_failure(&source, primary))?;
     let runtime = WorkerRuntime::new(engine, snapshot.envelope().base());
-    let broker = InstallingBroker::new(snapshot, runtime)
-        .map_err(|primary| fenced_failure(&source, primary))?;
-    let startup = if offer {
-        broker
-            .prepare_os_pool_installation_offer(
-                std::time::Instant::now() + std::time::Duration::from_secs(300),
-            )
-            .map_err(|primary| fenced_failure(&source, primary))?
-            .prepare_service()
-            .map_err(|primary| fenced_failure(&source, primary))?
-    } else {
-        broker
-            .prepare_service()
-            .map_err(|primary| fenced_failure(&source, primary))?
-    };
+    let startup = startup::prepare(snapshot, runtime, offer)
+        .map_err(|primary| fenced_box_failure(&source, primary))?;
     let service = startup
         .bind_listener()
         .map_err(|primary| fenced_failure(&source, primary))?;
@@ -164,11 +216,12 @@ fn serve(config: PathBuf, offer: bool) -> Result<(), Box<dyn std::error::Error>>
     Ok(())
 }
 fn captured_engine() -> Result<InstalledWorkerEngine, Box<dyn std::error::Error>> {
+    Ok(InstalledWorkerEngine::new(captured_engine_bootstrap()?))
+}
+fn captured_engine_bootstrap() -> Result<EngineBootstrap, Box<dyn std::error::Error>> {
     let program = option_env!("REVERIE_FIXED_NATIVE_WORKER_ENGINE")
         .ok_or("NATIVE_WORKER_BROKER_PACKAGED_ENGINE_REQUIRED")?;
-    Ok(InstalledWorkerEngine::new(EngineBootstrap::capture(
-        program.as_ref(),
-    )?))
+    Ok(EngineBootstrap::capture(program.as_ref())?)
 }
 
 #[cfg(test)]
@@ -349,11 +402,14 @@ fn fenced_failure<E: std::error::Error + 'static>(
     source: &std::path::Path,
     primary: E,
 ) -> Box<dyn std::error::Error> {
+    fenced_box_failure(source, Box::new(primary))
+}
+fn fenced_box_failure(
+    source: &std::path::Path,
+    primary: Box<dyn std::error::Error>,
+) -> Box<dyn std::error::Error> {
     let fence = reverie_host::worker_service::record_service_failure(source).err();
-    Box::new(FencedFailure {
-        primary: Box::new(primary),
-        fence,
-    })
+    Box::new(FencedFailure { primary, fence })
 }
 #[derive(Debug)]
 struct FencedFailure {

@@ -7,6 +7,8 @@ mod platform;
 mod publication;
 mod request;
 mod status;
+mod website;
+use website::WebsiteGpu;
 #[cfg(test)]
 mod tests;
 use platform::Platform;

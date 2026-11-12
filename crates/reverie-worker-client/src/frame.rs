@@ -51,6 +51,10 @@ impl Connection {
         self.check_deadline()?;
         self.endpoint.check(&self.stream)
     }
+    pub(crate) fn validate_quiesced(&self) -> Result<()> {
+        self.check_deadline()?;
+        self.endpoint.check_quiesced(&self.stream)
+    }
     fn check_deadline(&self) -> Result<()> {
         if self
             .deadline

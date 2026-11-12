@@ -4,6 +4,9 @@ use super::*;
 use reverie_contracts::worker_pool::BrokerProgramData;
 use std::io::Read;
 use stopped::bus::{BusReader, ExpectedCommands, ServiceGroupData};
+mod failed_reset;
+mod stop_pending;
+pub(super) use stop_pending::StopPendingTakeover;
 
 /// Present only after the actual immutable program/unit and original owned
 /// selection were checked. No caller or wire constructor is exposed.
@@ -37,6 +40,11 @@ impl State {
         let expected = ExpectedCommands::capture(&old_body, &self.home)?;
         self.upgrade_bus = Some(BusReader::capture(self)?);
         self.close_metadata()?;
+        let retained_stop = if force {
+            self.take_over_stopped_pending(&old, &expected, &source)?
+        } else {
+            None
+        };
         self.begin_attempt(&WorkerServiceAction::Upgrade {
             force_stopped: force,
         })?;
@@ -55,12 +63,16 @@ impl State {
         } else {
             None
         };
-        let history = self.upgrade_history(&old, &source.digest, force)?;
+        let history = match retained_stop {
+            Some(history) => history,
+            None => self.upgrade_history(&old, &source.digest, force)?,
+        };
         self.pin_package_at(&history.join("gcroot"))?;
         self.assert_upgrade_stopped(&old, &expected, force)?;
         if let Some(group) = &group {
             self.assert_force_group_current(group)?;
             self.archive_old_markers(&history)?;
+            self.reset_failed_upgrade(&old, &expected, group)?;
         }
         self.assert_no_native_actor()?;
         self.replace_native_links(&history, &old)?;
@@ -72,9 +84,7 @@ impl State {
         self.command(&["daemon-reload"])?;
         let selected = self.observe()?;
         self.assert_installed(&selected)?;
-        selected.require_action_finished(&WorkerServiceAction::Upgrade {
-            force_stopped: force,
-        })?;
+        selected.require_action_finished(&WorkerServiceAction::Stop)?;
         if let Some(group) = &group {
             self.assert_force_group_current(group)?;
         }
@@ -128,10 +138,15 @@ impl State {
         let package = unit.ancestors().nth(4).ok_or(WorkerServiceError::Refused(
             "NATIVE_SERVICE_UPGRADE_PACKAGE",
         ))?;
-        need(
-            unit == package.join("share/systemd/user").join(UNIT),
+        let role = [
+            NativeWorkerServiceRole::Broker,
+            NativeWorkerServiceRole::PoolOfferV1,
+        ]
+        .into_iter()
+        .find(|role| unit == package.join(role.unit_relative_path()))
+        .ok_or(WorkerServiceError::Refused(
             "NATIVE_SERVICE_UPGRADE_PACKAGE",
-        )?;
+        ))?;
         let raw = self.read_immutable(&package.join("share/reverie/worker-broker-program.json"))?;
         let selected = BrokerProgramData::decode(raw.as_bytes())
             .map_err(|_| WorkerServiceError::Refused("NATIVE_SERVICE_UPGRADE_PROGRAM"))?;
@@ -154,7 +169,7 @@ impl State {
         observed.map_err(|e| self.retain_program_error(e))?;
         let body = self.read_immutable(unit)?;
         need(
-            body == reverie_contracts::worker_service::native_unit(&executable),
+            body == reverie_contracts::worker_service::native_unit_for_role(&executable, role),
             "NATIVE_SERVICE_UPGRADE_UNIT_RECIPE",
         )?;
         Ok(body)

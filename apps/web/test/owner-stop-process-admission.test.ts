@@ -12,14 +12,17 @@ import {CompanyService} from '../src/company-service.js';
 import {registerSessionRuntimeRoutes,resumeOwnerStops,runtimeSwitches,type LaptopAgentStop,type StopBounds} from '../src/web/routes/session-runtime-routes.js';
 import {ownerStopPending,useOwnerStopJournal,recordOwnerStop} from '../src/owner-stop-journal.js';
 import {chmodSync,mkdirSync,readdirSync,statSync} from 'node:fs';
-import type {TerminalMultiplexer,MuxSession} from '../src/mux-interface.js';
+import type {TerminalMultiplexer,MuxSession,RespawnPaneOptions} from '../src/mux-interface.js';
 
 const cleanups:Array<()=>Promise<void>>=[];
 afterEach(async()=>{vi.unstubAllEnvs();vi.restoreAllMocks();for(const clean of cleanups.splice(0).reverse())await clean();});
 async function setup(stop?:LaptopAgentStop,waitMs?:number,bounds?:StopBounds){
  const dir=await mkdtemp(join(tmpdir(),'dead-pane-owner-'));cleanups.push(()=>rm(dir,{recursive:true,force:true}));
  const mux={isAvailable:()=>true,muxSessionExists:vi.fn(()=>true),isPaneDead:vi.fn(()=>true),
-  respawnPane:vi.fn(async()=>42),clearPaneExit:vi.fn()};
+  respawnPane:vi.fn(async(options:RespawnPaneOptions)=>{
+   if(options.admitted&&!options.admitted())return null;
+   options.onProviderDispatch?.();return 42;
+  }),clearPaneExit:vi.fn()};
  const session=new Session({workingDir:dir,mode:'opencode',useMux:true,mux:mux as unknown as TerminalMultiplexer,
   muxSession:{sessionId:'owned',muxName:'reverie-owned',pid:41}as MuxSession,
   subscriptionProfile:{provider:'openai',id:'selected',label:'Selected'},openCodeConfig:{model:'selected/model',continueSession:'ses_selected'}});

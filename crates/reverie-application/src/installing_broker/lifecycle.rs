@@ -4,6 +4,8 @@ use super::*;
 use reverie_core::decimal::UnsignedInteger;
 use reverie_host::worker_reports::{WorkerLaunchConnection, WorkerLaunchHold};
 use std::ops::{Deref, DerefMut};
+mod fleet_preview;
+pub(in crate::installing_broker) use fleet_preview::FleetRegistrationSnapshot;
 mod reuse_finalization;
 
 /// Only equality with the same installed state has meaning. This is not wire
@@ -12,6 +14,11 @@ mod reuse_finalization;
 pub(super) struct LaunchGeneration(Arc<Generation>);
 pub(super) struct DrainingOwner {
     generation: LaunchGeneration,
+}
+impl DrainingOwner {
+    pub(super) fn serial_data(&self) -> &str {
+        self.generation.serial().as_str()
+    }
 }
 /// Negative same-registry fence for one genuine detached stop attempt.
 pub(super) struct DetachedStopToken {
@@ -183,6 +190,23 @@ impl<'a> LaptopLifecycle<'a> {
         if self.guard.draining || !self.guard.transients_empty() {
             return Err(GateError::Refused("WORKER_STOP_ACTIVE_LAUNCH_OR_VIEWER"));
         }
+        Ok(self.mint_drain_owner())
+    }
+    pub(super) fn begin_uninstalled_observation(&mut self) -> Result<DrainingOwner, GateError> {
+        if !self.guard.is_empty() {
+            return Err(GateError::Refused("POOL_ABSENCE_REGISTRATIONS_RETAINED"));
+        }
+        self.begin_control_drain()
+    }
+    /// Named service-maintenance denial precedes interruption of actual active
+    /// originals. It grants no stop or closure; finalizers keep their owners.
+    pub(super) fn begin_service_drain(&mut self) -> Result<DrainingOwner, GateError> {
+        if self.guard.draining {
+            return Err(GateError::Refused("WORKER_SERVICE_DRAIN_ALREADY_ACTIVE"));
+        }
+        Ok(self.mint_drain_owner())
+    }
+    fn mint_drain_owner(&mut self) -> DrainingOwner {
         self.guard.generation = LaunchGeneration(Arc::new(Generation {
             serial: self
                 .guard
@@ -191,9 +215,20 @@ impl<'a> LaptopLifecycle<'a> {
                 .plus(&UnsignedInteger::from_u64(1)),
         }));
         self.guard.draining = true;
-        Ok(DrainingOwner {
+        DrainingOwner {
             generation: self.guard.generation.clone(),
-        })
+        }
+    }
+    pub(super) fn assert_service_drain(&self, owner: &DrainingOwner) -> Result<(), GateError> {
+        if !self.guard.draining
+            || !Arc::ptr_eq(&self.guard.generation.0, &owner.generation.0)
+            || !self.guard.transients_empty()
+        {
+            return Err(GateError::Refused(
+                "WORKER_SERVICE_DRAIN_ORIGINALS_RETAINED",
+            ));
+        }
+        Ok(())
     }
     pub(super) fn finish_control_drain(&mut self, owner: &DrainingOwner) -> Result<(), GateError> {
         if !self.guard.draining

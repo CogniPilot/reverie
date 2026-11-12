@@ -26,6 +26,17 @@ mod arguments;
 #[cfg(test)]
 mod tests;
 
+pub(super) fn assert_predecessor_source(birth: &ControllerBirthV2, source: &Path) -> Result<()> {
+    use arguments::Role;
+    let executable = native::python_path(birth.program().code().path.codepoints())?;
+    let actual = birth.broker().argv_digest();
+    need(
+        Role::Broker.source_digest(&executable, source)? == actual
+            || Role::InstallationOfferV1.source_digest(&executable, source)? == actual,
+        "WORKER_POOL_PREDECESSOR_SOURCE_ARGUMENTS",
+    )
+}
+
 #[must_use = "retain the actual binding through controller bootstrap and uncertainty"]
 pub struct BrokerBootstrapBinding {
     role: arguments::Role,
@@ -205,6 +216,10 @@ impl BrokerBootstrapBinding {
         Ok(end)
     }
     pub fn assert_current(&mut self, runtime: &WorkerRuntime, end: Instant) -> Result<()> {
+        self.assert_runtime(runtime, end)?;
+        self.assert_original_current(end)
+    }
+    fn assert_runtime(&self, runtime: &WorkerRuntime, end: Instant) -> Result<()> {
         self.budget(end)?;
         need(
             Arc::ptr_eq(&self.engine, runtime.installed_engine()),
@@ -215,6 +230,33 @@ impl BrokerBootstrapBinding {
             ids.uid() == native::uid() && ids.gid() == nix::unistd::getgid().as_raw(),
             "WORKER_POOL_NATIVE_BROKER_IDS",
         )?;
+        Ok(())
+    }
+    /// Reobserve only the original captured native owner. Callers must check
+    /// their same-runtime/read-client provenance before using this private tail.
+    pub(super) fn assert_original_current(&mut self, end: Instant) -> Result<()> {
+        let end = self.assert_original_prefix(end)?;
+        let current = self
+            .processes
+            .observe_current_broker(end)
+            .map_err(facts_error)?;
+        self.finish_process_current(&current, &self.processes)
+    }
+    /// Read-only status uses its original Q's observer, retaining any new
+    /// descriptor uncertainty there rather than poisoning the installed owner.
+    pub(super) fn assert_current_with_process_observer(
+        &self,
+        runtime: &WorkerRuntime,
+        processes: &mut WebsiteProcessObserver,
+        end: Instant,
+    ) -> Result<()> {
+        self.assert_runtime(runtime, end)?;
+        let end = self.assert_original_prefix(end)?;
+        let current = processes.observe_current_broker(end).map_err(facts_error)?;
+        self.finish_process_current(&current, processes)
+    }
+    fn assert_original_prefix(&self, end: Instant) -> Result<Instant> {
+        self.budget(end)?;
         self.pidfd_live()?;
         let program = self
             .program
@@ -228,17 +270,19 @@ impl BrokerBootstrapBinding {
             )? == *program,
             "WORKER_POOL_BROKER_MANIFEST_CHANGED",
         )?;
-        let end = self.budget(end)?;
-        let current = self
-            .processes
-            .observe_current_broker(end)
-            .map_err(facts_error)?;
+        self.budget(end)
+    }
+    fn finish_process_current(
+        &self,
+        current: &ProcessSnapshot,
+        processes: &WebsiteProcessObserver,
+    ) -> Result<()> {
         need(
-            self.process.as_ref() == Some(&current),
+            self.process.as_ref() == Some(current),
             "WORKER_POOL_BROKER_PROCESS_CHANGED",
         )?;
         self.code.assert_finalized().map_err(facts_error)?;
-        self.processes.assert_finalized().map_err(facts_error)?;
+        processes.assert_finalized().map_err(facts_error)?;
         self.pidfd_live()
     }
     /// Observation DATA for the separately checked immutable birth publication.

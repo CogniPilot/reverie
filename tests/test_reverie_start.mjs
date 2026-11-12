@@ -438,6 +438,47 @@ test('only a validated durable boolean enables Admin Harness phone wake', t => {
       selection === true ? ['REVERIE_ADMIN_PHONE_WAKE=enabled'] : []);
   }
 });
+test('viewer endpoint comes only from durable deployment selection and is passed as one environment value', t => {
+  const f = fixture(t);
+  assert.equal(f.run([], { REVERIE_WORKER_VIEWER_SOCKET: '/ambient/not-selected.sock' }).status, 0);
+  let command = f.calls().filter(([tool, a]) => tool === 'docker' && a[0] === 'run').at(-1)[1];
+  assert.ok(!command.some(value => value.startsWith('REVERIE_WORKER_VIEWER_SOCKET=')));
+  const file = join(f.deploy, 'deployment.json'), config = JSON.parse(readFileSync(file));
+  const selected = "/run/reverie-workers/viewer's socket.sock";
+  config.workerViewerSocket = selected; writeFileSync(file, JSON.stringify(config));
+  const result = f.run([], { REVERIE_WORKER_VIEWER_SOCKET: '/ambient/not-selected.sock' });
+  assert.equal(result.status, 0, result.stderr);
+  command = f.calls().filter(([tool, a]) => tool === 'docker' && a[0] === 'run').at(-1)[1];
+  assert.deepEqual(command.filter(value => value.startsWith('REVERIE_WORKER_VIEWER_SOCKET=')), ['REVERIE_WORKER_VIEWER_SOCKET=' + selected]);
+});
+test('invalid viewer endpoint selections refuse before engine access', t => {
+  const f = fixture(t); assert.equal(f.run().status, 0);
+  const file = join(f.deploy, 'deployment.json'), config = JSON.parse(readFileSync(file));
+  for (const value of ['', 'relative.sock', '/run/a\nsock', '/run/a\0sock', 1, null, {}, [], '/' + 'λ'.repeat(54)]) {
+    config.workerViewerSocket = value; writeFileSync(file, JSON.stringify(config));
+    const before = f.calls().length, result = f.run();
+    assert.equal(result.status, 1); assert.equal(f.calls().length, before);
+  }
+});
+test('protected website creation includes the selected viewer in its retained environment intent', t => {
+  const f = fixture(t), env = f.enableH('terminal');
+  const file = join(f.deploy, 'deployment.json'), config = JSON.parse(readFileSync(file));
+  config.workerViewerSocket = '/run/reverie-workers/viewer.sock'; writeFileSync(file, JSON.stringify(config));
+  const result = f.run([], env); assert.equal(result.status, 0, result.stderr);
+  const created = JSON.parse(readFileSync(join(f.root, 'h-state.json')));
+  assert.ok(created.Config.Env.includes('REVERIE_WORKER_VIEWER_SOCKET=/run/reverie-workers/viewer.sock'));
+  assert.ok(f.calls().some(([tool, phase]) => tool === 'helper' && phase === 'prepare-created'));
+});
+test('matching deployment label cannot hide a changed viewer endpoint', t => {
+  const f = fixture(t); assert.equal(f.run().status, 0);
+  const command = f.calls().find(([tool, a]) => tool === 'docker' && a[0] === 'run')[1];
+  const signature = command[command.indexOf('--label') + 1].split('=')[1];
+  const matching = { Config: { Labels: { 'reverie.deployment': signature }, Env: ['REVERIE_WORKER_VIEWER_SOCKET=/unselected.sock'] }, State: { Running: false } };
+  const before = f.calls().length, result = f.run([], { INSPECT: JSON.stringify(matching) });
+  assert.equal(result.status, 1); assert.match(result.stderr, /worker viewer startup setting differs/);
+  assert.equal(f.calls().length, before + 1);
+  assert.ok(!f.calls().slice(before).some(([tool, a]) => tool === 'docker' && ['start', 'stop', 'rm', 'run'].includes(a[0])));
+});
 test('phone startup setting rejects string, number, null, object and unknown-field bypasses before engine calls', t => {
   const f = fixture(t); assert.equal(f.run().status, 0);
   const file = join(f.deploy, 'deployment.json'), config = JSON.parse(readFileSync(file));

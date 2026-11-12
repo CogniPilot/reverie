@@ -150,8 +150,14 @@ impl EngineObserver {
                 "WORKER_POOL_WEBSITE_INSIDE_POOL",
             )?;
         }
+        let current = self.read(&target)?;
         need(
-            self.read(&target)? == website,
+            reverie_contracts::worker_recovery::RecoveryInspection::same_container_object_inspection(
+                &policy.website_container,
+                &website,
+                &current,
+            )
+            .map_err(|_| PoolError::Refused("WORKER_POOL_WEBSITE_IDENTITY"))?,
             "WORKER_POOL_WEBSITE_CHANGED",
         )
     }
@@ -250,8 +256,9 @@ async fn query(
 ) -> Result<(u16, Vec<u8>)> {
     let peer = nix::sys::socket::getsockopt(&*stream, nix::sys::socket::sockopt::PeerCredentials)
         .map_err(|_| PoolError::Refused("WORKER_POOL_ENGINE_PEER_UNKNOWN"))?;
+    // Socket activation can retain root PID 1 as the listening peer.
     need(
-        peer.uid() == 0 && peer.pid() > 1,
+        peer.uid() == 0 && peer.pid() > 0,
         "WORKER_POOL_ENGINE_ROOT_PEER_REQUIRED",
     )?;
     let (mut sender, connection) = http1::handshake(TokioIo::new(stream))

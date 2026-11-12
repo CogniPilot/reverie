@@ -58,7 +58,10 @@ enum Control {
     ProviderHealth,
     /// Observe original live storage-owner kinds/phases; never reconcile or retry.
     StorageStatus,
+    /// Observe current uninstalled pool state; never resolve an old operation.
+    PoolRecoveryStatus,
     StopLaptops,
+    QuiesceForDeployment,
     Shutdown,
     RestartWebsite,
     ReloadResources,
@@ -71,7 +74,9 @@ impl Control {
             Self::Status => crate::control::Action::Status.name(),
             Self::ProviderHealth => crate::control::Action::ProviderHealth.name(),
             Self::StorageStatus => crate::control::Action::StorageStatus.name(),
+            Self::PoolRecoveryStatus => crate::control::Action::PoolRecoveryStatus.name(),
             Self::StopLaptops => crate::control::Action::StopLaptops.name(),
+            Self::QuiesceForDeployment => crate::control::Action::QuiesceForDeployment.name(),
             Self::Shutdown => "shutdown",
             Self::RestartWebsite => "restart-website",
             Self::ReloadResources => "reload-resources",
@@ -155,6 +160,13 @@ impl Args {
         self.launch()
     }
     fn control(self, control: Control) -> Result<Operation> {
+        if control == Control::QuiesceForDeployment
+            && (self.has_launch() || self.caller_session.is_some())
+        {
+            return Err(Error::new(
+                "Deployment quiescence accepts no identity or launch inputs",
+            ));
+        }
         if control == Control::StorageStatus && (self.has_launch() || self.caller_session.is_some())
         {
             return Err(Error::new(

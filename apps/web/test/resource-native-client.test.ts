@@ -15,6 +15,7 @@ import {
   type ResourcePreviewContext,
   type RamResourceOwnerContext,
   type RamResourcePreviewContext,
+  type RamResourceStatusContext,
 } from '../src/resource-owner-authority.js';
 import { ResourceNativeClient, ResourceHistoricalSettlement } from '../src/resource-native-client.js';
 import { RamResourceNativeClient } from '../src/resource-ram-native-client.js';
@@ -24,6 +25,7 @@ let directory: string, path: string, app: FastifyInstance, server: Server, auth:
 let authority: ResourceOwnerAuthority, preview: ResourcePreviewContext, apply: ResourceOwnerContext;
 let token: string, peers: Set<Socket>, clients: { close(): void }[];
 let ramPreview: RamResourcePreviewContext, ramApply: RamResourceOwnerContext;
+let ramStatus: RamResourceStatusContext;
 let purpose: 'resource-replacement-v1' | 'resource-ram-pool-v2';
 let ramReference: string;
 const approval = {
@@ -73,6 +75,10 @@ beforeEach(async () => {
   authority = new ResourceOwnerAuthority(auth);
   app = Fastify();
   await app.register(cookie);
+  app.get('/status-context', async (request) => {
+    ramStatus = authority.captureRamStatus(request, approval.employeeId);
+    return {};
+  });
   app.post('/capture', async (request) => {
     preview = authority.capturePreview(request, approval.employeeId);
     apply = authority.capture(request, approval);
@@ -173,6 +179,55 @@ async function openRam(context: RamResourceOwnerContext | RamResourcePreviewCont
   clients.push(client);
   return client;
 }
+
+it('employee status binds the real read-only owner context and sends no effect fields', async () => {
+  purpose = 'resource-ram-pool-v2';
+  expect(
+    (
+      await app.inject({
+        method: 'GET',
+        url: '/status-context',
+        headers: {
+          host: 'localhost',
+          cookie: 'reverie_owner=' + token,
+        },
+      })
+    ).statusCode
+  ).toBe(200);
+  const sessionId = randomUUID();
+  behavior = (socket, value) => {
+    if (value.kind === 'resource-operation')
+      socket.write(
+        frame({
+          kind: 'resource-owner-check',
+          requestId: value.requestId,
+          nonce: randomUUID(),
+          stage: 'status',
+          employeeId: approval.employeeId,
+          approval: null,
+        })
+      );
+    else socket.write(frame({ kind: 'resource-result', requestId: value.requestId, value: { readOnly: true } }));
+  };
+  const client = await ResourceNativeClient.openRam(path, authority, ramStatus);
+  clients.push(client);
+  await expect(client.request('employee-status', { employeeId: approval.employeeId, sessionId })).resolves.toEqual({
+    readOnly: true,
+  });
+  expect(received[0]).toMatchObject({ verb: 'employee-status', employeeId: approval.employeeId, sessionId });
+  expect(received[1]).toMatchObject({
+    stage: 'status',
+    approval: null,
+    principal: ramStatus.principal,
+    ownerScopeDigest: ramStatus.ownerScopeDigest,
+  });
+  const count = received.length;
+  await expect(client.request('employee-status', { employeeId: randomUUID(), sessionId })).rejects.toThrow();
+  await expect(
+    client.request('draft', { employeeId: approval.employeeId, idempotencyKey: randomUUID(), memoryMiB: 8192 })
+  ).rejects.toThrow();
+  expect(received).toHaveLength(count);
+});
 
 it('RAM-v2 sends the explicit purpose and bounded soft-memory draft with the actual current owner', async () => {
   const client = await openRam(),

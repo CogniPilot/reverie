@@ -14,6 +14,7 @@ pub(super) struct Fixture {
     directory: PathBuf,
     pub(super) root: PathBuf,
     pub(super) runtime: WorkerRuntime,
+    pub(super) starts: std::sync::Arc<std::sync::atomic::AtomicUsize>,
 }
 impl Fixture {
     pub(super) fn new() -> Self {
@@ -27,11 +28,12 @@ impl Fixture {
             .unwrap();
         let root = directory.join("reverie");
         fs::DirBuilder::new().mode(0o700).create(&root).unwrap();
-        let runtime = runtime();
+        let (runtime, starts) = runtime();
         Self {
             directory,
             root,
             runtime,
+            starts,
         }
     }
     pub(super) fn versions(&self) -> PathBuf {
@@ -98,7 +100,10 @@ impl Drop for Fixture {
         fs::remove_dir_all(&self.directory).unwrap();
     }
 }
-fn runtime() -> WorkerRuntime {
+fn runtime() -> (
+    WorkerRuntime,
+    std::sync::Arc<std::sync::atomic::AtomicUsize>,
+) {
     // Inert existing engine capture. No query or program executes in this
     // component fixture; it supplies actual cancellation/first-stop identity.
     let capture = EngineBootstrap::from_service(
@@ -124,5 +129,9 @@ fn runtime() -> WorkerRuntime {
         .unwrap(),
     )
     .unwrap();
-    WorkerRuntime::new(InstalledWorkerEngine::new(capture), &base)
+    let starts = capture.hooks.starts.clone();
+    (
+        WorkerRuntime::new(InstalledWorkerEngine::new(capture), &base),
+        starts,
+    )
 }

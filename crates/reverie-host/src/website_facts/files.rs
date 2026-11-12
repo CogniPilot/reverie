@@ -27,7 +27,7 @@ impl Descriptors {
             }
         }
         if self.uncertain {
-            Err(WebsiteFactsError::Refused("BACKEND_CODE_CLOSE_UNCONFIRMED"))
+            Err(WebsiteFactsError::DescriptorClose)
         } else {
             Ok(())
         }

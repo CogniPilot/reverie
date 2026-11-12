@@ -14,7 +14,15 @@
 
 import { z } from 'zod';
 import { compileVersionRegex, countCaptureGroups, TOKEN_PATTERNS } from './patterns.js';
-import { isKnownLauncherProfile, isKnownSetenvProfile } from './profiles.js';
+import {
+  ACCOUNT_REPLACEMENT_PROFILE_NAMES,
+  LAUNCH_EFFORT_INPUT_NAMES,
+  STARTUP_ACCOUNT_PROFILE_NAMES,
+  THREAD_STATE_PROFILE_NAMES,
+  THREAD_STATE_BINDINGS,
+  isKnownLauncherProfile,
+  isKnownSetenvProfile,
+} from './profiles.js';
 import type { AgentSkillDir, LaunchDefaultSettingKey, McpConfigFormat, ModelConfigResolverName } from './types.js';
 
 /** `capabilities.agentSkillDir`: every value must stay a fixed, relative, `..`-free path. */
@@ -112,6 +120,8 @@ const launchSchema = z
     params: z.record(z.string(), paramSpecSchema),
     chain: z.enum(['first', 'fallback']).optional(),
     resumeSelection: z.literal('claude-transcript').optional(),
+    threadStateProfile: z.enum(THREAD_STATE_PROFILE_NAMES).optional(),
+    effortInput: z.enum(LAUNCH_EFFORT_INPUT_NAMES).optional(),
     variants: z.array(variantSchema).min(1).max(4),
     legacyConfigAliases: z.record(z.string(), z.string()).optional(),
     legacyConfigField: z.string().min(1).max(40).optional(),
@@ -124,6 +134,29 @@ const launchSchema = z
   })
   .strict()
   .superRefine((launch, ctx) => {
+    if (
+      launch.effortInput &&
+      (launch.legacyConfigField !== undefined ||
+        launch.params.effortLevel?.type !== 'engine' ||
+        launch.params.effortLevel.source !== 'effortLevel' ||
+        launch.params.effortJson?.type !== 'engine' ||
+        launch.params.effortJson.source !== 'effortSettingsJson')
+    ) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'Session effort codec disagrees with declared engine/config binding',
+        path: ['effortInput'],
+      });
+    }
+    if (launch.threadStateProfile) {
+      const binding = THREAD_STATE_BINDINGS[launch.threadStateProfile];
+      const field = 'field' in binding ? binding.field : undefined;
+      if (launch.legacyConfigField !== field || launch.params[binding.param]?.type !== 'token'
+        || (launch.legacyConfigAliases?.[binding.param] ?? binding.param) !== binding.key
+        || ('forkParam' in binding && (launch.params[binding.forkParam]?.type !== 'bool'
+          || (launch.legacyConfigAliases?.[binding.forkParam] ?? binding.forkParam) !== binding.forkKey)))
+        ctx.addIssue({code:'custom',message:'Native thread profile disagrees with declared launch/config binding',path:['threadStateProfile']});
+    }
     const paramNames = new Set(Object.keys(launch.params));
     const checkValueFrom = (name: string, path: (string | number)[]) => {
       if (!paramNames.has(name)) {
@@ -295,12 +328,41 @@ const launchModelTemplate = z
   .regex(/^[a-zA-Z0-9._\-/:{}]+$/)
   .optional();
 
+const workspaceHookPolicySchema = z.enum(['install', 'refresh-only', 'none']);
+const configProperty = z.string().regex(/^[A-Za-z][A-Za-z0-9_]{0,63}$/)
+  .refine(value => !['constructor', 'prototype'].includes(value), 'Unsafe config property');
+
 const capabilitiesSchema = z
   .object({
+    input: z.object({
+      keyBurstMaxChars: z.number().int().positive().max(1000000).optional(),
+      requiresEmptyComposer: z.boolean().optional(),
+      shellKeyGuard: z.boolean().optional(),
+    }).strict().optional(),
+    turnSummaryHooks: z.literal('codex-config-v1').optional(),
+    rebootRestore: z.enum(['native-required','native-or-new','persistent-record']).optional(),
+    startupAccountProfile: z.enum(STARTUP_ACCOUNT_PROFILE_NAMES).optional(),
+    fullAccessDefaults: z.object({
+      values: z.record(configProperty, z.union([z.boolean(), z.string().min(1).max(120)]))
+        .refine(value => Object.keys(value).length >= 1 && Object.keys(value).length <= 8, 'Expected 1 to 8 defaults'),
+      unlessJsonProperty: z.object({configField: configProperty, property: configProperty}).strict().optional(),
+    }).strict().optional(),
+    accountReplacementProfile: z.enum(ACCOUNT_REPLACEMENT_PROFILE_NAMES).optional(),
+    accountReplacementRefusal: z.string().min(1).max(240).optional(),
     chatDelivery: z.literal('poll').optional(),
     external: z.boolean(),
     requiresMux: z.boolean(),
     hooks: z.enum(['none', 'always', 'supervised']),
+    // Stock identity is resolved/merged before this schema. Missing profiles on
+    // old custom entries grant no new workspace writes.
+    workspaceHooks: z
+      .object({
+        sessionCreate: workspaceHookPolicySchema.default('none'),
+        freshCase: workspaceHookPolicySchema.default('none'),
+        existingCase: workspaceHookPolicySchema.default('none'),
+      })
+      .strict()
+      .default({ sessionCreate: 'none', freshCase: 'none', existingCase: 'none' }),
     transcript: z.enum(['claude-jsonl', 'codex-rollout', 'deepseek-zstd', 'omp-jsonl', 'none']),
     altScreen: z.enum(['strip-full', 'strip-mux-only', 'strip-mux-and-mouse', 'preserve']),
     echo: echoSchema,
@@ -318,6 +380,7 @@ const capabilitiesSchema = z
     ralph: z.boolean(),
     respawn: z.boolean(),
     effort: z.boolean(),
+    localModelPreference: z.literal('preferred').optional(),
     agentSkillInjection: z.boolean(),
     // A closed list on purpose: it decides where the server WRITES, and this file is
     // user-editable, so it can never be a free path (`..`, absolute).
@@ -673,6 +736,11 @@ export const CliEntrySchema = z
     // `legacyConfigField` the entry's params are read off the request body itself, where a
     // filled `model` would be a different field (claude's per-session one), so refuse it.
     const { launchDefaults } = entry.capabilities;
+    if (entry.capabilities.rebootRestore && entry.capabilities.rebootRestore !== 'persistent-record' && !entry.launch.threadStateProfile)
+      ctx.addIssue({code:'custom',message:'Native reboot restore requires an explicit thread profile',path:['capabilities','rebootRestore']});
+    if (entry.capabilities.fullAccessDefaults && !entry.launch.legacyConfigField) {
+      ctx.addIssue({code:'custom',message:'fullAccessDefaults needs launch.legacyConfigField',path:['capabilities','fullAccessDefaults']});
+    }
     if (launchDefaults !== undefined) {
       if (entry.launch.legacyConfigField === undefined) {
         ctx.addIssue({

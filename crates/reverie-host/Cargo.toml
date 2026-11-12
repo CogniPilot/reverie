@@ -16,6 +16,7 @@ getrandom.workspace = true
 # signal and process modules.
 nix = { workspace = true, features = ["term", "fs", "socket", "poll", "user", "signal", "time"] }
 reverie-core.workspace = true
+reverie-worker-client.workspace = true
 reverie-diagnostics.workspace = true
 reverie-python-regex.workspace = true
 reverie-contracts.workspace = true

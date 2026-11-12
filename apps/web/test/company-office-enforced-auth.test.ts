@@ -244,6 +244,36 @@ it('the existing recovery wake still respects deliberate OFF intent', async () =
   expect(store.snapshot().employees.find(row => row.id === TARGET)!.desiredRunning).toBe(false);
 });
 
+it.each(['grant', 'actor-generation', 'target-generation', 'actor-session'] as const)(
+  'headless wake rechecks %s after its awaited recovery boundary', async change => {
+    await store.update(state => { state.employees.find(row => row.id === TARGET)!.desiredRunning = true; });
+    let entered!: () => void, release!: () => void;
+    const ready = new Promise<void>(resolve => { entered = resolve; });
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    wake.mockImplementationOnce(async (id, options) => {
+      entered(); await gate;
+      if (!options?.stillCurrent?.()) return {awakened: [], skipped: [{employeeId: id, reason: 'changed-or-stopping'}]};
+      launched.push(id); return {awakened: [id], skipped: []};
+    });
+    const pending = app.inject({method: 'POST', url: `/api/company/employees/${TARGET}/wake`, headers: headers(), payload: {}}).then(response => response);
+    try {
+      await ready;
+      if (change === 'actor-session') sessions.set(ACTOR_SID, {id: ACTOR_SID, owner: 'office-review-alice', name: 'Replacement'});
+      else await store.update(state => {
+        const actor = state.employees.find(row => row.id === ACTOR)!;
+        if (change === 'grant') actor.permissions.recoverEmployees = false;
+        else if (change === 'actor-generation') actor.sessionGeneration++;
+        else state.employees.find(row => row.id === TARGET)!.sessionGeneration++;
+      });
+      release();
+      const response = await pending;
+      expect(response.statusCode, response.body).toBe(200);
+      expect(response.json().data.recovery).toEqual({awakened: [], skipped: [{employeeId: TARGET, reason: 'start-unconfirmed'}]});
+      expect(launched).toEqual([]); expect(stopped).toEqual([]);
+    } finally { release(); await pending; }
+  }
+);
+
 it('retired employees remain excluded instead of being silently restored', async () => {
   await store.update(state => {
     const employee = state.employees.find(row => row.id === TARGET)!;

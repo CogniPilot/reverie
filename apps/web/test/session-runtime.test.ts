@@ -81,6 +81,32 @@ describe('owner runtime transaction', () => {
   const payload = { mode: 'codex', source: { kind: 'subscription', profileId: 'second' }, model: 'gpt-5', effort: 'high' };
   const headers = { 'x-owner-test': 'yes' };
 
+  it.each(['null', 'throw'] as const)('retains the attempted recipe after uncertain physical dispatch without rollback launch (%s)', async outcome => {
+    const {app, session, ctx} = await harness();
+    const respawn = vi.fn(async (options: {onProviderDispatch?: () => void}) => {
+      options.onProviderDispatch?.();
+      if (outcome === 'throw') throw new Error('synthetic partial provider dispatch');
+      return null;
+    });
+    Object.assign(session, {_useMux: true, _muxSession: {sessionId: session.id, muxName: 'synthetic-runtime-pane', pid: 999_999_991},
+      _mux: {muxSessionExists: () => true, respawnPane: respawn, clearPaneExit: vi.fn()}});
+    const stop = vi.spyOn(session, 'stop');
+    const change = {mode: 'opencode', source: {kind: 'subscription', profileId: 'second'}};
+    try {
+      const result = await app.inject({method: 'POST', url: `/api/sessions/${session.id}/runtime`, headers, payload: change});
+      expect(result.statusCode, result.body).toBe(409); expect(result.json().error).toContain('unconfirmed');
+      expect(result.json().error).not.toContain('previous settings were restored');
+      expect(ctx.sessions.get(session.id)).toBe(session); expect(session.providerDispatchHeld).toBe(true);
+      expect(session.subscriptionProfile?.id).toBe('second'); expect(session.toState().providerDispatchHeld).toBe(true);
+      expect(respawn).toHaveBeenCalledOnce(); expect(stop).not.toHaveBeenCalled();
+      expect(ctx.discardPartiallyBuiltSession).not.toHaveBeenCalled(); expect(ctx.persistSessionStateNow).toHaveBeenCalledWith(session);
+      expect((await app.inject({method: 'POST', url: `/api/sessions/${session.id}/runtime`, headers,
+        payload: {...change, source: {kind: 'subscription', profileId: 'first'}}})).statusCode).toBe(409);
+      expect(session.subscriptionProfile?.id).toBe('second'); expect(respawn).toHaveBeenCalledOnce();
+    } finally {await app.close();}
+  });
+
+
   it.each([false, true])('does not persist an isolated runtime switch from viewer success (recovery=%s)', async (recovery) => {
     const { app, session, ctx } = await harness();
     if (recovery) {

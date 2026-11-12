@@ -19,9 +19,15 @@ enum LegacyPhase {
     Confirmed,
     Failed,
 }
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum LegacyPurpose {
+    Ordinary,
+    Control,
+}
 pub(crate) struct OrdinaryStopAttempt {
     origin: Arc<InstalledWorkerEngine>,
     phase: LegacyPhase,
+    purpose: LegacyPurpose,
     name: String,
     session: ProfileSessionId,
     container: Option<ContainerId>,
@@ -55,6 +61,7 @@ impl OrdinaryStopAttempt {
         Ok(Self {
             origin: runtime.installed_engine().clone(),
             phase: LegacyPhase::Held,
+            purpose: LegacyPurpose::Ordinary,
             name: plan.arguments().name().to_owned(),
             session: plan.session().clone(),
             container,
@@ -141,7 +148,7 @@ impl OrdinaryStopAttempt {
         required: bool,
     ) -> Result<crate::captured_client::CapturedOutput> {
         let end = self.clipped(Instant::now() + Duration::from_secs(20));
-        if self.deadline.is_none() {
+        if self.deadline.is_none() || self.purpose == LegacyPurpose::Control {
             call::captured_for_worker(&self.origin, end, &mut self.pending, args, required)
         } else {
             call::captured(&self.origin, end, &mut self.pending, args, required)

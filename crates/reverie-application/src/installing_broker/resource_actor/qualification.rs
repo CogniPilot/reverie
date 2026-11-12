@@ -1,4 +1,5 @@
 use super::*;
+mod pool_publication;
 use reverie_core::operations::JournalDigest;
 use reverie_host::website_facts::{ImmutableInputKind, WebsiteMetadataRoute};
 mod protected_launch;
@@ -6,7 +7,13 @@ mod protected_launch;
 impl Frame<'_> {
     pub(super) fn prepare(&mut self) -> Result<()> {
         self.retain()?;
-        if matches!(self.purpose, WebsitePurpose::RamOperation) {
+        self.prepare_after_retain()
+    }
+    pub(super) fn prepare_after_retain(&mut self) -> Result<()> {
+        if matches!(
+            self.purpose,
+            WebsitePurpose::RamOperation | WebsitePurpose::FleetPreview
+        ) {
             need(
                 self.broker.resource_reservations()?.is_some(),
                 "RESOURCE_ACTOR_GATE_REQUIRED",
@@ -159,6 +166,10 @@ impl Frame<'_> {
     }
     pub(super) fn guard_peer(&mut self, end: Instant) -> Result<()> {
         self.assert_metadata(end)?;
+        self.guard_peer_observations(end)?;
+        self.assert_metadata(end)
+    }
+    pub(super) fn guard_peer_observations(&mut self, end: Instant) -> Result<()> {
         let bindings = self
             .bindings
             .as_ref()
@@ -232,6 +243,6 @@ impl Frame<'_> {
         )?;
         engine.guard_same_kernel(end)?;
         channel.require_connected()?;
-        self.assert_metadata(end)
+        Ok(())
     }
 }

@@ -68,3 +68,21 @@ it('declines, marks an unfinished approval, and shows nothing when there is noth
   const agent = await setup({ owner: false });
   expect(agent.h.document.querySelector('.ca-company-hire-requests')).toBeNull();
 });
+
+it('holds an ambiguous server failure and a linked approval without offering startup replay or decline', async () => {
+  const { h, calls, reply } = await setup();
+  reply({ ok: false, status: 503, error: 'Hire startup was not confirmed; identity retained' });
+  card(h).querySelector('.is-primary').click(); await h.flush();
+  expect(card(h).querySelector('[role="alert"]').textContent).toContain('identity retained');
+  expect([...card(h).querySelectorAll('button')].every((button: any) => button.disabled)).toBe(true);
+  expect(calls).toHaveLength(1);
+  const linked = await setup({ requests: [{ ...pending, status: 'approving', hireId: 'h1' } as any] });
+  expect([...card(linked.h).querySelectorAll('button')].every((button: any) => button.disabled)).toBe(true);
+  expect(card(linked.h).textContent).toContain('linked to a retained hire');
+  expect(linked.calls).toEqual([]);
+  const creating = await setup({ requests: [{ ...pending, status: 'approving', reservation: { phase: 'creation-issued', at: Date.now() } } as any] });
+  expect([...card(creating.h).querySelectorAll('button')].every((button: any) => button.disabled)).toBe(true);
+  expect(card(creating.h).textContent).toContain('unconfirmed session creation');
+  expect(card(creating.h).textContent).toContain('an empty list does not prove');
+  expect(creating.calls).toEqual([]);
+});
