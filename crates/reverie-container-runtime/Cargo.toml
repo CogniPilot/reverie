@@ -1,0 +1,23 @@
+[package]
+name = "reverie-container-runtime"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[features]
+test-fixtures = []
+
+[[bin]]
+name = "reverie-container-fixture"
+path = "tests/support/fixture.rs"
+required-features = ["test-fixtures"]
+
+[dependencies]
+getrandom.workspace = true
+nix = { workspace = true, features = ["signal", "process"] }
+reverie-local-model = { path = "../reverie-local-model" }
+tokio.workspace = true
+
+[lints]
+workspace = true

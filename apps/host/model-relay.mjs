@@ -35,6 +35,10 @@ export function modelRelay(socketPath, port = 8092, unavailableMessage = 'Local 
   return server;
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  const server = modelRelay(process.env.REVERIE_MODEL_SOCKET ?? '/run/reverie-control/models/default.sock');
+  const port = Number(process.env.REVERIE_MODEL_PORT ?? '8092');
+  if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('Invalid model relay port');
+  const message = process.env.REVERIE_CONTAINER_RELAY === '1'
+    ? 'The container local model is starting or unavailable. Check the container logs.' : undefined;
+  const server = modelRelay(process.env.REVERIE_MODEL_SOCKET ?? '/run/reverie-control/models/default.sock', port, message);
   server.on('error', () => { process.stderr.write('Local model relay could not start\n'); process.exitCode = 1; });
 }

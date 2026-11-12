@@ -1,0 +1,33 @@
+# Optional self-contained NVIDIA deployment. No host Reverie service, host
+# telemetry mount, Docker socket, or personal Nix profile is required.
+services:
+  reverie:
+    image: ${REVERIE_IMAGE:-reverie-gpu:latest}
+    restart: unless-stopped
+    stop_grace_period: 30s
+    devices:
+      - ${REVERIE_GPU_DEVICE:?Select an NVIDIA CDI device}
+    ports:
+      - 127.0.0.1:${REVERIE_PORT:-3000}:3000
+    environment:
+      REVERIE_LOCAL_MODEL: /models/${REVERIE_MODEL_FILE:?Select an existing GGUF file}
+      REVERIE_LOCAL_MODEL_ALIAS: ${REVERIE_MODEL_ALIAS:-local-model}
+      REVERIE_LOCAL_MODEL_CONTEXT: ${REVERIE_MODEL_CONTEXT:-32768}
+      REVERIE_LOCAL_MODEL_CACHE_TYPE: ${REVERIE_MODEL_CACHE_TYPE:-f16}
+      REVERIE_LOCAL_MODEL_MMPROJ: ${REVERIE_MODEL_MMPROJ:-}
+      REVERIE_LOCAL_MODEL_SAMPLING_PROFILE: ${REVERIE_MODEL_SAMPLING_PROFILE:-server-default}
+    volumes:
+      - reverie-data:/instances
+      - reverie-home:/home/agent
+      - reverie-scratch:/scratch
+      - reverie-workspace:/reverie_workspace
+      - type: bind
+        source: ${REVERIE_MODELS_DIR:?Select the existing model directory}
+        target: /models
+        read_only: true
+
+volumes:
+  reverie-data:
+  reverie-home:
+  reverie-scratch:
+  reverie-workspace:

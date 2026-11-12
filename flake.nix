@@ -113,6 +113,7 @@
             };
           };
           inherit container-memory start update gpuPublisher localModel;
+          containerRuntime = import ./nix/container-runtime.nix { inherit pkgs; src = source; };
           launchGuard = import ./nix/launch-guard.nix { inherit pkgs; src = source; };
           dockerImage = import ./nix/image.nix {
             inherit pkgs;
@@ -275,6 +276,18 @@
           };
         };
     in {
+      lib.mkContainerGpuImage = { system, capability ? "", baseImage ? self.packages.${system}.dockerImage,
+        baseConfig ? baseImage.reverieConfig }:
+        import ./nix/container-gpu-image.nix {
+          pkgs = pkgsFor system;
+          src = source;
+          inherit baseImage baseConfig;
+          inherit (self.packages.${system}) containerRuntime gpuPublisher;
+          inferenceRuntime = import ./nix/local-model-runtime.nix {
+            nixpkgs = toString llama-nixpkgs;
+            inherit system capability;
+          };
+        };
       nixosModules.workerIsolation = { config, lib, pkgs, ... }: import ./nix/worker-isolation.nix {
         inherit config lib pkgs;
         brokerPackage = self.packages.${pkgs.stdenv.hostPlatform.system}.workerBroker;
