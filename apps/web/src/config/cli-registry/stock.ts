@@ -527,6 +527,7 @@ const OPENCODE: CliEntry = {
   capabilities: {
     ...agentDefaults(),
     workspaceHooks: { sessionCreate: 'none', freshCase: 'none', existingCase: 'none' },
+    input: { shellKeyGuard: true },
     ...AGENTS_DIR_SKILL,
     altScreen: 'strip-mux-and-mouse',
     echo: { policy: 'buffer', anchor: { kind: 'cursor' }, predictProfile: undefined },
@@ -677,6 +678,8 @@ const CODEX: CliEntry = {
   capabilities: {
     ...agentDefaults(),
     ...AGENTS_DIR_SKILL,
+    input: { keyBurstMaxChars: 1000, requiresEmptyComposer: true },
+    turnSummaryHooks: 'codex-config-v1',
     // Codex draws `› Ask Codex to do anything` on its composer row and
     // `Working (2m 49s • esc to interrupt)` above it while a turn runs. It animates no
     // braille spinner, and it never prints `esc to interrupt` at rest, so that phrase

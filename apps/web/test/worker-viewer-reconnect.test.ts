@@ -1,3 +1,4 @@
+import { registerMuxFixture } from './helpers/registered-mux-fixture.js';
 import {WorkerProviderHealth} from '../src/worker-provider-health.js';
 import Fastify from 'fastify';
 import { afterEach, expect, it, vi } from 'vitest';
@@ -31,6 +32,7 @@ async function fixture() {
     capturePaneText: vi.fn(() => '›\nGPT-6.1-Sol high · /work\n? for shortcuts'), sendInput: vi.fn(), setAttached: vi.fn() };
   const session = new Session({ workingDir: dir, mode: 'codex', useMux: true, mux: mux as never,
     muxSession: { muxName: 'reverie-owned', sessionId: 'owned', pid: 41 } as never });
+  registerMuxFixture(session);
   Object.assign(session, { ptyProcess: { pid: 123 }, _pid: 123 });
   cleanups.push(async () => {
     const client = (session as any).ptyProcess;

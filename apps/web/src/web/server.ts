@@ -4786,7 +4786,7 @@ export class WebServer extends EventEmitter {
     if (dead.length === 0) return 0;
 
     const persisted = this.store.getSessions();
-    const codexRecords = dead.map((id) => persisted[id]).filter((saved) => saved?.mode === 'codex');
+    const codexRecords = dead.map((id) => persisted[id]).filter((saved) => getCli(saved?.mode ?? '')?.capabilities.transcript === 'codex-rollout');
     if (codexRecords.length) {
       const profiles = await readSubscriptionProfiles();
       const bindings = new Map<string | undefined, Map<string, string>>();

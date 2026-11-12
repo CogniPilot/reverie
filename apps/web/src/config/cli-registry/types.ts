@@ -368,6 +368,14 @@ export interface FullAccessDefaults {
 }
 
 export interface CliCapabilities {
+  /** Terminal input protocol, independent of transcript and account support. */
+  input?: {
+    keyBurstMaxChars?: number;
+    requiresEmptyComposer?: boolean;
+    shellKeyGuard?: boolean;
+  };
+  /** Local workspace hook codec installed before starting the provider. */
+  turnSummaryHooks?: 'codex-config-v1';
   /** Presentation preference among enabled harnesses with supported local-model injection. */
   localModelPreference?: 'preferred';
   /** Explicit reboot offer policy; never inferred from a transcript reader or resume argument. */

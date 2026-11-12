@@ -25,7 +25,7 @@ import { cliConfigContent } from './cli-config-content.js';
 
 import { randomBytes } from 'node:crypto';
 import { pasteDeliveryEnabled, typeIntoOpencode } from './opencode-input.js';
-import { pastesInsteadOfKeys, typeAndSubmit, writeGateActive, writeGateOpen, type SubmitSettleIo, type TurnSignals } from './submit-settle.js';
+import { pastesInsteadOfKeys, typeAndSubmit, writeGateActive, writeGateOpen, writeGateTypedUnsent, type SubmitSettleIo, type TurnSignals } from './submit-settle.js';
 import { EventEmitter } from 'node:events';
 import { collectDescendants } from './proc-tree.js';
 import { isSameProcess, parseLivePane, PANE_LIVENESS_FORMAT, readProcStat, resolveLivePaneTarget, signalDescendants } from './signal-target.js';
@@ -3940,7 +3940,7 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
         if (outcome === 'blocked') {
           console.warn(`[TmuxManager] ${session.muxName} stayed in OpenCode shell mode after Escape: text left unsent, Enter withheld`);
         }
-        return attempt.finish(outcome !== 'not-written', admitted());
+        return attempt.finish(outcome !== 'not-written' || writeGateTypedUnsent(), admitted());
       }
 
       if (textPart && hasCarriageReturn) {
@@ -3967,7 +3967,10 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
         };
         const outcome = await typeAndSubmit(io, textPart, this.turnSignals(session.mode), `[TmuxManager] ${session.muxName}`, options.requireEmptyComposer,
           options.admitted ? () => admitted() && (!options.stillIdle || options.stillIdle()) : options.stillIdle);
-        if (outcome === 'not-written') return attempt.finish(false, admitted());
+        // A positively completed text write with Enter deliberately withheld is
+        // known, not an RPC failure. The enclosing gate records typed-unsent;
+        // changed provider authority still fails closed here.
+        if (outcome === 'not-written') return attempt.finish(writeGateTypedUnsent(), admitted());
       } else if (textPart) {
         // Text only, no Enter
         await dispatch(`${this.tmux()} send-keys -t "${session.muxName}" -l ${shellescape(textPart)}`, {

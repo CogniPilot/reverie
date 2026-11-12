@@ -1,3 +1,4 @@
+import { registerMuxFixture } from './helpers/registered-mux-fixture.js';
 /**
  * A write that owns the composer (an agent wake, a capacity retry) presses Enter only while the composer holds exactly its own
  * text, in every harness. Codex already had this; Claude Code did not, so a person typing between the text and its Enter had
@@ -129,6 +130,7 @@ describe('the session runs exactly the writes that own the composer under their 
     };
     const session = new Session({ workingDir: dir, mode: 'claude', useMux: true, mux: mux as unknown as TerminalMultiplexer,
       muxSession: { sessionId: 'owned', muxName: 'reverie-owned', pid: 41 } as MuxSession });
+    registerMuxFixture(session);
     cleanups.push(async () => { Object.assign(session, { ptyProcess: null, _muxSession: null }); await session.stop(false); });
     return { session, calls };
   }

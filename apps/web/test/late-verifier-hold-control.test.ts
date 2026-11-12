@@ -1,3 +1,4 @@
+import { registerMuxFixture } from './helpers/registered-mux-fixture.js';
 import { afterEach, expect, it, vi } from 'vitest';
 import { Session } from '../src/session.js';
 import { typeAndSubmit } from '../src/submit-settle.js';
@@ -13,6 +14,7 @@ it('holds every later capacity Enter after PlanMove pauses during initial confir
   return(await typeAndSubmit(io,input.replace(/\r/g,''),{glyph:'›',workingLine:'esc to interrupt'},'owned-control',options.requireEmptyComposer))!=='not-written';
  })};
  session=new Session({id:'test-session-1',workingDir:'/owned/fixture',mode:'codex',useMux:true,mux:mux as never,muxSession:{muxName:'reverie-owned-review',sessionId:'test-session-1',pid:42}as never});
+ registerMuxFixture(session);
  const retry=(session as unknown as{_capacityRetry:{deps:{delaysMs:number[]};check():void;paused:boolean}})._capacityRetry;retry.deps.delaysMs=[1,1,1];retry.check();await vi.advanceTimersByTimeAsync(1);
  expect(release).toBeTypeOf('function');expect(retry.paused).toBe(true);expect(keys).toEqual(['continue','initialEnter']);
  // Real Session._verifySubmitted + real SubmitVerifier owns this later timer.

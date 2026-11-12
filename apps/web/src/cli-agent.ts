@@ -636,7 +636,7 @@ export async function agentSpawn(deps: AgentDeps, options: SpawnOptions): Promis
   if (options.bypassApprovals) codexConfig.dangerouslyBypassApprovals = true;
   if (options.resumeSessionId !== undefined) codexConfig.resumeSessionId = options.resumeSessionId;
   if (Object.keys(codexConfig).length > 0) {
-    if (options.mode !== 'codex') {
+    if (getCli(options.mode)?.launch.legacyConfigField !== 'codexConfig') {
       return fail(deps, '--reasoning-effort, --bypass-approvals and --resume-session apply to --mode codex only');
     }
     if (

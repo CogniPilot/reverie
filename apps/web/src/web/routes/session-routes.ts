@@ -953,7 +953,7 @@ function wakeableHost(host: RemoteHost): WakeableRemote {
 
 /** Persist a launch seed only once that runtime's conversation is known. */
 export async function persistDockerLaunchConversation(session: Session, configDir: string): Promise<void> {
-  if (!session.docker || session.mode !== 'claude' || session.claudeSessionIdPending) return;
+  if (!session.docker || getCli(session.mode)?.launch.resumeSelection !== 'claude-transcript' || session.claudeSessionIdPending) return;
   await persistDockerCaseClaudeSessionId(configDir, session.docker.containerName,
     session.claudeSessionId || session.id);
 }
@@ -1551,7 +1551,7 @@ export function registerSessionRoutes(
     const terminalHistoryConfig = await ctx.getTerminalHistoryConfig();
     // The thread is decided once, before anything is stopped: the stop removes the old record the employee's thread may come from.
     const launchThread =
-      mode === 'opencode'
+      getCli(mode)?.launch.threadStateProfile === 'forkable-continue-v1'
         ? typeof launchBody.openCodeConfig?.continueSession === 'string'
           ? launchBody.openCodeConfig.continueSession
           : employeeThread(ctx, spawnIdentity)
@@ -2289,7 +2289,7 @@ export function registerSessionRoutes(
     });
     const idleRefusal = () => createErrorResponse(ApiErrorCode.SESSION_BUSY,
       'Session is busy or has a draft in its composer; nothing was typed.');
-    const rawInput = agentCaller && session.mode === 'opencode' ? guardShellKey(inputStr) : inputStr;
+    const rawInput = agentCaller && getCli(session.mode)?.capabilities.input?.shellKeyGuard ? guardShellKey(inputStr) : inputStr;
     const admission = ctx.terminalInput.begin(session, {input: inputStr, rawInput, clientId, seq, useMux, ifIdle: ifIdle ?? undefined, agentInput: agentCaller},
       () => ctx.sessions.get(id) === session);
     if (admission.state === 'held') return unconfirmedInput();
@@ -4741,7 +4741,7 @@ export function registerSessionRoutes(
     // Decided once, here; the old session is stopped only just before the new one starts (claimEmployeeThread below), after every
     // check that can still refuse the request.
     let qsThread: string | undefined;
-    if (mode === 'opencode') {
+    if (getCli(mode)?.launch.threadStateProfile === 'forkable-continue-v1') {
       qsThread =
         typeof openCodeConfig?.continueSession === 'string'
           ? openCodeConfig.continueSession

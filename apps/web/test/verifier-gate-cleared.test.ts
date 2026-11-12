@@ -1,3 +1,4 @@
+import { registerMuxFixture } from './helpers/registered-mux-fixture.js';
 import Fastify from 'fastify';
 import fastifyCookie from '@fastify/cookie';
 import { afterEach, expect, it, vi } from 'vitest';
@@ -41,6 +42,7 @@ function codexSession(screen: { text: string }, hooks: { onType?: (s: Session) =
   };
   session = new Session({ id: 'test-session-1', workingDir: '/tmp', mode: 'codex', useMux: true, mux: mux as never,
     muxSession: { muxName: 'reverie-owned-review', sessionId: 'test-session-1', pid: 42 } as never });
+  registerMuxFixture(session);
   cleanups.push(async () => {
     Object.assign(session, { ptyProcess: null, _muxSession: null });
     await session.stop(false);

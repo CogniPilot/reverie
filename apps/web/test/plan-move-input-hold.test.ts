@@ -1,3 +1,4 @@
+import { registerMuxFixture } from './helpers/registered-mux-fixture.js';
 import Fastify from 'fastify';
 import fastifyCookie from '@fastify/cookie';
 import { afterEach, expect, it, vi } from 'vitest';
@@ -45,6 +46,7 @@ async function harness(holdAt?: 'probe' | 'settle') {
   const ctx = createMockRouteContext();
   const session = new Session({ id: 'test-session-1', workingDir: '/tmp', mode: 'claude', useMux: true, mux: mux as never,
     muxSession: { muxName: 'reverie-owned-review', sessionId: 'test-session-1', pid: 42 } as never });
+  registerMuxFixture(session);
   ctx.sessions.set(session.id, session as never);
   const pty = { write: vi.fn() };
   Object.assign(session, { ptyProcess: pty });
@@ -101,7 +103,10 @@ it('refuses an agent\'s send and wake while a plan move owns the composer, so it
 it('refuses an agent\'s send whose move hold began after the route\'s early check, on every write path, and hands its seq back', async () => {
   for (const extra of [{}, { useMux: true }, { useMux: false }, { wait: true, waitTimeout: 1000 }]) {
     const { session, keys, input, pty, release, seq } = await harness('probe');
-    expect(shape(await input('agent note', true, false, extra))).toEqual(BUSY);
+    const response = await input('agent note', true, false, extra);
+    if ('useMux' in extra && extra.useMux === true) expect(response.json()).toEqual({pending: true});
+    else expect(shape(response)).toEqual(BUSY);
+    await new Promise(resolve => setTimeout(resolve, 0));
     expect(keys).toEqual([]); // zero text, zero Enter
     expect(pty.write).not.toHaveBeenCalled(); // no raw fallback either
     expect(session.shouldApplyInput('review', seq())).toBe(true); // nothing was typed, so the retry is not a duplicate
@@ -121,12 +126,12 @@ it('withholds Enter when a move takes the composer while the agent\'s text settl
   for (const extra of [{}, { useMux: true }]) {
     const { session, keys, input, pty, release, seq } = await harness('settle');
     const res = await input('agent note', true, false, extra);
-    expect(res.json().success).not.toBe(false);
+    if ('useMux' in extra) expect(res.json()).toEqual({pending: true});
+    else expect(res.json()).toMatchObject({success: false, errorCode: 'SESSION_BUSY', data: {delivered: false, typedUnsent: true}});
     await new Promise(resolve => setTimeout(resolve, 0)); // the fire-and-forget write's settle
     expect(keys).toEqual(['agent note']); // the text is in the composer, its Enter withheld
     expect(pty.write).not.toHaveBeenCalled(); // and no raw write of it a second time
     expect(session.shouldApplyInput('review', seq())).toBe(false); // the seq stays spent: a retry cannot type it again
-    if (!('useMux' in extra)) expect(res.json()).toEqual({ delivered: false, typedUnsent: true });
     release();
   }
 });
@@ -160,6 +165,7 @@ it('withholds the submit verifier\'s later Enter for an agent\'s write once a mo
       const mux = { capturePaneText: () => screen, sendInput: vi.fn(async (_id: string, input: string) => { sent.push(input); return true; }) };
       const session = new Session({ id: `verifier-${mode}`, workingDir: '/tmp', mode, useMux: true, mux: mux as never,
         muxSession: { muxName: 'reverie-owned-review', sessionId: `verifier-${mode}`, pid: 42 } as never });
+      registerMuxFixture(session);
       try {
         expect(await session.writeViaMux('agent note\r', { fromUser: true, opencodeGuard: mode === 'opencode', agentInput: true })).toBe(true);
         const release = session.pauseCapacityRetry();

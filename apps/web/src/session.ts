@@ -2276,7 +2276,7 @@ export class Session extends EventEmitter {
       delete next.continueSession; delete next.resumeSessionId; delete next.forkSession; delete next.configContent;
       next.model = options.model;
       if (options.effortField) next[options.effortField] = options.effort;
-      if (targetThread) next[options.mode === 'opencode' ? 'continueSession' : 'resumeSessionId'] = targetThread;
+      if (targetThread) next[getCli(options.mode)?.launch.legacyConfigAliases?.resumeId ?? 'resumeSessionId'] = targetThread;
       record['_' + field] = next;
     } else this._resumeSessionId = targetThread;
     return () => {
@@ -2487,7 +2487,7 @@ export class Session extends EventEmitter {
    * because every start would fork the thread again.
    */
   setOpenCodeThread(thread: string): void {
-    if (this.mode !== 'opencode') throw new Error('Only an OpenCode session has a thread');
+    if (getCli(this.mode)?.launch.threadStateProfile !== 'forkable-continue-v1') throw new Error('Only an OpenCode session has a thread');
     if (this._openCodeConfig?.forkSession === true) throw new Error('This session forks its thread on every start');
     this._openCodeConfig = { ...this._openCodeConfig, continueSession: thread };
   }
@@ -3088,7 +3088,7 @@ export class Session extends EventEmitter {
     await this.applyFullAccessDefault();
     await this._prepareSelectedClaudeProfile();
     await this._prepareManagedCodexTrust();
-    if (this.mode === 'codex' && !this._remote && !this._docker) {
+    if (getCli(this.mode)?.capabilities.turnSummaryHooks === 'codex-config-v1' && !this._remote && !this._docker) {
       await applyCodexTurnSummaryHooks(this.workingDir);
     }
     await this._prepareCodexHookTrust();
@@ -3536,7 +3536,7 @@ export class Session extends EventEmitter {
     assertAdmission();
     await this._prepareManagedCodexTrust();
     assertAdmission();
-    if (this.mode === 'codex' && !this._remote && !this._docker) {
+    if (getCli(this.mode)?.capabilities.turnSummaryHooks === 'codex-config-v1' && !this._remote && !this._docker) {
       await applyCodexTurnSummaryHooks(this.workingDir);
       assertAdmission();
     }
@@ -5647,7 +5647,7 @@ export class Session extends EventEmitter {
    * (never a guessed or restored one), on this host, and only when exactly one file carries it.
    */
   async claudeTranscript(): Promise<string | undefined> {
-    if (this.mode !== 'claude' || this._remote || !this._claudeSessionIdIsFirstHand || !this._claudeSessionId) return undefined;
+    if (getCli(this.mode)?.capabilities.transcript !== 'claude-jsonl' || this._remote || !this._claudeSessionIdIsFirstHand || !this._claudeSessionId) return undefined;
     return locateClaudeTranscript(this._claudeSessionId, this._claudeConfigDir());
   }
 
@@ -5657,7 +5657,7 @@ export class Session extends EventEmitter {
 
   canAcceptChatInput(): boolean {
     if (this._viewerInputHeld || this.paneLifecycleInFlight || (this._workerBacked && this._paneExit)) return false;
-    if (this.mode !== 'codex') return true;
+    if (!getCli(this.mode)?.capabilities.input?.requiresEmptyComposer) return true;
     const glyph = getCli(this.mode)?.capabilities.workDetect?.promptGlyph ?? '';
     return !!this._muxSession && composerIsEmpty(this._mux?.capturePaneText?.(this._muxSession.muxName, undefined, { escapes: true }), glyph);
   }
@@ -5671,8 +5671,8 @@ export class Session extends EventEmitter {
       options.onMoveHeld?.();
       return false;
     }
-    const fromEmptyComposer = this.mode === 'codex' && this.canAcceptChatInput();
-    if (options.requireEmptyComposer && this.mode === 'codex' && !fromEmptyComposer) {
+    const fromEmptyComposer = !!getCli(this.mode)?.capabilities.input?.requiresEmptyComposer && this.canAcceptChatInput();
+    if (options.requireEmptyComposer && getCli(this.mode)?.capabilities.input?.requiresEmptyComposer && !fromEmptyComposer) {
       if (options.requireIdle) options.onIdleRefused?.();
       return false;
     }
@@ -5695,7 +5695,7 @@ export class Session extends EventEmitter {
     }
     // An agent's or the chat's text in an OpenCode pane: no ASCII "!" (it would flip the composer into shell mode).
     const guard = options.opencodeGuard;
-    const opencode = !!guard && this.mode === 'opencode';
+    const opencode = !!guard && !!getCli(this.mode)?.capabilities.input?.shellKeyGuard;
     if (opencode) data = guardShellKey(data, { keepLeading: guard === 'person' });
     this._recheckPaneDialogSoon();
     if (this._mux && this._muxSession) {
@@ -5801,8 +5801,8 @@ export class Session extends EventEmitter {
           finally {this._muxWriteIds.add(enterId);}
         };
         try {
-          const send = () => mux.sendInput(this.id, '\r', {admitted: effect, ...(mode === 'opencode' ? {opencode: true} : {})});
-          const sent = gate && mode === 'opencode' ? (await withWriteGate(effect, send)).result : await send();
+          const send = () => mux.sendInput(this.id, '\r', {admitted: effect, ...(getCli(mode)?.capabilities.input?.shellKeyGuard ? {opencode: true} : {})});
+          const sent = gate && getCli(mode)?.capabilities.input?.shellKeyGuard ? (await withWriteGate(effect, send)).result : await send();
           if (!effect()) verifier.cancel();
           return sent;
         } catch (cause) {

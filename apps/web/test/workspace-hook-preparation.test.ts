@@ -157,6 +157,7 @@ function restartTransport(session: Session) {
   const respawn = vi.fn(async (options: {onProviderDispatch?: () => void}) => {options.onProviderDispatch?.(); return 999_999_996;});
   Object.assign(session, {_useMux: true, _muxSession: {sessionId: session.id, muxName: 'synthetic-pane', pid: 999_999_997},
     _mux: {muxSessionExists: () => true, respawnPane: respawn, clearPaneExit: vi.fn()}});
+  registerMuxFixture(session);
   return respawn;
 }
 it('validates again before an actual restart and exports a fresh generation only after dispatch', async () => {
@@ -395,7 +396,7 @@ it('revocation while a mux write awaits I/O blocks the physical key and reports 
   const {app, post} = await hookHarness(session);
   try {
     await post(token, 'permission_prompt'); const item = approvalInbox.getForSession(session.id)!;
-    const answering = app.inject({method: 'POST', url: `/api/approvals/${encodeURIComponent(item.id)}/answer`, payload: {action: 'approve'}});
+    const answering = app.inject({method: 'POST', url: `/api/approvals/${encodeURIComponent(item.id)}/answer`, payload: {action: 'approve'}}).then(response => response);
     await ready.promise; session.setMode('shell'); resume.resolve();
     const answer = await answering; expect(answer.statusCode).toBe(409);
     expect(answer.json().error).toContain('unconfirmed'); expect(answer.json().error.toLowerCase()).toContain('do not replay');
@@ -784,3 +785,4 @@ it('held attachment preserves the original subject when consecutive mux observat
   expect((session as unknown as {_muxSession: object})._muxSession).toBe(original);
   expect(mux.createSession).not.toHaveBeenCalled(); expect(mux.respawnPane).not.toHaveBeenCalled();
 });
+import { registerMuxFixture } from './helpers/registered-mux-fixture.js';

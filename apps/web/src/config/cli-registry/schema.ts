@@ -334,6 +334,12 @@ const configProperty = z.string().regex(/^[A-Za-z][A-Za-z0-9_]{0,63}$/)
 
 const capabilitiesSchema = z
   .object({
+    input: z.object({
+      keyBurstMaxChars: z.number().int().positive().max(1000000).optional(),
+      requiresEmptyComposer: z.boolean().optional(),
+      shellKeyGuard: z.boolean().optional(),
+    }).strict().optional(),
+    turnSummaryHooks: z.literal('codex-config-v1').optional(),
     rebootRestore: z.enum(['native-required','native-or-new','persistent-record']).optional(),
     startupAccountProfile: z.enum(STARTUP_ACCOUNT_PROFILE_NAMES).optional(),
     fullAccessDefaults: z.object({
