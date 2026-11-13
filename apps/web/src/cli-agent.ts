@@ -41,6 +41,8 @@ import { agentForcePlanMove, agentMoveJournal } from './cli-agent-force.js';
 import { agentCredentialsInstall, agentCredentialsList } from './cli-agent-credentials.js';
 import { agentCredentialStatus } from './cli-agent-credential-status.js';
 import { agentContext, agentContextReceipt } from './cli-agent-context.js';
+import { readDockerWorkerIdentity } from './docker-worker-identity-client.js';
+import { DOCKER_WORKER_IDENTITY_HEADER } from './docker-worker-identity.js';
 import { AGENT_EXIT } from './agent-exit-codes.js';
 import https from 'node:https';
 import { readFileSync } from 'node:fs';
@@ -85,6 +87,8 @@ export interface AgentContext {
   selfId: string;
   /** Basic-auth credentials, when the server has a password. */
   auth?: ReverieCredentials;
+  /** Private per-worker callback credential; never a human password or permission grant. */
+  workerIdentity?: string;
 }
 
 /** Thrown when the process is not inside a Reverie-managed session. */
@@ -116,6 +120,8 @@ export function resolveAgentContext(
   if (!selfId) {
     throw new AgentGuardError('REVERIE_SESSION_ID is not set; cannot tell which session is me.');
   }
+  const workerIdentity = readDockerWorkerIdentity(env, selfId);
+  if (workerIdentity !== undefined) return { apiUrl, selfId, workerIdentity };
   const credentials = credentialsFrom(env, envFile());
   return { apiUrl, selfId, auth: credentials.password ? credentials : undefined };
 }
@@ -305,6 +311,11 @@ export function baseHeaders(ctx: AgentContext): Record<string, string> {
   // may create one (see agentSpawn), never anything else. Absent for a caller outside
   // any session (`reverie mcp` launched by a desktop MCP client), which has no self.
   if (ctx.selfId) headers['X-Reverie-Parent-Session'] = ctx.selfId;
+  if (ctx.workerIdentity !== undefined) {
+    if (ctx.auth) throw new AgentGuardError('Worker and human credentials cannot be mixed');
+    headers[DOCKER_WORKER_IDENTITY_HEADER] = ctx.workerIdentity;
+    return headers;
+  }
   const authorization = ctx.auth ? basicAuthHeader(ctx.auth) : undefined;
   if (authorization) headers.Authorization = authorization;
   return headers;
@@ -313,6 +324,11 @@ export function baseHeaders(ctx: AgentContext): Record<string, string> {
 /** The real transport. `rejectUnauthorized:false` because the HTTPS install uses a self-signed cert. */
 export const httpRequest: ApiRequest = (ctx, options) => {
   const url = new URL(options.path, ctx.apiUrl);
+  if (ctx.workerIdentity !== undefined &&
+      (url.origin !== new URL(ctx.apiUrl).origin || !['http:', 'https:'].includes(url.protocol) ||
+       Object.keys(options.headers ?? {}).some(key => ['authorization', 'cookie', 'x-reverie-parent-session',
+         'x-reverie-service-token', 'x-reverie-recovery-assertion', DOCKER_WORKER_IDENTITY_HEADER].includes(key.toLowerCase()))))
+    return Promise.reject(new AgentGuardError('Worker credential target or header override refused'));
   const bounds = options.binary ?? options.bounds;
   if (
     bounds &&

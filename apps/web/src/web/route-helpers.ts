@@ -5,6 +5,7 @@
  * that replaces ~43 inline not-found checks across route handlers.
  */
 
+import { dockerWorkerIdentityOf } from '../docker-worker-identity.js';
 import { join, resolve, relative, isAbsolute } from 'node:path';
 import { realpathSync, existsSync, mkdirSync } from 'node:fs';
 import fs from 'node:fs/promises';
@@ -165,6 +166,8 @@ export function canAccessOwned(user: AuthUser, owner: string | undefined): boole
  * flag can be removed later without leaving stray owners).
  */
 export function ownerFor(req: FastifyRequest): string | undefined {
+  const machine = dockerWorkerIdentityOf(req);
+  if (machine) return machine.owner;
   return isMultiUserMode() ? getAuthUser(req).username : undefined;
 }
 

@@ -1,3 +1,4 @@
+import { dockerWorkerIdentityOf, dockerWorkerIdentityPresented } from '../../docker-worker-identity.js';
 import { isEmbassyProtocolRoute } from '../../embassy-public-routes.js';
 import { isEmployeeRecoveryTransport } from '../../employee-recovery-service.js';
 import { isMuxMetadataTransport } from '../../mux-metadata-reconciliation.js';
@@ -429,6 +430,14 @@ export function registerAuthMiddleware(
   // undefined; the ownership helpers then default to a synthetic admin).
   if (!app.hasRequestDecorator('authUser')) app.decorateRequest('authUser', undefined);
 
+  app.addHook('onRequest', (req, reply, done) => {
+    if (dockerWorkerIdentityPresented(req) && !dockerWorkerIdentityOf(req)) {
+      reply.code(403).send('Docker worker identity refused');
+      return;
+    }
+    done();
+  });
+
   const multiUser = isMultiUserMode();
   const authPassword = process.env.REVERIE_PASSWORD;
 
@@ -437,6 +446,7 @@ export function registerAuthMiddleware(
   // without REVERIE_PASSWORD.
   if (!multiUser && !authPassword) {
     app.addHook('onRequest', (req, _reply, done) => {
+      if (dockerWorkerIdentityOf(req)) { done(); return; }
       const current = () => !isMultiUserMode() && process.env.REVERIE_PASSWORD === authPassword;
       credentiallessTransport.set(req, current);
       recordHumanTransport(req, false, current);
@@ -448,7 +458,7 @@ export function registerAuthMiddleware(
       app.addHook('onRequest', (req, _reply, done) => {
         // Re-read the actual owner policy: setup/enforcement activation revokes
         // public view-filter access without changing authentication policy.
-        if (current() && !req.headers.authorization && !req.cookies?.[OWNER_COOKIE] && !req.cookies?.[AUTH_COOKIE_NAME])
+        if (!dockerWorkerIdentityPresented(req) && current() && !req.headers.authorization && !req.cookies?.[OWNER_COOKIE] && !req.cookies?.[AUTH_COOKIE_NAME])
           publicTransport.set(req, { scope, current });
         done();
       });
@@ -504,6 +514,7 @@ export function registerAuthMiddleware(
   const expectedHeader = 'Basic ' + Buffer.from(`${authUsername}:${authPassword}`).toString('base64');
 
   app.addHook('onRequest', (req, reply, done) => {
+    if (dockerWorkerIdentityOf(req)) { done(); return; }
     if (isEmployeeRecoveryTransport(req, basePath) || isMuxMetadataTransport(req, basePath)) { done(); return; }
     const bypass = checkHookSecretBypass(req, reply, hookSecretFailures);
     if (bypass === 'bypass') {
@@ -721,6 +732,7 @@ function registerMultiUserAuthHook(
   };
 
   app.addHook('onRequest', async (req, reply) => {
+    if (dockerWorkerIdentityOf(req)) return;
     if (isEmployeeRecoveryTransport(req, basePath) || isMuxMetadataTransport(req, basePath)) return;
     const bypass = checkHookSecretBypass(req, reply, hookSecretFailures);
     if (bypass === 'bypass' || bypass === 'rejected') return;

@@ -1,3 +1,4 @@
+import { dockerWorkerIdentityOf, dockerWorkerIdentityPresented } from '../docker-worker-identity.js';
 import { LIMITED_ROUTES, limitedAsset } from './limited-access.js';
 import { isEmbassyProtocolRoute } from '../embassy-public-routes.js';
 /**
@@ -294,6 +295,9 @@ export interface PolicyDeps {
 }
 
 export function callerOf(req: FastifyRequest, deps: Pick<PolicyDeps, 'service' | 'ctx'>): Caller {
+  const machine = dockerWorkerIdentityOf(req);
+  if (machine) return { kind: 'agent', session: machine.sessionId };
+  if (dockerWorkerIdentityPresented(req)) return { kind: 'invalid' };
   const session = deps.service.session(req.cookies?.[OWNER_COOKIE]);
   if (session)
     return { kind: session.role === 'limited' ? 'limited' : session.restricted ? 'restricted-owner' : 'owner' };
@@ -476,7 +480,8 @@ export function registerOwnerPolicy(app: FastifyInstance, deps: PolicyDeps): voi
         const originalSession = deps.service.session(originalToken, false);
         // Neither a limited nor a password-change login admits the global stream.
         if (originalSession?.role === 'limited' || originalSession?.restricted) return false;
-        return originalSession !== undefined || deps.service.policy() !== 'enforce';
+        return !dockerWorkerIdentityPresented(req) &&
+          (originalSession !== undefined || deps.service.policy() !== 'enforce');
       },
     }));
     // Limited accounts remain limited even when an operator changes the owner policy to off/log.
@@ -503,7 +508,8 @@ export function registerOwnerPolicy(app: FastifyInstance, deps: PolicyDeps): voi
     // Keep the current Limited-account boundary ahead of Goal's purpose-specific gate.
     // Exact Goal routes still require raw-body/provenance verification and the preHandler below.
     if (goalRouteAction(req)) return;
-    const policy = deps.service.policy();
+    // Machine credentials always keep agent scope, including human compatibility off/log modes.
+    const policy = dockerWorkerIdentityPresented(req) ? 'enforce' : deps.service.policy();
     if (policy === 'off' && !hasDelegatedSessionCreate()) return;
     const route = req.routeOptions?.url;
     const rawUrl = req.url ?? '';
