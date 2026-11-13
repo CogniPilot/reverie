@@ -17,8 +17,11 @@ in pkgs.mkShell {
     voiceVerifier
     (pkgs.python3.withPackages (ps: [ ps.openai-whisper ps.numpy kokoro.kokoro ]))
     pkgs.nodejs_22 pkgs.chromium pkgs.git pkgs.ffmpeg-headless pkgs.espeak-ng
+    pkgs.stdenv.cc pkgs.gnumake
     pkgs.coreutils pkgs.bash (pkgs.lib.getBin pkgs.util-linux)
   ];
+  # Build node-pty offline against this exact Node version after npm --ignore-scripts.
+  npm_config_nodedir = "${pkgs.nodejs_22}";
   shellHook = ''
     export CHROMIUM_PATH=${pkgs.chromium}/bin/chromium
     export PHONEMIZER_ESPEAK_LIBRARY=${pkgs.espeak-ng}/lib/libespeak-ng.so

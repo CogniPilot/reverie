@@ -750,7 +750,7 @@ it('carries a real manager query timeout through the original Session and owner 
   await mkdir(bin);
   // A finite owned Node executable, never the host tmux or a provider. Without
   // the real manager's 5s deadline its late valid pane reply would be responsive.
-  await writeFile(join(bin,'tmux'),`#!${process.execPath}\nconst fs=require('node:fs');\nfs.writeFileSync(${JSON.stringify(calls)},JSON.stringify(process.argv.slice(2)));\nprocess.on('SIGTERM',()=>{fs.writeFileSync(${JSON.stringify(done)},'TERM');process.exit(0)});\nsetTimeout(()=>{fs.writeFileSync(${JSON.stringify(done)},'late');process.stdout.write(${JSON.stringify(`0 41 ${muxName}\n`)});process.exit(0)},6500);\n`,{mode:0o700});
+  await writeFile(join(bin,'tmux'),`#!${process.execPath}\nconst fs=require('node:fs');\nprocess.on('SIGTERM',()=>{fs.writeFileSync(${JSON.stringify(done)},'TERM');process.exit(0)});\nfs.writeFileSync(${JSON.stringify(calls)},JSON.stringify(process.argv.slice(2)));\nsetTimeout(()=>{fs.writeFileSync(${JSON.stringify(done)},'late');process.stdout.write(${JSON.stringify(`0 41 ${muxName}\n`)});process.exit(0)},6500);\n`,{mode:0o700});
   vi.stubEnv('PATH',`${bin}:${process.env.PATH}`);
   const manager=new TmuxManager(); cleanups.push(async()=>manager.destroy());
   f.mux.readPaneLiveness.mockImplementation(name=>manager.readPaneLiveness(name));
@@ -760,7 +760,7 @@ it('carries a real manager query timeout through the original Session and owner 
   const reply=await app.inject({method:'POST',url:`/api/company/employees/${f.employee.id}/reconnect/status`,payload:f.expected});
   expect(reply.statusCode).toBe(200);
   expect(reply.json().data.reconnect).toMatchObject({state:'blocked',reason:'pane-observation-unconfirmed',observation:'pane-observation-unconfirmed'});
-  expect(JSON.parse(readFileSync(calls,'utf8'))).toContain('list-panes');
+  expect(JSON.parse(readFileSync(calls,'utf8'))).toEqual(['-L',manager.muxSocket,'list-panes','-a','-F','#{pane_dead} #{pane_pid} #{session_name}']);
   expect(readFileSync(done,'utf8')).toBe('TERM');
   expect(f.registered.get(f.session.id)).toBe(before); expect(f.session.pid).toBe(123);
   expect(f.session.status).toBe('busy'); expect(f.session.viewerInputHeld).toBe(true);
