@@ -18,6 +18,7 @@ import { existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, 
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import type { Manifest } from '../scripts/control-behavior-inventory';
 import {
   BROWSER_TEST_GLOBS,
   MOBILE_TEST_GLOBS,
@@ -89,7 +90,8 @@ function nixCheckedFiles(source: string): string[] {
   let continued = false;
   for (const line of source.slice(start, end).split('\n')) {
     const match = (continued ? CONTINUATION : NPM_TEST).exec(line);
-    if (continued && !match) throw new Error(`an npm test command continues into a line that is not test files: ${line.trim()}`);
+    if (continued && !match)
+      throw new Error(`an npm test command continues into a line that is not test files: ${line.trim()}`);
     if (match) out.push(...match[1]!.trim().split(/\s+/u));
     continued = !!match?.[2];
   }
@@ -141,16 +143,31 @@ describe('test suite partition', () => {
     const registered = new Set(checked);
     const unchecked = Object.entries(NIX_UNCHECKED_TESTS);
 
-    expect(gate.filter((file) => !registered.has(file) && !(file in NIX_UNCHECKED_TESTS)),
-      'a gate file the Nix checks never run is tested by nothing in CI: add it to an `npm test --` line in nix/package.nix, '
-        + 'or to NIX_UNCHECKED_TESTS with the reason it cannot run there').toEqual([]);
-    expect(checked.filter((file) => !files.has(file)), 'nix/package.nix names a test file that does not exist').toEqual([]);
-    expect(checked.filter((file) => claims(NON_CI_TEST_GLOBS, file)), 'nix/package.nix names a file `npm test` excludes').toEqual([]);
-    expect(checked.filter((file, i) => checked.indexOf(file) !== i), 'nix/package.nix runs a file twice').toEqual([]);
-    expect(unchecked.filter(([file]) => !gate.includes(file) || registered.has(file)).map(([file]) => file),
-      'NIX_UNCHECKED_TESTS lists a file that is gone, not in the gate, or registered after all').toEqual([]);
-    expect(unchecked.filter(([, reason]) => reason.trim().length < 10).map(([file]) => file), 'every unchecked file needs a real reason')
-      .toEqual([]);
+    expect(
+      gate.filter((file) => !registered.has(file) && !(file in NIX_UNCHECKED_TESTS)),
+      'a gate file the Nix checks never run is tested by nothing in CI: add it to an `npm test --` line in nix/package.nix, ' +
+        'or to NIX_UNCHECKED_TESTS with the reason it cannot run there'
+    ).toEqual([]);
+    expect(
+      checked.filter((file) => !files.has(file)),
+      'nix/package.nix names a test file that does not exist'
+    ).toEqual([]);
+    expect(
+      checked.filter((file) => claims(NON_CI_TEST_GLOBS, file)),
+      'nix/package.nix names a file `npm test` excludes'
+    ).toEqual([]);
+    expect(
+      checked.filter((file, i) => checked.indexOf(file) !== i),
+      'nix/package.nix runs a file twice'
+    ).toEqual([]);
+    expect(
+      unchecked.filter(([file]) => !gate.includes(file) || registered.has(file)).map(([file]) => file),
+      'NIX_UNCHECKED_TESTS lists a file that is gone, not in the gate, or registered after all'
+    ).toEqual([]);
+    expect(
+      unchecked.filter(([, reason]) => reason.trim().length < 10).map(([file]) => file),
+      'every unchecked file needs a real reason'
+    ).toEqual([]);
   });
 
   it('reads the Nix registration it guards', () => {
@@ -163,20 +180,31 @@ describe('test suite partition', () => {
   });
 
   it('registers only files an npm test command in the console checkPhase runs', () => {
-    const phase = (body: string) => `    checkPhase = ''\n      runHook preCheck\n${body}\n      runHook postCheck\n    '';\n`;
-    expect(nixCheckedFiles("    buildPhase = ''\n      npm test -- test/z.test.ts\n    '';\n" + phase([
-      '      npm test -- test/a.test.ts \\',
-      '        test/b.test.ts',
-      '      NIX_CUSTODY=1 npm test -- test/c.test.ts',
-      '      echo npm test -- test/d.test.ts \\',
-      '        test/e.test.ts',
-      '      # npm test -- test/f.test.ts',
-      '      npm test -- test/g.test.ts || true',
-      '      npm test -- test/h.test.ts | tee log',
-      '      npm test -- $EXTRA test/i.test.ts',
-      '      FLAGS="$PWD/x" npm test -- test/j.test.ts',
-    ].join('\n')) + '      npm test -- test/k.test.ts\n')).toEqual(['test/a.test.ts', 'test/b.test.ts', 'test/c.test.ts']);
-    expect(() => nixCheckedFiles(phase('      npm test -- test/a.test.ts \\\n      echo done'))).toThrow(/not test files/);
+    const phase = (body: string) =>
+      `    checkPhase = ''\n      runHook preCheck\n${body}\n      runHook postCheck\n    '';\n`;
+    expect(
+      nixCheckedFiles(
+        "    buildPhase = ''\n      npm test -- test/z.test.ts\n    '';\n" +
+          phase(
+            [
+              '      npm test -- test/a.test.ts \\',
+              '        test/b.test.ts',
+              '      NIX_CUSTODY=1 npm test -- test/c.test.ts',
+              '      echo npm test -- test/d.test.ts \\',
+              '        test/e.test.ts',
+              '      # npm test -- test/f.test.ts',
+              '      npm test -- test/g.test.ts || true',
+              '      npm test -- test/h.test.ts | tee log',
+              '      npm test -- $EXTRA test/i.test.ts',
+              '      FLAGS="$PWD/x" npm test -- test/j.test.ts',
+            ].join('\n')
+          ) +
+          '      npm test -- test/k.test.ts\n'
+      )
+    ).toEqual(['test/a.test.ts', 'test/b.test.ts', 'test/c.test.ts']);
+    expect(() => nixCheckedFiles(phase('      npm test -- test/a.test.ts \\\n      echo done'))).toThrow(
+      /not test files/
+    );
     expect(() => nixCheckedFiles('npm test -- test/a.test.ts\n')).toThrow(/no console checkPhase/);
   });
 
@@ -212,4 +240,103 @@ describe('test suite partition', () => {
       ).toBe(true);
     }
   });
+});
+
+/** The curated browser job must actually invoke every browser scenario mapped as covered. */
+function browserCheckedFiles(source: string): string[] {
+  const start = source.search(/^\s+nix develop --command node apps\/web\/node_modules\/vitest\/vitest\.mjs run \\$/mu);
+  if (start === -1) throw new Error('no curated browser invocation in image.yml');
+  const lines = source.slice(start).trimStart().split('\n');
+  if (lines[1]?.trim() !== '--config apps/web/config/vitest.browser.config.ts \\')
+    throw new Error('curated browser runner config changed');
+  const files: string[] = [];
+  for (const line of lines.slice(2)) {
+    if (line.trim() === '2>&1 | tee acceptance/resource-layout.log') return files;
+    const match = /^\s+apps\/web\/(test\/[\w./-]+\.test\.ts)\s+\\$/u.exec(line);
+    if (!match) throw new Error('unsupported curated browser selection: ' + line.trim());
+    files.push(match[1]!);
+  }
+  throw new Error('curated browser invocation has no checked completion');
+}
+
+function ciWorkflowSource(): string {
+  const supplied = resolve(ROOT, 'test/fixtures/control-coverage/image.yml');
+  if (existsSync(supplied)) return readFileSync(supplied, 'utf8');
+  const repository = resolve(ROOT, '../..', '.github/workflows/image.yml');
+  if (resolve(ROOT, '../..', 'apps/web') !== ROOT) throw new Error('Trusted image.yml was not supplied');
+  return readFileSync(repository, 'utf8');
+}
+
+function mappedExecutionGaps(manifest: Manifest, nix: string, workflow: string): string[] {
+  const checked = new Set(nixCheckedFiles(nix));
+  const browser = new Set(browserCheckedFiles(workflow));
+  const mapped = new Set(
+    manifest.mappings.flatMap((mapping) =>
+      mapping.scenarios.map((id) => {
+        const scenario = manifest.scenarios[id];
+        if (!scenario) throw new Error('Unknown mapped scenario: ' + id);
+        return scenario.test;
+      })
+    )
+  );
+  return [...mapped]
+    .filter((file) =>
+      claims(BROWSER_TEST_GLOBS, file) ? !browser.has(file) : claims(NON_CI_TEST_GLOBS, file) || !checked.has(file)
+    )
+    .sort();
+}
+
+it('executes every mapped control scenario in the mandatory image or browser checks', () => {
+  const manifest = JSON.parse(readFileSync(resolve(ROOT, 'config/control-behavior-manifest.json'), 'utf8')) as Manifest;
+  expect(
+    mappedExecutionGaps(manifest, nixPackageSource(resolve(ROOT, 'test')), ciWorkflowSource()),
+    'Mapped coverage requires actual CI execution; register the owning suite instead of merely listing a scenario'
+  ).toEqual([]);
+});
+
+it('rejects absent mapped browser and default suites, including commented-out browser selections', () => {
+  const phase = "    checkPhase = ''\n      npm test -- test/default.test.ts\n      runHook postCheck\n    '';\n";
+  const workflow = [
+    '          nix develop --command node apps/web/node_modules/vitest/vitest.mjs run \\',
+    '            --config apps/web/config/vitest.browser.config.ts \\',
+    '            apps/web/test/employee-resource-controls.browser.test.ts \\',
+    '          2>&1 | tee acceptance/resource-layout.log',
+  ].join('\n');
+  const manifest = {
+    scenarios: {
+      browser: { test: 'test/employee-resource-controls.browser.test.ts' },
+      default: { test: 'test/default.test.ts' },
+    },
+    mappings: [{ scenarios: ['browser', 'default'] }],
+  } as unknown as Manifest;
+  expect(mappedExecutionGaps(manifest, phase, workflow)).toEqual([]);
+  expect(mappedExecutionGaps(manifest, phase.replace('test/default.test.ts', 'test/other.test.ts'), workflow)).toEqual([
+    'test/default.test.ts',
+  ]);
+  expect(
+    mappedExecutionGaps(
+      manifest,
+      phase,
+      workflow.replace(
+        'apps/web/test/employee-resource-controls.browser.test.ts',
+        'apps/web/test/office-server.browser.test.ts'
+      )
+    )
+  ).toEqual(['test/employee-resource-controls.browser.test.ts']);
+  expect(() =>
+    browserCheckedFiles(
+      workflow.replace(
+        '            apps/web/test/employee-resource-controls.browser.test.ts',
+        '            # apps/web/test/employee-resource-controls.browser.test.ts'
+      )
+    )
+  ).toThrow(/unsupported curated browser selection/);
+  expect(() =>
+    browserCheckedFiles(
+      workflow.replace(
+        '--config apps/web/config/vitest.browser.config.ts',
+        '--config apps/web/config/vitest.ci.config.ts'
+      )
+    )
+  ).toThrow(/runner config changed/);
 });

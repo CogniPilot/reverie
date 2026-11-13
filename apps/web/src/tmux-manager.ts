@@ -37,6 +37,7 @@ import { workerLaunchCommand, WorkerViewerEndpoint, WorkerViewerEndpointCustodyE
 import { MuxMutationRefusedError } from './mux-interface.js';
 
 const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import {
@@ -2693,8 +2694,13 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
    * stall every other session's I/O while tmux answers.
    */
   private async listPanesAsync(): Promise<string | null> {
+    return this.queryTmux(['list-panes', '-a', '-F', PANE_LIVENESS_FORMAT]);
+  }
+
+  /** Run only the finite query client: timeout must not target a shell wrapper. */
+  private async queryTmux(arguments_: string[]): Promise<string | null> {
     try {
-      const { stdout } = await execAsync(`${this.tmux()} list-panes -a -F '${PANE_LIVENESS_FORMAT}'`, {
+      const { stdout } = await execFileAsync('tmux', ['-L', this.tmuxSocket, ...arguments_], {
         encoding: 'utf-8',
         timeout: EXEC_TIMEOUT_MS,
       });
@@ -2706,16 +2712,10 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
 
   /** Pid of the tmux server on our socket, or null when it does not answer. */
   private async getServerPidAsync(): Promise<number | null> {
-    try {
-      const { stdout } = await execAsync(`${this.tmux()} display-message -p '#{pid}'`, {
-        encoding: 'utf-8',
-        timeout: EXEC_TIMEOUT_MS,
-      });
-      const pid = parseInt(stdout.trim(), 10);
-      return Number.isNaN(pid) ? null : pid;
-    } catch {
-      return null;
-    }
+    const output = await this.queryTmux(['display-message', '-p', '#{pid}']);
+    if (output === null) return null;
+    const pid = parseInt(output.trim(), 10);
+    return Number.isNaN(pid) ? null : pid;
   }
 
   /**

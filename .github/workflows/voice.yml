@@ -45,6 +45,8 @@ jobs:
         env:
           PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
         run: nix develop .#voice-ci --command npm ci --prefix apps/web --ignore-scripts
+      - name: Build and verify the native PTY before starting the console
+        run: nix develop .#voice-ci --command node apps/web/scripts/fix-node-pty.mjs
       - name: Check audio validators and browser launcher
         run: |
           nix develop .#voice-ci --command node apps/web/node_modules/typescript/bin/tsc --project apps/web/config/tsconfig.voice-ci.json

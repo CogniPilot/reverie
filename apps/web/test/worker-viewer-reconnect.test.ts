@@ -23,6 +23,8 @@ import { createHarness, member, room } from './helpers/chat-app-harness.mjs';
 import {frontendClassMethods} from './helpers/frontend-declarations.js';
 import { TmuxManager } from '../src/tmux-manager.js';
 import { FixtureLocks } from './helpers/browser-input-fixture.js';
+import { echoClientArgv, ownedEchoArgv } from './helpers/owned-pty-echo.js';
+import { spawn as spawnPty, type IPty } from 'node-pty';
 
 const cleanups: Array<() => Promise<unknown>> = [];
 afterEach(async () => { vi.useRealTimers(); vi.unstubAllEnvs(); vi.restoreAllMocks();
@@ -270,10 +272,44 @@ it('reattaches a missing website PTY through the canonical client factory withou
   expect(f.session.runtimeHealth).toBe('disconnected');
   expect(await f.controller.reconnect(f.employee.id,f.expected,undefined)).toBe('connected');
   const pid=f.session.pid!;expect(pid).toBeGreaterThan(1);expect(pid).not.toBe(42);
-  const argv=readFileSync(`/proc/${pid}/cmdline`,'utf8').split('\0');
-  expect(argv[1]).toBe('-e');expect(argv[2]).toContain('process.stdin.pipe(process.stdout)');
+  const client = (f.session as unknown as { ptyProcess: IPty }).ptyProcess;
+  const argv = await ownedEchoArgv(client, () =>
+    (f.session as unknown as { ptyProcess: IPty }).ptyProcess === client && f.session.pid === pid);
+  expect(argv).toEqual(echoClientArgv);
   expect(f.mux.respawnPane).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({workerAttachOnly:true}));
   expect(f.session.runtimeHealth).toBe('unknown');expect(f.mux.sendInput).not.toHaveBeenCalled();
+});
+
+it('rejects a real owned PTY exit before any echo acknowledgement', async () => {
+  const f = await fixture();
+  // This actual child never echoes, so a fast echo cannot beat the exit control.
+  const client = spawnPty(process.execPath, ['-e', 'process.stdin.resume();'], { cwd: f.dir });
+  let exited = false, killRequested = false;
+  const stopped = new Promise<void>(resolve => client.onExit(() => { exited = true; resolve(); }));
+  const waitForExit = () => new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('Owned inert exit control did not reap')), 2_000);
+    stopped.then(() => { clearTimeout(timer); resolve(); });
+  });
+  cleanups.push(async () => {
+    if (!killRequested && !exited) { killRequested = true; client.kill(); }
+    await waitForExit();
+  });
+  const refused = expect(ownedEchoArgv(client, () => !exited)).rejects.toThrow(/exited|incarnation|not live/);
+  killRequested = true; client.kill();
+  await refused;
+  await waitForExit();
+  expect(f.mux.respawnPane).not.toHaveBeenCalled();
+  expect(f.mux.sendInput).not.toHaveBeenCalled();
+});
+
+it('refuses a cancelled echo observation before writing to its owned client', async () => {
+  const f = await fixture(); Object.assign(f.session, { ptyProcess: null, _pid: null, _viewerClientLost: true });
+  expect(await f.controller.reconnect(f.employee.id, f.expected, undefined)).toBe('connected');
+  const client = (f.session as unknown as { ptyProcess: IPty }).ptyProcess;
+  const write = vi.spyOn(client, 'write');
+  await expect(ownedEchoArgv(client, () => false)).rejects.toThrow('incarnation changed');
+  expect(write).not.toHaveBeenCalled();
+  expect(f.mux.sendInput).not.toHaveBeenCalled();
 });
 
 it.each(['unreadable', 'dead', 'wrong-pid'] as const)('retains disconnection/input hold after %s readback; respawn exit zero is insufficient', async state => {
@@ -750,7 +786,7 @@ it('carries a real manager query timeout through the original Session and owner 
   await mkdir(bin);
   // A finite owned Node executable, never the host tmux or a provider. Without
   // the real manager's 5s deadline its late valid pane reply would be responsive.
-  await writeFile(join(bin,'tmux'),`#!${process.execPath}\nconst fs=require('node:fs');\nfs.writeFileSync(${JSON.stringify(calls)},JSON.stringify(process.argv.slice(2)));\nprocess.on('SIGTERM',()=>{fs.writeFileSync(${JSON.stringify(done)},'TERM');process.exit(0)});\nsetTimeout(()=>{fs.writeFileSync(${JSON.stringify(done)},'late');process.stdout.write(${JSON.stringify(`0 41 ${muxName}\n`)});process.exit(0)},6500);\n`,{mode:0o700});
+  await writeFile(join(bin,'tmux'),`#!${process.execPath}\nconst fs=require('node:fs');\nprocess.on('SIGTERM',()=>{fs.writeFileSync(${JSON.stringify(done)},'TERM');process.exit(0)});\nfs.writeFileSync(${JSON.stringify(calls)},JSON.stringify(process.argv.slice(2)));\nsetTimeout(()=>{fs.writeFileSync(${JSON.stringify(done)},'late');process.stdout.write(${JSON.stringify(`0 41 ${muxName}\n`)});process.exit(0)},6500);\n`,{mode:0o700});
   vi.stubEnv('PATH',`${bin}:${process.env.PATH}`);
   const manager=new TmuxManager(); cleanups.push(async()=>manager.destroy());
   f.mux.readPaneLiveness.mockImplementation(name=>manager.readPaneLiveness(name));
@@ -760,7 +796,7 @@ it('carries a real manager query timeout through the original Session and owner 
   const reply=await app.inject({method:'POST',url:`/api/company/employees/${f.employee.id}/reconnect/status`,payload:f.expected});
   expect(reply.statusCode).toBe(200);
   expect(reply.json().data.reconnect).toMatchObject({state:'blocked',reason:'pane-observation-unconfirmed',observation:'pane-observation-unconfirmed'});
-  expect(JSON.parse(readFileSync(calls,'utf8'))).toContain('list-panes');
+  expect(JSON.parse(readFileSync(calls,'utf8'))).toEqual(['-L',manager.muxSocket,'list-panes','-a','-F','#{pane_dead} #{pane_pid} #{session_name}']);
   expect(readFileSync(done,'utf8')).toBe('TERM');
   expect(f.registered.get(f.session.id)).toBe(before); expect(f.session.pid).toBe(123);
   expect(f.session.status).toBe('busy'); expect(f.session.viewerInputHeld).toBe(true);

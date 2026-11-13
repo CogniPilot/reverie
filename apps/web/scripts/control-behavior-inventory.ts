@@ -271,34 +271,216 @@ function tokens(text: string): string {
   return out.join('\u001f');
 }
 
-function skippedAncestor(node: ts.Node): boolean {
-  for (let parent = node.parent; parent; parent = parent.parent) {
-    if (!ts.isCallExpression(parent)) continue;
-    let expression: ts.Expression = parent.expression;
-    const parts: string[] = [];
-    while (ts.isCallExpression(expression) || ts.isPropertyAccessExpression(expression)) {
-      if (ts.isCallExpression(expression)) expression = expression.expression;
-      else {
-        parts.push(expression.name.text);
-        expression = expression.expression;
-      }
-    }
+function staticRegistrationLoop(loop: ts.ForOfStatement): boolean {
+  if (loop.awaitModifier || !ts.isVariableDeclarationList(loop.initializer)) return false;
+  const bindings = loop.initializer;
+  const table = loop.expression;
+  const statements = ts.isBlock(loop.statement) ? loop.statement.statements : [loop.statement];
+  return (
+    !!(bindings.flags & ts.NodeFlags.Const) &&
+    bindings.declarations.length === 1 &&
+    ts.isIdentifier(bindings.declarations[0]!.name) &&
+    ts.isArrayLiteralExpression(table) &&
+    table.elements.length > 0 &&
+    table.elements.every((entry) => ts.isNumericLiteral(entry) && Number.isFinite(Number(entry.text))) &&
+    statements.length > 0 &&
+    statements.every(
+      (entry) =>
+        ts.isExpressionStatement(entry) &&
+        ts.isCallExpression(entry.expression) &&
+        ts.isIdentifier(entry.expression.expression) &&
+        ['it', 'test'].includes(entry.expression.expression.text)
+    )
+  );
+}
+
+function exitsRegistrationScope(node: ts.Node): boolean {
+  if (ts.isFunctionLike(node)) return false;
+  if (ts.isReturnStatement(node) || ts.isThrowStatement(node)) return true;
+  return ts.forEachChild(node, exitsRegistrationScope) === true;
+}
+
+function registrationSource(source: string) {
+  const filename = '/scenario.ts';
+  const options: ts.CompilerOptions = {
+    noResolve: true,
+    noLib: true,
+    types: [],
+    target: ts.ScriptTarget.Latest,
+    module: ts.ModuleKind.ESNext,
+    moduleDetection: ts.ModuleDetectionKind.Force,
+  };
+  const host = ts.createCompilerHost(options, true);
+  host.getSourceFile = (file, languageVersion) =>
+    file === filename ? ts.createSourceFile(file, source, languageVersion, true) : undefined;
+  host.fileExists = (file) => file === filename;
+  host.readFile = () => undefined;
+  host.directoryExists = () => false;
+  host.getDirectories = () => [];
+  host.getCurrentDirectory = () => '/';
+  const program = ts.createProgram([filename], options, host);
+  const parsed = program.getSourceFile(filename);
+  if (!parsed) throw Error('The original scenario module was not parsed');
+  return {
+    parsed,
+    checker: program.getTypeChecker(),
+    syntaxValid: program.getSyntacticDiagnostics(parsed).length === 0,
+  };
+}
+
+function transparentRegistrationExpression(node: ts.Node): ts.Node {
+  while (
+    ts.isParenthesizedExpression(node) ||
+    ts.isAsExpression(node) ||
+    ts.isTypeAssertionExpression(node) ||
+    ts.isNonNullExpression(node) ||
+    ts.isSatisfiesExpression(node)
+  )
+    node = node.expression;
+  return node;
+}
+
+function registrationProperty(input: ts.Node) {
+  const node = transparentRegistrationExpression(input);
+  if (ts.isPropertyAccessExpression(node))
+    return { base: transparentRegistrationExpression(node.expression), key: node.name.text };
+  if (ts.isElementAccessExpression(node)) {
+    const key = transparentRegistrationExpression(node.argumentExpression);
+    if (ts.isStringLiteralLike(key)) return { base: transparentRegistrationExpression(node.expression), key: key.text };
+  }
+  return undefined;
+}
+
+function registrationReassigned(identifier: ts.Identifier, checker: ts.TypeChecker, method?: 'each'): boolean {
+  const original = checker.getSymbolAtLocation(identifier);
+  const binding = (input: ts.Node): boolean => {
+    const node = transparentRegistrationExpression(input);
+    if (ts.isIdentifier(node)) return node.text === identifier.text && checker.getSymbolAtLocation(node) === original;
+    if (original) return false;
+    const property = registrationProperty(node);
+    return (
+      !!property &&
+      property.key === identifier.text &&
+      ts.isIdentifier(property.base) &&
+      ['globalThis', 'global', 'window'].includes(property.base.text) &&
+      !checker.getSymbolAtLocation(property.base)?.declarations?.length
+    );
+  };
+  const target = (input: ts.Node): boolean => {
+    const node = transparentRegistrationExpression(input);
+    if (ts.isArrayLiteralExpression(node)) return node.elements.some(target);
+    if (ts.isObjectLiteralExpression(node)) return node.properties.some(target);
+    if (ts.isSpreadElement(node) || ts.isSpreadAssignment(node)) return target(node.expression);
+    if (ts.isPropertyAssignment(node)) return target(node.initializer);
+    if (ts.isShorthandPropertyAssignment(node))
+      return node.name.text === identifier.text && checker.getShorthandAssignmentValueSymbol(node) === original;
+    if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken) return target(node.left);
+    if (binding(node)) return true;
+    const property = registrationProperty(node);
+    return method !== undefined && property?.key === method && binding(property.base);
+  };
+  const visit = (node: ts.Node): boolean => {
     if (
-      ts.isIdentifier(expression) &&
-      ['describe', 'it', 'test'].includes(expression.text) &&
-      parts.some((part) => ['skip', 'todo', 'skipIf', 'runIf'].includes(part))
+      (ts.isBinaryExpression(node) &&
+        node.operatorToken.kind >= ts.SyntaxKind.FirstAssignment &&
+        node.operatorToken.kind <= ts.SyntaxKind.LastAssignment &&
+        target(node.left)) ||
+      ((ts.isPrefixUnaryExpression(node) || ts.isPostfixUnaryExpression(node)) &&
+        [ts.SyntaxKind.PlusPlusToken, ts.SyntaxKind.MinusMinusToken].includes(node.operator) &&
+        target(node.operand)) ||
+      (ts.isDeleteExpression(node) && target(node.expression)) ||
+      ((ts.isForInStatement(node) || ts.isForOfStatement(node)) && target(node.initializer))
     )
       return true;
+    return ts.forEachChild(node, visit) === true;
+  };
+  return visit(identifier.getSourceFile());
+}
+
+/** Free configured Vitest globals and real named Vitest imports may register tests.
+ * A local alias, parameter or replacement function supplies no such proof.
+ */
+function registrationBinding(
+  identifier: ts.Identifier,
+  checker: ts.TypeChecker,
+  suite = false,
+  method?: 'each'
+): boolean {
+  if (registrationReassigned(identifier, checker, method)) return false;
+  const symbol = checker.getSymbolAtLocation(identifier);
+  if (!symbol) return true;
+  if (symbol.declarations?.length !== 1) return false;
+  const binding = symbol.declarations[0]!;
+  if (!ts.isImportSpecifier(binding) || binding.isTypeOnly) return false;
+  const clause = binding.parent.parent;
+  const imported = clause.parent;
+  if (
+    !ts.isImportClause(clause) ||
+    clause.isTypeOnly ||
+    !ts.isImportDeclaration(imported) ||
+    !ts.isStringLiteral(imported.moduleSpecifier) ||
+    imported.moduleSpecifier.text !== 'vitest'
+  )
+    return false;
+  return (suite ? ['describe'] : ['it', 'test']).includes((binding.propertyName ?? binding.name).text);
+}
+
+/** Registration must be unconditional, optionally in ordinary suites or fixed numeric loops.
+ * A matching title in a factory or unreachable branch establishes no registration.
+ */
+function unconditionalRegistration(node: ts.CallExpression, checker: ts.TypeChecker): boolean {
+  const initial = node.parent;
+  if (!ts.isExpressionStatement(initial)) return false;
+  let statement: ts.Statement = initial;
+  for (;;) {
+    const scope = statement.parent;
+    if (ts.isSourceFile(scope) || ts.isBlock(scope)) {
+      if (scope.statements.slice(0, scope.statements.indexOf(statement)).some(exitsRegistrationScope)) return false;
+    }
+    if (ts.isSourceFile(scope)) return true;
+    const loop = ts.isForOfStatement(scope)
+      ? scope
+      : ts.isBlock(scope) && ts.isForOfStatement(scope.parent)
+        ? scope.parent
+        : undefined;
+    if (loop) {
+      if (!staticRegistrationLoop(loop)) return false;
+      statement = loop;
+      continue;
+    }
+    if (!ts.isBlock(scope)) return false;
+    const callback = scope.parent;
+    if (
+      (!ts.isArrowFunction(callback) && !ts.isFunctionExpression(callback)) ||
+      callback.body !== scope ||
+      callback.modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.AsyncKeyword) ||
+      (ts.isFunctionExpression(callback) && callback.asteriskToken)
+    )
+      return false;
+    const suite = callback.parent;
+    if (
+      !ts.isCallExpression(suite) ||
+      !ts.isIdentifier(suite.expression) ||
+      suite.expression.text !== 'describe' ||
+      !registrationBinding(suite.expression, checker, true) ||
+      suite.arguments[1] !== callback ||
+      !suite.arguments[0] ||
+      !ts.isStringLiteralLike(suite.arguments[0])
+    )
+      return false;
+    if (!ts.isExpressionStatement(suite.parent)) return false;
+    statement = suite.parent;
   }
-  return false;
 }
 
 /** Only a direct top-level nonempty static numeric browser table is a known registration.
  * Runtime tables, holes/spreads, conditional registrations and modifiers remain unknown.
  */
-function scenarioRegistration(node: ts.CallExpression): boolean {
+function scenarioRegistration(node: ts.CallExpression, checker: ts.TypeChecker): boolean {
+  if (!unconditionalRegistration(node, checker)) return false;
   const expression = node.expression;
-  if (ts.isIdentifier(expression)) return ['it', 'test'].includes(expression.text);
+  if (ts.isIdentifier(expression))
+    return ['it', 'test'].includes(expression.text) && registrationBinding(expression, checker);
   if (!ts.isExpressionStatement(node.parent) || !ts.isSourceFile(node.parent.parent)) return false;
   if (!ts.isCallExpression(expression) || expression.arguments.length !== 1) return false;
   const factory = expression.expression;
@@ -306,7 +488,8 @@ function scenarioRegistration(node: ts.CallExpression): boolean {
     !ts.isPropertyAccessExpression(factory) ||
     factory.name.text !== 'each' ||
     !ts.isIdentifier(factory.expression) ||
-    !['it', 'test'].includes(factory.expression.text)
+    !['it', 'test'].includes(factory.expression.text) ||
+    !registrationBinding(factory.expression, checker, false, 'each')
   )
     return false;
   const table = expression.arguments[0];
@@ -342,24 +525,36 @@ export function validateManifest(
   for (const entry of declarations) if (!assigned.has(entry.id)) errors.push(`New unmapped declaration: ${entry.id}`);
   if (manifest.gaps.length > manifest.gapBudget) errors.push('Reviewed gap budget exceeded');
   for (const gap of manifest.gaps) if (!gap.reason.trim()) errors.push(`Gap lacks reason: ${gap.declaration}`);
+  const scenarioSources = new Map<string, ReturnType<typeof registrationSource>>();
   for (const [id, scenario] of Object.entries(manifest.scenarios)) {
     if (!scenario.outcome.trim() || !scenario.assertions.length)
       errors.push(`Scenario lacks behavioral contract: ${id}`);
-    let source: string;
-    try {
-      source = readFileSync(join(root, scenario.test), 'utf8');
-    } catch {
-      errors.push(`Missing scenario test: ${id}`);
+    let original = scenarioSources.get(scenario.test);
+    if (!original) {
+      let source: string;
+      try {
+        source = readFileSync(join(root, scenario.test), 'utf8');
+      } catch {
+        errors.push(`Missing scenario test: ${id}`);
+        continue;
+      }
+      original = registrationSource(source);
+      scenarioSources.set(scenario.test, original);
+    }
+    const { parsed, checker } = original;
+    if (!original.syntaxValid) {
+      errors.push(`Invalid scenario test syntax: ${id}`);
       continue;
     }
-    const parsed = ts.createSourceFile(scenario.test, source, ts.ScriptTarget.Latest, true);
     const bodies: string[] = [];
     const visit = (node: ts.Node) => {
-      if (ts.isCallExpression(node) && scenarioRegistration(node)) {
-        const title = literal(node.arguments[0], parsed);
-        if (title === scenario.title && node.arguments[1] && !skippedAncestor(node))
-          bodies.push(node.arguments[1].getText(parsed));
-      }
+      if (
+        ts.isCallExpression(node) &&
+        literal(node.arguments[0], parsed) === scenario.title &&
+        node.arguments[1] &&
+        scenarioRegistration(node, checker)
+      )
+        bodies.push(node.arguments[1].getText(parsed));
       ts.forEachChild(node, visit);
     };
     visit(parsed);
